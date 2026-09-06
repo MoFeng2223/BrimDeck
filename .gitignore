@@ -1,0 +1,34 @@
+# .NET build output
+[Bb]in/
+[Oo]bj/
+artifacts/
+.artifacts/
+
+# Local environment variables
+.env
+.env.*
+*.env
+!.env.example
+!.env.*.example
+
+# Logs
+*.log
+*.binlog
+[Ll]og/
+[Ll]ogs/
+
+# Editor local history
+.history/
+.localhistory/
+
+# Operating system temporary files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local AI assistant instructions and configuration
+CLAUDE.md
+AGENTS.md
+.claude/
+.agents/
+.codex/
