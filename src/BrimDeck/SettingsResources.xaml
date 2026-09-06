@@ -1,0 +1,177 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <SolidColorBrush x:Key="SettingsAccent" Color="#0A84FF"/>
+  <SolidColorBrush x:Key="SettingsAccentHover" Color="#3395FF"/>
+  <SolidColorBrush x:Key="SettingsTextPrimary" Color="#F2F2F4"/>
+  <SolidColorBrush x:Key="SettingsTextSecondary" Color="#9B9BA3"/>
+  <SolidColorBrush x:Key="SettingsFillHover" Color="#14FFFFFF"/>
+  <SolidColorBrush x:Key="SettingsFillPressed" Color="#24FFFFFF"/>
+  <SolidColorBrush x:Key="SettingsFillSelected" Color="#2EFFFFFF"/>
+  <Style x:Key="SettingsButton" TargetType="Button">
+    <Setter Property="Foreground" Value="{StaticResource SettingsTextSecondary}"/><Setter Property="Background" Value="Transparent"/>
+    <Setter Property="BorderBrush" Value="Transparent"/><Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="Padding" Value="10,5"/><Setter Property="FontSize" Value="12"/><Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+      <Border x:Name="Chrome" CornerRadius="6" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
+        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
+      </Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{StaticResource SettingsFillHover}"/><Setter Property="Foreground" Value="{StaticResource SettingsTextPrimary}"/></Trigger>
+        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{StaticResource SettingsFillPressed}"/></Trigger>
+        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource SettingsAccent}"/></Trigger>
+        <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.4"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="SettingsPrimaryButton" TargetType="Button" BasedOn="{StaticResource SettingsButton}">
+    <Setter Property="Foreground" Value="White"/><Setter Property="Background" Value="{StaticResource SettingsAccent}"/><Setter Property="FontWeight" Value="SemiBold"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+      <Border x:Name="Chrome" CornerRadius="6" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
+        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      </Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{StaticResource SettingsAccentHover}"/></Trigger>
+        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Chrome" Property="Opacity" Value="0.8"/></Trigger>
+        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="#B3FFFFFF"/></Trigger>
+        <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.4"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="SettingsCloseButton" TargetType="Button" BasedOn="{StaticResource SettingsButton}">
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+      <Border x:Name="Chrome" CornerRadius="6" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" BorderBrush="Transparent" BorderThickness="1"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="#C42B1C"/><Setter Property="Foreground" Value="White"/></Trigger>
+        <Trigger Property="IsPressed" Value="True"><Setter Property="Opacity" Value="0.7"/></Trigger>
+        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource SettingsAccent}"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="SettingsNav" TargetType="Button" BasedOn="{StaticResource SettingsButton}">
+    <Setter Property="Height" Value="34"/><Setter Property="Padding" Value="12,0"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+      <Border x:Name="Chrome" CornerRadius="7" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" Padding="{TemplateBinding Padding}">
+        <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+      </Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{StaticResource SettingsFillHover}"/></Trigger>
+        <Trigger Property="Tag" Value="Selected"><Setter TargetName="Chrome" Property="Background" Value="{StaticResource SettingsAccent}"/></Trigger>
+        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="#80FFFFFF"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="SettingsChoice" TargetType="RadioButton">
+    <Setter Property="Foreground" Value="#B6B6BE"/><Setter Property="FontSize" Value="12.5"/>
+    <Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
+      <StackPanel Background="Transparent">
+        <Border x:Name="Chrome" CornerRadius="12" BorderBrush="#343438" BorderThickness="1.5" Padding="3">
+          <ContentPresenter x:Name="Preview" HorizontalAlignment="Stretch"/>
+        </Border>
+        <Grid Height="30" Margin="8,4,8,0">
+          <TextBlock Text="{TemplateBinding Tag}" Foreground="{TemplateBinding Foreground}" FontSize="{TemplateBinding FontSize}" FontWeight="{TemplateBinding FontWeight}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          <Border x:Name="Selection" Width="14" Height="14" CornerRadius="7" Background="{StaticResource SettingsAccent}" HorizontalAlignment="Right" VerticalAlignment="Center" Visibility="Hidden">
+            <Path Data="M 3.5,7 L 6,9.5 L 10.5,4.5" Stroke="White" StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+          </Border>
+        </Grid>
+      </StackPanel>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="#74747C"/><Setter Property="Foreground" Value="{StaticResource SettingsTextPrimary}"/></Trigger>
+        <Trigger Property="IsChecked" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="#529DFF"/><Setter TargetName="Selection" Property="Visibility" Value="Visible"/><Setter Property="Foreground" Value="{StaticResource SettingsTextPrimary}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
+        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource SettingsAccentHover}"/></Trigger>
+        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Preview" Property="Opacity" Value="0.85"/></Trigger>
+        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="SettingsNumber" TargetType="TextBox">
+    <Setter Property="Foreground" Value="{StaticResource SettingsTextPrimary}"/><Setter Property="Background" Value="Transparent"/>
+    <Setter Property="CaretBrush" Value="{StaticResource SettingsAccent}"/><Setter Property="BorderThickness" Value="0"/>
+    <Setter Property="SelectionBrush" Value="#0A84FF"/><Setter Property="FontSize" Value="12"/>
+    <Setter Property="TextAlignment" Value="Right"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="Padding" Value="0"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox">
+      <ScrollViewer x:Name="PART_ContentHost" Background="Transparent" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden" Focusable="False"/>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="SettingsTrack" TargetType="RepeatButton">
+    <Setter Property="Focusable" Value="False"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RepeatButton">
+      <Border Background="Transparent"><Border x:Name="Rail" Height="4" CornerRadius="2" Background="{TemplateBinding Background}" VerticalAlignment="Center"/></Border>
+      <ControlTemplate.Triggers><Trigger Property="Tag" Value="Filled"><Setter TargetName="Rail" Property="Margin" Value="8,0,-8,0"/></Trigger></ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="SettingsSlider" TargetType="Slider">
+    <Setter Property="Height" Value="24"/><Setter Property="Focusable" Value="True"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Slider">
+      <Grid Background="Transparent">
+        <Border Height="4" CornerRadius="2" Background="#26FFFFFF" Margin="8,0" VerticalAlignment="Center"/>
+        <Track x:Name="PART_Track" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}" Orientation="Horizontal">
+          <Track.DecreaseRepeatButton><RepeatButton Style="{StaticResource SettingsTrack}" Tag="Filled" Background="{StaticResource SettingsAccent}" Command="Slider.DecreaseLarge"/></Track.DecreaseRepeatButton>
+          <Track.Thumb><Thumb Width="16" Height="24" Cursor="Hand">
+            <Thumb.Template><ControlTemplate TargetType="Thumb">
+              <Grid Background="Transparent">
+                <Ellipse x:Name="Knob" Width="16" Height="16" Fill="White" RenderTransformOrigin="0.5,0.5">
+                  <Ellipse.RenderTransform><ScaleTransform x:Name="KnobScale"/></Ellipse.RenderTransform>
+                  <Ellipse.Effect><DropShadowEffect BlurRadius="5" ShadowDepth="1" Direction="270" Opacity="0.45"/></Ellipse.Effect>
+                </Ellipse>
+              </Grid>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsDragging" Value="True"><Setter TargetName="Knob" Property="Fill" Value="#ECECF0"/></Trigger>
+                <EventTrigger RoutedEvent="MouseEnter"><BeginStoryboard><Storyboard>
+                  <DoubleAnimation Storyboard.TargetName="KnobScale" Storyboard.TargetProperty="ScaleX" To="1.12" Duration="0:0:0.12"/>
+                  <DoubleAnimation Storyboard.TargetName="KnobScale" Storyboard.TargetProperty="ScaleY" To="1.12" Duration="0:0:0.12"/>
+                </Storyboard></BeginStoryboard></EventTrigger>
+                <EventTrigger RoutedEvent="MouseLeave"><BeginStoryboard><Storyboard>
+                  <DoubleAnimation Storyboard.TargetName="KnobScale" Storyboard.TargetProperty="ScaleX" To="1" Duration="0:0:0.12"/>
+                  <DoubleAnimation Storyboard.TargetName="KnobScale" Storyboard.TargetProperty="ScaleY" To="1" Duration="0:0:0.12"/>
+                </Storyboard></BeginStoryboard></EventTrigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate></Thumb.Template>
+          </Thumb></Track.Thumb>
+          <Track.IncreaseRepeatButton><RepeatButton Style="{StaticResource SettingsTrack}" Background="Transparent" Command="Slider.IncreaseLarge"/></Track.IncreaseRepeatButton>
+        </Track>
+        <Border x:Name="Focus" BorderThickness="1" BorderBrush="#800A84FF" CornerRadius="8" IsHitTestVisible="False" Visibility="Collapsed"/>
+      </Grid>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Focus" Property="Visibility" Value="Visible"/></Trigger>
+        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.35"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="SettingsToggle" TargetType="CheckBox">
+    <Setter Property="Foreground" Value="{StaticResource SettingsTextPrimary}"/><Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="CheckBox">
+      <DockPanel Background="Transparent">
+        <Grid DockPanel.Dock="Right" Width="38" Height="22" Margin="16,0,0,0">
+          <Border x:Name="Track" CornerRadius="11" Background="#33FFFFFF" BorderBrush="Transparent" BorderThickness="0"/>
+          <Ellipse Width="18" Height="18" Fill="White" HorizontalAlignment="Left" Margin="2,0,0,0">
+            <Ellipse.RenderTransform><TranslateTransform x:Name="Knob"/></Ellipse.RenderTransform>
+            <Ellipse.Effect><DropShadowEffect BlurRadius="3" ShadowDepth="1" Direction="270" Opacity="0.3"/></Ellipse.Effect>
+          </Ellipse>
+        </Grid>
+        <ContentPresenter VerticalAlignment="Center"/>
+      </DockPanel>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsChecked" Value="True">
+          <Setter TargetName="Track" Property="Background" Value="{StaticResource SettingsAccent}"/>
+          <Trigger.EnterActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="Knob" Storyboard.TargetProperty="X" To="16" Duration="0:0:0.15"/></Storyboard></BeginStoryboard></Trigger.EnterActions>
+          <Trigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="Knob" Storyboard.TargetProperty="X" To="0" Duration="0:0:0.15"/></Storyboard></BeginStoryboard></Trigger.ExitActions>
+        </Trigger>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Track" Property="Opacity" Value="0.88"/></Trigger>
+        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Track" Property="BorderBrush" Value="White"/><Setter TargetName="Track" Property="BorderThickness" Value="1"/></Trigger>
+        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.35"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="SettingsSegment" TargetType="RadioButton">
+    <Setter Property="Foreground" Value="{StaticResource SettingsTextSecondary}"/><Setter Property="FontSize" Value="12"/><Setter Property="Cursor" Value="Hand"/><Setter Property="Padding" Value="8,5"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
+      <Border x:Name="Selection" CornerRadius="6" Background="Transparent" Padding="{TemplateBinding Padding}" BorderThickness="1" BorderBrush="Transparent"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{StaticResource SettingsTextPrimary}"/></Trigger>
+        <Trigger Property="IsChecked" Value="True"><Setter TargetName="Selection" Property="Background" Value="{StaticResource SettingsFillSelected}"/><Setter Property="Foreground" Value="{StaticResource SettingsTextPrimary}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
+        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Selection" Property="BorderBrush" Value="{StaticResource SettingsAccent}"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+</ResourceDictionary>

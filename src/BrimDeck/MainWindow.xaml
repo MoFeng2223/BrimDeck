@@ -1,0 +1,55 @@
+<Window x:Class="BrimDeck.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:BrimDeck" Title="BrimDeck" WindowStyle="None"
+        AllowsTransparency="True" Background="Transparent" ResizeMode="NoResize" Topmost="True"
+        ShowActivated="False" ShowInTaskbar="False" Width="760" Height="256" Style="{StaticResource {x:Type Window}}">
+  <Grid x:Name="Stage" Background="{x:Null}">
+    <!-- Hover state belongs to the zone, so moving between the panel and the strip above it never counts as leaving. -->
+    <Grid x:Name="HoverZone" HorizontalAlignment="Center" VerticalAlignment="Top" Background="{x:Null}"
+          MouseEnter="Island_MouseEnter" MouseLeave="Island_MouseLeave">
+      <Grid x:Name="IslandShadow" HorizontalAlignment="Center" VerticalAlignment="Top"
+            Width="{Binding ActualWidth, ElementName=Island}" Height="{Binding ActualHeight, ElementName=Island}"
+            Margin="{Binding Margin, ElementName=Island}" Opacity="0" IsHitTestVisible="False">
+        <Grid.Effect>
+          <DropShadowEffect Color="Black" BlurRadius="14" ShadowDepth="4" Direction="270" Opacity="0.28"/>
+        </Grid.Effect>
+        <local:IslandBorder Background="Black" CornerRadius="{Binding CornerRadius, ElementName=Island}"
+                            ShoulderRadius="{Binding ShoulderRadius, ElementName=Island}"/>
+      </Grid>
+      <local:IslandBorder x:Name="Island" HorizontalAlignment="Center" VerticalAlignment="Top" Width="238" Height="32"
+              Background="Black" BorderThickness="0" CornerRadius="0,0,12,12" ShoulderRadius="16" MaterialOpacity="1" ClipToBounds="True">
+        <Grid>
+          <!-- Compact content: progress rings by application, an alert while a quota crosses a threshold, and the capsule's clock. -->
+          <Grid x:Name="Compact" Margin="16,0" VerticalAlignment="Center" Height="26">
+            <StackPanel x:Name="CompactRings" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <TextBlock x:Name="CompactTime" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" FontSize="11.5" Foreground="#9EEBEBF5" HorizontalAlignment="Right" VerticalAlignment="Center" Visibility="Collapsed"/>
+            <StackPanel x:Name="CompactAlert" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+          </Grid>
+          <Border x:Name="LineVisual" Height="4" Width="56" Background="#8E8E93" CornerRadius="2" VerticalAlignment="Top" Margin="0,4,0,0" Visibility="Collapsed"/>
+          <Grid x:Name="ExpandedContent" Visibility="Hidden" Opacity="0"
+                   HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Grid x:Name="ContentCanvas" Width="760" Height="240" Margin="0">
+              <Grid.RowDefinitions><RowDefinition x:Name="ToolbarRow" Height="36"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+              <Grid x:Name="Toolbar">
+                <!-- The clock is centered on the whole panel; the switches and the settings button sit inside their own insets. -->
+                <TextBlock x:Name="ClockLabel" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" FontSize="12" Foreground="#61EBEBF5" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="14,0,0,0">
+                  <StackPanel x:Name="ViewButtons" Orientation="Horizontal" VerticalAlignment="Center"/>
+                  <StackPanel x:Name="PeriodButtons" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,20,0">
+                  <TextBlock x:Name="ModeLabel" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" FontSize="11" Foreground="#61EBEBF5" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                  <Button x:Name="SettingsButton" Content="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="18" Width="32" Height="32" Padding="0"
+                          HorizontalContentAlignment="Center" Foreground="#9EEBEBF5"
+                          Background="Transparent" BorderThickness="0" ToolTip="设置" AutomationProperties.Name="设置" Click="Settings_Click"/>
+                </StackPanel>
+              </Grid>
+              <Grid Grid.Row="1" x:Name="UsageContent" Margin="6,0,6,10"/>
+            </Grid>
+          </Grid>
+        </Grid>
+      </local:IslandBorder>
+      <!-- The capsule hangs below the screen edge; this strip keeps the gap above it inside the hover zone. -->
+      <Border x:Name="HoverExtension" Background="#01000000" Height="0" VerticalAlignment="Top" HorizontalAlignment="Stretch"/>
+    </Grid>
+  </Grid>
+</Window>
