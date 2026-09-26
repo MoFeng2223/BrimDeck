@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 Push-Location $projectRoot
 try {
-    if (!$ReleaseNotes) { $ReleaseNotes = "docs/releases/$Version.md" }
+    if (!$ReleaseNotes) { $ReleaseNotes = "releases/$Version.md" }
     $notesPath = (Resolve-Path -LiteralPath $ReleaseNotes).Path
     $outputPath = [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($OutputDirectory)) { $OutputDirectory } else { Join-Path $projectRoot $OutputDirectory }))
     $publishPath = Join-Path $projectRoot ".artifacts/release-build/$Version-$([Guid]::NewGuid().ToString('N'))"
