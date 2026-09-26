@@ -10,6 +10,9 @@ concurrency:
 jobs:
   release:
     runs-on: windows-latest
+    # The release environment requires the maintainer's approval, so a mistakenly pushed tag runs nothing
+    # (no tests, packaging or publishing) until someone approves it under Actions > Review deployments.
+    environment: release
     permissions:
       contents: write
     defaults:
