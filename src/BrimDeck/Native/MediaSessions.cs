@@ -23,6 +23,7 @@ internal sealed class MediaSessions : IDisposable
         public int Revision;
         public MediaTrack? Track;
         public BitmapSource? Cover;
+        public byte[]? CoverBytes;
     }
     private sealed class CoverCache
     {
@@ -72,23 +73,9 @@ internal sealed class MediaSessions : IDisposable
         Changed?.Invoke();
         return enabled;
     }
-    public bool FollowsSystem => _selected is null && _pinned is null;
     // A pinned source stays on screen whatever other players do, until it is unpinned or closes.
     public string? Pinned => _pinned;
     public event Action? Changed;
-
-    // Diagnostic output records each transport before merging. A GSMTC fallback must
-    // never make a disconnected dedicated adapter look as though it passed a live test.
-    internal IEnumerable<string> ConnectionDiagnostics()
-    {
-        foreach (var connection in _connections)
-        {
-            var snapshot = connection.Snapshot;
-            yield return $"connection={connection.GetType().Name}; pid={connection.ProcessId}; ready={snapshot is not null}; title={snapshot?.Title}; state={snapshot?.State}; position={snapshot?.Position}; duration={snapshot?.Duration}; seek={snapshot?.CanSeek}; shuffle={snapshot?.CanShuffle}; repeat={snapshot?.CanRepeat}; logWatching={(connection as NeteaseSource)?.LogWatching}; error={connection.Error}";
-        }
-        foreach (var route in _routes.Values)
-            yield return $"route={route.Id}; primary={route.Connection?.GetType().Name ?? "system"}; system={route.System?.Session.SourceAppUserModelId ?? "none"}; supplement={route.Supplement}";
-    }
 
     public MediaSessions(Dispatcher dispatcher, bool connectPlayers = true)
     {
@@ -147,7 +134,9 @@ internal sealed class MediaSessions : IDisposable
     private void Schedule()
     {
         if (_disposed || _dispatcher.HasShutdownStarted) return;
-        _dispatcher.BeginInvoke(() => { if (!_disposed) { _debounce.Stop(); _debounce.Start(); } });
+        // A burst of events is read once, 100 ms after its first event. Restarting the wait on every event
+        // would postpone the read for as long as a player keeps reporting progress.
+        _dispatcher.BeginInvoke(() => { if (!_disposed && !_debounce.IsEnabled) _debounce.Start(); });
     }
     public void Select(string? id)
     {
@@ -293,13 +282,14 @@ internal sealed class MediaSessions : IDisposable
     {
         var routes = new List<Route>();
         var consumed = new HashSet<SystemSource>();
+        var current = _connections.Length > 0 ? _manager?.GetCurrentSession() : null;
         foreach (var connection in _connections)
         {
             if (connection.ProcessId is not { } pid || connection.Snapshot is not { } snapshot) continue;
             bool netease = connection is NeteaseSource;
             string name = netease ? "cloudmusic" : "QQMusic";
             var systems = _sessions.Values.Where(s => AppMatches(s, name + ".exe")).ToArray();
-            var system = systems.FirstOrDefault(s => s.Session == _manager?.GetCurrentSession()) ?? systems.FirstOrDefault();
+            var system = systems.FirstOrDefault(s => s.Session == current) ?? systems.FirstOrDefault();
             // A disconnected QQ pipe falls back as a whole to GSMTC. Retain its last
             // song without capabilities only when there is no system replacement.
             if (connection is QqMediaConnection { Ready: false } && system is not null) continue;
@@ -361,11 +351,12 @@ internal sealed class MediaSessions : IDisposable
         {
             var track = source.Track ?? new MediaTrack { PositionKnown = false };
             var cover = source.Cover;
+            var coverBytes = source.CoverBytes;
             if (metadata)
             {
                 var properties = await source.Session.TryGetMediaPropertiesAsync();
                 var updated = track with { Title = properties.Title ?? "", Artist = properties.Artist ?? "", Album = properties.AlbumTitle ?? "" };
-                if (!MediaRouting.SameSong(track, updated)) cover = null;
+                if (!MediaRouting.SameSong(track, updated)) { cover = null; coverBytes = null; }
                 track = updated;
                 if (properties.Thumbnail is { } thumbnail)
                 {
@@ -376,7 +367,9 @@ internal sealed class MediaSessions : IDisposable
                         {
                             using var reader = new Windows.Storage.Streams.DataReader(stream);
                             await reader.LoadAsync((uint)stream.Size);
-                            var bytes = new byte[(int)stream.Size]; reader.ReadBytes(bytes); cover = DecodeCover(bytes);
+                            var bytes = new byte[(int)stream.Size]; reader.ReadBytes(bytes);
+                            // Unchanged artwork keeps its image, so periodic rereads do not rebuild the page.
+                            if (coverBytes is null || !bytes.AsSpan().SequenceEqual(coverBytes)) { cover = DecodeCover(bytes); coverBytes = bytes; }
                         }
                     }
                     catch { /* Artwork failure must not suppress controls. */ }
@@ -394,7 +387,7 @@ internal sealed class MediaSessions : IDisposable
             bool known = timeline.EndTime > timeline.StartTime && timeline.LastUpdatedTime.Year > 1601 &&
                 timeline.Position >= timeline.StartTime && timeline.Position <= timeline.EndTime;
             if (_disposed || revision != source.Revision) return;
-            source.Cover = cover;
+            source.Cover = cover; source.CoverBytes = coverBytes;
             source.Track = track with
             {
                 Id = source.Id, State = state, Source = SourceName(source.Session.SourceAppUserModelId),

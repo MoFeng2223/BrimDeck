@@ -35,9 +35,7 @@ public sealed partial class SettingsWindow : Window
     private StackPanel? _appRows;
     public FrameworkElement RootVisual { get; private set; } = null!;
     // The whole page, including the part scrolled out of view.
-    internal FrameworkElement PageVisual => _content;
     private DeckSettings S => _app.Settings;
-    internal bool IsDarkTheme => _palette.Dark;
     private event Action? PaletteChanged;
 
     public static string StyleName(CompactStyle style) => style switch { CompactStyle.Notch => Loc.T("刘海", "Notch"), CompactStyle.Capsule => Loc.T("胶囊", "Capsule"), _ => Loc.T("指示条", "Indicator") };
@@ -263,14 +261,6 @@ public sealed partial class SettingsWindow : Window
         return grip;
     }
 
-    private static Border BrandMark(double size)
-    {
-        var inset = new Grid();
-        inset.Children.Add(new Border { Width = size * .62, Height = size * .2, CornerRadius = new CornerRadius(size * .1), Background = UI.Brush("#F2FFFFFF"), VerticalAlignment = VerticalAlignment.Center });
-        var gradient = new LinearGradientBrush(Color.FromRgb(0x4C, 0x8F, 0xFF), Color.FromRgb(0x5E, 0x5C, 0xE6), 45);
-        return new Border { Child = inset, Width = size, Height = size, CornerRadius = new CornerRadius(size * .27), Background = gradient };
-    }
-
     private void Change(Action<DeckSettings> edit) { var settings = S.Copy(); edit(settings); _app.UpdateSettings(settings); }
 
     // Many choices rebuild the page. The control that had keyboard focus is replaced by an identical one, so focus
@@ -365,7 +355,7 @@ public sealed partial class SettingsWindow : Window
     {
         SectionTitle(Loc.T("启动", "Startup")); Group(Toggle(Loc.T("开机自启动", "Start with Windows"),S.LaunchAtStartup,value =>
         {
-            try { if (!_app.SmokeMode) Native.StartupRegistration.SetEnabled(value); Change(s=>s.LaunchAtStartup=value); }
+            try { Native.StartupRegistration.SetEnabled(value); Change(s=>s.LaunchAtStartup=value); }
             catch(Exception ex) when(ex is System.IO.IOException or UnauthorizedAccessException or System.Security.SecurityException)
             { SaveStatus(Loc.T("无法设置自启动：", "Could not change the startup setting: ")+ex.Message,true); ShowPage(0); }
         }));
@@ -482,7 +472,7 @@ public sealed partial class SettingsWindow : Window
         var defaults=new DeckSettings();
         if(_page==0)
         {
-            try { if(!_app.SmokeMode) Native.StartupRegistration.SetEnabled(false); }
+            try { Native.StartupRegistration.SetEnabled(false); }
             catch(Exception ex) when(ex is System.IO.IOException or UnauthorizedAccessException or System.Security.SecurityException)
             {SaveStatus(Loc.T("无法恢复自启动设置：", "Could not restore the startup setting: ")+ex.Message,true);return;}
         }
@@ -501,7 +491,6 @@ public sealed partial class SettingsWindow : Window
         if(_page==0)RebuildTheme();else ShowPage(_page);
     }
 
-    internal bool IsPreviewing => _preview;
     // A page that is not shown cannot be previewed, so its sizes are only saved.
     private void Resize(Action<DeckSettings> edit, DeckPage page = DeckPage.Usage)
     { bool shown = page == DeckPage.Music ? S.MusicPage : S.UsagePage; Change(edit); if (!shown) return; _preview = true; _previewPage = page; _app.Deck.Preview(true); _app.Deck.SelectPage(page, remember: false); }

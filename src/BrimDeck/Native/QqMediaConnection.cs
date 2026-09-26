@@ -78,7 +78,9 @@ internal sealed class QqMediaConnection : IMediaPlayerConnection
             System.Security.Principal.TokenImpersonationLevel.Identification);
         using var connecting = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
         connecting.CancelAfter(1500);
-        await pipe.ConnectAsync(connecting.Token).ConfigureAwait(false);
+        // One attempt only: without a timeout the runtime spins on a missing pipe until cancellation.
+        // The supervisor already retries every five seconds while QQ Music is closed.
+        await pipe.ConnectAsync(0, connecting.Token).ConfigureAwait(false);
         if (!GetNamedPipeServerProcessId(pipe.SafePipeHandle, out uint pid) || pid > int.MaxValue)
             throw new InvalidDataException("QQ Music pipe has no identifiable owner.");
         using (var process = Process.GetProcessById((int)pid))

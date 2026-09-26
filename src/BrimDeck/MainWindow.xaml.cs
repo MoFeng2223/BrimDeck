@@ -28,9 +28,6 @@ public partial class MainWindow : Window
     // Checks run every 40 ms near the surface. Farther away the interval grows with the distance, assuming the cursor
     // approaches at no more than 10 physical pixels per millisecond, so it still arrives within one short interval.
     private const double TrackNear = 40, TrackFar = 160, ApproachSpeed = 10;
-    internal Func<Point> PointerPosition { get; set; } = WindowsHost.Cursor;
-    internal bool PointerTracking { get => _pointerTrack.IsEnabled; set { _trackPointer = value; UpdatePointerTracking(); } }
-    internal TimeSpan PointerTrackInterval => _pointerTrack.Interval;
     private readonly WindowsHost _host = new();
     // Animated in place so the indicator style can fade its surface in and out instead of switching brushes.
     private readonly SolidColorBrush _surface = new(Colors.Black);
@@ -56,17 +53,8 @@ public partial class MainWindow : Window
     private DeckSettings Settings => _app.Settings;
     public bool IsExpanded => _expanded;
     public bool IsSuppressed => !_preview && Settings.Behavior(_context) == WindowBehavior.Hide;
-    public FrameworkElement PanelVisual => Island;
-    internal FrameworkElement SurfaceVisual => Stage;
-    internal byte SurfaceAlpha => _surface.Color.A;
-    internal Color SurfaceColor => _surface.Color;
-    internal VirtualDesktopPresence? VirtualDesktops => _virtualDesktops;
-    internal bool AlertVisible => _alert is not null;
-    internal bool EscapeRegistered => _escapeDismissal?.IsEnabled == true;
     public IReadOnlyList<ProviderSnapshot> Snapshots { get; private set; } = [];
     public string? LastRefreshError { get; private set; }
-    // UI smoke scenarios can delay or fail external reads without touching user accounts.
-    internal Func<DateTime?, Task<IReadOnlyList<ProviderSnapshot>>>? SnapshotLoader { get; set; }
 
     private sealed record CompactAlertInfo(AppEntry Entry, string Name, string Label, double Used, DateTimeOffset? ResetAt);
 
@@ -95,8 +83,8 @@ public partial class MainWindow : Window
         {
             _virtualDesktops ??= new VirtualDesktopPresence(this);
             _context = WindowsHost.DetectContext(); ApplySettings();
-            // Smoke scenarios drive pointer state directly; the physical cursor must not interfere.
-            if (!_app.SmokeMode) { PointerTracking = true; ScheduleClock(); _clock.Start(); StartMusic(); await RefreshAutomaticallyAsync(); }
+            _trackPointer = true; UpdatePointerTracking();
+            ScheduleClock(); _clock.Start(); StartMusic(); await RefreshAutomaticallyAsync();
         };
         Closing += (_, e) => { if (!_app.Exiting) { e.Cancel = true; SetExpanded(false); } };
         Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _alertTimer.Stop(); };
@@ -186,7 +174,6 @@ public partial class MainWindow : Window
         ApplySettings();
         PointerChanged(_pointerInside);
     }
-    public void TestContext(ScreenContext context) { _context = context; ApplySettings(); }
     public void SetSnapshots(IReadOnlyList<ProviderSnapshot> snapshots)
     {
         Snapshots = snapshots; _updatedAt = DateTimeOffset.Now;
@@ -333,7 +320,7 @@ public partial class MainWindow : Window
         if (duration == 0) SetImmediate(_surface, SolidColorBrush.ColorProperty, indicator ? IndicatorColor : Colors.Black);
         else _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = indicator ? IndicatorColor : Colors.Black, EasingFunction = easeInOut }, duration, tint), HandoffBehavior.SnapshotAndReplace);
         // The panel is rebuilt when data or settings change, never here: a rebuild on the first frame reads as a stall.
-        if (expanded) RefreshStatus();
+        if (expanded) { RefreshStatus(); UpdateMusicPosition(); }
         else RenderSyncButton();
         UpdateMusicTimer();
     }
@@ -363,7 +350,7 @@ public partial class MainWindow : Window
     internal void TrackPointer()
     {
         if (_preview || IsSuppressed || !IsVisible || PresentationSource.FromVisual(Stage) is null) return;
-        var cursor = PointerPosition();
+        var cursor = WindowsHost.Cursor();
         double left = (Stage.ActualWidth - _compactHover.Width) / 2;
         var area = new Rect(Stage.PointToScreen(new Point(left, 0)), Stage.PointToScreen(new Point(left + _compactHover.Width, _compactHover.Height)));
         bool inCompact = area.Contains(cursor);
@@ -410,7 +397,7 @@ public partial class MainWindow : Window
     {
         var settings = Settings.Copy();
         var prices = _app.Prices.RefreshAsync(cancellation: _app.Lifetime.Token);
-        var usage = _app.DemoMode ? Task.FromResult(DemoData.Create()) : Task.Run(() => _app.Usage.RefreshAsync(settings, _app.Lifetime.Token, historyStart));
+        var usage = Task.Run(() => _app.Usage.RefreshAsync(settings, _app.Lifetime.Token, historyStart));
         await Task.WhenAll(prices, usage);
         return await usage;
     }
@@ -423,14 +410,14 @@ public partial class MainWindow : Window
         RenderSyncButton();
         try
         {
-            var result = await (SnapshotLoader?.Invoke(_historyStart) ?? LoadSnapshotsAsync(_historyStart));
+            var result = await LoadSnapshotsAsync(_historyStart);
             SetSnapshots(result);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { LastRefreshError = ex.GetType().Name + "\n" + ex.StackTrace; }
         finally
         {
-            _refreshing = false; RenderUsage();
+            _refreshing = false; RestartSyncCycle(); RenderUsage();
             if (_refreshRequested)
             {
                 _refreshRequested = false; _ = RefreshAsync();
@@ -477,20 +464,4 @@ public sealed class BezierEase : EasingFunctionBase
     private static double A(double a1, double a2) => 1 - 3 * a2 + 3 * a1;
     private static double B(double a1, double a2) => 3 * a2 - 6 * a1;
     private static double Sample(double t, double a1, double a2) => ((A(a1, a2) * t + B(a1, a2)) * t + 3 * a1) * t;
-}
-
-internal static class DemoData
-{
-    public static List<ProviderSnapshot> Create()
-    {
-        var now = DateTimeOffset.Now;
-        return ProviderCatalog.BuiltIns.Select((id, i) => new ProviderSnapshot(id)
-        {
-            Plan = id == ProviderId.Claude ? "Max 5x" : id == ProviderId.Codex ? "prolite" : id == ProviderId.Cursor ? "Free" : "Pro", Status = Loc.T("演示数据", "Demo data"), Source = Loc.T("内置示例", "Built-in sample"), LiveQuota = false, QuotaTime = now, UsageAvailable = true, UsageNote = Loc.T("示例数据", "Sample data"),
-            Quotas = id == ProviderId.Antigravity
-                ? [new("Gemini · 5 小时", 2, now.AddHours(4), 300), new("Gemini · 每周", 16, now.AddDays(4), 10080), new("Claude · 5 小时", 35, now.AddHours(2), 300), new("Claude · 每周", 88, now.AddDays(3), 10080)]
-                : [new(id == ProviderId.Cursor ? "Cursor 模型" : "5 小时额度", id == ProviderId.Claude ? 47 : 1 + i * 9, now.AddHours(2).AddMinutes(18 + i * 7), id == ProviderId.Cursor ? null : 300), new(id == ProviderId.Cursor ? "其他模型" : "每周额度", id == ProviderId.Claude ? 6 : 16 + i * 7, now.AddDays(3).AddHours(i), id == ProviderId.Cursor ? null : 10080)],
-            Entries = Enumerable.Range(0, 30).Select(d => new TokenEntry($"demo:{id}:{d}", now.AddDays(-d), id == ProviderId.Claude ? "claude-sonnet-4-6" : "gpt-6-astra", 184000 + i * 10000, 740000, 18000, 0, 27000)).ToList()
-        }).ToList();
-    }
 }

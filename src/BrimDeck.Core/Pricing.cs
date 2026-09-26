@@ -17,7 +17,6 @@ public sealed record CostSummary(decimal Amount, int Reported, int Estimated, in
 public sealed class Pricing : IDisposable
 {
     public const string Source = "https://openrouter.ai/api/v1/models";
-    public const string SourcePage = "https://openrouter.ai/models";
     public static readonly TimeSpan RefreshInterval = TimeSpan.FromDays(1);
     private readonly HttpClient _http;
     private readonly bool _ownsHttp;
@@ -30,6 +29,8 @@ public sealed class Pricing : IDisposable
     private readonly SemaphoreSlim _gate = new(1);
     private DateTimeOffset? _lastAttempt;
     private Dictionary<string, ModelPrice> _lookup = new(StringComparer.OrdinalIgnoreCase);
+    // Each refresh prices thousands of records that share a few model names; results are kept until the catalog changes.
+    private System.Collections.Concurrent.ConcurrentDictionary<string, ModelPrice?> _found = new(StringComparer.Ordinal);
     public int ModelCount { get; private set; }
     public DateTimeOffset? UpdatedAt { get; private set; }
     public string? LastError { get; private set; }
@@ -172,7 +173,8 @@ public sealed class Pricing : IDisposable
         foreach (var remote in _remote.Values)
             if (_manual.TryGetValue(Normalize(remote.Model[(remote.Model.IndexOf('/') + 1)..]), out var manual))
                 lookup.TryAdd(Normalize(remote.Model), manual);
-        _lookup = lookup; ModelCount = models.Length;
+        // The table is replaced before the cache, so a concurrent Find never stores an old answer in the new cache.
+        _lookup = lookup; _found = new(StringComparer.Ordinal); ModelCount = models.Length;
         Changed?.Invoke();
     }
     private Dictionary<string, ModelPrice> MergedModels()
@@ -226,12 +228,14 @@ public sealed class Pricing : IDisposable
     }
     public ModelPrice? Find(string model)
     {
+        var found = _found; var lookup = _lookup;
+        if (found.TryGetValue(model, out var known)) return known;
         string key = Normalize(model);
-        var lookup = _lookup;
-        if (lookup.TryGetValue(key, out var price)) return price;
         // Only a dated snapshot can fall back to its exact base model. Variants remain distinct.
         string undated = Regex.Replace(key, @"-\d{8}$", "");
-        return undated != key && lookup.TryGetValue(undated, out price) ? price : null;
+        var price = lookup.TryGetValue(key, out var exact) ? exact : undated != key && lookup.TryGetValue(undated, out var dated) ? dated : null;
+        found[model] = price;
+        return price;
     }
     public decimal? Estimate(TokenEntry entry)
     {

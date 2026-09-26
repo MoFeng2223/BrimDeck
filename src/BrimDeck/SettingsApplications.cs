@@ -174,7 +174,6 @@ public sealed partial class SettingsWindow
         if (_appDrag is not { } drag || _appRows is null) return;
         _appDrag = null;
         if (drag.Handle.IsMouseCaptured) drag.Handle.ReleaseMouseCapture();
-        drag.Handle.PreviewMouseMove -= IgnoreProbePointer;
         var positions = drag.Rows.Select((row, i) => (row, y: i * AppRowHeight + RowTransform(row).Y)).ToArray();
         bool changed = commit && drag.From != drag.Target;
         if (changed)
@@ -193,28 +192,5 @@ public sealed partial class SettingsWindow
             var order = _appRows.Children.OfType<Border>().Where(b => b.Tag is AppEntry).Select(b => ((AppEntry)b.Tag).InstanceId).ToArray();
             Change(s => s.Apps = order.Select(id => s.Entry(id)!).ToList());
         }
-    }
-
-    // Smoke probes use the same capture, movement, cancellation and release path as pointer events.
-    internal void BeginAppDrag(int index)
-    {
-        if (_appRows is null) ShowPage(3);
-        _appRows!.UpdateLayout();
-        var row = (Border)_appRows.Children[index];
-        var handle = (Border)((Grid)row.Child).Children[0];
-        handle.Focus();
-        // Test coordinates must not be replaced by WPF's synthetic mouse moves
-        // when capture/layout changes, or by the user's physical mouse position.
-        handle.PreviewMouseMove += IgnoreProbePointer;
-        StartAppDrag(row, handle, index * AppRowHeight + RowTransform(row).Y + AppRowHeight / 2);
-    }
-
-    private static void IgnoreProbePointer(object sender, MouseEventArgs e) => e.Handled = true;
-
-    internal void MoveApp(int from, int to)
-    {
-        BeginAppDrag(from);
-        UpdateAppDrag(Math.Clamp(to, 0, S.Apps.Count - 1) * AppRowHeight + AppRowHeight / 2);
-        EndAppDrag(true);
     }
 }

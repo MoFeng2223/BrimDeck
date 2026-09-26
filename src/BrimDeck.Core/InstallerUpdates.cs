@@ -78,6 +78,7 @@ public sealed class InstallerUpdateBackend : IAppUpdateBackend
         return _available is null ? null : Describe(_available);
     }
 
+    private static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(30);
     public async Task DownloadAsync(AppRelease release, Action<int> progress, CancellationToken cancellation)
     {
         var manifest = _available is { } available && available.Version == release.Version ? available
@@ -94,8 +95,12 @@ public sealed class InstallerUpdateBackend : IAppUpdateBackend
                 await using var file = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
                 using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
                 var buffer = new byte[81920]; long total = 0; int reported = -1, read;
-                while ((read = await source.ReadAsync(buffer, cancellation).ConfigureAwait(false)) > 0)
+                // The client timeout ends with the response headers; a body that stops arriving fails after 30 seconds without data.
+                using var stall = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+                stall.CancelAfter(StallTimeout);
+                while ((read = await source.ReadAsync(buffer, stall.Token).ConfigureAwait(false)) > 0)
                 {
+                    stall.CancelAfter(StallTimeout);
                     total += read;
                     if (total > manifest.Size) throw new InvalidDataException("Installer size mismatch.");
                     hash.AppendData(buffer, 0, read);

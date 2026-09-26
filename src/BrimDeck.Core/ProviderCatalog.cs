@@ -62,14 +62,6 @@ public static class ProviderCatalog
         return site;
     }
     public static bool NeedsSite(ProviderId id) => id is ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom;
-    public static string Endpoint(AppEntry entry) => entry.QuotaSource switch
-    {
-        ProviderId.GlmChina => "https://open.bigmodel.cn/api/monitor/usage/quota/limit",
-        ProviderId.GlmGlobal => "https://api.z.ai/api/monitor/usage/quota/limit",
-        ProviderId.NewApi => NormalizeSite(entry.Site) + "/api/usage/token/",
-        ProviderId.Sub2Api => NormalizeSite(entry.Site) + "/v1/usage",
-        _ => NormalizeSite(entry.Site, false)
-    };
     public static Uri ValidateUrl(string url)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("https" or "http") ||

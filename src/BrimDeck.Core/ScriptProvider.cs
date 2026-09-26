@@ -204,7 +204,12 @@ public sealed class ConfiguredProviders : IDisposable
     public async Task<List<ProviderSnapshot>> RefreshAsync(IEnumerable<AppEntry> entries, CancellationToken ct)
     {
         var configurations = entries.Where(e => !ProviderCatalog.IsBuiltIn(e.QuotaSource)).Select(e => (Entry: e.Copy(), Secret: ReadSecret(e))).ToList();
-        var tasks = configurations.GroupBy(p => ProviderCatalog.RequestKey(p.Entry, p.Secret)).Select(async group =>
+        var groups = configurations.GroupBy(p => ProviderCatalog.RequestKey(p.Entry, p.Secret)).ToList();
+        // State kept for a site or key that is no longer configured is dropped, so edits do not accumulate it.
+        var current = groups.Select(g => g.Key).ToHashSet();
+        static void Prune<T>(ConcurrentDictionary<string, T> map, HashSet<string> keep) { foreach (var key in map.Keys) if (!keep.Contains(key)) map.TryRemove(key, out _); }
+        Prune(_lastGood, current); Prune(_retryAt, current); Prune(_memory, current);
+        var tasks = groups.Select(async group =>
         {
             var first = group.First();
             var test = await FetchAsync(first.Entry, first.Secret, group.Key, ct);

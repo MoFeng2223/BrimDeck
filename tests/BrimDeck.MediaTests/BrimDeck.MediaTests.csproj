@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BrimDeck.Core\BrimDeck.Core.csproj" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="System.Management" Version="10.0.0" />
+    <Compile Include="..\..\src\BrimDeck\Native\IMediaPlayerConnection.cs" Link="IMediaPlayerConnection.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\NeteaseSource.cs" Link="NeteaseSource.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\NeteaseLogReader.cs" Link="NeteaseLogReader.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\NeteaseCdpConnection.cs" Link="NeteaseCdpConnection.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\NeteaseBridgeScript.cs" Link="NeteaseBridgeScript.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\TcpListeners.cs" Link="TcpListeners.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\QqMediaConnection.cs" Link="QqMediaConnection.cs" />
+  </ItemGroup>
+</Project>

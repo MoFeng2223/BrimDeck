@@ -3,9 +3,6 @@
   <Application.Resources>
     <FontFamily x:Key="AppTextFont">Microsoft YaHei</FontFamily>
     <SolidColorBrush x:Key="BackgroundBrush" Color="#141416"/>
-    <SolidColorBrush x:Key="SurfaceBrush" Color="#1B1D23"/>
-    <SolidColorBrush x:Key="MutedBrush" Color="#9296A4"/>
-    <SolidColorBrush x:Key="AccentBrush" Color="#3478F6"/>
     <Style TargetType="Window">
       <Setter Property="FontFamily" Value="{StaticResource AppTextFont}"/>
       <Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="#EFF0F5"/>

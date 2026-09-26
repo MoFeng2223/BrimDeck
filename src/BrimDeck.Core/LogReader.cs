@@ -4,8 +4,22 @@ namespace BrimDeck.Core;
 
 public sealed class LogReader
 {
-    private sealed record CacheItem(long Length, DateTime Modified, DateTimeOffset Cutoff, List<TokenEntry> Entries, JsonElement Quota, DateTimeOffset? QuotaTime, int Errors);
-    private readonly Dictionary<string, CacheItem> _cache = new(StringComparer.OrdinalIgnoreCase);
+    // Session logs only grow at the end. Each file remembers where its last complete line ended, together with the
+    // Codex parser's running state, so a refresh parses only the lines written since. A shorter or rewritten file,
+    // or an earlier start date, is parsed again from the beginning.
+    private sealed class CacheItem(DateTimeOffset cutoff)
+    {
+        public readonly DateTimeOffset Cutoff = cutoff;
+        public long Length, Offset;
+        public DateTime Modified;
+        public readonly List<TokenEntry> Entries = [];
+        public JsonElement Quota;
+        public DateTimeOffset? QuotaTime;
+        public int Errors;
+        public string Model = "unknown", LastTotal = "";
+    }
+    // Claude and Codex read different folders; each keeps only the files its latest read visited.
+    private readonly Dictionary<ProviderId, Dictionary<string, CacheItem>> _caches = [];
 
     public ProviderSnapshot Read(ProviderId id, string root, DateTimeOffset now, DateTime? startDate = null)
     {
@@ -13,6 +27,8 @@ public sealed class LogReader
         var cutoff = new DateTimeOffset(startDate?.Date ?? now.LocalDateTime.Date.AddDays(-29));
         result.UsageStart = cutoff.LocalDateTime.Date;
         var folders = id == ProviderId.Codex ? new[] { "sessions", "archived_sessions" } : new[] { "projects" };
+        if (!_caches.TryGetValue(id, out var cache)) _caches[id] = cache = new(StringComparer.OrdinalIgnoreCase);
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var entries = new Dictionary<string, TokenEntry>();
         int count = 0, errors = 0;
         JsonElement latestQuota = default;
@@ -28,20 +44,25 @@ public sealed class LogReader
                 {
                     var info = new FileInfo(file);
                     if (info.LastWriteTimeUtc < cutoff.UtcDateTime) continue;
-                    if (!_cache.TryGetValue(file, out var cached) || cached.Length != info.Length || cached.Modified != info.LastWriteTimeUtc || cutoff < cached.Cutoff)
-                        _cache[file] = cached = ParseFile(file, id, cutoff, info);
+                    visited.Add(file);
+                    if (!cache.TryGetValue(file, out var cached) || cutoff < cached.Cutoff || info.Length < cached.Length ||
+                        info.Length == cached.Length && info.LastWriteTimeUtc != cached.Modified)
+                        cache[file] = cached = new CacheItem(cutoff);
+                    if (info.Length != cached.Length || info.LastWriteTimeUtc != cached.Modified) Parse(file, id, cached, info);
                     count++; errors += cached.Errors;
-                    foreach (var entry in cached.Entries.Where(e => e.Time >= cutoff && e.Time <= now && e.Total > 0))
+                    foreach (var entry in cached.Entries)
                     {
+                        if (entry.Time < cutoff || entry.Time > now || entry.Total <= 0) continue;
                         // Streaming Claude records can repeat an id; keep its most complete usage.
                         if (!entries.TryGetValue(entry.Key, out var old) || entry.Total >= old.Total) entries[entry.Key] = entry;
                     }
                     if (cached.QuotaTime is { } time && (result.QuotaTime is null || time > result.QuotaTime))
                     { result.QuotaTime = time; latestQuota = cached.Quota; }
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { errors++; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { errors++; cache.Remove(file); }
             }
         }
+        foreach (var gone in cache.Keys.Where(file => !visited.Contains(file)).ToList()) cache.Remove(gone);
         result.Entries = entries.Values.OrderBy(x => x.Time).ToList();
         result.UsageNote = result.UsageAvailable ? Loc.T($"本机 {cutoff.LocalDateTime:yyyy-MM-dd} 起 · {count} 个记录文件", $"This PC since {cutoff.LocalDateTime:yyyy-MM-dd} · " + Loc.Count(count, "record file", "record files"))
             : Loc.T("未找到本机会话记录。", "No local session records were found.");
@@ -57,69 +78,82 @@ public sealed class LogReader
         return result;
     }
 
-    private static CacheItem ParseFile(string file, ProviderId id, DateTimeOffset cutoff, FileInfo info)
+    // Reads complete lines after the remembered offset. A line still being written is left for the next refresh.
+    private static void Parse(string file, ProviderId id, CacheItem item, FileInfo info)
     {
-        using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        using var reader = new StreamReader(stream);
-        var entries = new List<TokenEntry>();
-        string model = "unknown";
-        string lastTotal = "";
-        JsonElement quota = default;
-        DateTimeOffset? quotaTime = null;
-        int errors = 0;
-        string? line;
-        while ((line = reader.ReadLine()) is not null)
+        using var stream = SharedFile.Open(file);
+        stream.Seek(item.Offset, SeekOrigin.Begin);
+        var buffer = new byte[1 << 20];
+        int filled = 0, read;
+        while ((read = stream.Read(buffer, filled, buffer.Length - filled)) > 0)
         {
-            if (!line.Contains("\"token_count\"", StringComparison.Ordinal) && !line.Contains("\"turn_context\"", StringComparison.Ordinal) &&
-                !line.Contains("\"usage\"", StringComparison.Ordinal)) continue;
-            try
+            filled += read;
+            int start = 0, newline;
+            while ((newline = Array.IndexOf(buffer, (byte)'\n', start, filled - start)) >= 0)
             {
-                using var doc = JsonDocument.Parse(line);
-                var obj = doc.RootElement;
-                var time = obj.Get("timestamp").Date();
-                var type = obj.Get("type").Text();
-                if (id == ProviderId.Codex)
-                {
-                    var payload = obj.Get("payload");
-                    if (type == "turn_context") { model = payload.Get("model").Text(); continue; }
-                    if (type != "event_msg" || payload.Get("type").Text() != "token_count" || time is null) continue;
-                    var limits = payload.Get("rate_limits");
-                    if (limits.ValueKind == JsonValueKind.Object && (limits.Get("limit_id").Text() is "" or "codex") && (quotaTime is null || time >= quotaTime))
-                    { quota = limits.Clone(); quotaTime = time; }
-                    var usageInfo = payload.Get("info");
-                    var cumulative = usageInfo.Get("total_token_usage");
-                    var identity = cumulative.ValueKind == JsonValueKind.Object ? cumulative.GetRawText() : "";
-                    if (identity.Length > 0)
-                    {
-                        if (identity == lastTotal) continue;
-                        lastTotal = identity;
-                    }
-                    var usage = usageInfo.Get("last_token_usage");
-                    if (usage.ValueKind != JsonValueKind.Object || time < cutoff) continue;
-                    long input = usage.Get("input_tokens").Count(), cached = Math.Min(input, usage.Get("cached_input_tokens").Count());
-                    var write = usage.Get("cache_write_input_tokens").Count();
-                    var output = usage.Get("output_tokens").Count();
-                    // Timestamp + cumulative counters deduplicate history copied into a fork.
-                    entries.Add(new($"codex:{time:O}:{identity}:{usage.GetRawText()}", time.Value, model, input - cached, cached, write, 0, output));
-                }
-                else
-                {
-                    if (type != "assistant" || time is null || time < cutoff) continue;
-                    var message = obj.Get("message");
-                    var usage = message.Get("usage");
-                    if (usage.ValueKind != JsonValueKind.Object) continue;
-                    var creation = usage.Get("cache_creation_input_tokens").Count();
-                    var hour = Math.Min(creation, usage.Get("cache_creation").Get("ephemeral_1h_input_tokens").Count());
-                    var key = message.Get("id").Text();
-                    if (key.Length == 0) key = obj.Get("uuid").Text();
-                    if (key.Length == 0) key = $"{time:O}:{usage.GetRawText()}";
-                    entries.Add(new("claude:" + key, time.Value, message.Get("model").Text(), usage.Get("input_tokens").Count(),
-                        usage.Get("cache_read_input_tokens").Count(), creation - hour, hour, usage.Get("output_tokens").Count()));
-                }
+                ParseLine(buffer.AsMemory(start, newline - start), id, item);
+                start = newline + 1;
             }
-            catch (JsonException) { errors++; }
+            item.Offset += start;
+            Buffer.BlockCopy(buffer, start, buffer, 0, filled - start);
+            filled -= start;
+            // A single line longer than the buffer (a large tool result) grows it instead of being split.
+            if (filled == buffer.Length) Array.Resize(ref buffer, buffer.Length * 2);
         }
-        return new(info.Length, info.LastWriteTimeUtc, cutoff, entries, quota, quotaTime, errors);
+        item.Length = info.Length; item.Modified = info.LastWriteTimeUtc;
+    }
+
+    private static void ParseLine(ReadOnlyMemory<byte> line, ProviderId id, CacheItem item)
+    {
+        if (line.Span.StartsWith((ReadOnlySpan<byte>)[0xEF, 0xBB, 0xBF])) line = line[3..]; // UTF-8 byte order mark
+        var span = line.Span;
+        if (span.IndexOf("\"token_count\""u8) < 0 && span.IndexOf("\"turn_context\""u8) < 0 && span.IndexOf("\"usage\""u8) < 0) return;
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            var obj = doc.RootElement;
+            var time = obj.Get("timestamp").Date();
+            var type = obj.Get("type").Text();
+            if (id == ProviderId.Codex)
+            {
+                var payload = obj.Get("payload");
+                if (type == "turn_context") { item.Model = payload.Get("model").Text(); return; }
+                if (type != "event_msg" || payload.Get("type").Text() != "token_count" || time is null) return;
+                var limits = payload.Get("rate_limits");
+                if (limits.ValueKind == JsonValueKind.Object && (limits.Get("limit_id").Text() is "" or "codex") && (item.QuotaTime is null || time >= item.QuotaTime))
+                { item.Quota = limits.Clone(); item.QuotaTime = time; }
+                var usageInfo = payload.Get("info");
+                var cumulative = usageInfo.Get("total_token_usage");
+                var identity = cumulative.ValueKind == JsonValueKind.Object ? cumulative.GetRawText() : "";
+                if (identity.Length > 0)
+                {
+                    if (identity == item.LastTotal) return;
+                    item.LastTotal = identity;
+                }
+                var usage = usageInfo.Get("last_token_usage");
+                if (usage.ValueKind != JsonValueKind.Object || time < item.Cutoff) return;
+                long input = usage.Get("input_tokens").Count(), cached = Math.Min(input, usage.Get("cached_input_tokens").Count());
+                var write = usage.Get("cache_write_input_tokens").Count();
+                var output = usage.Get("output_tokens").Count();
+                // Timestamp + cumulative counters deduplicate history copied into a fork.
+                item.Entries.Add(new($"codex:{time:O}:{identity}:{usage.GetRawText()}", time.Value, item.Model, input - cached, cached, write, 0, output));
+            }
+            else
+            {
+                if (type != "assistant" || time is null || time < item.Cutoff) return;
+                var message = obj.Get("message");
+                var usage = message.Get("usage");
+                if (usage.ValueKind != JsonValueKind.Object) return;
+                var creation = usage.Get("cache_creation_input_tokens").Count();
+                var hour = Math.Min(creation, usage.Get("cache_creation").Get("ephemeral_1h_input_tokens").Count());
+                var key = message.Get("id").Text();
+                if (key.Length == 0) key = obj.Get("uuid").Text();
+                if (key.Length == 0) key = $"{time:O}:{usage.GetRawText()}";
+                item.Entries.Add(new("claude:" + key, time.Value, message.Get("model").Text(), usage.Get("input_tokens").Count(),
+                    usage.Get("cache_read_input_tokens").Count(), creation - hour, hour, usage.Get("output_tokens").Count()));
+            }
+        }
+        catch (JsonException) { item.Errors++; }
     }
 }
 

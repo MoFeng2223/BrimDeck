@@ -1,20 +1,32 @@
 using System.Windows;
 using BrimDeck.Core;
 using System.Windows.Automation;
+using System.Windows.Media;
 using System.Windows.Media.Animation;
 
 namespace BrimDeck;
 
 public partial class MainWindow
 {
-    private double _syncRotationSeconds;
+    private string _syncSpin = "";
+    // The countdown ring shows how far the automatic cycle has run. It is redrawn once a second, and only while the
+    // usage page is on screen: an endlessly rotating icon made the layered panel recompose every frame.
+    private DateTime _syncCycleStart = DateTime.UtcNow;
+    private PromptTimer? _syncRingTimer;
+    private bool _syncCountdown;
     internal bool AutomaticSyncEnabled => Settings.QuotaWanted && Settings.UsageAutoSync;
-    internal bool IsSynchronizing => _refreshing;
 
     private void ApplySyncSchedule()
     {
-        if (IsLoaded && !_app.SmokeMode && AutomaticSyncEnabled) _refresh.Start();
+        if (IsLoaded && AutomaticSyncEnabled) { if (!_refresh.IsEnabled) { _refresh.Start(); _syncCycleStart = DateTime.UtcNow; } }
         else _refresh.Stop();
+    }
+
+    // A read that just finished starts the next full cycle, so the ring always runs from empty to a real sync.
+    private void RestartSyncCycle()
+    {
+        if (_refresh.IsEnabled) { _refresh.Stop(); _refresh.Start(); }
+        _syncCycleStart = DateTime.UtcNow;
     }
 
     internal Task RefreshAutomaticallyAsync(bool queueIfBusy = false)
@@ -48,14 +60,52 @@ public partial class MainWindow
         SyncButton.ToolTip = tip;
         AutomationProperties.SetName(SyncButton, _details ? tip : Settings.UsageAutoSync ? Loc.T("关闭自动同步", "Turn off automatic sync") : Loc.T("开启自动同步", "Turn on automatic sync"));
 
-        // Keep a running rotation across clock ticks and table renders; suspend it when the panel is hidden.
-        double seconds = _expanded && !IsMusicPage && Settings.UsagePage && Settings.Animations && SystemParameters.ClientAreaAnimation
-            && (_details ? _refreshing : Settings.UsageAutoSync) ? _details ? 1 : 4.8 : 0;
-        if (_syncRotationSeconds == seconds) return;
-        _syncRotationSeconds = seconds;
-        SyncRotation.BeginAnimation(System.Windows.Media.RotateTransform.AngleProperty, seconds == 0 ? null : new DoubleAnimation
+        bool onScreen = _expanded && !IsMusicPage && Settings.UsagePage && !IsSuppressed;
+        _syncCountdown = !_details && Settings.UsageAutoSync && _refresh.IsEnabled;
+        SyncTrack.Visibility = SyncProgress.Visibility = _syncCountdown ? Visibility.Visible : Visibility.Collapsed;
+        // Inside the ring the arrows shrink to 13 DIP; the stroke stays 1.24 DIP like the standalone icon.
+        SyncGlyph.Width = SyncGlyph.Height = _syncCountdown ? 13 : 18;
+        SyncArrows.StrokeThickness = _syncCountdown ? 1.65 * 18 / 13 : 1.65;
+        UpdateSyncRing();
+        var ringTimer = _syncRingTimer ??= new PromptTimer(Dispatcher, UpdateSyncRing) { Interval = TimeSpan.FromSeconds(1) };
+        if (_syncCountdown && onScreen) { if (!ringTimer.IsEnabled) ringTimer.Start(); }
+        else ringTimer.Stop();
+
+        // A manual read on the details page spins until it ends; an automatic sync turns the arrows once.
+        bool animations = Settings.Animations && SystemParameters.ClientAreaAnimation;
+        string spin = !onScreen || !animations || !_refreshing ? "" : _details ? "details" : _syncCountdown ? "once" : "";
+        if (_syncSpin == spin) return;
+        _syncSpin = spin;
+        SyncRotation.BeginAnimation(RotateTransform.AngleProperty, spin.Length == 0 ? null : new DoubleAnimation
         {
-            From = 0, To = 360, Duration = TimeSpan.FromSeconds(seconds), RepeatBehavior = RepeatBehavior.Forever
+            From = 0, To = 360, Duration = TimeSpan.FromSeconds(1),
+            RepeatBehavior = spin == "details" ? RepeatBehavior.Forever : new RepeatBehavior(1), FillBehavior = FillBehavior.Stop
         });
+    }
+
+    private void UpdateSyncRing()
+    {
+        if (!_syncCountdown) { SyncProgress.Data = null; return; }
+        double fraction = _refreshing ? 1 : Math.Clamp((DateTime.UtcNow - _syncCycleStart).TotalSeconds / _refresh.Interval.TotalSeconds, 0, 1);
+        SyncProgress.Data = RingArc(fraction);
+    }
+
+    // The arc starts at 12 o'clock and grows counterclockwise, like the compact quota rings.
+    private static Geometry? RingArc(double fraction)
+    {
+        const double center = 12, radius = 10;
+        if (fraction <= 0) return null;
+        Geometry geometry;
+        if (fraction >= .999) geometry = new EllipseGeometry(new Point(center, center), radius, radius);
+        else
+        {
+            double angle = fraction * Math.PI * 2;
+            var figure = new PathFigure { StartPoint = new Point(center, center - radius), IsClosed = false };
+            figure.Segments.Add(new ArcSegment(new Point(center - radius * Math.Sin(angle), center - radius * Math.Cos(angle)),
+                new Size(radius, radius), 0, fraction > .5, SweepDirection.Counterclockwise, true));
+            geometry = new PathGeometry([figure]);
+        }
+        geometry.Freeze();
+        return geometry;
     }
 }

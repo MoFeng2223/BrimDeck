@@ -198,7 +198,6 @@ internal sealed class MusicMarquee : FrameworkElement
     public Brush Foreground { get; init; } = UI.Brush(UI.Primary);
     private FormattedText Formatted => _formatted ??= new(Text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
         Typeface, FontSize, Foreground, VisualTreeHelper.GetDpi(this).PixelsPerDip);
-    public bool Overflows => Formatted.Width > (double.IsFinite(Width) ? Width : ActualWidth);
     public void SetScrolling(bool enabled) { _scrolling = enabled; UpdateAnimation(); }
     private void ResetText() { _formatted = null; ResetAnimation(); InvalidateVisual(); }
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)

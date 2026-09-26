@@ -23,7 +23,7 @@ public static class ZCodeUsage
     {
         var path = Credentials(home);
         if (!File.Exists(path)) return null;
-        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        using var doc = SharedFile.Parse(path);
         var profile = Environment.GetEnvironmentVariable("USERPROFILE") is { Length: > 0 } userProfile ? userProfile : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         secret ??= Environment.GetEnvironmentVariable("ZCODE_CREDENTIAL_SECRET") is { Length: > 0 } custom ? custom : $"zcode-credential-fallback:win32:{profile}:{Environment.UserName}";
         var key = SHA256.HashData(Encoding.UTF8.GetBytes(secret));
@@ -46,7 +46,7 @@ public static class ZCodeUsage
         {
             var path = Path.Combine(home, "v2", "telemetry-state.json");
             if (!File.Exists(path)) return "";
-            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            using var doc = SharedFile.Parse(path);
             return Guid.TryParse(doc.RootElement.Get("deviceMid").Text(), out var id) ? id.ToString() : "";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return ""; }

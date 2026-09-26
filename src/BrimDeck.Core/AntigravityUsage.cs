@@ -23,6 +23,8 @@ public sealed class AntigravityUsage
         if (!snapshot.UsageAvailable) { snapshot.UsageNote = Loc.T("未找到本机 Antigravity 会话记录。", "No local Antigravity session records were found."); return; }
         var entries = new Dictionary<string, TokenEntry>(StringComparer.Ordinal);
         int count = 0, failed = 0;
+        // Only conversations inside the current window stay cached, so the cache does not grow for as long as the app runs.
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var database in existing.SelectMany(folder => SafeFiles(folder)))
         {
             // Recent messages may still sit in the write-ahead log, so it counts towards the file's age and identity.
@@ -30,6 +32,7 @@ public sealed class AntigravityUsage
             var info = new FileInfo(database);
             var modified = wal.Exists && wal.LastWriteTimeUtc > info.LastWriteTimeUtc ? wal.LastWriteTimeUtc : info.LastWriteTimeUtc;
             if (modified < start.UtcDateTime) continue;
+            visited.Add(database);
             var length = info.Length + (wal.Exists ? wal.Length : 0);
             if (!_cache.TryGetValue(database, out var cached) || cached.Modified != modified || cached.Length != length || start < cached.Cutoff)
                 _cache[database] = cached = Parse(desktop, database, start, modified, length);
@@ -37,6 +40,7 @@ public sealed class AntigravityUsage
             if (!cached.Complete) failed++;
             foreach (var entry in cached.Entries.Where(e => e.Time >= start && e.Time <= now)) entries.TryAdd(entry.Key, entry);
         }
+        foreach (var gone in _cache.Keys.Where(database => !visited.Contains(database)).ToList()) _cache.Remove(gone);
         snapshot.Entries = entries.Values.OrderBy(e => e.Time).ToList();
         snapshot.UsageComplete = failed == 0;
         snapshot.UsageNote = Loc.T($"本机 Antigravity 与 Antigravity CLI {start.LocalDateTime:yyyy-MM-dd} 起 · {count} 个会话",

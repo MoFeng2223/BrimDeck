@@ -84,13 +84,12 @@ public partial class MainWindow
         return snapshot.Entries.Where(x => x.Time.LocalDateTime >= start).ToList();
     }
 
-    // The cheap part of a render: clock, mode label, status tooltip and the synchronization button. Run on every expansion.
+    // The cheap part of a render: clock, status tooltip and the synchronization button. Run on every expansion.
     internal void RefreshStatus()
     {
         RenderSyncButton();
         RenderPageSwitch();
         ClockLabel.Text = DateTime.Now.ToString("HH:mm");
-        ModeLabel.Text = _app.DemoMode && !_details ? Loc.T("演示", "Demo") : "";
         var updateStatus = _refreshing ? Loc.T("更新中", "Updating") : LastRefreshError is not null ? Loc.T("更新失败", "Update failed") :
             _updatedAt is { } time ? Loc.T($"更新于 {time.LocalDateTime:MM-dd HH:mm:ss}", $"Updated {time.LocalDateTime:MM-dd HH:mm:ss}") : Loc.T("尚未更新", "Not updated yet");
         SettingsButton.ToolTip = Loc.T("设置", "Settings") + "\n" + updateStatus;
@@ -449,13 +448,16 @@ public partial class MainWindow
         // Captions end on one vertical line, so "今日" and "7 天" stack cleanly and both figures start at the same distance.
         // The English caption is written "7days" without a space, as the user chose.
         var caption = UI.Centered(Loc.IsEnglish ? label.Replace(" ", "") : label, layout.Foot, UI.Tertiary); caption.Margin = new Thickness(0, 0, 8, 0); caption.HorizontalAlignment = HorizontalAlignment.Right; row.Children.Add(caption);
-        FrameworkElement tokens = snapshot.UsageAvailable ? UI.Centered(UI.Number(entries.Sum(x => x.Total)), layout.Foot, UI.Secondary)
+        // Each row prices its records once; the figure and its tooltip share the result.
+        long total = entries.Sum(x => x.Total);
+        var cost = snapshot.UsageAvailable ? _app.Prices.Summarize(entries) : null;
+        FrameworkElement tokens = snapshot.UsageAvailable ? UI.Centered(UI.Number(total), layout.Foot, UI.Secondary)
             : UI.CenteredSymbol("—", layout.Foot, UI.Secondary);
         tokens.HorizontalAlignment = HorizontalAlignment.Left;
-        tokens.ToolTip = ProviderCatalog.UsageTip(snapshot.Id) + "\n" + (snapshot.UsageAvailable ? Loc.T($"{label} Token · {entries.Sum(x => x.Total):N0}", $"{label} tokens · {entries.Sum(x => x.Total):N0}") : snapshot.UsageNote); Grid.SetColumn(tokens, 1); row.Children.Add(tokens);
-        FrameworkElement price = snapshot.UsageAvailable ? UI.Centered(UI.Cost(entries, _app.Prices), layout.Foot, UI.Primary, FontWeights.SemiBold)
+        tokens.ToolTip = ProviderCatalog.UsageTip(snapshot.Id) + "\n" + (snapshot.UsageAvailable ? Loc.T($"{label} Token · {total:N0}", $"{label} tokens · {total:N0}") : snapshot.UsageNote); Grid.SetColumn(tokens, 1); row.Children.Add(tokens);
+        FrameworkElement price = snapshot.UsageAvailable ? UI.Centered(UI.Cost(cost!), layout.Foot, UI.Primary, FontWeights.SemiBold)
             : UI.CenteredSymbol("—", layout.Foot, UI.Tertiary, FontWeights.SemiBold);
-        price.Margin = new Thickness(grouped ? 12 : 8, 0, 0, 0); price.ToolTip = snapshot.UsageAvailable ? UI.CostNote(entries, _app.Prices) : snapshot.UsageNote; Grid.SetColumn(price, 2); row.Children.Add(price);
+        price.Margin = new Thickness(grouped ? 12 : 8, 0, 0, 0); price.ToolTip = snapshot.UsageAvailable ? UI.CostNote(cost!, _app.Prices) : snapshot.UsageNote; Grid.SetColumn(price, 2); row.Children.Add(price);
         var arrow = UI.CenteredSymbol("›", layout.Foot + 1, UI.Tertiary); arrow.HorizontalAlignment = HorizontalAlignment.Right;
         Grid.SetColumn(arrow, 3); row.Children.Add(arrow);
         var link = DetailLink(row, Loc.T($"查看 {entry.Name} {label}明细", $"Show {entry.Name} {label.ToLowerInvariant()} details"), () => OpenModelDetails(snapshot.Id, days));

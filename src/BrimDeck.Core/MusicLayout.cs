@@ -32,8 +32,6 @@ public sealed record MusicLayout(MusicTier Tier, double BodyY, double BodyHeight
     // In English the second step keeps the meaning in two words; "En…" in Segoe UI is narrower than "启…".
     public static string[] FullControlLabels => Loc.IsEnglish ? ["Enable full control", "Full control", "Enable…", "En…"] : ["启用完整控制", "启用完整…", "启用…", "启…"];
     public const double FullControlGap = 8, FullControlChrome = 14, FullControlMinimum = 36;
-    public double ColumnCenter => ColumnX + ColumnWidth / 2;
-    public double TripletCenter => TripletX + TripletWidth / 2;
     public static MusicLayout Calculate(double width, double height, bool lyrics, bool timeline, bool mode, bool message = false, bool logMode = false, double messageHeight = 0, bool transport = true)
     {
         var tier = height < 180 ? MusicTier.Compact : height < 290 ? MusicTier.Standard : MusicTier.Spacious;

@@ -42,14 +42,33 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         {
             // Each underlying source is read once, even when several columns reuse it.
             var required = settings.RequiredProviders;
-            var tasks = ProviderCatalog.UsageSources.Where(required.Contains).Select(id => FetchAsync(id, usageStart, cancellation));
-            var configured = _configured.RefreshAsync(settings.EnabledApps, cancellation);
+            // A stalled source ends with a timeout status instead of holding every later refresh behind this gate.
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+            deadline.CancelAfter(TimeSpan.FromSeconds(90));
+            var tasks = ProviderCatalog.UsageSources.Where(required.Contains).Select(id => FetchAsync(id, usageStart, deadline.Token, cancellation));
+            var configured = _configured.RefreshAsync(settings.EnabledApps, deadline.Token);
             return [.. await Task.WhenAll(tasks), .. await configured];
         }
         finally { _gate.Release(); }
     }
 
-    private async Task<ProviderSnapshot> FetchAsync(ProviderId id, DateTime? usageStart, CancellationToken ct)
+    // One failing source must not discard the others' results; errors not anticipated below still end as a status.
+    private async Task<ProviderSnapshot> FetchAsync(ProviderId id, DateTime? usageStart, CancellationToken ct, CancellationToken lifetime)
+    {
+        try { return await FetchCoreAsync(id, usageStart, ct); }
+        catch (Exception ex) when (!lifetime.IsCancellationRequested)
+        {
+            bool timedOut = ex is OperationCanceledException;
+            return new ProviderSnapshot(id)
+            {
+                UsageStart = usageStart?.Date ?? _clock().LocalDateTime.Date.AddDays(-29),
+                StatusLabel = timedOut ? Loc.T("读取超时", "Timed out") : Loc.T("读取失败", "Read failed"),
+                Status = timedOut ? Loc.T("读取超时，稍后重试", "Reading timed out. Retrying later.") : Loc.T("暂时无法读取数据，稍后重试", "The data cannot be read right now. Retrying later.")
+            };
+        }
+    }
+
+    private async Task<ProviderSnapshot> FetchCoreAsync(ProviderId id, DateTime? usageStart, CancellationToken ct)
     {
         var now = _clock();
         var start = new DateTimeOffset(usageStart?.Date ?? now.LocalDateTime.Date.AddDays(-29));
@@ -479,7 +498,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         using var stream = await response.Content.ReadAsStreamAsync(ct);
         return await JsonDocument.ParseAsync(stream, cancellationToken: ct);
     }
-    private static JsonDocument? ReadJson(string path) => File.Exists(path) ? JsonDocument.Parse(File.ReadAllText(path)) : null;
+    private static JsonDocument? ReadJson(string path) => SharedFile.ReadJson(path);
     private static void Connected(ProviderSnapshot snapshot, string source, DateTimeOffset now)
     { snapshot.LiveQuota = true; snapshot.QuotaTime = now; snapshot.Source = source; snapshot.Status = Loc.T("已连接", "Connected"); snapshot.StatusLabel = Loc.T("已连接", "Connected"); }
     public void Dispose() { _configured.Dispose(); if (http is null) { _http.Dispose(); _zcodeHttp.Dispose(); } _gate.Dispose(); }

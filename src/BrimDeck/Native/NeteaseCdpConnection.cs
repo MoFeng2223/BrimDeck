@@ -246,32 +246,18 @@ internal sealed partial class NeteaseCdpConnection(NeteaseProcess process) : IMe
     internal static bool OwnsPort(NeteaseProcess owner)
     {
         if (owner.DebugPort is not { } port || !owner.IsAlive()) return false;
-        nint table = 0;
         try
         {
             // Reject a non-loopback listener, including an IPv6 wildcard, at this port.
             if (IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners().Any(e => e.Port == port && !IPAddress.IsLoopback(e.Address))) return false;
-            int size = 0;
-            GetExtendedTcpTable(0, ref size, false, 2, 3, 0); // IPv4, TCP_TABLE_OWNER_PID_LISTENER
-            if (size <= 0 || size > 16_777_216) return false;
-            table = Marshal.AllocHGlobal(size);
-            if (GetExtendedTcpTable(table, ref size, false, 2, 3, 0) != 0) return false;
-            int count = Marshal.ReadInt32(table), rowSize = Marshal.SizeOf<TcpOwnerRow>();
-            if (count < 0 || count > (size - sizeof(int)) / rowSize) return false;
             bool found = false;
-            for (int i = 0; i < count; i++)
+            foreach (var listener in TcpListeners.Read().Where(l => l.Port == port))
             {
-                var row = Marshal.PtrToStructure<TcpOwnerRow>(table + sizeof(int) + i * rowSize);
-                int localPort = (int)((row.LocalPort & 255) << 8 | (row.LocalPort >> 8 & 255));
-                if (localPort != port) continue;
-                if (row.Pid != owner.Id || !new IPAddress(row.LocalAddress).Equals(IPAddress.Loopback)) return false;
+                if (listener.ProcessId != owner.Id || !listener.Address.Equals(IPAddress.Loopback)) return false;
                 found = true;
             }
             return found && owner.IsAlive();
         }
         catch { return false; }
-        finally { if (table != 0) Marshal.FreeHGlobal(table); }
     }
-    [StructLayout(LayoutKind.Sequential)] private struct TcpOwnerRow { public uint State, LocalAddress, LocalPort, RemoteAddress, RemotePort, Pid; }
-    [DllImport("iphlpapi.dll")] private static extern uint GetExtendedTcpTable(nint table, ref int size, bool order, int family, int tableClass, uint reserved);
 }

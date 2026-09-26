@@ -85,9 +85,15 @@
                       </Canvas>
                     </Grid>
                   </Button>
-                  <TextBlock x:Name="ModeLabel" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" FontSize="11" Foreground="#61EBEBF5" Margin="0,0,10,0" VerticalAlignment="Center"/>
-                  <Button x:Name="SyncButton" Style="{StaticResource PanelIconButton}" Margin="0,0,4,0" VerticalAlignment="Center" Click="Sync_Click">
-                    <Viewbox Width="18" Height="18"><Grid Width="24" Height="24">
+                  <Button x:Name="SyncButton" Style="{StaticResource PanelIconButton}" Margin="10,0,4,0" VerticalAlignment="Center" Click="Sync_Click">
+                    <Grid Width="24" Height="24">
+                    <!-- Countdown to the next automatic sync: a static ring filled once a second, 12 o'clock, counterclockwise. -->
+                    <Path x:Name="SyncTrack" Stroke="#1FFFFFFF" StrokeThickness="1.2" Visibility="Collapsed">
+                      <Path.Data><EllipseGeometry Center="12,12" RadiusX="10" RadiusY="10"/></Path.Data>
+                    </Path>
+                    <Path x:Name="SyncProgress" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2"
+                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" Visibility="Collapsed"/>
+                    <Viewbox x:Name="SyncGlyph" Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center"><Grid Width="24" Height="24">
                       <Path x:Name="SyncArrows" Data="M 3,11 A 9,9 0 0 1 18.4,5.6 L 21,8 M 21,3 L 21,8 L 16,8 M 21,13 A 9,9 0 0 1 5.6,18.4 L 3,16 M 3,21 L 3,16 L 8,16"
                             Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.65" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round">
                         <Path.RenderTransform><RotateTransform x:Name="SyncRotation" CenterX="12" CenterY="12"/></Path.RenderTransform>
@@ -95,6 +101,7 @@
                       <Path x:Name="SyncSlash" Data="M 4,4 L 20,20" Visibility="Collapsed" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                             StrokeThickness="1.9" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                     </Grid></Viewbox>
+                    </Grid>
                   </Button>
                   <Button x:Name="SettingsButton" Content="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="18" Width="32" Height="32" Padding="0"
                           HorizontalContentAlignment="Center" Foreground="#9EEBEBF5"

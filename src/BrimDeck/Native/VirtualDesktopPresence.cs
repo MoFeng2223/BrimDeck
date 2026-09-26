@@ -49,7 +49,8 @@ internal sealed class VirtualDesktopPresence : IDisposable
             }
             IsPinned = pinned;
             LastError = null;
-            _retry.Interval = TimeSpan.FromSeconds(pinned ? 5 : 2);
+            // Once pinned, an Explorer restart or a visibility change triggers the next check; the timer is only a fallback.
+            _retry.Interval = TimeSpan.FromSeconds(pinned ? 60 : 2);
             return pinned;
         }
         catch (Exception ex) when (ex is COMException or InvalidCastException)

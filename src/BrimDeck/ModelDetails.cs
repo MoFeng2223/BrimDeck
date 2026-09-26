@@ -16,9 +16,7 @@ public partial class MainWindow
     private ScrollViewer? _modelScroll;
     private double _modelScrollOffset;
     private Window? _detailPopup;
-    internal bool ShowingModelDetails => _details;
     internal UsageDateRange ModelRange => _customRange ?? UsageDateRange.Recent(_days, DateTime.Today);
-    internal IReadOnlySet<ProviderId> ModelApps => _modelApps;
 
     private Button DetailLink(UIElement content, string name, Action click)
     {
@@ -66,7 +64,7 @@ public partial class MainWindow
         if (range.Start < earliest)
         {
             _historyStart = range.Start;
-            if (!_app.SmokeMode) _ = RefreshAsync();
+            _ = RefreshAsync();
         }
         RenderUsage();
     }

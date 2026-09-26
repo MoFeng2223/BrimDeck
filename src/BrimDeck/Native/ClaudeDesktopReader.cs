@@ -17,13 +17,13 @@ internal static class ClaudeDesktopReader
             {
                 var configPath = Path.Combine(profile, "config.json");
                 if (!File.Exists(configPath)) continue;
-                using var config = JsonDocument.Parse(File.ReadAllText(configPath));
+                using var config = BrimDeck.Core.SharedFile.Parse(configPath);
                 var root = config.RootElement;
                 // V2 is authoritative, including cleared entries after sign-out.
                 var encrypted = root.TryGetProperty("oauth:tokenCacheV2", out var v2)
                     ? v2.Text() : root.Get("oauth:tokenCache").Text();
                 if (encrypted.Length == 0) continue;
-                using var state = JsonDocument.Parse(File.ReadAllText(Path.Combine(profile, "Local State")));
+                using var state = BrimDeck.Core.SharedFile.Parse(Path.Combine(profile, "Local State"));
                 var wrappedKey = Convert.FromBase64String(state.RootElement.Get("os_crypt").Get("encrypted_key").Text());
                 if (!wrappedKey.AsSpan().StartsWith("DPAPI"u8)) throw new CryptographicException();
                 var key = ProtectedData.Unprotect(wrappedKey.AsSpan(5).ToArray(), null, DataProtectionScope.CurrentUser);

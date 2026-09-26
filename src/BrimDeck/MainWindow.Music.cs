@@ -60,9 +60,7 @@ public partial class MainWindow
     private QuotaCarousel? _quotaCarousel;
     private TimeSpan _quotaElapsed;
     internal bool IsMusicPage => _page == DeckPage.Music && Settings.MusicPage;
-    internal MediaTrack? CurrentMedia => _mediaTrack;
     internal CompactMusicLayout? CurrentCompactLayout { get; private set; }
-    internal IReadOnlyList<MediaTrack> MediaTracks => _mediaTracks;
 
     private void InitializeMusic()
     {
@@ -106,7 +104,7 @@ public partial class MainWindow
             _hover.Stop(); _leave.Stop(); _pageSwitchHold.Stop(); _pageSwitchHold.Start();
         }
         _detailPopup?.Close(); _details = false; _page = page; _musicRenderKey = "";
-        if (remember) { Settings.LastPage = page; if (!_app.SmokeMode) _app.FlushSettings(); }
+        if (remember) { Settings.LastPage = page; _app.QueueSave(); }
         ApplySettings(animatePage: changed && _expanded && !_preview);
     }
     private void MusicPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Music);
@@ -137,7 +135,6 @@ public partial class MainWindow
         SettingsButton.Style = (Style)FindResource(IsMusicPage ? (object)"PanelMusicSettingsButton" : typeof(Button));
         SettingsButton.Width = IsMusicPage ? 28 : 32; SettingsButton.Height = IsMusicPage ? 24 : 32;
         SettingsButton.FontSize = IsMusicPage ? 16 : 18;
-        ModeLabel.Visibility = IsMusicPage ? Visibility.Collapsed : Visibility.Visible;
     }
     private void MediaChanged()
     {
@@ -185,7 +182,6 @@ public partial class MainWindow
             _lyrics = Lyrics.Parse(requested.EmbeddedLyrics, null, requested.Duration.TotalSeconds, requested.Source);
             if (IsMusicPage) RenderMusic(); RenderCompact(); return;
         }
-        if (_app.SmokeMode) return;
         var request = CancellationTokenSource.CreateLinkedTokenSource(_app.Lifetime.Token); _lyricsRequest = request;
         try
         {
@@ -197,18 +193,6 @@ public partial class MainWindow
         catch (OperationCanceledException) { }
         catch (Exception) { /* Lyrics are optional; provider failures keep the no-lyrics layout. */ }
     }
-    internal void SetMediaForTest(MediaTrack? track, BitmapSource? cover = null, Lyrics? lyrics = null, IReadOnlyList<MediaTrack>? tracks = null)
-    {
-        // Settings/context notifications can run between injecting a fixture and capturing it.
-        // Associate its lyrics with the same key as a completed real lookup.
-        _lyricsRequest?.Cancel(); _lyricsKey = LyricsKey(track);
-        _seekPreview.Observe(track, DateTimeOffset.UtcNow);
-        _mediaTrack = track; _mediaCover = cover; _musicAccent = MusicVisuals.Accent(cover); _lyrics = lyrics ?? Lyrics.Empty;
-        _mediaTracks = tracks ?? (track is null ? [] : [track]); _musicRenderKey = ""; _trackNoticeUntil = default;
-        RenderCompact(); if (IsMusicPage) RenderMusic();
-    }
-    internal void ReceiveMediaForTest(MediaTrack? track, BitmapSource? cover = null)
-        => ApplyMediaUpdate(track, track is null ? [] : [track], cover);
     private void ToggleSourcePin(ContextMenu menu, MenuItem item, string id)
     {
         bool pin = !Equals(item.Tag, "pinned");
@@ -224,8 +208,7 @@ public partial class MainWindow
     internal static string FullControlEntryLabel => Loc.T("网易云音乐 · 完整控制", "NetEase Cloud Music · Full control");
     // Alone in the toolbar the entry has at most 150 DIP; the full English name would lose "Full control" to the ellipsis.
     internal static string FullControlButtonLabel => Loc.T("网易云音乐 · 完整控制", "NetEase full control");
-    internal bool? NeteaseInstalledForTest;
-    private bool FullControlEntryShown => Settings.NeteaseFullControlEntry && (NeteaseInstalledForTest ?? _media?.NeteaseInstalled == true);
+    private bool FullControlEntryShown => Settings.NeteaseFullControlEntry && _media?.NeteaseInstalled == true;
     // Started from the source menu or the lone button. Only the disabled entry shows that it is under way;
     // neither progress nor a failure is reported, and a later click is ignored until it ends.
     private async Task StartNeteaseFullControl()
@@ -610,11 +593,13 @@ public partial class MainWindow
     {
         if (_mediaTrack is not { } track || track.State == MediaState.Stopped) { MusicIndicator.Visibility = Visibility.Collapsed; return; }
         var position = _seekPreview.Position(track, DateTimeOffset.UtcNow);
-        if (!_seeking && _musicSeek is not null) { _updatingSeek = true; _musicSeek.Value = track.Duration > TimeSpan.Zero ? position.TotalSeconds / track.Duration.TotalSeconds : 0; _updatingSeek = false; UpdateSeekLabels(_musicSeek.Value); }
+        // The expanded page's controls stay in the tree while collapsed; they are brought up to date when the panel opens.
+        bool page = _expanded && IsMusicPage;
+        if (page && !_seeking && _musicSeek is not null) { _updatingSeek = true; _musicSeek.Value = track.Duration > TimeSpan.Zero ? position.TotalSeconds / track.Duration.TotalSeconds : 0; _updatingSeek = false; UpdateSeekLabels(_musicSeek.Value); }
         var line = CurrentLyrics(track);
-        if (_lyricCurrent is not null) _lyricCurrent.Text = line.Current;
-        if (_lyricPrevious is not null) _lyricPrevious.Text = line.Previous;
-        if (_lyricNext is not null) _lyricNext.Text = line.Next;
+        if (page && _lyricCurrent is not null) _lyricCurrent.Text = line.Current;
+        if (page && _lyricPrevious is not null) _lyricPrevious.Text = line.Previous;
+        if (page && _lyricNext is not null) _lyricNext.Text = line.Next;
         if (CompactLyrics && _compactLyric != line.Current)
         {
             _compactLyric = line.Current;
@@ -682,11 +667,13 @@ public partial class MainWindow
         _media?.SetPresentationActive(musicVisible);
         bool progressVisible = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.MusicIndicatorProgress && _mediaTrack is { HasTimeline: true, State: not MediaState.Stopped };
         bool animations = Settings.Animations && SystemParameters.ClientAreaAnimation;
-        _compactMarquee?.SetScrolling(animations && IsVisible && !IsSuppressed && !_expanded && _alert is null && EffectiveStyle != CompactStyle.Line);
+        // A paused song rests at the start of its line; an endless scroll would keep the window composing for hours.
+        _compactMarquee?.SetScrolling(animations && MusicAudioActive && IsVisible && !IsSuppressed && !_expanded && _alert is null && EffectiveStyle != CompactStyle.Line);
         UpdateQuotaCarousel();
         bool needed = IsVisible && !IsSuppressed && (MusicAudioActive && (musicVisible || progressVisible) || _trackNoticeUntil > DateTimeOffset.UtcNow);
-        _musicTick.Interval = TimeSpan.FromMilliseconds(animations && MusicAudioActive ? 33 : 250);
-        if (needed && !_app.SmokeMode) { if (!_musicTick.IsEnabled) { _lastMusicTick = DateTimeOffset.UtcNow; _musicTick.Start(); } }
+        // Frame-rate ticks only drive visible equalizer bars; the line indicator's progress moves a pixel every few seconds.
+        _musicTick.Interval = TimeSpan.FromMilliseconds(animations && MusicAudioActive && musicVisible ? 33 : 250);
+        if (needed) { if (!_musicTick.IsEnabled) { _lastMusicTick = DateTimeOffset.UtcNow; _musicTick.Start(); } }
         else _musicTick.Stop();
         if (_expanded || EffectiveStyle != CompactStyle.Line || !Settings.MusicIndicatorProgress || _mediaTrack is not { HasTimeline: true, State: not MediaState.Stopped }) MusicIndicator.Visibility = Visibility.Collapsed;
     }

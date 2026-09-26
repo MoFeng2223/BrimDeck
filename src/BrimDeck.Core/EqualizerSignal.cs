@@ -20,6 +20,7 @@ public sealed class EqualizerSignal
     private readonly Queue<(double Time, double Db)>[] _ranges = Enumerable.Range(0, Edges.Length - 1).Select(_ => new Queue<(double, double)>()).ToArray();
     private readonly double[] _smoothed = new double[Edges.Length - 1], _rises = new double[Edges.Length - 1];
     private readonly List<(double Time, double Value)> _history = [];
+    private double[] _sorted = new double[256];
     private readonly object _gate = new();
     private int _write;
     private double _head, _last = double.NaN, _lastInput = double.NaN;
@@ -55,7 +56,8 @@ public sealed class EqualizerSignal
         {
             _head += (target - _head) * (1 - Math.Exp(-dt / (target > _head ? Attack : Release)));
             _history.Add((now, _head));
-            int stale = _history.FindIndex(h => now - h.Time <= HistorySeconds);
+            int stale = 0;
+            while (stale < _history.Count && now - _history[stale].Time > HistorySeconds) stale++;
             if (stale > 0) _history.RemoveRange(0, stale);
         }
     }
@@ -103,7 +105,12 @@ public sealed class EqualizerSignal
             double db = Math.Max(SilenceDb, 10 * Math.Log10(1e-12 + power));
             var range = _ranges[b]; range.Enqueue((now, db));
             while (now - range.Peek().Time > RangeSeconds) range.Dequeue();
-            double floor = Percentile(range, .25), ceiling = Math.Max(Percentile(range, .98), floor + 15);
+            // One sort per band and frame serves both percentiles; the buffer is reused across frames.
+            int count = range.Count, n = 0;
+            if (_sorted.Length < count) _sorted = new double[count * 2];
+            foreach (var (_, value) in range) _sorted[n++] = value;
+            Array.Sort(_sorted, 0, count);
+            double floor = Percentile(_sorted, count, .25), ceiling = Math.Max(Percentile(_sorted, count, .98), floor + 15);
             level += Math.Pow(Math.Clamp((db - floor) / (ceiling - floor), 0, 1), 1.5) / (Edges.Length - 1);
             if (double.IsNaN(_smoothed[b])) _smoothed[b] = db;
             _rises[b] = Math.Clamp((db - _smoothed[b]) / 6, 0, 1);
@@ -115,11 +122,7 @@ public sealed class EqualizerSignal
         return Math.Clamp(.05 + .45 * level + .45 * (first + second) / 2, 0, 1);
     }
 
-    private static double Percentile(Queue<(double Time, double Db)> values, double p)
-    {
-        var sorted = values.Select(v => v.Db).ToArray(); Array.Sort(sorted);
-        return sorted[(int)Math.Clamp(p * (sorted.Length - 1), 0, sorted.Length - 1)];
-    }
+    private static double Percentile(double[] sorted, int count, double p) => sorted[(int)Math.Clamp(p * (count - 1), 0, count - 1)];
 
     private static void Fft(double[] re, double[] im)
     {

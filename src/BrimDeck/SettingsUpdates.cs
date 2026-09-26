@@ -12,7 +12,6 @@ public sealed partial class SettingsWindow
     private UpdateView? _aboutUpdateView;
     private Window? _updateDialog;
     private int _updateOpenGeneration;
-    internal Window? UpdateDialog => _updateDialog;
 
     internal async Task CheckUpdatesOnOpenAsync()
     {

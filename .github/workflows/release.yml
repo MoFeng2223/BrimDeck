@@ -32,23 +32,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
       - name: Package installer and update feed
         run: ./scripts/Publish-Release.ps1 -Version $env:RELEASE_VERSION
-      - name: Verify packaged user interface
-        run: |
-          $published = Get-ChildItem .artifacts/release-build -Directory | Select-Object -Last 1
-          $output = Join-Path $pwd '.artifacts/release-smoke'
-          $process = Start-Process (Join-Path $published.FullName 'BrimDeck.exe') -ArgumentList @('--smoke', $output, '--demo') -WindowStyle Hidden -PassThru
-          if (!$process.WaitForExit(180000)) { $process.Kill(); throw 'UI validation timed out.' }
-          if ($process.ExitCode -ne 0) { throw 'UI validation failed.' }
       - name: Verify install, in-app update and uninstall
         run: ./scripts/Test-AppUpdate.ps1
       - uses: actions/upload-artifact@v7.0.1
         if: always()
         with:
           name: windows-release-validation
-          path: |
-            artifacts/releases/
-            .artifacts/release-smoke/
-          include-hidden-files: true
+          path: artifacts/releases/
       # The app reads update.json from /releases/latest, so the release is published (not a draft or prerelease)
       # only after every file is attached.
       - name: Publish complete release

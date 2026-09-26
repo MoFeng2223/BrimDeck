@@ -18,6 +18,7 @@ internal sealed class ProcessLoopbackCapture : IDisposable
     private readonly AudioClient _client;
     private readonly AudioCaptureClient _capture;
     private float[] _buffer = new float[4096];
+    private short[] _pcm = new short[4096];
     private double _analysed = double.NegativeInfinity;
     public AutoResetEvent Ready { get; } = new(false);
     public EqualizerSignal Signal { get; } = new(Format.SampleRate);
@@ -75,9 +76,14 @@ internal sealed class ProcessLoopbackCapture : IDisposable
             {
                 IntPtr data = _capture.GetBuffer(out frames, out var flags);
                 int count = frames * Format.Channels;
-                if (_buffer.Length < count) _buffer = new float[count];
+                if (_buffer.Length < count) { _buffer = new float[count]; _pcm = new short[count]; }
                 if ((flags & AudioClientBufferFlags.Silent) != 0) Array.Clear(_buffer, 0, count);
-                else for (int i = 0; i < count; i++) _buffer[i] = Marshal.ReadInt16(data, i * 2) / 32768f;
+                else
+                {
+                    // One block copy per packet instead of a marshalled read per sample.
+                    Marshal.Copy(data, _pcm, 0, count);
+                    for (int i = 0; i < count; i++) _buffer[i] = _pcm[i] / 32768f;
+                }
                 _capture.ReleaseBuffer(frames);
                 Signal.Push(_buffer.AsSpan(0, count), Format.Channels, now);
             }

@@ -111,7 +111,11 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
     private bool _cdpFailed;
     private int _restarting;
     private string? _installed;
-    private long _installedCheckedAt = -30_000;
+    // Installation rarely changes while the app runs, and a running player already counts as installed.
+    private const long InstalledCheckInterval = 600_000;
+    private long _installedCheckedAt = -InstalledCheckInterval;
+    // Player processes that could not be identified; WMI is asked again only when this set changes.
+    private int[] _unidentified = [];
     public DesktopMediaSnapshot? Snapshot => Volatile.Read(ref _snapshot);
     internal string Identity => _process?.Identity ?? "netease";
     public int? ProcessId => _process?.Id;
@@ -141,7 +145,7 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
         try
         {
             _stop.Token.ThrowIfCancellationRequested();
-            if (Environment.TickCount64 - _installedCheckedAt >= 30_000)
+            if (Environment.TickCount64 - _installedCheckedAt >= InstalledCheckInterval)
             {
                 _installedCheckedAt = Environment.TickCount64;
                 var installed = NeteaseProcess.FindInstalled();
@@ -151,9 +155,13 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
             {
                 Clear();
                 var processes = Process.GetProcessesByName("cloudmusic");
-                try { if (processes.Length == 0) return; }
+                int[] ids;
+                try { ids = processes.Select(p => p.Id).Order().ToArray(); }
                 finally { foreach (var process in processes) process.Dispose(); }
+                if (ids.Length == 0) _unidentified = [];
+                if (ids.Length == 0 || ids.SequenceEqual(_unidentified)) return;
                 _process = NeteaseProcess.Discover();
+                _unidentified = _process is null ? ids : [];
                 _stop.Token.ThrowIfCancellationRequested();
                 if (_process is null) return;
                 _cdpFailed = false; Error = null;

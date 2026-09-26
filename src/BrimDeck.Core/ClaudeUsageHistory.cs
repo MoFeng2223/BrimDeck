@@ -30,7 +30,7 @@ public static class ClaudeUsageHistory
             {
                 var path = Path.Combine(profile, "plan-usage-history.json");
                 if (!File.Exists(path)) continue;
-                using var doc = JsonDocument.Parse(File.ReadAllText(path));
+                using var doc = SharedFile.Parse(path);
                 if (Parse(doc.RootElement) is { } sample && (latest is null || sample.Time > latest.Time)) latest = sample;
             }
             catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { }

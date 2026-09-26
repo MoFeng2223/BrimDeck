@@ -32,3 +32,6 @@ AGENTS.md
 .claude/
 .agents/
 .codex/
+
+# Local design drafts
+output/

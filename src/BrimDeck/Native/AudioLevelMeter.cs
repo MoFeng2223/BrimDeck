@@ -50,6 +50,9 @@ internal sealed class AudioLevelMeter : IDisposable
         string? target = null;
         bool retried = false;
         double nextPeak = 0;
+        // A player may create its audio session after it reports playback; look again with growing pauses.
+        int searchDelay = 1000;
+        WaitHandle[]? waits = null;
         try
         {
             while (true)
@@ -62,11 +65,12 @@ internal sealed class AudioLevelMeter : IDisposable
                     if (changed) { revision = _revision; target = _requested; }
                 }
                 // Starting a capture waits for the system; do it outside the lock SetSource takes on the UI thread.
-                if (changed) { Clear(); if (target is not null) Enumerate(target); retried = false; }
+                if (changed) { Clear(); if (target is not null) Enumerate(target); retried = false; searchDelay = 1000; }
                 var capture = _capture;
                 double now = Now;
                 if (capture is not null && !capture.Drain(now)) { StopCapture(); capture = null; }
-                if (now >= nextPeak)
+                // Captured audio drives the bars whenever a capture runs, so session peaks are only read without one.
+                if (capture is null && now >= nextPeak)
                 {
                     nextPeak = now + .033;
                     float peak = 0;
@@ -78,8 +82,18 @@ internal sealed class AudioLevelMeter : IDisposable
                     }
                     Volatile.Write(ref _peak, peak);
                 }
-                if (capture is not null) WaitHandle.WaitAny([_wake, capture.Ready], 20);
-                else _wake.WaitOne(_sessions.Count > 0 ? 33 : Timeout.Infinite);
+                if (capture is not null)
+                {
+                    if (waits?[1] != capture.Ready) waits = [_wake, capture.Ready];
+                    WaitHandle.WaitAny(waits, 20);
+                }
+                else if (_sessions.Count > 0) _wake.WaitOne(33);
+                else if (target is null) _wake.WaitOne();
+                else if (!_wake.WaitOne(searchDelay))
+                {
+                    searchDelay = Math.Min(searchDelay * 2, 30_000);
+                    Clear(); Enumerate(target);
+                }
             }
         }
         finally { Clear(); Volatile.Write(ref _peak, 0); _wake.Dispose(); }

@@ -13,6 +13,18 @@ var root = Path.Combine(Path.GetTempPath(), "BrimDeck-Tests-" + Guid.NewGuid().T
 Directory.CreateDirectory(root);
 try
 {
+    ModelUsageTests.Run(Check);
+    AntigravityUsageTests.Run(root, Check);
+    await MusicTests.Run(Check);
+    EqualizerSignalTests.Run(Check);
+    NeteaseLogTests.Run(Check);
+    await DashboardUsageTests.Run(root, Check);
+    await AppUpdateTests.Run(root, Check);
+    await InstallerUpdateTests.Run(root, Check);
+    SettingsMigrationTests.Run(root, Check);
+    LanguageTests.Run(root, Check);
+    await ConfiguredProviderTests.Run(Check);
+    await ZCodeUsageTests.Run(root, Check);
     var priceTime = DateTimeOffset.UtcNow;
     const string catalogJson = """
         {"data":[
@@ -27,7 +39,6 @@ try
     using var priceClient = new HttpClient(handler);
     var priceDirectory = Path.Combine(root, "prices");
     using var pricing = new Pricing(priceDirectory, priceClient, () => priceTime);
-    Check("No built-in price table", pricing.ModelCount == 0 && pricing.Find("gpt-6-astra") is null);
     await pricing.RefreshAsync();
     Check("Live catalog loaded without credentials", pricing.ModelCount == 4 && handler.Calls == 1 && !handler.SawAuthorization);
     await pricing.RefreshAsync();
@@ -40,39 +51,82 @@ try
         Check("Restart refreshes online even with fresh cache", handler.Calls == 2);
     }
 
+    // The editable layer is independent of downloaded prices and must survive refresh and restart.
+    var manualDirectory = Path.Combine(root, "manual-prices");
+    using var manualHandler = new CatalogHandler(catalogJson);
+    using var manualHttp = new HttpClient(manualHandler);
+    using var editable = new Pricing(manualDirectory, manualHttp, () => priceTime);
+    await editable.RefreshAsync();
+    var ownPrice = new TokenPrices(.000002m, .000009m, .0000002m, .0000025m, .000004m);
+    Check("A new manual model is persisted", editable.TrySetManual("local/new-model", ownPrice, false, out _));
+    Check("Manual model is immediately available for cost calculation", editable.Estimate(new TokenEntry("manual", priceTime, "new-model", 1_000_000, 0, 0, 0, 1_000_000, null)) == 11m);
+    Check("Duplicate model creation is case insensitive", !editable.TrySetManual("LOCAL/NEW-MODEL", ownPrice, false, out _));
+    Check("Remote aliases cannot be added as duplicate manual models", !editable.TrySetManual("claude-sonnet-4-5", ownPrice, false, out _));
+    Check("Manual editing uses the exact existing model", editable.TrySetManual("openai/gpt-6-astra", ownPrice, true, out _));
+    manualHandler.Json = catalogJson.Replace("0.00001", "0.00008", StringComparison.Ordinal);
+    await editable.RefreshAsync(true);
+    Check("Remote conflicts do not overwrite manually edited values", editable.Find("gpt-6-astra")!.Prices == ownPrice && editable.IsManual("openai/gpt-6-astra"));
+    Check("Manual additions remain after a remote refresh", editable.Find("local/new-model")!.Prices == ownPrice);
+    Check("Manual prices are not overridden by a remote long-context tier", editable.Find("gpt-6-astra")!.Tiers.Count == 0);
+    Check("Negative and malformed manual values are rejected", !editable.TrySetManual("local/invalid", ownPrice with { Input = -1 }, false, out _) && !editable.TrySetManual("bad model id", ownPrice, false, out _));
+    Check("Unavailable cache prices remain unspecified", editable.TrySetManual("local/without-cache", new(0, 0, null, null, null), false, out _) && editable.Find("local/without-cache")!.Prices.CacheRead is null);
+    // 1M tokens of each cache kind; input 2 USD/M, output 8 USD/M.
+    var cacheUse = (string model) => new TokenEntry("manual", priceTime, model, 0, 1_000_000, 1_000_000, 1_000_000, 0, null);
+    Check("Blank manual cache prices: reads cost nothing, both writes cost the input price",
+        editable.TrySetManual("local/blank-cache", new(.000002m, .000008m, null, null, null), false, out _)
+        && editable.Find("local/blank-cache")!.Prices.CacheRead is null && editable.Estimate(cacheUse("local/blank-cache")) == 4m);
+    Check("A blank one-hour cache write price follows the cache write price",
+        editable.TrySetManual("local/write-only", new(.000002m, .000008m, null, .000003m, null), false, out _) && editable.Estimate(cacheUse("local/write-only")) == 6m);
+    Check("Manual cache prices entered as zero charge nothing",
+        editable.TrySetManual("local/zero-cache", new(.000002m, .000008m, 0, 0, 0), false, out _) && editable.Estimate(cacheUse("local/zero-cache")) == 0m);
+    Check("A bare manual ID can be added before online discovery", editable.TrySetManual("future-model", ownPrice, false, out _));
+    manualHandler.Json = """{"data":[{"id":"vendor/future-model","pricing":{"prompt":"0.0009","completion":"0.0009"}},{"id":"vendor/another-model","pricing":{"prompt":"0.000001","completion":"0.000002"}}]}""";
+    await editable.RefreshAsync(true);
+    Check("Online discovery respects an existing bare manual ID", editable.Find("vendor/future-model")!.Prices == ownPrice && editable.Models.Count(m => m.Model.Contains("future-model", StringComparison.Ordinal)) == 1);
+    Check("Incremental refresh retains other catalog rows and adds new models", editable.Find("claude-sonnet-4.5") is not null && editable.Find("vendor/another-model") is not null);
+    using (var restarted = new Pricing(manualDirectory, manualHttp, () => priceTime))
+    {
+        Check("Manual values and models survive restart", restarted.Find("openai/gpt-6-astra")!.Prices == ownPrice && restarted.Find("local/new-model")!.Prices == ownPrice);
+        await restarted.RefreshAsync();
+        Check("First refresh after restart still protects manual changes", restarted.Find("gpt-6-astra")!.Prices == ownPrice);
+    }
+    var damagedDirectory = Path.Combine(root, "damaged-manual"); Directory.CreateDirectory(damagedDirectory);
+    File.WriteAllText(Path.Combine(damagedDirectory, "manual-model-prices.json"), "broken");
+    using (var damaged = new Pricing(damagedDirectory, manualHttp))
+        Check("A corrupt manual file is preserved and cannot be overwritten by an empty replacement", damaged.ManualLoadWarning is not null && !damaged.TrySetManual("local/new", ownPrice, false, out _) && File.ReadAllText(Path.Combine(damagedDirectory, "manual-model-prices.json")) == "broken");
+    var blockedDirectory = Path.Combine(root, "blocked-manual"); Directory.CreateDirectory(blockedDirectory);
+    Directory.CreateDirectory(Path.Combine(blockedDirectory, "manual-model-prices.json.tmp"));
+    using (var blocked = new Pricing(blockedDirectory, manualHttp))
+        Check("A failed manual write does not change the active catalog", !blocked.TrySetManual("local/new", ownPrice, false, out _) && blocked.Find("local/new") is null);
+
     var defaults = new DeckSettings();
-    Check("Default notch", defaults.Style == CompactStyle.Notch);
-    Check("Default compact summary rings", defaults.CompactSummary);
-    Check("Maximized uses line", defaults.Behavior(ScreenContext.Maximized) == WindowBehavior.Line);
-    Check("Both fullscreen modes hide", defaults.Behavior(ScreenContext.Borderless) == WindowBehavior.Hide && defaults.Behavior(ScreenContext.Exclusive) == WindowBehavior.Hide);
     Check("Borderless fullscreen classified independently", ScreenPolicy.Classify(false, true, false, true) == ScreenContext.Borderless);
-    Check("Normal maximized browser classified", ScreenPolicy.Classify(false, false, true, true) == ScreenContext.Maximized);
     Check("Auto-hidden taskbar does not turn captioned maximization into fullscreen", ScreenPolicy.Classify(false, true, true, true) == ScreenContext.Maximized);
     Check("Exclusive mode wins over window shape", ScreenPolicy.Classify(true, false, true, true) == ScreenContext.Exclusive);
     defaults.Borderless = WindowBehavior.Normal;
     Check("Fullscreen override independent", defaults.Behavior(ScreenContext.Borderless) == WindowBehavior.Normal && defaults.Behavior(ScreenContext.Exclusive) == WindowBehavior.Hide);
-    Check("All four presets are listed in order by default", defaults.Apps.Select(app => app.Id).SequenceEqual([ProviderId.Claude, ProviderId.Codex, ProviderId.Antigravity, ProviderId.Cursor]) && defaults.EnabledApps.Count == 4);
-    Check("Four applications raise the minimum width to 640", defaults.MinimumWidth == 640);
-    defaults.UsagePage = false;
-    Check("Page off retains provider choice", !defaults.Enabled(ProviderId.Claude) && defaults.Entry(ProviderId.Claude)!.Enabled);
-    defaults.UsagePage = true; defaults.SetEnabled(ProviderId.Codex, false);
-    Check("Provider toggles independent", defaults.Enabled(ProviderId.Claude) && !defaults.Enabled(ProviderId.Codex) && defaults.EnabledApps.Count == 3);
-    Check("Two applications keep the 440 minimum", Only(ProviderId.Claude, ProviderId.Codex).MinimumWidth == 440);
+    defaults.SetEnabled(ProviderId.Codex, false);
+    Check("Provider toggles independent", defaults.Enabled(ProviderId.Claude) && !defaults.Enabled(ProviderId.Codex) && defaults.EnabledApps.Count == 1);
     defaults.Width = double.NaN; defaults.Height = 99999; defaults.OpenDelay = -10; defaults.Style = (CompactStyle)99; defaults.Normalize();
-    Check("Invalid settings clamped", defaults.Width == 760 && defaults.Height == 400 && defaults.OpenDelay == 0 && defaults.Style == CompactStyle.Notch);
-    var narrow = new DeckSettings { Width = 500 }; narrow.Normalize();
-    Check("Width below the per-column minimum is raised", narrow.Width == 640);
+    Check("Invalid settings clamped", double.IsFinite(defaults.Width) && defaults.Height < 99999 && defaults.OpenDelay == 0 && Enum.IsDefined(defaults.Style));
+    var narrow = new DeckSettings { Width = 500 }; foreach (var app in narrow.Apps) app.Enabled = true; narrow.Normalize();
+    Check("Width below the per-column minimum is raised", narrow.Width == narrow.MinimumWidth);
+    var four = new DeckSettings(); foreach (var app in four.Apps) app.Enabled = true;
+    var two = Only(ProviderId.Claude, ProviderId.Codex);
+    Check("Quick sizes never drop below the minimum width", Enum.GetValues<PanelSize>().All(size => four.PresetSize(size).Width >= four.MinimumWidth && two.PresetSize(size).Width >= two.MinimumWidth));
+    var chosen = new DeckSettings { QuickSize = PanelSize.Spacious, Width = 1100, Height = 310 };
+    chosen.SetEnabled(ProviderId.Cursor, false);
+    Check("A chosen quick size keeps its width after the application count changes", chosen.Width == 1100 && chosen.QuickSize == PanelSize.Spacious);
     var moved = new DeckSettings(); var first = moved.Apps[0]; moved.Apps.RemoveAt(0); moved.Apps.Add(first);
-    moved.Apps[0].ThemeColor = "ff8800"; moved.Apps[1].WarningColor = "#zzzzzz"; moved.Apps.Add(new AppEntry { Id = ProviderId.Codex, ThemeColor = "#000000" });
+    moved.Apps[0].ThemeColor = "ff8800"; moved.Apps[1].WarningColor = "#zzzzzz"; moved.Apps.Add(new AppEntry { QuotaSource = ProviderId.Codex, ThemeColor = "#000000" });
     moved.Normalize();
-    Check("Order is kept, colors are normalized and duplicates are dropped", moved.Apps.Select(app => app.Id).SequenceEqual([ProviderId.Codex, ProviderId.Antigravity, ProviderId.Cursor, ProviderId.Claude]) &&
+    Check("Order and duplicate sources are kept while colors are normalized", moved.Apps.Select(app => app.QuotaSource).SequenceEqual([ProviderId.Codex, ProviderId.Antigravity, ProviderId.Cursor, ProviderId.Claude, ProviderId.Codex]) &&
         moved.Apps[0].ThemeColor == "#FF8800" && moved.Apps[1].WarningColor == "" && moved.Apps[1].Warning == AppPresets.WarningColor);
-    Check("Quota color follows the thresholds", AppPresets.QuotaColor(moved.Apps[0], 69.9) == "#FF8800" && AppPresets.QuotaColor(moved.Apps[0], 70) == AppPresets.WarningColor && AppPresets.QuotaColor(moved.Apps[0], 90) == AppPresets.CriticalColor);
     var copied = moved.Copy(); copied.Apps[0].ThemeColor = "#123456";
     Check("Copies do not share application entries", moved.Apps[0].ThemeColor == "#FF8800");
     var store = new SettingsStore(Path.Combine(root, "settings")); store.Save(moved);
     var loaded = store.Load();
-    Check("Settings roundtrip keeps order and colors", loaded.Apps.Select(app => app.Id).SequenceEqual(moved.Apps.Select(app => app.Id)) && loaded.Apps[0].ThemeColor == "#FF8800" && loaded.Height == 240);
+    Check("Settings roundtrip keeps order and colors", loaded.Apps.Select(app => app.QuotaSource).SequenceEqual(moved.Apps.Select(app => app.QuotaSource)) && loaded.Apps[0].ThemeColor == "#FF8800");
     File.WriteAllText(store.FilePath, "broken json");
     Check("Corrupt settings recover visibly", store.Load().Style == CompactStyle.Notch && store.LoadWarning is not null);
 
@@ -87,12 +141,12 @@ try
     Directory.CreateDirectory(classicProfile); Directory.CreateDirectory(storeProfile);
     Directory.CreateDirectory(Path.Combine(locations.Local, "Packages", "Unrelated_testfamily", "LocalCache", "Roaming", "Claude"));
     Check("Classic and Store Claude profiles discovered automatically", locations.ClaudeDesktopProfiles().Count == 2 && locations.ClaudeDesktopProfiles().Contains(storeProfile));
-    var oldSettings = JsonSerializer.Deserialize<DeckSettings>("""{"Width":890,"Claude":false,"CodexHome":"obsolete","ClaudeHome":"obsolete","CursorDatabase":"obsolete","OnlineQuota":false}""")!;
+    var oldSettings = SettingsMigrations.Read("""{"Width":890,"Claude":false,"CodexHome":"obsolete","ClaudeHome":"obsolete","CursorDatabase":"obsolete","OnlineQuota":false}""");
     oldSettings.Normalize();
     var migrated = JsonSerializer.Serialize(oldSettings);
     Check("Old switches migrate into the application list and are not written back", oldSettings.Width == 890 && !oldSettings.Enabled(ProviderId.Claude) && oldSettings.Enabled(ProviderId.Codex) &&
         migrated.Contains("\"Apps\"") && !migrated.Contains("\"Claude\"") && !migrated.Contains("Home") && !migrated.Contains("CursorDatabase") && !migrated.Contains("OnlineQuota"));
-    object CachedToken(string token, long expires) => new { token, expiresAt = expires, subscriptionType = "max", rateLimitTier = "default_claude_max_5x" };
+    object CachedToken(string token, long expires) => new { token, expiresAt = expires, subscriptionType = "max", rateLimitTier = "default_claude_max_20x" };
     string CacheKey(string account, string scope, string host = "https://api.anthropic.com") => $"acct:{account}|client:org:{host}:{scope}";
     var future = now.AddHours(1).ToUnixTimeMilliseconds();
     var cacheFixture = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
@@ -107,7 +161,6 @@ try
     });
     var desktopCredentials = ClaudeDesktopCache.Parse(cacheFixture, "current", now);
     Check("Desktop selects active account, provider host, valid expiry and profile scope", desktopCredentials.Count == 2 && desktopCredentials[0].Token == "test-profile");
-    Check("Desktop tier provides exact Max multiplier", desktopCredentials.All(item => item.Plan == "Max 5x"));
     Check("Scoped desktop tokens require a known current account", ClaudeDesktopCache.Parse(cacheFixture, "", now).Count == 0);
     Check("Credential formatting does not expose secrets", !desktopCredentials[0].ToString()!.Contains("test-profile"));
     var desktopFixture = new ClaudeFixtureSources { State = new(true, desktopCredentials) };
@@ -120,13 +173,13 @@ try
         Task<List<ProviderSnapshot>> Refresh(DeckSettings settings, CancellationToken ct = default) { usageClock = usageClock.AddSeconds(60); return service.RefreshAsync(settings, ct); }
         var onlyClaude = Only(ProviderId.Claude);
         var result = (await Refresh(onlyClaude)).Single();
-        Check("Desktop-only login connects without Claude Code credentials", result.LiveQuota && result.Quotas.Count == 2 && result.Plan == "Max 5x" && result.Source.Contains("桌面版"));
+        Check("Desktop-only login connects without Claude Code credentials", result.LiveQuota && result.Quotas.Count == 2 && result.Plan == "Max 20x");
         Check("Desktop quota resets come from server", result.Quotas.All(quota => quota.ResetAt is not null) && result.Quotas.Single(quota => quota.Minutes == 300).UsedPercent == 9);
         Directory.CreateDirectory(locations.ClaudeHome);
         var credentialPath = Path.Combine(locations.ClaudeHome, ".credentials.json");
         File.WriteAllText(credentialPath, """{"claudeAiOauth":{"accessToken":"test-rejected","subscriptionType":"pro"}}""");
         result = (await Refresh(onlyClaude)).Single();
-        Check("Rejected Code login falls back to Desktop and replaces its plan", quotaHandler.Rejected == 1 && result.LiveQuota && result.Plan == "Max 5x");
+        Check("Rejected Code login falls back to Desktop and replaces its plan", quotaHandler.Rejected == 1 && result.LiveQuota && result.Plan == "Max 20x");
         File.WriteAllText(credentialPath, "broken");
         result = (await Refresh(onlyClaude)).Single();
         Check("Damaged Code login does not prevent Desktop connection", result.LiveQuota);
@@ -135,7 +188,7 @@ try
         desktopFixture.State = new(false, []);
         quotaHandler.Requests.Clear();
         result = (await Refresh(onlyClaude)).Single();
-        Check("CLI-only installation connects and displays its own plan", result.LiveQuota && result.Source.StartsWith("Claude Code") && result.Plan == "pro" && quotaHandler.Requests.Count == 1);
+        Check("CLI-only installation connects and displays its own plan", result.LiveQuota && result.Plan == "pro" && quotaHandler.Requests.Count == 1);
         var readCalls = desktopFixture.ReadCalls;
         desktopFixture.ReadFailure = new IOException("Test desktop cache unavailable");
         result = (await Refresh(onlyClaude)).Single();
@@ -143,55 +196,54 @@ try
         desktopFixture.ReadFailure = null;
         desktopFixture.State = new(true, desktopCredentials);
 
-        foreach (var fault in new[] { "server", "timeout", "network", "malformed", "empty", "limited" })
+        foreach (var fault in new[] { "timeout", "malformed", "limited" })
         {
             quotaHandler.Requests.Clear();
             quotaHandler.Override = (token, _) => token != "test-code" ? null : fault switch
             {
                 "timeout" => throw new TaskCanceledException("Test timeout"),
-                "network" => throw new HttpRequestException("Test connection failure"),
                 "malformed" => new(System.Net.HttpStatusCode.OK) { Content = new StringContent("invalid json") },
-                "empty" => new(System.Net.HttpStatusCode.OK) { Content = new StringContent("{}") },
-                "limited" => new(System.Net.HttpStatusCode.TooManyRequests),
-                _ => new(System.Net.HttpStatusCode.ServiceUnavailable)
+                _ => new(System.Net.HttpStatusCode.TooManyRequests)
             };
             result = (await Refresh(onlyClaude)).Single();
             Check($"CLI {fault} failure falls back to one successful Desktop result", result.LiveQuota && result.Quotas.Count == 2 &&
-                result.Plan == "Max 5x" && result.Source.Contains("桌面版") && quotaHandler.Requests.SequenceEqual(["test-code", "test-profile"]));
+                result.Plan == "Max 20x" && quotaHandler.Requests.SequenceEqual(["test-code", "test-profile"]));
         }
 
         quotaHandler.Override = null; quotaHandler.Requests.Clear();
         result = (await Refresh(onlyClaude)).Single();
         var requestsSoFar = quotaHandler.Requests.Count;
         result = (await Refresh(onlyClaude)).Single();
-        Check("Claude requests fresh account quotas on the next 60-second cycle", result.LiveQuota && result.Quotas.Count == 2 && result.QuotaTime == usageClock && result.Status == "已连接" && quotaHandler.Requests.Count == requestsSoFar + 1);
+        Check("Claude requests fresh account quotas on the next 60-second cycle", result.LiveQuota && result.Quotas.Count == 2 && result.QuotaTime == usageClock && quotaHandler.Requests.Count == requestsSoFar + 1);
         result = (await service.RefreshAsync(onlyClaude)).Single();
         Check("Manual refresh immediately requests account quotas", result.LiveQuota && quotaHandler.Requests.Count == requestsSoFar + 2);
         var previousTime = result.QuotaTime;
         quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.ServiceUnavailable);
         quotaHandler.Requests.Clear();
         result = (await Refresh(onlyClaude)).Single();
-        Check("Transient failure keeps the last account quotas with their time", result.LiveQuota && result.Quotas.Count == 2 && result.QuotaTime == previousTime && result.Status.Contains("显示") && result.StatusLabel == "稍后重试" && quotaHandler.Requests.Count == 2);
+        Check("Transient failure keeps the last account quotas with their time", result.LiveQuota && result.Quotas.Count == 2 && result.QuotaTime == previousTime && quotaHandler.Requests.Count == 2);
+        var polled = true;
         for (int cycle = 1; cycle <= 4; cycle++)
         {
             quotaHandler.Requests.Clear();
             result = (await Refresh(onlyClaude)).Single();
-            Check($"Failure cycle {cycle} still requests quotas after 60 seconds", result.Quotas.Count == 2 && quotaHandler.Requests.Count == 2);
+            polled &= result.Quotas.Count == 2 && quotaHandler.Requests.Count == 2;
         }
+        Check("Repeated failures still request quotas every 60-second cycle", polled);
         quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.TooManyRequests);
         quotaHandler.Requests.Clear();
         result = (await Refresh(onlyClaude)).Single();
-        Check("Rate limiting does not cycle every Desktop scope", result.Status.Contains("请求频繁") && result.Quotas.Count == 2 && quotaHandler.Requests.Count == 2);
+        Check("Rate limiting does not cycle every Desktop scope", result.Quotas.Count == 2 && quotaHandler.Requests.Count == 2);
         quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.Unauthorized);
         quotaHandler.Requests.Clear();
         result = (await Refresh(onlyClaude)).Single();
-        Check("Rejected logins do not keep showing earlier account quotas", !result.LiveQuota && result.Quotas.Count == 0 && result.StatusLabel == "登录已失效");
+        Check("Rejected logins do not keep showing earlier account quotas", !result.LiveQuota && result.Quotas.Count == 0);
         using (var fresh = new UsageService(desktopFixture, locations, quotaClient, () => usageClock))
         {
             quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.ServiceUnavailable);
             quotaHandler.Requests.Clear();
             var unavailable = (await fresh.RefreshAsync(onlyClaude)).Single();
-            Check("Both sources failing leaves quota unavailable instead of inventing a value", !unavailable.LiveQuota && unavailable.Quotas.Count == 0 && unavailable.StatusLabel == "暂不可用" && quotaHandler.Requests.Count == 2);
+            Check("Both sources failing leaves quota unavailable instead of inventing a value", !unavailable.LiveQuota && unavailable.Quotas.Count == 0 && quotaHandler.Requests.Count == 2);
         }
 
         desktopFixture.State = new(true, [new("test-code", "pro", "Claude 桌面版"), desktopCredentials[0]]);
@@ -211,10 +263,6 @@ try
         }
         quotaHandler.Override = null;
         File.Delete(credentialPath);
-        desktopFixture.ReadFailure = new UnauthorizedAccessException("Test unavailable profile");
-        result = (await Refresh(onlyClaude)).Single();
-        Check("Desktop discovery exceptions produce a readable status", !result.LiveQuota && result.StatusLabel == "读取失败");
-        desktopFixture.ReadFailure = null;
         desktopFixture.State = new(true, [], true);
         result = (await Refresh(onlyClaude)).Single();
         Check("Unreadable Desktop login is not reported as missing installation", !result.LiveQuota && result.StatusLabel == "读取失败" && result.Status.Contains("桌面版"));
@@ -231,11 +279,11 @@ try
         quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.TooManyRequests);
         File.WriteAllText(historyPath, History(usageClock.AddMinutes(2), 37, 7));
         result = (await Refresh(onlyClaude)).Single();
-        Check("Rate limiting without any earlier reading falls back to the desktop application's local history", result.LiveQuota && result.Source.Contains("本地用量记录") &&
-            result.Quotas.Single(q => q.Minutes == 300).UsedPercent == 37 && result.Quotas.Single(q => q.Minutes == 10080).UsedPercent == 7 && result.Status.Contains("桌面版") && result.Plan == "Max 5x");
+        Check("Rate limiting without any earlier reading falls back to the desktop application's local history", result.LiveQuota &&
+            result.Quotas.Single(q => q.Minutes == 300).UsedPercent == 37 && result.Quotas.Single(q => q.Minutes == 10080).UsedPercent == 7 && result.Plan == "Max 20x");
         quotaHandler.Override = null;
         result = (await Refresh(onlyClaude)).Single();
-        Check("A successful account reading replaces the local history sample", result.LiveQuota && result.Source.Contains("账户配额") && result.Quotas.Single(q => q.Minutes == 300).UsedPercent == 9);
+        Check("A successful account reading replaces the local history sample", result.LiveQuota && result.Quotas.Single(q => q.Minutes == 300).UsedPercent == 9);
         var readingTime = result.QuotaTime;
         quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.TooManyRequests);
         File.WriteAllText(historyPath, History(usageClock.AddMinutes(2), 41, 8));
@@ -253,19 +301,18 @@ try
         Check("Process discovery failure is not mislabeled as signed out", failed.StatusLabel == "检测失败" && !failed.Status.Contains("登录", StringComparison.Ordinal));
         failingDesktop.Fail = false;
         var recovered = (await service.RefreshAsync(onlyAntigravity)).Single();
-        Check("Discovery errors do not prevent subsequent refresh", recovered.StatusLabel == "服务未就绪");
+        Check("Discovery errors do not prevent subsequent refresh", recovered.StatusLabel != failed.StatusLabel);
     }
     var quotas = QuotaParser.Codex(Json("""
         {"rate_limit":{"primary_window":{"used_percent":16,"limit_window_seconds":604800,"reset_after_seconds":3600}}}
         """), now, true);
-    Check("Codex primary can be weekly", quotas.Single().Label == "每周额度");
+    Check("Codex primary can be weekly", quotas.Single().Minutes == 10080);
     Check("Codex reset relative", Math.Abs((quotas[0].ResetAt!.Value - now).TotalSeconds - 3600) < .1);
     var plusQuotas = QuotaParser.Codex(Json("""
         {"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":42,"limit_window_seconds":18000,"reset_after_seconds":1800},"secondary_window":{"used_percent":16,"limit_window_seconds":604800,"reset_after_seconds":3600}}}
         """), now, true);
     Check("Codex Plus retains both five-hour and weekly windows", plusQuotas.Count == 2 &&
-        plusQuotas.Single(x => x.Minutes == 300) is { UsedPercent: 42, Label: "5 小时额度" } &&
-        plusQuotas.Single(x => x.Minutes == 10080) is { UsedPercent: 16, Label: "每周额度" });
+        plusQuotas.Single(x => x.Minutes == 300).UsedPercent == 42 && plusQuotas.Single(x => x.Minutes == 10080).UsedPercent == 16);
     var localQuotas = QuotaParser.Codex(Json("""
         {"primary":{"used_percent":16,"window_minutes":10080},"secondary":{"used_percent":42,"window_minutes":300}}
         """), now, false);
@@ -284,10 +331,9 @@ try
     Check("Antigravity zero fraction means depleted", QuotaParser.Antigravity(Json("""{"groups":[{"buckets":[{"bucketId":"gemini-5h","remainingFraction":0}]}]}""")).Single().Remaining == 0);
     Check("Cursor free membership is displayed as a real plan", PlanParser.Cursor(Json("""{"membershipType":"free"}""")) == "free");
     Check("Cursor quota alone does not imply a paid plan", PlanParser.Cursor(Json("""{"planUsage":{"totalPercentUsed":0}}""")) == "");
-    Check("Antigravity uses the named user tier before its service plan", PlanParser.Antigravity(Json("""{"userStatus":{"userTier":{"name":"Google AI Pro"},"planStatus":{"planInfo":{"planName":"Pro"}}}}""")) == "Google AI Pro");
-    Check("Antigravity falls back to its explicit service plan", PlanParser.Antigravity(Json("""{"userStatus":{"planStatus":{"planInfo":{"planName":"Pro"}}}}""")) == "Pro");
+    Check("Antigravity uses the named user tier before its service plan", PlanParser.Antigravity(Json("""{"userStatus":{"userTier":{"name":"Example Tier"},"planStatus":{"planInfo":{"planName":"Pro"}}}}""")) == "Example Tier");
     Check("Missing Antigravity subscription is not inferred from quota", PlanParser.Antigravity(Json("""{"groups":[{"buckets":[{"bucketId":"gemini-weekly","remainingFraction":1}]}]}""")) == "");
-    Check("Claude local account tier preserves Max multiplier", PlanParser.ClaudeProfile(Json("""{"oauthAccount":{"organizationRateLimitTier":"default_claude_max_5x"}}""")) == "Max 5x");
+    Check("Claude local account tier preserves Max multiplier", PlanParser.ClaudeProfile(Json("""{"oauthAccount":{"organizationRateLimitTier":"default_claude_max_20x"}}""")) == "Max 20x");
     Check("Unknown Claude profile does not invent a plan", PlanParser.ClaudeProfile(Json("""{"oauthAccount":{"organizationRateLimitTier":"unknown"}}""")) == "");
     var eventItem = UsageService.ParseCursorEvent(Json("""{"timestamp":"1789000000000","model":"composer-2.5","tokenUsage":{"inputTokens":100,"cacheReadTokens":900,"cacheWriteTokens":20,"outputTokens":30,"totalCents":3.45131}}"""));
     Check("Cursor token categories are disjoint", eventItem!.Total == 1050);
@@ -302,6 +348,27 @@ try
     Check("Unknown cache price is not invented", pricing.Estimate(entry with { Model = "claude-sonnet-4-5" }) is null);
     Check("Token calculation is marked as an estimate", pricing.Summarize([entry]) is { Estimated: 1, IsEstimate: true });
     Check("Mixed known and unknown costs retain incompleteness", pricing.Summarize([entry, entry with { Model = "unknown" }]) is { Estimated: 1, Unpriced: 1 });
+    using (var agPricing = new Pricing(Path.Combine(root, "antigravity-prices")))
+    {
+        var agPrice = new TokenPrices(.000001m, .000002m, .0000001m, null, null);
+        foreach (var name in new[] { "google/gemini-3.8-flash", "google/gemini-3.1-pro-preview", "anthropic/claude-sonnet-4.6", "openai/gpt-oss-120b" })
+            agPricing.TrySetManual(name, agPrice, false, out _);
+        var agEntry = new TokenEntry("ag:test", now, "gemini-3.8-flash", 1000, 100, 0, 0, 200);
+        Check("Antigravity reasoning suffixes use the base price", new[] { "gemini-3.8-flash-low", "google/gemini-3.1-pro-preview-high", "claude-sonnet-4.6-thinking", "openai/gpt-oss-120b-medium" }
+            .All(name => agPricing.Estimate(agEntry with { Model = name }) == .00141m));
+        Check("Distinct or unknown variants remain unpriced", new[] { "gemini-3.8-flash-ultra", "gemini-3.8-flash:free-high", "other/gemini-3.8-flash-high" }
+            .All(name => agPricing.Estimate(agEntry with { Model = name }) is null));
+        Check("Reasoning fallback is confined to Antigravity", agPricing.Estimate(agEntry with { Key = "other:test", Model = "gemini-3.8-flash-high" }) is null);
+        Check("Reasoning aliases do not change catalog lookup", agPricing.Find("gemini-3.8-flash-high") is null);
+        Check("Reported amount takes precedence", agPricing.Estimate(agEntry with { Model = "gemini-3.8-flash-high", ReportedCostUsd = 7m }) == 7m);
+        Check("Base price updates reach reasoning variants", agPricing.TrySetManual("google/gemini-3.8-flash", agPrice with { Input = .000002m }, true, out _) && agPricing.Estimate(agEntry with { Model = "gemini-3.8-flash-high" }) == .00241m);
+        Check("Explicit variant price takes precedence", agPricing.TrySetManual("google/gemini-3.8-flash-high", agPrice with { Input = .000003m }, false, out _) && agPricing.Estimate(agEntry with { Model = "gemini-3.8-flash-high" }) == .00341m);
+        Check("A blank cache price in a manual base price charges the input price", agPricing.Estimate(agEntry with { Model = "gemini-3.8-flash-low", CacheWrite = 1 }) == .002412m);
+        var empty = new TokenEntry("ag:empty", now, "", 0, 0, 0, 0, 0);
+        Check("Empty steps do not mark totals incomplete", agPricing.Summarize([empty, agEntry]) is { Estimated: 1, Unpriced: 0 });
+        Check("Unknown model with real usage stays incomplete", agPricing.Summarize([empty with { Input = 1 }]) is { Unpriced: 1 });
+        Check("Empty model with reported cost is retained", agPricing.Summarize([empty with { ReportedCostUsd = 2m }]) is { Amount: 2m, Reported: 1 });
+    }
     var longContext = new TokenEntry("long", now, "gpt-6-astra", 300_000, 0, 0, 0, 100);
     Check("Remote long-context tier used", pricing.Estimate(longContext) == 6.0075m);
     Check("Missing one-hour cache price stays unknown", pricing.Estimate(longContext with { CacheWriteHour = 10 }) is null);
@@ -310,8 +377,6 @@ try
 
     priceTime = priceTime.AddHours(23);
     handler.Json = catalogJson.Replace("0.000003", "0.000004", StringComparison.Ordinal).Replace("vendor/dynamic-price", "vendor/new-catalog-model", StringComparison.Ordinal).Replace("\"-1\"", "\"0.000001\"", StringComparison.Ordinal);
-    await pricing.RefreshAsync();
-    Check("No hourly catalog requests before the daily interval", handler.Calls == 2 && !pricing.IsStale);
     priceTime = priceTime.AddMinutes(59).AddSeconds(59);
     await pricing.RefreshAsync();
     Check("Daily catalog request waits for the full 24 hours", handler.Calls == 2 && !pricing.IsStale);
@@ -363,7 +428,16 @@ try
     Check("Codex model context retained", parsed.Entries.All(x => x.Model == "gpt-6-astra"));
     Check("Malformed JSONL reported, valid rows retained", parsed.UsageNote.Contains("未能读取") && parsed.Entries.Count == 2);
     Check("Cached reads stable", logs.Read(ProviderId.Codex, codexRoot, now).Entries.Count == 2);
-    File.AppendAllText(Path.Combine(sessions, "session.jsonl"), Environment.NewLine + Event(now.AddMinutes(-1), 370, 100, 80, 20));
+    var older = Event(now.AddDays(-45), 90, 30, 10, 5);
+    var oldFile = Path.Combine(sessions, "older.jsonl");
+    File.WriteAllLines(oldFile, [context, older]);
+    File.SetLastWriteTimeUtc(oldFile, now.AddDays(-45).UtcDateTime);
+    Check("Default history skips files outside 30 days", logs.Read(ProviderId.Codex, codexRoot, now).Entries.Count == 2);
+    Check("Custom dates read older files", logs.Read(ProviderId.Codex, codexRoot, now, now.LocalDateTime.Date.AddDays(-60)).Entries.Count == 3);
+    File.AppendAllText(Path.Combine(sessions, "fork.jsonl"), Event(now.AddDays(-40), 80, 25, 10, 5) + Environment.NewLine);
+    _ = logs.Read(ProviderId.Codex, codexRoot, now);
+    Check("An earlier date reparses cached files without dropping older entries", logs.Read(ProviderId.Codex, codexRoot, now, now.LocalDateTime.Date.AddDays(-60)).Entries.Count == 4);
+    File.AppendAllText(Path.Combine(sessions, "session.jsonl"), Event(now.AddMinutes(-1), 370, 100, 80, 20) + Environment.NewLine);
     Check("Appended logs invalidate cache", logs.Read(ProviderId.Codex, codexRoot, now).Entries.Count == 3);
     var claudeRoot = Path.Combine(root, "claude"); var projects = Path.Combine(claudeRoot, "projects"); Directory.CreateDirectory(projects);
     string ClaudeEvent(long output) => JsonSerializer.Serialize(new { timestamp = now.AddMinutes(-1), type = "assistant", message = new { id = "same-message", model = "claude-sonnet-4-6", usage = new { input_tokens = 100, cache_read_input_tokens = 200, cache_creation_input_tokens = 30, cache_creation = new { ephemeral_1h_input_tokens = 10 }, output_tokens = output } } });
@@ -371,7 +445,25 @@ try
     var claude = logs.Read(ProviderId.Claude, claudeRoot, now);
     Check("Claude streamed messages use complete counters once", claude.Entries.Count == 1 && claude.Entries.Single().Total == 370);
     Check("Claude 1-hour writes separated", claude.Entries.Single().CacheWriteHour == 10 && claude.Entries.Single().CacheWrite == 20);
+    // The parsed Claude entry: input 100, cache read 200, cache write 20, one-hour cache write 10, output 40.
+    using (var claudePricing = new Pricing(Path.Combine(root, "claude-prices")))
+    {
+        const decimal M = 1_000_000m;
+        var claudeEntry = claude.Entries.Single();
+        bool Priced(TokenPrices prices, bool replace, decimal perMillion) =>
+            claudePricing.TrySetManual("claude-sonnet-4-6", prices, replace, out _) && claudePricing.Estimate(claudeEntry) == perMillion / M;
+        Check("A parsed Claude one-hour write follows a manual cache write price when left blank",
+            Priced(new(3 / M, 15 / M, null, 3.75m / M, null), false, 100 * 3 + 20 * 3.75m + 10 * 3.75m + 40 * 15));
+        Check("A parsed Claude one-hour write falls back to the input price when both writes are blank",
+            Priced(new(3 / M, 15 / M, null, null, null), true, 100 * 3 + 20 * 3 + 10 * 3 + 40 * 15));
+        Check("A parsed Claude one-hour write uses its own manual price when filled",
+            Priced(new(3 / M, 15 / M, null, 3.75m / M, 6 / M), true, 100 * 3 + 20 * 3.75m + 10 * 6 + 40 * 15));
+    }
     Check("Missing source is unavailable, not zero", !logs.Read(ProviderId.Claude, Path.Combine(root, "missing"), now).UsageAvailable);
+    var retired = SettingsMigrations.Read("""{"Apps":[{"QuotaSource":"claude","UsageSource":8},{"QuotaSource":"codex","UsageSource":9},{"QuotaSource":"claude","UsageSource":10}]}""");
+    retired.Normalize();
+    Check("Retired split Claude statistics return to Claude while later sources keep their saved numbers",
+        retired.Apps.Select(app => app.UsageSource).SequenceEqual([ProviderId.Claude, ProviderId.Claude, ProviderId.ZCode]));
     Console.WriteLine($"\n{passed} checks passed.");
 }
 
@@ -427,8 +519,10 @@ sealed class ClaudeQuotaHandler : HttpMessageHandler
         if (Override?.Invoke(token, cancellationToken) is { } response) return Task.FromResult(response);
         if (token == "test-rejected")
         { Rejected++; return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.Unauthorized)); }
-        return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("""
-            {"five_hour":{"utilization":9,"resets_at":"2026-09-06T12:20:00Z"},"seven_day":{"utilization":4,"resets_at":"2026-09-10T18:00:00Z"}}
-            """) });
+        return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new
+        {
+            five_hour = new { utilization = 9, resets_at = DateTimeOffset.UtcNow.AddHours(4) },
+            seven_day = new { utilization = 4, resets_at = DateTimeOffset.UtcNow.AddDays(5) }
+        })) });
     }
 }

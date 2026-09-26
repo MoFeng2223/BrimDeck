@@ -18,7 +18,12 @@ internal static class UI
     // Text and structure on the pure black surface: three label levels by opacity, hairlines by opacity.
     public const string Primary = "#F5F5F7", Secondary = "#9EEBEBF5", Tertiary = "#61EBEBF5";
     public const string Hairline = "#17FFFFFF", Track = "#1FFFFFFF", Fill = "#12FFFFFF", FillSelected = "#24FFFFFF", Outline = "#24FFFFFF";
-    public static Brush Brush(string color) => new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
+    // Panels are rebuilt on every refresh with hundreds of brushes; one frozen brush per color is shared instead.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Brush> Brushes = new(StringComparer.OrdinalIgnoreCase);
+    public static Brush Brush(string color) => Brushes.GetOrAdd(color, static text =>
+    {
+        var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(text)); brush.Freeze(); return brush;
+    });
     public static string ColorFor(ProviderId id) => AppPresets.ThemeColor(id);
     public static TextBlock Text(string text, double size = 13, string color = "#E6E8EF", FontWeight? weight = null)
         => new() { Text = text, FontFamily = TextFont, FontSize = size, Foreground = Brush(color), FontWeight = weight ?? FontWeights.Normal, TextWrapping = TextWrapping.Wrap };
@@ -80,19 +85,14 @@ internal static class UI
         }
         return ring;
     }
-    public static Border Card(UIElement child, double padding = 16) => new()
-    { Child = child, Background = Brush("#1C1C1E"), CornerRadius = new CornerRadius(10), BorderBrush = Brush("#2B2B2E"), BorderThickness = new Thickness(1), Padding = new Thickness(padding) };
     public static Border Divider(double margin = 12) => new() { Height = 1, Background = Brush("#2D2F38"), Margin = new Thickness(0, margin, 0, margin) };
     public static string Number(long number) => number switch
     { >= 1_000_000_000 => (number / 1_000_000_000d).ToString("0.##", CultureInfo.InvariantCulture) + "B", >= 1_000_000 => (number / 1_000_000d).ToString("0.##", CultureInfo.InvariantCulture) + "M", >= 1000 => (number / 1000d).ToString("0.#", CultureInfo.InvariantCulture) + "K", _ => number.ToString("N0") };
-    public static string Cost(IEnumerable<TokenEntry> entries, Pricing pricing)
+    public static string Cost(IEnumerable<TokenEntry> entries, Pricing pricing) => Cost(pricing.Summarize(entries));
+    public static string Cost(CostSummary cost) => "$" + cost.Amount.ToString("N2", CultureInfo.InvariantCulture) + (cost.Unpriced > 0 ? " +" : "");
+    public static string CostNote(IEnumerable<TokenEntry> entries, Pricing pricing) => CostNote(pricing.Summarize(entries), pricing);
+    public static string CostNote(CostSummary cost, Pricing pricing)
     {
-        var cost = pricing.Summarize(entries);
-        return "$" + cost.Amount.ToString("N2", CultureInfo.InvariantCulture) + (cost.Unpriced > 0 ? " +" : "");
-    }
-    public static string CostNote(IEnumerable<TokenEntry> entries, Pricing pricing)
-    {
-        var cost = pricing.Summarize(entries);
         if (!cost.HasValue && cost.Unpriced == 0) return Loc.T("无用量记录", "No usage records");
         if (!cost.HasValue && cost.Unpriced > 0) return pricing.LastError ?? Loc.T("未匹配到完整价格", "Prices could not be matched for every record");
         var note = cost.IsEstimate ? Loc.T("按模型单价计算 · USD", "Estimated from model prices · USD") : Loc.T("接口金额 · USD", "Amount from the API · USD");

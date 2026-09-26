@@ -54,12 +54,44 @@ public sealed class DesktopSources : IDesktopSources
         }
     }
 
+    // Discovery asks WMI for the process command line, so its result is kept for as long as that process lives
+    // and still listens on the same ports. Each refresh then costs one read of the system's listener table.
+    private (int Id, DateTime Started, IReadOnlyList<LocalEndpoint> Endpoints)[] _antigravity = [];
+
     public async Task<IReadOnlyList<LocalEndpoint>> FindAntigravityAsync(CancellationToken cancellation)
     {
+        var listeners = TcpListeners.Read();
+        var known = _antigravity.Where(p => Alive(p.Id, p.Started) &&
+            p.Endpoints.All(e => listeners.Any(l => l.ProcessId == p.Id && l.Port == e.Port))).ToArray();
+        if (known.Length > 0 && known.Length == _antigravity.Length) return known.SelectMany(p => p.Endpoints).ToList();
+        // A WMI query has no timeout of its own; a stalled service must not hold the refresh.
+        var processes = await Task.Run(FindAntigravityProcesses, cancellation).WaitAsync(TimeSpan.FromSeconds(15), cancellation);
+        var found = new List<(int, DateTime, IReadOnlyList<LocalEndpoint>)>();
+        foreach (var (pid, command) in processes)
+        {
+            var match = Regex.Match(command, "--csrf_token(?:=|\\s+)\"?([^\\s\"]+)");
+            if (!match.Success || StartTime(pid) is not { } started) continue;
+            var endpoints = listeners.Where(l => l.ProcessId == pid).Select(l => l.Port).Distinct()
+                .SelectMany(port => new LocalEndpoint[] { new(port, "https", match.Groups[1].Value), new(port, "http", match.Groups[1].Value) }).ToList();
+            if (endpoints.Count > 0) found.Add((pid, started, endpoints));
+        }
+        _antigravity = [.. found];
+        return found.SelectMany(p => p.Item3).ToList();
+    }
+
+    private static DateTime? StartTime(int pid)
+    {
+        try { using var process = Process.GetProcessById(pid); return process.StartTime; }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { return null; }
+    }
+    private static bool Alive(int pid, DateTime started) => StartTime(pid) == started;
+
+    private static List<(int Id, string Command)> FindAntigravityProcesses()
+    {
         // WMI reads only the matching local process metadata; credentials never leave this method's result in memory.
-        var processes = new List<(uint Id, string Command)>();
+        var processes = new List<(int Id, string Command)>();
         var locatorType = Type.GetTypeFromProgID("WbemScripting.SWbemLocator");
-        if (locatorType is null) return [];
+        if (locatorType is null) return processes;
         dynamic locator = Activator.CreateInstance(locatorType)!;
         dynamic? service = null, rows = null;
         try
@@ -70,10 +102,9 @@ public sealed class DesktopSources : IDesktopSources
             {
                 try
                 {
-                    cancellation.ThrowIfCancellationRequested();
                     string path = WmiProperty(row, "ExecutablePath") as string ?? "";
                     string command = WmiProperty(row, "CommandLine") as string ?? "";
-                    if (path.Contains("antigravity", StringComparison.OrdinalIgnoreCase)) processes.Add((Convert.ToUInt32(WmiProperty(row, "ProcessId")), command));
+                    if (path.Contains("antigravity", StringComparison.OrdinalIgnoreCase)) processes.Add((Convert.ToInt32(WmiProperty(row, "ProcessId")), command));
                 }
                 finally { Marshal.FinalReleaseComObject(row); }
             }
@@ -84,27 +115,7 @@ public sealed class DesktopSources : IDesktopSources
             if (service is not null) Marshal.FinalReleaseComObject(service);
             Marshal.FinalReleaseComObject(locator);
         }
-        if (processes.Count == 0) return [];
-        using var netstat = Process.Start(new ProcessStartInfo("netstat.exe", "-ano -p tcp")
-        { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true })!;
-        var outputTask = netstat.StandardOutput.ReadToEndAsync(cancellation);
-        await netstat.WaitForExitAsync(cancellation);
-        var output = await outputTask;
-        var endpoints = new List<LocalEndpoint>();
-        foreach (var (pid, command) in processes)
-        {
-            var match = Regex.Match(command, "--csrf_token(?:=|\\s+)\"?([^\\s\"]+)");
-            if (!match.Success) continue;
-            foreach (var line in output.Split('\n'))
-            {
-                var fields = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-                if (fields.Length != 5 || fields[3] != "LISTENING" || fields[4] != pid.ToString()) continue;
-                if (!int.TryParse(fields[1][(fields[1].LastIndexOf(':') + 1)..], out var port)) continue;
-                endpoints.Add(new(port, "https", match.Groups[1].Value));
-                endpoints.Add(new(port, "http", match.Groups[1].Value));
-            }
-        }
-        return endpoints.Distinct().ToList();
+        return processes;
     }
 
     private static object? WmiProperty(object row, string name)

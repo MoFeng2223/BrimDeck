@@ -75,13 +75,6 @@ public static class AppPresets
         "#B9A8FF", "#E7A0D0", "#E78284", "#D4D5DF", "#8E8E93", "#F5F5F7"
     ];
     public static string Name(ProviderId id) => ProviderCatalog.Name(id);
-    public static string Description(ProviderId id) => id switch
-    {
-        ProviderId.Claude => Loc.T("Claude Code 或桌面版的订阅配额与本机记录", "Subscription quota and local records from Claude Code or the desktop app"),
-        ProviderId.Codex => Loc.T("账户配额与本机记录", "Account quota and local records"),
-        ProviderId.Antigravity => Loc.T("本地服务中的 Gemini 与 Claude 配额", "Gemini and Claude quotas from the local service"),
-        _ => Loc.T("当前账期的模型额度", "Model quota for the current billing period")
-    };
     // The original preset colors: coral for Claude, mint for Codex, periwinkle for Antigravity, light gray for Cursor.
     public static string ThemeColor(ProviderId id) => id switch
     { ProviderId.Claude => "#E5A385", ProviderId.Codex => "#98DBB0", ProviderId.Antigravity => "#9CB9FF", ProviderId.ZCode => "#7FD1C4", _ => "#D4D5DF" };
