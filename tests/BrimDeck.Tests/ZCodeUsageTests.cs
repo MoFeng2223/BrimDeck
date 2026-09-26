@@ -4,7 +4,8 @@ static class ZCodeUsageTests
 {
     public static async Task Run(string root, Action<string, bool> check)
     {
-        var start = new DateTimeOffset(2026, 9, 20, 0, 0, 0, TimeSpan.FromHours(8));
+        // Local midnight, like the start of a statistics period, so the query bound matches on every machine's time zone.
+        var start = new DateTimeOffset(new DateTime(2026, 9, 20, 0, 0, 0, DateTimeKind.Local));
         long At(int hours) => start.AddHours(hours).ToUnixTimeMilliseconds();
         // input_tokens includes the cached part, as in ZCode's own records.
         var entries = ZCodeUsage.Parse([
