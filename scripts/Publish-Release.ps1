@@ -6,6 +6,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
+. (Join-Path $PSScriptRoot 'ReleaseNotes.ps1')
 Push-Location $projectRoot
 try {
     if (!$ReleaseNotes) { $ReleaseNotes = "releases/$Version.md" }
@@ -24,12 +25,12 @@ try {
     # The app reads update.json from the latest release and verifies the installer against it before running it.
     $manifest = [ordered]@{
         version = $Version
-        notes = (Get-Content -Raw -Encoding utf8 -LiteralPath $notesPath).Trim()
+        notes = Read-ReleaseNotes $notesPath
         file = $installer.Name
         size = $installer.Length
         sha256 = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     }
-    [IO.File]::WriteAllText((Join-Path $outputPath 'update.json'), ($manifest | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $outputPath 'update.json'), ($manifest | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
     Get-ChildItem -LiteralPath $outputPath -File | Where-Object Name -ne 'SHA256SUMS.txt' | ForEach-Object {
         '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
     } | Set-Content -LiteralPath (Join-Path $outputPath 'SHA256SUMS.txt') -Encoding utf8

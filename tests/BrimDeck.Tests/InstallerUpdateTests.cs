@@ -22,6 +22,13 @@ internal static class InstallerUpdateTests
         var backend = Backend();
         var release = await backend.CheckAsync(CancellationToken.None);
         check("installer manifest reports a newer release with notes and size", release == new AppRelease("0.2.0", "Release notes", installer.Length));
+        var localized = UpdateManifest.Parse((manifest with { Notes = new([("zh-CN", "中文说明"), ("en-US", "English notes")]) }).ToJson()).Notes;
+        check("localized notes survive the manifest round trip", localized == new ReleaseNotes([("zh-CN", "中文说明"), ("en-US", "English notes")]));
+        check("notes follow the interface language", localized.For("zh-CN") == "中文说明" && localized.For("en-US") == "English notes");
+        check("another region of the same language uses that language", localized.For("zh-TW") == "中文说明");
+        check("an unknown language falls back to English", localized.For("ja-JP") == "English notes");
+        check("notes without English fall back to the first language", new ReleaseNotes([("zh-CN", "中文说明")]).For("en-US") == "中文说明");
+        check("plain-text notes show in every language", UpdateManifest.Parse(manifest.ToJson()).Notes.For("ja-JP") == "Release notes");
         check("the same version is not offered again", await Backend("0.2.0").CheckAsync(CancellationToken.None) is null);
         check("a newer running version ignores an older manifest", await Backend("0.10.0").CheckAsync(CancellationToken.None) is null);
 

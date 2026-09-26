@@ -1,7 +1,7 @@
 namespace BrimDeck.Core;
 
 public enum AppUpdateStage { Idle, Checking, Available, Downloading, Ready, Installing }
-public sealed record AppRelease(string Version, string Notes, long Size);
+public sealed record AppRelease(string Version, ReleaseNotes Notes, long Size);
 
 public interface IAppUpdateBackend
 {

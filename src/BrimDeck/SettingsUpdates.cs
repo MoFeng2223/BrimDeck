@@ -138,7 +138,7 @@ public sealed partial class SettingsWindow
                 _ => Loc.T("进入设置时检查新版本，也可以随时手动检查。", "BrimDeck checks for a new version when settings open. You can also check at any time.")
             };
             // Show release notes as text. Remote release content cannot execute HTML or scripts.
-            notes.Text = (release?.Notes ?? "").Trim();
+            notes.Text = release?.Notes.For(Loc.Language) ?? "";
             noteScroll.Visibility = notes.Text.Length > 0 && stage is not AppUpdateStage.Checking ? Visibility.Visible : Visibility.Collapsed;
             progress.Value = updates.Progress; progress.Visibility = stage == AppUpdateStage.Downloading ? Visibility.Visible : Visibility.Collapsed;
             error.Text = updates.Error ?? ""; error.Visibility = updates.Error is null ? Visibility.Collapsed : Visibility.Visible;

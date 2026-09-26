@@ -8,7 +8,7 @@ namespace BrimDeck.Core;
 // update.json is published with every release and names the installer that belongs to it.
 public sealed record UpdateManifest(
     [property: JsonPropertyName("version")] string Version,
-    [property: JsonPropertyName("notes")] string Notes,
+    [property: JsonPropertyName("notes")] ReleaseNotes Notes,
     [property: JsonPropertyName("file")] string File,
     [property: JsonPropertyName("size")] long Size,
     [property: JsonPropertyName("sha256")] string Sha256)
@@ -19,7 +19,7 @@ public sealed record UpdateManifest(
     public static UpdateManifest Parse(string json)
     {
         var manifest = JsonSerializer.Deserialize<UpdateManifest>(json) ?? throw new InvalidDataException("Empty update manifest.");
-        return manifest.IsValid ? manifest with { Notes = manifest.Notes ?? "" } : throw new InvalidDataException("Invalid update manifest.");
+        return manifest.IsValid ? manifest with { Notes = manifest.Notes ?? ReleaseNotes.Of("") } : throw new InvalidDataException("Invalid update manifest.");
     }
 
     public string ToJson() => JsonSerializer.Serialize(this);
