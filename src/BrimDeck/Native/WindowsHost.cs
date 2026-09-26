@@ -21,9 +21,19 @@ public sealed class WindowsHost : IDisposable
         };
         _timer.Start();
     }
-    public static (Rect Bounds, Rect Work, double Scale) PrimaryScreen()
+    public static (Rect Bounds, Rect Work, double Scale) PrimaryScreen() => Screen(MonitorFromPoint(new POINT(), 1));
+    // The monitor under the mouse pointer, where a window opened with CenterScreen appears.
+    public static (Rect Bounds, Rect Work, double Scale) CursorScreen()
+    { GetCursorPos(out var point); return Screen(MonitorFromPoint(point, 2)); }
+    // The monitor that holds most of the window; the handle tells whether the window has moved to another monitor.
+    public static (IntPtr Monitor, Rect Bounds, Rect Work, double Scale) WindowScreen(Window window)
     {
-        var monitor = MonitorFromPoint(new POINT(), 1);
+        var monitor = MonitorFromWindow(new WindowInteropHelper(window).Handle, 2);
+        var (bounds, work, scale) = Screen(monitor);
+        return (monitor, bounds, work, scale);
+    }
+    private static (Rect Bounds, Rect Work, double Scale) Screen(IntPtr monitor)
+    {
         var info = new MONITORINFO { Size = Marshal.SizeOf<MONITORINFO>() };
         GetMonitorInfo(monitor, ref info);
         GetDpiForMonitor(monitor, 0, out var dpi, out _);

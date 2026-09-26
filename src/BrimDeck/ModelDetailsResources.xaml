@@ -1,0 +1,29 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Style x:Key="DetailLinkButton" TargetType="Button">
+    <Setter Property="Background" Value="Transparent"/><Setter Property="Padding" Value="0"/>
+    <Setter Property="Foreground" Value="#F5F5F7"/><Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+    <Setter Property="FocusVisualStyle" Value="{StaticResource PanelKeyboardFocus}"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+      <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="5" Padding="{TemplateBinding Padding}">
+        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
+      </Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="#12FFFFFF"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <!-- The scrollbar lies in the right inset, outside the shared table width. -->
+  <Style x:Key="ModelScrollViewer" TargetType="ScrollViewer">
+    <Setter Property="VerticalScrollBarVisibility" Value="Auto"/><Setter Property="HorizontalScrollBarVisibility" Value="Disabled"/>
+    <Setter Property="PanningMode" Value="VerticalOnly"/><Setter Property="CanContentScroll" Value="False"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollViewer">
+      <Grid>
+        <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" Content="{TemplateBinding Content}" CanContentScroll="{TemplateBinding CanContentScroll}"/>
+        <ScrollBar x:Name="PART_VerticalScrollBar" HorizontalAlignment="Right" Width="6" Margin="0,0,-11,0" Orientation="Vertical"
+          Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}" Maximum="{TemplateBinding ScrollableHeight}"
+          ViewportSize="{TemplateBinding ViewportHeight}" Value="{Binding VerticalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}"/>
+      </Grid>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+</ResourceDictionary>

@@ -4,13 +4,14 @@ namespace BrimDeck.Core;
 
 public sealed class LogReader
 {
-    private sealed record CacheItem(long Length, DateTime Modified, List<TokenEntry> Entries, JsonElement Quota, DateTimeOffset? QuotaTime, int Errors);
+    private sealed record CacheItem(long Length, DateTime Modified, DateTimeOffset Cutoff, List<TokenEntry> Entries, JsonElement Quota, DateTimeOffset? QuotaTime, int Errors);
     private readonly Dictionary<string, CacheItem> _cache = new(StringComparer.OrdinalIgnoreCase);
 
-    public ProviderSnapshot Read(ProviderId id, string root, DateTimeOffset now)
+    public ProviderSnapshot Read(ProviderId id, string root, DateTimeOffset now, DateTime? startDate = null)
     {
         var result = new ProviderSnapshot(id);
-        var cutoff = new DateTimeOffset(now.LocalDateTime.Date.AddDays(-29), now.ToLocalTime().Offset);
+        var cutoff = new DateTimeOffset(startDate?.Date ?? now.LocalDateTime.Date.AddDays(-29));
+        result.UsageStart = cutoff.LocalDateTime.Date;
         var folders = id == ProviderId.Codex ? new[] { "sessions", "archived_sessions" } : new[] { "projects" };
         var entries = new Dictionary<string, TokenEntry>();
         int count = 0, errors = 0;
@@ -27,7 +28,7 @@ public sealed class LogReader
                 {
                     var info = new FileInfo(file);
                     if (info.LastWriteTimeUtc < cutoff.UtcDateTime) continue;
-                    if (!_cache.TryGetValue(file, out var cached) || cached.Length != info.Length || cached.Modified != info.LastWriteTimeUtc)
+                    if (!_cache.TryGetValue(file, out var cached) || cached.Length != info.Length || cached.Modified != info.LastWriteTimeUtc || cutoff < cached.Cutoff)
                         _cache[file] = cached = ParseFile(file, id, cutoff, info);
                     count++; errors += cached.Errors;
                     foreach (var entry in cached.Entries.Where(e => e.Time >= cutoff && e.Time <= now && e.Total > 0))
@@ -42,14 +43,16 @@ public sealed class LogReader
             }
         }
         result.Entries = entries.Values.OrderBy(x => x.Time).ToList();
-        result.UsageNote = result.UsageAvailable ? $"本机近 30 天 · {count} 个记录文件" : "未找到本机会话记录。";
-        if (errors > 0) result.UsageNote += $" · {errors} 处记录未能读取";
+        result.UsageNote = result.UsageAvailable ? Loc.T($"本机 {cutoff.LocalDateTime:yyyy-MM-dd} 起 · {count} 个记录文件", $"This PC since {cutoff.LocalDateTime:yyyy-MM-dd} · " + Loc.Count(count, "record file", "record files"))
+            : Loc.T("未找到本机会话记录。", "No local session records were found.");
+        result.UsageComplete = errors == 0;
+        if (errors > 0) result.UsageNote += Loc.T($" · {errors} 处记录未能读取", " · " + Loc.Count(errors, "record", "records") + " could not be read");
         if (latestQuota.ValueKind == JsonValueKind.Object)
         {
             result.Quotas = QuotaParser.Codex(latestQuota, result.QuotaTime ?? now, false);
             result.Plan = latestQuota.Get("plan_type").Text();
-            result.Source = "本地配额快照";
-            result.Status = "本地记录";
+            result.Source = Loc.T("本地配额快照", "Local quota snapshot");
+            result.Status = Loc.T("本地记录", "Local records");
         }
         return result;
     }
@@ -116,7 +119,7 @@ public sealed class LogReader
             }
             catch (JsonException) { errors++; }
         }
-        return new(info.Length, info.LastWriteTimeUtc, entries, quota, quotaTime, errors);
+        return new(info.Length, info.LastWriteTimeUtc, cutoff, entries, quota, quotaTime, errors);
     }
 }
 
@@ -139,9 +142,37 @@ public static class QuotaParser
         }
         return result;
     }
-    public static List<Quota> Claude(JsonElement root) => new[] { ("five_hour", "5 小时额度", 300), ("seven_day", "每周额度", 10080) }
-        .Where(x => root.Get(x.Item1).Get("utilization").Number() is not null)
-        .Select(x => new Quota(x.Item2, Math.Clamp(root.Get(x.Item1).Get("utilization").Number()!.Value, 0, 100), root.Get(x.Item1).Get("resets_at").Date(), x.Item3)).ToList();
+    public static List<Quota> Claude(JsonElement root)
+    {
+        var result = new List<Quota>();
+        void Add(string label, double? percent, DateTimeOffset? reset, int? window)
+        {
+            if (percent is not { } value || value < 0 || result.Any(q => q.Label == label)) return;
+            result.Add(new(label, value, reset, window));
+        }
+        foreach (var (key, label, window) in new[] { ("five_hour", "5 小时额度", 300), ("seven_day", "每周额度", 10080) })
+            Add(label, root.Get(key).Get("utilization").Number(), root.Get(key).Get("resets_at").Date(), window);
+        // Current Claude clients read server-driven limits, including Fable, from scope.model.display_name.
+        // The server decides entitlement; missing/null meters never become an invented zero for a plan.
+        foreach (var limit in root.Get("limits").Items())
+        {
+            string kind = limit.Get("kind").Text(), group = limit.Get("group").Text();
+            string model = limit.Get("scope").Get("model").Get("display_name").Text();
+            string surface = limit.Get("scope").Get("surface").Get("display_name").Text();
+            if (kind == "session") Add("5 小时额度", limit.Get("percent").Number(), limit.Get("resets_at").Date(), 300);
+            else if (kind == "weekly_all") Add("每周额度", limit.Get("percent").Number(), limit.Get("resets_at").Date(), 10080);
+            else if (!string.IsNullOrWhiteSpace(model.Length > 0 ? model : surface))
+            {
+                var name = model.Length > 0 ? model : surface;
+                bool weekly = group == "weekly" || kind == "weekly_scoped";
+                Add(name + (weekly ? " 每周" : ""), limit.Get("percent").Number(), limit.Get("resets_at").Date(), weekly ? 10080 : null);
+            }
+        }
+        foreach (var (key, name) in new[] { ("seven_day_opus", "Opus"), ("seven_day_sonnet", "Sonnet") })
+            if (!result.Any(q => q.Label.StartsWith(name, StringComparison.OrdinalIgnoreCase)))
+                Add(name + " 每周", root.Get(key).Get("utilization").Number(), root.Get(key).Get("resets_at").Date(), 10080);
+        return result;
+    }
     public static List<Quota> Cursor(JsonElement root)
     {
         var plan = root.Get("planUsage");

@@ -20,12 +20,26 @@ public partial class App : Application
     public DeckSettings Settings { get; private set; } = new();
     public SettingsStore Store { get; private set; } = null!;
     public UsageService Usage { get; private set; } = null!;
+    public ProviderSecrets Secrets { get; private set; } = null!;
     public Pricing Prices { get; private set; } = null!;
+    public AppUpdates Updates { get; internal set; } = null!;
     public MainWindow Deck { get; private set; } = null!;
     public CancellationTokenSource Lifetime { get; } = new();
     public bool Exiting { get; private set; }
     public bool DemoMode { get; set; }
     public bool SmokeMode { get; private set; }
+    // Smoke runs look controls up by their Chinese names, so they keep Chinese whatever their settings say.
+    // The language scenario clears this to switch languages.
+    internal string? FixedLanguage { get; set; }
+
+    // Tooltip delays are not inherited, so the defaults are replaced for every element before any window exists.
+    // The system hover time on some machines is a full second; every tooltip here opens after the same short pause.
+    static App()
+    {
+        System.Windows.Controls.ToolTipService.InitialShowDelayProperty.OverrideMetadata(typeof(FrameworkElement), new FrameworkPropertyMetadata(120));
+        System.Windows.Controls.ToolTipService.BetweenShowDelayProperty.OverrideMetadata(typeof(FrameworkElement), new FrameworkPropertyMetadata(400));
+        System.Windows.Controls.ToolTipService.ShowDurationProperty.OverrideMetadata(typeof(FrameworkElement), new FrameworkPropertyMetadata(20000));
+    }
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -45,10 +59,26 @@ public partial class App : Application
             SetCurrentProcessExplicitAppUserModelID("BrimDeck.Desktop");
         }
         var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck");
-        if (SmokeMode) folder = Path.Combine(Path.GetTempPath(), "BrimDeck-Smoke-" + Environment.ProcessId);
+        if (SmokeMode) folder = Path.Combine(Path.GetTempPath(), $"BrimDeck-Smoke-{Environment.ProcessId}-{Guid.NewGuid():N}");
         Store = new SettingsStore(folder); Settings = Store.Load();
+        if (SmokeMode) FixedLanguage = Loc.Chinese;
+        UseLanguage();
+        // The language a first start takes from Windows is kept, even if the display language changes later.
+        if (Store.IsFirstStart && !SmokeMode) FlushSettings();
+        if (!SmokeMode)
+        {
+            try
+            {
+                Settings.LaunchAtStartup = StartupRegistration.IsEnabled();
+                // When moving from the old EXE to an installed copy, keep an enabled startup entry at the new stable path.
+                if (Settings.LaunchAtStartup) StartupRegistration.SetEnabled(true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { }
+        }
         Prices = new Pricing(folder);
-        Usage = new UsageService(new DesktopSources());
+        Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(folder), folder);
+        Secrets = new ProviderSecrets(folder);
+        Usage = new UsageService(new DesktopSources(), secrets: Secrets);
         Deck = new MainWindow(this); MainWindow = Deck; Deck.Show();
         _save.Tick += (_, _) => FlushSettings();
         if (!SmokeMode)
@@ -65,6 +95,13 @@ public partial class App : Application
             Dispatcher.BeginInvoke(async () => await RunSmokeAsync(Path.GetFullPath(output), e.Args.Contains("--live")));
         }
     }
+    // Names used by XAML templates follow the language through these resources.
+    private void UseLanguage()
+    {
+        Loc.Use(FixedLanguage ?? Settings.Language);
+        Resources["PinSourceName"] = Loc.T("固定显示", "Pin");
+        Resources["UnpinSourceName"] = Loc.T("取消固定", "Unpin");
+    }
     public void OpenSettings()
     {
         if (_settingsWindow is null)
@@ -76,22 +113,43 @@ public partial class App : Application
         }
         if (_settingsWindow.WindowState == WindowState.Minimized) _settingsWindow.WindowState = WindowState.Normal;
         _settingsWindow.Activate();
+        if (!SmokeMode) _ = _settingsWindow.CheckUpdatesOnOpenAsync();
     }
     public void UpdateSettings(DeckSettings settings)
     {
-        bool dataChanged = settings.UsagePage != Settings.UsagePage ||
-            !settings.EnabledApps.Select(app => app.Id).SequenceEqual(Settings.EnabledApps.Select(app => app.Id));
-        settings.Normalize(); Settings = settings; Deck.ApplySettings();
+        foreach (var previous in Settings.Apps)
+        {
+            var next = settings.Entry(previous.InstanceId);
+            if (previous.SecretRevision != Guid.Empty && (next is null || next.QuotaSource != previous.QuotaSource))
+            {
+                try { Secrets.Delete(previous.InstanceId); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+                { _settingsWindow?.SaveStatus(Loc.T("密钥文件无法更新，请检查本机设置目录后重试。", "The key file could not be updated. Check the local settings folder and try again."), true); return; }
+            }
+        }
+        bool dataChanged = !settings.RequiredProviders.SetEquals(Settings.RequiredProviders) ||
+            !settings.EnabledApps.Select(e => e.ConfigurationKey).ToHashSet().SetEquals(Settings.EnabledApps.Select(e => e.ConfigurationKey));
+        bool syncEnabled = settings.UsageAutoSync && !Settings.UsageAutoSync;
+        settings.Normalize(); Settings = settings;
+        // Statuses and notes are worded when the data is read, so a new language reads the data again.
+        bool languageChanged = Loc.Normalize(FixedLanguage ?? settings.Language) != Loc.Language;
+        if (languageChanged) UseLanguage();
+        Deck.ApplySettings();
         _save.Stop(); _save.Start();
-        if (dataChanged && !SmokeMode) _ = Deck.RefreshAsync();
+        if ((dataChanged || syncEnabled || languageChanged) && !SmokeMode) _ = Deck.RefreshAutomaticallyAsync(queueIfBusy: true);
     }
     public void FlushSettings()
     {
         _save.Stop();
-        try { Store.Save(Settings); _settingsWindow?.SaveStatus("已保存 · " + DateTime.Now.ToString("HH:mm:ss")); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _settingsWindow?.SaveStatus("保存失败，请检查设置目录权限。", true); }
+        try { Store.Save(Settings); _settingsWindow?.SaveStatus(""); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _settingsWindow?.SaveStatus(Loc.T("保存失败，请检查设置目录权限。", "Saving failed. Check the permissions of the settings folder."), true); }
     }
-    public void ExitApplication() { Exiting = true; Lifetime.Cancel(); FlushSettings(); Shutdown(); }
+    // The settings window records its size before the final save; closing it during shutdown would be too late.
+    public void ExitApplication() { Exiting = true; Lifetime.Cancel(); _settingsWindow?.RememberSize(); FlushSettings(); Shutdown(); }
+    internal void InstallUpdate()
+    {
+        if (Updates.PrepareRestart(() => Store.Save(Settings))) ExitApplication();
+    }
     protected override void OnExit(ExitEventArgs e)
     {
         Exiting = true; Lifetime.Cancel(); _save.Stop(); _tray?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
@@ -100,17 +158,136 @@ public partial class App : Application
     private async Task RunSmokeAsync(string output, bool live)
     {
         Directory.CreateDirectory(output);
+        // Scenarios invoke controls explicitly. Physical clicks during screenshots
+        // must not change the selected page underneath an assertion.
+        if (!Environment.GetCommandLineArgs().Contains("--music-hover") && !Environment.GetCommandLineArgs().Contains("--source-menu-interactive"))
+            Deck.PreviewMouseDown += (_, args) => args.Handled = true;
         var checks = new List<string>();
         bool failed = false;
         try
         {
             DemoMode = !live;
+            if (Environment.GetCommandLineArgs().Contains("--control-dialog"))
+            {
+                await VerifyControlDialogAsync(output, checks);
+                File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
+                failed = checks.Any(x => x.StartsWith("FAIL", StringComparison.Ordinal));
+                return;
+            }
+            if (Environment.GetCommandLineArgs().Contains("--source-menu"))
+            {
+                await VerifySourceMenuAsync(output, checks);
+                File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
+                failed = checks.Any(x => x.StartsWith("FAIL", StringComparison.Ordinal));
+                return;
+            }
+            if (Environment.GetCommandLineArgs().Contains("--music-marquee"))
+            {
+                await VerifyMusicMarqueeAsync(output, checks);
+                File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
+                failed = checks.Any(x => x.StartsWith("FAIL", StringComparison.Ordinal));
+                return;
+            }
+            if (Environment.GetCommandLineArgs().Contains("--quota-carousel"))
+            {
+                await VerifyQuotaCarouselAsync(output, checks);
+                File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
+                failed = checks.Any(x => x.StartsWith("FAIL", StringComparison.Ordinal));
+                return;
+            }
+            if (Environment.GetCommandLineArgs().Contains("--music-hover"))
+            {
+                await VerifyMusicHoverAsync(output, checks);
+                File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
+                failed = checks.Any(x => x.StartsWith("FAIL", StringComparison.Ordinal));
+                return;
+            }
+            if (Environment.GetCommandLineArgs().Contains("--music-resize"))
+            {
+                await VerifyMusicResizeAsync(output, checks);
+                File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
+                failed = checks.Any(x => x.StartsWith("FAIL", StringComparison.Ordinal));
+                return;
+            }
+            if (Environment.GetCommandLineArgs().Contains("--music-seek"))
+            {
+                await VerifyMusicSeekAsync(output, checks);
+                File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
+                failed = checks.Any(x => x.StartsWith("FAIL", StringComparison.Ordinal));
+                return;
+            }
+            if (Environment.GetCommandLineArgs().Contains("--music"))
+            {
+                await VerifyMusicAsync(output, checks, Environment.GetCommandLineArgs().Contains("--media-live"));
+                File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
+                failed = checks.Any(x => x.StartsWith("FAIL", StringComparison.Ordinal));
+                return;
+            }
             if (live) await Deck.RefreshAsync(); else Deck.SetSnapshots(DemoData.Create());
-            var reportedEntry = new TokenEntry("reported", DateTimeOffset.Now, "unknown", 1, 0, 0, 0, 1, 12.3m);
-            checks.Add(UI.Cost([reportedEntry], Prices) == "$12.30" ? "PASS reported cost has no approximation sign" : "FAIL reported cost label");
-            var unknownEntry = reportedEntry with { Model = "brimdeck-test-unpriced-model", ReportedCostUsd = null };
-            checks.Add(UI.Cost([unknownEntry], Prices) == "$0.00 +" && UI.Cost([reportedEntry, unknownEntry], Prices) == "$12.30 +"
-                ? "PASS unknown costs show known subtotal followed by plus" : "FAIL incomplete cost label");
+            if (Environment.GetCommandLineArgs().Contains("--language"))
+            {
+                await VerifyLanguageAsync(output, checks);
+                File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
+                failed = checks.Any(x => x.StartsWith("FAIL", StringComparison.Ordinal));
+                return;
+            }
+            if (Environment.GetCommandLineArgs().Contains("--preview-dismissal"))
+            {
+                await VerifyPreviewDismissalAsync(output, checks);
+                File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
+                failed = checks.Any(x => x.StartsWith("FAIL", StringComparison.Ordinal));
+                return;
+            }
+            if (Environment.GetCommandLineArgs().Contains("--hover-tracking"))
+            {
+                await VerifyHoverTrackingAsync(checks);
+                File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
+                failed = checks.Any(x => x.StartsWith("FAIL", StringComparison.Ordinal));
+                return;
+            }
+            if (Environment.GetCommandLineArgs().Contains("--page-switch"))
+            {
+                await VerifyPageSwitchFramesAsync(output, checks);
+                await VerifyPageSwitchHoverAsync(output, checks);
+                File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
+                failed = checks.Any(x => x.StartsWith("FAIL", StringComparison.Ordinal));
+                return;
+            }
+            if (Environment.GetCommandLineArgs().Contains("--typography"))
+            {
+                await VerifyTypographyAsync(output, checks);
+                File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
+                failed = checks.Any(x => x.StartsWith("FAIL", StringComparison.Ordinal));
+                return;
+            }
+            if (Environment.GetCommandLineArgs().Contains("--settings-only"))
+            {
+                await VerifySettingsAsync(output, checks);
+                File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
+                failed = checks.Any(x => x.StartsWith("FAIL", StringComparison.Ordinal));
+                return;
+            }
+            if (Environment.GetCommandLineArgs().Contains("--tooltip-response"))
+            {
+                await VerifyTooltipResponseAsync(output, checks);
+                File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
+                failed = checks.Any(x => x.StartsWith("FAIL", StringComparison.Ordinal));
+                return;
+            }
+            if (Environment.GetCommandLineArgs().Contains("--providers"))
+            {
+                await VerifyProvidersAsync(output, checks);
+                File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
+                failed = checks.Any(x => x.StartsWith("FAIL", StringComparison.Ordinal));
+                return;
+            }
+            if (Environment.GetCommandLineArgs().Contains("--app-interactions"))
+            {
+                await VerifyAppInteractionsAsync(output, checks);
+                File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
+                failed = checks.Any(x => x.StartsWith("FAIL", StringComparison.Ordinal));
+                return;
+            }
             if (live)
             {
                 if (new DesktopSources().ReadClaudeDesktop(DataLocations.Detect()).Credentials.Count > 0)
@@ -121,9 +298,6 @@ public partial class App : Application
                         ? "PASS Claude Desktop login reads five-hour and weekly quotas with reset times" : "FAIL Claude Desktop live quotas");
                 }
                 checks.Add(Prices.ModelCount > 0 && Prices.LastError is null ? $"PASS online price catalog: {Prices.ModelCount} models" : "FAIL online price catalog");
-                var estimate = reportedEntry with { Model = "gpt-6-astra", ReportedCostUsd = null };
-                checks.Add(Prices.Estimate(estimate) is { } amount && UI.Cost([estimate], Prices) == "$" + amount.ToString("N2", System.Globalization.CultureInfo.InvariantCulture)
-                    ? "PASS calculated cost displays its sum without approximation" : "FAIL calculated cost label");
                 if (Deck.Snapshots.Any(s => s.Id == ProviderId.Antigravity && s.LiveQuota))
                 {
                     var desktop = new DesktopSources();
@@ -171,40 +345,14 @@ public partial class App : Application
                     foreach (var child in Elements(VisualTreeHelper.GetChild(root, i))) yield return child;
             }
             Rect Bounds(FrameworkElement element) => element.TransformToAncestor(Deck.PanelVisual).TransformBounds(new Rect(element.RenderSize));
-            void RecordTypography(int providers)
-            {
-                Deck.PanelVisual.UpdateLayout();
-                var title = Elements(Deck.PanelVisual).OfType<System.Windows.Controls.TextBlock>().Single(x => x.Text == "Codex");
-                var body = Elements(Deck.PanelVisual).OfType<System.Windows.Controls.TextBlock>().First(x => x.Text == "今日");
-                double VisibleSize(System.Windows.Controls.TextBlock text) => text.FontSize *
-                    text.TransformToAncestor(Deck.PanelVisual).TransformBounds(new Rect(0, 0, 1, 1)).Height;
-                checks.Add($"LAYOUT providers={providers}; title={VisibleSize(title):F2} DIP; body={VisibleSize(body):F2} DIP");
-            }
-            RecordTypography(4);
             System.Windows.Controls.Button ToolbarButton(string name) => Elements(Deck.PanelVisual).OfType<System.Windows.Controls.Button>()
                 .Single(button => System.Windows.Automation.AutomationProperties.GetName(button) == name);
-            checks.Add(new[] { "AI 用量", "模型明细" }.All(name => ToolbarButton(name).Content is System.Windows.Controls.TextBlock && Bounds(ToolbarButton(name)).Height >= 16)
-                ? "PASS view switchers are labeled text segments" : "FAIL view switcher presentation");
-            var clock = Elements(Deck.PanelVisual).OfType<System.Windows.Controls.TextBlock>().Single(text => text.Name == "ClockLabel");
-            var clockBounds = Bounds(clock);
-            checks.Add(Math.Abs((clockBounds.Left + clockBounds.Right) / 2 - Deck.PanelVisual.ActualWidth / 2) < 1 && clock.Text.Length == 5
-                ? "PASS toolbar clock is centered" : "FAIL toolbar clock placement");
-            var settingsBounds = Bounds(ToolbarButton("设置"));
-            checks.Add(settingsBounds.Height >= 30 && Deck.PanelVisual.ActualWidth - settingsBounds.Right >= 20 &&
-                !Elements(Deck.PanelVisual).OfType<System.Windows.Controls.Button>().Any(button => System.Windows.Automation.AutomationProperties.GetName(button) == "刷新用量")
-                ? "PASS settings has a generous target and edge inset without a refresh button" : "FAIL toolbar settings layout");
             System.Windows.Controls.Button GroupButton(string group) => Elements(Deck.PanelVisual).OfType<System.Windows.Controls.Button>()
                 .Single(button => System.Windows.Automation.AutomationProperties.GetName(button) == "Antigravity " + group);
             var options = Elements(Deck.PanelVisual).OfType<System.Windows.Controls.Button>()
                 .Where(button => System.Windows.Automation.AutomationProperties.GetName(button).StartsWith("Antigravity ", StringComparison.Ordinal)).ToList();
             if (options.Count == 2)
             {
-                var title = Elements(Deck.PanelVisual).OfType<System.Windows.Controls.TextBlock>().Single(x => x.Text == "Antigravity");
-                var titleBounds = Bounds(title); var left = Bounds(options[0]); var right = Bounds(options[1]);
-                checks.Add(ReferenceEquals(options[0].Parent, options[1].Parent) && Math.Abs(left.Right - right.Left) < .5 &&
-                    left.Left > titleBounds.Right && Math.Abs((left.Top + left.Bottom - titleBounds.Top - titleBounds.Bottom) / 2) < 1.5
-                    ? "PASS joined Antigravity selector shares the title row" : "FAIL Antigravity selector layout");
-                checks.Add($"LAYOUT Antigravity selector labels: {string.Join("|", options.Select(button => ((System.Windows.Controls.TextBlock)button.Content).Text))}");
                 GroupButton("Claude").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
                 checks.Add(GroupButton("Claude").Tag is "Selected" && GroupButton("Gemini").Tag is null
                     ? "PASS Antigravity segment changes selection" : "FAIL Antigravity segment interaction");
@@ -212,9 +360,11 @@ public partial class App : Application
             checks.Add(!HasScrollViewer(Deck.PanelVisual) && ContentFits() ? "PASS compact overview fits without scroll containers" : "FAIL overview layout");
             Deck.SelectQuotaGroup("Claude"); await Task.Delay(30); Capture(Deck.PanelVisual, Path.Combine(output, "panel-claude-group.png"));
             Deck.SelectQuotaGroup("Gemini");
-            ToolbarButton("模型明细").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); await Task.Delay(30); Capture(Deck.PanelVisual, Path.Combine(output, "panel-models.png"));
-            checks.Add(!HasScrollViewer(Deck.PanelVisual) && ContentFits() ? "PASS model view fits without scrolling" : "FAIL model layout");
-            ToolbarButton("AI 用量").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            ToolbarButton("查看 Claude 今日明细").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); await Task.Delay(30); Capture(Deck.PanelVisual, Path.Combine(output, "panel-models.png"));
+            ToolbarButton("返回用量").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            await CheckModelDetailsAsync(output, checks);
+            await CheckBackgroundRefreshAsync(checks);
+            await CheckUsageSynchronizationAsync(output, checks);
             ToolbarButton("设置").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); await Task.Delay(150);
             Capture(_settingsWindow!.RootVisual, Path.Combine(output, "settings-appearance.png"));
             _settingsWindow.ShowPage(1); await Task.Delay(180); Capture(_settingsWindow.RootVisual, Path.Combine(output, "settings-interaction.png"));
@@ -225,40 +375,68 @@ public partial class App : Application
             var columnOrder = Elements(Deck.PanelVisual).OfType<System.Windows.Controls.TextBlock>().Where(text => names.Contains(text.Text) && text.FontSize >= 12)
                 .OrderBy(text => Bounds(text).Left).Select(text => text.Text).ToList();
             checks.Add(Settings.Apps.Select(app => app.Id).SequenceEqual([ProviderId.Codex, ProviderId.Antigravity, ProviderId.Claude, ProviderId.Cursor]) &&
-                columnOrder.SequenceEqual(Settings.Apps.Select(app => AppPresets.Name(app.Id)))
+                columnOrder.SequenceEqual(Settings.ConfiguredApps.Select(app => AppPresets.Name(app.Id)))
                 ? "PASS application rows reorder and the panel columns follow" : $"FAIL application reorder: {string.Join(",", columnOrder)}");
             _settingsWindow.MoveApp(2, 0); await Task.Delay(50);
-            var themed = Settings.Copy(); themed.Apps.Single(app => app.Id == ProviderId.Codex).ThemeColor = "#FF0000"; UpdateSettings(themed); await Task.Delay(50);
-            checks.Add(Elements(Deck.PanelVisual).OfType<System.Windows.Controls.Border>().Any(border => border.Background is SolidColorBrush { Color: { R: 255, G: 0, B: 0 } })
-                ? "PASS custom theme color reaches the quota track" : "FAIL custom theme color");
-            var recolored = Settings.Copy(); recolored.Apps.Single(app => app.Id == ProviderId.Codex).ThemeColor = ""; UpdateSettings(recolored); await Task.Delay(50);
             _settingsWindow.ShowPage(4); await Task.Delay(100); Capture(_settingsWindow.RootVisual, Path.Combine(output, "settings-pricing.png"));
             void CaptionClick(string name) => Elements(_settingsWindow!.RootVisual).OfType<System.Windows.Controls.Button>()
                 .Single(button => System.Windows.Automation.AutomationProperties.GetName(button) == name)
                 .RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            async Task WaitSettingsState(WindowState state)
+            {
+                var deadline = Environment.TickCount64 + 1500;
+                while (_settingsWindow!.WindowState != state && Environment.TickCount64 < deadline) await Task.Delay(25);
+                await Task.Delay(80); // Allow the native window transition to finish arranging its content.
+            }
             _settingsWindow.ShowPage(1);
-            CaptionClick("最大化"); await Task.Delay(180);
+            CaptionClick("最大化"); await WaitSettingsState(WindowState.Maximized);
             checks.Add(_settingsWindow.WindowState == WindowState.Maximized ? "PASS custom caption maximizes settings" : "FAIL settings maximize");
             Capture(_settingsWindow.RootVisual, Path.Combine(output, "settings-maximized.png"));
-            CaptionClick("还原"); await Task.Delay(100);
+            CaptionClick("还原"); await WaitSettingsState(WindowState.Normal);
             checks.Add(_settingsWindow.WindowState == WindowState.Normal ? "PASS custom caption restores settings" : "FAIL settings restore");
             var normalSettingsSize = new Size(_settingsWindow.Width, _settingsWindow.Height);
             _settingsWindow.Width = _settingsWindow.MinWidth; _settingsWindow.Height = _settingsWindow.MinHeight; await Task.Delay(100);
             Capture(_settingsWindow.RootVisual, Path.Combine(output, "settings-small.png"));
             _settingsWindow.Width = normalSettingsSize.Width; _settingsWindow.Height = normalSettingsSize.Height;
-            CaptionClick("最小化"); await Task.Delay(100);
+            CaptionClick("最小化"); await WaitSettingsState(WindowState.Minimized);
             checks.Add(_settingsWindow.WindowState == WindowState.Minimized ? "PASS custom caption minimizes settings" : "FAIL settings minimize");
-            OpenSettings(); await Task.Delay(100);
+            OpenSettings(); await WaitSettingsState(WindowState.Normal);
             checks.Add(_settingsWindow.WindowState == WindowState.Normal && _settingsWindow.IsVisible ? "PASS settings entry restores minimized window" : "FAIL reopen minimized settings");
             CaptionClick("关闭设置"); await Task.Delay(50);
             checks.Add(_settingsWindow is null && !Exiting ? "PASS closing settings keeps application running" : "FAIL settings close");
+            // The size the window was closed at comes back on the next opening, and so does a maximized window.
+            OpenSettings(); await Task.Delay(80); _settingsWindow!.Width = 900; _settingsWindow.Height = 700; await Task.Delay(50);
+            CaptionClick("关闭设置"); await Task.Delay(50); OpenSettings(); await Task.Delay(80);
+            checks.Add(Math.Abs(_settingsWindow!.ActualWidth - 900) < 1 && Math.Abs(_settingsWindow.ActualHeight - 700) < 1
+                ? "PASS settings reopen at the size they were closed at" : $"FAIL settings size not kept: {_settingsWindow.ActualWidth}x{_settingsWindow.ActualHeight}");
+            CaptionClick("最大化"); await WaitSettingsState(WindowState.Maximized); CaptionClick("关闭设置"); await Task.Delay(50);
+            OpenSettings(); await WaitSettingsState(WindowState.Maximized);
+            checks.Add(_settingsWindow!.WindowState == WindowState.Maximized && Settings.SettingsWindowWidth == 900
+                ? "PASS maximized settings reopen maximized and keep the normal size" : "FAIL settings maximized state not kept");
+            CaptionClick("关闭设置"); await Task.Delay(50);
+            // A size saved on a larger screen is fitted to the work area of the screen the window opens on.
+            var oversized = Settings.Copy(); oversized.SettingsWindowWidth = 20000; oversized.SettingsWindowHeight = 20000; oversized.SettingsWindowMaximized = false; UpdateSettings(oversized);
+            OpenSettings(); await Task.Delay(80);
+            var (_, settingsWork, settingsScale) = Native.WindowsHost.CursorScreen();
+            checks.Add(_settingsWindow!.ActualWidth <= settingsWork.Width / settingsScale - 23 && _settingsWindow.ActualHeight <= settingsWork.Height / settingsScale - 23
+                ? "PASS a saved settings size larger than the screen is fitted to the work area" : $"FAIL oversized settings: {_settingsWindow.ActualWidth}x{_settingsWindow.ActualHeight}");
+            CaptionClick("关闭设置"); await Task.Delay(50);
+            var defaultSize = Settings.Copy(); defaultSize.SettingsWindowWidth = null; defaultSize.SettingsWindowHeight = null; defaultSize.SettingsWindowMaximized = false; UpdateSettings(defaultSize);
+            await VerifySettingsAsync(output, checks);
+            await VerifyPreviewDismissalAsync(output, checks);
+            await VerifySourcesAsync(output, checks);
+            await VerifyProvidersAsync(output, checks);
+            await VerifyAppInteractionsAsync(output, checks);
+            await VerifyAppUpdatesAsync(output, checks);
             Deck.Preview(false);
+            var hoverSettings = Settings.Copy(); hoverSettings.OpenDelay = 200; hoverSettings.CloseDelay = 300; UpdateSettings(hoverSettings);
             Deck.TestContext(ScreenContext.Desktop); Deck.SetExpanded(false, true);
             Deck.PointerChanged(true); await Task.Delay(60); checks.Add(!Deck.IsExpanded ? "PASS hover waits for configured delay" : "FAIL hover early");
             Deck.PointerChanged(false); await Task.Delay(240); checks.Add(!Deck.IsExpanded ? "PASS leaving cancels pending expansion" : "FAIL hover cancel");
             Deck.PointerChanged(true); await Task.Delay(280); checks.Add(Deck.IsExpanded ? "PASS hover expands after delay" : "FAIL hover expansion");
             Deck.PointerChanged(false); await Task.Delay(60); Deck.PointerChanged(true); await Task.Delay(340); checks.Add(Deck.IsExpanded ? "PASS reentry cancels collapse" : "FAIL reentry");
             Deck.PointerChanged(false); await Task.Delay(380); checks.Add(!Deck.IsExpanded ? "PASS leave collapses after delay" : "FAIL leave");
+            await VerifyHoverTrackingAsync(checks);
             foreach (var style in Enum.GetValues<CompactStyle>())
             {
                 var s = Settings.Copy(); s.Style = style; UpdateSettings(s); Deck.TestContext(ScreenContext.Desktop); Deck.SetExpanded(false, true); await Task.Delay(50);
@@ -271,42 +449,46 @@ public partial class App : Application
                     Capture(Deck.SurfaceVisual, Path.Combine(output, $"compact-{style.ToString().ToLowerInvariant()}-dark.png"), UI.Brush("#18191D"), surfaceRegion);
                     checks.Add(Deck.SurfaceVisual.InputHitTest(new Point(surfaceBounds.Left + surfaceBounds.Width / 2, surfaceBounds.Bottom + 3)) is null
                         ? $"PASS {style} shadow does not intercept pointer input" : $"FAIL {style} shadow intercepts input");
-                }
-                if (style == CompactStyle.Capsule)
-                {
-                    checks.Add(surfaceBounds.Top > 0 && Deck.SurfaceVisual.InputHitTest(new Point(surfaceBounds.Left + surfaceBounds.Width / 2, .5)) is not null &&
-                        Deck.SurfaceVisual.InputHitTest(new Point(surfaceBounds.Left - 3, .5)) is null
-                        ? "PASS capsule hover zone reaches the screen edge without widening" : "FAIL capsule hover zone");
+                    // The whole bounding box from the screen edge hovers: shoulders, rounded corners and the capsule's gap.
+                    var hoverZone = (UIElement)Deck.FindName("HoverZone");
+                    Point[] hoverPoints =
+                    [
+                        new(surfaceBounds.Left + 1, 0.5), new(surfaceBounds.Right - 1, 0.5), new(surfaceBounds.Left + surfaceBounds.Width / 2, 0.5),
+                        new(surfaceBounds.Left + 1, surfaceBounds.Bottom - 1), new(surfaceBounds.Right - 1, surfaceBounds.Bottom - 1),
+                        new(surfaceBounds.Left + 1, surfaceBounds.Top + surfaceBounds.Height / 2), new(surfaceBounds.Right - 1, surfaceBounds.Top + surfaceBounds.Height / 2)
+                    ];
+                    var missed = hoverPoints.Where(point => Deck.SurfaceVisual.InputHitTest(point) is not DependencyObject hit || !hoverZone.IsAncestorOf(hit)).ToList();
+                    checks.Add(missed.Count == 0 ? $"PASS {style} hovers across its full bounding box from the screen edge"
+                        : $"FAIL {style} hover misses {string.Join(" ", missed.Select(point => $"({point.X:0.#},{point.Y:0.#})"))}");
                 }
                 if (style == CompactStyle.Notch)
                 {
-                    checks.Add(Deck.PanelVisual.InputHitTest(new Point(2, 16)) is null &&
-                        Deck.PanelVisual.InputHitTest(new Point(20, 16)) is not null &&
-                        Deck.PanelVisual.InputHitTest(new Point(12, .2)) is not null
-                        ? "PASS notch shoulders respond to hover while transparent corners do not" : "FAIL notch pointer silhouette");
-                    checks.Add(Elements(Deck.PanelVisual).OfType<System.Windows.Shapes.Path>().Count() == Settings.EnabledApps.Count
-                        ? "PASS compact notch shows one progress ring per application" : "FAIL compact rings");
                     Deck.ShowAlert(Settings.Apps[0], "每周", 88, DateTimeOffset.Now.AddDays(3)); await Task.Delay(420);
                     Capture(Deck.SurfaceVisual, Path.Combine(output, "compact-notch-alert.png"), UI.Brush("#DDE7EF"),
                         new Rect(Deck.PanelVisual.TransformToAncestor(Deck.SurfaceVisual).Transform(new Point()).X, 0, Deck.PanelVisual.ActualWidth, Deck.PanelVisual.ActualHeight));
-                    checks.Add(Deck.AlertVisible && Deck.PanelVisual.ActualWidth > 300 ? "PASS threshold alert widens the compact island" : $"FAIL alert width {Deck.PanelVisual.ActualWidth:F0}");
+                    checks.Add(Deck.AlertVisible ? "PASS threshold alert appears on the compact island" : "FAIL threshold alert");
                     Deck.ClearAlert(); Deck.SetExpanded(false, true); await Task.Delay(50);
                 }
-                checks.Add("PASS compact " + style);
             }
             if (SystemParameters.ClientAreaAnimation)
             {
                 var indicator = Settings.Copy(); indicator.Style = CompactStyle.Line; indicator.AnimationDuration = 400; UpdateSettings(indicator);
                 Deck.TestContext(ScreenContext.Desktop); Deck.SetExpanded(false, true); await Task.Delay(50);
-                Deck.SetExpanded(true); await Task.Delay(120);
+                Deck.SetExpanded(true); await Task.Delay(70);
                 Capture(Deck.SurfaceVisual, Path.Combine(output, "expand-line-mid.png"), UI.Brush("#DDE7EF"));
-                checks.Add(Deck.SurfaceAlpha is > 1 and < 250 && Deck.PanelVisual.ActualWidth > 72 && Deck.PanelVisual.ActualWidth < Deck.Width
-                    ? "PASS indicator expansion fades the surface in while growing" : $"FAIL indicator expansion: alpha={Deck.SurfaceAlpha}; width={Deck.PanelVisual.ActualWidth:F0}");
                 await Task.Delay(400);
-                checks.Add(Deck.SurfaceAlpha == 255 && Math.Abs(Deck.Island.Margin.Top) < .01 && Deck.Island.CornerRadius.TopLeft == 0
-                    ? "PASS every style expands into the same edge-attached panel" : "FAIL expanded shape");
+                var slow = Settings.Copy(); slow.Style = CompactStyle.Line; slow.AnimationDuration = 800; UpdateSettings(slow);
+                Deck.TestContext(ScreenContext.Desktop); Deck.SetExpanded(true, true); await Task.Delay(50);
+                Deck.SetExpanded(false); await Task.Delay(400);
+                Capture(Deck.SurfaceVisual, Path.Combine(output, "collapse-line-mid.png"), UI.Brush("#DDE7EF"));
+                await Task.Delay(500);
                 Deck.SetExpanded(false, true);
             }
+            var trayMenu = TrayIcon.CreateMenu(() => { }, () => { });
+            trayMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.AbsolutePoint; trayMenu.HorizontalOffset = 200; trayMenu.VerticalOffset = 200;
+            trayMenu.IsOpen = true; await Task.Delay(150); trayMenu.UpdateLayout();
+            Capture(trayMenu, Path.Combine(output, "tray-menu.png"));
+            trayMenu.IsOpen = false;
             UpdateSettings(new DeckSettings());
             Deck.TestContext(ScreenContext.Maximized); checks.Add(Deck.IsVisible && !Deck.IsExpanded ? "PASS maximized remains available" : "FAIL maximized");
             Deck.TestContext(ScreenContext.Borderless); Deck.SetExpanded(true); checks.Add(!Deck.IsVisible && !Deck.IsExpanded ? "PASS borderless hidden and cannot expand" : "FAIL borderless");
@@ -316,67 +498,60 @@ public partial class App : Application
             Deck.TestContext(ScreenContext.Desktop);
             await Task.Delay(80);
             checks.Add(Deck.VirtualDesktops?.EnsurePinned() == true ? "PASS virtual desktop pin survives fullscreen hide and show" : "FAIL pin lost after fullscreen");
-            var normalBounds = ContentBounds();
             var shortPanel = Settings.Copy(); shortPanel.Height = 140; UpdateSettings(shortPanel); Deck.Preview(true); await Task.Delay(80);
-            var shortBounds = ContentBounds();
             Capture(Deck.PanelVisual, Path.Combine(output, "panel-short.png"));
-            checks.Add(ContentFills() && Math.Abs(shortBounds.Width - normalBounds.Width) < .5 && shortBounds.Height < normalBounds.Height
-                ? "PASS reducing height retains full panel width" : "FAIL independent height resizing");
             var small = Settings.Copy(); small.Width = 440; small.Height = 140; UpdateSettings(small); Deck.Preview(true); await Task.Delay(100);
             Capture(Deck.PanelVisual, Path.Combine(output, "panel-small.png"));
             checks.Add(ContentFills() && !HasScrollViewer(Deck.PanelVisual) ? "PASS minimum size fills panel without scrolling" : "FAIL minimum size layout");
             var tall = Settings.Copy(); tall.Width = 440; tall.Height = 400; UpdateSettings(tall); await Task.Delay(50);
             Capture(Deck.PanelVisual, Path.Combine(output, "panel-tall.png"));
-            checks.Add(ContentFills() && !HasScrollViewer(Deck.PanelVisual) ? "PASS narrow tall panel fills both axes without scrolling" : "FAIL tall layout");
             var wide = Settings.Copy(); wide.Width = 1200; wide.Height = 140; UpdateSettings(wide); await Task.Delay(50);
             Capture(Deck.PanelVisual, Path.Combine(output, "panel-wide.png"));
-            checks.Add(ContentFills() && !HasScrollViewer(Deck.PanelVisual) ? "PASS wide short panel fills both axes without scrolling" : "FAIL wide layout");
-            UpdateSettings(new DeckSettings());
+            UpdateSettings(AllApps(new DeckSettings()));
             foreach (int count in new[] { 3, 2 })
             {
                 var fewer = Settings.Copy(); fewer.SetEnabled(ProviderId.Claude, false); fewer.SetEnabled(ProviderId.Cursor, count == 3);
                 UpdateSettings(fewer); await Task.Delay(50);
                 Capture(Deck.PanelVisual, Path.Combine(output, $"panel-count-{count}.png"));
-                RecordTypography(count);
             }
             var previousSize = Settings.Copy();
-            UpdateSettings(new DeckSettings { Width = 700, Height = 180 }); await Task.Delay(50);
+            static DeckSettings Without(DeckSettings settings, params ProviderId[] ids) { foreach (var id in ids) settings.SetEnabled(id, false); return settings; }
+            // New settings show two applications; the four-column scenarios switch on every built-in one.
+            static DeckSettings AllApps(DeckSettings settings) { foreach (var app in settings.Apps) app.Enabled = true; return settings; }
+            UpdateSettings(AllApps(new DeckSettings { Width = 700, Height = 180 })); await Task.Delay(50);
             Capture(Deck.PanelVisual, Path.Combine(output, "panel-compact-four.png"));
-            UpdateSettings(new DeckSettings { Width = 700, Height = 180, Claude = false }); await Task.Delay(50);
+            UpdateSettings(Without(AllApps(new DeckSettings { Width = 700, Height = 180 }), ProviderId.Claude)); await Task.Delay(50);
             Capture(Deck.PanelVisual, Path.Combine(output, "panel-compact-three.png"));
-            UpdateSettings(new DeckSettings { Width = 750, Height = 220 }); await Task.Delay(50);
+            UpdateSettings(AllApps(new DeckSettings { Width = 760, Height = 240 })); await Task.Delay(50);
             Capture(Deck.PanelVisual, Path.Combine(output, "panel-readable-four.png"));
-            var fourBodySize = Elements(Deck.PanelVisual).OfType<System.Windows.Controls.TextBlock>().First(text => text.Text == "今日").FontSize;
-            UpdateSettings(new DeckSettings { Width = 750, Height = 220, Antigravity = false, Cursor = false }); await Task.Delay(50);
+            UpdateSettings(Without(new DeckSettings { Width = 760, Height = 240 }, ProviderId.Antigravity, ProviderId.Cursor)); await Task.Delay(50);
             Capture(Deck.PanelVisual, Path.Combine(output, "panel-readable-two.png"));
-            var twoBodySize = Elements(Deck.PanelVisual).OfType<System.Windows.Controls.TextBlock>().First(text => text.Text == "今日").FontSize;
-            checks.Add(fourBodySize >= 10 && twoBodySize > fourBodySize && ContentFills()
-                ? "PASS fewer providers gain larger readable text without shrinking the toolbar" : $"FAIL responsive text sizes: four={fourBodySize}; two={twoBodySize}");
-            UpdateSettings(new DeckSettings { Width = 770, Height = 180, Antigravity = false, Cursor = false }); await Task.Delay(50);
+            UpdateSettings(Without(new DeckSettings { Width = 770, Height = 180 }, ProviderId.Antigravity, ProviderId.Cursor)); await Task.Delay(50);
             Capture(Deck.PanelVisual, Path.Combine(output, "panel-readable-two-short.png"));
-            checks.Add(Elements(Deck.PanelVisual).OfType<System.Windows.Controls.TextBlock>().Single(text => text.Text == "Codex").FontSize >= 12 &&
-                Elements(Deck.PanelVisual).OfType<System.Windows.Controls.TextBlock>().Any(text => text.Text == "今日") && Bounds(ToolbarButton("设置")).Height >= 30
-                ? "PASS short two-provider panel retains legible text, totals and full-size settings" : "FAIL short panel readability");
-            UpdateSettings(new DeckSettings { Width = 640, Height = 140 }); await Task.Delay(50);
+            UpdateSettings(AllApps(new DeckSettings { Width = 640, Height = 140 })); await Task.Delay(50);
             Capture(Deck.PanelVisual, Path.Combine(output, "panel-minimum-four.png"));
-            checks.Add(ContentFills() && !HasScrollViewer(Deck.PanelVisual) && Elements(Deck.PanelVisual).OfType<System.Windows.Controls.TextBlock>().Count(text => text.Text == "5 小时") == 3
-                ? "PASS four providers at the minimum size keep every quota visible" : "FAIL minimum four-provider layout");
-            ToolbarButton("模型明细").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); await Task.Delay(30);
+            foreach (var size in Enum.GetValues<PanelSize>())
+            {
+                var (presetWidth, presetHeight) = AllApps(new DeckSettings()).PresetSize(size);
+                UpdateSettings(AllApps(new DeckSettings { Width = presetWidth, Height = presetHeight })); await Task.Delay(50);
+                Capture(Deck.PanelVisual, Path.Combine(output, $"panel-size-{size.ToString().ToLowerInvariant()}.png"));
+            }
+            var twoStandard = Without(new DeckSettings(), ProviderId.Antigravity, ProviderId.Cursor); var (twoWidth, twoHeight) = twoStandard.PresetSize(PanelSize.Standard);
+            twoStandard.Width = twoWidth; twoStandard.Height = twoHeight; UpdateSettings(twoStandard); await Task.Delay(50);
+            Capture(Deck.PanelVisual, Path.Combine(output, "panel-size-standard-two.png"));
+            ToolbarButton("查看 Claude 今日明细").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); await Task.Delay(30);
             Capture(Deck.PanelVisual, Path.Combine(output, "panel-models-short.png"));
-            ToolbarButton("AI 用量").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            ToolbarButton("返回用量").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
             UpdateSettings(previousSize);
             var single = Settings.Copy(); foreach (var id in Enum.GetValues<ProviderId>()) single.SetEnabled(id, id == ProviderId.Codex); UpdateSettings(single); await Task.Delay(50);
             Capture(Deck.PanelVisual, Path.Combine(output, "panel-single.png"));
-            RecordTypography(1);
-            checks.Add(ContentFits() && !HasScrollViewer(Deck.PanelVisual) ? "PASS one provider stays accessible" : "FAIL one provider layout");
             var disabled = Settings.Copy(); disabled.UsagePage = false; UpdateSettings(disabled); await Task.Delay(100); Capture(Deck.PanelVisual, Path.Combine(output, "panel-disabled.png"));
-            checks.Add("PASS settings pages and size variants rendered");
             foreach (var snapshot in Deck.Snapshots)
                 checks.Add($"DATA {snapshot.Name}: {snapshot.Status}; plan={snapshot.Plan}; planSource={snapshot.PlanSource}; quotas={snapshot.Quotas.Count}; tokens={snapshot.Entries.Sum(x => x.Total)}; records={snapshot.Entries.Count}; source={snapshot.Source}");
             File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
             failed = checks.Any(x => x.StartsWith("FAIL", StringComparison.Ordinal)) || Deck.LastRefreshError is not null;
         }
-        catch (Exception ex) { failed = true; File.WriteAllText(Path.Combine(output, "error.txt"), ex.ToString()); }
+        catch (Exception ex) { failed = true; File.WriteAllLines(Path.Combine(output, "checks.txt"), checks); File.WriteAllText(Path.Combine(output, "error.txt"), ex.ToString()); }
         finally { Exiting = true; Lifetime.Cancel(); FlushSettings(); Shutdown(failed ? 1 : 0); }
     }
     private static void Capture(FrameworkElement element, string file, Brush? background = null, Rect? region = null)

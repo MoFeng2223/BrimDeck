@@ -31,7 +31,7 @@ public static class ClaudeDesktopCache
             var expires = item.Value.Get("expiresAt").Number();
             if (token.Length == 0 || expires is null || expires <= now.ToUnixTimeMilliseconds()) continue;
             credentials.Add((new(token, PlanParser.ClaudeTier(item.Value.Get("rateLimitTier").Text(),
-                item.Value.Get("subscriptionType").Text()), "Claude 桌面版"), scopes.Length));
+                item.Value.Get("subscriptionType").Text()), Loc.T("Claude 桌面版", "Claude desktop app")), scopes.Length));
         }
         // Prefer the existing profile-only credential when the desktop has several scopes cached.
         return credentials.OrderBy(item => item.ScopeCount).Select(item => item.Credential)

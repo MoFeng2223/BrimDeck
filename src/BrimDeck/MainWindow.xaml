@@ -2,6 +2,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:BrimDeck" Title="BrimDeck" WindowStyle="None"
         AllowsTransparency="True" Background="Transparent" ResizeMode="NoResize" Topmost="True"
         ShowActivated="False" ShowInTaskbar="False" Width="760" Height="256" Style="{StaticResource {x:Type Window}}">
+  <Window.Resources>
+    <ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="ModelDetailsResources.xaml"/><ResourceDictionary Source="ToolbarResources.xaml"/><ResourceDictionary Source="MusicResources.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary>
+  </Window.Resources>
   <Grid x:Name="Stage" Background="{x:Null}">
     <!-- Hover state belongs to the zone, so moving between the panel and the strip above it never counts as leaving. -->
     <Grid x:Name="HoverZone" HorizontalAlignment="Center" VerticalAlignment="Top" Background="{x:Null}"
@@ -15,41 +18,92 @@
         <local:IslandBorder Background="Black" CornerRadius="{Binding CornerRadius, ElementName=Island}"
                             ShoulderRadius="{Binding ShoulderRadius, ElementName=Island}"/>
       </Grid>
+      <!-- In compact form this strip covers the whole bounding box from the screen edge down, including the notch shoulders,
+           the rounded corners and the gap above the capsule. It sits below the island so compact content keeps its own hit testing. -->
+      <Border x:Name="HoverExtension" Background="#01000000" Height="0" VerticalAlignment="Top" HorizontalAlignment="Stretch"/>
       <local:IslandBorder x:Name="Island" HorizontalAlignment="Center" VerticalAlignment="Top" Width="238" Height="32"
               Background="Black" BorderThickness="0" CornerRadius="0,0,12,12" ShoulderRadius="16" MaterialOpacity="1" ClipToBounds="True">
         <Grid>
-          <!-- Compact content: progress rings by application, an alert while a quota crosses a threshold, and the capsule's clock. -->
-          <Grid x:Name="Compact" Margin="16,0" VerticalAlignment="Center" Height="26">
+          <Border x:Name="MusicIndicator" Height="4" HorizontalAlignment="Left" VerticalAlignment="Center" Background="#FF55555A" CornerRadius="2" Visibility="Collapsed" IsHitTestVisible="False"/>
+          <!-- Compact music and quotas share the fixed content area; quota alerts take precedence. -->
+          <Grid x:Name="Compact" HorizontalAlignment="Center" VerticalAlignment="Center" Height="26" RenderTransformOrigin="0.5,0.5">
+            <Grid.RenderTransform><ScaleTransform x:Name="CompactScale"/></Grid.RenderTransform>
             <StackPanel x:Name="CompactRings" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             <TextBlock x:Name="CompactTime" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" FontSize="11.5" Foreground="#9EEBEBF5" HorizontalAlignment="Right" VerticalAlignment="Center" Visibility="Collapsed"/>
             <StackPanel x:Name="CompactAlert" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
           </Grid>
-          <Border x:Name="LineVisual" Height="4" Width="56" Background="#8E8E93" CornerRadius="2" VerticalAlignment="Top" Margin="0,4,0,0" Visibility="Collapsed"/>
-          <Grid x:Name="ExpandedContent" Visibility="Hidden" Opacity="0"
-                   HorizontalAlignment="Center" VerticalAlignment="Center">
-            <Grid x:Name="ContentCanvas" Width="760" Height="240" Margin="0">
+          <!-- Pinned to the top and scaled about the top center, so the content recedes toward the screen edge instead of sliding while the panel shrinks. -->
+          <Grid x:Name="ExpandedContent" Visibility="Hidden" Opacity="0" Width="{Binding ActualWidth, ElementName=Island}"
+                   HorizontalAlignment="Center" VerticalAlignment="Top" RenderTransformOrigin="0.5,0">
+            <Grid.RenderTransform><ScaleTransform x:Name="ContentScale"/></Grid.RenderTransform>
+            <Grid x:Name="ContentCanvas" Width="760" Height="240" Margin="0" HorizontalAlignment="Center">
               <Grid.RowDefinitions><RowDefinition x:Name="ToolbarRow" Height="36"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-              <Grid x:Name="Toolbar">
+              <Grid Grid.Row="1" x:Name="UsageContent" Margin="6,0,6,10"/>
+              <Grid Grid.Row="1" x:Name="MusicContent" Visibility="Collapsed"/>
+            </Grid>
+              <!-- Keep the toolbar outside the fixed page layout so neither resize direction clips its controls. -->
+              <Grid x:Name="Toolbar" Height="{Binding Height.Value, ElementName=ToolbarRow}" VerticalAlignment="Top">
                 <!-- The clock is centered on the whole panel; the switches and the settings button sit inside their own insets. -->
                 <TextBlock x:Name="ClockLabel" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" FontSize="12" Foreground="#61EBEBF5" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="14,0,0,0">
-                  <StackPanel x:Name="ViewButtons" Orientation="Horizontal" VerticalAlignment="Center"/>
-                  <StackPanel x:Name="PeriodButtons" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0"/>
-                </StackPanel>
+                <Border x:Name="PageSwitch" Background="#0FFFFFFF" CornerRadius="8" Padding="2" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="10,0,0,0">
+                 <StackPanel Orientation="Horizontal">
+                <Button x:Name="AIUsageButton" Style="{StaticResource PanelIconButton}" Width="28" Height="24"
+                        Click="AIUsage_Click">
+                  <Viewbox Width="16" Height="16"><Canvas Width="24" Height="24">
+                    <Path Data="M 4,21 L 4,16 M 9,21 L 9,13 M 14,21 L 14,15 M 19,21 L 19,10 M 3,12 L 9,6 L 14,10 L 21,3 M 16,3 L 21,3 L 21,8"
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.65" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                  </Canvas></Viewbox>
+                </Button>
+                <Button x:Name="MusicPageButton" Style="{StaticResource PanelIconButton}" Width="28" Height="24" Margin="1,0,0,0" Click="MusicPage_Click">
+                  <Viewbox Width="16" Height="16"><Canvas Width="24" Height="24"><Path Data="M 9,18 V 5.5 L 20,3.3 V 16 M 9,18 A 3,3 0 1 1 3,18 A 3,3 0 1 1 9,18 M 20,16 A 3,3 0 1 1 14,16 A 3,3 0 1 1 20,16" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.65" StrokeLineJoin="Round"/></Canvas></Viewbox>
+                </Button>
+                 </StackPanel>
+                </Border>
+                <StackPanel x:Name="ApplicationPages" Margin="82,0,0,0" HorizontalAlignment="Left" VerticalAlignment="Center" Visibility="Collapsed"/>
+                <Grid x:Name="ModelToolbar" Margin="10,0,96,0" Visibility="Collapsed" VerticalAlignment="Center"/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,20,0">
+                  <Button x:Name="MediaSourceButton" Style="{StaticResource PanelSourceButton}" Width="Auto" MaxWidth="150" Padding="8,0" Margin="0,0,2,0" Click="MediaSource_Click" Visibility="Collapsed">
+                    <Button.RenderTransform><TranslateTransform Y="1"/></Button.RenderTransform>
+                    <Grid>
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                      <Viewbox x:Name="MediaSourcePin" Width="10" Height="10" Margin="0,0,4,0" VerticalAlignment="Center" Visibility="Collapsed">
+                        <!-- Measured ink: the pin's center sat 1 DIP above the label and chevron. -->
+                        <Viewbox.RenderTransform><TranslateTransform Y="1"/></Viewbox.RenderTransform>
+                        <Canvas Width="16" Height="16">
+                          <Path Data="M9.6,1.6 L14.4,6.4 L12.2,7.3 L9.3,10.2 L9.7,12.8 L8.4,14.1 L1.9,7.6 L3.2,6.3 L5.8,6.7 L8.7,3.8 Z" StrokeThickness="1.5" StrokeLineJoin="Round"
+                                Fill="{Binding Foreground, ElementName=MediaSourceButton}" Stroke="{Binding Foreground, ElementName=MediaSourceButton}"/>
+                          <Path Data="M5.1,10.9 L1.6,14.4" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Stroke="{Binding Foreground, ElementName=MediaSourceButton}"/>
+                        </Canvas>
+                      </Viewbox>
+                      <TextBlock x:Name="MediaSourceLabel" Grid.Column="1" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" FontSize="12"
+                                 Foreground="{Binding Foreground, ElementName=MediaSourceButton}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                      <Canvas x:Name="MediaSourceChevron" Grid.Column="2" Width="8" Height="4" Margin="5,0,0,0" VerticalAlignment="Center" Visibility="Collapsed">
+                        <Path Data="M0.5,0.5 L4,3.5 L7.5,0.5" Stroke="{Binding Foreground, ElementName=MediaSourceButton}" StrokeThickness="1.5"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round">
+                          <Path.RenderTransform><TranslateTransform Y="0.5"/></Path.RenderTransform>
+                        </Path>
+                      </Canvas>
+                    </Grid>
+                  </Button>
                   <TextBlock x:Name="ModeLabel" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" FontSize="11" Foreground="#61EBEBF5" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                  <Button x:Name="SyncButton" Style="{StaticResource PanelIconButton}" Margin="0,0,4,0" VerticalAlignment="Center" Click="Sync_Click">
+                    <Viewbox Width="18" Height="18"><Grid Width="24" Height="24">
+                      <Path x:Name="SyncArrows" Data="M 3,11 A 9,9 0 0 1 18.4,5.6 L 21,8 M 21,3 L 21,8 L 16,8 M 21,13 A 9,9 0 0 1 5.6,18.4 L 3,16 M 3,21 L 3,16 L 8,16"
+                            Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.65" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round">
+                        <Path.RenderTransform><RotateTransform x:Name="SyncRotation" CenterX="12" CenterY="12"/></Path.RenderTransform>
+                      </Path>
+                      <Path x:Name="SyncSlash" Data="M 4,4 L 20,20" Visibility="Collapsed" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                            StrokeThickness="1.9" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                    </Grid></Viewbox>
+                  </Button>
                   <Button x:Name="SettingsButton" Content="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="18" Width="32" Height="32" Padding="0"
                           HorizontalContentAlignment="Center" Foreground="#9EEBEBF5"
-                          Background="Transparent" BorderThickness="0" ToolTip="设置" AutomationProperties.Name="设置" Click="Settings_Click"/>
+                          Background="Transparent" BorderThickness="0" Click="Settings_Click"/>
                 </StackPanel>
               </Grid>
-              <Grid Grid.Row="1" x:Name="UsageContent" Margin="6,0,6,10"/>
-            </Grid>
           </Grid>
         </Grid>
       </local:IslandBorder>
-      <!-- The capsule hangs below the screen edge; this strip keeps the gap above it inside the hover zone. -->
-      <Border x:Name="HoverExtension" Background="#01000000" Height="0" VerticalAlignment="Top" HorizontalAlignment="Stretch"/>
     </Grid>
   </Grid>
 </Window>

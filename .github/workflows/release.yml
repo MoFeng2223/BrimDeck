@@ -1,0 +1,64 @@
+name: Publish Windows release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+      - name: Validate release version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v(\d+\.\d+\.\d+)$') { throw 'Use a stable version tag, for example v0.2.0.' }
+          "RELEASE_VERSION=$($Matches[1])" >> $env:GITHUB_ENV
+      - name: Test
+        run: |
+          dotnet run --project tests/BrimDeck.Tests -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
+      - name: Package installer and update feed
+        run: ./scripts/Publish-Release.ps1 -Version $env:RELEASE_VERSION
+      - name: Verify packaged user interface
+        run: |
+          $published = Get-ChildItem .artifacts/release-build -Directory | Select-Object -Last 1
+          $output = Join-Path $pwd '.artifacts/release-smoke'
+          $process = Start-Process (Join-Path $published.FullName 'BrimDeck.exe') -ArgumentList @('--smoke', $output, '--demo') -WindowStyle Hidden -PassThru
+          if (!$process.WaitForExit(180000)) { $process.Kill(); throw 'UI validation timed out.' }
+          if ($process.ExitCode -ne 0) { throw 'UI validation failed.' }
+      - name: Verify install, in-app update and uninstall
+        run: ./scripts/Test-AppUpdate.ps1
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: windows-release-validation
+          path: |
+            artifacts/releases/
+            .artifacts/release-smoke/
+          include-hidden-files: true
+      # The app reads update.json from /releases/latest, so the release is published (not a draft or prerelease)
+      # only after every file is attached.
+      - name: Publish complete release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          $files = Get-ChildItem artifacts/releases -File | ForEach-Object FullName
+          gh release create $env:RELEASE_TAG @files --target $env:RELEASE_COMMIT --title "BrimDeck $env:RELEASE_VERSION" --notes-file "docs/releases/$env:RELEASE_VERSION.md" --draft
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed.' }
+          gh release edit $env:RELEASE_TAG --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Release publish failed.' }

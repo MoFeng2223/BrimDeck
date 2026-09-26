@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using BrimDeck.Core;
@@ -23,13 +24,34 @@ internal static class UI
         => new() { Text = text, FontFamily = TextFont, FontSize = size, Foreground = Brush(color), FontWeight = weight ?? FontWeights.Normal, TextWrapping = TextWrapping.Wrap };
     public static TextBlock Line(string text, double size = 13, string color = "#E6E6E9", FontWeight? weight = null)
         => new() { Text = text, FontFamily = TextFont, FontSize = size, Foreground = Brush(color), FontWeight = weight ?? FontWeights.Normal, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis };
-    // A single line whose height is exactly the given value, independent of the font's own line box.
-    public static TextBlock Fixed(string text, double size, double lineHeight, string color, FontWeight? weight = null, FontFamily? font = null)
+    // Keep the font's natural line box so a parent can center it within a taller row or button.
+    public static TextBlock Centered(string text, double size, string color, FontWeight? weight = null, FontFamily? font = null)
     {
         var block = Line(text, size, color, weight);
         block.FontFamily = font ?? PanelFont;
+        block.VerticalAlignment = VerticalAlignment.Center;
+        // Equal-width digits keep figures in neighbouring rows on the same vertical lines.
+        Typography.SetNumeralAlignment(block, FontNumeralAlignment.Tabular);
+        return block;
+    }
+    // Standalone symbols center their visible ink, without the font's baseline whitespace.
+    public static Path CenteredSymbol(string text, double size, string color, FontWeight? weight = null)
+    {
+        var brush = Brush(color);
+        var formatted = new FormattedText(text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+            new Typeface(PanelFont, FontStyles.Normal, weight ?? FontWeights.Normal, FontStretches.Normal), size, brush, 1);
+        var geometry = formatted.BuildGeometry(new Point());
+        var bounds = geometry.Bounds;
+        geometry.Transform = new TranslateTransform(0, -bounds.Top);
+        return new Path { Data = geometry, Fill = brush, Width = formatted.WidthIncludingTrailingWhitespace,
+            Height = bounds.Height, Stretch = Stretch.None, VerticalAlignment = VerticalAlignment.Center, UseLayoutRounding = false };
+    }
+    // A single line whose height is exactly the given value, independent of the font's own line box.
+    public static TextBlock Fixed(string text, double size, double lineHeight, string color, FontWeight? weight = null, FontFamily? font = null)
+    {
+        var block = Centered(text, size, color, weight, font);
         block.LineHeight = lineHeight; block.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
-        block.Height = lineHeight; block.VerticalAlignment = VerticalAlignment.Center;
+        block.Height = lineHeight;
         return block;
     }
     public static Button Button(string text, Action click, bool active = false)
@@ -39,7 +61,7 @@ internal static class UI
         button.Click += (_, _) => click();
         return button;
     }
-    // A progress ring: a faint track with a colored arc that starts at the top and runs clockwise.
+    // A progress ring: a faint track with a colored arc that starts at the top and runs counterclockwise.
     public static Grid Ring(double percent, string color, double size, double thickness)
     {
         var ring = new Grid { Width = size, Height = size };
@@ -51,8 +73,8 @@ internal static class UI
             double radius = size / 2 - thickness / 2, center = size / 2;
             double angle = fraction * Math.PI * 2;
             var figure = new PathFigure { StartPoint = new Point(center, center - radius), IsClosed = false };
-            figure.Segments.Add(new ArcSegment(new Point(center + radius * Math.Sin(angle), center - radius * Math.Cos(angle)),
-                new Size(radius, radius), 0, fraction > .5, SweepDirection.Clockwise, true));
+            figure.Segments.Add(new ArcSegment(new Point(center - radius * Math.Sin(angle), center - radius * Math.Cos(angle)),
+                new Size(radius, radius), 0, fraction > .5, SweepDirection.Counterclockwise, true));
             var geometry = new PathGeometry(); geometry.Figures.Add(figure);
             ring.Children.Add(new Path { Data = geometry, Stroke = Brush(color), StrokeThickness = thickness, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round });
         }
@@ -71,38 +93,41 @@ internal static class UI
     public static string CostNote(IEnumerable<TokenEntry> entries, Pricing pricing)
     {
         var cost = pricing.Summarize(entries);
-        if (!cost.HasValue && cost.Unpriced == 0) return "无用量记录";
-        if (!cost.HasValue && cost.Unpriced > 0) return pricing.LastError ?? "未匹配到完整价格";
-        var note = cost.IsEstimate ? "按模型单价计算 · USD" : "接口金额 · USD";
-        if (cost.IsEstimate && pricing.UpdatedAt is { } time) note += $"\n价格更新 {time.LocalDateTime:MM-dd HH:mm}";
-        if (cost.IsEstimate && (pricing.IsStale || pricing.LastError is not null)) note += " · 缓存";
-        if (cost.Unpriced > 0) note += $"\n{cost.Unpriced} 条记录未计价";
+        if (!cost.HasValue && cost.Unpriced == 0) return Loc.T("无用量记录", "No usage records");
+        if (!cost.HasValue && cost.Unpriced > 0) return pricing.LastError ?? Loc.T("未匹配到完整价格", "Prices could not be matched for every record");
+        var note = cost.IsEstimate ? Loc.T("按模型单价计算 · USD", "Estimated from model prices · USD") : Loc.T("接口金额 · USD", "Amount from the API · USD");
+        if (cost.IsEstimate && pricing.UpdatedAt is { } time) note += Loc.T($"\n价格更新 {time.LocalDateTime:MM-dd HH:mm}", $"\nPrices updated {time.LocalDateTime:MM-dd HH:mm}");
+        if (cost.IsEstimate && (pricing.IsStale || pricing.LastError is not null)) note += Loc.T(" · 缓存", " · cached");
+        if (cost.Unpriced > 0) note += Loc.T($"\n{cost.Unpriced} 条记录未计价", "\n" + Loc.Count(cost.Unpriced, "record has", "records have") + " no price");
         return note;
     }
     public static string Reset(DateTimeOffset? date)
     {
-        if (date is null) return "重置时间未知";
+        if (date is null) return Loc.T("重置时间未知", "Reset time unknown");
         var remaining = date.Value - DateTimeOffset.Now;
-        if (remaining <= TimeSpan.Zero) return "已到重置时间，等待更新";
-        if (remaining.TotalDays >= 1) return $"{(int)remaining.TotalDays} 天 {remaining.Hours} 小时后重置";
-        if (remaining.TotalHours >= 1) return $"{remaining.Hours} 小时 {remaining.Minutes} 分后重置";
-        return $"{Math.Max(1, (int)Math.Ceiling(remaining.TotalMinutes))} 分钟后重置";
+        if (remaining <= TimeSpan.Zero) return Loc.T("已到重置时间，等待更新", "Reset time reached; waiting for an update");
+        if (remaining.TotalDays >= 1) return Loc.T($"{(int)remaining.TotalDays} 天 {remaining.Hours} 小时后重置", $"Resets in {(int)remaining.TotalDays} d {remaining.Hours} h");
+        if (remaining.TotalHours >= 1) return Loc.T($"{remaining.Hours} 小时 {remaining.Minutes} 分后重置", $"Resets in {remaining.Hours} h {remaining.Minutes} min");
+        int minutes = Math.Max(1, (int)Math.Ceiling(remaining.TotalMinutes));
+        return Loc.T($"{minutes} 分钟后重置", $"Resets in {minutes} min");
     }
     public static string ShortReset(DateTimeOffset? date)
     {
         if (date is null) return "";
         var remaining = date.Value - DateTimeOffset.Now;
-        if (remaining <= TimeSpan.Zero) return "待重置";
-        if (remaining.TotalDays >= 1) return $"{(int)remaining.TotalDays} 天 {remaining.Hours} 时后";
-        if (remaining.TotalHours >= 1) return $"{remaining.Hours} 时 {remaining.Minutes} 分后";
-        return $"{Math.Max(1, (int)Math.Ceiling(remaining.TotalMinutes))} 分后";
+        if (remaining <= TimeSpan.Zero) return Loc.T("待重置", "Reset due");
+        if (remaining.TotalDays >= 1) return Loc.T($"{(int)remaining.TotalDays} 天 {remaining.Hours} 时后", $"in {(int)remaining.TotalDays}d {remaining.Hours}h");
+        if (remaining.TotalHours >= 1) return Loc.T($"{remaining.Hours} 时 {remaining.Minutes} 分后", $"in {remaining.Hours}h {remaining.Minutes}m");
+        int minutes = Math.Max(1, (int)Math.Ceiling(remaining.TotalMinutes));
+        return Loc.T($"{minutes} 分后", $"in {minutes}m");
     }
-    // "Gemini · 5 小时额度" → "5 小时"; the group prefix is shown by the column's switch instead.
+    // "Gemini · 5 小时额度" → "5 小时"; the group prefix is shown by the column's switch instead. The group stays in the
+    // data's words, since it also selects the group; the label is only shown, so it is translated.
     public static string QuotaGroup(Quota quota) => quota.Label.Contains('·') ? quota.Label.Split('·')[0].Trim() : "";
     public static string QuotaLabel(Quota quota)
     {
         var label = quota.Label.Contains('·') ? quota.Label.Split('·')[^1].Trim() : quota.Label;
-        return label.Replace("额度", "", StringComparison.Ordinal).Trim();
+        return Loc.Label(label.Replace("额度", "", StringComparison.Ordinal).Trim());
     }
     public static string DisplayPlan(string plan) => plan.Trim().ToLowerInvariant() switch
     { "prolite" => "Pro Lite", "pro" or "google ai pro" => "Pro", "google ai ultra" => "Ultra", "plus" => "Plus", "free" => "Free", "max" => "Max", "team" => "Team", "business" => "Business", "enterprise" => "Enterprise", _ => plan.Trim() };

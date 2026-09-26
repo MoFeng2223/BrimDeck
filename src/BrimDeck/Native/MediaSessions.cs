@@ -1,0 +1,572 @@
+using System.Diagnostics;
+using System.IO;
+using System.Net.Http;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
+using BrimDeck.Core;
+using Windows.Media;
+using Windows.Media.Control;
+using Session = Windows.Media.Control.GlobalSystemMediaTransportControlsSession;
+
+namespace BrimDeck.Native;
+
+// Each route has one authoritative source and, in log mode only, a control supplement.
+internal sealed class MediaSessions : IDisposable
+{
+    private sealed class SystemSource(Session session)
+    {
+        public Session Session { get; } = session;
+        public string Id { get; } = "system:" + Guid.NewGuid().ToString("N");
+        public string ProcessName { get; } = ProcessNameFor(session.SourceAppUserModelId);
+        public bool Dirty = true, MetadataDirty = true;
+        public Task? PendingRead;
+        public int Revision;
+        public MediaTrack? Track;
+        public BitmapSource? Cover;
+    }
+    private sealed class CoverCache
+    {
+        public BitmapSource? Cover;
+        public string CoverKey = "";
+        public byte[]? CoverBytes;
+        public CancellationTokenSource? CoverCancellation;
+    }
+    private sealed record Route(string Id, string ProcessName, SystemSource? System, IMediaPlayerConnection? Connection = null, bool Supplement = false);
+
+    private readonly Dispatcher _dispatcher;
+    // Debounce and recheck decide when a track change reaches the panel, so they run on PromptTimer; see PromptTimer.
+    private readonly PromptTimer _debounce, _recheck;
+    private readonly DispatcherTimer _poll;
+    private readonly MediaPlaybackStack _stack = new();
+    private readonly AudioLevelMeter _meter = new();
+    private readonly IMediaPlayerConnection[] _connections;
+    private readonly HttpClient _coverHttp = new() { Timeout = TimeSpan.FromSeconds(6) };
+    private readonly Dictionary<Session, SystemSource> _sessions = new();
+    private readonly Dictionary<string, CoverCache> _covers = new();
+    private readonly Dictionary<string, Route> _routes = new();
+    private GlobalSystemMediaTransportControlsSessionManager? _manager;
+    private bool _reading, _again, _disposed, _sessionListDirty = true, _visible, _requestingManager, _announcedRestarting;
+    private DateTimeOffset _recoveryAt;
+    private string? _selected, _pinned, _pinnedSource, _announcedPin;
+    public IReadOnlyList<MediaTrack> Tracks { get; private set; } = [];
+    public MediaTrack? Current { get; private set; }
+    public BitmapSource? Cover { get; private set; }
+    public string? Error { get; private set; }
+    public bool CanEnableFullControl => Current?.IsNeteaseLog == true && Netease?.ProcessId is not null;
+    public bool RestartingNetease => Netease?.Restarting == true;
+    public bool NeteaseInstalled => Netease?.Installed == true;
+    public bool NeteaseRunning => Netease?.ProcessId is not null;
+    public bool NeteaseFullControl => Netease is { ProcessId: not null, IsLogMode: false };
+    private NeteaseSource? Netease => _connections.OfType<NeteaseSource>().FirstOrDefault();
+    public async Task<bool> EnableFullControlAsync(bool quiet = false)
+    {
+        var source = Netease;
+        if (source is null) return false;
+        bool manual = _selected is not null;
+        bool enabled = await source.EnableFullControlAsync(quiet);
+        if (_disposed) return false;
+        _selected = source.Identity;
+        await RefreshAsync();
+        if (!manual) _selected = null;
+        if (!enabled && !quiet) Error = source.Error;
+        Changed?.Invoke();
+        return enabled;
+    }
+    public bool FollowsSystem => _selected is null && _pinned is null;
+    // A pinned source stays on screen whatever other players do, until it is unpinned or closes.
+    public string? Pinned => _pinned;
+    public event Action? Changed;
+
+    // Diagnostic output records each transport before merging. A GSMTC fallback must
+    // never make a disconnected dedicated adapter look as though it passed a live test.
+    internal IEnumerable<string> ConnectionDiagnostics()
+    {
+        foreach (var connection in _connections)
+        {
+            var snapshot = connection.Snapshot;
+            yield return $"connection={connection.GetType().Name}; pid={connection.ProcessId}; ready={snapshot is not null}; title={snapshot?.Title}; state={snapshot?.State}; position={snapshot?.Position}; duration={snapshot?.Duration}; seek={snapshot?.CanSeek}; shuffle={snapshot?.CanShuffle}; repeat={snapshot?.CanRepeat}; logWatching={(connection as NeteaseSource)?.LogWatching}; error={connection.Error}";
+        }
+        foreach (var route in _routes.Values)
+            yield return $"route={route.Id}; primary={route.Connection?.GetType().Name ?? "system"}; system={route.System?.Session.SourceAppUserModelId ?? "none"}; supplement={route.Supplement}";
+    }
+
+    public MediaSessions(Dispatcher dispatcher, bool connectPlayers = true)
+    {
+        _dispatcher = dispatcher;
+        _connections = connectPlayers ? [new NeteaseSource(), new QqMediaConnection()] : [];
+        _debounce = new PromptTimer(dispatcher, async () => { _debounce!.Stop(); await RefreshAsync(); }) { Interval = TimeSpan.FromMilliseconds(100) };
+        _poll = new DispatcherTimer(TimeSpan.FromSeconds(30), DispatcherPriority.Background,
+            async (_, _) => await RefreshAsync(), dispatcher);
+        // A briefly stopped source is held in place; no event arrives when that hold ends.
+        _recheck = new PromptTimer(dispatcher, () => { _recheck!.Stop(); Schedule(); }) { Interval = TimeSpan.FromSeconds(1) };
+        _debounce.Stop(); _poll.Stop(); _recheck.Stop();
+        foreach (var connection in _connections) connection.Changed += Schedule;
+    }
+    public async Task StartAsync()
+    {
+        foreach (var connection in _connections) await connection.StartAsync();
+        _ = RequestManagerAsync();
+        if (_disposed) return;
+        await RefreshAsync(); _poll.Start();
+    }
+    private async Task RequestManagerAsync()
+    {
+        if (_disposed || _manager is not null || _requestingManager) return;
+        _requestingManager = true;
+        try
+        {
+            var manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+            if (_disposed) return;
+            _manager = manager;
+            manager.SessionsChanged += SessionsChanged;
+            manager.CurrentSessionChanged += CurrentChanged;
+            _sessionListDirty = true; Error = null; Schedule();
+        }
+        catch (Exception ex) { Error = Loc.T("无法读取媒体会话：", "Media sessions could not be read: ") + ex.Message; }
+        finally { _requestingManager = false; }
+    }
+    private void SessionsChanged(GlobalSystemMediaTransportControlsSessionManager sender, SessionsChangedEventArgs args)
+        => _dispatcher.BeginInvoke(() => { _sessionListDirty = true; Schedule(); });
+    private void CurrentChanged(GlobalSystemMediaTransportControlsSessionManager sender, CurrentSessionChangedEventArgs args) => Schedule();
+    private void MetadataChanged(Session sender, MediaPropertiesChangedEventArgs args) => Dirty(sender, true);
+    private void PlaybackChanged(Session sender, PlaybackInfoChangedEventArgs args) => Dirty(sender, false);
+    private void TimelineChanged(Session sender, TimelinePropertiesChangedEventArgs args) => Dirty(sender, false);
+    private void Dirty(Session session, bool metadata) => _dispatcher.BeginInvoke(() =>
+    {
+        if (_sessions.TryGetValue(session, out var source))
+        {
+            source.Dirty = true; source.MetadataDirty |= metadata;
+            if (metadata)
+            {
+                source.Revision++;
+                _ = RetryMetadataAsync(source, source.Revision);
+            }
+        }
+        Schedule();
+    });
+    private void Schedule()
+    {
+        if (_disposed || _dispatcher.HasShutdownStarted) return;
+        _dispatcher.BeginInvoke(() => { if (!_disposed) { _debounce.Stop(); _debounce.Start(); } });
+    }
+    public void Select(string? id)
+    {
+        // Choosing another source while one is pinned moves the pin instead of dropping it.
+        if (_pinned is not null && id is not null) { Pin(id); return; }
+        _selected = id; Schedule();
+    }
+    public void Pin(string? id)
+    {
+        if (id is not null && Tracks.FirstOrDefault(t => t.Id == id) is { } track)
+        { _pinned = id; _pinnedSource = track.Source; _selected = null; }
+        else
+        {
+            // Unpinning keeps the source on screen as an ordinary selection until another player starts.
+            if (_pinned is not null) _selected = _pinned;
+            _pinned = _pinnedSource = null;
+        }
+        Schedule();
+    }
+    private void ScheduleRecheck(DateTimeOffset? at)
+    {
+        _recheck.Stop();
+        if (at is not { } due) return;
+        _recheck.Interval = TimeSpan.FromMilliseconds(Math.Max(50, (due - DateTimeOffset.UtcNow).TotalMilliseconds + 50));
+        _recheck.Start();
+    }
+    public void SetPresentationActive(bool active)
+    {
+        if (_visible == active) return;
+        _visible = active; UpdateMeter();
+        if (active) Schedule();
+    }
+    private void Subscribe(Session session)
+    { session.MediaPropertiesChanged += MetadataChanged; session.PlaybackInfoChanged += PlaybackChanged; session.TimelinePropertiesChanged += TimelineChanged; }
+    private void Unsubscribe(Session session)
+    { session.MediaPropertiesChanged -= MetadataChanged; session.PlaybackInfoChanged -= PlaybackChanged; session.TimelinePropertiesChanged -= TimelineChanged; }
+
+    public async Task RefreshAsync()
+    {
+        if (_disposed) return;
+        if (_reading) { _again = true; return; }
+        _reading = true;
+        try
+        {
+            do
+            {
+                _again = false;
+                // Recovery is deliberately slow. Normal discovery and GSMTC updates are event-driven.
+                if (DateTimeOffset.UtcNow - _recoveryAt > TimeSpan.FromSeconds(30))
+                {
+                    _recoveryAt = DateTimeOffset.UtcNow; _sessionListDirty = true;
+                    if (_manager is null) _ = RequestManagerAsync();
+                    foreach (var source in _sessions.Values) source.Dirty = source.MetadataDirty = true;
+                }
+                if (_sessionListDirty)
+                {
+                    _sessionListDirty = false;
+                    var live = _manager?.GetSessions().ToArray() ?? [];
+                    foreach (var removed in _sessions.Keys.Where(s => !live.Contains(s)).ToArray())
+                    { Unsubscribe(removed); _sessions.Remove(removed); }
+                    foreach (var session in live.Where(s => !_sessions.ContainsKey(s)))
+                    {
+                        var source = new SystemSource(session);
+                        _sessions.Add(session, source); Subscribe(session); _ = RetryMetadataAsync(source, source.Revision);
+                    }
+                }
+                // Provider reads complete independently and schedule their own refresh. A slow
+                // Windows source must not delay native player events.
+                foreach (var source in _sessions.Values.Where(s => s.Dirty).ToArray()) _ = ReadSystemAsync(source);
+                if (_disposed) return;
+                var routes = BuildRoutes();
+                var tracks = new List<MediaTrack>();
+                var covers = new Dictionary<string, BitmapSource?>();
+                foreach (var route in routes)
+                {
+                    MediaTrack? track;
+                    BitmapSource? artwork;
+                    if (route.Connection?.Snapshot is { } native)
+                    {
+                        track = FromDesktop(native) with { Id = route.Id, Source = SourceName(route.ProcessName) };
+                        // If the log format is unavailable, the system source owns metadata.
+                        if (native.IsNeteaseLog && native.Title.Length == 0 && route.System?.Track is { } fallback)
+                            track = fallback with { Id = route.Id, IsNeteaseLog = true, CanSeek = false, CanShuffle = false, CanRepeat = false };
+                        if (route.Supplement) track = MediaRouting.Merge(track, route.System?.Track);
+                        if (!_covers.TryGetValue(route.Id, out var cache)) _covers[route.Id] = cache = new();
+                        string key = (native.SongId ?? track.SongKey) + "|" + native.CoverUrl;
+                        bool bytesChanged = native.Cover is { } bytes && (cache.CoverBytes is null || !bytes.AsSpan().SequenceEqual(cache.CoverBytes));
+                        if (cache.CoverKey != key || bytesChanged)
+                        {
+                            cache.CoverCancellation?.Cancel(); cache.CoverKey = key; cache.CoverBytes = native.Cover;
+                            cache.Cover = DecodeCover(native.Cover);
+                            if (cache.Cover is null && native.CoverUrl is not null) _ = ReadCoverAsync(cache, key, native.CoverUrl);
+                        }
+                        artwork = native.IsNeteaseLog && native.Title.Length == 0 ? route.System?.Cover : cache.Cover;
+                    }
+                    else { track = route.System?.Track is { } system ? system with { Id = route.Id } : null; artwork = route.System?.Cover; }
+                    if (track is null) continue;
+                    tracks.Add(track); covers[track.Id] = artwork;
+                }
+                if (_disposed) return;
+                _routes.Clear(); foreach (var route in routes) _routes[route.Id] = route;
+                foreach (var key in _covers.Keys.Where(k => routes.All(r => r.Id != k)).ToArray())
+                { _covers[key].CoverCancellation?.Cancel(); _covers.Remove(key); }
+                if (_selected is not null && tracks.All(t => t.Id != _selected)) _selected = null;
+                _pinned = MediaPlaybackStack.FollowPin(_pinned, _pinnedSource, tracks, Tracks);
+                if (_pinned is null) _pinnedSource = null;
+                var systemCurrent = _manager?.GetCurrentSession();
+                var preferred = routes.FirstOrDefault(r => r.System?.Session == systemCurrent)?.Id;
+                var decision = _stack.Update(tracks, DateTimeOffset.UtcNow, preferred, Current?.Id);
+                // Starting playback in another player is a newer choice than a manual selection.
+                if (decision.Started is { } started && started != _selected) _selected = null;
+                ScheduleRecheck(decision.RecheckAt);
+                var current = tracks.FirstOrDefault(t => t.Id == _pinned) ?? tracks.FirstOrDefault(t => t.Id == _selected)
+                    ?? tracks.FirstOrDefault(t => t.Id == decision.Current);
+                var cover = current is null ? null : covers.GetValueOrDefault(current.Id);
+                string? connectionError = routes.FirstOrDefault(r => r.Id == current?.Id)?.Connection?.Error;
+                // The end of a restart changes nothing else once the player is back, yet the entries it disabled must return.
+                bool restarting = RestartingNetease;
+                bool changed = Error != connectionError || !Tracks.SequenceEqual(tracks) || Current != current || Cover != cover || _announcedPin != _pinned || _announcedRestarting != restarting;
+                _announcedPin = _pinned; _announcedRestarting = restarting;
+                Tracks = tracks; Current = current; Cover = cover;
+                Error = connectionError;
+                UpdateMeter();
+                if (changed) Changed?.Invoke();
+            } while (_again && !_disposed);
+        }
+        catch (Exception ex) { Error = Loc.T("媒体信息暂时不可用：", "Media information is temporarily unavailable: ") + ex.Message; Changed?.Invoke(); }
+        finally { _reading = false; }
+    }
+
+    private async Task RetryMetadataAsync(SystemSource source, int revision)
+    {
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            await Task.Delay(attempt == 0 ? 500 : 1000);
+            if (_disposed || source.Revision != revision || !_sessions.ContainsValue(source)) return;
+            source.Dirty = source.MetadataDirty = true; Schedule();
+        }
+    }
+    private static bool AppMatches(SystemSource source, string executable) =>
+        string.Equals(Path.GetFileName(source.Session.SourceAppUserModelId), executable, StringComparison.OrdinalIgnoreCase);
+    private List<Route> BuildRoutes()
+    {
+        var routes = new List<Route>();
+        var consumed = new HashSet<SystemSource>();
+        foreach (var connection in _connections)
+        {
+            if (connection.ProcessId is not { } pid || connection.Snapshot is not { } snapshot) continue;
+            bool netease = connection is NeteaseSource;
+            string name = netease ? "cloudmusic" : "QQMusic";
+            var systems = _sessions.Values.Where(s => AppMatches(s, name + ".exe")).ToArray();
+            var system = systems.FirstOrDefault(s => s.Session == _manager?.GetCurrentSession()) ?? systems.FirstOrDefault();
+            // A disconnected QQ pipe falls back as a whole to GSMTC. Retain its last
+            // song without capabilities only when there is no system replacement.
+            if (connection is QqMediaConnection { Ready: false } && system is not null) continue;
+            foreach (var entry in systems) consumed.Add(entry);
+            string identity = connection is NeteaseSource ns ? ns.Identity : ((QqMediaConnection)connection).Identity;
+            routes.Add(new(identity, name, system, connection, netease && snapshot.IsNeteaseLog));
+        }
+        foreach (var source in _sessions.Values.Where(s => !consumed.Contains(s)))
+            routes.Add(new(source.Id, source.ProcessName, source));
+        return routes;
+    }
+
+    private async Task ReadCoverAsync(CoverCache cache, string key, string url)
+    {
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+        cache.CoverCancellation = cancellation;
+        var token = cancellation.Token;
+        try
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("https" or "http")) return;
+            // Netease originals reach 3000 px and more than the size limit below. Its image CDN returns
+            // the size DecodeCover keeps anyway when asked with its own resize parameter.
+            if (uri.Query.Length == 0 && uri.Host.EndsWith(".music.126.net", StringComparison.OrdinalIgnoreCase))
+                uri = new Uri(uri.AbsoluteUri + $"?param={CoverPixels}y{CoverPixels}");
+            using var response = await _coverHttp.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, token);
+            response.EnsureSuccessStatusCode();
+            if (response.Content.Headers.ContentLength > 8_388_608) return;
+            await using var stream = await response.Content.ReadAsStreamAsync(token);
+            using var buffer = new MemoryStream();
+            var bytes = new byte[16_384];
+            int length;
+            while ((length = await stream.ReadAsync(bytes, token)) > 0)
+            {
+                if (buffer.Length + length > 8_388_608) return;
+                buffer.Write(bytes, 0, length);
+            }
+            if (!_disposed && cache.CoverKey == key) { cache.Cover = DecodeCover(buffer.ToArray()); Schedule(); }
+        }
+        catch { /* A cover request cannot block playback state or controls. */ }
+        finally { if (ReferenceEquals(cache.CoverCancellation, cancellation)) cache.CoverCancellation = null; }
+    }
+
+    private async Task ReadSystemAsync(SystemSource source)
+    {
+        // One hung provider must not stall audio discovery or create more in-flight reads each tick.
+        if (source.PendingRead is { IsCompleted: false }) return;
+        source.Dirty = false;
+        bool metadata = source.MetadataDirty || source.Track is null;
+        source.MetadataDirty = false;
+        var pending = ReadSystemCoreAsync(source, metadata, source.Revision);
+        source.PendingRead = pending;
+        try { await pending.WaitAsync(TimeSpan.FromSeconds(1)); }
+        catch (TimeoutException) { Error = Loc.T("Windows 媒体读取超时。", "Reading Windows media timed out."); }
+    }
+
+    private async Task ReadSystemCoreAsync(SystemSource source, bool metadata, int revision)
+    {
+        try
+        {
+            var track = source.Track ?? new MediaTrack { PositionKnown = false };
+            var cover = source.Cover;
+            if (metadata)
+            {
+                var properties = await source.Session.TryGetMediaPropertiesAsync();
+                var updated = track with { Title = properties.Title ?? "", Artist = properties.Artist ?? "", Album = properties.AlbumTitle ?? "" };
+                if (!MediaRouting.SameSong(track, updated)) cover = null;
+                track = updated;
+                if (properties.Thumbnail is { } thumbnail)
+                {
+                    try
+                    {
+                        using var stream = await thumbnail.OpenReadAsync();
+                        if (stream.Size is > 0 and < 16_777_216)
+                        {
+                            using var reader = new Windows.Storage.Streams.DataReader(stream);
+                            await reader.LoadAsync((uint)stream.Size);
+                            var bytes = new byte[(int)stream.Size]; reader.ReadBytes(bytes); cover = DecodeCover(bytes);
+                        }
+                    }
+                    catch { /* Artwork failure must not suppress controls. */ }
+                }
+            }
+            var playback = source.Session.GetPlaybackInfo(); var controls = playback.Controls;
+            var timeline = source.Session.GetTimelineProperties();
+            var state = playback.PlaybackStatus switch
+            {
+                GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing => MediaState.Playing,
+                GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused or GlobalSystemMediaTransportControlsSessionPlaybackStatus.Opened => MediaState.Paused,
+                GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped or GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed => MediaState.Stopped,
+                _ => MediaState.Unknown
+            };
+            bool known = timeline.EndTime > timeline.StartTime && timeline.LastUpdatedTime.Year > 1601 &&
+                timeline.Position >= timeline.StartTime && timeline.Position <= timeline.EndTime;
+            if (_disposed || revision != source.Revision) return;
+            source.Cover = cover;
+            source.Track = track with
+            {
+                Id = source.Id, State = state, Source = SourceName(source.Session.SourceAppUserModelId),
+                PositionKnown = known, Start = timeline.StartTime, End = timeline.EndTime,
+                ReportedPosition = timeline.Position, PositionAt = timeline.LastUpdatedTime,
+                MinSeek = timeline.MinSeekTime, MaxSeek = timeline.MaxSeekTime, Rate = playback.PlaybackRate ?? 1,
+                CanToggle = controls.IsPlayPauseToggleEnabled || (state == MediaState.Playing ? controls.IsPauseEnabled : controls.IsPlayEnabled),
+                CanPrevious = controls.IsPreviousEnabled, CanNext = controls.IsNextEnabled,
+                CanSeek = known && controls.IsPlaybackPositionEnabled,
+                CanShuffle = controls.IsShuffleEnabled, CanRepeat = controls.IsRepeatEnabled, Shuffle = playback.IsShuffleActive == true,
+                Repeat = playback.AutoRepeatMode switch { MediaPlaybackAutoRepeatMode.Track => MediaRepeat.Track, MediaPlaybackAutoRepeatMode.List => MediaRepeat.List, _ => MediaRepeat.None }
+            };
+        }
+        catch (Exception ex)
+        {
+            Error = Loc.T("Windows 媒体读取失败：", "Reading Windows media failed: ") + ex.Message;
+            if (source.Track is { } previous) source.Track = previous with { State = MediaState.Unknown, PositionKnown = false,
+                CanToggle = false, CanPrevious = false, CanNext = false, CanSeek = false, CanRepeat = false, CanShuffle = false };
+        }
+        finally { Schedule(); }
+    }
+    private static MediaTrack FromDesktop(DesktopMediaSnapshot snapshot) => new()
+    {
+        Title = snapshot.Title, Artist = snapshot.Artist, Album = snapshot.Album, State = snapshot.State ?? MediaState.Unknown,
+        PositionKnown = snapshot.Position is { } position && snapshot.Duration is { } duration && duration > TimeSpan.Zero && position >= TimeSpan.Zero && position <= duration,
+        TimelinePending = snapshot.TimelinePending, Rate = snapshot.Rate, IsNeteaseLog = snapshot.IsNeteaseLog, PreviousRestricted = snapshot.PreviousRestricted,
+        End = snapshot.Duration ?? TimeSpan.Zero, ReportedPosition = snapshot.Position ?? TimeSpan.Zero, PositionAt = snapshot.PositionAt ?? DateTimeOffset.UtcNow,
+        SongId = snapshot.SongId ?? "", EmbeddedLyrics = snapshot.SyncedLyrics ?? "", CurrentLyric = snapshot.CurrentLyric, CurrentLyricStart = snapshot.CurrentLyricStart,
+        CanToggle = snapshot.CanToggle, CanPrevious = snapshot.CanPrevious, CanNext = snapshot.CanNext, CanSeek = snapshot.CanSeek,
+        CanShuffle = snapshot.CanShuffle, CanRepeat = snapshot.CanRepeat, Shuffle = snapshot.Shuffle == true, Repeat = snapshot.Repeat ?? MediaRepeat.None
+    };
+    private const int CoverPixels = 512;
+    internal static BitmapSource? DecodeCover(byte[]? bytes)
+    {
+        if (bytes is null) return null;
+        try
+        {
+            try { return Decode(BitmapCreateOptions.None); }
+            // An empty EXIF block in some QQ covers makes WIC's color-context read fail.
+            // Decode the pixels without that metadata, while keeping normal color handling first.
+            catch (IOException) { return Decode(BitmapCreateOptions.IgnoreColorProfile); }
+        }
+        catch { return null; }
+
+        BitmapSource Decode(BitmapCreateOptions options)
+        {
+            using var memory = new MemoryStream(bytes);
+            var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad;
+            image.CreateOptions = options;
+            image.DecodePixelWidth = CoverPixels; image.StreamSource = memory; image.EndInit(); image.Freeze(); return image;
+        }
+    }
+
+    public async Task<bool> CommandAsync(string id, MediaCommand command)
+    {
+        if (!_routes.TryGetValue(id, out var route)) return false;
+        var current = Tracks.FirstOrDefault(t => t.Id == id);
+        if (current is null || command == MediaCommand.Previous && !current.CanPrevious || command == MediaCommand.Next && !current.CanNext ||
+            command == MediaCommand.PlayPause && !current.CanToggle || command == MediaCommand.Shuffle && !current.CanShuffle || command == MediaCommand.Repeat && !current.CanRepeat) return false;
+        var state = current.State;
+        try
+        {
+            return await MediaRouting.DispatchAsync(async () => route.Connection is { } connection
+                ? DispatchResult(await connection.CommandAsync(command, state))
+                : MediaDispatchResult.Unavailable,
+                () => (route.Connection is null || route.Supplement && command is MediaCommand.PlayPause or MediaCommand.Previous or MediaCommand.Next)
+                    ? SystemCommandAsync(route.System?.Session, command).WaitAsync(TimeSpan.FromSeconds(2)) : Task.FromResult(false));
+        }
+        catch { return false; }
+        finally { Invalidate(route); }
+    }
+    public async Task<bool> SetPlaybackModeAsync(string id, MusicPlaybackMode mode)
+    {
+        if (!_routes.TryGetValue(id, out var route) || Tracks.FirstOrDefault(t => t.Id == id) is not { } current ||
+            !MusicPlaybackModes.Supported(current).Contains(mode)) return false;
+        try
+        {
+            if (route.Connection is { } connection)
+                return await connection.SetPlaybackModeAsync(mode) == DesktopCommandResult.Sent;
+            if (route.System?.Session is not { } session) return false;
+            var info = session.GetPlaybackInfo();
+            bool shuffle = mode == MusicPlaybackMode.Shuffle;
+            if ((info.IsShuffleActive == true) != shuffle &&
+                !await session.TryChangeShuffleActiveAsync(shuffle).AsTask().WaitAsync(TimeSpan.FromSeconds(2))) return false;
+            if (shuffle || !current.CanRepeat) return true;
+            var repeat = mode switch { MusicPlaybackMode.List => MediaPlaybackAutoRepeatMode.List, MusicPlaybackMode.Track => MediaPlaybackAutoRepeatMode.Track, _ => MediaPlaybackAutoRepeatMode.None };
+            return info.AutoRepeatMode == repeat || await session.TryChangeAutoRepeatModeAsync(repeat).AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+        }
+        catch { return false; }
+        finally { Invalidate(route); }
+    }
+    private static async Task<bool> SystemCommandAsync(Session? session, MediaCommand command)
+    {
+        if (session is null) return false;
+        var info = session.GetPlaybackInfo(); var controls = info.Controls;
+        return command switch
+        {
+            MediaCommand.Previous => controls.IsPreviousEnabled && await session.TrySkipPreviousAsync(),
+            MediaCommand.Next => controls.IsNextEnabled && await session.TrySkipNextAsync(),
+            MediaCommand.Shuffle => controls.IsShuffleEnabled && await session.TryChangeShuffleActiveAsync(info.IsShuffleActive != true),
+            MediaCommand.Repeat => controls.IsRepeatEnabled && await session.TryChangeAutoRepeatModeAsync(info.AutoRepeatMode switch
+            { MediaPlaybackAutoRepeatMode.None => MediaPlaybackAutoRepeatMode.List, MediaPlaybackAutoRepeatMode.List => MediaPlaybackAutoRepeatMode.Track, _ => MediaPlaybackAutoRepeatMode.None }),
+            _ => controls.IsPlayPauseToggleEnabled ? await session.TryTogglePlayPauseAsync()
+                : info.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
+                    ? controls.IsPauseEnabled && await session.TryPauseAsync() : controls.IsPlayEnabled && await session.TryPlayAsync()
+        };
+    }
+    public async Task<bool> SeekAsync(MediaTrack track, double fraction)
+    {
+        if (!track.HasTimeline || !track.CanSeek || !_routes.TryGetValue(track.Id, out var route)) return false;
+        // A drag can finish after the source has changed songs. Never apply its old
+        // duration or fraction to the next song, including changes not rendered yet.
+        var current = Tracks.FirstOrDefault(t => t.Id == track.Id);
+        if (current is null || !MediaRouting.SameSong(current, track) || !SameKnownId(track.SongId, current.SongId)) return false;
+        if (route.Connection?.Snapshot is { } snapshot &&
+            (!MediaRouting.SameSong(track, FromDesktop(snapshot)) || !SameKnownId(track.SongId, snapshot.SongId))) return false;
+        try
+        {
+            return await MediaRouting.DispatchAsync(async () => route.Connection is { } connection
+                ? DispatchResult(await connection.SeekAsync(TimeSpan.FromTicks(current.SeekTicks(fraction))))
+                : MediaDispatchResult.Unavailable,
+                async () => route.Connection is null && route.System?.Track is { CanSeek: true } system && MediaRouting.SameSong(track, system) &&
+                    await route.System.Session.TryChangePlaybackPositionAsync(system.SeekTicks(fraction)).AsTask().WaitAsync(TimeSpan.FromSeconds(2)));
+        }
+        catch { return false; }
+        finally { Invalidate(route); }
+    }
+    private static bool SameKnownId(string? first, string? second) =>
+        string.IsNullOrEmpty(first) || string.IsNullOrEmpty(second) || string.Equals(first, second, StringComparison.Ordinal);
+    private void Invalidate(Route route)
+    {
+        if (route.System is { } system) system.Dirty = true;
+        Schedule();
+    }
+    private static MediaDispatchResult DispatchResult(DesktopCommandResult result) => result switch
+    { DesktopCommandResult.Unavailable => MediaDispatchResult.Unavailable, DesktopCommandResult.Sent => MediaDispatchResult.Sent, _ => MediaDispatchResult.Uncertain };
+    public float Peak() => _meter.Peak;
+    // Flowing bar values from the player's captured audio; false when only the peak meter is available.
+    public bool FlowLevels(Span<double> levels) => _meter.TryFill(levels);
+    private void UpdateMeter() => _meter.SetSource(Current is not null && _routes.TryGetValue(Current.Id, out var route) ? route.ProcessName : null,
+        _visible && Current?.State == MediaState.Playing);
+
+    private static string ProcessNameFor(string id)
+    {
+        string lower = id.ToLowerInvariant();
+        if (lower.Contains("cloudmusic") || lower.Contains("netease")) return "cloudmusic";
+        if (lower.Contains("qqmusic")) return "QQMusic";
+        if (lower.Contains("msedge")) return "msedge";
+        if (lower.Contains("chrome")) return "chrome";
+        return Path.GetFileNameWithoutExtension(id.Split('!')[0]);
+    }
+    internal static string SourceName(string id)
+    {
+        string lower = id.ToLowerInvariant();
+        if (lower.Contains("cloudmusic") || lower.Contains("netease")) return "网易云音乐";
+        if (lower.Contains("qqmusic")) return "QQ 音乐";
+        if (lower.Contains("msedge")) return "Microsoft Edge";
+        if (lower.Contains("chrome")) return "Google Chrome";
+        if (lower.Contains("spotify")) return "Spotify";
+        if (lower.Contains("itunes") || lower.Contains("applemusic")) return "Apple Music";
+        if (lower.Contains("qiyi")) return "爱奇艺";
+        return Path.GetFileNameWithoutExtension(id.Split('!')[0]);
+    }
+    public void Dispose()
+    {
+        _disposed = true; _debounce.Stop(); _poll.Stop(); _recheck.Stop();
+        if (_manager is not null) { _manager.SessionsChanged -= SessionsChanged; _manager.CurrentSessionChanged -= CurrentChanged; }
+        foreach (var session in _sessions.Keys) Unsubscribe(session);
+        foreach (var cache in _covers.Values) cache.CoverCancellation?.Cancel();
+        _sessions.Clear(); _covers.Clear(); _routes.Clear();
+        foreach (var connection in _connections) { connection.Changed -= Schedule; connection.Dispose(); }
+        _coverHttp.Dispose();
+        _meter.Dispose();
+    }
+}

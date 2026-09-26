@@ -21,16 +21,24 @@ public sealed record ClaudeQuotaSnapshot(DateTimeOffset Time, string Plan, strin
 public sealed class ProviderSnapshot(ProviderId id)
 {
     public ProviderId Id { get; } = id;
-    public string Name => Id == ProviderId.Claude ? "Claude" : Id.ToString();
+    public string Name => AppPresets.Name(Id);
+    public HashSet<string> Configurations { get; set; } = [];
+    public string Scope { get; set; } = "";
+    public Dictionary<string, string> Details { get; set; } = [];
+    public bool IsStale { get; set; }
+    private List<UsageMetric>? _metrics;
+    public List<UsageMetric> Metrics { get => _metrics ?? Quotas.Select(UsageMetric.FromQuota).ToList(); set => _metrics = value; }
     public string Plan { get; set; } = "";
     public string PlanSource { get; set; } = "";
-    public string Status { get; set; } = "等待更新";
-    public string StatusLabel { get; set; } = "等待更新";
+    public string Status { get; set; } = Loc.T("等待更新", "Waiting for update");
+    public string StatusLabel { get; set; } = Loc.T("等待更新", "Waiting for update");
     public string Source { get; set; } = "";
     public string UsageNote { get; set; } = "";
     public DateTimeOffset? QuotaTime { get; set; }
     public bool LiveQuota { get; set; }
     public bool UsageAvailable { get; set; }
+    public bool UsageComplete { get; set; } = true;
+    public DateTime? UsageStart { get; set; }
     public List<Quota> Quotas { get; set; } = [];
     public List<TokenEntry> Entries { get; set; } = [];
 }

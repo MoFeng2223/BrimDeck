@@ -1,0 +1,298 @@
+using System.Diagnostics;
+using System.IO;
+using System.Management;
+using System.Text.RegularExpressions;
+using BrimDeck.Core;
+using Microsoft.Win32;
+
+namespace BrimDeck.Native;
+
+internal sealed record NeteaseProcess(int Id, long Started, string Path, int? DebugPort, long StartTick)
+{
+    public string Identity => $"netease:{Id}:{Started}";
+    public bool IsAlive()
+    {
+        try { using var process = Process.GetProcessById(Id); return !process.HasExited && process.StartTime.ToUniversalTime().Ticks == Started; }
+        catch { return false; }
+    }
+    public async Task ExitAsync(CancellationToken cancellationToken)
+    {
+        if (!IsAlive()) return;
+        // The client's single-instance startup handler forwards this command as
+        // its native exit message. Unlike WM_CLOSE it bypasses close-to-tray and
+        // the close confirmation, without terminating the process or changing settings.
+        using var request = Start(Path, "--orpheus-startup=exit-process");
+        var deadline = Environment.TickCount64 + 15_000;
+        while (IsAlive() || !request.HasExited)
+        {
+            if (Environment.TickCount64 >= deadline) throw new InvalidOperationException(Loc.T("网易云未响应退出请求，请稍后重试。", "NetEase Cloud Music did not respond to the request to quit. Try again later."));
+            await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+        }
+    }
+    internal static Process Start(string path, params string[] arguments)
+    {
+        var info = new ProcessStartInfo(path) { UseShellExecute = true, WorkingDirectory = System.IO.Path.GetDirectoryName(path)! };
+        foreach (var argument in arguments) info.ArgumentList.Add(argument);
+        var process = Process.Start(info) ?? throw new InvalidOperationException(Loc.T("无法启动网易云。", "NetEase Cloud Music could not be started."));
+        // Shell execution keeps the player's diagnostic streams detached from BrimDeck.
+        return process;
+    }
+    public static NeteaseProcess? Discover()
+    {
+        using var current = Process.GetCurrentProcess();
+        using var query = new ManagementObjectSearcher("SELECT ProcessId, CommandLine, ExecutablePath, SessionId FROM Win32_Process WHERE Name='cloudmusic.exe'");
+        using var rows = query.Get();
+        var candidates = new List<NeteaseProcess>();
+        foreach (ManagementObject row in rows)
+        {
+            using (row)
+            {
+                string? command = row["CommandLine"] as string, path = row["ExecutablePath"] as string;
+                if (command is null || path is null || command.Contains("--type=", StringComparison.OrdinalIgnoreCase) || (uint)row["SessionId"] != current.SessionId) continue;
+                try
+                {
+                    using var process = Process.GetProcessById((int)(uint)row["ProcessId"]);
+                    if (process.HasExited || !string.Equals(System.IO.Path.GetFileName(path), "cloudmusic.exe", StringComparison.OrdinalIgnoreCase)) continue;
+                    var match = Regex.Match(command, @"(?:^|\s)--remote-debugging-port=(\d+)(?:\s|$)");
+                    int? port = match.Success && int.TryParse(match.Groups[1].Value, out int parsed) && parsed is > 0 and <= 65535 ? parsed : null;
+                    var start = process.StartTime.ToUniversalTime();
+                    candidates.Add(new(process.Id, start.Ticks, path, port, Math.Max(0, Environment.TickCount64 - (long)(DateTime.UtcNow - start).TotalMilliseconds - 1000)));
+                }
+                catch { }
+            }
+        }
+        return candidates.Count == 1 ? candidates[0] : null;
+    }
+    // The installer records the player under its uninstall entry; the orpheus:// handler it
+    // registers names the same executable and remains when that entry is missing.
+    public static string? FindInstalled()
+    {
+        static string? Checked(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            value = value.Trim();
+            if (value.StartsWith('"')) { int end = value.IndexOf('"', 1); value = end > 0 ? value[1..end] : value.Trim('"'); }
+            else if (value.LastIndexOf(',') is int comma and > 0 && !value.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) value = value[..comma];
+            return string.Equals(System.IO.Path.GetFileName(value), "cloudmusic.exe", StringComparison.OrdinalIgnoreCase) && File.Exists(value) ? value : null;
+        }
+        try
+        {
+            foreach (var (hive, view) in new[] { (RegistryHive.CurrentUser, RegistryView.Default), (RegistryHive.LocalMachine, RegistryView.Registry32), (RegistryHive.LocalMachine, RegistryView.Registry64) })
+            {
+                using var root = RegistryKey.OpenBaseKey(hive, view);
+                using var uninstall = root.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall");
+                if (uninstall is null) continue;
+                foreach (var name in uninstall.GetSubKeyNames())
+                {
+                    using var entry = uninstall.OpenSubKey(name);
+                    if (entry?.GetValue("DisplayName") as string != "网易云音乐") continue;
+                    if (Checked(entry.GetValue("DisplayIcon") as string) is { } icon) return icon;
+                    if (entry.GetValue("InstallLocation") is string { Length: > 0 } location && Checked(System.IO.Path.Combine(location, "cloudmusic.exe")) is { } located) return located;
+                }
+            }
+            using var handler = Registry.ClassesRoot.OpenSubKey(@"orpheus\shell\open\command");
+            return Checked(handler?.GetValue(null) as string);
+        }
+        catch { return null; }
+    }
+}
+
+internal sealed class NeteaseSource : IMediaPlayerConnection
+{
+    internal const int ControlPort = 21631;
+    private readonly CancellationTokenSource _stop = new();
+    private readonly SemaphoreSlim _refresh = new(1, 1);
+    private readonly SemaphoreSlim _wake = new(0, 1);
+    private Task? _supervisor;
+    private NeteaseProcess? _process;
+    private NeteaseLogReader? _log;
+    private NeteaseCdpConnection? _cdp;
+    private DesktopMediaSnapshot? _snapshot;
+    private bool _cdpFailed;
+    private int _restarting;
+    private string? _installed;
+    private long _installedCheckedAt = -30_000;
+    public DesktopMediaSnapshot? Snapshot => Volatile.Read(ref _snapshot);
+    internal string Identity => _process?.Identity ?? "netease";
+    public int? ProcessId => _process?.Id;
+    public string? Error { get; private set; }
+    public bool IsLogMode => _process is not null && _cdp?.Ready != true;
+    public bool Restarting => Volatile.Read(ref _restarting) != 0;
+    // A running player counts as installed even when neither registry entry is present.
+    public bool Installed => _process is not null || Volatile.Read(ref _installed) is not null;
+    internal bool LogWatching => _log?.Watching == true;
+    public event Action? Changed;
+    public Task StartAsync() { _supervisor ??= Task.Run(SuperviseAsync); return Task.CompletedTask; }
+    private void Signal() { if (_wake.CurrentCount == 0) { try { _wake.Release(); } catch (SemaphoreFullException) { } } }
+    private async Task SuperviseAsync()
+    {
+        while (!_stop.IsCancellationRequested)
+        {
+            try { await RefreshAsync().ConfigureAwait(false); }
+            catch (OperationCanceledException) when (_stop.IsCancellationRequested) { break; }
+            catch { Error = Loc.T("网易云来源暂时不可用。", "The NetEase Cloud Music source is temporarily unavailable."); }
+            try { await _wake.WaitAsync(TimeSpan.FromSeconds(5), _stop.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { break; }
+        }
+    }
+    private async Task RefreshAsync()
+    {
+        await _refresh.WaitAsync(_stop.Token).ConfigureAwait(false);
+        try
+        {
+            _stop.Token.ThrowIfCancellationRequested();
+            if (Environment.TickCount64 - _installedCheckedAt >= 30_000)
+            {
+                _installedCheckedAt = Environment.TickCount64;
+                var installed = NeteaseProcess.FindInstalled();
+                if (Interlocked.Exchange(ref _installed, installed) is null != installed is null) Changed?.Invoke();
+            }
+            if (_process?.IsAlive() != true)
+            {
+                Clear();
+                var processes = Process.GetProcessesByName("cloudmusic");
+                try { if (processes.Length == 0) return; }
+                finally { foreach (var process in processes) process.Dispose(); }
+                _process = NeteaseProcess.Discover();
+                _stop.Token.ThrowIfCancellationRequested();
+                if (_process is null) return;
+                _cdpFailed = false; Error = null;
+            }
+            if (_process.DebugPort.HasValue && !_cdpFailed && _cdp is null)
+            {
+                var connection = new NeteaseCdpConnection(_process);
+                _cdp = connection; connection.Changed += CdpChanged;
+                await connection.StartAsync().ConfigureAwait(false);
+            }
+            if (_cdp is { Failed: true })
+            {
+                _cdpFailed = true;
+                Error = (_cdp.Error ?? Loc.T("完整控制连接失败。", "The full control connection failed.")) + Loc.T(" 已恢复普通模式。", " Normal mode is restored.");
+                _cdp.Changed -= CdpChanged; _cdp.Dispose(); _cdp = null;
+            }
+            if (_cdp is not null) { PublishCdp(); return; }
+            if (_log is null)
+            {
+                _log = new(_process); _log.Changed += LogChanged; _log.Start();
+            }
+            PublishLog();
+        }
+        finally { _refresh.Release(); }
+    }
+    private void CdpChanged()
+    {
+        if (_cdp?.Failed == true) Signal();
+        PublishCdp();
+    }
+    private void PublishCdp()
+    {
+        if (_stop.IsCancellationRequested) return;
+        Publish(_cdp?.Snapshot);
+    }
+    private void LogChanged() => PublishLog();
+    private void PublishLog()
+    {
+        if (_stop.IsCancellationRequested || _process is null) return;
+        var state = _log?.State;
+        // A session known only by its id is not a media entry. Without a title the
+        // route is not created and any system session of the player stands on its own.
+        if (state?.Track is not { Title.Length: > 0 } track) { Publish(null); return; }
+        Publish(new(track.Title, track.Artist, track.Album, track.HasTimeline ? track.ReportedPosition : null,
+            track.Duration > TimeSpan.Zero ? track.Duration : null, track.State, false, false, false, false,
+            SongId: track.SongId, CoverUrl: state.CoverUrl, PositionAt: track.PositionAt, TimelinePending: track.TimelinePending,
+            Rate: track.Rate, IsNeteaseLog: true, PreviousRestricted: track.PreviousRestricted));
+    }
+    private void Publish(DesktopMediaSnapshot? snapshot)
+    {
+        if (Interlocked.Exchange(ref _snapshot, snapshot) != snapshot) Changed?.Invoke();
+    }
+    private void Clear()
+    {
+        if (_log is { } log) { _log = null; log.Changed -= LogChanged; log.Dispose(); }
+        if (_cdp is { } cdp) { _cdp = null; cdp.Changed -= CdpChanged; cdp.Dispose(); }
+        _process = null; Publish(null);
+    }
+    public Task<DesktopCommandResult> CommandAsync(MediaCommand command, MediaState state) =>
+        _cdp?.CommandAsync(command, state) ?? Task.FromResult(DesktopCommandResult.Unavailable);
+    public Task<DesktopCommandResult> SetPlaybackModeAsync(MusicPlaybackMode mode) =>
+        _cdp?.SetPlaybackModeAsync(mode) ?? Task.FromResult(DesktopCommandResult.Unavailable);
+    public Task<DesktopCommandResult> SeekAsync(TimeSpan position) =>
+        _cdp?.SeekAsync(position) ?? Task.FromResult(DesktopCommandResult.Unavailable);
+
+    // The UI must obtain the user's consent before calling this operation. A running player,
+    // in either mode, is closed and started again; a player that is not running is started.
+    // A quiet request leaves no error behind: its caller only shows that it is in progress.
+    public async Task<bool> EnableFullControlAsync(bool quiet = false)
+    {
+        if (Interlocked.CompareExchange(ref _restarting, 1, 0) != 0) return false;
+        var owner = _process?.IsAlive() == true ? _process : null;
+        var beforeRestart = owner is null ? null : Snapshot;
+        Error = null; Changed?.Invoke();
+        try
+        {
+            string path = owner?.Path ?? Volatile.Read(ref _installed) ?? NeteaseProcess.FindInstalled() ?? throw new InvalidOperationException(Loc.T("未找到网易云音乐。", "NetEase Cloud Music was not found."));
+            if (owner is not null) await owner.ExitAsync(_stop.Token).ConfigureAwait(false);
+            // The user asked for this start, so the player starts the ordinary way and its window appears.
+            using var launched = NeteaseProcess.Start(path,
+                $"--remote-debugging-port={ControlPort}", "--remote-debugging-address=127.0.0.1");
+            Signal();
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                await Task.Delay(250, _stop.Token).ConfigureAwait(false);
+                if (_cdp?.Ready == true && _process is { } started && started.Started != owner?.Started)
+                {
+                    // The player is back under full control; the entries are released now,
+                    // not after the earlier playback state has been confirmed.
+                    Interlocked.Exchange(ref _restarting, 0); Changed?.Invoke();
+                    if (beforeRestart?.State is MediaState.Playing or MediaState.Paused)
+                        await RestoreStateAsync(beforeRestart.State.Value).ConfigureAwait(false);
+                    return true;
+                }
+            }
+            await _refresh.WaitAsync(_stop.Token).ConfigureAwait(false);
+            try
+            {
+                _cdpFailed = true;
+                if (_cdp is { } failed) { _cdp = null; failed.Changed -= CdpChanged; failed.Dispose(); }
+            }
+            finally { _refresh.Release(); }
+            throw new InvalidOperationException(Loc.T("未能建立完整控制连接，已恢复普通模式。", "The full control connection could not be made. Normal mode is restored."));
+        }
+        catch (OperationCanceledException) { return false; }
+        catch (Exception ex) { if (!quiet) Error = ex.Message; return false; }
+        finally { Interlocked.Exchange(ref _restarting, 0); Signal(); Changed?.Invoke(); }
+    }
+    // The client applies its own autoplay setting shortly after the page loads, so the
+    // state before the restart is confirmed rather than corrected once.
+    private async Task RestoreStateAsync(MediaState wanted)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(8);
+        var settled = DateTimeOffset.UtcNow.AddSeconds(2);
+        for (int corrections = 0; DateTimeOffset.UtcNow < deadline;)
+        {
+            await Task.Delay(250, _stop.Token).ConfigureAwait(false);
+            var reported = Snapshot?.State;
+            if (reported is not (MediaState.Playing or MediaState.Paused)) continue;
+            var state = reported.Value;
+            if (state == wanted) { if (DateTimeOffset.UtcNow >= settled) return; continue; }
+            if (++corrections > 3) return;
+            await CommandAsync(MediaCommand.PlayPause, state).ConfigureAwait(false);
+            settled = DateTimeOffset.UtcNow.AddSeconds(2);
+        }
+    }
+    public void Dispose()
+    {
+        _stop.Cancel();
+        // Release active transports immediately. Serialize final cleanup with discovery
+        // so a WMI query already in flight cannot install a watcher after disposal.
+        _log?.Dispose(); _cdp?.Dispose();
+        _ = CleanupAsync();
+    }
+    private async Task CleanupAsync()
+    {
+        await _refresh.WaitAsync().ConfigureAwait(false);
+        try { Clear(); }
+        finally { _refresh.Release(); }
+    }
+}

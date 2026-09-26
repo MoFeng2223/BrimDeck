@@ -3,6 +3,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 using BrimDeck.Core;
 
@@ -10,28 +11,37 @@ namespace BrimDeck;
 
 public partial class MainWindow
 {
-    internal void ShowModelDetails(bool details) { _details = details; _modelPage = 0; RenderUsage(); }
-    internal void SelectQuotaGroup(string group) { _antigravityGroup = group; RenderUsage(); }
+    internal void ShowModelDetails(bool details) { if (IsMusicPage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false); _details = details && Settings.UsagePage; RenderUsage(); }
+    internal void SelectQuotaGroup(string group)
+    {
+        foreach (var entry in Settings.EnabledApps.Where(app => app.QuotaSource == ProviderId.Antigravity)) _quotaGroups[entry.InstanceId] = group;
+        RenderUsage();
+    }
+    internal void SelectQuotaGroup(Guid instanceId, string group) { _quotaGroups[instanceId] = group; RenderUsage(); }
     internal FrameworkElement ScaledContent => ContentCanvas;
 
-    private const double ContentBottomInset = 10, ColumnTopInset = 2, EdgeInset = 6;
+    private const double ColumnTopInset = 2, EdgeInset = 6;
 
     private enum Tier { Roomy, Default, Dense, Compact, Tiny }
     private sealed record SegmentItem(string Text, string Name, bool Active, Action Select, string? Tip = null);
-    private sealed record QuotaView(List<Quota> Quotas, List<string> Groups, int Pages, int Page);
+    private sealed record QuotaView(List<UsageMetric> Quotas, List<string> Groups, int Pages, int Page);
 
     // Every size is a whole DIP so text stays crisp; the panel steps between tiers instead of scaling continuously.
     private sealed record Layout(Tier Tier, double Name, double Number, double Label, double Reset, double Foot, double Plan, double Segment,
-        double Head, double LabelRow, double QuotaGap, double RowGap, double Track, double ColumnPad, double Toolbar, double FootTop, double FootBottom, bool Footer, bool UsedWord)
+        double Head, double LabelRow, double QuotaGap, double RowGap, double Track, double ColumnPad, double Toolbar, double FootTop, double FootBottom, double Bottom, bool Footer, bool UsedWord)
     {
+        // Small panels prioritize quotas; the bottom inset keeps the final row off the edge.
         public static Layout For(Tier tier) => tier switch
         {
-            Tier.Roomy => new(tier, 18, 30, 14, 12.5, 14, 12, 12, 30, 18, 20, 6, 6, 20, 40, 10, 9, true, true),
-            Tier.Default => new(tier, 15, 20, 12, 11, 12, 10.5, 10.5, 24, 16, 10, 4, 4, 14, 36, 8, 7, true, true),
-            Tier.Dense => new(tier, 14, 18, 11.5, 10.5, 11, 10.5, 10.5, 22, 15, 8, 3, 4, 10, 36, 6, 5, true, true),
-            Tier.Compact => new(tier, 13, 16, 11, 10, 11, 9.5, 9.5, 20, 13, 4, 2, 3, 10, 32, 4, 4, true, true),
-            _ => new(tier, 12, 15, 10.5, 10, 10, 9.5, 9.5, 18, 13, 4, 2, 3, 8, 28, 0, 0, false, false)
+            Tier.Roomy => new(tier, 18, 30, 14, 12.5, 14, 12, 12, 28, 18, 16, 6, 6, 20, 40, 8, 7, 18, true, true),
+            Tier.Default => new(tier, 15, 20, 12, 11, 12, 10.5, 10.5, 24, 16, 10, 4, 4, 14, 36, 8, 7, 16, true, true),
+            Tier.Dense => new(tier, 14, 18, 11.5, 10.5, 11, 10.5, 10.5, 22, 15, 8, 3, 4, 10, 36, 6, 5, 14, true, true),
+            Tier.Compact => new(tier, 13, 16, 11, 10, 11, 9.5, 9.5, 20, 13, 4, 2, 3, 10, 32, 0, 0, 12, false, true),
+            _ => new(tier, 12, 15, 10.5, 10, 10, 9.5, 9.5, 18, 13, 4, 2, 3, 8, 28, 0, 0, 10, false, false)
         };
+        // Totals row: a fixed caption column keeps the token figures of both rows on one vertical line.
+        // Wide enough for "今日" and "7 天", or for "Today" and "7 days".
+        public double CaptionWidth => Math.Ceiling(Foot * (Loc.IsEnglish ? 3.7 : 2.7));
         // A single column wider than 480 DIP lays its quotas side by side with larger numbers.
         public Layout Wide() => this with
         {
@@ -45,20 +55,25 @@ public partial class MainWindow
         public double Required(int slots, bool inline) => Head + slots * QuotaHeight + Math.Max(0, slots - 1) * QuotaGap + FooterHeight(inline);
     }
 
-    private static double ToolbarFor(double panelHeight) => panelHeight < 170 ? 28 : panelHeight >= 320 ? 40 : 36;
+    private static double ToolbarFor(double panelHeight) => panelHeight < 150 ? 28 : panelHeight >= 290 ? 40 : 36;
 
     private static (Layout Layout, bool Inline, bool Wide) Fit(int count, int slots, double columnWidth, double panelHeight)
     {
-        bool wide = count == 1 && columnWidth >= 480;
+        bool wide = count == 1 && columnWidth >= 480 && slots <= 2;
         // Width limits the tier first; extra height only enlarges columns that are wide enough for it.
-        var byWidth = columnWidth >= 300 && count <= 2 ? Tier.Default : columnWidth >= 170 ? Tier.Dense : Tier.Compact;
-        var start = panelHeight < 170 ? Tier.Tiny : panelHeight >= 320 && columnWidth >= 260 ? Tier.Roomy : byWidth;
+        var byWidth = columnWidth >= 220 ? Tier.Default : columnWidth >= 170 ? Tier.Dense : Tier.Compact;
+        var start = panelHeight < 150 ? Tier.Tiny : panelHeight >= 290 && columnWidth >= 260 ? Tier.Roomy : byWidth;
         for (var tier = start; tier <= Tier.Tiny; tier++)
         {
             var layout = Layout.For(tier); if (wide) layout = layout.Wide();
-            bool inline = columnWidth >= 300 && (count <= 2 || tier == Tier.Roomy && columnWidth >= 260);
-            double available = panelHeight - layout.Toolbar - ContentBottomInset - ColumnTopInset;
-            if (layout.Required(wide ? 1 : slots, inline) <= available) return (layout, inline, wide);
+            // Totals sit side by side only when a column is wide enough for both groups at that tier's size.
+            bool inline = columnWidth >= (tier == Tier.Roomy ? 400 : tier == Tier.Default ? 340 : 300) && count <= 2;
+            double available = panelHeight - layout.Toolbar - layout.Bottom - ColumnTopInset;
+            // Narrow columns pick a small tier for their width alone; they keep the totals whenever the height still has room.
+            var candidates = panelHeight < 200 ? [layout with { Footer = false }]
+                : layout.Footer ? new[] { layout } : [layout with { Footer = true, FootTop = 4, FootBottom = 3 }, layout];
+            foreach (var candidate in candidates)
+                if (candidate.Required(wide ? 1 : slots, inline) <= available) return (candidate, inline, wide);
         }
         return (Layout.For(Tier.Tiny), false, wide);
     }
@@ -69,44 +84,62 @@ public partial class MainWindow
         return snapshot.Entries.Where(x => x.Time.LocalDateTime >= start).ToList();
     }
 
+    // The cheap part of a render: clock, mode label, status tooltip and the synchronization button. Run on every expansion.
+    internal void RefreshStatus()
+    {
+        RenderSyncButton();
+        RenderPageSwitch();
+        ClockLabel.Text = DateTime.Now.ToString("HH:mm");
+        ModeLabel.Text = _app.DemoMode && !_details ? Loc.T("演示", "Demo") : "";
+        var updateStatus = _refreshing ? Loc.T("更新中", "Updating") : LastRefreshError is not null ? Loc.T("更新失败", "Update failed") :
+            _updatedAt is { } time ? Loc.T($"更新于 {time.LocalDateTime:MM-dd HH:mm:ss}", $"Updated {time.LocalDateTime:MM-dd HH:mm:ss}") : Loc.T("尚未更新", "Not updated yet");
+        SettingsButton.ToolTip = Loc.T("设置", "Settings") + "\n" + updateStatus;
+    }
+
     public void RenderUsage()
     {
         if (UsageContent is null) return;
-        ViewButtons.Children.Clear(); PeriodButtons.Children.Clear(); UsageContent.Children.Clear();
-        ClockLabel.Text = DateTime.Now.ToString("HH:mm");
+        if (IsMusicPage) { RenderMusic(); return; }
+        MusicContent.Visibility = Visibility.Collapsed; UsageContent.Visibility = Visibility.Visible;
+        if (!Settings.UsagePage) _details = false;
+        RefreshStatus();
+        if (_detailPopup is not null) return;
+        if (_modelScroll is { IsLoaded: true }) _modelScrollOffset = _modelScroll.VerticalOffset;
+        _modelScroll = null;
+        ModelToolbar.Children.Clear(); UsageContent.Children.Clear();
+        ApplicationPages.Children.Clear(); ApplicationPages.Visibility = Visibility.Collapsed;
         double panelHeight = ContentCanvas.Height;
         ToolbarRow.Height = new GridLength(ToolbarFor(panelHeight));
-        ViewButtons.Children.Add(Segmented([new("用量", "AI 用量", !_details, () => ShowModelDetails(false)), new("模型", "模型明细", _details, () => ShowModelDetails(true))], 12, 18, 10));
-        if (_details)
-            PeriodButtons.Children.Add(Segmented(new[] { 1, 7, 30 }.Select(days => new SegmentItem(days == 1 ? "今日" : $"{days} 天", days == 1 ? "今日" : $"{days} 天", _days == days,
-                () => { _days = days; _modelPage = 0; RenderUsage(); })).ToList(), 11.5, 17, 8));
-        ModeLabel.Text = _app.DemoMode ? "演示" : "";
-        var updateStatus = _refreshing ? "更新中" : LastRefreshError is not null ? "更新失败" :
-            _updatedAt is { } time ? $"更新于 {time.LocalDateTime:MM-dd HH:mm:ss}" : "尚未更新";
-        SettingsButton.ToolTip = "设置\n" + updateStatus;
+        ClockLabel.Visibility = _details ? Visibility.Collapsed : Visibility.Visible;
+        ModelToolbar.Visibility = _details ? Visibility.Visible : Visibility.Collapsed;
 
-        var apps = Settings.EnabledApps;
+        // The compact rings may keep the data current while the AI usage page itself is switched off.
+        IReadOnlyList<AppEntry> apps = Settings.UsagePage ? Settings.EnabledApps : [];
+        IReadOnlyList<ProviderId> statistics = Settings.UsagePage ? Settings.StatisticsProviders : [];
+        SynchronizeModelSelection(statistics);
+        if (_details) RenderModelToolbar(statistics);
         if (apps.Count == 0)
         {
             var empty = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            empty.Children.Add(UI.Fixed(Settings.UsagePage ? "未选择应用" : "AI 用量已关闭", 14, 20, UI.Secondary));
-            var open = Segmented([new("打开设置", "打开设置", false, _app.OpenSettings)], 12, 22, 12);
+            empty.Children.Add(UI.Fixed(Settings.UsagePage ? Loc.T("未选择应用", "No apps selected") : Loc.T("AI 用量已关闭", "AI usage is off"), 14, 20, UI.Secondary));
+            var openText = Loc.T("打开设置", "Open settings");
+            var open = Segmented([new(openText, openText, false, _app.OpenSettings)], 12, 22, 12, centerText: true);
             open.Margin = new Thickness(0, 12, 0, 0); open.HorizontalAlignment = HorizontalAlignment.Center;
             empty.Children.Add(open); UsageContent.Children.Add(empty);
             return;
         }
-        var columns = apps.Select(entry => (Entry: entry, Snapshot: Snapshots.FirstOrDefault(x => x.Id == entry.Id) ?? new ProviderSnapshot(entry.Id))).ToList();
-        if (_details) RenderModels(columns.Select(x => x.Snapshot).ToList());
-        else RenderColumns(columns);
+        if (_details) RenderModels(DashboardUsage.Statistics(Settings, Snapshots));
+        else RenderColumns(DashboardUsage.Columns(Settings, Snapshots));
     }
 
     // A joined switch: one rounded strip, the selected segment filled. Buttons carry accessible names.
-    private static Border Segmented(IReadOnlyList<SegmentItem> items, double fontSize, double lineHeight, double padX)
+    private static Border Segmented(IReadOnlyList<SegmentItem> items, double fontSize, double lineHeight, double padX, bool centerText = false)
     {
         var strip = new StackPanel { Orientation = Orientation.Horizontal };
         foreach (var item in items)
         {
-            var text = UI.Fixed(item.Text, fontSize, lineHeight, UI.Secondary); text.ClearValue(TextBlock.ForegroundProperty); text.ClearValue(TextBlock.FontWeightProperty);
+            var text = centerText ? UI.Centered(item.Text, fontSize, UI.Secondary) : UI.Fixed(item.Text, fontSize, lineHeight, UI.Secondary);
+            text.ClearValue(TextBlock.ForegroundProperty); text.ClearValue(TextBlock.FontWeightProperty);
             var button = new Button { Style = (Style)Application.Current.FindResource("SegmentButton"), Content = text, Height = lineHeight, FontSize = fontSize,
                 Padding = new Thickness(padX, 0, padX, 0), Tag = item.Active ? "Selected" : null, ToolTip = item.Tip };
             button.Click += (_, _) => item.Select();
@@ -116,43 +149,68 @@ public partial class MainWindow
         return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(Math.Round(lineHeight / 3) + 1), Padding = new Thickness(1) };
     }
 
-    private QuotaView Quotas(ProviderSnapshot snapshot)
+    private QuotaView Quotas(AppEntry entry, ProviderSnapshot snapshot)
     {
-        var quotas = snapshot.Quotas.OrderBy(x => x.Minutes is > 0 ? x.Minutes.Value : int.MaxValue).ToList();
+        const int capacity = 2;
+        var quotas = snapshot.Metrics.OrderBy(x => x.Window is > 0 ? x.Window.Value : int.MaxValue).ToList();
         var groups = new List<string>();
-        string GroupOf(Quota quota) => UI.QuotaGroup(quota) is { Length: > 0 } group ? group : "其他";
-        if (snapshot.Id == ProviderId.Antigravity && quotas.Any(x => UI.QuotaGroup(x).Length > 0))
+        string GroupOf(UsageMetric quota) => UI.QuotaGroup(new Quota(quota.Label, 0, null)) is { Length: > 0 } group ? group : "其他";
+        if (snapshot.Id == ProviderId.Antigravity && quotas.Any(x => GroupOf(x) != "其他"))
         {
             groups = quotas.Select(GroupOf).Distinct().ToList();
-            if (!groups.Contains(_antigravityGroup)) _antigravityGroup = groups[0];
-            quotas = quotas.Where(x => GroupOf(x) == _antigravityGroup).ToList();
+            var selected = _quotaGroups.GetValueOrDefault(entry.InstanceId, "Gemini");
+            if (!groups.Contains(selected)) selected = groups[0];
+            _quotaGroups[entry.InstanceId] = selected;
+            quotas = quotas.Where(x => GroupOf(x) == selected).ToList();
         }
-        int pages = Math.Max(1, (quotas.Count + 1) / 2);
-        int page = Math.Clamp(_quotaPages.GetValueOrDefault(snapshot.Id), 0, pages - 1);
-        if (pages > 1) quotas = quotas.Skip(page * 2).Take(2).ToList();
+        int pages = Math.Max(1, (quotas.Count + capacity - 1) / capacity);
+        int page = Math.Clamp(_quotaPages.GetValueOrDefault(entry.InstanceId), 0, pages - 1);
+        if (pages > 1) quotas = quotas.Skip(page * capacity).Take(capacity).ToList();
         return new QuotaView(quotas, groups, pages, page);
     }
 
-    private void RenderColumns(List<(AppEntry Entry, ProviderSnapshot Snapshot)> columns)
+    private void RenderColumns(IReadOnlyList<DashboardColumn> columns)
     {
+        int pageSize = Math.Max(1, (int)((ContentCanvas.Width - 40) / AppPresets.MinimumColumnWidth));
+        int pages = Math.Max(1, (columns.Count + pageSize - 1) / pageSize);
+        _applicationPage = Math.Clamp(_applicationPage, 0, pages - 1);
+        if (pages > 1)
+        {
+            var controls = new StackPanel { Orientation = Orientation.Horizontal };
+            Button PageButton(string label, string name, int step)
+            {
+                var button = ModelAction(label, name, () => { _applicationPage += step; RenderUsage(); });
+                button.IsEnabled = step < 0 ? _applicationPage > 0 : _applicationPage + 1 < pages;
+                button.Padding = new Thickness(6, 0, 6, 0); return button;
+            }
+            controls.Children.Add(PageButton("‹", Loc.T("上一页应用", "Previous apps"), -1));
+            var page = UI.Centered($"{_applicationPage + 1}/{pages}", 11, UI.Secondary); page.Margin = new Thickness(4, 0, 4, 0);
+            page.ToolTip = Loc.T($"共 {columns.Count} 项应用", $"{columns.Count} apps in total"); controls.Children.Add(page);
+            controls.Children.Add(PageButton("›", Loc.T("下一页应用", "Next apps"), 1));
+            ApplicationPages.Children.Add(controls); ApplicationPages.Visibility = Visibility.Visible;
+            columns = columns.Skip(_applicationPage * pageSize).Take(pageSize).ToList();
+        }
         int count = columns.Count;
         double columnWidth = (ContentCanvas.Width - EdgeInset * 2) / count;
-        var views = columns.Select(x => Quotas(x.Snapshot)).ToList();
+        // Each page contains at most two quotas, regardless of the panel's height.
+        var views = columns.Select(x => Quotas(x.Entry, x.Quota)).ToList();
         int slots = views.Max(view => Math.Clamp(view.Quotas.Count, 1, 2));
         var (layout, inline, wide) = Fit(count, slots, columnWidth, ContentCanvas.Height);
         ToolbarRow.Height = new GridLength(layout.Toolbar);
+        UsageContent.Margin = new Thickness(EdgeInset, 0, EdgeInset, layout.Bottom);
         // Spare height is always split evenly above and below the quotas, so resizing moves them smoothly
         // instead of pinning them under the title until a threshold is crossed.
         const bool center = true;
         var grid = new UniformGrid { Columns = count, Rows = 1 };
         for (int i = 0; i < count; i++)
-            grid.Children.Add(Column(columns[i].Entry, columns[i].Snapshot, views[i], layout, inline, wide, center, i > 0, columnWidth - layout.ColumnPad * 2 - (i > 0 ? 1 : 0)));
+            grid.Children.Add(Column(columns[i].Entry, columns[i].Quota, columns[i].Usage, views[i], layout, inline, wide, center, i > 0, columnWidth - layout.ColumnPad * 2 - (i > 0 ? 1 : 0)));
         UsageContent.Children.Add(grid);
     }
 
-    private FrameworkElement Column(AppEntry entry, ProviderSnapshot snapshot, QuotaView view, Layout layout, bool inline, bool wide, bool center, bool separator, double innerWidth)
+    private FrameworkElement Column(AppEntry entry, ProviderSnapshot snapshot, ProviderSnapshot usage, QuotaView view, Layout layout, bool inline, bool wide, bool center, bool separator, double innerWidth)
     {
         bool off = view.Quotas.Count == 0;
+        void NextQuotaPage() { _quotaPages[entry.InstanceId] = (view.Page + 1) % view.Pages; RenderUsage(); }
         var column = new Grid();
         column.RowDefinitions.Add(new RowDefinition { Height = new GridLength(layout.Head) });
         column.RowDefinitions.Add(new RowDefinition());
@@ -164,12 +222,10 @@ public partial class MainWindow
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.ColumnDefinitions.Add(new ColumnDefinition());
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var name = UI.Fixed(snapshot.Name, layout.Name, layout.Head, off ? UI.Secondary : UI.Primary, FontWeights.SemiBold);
+        var name = UI.Centered(entry.Name, layout.Name, off ? UI.Secondary : UI.Primary, FontWeights.SemiBold);
         name.HorizontalAlignment = HorizontalAlignment.Left;
-        var tip = new List<string> { snapshot.Status, snapshot.Source, snapshot.QuotaTime?.LocalDateTime.ToString("MM-dd HH:mm:ss") ?? "" };
-        if (!layout.Footer) foreach (var (label, days) in new[] { ("今日", 1), ("7 天", 7) })
-            tip.Add(snapshot.UsageAvailable ? $"{label} {UI.Number(Entries(snapshot, days).Sum(x => x.Total))} · {UI.Cost(Entries(snapshot, days), _app.Prices)}" : $"{label} —");
-        name.ToolTip = string.Join("\n", tip.Where(x => !string.IsNullOrWhiteSpace(x)));
+        name.ToolTip = QuotaTooltip(snapshot);
+        AutomationProperties.SetAutomationId(name, "quota-title-" + entry.InstanceId.ToString("N"));
         head.Children.Add(name);
         name.Measure(new Size(double.PositiveInfinity, layout.Head));
         double nameWidth = name.DesiredSize.Width, occupied = 0;
@@ -180,13 +236,7 @@ public partial class MainWindow
             chip.Measure(new Size(double.PositiveInfinity, layout.Head)); occupied += chip.DesiredSize.Width;
         }
         FrameworkElement? control = null;
-        if (view.Groups.Count > 1) control = GroupSwitch(view.Groups, layout, innerWidth - occupied - nameWidth);
-        else if (view.Pages > 1)
-        {
-            control = Segmented([new($"{view.Page + 1}/{view.Pages} ›", "切换配额", false, () => { _quotaPages[snapshot.Id] = (view.Page + 1) % view.Pages; RenderUsage(); }, "切换配额")],
-                layout.Segment, Math.Ceiling(layout.Segment * 1.35), 6);
-            control.Margin = new Thickness(6, 0, 0, 0); control.VerticalAlignment = VerticalAlignment.Center;
-        }
+        if (view.Groups.Count > 1) control = GroupSwitch(entry, view.Groups, layout, innerWidth - occupied - nameWidth);
         if (control is not null)
         {
             Grid.SetColumn(control, 3); head.Children.Add(control);
@@ -231,22 +281,38 @@ public partial class MainWindow
         {
             var footer = new StackPanel();
             footer.Children.Add(new Border { Height = 1, Background = UI.Brush(UI.Hairline), Margin = new Thickness(0, layout.FootTop, 0, layout.FootBottom) });
-            var rows = new UniformGrid { Rows = inline ? 1 : 2, Columns = inline ? 2 : 1 };
-            var today = TotalRow(snapshot, "今日", 1, layout); var week = TotalRow(snapshot, "7 天", 7, layout);
-            if (inline) { today.Margin = new Thickness(0, 0, 8, 0); week.Margin = new Thickness(8, 0, 0, 0); }
-            rows.Children.Add(today); rows.Children.Add(week); footer.Children.Add(rows);
+            var today = TotalRow(entry, usage, Loc.T("今日", "Today"), 1, layout, inline); var week = TotalRow(entry, usage, Loc.T("7 天", "7 days"), 7, layout, inline);
+            if (inline)
+            {
+                // Side by side, each period is one tight group: today at the left edge, the week at the right edge.
+                var rows = new Grid();
+                today.HorizontalAlignment = HorizontalAlignment.Left; week.HorizontalAlignment = HorizontalAlignment.Right;
+                rows.Children.Add(today); rows.Children.Add(week); footer.Children.Add(rows);
+            }
+            else
+            {
+                var rows = new StackPanel(); rows.Children.Add(today); rows.Children.Add(week); footer.Children.Add(rows);
+            }
             Grid.SetRow(footer, 2); column.Children.Add(footer);
         }
-        return new Border
+        var surface = new Border
         {
             Child = column, Padding = new Thickness(layout.ColumnPad, ColumnTopInset, layout.ColumnPad, 0),
-            BorderThickness = new Thickness(separator ? 1 : 0, 0, 0, 0), BorderBrush = UI.Brush(UI.Hairline)
+            BorderThickness = new Thickness(separator ? 1 : 0, 0, 0, 0), BorderBrush = UI.Brush(UI.Hairline), Tag = entry.InstanceId
         };
+        if (view.Pages > 1)
+        {
+            surface.Background = Brushes.Transparent; surface.Cursor = Cursors.Hand;
+            AutomationProperties.SetHelpText(surface, Loc.T($"点击此列切换配额，第 {view.Page + 1} 页，共 {view.Pages} 页。", $"Click this column to switch quotas. Page {view.Page + 1} of {view.Pages}."));
+            // Buttons handle their own mouse events, so statistics links and group switches act only once.
+            surface.MouseLeftButtonUp += (_, e) => { e.Handled = true; NextQuotaPage(); };
+        }
+        return surface;
     }
 
     private static Border PlanChip(ProviderSnapshot snapshot, Layout layout)
     {
-        var text = UI.Fixed(UI.DisplayPlan(snapshot.Plan), layout.Plan, Math.Ceiling(layout.Plan * 1.45), UI.Tertiary);
+        var text = UI.Centered(UI.DisplayPlan(snapshot.Plan), layout.Plan, UI.Tertiary);
         return new Border
         {
             Child = text, BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4),
@@ -255,19 +321,22 @@ public partial class MainWindow
         };
     }
 
-    // Full group names when the title row has room, then a three-letter form, then initials.
-    private Border GroupSwitch(List<string> groups, Layout layout, double available)
+    // Full group names when the title row has room, then a three-letter form, then initials. Groups keep the data's words
+    // as their keys; "其他" is shown translated.
+    private Border GroupSwitch(AppEntry entry, List<string> groups, Layout layout, double available)
     {
+        var names = groups.Select(Loc.Label).ToList();
         string[][] variants =
         [
-            groups.ToArray(),
-            groups.Select(group => group.Length > 3 ? group[..3] + "…" : group).ToArray(),
-            groups.Select(group => group[..1]).ToArray()
+            names.ToArray(),
+            names.Select(name => name.Length > 3 ? name[..3] + "…" : name).ToArray(),
+            names.Select(name => name[..1]).ToArray()
         ];
         Border chosen = null!;
         foreach (var labels in variants)
         {
-            var items = groups.Select((group, i) => new SegmentItem(labels[i], "Antigravity " + group, group == _antigravityGroup, () => SelectQuotaGroup(group), labels[i] == group ? null : group)).ToList();
+            var items = groups.Select((group, i) => new SegmentItem(labels[i], "Antigravity " + group,
+                group == _quotaGroups.GetValueOrDefault(entry.InstanceId, "Gemini"), () => SelectQuotaGroup(entry.InstanceId, group), labels[i] == names[i] ? null : names[i])).ToList();
             chosen = Segmented(items, layout.Segment, Math.Ceiling(layout.Segment * 1.35), labels == variants[0] ? 7 : 5);
             chosen.Measure(new Size(double.PositiveInfinity, layout.Head));
             if (chosen.DesiredSize.Width + 6 <= available) break;
@@ -277,32 +346,60 @@ public partial class MainWindow
     }
 
     // Three rows per quota: the period name, the used share with its reset countdown, and the track.
-    private static Grid QuotaBlock(AppEntry entry, Quota quota, Layout layout)
+    private static Grid QuotaBlock(AppEntry entry, UsageMetric quota, Layout layout)
     {
-        double used = Math.Clamp(quota.UsedPercent, 0, 100);
-        string color = AppPresets.QuotaColor(entry, used);
-        int level = AppPresets.Level(used);
+        double used = Math.Clamp(quota.UsedPercent ?? 100, 0, 100);
+        string color = quota.UsedPercent is null ? entry.Theme : AppPresets.QuotaColor(entry, used);
+        int level = quota.UsedPercent is null ? 0 : AppPresets.Level(used);
         var block = new Grid();
         foreach (double height in new[] { layout.LabelRow, layout.RowGap, layout.NumberRow, layout.RowGap, layout.Track })
             block.RowDefinitions.Add(new RowDefinition { Height = new GridLength(height) });
-        var label = UI.Fixed(UI.QuotaLabel(quota), layout.Label, layout.LabelRow, UI.Secondary); label.ToolTip = quota.Label; label.HorizontalAlignment = HorizontalAlignment.Left;
-        block.Children.Add(label);
+        var labelRow = new Grid(); labelRow.ColumnDefinitions.Add(new ColumnDefinition()); labelRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var label = UI.Fixed(MetricLabel(quota), layout.Label, layout.LabelRow, UI.Secondary); label.ToolTip = Loc.Label(quota.Label); label.HorizontalAlignment = HorizontalAlignment.Left;
+        labelRow.Children.Add(label); block.Children.Add(labelRow);
         // The number always shows in full; the countdown at the right is what gives way in a narrow column.
-        var numbers = new Grid(); numbers.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); numbers.ColumnDefinitions.Add(new ColumnDefinition());
+        var numbers = new Grid(); numbers.ColumnDefinitions.Add(new ColumnDefinition()); numbers.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         Grid.SetRow(numbers, 2);
         var number = new TextBlock { FontFamily = UI.DisplayFont, LineHeight = layout.NumberRow, LineStackingStrategy = LineStackingStrategy.BlockLineHeight, Height = layout.NumberRow,
-            TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
-        number.Inlines.Add(new Run($"{used:0.#}%") { FontSize = layout.Number, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(level > 0 ? color : UI.Primary) });
-        if (layout.UsedWord) number.Inlines.Add(new Run(" 已用") { FontSize = 11, FontFamily = UI.PanelFont, Foreground = UI.Brush(UI.Tertiary) });
-        number.ToolTip = $"已用 {used:0.#}% · 剩余 {quota.Remaining:0.#}%";
+            TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
+        // A custom item without a value leaves the row empty; the row keeps its height so blocks stay aligned.
+        if (quota.ValueText.Length > 0) number.Inlines.Add(new Run(quota.ValueText) { FontSize = layout.Number, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(level > 0 ? color : UI.Primary) });
+        if (layout.UsedWord && quota.ValueSuffix.Length > 0) number.Inlines.Add(new Run(" " + quota.ValueSuffix) { FontSize = 11, FontFamily = UI.PanelFont, Foreground = UI.Brush(UI.Tertiary) });
+        number.ToolTip = quota.Kind switch
+        {
+            MetricKind.Balance => Loc.T("可用 " + quota.ValueText, quota.ValueText + " available")
+                + (quota.Total is { } total ? Loc.T(" · 总额 " + UsageMetric.Money(total, quota.Currency), " · " + UsageMetric.Money(total, quota.Currency) + " total") : ""),
+            MetricKind.Spend => Loc.T("已用 " + quota.ValueText, quota.ValueText + " used") + (quota.Unlimited ? Loc.T(" · 无上限", " · no limit") : ""),
+            MetricKind.Count => CountTooltip(quota),
+            _ => MetricPercentTooltip(quota)
+        };
         numbers.Children.Add(number);
         var resetText = UI.ShortReset(quota.ResetAt);
-        if (resetText.Length > 0)
+        var expiryText = quota.ExpiresAt is { } expiry ? (expiry <= DateTimeOffset.Now ? Loc.T("已到期", "Expired") : Loc.T(UI.ShortReset(expiry) + "到期", "expires " + UI.ShortReset(expiry))) : "";
+        var countText = CountLabel(quota);
+        var sideText = countText.Length > 0 ? countText : quota.Kind == MetricKind.Balance && quota.UsedPercent is { } percent ? Loc.T($"{Math.Max(0, percent):0.#}% 已用", $"{Math.Max(0, percent):0.#}% used") : quota.Unlimited ? Loc.T("无上限", "No limit") : "";
+        // Times sit beside the number, next to the track; shares, counts and "无上限" sit at the label's right.
+        // A quota with both a reset and an expiry keeps the reset below and moves the expiry up.
+        bool expiryAbove = resetText.Length > 0 && expiryText.Length > 0;
+        // A custom item places its own strings in the same two spots.
+        bool text = quota.Kind == MetricKind.Text;
+        var upperText = text ? quota.Note : expiryAbove ? expiryText : sideText;
+        if (upperText.Length > 0)
         {
-            var reset = UI.Line(resetText, layout.Reset, UI.Tertiary); reset.FontFamily = UI.PanelFont;
-            reset.VerticalAlignment = VerticalAlignment.Bottom; reset.HorizontalAlignment = HorizontalAlignment.Right; reset.Margin = new Thickness(8, 0, 0, 1);
-            reset.ToolTip = quota.ResetAt?.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
-            Grid.SetColumn(reset, 1); numbers.Children.Add(reset);
+            var reset = UI.Fixed(upperText, layout.Reset, layout.LabelRow, UI.Tertiary);
+            reset.HorizontalAlignment = HorizontalAlignment.Right; reset.Margin = new Thickness(6, 0, 0, 0);
+            reset.ToolTip = text ? null : expiryAbove ? quota.ExpiresAt!.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")
+                : countText.Length > 0 ? CountTooltip(quota) : MetricPercentTooltip(quota);
+            Grid.SetColumn(reset, 1); labelRow.Children.Add(reset);
+        }
+        var rightText = text ? quota.ResetText : resetText.Length > 0 ? resetText : expiryText;
+        if (rightText.Length > 0)
+        {
+            var right = UI.Line(rightText, layout.Reset, UI.Tertiary);
+            right.FontFamily = UI.PanelFont;
+            right.ToolTip = text ? null : (quota.ResetAt ?? quota.ExpiresAt)!.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
+            right.VerticalAlignment = VerticalAlignment.Bottom; right.HorizontalAlignment = HorizontalAlignment.Right;
+            right.Margin = new Thickness(6, 0, 0, 1); Grid.SetColumn(right, 1); numbers.Children.Add(right);
         }
         block.Children.Add(numbers);
         var track = new Grid(); Grid.SetRow(track, 4);
@@ -314,63 +411,59 @@ public partial class MainWindow
         return block;
     }
 
-    private Grid TotalRow(ProviderSnapshot snapshot, string label, int days, Layout layout)
+    // A rounded share hides small usage of a large grant, so counts show the exact amounts.
+    private static string? CountTooltip(UsageMetric metric)
+    {
+        if (metric is not { Used: { } used, Total: { } total }) return MetricPercentTooltip(metric);
+        var unit = metric.Unit.Length > 0 ? " " + Loc.Label(metric.Unit) : "";
+        return Loc.T($"已用 {used:N0}{unit} · 剩余 {Math.Max(0, total - used):N0}{unit}\n总额 {total:N0}{unit}",
+            $"{used:N0}{unit} used · {Math.Max(0, total - used):N0}{unit} left\n{total:N0}{unit} total");
+    }
+
+    // Counts in the hundreds of thousands, such as token grants, are abbreviated so the title keeps its room.
+    private static string CountLabel(UsageMetric metric) => metric is { Kind: MetricKind.Count, Used: { } used, Total: { } total }
+        ? total >= 100_000 ? $"{UI.Number((long)used)} / {UI.Number((long)total)}" : metric.CountText : "";
+
+    private static string? MetricPercentTooltip(UsageMetric metric) => metric.UsedPercent is { } percent
+        ? Loc.T($"已用 {Math.Max(0, percent):0.#}% · 剩余 {Math.Max(0, 100 - percent):0.#}%", $"{Math.Max(0, percent):0.#}% used · {Math.Max(0, 100 - percent):0.#}% left") : null;
+
+    private static string? QuotaTooltip(ProviderSnapshot snapshot)
+    {
+        var lines = new List<string>();
+        // Quota values, windows and the plan already appear in the column.
+        if (snapshot.QuotaTime is { } time) lines.Add(Loc.T($"更新时间：{time.LocalDateTime:MM-dd HH:mm:ss}", $"Updated: {time.LocalDateTime:MM-dd HH:mm:ss}"));
+        if ((!snapshot.LiveQuota || snapshot.IsStale) && snapshot.Status.Length > 0 && snapshot.Status != Loc.T("已连接", "Connected")) lines.Add(snapshot.Status);
+        return lines.Count > 0 ? string.Join("\n", lines) : snapshot.LiveQuota || snapshot.Metrics.Count > 0 ? null : Loc.T("尚未获取配额", "Quota not read yet");
+    }
+    private static string MetricLabel(UsageMetric metric) => metric.Kind == MetricKind.Text ? metric.Label : UI.QuotaLabel(new Quota(metric.Label, 0, null, metric.Window));
+
+    // Stacked: caption | tokens ... cost, so both rows line up. Grouped (side by side): caption, tokens and cost close together.
+    private FrameworkElement TotalRow(AppEntry entry, ProviderSnapshot snapshot, string label, int days, Layout layout, bool grouped = false)
     {
         var entries = Entries(snapshot, days);
         var row = new Grid { Height = layout.FootRow };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, MinWidth = 30 }); row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var caption = UI.Fixed(label, layout.Foot, layout.FootRow, UI.Tertiary); caption.Margin = new Thickness(0, 0, 8, 0); caption.HorizontalAlignment = HorizontalAlignment.Left; row.Children.Add(caption);
-        var tokens = UI.Fixed(snapshot.UsageAvailable ? UI.Number(entries.Sum(x => x.Total)) : "—", layout.Foot, layout.FootRow, UI.Secondary); tokens.HorizontalAlignment = HorizontalAlignment.Left;
-        tokens.ToolTip = snapshot.UsageAvailable ? $"{label} Token · {entries.Sum(x => x.Total):N0}" : snapshot.UsageNote; Grid.SetColumn(tokens, 1); row.Children.Add(tokens);
-        var price = UI.Fixed(snapshot.UsageAvailable ? UI.Cost(entries, _app.Prices) : "—", layout.Foot, layout.FootRow, snapshot.UsageAvailable ? UI.Primary : UI.Tertiary, FontWeights.SemiBold);
-        price.Margin = new Thickness(8, 0, 0, 0); price.ToolTip = snapshot.UsageAvailable ? UI.CostNote(entries, _app.Prices) : snapshot.UsageNote; Grid.SetColumn(price, 2); row.Children.Add(price);
-        return row;
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.CaptionWidth) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = grouped ? GridLength.Auto : new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+        // Captions end on one vertical line, so "今日" and "7 天" stack cleanly and both figures start at the same distance.
+        // The English caption is written "7days" without a space, as the user chose.
+        var caption = UI.Centered(Loc.IsEnglish ? label.Replace(" ", "") : label, layout.Foot, UI.Tertiary); caption.Margin = new Thickness(0, 0, 8, 0); caption.HorizontalAlignment = HorizontalAlignment.Right; row.Children.Add(caption);
+        FrameworkElement tokens = snapshot.UsageAvailable ? UI.Centered(UI.Number(entries.Sum(x => x.Total)), layout.Foot, UI.Secondary)
+            : UI.CenteredSymbol("—", layout.Foot, UI.Secondary);
+        tokens.HorizontalAlignment = HorizontalAlignment.Left;
+        tokens.ToolTip = ProviderCatalog.UsageTip(snapshot.Id) + "\n" + (snapshot.UsageAvailable ? Loc.T($"{label} Token · {entries.Sum(x => x.Total):N0}", $"{label} tokens · {entries.Sum(x => x.Total):N0}") : snapshot.UsageNote); Grid.SetColumn(tokens, 1); row.Children.Add(tokens);
+        FrameworkElement price = snapshot.UsageAvailable ? UI.Centered(UI.Cost(entries, _app.Prices), layout.Foot, UI.Primary, FontWeights.SemiBold)
+            : UI.CenteredSymbol("—", layout.Foot, UI.Tertiary, FontWeights.SemiBold);
+        price.Margin = new Thickness(grouped ? 12 : 8, 0, 0, 0); price.ToolTip = snapshot.UsageAvailable ? UI.CostNote(entries, _app.Prices) : snapshot.UsageNote; Grid.SetColumn(price, 2); row.Children.Add(price);
+        var arrow = UI.CenteredSymbol("›", layout.Foot + 1, UI.Tertiary); arrow.HorizontalAlignment = HorizontalAlignment.Right;
+        Grid.SetColumn(arrow, 3); row.Children.Add(arrow);
+        var link = DetailLink(row, Loc.T($"查看 {entry.Name} {label}明细", $"Show {entry.Name} {label.ToLowerInvariant()} details"), () => OpenModelDetails(snapshot.Id, days));
+        // Extend the highlight into the column inset without shifting the aligned totals.
+        link.Padding = new Thickness(6, 0, 6, 0);
+        link.Margin = new Thickness(-6, 0, -6, 0);
+        AutomationProperties.SetAutomationId(link, $"usage-{days}-{entry.InstanceId:N}");
+        return link;
     }
 
-    private void RenderModels(List<ProviderSnapshot> snapshots)
-    {
-        var rows = snapshots.SelectMany(s => Entries(s, _days).GroupBy(x => x.Model).Select(g => new { Snapshot = s, Model = g.Key, Tokens = g.ToList() })).OrderByDescending(x => x.Tokens.Sum(t => t.Total)).ToList();
-        const double rowHeight = 27, headerHeight = 22, pagerHeight = 24;
-        double available = ContentCanvas.Height - ToolbarFor(ContentCanvas.Height) - ContentBottomInset - 4;
-        int pageSize = Math.Clamp((int)Math.Floor((available - headerHeight - pagerHeight) / rowHeight), 1, 8);
-        int pages = Math.Max(1, (rows.Count + pageSize - 1) / pageSize); _modelPage = Math.Clamp(_modelPage, 0, pages - 1);
-        var panel = new Grid();
-        panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(headerHeight) }); panel.RowDefinitions.Add(new RowDefinition()); panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(pagerHeight) });
-        Grid ModelRow(string app, string model, string total, string price, bool header)
-        {
-            var row = new Grid { Height = header ? headerHeight : rowHeight };
-            foreach (double width in new[] { 1.1, 3.4, 1.8, 1.5 }) row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width, GridUnitType.Star) });
-            string[] values = [app, model, total, price];
-            for (int i = 0; i < values.Length; i++)
-            {
-                var text = header ? UI.Fixed(values[i], 11, headerHeight, UI.Tertiary)
-                    : UI.Fixed(values[i], 12.5, rowHeight, i == 1 ? UI.Secondary : UI.Primary, i == 0 || i == 3 ? FontWeights.SemiBold : FontWeights.Normal);
-                text.HorizontalAlignment = i >= 2 ? HorizontalAlignment.Right : HorizontalAlignment.Left;
-                if (i > 0) text.Margin = new Thickness(12, 0, 0, 0);
-                Grid.SetColumn(text, i); row.Children.Add(text);
-            }
-            return row;
-        }
-        var headerRow = new Border { Child = ModelRow("应用", "模型", "Token", "费用 · USD", true), BorderBrush = UI.Brush(UI.Hairline), BorderThickness = new Thickness(0, 0, 0, 1) };
-        panel.Children.Add(headerRow);
-        var list = new StackPanel(); Grid.SetRow(list, 1); panel.Children.Add(list);
-        foreach (var row in rows.Skip(_modelPage * pageSize).Take(pageSize))
-        {
-            var item = new Border { Child = ModelRow(row.Snapshot.Name, row.Model, UI.Number(row.Tokens.Sum(x => x.Total)), UI.Cost(row.Tokens, _app.Prices), false),
-                BorderBrush = UI.Brush("#0DFFFFFF"), BorderThickness = new Thickness(0, list.Children.Count > 0 ? 1 : 0, 0, 0) };
-            item.ToolTip = UI.CostNote(row.Tokens, _app.Prices) + $"\n输入 {row.Tokens.Sum(x => x.Input):N0} · 缓存 {row.Tokens.Sum(x => x.CacheRead + x.CacheWrite + x.CacheWriteHour):N0} · 输出 {row.Tokens.Sum(x => x.Output):N0}";
-            list.Children.Add(item);
-        }
-        if (rows.Count == 0) { var empty = UI.Fixed("暂无用量明细", 13, 20, UI.Tertiary); empty.Margin = new Thickness(0, 24, 0, 0); empty.HorizontalAlignment = HorizontalAlignment.Center; list.Children.Add(empty); }
-        if (pages > 1)
-        {
-            var navigation = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
-            var previous = Segmented([new("‹", "上一页", false, () => { _modelPage--; RenderUsage(); }, "上一页")], 12, 18, 7); previous.IsEnabled = _modelPage > 0;
-            var count = UI.Fixed($"{_modelPage + 1} / {pages}", 11, 18, UI.Tertiary); count.Margin = new Thickness(10, 0, 10, 0);
-            var next = Segmented([new("›", "下一页", false, () => { _modelPage++; RenderUsage(); }, "下一页")], 12, 18, 7); next.IsEnabled = _modelPage < pages - 1;
-            navigation.Children.Add(previous); navigation.Children.Add(count); navigation.Children.Add(next);
-            Grid.SetRow(navigation, 2); panel.Children.Add(navigation);
-        }
-        UsageContent.Children.Add(new Border { Child = panel, Padding = new Thickness(14, 0, 14, 0) });
-    }
 }

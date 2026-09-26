@@ -1,5 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Media;
+using BrimDeck.Core;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
@@ -19,31 +21,70 @@ public sealed class TrayIcon : IDisposable
         _settings = settings; _exit = exit;
         var hwnd = new WindowInteropHelper(owner).Handle;
         _source = HwndSource.FromHwnd(hwnd); _source.AddHook(Hook);
-        var path = Environment.ProcessPath!;
-        var icon = ExtractIcon(IntPtr.Zero, path, 0);
-        if (icon == IntPtr.Zero || icon == new IntPtr(1)) icon = LoadIcon(IntPtr.Zero, new IntPtr(32512));
         _data = new NOTIFYICONDATA { Size = Marshal.SizeOf<NOTIFYICONDATA>(), Window = hwnd, Id = 1, Flags = 1 | 2 | 4, CallbackMessage = Callback,
-            Icon = icon, Tip = "BrimDeck · 右键打开设置", Info = "", InfoTitle = "" };
+            Icon = LoadTrayIcon(out _ownsIcon), Tip = "BrimDeck", Info = "", InfoTitle = "" };
         Shell_NotifyIcon(0, ref _data);
+    }
+    private bool _ownsIcon;
+    private long _dpi;
+    // The notification area shows the small icon size at the primary monitor's scale. The executable's icon group carries
+    // every size, so the exact one is extracted instead of scaling another.
+    private static IntPtr LoadTrayIcon(out bool owned)
+    {
+        var (_, _, scale) = WindowsHost.PrimaryScreen();
+        uint size = (uint)GetSystemMetricsForDpi(49 /* SM_CXSMICON */, (uint)Math.Round(96 * scale));
+        if (SHDefExtractIcon(Environment.ProcessPath!, 0, 0, out var large, out var small, size | size << 16) == 0)
+        {
+            if (large != IntPtr.Zero && large != small) DestroyIcon(large);
+            if (small != IntPtr.Zero) { owned = true; return small; }
+        }
+        owned = false; return LoadIcon(IntPtr.Zero, new IntPtr(32512));
+    }
+    // A scale or display change can change the small icon size, which otherwise stays at the size from start-up.
+    private void ReloadIcon()
+    {
+        var (previous, ownedPrevious) = (_data.Icon, _ownsIcon);
+        _data.Icon = LoadTrayIcon(out _ownsIcon);
+        Shell_NotifyIcon(1 /* NIM_MODIFY */, ref _data);
+        if (ownedPrevious) DestroyIcon(previous);
     }
     private IntPtr Hook(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if ((uint)message == _taskbarCreated) Shell_NotifyIcon(0, ref _data);
+        // WM_DPICHANGED carries the new DPI in its low word; it can arrive without a change, which needs no new icon.
+        if (message == 0x02E0 /* WM_DPICHANGED */ && (wParam.ToInt64() & 0xFFFF) is var dpi && dpi != _dpi) { _dpi = dpi; ReloadIcon(); }
+        if (message == 0x007E /* WM_DISPLAYCHANGE */) ReloadIcon();
         if (message != Callback) return IntPtr.Zero;
         var mouseMessage = lParam.ToInt32() & 0xffff;
         if (mouseMessage == 0x203) _settings();
         if (mouseMessage == 0x205)
         {
             SetForegroundWindow(hwnd);
-            var menu = new ContextMenu { Placement = PlacementMode.MousePoint };
-            var settings = new MenuItem { Header = "设置…" }; settings.Click += (_, _) => _settings(); menu.Items.Add(settings);
-            menu.Items.Add(new Separator());
-            var exit = new MenuItem { Header = "退出 BrimDeck" }; exit.Click += (_, _) => _exit(); menu.Items.Add(exit);
+            var menu = CreateMenu(_settings, _exit);
+            menu.Placement = PlacementMode.MousePoint;
             menu.IsOpen = true;
         }
         return IntPtr.Zero;
     }
-    public void Dispose() { Shell_NotifyIcon(2, ref _data); _source.RemoveHook(Hook); }
+    // Shared with the UI smoke run, which renders the menu without a tray.
+    internal static ContextMenu CreateMenu(Action settings, Action exit)
+    {
+        var menu = new ContextMenu();
+        // Tray menus belong to the shell, so they follow the system's app theme rather than the settings window's palette.
+        if (!SettingsPalette.IsDark(SettingsTheme.System))
+        {
+            menu.Resources["MenuSurface"] = new SolidColorBrush(Color.FromRgb(0xF9, 0xF9, 0xF9));
+            menu.Resources["MenuInk"] = new SolidColorBrush(Color.FromRgb(0x1B, 0x1B, 0x1B));
+            menu.Resources["MenuEdge"] = new SolidColorBrush(Color.FromArgb(0x17, 0, 0, 0));
+            menu.Resources["MenuHover"] = new SolidColorBrush(Color.FromRgb(0xE9, 0xE9, 0xE9));
+            menu.Resources["MenuRule"] = new SolidColorBrush(Color.FromRgb(0xE1, 0xE1, 0xE1));
+        }
+        var open = new MenuItem { Header = Loc.T("设置", "Settings") }; open.Click += (_, _) => settings(); menu.Items.Add(open);
+        menu.Items.Add(new Separator());
+        var quit = new MenuItem { Header = Loc.T("退出", "Exit") }; quit.Click += (_, _) => exit(); menu.Items.Add(quit);
+        return menu;
+    }
+    public void Dispose() { Shell_NotifyIcon(2, ref _data); _source.RemoveHook(Hook); if (_ownsIcon) DestroyIcon(_data.Icon); }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] private struct NOTIFYICONDATA
     {
         public int Size; public IntPtr Window; public uint Id, Flags, CallbackMessage; public IntPtr Icon;
@@ -55,7 +96,9 @@ public sealed class TrayIcon : IDisposable
         public uint InfoFlags; public Guid GuidItem; public IntPtr BalloonIcon;
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern bool Shell_NotifyIcon(uint message, ref NOTIFYICONDATA data);
-    [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern IntPtr ExtractIcon(IntPtr instance, string file, uint index);
+    [DllImport("shell32", CharSet = CharSet.Unicode, EntryPoint = "SHDefExtractIconW")] private static extern int SHDefExtractIcon(string file, int index, uint flags, out IntPtr large, out IntPtr small, uint size);
+    [DllImport("user32")] private static extern int GetSystemMetricsForDpi(int index, uint dpi);
+    [DllImport("user32")] private static extern bool DestroyIcon(IntPtr icon);
     [DllImport("user32", CharSet = CharSet.Unicode)] private static extern IntPtr LoadIcon(IntPtr instance, IntPtr name);
     [DllImport("user32")] private static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32", CharSet = CharSet.Unicode)] private static extern uint RegisterWindowMessage(string message);

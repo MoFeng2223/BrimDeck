@@ -11,38 +11,54 @@ public interface IDesktopSources
     ClaudeDesktopState ReadClaudeDesktop(DataLocations locations) => new(false, []);
     string? ReadCursorToken(string database);
     Task<IReadOnlyList<LocalEndpoint>> FindAntigravityAsync(CancellationToken cancellation);
+    // Runs a read-only query against a local SQLite database; null means the database could not be opened or queried.
+    IReadOnlyList<string?[]>? QueryDatabase(string database, string sql) => null;
 }
 
-public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null) : IDisposable
+public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null) : IDisposable
 {
     // Every provider uses the panel's shared refresh cycle. Claude may display local history
     // after an unsuccessful request, but it does not delay the next scheduled refresh.
-    private const string ClaudeUsageNote = " Token 统计来自本机 Claude Code 会话，不包含桌面版普通聊天。";
+    private static string ClaudeUsageNote => Loc.T(" Token 统计来自本机 Claude Code 会话，不包含桌面版普通聊天。",
+        " Token statistics come from local Claude Code sessions and do not include regular chats in the desktop app.");
     private readonly HttpClient _http = http ?? new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(12) };
+    // ZCode's own service (Start Plan and MCP allowances) can take tens of seconds; those requests finish in the background.
+    private readonly HttpClient _zcodeHttp = http ?? new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(45) };
+    private readonly LatestResponse _zcodeStart = new(), _zcodeMcp = new();
+    private (string Account, ProviderResult Result, DateTimeOffset Time)? _zcodeCoding;
     private readonly DataLocations _locations = locations ?? DataLocations.Detect();
     private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.Now);
     private readonly LogReader _logs = new();
+    private readonly AntigravityUsage _antigravity = new();
     private readonly SemaphoreSlim _gate = new(1);
     private ClaudeQuotaSnapshot? _claudeRetained;
+    private readonly ConfiguredProviders _configured = new(secrets, http, clock);
+    public Task<ProviderTestResult> TestProviderAsync(AppEntry entry, CancellationToken ct = default) => _configured.TestAsync(entry, ct);
 
-    public async Task<List<ProviderSnapshot>> RefreshAsync(DeckSettings settings, CancellationToken cancellation = default)
+    public async Task<List<ProviderSnapshot>> RefreshAsync(DeckSettings settings, CancellationToken cancellation = default, DateTime? usageStart = null)
     {
         await _gate.WaitAsync(cancellation);
         try
         {
-            var tasks = Enum.GetValues<ProviderId>().Where(settings.Enabled).Select(id => FetchAsync(id, cancellation));
-            return (await Task.WhenAll(tasks)).ToList();
+            // Each underlying source is read once, even when several columns reuse it.
+            var required = settings.RequiredProviders;
+            var tasks = ProviderCatalog.UsageSources.Where(required.Contains).Select(id => FetchAsync(id, usageStart, cancellation));
+            var configured = _configured.RefreshAsync(settings.EnabledApps, cancellation);
+            return [.. await Task.WhenAll(tasks), .. await configured];
         }
         finally { _gate.Release(); }
     }
 
-    private async Task<ProviderSnapshot> FetchAsync(ProviderId id, CancellationToken ct)
+    private async Task<ProviderSnapshot> FetchAsync(ProviderId id, DateTime? usageStart, CancellationToken ct)
     {
         var now = _clock();
+        var start = new DateTimeOffset(usageStart?.Date ?? now.LocalDateTime.Date.AddDays(-29));
         // The reader owns a cache and is accessed serially before the first asynchronous request.
         var snapshot = id is ProviderId.Claude or ProviderId.Codex
-            ? _logs.Read(id, id == ProviderId.Codex ? _locations.CodexHome : _locations.ClaudeHome, now) : new ProviderSnapshot(id);
+            ? _logs.Read(id, id == ProviderId.Codex ? _locations.CodexHome : _locations.ClaudeHome, now, start.LocalDateTime) : new ProviderSnapshot(id) { UsageStart = start.LocalDateTime.Date };
         if (id == ProviderId.Claude) ReadClaudeProfile(snapshot);
+        if (id == ProviderId.ZCode) ZCodeUsage.Read(snapshot, desktop, _locations.ZCodeHome, start, now);
+        if (id == ProviderId.Antigravity) _antigravity.Read(snapshot, desktop, _locations.AntigravityConversations, start, now);
         try
         {
             switch (id)
@@ -52,7 +68,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     using var auth = ReadJson(Path.Combine(_locations.CodexHome, "auth.json"));
                     var tokens = auth?.RootElement.Get("tokens") ?? default;
                     var token = tokens.Get("access_token").Text();
-                    if (token.Length == 0) { snapshot.StatusLabel = "未连接"; snapshot.Status = "请先登录 Codex"; break; }
+                    if (token.Length == 0) { snapshot.StatusLabel = Loc.T("未连接", "Not connected"); snapshot.Status = Loc.T("请先登录 Codex", "Sign in to Codex first"); break; }
                     using var request = Bearer(HttpMethod.Get, "https://chatgpt.com/backend-api/wham/usage", token);
                     var account = tokens.Get("account_id").Text();
                     if (account.Length > 0) request.Headers.TryAddWithoutValidation("ChatGPT-Account-Id", account);
@@ -61,38 +77,45 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     if (quotas.Count == 0) throw new InvalidDataException();
                     snapshot.Quotas = quotas;
                     snapshot.Plan = doc.RootElement.Get("plan_type").Text();
-                    snapshot.PlanSource = "Codex 账户";
-                    Connected(snapshot, "Codex 账户", now);
+                    snapshot.PlanSource = Loc.T("Codex 账户", "Codex account");
+                    Connected(snapshot, Loc.T("Codex 账户", "Codex account"), now);
                     break;
                 }
                 case ProviderId.Claude:
                     await ReadClaudeAsync(snapshot, now, ct);
                     break;
                 case ProviderId.Cursor:
-                    await ReadCursorAsync(snapshot, now, ct);
+                    await ReadCursorAsync(snapshot, now, start, ct);
                     break;
                 case ProviderId.Antigravity:
-                    await ReadAntigravityAsync(snapshot, now, ct);
+                    await ReadAntigravityAsync(snapshot, now, start, ct);
+                    break;
+                case ProviderId.ZCode:
+                    await ReadZCodeAsync(snapshot, now, ct);
                     break;
             }
         }
         catch (HttpRequestException ex)
         {
-            snapshot.StatusLabel = ex.StatusCode switch { HttpStatusCode.Unauthorized => "登录已失效", HttpStatusCode.Forbidden => "访问受限", _ => "暂不可用" };
+            snapshot.StatusLabel = ex.StatusCode switch
+            { HttpStatusCode.Unauthorized => Loc.T("登录已失效", "Sign-in expired"), HttpStatusCode.Forbidden => Loc.T("访问受限", "Access denied"), _ => Loc.T("暂不可用", "Unavailable") };
             snapshot.Status = ex.StatusCode switch
             {
-                HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => "登录已失效或账户接口拒绝访问，请在原应用重新登录",
-                HttpStatusCode.TooManyRequests => "请求频繁，稍后自动重试",
-                _ => "账户接口暂时不可用"
+                HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => Loc.T("登录已失效或账户接口拒绝访问，请在原应用重新登录",
+                    "The sign-in has expired or the account API refused access. Sign in again in the original app."),
+                HttpStatusCode.TooManyRequests => Loc.T("请求频繁，稍后自动重试", "Too many requests. Retrying automatically later."),
+                _ => Loc.T("账户接口暂时不可用", "The account API is temporarily unavailable.")
             };
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { snapshot.StatusLabel = "读取超时"; snapshot.Status = "读取超时，稍后重试"; }
-        catch (InvalidDataException) { snapshot.StatusLabel = "数据不可用"; snapshot.Status = "数据格式发生变化，暂时无法读取配额"; }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        { snapshot.StatusLabel = Loc.T("读取超时", "Timed out"); snapshot.Status = Loc.T("读取超时，稍后重试", "Reading timed out. Retrying later."); }
+        catch (InvalidDataException)
+        { snapshot.StatusLabel = Loc.T("数据不可用", "Data unavailable"); snapshot.Status = Loc.T("数据格式发生变化，暂时无法读取配额", "The data format has changed, so the quota cannot be read for now."); }
         catch (System.Runtime.InteropServices.COMException)
-        { snapshot.StatusLabel = "检测失败"; snapshot.Status = "本地服务检测失败，稍后重试"; }
+        { snapshot.StatusLabel = Loc.T("检测失败", "Detection failed"); snapshot.Status = Loc.T("本地服务检测失败，稍后重试", "Detecting the local service failed. Retrying later."); }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or FormatException)
-        { snapshot.StatusLabel = "读取失败"; snapshot.Status = "暂时无法读取数据，稍后重试"; }
-        if (!snapshot.LiveQuota && snapshot.Quotas.Count > 0) snapshot.Source = "本地配额快照 · 可能已过时";
+        { snapshot.StatusLabel = Loc.T("读取失败", "Read failed"); snapshot.Status = Loc.T("暂时无法读取数据，稍后重试", "The data cannot be read right now. Retrying later."); }
+        if (!snapshot.LiveQuota && snapshot.Quotas.Count > 0) snapshot.Source = Loc.T("本地配额快照 · 可能已过时", "Local quota snapshot · may be outdated");
         return snapshot;
     }
 
@@ -106,7 +129,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 .Equals(Path.Combine(home, ".claude"), StringComparison.OrdinalIgnoreCase)) profile = Path.Combine(home, ".claude.json");
             using var doc = ReadJson(profile);
             snapshot.Plan = PlanParser.ClaudeProfile(doc?.RootElement ?? default);
-            if (snapshot.Plan.Length > 0) snapshot.PlanSource = "Claude 本地账户记录";
+            if (snapshot.Plan.Length > 0) snapshot.PlanSource = Loc.T("Claude 本地账户记录", "Claude local account record");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException) { }
     }
@@ -133,8 +156,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 // Publish only a complete successful result, all from the same login.
                 snapshot.Quotas = quotas;
                 snapshot.Plan = credential.Plan;
-                snapshot.PlanSource = credential.Plan.Length > 0 ? credential.Source + " 登录记录" : "";
-                Connected(snapshot, credential.Source + " · 账户配额", now);
+                snapshot.PlanSource = credential.Plan.Length > 0 ? credential.Source + Loc.T(" 登录记录", " sign-in record") : "";
+                Connected(snapshot, credential.Source + Loc.T(" · 账户配额", " · account quota"), now);
                 snapshot.UsageNote += ClaudeUsageNote;
                 _claudeRetained = new(now, snapshot.Plan, snapshot.PlanSource, snapshot.Source, quotas.ToList());
                 return true;
@@ -186,17 +209,19 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 {
                     // The plan comes from the login record and stays known while the interface is unavailable.
                     var local = Freshest(now);
-                    if (local.Plan.Length == 0 && login is { Plan.Length: > 0 }) _claudeRetained = local = local with { Plan = login.Plan, PlanSource = login.Source + " 登录记录" };
+                    if (local.Plan.Length == 0 && login is { Plan.Length: > 0 }) _claudeRetained = local = local with { Plan = login.Plan, PlanSource = login.Source + Loc.T(" 登录记录", " sign-in record") };
                     Retain(snapshot, local, failure, now); return;
                 }
             }
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
         }
         _claudeRetained = null;
-        snapshot.StatusLabel = desktopState.ReadFailed || codeReadFailed ? "读取失败" : desktopState.Detected ? "等待登录" : "未连接";
-        snapshot.Status = desktopState.ReadFailed ? "已发现 Claude 桌面版，暂时无法读取登录信息" : codeReadFailed
-            ? "暂时无法读取 Claude Code 登录信息" : desktopState.Detected
-            ? "请打开 Claude 桌面版并确认已登录，随后刷新配额" : "请先登录 Claude 桌面版或 Claude Code";
+        snapshot.StatusLabel = desktopState.ReadFailed || codeReadFailed ? Loc.T("读取失败", "Read failed")
+            : desktopState.Detected ? Loc.T("等待登录", "Waiting for sign-in") : Loc.T("未连接", "Not connected");
+        snapshot.Status = desktopState.ReadFailed ? Loc.T("已发现 Claude 桌面版，暂时无法读取登录信息", "The Claude desktop app was found, but its sign-in cannot be read right now.")
+            : codeReadFailed ? Loc.T("暂时无法读取 Claude Code 登录信息", "The Claude Code sign-in cannot be read right now.")
+            : desktopState.Detected ? Loc.T("请打开 Claude 桌面版并确认已登录，随后刷新配额", "Open the Claude desktop app, make sure you are signed in, then refresh the quota.")
+            : Loc.T("请先登录 Claude 桌面版或 Claude Code", "Sign in to the Claude desktop app or Claude Code first.");
     }
 
     private bool HasLocalQuota => _claudeRetained is not null || ClaudeUsageHistory.Latest(_locations) is not null;
@@ -210,8 +235,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (sample is not null && sample.Time <= now.AddMinutes(5) && (kept is null || sample.Time > kept.Time))
         {
             DateTimeOffset? Reset(int minutes) => kept?.Quotas.FirstOrDefault(quota => quota.Minutes == minutes)?.ResetAt is { } reset && reset > sample.Time ? reset : null;
-            kept = new(sample.Time, kept?.Plan ?? "", kept?.PlanSource ?? "", "Claude 桌面版 · 本地用量记录",
-                [new Quota("5 小时额度", sample.FiveHour, Reset(300), 300), new Quota("每周额度", sample.SevenDay, Reset(10080), 10080)], true);
+            var scoped = kept?.Quotas.Where(q => q.Label is not ("5 小时额度" or "每周额度")).ToList() ?? [];
+            kept = new(sample.Time, kept?.Plan ?? "", kept?.PlanSource ?? "", Loc.T("Claude 桌面版 · 本地用量记录", "Claude desktop app · local usage records"),
+                [new Quota("5 小时额度", sample.FiveHour, Reset(300), 300), new Quota("每周额度", sample.SevenDay, Reset(10080), 10080), .. scoped], true);
             _claudeRetained = kept;
         }
         return kept ?? throw new InvalidOperationException("No local quota available");
@@ -219,27 +245,30 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
 
     private static void Retain(ProviderSnapshot snapshot, ClaudeQuotaSnapshot kept, Exception? failure, DateTimeOffset now)
     {
+        snapshot.IsStale = true;
         snapshot.Quotas = kept.Quotas.ToList();
         if (kept.Plan.Length > 0) { snapshot.Plan = kept.Plan; snapshot.PlanSource = kept.PlanSource; }
         snapshot.LiveQuota = true; snapshot.QuotaTime = kept.Time; snapshot.Source = kept.Source;
         var time = kept.Time.LocalDateTime.ToString(kept.Time.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
-        var shown = kept.Local ? $"显示 Claude 桌面版 {time} 记录的配额" : $"显示 {time} 读取的配额";
+        var shown = kept.Local ? Loc.T($"显示 Claude 桌面版 {time} 记录的配额", $"showing the quota the Claude desktop app recorded at {time}")
+            : Loc.T($"显示 {time} 读取的配额", $"showing the quota read at {time}");
         snapshot.Status = failure switch
         {
-            null => kept.Local ? $"已连接，{shown}" : "已连接",
-            HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } => $"请求频繁，{shown}，稍后自动重试",
-            OperationCanceledException => $"读取超时，{shown}，稍后自动重试",
-            _ => $"账户接口暂时不可用，{shown}，稍后自动重试"
+            null => kept.Local ? Loc.T($"已连接，{shown}", $"Connected, {shown}") : Loc.T("已连接", "Connected"),
+            HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } => Loc.T($"请求频繁，{shown}，稍后自动重试", $"Too many requests; {shown}. Retrying automatically later."),
+            OperationCanceledException => Loc.T($"读取超时，{shown}，稍后自动重试", $"Reading timed out; {shown}. Retrying automatically later."),
+            _ => Loc.T($"账户接口暂时不可用，{shown}，稍后自动重试", $"The account API is temporarily unavailable; {shown}. Retrying automatically later.")
         };
-        snapshot.StatusLabel = failure is null ? "已连接" : "稍后重试";
+        snapshot.StatusLabel = failure is null ? Loc.T("已连接", "Connected") : Loc.T("稍后重试", "Retrying later");
         snapshot.UsageNote += ClaudeUsageNote;
     }
 
-    private async Task ReadCursorAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    private async Task ReadCursorAsync(ProviderSnapshot snapshot, DateTimeOffset now, DateTimeOffset start, CancellationToken ct)
     {
         var token = desktop.ReadCursorToken(_locations.CursorDatabase);
-        snapshot.UsageNote = "Cursor Token 明细来自账户用量接口，包含其他设备上的用量。";
-        if (string.IsNullOrWhiteSpace(token)) { snapshot.StatusLabel = "未连接"; snapshot.Status = "请打开 Cursor 并确认已登录"; return; }
+        snapshot.UsageNote = Loc.T("Cursor Token 明细来自账户用量接口，包含其他设备上的用量。", "Cursor token details come from the account usage API and include usage on other devices.");
+        if (string.IsNullOrWhiteSpace(token))
+        { snapshot.StatusLabel = Loc.T("未连接", "Not connected"); snapshot.Status = Loc.T("请打开 Cursor 并确认已登录", "Open Cursor and make sure you are signed in."); return; }
         try
         {
             using var request = Bearer(HttpMethod.Post, "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage", token);
@@ -269,19 +298,18 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             catch (Exception ex) when (snapshot.Quotas.Count > 0 && !ct.IsCancellationRequested &&
                 ex is HttpRequestException or JsonException or InvalidDataException or FormatException or TaskCanceledException) { }
         }
-        if (snapshot.Plan.Length > 0) snapshot.PlanSource = "Cursor 账户";
+        if (snapshot.Plan.Length > 0) snapshot.PlanSource = Loc.T("Cursor 账户", "Cursor account");
         if (snapshot.Quotas.Count == 0) throw new InvalidDataException();
-        Connected(snapshot, "Cursor 当前账期", now);
-        try { await ReadCursorEvents(snapshot, token, now, ct); }
+        Connected(snapshot, Loc.T("Cursor 当前账期", "Cursor current billing period"), now);
+        try { await ReadCursorEvents(snapshot, token, now, start, ct); }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or IOException or InvalidDataException or TaskCanceledException)
-        { snapshot.UsageAvailable = false; snapshot.Entries.Clear(); snapshot.UsageNote = "配额已读取，账户 Token 明细暂时不可用或尚未读取完整。"; }
+        { snapshot.UsageAvailable = false; snapshot.Entries.Clear(); snapshot.UsageNote = Loc.T("配额已读取，账户 Token 明细暂时不可用或尚未读取完整。", "The quota was read, but the account's token details are unavailable or not fully read yet."); }
     }
 
-    private async Task ReadCursorEvents(ProviderSnapshot snapshot, string token, DateTimeOffset now, CancellationToken ct)
+    private async Task ReadCursorEvents(ProviderSnapshot snapshot, string token, DateTimeOffset now, DateTimeOffset start, CancellationToken ct)
     {
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
         budget.CancelAfter(TimeSpan.FromSeconds(20));
-        var start = new DateTimeOffset(now.LocalDateTime.Date.AddDays(-29));
         var entries = new Dictionary<string, TokenEntry>();
         long rowsRead = 0;
         for (int page = 1; page <= 100; page++)
@@ -317,11 +345,11 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             usage.Get("cacheWriteTokens").Count(), 0, usage.Get("outputTokens").Count(), cost);
     }
 
-    private async Task ReadAntigravityAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    private async Task ReadAntigravityAsync(ProviderSnapshot snapshot, DateTimeOffset now, DateTimeOffset start, CancellationToken ct)
     {
-        snapshot.UsageNote = "Token 明细需要 Antigravity 本地会话服务。";
         var endpoints = await desktop.FindAntigravityAsync(ct);
-        if (endpoints.Count == 0) { snapshot.StatusLabel = "服务未就绪"; snapshot.Status = "未检测到 Antigravity 本地用量服务"; return; }
+        if (endpoints.Count == 0)
+        { snapshot.StatusLabel = Loc.T("服务未就绪", "Service not ready"); snapshot.Status = Loc.T("未检测到 Antigravity 本地用量服务", "The Antigravity local usage service was not found."); return; }
         foreach (var endpoint in endpoints)
         {
             ct.ThrowIfCancellationRequested();
@@ -336,7 +364,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             {
                 using var status = await LocalCall(local, endpoint, "GetUserStatus", new { }, ct);
                 snapshot.Plan = PlanParser.Antigravity(status.RootElement);
-                if (snapshot.Plan.Length > 0) snapshot.PlanSource = "Antigravity 本地账户服务";
+                if (snapshot.Plan.Length > 0) snapshot.PlanSource = Loc.T("Antigravity 本地账户服务", "Antigravity local account service");
                 snapshot.Quotas = QuotaParser.Antigravity(status.RootElement);
                 try
                 {
@@ -346,58 +374,86 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 }
                 catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException) { }
                 if (snapshot.Quotas.Count == 0) continue;
-                Connected(snapshot, "Antigravity 本地服务", now);
-                try { await ReadTrajectories(local, endpoint, status.RootElement, snapshot, now, ct); }
-                catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException)
-                { snapshot.UsageNote = "配额已读取；部分本机会话明细暂时不可用。"; }
+                Connected(snapshot, Loc.T("Antigravity 本地服务", "Antigravity local service"), now);
                 return;
             }
             catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException) { }
         }
-        snapshot.StatusLabel = "服务暂不可用"; snapshot.Status = "检测到 Antigravity，但本地用量服务暂不可用";
+        snapshot.StatusLabel = Loc.T("服务暂不可用", "Service unavailable"); snapshot.Status = Loc.T("检测到 Antigravity，但本地用量服务暂不可用", "Antigravity was found, but its local usage service is unavailable.");
     }
 
-    private static async Task ReadTrajectories(HttpClient client, LocalEndpoint endpoint, JsonElement status, ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    // A ZCode column combines the signed-in account's Coding Plan (the same template as the 智谱 GLM / Z.ai GLM
+    // sources), its Start Plan event allowances and ZCode's daily MCP allowance. Each part is shown when available.
+    private async Task ReadZCodeAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
     {
-        using var timeBudget = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeBudget.CancelAfter(TimeSpan.FromSeconds(15));
-        var token = timeBudget.Token;
-        var aliases = new Dictionary<string, string>();
-        foreach (var item in status.Get("userStatus").Get("cascadeModelConfigData").Get("clientModelConfigs").Items())
+        var account = ZCodeUsage.ReadAccount(_locations.ZCodeHome);
+        if (account is null || account.ApiKey.Length == 0 && account.Jwt.Length == 0) { snapshot.StatusLabel = Loc.T("未连接", "Not connected"); snapshot.Status = Loc.T("请先登录 ZCode", "Sign in to ZCode first."); return; }
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(TimeSpan.FromSeconds(10));
+        // Each part keeps its last good result for the same account, so a failed or slow read never hides it.
+        static string Owner(string value) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+        var owner = Owner(account.Jwt);
+        Task<JsonElement?> Latest(LatestResponse latest, Func<JsonElement, bool> accept, string uri, params (string Name, string Value)[] headers) => latest.GetAsync(owner, async timeout =>
         {
-            var alias = item.Get("modelOrAlias").Get("model").Text();
-            var model = item.Get("modelId").Text();
-            if (alias.Length > 0 && model.Length > 0) aliases[alias] = model;
-        }
-        using var index = await LocalCall(client, endpoint, "GetAllCascadeTrajectories", new { }, token);
-        var summaries = index.RootElement.Get("trajectorySummaries");
-        if (summaries.ValueKind != JsonValueKind.Object) return;
-        snapshot.UsageAvailable = true;
-        var cutoff = now.LocalDateTime.Date.AddDays(-29);
-        var seen = new HashSet<string>();
-        foreach (var summary in summaries.EnumerateObject())
+            using var request = Bearer(HttpMethod.Get, uri, account.Jwt);
+            foreach (var (name, value) in headers) request.Headers.TryAddWithoutValidation(name, value);
+            using var doc = await SendAsync(_zcodeHttp, request, timeout);
+            return doc.RootElement.Clone();
+        }, accept, deadline.Token);
+        // The MCP request goes first: the service answers one account's requests in order and Start Plan is often slow.
+        var mcpTask = account.Jwt.Length > 0 && account.AccessToken.Length > 0
+            ? Latest(_zcodeMcp, root => ZCodeUsage.McpMetric(root) is not null, "https://zcode.z.ai/api/v1/mcp/usage",
+                ("X-Bigmodel-Authorization", "Bearer " + account.AccessToken), ("Bigmodel-Target-Type", "PERSONAL"))
+            : Task.FromResult<JsonElement?>(null);
+        bool startRequested = account.Jwt.Length > 0 && account.DeviceMid.Length > 0;
+        var startTask = startRequested
+            ? Latest(_zcodeStart, root => root.Get("code").Number() == 0 && root.Get("data").Get("plans").ValueKind == JsonValueKind.Array,
+                "https://zcode.z.ai/api/v1/zcode-plan/billing/balance", ("X-Device-Mid", account.DeviceMid))
+            : Task.FromResult<JsonElement?>(null);
+        ScriptSession? session = null; ProviderResult? coding = null; Exception? failure = null;
+        var codingOwner = Owner(account.Family + ":" + account.ApiKey);
+        if (account.ApiKey.Length > 0)
         {
-            if (summary.Value.Get("lastModifiedTime").Date() is { } modified && modified.LocalDateTime < cutoff) continue;
-            var steps = summary.Value.Get("stepCount").Count();
-            for (int offset = 0; offset < steps; offset += 50)
-            {
-                using var batch = await LocalCall(client, endpoint, "GetCascadeTrajectorySteps", new { cascadeId = summary.Name, startIndex = offset, endIndex = Math.Min(offset + 50, steps) }, token);
-                foreach (var step in batch.RootElement.Get("steps").Items())
-                {
-                    var metadata = step.Get("metadata");
-                    var usage = metadata.Get("modelUsage");
-                    if (metadata.Get("createdAt").Date() is not { } time || time.LocalDateTime < cutoff || time > now) continue;
-                    var key = usage.Get("messageId").Text();
-                    if (key.Length == 0) key = summary.Name + ":" + time.ToString("O") + ":" + usage.ToString();
-                    if (!seen.Add(key)) continue;
-                    var input = usage.Get("inputTokens").Count();
-                    var cached = Math.Min(input, usage.Get("cacheReadTokens").Count());
-                    var model = usage.Get("model").Text();
-                    snapshot.Entries.Add(new("ag:" + key, time, aliases.GetValueOrDefault(model, model), input - cached, cached, 0, 0, usage.Get("outputTokens").Count()));
-                }
-            }
+            session = new ScriptSession(_http, new AppEntry { QuotaSource = account.Family == "zai" ? ProviderId.GlmGlobal : ProviderId.GlmChina }, account.ApiKey, now, deadline.Token);
+            try { coding = await Task.Run(session.RunAsync, deadline.Token); _zcodeCoding = (codingOwner, coding, now); }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { failure = ex; }
         }
-        snapshot.UsageNote = "本地服务 · 近 30 天会话记录";
+        (string Label, string Status)? codingFailure = failure is null || session is null ? null : session.FailureStatus switch
+        {
+            401 => (Loc.T("登录已失效", "Sign-in expired"), Loc.T("ZCode 的 Coding Plan 凭据已失效，请在 ZCode 中重新登录", "The Coding Plan credentials of ZCode have expired. Sign in again in ZCode.")),
+            403 => (Loc.T("访问受限", "Access denied"), Loc.T("账户接口拒绝访问", "The account API refused access.")),
+            429 => (Loc.T("请求频繁", "Too many requests"), Loc.T("请求频繁，稍后自动重试", "Too many requests. Retrying automatically later.")),
+            _ => deadline.IsCancellationRequested ? (Loc.T("读取超时", "Timed out"), Loc.T("读取超时，稍后重试", "Reading timed out. Retrying later."))
+                : (Loc.T("读取失败", "Read failed"), session.Redact(failure.Message))
+        };
+        DateTimeOffset? codingTime = coding is null ? null : now;
+        if (coding is null && failure is not null && _zcodeCoding is { } kept && kept.Account == codingOwner) (coding, codingTime) = (kept.Result, kept.Time);
+        var startRoot = await startTask; var mcpRoot = await mcpTask;
+        ct.ThrowIfCancellationRequested();
+        var start = startRoot is { } root ? ZCodeUsage.StartPlan(root, now) : (Metrics: new List<UsageMetric>(), Plan: "");
+        var mcp = mcpRoot is { } mcpValue ? ZCodeUsage.McpMetric(mcpValue) : null;
+        if (coding is null && start.Metrics.Count == 0 && mcp is null)
+        {
+            (snapshot.StatusLabel, snapshot.Status) = codingFailure ?? (startRequested && startRoot is null
+                ? (Loc.T("读取超时", "Timed out"), Loc.T("ZCode 服务响应较慢，稍后自动重试", "The ZCode service is responding slowly. Retrying automatically later."))
+                : (Loc.T("未连接", "Not connected"), Loc.T("ZCode 账户没有可用的 Coding Plan 或 Start Plan", "The ZCode account has no active Coding Plan or Start Plan.")));
+            return;
+        }
+        // Rolling windows sort first by window length; the Start Plan grants precede the tool-call allowances.
+        // A kept MCP result past its daily refresh stays visible and its reset time reads as pending.
+        var codingMetrics = coding?.Metrics ?? [];
+        List<UsageMetric> metrics = [.. codingMetrics.Where(m => m.Window is not null), .. start.Metrics, .. codingMetrics.Where(m => m.Window is null)];
+        if (mcp is not null) metrics.Add(mcp);
+        snapshot.Metrics = metrics;
+        snapshot.Plan = coding?.Plan is { Length: > 0 } plan ? plan : start.Plan; snapshot.Scope = "plan";
+        snapshot.PlanSource = Loc.T("ZCode 账户", "ZCode account");
+        if (start.Plan.Length > 0) snapshot.Details["Start Plan"] = start.Plan;
+        Connected(snapshot, account.Family == "zai" ? Loc.T("ZCode · Z.ai 账户", "ZCode · Z.ai account") : Loc.T("ZCode · 智谱账户", "ZCode · Zhipu account"), now);
+        if (codingFailure is { } partial)
+        {
+            snapshot.IsStale = codingTime is not null;
+            snapshot.Status = "Coding Plan " + partial.Status + (codingTime is { } time
+                ? Loc.T($"，显示 {time.LocalDateTime:MM-dd HH:mm} 读取的数据", $" Showing the data read at {time.LocalDateTime:MM-dd HH:mm}.") : "");
+        }
     }
 
     private static HttpRequestMessage Bearer(HttpMethod method, string uri, string token)
@@ -425,6 +481,6 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     }
     private static JsonDocument? ReadJson(string path) => File.Exists(path) ? JsonDocument.Parse(File.ReadAllText(path)) : null;
     private static void Connected(ProviderSnapshot snapshot, string source, DateTimeOffset now)
-    { snapshot.LiveQuota = true; snapshot.QuotaTime = now; snapshot.Source = source; snapshot.Status = "已连接"; snapshot.StatusLabel = "已连接"; }
-    public void Dispose() { if (http is null) _http.Dispose(); _gate.Dispose(); }
+    { snapshot.LiveQuota = true; snapshot.QuotaTime = now; snapshot.Source = source; snapshot.Status = Loc.T("已连接", "Connected"); snapshot.StatusLabel = Loc.T("已连接", "Connected"); }
+    public void Dispose() { _configured.Dispose(); if (http is null) { _http.Dispose(); _zcodeHttp.Dispose(); } _gate.Dispose(); }
 }

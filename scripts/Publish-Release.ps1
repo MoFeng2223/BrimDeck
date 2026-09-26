@@ -1,0 +1,39 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version,
+    [string]$ReleaseNotes,
+    [string]$OutputDirectory = 'artifacts/releases'
+)
+$ErrorActionPreference = 'Stop'
+$projectRoot = Split-Path $PSScriptRoot -Parent
+Push-Location $projectRoot
+try {
+    if (!$ReleaseNotes) { $ReleaseNotes = "docs/releases/$Version.md" }
+    $notesPath = (Resolve-Path -LiteralPath $ReleaseNotes).Path
+    $outputPath = [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($OutputDirectory)) { $OutputDirectory } else { Join-Path $projectRoot $OutputDirectory }))
+    $publishPath = Join-Path $projectRoot ".artifacts/release-build/$Version-$([Guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Force -Path $publishPath, $outputPath | Out-Null
+    # Each version gets a clean output folder, so files of an earlier release never end up in this one.
+    Get-ChildItem -LiteralPath $outputPath -File | Remove-Item
+    dotnet publish src/BrimDeck/BrimDeck.csproj -c Release -r win-x64 --self-contained true -p:Version=$Version -p:PublishSingleFile=false -o $publishPath
+    if ($LASTEXITCODE -ne 0) { throw 'Application publish failed.' }
+    $iscc = & (Join-Path $PSScriptRoot 'Get-InnoSetup.ps1')
+    & $iscc -qp "-dAppVersion=$Version" "-dSourceDir=$publishPath" "-o$outputPath" installer/BrimDeck.iss
+    if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
+    $installer = Get-Item -LiteralPath (Join-Path $outputPath "BrimDeck-$Version-Setup.exe")
+    # The app reads update.json from the latest release and verifies the installer against it before running it.
+    $manifest = [ordered]@{
+        version = $Version
+        notes = (Get-Content -Raw -Encoding utf8 -LiteralPath $notesPath).Trim()
+        file = $installer.Name
+        size = $installer.Length
+        sha256 = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    [IO.File]::WriteAllText((Join-Path $outputPath 'update.json'), ($manifest | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+    Get-ChildItem -LiteralPath $outputPath -File | Where-Object Name -ne 'SHA256SUMS.txt' | ForEach-Object {
+        '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
+    } | Set-Content -LiteralPath (Join-Path $outputPath 'SHA256SUMS.txt') -Encoding utf8
+    Write-Output "Release artifacts: $outputPath"
+    Write-Output "Published application for validation: $publishPath"
+}
+finally { Pop-Location }

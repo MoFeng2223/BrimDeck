@@ -28,6 +28,32 @@ public sealed class DesktopSources : IDesktopSources
         }
     }
 
+    public IReadOnlyList<string?[]>? QueryDatabase(string database, string sql)
+    {
+        if (!File.Exists(database)) return null;
+        IntPtr db = IntPtr.Zero, statement = IntPtr.Zero;
+        try
+        {
+            if (sqlite3_open_v2(database, out db, 1, IntPtr.Zero) != 0) return null; // SQLITE_OPEN_READONLY
+            sqlite3_busy_timeout(db, 1000);
+            if (sqlite3_prepare_v2(db, sql, -1, out statement, IntPtr.Zero) != 0) return null;
+            var rows = new List<string?[]>();
+            int columns = sqlite3_column_count(statement), step;
+            while ((step = sqlite3_step(statement)) == 100) // SQLITE_ROW
+            {
+                var row = new string?[columns];
+                for (int i = 0; i < columns; i++) row[i] = Marshal.PtrToStringUTF8(sqlite3_column_text(statement, i));
+                rows.Add(row);
+            }
+            return step == 101 ? rows : null; // SQLITE_DONE
+        }
+        finally
+        {
+            if (statement != IntPtr.Zero) sqlite3_finalize(statement);
+            if (db != IntPtr.Zero) sqlite3_close(db);
+        }
+    }
+
     public async Task<IReadOnlyList<LocalEndpoint>> FindAntigravityAsync(CancellationToken cancellation)
     {
         // WMI reads only the matching local process metadata; credentials never leave this method's result in memory.
@@ -106,4 +132,5 @@ public sealed class DesktopSources : IDesktopSources
     [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)] private static extern int sqlite3_finalize(IntPtr statement);
     [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)] private static extern int sqlite3_close(IntPtr db);
     [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)] private static extern int sqlite3_busy_timeout(IntPtr db, int milliseconds);
+    [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)] private static extern int sqlite3_column_count(IntPtr statement);
 }
