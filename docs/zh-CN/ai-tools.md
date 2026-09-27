@@ -1,0 +1,85 @@
+# 支持的工具
+
+AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
+
+- **配额来源**：决定这一列显示的套餐、配额使用率与重置倒计时。
+- **统计应用**：决定这一列底部"今日"与"7 天"的 Token 用量、费用估算，以及模型明细。
+- **显示名称与颜色**：可以自定义名称、主题色、预警色与告警色。
+
+同一个工具可以出现在多列中，读取时只请求一次，合计也不会重复计算。
+
+| 工具 | 配额 | Token 用量与费用 | 需要的准备 |
+| --- | :---: | :---: | --- |
+| Claude | ✓ | ✓ | 在本机登录 Claude Code 或 Claude 桌面版。用量统计来自 Claude Code |
+| Codex | ✓ | ✓ | 在本机登录 Codex |
+| Cursor | ✓ | ✓ | 在本机登录 Cursor |
+| Antigravity | ✓ | ✓ | 读取配额时需要 Antigravity 桌面版正在运行 |
+| ZCode | ✓ | ✓ | 在本机登录 ZCode |
+| 智谱 GLM、Z.ai GLM | ✓ | | 在设置中填写 API 密钥 |
+| New API、Sub2API 中转站 | ✓ | | 在设置中填写站点地址和密钥 |
+| 自定义 | ✓ | | 编写一段 JavaScript 脚本 |
+
+手动填写的来源没有本地用量记录，"今日"和"7 天"可以另选一个工具统计。
+
+## 手动填写的来源
+
+在"配额来源"中选择智谱 GLM、Z.ai GLM、New API、Sub2API 或自定义后，该行会展开，填写所需内容即可。
+
+- **密钥**：使用 Windows 的加密功能保存在本机，不写入设置文件。删除该列或更换配额来源时，密钥一并删除。
+- **站点地址**：填写站点首页地址即可。末尾的 `/v1`，以及直接粘贴的控制台页面路径，会自动去掉。
+- **测试连接**：立即读取一次，显示读取结果与耗时。
+- **读取失败时**：保留最近一次成功读取的数据，名称的悬停提示中会说明失败原因。
+
+### 智谱 GLM 与 Z.ai GLM
+
+填写 GLM Coding Plan 的 API 密钥。显示 5 小时与每周额度，以及工具调用次数；积分制套餐显示已用积分与总积分。不返回额度的团队套餐暂不支持。
+
+### New API
+
+填写站点地址与 API 密钥。按站点和密钥的情况，显示账户余额或密钥余额、今日扣费，以及无上限密钥的累计消费。金额按站点设置的货币与汇率换算。
+
+### Sub2API
+
+填写站点地址与 API 密钥。钱包模式显示账户余额与今日扣费，订阅模式显示每日、每周、每月额度，限额密钥显示各时间段额度与密钥余额。名称旁的标签显示倍率或套餐名。
+
+选错 New API 与 Sub2API 时，读取结果会提示改用另一种。
+
+### 自定义脚本
+
+选择"自定义"后，代码框会预先填入可直接运行的模板。脚本需定义 `fetchUsage(ctx)`，返回要显示的配额数组：
+
+```javascript
+async function fetchUsage(ctx) {
+  const res = await ctx.http.get(ctx.site + "/api/usage", {
+    headers: { Authorization: "Bearer " + ctx.secrets.key }
+  });
+  if (res.status !== 200) throw new Error("读取失败：HTTP " + res.status);
+  const data = res.json();
+  return [
+    { title: "本月", percent: data.used / data.limit * 100, value: "$" + data.used.toFixed(2), suffix: "已用", resetAt: data.resetText }
+  ];
+}
+```
+
+`ctx` 提供：
+
+| 成员 | 说明 |
+| --- | --- |
+| `ctx.site`、`ctx.secrets.key` | 填写的站点地址与 API 密钥，未填写时为空字符串 |
+| `ctx.http.get(url, options)`、`ctx.http.post(url, options)` | 发送请求。`options` 可包含 `headers`、`timeout`（毫秒）与 `body`（仅 POST）。返回 `{ status, headers, text(), json() }` |
+| `ctx.log(text)` | 写一行日志，在"测试连接"中显示 |
+| `ctx.language`、`ctx.now` | 界面语言（`"zh-CN"` 或 `"en-US"`）与本次读取的时间 |
+
+返回数组中的每一项是一条配额，按顺序显示：
+
+| 字段 | 说明 |
+| --- | --- |
+| `title` | 必填。配额名称 |
+| `percent` | 选填，0–100。已用比例，决定进度条长度与颜色 |
+| `value`、`suffix` | 选填。大号数字及其右侧的小字，例如 `"$12.30"` 与 `"已用"` |
+| `note` | 选填。与名称同一行，靠右显示 |
+| `resetAt` | 选填。与数字同一行，靠右显示，直接显示原文，例如 `"2 时 13 分后"` |
+
+不符合要求的项会被跳过，并在读取结果中说明原因。脚本抛出的错误会原样显示。
+
+脚本在沙盒中运行，无法访问文件、进程或 .NET 对象。每次读取最长 10 秒，最多发送 16 个请求，请求与响应各不超过 1 MB。

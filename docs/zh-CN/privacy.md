@@ -1,0 +1,43 @@
+# 数据与隐私
+
+BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、续期或注销它们的登录，也不会上传会话内容或收集使用数据。
+
+## 读取的数据
+
+| 工具 | 配额 | Token 用量与费用 |
+| --- | --- | --- |
+| Claude | 读取 Claude Code 的登录（`%USERPROFILE%\.claude\.credentials.json`），不可用时改用 Claude 桌面版的登录，向 Anthropic 查询账户用量 | 读取 Claude Code 的本地会话记录（`projects\**\*.jsonl`），不含 Claude 桌面版的普通聊天 |
+| Codex | 读取 `%USERPROFILE%\.codex\auth.json` 中的登录，向 OpenAI 查询账户用量；查询失败时显示会话记录中的配额，并标明可能已过时 | 读取本地会话记录（`sessions` 与 `archived_sessions`） |
+| Antigravity | 从正在运行的 Antigravity 桌面版的本机服务（仅限 127.0.0.1）读取 | 读取 `%USERPROFILE%\.gemini` 下桌面版与 CLI 的本地会话数据库 |
+| Cursor | 以只读方式从 `%APPDATA%\Cursor\User\globalStorage\state.vscdb` 读取登录，向 Cursor 查询账户用量 | 向 Cursor 查询账户用量明细，包含该账户在其他设备上的用量 |
+| ZCode | 读取 ZCode 的登录，查询 Coding Plan、Start Plan 与 MCP 每日额度 | 读取本地请求记录（`%USERPROFILE%\.zcode\cli\db\db.sqlite`） |
+| 智谱 GLM、Z.ai GLM、New API、Sub2API、自定义 | 使用在设置中填写的密钥与站点地址 | 不提供 |
+
+- 设置了 `CLAUDE_CONFIG_DIR`、`CODEX_HOME` 或 `ZCODE_HOME`（须为绝对路径）时，从该目录读取。
+- 这些账户接口与本地数据格式并非公开的稳定接口。无法读取时，面板显示实际状态，不会显示虚构的数值。
+
+## 本机保存的文件
+
+所有文件保存在 `%LOCALAPPDATA%\BrimDeck`：
+
+| 文件 | 内容 |
+| --- | --- |
+| `settings.json` | 设置，不含任何登录令牌或 API 密钥 |
+| `secrets.dat` | 手动填写的 API 密钥，使用 Windows 的加密功能按当前用户加密 |
+| `model-prices.json`、`manual-model-prices.json` | 同步的模型单价、手动添加的单价 |
+| `update-prompt.txt`、`updates\` | 已提示过的版本号、下载的安装包 |
+| `crash.log` | 错误记录，超过 1 MB 时清空 |
+
+## 联网与安全
+
+- 仅连接以下地址：各工具的官方接口、你在设置中填写的站点、OpenRouter 模型目录（同步模型单价）、歌词服务（LRCLIB、网易云音乐、QQ 音乐）、播放器提供的封面地址，以及 GitHub Releases（检查更新）。
+- 读取的登录令牌仅在内存中使用，不写入磁盘；Claude 桌面版的登录缓存使用当前用户的 Windows 加密功能在内存中解密。
+- 自定义脚本在沙盒中运行，无法访问文件、进程或 .NET 对象，限制详见[支持的工具](ai-tools.md#自定义脚本)。
+- 律动条所用的声音仅在内存中分析，不会保存。
+
+## 网易云音乐完整控制
+
+- 完整控制需要网易云开启本机调试端口。通过 BrimDeck 启用时，使用的端口为 127.0.0.1:21631。
+- 端口开启期间，本机其他程序和浏览器网页可能借此操控网易云，读取其页面内容与登录状态。
+- BrimDeck 连接前会确认端口仅监听本机地址且属于网易云进程，但无法消除端口本身带来的风险。
+- 请仅在可信的环境中启用。以普通方式重新启动网易云，即可退出完整控制。

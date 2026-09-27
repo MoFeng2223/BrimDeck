@@ -19,7 +19,7 @@ namespace ReadmeMedia;
 // replaced by a handler that always fails, and media detection is never started. The panel window stays transparent
 // and off screen; each image is taken from its visual tree with RenderTargetBitmap.
 //
-// Usage: ReadmeMedia <output folder> [zh-CN|en-US] [stills,hero,settings]
+// Usage: ReadmeMedia <output folder> [zh-CN|en-US] [stills,hero,settings]  (settings only when named)
 internal static class Program
 {
     internal const BindingFlags Any = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
@@ -38,6 +38,8 @@ internal static class Program
         // method first, so an exception from the Startup event ends it before anything else happens.
         app.Startup += (_, _) => throw new StartupSkipped();
         Dispatcher.CurrentDispatcher.UnhandledException += (_, e) => { if (e.Exception is StartupSkipped) e.Handled = true; };
+        // The one setting OnStartup applies before anything else: the narrow scroll bars of the panel and settings.
+        app.Resources[SystemParameters.VerticalScrollBarWidthKey] = 7.0;
         Dispatcher.CurrentDispatcher.BeginInvoke(async () =>
         {
             try { await new Renderer(app, output, language, args.Length > 2 ? args[2].Split(',') : []).RunAsync(); }
@@ -128,7 +130,8 @@ internal sealed class Renderer(App app, string output, string language, string[]
         var backend = Type.GetType("BrimDeck.Updates.GitHubUpdates, BrimDeck")!.GetMethod("Create", [typeof(string)])!.Invoke(null, [folder]);
         Program.SetProperty(app, "Updates", new AppUpdates((IAppUpdateBackend)backend!, folder));
         // The "配额与统计" page: one row per application with its sources, name and colours.
-        if (Wants("settings")) await SettingsPage("settings", 3);
+        // Not used by the README at present; rendered only when asked for by name.
+        if (scenes.Contains("settings")) await SettingsPage("settings", 3);
         Directory.Delete(folder, true);
     }
 
@@ -153,6 +156,7 @@ internal sealed class Renderer(App app, string output, string language, string[]
 
     // ---------- Invented data ----------
 
+    // Five models in all, so the model details list fits the panel without a scroll bar.
     private List<ProviderSnapshot> Snapshots()
     {
         DateTimeOffset In(double days, double hours, double minutes) => _now.AddDays(days).AddHours(hours).AddMinutes(minutes).AddSeconds(30);
@@ -163,17 +167,17 @@ internal sealed class Renderer(App app, string output, string language, string[]
         };
         var claude = Snapshot(ProviderId.Claude, "max",
             new Quota("5 小时额度", 34, In(0, 2, 13), 300), new Quota("每周额度", 58, In(3, 5, 0), 10080));
-        claude.Entries = Entries(1, ["claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5"], [.55, .35, .10], 26_400_000, 17.84m);
+        claude.Entries = Entries(1, ["claude-opus-5-5", "claude-sonnet-5"], [.65, .35], 26_400_000, 17.84m);
         var codex = Snapshot(ProviderId.Codex, "plus",
             new Quota("5 小时额度", 22, In(0, 3, 41), 300), new Quota("每周额度", 41, In(4, 2, 0), 10080));
-        codex.Entries = Entries(2, ["gpt-5.5-codex", "gpt-5.5"], [.8, .2], 11_200_000, 6.37m);
+        codex.Entries = Entries(2, ["gpt-5.5-codex"], [1], 11_200_000, 6.37m);
         var cursor = Snapshot(ProviderId.Cursor, "pro",
             new Quota("Cursor 模型", 76, In(12, 6, 0)), new Quota("其他模型", 18, In(12, 6, 0)));
-        cursor.Entries = Entries(3, ["auto", "claude-sonnet-5", "gpt-5.5"], [.6, .25, .15], 3_900_000, 2.41m);
+        cursor.Entries = Entries(3, ["auto"], [1], 3_900_000, 2.41m);
         var antigravity = Snapshot(ProviderId.Antigravity, "Google AI Pro",
             new Quota("Gemini · 5 小时", 12, In(0, 4, 5), 300), new Quota("Gemini · 每周", 29, In(5, 1, 0), 10080),
             new Quota("Claude · 5 小时", 47, In(0, 1, 26), 300), new Quota("Claude · 每周", 63, In(5, 1, 0), 10080));
-        antigravity.Entries = Entries(4, ["gemini-3-pro", "gemini-3-flash", "claude-sonnet-5"], [.5, .3, .2], 5_600_000, 3.12m);
+        antigravity.Entries = Entries(4, ["gemini-3-pro"], [1], 5_600_000, 3.12m);
         return [claude, codex, cursor, antigravity];
     }
 

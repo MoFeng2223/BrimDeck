@@ -202,10 +202,11 @@ def main():
         still(render, out, name)
     for name in ["compact-notch", "compact-notch-lyrics", "compact-capsule", "compact-line", "compact-alert"]:
         still(render, out, name, margin=(36, 0, 36, 30), radius=10)
-    window_shot(render, out, "settings")
+    if (render / "settings.png").exists():
+        window_shot(render, out, "settings")
     icon = Image.open(Path(__file__).resolve().parents[2] / "src" / "BrimDeck" / "Assets" / "BrimDeck.ico")
     icon.size = max(icon.info["sizes"])
-    icon.convert("RGBA").resize((128, 128), Image.LANCZOS).save(out.parent / "icon.png", optimize=True)
+    icon.convert("RGBA").resize((128, 128), Image.LANCZOS).save(out.parents[1] / "icon.png", optimize=True)
     print("hero frames:", hero(render, out))
 
 
