@@ -1,0 +1,103 @@
+using System.Net;
+using System.Text.Json;
+using BrimDeck.Core;
+
+internal static class DashboardUsageTests
+{
+    public static async Task Run(string root, Action<string, bool> check)
+    {
+        var legacy = SettingsMigrations.Read("""{"Apps":[{"Id":1,"Enabled":true,"ThemeColor":"#123456"},{"Id":0,"Enabled":false}]}""");
+        legacy.Normalize();
+        check("Legacy app rows migrate both sources and their default names", legacy.Apps[0] is { QuotaSource: ProviderId.Codex, UsageSource: ProviderId.Codex, Name: "Codex", Theme: "#123456" }
+            && !legacy.Apps[1].Enabled && legacy.Apps[1].Name == "Claude");
+        var oldIdentity = legacy.Apps[0].InstanceId;
+        var serialized = JsonSerializer.Serialize(legacy);
+        var migrated = JsonSerializer.Deserialize<DeckSettings>(serialized)!;
+        migrated.Normalize();
+        check("New source settings persist stable identities without the legacy Id field", migrated.Apps[0].InstanceId == oldIdentity
+            && serialized.Contains("\"QuotaSource\"") && serialized.Contains("\"UsageSource\"") && !serialized.Contains("\"Id\""));
+
+        var mixed = new AppEntry { QuotaSource = ProviderId.Claude, UsageSource = ProviderId.Codex };
+        var duplicate = mixed.Copy(); duplicate.InstanceId = Guid.NewGuid(); duplicate.DisplayName = "工作用量"; duplicate.ThemeColor = "#FF0000";
+        var settings = new DeckSettings { Apps = [mixed, duplicate] };
+        settings.Normalize();
+        check("Repeated quota and statistics sources retain independent columns", settings.Apps.Count == 2 && mixed.InstanceId != duplicate.InstanceId);
+        mixed.QuotaSource = ProviderId.Antigravity;
+        check("Changing a quota source updates only an automatic name", mixed.Name == "Antigravity" && mixed.UsageSource == ProviderId.Codex);
+        duplicate.QuotaSource = ProviderId.Antigravity;
+        check("Changing either source preserves a user supplied name", duplicate.Name == "工作用量" && duplicate.Theme == "#FF0000");
+        mixed.QuotaSource = duplicate.QuotaSource = ProviderId.Claude;
+        check("Required sources include statistics-only applications once", settings.RequiredProviders.SetEquals([ProviderId.Claude, ProviderId.Codex])
+            && settings.StatisticsProviders.SequenceEqual([ProviderId.Codex]));
+        mixed.Enabled = false;
+        check("Disabling the first duplicate does not disable another column's source", settings.Enabled(ProviderId.Claude) && settings.Enabled(ProviderId.Codex));
+        mixed.Enabled = true;
+
+        var now = DateTimeOffset.Now;
+        var quota = new ProviderSnapshot(ProviderId.Claude) { Plan = "Quota plan", LiveQuota = true, Quotas = [new("每周", 71, now.AddDays(1))],
+            UsageAvailable = true, Entries = [new("wrong-source", now, "wrong-model", 9999, 0, 0, 0, 0)] };
+        var usage = new ProviderSnapshot(ProviderId.Codex) { UsageAvailable = true, Entries = [new("statistics", now, "test-model", 80, 5, 0, 0, 15, .25m)] };
+        var columns = DashboardUsage.Columns(settings, [quota, usage]);
+        check("A mixed column uses the chosen quota and original statistics snapshot", columns.Count == 2 && ReferenceEquals(columns[0].Quota, quota)
+            && ReferenceEquals(columns[0].Usage, usage) && columns[0].Quota.Quotas.Single().UsedPercent == 71 && columns[0].Usage.Entries.Sum(e => e.Total) == 100);
+        var missingQuota = DashboardUsage.Columns(settings, [usage])[0];
+        check("Missing quotas do not hide valid statistics from the other application", missingQuota.Quota.Quotas.Count == 0 && missingQuota.Usage.UsageAvailable);
+        var missingUsage = DashboardUsage.Columns(settings, [quota])[0];
+        check("Missing statistics never fall back to the quota provider's token counts", missingUsage.Quota.Quotas.Count == 1 && !missingUsage.Usage.UsageAvailable && missingUsage.Usage.Entries.Count == 0);
+        var statistics = DashboardUsage.Statistics(settings, [quota, usage]);
+        var total = ModelUsage.Filter(statistics, settings.StatisticsProviders.ToHashSet(), UsageDateRange.Recent(1, DateTime.Today));
+        check("Model totals count a repeated statistics application exactly once", total.Rows.Count == 1 && total.Entries.Sum(e => e.Total) == 100 && total.Rows[0].Provider == ProviderId.Codex);
+        settings.UsagePage = false;
+        check("Compact rings keep the requested sources while the page is off", settings.RequiredProviders.Count > 0);
+        settings.NotchSummary = false;
+        check("Disabling the page and the rings removes both kinds of requested sources", settings.RequiredProviders.Count == 0 && DashboardUsage.Columns(settings, [quota, usage]).Count == 0);
+        settings.UsagePage = true; settings.NotchSummary = true;
+
+        var copied = settings.Copy();
+        copied.Apps.RemoveAt(0);
+        copied.Apps.Add(copied.Apps[0].Copy()); copied.Normalize();
+        check("Copied instance IDs are repaired without dropping repeated rows", copied.Apps.Count == 2 && copied.Apps.Select(a => a.InstanceId).Distinct().Count() == 2);
+
+        var oversized = new DeckSettings { Apps = Enumerable.Range(1, 9).Select(i => new AppEntry
+            { QuotaSource = ProviderId.Claude, UsageSource = ProviderId.Claude, DisplayName = "应用 " + i, Enabled = i != 1 }).ToList() };
+        var retained = oversized.Apps.Take(7).Select(a => a.InstanceId).ToArray();
+        oversized.Normalize();
+        check("Application configuration is limited to seven rows including hidden rows", oversized.Apps.Count == 7 && oversized.EnabledApps.Count == 6);
+        check("Oversized configurations preserve the first seven identities and their order", oversized.Apps.Select(a => a.InstanceId).SequenceEqual(retained));
+
+        var directory = Path.Combine(root, "source-requests");
+        var locations = DataLocations.Resolve(Path.Combine(directory, "home"), Path.Combine(directory, "roaming"), Path.Combine(directory, "local"), null, null);
+        Directory.CreateDirectory(locations.CodexHome);
+        File.WriteAllText(Path.Combine(locations.CodexHome, "auth.json"), """{"tokens":{"access_token":"fixture-codex"}}""");
+        using var handler = new SourceHandler();
+        using var client = new HttpClient(handler);
+        using var service = new UsageService(new SourceDesktop(), locations, client);
+        var snapshots = await service.RefreshAsync(settings);
+        check("Mixed duplicate columns fetch both underlying sources only once", snapshots.Count == 2 && handler.Requests.Count == 2
+            && handler.Requests.Distinct().Count() == 2 && snapshots.All(s => s.LiveQuota));
+    }
+
+    private sealed class SourceDesktop : IDesktopSources
+    {
+        public ClaudeDesktopState ReadClaudeDesktop(DataLocations locations) => new(true, [new("fixture-claude", "pro", "测试登录")]);
+        public string? ReadCursorToken(string database) => throw new InvalidOperationException("Unselected Cursor source was read");
+        public Task<IReadOnlyList<LocalEndpoint>> FindAntigravityAsync(CancellationToken cancellation) => throw new InvalidOperationException("Unselected Antigravity source was read");
+    }
+
+    private sealed class SourceHandler : HttpMessageHandler
+    {
+        public List<string> Requests { get; } = [];
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var destination = request.RequestUri!.AbsoluteUri;
+            Requests.Add(destination);
+            var json = destination switch
+            {
+                "https://api.anthropic.com/api/oauth/usage" => """{"five_hour":{"utilization":71}}""",
+                "https://chatgpt.com/backend-api/wham/usage" => """{"rate_limit":{"primary_window":{"used_percent":22,"limit_window_seconds":18000}}}""",
+                _ => throw new InvalidOperationException("Unexpected destination")
+            };
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json) });
+        }
+    }
+}

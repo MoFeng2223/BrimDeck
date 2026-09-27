@@ -17,9 +17,10 @@ artifacts/
 [Ll]og/
 [Ll]ogs/
 
-# Editor local history
+# Editor local history and settings
 .history/
 .localhistory/
+.vscode/
 
 # Operating system temporary files
 .DS_Store
@@ -32,3 +33,9 @@ AGENTS.md
 .claude/
 .agents/
 .codex/
+
+# Local design drafts
+output/
+
+# Local development notes: architecture, design decisions, plans, release steps
+dev-docs/

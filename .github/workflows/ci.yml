@@ -1,0 +1,36 @@
+name: Checks
+# Every pull request into dev or main must build and pass the tests that need no installed players or accounts.
+# The install, in-app update and uninstall test stays in the release workflow: it installs software and takes minutes.
+on:
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build
+        run: |
+          dotnet build BrimDeck.sln -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
+      - name: Core tests
+        run: |
+          dotnet run --project tests/BrimDeck.Tests -c Release --no-build
+          if ($LASTEXITCODE -ne 0) { throw 'Core tests failed.' }
+      - name: Media tests
+        run: |
+          dotnet run --project tests/BrimDeck.MediaTests -c Release --no-build
+          if ($LASTEXITCODE -ne 0) { throw 'Media tests failed.' }
