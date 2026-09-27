@@ -31,6 +31,10 @@ internal static class InstallerUpdateTests
         check("plain-text notes show in every language", UpdateManifest.Parse(manifest.ToJson()).Notes.For("ja-JP") == "Release notes");
         check("the same version is not offered again", await Backend("0.2.0").CheckAsync(CancellationToken.None) is null);
         check("a newer running version ignores an older manifest", await Backend("0.10.0").CheckAsync(CancellationToken.None) is null);
+        check("a prerelease is offered its final release", await Backend("0.2.0-beta.3").CheckAsync(CancellationToken.None) is not null);
+        check("prereleases order by label and before their release", ApplicationVersion.Compare("0.2.0-alpha.2", "0.2.0-beta.1") < 0
+            && ApplicationVersion.Compare("0.2.0-beta.2", "0.2.0-beta.10") < 0 && ApplicationVersion.Compare("0.2.0-beta.10", "0.2.0") < 0
+            && ApplicationVersion.Compare("0.2.0", "0.3.0-alpha.1") < 0 && ApplicationVersion.Compare("0.2.0-beta.1", "0.2.0-beta.1+abc") == 0);
 
         foreach (var (name, json) in new[]
         {
@@ -38,6 +42,7 @@ internal static class InstallerUpdateTests
             ("non-executable installer", (manifest with { File = "BrimDeck-0.2.0-Setup.zip" }).ToJson()),
             ("short checksum", (manifest with { Sha256 = "abc" }).ToJson()),
             ("four-part version", (manifest with { Version = "0.2.0.1" }).ToJson()),
+            ("path in version", (manifest with { Version = "0.2.0-beta/../x" }).ToJson()),
             ("missing size", (manifest with { Size = 0 }).ToJson()),
         })
         {

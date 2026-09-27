@@ -1,4 +1,6 @@
 name: Publish Windows release
+# v1.2.0 publishes a release from a commit on main. v1.2.0-alpha.1 and v1.2.0-beta.1 publish a prerelease from a commit
+# on dev; the app only offers releases, never prereleases. A tag on any other commit publishes nothing.
 on:
   push:
     tags: ['v*']
@@ -8,13 +10,42 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  # Runs before the approval, so a tag with a wrong name or on the wrong branch fails without asking for it.
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Check tag name and branch
+        id: tag
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v(\d+\.\d+\.\d+(-(alpha|beta)\.\d+)?)$') {
+              throw 'Use v1.2.0 for a release, or v1.2.0-alpha.1 or v1.2.0-beta.1 for a prerelease.'
+          }
+          $version = $Matches[1]; $prerelease = [bool]$Matches[2]
+          $branch = if ($prerelease) { 'dev' } else { 'main' }
+          git merge-base --is-ancestor HEAD "origin/$branch"
+          if ($LASTEXITCODE -ne 0) { throw "$env:RELEASE_TAG must point to a commit on $branch." }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "prerelease=$("$prerelease".ToLowerInvariant())" >> $env:GITHUB_OUTPUT
   release:
+    needs: check
     runs-on: windows-latest
     # The release environment requires the maintainer's approval, so a mistakenly pushed tag runs nothing
     # (no tests, packaging or publishing) until someone approves it under Actions > Review deployments.
     environment: release
     permissions:
       contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.check.outputs.version }}
+      RELEASE_PRERELEASE: ${{ needs.check.outputs.prerelease }}
     defaults:
       run:
         shell: pwsh
@@ -23,12 +54,6 @@ jobs:
       - uses: actions/setup-dotnet@v6.0.0
         with:
           dotnet-version: '10.0.x'
-      - name: Validate release version
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          if ($env:RELEASE_TAG -notmatch '^v(\d+\.\d+\.\d+)$') { throw 'Use a stable version tag, for example v0.2.0.' }
-          "RELEASE_VERSION=$($Matches[1])" >> $env:GITHUB_ENV
       - name: Test
         run: |
           dotnet run --project tests/BrimDeck.Tests -c Release
@@ -42,16 +67,19 @@ jobs:
         with:
           name: windows-release-validation
           path: artifacts/releases/
-      # The app reads update.json from /releases/latest, so the release is published (not a draft or prerelease)
-      # only after every file is attached.
+      # The app reads update.json from /releases/latest, which skips drafts and prereleases. A release is published
+      # (not left as a draft) only after every file is attached; a prerelease is published as such and never marked latest.
       - name: Publish complete release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
           RELEASE_COMMIT: ${{ github.sha }}
         run: |
+          $prerelease = $env:RELEASE_PRERELEASE -eq 'true'
           $files = Get-ChildItem artifacts/releases -File | ForEach-Object FullName
-          gh release create $env:RELEASE_TAG @files --target $env:RELEASE_COMMIT --title "BrimDeck $env:RELEASE_VERSION" --notes-file "releases/$env:RELEASE_VERSION.md" --draft
+          $kind = if ($prerelease) { @('--prerelease') } else { @() }
+          gh release create $env:RELEASE_TAG @files --target $env:RELEASE_COMMIT --title "BrimDeck $env:RELEASE_VERSION" --notes-file "releases/$env:RELEASE_VERSION.md" --draft @kind
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed.' }
-          gh release edit $env:RELEASE_TAG --draft=false --latest
+          $latest = if ($prerelease) { @() } else { @('--latest') }
+          gh release edit $env:RELEASE_TAG --draft=false @latest
           if ($LASTEXITCODE -ne 0) { throw 'Release publish failed.' }
