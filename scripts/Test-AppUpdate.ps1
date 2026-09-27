@@ -73,6 +73,8 @@ try {
     # Same as unchecking the desktop shortcut on the finished page.
     Set-ItemProperty -Path $uninstallKey -Name 'BrimDeck.DesktopShortcut' -Value '0'
     [IO.File]::Delete($desktopShortcut)
+    # A fresh account, such as a CI runner, may have no Run key yet; the app creates it the same way.
+    if (!(Test-Path $runKey)) { New-Item -Path $runKey | Out-Null }
     New-ItemProperty -Path $runKey -Name $runValue -Value "`"$installPath\BrimDeck.UpdateHarness.exe`"" -Force | Out-Null
     $start = [Diagnostics.ProcessStartInfo]::new((Join-Path $installPath 'BrimDeck.UpdateHarness.exe'))
     $start.UseShellExecute = $false
