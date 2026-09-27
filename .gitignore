@@ -17,9 +17,10 @@ artifacts/
 [Ll]og/
 [Ll]ogs/
 
-# Editor local history
+# Editor local history and settings
 .history/
 .localhistory/
+.vscode/
 
 # Operating system temporary files
 .DS_Store
