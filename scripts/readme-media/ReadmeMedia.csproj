@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Renders the README images from BrimDeck's own interface code with invented data. See docs/development.md. -->
+  <!-- Renders the README images from BrimDeck's own interface code with invented data. Usage is described at the top of Program.cs. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>

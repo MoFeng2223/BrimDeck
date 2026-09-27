@@ -137,7 +137,7 @@
 
 ## 参与开发
 
-构建、测试与项目文档见 [开发](docs/development.md)。欢迎提交 Issue 和 Pull Request。
+欢迎提交 Issue 和 Pull Request。
 
 ## 许可证
 

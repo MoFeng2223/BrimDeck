@@ -35,3 +35,6 @@ AGENTS.md
 
 # Local design drafts
 output/
+
+# Local development notes: architecture, design decisions, plans, release steps
+dev-docs/
