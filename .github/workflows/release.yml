@@ -77,9 +77,10 @@ jobs:
         run: |
           $prerelease = $env:RELEASE_PRERELEASE -eq 'true'
           $files = Get-ChildItem artifacts/releases -File | ForEach-Object FullName
-          $kind = if ($prerelease) { @('--prerelease') } else { @() }
+          # @(...) keeps a single flag an array; a plain string would be splatted one character at a time.
+          $kind = @(if ($prerelease) { '--prerelease' })
           gh release create $env:RELEASE_TAG @files --target $env:RELEASE_COMMIT --title "BrimDeck $env:RELEASE_VERSION" --notes-file "releases/$env:RELEASE_VERSION.md" --draft @kind
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed.' }
-          $latest = if ($prerelease) { @() } else { @('--latest') }
+          $latest = @(if (!$prerelease) { '--latest' })
           gh release edit $env:RELEASE_TAG --draft=false @latest
           if ($LASTEXITCODE -ne 0) { throw 'Release publish failed.' }
