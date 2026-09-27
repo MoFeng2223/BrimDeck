@@ -12,6 +12,12 @@
 #ifndef SourceDir
   #error Define SourceDir as the folder produced by dotnet publish
 #endif
+; The Windows file version takes numbers only, so a prerelease label ("0.3.0-beta.1") is left out of it.
+#if Pos("-", AppVersion) > 0
+  #define FileVersion Copy(AppVersion, 1, Pos("-", AppVersion) - 1)
+#else
+  #define FileVersion AppVersion
+#endif
 ; Must match GitHubUpdates.InstallerAppId. Never change it, or updates install a second copy.
 #ifndef AppId
   #define AppId "9D9AD6ED-CF62-4527-A587-6DBE94A74B9E"
@@ -52,7 +58,7 @@ AppPublisherURL=https://github.com/MoFeng2223/BrimDeck
 AppSupportURL=https://github.com/MoFeng2223/BrimDeck/issues
 AppUpdatesURL=https://github.com/MoFeng2223/BrimDeck/releases
 AppCopyright=Copyright (C) MoFeng2223
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#FileVersion}
 UninstallDisplayName={#AppName}
 UninstallDisplayIcon={app}\{#MainExe}
 ; Installs for the current user by default, so in-app updates run without an administrator prompt.

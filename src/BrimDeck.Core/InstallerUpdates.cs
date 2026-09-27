@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -25,13 +26,14 @@ public sealed record UpdateManifest(
     public string ToJson() => JsonSerializer.Serialize(this);
 
     // Only a plain installer name is accepted, so a manifest cannot direct the download outside the updates folder.
-    private bool IsValid => ParseVersion(Version) is not null && Size is > 0 and <= MaxSize &&
+    private bool IsValid => IsVersion(Version) && Size is > 0 and <= MaxSize &&
         !string.IsNullOrEmpty(File) && File.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) &&
         File.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_') &&
         Sha256 is { Length: 64 } && Sha256.All(char.IsAsciiHexDigit);
 
-    public static Version? ParseVersion(string? value) =>
-        System.Version.TryParse(value, out var version) && version.Build >= 0 && version.Revision < 0 ? version : null;
+    // Major.minor.patch with an optional prerelease label, as in the release tags ("0.3.0", "0.3.0-beta.1").
+    // The version also names the tag the installer is downloaded from, so nothing else is accepted.
+    private static bool IsVersion(string? value) => value is not null && Regex.IsMatch(value, @"^\d+\.\d+\.\d+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?\z");
 }
 
 // Downloads the installer of a newer release, verifies its size and SHA-256, and runs it silently after the app exits.
@@ -45,14 +47,13 @@ public sealed class InstallerUpdateBackend : IAppUpdateBackend
     private readonly Func<UpdateManifest, Uri> _installer;
     private readonly string _directory;
     private readonly Func<ProcessStartInfo, bool> _launch;
-    private readonly Version _current;
     private UpdateManifest? _available;
 
     public InstallerUpdateBackend(HttpClient http, Uri manifest, Func<UpdateManifest, Uri> installer, string currentVersion,
         string directory, bool installed, Func<ProcessStartInfo, bool>? launch = null)
     {
         _http = http; _manifest = manifest; _installer = installer; _directory = directory; CanInstall = installed;
-        CurrentVersion = currentVersion; _current = UpdateManifest.ParseVersion(currentVersion) ?? new Version(0, 0, 0);
+        CurrentVersion = currentVersion;
         _launch = launch ?? (start => { using var process = Process.Start(start); return process is not null; });
     }
 
@@ -143,7 +144,7 @@ public sealed class InstallerUpdateBackend : IAppUpdateBackend
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or JsonException) { return null; }
     }
 
-    private bool IsNewer(UpdateManifest manifest) => UpdateManifest.ParseVersion(manifest.Version) > _current;
+    private bool IsNewer(UpdateManifest manifest) => ApplicationVersion.Compare(manifest.Version, CurrentVersion) > 0;
     private static AppRelease Describe(UpdateManifest manifest) => new(manifest.Version, manifest.Notes, manifest.Size);
     private static bool Matches(byte[] hash, string expected) => Convert.ToHexString(hash).Equals(expected, StringComparison.OrdinalIgnoreCase);
 
