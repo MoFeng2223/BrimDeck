@@ -696,8 +696,17 @@ public sealed partial class SettingsWindow : Window
             Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 18, ShadowDepth = 6, Direction = 270, Opacity = .45 }
         };
         select.Tag = menu;
-        select.Click += (_, _) => menu.IsOpen = !menu.IsOpen;
+        TogglePopup(select, menu);
         return select;
+    }
+
+    // A popup that closes when the mouse goes down outside it also closes when its own button is pressed.
+    // While the popup is open the button ignores the mouse, so that press only closes the popup and does not open it again.
+    private static void TogglePopup(ButtonBase button, Popup popup)
+    {
+        popup.Opened += (_, _) => button.IsHitTestVisible = false;
+        popup.Closed += (_, _) => button.IsHitTestVisible = true;
+        button.Click += (_, _) => popup.IsOpen = !popup.IsOpen;
     }
 
     // One line of the application menu: the name at the left, an optional note at the right.
@@ -724,7 +733,7 @@ public sealed partial class SettingsWindow : Window
         AutomationProperties.SetName(button, Loc.T($"{app} {label}颜色", $"{app} {label} color")); AutomationProperties.SetHelpText(button, color + (isDefault ? Loc.T("（默认）", " (default)") : ""));
         var popup = new Popup { PlacementTarget = button, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4, HorizontalOffset = -4 };
         popup.Child = ColorPicker(color, isDefault, value => { popup.IsOpen = false; apply(value); if (owner is { } id) RefreshAppRow(id); else ShowPage(3); });
-        button.Click += (_, _) => popup.IsOpen = !popup.IsOpen;
+        TogglePopup(button, popup);
         return button;
     }
 
