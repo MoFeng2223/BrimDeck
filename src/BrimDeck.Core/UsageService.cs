@@ -239,8 +239,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             : desktopState.Detected ? Loc.T("等待登录", "Waiting for sign-in") : Loc.T("未连接", "Not connected");
         snapshot.Status = desktopState.ReadFailed ? Loc.T("已发现 Claude 桌面版，暂时无法读取登录信息", "The Claude desktop app was found, but its sign-in cannot be read right now.")
             : codeReadFailed ? Loc.T("暂时无法读取 Claude Code 登录信息", "The Claude Code sign-in cannot be read right now.")
-            : desktopState.Detected ? Loc.T("请打开 Claude 桌面版并确认已登录，随后刷新配额", "Open the Claude desktop app, make sure you are signed in, then refresh the quota.")
-            : Loc.T("请先登录 Claude 桌面版或 Claude Code", "Sign in to the Claude desktop app or Claude Code first.");
+            : Loc.T("请先登录 Claude Code 或 Claude 桌面版，然后刷新配额", "Sign in to Claude Code or the Claude desktop app, then refresh the quota.");
     }
 
     private bool HasLocalQuota => _claudeRetained is not null || ClaudeUsageHistory.Latest(_locations) is not null;
