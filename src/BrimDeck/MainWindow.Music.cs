@@ -41,7 +41,10 @@ public partial class MainWindow
     private string _lyricsKey = "", _musicRenderKey = "", _compactLyric = "";
     // Drives the equalizer, which must keep moving while the cursor moves; see PromptTimer.
     private PromptTimer _musicTick = null!;
-    private DateTimeOffset _lastMusicTick = DateTimeOffset.UtcNow, _positionTick, _trackNoticeUntil;
+    private DateTimeOffset _lastMusicTick = DateTimeOffset.UtcNow, _positionTick, _trackNoticeUntil, _trackNoticeArmedUntil;
+    // QQ Music reports the next song while it is stopped and starts playing it up to 1.5 s later (measured
+    // through its pipe). A song that starts within this window still shows its title; one started by hand later does not.
+    private static readonly TimeSpan TrackNoticeStartWindow = TimeSpan.FromSeconds(5);
     private bool _musicStarted, _seeking, _updatingSeek, _commandBusy;
     private MediaTrack? _seekTrack;
     private readonly MediaSeekPreview _seekPreview = new();
@@ -151,11 +154,17 @@ public partial class MainWindow
         _seekPreview.Observe(track, DateTimeOffset.UtcNow);
         bool coverChanged = _mediaCover != cover;
         if (coverChanged) { _mediaCover = cover; _musicAccent = MusicVisuals.Accent(_mediaCover); }
+        var now = DateTimeOffset.UtcNow;
         if (changedSong)
         {
             _seeking = false; _seekTrack = null;
-            if (_mediaTrack is { State: MediaState.Playing } && Settings.MusicTrackNotice) _trackNoticeUntil = DateTimeOffset.UtcNow.AddSeconds(4);
-            else _trackNoticeUntil = default;
+            // A notice still on screen switches to the new title instead of giving way to the summary until playback starts.
+            _trackNoticeArmedUntil = _mediaTrack is not null && Settings.MusicTrackNotice ? now + TrackNoticeStartWindow : default;
+        }
+        if (_trackNoticeArmedUntil != default && _mediaTrack is { State: MediaState.Playing })
+        {
+            if (now <= _trackNoticeArmedUntil) _trackNoticeUntil = now.AddSeconds(4);
+            _trackNoticeArmedUntil = default;
         }
         if (lyricsChanged) UpdateLyrics();
         if (changedSong || lyricsChanged || coverChanged || old?.State != _mediaTrack?.State || old?.HasTimeline != _mediaTrack?.HasTimeline) RenderCompact();
