@@ -24,7 +24,8 @@ public partial class MainWindow
 
     private enum Tier { Roomy, Default, Dense, Compact, Tiny }
     private sealed record SegmentItem(string Text, string Name, bool Active, Action Select, string? Tip = null);
-    private sealed record QuotaView(List<UsageMetric> Quotas, List<string> Groups, int Pages, int Page);
+    // Slots is the most quotas any page or group of this app shows, so switching keeps the same layout.
+    private sealed record QuotaView(List<UsageMetric> Quotas, List<string> Groups, int Pages, int Page, int Slots);
 
     // Every size is a whole DIP so text stays crisp; the panel steps between tiers instead of scaling continuously.
     private sealed record Layout(Tier Tier, double Name, double Number, double Label, double Reset, double Foot, double Plan, double Segment,
@@ -154,7 +155,10 @@ public partial class MainWindow
         var quotas = snapshot.Metrics.OrderBy(x => x.Window is > 0 ? x.Window.Value : int.MaxValue).ToList();
         var groups = new List<string>();
         string GroupOf(UsageMetric quota) => UI.QuotaGroup(new Quota(quota.Label, 0, null)) is { Length: > 0 } group ? group : "其他";
-        if (snapshot.Id == ProviderId.Antigravity && quotas.Any(x => GroupOf(x) != "其他"))
+        bool grouped = snapshot.Id == ProviderId.Antigravity && quotas.Any(x => GroupOf(x) != "其他");
+        // Sized for the fullest set the column can switch to: each group, or all quotas when there are no groups.
+        int slots = Math.Clamp(quotas.GroupBy(x => grouped ? GroupOf(x) : "").Select(x => x.Count()).DefaultIfEmpty(1).Max(), 1, capacity);
+        if (grouped)
         {
             groups = quotas.Select(GroupOf).Distinct().ToList();
             var selected = _quotaGroups.GetValueOrDefault(entry.InstanceId, "Gemini");
@@ -165,7 +169,7 @@ public partial class MainWindow
         int pages = Math.Max(1, (quotas.Count + capacity - 1) / capacity);
         int page = Math.Clamp(_quotaPages.GetValueOrDefault(entry.InstanceId), 0, pages - 1);
         if (pages > 1) quotas = quotas.Skip(page * capacity).Take(capacity).ToList();
-        return new QuotaView(quotas, groups, pages, page);
+        return new QuotaView(quotas, groups, pages, page, slots);
     }
 
     private void RenderColumns(IReadOnlyList<DashboardColumn> columns)
@@ -187,21 +191,25 @@ public partial class MainWindow
             page.ToolTip = Loc.T($"共 {columns.Count} 项应用", $"{columns.Count} apps in total"); controls.Children.Add(page);
             controls.Children.Add(PageButton("›", Loc.T("下一页应用", "Next apps"), 1));
             ApplicationPages.Children.Add(controls); ApplicationPages.Visibility = Visibility.Visible;
-            columns = columns.Skip(_applicationPage * pageSize).Take(pageSize).ToList();
         }
-        int count = columns.Count;
+        // The layout is fitted to everything the panel can show, not to the page on screen, so switching application
+        // pages, quota pages or groups never changes column widths, sizes or spacing. A short last page leaves its
+        // remaining columns empty.
+        int count = Math.Min(columns.Count, pageSize);
         double columnWidth = (ContentCanvas.Width - EdgeInset * 2) / count;
         // Each page contains at most two quotas, regardless of the panel's height.
         var views = columns.Select(x => Quotas(x.Entry, x.Quota)).ToList();
-        int slots = views.Max(view => Math.Clamp(view.Quotas.Count, 1, 2));
+        int slots = views.Max(view => view.Slots);
         var (layout, inline, wide) = Fit(count, slots, columnWidth, ContentCanvas.Height);
+        int first = _applicationPage * pageSize;
+        columns = columns.Skip(first).Take(pageSize).ToList(); views = views.Skip(first).Take(pageSize).ToList();
         ToolbarRow.Height = new GridLength(layout.Toolbar);
         UsageContent.Margin = new Thickness(EdgeInset, 0, EdgeInset, layout.Bottom);
         // Spare height is always split evenly above and below the quotas, so resizing moves them smoothly
         // instead of pinning them under the title until a threshold is crossed.
         const bool center = true;
         var grid = new UniformGrid { Columns = count, Rows = 1 };
-        for (int i = 0; i < count; i++)
+        for (int i = 0; i < columns.Count; i++)
             grid.Children.Add(Column(columns[i].Entry, columns[i].Quota, columns[i].Usage, views[i], layout, inline, wide, center, i > 0, columnWidth - layout.ColumnPad * 2 - (i > 0 ? 1 : 0)));
         UsageContent.Children.Add(grid);
     }
@@ -254,18 +262,22 @@ public partial class MainWindow
         }
         else if (wide)
         {
-            var row = new UniformGrid { Rows = 1, Columns = view.Quotas.Count, VerticalAlignment = VerticalAlignment.Center };
+            // A page with fewer quotas leaves the remaining cells empty instead of widening its quotas.
+            int cells = Math.Max(view.Quotas.Count, view.Slots);
+            var row = new UniformGrid { Rows = 1, Columns = cells, VerticalAlignment = VerticalAlignment.Center };
             for (int i = 0; i < view.Quotas.Count; i++)
             {
                 var block = QuotaBlock(entry, view.Quotas[i], layout);
-                block.Margin = new Thickness(i > 0 ? 18 : 0, 0, i < view.Quotas.Count - 1 ? 18 : 0, 0);
+                block.Margin = new Thickness(i > 0 ? 18 : 0, 0, i < cells - 1 ? 18 : 0, 0);
                 row.Children.Add(block);
             }
             body = row;
         }
         else
         {
-            var stack = new StackPanel { VerticalAlignment = center ? VerticalAlignment.Center : VerticalAlignment.Top };
+            // A page with fewer quotas keeps the height of the fullest page, so its first quota stays where it was.
+            var stack = new StackPanel { VerticalAlignment = center ? VerticalAlignment.Center : VerticalAlignment.Top,
+                MinHeight = view.Slots * layout.QuotaHeight + (view.Slots - 1) * layout.QuotaGap };
             for (int i = 0; i < view.Quotas.Count; i++)
             {
                 var block = QuotaBlock(entry, view.Quotas[i], layout);

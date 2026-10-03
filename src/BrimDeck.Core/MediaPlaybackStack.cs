@@ -30,6 +30,10 @@ public sealed class MediaPlaybackStack
         return tracks.FirstOrDefault(t => t.Source == source && previous.All(p => p.Id != t.Id))?.Id;
     }
 
+    // A source that stopped within the grace period is between songs or buffering, as far as the last Update knows.
+    public bool BrieflyStopped(string id, DateTimeOffset now) =>
+        _entries.TryGetValue(id, out var entry) && !entry.Playing && entry.StoppedAt is { } stopped && now - stopped <= Grace;
+
     public MediaStackDecision Update(IReadOnlyList<MediaTrack> tracks, DateTimeOffset now, string? systemCurrent = null, string? previous = null)
     {
         var live = tracks.Select(t => t.Id).ToHashSet();

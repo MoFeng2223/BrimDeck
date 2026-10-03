@@ -28,6 +28,8 @@ internal sealed class MediaSessions : IDisposable
     private sealed class CoverCache
     {
         public BitmapSource? Cover;
+        // The artwork on screen before a song change stays there while the new song's cover downloads.
+        public BitmapSource? Previous;
         public string CoverKey = "";
         public byte[]? CoverBytes;
         public CancellationTokenSource? CoverCancellation;
@@ -44,6 +46,10 @@ internal sealed class MediaSessions : IDisposable
     private readonly HttpClient _coverHttp = new() { Timeout = TimeSpan.FromSeconds(6) };
     private readonly Dictionary<Session, SystemSource> _sessions = new();
     private readonly Dictionary<string, CoverCache> _covers = new();
+    // Downloaded artwork of recent songs, so switching back to one shows its cover at once.
+    // Players that publish only a URL (QQ's pipe, Netease) would otherwise download it on every switch.
+    private const int RecentCoverCount = 16;
+    private readonly LinkedList<(string Url, byte[] Bytes)> _recentCovers = new();
     private readonly Dictionary<string, Route> _routes = new();
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
     private bool _reading, _again, _disposed, _sessionListDirty = true, _visible, _requestingManager, _announcedRestarting;
@@ -222,15 +228,18 @@ internal sealed class MediaSessions : IDisposable
                             track = fallback with { Id = route.Id, IsNeteaseLog = true, CanSeek = false, CanShuffle = false, CanRepeat = false };
                         if (route.Supplement) track = MediaRouting.Merge(track, route.System?.Track);
                         if (!_covers.TryGetValue(route.Id, out var cache)) _covers[route.Id] = cache = new();
-                        string key = (native.SongId ?? track.SongKey) + "|" + native.CoverUrl;
+                        // Not SongKey: it includes the duration, which QQ's pipe reports about a second after the song.
+                        string key = (native.SongId ?? $"{track.Title}\n{track.Artist}\n{track.Album}") + "|" + native.CoverUrl;
                         bool bytesChanged = native.Cover is { } bytes && (cache.CoverBytes is null || !bytes.AsSpan().SequenceEqual(cache.CoverBytes));
                         if (cache.CoverKey != key || bytesChanged)
                         {
                             cache.CoverCancellation?.Cancel(); cache.CoverKey = key; cache.CoverBytes = native.Cover;
-                            cache.Cover = DecodeCover(native.Cover);
-                            if (cache.Cover is null && native.CoverUrl is not null) _ = ReadCoverAsync(cache, key, native.CoverUrl);
+                            var shown = cache.Cover ?? cache.Previous;
+                            cache.Cover = DecodeCover(native.Cover ?? RecentCover(native.CoverUrl));
+                            cache.Previous = null;
+                            if (cache.Cover is null && native.CoverUrl is not null) { cache.Previous = shown; _ = ReadCoverAsync(cache, key, native.CoverUrl); }
                         }
-                        artwork = native.IsNeteaseLog && native.Title.Length == 0 ? route.System?.Cover : cache.Cover;
+                        artwork = native.IsNeteaseLog && native.Title.Length == 0 ? route.System?.Cover : cache.Cover ?? cache.Previous;
                     }
                     else { track = route.System?.Track is { } system ? system with { Id = route.Id } : null; artwork = route.System?.Cover; }
                     if (track is null) continue;
@@ -245,12 +254,16 @@ internal sealed class MediaSessions : IDisposable
                 if (_pinned is null) _pinnedSource = null;
                 var systemCurrent = _manager?.GetCurrentSession();
                 var preferred = routes.FirstOrDefault(r => r.System?.Session == systemCurrent)?.Id;
-                var decision = _stack.Update(tracks, DateTimeOffset.UtcNow, preferred, Current?.Id);
+                var now = DateTimeOffset.UtcNow;
+                var decision = _stack.Update(tracks, now, preferred, Current?.Id);
                 // Starting playback in another player is a newer choice than a manual selection.
                 if (decision.Started is { } started && started != _selected) _selected = null;
                 ScheduleRecheck(decision.RecheckAt);
                 var current = tracks.FirstOrDefault(t => t.Id == _pinned) ?? tracks.FirstOrDefault(t => t.Id == _selected)
                     ?? tracks.FirstOrDefault(t => t.Id == decision.Current);
+                // QQ Music reports a stop of 50 to 100 ms between songs. A stopped player leaves the compact view,
+                // so a brief stop is shown as a pause; the recheck shows a lasting stop once the stack's grace ends.
+                if (current is { State: MediaState.Stopped } && _stack.BrieflyStopped(current.Id, now)) current = current with { State = MediaState.Paused };
                 var cover = current is null ? null : covers.GetValueOrDefault(current.Id);
                 string? connectionError = routes.FirstOrDefault(r => r.Id == current?.Id)?.Connection?.Error;
                 // The end of a restart changes nothing else once the player is back, yet the entries it disabled must return.
@@ -326,10 +339,31 @@ internal sealed class MediaSessions : IDisposable
                 if (buffer.Length + length > 8_388_608) return;
                 buffer.Write(bytes, 0, length);
             }
-            if (!_disposed && cache.CoverKey == key) { cache.Cover = DecodeCover(buffer.ToArray()); Schedule(); }
+            var downloaded = buffer.ToArray();
+            if (_disposed) return;
+            RememberCover(url, downloaded);
+            if (cache.CoverKey == key) { cache.Cover = DecodeCover(downloaded); cache.Previous = null; Schedule(); }
         }
         catch { /* A cover request cannot block playback state or controls. */ }
-        finally { if (ReferenceEquals(cache.CoverCancellation, cancellation)) cache.CoverCancellation = null; }
+        finally
+        {
+            if (ReferenceEquals(cache.CoverCancellation, cancellation)) cache.CoverCancellation = null;
+            // A failed download stops holding the previous song's artwork; the placeholder replaces it.
+            if (!_disposed && cache.CoverKey == key && cache.Previous is not null) { cache.Previous = null; Schedule(); }
+        }
+    }
+    private byte[]? RecentCover(string? url)
+    {
+        if (url is null) return null;
+        for (var node = _recentCovers.First; node is not null; node = node.Next)
+            if (node.Value.Url == url) { _recentCovers.Remove(node); _recentCovers.AddFirst(node); return node.Value.Bytes; }
+        return null;
+    }
+    private void RememberCover(string url, byte[] bytes)
+    {
+        if (RecentCover(url) is not null) return;
+        _recentCovers.AddFirst((url, bytes));
+        while (_recentCovers.Count > RecentCoverCount) _recentCovers.RemoveLast();
     }
 
     private async Task ReadSystemAsync(SystemSource source)
