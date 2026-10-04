@@ -6,7 +6,7 @@ BrimDeck reads only the sign-in state and usage records that apps already keep. 
 
 | Tool | Quota | Tokens and cost |
 | --- | --- | --- |
-| Claude | Reads the Claude Code sign-in (`%USERPROFILE%\.claude\.credentials.json`), or the Claude desktop app's sign-in when that is unavailable, and asks Anthropic for the account usage | Reads the local Claude Code session records (`projects\**\*.jsonl`); regular chats in the Claude desktop app are not included |
+| Claude | Reads the Claude Code sign-in (`%USERPROFILE%\.claude\.credentials.json`), or the Claude desktop app's sign-in when that is unavailable, and asks Anthropic for the account usage. Each row can turn off "Fetch quota online": such a row reads no sign-in and sends nothing, and shows only the quota the Claude desktop app recorded on this PC (`plan-usage-history.json`) | Reads the local Claude Code session records (`projects\**\*.jsonl`); regular chats in the Claude desktop app are not included |
 | Codex | Reads the sign-in in `%USERPROFILE%\.codex\auth.json` and asks OpenAI for the account usage; if that fails, shows the quota from the session records and marks it as possibly out of date | Reads the local session records (`sessions` and `archived_sessions`) |
 | Antigravity | Reads from the local service of the running Antigravity desktop app (127.0.0.1 only) | Reads the local conversation databases of the desktop app and the CLI under `%USERPROFILE%\.gemini` |
 | Cursor | Reads the Cursor sign-in from `%APPDATA%\Cursor\User\globalStorage\state.vscdb` in read-only mode and asks Cursor for the account usage | Asks Cursor for the account usage details, including usage on other devices |

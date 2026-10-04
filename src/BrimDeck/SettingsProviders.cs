@@ -67,10 +67,49 @@ public sealed partial class SettingsWindow
         { _expandedSource = id; view.Detail.Visibility = Visibility.Visible; view.Row.Height = double.NaN; PointArrow(view.Arrow, true); }
     }
 
+    // Claude needs no site or key; its expanded row holds this row's own switch for reading the quota online.
+    private FrameworkElement ClaudeDetails(AppEntry entry)
+    {
+        var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, 12);
+        string title = Loc.T("联网获取额度", "Fetch quota online");
+        string help = Loc.T("开启：使用 Claude Code 或桌面版的登录，联网获取额度。\n关闭：不联网，只显示 Claude 桌面版在本机记录的最新额度。",
+            "On: fetches the quota online with the Claude Code or desktop app sign-in.\nOff: no network access; shows the latest quota the Claude desktop app recorded on this PC.");
+        var line = new Grid();
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        line.ColumnDefinitions.Add(new ColumnDefinition());
+        var heading = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(16, 0, 16, 0), VerticalAlignment = VerticalAlignment.Center };
+        var caption = TextLine(title, 12, TextSecondary); caption.VerticalAlignment = VerticalAlignment.Center;
+        heading.Children.Add(caption);
+        // The same help mark as the column headings of the application list.
+        var mark = Stroke("M 6,1 A 5,5 0 1 1 6,11 A 5,5 0 1 1 6,1 Z M 6,5.4 V 8.4 M 6,3.6 V 3.7", 12, 12, TextTertiary); mark.StrokeThickness = 1.1;
+        var info = new Border { Width = 12, Height = 12, Background = Brushes.Transparent, Margin = new Thickness(4, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Help, Focusable = true, Child = mark, RenderTransform = new TranslateTransform(0, 0.5),
+            FocusVisualStyle = (Style)FindResource("SettingsSmallHelpFocus") };
+        AttachSettingHelp(info, title, () => help);
+        heading.Children.Add(info);
+        line.Children.Add(heading);
+        var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = entry.QuotaOnline, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetName(toggle, title); AutomationProperties.SetHelpText(toggle, help);
+        AutomationProperties.SetAutomationId(toggle, "claude-online-" + entry.InstanceId.ToString("N"));
+        Grid.SetColumn(toggle, 1); line.Children.Add(toggle);
+        void Set(bool online)
+        {
+            if (S.Entry(entry.InstanceId) is not { } current || current.QuotaOnline == online) return;
+            Change(s => s.Entry(entry.InstanceId)!.QuotaOnline = online);
+        }
+        toggle.Checked += (_, _) => Set(true); toggle.Unchecked += (_, _) => Set(false);
+        line.Margin = new Thickness(0, 5, 0, 5);
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetColumn(line, 1); Grid.SetColumnSpan(line, 6); grid.Children.Add(line);
+        return grid;
+    }
+
     // The expanded configuration starts under the quota source: a short label column, then fields that end midway
     // between the warning and critical colors. Labels share one width so every field starts at the same place.
     private FrameworkElement SourceDetails(AppEntry entry)
     {
+        if (entry.QuotaSource == ProviderId.Claude) return ClaudeDetails(entry);
         var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, 12); Grid.SetIsSharedSizeScope(grid, true);
         var result = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(6, 4, 6, 4) };
         Func<bool> commitSite = () => true;

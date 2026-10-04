@@ -42,20 +42,25 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         {
             // Each underlying source is read once, even when several columns reuse it.
             var required = settings.RequiredProviders;
+            // The Claude account API is asked only for rows that read online; rows that do not share one local snapshot.
+            bool claudeOnline = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Claude && app.QuotaOnline);
+            bool claudeLocal = settings.EnabledApps.Any(ProviderCatalog.ReadsLocalQuota);
             // A stalled source ends with a timeout status instead of holding every later refresh behind this gate.
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             deadline.CancelAfter(TimeSpan.FromSeconds(90));
-            var tasks = ProviderCatalog.UsageSources.Where(required.Contains).Select(id => FetchAsync(id, usageStart, deadline.Token, cancellation));
+            var tasks = ProviderCatalog.UsageSources.Where(required.Contains).Select(id => FetchAsync(id, usageStart, claudeOnline, deadline.Token, cancellation));
             var configured = _configured.RefreshAsync(settings.EnabledApps, deadline.Token);
-            return [.. await Task.WhenAll(tasks), .. await configured];
+            List<ProviderSnapshot> results = [.. await Task.WhenAll(tasks), .. await configured];
+            if (claudeLocal) results.Add(ReadClaudeLocal(usageStart));
+            return results;
         }
         finally { _gate.Release(); }
     }
 
     // One failing source must not discard the others' results; errors not anticipated below still end as a status.
-    private async Task<ProviderSnapshot> FetchAsync(ProviderId id, DateTime? usageStart, CancellationToken ct, CancellationToken lifetime)
+    private async Task<ProviderSnapshot> FetchAsync(ProviderId id, DateTime? usageStart, bool claudeOnline, CancellationToken ct, CancellationToken lifetime)
     {
-        try { return await FetchCoreAsync(id, usageStart, ct); }
+        try { return await FetchCoreAsync(id, usageStart, claudeOnline, ct); }
         catch (Exception ex) when (!lifetime.IsCancellationRequested)
         {
             bool timedOut = ex is OperationCanceledException;
@@ -68,7 +73,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
     }
 
-    private async Task<ProviderSnapshot> FetchCoreAsync(ProviderId id, DateTime? usageStart, CancellationToken ct)
+    private async Task<ProviderSnapshot> FetchCoreAsync(ProviderId id, DateTime? usageStart, bool claudeOnline, CancellationToken ct)
     {
         var now = _clock();
         var start = new DateTimeOffset(usageStart?.Date ?? now.LocalDateTime.Date.AddDays(-29));
@@ -101,7 +106,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     break;
                 }
                 case ProviderId.Claude:
-                    await ReadClaudeAsync(snapshot, now, ct);
+                    // Without an online Claude row this snapshot only serves token statistics, so no sign-in is read.
+                    if (claudeOnline) await ReadClaudeAsync(snapshot, now, ct);
                     break;
                 case ProviderId.Cursor:
                     await ReadCursorAsync(snapshot, now, start, ct);
@@ -224,10 +230,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             if (failure is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }) _claudeRetained = null;
             else
             {
-                if (HasLocalQuota)
+                if (Freshest(now) is { } local)
                 {
                     // The plan comes from the login record and stays known while the interface is unavailable.
-                    var local = Freshest(now);
                     if (local.Plan.Length == 0 && login is { Plan.Length: > 0 }) _claudeRetained = local = local with { Plan = login.Plan, PlanSource = login.Source + Loc.T(" 登录记录", " sign-in record") };
                     Retain(snapshot, local, failure, now); return;
                 }
@@ -242,11 +247,34 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             : Loc.T("请先登录 Claude Code 或 Claude 桌面版，然后刷新配额", "Sign in to Claude Code or the Claude desktop app, then refresh the quota.");
     }
 
-    private bool HasLocalQuota => _claudeRetained is not null || ClaudeUsageHistory.Latest(_locations) is not null;
+    // Claude rows that do not read online share this snapshot. No sign-in is read and no request is sent: the quota is the
+    // newest sample in the desktop application's own usage history, which carries no reset times. The plan comes from
+    // the local account record.
+    private ProviderSnapshot ReadClaudeLocal(DateTime? usageStart)
+    {
+        var now = _clock();
+        var snapshot = new ProviderSnapshot(ProviderId.Claude) { Configurations = [ProviderCatalog.LocalQuota], UsageStart = usageStart?.Date ?? now.LocalDateTime.Date.AddDays(-29) };
+        ReadClaudeProfile(snapshot);
+        if (ClaudeUsageHistory.Latest(_locations) is not { } sample || sample.Time > now.AddMinutes(5))
+        {
+            snapshot.StatusLabel = Loc.T("无本地记录", "No local record");
+            snapshot.Status = Loc.T("不联网读取，本机没有 Claude 桌面版记录的额度", "Not reading online, and the Claude desktop app has not recorded a quota on this PC.");
+            return snapshot;
+        }
+        snapshot.Quotas = [new Quota("5 小时额度", sample.FiveHour, null, 300), new Quota("每周额度", sample.SevenDay, null, 10080)];
+        snapshot.IsStale = true;
+        snapshot.LiveQuota = true; snapshot.QuotaTime = sample.Time;
+        snapshot.Source = Loc.T("Claude 桌面版 · 本地用量记录", "Claude desktop app · local usage records");
+        var time = sample.Time.LocalDateTime.ToString(sample.Time.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
+        snapshot.StatusLabel = Loc.T("本地记录", "Local record");
+        snapshot.Status = Loc.T($"不联网读取，显示 Claude 桌面版 {time} 记录的额度", $"Not reading online; showing the quota the Claude desktop app recorded at {time}.");
+        return snapshot;
+    }
 
     // The desktop application samples the same account about every fifteen minutes. A newer local
     // sample replaces the last interface reading; reset times are carried over while they still lie ahead.
-    private ClaudeQuotaSnapshot Freshest(DateTimeOffset now)
+    // Null when neither an earlier reading nor a usable sample exists.
+    private ClaudeQuotaSnapshot? Freshest(DateTimeOffset now)
     {
         var kept = _claudeRetained;
         var sample = ClaudeUsageHistory.Latest(_locations);
@@ -258,7 +286,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 [new Quota("5 小时额度", sample.FiveHour, Reset(300), 300), new Quota("每周额度", sample.SevenDay, Reset(10080), 10080), .. scoped], true);
             _claudeRetained = kept;
         }
-        return kept ?? throw new InvalidOperationException("No local quota available");
+        return kept;
     }
 
     private static void Retain(ProviderSnapshot snapshot, ClaudeQuotaSnapshot kept, Exception? failure, DateTimeOffset now)

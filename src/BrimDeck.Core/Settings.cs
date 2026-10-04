@@ -28,6 +28,9 @@ public sealed class AppEntry
     public string Site { get; set; } = "";
     public string Script { get; set; } = "";
     public Guid SecretRevision { get; set; }
+    // Claude rows only: read the quota from the account API. When off, the row sends no request and shows the quota the
+    // Claude desktop app recorded on this PC. Each row has its own choice.
+    public bool QuotaOnline { get; set; } = true;
     [JsonIgnore] public string ConfigurationKey => ProviderCatalog.ConfigurationKey(this);
     // Shorthand for QuotaSource in code. The "Id" member of old files is converted by SettingsMigrations.
     [JsonIgnore] public ProviderId Id { get => QuotaSource; set => QuotaSource = value; }

@@ -290,7 +290,42 @@ try
         result = (await Refresh(onlyClaude)).Single();
         Check("A newer local sample wins over the stored reading and keeps the reset time still ahead", result.Quotas.Single(q => q.Minutes == 300).UsedPercent == 41 &&
             result.Quotas.Single(q => q.Minutes == 10080).ResetAt is not null && result.QuotaTime > readingTime);
+
+        var savedRow = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(Only(ProviderId.Claude)))!.AsObject();
+        foreach (var app in savedRow["Apps"]!.AsArray()) app!.AsObject().Remove("QuotaOnline");
+        Check("Claude rows read online by default, including in files saved before the setting existed",
+            new AppEntry().QuotaOnline && SettingsMigrations.Read(savedRow.ToJsonString()).Apps.Single().QuotaOnline);
+        DeckSettings ClaudeRows(params bool[] online) => new() { Apps = online.Select(o => new AppEntry { Id = ProviderId.Claude, QuotaOnline = o }).ToList() };
+        quotaHandler.Override = null;
+        quotaHandler.Requests.Clear();
+        await Refresh(ClaudeRows(true));
+        int oneRowRequests = quotaHandler.Requests.Count;
+        quotaHandler.Requests.Clear();
+        var twoOnline = await Refresh(ClaudeRows(true, true));
+        Check("Two online Claude rows share one online reading", quotaHandler.Requests.Count == oneRowRequests && twoOnline.Count(s => s.Id == ProviderId.Claude) == 1);
+
+        File.WriteAllText(historyPath, History(usageClock.AddMinutes(2), 44, 9));
+        var bothLocal = ClaudeRows(false, false);
+        quotaHandler.Requests.Clear(); readCalls = desktopFixture.ReadCalls;
+        var localResults = await Refresh(bothLocal);
+        var localColumns = DashboardUsage.Columns(bothLocal, localResults);
+        Check("Offline Claude rows send no request and read no sign-in", quotaHandler.Requests.Count == 0 && desktopFixture.ReadCalls == readCalls);
+        Check("Two offline Claude rows share one local reading", localResults.Count(s => s.Configurations.Contains(ProviderCatalog.LocalQuota)) == 1 &&
+            localColumns.All(c => c.Quota.LiveQuota && c.Quota.IsStale && c.Quota.StatusLabel == "本地记录" && c.Quota.Quotas.Single(q => q.Minutes == 300).UsedPercent == 44));
+
+        var mixed = ClaudeRows(true, false);
+        quotaHandler.Requests.Clear();
+        var mixedColumns = DashboardUsage.Columns(mixed, await Refresh(mixed));
+        Check("An online and an offline Claude row are configured separately", quotaHandler.Requests.Count == oneRowRequests &&
+            !mixedColumns[0].Quota.IsStale && mixedColumns[0].Quota.Quotas.Single(q => q.Minutes == 300).UsedPercent == 9 &&
+            mixedColumns[1].Quota.IsStale && mixedColumns[1].Quota.Quotas.Single(q => q.Minutes == 300).UsedPercent == 44);
+        Check("Token statistics never use the local quota snapshot", DashboardUsage.Statistics(mixed, await Refresh(mixed)).All(s => !s.Configurations.Contains(ProviderCatalog.LocalQuota)) &&
+            mixedColumns.All(c => !c.Usage.Configurations.Contains(ProviderCatalog.LocalQuota)));
         File.Delete(historyPath);
+        quotaHandler.Requests.Clear();
+        var emptyColumn = DashboardUsage.Columns(bothLocal, await Refresh(bothLocal))[0].Quota;
+        Check("Offline Claude without a local record says so instead of inventing a value", !emptyColumn.LiveQuota && emptyColumn.Quotas.Count == 0 &&
+            emptyColumn.StatusLabel == "无本地记录" && quotaHandler.Requests.Count == 0);
 
     }
     var failingDesktop = new FailingDesktopSources();

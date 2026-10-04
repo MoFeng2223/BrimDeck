@@ -6,7 +6,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 
 | 工具 | 配额 | Token 用量与费用 |
 | --- | --- | --- |
-| Claude | 读取 Claude Code 的登录（`%USERPROFILE%\.claude\.credentials.json`），不可用时改用 Claude 桌面版的登录，向 Anthropic 查询账户用量 | 读取 Claude Code 的本地会话记录（`projects\**\*.jsonl`），不含 Claude 桌面版的普通聊天 |
+| Claude | 读取 Claude Code 的登录（`%USERPROFILE%\.claude\.credentials.json`），不可用时改用 Claude 桌面版的登录，向 Anthropic 查询账户用量。每一行可以单独关闭"联网获取额度"：关闭的行不读取登录、不联网，只显示 Claude 桌面版在本机记录的额度（`plan-usage-history.json`） | 读取 Claude Code 的本地会话记录（`projects\**\*.jsonl`），不含 Claude 桌面版的普通聊天 |
 | Codex | 读取 `%USERPROFILE%\.codex\auth.json` 中的登录，向 OpenAI 查询账户用量；查询失败时显示会话记录中的配额，并标明可能已过时 | 读取本地会话记录（`sessions` 与 `archived_sessions`） |
 | Antigravity | 从正在运行的 Antigravity 桌面版的本机服务（仅限 127.0.0.1）读取 | 读取 `%USERPROFILE%\.gemini` 下桌面版与 CLI 的本地会话数据库 |
 | Cursor | 以只读方式从 `%APPDATA%\Cursor\User\globalStorage\state.vscdb` 读取登录，向 Cursor 查询账户用量 | 向 Cursor 查询账户用量明细，包含该账户在其他设备上的用量 |

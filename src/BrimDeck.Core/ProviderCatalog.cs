@@ -44,7 +44,11 @@ public static class ProviderCatalog
         ProviderId.GlmChina => "glm-cn", ProviderId.GlmGlobal => "glm-global", ProviderId.NewApi => "newapi", ProviderId.Sub2Api => "sub2api",
         _ => id.ToString().ToLowerInvariant()
     };
-    public static string ConfigurationKey(AppEntry entry) => Hash(JsonSerializer.Serialize(new { entry.QuotaSource, entry.Site, entry.Script, entry.SecretRevision }));
+    // Marks the Claude snapshot built only from this PC's records, shown by Claude rows that do not read online.
+    public const string LocalQuota = "local";
+    public static bool ReadsLocalQuota(AppEntry entry) => entry.QuotaSource == ProviderId.Claude && !entry.QuotaOnline;
+    public static string ConfigurationKey(AppEntry entry) => Hash(JsonSerializer.Serialize(new { entry.QuotaSource, entry.Site, entry.Script, entry.SecretRevision }))
+        + (ReadsLocalQuota(entry) ? ":" + LocalQuota : "");
     public static string RequestKey(AppEntry entry, string secret) => Hash(JsonSerializer.Serialize(new { entry.QuotaSource, entry.Site, entry.Script, secret }));
     private static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     // Console pages people copy from the address bar; everything from the first such segment on is dropped.
