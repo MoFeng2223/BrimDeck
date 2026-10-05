@@ -9,8 +9,8 @@ namespace BrimDeck.Core;
 // order, every step newer than the file's version and not newer than the running application; files without
 // AppVersion count as 0.0.0.
 // Reading stays tolerant: missing members take their defaults and unknown members are ignored, so a release that only
-// adds settings needs no step. Add a step when a setting is renamed, split, merged or changes meaning, and raise the
-// project version to the step's version so builds apply it.
+// adds settings needs no step. Add a step when a setting is renamed, split, merged or changes meaning, and add
+// releases/<the step's version>.md so builds take that version and apply it.
 public static class SettingsMigrations
 {
     private static readonly (Version Version, Action<JsonObject> Apply)[] Steps =
