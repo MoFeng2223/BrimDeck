@@ -170,6 +170,45 @@
       </ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
+  <Style x:Key="SettingsTileFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
+    <Border BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="1.5" CornerRadius="13" Margin="-3"/>
+  </ControlTemplate></Setter.Value></Setter></Style>
+  <!-- A clock style: the face on the black of the collapsed surface, with a check at the top right once chosen. -->
+  <Style x:Key="SettingsClockTile" TargetType="RadioButton">
+    <Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource SettingsTileFocus}"/>
+    <Setter Property="Height" Value="72"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
+      <Border x:Name="Chrome" CornerRadius="10" Background="#111114" BorderBrush="{DynamicResource SettingsBorder}" BorderThickness="2">
+        <Grid>
+          <ContentPresenter x:Name="Preview" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          <Border x:Name="Selection" Width="16" Height="16" CornerRadius="8" Background="{DynamicResource SettingsAccent}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,6,6,0" Visibility="Hidden">
+            <Path Data="M 4,8.2 L 6.9,11 L 12,5.4" Stroke="White" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+          </Border>
+        </Grid>
+      </Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="#74747C"/></Trigger>
+        <Trigger Property="IsChecked" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource SettingsAccent}"/><Setter TargetName="Selection" Property="Visibility" Value="Visible"/></Trigger>
+        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Preview" Property="Opacity" Value="0.85"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <!-- A clock color: the color as a disc, ringed in the accent once chosen. -->
+  <Style x:Key="SettingsClockSwatch" TargetType="RadioButton">
+    <Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource SettingsRoundFocus}"/>
+    <Setter Property="Width" Value="32"/><Setter Property="Height" Value="32"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
+      <Grid Width="32" Height="32" Background="Transparent" UseLayoutRounding="False" SnapsToDevicePixels="False">
+        <Ellipse x:Name="Ring" Width="32" Height="32" Stroke="Transparent" StrokeThickness="2"/>
+        <Ellipse Width="24" Height="24" Fill="{TemplateBinding Background}" Stroke="{DynamicResource SettingsSwatchBorder}" StrokeThickness="0.75"/>
+        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      </Grid>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource SettingsSwatchBorder}"/></Trigger>
+        <Trigger Property="IsChecked" Value="True"><Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource SettingsAccent}"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
   <Style x:Key="SettingsNumber" TargetType="TextBox">
     <Setter Property="Foreground" Value="{DynamicResource SettingsTextPrimary}"/><Setter Property="Background" Value="Transparent"/>
     <Setter Property="CaretBrush" Value="{DynamicResource SettingsAccent}"/><Setter Property="BorderThickness" Value="0"/>
@@ -289,7 +328,7 @@
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox">
       <Grid>
         <ToggleButton Focusable="False" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
-          <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border x:Name="Chrome" Background="{DynamicResource SettingsInput}" BorderBrush="{DynamicResource SettingsBorder}" BorderThickness="1" CornerRadius="6"><Path Data="M0,0 L4,4 L8,0" Stroke="{DynamicResource SettingsTextSecondary}" StrokeThickness="1.2" Width="8" Height="4" HorizontalAlignment="Right" Margin="0,0,10,0"/></Border></ControlTemplate></ToggleButton.Template>
+          <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border x:Name="Chrome" Background="{DynamicResource SettingsInput}" BorderBrush="{DynamicResource SettingsBorder}" BorderThickness="1" CornerRadius="6"><TextBlock Text="&#xE96E;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12" Foreground="{DynamicResource SettingsTextSecondary}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,9,0"/></Border></ControlTemplate></ToggleButton.Template>
         </ToggleButton>
         <ContentPresenter Content="{TemplateBinding SelectionBoxItem}" Margin="10,0,28,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
         <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False">

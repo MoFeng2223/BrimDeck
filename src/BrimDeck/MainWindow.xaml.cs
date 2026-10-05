@@ -120,8 +120,9 @@ public partial class MainWindow : Window
     }
     private void UpdateClock()
     {
-        var now = DateTime.Now.ToString("HH:mm");
-        ClockLabel.Text = now; CompactTime.Text = now;
+        var now = DateTime.Now;
+        ClockLabel.Text = now.ToString("HH:mm");
+        if (_compactClock is not null) _compactClock.Time = now;
     }
     public void ApplySettings() => ApplySettings(false);    private void ApplySettings(bool animatePage)
     {
@@ -186,10 +187,9 @@ public partial class MainWindow : Window
     internal void RenderCompact()
     {
         CompactRings.Children.Clear(); CompactAlert.Children.Clear();
-        CompactTime.Visibility = Visibility.Collapsed;
         CompactRings.HorizontalAlignment = HorizontalAlignment.Center;
         if (_quotaCarousel is not null) { _quotaElapsed = _quotaCarousel.Elapsed; _quotaCarousel.SetRunning(false, false); }
-        _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null;
+        _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _compactClock = null;
         if (_alert is { } alert)
         {
             CompactAlert.Visibility = Visibility.Visible; CompactRings.Visibility = Visibility.Collapsed;

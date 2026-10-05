@@ -17,6 +17,25 @@ public enum SettingsTheme { System, Light, Dark }
 public enum DeckPage { Usage, Music }
 public enum DefaultDeckPage { Last, Usage, Music }
 public enum CompactMusicText { None, Title, Lyrics }
+public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed }
+// Every clock style takes this one color. Gradient spreads ClockGradient across the digits, Custom is ClockCustomColor,
+// and Cover follows the color picked from the playing song's cover. Saved as numbers, so new members go at the end.
+public enum ClockColor { White, Amber, Cyan, Pink, Lime, Gradient, Cover, Custom }
+
+public static class ClockColors
+{
+    public const string DefaultCustom = "#B9A8FF";
+    // Every gradient has three colors: start, middle and end.
+    public static readonly string[] Sunset = ["#FFB38A", "#FF7EB3", "#B69CFF"];
+    public static IReadOnlyList<(string Name, string[] Stops)> Gradients =>
+    [
+        (Loc.T("日落", "Sunset"), Sunset),
+        (Loc.T("海洋", "Ocean"), ["#7CF3FF", "#4FA8FF", "#6A6CFF"]),
+        (Loc.T("极光", "Aurora"), ["#8BFFB0", "#5CE1E6", "#B69CFF"]),
+        (Loc.T("火焰", "Ember"), ["#FFE27A", "#FF9F43", "#FF5E5E"]),
+        (Loc.T("霓虹", "Neon"), ["#FF5CF0", "#A66BFF", "#5CE1E6"])
+    ];
+}
 
 // A dashboard column has an identity independent of either data source.
 public sealed class AppEntry
@@ -139,6 +158,14 @@ public sealed class DeckSettings
     public bool NotchMusic { get; set; } = true;
     public bool CapsuleSummary { get; set; } = true;
     public bool CapsuleMusic { get; set; } = true;
+    // The notch and the capsule each switch the clock on; its style, color and hour format are shared.
+    public bool NotchClock { get; set; }
+    public bool CapsuleClock { get; set; }
+    public ClockStyle ClockStyle { get; set; }
+    public ClockColor ClockColor { get; set; }
+    public string ClockCustomColor { get; set; } = ClockColors.DefaultCustom;
+    public List<string> ClockGradient { get; set; } = [.. ClockColors.Sunset];
+    public bool Clock24Hour { get; set; } = true;
     public CompactMusicText MusicText { get; set; }
     public bool MusicCoverColor { get; set; } = true;
     public bool MusicTrackNotice { get; set; } = true;
@@ -180,6 +207,8 @@ public sealed class DeckSettings
 
     public bool ShowsSummary(CompactStyle style) => style switch { CompactStyle.Notch => NotchSummary, CompactStyle.Capsule => CapsuleSummary, _ => false };
     public bool ShowsMusic(CompactStyle style) => style switch { CompactStyle.Notch => NotchMusic, CompactStyle.Capsule => CapsuleMusic, _ => false };
+    // The indicator is too thin for text, so it never shows the clock.
+    public bool ShowsClock(CompactStyle style) => style switch { CompactStyle.Notch => NotchClock, CompactStyle.Capsule => CapsuleClock, _ => false };
     // Media is detected for the expanded music page, the chosen style's music, or an indicator that shows playback
     // progress; a window rule can turn any style into the indicator.
     [JsonIgnore] public bool MediaWanted => MusicPage || ShowsMusic(Style) || MusicIndicatorProgress
@@ -217,6 +246,7 @@ public sealed class DeckSettings
     {
         var copy = (DeckSettings)MemberwiseClone();
         copy._apps = _apps?.Select(app => app.Copy()).ToList();
+        copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
         return copy;
     }
     public void Normalize()
@@ -237,6 +267,11 @@ public sealed class DeckSettings
         MusicWidth = double.IsFinite(MusicWidth) ? Math.Clamp(MusicWidth, 440, 1200) : 520;
         MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, 140, 400) : 200;
         if (!Enum.IsDefined(MusicText)) MusicText = CompactMusicText.None;
+        if (!Enum.IsDefined(ClockStyle)) ClockStyle = ClockStyle.Minimal;
+        if (!Enum.IsDefined(ClockColor)) ClockColor = ClockColor.White;
+        ClockCustomColor = AppPresets.NormalizeColor(ClockCustomColor) is { Length: > 0 } custom ? custom : ClockColors.DefaultCustom;
+        var stops = (ClockGradient ?? []).Select(AppPresets.NormalizeColor).ToList();
+        ClockGradient = stops.Count == 3 && stops.All(stop => stop.Length > 0) ? stops : [.. ClockColors.Sunset];
         if (!Enum.IsDefined(DefaultPage)) DefaultPage = DefaultDeckPage.Last;
         if (!Enum.IsDefined(LastPage)) LastPage = DeckPage.Usage;
         OpenDelay = Math.Clamp(OpenDelay, 0, 2000);

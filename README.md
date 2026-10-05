@@ -46,6 +46,8 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
 
   <img src="docs/en-US/images/compact-notch-lyrics.png" width="279" alt="Notch showing a lyric line">
 
+- Notch and Capsule can also show the time at their right end, in one of nine styles, in a color of your choice, and in 12- or 24-hour format.
+
 - When a quota reaches 70% or 90%, the collapsed view widens and shows a notice for 5 seconds.
 
   <img src="docs/en-US/images/compact-alert.png" width="337" alt="Quota notice: Claude 5-hour 91% used">

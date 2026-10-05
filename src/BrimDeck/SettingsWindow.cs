@@ -386,10 +386,12 @@ public sealed partial class SettingsWindow : Window
         // The grid clips at its own bounds, so each card keeps 3 DIP or more of its cell free on every side of the
         // keyboard focus ring: 6 DIP left and right (the grid overhangs the page by the same amount) and 3 DIP above.
         var styles=new UniformGrid { Columns=3,Margin=new Thickness(-6,0,-6,24) };
+        _styleCards.Clear();
         foreach(var style in Enum.GetValues<CompactStyle>())
         {
-            var button=new RadioButton { Style=(Style)FindResource("SettingsChoice"),Content=CompactStylePreview.Create(style,_palette.Dark),Margin=new Thickness(6,3,6,0),Tag=StyleName(style),GroupName="CompactStyle",IsChecked=S.Style==style };
+            var button=new RadioButton { Style=(Style)FindResource("SettingsChoice"),Content=CompactStylePreview.Create(style,_palette.Dark,S.ShowsClock(style)),Margin=new Thickness(6,3,6,0),Tag=StyleName(style),GroupName="CompactStyle",IsChecked=S.Style==style };
             button.Checked+=(_,_)=>{ var previous=S.Style; Change(s=>s.Style=style); ShowStyleOptions(style,previous); }; AutomationProperties.SetName(button,StyleName(style)); styles.Children.Add(button);
+            _styleCards[style]=button;
         }
         _styleOptions=new Grid();
         _content.Children.Add(styles); _content.Children.Add(_styleOptions); ShowStyleOptions(S.Style,null);
@@ -440,8 +442,8 @@ public sealed partial class SettingsWindow : Window
         AutomationProperties.SetName(toggle, title);
         toggle.Checked += (_, _) => show(true);
         toggle.Unchecked += (_, _) => show(false);
-        arrow = GlyphButton("M 0,0 L 4,4 L 8,0", 8, 4, Loc.T("展开" + (name.Length > 0 && name[0] < 128 ? " " : "") + name + "尺寸", "Show " + name + " sizes"), () => Flip());
-        arrow.Width = 18; arrow.Height = 28; arrow.ToolTip = null; arrow.Margin = new Thickness(12, 0, 0, 0);
+        arrow = ChevronButton(Loc.T("展开" + (name.Length > 0 && name[0] < 128 ? " " : "") + name + "尺寸", "Show " + name + " sizes"), () => Flip());
+        arrow.Margin = new Thickness(12, 0, 0, 0);
         PointArrow(arrow, open);
         var controls = new StackPanel { Orientation = Orientation.Horizontal }; controls.Children.Add(toggle); controls.Children.Add(arrow);
         var header = Row(title, controls); header.Background = Brushes.Transparent;
@@ -492,7 +494,8 @@ public sealed partial class SettingsWindow : Window
             switch(_page)
             {
                 case 0:s.LaunchAtStartup=false;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;break;
-                case 1:s.Style=defaults.Style;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;break;
+                case 1:s.Style=defaults.Style;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;
+                    s.NotchClock=defaults.NotchClock;s.CapsuleClock=defaults.CapsuleClock;s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=defaults.ClockGradient;s.Clock24Hour=defaults.Clock24Hour;break;
                 case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.RightClickSettings=defaults.RightClickSettings;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;break;
                 case 3:s.QuotaAlerts=defaults.QuotaAlerts;s.Apps=defaults.Apps;break;
                 case 5:s.MusicText=defaults.MusicText;s.MusicCoverColor=defaults.MusicCoverColor;s.MusicTrackNotice=defaults.MusicTrackNotice;s.LyricsEnabled=defaults.LyricsEnabled;break;
@@ -657,7 +660,7 @@ public sealed partial class SettingsWindow : Window
         string Label(ProviderId id) => AppPresets.Name(id);
         var select = ActionButton("", () => { });
         var selectContent = new DockPanel();
-        var chevron = Stroke("M 0,0 L 4,4 L 8,0", 8, 4, TextSecondary); chevron.Margin = new Thickness(8, 1, 0, 0); DockPanel.SetDock(chevron, Dock.Right); selectContent.Children.Add(chevron);
+        var chevron = Chevron(); chevron.Foreground = UI.Brush(TextSecondary); chevron.Margin = new Thickness(8, ChevronDrop.Top, 0, ChevronDrop.Bottom); DockPanel.SetDock(chevron, Dock.Right); selectContent.Children.Add(chevron);
         var selectLabel = TextLine(Label(selected), 12.5, TextPrimary, FontWeights.SemiBold);
         selectLabel.VerticalAlignment = VerticalAlignment.Center; selectLabel.TextTrimming = TextTrimming.CharacterEllipsis;
         selectContent.Children.Add(selectLabel);

@@ -46,6 +46,8 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
   <img src="docs/zh-CN/images/compact-notch-lyrics.png" width="279" alt="刘海中显示歌词">
 
+- 刘海与胶囊还可以在右侧显示时间，提供九种样式，可以选择颜色，并可切换 12 小时制或 24 小时制。
+
 - 配额使用率达到 70% 或 90% 时，收起形态自动加宽并显示提醒 5 秒。
 
   <img src="docs/zh-CN/images/compact-alert.png" width="337" alt="配额提醒：Claude 5 小时已用 91%">

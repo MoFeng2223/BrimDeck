@@ -27,8 +27,26 @@ public sealed partial class SettingsWindow
     // The same chevron as the selectors, turned to point right while the row is closed.
     private static void PointArrow(Button arrow, bool open)
     {
-        if (arrow.Content is System.Windows.Shapes.Path chevron) chevron.RenderTransform = new RotateTransform(open ? 0 : -90);
+        if (arrow.Content is UIElement chevron) chevron.RenderTransform = new RotateTransform(open ? 0 : -90);
         AutomationProperties.SetItemStatus(arrow, open ? Loc.T("已展开", "Expanded") : Loc.T("已收起", "Collapsed"));
+    }
+    // The Windows 11 icon font's small chevron (ChevronDownSmall) is hinted like text and heavy enough beside a bold label.
+    // Expandable rows, selectors, combo boxes and the panel's source button all use it.
+    // Measured ink: the glyph's center sits at 0.4688 of its box, so it turns about that point, and the labels' glyphs sit
+    // lower than their boxes, so it drops 1 DIP to meet them.
+    internal static readonly Thickness ChevronDrop = new(0, 1, 0, -1);
+    internal static TextBlock Chevron() => new()
+    {
+        Text = "", FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 12, Margin = ChevronDrop,
+        RenderTransformOrigin = new Point(.5, .4688), VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center
+    };
+    // The chevron follows the button's foreground, so hover brightens it.
+    private Button ChevronButton(string label, Action action)
+    {
+        var button = new Button { Content = Chevron(), Style = (Style)FindResource("SettingsGlyphButton"), Width = 18, Height = 28 };
+        AutomationProperties.SetName(button, label);
+        button.Click += (_, _) => action();
+        return button;
     }
     // A bare icon whose stroke follows the button, so hover brightens the icon instead of filling a box.
     private Button GlyphButton(string data, double width, double height, string label, Action action)
@@ -42,8 +60,7 @@ public sealed partial class SettingsWindow
     }
     private void AttachSourceDetails(AppEntry entry, Grid row, Border border)
     {
-        var arrow = GlyphButton("M 0,0 L 4,4 L 8,0", 8, 4, Loc.T("展开 " + entry.Name + " 配额配置", "Show " + entry.Name + " quota configuration"), () => ToggleSourceRow(entry.InstanceId));
-        arrow.Width = 18; arrow.Height = 28; arrow.ToolTip = null;
+        var arrow = ChevronButton(Loc.T("展开 " + entry.Name + " 配额配置", "Show " + entry.Name + " quota configuration"), () => ToggleSourceRow(entry.InstanceId));
         arrow.HorizontalAlignment = HorizontalAlignment.Right; arrow.VerticalAlignment = VerticalAlignment.Center;
         AutomationProperties.SetAutomationId(arrow, "expand-source-" + entry.InstanceId.ToString("N"));
         row.Children.Add(arrow);
