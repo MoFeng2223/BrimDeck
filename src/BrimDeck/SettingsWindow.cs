@@ -399,21 +399,32 @@ public sealed partial class SettingsWindow : Window
     private readonly HashSet<DeckPage> _openSizes = [];
     private void Expanded()
     {
-        SectionTitle(Loc.T("显示的页面", "Pages shown"));
-        Group(SizeRow(Loc.T("显示 AI 用量", "Show AI usage"), Loc.T("AI 用量", "AI usage"), DeckPage.Usage, S.UsagePage, value => Change(s => s.UsagePage = value), Collect(UsageSizes)),
-            SizeRow(Loc.T("显示音乐", "Show music"), Loc.T("音乐", "music"), DeckPage.Music, S.MusicPage, value => Change(s => s.MusicPage = value), Collect(MusicSizeControls)));
         // The last viewed page is always offered, followed by each page that is shown. A choice whose page is switched off
         // reads as the last viewed page, which is what the panel does then, and returns when the page is shown again.
-        var starts = new List<(DefaultDeckPage Value, string Label)> { (DefaultDeckPage.Last, Loc.T("上次停留的页面", "Last viewed page")) };
-        if (S.UsagePage) starts.Add((DefaultDeckPage.Usage, Loc.T("AI 用量", "AI usage")));
-        if (S.MusicPage) starts.Add((DefaultDeckPage.Music, Loc.T("音乐", "Music")));
-        var start = new ComboBox { Width = 150, Style = (Style)FindResource("SettingsCombo"), ItemsSource = starts.Select(option => option.Label).ToList(),
-            SelectedIndex = Math.Max(0, starts.FindIndex(option => option.Value == S.DefaultPage)) };
+        // Switching a page on or off refills the list in place, so the page is not rebuilt and the switch keeps its animation.
+        var start = new ComboBox { Width = 150, Style = (Style)FindResource("SettingsCombo") };
         AutomationProperties.SetName(start, Loc.T("每次打开时显示", "Page shown on opening"));
-        start.SelectionChanged += (_, _) => { if (start.SelectedIndex >= 0) Change(s => s.DefaultPage = starts[start.SelectedIndex].Value); };
+        List<(DefaultDeckPage Value, string Label)> starts = [];
+        bool filling = false;
+        void FillStarts()
+        {
+            starts = [(DefaultDeckPage.Last, Loc.T("上次停留的页面", "Last viewed page"))];
+            if (S.UsagePage) starts.Add((DefaultDeckPage.Usage, Loc.T("AI 用量", "AI usage")));
+            if (S.MusicPage) starts.Add((DefaultDeckPage.Music, Loc.T("音乐", "Music")));
+            filling = true;
+            start.ItemsSource = starts.Select(option => option.Label).ToList();
+            start.SelectedIndex = Math.Max(0, starts.FindIndex(option => option.Value == S.DefaultPage));
+            filling = false;
+        }
+        FillStarts();
+        start.SelectionChanged += (_, _) => { if (!filling && start.SelectedIndex >= 0) Change(s => s.DefaultPage = starts[start.SelectedIndex].Value); };
+        SectionTitle(Loc.T("显示的页面", "Pages shown"));
+        Group(SizeRow(Loc.T("显示 AI 用量", "Show AI usage"), Loc.T("AI 用量", "AI usage"), DeckPage.Usage, S.UsagePage, value => { Change(s => s.UsagePage = value); FillStarts(); }, Collect(UsageSizes)),
+            SizeRow(Loc.T("显示音乐", "Show music"), Loc.T("音乐", "music"), DeckPage.Music, S.MusicPage, value => { Change(s => s.MusicPage = value); FillStarts(); }, Collect(MusicSizeControls)));
         // Settings that apply across the expanded pages rather than to one of them.
         SectionTitle(Loc.T("通用", "General"));
-        Group(Row(Loc.T("每次打开时显示", "Page shown on opening"), start));
+        Group(Row(Loc.T("每次打开时显示", "Page shown on opening"), start),
+            Toggle(Loc.T("右键点击打开设置", "Right-click opens settings"), S.RightClickSettings, value => Change(s => s.RightClickSettings = value)));
     }
     private FrameworkElement SizeRow(string title, string name, DeckPage page, bool shown, Action<bool> show, StackPanel sizes)
     {
@@ -427,8 +438,8 @@ public sealed partial class SettingsWindow : Window
         }
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = shown, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, title);
-        toggle.Checked += (_, _) => { show(true); ShowPage(2); };
-        toggle.Unchecked += (_, _) => { show(false); ShowPage(2); };
+        toggle.Checked += (_, _) => show(true);
+        toggle.Unchecked += (_, _) => show(false);
         arrow = GlyphButton("M 0,0 L 4,4 L 8,0", 8, 4, Loc.T("展开" + (name.Length > 0 && name[0] < 128 ? " " : "") + name + "尺寸", "Show " + name + " sizes"), () => Flip());
         arrow.Width = 18; arrow.Height = 28; arrow.ToolTip = null; arrow.Margin = new Thickness(12, 0, 0, 0);
         PointArrow(arrow, open);
@@ -482,7 +493,7 @@ public sealed partial class SettingsWindow : Window
             {
                 case 0:s.LaunchAtStartup=false;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;break;
                 case 1:s.Style=defaults.Style;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;break;
-                case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;break;
+                case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.RightClickSettings=defaults.RightClickSettings;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;break;
                 case 3:s.QuotaAlerts=defaults.QuotaAlerts;s.Apps=defaults.Apps;break;
                 case 5:s.MusicText=defaults.MusicText;s.MusicCoverColor=defaults.MusicCoverColor;s.MusicTrackNotice=defaults.MusicTrackNotice;s.LyricsEnabled=defaults.LyricsEnabled;break;
                 case 6:s.NeteaseFullControlEntry=defaults.NeteaseFullControlEntry;break;

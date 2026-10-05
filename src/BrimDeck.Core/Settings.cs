@@ -146,6 +146,8 @@ public sealed class DeckSettings
     // Offers "网易云音乐 · 完整控制" in the source menu, or alone in its place when nothing plays.
     public bool NeteaseFullControlEntry { get; set; }
     public DefaultDeckPage DefaultPage { get; set; }
+    // A right click on the expanded panel opens the settings window.
+    public bool RightClickSettings { get; set; } = true;
     public DeckPage LastPage { get; set; }
     public double Width { get; set; } = 520;
     public double Height { get; set; } = 200;
