@@ -30,6 +30,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.Now);
     private readonly LogReader _logs = new();
     private readonly AntigravityUsage _antigravity = new();
+    private readonly DshSessions _dsh = new();
     private readonly SemaphoreSlim _gate = new(1);
     private ClaudeQuotaSnapshot? _claudeRetained;
     private readonly ConfiguredProviders _configured = new(secrets, http, clock);
@@ -83,6 +84,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (id == ProviderId.Claude) ReadClaudeProfile(snapshot);
         if (id == ProviderId.ZCode) ZCodeUsage.Read(snapshot, desktop, _locations.ZCodeHome, start, now);
         if (id == ProviderId.Antigravity) _antigravity.Read(snapshot, desktop, _locations.AntigravityConversations, start, now);
+        if (id == ProviderId.Dsh) _dsh.Read(snapshot, _locations.DshHome, start, now);
         try
         {
             switch (id)
@@ -117,6 +119,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     break;
                 case ProviderId.ZCode:
                     await ReadZCodeAsync(snapshot, now, ct);
+                    break;
+                case ProviderId.Dsh:
+                    await ReadDshAsync(snapshot, now, ct);
                     break;
             }
         }
@@ -501,6 +506,59 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             snapshot.Status = "Coding Plan " + partial.Status + (codingTime is { } time
                 ? Loc.T($"，显示 {time.LocalDateTime:MM-dd HH:mm} 读取的数据", $" Showing the data read at {time.LocalDateTime:MM-dd HH:mm}.") : "");
         }
+    }
+
+    // DeepSeek Harness signs in to a DeepSeek platform account; its balance is read the way DeepSeek Harness reads it.
+    // Without a signed-in account, the API key saved on its Models page is read with the DeepSeek source's script.
+    private async Task ReadDshAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
+        var account = DshUsage.ReadAccount(_locations.DshHome);
+        if (account is null || account.Token.Length == 0 && account.ApiKey.Length == 0)
+        {
+            snapshot.StatusLabel = Loc.T("未连接", "Not connected");
+            snapshot.Status = Loc.T("请先在 DeepSeek Harness 中登录 DeepSeek 账户，或在其中保存 DeepSeek API 密钥", "Sign in to a DeepSeek account in DeepSeek Harness, or save a DeepSeek API key there.");
+            return;
+        }
+        snapshot.Scope = "account";
+        if (account.Token.Length == 0)
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(TimeSpan.FromSeconds(10));
+            var session = new ScriptSession(_http, new AppEntry { QuotaSource = ProviderId.DeepSeek }, account.ApiKey, now, deadline.Token);
+            ProviderResult result;
+            try { result = await Task.Run(session.RunAsync, deadline.Token); }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                (snapshot.StatusLabel, snapshot.Status) = session.FailureStatus switch
+                {
+                    401 => (Loc.T("密钥无效", "Invalid key"), Loc.T("DeepSeek 拒绝了 DeepSeek Harness 中保存的 API 密钥，请在 DeepSeek Harness 中更新", "DeepSeek rejected the API key saved in DeepSeek Harness. Update it in DeepSeek Harness.")),
+                    429 => (Loc.T("请求频繁", "Too many requests"), Loc.T("请求频繁，稍后自动重试", "Too many requests. Retrying automatically later.")),
+                    _ => deadline.IsCancellationRequested ? (Loc.T("读取超时", "Timed out"), Loc.T("读取超时，稍后重试", "Reading timed out. Retrying later."))
+                        : (Loc.T("读取失败", "Read failed"), session.Redact(ex.Message))
+                };
+                return;
+            }
+            snapshot.Metrics = result.Metrics;
+            Connected(snapshot, Loc.T("DeepSeek Harness · DeepSeek API 密钥", "DeepSeek Harness · DeepSeek API key"), now);
+            if (result.Warnings.Count > 0) snapshot.Status += Loc.T("；", "; ") + string.Join(Loc.T("；", "; "), result.Warnings);
+            return;
+        }
+        using var request = new HttpRequestMessage(HttpMethod.Get, DshUsage.Platform + "/api/v0/users/get_user_summary");
+        request.Headers.TryAddWithoutValidation("x-dsh-auth-token", account.Token);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.UserAgent.ParseAdd("BrimDeck/0.1");
+        using var response = await _http.SendAsync(request, ct);
+        // As in DeepSeek Harness, HTTP 401 or code 40003 means the stored sign-in is no longer accepted.
+        void Expired()
+        {
+            snapshot.StatusLabel = Loc.T("登录已失效", "Sign-in expired");
+            snapshot.Status = Loc.T("DeepSeek Harness 的登录已失效，请在 DeepSeek Harness 中重新登录", "The DeepSeek Harness sign-in has expired. Sign in again in DeepSeek Harness.");
+        }
+        if (response.StatusCode == HttpStatusCode.Unauthorized) { Expired(); return; }
+        response.EnsureSuccessStatusCode();
+        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        if (doc.RootElement.Get("code").Number() == 40003) { Expired(); return; }
+        snapshot.Metrics = DshUsage.Summary(doc.RootElement) ?? throw new InvalidDataException();
+        Connected(snapshot, Loc.T("DeepSeek Harness · DeepSeek 账户", "DeepSeek Harness · DeepSeek account"), now);
     }
 
     private static HttpRequestMessage Bearer(HttpMethod method, string uri, string token)

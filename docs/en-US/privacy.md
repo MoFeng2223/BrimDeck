@@ -11,9 +11,10 @@ BrimDeck reads only the sign-in state and usage records that apps already keep. 
 | Antigravity | Reads from the local service of the running Antigravity desktop app (127.0.0.1 only) | Reads the local conversation databases of the desktop app and the CLI under `%USERPROFILE%\.gemini` |
 | Cursor | Reads the Cursor sign-in from `%APPDATA%\Cursor\User\globalStorage\state.vscdb` in read-only mode and asks Cursor for the account usage | Asks Cursor for the account usage details, including usage on other devices |
 | ZCode | Reads the ZCode sign-in and asks for the Coding Plan, Start Plan and MCP daily limits | Reads the local request records (`%USERPROFILE%\.zcode\cli\db\db.sqlite`) |
-| Zhipu GLM, Z.ai GLM, New API, Sub2API, Custom | Uses the key and site address entered in settings | Not available |
+| DeepSeek Harness | Reads the DeepSeek Harness sign-in (`%USERPROFILE%\.dsh\.credentials.yaml`) and asks the DeepSeek platform for the account balance and total cost; without a signed-in account, uses the API key saved there to ask for the balance | Reads the local session records (`%USERPROFILE%\.dsh\sessions`) |
+| Zhipu GLM, Z.ai GLM, DeepSeek, New API, Sub2API, Custom | Uses the key and site address entered in settings | Not available |
 
-- When `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `ZCODE_HOME` is set to an absolute path, that folder is read instead.
+- When `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `ZCODE_HOME` or `DSH_HOME` is set to an absolute path, that folder is read instead.
 - These account APIs and local data formats are not stable public interfaces. When they cannot be read, the panel shows the actual status and never makes up numbers.
 
 ## Files stored on this PC
