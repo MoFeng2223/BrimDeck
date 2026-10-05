@@ -671,6 +671,7 @@ public sealed partial class SettingsWindow : Window
         // The application menu is a styled popup list: dark surface, rounded corners, no icon column.
         var menu = new Popup { PlacementTarget = select, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
         var items = new StackPanel { Width = 208 };
+        Button? current = null;
         string? group = null;
         foreach (var id in quota ? ProviderCatalog.Sources : ProviderCatalog.UsageSources)
         {
@@ -681,6 +682,7 @@ public sealed partial class SettingsWindow : Window
                 var header = TextLine(group, 10.5, TextTertiary); header.Margin = new Thickness(10, 4, 10, 3); items.Children.Add(header);
             }
             var item = MenuEntry(Label(id), "", true, id == selected);
+            if (id == selected) current = item;
             item.Click += (_, _) =>
             {
                 menu.IsOpen = false;
@@ -700,15 +702,49 @@ public sealed partial class SettingsWindow : Window
             };
             AutomationProperties.SetName(item, Loc.T("选择 ", "Select ") + Label(id)); items.Children.Add(item);
         }
-        menu.Child = new Border
+        // The list grows as sources are added; past the room on screen it scrolls instead of running off the screen.
+        var list = new ScrollViewer
         {
-            Child = items, Background = UI.Brush(_palette.Popup), BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8), Padding = new Thickness(5), Margin = new Thickness(8),
-            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 18, ShadowDepth = 6, Direction = 270, Opacity = .45 }
+            Style = (Style)FindResource("SettingsScrollViewer"), Content = items, Focusable = false,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        };
+        var surface = new Border
+        {
+            Child = list, Background = UI.Brush(_palette.Popup), BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8), Padding = new Thickness(5)
+        };
+        menu.Child = surface;
+        // A long list opens at the selected source.
+        menu.Opened += (_, _) =>
+        {
+            list.ScrollToTop();
+            if (current is { } chosen) Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => chosen.BringIntoView());
         };
         select.Tag = menu;
+        select.Click += (_, _) => { if (!menu.IsOpen) FitMenuToScreen(select, menu, surface); };
         TogglePopup(select, menu);
         return select;
+    }
+
+    // Opens the menu on the side of the button that has room for it inside the monitor's work area, so it never covers
+    // the taskbar, and limits its height to that room. The room depends on the screen resolution, the Windows scale and
+    // where the button is, so it is measured again each time the menu opens.
+    private static void FitMenuToScreen(FrameworkElement anchor, Popup menu, FrameworkElement surface)
+    {
+        const double Gap = 4, Edge = 8;
+        if (PresentationSource.FromVisual(anchor)?.CompositionTarget is not { } target) return;
+        var fromDevice = target.TransformFromDevice;
+        var top = anchor.PointToScreen(new Point(0, 0));
+        var bottom = anchor.PointToScreen(new Point(anchor.ActualWidth, anchor.ActualHeight));
+        var work = Native.WindowsHost.WorkAreaAt(new Point((top.X + bottom.X) / 2, (top.Y + bottom.Y) / 2));
+        double below = fromDevice.Transform(new Vector(0, work.Bottom - bottom.Y)).Y - Gap - Edge;
+        double above = fromDevice.Transform(new Vector(0, top.Y - work.Top)).Y - Gap - Edge;
+        surface.MaxHeight = double.PositiveInfinity;
+        surface.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        bool down = surface.DesiredSize.Height <= below || below >= above;
+        menu.Placement = down ? PlacementMode.Bottom : PlacementMode.Top;
+        menu.VerticalOffset = down ? Gap : -Gap;
+        surface.MaxHeight = Math.Max(0, down ? below : above);
     }
 
     // A popup that closes when the mouse goes down outside it also closes when its own button is pressed.
@@ -742,7 +778,7 @@ public sealed partial class SettingsWindow : Window
         var button = new Button { Style = (Style)FindResource("SettingsColorButton"), Foreground = UI.Brush(color) };
         // The column heading explains each color; the swatch itself carries no hover note.
         AutomationProperties.SetName(button, Loc.T($"{app} {label}颜色", $"{app} {label} color")); AutomationProperties.SetHelpText(button, color + (isDefault ? Loc.T("（默认）", " (default)") : ""));
-        var popup = new Popup { PlacementTarget = button, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4, HorizontalOffset = -4 };
+        var popup = new Popup { PlacementTarget = button, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
         popup.Child = ColorPicker(color, isDefault, value => { popup.IsOpen = false; apply(value); if (owner is { } id) RefreshAppRow(id); else ShowPage(3); });
         TogglePopup(button, popup);
         return button;
@@ -775,8 +811,7 @@ public sealed partial class SettingsWindow : Window
         return new Border
         {
             Child = panel, Background = UI.Brush(_palette.Popup), BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(9), Padding = new Thickness(10), Margin = new Thickness(8),
-            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 18, ShadowDepth = 6, Direction = 270, Opacity = .45 }
+            CornerRadius = new CornerRadius(9), Padding = new Thickness(10)
         };
     }
 
