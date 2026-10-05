@@ -312,6 +312,8 @@ try
         Check("Offline Claude rows send no request and read no sign-in", quotaHandler.Requests.Count == 0 && desktopFixture.ReadCalls == readCalls);
         Check("Two offline Claude rows share one local reading", localResults.Count(s => s.Configurations.Contains(ProviderCatalog.LocalQuota)) == 1 &&
             localColumns.All(c => c.Quota.LiveQuota && c.Quota.IsStale && c.Quota.StatusLabel == "本地记录" && c.Quota.Quotas.Single(q => q.Minutes == 300).UsedPercent == 44));
+        Check("An offline Claude reading is timed when BrimDeck read it and names the time of the desktop record", localColumns.All(c => c.Quota.QuotaTime == usageClock &&
+            c.Quota.Status.StartsWith("来自 Claude 桌面版，最新记录于 ", StringComparison.Ordinal)));
 
         var mixed = ClaudeRows(true, false);
         quotaHandler.Requests.Clear();

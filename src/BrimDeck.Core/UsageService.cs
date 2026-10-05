@@ -258,16 +258,17 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (ClaudeUsageHistory.Latest(_locations) is not { } sample || sample.Time > now.AddMinutes(5))
         {
             snapshot.StatusLabel = Loc.T("无本地记录", "No local record");
-            snapshot.Status = Loc.T("不联网读取，本机没有 Claude 桌面版记录的额度", "Not reading online, and the Claude desktop app has not recorded a quota on this PC.");
+            snapshot.Status = Loc.T("Claude 桌面版尚未在本机记录额度", "The Claude desktop app has not recorded a quota on this PC yet.");
             return snapshot;
         }
         snapshot.Quotas = [new Quota("5 小时额度", sample.FiveHour, null, 300), new Quota("每周额度", sample.SevenDay, null, 10080)];
         snapshot.IsStale = true;
-        snapshot.LiveQuota = true; snapshot.QuotaTime = sample.Time;
+        // The update time is when BrimDeck read the history; the status gives the time of the newest sample in it.
+        snapshot.LiveQuota = true; snapshot.QuotaTime = now;
         snapshot.Source = Loc.T("Claude 桌面版 · 本地用量记录", "Claude desktop app · local usage records");
         var time = sample.Time.LocalDateTime.ToString(sample.Time.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
         snapshot.StatusLabel = Loc.T("本地记录", "Local record");
-        snapshot.Status = Loc.T($"不联网读取，显示 Claude 桌面版 {time} 记录的额度", $"Not reading online; showing the quota the Claude desktop app recorded at {time}.");
+        snapshot.Status = Loc.T($"来自 Claude 桌面版，最新记录于 {time}", $"From the Claude desktop app, latest record at {time}.");
         return snapshot;
     }
 
