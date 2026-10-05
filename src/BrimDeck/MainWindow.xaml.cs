@@ -89,7 +89,8 @@ public partial class MainWindow : Window
         Closing += (_, e) => { if (!_app.Exiting) { e.Cancel = true; SetExpanded(false); } };
         Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _alertTimer.Stop(); };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
-        MouseRightButtonUp += (_, e) => { _app.OpenSettings(); e.Handled = true; };
+        // The collapsed island opens on hover, so a right click there does nothing.
+        MouseRightButtonUp += (_, e) => { if (!_expanded || !Settings.RightClickSettings) return; _app.OpenSettings(); e.Handled = true; };
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { SetExpanded(false); e.Handled = true; } };
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += DisplayChanged;
         Closed += (_, _) => Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= DisplayChanged;
@@ -119,8 +120,9 @@ public partial class MainWindow : Window
     }
     private void UpdateClock()
     {
-        var now = DateTime.Now.ToString("HH:mm");
-        ClockLabel.Text = now; CompactTime.Text = now;
+        var now = DateTime.Now;
+        ClockLabel.Text = now.ToString("HH:mm");
+        if (_compactClock is not null) _compactClock.Time = now;
     }
     public void ApplySettings() => ApplySettings(false);    private void ApplySettings(bool animatePage)
     {
@@ -185,10 +187,9 @@ public partial class MainWindow : Window
     internal void RenderCompact()
     {
         CompactRings.Children.Clear(); CompactAlert.Children.Clear();
-        CompactTime.Visibility = Visibility.Collapsed;
         CompactRings.HorizontalAlignment = HorizontalAlignment.Center;
         if (_quotaCarousel is not null) { _quotaElapsed = _quotaCarousel.Elapsed; _quotaCarousel.SetRunning(false, false); }
-        _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null;
+        _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _compactClock = null;
         if (_alert is { } alert)
         {
             CompactAlert.Visibility = Visibility.Visible; CompactRings.Visibility = Visibility.Collapsed;

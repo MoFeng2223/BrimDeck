@@ -25,11 +25,10 @@
               Background="Black" BorderThickness="0" CornerRadius="0,0,12,12" ShoulderRadius="16" MaterialOpacity="1" ClipToBounds="True">
         <Grid>
           <Border x:Name="MusicIndicator" Height="4" HorizontalAlignment="Left" VerticalAlignment="Center" Background="#FF55555A" CornerRadius="2" Visibility="Collapsed" IsHitTestVisible="False"/>
-          <!-- Compact music and quotas share the fixed content area; quota alerts take precedence. -->
+          <!-- Compact music, quotas and the clock share the fixed content area; quota alerts take precedence. -->
           <Grid x:Name="Compact" HorizontalAlignment="Center" VerticalAlignment="Center" Height="26" RenderTransformOrigin="0.5,0.5">
             <Grid.RenderTransform><ScaleTransform x:Name="CompactScale"/></Grid.RenderTransform>
             <StackPanel x:Name="CompactRings" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            <TextBlock x:Name="CompactTime" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" FontSize="11.5" Foreground="#9EEBEBF5" HorizontalAlignment="Right" VerticalAlignment="Center" Visibility="Collapsed"/>
             <StackPanel x:Name="CompactAlert" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
           </Grid>
           <!-- Pinned to the top and scaled about the top center, so the content recedes toward the screen edge instead of sliding while the panel shrinks. -->
@@ -77,12 +76,9 @@
                       </Viewbox>
                       <TextBlock x:Name="MediaSourceLabel" Grid.Column="1" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" FontSize="12"
                                  Foreground="{Binding Foreground, ElementName=MediaSourceButton}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                      <Canvas x:Name="MediaSourceChevron" Grid.Column="2" Width="8" Height="4" Margin="5,0,0,0" VerticalAlignment="Center" Visibility="Collapsed">
-                        <Path Data="M0.5,0.5 L4,3.5 L7.5,0.5" Stroke="{Binding Foreground, ElementName=MediaSourceButton}" StrokeThickness="1.5"
-                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round">
-                          <Path.RenderTransform><TranslateTransform Y="0.5"/></Path.RenderTransform>
-                        </Path>
-                      </Canvas>
+                      <!-- The settings window's chevron: the icon font's small chevron, dropped 1 DIP to meet the label's glyphs. -->
+                      <TextBlock x:Name="MediaSourceChevron" Grid.Column="2" Text="&#xE96E;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12" Margin="5,1,0,-1"
+                                 Foreground="{Binding Foreground, ElementName=MediaSourceButton}" VerticalAlignment="Center" Visibility="Collapsed"/>
                     </Grid>
                   </Button>
                   <Button x:Name="SyncButton" Style="{StaticResource PanelIconButton}" Margin="10,0,4,0" VerticalAlignment="Center" Click="Sync_Click">

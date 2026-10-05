@@ -15,15 +15,24 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | Cursor | ✓ | ✓ | Sign in to Cursor on this PC |
 | Antigravity | ✓ | ✓ | The Antigravity desktop app must be running for its quota to be read |
 | ZCode | ✓ | ✓ | Sign in to ZCode on this PC |
+| DeepSeek Harness | ✓ | ✓ | Sign in to a DeepSeek account in the DeepSeek Harness desktop or web app, or save an API key there |
 | Zhipu GLM, Z.ai GLM | ✓ | | Enter an API key in settings |
+| DeepSeek | ✓ | | Enter an API key in settings |
 | New API, Sub2API relay sites | ✓ | | Enter the site address and key in settings |
 | Custom | ✓ | | Write a short JavaScript script |
 
 Sources you enter by hand have no local usage records; choose another tool as the usage app for Today and 7 days.
 
+## DeepSeek Harness
+
+The DeepSeek Harness desktop app and web app (`npx @deepseek-ai/dsh web`) share one data folder, so signing in to either is enough.
+
+- **Quota**: when a DeepSeek account is signed in to DeepSeek Harness, shows that account's balance, granted balance and total cost, the same figures as the DeepSeek platform's web console, all for the whole account. Without a signed-in account, the API key saved on the DeepSeek Harness Models page is used, and only the balance and the granted balance can be shown. If the sign-in expires, sign in again in DeepSeek Harness.
+- **Tokens and cost**: read from the DeepSeek Harness session records on this PC, covering the desktop app and the web app. Costs are estimated from model prices; models missing from the price list are not priced, and you can add their prices in settings.
+
 ## Sources entered by hand
 
-Choose Zhipu GLM, Z.ai GLM, New API, Sub2API or Custom as the quota source, and the row expands so you can fill in what it needs.
+Choose Zhipu GLM, Z.ai GLM, DeepSeek, New API, Sub2API or Custom as the quota source, and the row expands so you can fill in what it needs.
 
 - **Key**: stored on this PC, encrypted by Windows, and never written to the settings file. It is deleted when you remove the column or change its quota source.
 - **Site address**: the home page address is enough. A trailing `/v1`, or the path of a console page you paste, is removed automatically.
@@ -33,6 +42,10 @@ Choose Zhipu GLM, Z.ai GLM, New API, Sub2API or Custom as the quota source, and 
 ### Zhipu GLM and Z.ai GLM
 
 Enter the API key of your GLM Coding Plan. Shows the 5-hour and weekly limits and tool call counts; credit-based plans show credits used and the total. Team plans whose API returns no limits are not supported yet.
+
+### DeepSeek
+
+Enter an API key created on the DeepSeek platform. Shows the account balance and the granted part of it, in the account's currency (CNY or USD). When the balance is too low to call the API, the status says so.
 
 ### New API
 

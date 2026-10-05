@@ -15,6 +15,14 @@ internal static class MusicTests
             && MusicPlaybackModes.Next(modes with { Repeat = MediaRepeat.None }) == MusicPlaybackMode.List);
         check("Repeat-only sources omit shuffle", MusicPlaybackModes.Supported(modes with { CanShuffle = false }).SequenceEqual([MusicPlaybackMode.List, MusicPlaybackMode.Track, MusicPlaybackMode.Order]));
         check("Sources without modes omit the mode control", MusicPlaybackModes.Supported(new MediaTrack()).Count == 0);
+        var narrow = CompactMusicLayout.Calculate(115, true, 4, true);
+        check("A narrow compact row keeps one rotating ring beside a scrolling lyric", narrow.VisibleRings == 1 && narrow.ScrollRings && narrow.RingSize == 10 && narrow.TextWidth == 43);
+        var capsule = CompactMusicLayout.Calculate(91.3, true, 4, true);
+        check("The capsule beside the widest clock still shows a ring and the lyric", capsule.VisibleRings == 1 && capsule.TextWidth > 19);
+        var tight = CompactMusicLayout.Calculate(84, true, 4, true);
+        check("Rings give way to the lyric once it would fall below its minimum", tight.VisibleRings == 0 && tight.TextWidth == 30);
+        check("Without the clock the notch shows four rings and the capsule three beside the lyric", CompactMusicLayout.Calculate(178, true, 4, true).VisibleRings == 4
+            && CompactMusicLayout.Calculate(164, true, 4, true).VisibleRings == 3);
         var now = DateTimeOffset.UtcNow;
         var track = new MediaTrack { Title = "测试曲目", Artist = "测试歌手", Start = TimeSpan.FromSeconds(10), End = TimeSpan.FromSeconds(210), ReportedPosition = TimeSpan.FromSeconds(20), PositionAt = now, State = MediaState.Playing, Rate = 2 };
         check("Playback position applies rate and timeline origin", track.Position(now.AddSeconds(3)).TotalSeconds == 16);

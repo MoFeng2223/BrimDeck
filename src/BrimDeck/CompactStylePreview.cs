@@ -11,7 +11,7 @@ internal static class CompactStylePreview
     private static readonly DrawingBrush DarkDesktop = CreateDesktop(true);
     private static readonly DrawingBrush LightDesktop = CreateDesktop(false);
 
-    public static FrameworkElement Create(CompactStyle style, bool dark = true)
+    public static FrameworkElement Create(CompactStyle style, bool dark = true, bool clock = false)
     {
         // Every option uses the same scene and scale so only the panel's shape changes.
         var screen = new Grid
@@ -43,7 +43,16 @@ internal static class CompactStylePreview
                 var ring = UI.Ring(percent, color, 4.6, .9); ring.Margin = new Thickness(0, 0, 3.4, 0); detail.Children.Add(ring);
             }
             detail.Margin = new Thickness(3.4, 0, 0, 0);
-            island.Child = detail; screen.Children.Add(island);
+            if (clock)
+            {
+                // With the clock on, the time sits at the right end and the rings take the rest, as on the real island.
+                var row = new DockPanel { Margin = new Thickness(notch ? 11 : 7, 0, notch ? 11 : 7, 0), VerticalAlignment = VerticalAlignment.Center };
+                var time = new TextBlock { Text = "14:32", FontFamily = UI.PanelFont, FontSize = 5.5, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(UI.Primary), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 0, 0, 0) };
+                DockPanel.SetDock(time, Dock.Right); row.Children.Add(time); row.Children.Add(detail);
+                island.Child = row;
+            }
+            else island.Child = detail;
+            screen.Children.Add(island);
         }
         return new Viewbox { Child = screen, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Stretch };
     }

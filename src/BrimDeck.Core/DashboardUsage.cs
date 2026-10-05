@@ -13,11 +13,14 @@ public static class DashboardUsage
     public static IReadOnlyList<ProviderSnapshot> Statistics(DeckSettings settings, IReadOnlyList<ProviderSnapshot> snapshots)
         => settings.StatisticsProviders.Select(id => Find(snapshots, id)).ToList();
 
+    // The local Claude snapshot serves only the rows that chose it; statistics and online rows use the main snapshot.
     private static ProviderSnapshot Find(IReadOnlyList<ProviderSnapshot> snapshots, ProviderId id)
-        => snapshots.FirstOrDefault(snapshot => snapshot.Id == id) ?? new ProviderSnapshot(id);
+        => snapshots.FirstOrDefault(snapshot => snapshot.Id == id && !snapshot.Configurations.Contains(ProviderCatalog.LocalQuota)) ?? new ProviderSnapshot(id);
 
     public static ProviderSnapshot Quota(AppEntry entry, IReadOnlyList<ProviderSnapshot> snapshots)
-        => ProviderCatalog.IsBuiltIn(entry.QuotaSource) ? Find(snapshots, entry.QuotaSource)
+        => ProviderCatalog.ReadsLocalQuota(entry)
+            ? snapshots.FirstOrDefault(snapshot => snapshot.Id == entry.QuotaSource && snapshot.Configurations.Contains(ProviderCatalog.LocalQuota)) ?? new ProviderSnapshot(entry.QuotaSource)
+            : ProviderCatalog.IsBuiltIn(entry.QuotaSource) ? Find(snapshots, entry.QuotaSource)
             : snapshots.FirstOrDefault(snapshot => snapshot.Id == entry.QuotaSource && snapshot.Configurations.Contains(entry.ConfigurationKey))
                 ?? new ProviderSnapshot(entry.QuotaSource);
 }

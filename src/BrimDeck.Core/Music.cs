@@ -57,6 +57,8 @@ public sealed record MediaTrack
 // All layout decisions depend on available content width, including future custom compact sizes.
 public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, double RingGap, int VisibleRings, double RingWidth, double TextWidth, bool ScrollRings)
 {
+    // The narrowest scrolling lyric: about one and a half characters. Rings and lyric both stay down to this width.
+    private const double MinimumText = 18;
     public static CompactMusicLayout Calculate(double contentWidth, bool media, int rings, bool text)
     {
         double middle = Math.Max(0, contentWidth - (media ? 54 : 0));
@@ -72,10 +74,12 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
             // Once rotating, leave most of the middle area to the scrolling lyric.
             double ringBudget = text ? Math.Min(middle * .4, middle - desiredText - between) : middle;
             visible = Math.Clamp((int)Math.Floor((ringBudget + gap) / (size + gap)), 0, rings);
+            // Below its preferred width the lyric still scrolls, so one rotating ring stays beside it.
+            if (text && visible == 0 && rings > 0 && middle - size - between >= MinimumText) visible = 1;
         }
         double ringWidth = Span(visible, size, gap);
         double textWidth = text ? Math.Max(0, middle - ringWidth - (visible > 0 ? 8 : 0)) : 0;
-        if (text && textWidth < 40)
+        if (text && textWidth < MinimumText)
         {
             textWidth = 0; size = 10; gap = 5;
             visible = Math.Clamp((int)Math.Floor((middle + gap) / (size + gap)), 0, rings);

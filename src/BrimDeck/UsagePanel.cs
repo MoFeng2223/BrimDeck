@@ -262,22 +262,35 @@ public partial class MainWindow
         }
         else if (wide)
         {
-            // A page with fewer quotas leaves the remaining cells empty instead of widening its quotas.
+            // A page with fewer quotas keeps the width of a full page's quotas instead of widening them, and is centered.
             int cells = Math.Max(view.Quotas.Count, view.Slots);
-            var row = new UniformGrid { Rows = 1, Columns = cells, VerticalAlignment = VerticalAlignment.Center };
-            for (int i = 0; i < view.Quotas.Count; i++)
+            if (view.Quotas.Count < cells)
             {
-                var block = QuotaBlock(entry, view.Quotas[i], layout);
-                block.Margin = new Thickness(i > 0 ? 18 : 0, 0, i < cells - 1 ? 18 : 0, 0);
-                row.Children.Add(block);
+                var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+                foreach (var quota in view.Quotas)
+                {
+                    var block = QuotaBlock(entry, quota, layout);
+                    block.Width = Math.Max(0, innerWidth / cells - 18);
+                    row.Children.Add(block);
+                }
+                body = row;
             }
-            body = row;
+            else
+            {
+                var row = new UniformGrid { Rows = 1, Columns = cells, VerticalAlignment = VerticalAlignment.Center };
+                for (int i = 0; i < view.Quotas.Count; i++)
+                {
+                    var block = QuotaBlock(entry, view.Quotas[i], layout);
+                    block.Margin = new Thickness(i > 0 ? 18 : 0, 0, i < cells - 1 ? 18 : 0, 0);
+                    row.Children.Add(block);
+                }
+                body = row;
+            }
         }
         else
         {
-            // A page with fewer quotas keeps the height of the fullest page, so its first quota stays where it was.
-            var stack = new StackPanel { VerticalAlignment = center ? VerticalAlignment.Center : VerticalAlignment.Top,
-                MinHeight = view.Slots * layout.QuotaHeight + (view.Slots - 1) * layout.QuotaGap };
+            // A page with fewer quotas is centered like a column that has only one quota; type sizes and spacing do not change.
+            var stack = new StackPanel { VerticalAlignment = center ? VerticalAlignment.Center : VerticalAlignment.Top };
             for (int i = 0; i < view.Quotas.Count; i++)
             {
                 var block = QuotaBlock(entry, view.Quotas[i], layout);

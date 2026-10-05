@@ -60,6 +60,7 @@ public partial class MainWindow
     private MusicEqualizer? _musicEqualizer, _compactEqualizer;
     private readonly double[] _flowLevels = new double[5];
     private MusicMarquee? _compactMarquee;
+    private ClockFace? _compactClock;
     private QuotaCarousel? _quotaCarousel;
     private TimeSpan _quotaElapsed;
     internal bool IsMusicPage => _page == DeckPage.Music && Settings.MusicPage;
@@ -627,6 +628,9 @@ public partial class MainWindow
         if (track.IsQqMusic && _lyrics.Lines.Count == 0 && !_lyrics.Instrumental) return ("", track.CurrentLyric ?? "", "");
         return _lyrics.At(track, DateTimeOffset.UtcNow);
     }
+    private const double CompactClockGap = 8;
+    // The color taken from the playing song's cover; the fallback brush used without a cover is not opaque.
+    internal Color? CoverColor => _mediaCover is not null && _mediaTrack is { State: not MediaState.Stopped } && _musicAccent is SolidColorBrush { Color.A: 255 } accent ? accent.Color : null;
     private void RenderCompactMusic()
     {
         double contentWidth = Math.Max(0, CompactWidth(EffectiveStyle) - (EffectiveStyle == CompactStyle.Notch ? 60 : 32));
@@ -644,9 +648,22 @@ public partial class MainWindow
             }
         }
         var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
-        var layout = CompactMusicLayout.Calculate(contentWidth, media, apps.Count, text.Length > 0); CurrentCompactLayout = layout;
+        // The clock keeps its own width at the right; the rest goes to the cover, rings, text and equalizer as before.
+        // Shown alone, it is centred.
+        var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, ClockFace.Palette(Settings, CoverColor), DateTime.Now) : null;
+        bool clockAlone = clock is not null && !media && apps.Count == 0;
+        double clockRoom = clock is not null && !clockAlone ? clock.ReservedWidth + CompactClockGap : 0;
+        var layout = CompactMusicLayout.Calculate(Math.Max(0, contentWidth - clockRoom), media, apps.Count, text.Length > 0); CurrentCompactLayout = layout;
         var grid = new Grid { Width = contentWidth, Height = 24 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(media ? 28 : 0) }); grid.ColumnDefinitions.Add(new ColumnDefinition()); grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(media ? 26 : 0) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(clockRoom) });
+        if (clock is not null)
+        {
+            clock.VerticalAlignment = VerticalAlignment.Center;
+            clock.HorizontalAlignment = clockAlone ? HorizontalAlignment.Center : HorizontalAlignment.Right;
+            if (clockAlone) Grid.SetColumnSpan(clock, 4); else Grid.SetColumn(clock, 3);
+            grid.Children.Add(clock); _compactClock = clock;
+        }
         if (media)
         {
             var cover = MusicVisuals.Cover(_mediaCover, 20, 4); cover.HorizontalAlignment = HorizontalAlignment.Left; cover.VerticalAlignment = VerticalAlignment.Center; AutomationProperties.SetName(cover, _mediaTrack!.Caption); grid.Children.Add(cover);

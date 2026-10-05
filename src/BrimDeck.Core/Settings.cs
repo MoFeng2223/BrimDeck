@@ -9,13 +9,33 @@ public enum CompactStyle { Notch, Capsule, Line }
 public enum WindowBehavior { Normal, Line, Hide }
 public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive }
 // ZCode reads the ZCode desktop application's local request records and its signed-in Coding Plan quota.
+// Dsh reads the DeepSeek account or API key that DeepSeek Harness (desktop or web) signed in with; DeepSeek uses a key entered by hand.
 // Statistics sources are saved as numbers. 8 and 9 were a short-lived split of Claude and are retired:
 // SettingsMigrations maps them back to Claude, and later members keep their saved numbers.
-public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11 }
+public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13 }
 public enum SettingsTheme { System, Light, Dark }
 public enum DeckPage { Usage, Music }
 public enum DefaultDeckPage { Last, Usage, Music }
 public enum CompactMusicText { None, Title, Lyrics }
+public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed }
+// Every clock style takes this one color. Gradient spreads ClockGradient across the digits, Custom is ClockCustomColor,
+// and Cover follows the color picked from the playing song's cover. Saved as numbers, so new members go at the end.
+public enum ClockColor { White, Amber, Cyan, Pink, Lime, Gradient, Cover, Custom }
+
+public static class ClockColors
+{
+    public const string DefaultCustom = "#B9A8FF";
+    // Every gradient has three colors: start, middle and end.
+    public static readonly string[] Sunset = ["#FFB38A", "#FF7EB3", "#B69CFF"];
+    public static IReadOnlyList<(string Name, string[] Stops)> Gradients =>
+    [
+        (Loc.T("日落", "Sunset"), Sunset),
+        (Loc.T("海洋", "Ocean"), ["#7CF3FF", "#4FA8FF", "#6A6CFF"]),
+        (Loc.T("极光", "Aurora"), ["#8BFFB0", "#5CE1E6", "#B69CFF"]),
+        (Loc.T("火焰", "Ember"), ["#FFE27A", "#FF9F43", "#FF5E5E"]),
+        (Loc.T("霓虹", "Neon"), ["#FF5CF0", "#A66BFF", "#5CE1E6"])
+    ];
+}
 
 // A dashboard column has an identity independent of either data source.
 public sealed class AppEntry
@@ -28,6 +48,9 @@ public sealed class AppEntry
     public string Site { get; set; } = "";
     public string Script { get; set; } = "";
     public Guid SecretRevision { get; set; }
+    // Claude rows only: read the quota from the account API. When off, the row sends no request and shows the quota the
+    // Claude desktop app recorded on this PC. Each row has its own choice.
+    public bool QuotaOnline { get; set; } = true;
     [JsonIgnore] public string ConfigurationKey => ProviderCatalog.ConfigurationKey(this);
     // Shorthand for QuotaSource in code. The "Id" member of old files is converted by SettingsMigrations.
     [JsonIgnore] public ProviderId Id { get => QuotaSource; set => QuotaSource = value; }
@@ -77,7 +100,7 @@ public static class AppPresets
     public static string Name(ProviderId id) => ProviderCatalog.Name(id);
     // The original preset colors: coral for Claude, mint for Codex, periwinkle for Antigravity, light gray for Cursor.
     public static string ThemeColor(ProviderId id) => id switch
-    { ProviderId.Claude => "#E5A385", ProviderId.Codex => "#98DBB0", ProviderId.Antigravity => "#9CB9FF", ProviderId.ZCode => "#7FD1C4", _ => "#D4D5DF" };
+    { ProviderId.Claude => "#E5A385", ProviderId.Codex => "#98DBB0", ProviderId.Antigravity => "#9CB9FF", ProviderId.ZCode => "#7FD1C4", ProviderId.Dsh => "#B9A8FF", _ => "#D4D5DF" };
     public static string QuotaColor(AppEntry entry, double usedPercent)
         => usedPercent >= CriticalPercent ? entry.Critical : usedPercent >= WarningPercent ? entry.Warning : entry.Theme;
     public static int Level(double usedPercent) => usedPercent >= CriticalPercent ? 2 : usedPercent >= WarningPercent ? 1 : 0;
@@ -135,6 +158,14 @@ public sealed class DeckSettings
     public bool NotchMusic { get; set; } = true;
     public bool CapsuleSummary { get; set; } = true;
     public bool CapsuleMusic { get; set; } = true;
+    // The notch and the capsule each switch the clock on; its style, color and hour format are shared.
+    public bool NotchClock { get; set; }
+    public bool CapsuleClock { get; set; }
+    public ClockStyle ClockStyle { get; set; }
+    public ClockColor ClockColor { get; set; }
+    public string ClockCustomColor { get; set; } = ClockColors.DefaultCustom;
+    public List<string> ClockGradient { get; set; } = [.. ClockColors.Sunset];
+    public bool Clock24Hour { get; set; } = true;
     public CompactMusicText MusicText { get; set; }
     public bool MusicCoverColor { get; set; } = true;
     public bool MusicTrackNotice { get; set; } = true;
@@ -143,6 +174,8 @@ public sealed class DeckSettings
     // Offers "网易云音乐 · 完整控制" in the source menu, or alone in its place when nothing plays.
     public bool NeteaseFullControlEntry { get; set; }
     public DefaultDeckPage DefaultPage { get; set; }
+    // A right click on the expanded panel opens the settings window.
+    public bool RightClickSettings { get; set; } = true;
     public DeckPage LastPage { get; set; }
     public double Width { get; set; } = 520;
     public double Height { get; set; } = 200;
@@ -174,6 +207,8 @@ public sealed class DeckSettings
 
     public bool ShowsSummary(CompactStyle style) => style switch { CompactStyle.Notch => NotchSummary, CompactStyle.Capsule => CapsuleSummary, _ => false };
     public bool ShowsMusic(CompactStyle style) => style switch { CompactStyle.Notch => NotchMusic, CompactStyle.Capsule => CapsuleMusic, _ => false };
+    // The indicator is too thin for text, so it never shows the clock.
+    public bool ShowsClock(CompactStyle style) => style switch { CompactStyle.Notch => NotchClock, CompactStyle.Capsule => CapsuleClock, _ => false };
     // Media is detected for the expanded music page, the chosen style's music, or an indicator that shows playback
     // progress; a window rule can turn any style into the indicator.
     [JsonIgnore] public bool MediaWanted => MusicPage || ShowsMusic(Style) || MusicIndicatorProgress
@@ -211,6 +246,7 @@ public sealed class DeckSettings
     {
         var copy = (DeckSettings)MemberwiseClone();
         copy._apps = _apps?.Select(app => app.Copy()).ToList();
+        copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
         return copy;
     }
     public void Normalize()
@@ -231,6 +267,11 @@ public sealed class DeckSettings
         MusicWidth = double.IsFinite(MusicWidth) ? Math.Clamp(MusicWidth, 440, 1200) : 520;
         MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, 140, 400) : 200;
         if (!Enum.IsDefined(MusicText)) MusicText = CompactMusicText.None;
+        if (!Enum.IsDefined(ClockStyle)) ClockStyle = ClockStyle.Minimal;
+        if (!Enum.IsDefined(ClockColor)) ClockColor = ClockColor.White;
+        ClockCustomColor = AppPresets.NormalizeColor(ClockCustomColor) is { Length: > 0 } custom ? custom : ClockColors.DefaultCustom;
+        var stops = (ClockGradient ?? []).Select(AppPresets.NormalizeColor).ToList();
+        ClockGradient = stops.Count == 3 && stops.All(stop => stop.Length > 0) ? stops : [.. ClockColors.Sunset];
         if (!Enum.IsDefined(DefaultPage)) DefaultPage = DefaultDeckPage.Last;
         if (!Enum.IsDefined(LastPage)) LastPage = DeckPage.Usage;
         OpenDelay = Math.Clamp(OpenDelay, 0, 2000);

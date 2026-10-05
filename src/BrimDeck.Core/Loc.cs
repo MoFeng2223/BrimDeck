@@ -33,6 +33,7 @@ public static class Loc
         ["账期"] = "Billing period", ["套餐"] = "Plan", ["其他"] = "Other",
         ["Cursor 模型"] = "Cursor models", ["其他模型"] = "Other models", ["工具调用"] = "Tool calls",
         ["账户余额"] = "Account balance", ["密钥余额"] = "Key balance", ["今日扣费"] = "Charged today", ["密钥累计"] = "Key total",
+        ["赠送余额"] = "Granted balance", ["累计消费"] = "Total cost",
         ["次"] = "calls", ["积分"] = "credits", ["令牌"] = "tokens",
         ["网易云音乐"] = "NetEase Cloud Music", ["QQ 音乐"] = "QQ Music", ["爱奇艺"] = "iQIYI",
     };

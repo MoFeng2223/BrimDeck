@@ -15,15 +15,24 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 | Cursor | ✓ | ✓ | 在本机登录 Cursor |
 | Antigravity | ✓ | ✓ | 读取配额时需要 Antigravity 桌面版正在运行 |
 | ZCode | ✓ | ✓ | 在本机登录 ZCode |
+| DeepSeek Harness | ✓ | ✓ | 在 DeepSeek Harness 桌面版或网页版中登录 DeepSeek 账户，或在其中保存 API 密钥 |
 | 智谱 GLM、Z.ai GLM | ✓ | | 在设置中填写 API 密钥 |
+| DeepSeek | ✓ | | 在设置中填写 API 密钥 |
 | New API、Sub2API 中转站 | ✓ | | 在设置中填写站点地址和密钥 |
 | 自定义 | ✓ | | 编写一段 JavaScript 脚本 |
 
 手动填写的来源没有本地用量记录，"今日"和"7 天"可以另选一个工具统计。
 
+## DeepSeek Harness
+
+DeepSeek Harness 桌面版与网页版（`npx @deepseek-ai/dsh web`）共用同一个数据目录，两者任选其一登录即可。
+
+- **配额**：在 DeepSeek Harness 中登录了 DeepSeek 账户时，显示该账户的余额、赠送余额与累计消费金额，与 DeepSeek 开放平台网页显示的数字一致，均按整个账户计算。未登录账户时，使用在 DeepSeek Harness 模型页面保存的 API 密钥，只能显示余额与赠送余额。登录失效时，请在 DeepSeek Harness 中重新登录。
+- **Token 用量与费用**：读取本机的 DeepSeek Harness 会话记录，包含桌面版与网页版。费用按模型单价估算；单价表中没有的模型不计算费用，可以在设置中手动添加单价。
+
 ## 手动填写的来源
 
-在"配额来源"中选择智谱 GLM、Z.ai GLM、New API、Sub2API 或自定义后，该行会展开，填写所需内容即可。
+在"配额来源"中选择智谱 GLM、Z.ai GLM、DeepSeek、New API、Sub2API 或自定义后，该行会展开，填写所需内容即可。
 
 - **密钥**：使用 Windows 的加密功能保存在本机，不写入设置文件。删除该列或更换配额来源时，密钥一并删除。
 - **站点地址**：填写站点首页地址即可。末尾的 `/v1`，以及直接粘贴的控制台页面路径，会自动去掉。
@@ -33,6 +42,10 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 ### 智谱 GLM 与 Z.ai GLM
 
 填写 GLM Coding Plan 的 API 密钥。显示 5 小时与每周额度，以及工具调用次数；积分制套餐显示已用积分与总积分。不返回额度的团队套餐暂不支持。
+
+### DeepSeek
+
+填写在 DeepSeek 开放平台创建的 API 密钥。显示账户余额与其中的赠送余额，金额按账户的货币（人民币或美元）显示。余额不足以调用 API 时，状态中会提示。
 
 ### New API
 

@@ -6,14 +6,15 @@ BrimDeck reads only the sign-in state and usage records that apps already keep. 
 
 | Tool | Quota | Tokens and cost |
 | --- | --- | --- |
-| Claude | Reads the Claude Code sign-in (`%USERPROFILE%\.claude\.credentials.json`), or the Claude desktop app's sign-in when that is unavailable, and asks Anthropic for the account usage | Reads the local Claude Code session records (`projects\**\*.jsonl`); regular chats in the Claude desktop app are not included |
+| Claude | Reads the Claude Code sign-in (`%USERPROFILE%\.claude\.credentials.json`), or the Claude desktop app's sign-in when that is unavailable, and asks Anthropic for the account usage. Each row can turn off "Fetch quota online": such a row reads no sign-in and sends nothing, and shows only the quota the Claude desktop app recorded on this PC (`plan-usage-history.json`) | Reads the local Claude Code session records (`projects\**\*.jsonl`); regular chats in the Claude desktop app are not included |
 | Codex | Reads the sign-in in `%USERPROFILE%\.codex\auth.json` and asks OpenAI for the account usage; if that fails, shows the quota from the session records and marks it as possibly out of date | Reads the local session records (`sessions` and `archived_sessions`) |
 | Antigravity | Reads from the local service of the running Antigravity desktop app (127.0.0.1 only) | Reads the local conversation databases of the desktop app and the CLI under `%USERPROFILE%\.gemini` |
 | Cursor | Reads the Cursor sign-in from `%APPDATA%\Cursor\User\globalStorage\state.vscdb` in read-only mode and asks Cursor for the account usage | Asks Cursor for the account usage details, including usage on other devices |
 | ZCode | Reads the ZCode sign-in and asks for the Coding Plan, Start Plan and MCP daily limits | Reads the local request records (`%USERPROFILE%\.zcode\cli\db\db.sqlite`) |
-| Zhipu GLM, Z.ai GLM, New API, Sub2API, Custom | Uses the key and site address entered in settings | Not available |
+| DeepSeek Harness | Reads the DeepSeek Harness sign-in (`%USERPROFILE%\.dsh\.credentials.yaml`) and asks the DeepSeek platform for the account balance and total cost; without a signed-in account, uses the API key saved there to ask for the balance | Reads the local session records (`%USERPROFILE%\.dsh\sessions`) |
+| Zhipu GLM, Z.ai GLM, DeepSeek, New API, Sub2API, Custom | Uses the key and site address entered in settings | Not available |
 
-- When `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `ZCODE_HOME` is set to an absolute path, that folder is read instead.
+- When `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `ZCODE_HOME` or `DSH_HOME` is set to an absolute path, that folder is read instead.
 - These account APIs and local data formats are not stable public interfaces. When they cannot be read, the panel shows the actual status and never makes up numbers.
 
 ## Files stored on this PC
