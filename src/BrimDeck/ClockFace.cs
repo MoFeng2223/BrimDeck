@@ -1,0 +1,265 @@
+using System.Globalization;
+using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Effects;
+using BrimDeck.Core;
+
+namespace BrimDeck;
+
+// The time on the collapsed notch or capsule. Each digit takes the advance of the widest digit and the hour always has
+// room for two, so the face keeps one width through the day and nothing beside it moves when the minute changes.
+internal sealed class ClockFace : FrameworkElement
+{
+    public const double FaceHeight = 24;
+    public static readonly Color White = Color.FromRgb(0xF5, 0xF5, 0xF7);
+    private static readonly FontFamily Orbitron = Bundled("Orbitron"), InstrumentSerif = Bundled("Instrument Serif"), Unbounded = Bundled("Unbounded"), BebasNeue = Bundled("Bebas Neue");
+    private static FontFamily Bundled(string name) => new(new Uri("pack://application:,,,/BrimDeck;component/"), "./Assets/Fonts/#" + name);
+    private static readonly Typeface Plain = Face(UI.PanelFont), Bold = Face(UI.PanelFont, FontWeights.SemiBold);
+    private static Typeface Face(FontFamily family, FontWeight? weight = null, bool italic = false)
+        => new(family, italic ? FontStyles.Italic : FontStyles.Normal, weight ?? FontWeights.Normal, FontStretches.Normal);
+
+    private readonly ClockStyle _style;
+    private readonly bool _h24;
+    private readonly Color[] _colors;
+    private DateTime _time;
+    private double? _reserved;
+
+    // One color fills the face; more are spread evenly across it from left to right.
+    public ClockFace(ClockStyle style, bool h24, Color[] colors, DateTime time)
+    {
+        _style = style; _h24 = h24; _colors = colors.Length > 0 ? colors : [White]; _time = time;
+        Height = FaceHeight; IsHitTestVisible = false;
+        var glow = _colors[_colors.Length / 2];
+        if (style == ClockStyle.Neon) Effect = new DropShadowEffect { Color = glow, ShadowDepth = 0, BlurRadius = 9, Opacity = .85 };
+        else if (style == ClockStyle.Segment) Effect = new DropShadowEffect { Color = glow, ShadowDepth = 0, BlurRadius = 5, Opacity = .6 };
+    }
+
+    public static string Title(ClockStyle style) => style switch
+    {
+        ClockStyle.Stacked => Loc.T("双行", "Two lines"), ClockStyle.Digits => Loc.T("叠放", "Stacked digits"), ClockStyle.Dots => Loc.T("点阵", "Dot matrix"),
+        ClockStyle.Segment => Loc.T("数码管", "Seven segment"), ClockStyle.Neon => Loc.T("霓虹", "Neon"), ClockStyle.Serif => Loc.T("衬线", "Serif"),
+        ClockStyle.Wide => Loc.T("宽体", "Wide"), ClockStyle.Condensed => Loc.T("窄体", "Condensed"), _ => Loc.T("简约", "Simple")
+    };
+    // The cover color is used when a song with a cover is playing; otherwise the clock is white.
+    public static Color[] Palette(DeckSettings settings, Color? cover) => settings.ClockColor switch
+    {
+        ClockColor.Gradient => settings.ClockGradient.Select(Parse).ToArray(),
+        ClockColor.Custom => [Parse(settings.ClockCustomColor)],
+        ClockColor.Cover => [cover ?? White],
+        var preset => [Preset(preset)]
+    };
+    public static Color Preset(ClockColor color) => color switch
+    {
+        ClockColor.Amber => Color.FromRgb(0xFF, 0x9F, 0x43), ClockColor.Cyan => Color.FromRgb(0x5C, 0xE1, 0xE6),
+        ClockColor.Pink => Color.FromRgb(0xFF, 0x8F, 0xB1), ClockColor.Lime => Color.FromRgb(0xE4, 0xFF, 0x6A), _ => White
+    };
+    public static Color Parse(string color) => (Color)ColorConverter.ConvertFromString(color);
+    // A swatch for colors at evenly spaced stops; the diagonal shows every stop on a round swatch.
+    public static Brush Fill(IReadOnlyList<Color> colors, bool diagonal = true)
+    {
+        if (colors.Count == 1) return new SolidColorBrush(colors[0]);
+        var stops = new GradientStopCollection(colors.Select((color, i) => new GradientStop(color, (double)i / (colors.Count - 1))));
+        return new LinearGradientBrush(stops, new Point(0, 0), diagonal ? new Point(1, 1) : new Point(1, 0));
+    }
+
+    public DateTime Time
+    {
+        get => _time;
+        set { if (value == _time) return; _time = value; InvalidateVisual(); }
+    }
+    // The widest the face gets on any day: a two-digit hour, a two-digit month and day, every weekday, morning and afternoon.
+    public double ReservedWidth => _reserved ??= Enumerable.Range(22, 7).SelectMany(day => new[] { 10, 22 }.Select(hour => new DateTime(2025, 12, day, hour, 0, 0)))
+        .Max(time => Layout(null, time, 0, Brushes.White));
+
+    protected override Size MeasureOverride(Size availableSize) => new(ReservedWidth, FaceHeight);
+
+    protected override void OnRender(DrawingContext dc)
+    {
+        double width = Layout(null, _time, 0, Brushes.White), scale = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        double x = Math.Round((ReservedWidth - width) / 2 * scale) / scale;
+        Brush paint = Fill(_colors);
+        if (paint is LinearGradientBrush gradient) { gradient.MappingMode = BrushMappingMode.Absolute; gradient.StartPoint = new Point(x, 0); gradient.EndPoint = new Point(x + width, 0); }
+        paint.Freeze();
+        Layout(dc, _time, x, paint);
+    }
+
+    // Draws the face from x when dc is set; returns the width either way.
+    private double Layout(DrawingContext? dc, DateTime time, double x, Brush paint)
+    {
+        string hour = _h24 ? time.ToString("HH", CultureInfo.InvariantCulture) : (time.Hour % 12 == 0 ? 12 : time.Hour % 12).ToString(CultureInfo.InvariantCulture);
+        string minute = time.ToString("mm", CultureInfo.InvariantCulture), clock = hour + ":" + minute;
+        // Both languages mark the 12-hour clock with AM or PM after the time.
+        string? period = _h24 ? null : time.Hour < 12 ? "AM" : "PM";
+        switch (_style)
+        {
+            case ClockStyle.Dots: return Dots(dc, clock, x);
+            case ClockStyle.Segment: return Segments(dc, clock, x);
+            case ClockStyle.Digits:
+            {
+                // Hours over minutes, both as two digits, the minutes dimmer.
+                var hours = new Run(hour.PadLeft(2, '0'), Bold, 11, -.02);
+                var minutes = hours with { Text = minute, Opacity = .55 };
+                double width = Math.Max(RunWidth(hours), RunWidth(minutes));
+                double top = (FaceHeight - 23) / 2;
+                Draw(dc, x + (width - RunWidth(hours)) / 2, Baseline(hours, top + 5.75), paint, hours);
+                Draw(dc, x + (width - RunWidth(minutes)) / 2, Baseline(minutes, top + 17.25), paint, minutes);
+                return width;
+            }
+            case ClockStyle.Stacked:
+            {
+                // The time over the date and weekday, each line centred on the other.
+                var time1 = new Run(clock, Bold, 11.5);
+                var label = period is null ? (Run?)null : new Run(period, Plain, 9.5, Opacity: .62, Cells: false);
+                var date = new Run(Loc.IsEnglish ? time.ToString("ddd M/d", CultureInfo.GetCultureInfo("en-US"))
+                    : $"{time.Month}/{time.Day} 周{"日一二三四五六"[(int)time.DayOfWeek]}", Plain, 9, Opacity: .62, Cells: false);
+                const double gap = 3;
+                double first = RunWidth(time1) + (label is { } l ? RunWidth(l) + gap : 0), second = RunWidth(date), width = Math.Max(first, second);
+                double baseline = Baseline(time1, 6.5);
+                double left = Draw(dc, x + (width - first) / 2, baseline, paint, time1);
+                if (label is { } after) Draw(dc, left + gap, baseline, paint, after);
+                Draw(dc, x + (width - second) / 2, Baseline(date, 18.5), paint, date);
+                return width;
+            }
+            default:
+            {
+                var main = _style switch
+                {
+                    ClockStyle.Neon => new Run(clock, Face(Orbitron, FontWeights.SemiBold), 11.5, .06),
+                    ClockStyle.Serif => new Run(clock, Face(InstrumentSerif, italic: true), 19, .01),
+                    ClockStyle.Wide => new Run(clock, Face(Unbounded, FontWeights.SemiBold), 11.5, .01),
+                    ClockStyle.Condensed => new Run(clock, Face(BebasNeue), 19, .05),
+                    _ => new Run(clock, Bold, 12.5)
+                };
+                Run? label = period is null ? null : _style switch
+                {
+                    ClockStyle.Neon => new Run(period, Face(Orbitron, FontWeights.SemiBold), 8, .04, Cells: false),
+                    ClockStyle.Minimal => new Run(period, Plain, 10, Opacity: .62, Cells: false),
+                    _ => new Run(period, Plain, 10, Opacity: .7, Cells: false)
+                };
+                const double gap = 3;
+                double baseline = Baseline(main, FaceHeight / 2), start = x;
+                x = Draw(dc, x, baseline, paint, main);
+                if (label is { } after) x = Draw(dc, x + gap, baseline, paint, after);
+                return x - start;
+            }
+        }
+    }
+
+    // Letter spacing is in ems and falls between characters. Digits in a cell run take the widest digit's advance.
+    private readonly record struct Run(string Text, Typeface Face, double Size, double Spacing = 0, double Opacity = 1, bool Cells = true);
+    private double RunWidth(Run run) => Draw(null, 0, 0, Brushes.White, run);
+    // Returns where the run ends.
+    private double Draw(DrawingContext? dc, double x, double baseline, Brush paint, Run run)
+    {
+        double spacing = run.Spacing * run.Size, cell = run.Cells ? DigitCell(run) : 0;
+        if (dc is not null && run.Opacity < 1) dc.PushOpacity(run.Opacity);
+        if (!run.Cells && run.Spacing == 0)
+        {
+            var whole = Text(run.Text, run, paint);
+            dc?.DrawText(whole, new Point(x, baseline - whole.Baseline));
+            x += whole.WidthIncludingTrailingWhitespace;
+        }
+        else for (int i = 0; i < run.Text.Length; i++)
+        {
+            var text = Text(run.Text[i].ToString(), run, paint);
+            double advance = text.WidthIncludingTrailingWhitespace, box = run.Cells && char.IsAsciiDigit(run.Text[i]) ? cell : advance;
+            dc?.DrawText(text, new Point(x + (box - advance) / 2, baseline - text.Baseline));
+            x += box + (i < run.Text.Length - 1 ? spacing : 0);
+        }
+        if (dc is not null && run.Opacity < 1) dc.Pop();
+        return x;
+    }
+    private static readonly Dictionary<(Typeface, double, double), double> DigitCells = [];
+    private double DigitCell(Run run)
+    {
+        var key = (run.Face, run.Size, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        if (!DigitCells.TryGetValue(key, out var cell))
+            DigitCells[key] = cell = "0123456789".Max(digit => Text(digit.ToString(), run, Brushes.White).WidthIncludingTrailingWhitespace);
+        return cell;
+    }
+    private FormattedText Text(string text, Run run, Brush paint)
+        => new(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, run.Face, run.Size, paint, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+    // The baseline that centres the ink of the run's digits on the given height.
+    private double Baseline(Run run, double middle)
+    {
+        var zero = Text("0", run, Brushes.White);
+        var ink = zero.BuildGeometry(new Point()).Bounds;
+        return middle - (ink.Top + ink.Bottom) / 2 + zero.Baseline;
+    }
+
+    // Dot matrix: 5 × 7 digits drawn as 1.7 DIP dots on a 2 DIP pitch; only the lit dots are drawn.
+    private static readonly Dictionary<char, string[]> DotFont = new()
+    {
+        ['0'] = ["01110", "10001", "10011", "10101", "11001", "10001", "01110"], ['1'] = ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+        ['2'] = ["01110", "10001", "00001", "00010", "00100", "01000", "11111"], ['3'] = ["11111", "00010", "00100", "00010", "00001", "10001", "01110"],
+        ['4'] = ["00010", "00110", "01010", "10010", "11111", "00010", "00010"], ['5'] = ["11111", "10000", "11110", "00001", "00001", "10001", "01110"],
+        ['6'] = ["00110", "01000", "10000", "11110", "10001", "10001", "01110"], ['7'] = ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
+        ['8'] = ["01110", "10001", "10001", "01110", "10001", "10001", "01110"], ['9'] = ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
+        [':'] = ["0", "0", "1", "0", "1", "0", "0"]
+    };
+    private double Dots(DrawingContext? dc, string clock, double x)
+    {
+        const double pitch = 2, dot = 1.7, gap = 1.8;
+        double top = (FaceHeight - (6 * pitch + dot)) / 2, start = x;
+        for (int i = 0; i < clock.Length; i++)
+        {
+            var rows = DotFont[clock[i]];
+            if (dc is not null)
+            {
+                var brush = GlyphBrush(i, clock.Length);
+                for (int row = 0; row < rows.Length; row++)
+                    for (int column = 0; column < rows[row].Length; column++)
+                        if (rows[row][column] == '1') dc.DrawEllipse(brush, null, new Point(x + column * pitch + dot / 2, top + row * pitch + dot / 2), dot / 2, dot / 2);
+            }
+            x += (rows[0].Length - 1) * pitch + dot + (i < clock.Length - 1 ? gap : 0);
+        }
+        return x - start;
+    }
+
+    // Seven segments with 1.5 DIP strokes, leaning 7 degrees; only the lit segments are drawn.
+    private const double Stroke = 1.5, Segment = 4.6, SegmentGlyph = Segment + 2 * Stroke - .1;
+    private static readonly Dictionary<char, Rect> Segments7 = new()
+    {
+        ['a'] = new(Stroke - .05, 0, Segment, Stroke), ['b'] = new(Segment + Stroke - .1, Stroke - .25, Stroke, Segment),
+        ['c'] = new(Segment + Stroke - .1, Segment + Stroke + .05, Stroke, Segment), ['d'] = new(Stroke - .05, 2 * Segment + Stroke - .2, Segment, Stroke),
+        ['e'] = new(0, Segment + Stroke + .05, Stroke, Segment), ['f'] = new(0, Stroke - .25, Stroke, Segment),
+        ['g'] = new(Stroke - .05, (2 * Segment + Stroke - .2) / 2, Segment, Stroke)
+    };
+    private static readonly string[] SegmentMap = ["abcdef", "bc", "abged", "abgcd", "fgbc", "afgcd", "afgedc", "abc", "abcdefg", "abcdfg"];
+    private double Segments(DrawingContext? dc, string clock, double x)
+    {
+        const double gap = 1.4, height = 12;
+        double width = clock.Sum(ch => ch == ':' ? Stroke : SegmentGlyph) + gap * (clock.Length - 1), top = (FaceHeight - height) / 2;
+        if (dc is null) return width;
+        dc.PushTransform(new SkewTransform(-7, 0, x + width / 2, FaceHeight / 2));
+        for (int i = 0; i < clock.Length; i++)
+        {
+            var brush = GlyphBrush(i, clock.Length);
+            if (clock[i] == ':')
+            {
+                dc.DrawRoundedRectangle(brush, null, new Rect(x, top + 3.3, Stroke, Stroke), .6, .6);
+                dc.DrawRoundedRectangle(brush, null, new Rect(x, top + 7.6, Stroke, Stroke), .6, .6);
+                x += Stroke + gap; continue;
+            }
+            foreach (var key in SegmentMap[clock[i] - '0'])
+            {
+                var rect = Segments7[key]; rect.Offset(x, top);
+                dc.DrawRoundedRectangle(brush, null, rect, .6, .6);
+            }
+            x += SegmentGlyph + gap;
+        }
+        dc.Pop();
+        return width;
+    }
+
+    // Drawn glyphs take whole colors: the gradient moves from glyph to glyph, left to right.
+    private Brush GlyphBrush(int index, int count)
+    {
+        if (_colors.Length == 1) return UI.Brush(_colors[0].ToString());
+        double t = (count > 1 ? (double)index / (count - 1) : 0) * (_colors.Length - 1);
+        int segment = Math.Min((int)t, _colors.Length - 2);
+        var (from, to, f) = (_colors[segment], _colors[segment + 1], t - segment);
+        byte Mix(byte a, byte b) => (byte)Math.Round(a * (1 - f) + b * f);
+        return UI.Brush(Color.FromRgb(Mix(from.R, to.R), Mix(from.G, to.G), Mix(from.B, to.B)).ToString());
+    }
+}

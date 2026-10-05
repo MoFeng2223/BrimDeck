@@ -102,6 +102,13 @@ internal static class ConfiguredProviderTests
         handler.Respond = request => { host = request.RequestUri!.Host; return Glm("""{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":20}""", "max"); };
         var global = (await providers.TestAsync(entry)).Snapshot;
         check("Z.ai GLM uses the international host with the same parser", host == "api.z.ai" && global.Plan == "Max" && global.Metrics.Single() is { Window: 300, Percent: 20, ResetAt: null });
+        entry.QuotaSource = ProviderId.DeepSeek;
+        handler.Respond = request => { host = request.RequestUri!.Host; return Reply("""{"is_available":false,"balance_infos":[{"currency":"USD","total_balance":"0.00","granted_balance":"0.00","topped_up_balance":"0.00"}]}"""); };
+        var deepseek = (await providers.TestAsync(entry)).Snapshot;
+        check("DeepSeek reads the key's balance and warns when calls are no longer possible", host == "api.deepseek.com" && handler.Calls.Last().Authorization == "Bearer fixture-key-a" &&
+            deepseek.Scope == "account" && deepseek.Metrics.Count == 2 && deepseek.Metrics[0] is { Kind: MetricKind.Balance, Currency: "USD", UsedPercent: 100 } && deepseek.Status.Contains("余额不足"));
+        handler.Respond = _ => new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("""{"error":{"message":"Authentication Fails"}}""") };
+        check("A rejected DeepSeek key explains what to check", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: false, StatusLabel: "密钥无效" } rejected && rejected.Status.Contains("DeepSeek"));
         entry.QuotaSource = ProviderId.Custom;
         entry.Script = """async function fetchUsage(ctx) { const [a,b] = await Promise.all([ctx.http.get("https://example.test/a"),ctx.http.post("https://example.test/b",{body:{value:1}})]); ctx.log(ctx.secrets.key); return {metrics:[{kind:"balance",label:"余额",amount:a.json().balance+b.json().balance,currency:"USD"}]}; }""";
         handler.Respond = _ => Reply("""{"balance":2}""");

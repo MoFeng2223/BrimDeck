@@ -30,6 +30,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.Now);
     private readonly LogReader _logs = new();
     private readonly AntigravityUsage _antigravity = new();
+    private readonly DshSessions _dsh = new();
     private readonly SemaphoreSlim _gate = new(1);
     private ClaudeQuotaSnapshot? _claudeRetained;
     private readonly ConfiguredProviders _configured = new(secrets, http, clock);
@@ -42,20 +43,25 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         {
             // Each underlying source is read once, even when several columns reuse it.
             var required = settings.RequiredProviders;
+            // The Claude account API is asked only for rows that read online; rows that do not share one local snapshot.
+            bool claudeOnline = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Claude && app.QuotaOnline);
+            bool claudeLocal = settings.EnabledApps.Any(ProviderCatalog.ReadsLocalQuota);
             // A stalled source ends with a timeout status instead of holding every later refresh behind this gate.
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             deadline.CancelAfter(TimeSpan.FromSeconds(90));
-            var tasks = ProviderCatalog.UsageSources.Where(required.Contains).Select(id => FetchAsync(id, usageStart, deadline.Token, cancellation));
+            var tasks = ProviderCatalog.UsageSources.Where(required.Contains).Select(id => FetchAsync(id, usageStart, claudeOnline, deadline.Token, cancellation));
             var configured = _configured.RefreshAsync(settings.EnabledApps, deadline.Token);
-            return [.. await Task.WhenAll(tasks), .. await configured];
+            List<ProviderSnapshot> results = [.. await Task.WhenAll(tasks), .. await configured];
+            if (claudeLocal) results.Add(ReadClaudeLocal(usageStart));
+            return results;
         }
         finally { _gate.Release(); }
     }
 
     // One failing source must not discard the others' results; errors not anticipated below still end as a status.
-    private async Task<ProviderSnapshot> FetchAsync(ProviderId id, DateTime? usageStart, CancellationToken ct, CancellationToken lifetime)
+    private async Task<ProviderSnapshot> FetchAsync(ProviderId id, DateTime? usageStart, bool claudeOnline, CancellationToken ct, CancellationToken lifetime)
     {
-        try { return await FetchCoreAsync(id, usageStart, ct); }
+        try { return await FetchCoreAsync(id, usageStart, claudeOnline, ct); }
         catch (Exception ex) when (!lifetime.IsCancellationRequested)
         {
             bool timedOut = ex is OperationCanceledException;
@@ -68,7 +74,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
     }
 
-    private async Task<ProviderSnapshot> FetchCoreAsync(ProviderId id, DateTime? usageStart, CancellationToken ct)
+    private async Task<ProviderSnapshot> FetchCoreAsync(ProviderId id, DateTime? usageStart, bool claudeOnline, CancellationToken ct)
     {
         var now = _clock();
         var start = new DateTimeOffset(usageStart?.Date ?? now.LocalDateTime.Date.AddDays(-29));
@@ -78,6 +84,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (id == ProviderId.Claude) ReadClaudeProfile(snapshot);
         if (id == ProviderId.ZCode) ZCodeUsage.Read(snapshot, desktop, _locations.ZCodeHome, start, now);
         if (id == ProviderId.Antigravity) _antigravity.Read(snapshot, desktop, _locations.AntigravityConversations, start, now);
+        if (id == ProviderId.Dsh) _dsh.Read(snapshot, _locations.DshHome, start, now);
         try
         {
             switch (id)
@@ -101,7 +108,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     break;
                 }
                 case ProviderId.Claude:
-                    await ReadClaudeAsync(snapshot, now, ct);
+                    // Without an online Claude row this snapshot only serves token statistics, so no sign-in is read.
+                    if (claudeOnline) await ReadClaudeAsync(snapshot, now, ct);
                     break;
                 case ProviderId.Cursor:
                     await ReadCursorAsync(snapshot, now, start, ct);
@@ -111,6 +119,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     break;
                 case ProviderId.ZCode:
                     await ReadZCodeAsync(snapshot, now, ct);
+                    break;
+                case ProviderId.Dsh:
+                    await ReadDshAsync(snapshot, now, ct);
                     break;
             }
         }
@@ -224,10 +235,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             if (failure is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }) _claudeRetained = null;
             else
             {
-                if (HasLocalQuota)
+                if (Freshest(now) is { } local)
                 {
                     // The plan comes from the login record and stays known while the interface is unavailable.
-                    var local = Freshest(now);
                     if (local.Plan.Length == 0 && login is { Plan.Length: > 0 }) _claudeRetained = local = local with { Plan = login.Plan, PlanSource = login.Source + Loc.T(" 登录记录", " sign-in record") };
                     Retain(snapshot, local, failure, now); return;
                 }
@@ -242,11 +252,35 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             : Loc.T("请先登录 Claude Code 或 Claude 桌面版，然后刷新配额", "Sign in to Claude Code or the Claude desktop app, then refresh the quota.");
     }
 
-    private bool HasLocalQuota => _claudeRetained is not null || ClaudeUsageHistory.Latest(_locations) is not null;
+    // Claude rows that do not read online share this snapshot. No sign-in is read and no request is sent: the quota is the
+    // newest sample in the desktop application's own usage history, which carries no reset times. The plan comes from
+    // the local account record.
+    private ProviderSnapshot ReadClaudeLocal(DateTime? usageStart)
+    {
+        var now = _clock();
+        var snapshot = new ProviderSnapshot(ProviderId.Claude) { Configurations = [ProviderCatalog.LocalQuota], UsageStart = usageStart?.Date ?? now.LocalDateTime.Date.AddDays(-29) };
+        ReadClaudeProfile(snapshot);
+        if (ClaudeUsageHistory.Latest(_locations) is not { } sample || sample.Time > now.AddMinutes(5))
+        {
+            snapshot.StatusLabel = Loc.T("无本地记录", "No local record");
+            snapshot.Status = Loc.T("Claude 桌面版尚未在本机记录额度", "The Claude desktop app has not recorded a quota on this PC yet.");
+            return snapshot;
+        }
+        snapshot.Quotas = [new Quota("5 小时额度", sample.FiveHour, null, 300), new Quota("每周额度", sample.SevenDay, null, 10080)];
+        snapshot.IsStale = true;
+        // The update time is when BrimDeck read the history; the status gives the time of the newest sample in it.
+        snapshot.LiveQuota = true; snapshot.QuotaTime = now;
+        snapshot.Source = Loc.T("Claude 桌面版 · 本地用量记录", "Claude desktop app · local usage records");
+        var time = sample.Time.LocalDateTime.ToString(sample.Time.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
+        snapshot.StatusLabel = Loc.T("本地记录", "Local record");
+        snapshot.Status = Loc.T($"来自 Claude 桌面版，最新记录于 {time}", $"From the Claude desktop app, latest record at {time}.");
+        return snapshot;
+    }
 
     // The desktop application samples the same account about every fifteen minutes. A newer local
     // sample replaces the last interface reading; reset times are carried over while they still lie ahead.
-    private ClaudeQuotaSnapshot Freshest(DateTimeOffset now)
+    // Null when neither an earlier reading nor a usable sample exists.
+    private ClaudeQuotaSnapshot? Freshest(DateTimeOffset now)
     {
         var kept = _claudeRetained;
         var sample = ClaudeUsageHistory.Latest(_locations);
@@ -258,7 +292,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 [new Quota("5 小时额度", sample.FiveHour, Reset(300), 300), new Quota("每周额度", sample.SevenDay, Reset(10080), 10080), .. scoped], true);
             _claudeRetained = kept;
         }
-        return kept ?? throw new InvalidOperationException("No local quota available");
+        return kept;
     }
 
     private static void Retain(ProviderSnapshot snapshot, ClaudeQuotaSnapshot kept, Exception? failure, DateTimeOffset now)
@@ -472,6 +506,59 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             snapshot.Status = "Coding Plan " + partial.Status + (codingTime is { } time
                 ? Loc.T($"，显示 {time.LocalDateTime:MM-dd HH:mm} 读取的数据", $" Showing the data read at {time.LocalDateTime:MM-dd HH:mm}.") : "");
         }
+    }
+
+    // DeepSeek Harness signs in to a DeepSeek platform account; its balance is read the way DeepSeek Harness reads it.
+    // Without a signed-in account, the API key saved on its Models page is read with the DeepSeek source's script.
+    private async Task ReadDshAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
+        var account = DshUsage.ReadAccount(_locations.DshHome);
+        if (account is null || account.Token.Length == 0 && account.ApiKey.Length == 0)
+        {
+            snapshot.StatusLabel = Loc.T("未连接", "Not connected");
+            snapshot.Status = Loc.T("请先在 DeepSeek Harness 中登录 DeepSeek 账户，或在其中保存 DeepSeek API 密钥", "Sign in to a DeepSeek account in DeepSeek Harness, or save a DeepSeek API key there.");
+            return;
+        }
+        snapshot.Scope = "account";
+        if (account.Token.Length == 0)
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(TimeSpan.FromSeconds(10));
+            var session = new ScriptSession(_http, new AppEntry { QuotaSource = ProviderId.DeepSeek }, account.ApiKey, now, deadline.Token);
+            ProviderResult result;
+            try { result = await Task.Run(session.RunAsync, deadline.Token); }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                (snapshot.StatusLabel, snapshot.Status) = session.FailureStatus switch
+                {
+                    401 => (Loc.T("密钥无效", "Invalid key"), Loc.T("DeepSeek 拒绝了 DeepSeek Harness 中保存的 API 密钥，请在 DeepSeek Harness 中更新", "DeepSeek rejected the API key saved in DeepSeek Harness. Update it in DeepSeek Harness.")),
+                    429 => (Loc.T("请求频繁", "Too many requests"), Loc.T("请求频繁，稍后自动重试", "Too many requests. Retrying automatically later.")),
+                    _ => deadline.IsCancellationRequested ? (Loc.T("读取超时", "Timed out"), Loc.T("读取超时，稍后重试", "Reading timed out. Retrying later."))
+                        : (Loc.T("读取失败", "Read failed"), session.Redact(ex.Message))
+                };
+                return;
+            }
+            snapshot.Metrics = result.Metrics;
+            Connected(snapshot, Loc.T("DeepSeek Harness · DeepSeek API 密钥", "DeepSeek Harness · DeepSeek API key"), now);
+            if (result.Warnings.Count > 0) snapshot.Status += Loc.T("；", "; ") + string.Join(Loc.T("；", "; "), result.Warnings);
+            return;
+        }
+        using var request = new HttpRequestMessage(HttpMethod.Get, DshUsage.Platform + "/api/v0/users/get_user_summary");
+        request.Headers.TryAddWithoutValidation("x-dsh-auth-token", account.Token);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.UserAgent.ParseAdd("BrimDeck/0.1");
+        using var response = await _http.SendAsync(request, ct);
+        // As in DeepSeek Harness, HTTP 401 or code 40003 means the stored sign-in is no longer accepted.
+        void Expired()
+        {
+            snapshot.StatusLabel = Loc.T("登录已失效", "Sign-in expired");
+            snapshot.Status = Loc.T("DeepSeek Harness 的登录已失效，请在 DeepSeek Harness 中重新登录", "The DeepSeek Harness sign-in has expired. Sign in again in DeepSeek Harness.");
+        }
+        if (response.StatusCode == HttpStatusCode.Unauthorized) { Expired(); return; }
+        response.EnsureSuccessStatusCode();
+        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        if (doc.RootElement.Get("code").Number() == 40003) { Expired(); return; }
+        snapshot.Metrics = DshUsage.Summary(doc.RootElement) ?? throw new InvalidDataException();
+        Connected(snapshot, Loc.T("DeepSeek Harness · DeepSeek 账户", "DeepSeek Harness · DeepSeek account"), now);
     }
 
     private static HttpRequestMessage Bearer(HttpMethod method, string uri, string token)

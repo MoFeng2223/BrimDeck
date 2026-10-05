@@ -6,7 +6,7 @@ public static class ProviderScripts
 {
     public static string For(ProviderId id) => id switch
     {
-        ProviderId.GlmChina => GlmChina, ProviderId.GlmGlobal => GlmGlobal, ProviderId.NewApi => NewApi, ProviderId.Sub2Api => Sub2Api, _ => Example
+        ProviderId.GlmChina => GlmChina, ProviderId.GlmGlobal => GlmGlobal, ProviderId.DeepSeek => DeepSeek, ProviderId.NewApi => NewApi, ProviderId.Sub2Api => Sub2Api, _ => Example
     };
 
     // The template a new custom row starts from, in the interface language.
@@ -99,6 +99,37 @@ public static class ProviderScripts
           return { plan: level && level[0].toUpperCase() + level.slice(1), scope: "plan", metrics };
         }
         """.Replace("HOST", host);
+
+    // GET /user/balance (api-docs.deepseek.com/api/get-user-balance): is_available, and per currency (CNY or USD)
+    // total_balance = granted_balance (unexpired grants) + topped_up_balance, all as decimal strings.
+    // The documentation names one API host for every account; the currency follows the account.
+    public const string DeepSeek = """
+        async function fetchUsage(ctx) {
+          const t = (zh, en) => ctx.language === "en-US" ? en : zh;
+          const res = await ctx.http.get("https://api.deepseek.com/user/balance", {
+            headers: { Authorization: "Bearer " + ctx.secrets.key, Accept: "application/json" }
+          });
+          if (res.status === 401) throw new Error(t("DeepSeek 拒绝了这个 API 密钥，请检查密钥是否正确或已被删除。", "DeepSeek rejected this API key. Check that it is correct and has not been deleted."));
+          if (res.status !== 200) throw new Error("HTTP " + res.status);
+          const body = res.json();
+          if (!body || !Array.isArray(body.balance_infos)) throw new Error(t("balance_infos 缺失。", "balance_infos is missing."));
+          const amount = (info, field) => {
+            const value = Number(info[field]);
+            if (typeof info[field] !== "string" || !Number.isFinite(value)) throw new Error(field + t(" 缺失或不是数字。", " is missing or not a number."));
+            return value;
+          };
+          const metrics = [];
+          for (const info of body.balance_infos) {
+            const currency = info.currency;
+            if (currency !== "CNY" && currency !== "USD") continue;
+            metrics.push({ id: "total:" + currency, kind: "balance", label: "账户余额", amount: amount(info, "total_balance"), currency });
+            metrics.push({ id: "granted:" + currency, kind: "balance", label: "赠送余额", amount: amount(info, "granted_balance"), currency });
+          }
+          if (metrics.length === 0) throw new Error(t("接口没有返回人民币或美元余额。", "The API returned no balance in CNY or USD."));
+          const warnings = body.is_available === false ? [t("余额不足，DeepSeek API 暂时无法调用。", "The balance is insufficient, so the DeepSeek API cannot be called for now.")] : [];
+          return { scope: "account", metrics, warnings };
+        }
+        """;
 
     public const string NewApi = """
         async function fetchUsage(ctx) {

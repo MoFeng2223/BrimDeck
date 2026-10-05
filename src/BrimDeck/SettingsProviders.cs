@@ -27,8 +27,26 @@ public sealed partial class SettingsWindow
     // The same chevron as the selectors, turned to point right while the row is closed.
     private static void PointArrow(Button arrow, bool open)
     {
-        if (arrow.Content is System.Windows.Shapes.Path chevron) chevron.RenderTransform = new RotateTransform(open ? 0 : -90);
+        if (arrow.Content is UIElement chevron) chevron.RenderTransform = new RotateTransform(open ? 0 : -90);
         AutomationProperties.SetItemStatus(arrow, open ? Loc.T("已展开", "Expanded") : Loc.T("已收起", "Collapsed"));
+    }
+    // The Windows 11 icon font's small chevron (ChevronDownSmall) is hinted like text and heavy enough beside a bold label.
+    // Expandable rows, selectors, combo boxes and the panel's source button all use it.
+    // Measured ink: the glyph's center sits at 0.4688 of its box, so it turns about that point, and the labels' glyphs sit
+    // lower than their boxes, so it drops 1 DIP to meet them.
+    internal static readonly Thickness ChevronDrop = new(0, 1, 0, -1);
+    internal static TextBlock Chevron() => new()
+    {
+        Text = "", FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 12, Margin = ChevronDrop,
+        RenderTransformOrigin = new Point(.5, .4688), VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center
+    };
+    // The chevron follows the button's foreground, so hover brightens it.
+    private Button ChevronButton(string label, Action action)
+    {
+        var button = new Button { Content = Chevron(), Style = (Style)FindResource("SettingsGlyphButton"), Width = 18, Height = 28 };
+        AutomationProperties.SetName(button, label);
+        button.Click += (_, _) => action();
+        return button;
     }
     // A bare icon whose stroke follows the button, so hover brightens the icon instead of filling a box.
     private Button GlyphButton(string data, double width, double height, string label, Action action)
@@ -42,8 +60,7 @@ public sealed partial class SettingsWindow
     }
     private void AttachSourceDetails(AppEntry entry, Grid row, Border border)
     {
-        var arrow = GlyphButton("M 0,0 L 4,4 L 8,0", 8, 4, Loc.T("展开 " + entry.Name + " 配额配置", "Show " + entry.Name + " quota configuration"), () => ToggleSourceRow(entry.InstanceId));
-        arrow.Width = 18; arrow.Height = 28; arrow.ToolTip = null;
+        var arrow = ChevronButton(Loc.T("展开 " + entry.Name + " 配额配置", "Show " + entry.Name + " quota configuration"), () => ToggleSourceRow(entry.InstanceId));
         arrow.HorizontalAlignment = HorizontalAlignment.Right; arrow.VerticalAlignment = VerticalAlignment.Center;
         AutomationProperties.SetAutomationId(arrow, "expand-source-" + entry.InstanceId.ToString("N"));
         row.Children.Add(arrow);
@@ -67,16 +84,55 @@ public sealed partial class SettingsWindow
         { _expandedSource = id; view.Detail.Visibility = Visibility.Visible; view.Row.Height = double.NaN; PointArrow(view.Arrow, true); }
     }
 
+    // Claude needs no site or key; its expanded row holds this row's own switch for reading the quota online.
+    private FrameworkElement ClaudeDetails(AppEntry entry)
+    {
+        var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, 12);
+        string title = Loc.T("联网获取额度", "Fetch quota online");
+        string help = Loc.T("开启：使用 Claude Code 或桌面版的登录，联网获取额度。\n关闭：不联网，只显示 Claude 桌面版在本机记录的最新额度。",
+            "On: fetches the quota online with the Claude Code or desktop app sign-in.\nOff: no network access; shows the latest quota the Claude desktop app recorded on this PC.");
+        var line = new Grid();
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        line.ColumnDefinitions.Add(new ColumnDefinition());
+        var heading = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(16, 0, 16, 0), VerticalAlignment = VerticalAlignment.Center };
+        var caption = TextLine(title, 12, TextSecondary); caption.VerticalAlignment = VerticalAlignment.Center;
+        heading.Children.Add(caption);
+        // The same help mark as the column headings of the application list.
+        var mark = Stroke("M 6,1 A 5,5 0 1 1 6,11 A 5,5 0 1 1 6,1 Z M 6,5.4 V 8.4 M 6,3.6 V 3.7", 12, 12, TextTertiary); mark.StrokeThickness = 1.1;
+        var info = new Border { Width = 12, Height = 12, Background = Brushes.Transparent, Margin = new Thickness(4, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Help, Focusable = true, Child = mark, RenderTransform = new TranslateTransform(0, 0.5),
+            FocusVisualStyle = (Style)FindResource("SettingsSmallHelpFocus") };
+        AttachSettingHelp(info, title, () => help);
+        heading.Children.Add(info);
+        line.Children.Add(heading);
+        var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = entry.QuotaOnline, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetName(toggle, title); AutomationProperties.SetHelpText(toggle, help);
+        AutomationProperties.SetAutomationId(toggle, "claude-online-" + entry.InstanceId.ToString("N"));
+        Grid.SetColumn(toggle, 1); line.Children.Add(toggle);
+        void Set(bool online)
+        {
+            if (S.Entry(entry.InstanceId) is not { } current || current.QuotaOnline == online) return;
+            Change(s => s.Entry(entry.InstanceId)!.QuotaOnline = online);
+        }
+        toggle.Checked += (_, _) => Set(true); toggle.Unchecked += (_, _) => Set(false);
+        line.Margin = new Thickness(0, 5, 0, 5);
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetColumn(line, 1); Grid.SetColumnSpan(line, 6); grid.Children.Add(line);
+        return grid;
+    }
+
     // The expanded configuration starts under the quota source: a short label column, then fields that end midway
     // between the warning and critical colors. Labels share one width so every field starts at the same place.
     private FrameworkElement SourceDetails(AppEntry entry)
     {
+        if (entry.QuotaSource == ProviderId.Claude) return ClaudeDetails(entry);
         var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, 12); Grid.SetIsSharedSizeScope(grid, true);
         var result = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(6, 4, 6, 4) };
         Func<bool> commitSite = () => true;
         Action commitScript = () => { };
         void InvalidateTest() { result.Visibility = Visibility.Collapsed; _sourceTestCancellation?.Cancel(); }
-        TextBlock? Line(string label, FrameworkElement control)
+        TextBlock? Line(string label, FrameworkElement control, int span = 5)
         {
             var line = new Grid();
             line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "SourceLabel" });
@@ -88,7 +144,7 @@ public sealed partial class SettingsWindow
             line.Children.Add(caption);
             control.Margin = new Thickness(0, 5, 0, 5); Grid.SetColumn(control, 1); line.Children.Add(control);
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            Grid.SetRow(line, grid.RowDefinitions.Count - 1); Grid.SetColumn(line, 1); Grid.SetColumnSpan(line, 5); grid.Children.Add(line);
+            Grid.SetRow(line, grid.RowDefinitions.Count - 1); Grid.SetColumn(line, 1); Grid.SetColumnSpan(line, span); grid.Children.Add(line);
             return label.Length > 0 ? caption : null;
         }
         // A field drawn like the display name box; the hint sits inside it until something is typed.
@@ -153,6 +209,7 @@ public sealed partial class SettingsWindow
         string emptyHint = entry.QuotaSource switch
         {
             ProviderId.GlmChina or ProviderId.GlmGlobal => Loc.T("GLM 套餐密钥，加密保存在本机", "GLM plan key, stored encrypted on this PC"),
+            ProviderId.DeepSeek => Loc.T("DeepSeek API 密钥，加密保存在本机", "DeepSeek API key, stored encrypted on this PC"),
             ProviderId.Custom => Loc.T("可选，加密保存在本机", "Optional, stored encrypted on this PC"),
             _ => Loc.T("填写 API 密钥，加密保存在本机", "Enter the API key; it is stored encrypted on this PC")
         };
@@ -237,7 +294,9 @@ public sealed partial class SettingsWindow
             commitScript = SaveCode;
             code.IsKeyboardFocusWithinChanged += (_, _) => { if (!code.IsKeyboardFocusWithin) SaveCode(); };
             code.TextChanged += (_, _) => InvalidateTest();
-            var codeLabel = Line(Loc.T("代码", "Code"), frame)!; codeLabel.VerticalAlignment = VerticalAlignment.Top; codeLabel.Margin = new Thickness(16, 13, 16, 0);
+            // The code reaches across to the show switch: the switch is 38 wide and centred in its 50-wide column, so the frame stops 6 short of it.
+            var codeLabel = Line(Loc.T("代码", "Code"), frame, 7)!; codeLabel.VerticalAlignment = VerticalAlignment.Top; codeLabel.Margin = new Thickness(16, 13, 16, 0);
+            frame.Margin = new Thickness(0, 5, 6, 5);
         }
 
         var test = ActionButton(Loc.T("测试连接", "Test connection"), () => { }); test.Style = (Style)FindResource("SettingsOutlineButton");

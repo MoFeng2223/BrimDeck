@@ -25,6 +25,8 @@ public sealed class WindowsHost : IDisposable
     // The monitor under the mouse pointer, where a window opened with CenterScreen appears.
     public static (Rect Bounds, Rect Work, double Scale) CursorScreen()
     { GetCursorPos(out var point); return Screen(MonitorFromPoint(point, 2)); }
+    // The work area of the monitor nearest to a point given in device pixels.
+    public static Rect WorkAreaAt(Point point) => Screen(MonitorFromPoint(new POINT { X = (int)point.X, Y = (int)point.Y }, 2)).Work;
     // The monitor that holds most of the window; the handle tells whether the window has moved to another monitor.
     public static (IntPtr Monitor, Rect Bounds, Rect Work, double Scale) WindowScreen(Window window)
     {

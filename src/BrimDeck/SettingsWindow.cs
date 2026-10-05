@@ -386,10 +386,12 @@ public sealed partial class SettingsWindow : Window
         // The grid clips at its own bounds, so each card keeps 3 DIP or more of its cell free on every side of the
         // keyboard focus ring: 6 DIP left and right (the grid overhangs the page by the same amount) and 3 DIP above.
         var styles=new UniformGrid { Columns=3,Margin=new Thickness(-6,0,-6,24) };
+        _styleCards.Clear();
         foreach(var style in Enum.GetValues<CompactStyle>())
         {
-            var button=new RadioButton { Style=(Style)FindResource("SettingsChoice"),Content=CompactStylePreview.Create(style,_palette.Dark),Margin=new Thickness(6,3,6,0),Tag=StyleName(style),GroupName="CompactStyle",IsChecked=S.Style==style };
+            var button=new RadioButton { Style=(Style)FindResource("SettingsChoice"),Content=CompactStylePreview.Create(style,_palette.Dark,S.ShowsClock(style)),Margin=new Thickness(6,3,6,0),Tag=StyleName(style),GroupName="CompactStyle",IsChecked=S.Style==style };
             button.Checked+=(_,_)=>{ var previous=S.Style; Change(s=>s.Style=style); ShowStyleOptions(style,previous); }; AutomationProperties.SetName(button,StyleName(style)); styles.Children.Add(button);
+            _styleCards[style]=button;
         }
         _styleOptions=new Grid();
         _content.Children.Add(styles); _content.Children.Add(_styleOptions); ShowStyleOptions(S.Style,null);
@@ -399,21 +401,32 @@ public sealed partial class SettingsWindow : Window
     private readonly HashSet<DeckPage> _openSizes = [];
     private void Expanded()
     {
-        SectionTitle(Loc.T("显示的页面", "Pages shown"));
-        Group(SizeRow(Loc.T("显示 AI 用量", "Show AI usage"), Loc.T("AI 用量", "AI usage"), DeckPage.Usage, S.UsagePage, value => Change(s => s.UsagePage = value), Collect(UsageSizes)),
-            SizeRow(Loc.T("显示音乐", "Show music"), Loc.T("音乐", "music"), DeckPage.Music, S.MusicPage, value => Change(s => s.MusicPage = value), Collect(MusicSizeControls)));
         // The last viewed page is always offered, followed by each page that is shown. A choice whose page is switched off
         // reads as the last viewed page, which is what the panel does then, and returns when the page is shown again.
-        var starts = new List<(DefaultDeckPage Value, string Label)> { (DefaultDeckPage.Last, Loc.T("上次停留的页面", "Last viewed page")) };
-        if (S.UsagePage) starts.Add((DefaultDeckPage.Usage, Loc.T("AI 用量", "AI usage")));
-        if (S.MusicPage) starts.Add((DefaultDeckPage.Music, Loc.T("音乐", "Music")));
-        var start = new ComboBox { Width = 150, Style = (Style)FindResource("SettingsCombo"), ItemsSource = starts.Select(option => option.Label).ToList(),
-            SelectedIndex = Math.Max(0, starts.FindIndex(option => option.Value == S.DefaultPage)) };
+        // Switching a page on or off refills the list in place, so the page is not rebuilt and the switch keeps its animation.
+        var start = new ComboBox { Width = 150, Style = (Style)FindResource("SettingsCombo") };
         AutomationProperties.SetName(start, Loc.T("每次打开时显示", "Page shown on opening"));
-        start.SelectionChanged += (_, _) => { if (start.SelectedIndex >= 0) Change(s => s.DefaultPage = starts[start.SelectedIndex].Value); };
+        List<(DefaultDeckPage Value, string Label)> starts = [];
+        bool filling = false;
+        void FillStarts()
+        {
+            starts = [(DefaultDeckPage.Last, Loc.T("上次停留的页面", "Last viewed page"))];
+            if (S.UsagePage) starts.Add((DefaultDeckPage.Usage, Loc.T("AI 用量", "AI usage")));
+            if (S.MusicPage) starts.Add((DefaultDeckPage.Music, Loc.T("音乐", "Music")));
+            filling = true;
+            start.ItemsSource = starts.Select(option => option.Label).ToList();
+            start.SelectedIndex = Math.Max(0, starts.FindIndex(option => option.Value == S.DefaultPage));
+            filling = false;
+        }
+        FillStarts();
+        start.SelectionChanged += (_, _) => { if (!filling && start.SelectedIndex >= 0) Change(s => s.DefaultPage = starts[start.SelectedIndex].Value); };
+        SectionTitle(Loc.T("显示的页面", "Pages shown"));
+        Group(SizeRow(Loc.T("显示 AI 用量", "Show AI usage"), Loc.T("AI 用量", "AI usage"), DeckPage.Usage, S.UsagePage, value => { Change(s => s.UsagePage = value); FillStarts(); }, Collect(UsageSizes)),
+            SizeRow(Loc.T("显示音乐", "Show music"), Loc.T("音乐", "music"), DeckPage.Music, S.MusicPage, value => { Change(s => s.MusicPage = value); FillStarts(); }, Collect(MusicSizeControls)));
         // Settings that apply across the expanded pages rather than to one of them.
         SectionTitle(Loc.T("通用", "General"));
-        Group(Row(Loc.T("每次打开时显示", "Page shown on opening"), start));
+        Group(Row(Loc.T("每次打开时显示", "Page shown on opening"), start),
+            Toggle(Loc.T("右键点击打开设置", "Right-click opens settings"), S.RightClickSettings, value => Change(s => s.RightClickSettings = value)));
     }
     private FrameworkElement SizeRow(string title, string name, DeckPage page, bool shown, Action<bool> show, StackPanel sizes)
     {
@@ -427,10 +440,10 @@ public sealed partial class SettingsWindow : Window
         }
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = shown, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, title);
-        toggle.Checked += (_, _) => { show(true); ShowPage(2); };
-        toggle.Unchecked += (_, _) => { show(false); ShowPage(2); };
-        arrow = GlyphButton("M 0,0 L 4,4 L 8,0", 8, 4, Loc.T("展开" + (name.Length > 0 && name[0] < 128 ? " " : "") + name + "尺寸", "Show " + name + " sizes"), () => Flip());
-        arrow.Width = 18; arrow.Height = 28; arrow.ToolTip = null; arrow.Margin = new Thickness(12, 0, 0, 0);
+        toggle.Checked += (_, _) => show(true);
+        toggle.Unchecked += (_, _) => show(false);
+        arrow = ChevronButton(Loc.T("展开" + (name.Length > 0 && name[0] < 128 ? " " : "") + name + "尺寸", "Show " + name + " sizes"), () => Flip());
+        arrow.Margin = new Thickness(12, 0, 0, 0);
         PointArrow(arrow, open);
         var controls = new StackPanel { Orientation = Orientation.Horizontal }; controls.Children.Add(toggle); controls.Children.Add(arrow);
         var header = Row(title, controls); header.Background = Brushes.Transparent;
@@ -481,8 +494,9 @@ public sealed partial class SettingsWindow : Window
             switch(_page)
             {
                 case 0:s.LaunchAtStartup=false;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;break;
-                case 1:s.Style=defaults.Style;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;break;
-                case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;break;
+                case 1:s.Style=defaults.Style;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;
+                    s.NotchClock=defaults.NotchClock;s.CapsuleClock=defaults.CapsuleClock;s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=defaults.ClockGradient;s.Clock24Hour=defaults.Clock24Hour;break;
+                case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.RightClickSettings=defaults.RightClickSettings;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;break;
                 case 3:s.QuotaAlerts=defaults.QuotaAlerts;s.Apps=defaults.Apps;break;
                 case 5:s.MusicText=defaults.MusicText;s.MusicCoverColor=defaults.MusicCoverColor;s.MusicTrackNotice=defaults.MusicTrackNotice;s.LyricsEnabled=defaults.LyricsEnabled;break;
                 case 6:s.NeteaseFullControlEntry=defaults.NeteaseFullControlEntry;break;
@@ -635,7 +649,7 @@ public sealed partial class SettingsWindow : Window
         Grid.SetColumn(remove, 8); row.Children.Add(remove);
         var border = new Border { Child = row, Height = AppRowHeight, BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(0), Tag = entry,
             RenderTransform = new TranslateTransform() };
-        if (!ProviderCatalog.IsBuiltIn(entry.QuotaSource)) AttachSourceDetails(entry, row, border);
+        if (!ProviderCatalog.IsBuiltIn(entry.QuotaSource) || entry.QuotaSource == ProviderId.Claude) AttachSourceDetails(entry, row, border);
         return border;
     }
 
@@ -646,7 +660,7 @@ public sealed partial class SettingsWindow : Window
         string Label(ProviderId id) => AppPresets.Name(id);
         var select = ActionButton("", () => { });
         var selectContent = new DockPanel();
-        var chevron = Stroke("M 0,0 L 4,4 L 8,0", 8, 4, TextSecondary); chevron.Margin = new Thickness(8, 1, 0, 0); DockPanel.SetDock(chevron, Dock.Right); selectContent.Children.Add(chevron);
+        var chevron = Chevron(); chevron.Foreground = UI.Brush(TextSecondary); chevron.Margin = new Thickness(8, ChevronDrop.Top, 0, ChevronDrop.Bottom); DockPanel.SetDock(chevron, Dock.Right); selectContent.Children.Add(chevron);
         var selectLabel = TextLine(Label(selected), 12.5, TextPrimary, FontWeights.SemiBold);
         selectLabel.VerticalAlignment = VerticalAlignment.Center; selectLabel.TextTrimming = TextTrimming.CharacterEllipsis;
         selectContent.Children.Add(selectLabel);
@@ -660,6 +674,7 @@ public sealed partial class SettingsWindow : Window
         // The application menu is a styled popup list: dark surface, rounded corners, no icon column.
         var menu = new Popup { PlacementTarget = select, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
         var items = new StackPanel { Width = 208 };
+        Button? current = null;
         string? group = null;
         foreach (var id in quota ? ProviderCatalog.Sources : ProviderCatalog.UsageSources)
         {
@@ -670,6 +685,7 @@ public sealed partial class SettingsWindow : Window
                 var header = TextLine(group, 10.5, TextTertiary); header.Margin = new Thickness(10, 4, 10, 3); items.Children.Add(header);
             }
             var item = MenuEntry(Label(id), "", true, id == selected);
+            if (id == selected) current = item;
             item.Click += (_, _) =>
             {
                 menu.IsOpen = false;
@@ -689,15 +705,49 @@ public sealed partial class SettingsWindow : Window
             };
             AutomationProperties.SetName(item, Loc.T("选择 ", "Select ") + Label(id)); items.Children.Add(item);
         }
-        menu.Child = new Border
+        // The list grows as sources are added; past the room on screen it scrolls instead of running off the screen.
+        var list = new ScrollViewer
         {
-            Child = items, Background = UI.Brush(_palette.Popup), BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8), Padding = new Thickness(5), Margin = new Thickness(8),
-            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 18, ShadowDepth = 6, Direction = 270, Opacity = .45 }
+            Style = (Style)FindResource("SettingsScrollViewer"), Content = items, Focusable = false,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        };
+        var surface = new Border
+        {
+            Child = list, Background = UI.Brush(_palette.Popup), BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8), Padding = new Thickness(5)
+        };
+        menu.Child = surface;
+        // A long list opens at the selected source.
+        menu.Opened += (_, _) =>
+        {
+            list.ScrollToTop();
+            if (current is { } chosen) Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => chosen.BringIntoView());
         };
         select.Tag = menu;
+        select.Click += (_, _) => { if (!menu.IsOpen) FitMenuToScreen(select, menu, surface); };
         TogglePopup(select, menu);
         return select;
+    }
+
+    // Opens the menu on the side of the button that has room for it inside the monitor's work area, so it never covers
+    // the taskbar, and limits its height to that room. The room depends on the screen resolution, the Windows scale and
+    // where the button is, so it is measured again each time the menu opens.
+    private static void FitMenuToScreen(FrameworkElement anchor, Popup menu, FrameworkElement surface)
+    {
+        const double Gap = 4, Edge = 8;
+        if (PresentationSource.FromVisual(anchor)?.CompositionTarget is not { } target) return;
+        var fromDevice = target.TransformFromDevice;
+        var top = anchor.PointToScreen(new Point(0, 0));
+        var bottom = anchor.PointToScreen(new Point(anchor.ActualWidth, anchor.ActualHeight));
+        var work = Native.WindowsHost.WorkAreaAt(new Point((top.X + bottom.X) / 2, (top.Y + bottom.Y) / 2));
+        double below = fromDevice.Transform(new Vector(0, work.Bottom - bottom.Y)).Y - Gap - Edge;
+        double above = fromDevice.Transform(new Vector(0, top.Y - work.Top)).Y - Gap - Edge;
+        surface.MaxHeight = double.PositiveInfinity;
+        surface.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        bool down = surface.DesiredSize.Height <= below || below >= above;
+        menu.Placement = down ? PlacementMode.Bottom : PlacementMode.Top;
+        menu.VerticalOffset = down ? Gap : -Gap;
+        surface.MaxHeight = Math.Max(0, down ? below : above);
     }
 
     // A popup that closes when the mouse goes down outside it also closes when its own button is pressed.
@@ -731,7 +781,7 @@ public sealed partial class SettingsWindow : Window
         var button = new Button { Style = (Style)FindResource("SettingsColorButton"), Foreground = UI.Brush(color) };
         // The column heading explains each color; the swatch itself carries no hover note.
         AutomationProperties.SetName(button, Loc.T($"{app} {label}颜色", $"{app} {label} color")); AutomationProperties.SetHelpText(button, color + (isDefault ? Loc.T("（默认）", " (default)") : ""));
-        var popup = new Popup { PlacementTarget = button, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4, HorizontalOffset = -4 };
+        var popup = new Popup { PlacementTarget = button, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
         popup.Child = ColorPicker(color, isDefault, value => { popup.IsOpen = false; apply(value); if (owner is { } id) RefreshAppRow(id); else ShowPage(3); });
         TogglePopup(button, popup);
         return button;
@@ -764,8 +814,7 @@ public sealed partial class SettingsWindow : Window
         return new Border
         {
             Child = panel, Background = UI.Brush(_palette.Popup), BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(9), Padding = new Thickness(10), Margin = new Thickness(8),
-            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 18, ShadowDepth = 6, Direction = 270, Opacity = .45 }
+            CornerRadius = new CornerRadius(9), Padding = new Thickness(10)
         };
     }
 

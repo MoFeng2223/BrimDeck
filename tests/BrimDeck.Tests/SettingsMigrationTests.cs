@@ -27,6 +27,20 @@ internal static class SettingsMigrationTests
 
         var tolerant = SettingsMigrations.Read("""{"AppVersion":"0.1.0","Height":300,"NotYetKnown":{"a":1}}""", v010, out _);
         check("reading is tolerant of missing and unknown members", tolerant.Height == 300 && tolerant.Width == new DeckSettings().Width && tolerant.MusicPage);
+        check("the clock starts switched off, as simple white 24-hour digits", !tolerant.NotchClock && !tolerant.CapsuleClock
+            && tolerant.ClockStyle == ClockStyle.Minimal && tolerant.ClockColor == ClockColor.White && tolerant.Clock24Hour);
+        var clock = SettingsMigrations.Read("""{"AppVersion":"0.1.0","NotchClock":true,"ClockStyle":42,"ClockColor":-1,"Clock24Hour":false}""", v010, out _);
+        bool capsuleOff = !clock.ShowsClock(CompactStyle.Capsule);
+        clock.CapsuleClock = true;
+        check("the clock is switched per style and never shown on the indicator", clock.ShowsClock(CompactStyle.Notch) && capsuleOff
+            && clock.ShowsClock(CompactStyle.Capsule) && !clock.ShowsClock(CompactStyle.Line) && !clock.Clock24Hour);
+        check("unknown clock styles and colors fall back to the defaults", clock.ClockStyle == ClockStyle.Minimal && clock.ClockColor == ClockColor.White
+            && clock.ClockCustomColor == ClockColors.DefaultCustom && clock.ClockGradient.SequenceEqual(ClockColors.Sunset));
+        var colors = SettingsMigrations.Read("""{"AppVersion":"0.1.0","ClockColor":7,"ClockCustomColor":"12ab3c","ClockGradient":["#000000","#ffffff"]}""", v010, out _);
+        check("a custom clock color is normalized and a gradient needs three valid colors", colors.ClockColor == ClockColor.Custom
+            && colors.ClockCustomColor == "#12AB3C" && colors.ClockGradient.SequenceEqual(ClockColors.Sunset));
+        var edited = colors.Copy(); edited.ClockGradient[0] = "#000000";
+        check("a settings copy has its own gradient", colors.ClockGradient[0] == ClockColors.Sunset[0]);
 
         // Upgrade 0.1.0 -> 0.2.0, change a setting, return to 0.1.0, then go back to 0.2.0.
         var path = Path.Combine(root, "version-switch");
