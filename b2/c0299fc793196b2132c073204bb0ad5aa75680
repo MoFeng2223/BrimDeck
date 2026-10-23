@@ -1,0 +1,23 @@
+src/BrimDeck/MainWindow.CompactLayout.cs
+  h_dc4d9c798f1bc1 97
+src/BrimDeck.Core/CompactMonitor.cs
+  h_dc4d9c798f1bc1 62-68
+  h_dc4d9c798f1bc1 69
+src/BrimDeck/MonitorStrip.cs
+  h_dc4d9c798f1bc1 20,23,25,54-55
+src/BrimDeck/MainWindow.Music.cs
+  h_dc4d9c798f1bc1 754-755,757
+tests/BrimDeck.Tests/SystemMonitorTests.cs
+  h_dc4d9c798f1bc1 182-203
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b2c0299fc793196b2132c073204bb0ad5aa75680",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
