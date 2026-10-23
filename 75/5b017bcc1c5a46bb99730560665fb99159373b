@@ -1,0 +1,33 @@
+src/BrimDeck.Core/Settings.cs
+  h_dc4d9c798f1bc1 167,262-263,266-272,341,382-384
+src/BrimDeck/MonitorStrip.cs
+  h_dc4d9c798f1bc1 7-9,18-23,26,28-30,33-36,42,44-45,47-48,51,70,72,74,76,91,94-97,119-121,123-124,128,130,133
+src/BrimDeck/SettingsMonitor.cs
+  h_dc4d9c798f1bc1 5,32,49-52,56-84,86-94,96-98,101,104-105,109-194
+tests/BrimDeck.Tests/CompactReadingTests.cs
+  h_dc4d9c798f1bc1 1-167
+src/BrimDeck.Core/CompactMonitor.cs
+  h_dc4d9c798f1bc1 10-11,21-33,38,45-49,57-62,64-67,69-136,163-177,179
+  h_dc4d9c798f1bc1 63,68,178
+src/BrimDeck/SettingsWindow.cs
+  h_dc4d9c798f1bc1 529-534,536,581,642,651,674-699,966-967,969-970
+src/BrimDeck/MonitorView.cs
+  h_dc4d9c798f1bc1 24-29
+tests/BrimDeck.Tests/Program.cs
+  h_dc4d9c798f1bc1 29
+src/BrimDeck/SettingsApplications.cs
+  h_dc4d9c798f1bc1 60-61,63-65,118-125,132,134,139-140,150,153-154,157-158,168-170,179,185,188-189,193-195,199,202
+src/BrimDeck/MainWindow.Music.cs
+  h_dc4d9c798f1bc1 756
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "755b017bcc1c5a46bb99730560665fb99159373b",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
