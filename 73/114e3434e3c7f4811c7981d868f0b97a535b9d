@@ -1,0 +1,14 @@
+src/BrimDeck/MonitorStrip.cs
+  h_dc4d9c798f1bc1 188-204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "73114e3434e3c7f4811c7981d868f0b97a535b9d",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
