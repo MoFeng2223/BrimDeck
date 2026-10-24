@@ -1,0 +1,14 @@
+src/BrimDeck.Core/Settings.cs
+  h_dc4d9c798f1bc1 482,484
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "35f84fc8bf56a0abc2b1d37700755e4f915e24b4",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
