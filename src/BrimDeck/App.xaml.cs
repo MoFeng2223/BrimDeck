@@ -76,6 +76,7 @@ public partial class App : Application
         Store = new SettingsStore(folder); Settings = Store.Load();
         UseLanguage();
         PanelTheme.Use(Settings);
+        IslandExtensions.SetPalette(Settings.MonitorPalette);
         // "跟随系统" follows the Windows app theme while BrimDeck runs.
         Microsoft.Win32.SystemEvents.UserPreferenceChanged += SystemThemeChanged;
         // The language a first start takes from Windows is kept, even if the display language changes later.
@@ -203,6 +204,8 @@ public partial class App : Application
     {
         var previous = PanelTheme.Current;
         if (!PanelTheme.Use(Settings, reload, systemChanged)) return;
+        // The extension pages are drawn in the theme's text and surface colors, so a new theme gives them new ones.
+        IslandExtensions.SetPalette(Settings.MonitorPalette);
         if (systemChanged && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
         foreach (var deck in Decks.ToList()) deck.ApplySettings();
         if (!reload) _settingsWindow?.PanelThemeChanged();

@@ -11,7 +11,10 @@ namespace BrimDeck.Island.Clock;
 // and reload from Settings > Plugins.
 public sealed class ClockExtension : IIslandExtension
 {
-    private ClockView? _view;
+    // The views the panels hold, and the demand as last told: CreateView may come after SetDemand(true), and a rebuild
+    // makes a new view while the old one is on its way out.
+    private readonly List<WeakReference> _views = new();
+    private bool _shown;
 
     public string Id => "sample-clock";
     public string TitleZh => "时钟";
@@ -21,13 +24,21 @@ public sealed class ClockExtension : IIslandExtension
     public FrameworkElement CreateView(IslandColors colors)
     {
         // One view per panel showing the page; sharing one is fine too, but a view belongs to a single parent.
-        _view = new ClockView(colors);
-        return _view;
+        var view = new ClockView(colors);
+        _views.RemoveAll(reference => reference.Target is not ClockView);
+        _views.Add(new WeakReference(view));
+        view.Tick(_shown);
+        return view;
     }
 
-    // The page is on screen somewhere: keep the clock ticking. Off screen: stop the timer, so an unseen page costs
+    // The page is on screen somewhere: keep the clocks ticking. Off screen: stop every timer, so an unseen page costs
     // nothing.
-    public void SetDemand(bool shown) => _view?.Tick(shown);
+    public void SetDemand(bool shown)
+    {
+        _shown = shown;
+        foreach (var reference in _views.ToList())
+            if (reference.Target is ClockView view) view.Tick(shown);
+    }
 }
 
 // The page's content: the time large in the middle, the date under it. It draws itself and updates once a second while

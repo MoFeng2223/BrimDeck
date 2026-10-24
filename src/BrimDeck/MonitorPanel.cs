@@ -15,12 +15,19 @@ public partial class MainWindow
     // Which readings the collapsed row shows and how far each has come in or gone out, kept while the row is built again.
     private readonly StripPresence _stripPresence = new();
     private bool _monitorShowing, _stripShowing, _monitorFade, _extensionShowing;
+    // The extension slot this panel last told the app it was showing, so leaving that page releases it.
+    private int _extensionSlot = -1;
 
     private void InitializeMonitor()
     {
         IsVisibleChanged += (_, _) => UpdateMonitorDemand();
         _app.MonitorUpdated += MonitorUpdated;
-        Closed += (_, _) => { _app.MonitorUpdated -= MonitorUpdated; _app.PresentMonitor(this, false, false); _app.PresentExtension(this, ExtensionSlot, false); };
+        Closed += (_, _) =>
+        {
+            _app.MonitorUpdated -= MonitorUpdated; _app.PresentMonitor(this, false, false);
+            if (_extensionSlot >= 0) _app.PresentExtension(this, _extensionSlot, false);
+            _extensionSlot = -1;
+        };
     }
 
     // Asked whenever the panel opens, closes, changes page or is hidden, and whenever the collapsed row is built.
@@ -36,7 +43,13 @@ public partial class MainWindow
             _monitorView?.CloseCard();
         }
         _app.PresentMonitor(this, page, strip);
-        _app.PresentExtension(this, ExtensionSlot, extension);
+        int slot = extension ? ExtensionSlot : -1;
+        if (_extensionSlot != slot)
+        {
+            if (_extensionSlot >= 0) _app.PresentExtension(this, _extensionSlot, false);
+            _extensionSlot = slot;
+        }
+        if (slot >= 0) _app.PresentExtension(this, slot, true);
         // Neither took readings while hidden: they show the current ones, or dashes once the sampler has paused, never the
         // figures they showed last time.
         if (page && !_monitorShowing) _monitorView?.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);

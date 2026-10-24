@@ -98,14 +98,3 @@ public interface IIslandExtension
 
 删除扩展：删除 `extensions` 目录下对应 DLL（连同它引用的 `BrimDeck.Island.dll` 共享副本可保留），重启后页签消失；它的设置会保留，放回 DLL 后恢复。
 
-## 示例
-
-`src/BrimDeck.ThrmExt/` 是第一个扩展：THRM 散热器页（连接 THRM 核心服务的命名管道，读取 CPU/GPU 温度功耗与风扇转速）。它自带全部绘制与协议代码，可作为新扩展的模板。
-
-构建并安装一个扩展：
-
-```
-dotnet build src/BrimDeck.ThrmExt -c Release
-copy src\BrimDeck.ThrmExt\bin\Release\net10.0-windows10.0.19041.0\BrimDeck.ThrmExt.dll %LOCALAPPDATA%\BrimDeck\extensions\
-copy src\BrimDeck.ThrmExt\bin\Release\net10.0-windows10.0.19041.0\BrimDeck.Island.dll %LOCALAPPDATA%\BrimDeck\extensions\
-```

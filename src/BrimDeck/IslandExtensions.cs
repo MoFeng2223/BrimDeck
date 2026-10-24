@@ -80,23 +80,31 @@ internal static class IslandExtensions
                 if (kept[slot] && string.Equals(_sources[slot], Path.GetFileName(file), StringComparison.OrdinalIgnoreCase) && _stamps[slot] == stamp)
                 { unchanged = true; break; }
             if (unchanged) continue;
+            // Everything in here runs third-party code — the assembly's types and the extension's own constructor and Id
+            // getter included — so every exception is caught: one bad DLL is a row on the plugins page, never a failed
+            // startup.
+            AssemblyLoadContext? context = null;
+            bool listed = false;
             try
             {
-                var context = new AssemblyLoadContext("BrimDeck.Island:" + Path.GetFileName(file), isCollectible: true);
+                context = new AssemblyLoadContext("BrimDeck.Island:" + Path.GetFileName(file), isCollectible: true);
                 var assembly = context.LoadFromAssemblyPath(file);
                 int fromFile = perFile.Count;
                 perFile.Add((context, 0));
+                listed = true;
                 foreach (var type in assembly.GetTypes())
                 {
                     if (type.IsAbstract || !typeof(IIslandExtension).IsAssignableFrom(type)) continue;
                     if (type.GetConstructor(Type.EmptyTypes) is null) continue;
                     var extension = (IIslandExtension)Activator.CreateInstance(type)!;
-                    if (extension.Id.Trim().Length == 0) continue;
+                    var id = extension.Id;
+                    if (id is null || id.Trim().Length == 0) continue;
                     fresh.Add((extension, context, Path.GetFileName(file), stamp, fromFile));
                 }
             }
-            catch (Exception ex) when (ex is IOException or BadImageFormatException or ReflectionTypeLoadException or InvalidOperationException)
+            catch (Exception ex)
             {
+                if (context is not null && !listed) context.Unload();
                 Failures.Add((Path.GetFileName(file), ex.Message.Split('\n')[0]));
             }
         }

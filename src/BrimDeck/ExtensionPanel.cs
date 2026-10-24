@@ -12,7 +12,7 @@ public partial class MainWindow
     private readonly FrameworkElement?[] _extensionViews = new FrameworkElement?[4];
     private readonly string?[] _extensionKeys = new string?[4];
 
-    private string ExtensionKey(int slot) => string.Join("|", Settings.MonitorPalette, Loc.Language);
+    private string ExtensionKey(int slot) => string.Join("|", Settings.MonitorPalette, Loc.Language, PanelTheme.Generation);
 
     // A scan replaced or retired some slots: their views and tabs are dropped, the tabs are rebuilt, and the panel
     // re-renders — the page it stood on resolves to another when its slot is gone, and the fresh extension learns the
