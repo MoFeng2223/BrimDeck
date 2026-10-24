@@ -1,0 +1,18 @@
+src/BrimDeck/MainWindow.Music.cs
+  h_dc4d9c798f1bc1 673
+src/BrimDeck/SettingsPricing.cs
+  h_dc4d9c798f1bc1 60-63
+src/BrimDeck/UI.cs
+  h_dc4d9c798f1bc1 76-85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4c3475f70f28cc315931a0af945d6850ecb065ae",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
