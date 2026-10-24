@@ -5,11 +5,20 @@ namespace BrimDeck.Core;
 public static class DeckPages
 {
     // The page switch, left to right.
-    public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor];
+    public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor,
+        DeckPage.Extension0, DeckPage.Extension1, DeckPage.Extension2, DeckPage.Extension3];
+
+    // Set by the app at startup: whether each extension slot has an extension behind it, and that extension's id.
+    // Without them the slots read as empty, which is what the plain tests see.
+    public static Func<int, bool>? SlotOccupied;
+    public static Func<int, string?>? SlotId;
+    public static DeckPage ExtensionPage(int slot) => (DeckPage)(3 + Math.Clamp(slot, 0, 3));
+    public static int SlotOf(DeckPage page) => (int)page >= 3 ? (int)page - 3 : -1;
 
     public static bool Shown(DeckSettings settings, DeckPage page) => page switch
     {
-        DeckPage.Usage => settings.UsagePage, DeckPage.Music => settings.MusicPage, DeckPage.Monitor => settings.MonitorPage, _ => false
+        DeckPage.Usage => settings.UsagePage, DeckPage.Music => settings.MusicPage, DeckPage.Monitor => settings.MonitorPage,
+            DeckPage.Extension0 or DeckPage.Extension1 or DeckPage.Extension2 or DeckPage.Extension3 => SlotShown(settings, SlotOf(page)), _ => false
     };
 
     public static IReadOnlyList<DeckPage> Visible(DeckSettings settings) => Order.Where(page => Shown(settings, page)).ToList();
@@ -19,10 +28,22 @@ public static class DeckPages
     public static DeckPage Resolve(DeckSettings settings, DeckPage wanted)
         => Shown(settings, wanted) ? wanted : Visible(settings) is [var first, ..] ? first : DeckPage.Usage;
 
+    // A slot is shown while its extension is loaded and its own switch is on; an entry that has not been saved yet
+    // counts as on, so a freshly loaded extension appears without a visit to the settings.
+    internal static bool SlotShown(DeckSettings settings, int slot)
+        => SlotOccupied?.Invoke(slot) == true && SlotId?.Invoke(slot) is { } id
+            && settings.Extensions.FirstOrDefault(e => e.Id == id) is not { Shown: false };
+
+    internal static (double Width, double Height) SlotSize(DeckSettings settings, int slot)
+        => SlotId?.Invoke(slot) is { } id && settings.Extensions.FirstOrDefault(e => e.Id == id) is { } entry
+            ? (entry.Width, entry.Height) : ExtensionSizes.Default;
+
     // The page the panel opens on; null keeps the last viewed page.
     public static DeckPage? Opening(DefaultDeckPage choice) => choice switch
     {
-        DefaultDeckPage.Usage => DeckPage.Usage, DefaultDeckPage.Music => DeckPage.Music, DefaultDeckPage.Monitor => DeckPage.Monitor, _ => null
+        DefaultDeckPage.Usage => DeckPage.Usage, DefaultDeckPage.Music => DeckPage.Music, DefaultDeckPage.Monitor => DeckPage.Monitor,
+            DefaultDeckPage.Extension0 => DeckPage.Extension0, DefaultDeckPage.Extension1 => DeckPage.Extension1,
+            DefaultDeckPage.Extension2 => DeckPage.Extension2, DefaultDeckPage.Extension3 => DeckPage.Extension3, _ => null
     };
 
     // Every page's size lies within these; the usage page is also at least as wide as its columns need (MinimumWidth).
@@ -40,6 +61,16 @@ public static class DeckPages
         {
             case DeckPage.Music: settings.MusicWidth = width; settings.MusicHeight = height; break;
             case DeckPage.Monitor: settings.MonitorWidth = width; settings.MonitorHeight = height; break;
+            case DeckPage.Extension0 or DeckPage.Extension1 or DeckPage.Extension2 or DeckPage.Extension3:
+            {
+                if (SlotId?.Invoke(SlotOf(page)) is { } id)
+                {
+                    var entry = settings.Extensions.FirstOrDefault(e => e.Id == id);
+                    if (entry is null) { entry = new ExtensionPageSettings(id); settings.Extensions.Add(entry); }
+                    settings.Extensions[settings.Extensions.IndexOf(entry)] = entry with { Width = width, Height = height };
+                }
+                break;
+            }
             default: settings.Width = width; settings.Height = height; break;
         }
     }
@@ -48,6 +79,8 @@ public static class DeckPages
     {
         DeckPage.Music => (settings.MusicWidth, settings.MusicHeight),
         DeckPage.Monitor => (settings.MonitorWidth, settings.MonitorHeight),
+        DeckPage.Extension0 or DeckPage.Extension1 or DeckPage.Extension2 or DeckPage.Extension3
+            => SlotSize(settings, SlotOf(page)),
         _ => (Math.Max(settings.Width, settings.MinimumWidth), settings.Height)
     };
 

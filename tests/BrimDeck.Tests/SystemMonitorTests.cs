@@ -286,8 +286,24 @@ static class SystemMonitorTests
         check("Pages: with every page off the usage page says so", DeckPages.Resolve(settings, DeckPage.Music) == DeckPage.Usage && DeckPages.Visible(settings).Count == 0);
         check("The wheel's page switch is on by default and saved with the settings",
             settings.MouseWheelPages && !System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"MouseWheelPages":false}""")!.MouseWheelPages);
+        // The extension slots: occupied by the host's word, shown by their own entry, sized by it too.
+        var hooks = new DeckSettings { Extensions = [new ExtensionPageSettings("demo") { Shown = false }, new ExtensionPageSettings("sized") { Width = 700, Height = 300 }] };
+        try
+        {
+            DeckPages.SlotOccupied = slot => slot is 0 or 1;
+            DeckPages.SlotId = slot => slot is 0 ? "demo" : slot == 1 ? "sized" : null;
+            check("Pages: an occupied slot without an entry is shown by default",
+                !DeckPages.Shown(hooks, DeckPage.Extension0) && DeckPages.Shown(hooks, DeckPage.Extension1) && !DeckPages.Shown(hooks, DeckPage.Extension2));
+            check("Pages: an extension page keeps its own size",
+                DeckPages.Size(hooks, DeckPage.Extension1) == (700, 300) && DeckPages.Size(hooks, DeckPage.Extension2) == ExtensionSizes.Default);
+            DeckPages.SetSize(hooks, DeckPage.Extension1, 500, 200);
+            check("Pages: a drag resizes the extension page's own entry",
+                DeckPages.Size(hooks, DeckPage.Extension1) == (500, 200) && hooks.Extensions[1] is { Id: "sized", Width: 500 });
+        }
+        finally { DeckPages.SlotOccupied = null; DeckPages.SlotId = null; }
         check("Pages: opening choices", DeckPages.Opening(DefaultDeckPage.Monitor) == DeckPage.Monitor && DeckPages.Opening(DefaultDeckPage.Last) is null
-            && DeckPages.Opening(DefaultDeckPage.Usage) == DeckPage.Usage && DeckPages.Opening(DefaultDeckPage.Music) == DeckPage.Music);
+            && DeckPages.Opening(DefaultDeckPage.Usage) == DeckPage.Usage && DeckPages.Opening(DefaultDeckPage.Music) == DeckPage.Music
+            && DeckPages.Opening(DefaultDeckPage.Extension0) == DeckPage.Extension0);
         var sizes = new DeckSettings { Width = 500, Height = 150, MusicWidth = 700, MusicHeight = 180, MonitorWidth = 600, MonitorHeight = 300 };
         check("Pages: the window holds the largest shown page", DeckPages.Largest(sizes) == (700, 300));
         sizes.MusicPage = false; sizes.MonitorPage = false;
