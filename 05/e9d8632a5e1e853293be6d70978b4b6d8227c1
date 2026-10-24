@@ -1,0 +1,30 @@
+src/BrimDeck.Core/SystemMonitor.cs
+  h_dc4d9c798f1bc1 52-54,58-59,64-91
+src/BrimDeck/MonitorView.cs
+  h_dc4d9c798f1bc1 27-29
+src/BrimDeck/MonitorStrip.cs
+  h_dc4d9c798f1bc1 136-138,142,145-148,154-155,167,173,177,223-226,228,236
+src/BrimDeck.Core/MonitorLayout.cs
+  h_dc4d9c798f1bc1 41-42
+src/BrimDeck.Core/CompactMonitor.cs
+  h_dc4d9c798f1bc1 25-28,35-64,81-92,110-111,114-119,121-122,214-218,220-224,226-228,230-257
+  h_dc4d9c798f1bc1 229
+src/BrimDeck/SettingsMonitor.cs
+  h_dc4d9c798f1bc1 17-18,37-41,64-70,76,80-85,117-121,127-142,159-160,162-179,197,203,214-220,223-233,239
+src/BrimDeck/SettingsWindow.cs
+  h_dc4d9c798f1bc1 717-720,724
+tests/BrimDeck.Tests/CompactReadingTests.cs
+  h_dc4d9c798f1bc1 16-17,123,127,137-208,210-221,223-235
+  h_dc4d9c798f1bc1 209,222
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "05e9d8632a5e1e853293be6d70978b4b6d8227c1",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
