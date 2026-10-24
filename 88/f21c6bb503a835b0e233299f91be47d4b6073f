@@ -1,0 +1,77 @@
+docs/zh-CN/ai-tools.md
+  h_dc4d9c798f1bc1 20,23,51-60,63,79-82
+src/BrimDeck.Core/DataLocations.cs
+  h_dc4d9c798f1bc1 9-13,22-25,27,31
+tests/BrimDeck.Tests/ConfiguredProviderTests.cs
+  h_dc4d9c798f1bc1 143-187
+tests/BrimDeck.Tests/KimiUsageTests.cs
+  h_dc4d9c798f1bc1 1-490
+src/BrimDeck.Core/Themes/cyberpunk-edgerunners.json
+  h_dc4d9c798f1bc1 60
+src/BrimDeck.Core/Pricing.cs
+  h_dc4d9c798f1bc1 28,32-35,61,94-108,145,150-225,232-233,238-251,295-298,311-312,370-374
+src/BrimDeck.Core/Settings.cs
+  h_dc4d9c798f1bc1 21-22,25,135-136
+docs/en-US/themes.md
+  h_dc4d9c798f1bc1 63
+src/BrimDeck.Core/ScriptProvider.cs
+  h_dc4d9c798f1bc1 36,155-190,296
+  h_dc4d9c798f1bc1 191
+src/BrimDeck.Core/Themes/night-owl.json
+  h_dc4d9c798f1bc1 54
+src/BrimDeck.Core/UsageMetric.cs
+  h_dc4d9c798f1bc1 53-54
+src/BrimDeck.Core/KimiUsage.cs
+  h_dc4d9c798f1bc1 1-353
+src/BrimDeck.Core/Themes/github-light.json
+  h_dc4d9c798f1bc1 54
+src/BrimDeck/SettingsProviders.cs
+  h_dc4d9c798f1bc1 253
+docs/zh-CN/privacy.md
+  h_dc4d9c798f1bc1 16-17,19,31,33,39
+src/BrimDeck.Core/Loc.cs
+  h_dc4d9c798f1bc1 30,36
+tests/BrimDeck.Tests/Program.cs
+  h_dc4d9c798f1bc1 43,719-721
+src/BrimDeck.Core/UsageService.cs
+  h_dc4d9c798f1bc1 20-21,46-53,225,267-269,874-1022
+src/BrimDeck.Core/Themes/github-dark.json
+  h_dc4d9c798f1bc1 54
+src/BrimDeck.Core/ProviderCatalog.cs
+  h_dc4d9c798f1bc1 12-13,15,26,39-40,48,53
+src/BrimDeck.Core/Themes/dracula.json
+  h_dc4d9c798f1bc1 54
+src/BrimDeck.Core/Themes/one-dark-pro.json
+  h_dc4d9c798f1bc1 54
+src/BrimDeck.Core/Themes/light.json
+  h_dc4d9c798f1bc1 54
+src/BrimDeck.Core/Templates/theme-template.json
+  h_dc4d9c798f1bc1 64
+src/BrimDeck.Core/KimiQuotaCache.cs
+  h_dc4d9c798f1bc1 1-81
+docs/en-US/ai-tools.md
+  h_dc4d9c798f1bc1 20,23,51-60,63,79-82
+src/BrimDeck.Core/PanelThemes.cs
+  h_dc4d9c798f1bc1 79,83-84
+src/BrimDeck.Core/Themes/dark.json
+  h_dc4d9c798f1bc1 55
+docs/en-US/privacy.md
+  h_dc4d9c798f1bc1 16-17,19,31,33,39
+docs/zh-CN/themes.md
+  h_dc4d9c798f1bc1 63
+src/BrimDeck/App.xaml.cs
+  h_dc4d9c798f1bc1 86-87
+src/BrimDeck.Core/KimiSessions.cs
+  h_dc4d9c798f1bc1 1-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "88f21c6bb503a835b0e233299f91be47d4b6073f",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
