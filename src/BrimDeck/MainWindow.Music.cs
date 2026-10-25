@@ -129,10 +129,15 @@ public partial class MainWindow
         var place = PageHandover.Place(from);
         ShowPage(page, animatePage: changed && _expanded && !_preview);
         bool back = DeckPages.Order.ToList().IndexOf(page) < DeckPages.Order.ToList().IndexOf(before);
-        // An extension page arrives already in place beneath the leaving picture (its WebView content does not follow
-        // WPF opacity); every other page arrives with the switch's own fade and slide.
-        _handover.Send(picture, place, PageContent(page), back ? Handover.Back : Handover.Forward,
-            animateArrival: DeckPages.SlotOf(page) < 0);
+        if (DeckPages.SlotOf(page) is var extension and >= 0)
+        {
+            // The page switch's own arrival cannot animate a WebView through WPF opacity: the plugin page arrives by
+            // an entrance the host plays inside the browser, while the page left behind leaves as a picture above it.
+            IslandExtensions.Enter(extension, forward: !back);
+            _handover.Send(picture, place, PageContent(page), back ? Handover.Back : Handover.Forward, animateArrival: false);
+        }
+        else
+            _handover.Send(picture, place, PageContent(page), back ? Handover.Back : Handover.Forward);
     }
     // The page switch's hand-over animates the content of the page it leaves and the page it enters, so every page —
     // the extension slots included — must resolve to the grid that shows it.

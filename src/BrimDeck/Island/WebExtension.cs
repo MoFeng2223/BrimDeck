@@ -111,6 +111,9 @@ internal sealed class WebExtension : IIslandExtension
     private string? _stateJson;
     private readonly Dictionary<string, (DateTime Due, bool Fired)> _alarms = new(StringComparer.Ordinal);
     private bool _shown, _keepAlive, _reclaimed;
+    // Whether some page has finished a navigation and not been reclaimed since: the switch entrance needs a loaded
+    // page; a cold page arrives by the fade-in of its first navigation instead.
+    private bool _loaded;
     private DispatcherTimer? _reclaim;
 
     public WebExtension(ExtensionManifest manifest, string folder)
@@ -157,11 +160,12 @@ internal sealed class WebExtension : IIslandExtension
     // navigation fades it in inside the browser, where WPF's own opacity does not reliably reach the composition
     // content. The shim also clears the hold by itself after a moment, so a host that stops mid-way cannot leave a
     // page invisible.
-    private static void ArriveWhenLoaded(CoreWebView2 core)
+    private void ArriveWhenLoaded(CoreWebView2 core)
     {
         bool arrived = false;
         core.NavigationCompleted += async (_, _) =>
         {
+            _loaded = true;
             if (arrived) return;
             arrived = true;
             var script = Soft.Enabled
@@ -169,6 +173,28 @@ internal sealed class WebExtension : IIslandExtension
                 : "document.documentElement.style.opacity='1';";
             try { await core.ExecuteScriptAsync(script).ConfigureAwait(true); } catch (Exception) { }
         };
+    }
+
+    // The switch's own arrival cannot animate a WebView through WPF opacity. A page that is already loaded gets its
+    // entrance inside the browser instead — from the side it is switched in from, fading up — while the page left
+    // behind leaves as a picture above it. A page still loading takes the fade-in of its first navigation instead.
+    internal void Enter(bool forward)
+    {
+        if (!_loaded || !Soft.Enabled) return;
+        var script = $$"""
+            (function(){var d=document.documentElement||document.body;if(!d)return;var s=d.style;
+            s.transition='none';s.transform='translateX({{(forward ? 16 : -16)}}px)';s.opacity='0';
+            s.transition='opacity {{Soft.Move}}ms ease-out, transform {{Soft.Move}}ms ease-out';
+            requestAnimationFrame(function(){requestAnimationFrame(function(){s.transform='none';s.opacity='1';});});})()
+            """;
+        foreach (var (_, core) in Pages())
+            _ = Run(core, script);
+    }
+
+    private static async Task Run(CoreWebView2 core, string script)
+    {
+        // A page mid-teardown or already disposed loses its entrance, nothing more; the page itself stays as it was.
+        try { await core.ExecuteScriptAsync(script).ConfigureAwait(true); } catch (Exception) { }
     }
 
     // The panel asks before putting a cached view back: a control that left the tree was disposed with the page, and
@@ -275,6 +301,8 @@ internal sealed class WebExtension : IIslandExtension
     {
         _reclaim?.Stop();
         _reclaimed = true;
+        // The blank page is no content: the next load arrives by its own fade-in, not by a switch entrance.
+        _loaded = false;
         ExtensionLog.Write("view: reclaim " + Id);
         foreach (var (_, core) in Pages())
             try { core.Navigate("about:blank"); } catch (Exception) { }

@@ -179,6 +179,15 @@ internal static class IslandExtensions
         catch (Exception) { }
     }
 
+    // A page switch is arriving at this slot's page from this direction; a web page carries its entrance inside the
+    // browser, where the switch's own animation cannot reach it.
+    public static void Enter(int slot, bool forward)
+    {
+        if (slot < 0 || slot >= Slots.Length) return;
+        try { if (Slots[slot] is WebExtension web) web.Enter(forward); }
+        catch (Exception) { }
+    }
+
     public static string Title(int slot) => Slots[slot] is { } extension ? (Loc.IsEnglish ? extension.TitleEn : extension.TitleZh) : "";
 
     // The colors an extension draws with: its monitor palette page's scheme on the theme's text and surface colors.
