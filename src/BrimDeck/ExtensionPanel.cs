@@ -49,7 +49,15 @@ public partial class MainWindow
         var key = ExtensionKey(slot);
         if (_extensionViews[slot] is not { } view || _extensionKeys[slot] != key)
         {
-            view = IslandExtensions.Slots[slot]!.CreateView(IslandExtensions.Colors);
+            try { view = IslandExtensions.Slots[slot]!.CreateView(IslandExtensions.Colors); }
+            catch (Exception ex)
+            {
+                view = new System.Windows.Controls.TextBlock
+                {
+                    Text = Loc.T("插件页面无法显示：", "The plugin page could not be shown: ") + ex.Message.Split('\n')[0],
+                    Margin = new Thickness(8), TextWrapping = TextWrapping.Wrap
+                };
+            }
             _extensionViews[slot] = view;
             _extensionKeys[slot] = key;
             ExtensionContent.Children.Clear();

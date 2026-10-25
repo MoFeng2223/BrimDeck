@@ -58,6 +58,9 @@ public partial class App : Application
         IslandExtensions.Load();
         IslandExtensions.ExtensionsChanged += slots =>
         {
+            // A replaced instance starts knowing nothing; the panels showing its page tell it again.
+            foreach (var slot in slots)
+                if (_presentingExtension[slot].Count > 0) IslandExtensions.Notify(slot, true);
             foreach (var deck in Decks.ToList()) deck.OnExtensionsChanged(slots);
         };
         base.OnStartup(e);
@@ -272,8 +275,11 @@ public partial class App : Application
     internal void PresentExtension(MainWindow deck, int slot, bool shown)
     {
         if (slot < 0 || slot >= _presentingExtension.Length) return;
+        bool before = _presentingExtension[slot].Count > 0;
         if (shown) _presentingExtension[slot].Add(deck); else _presentingExtension[slot].Remove(deck);
-        IslandExtensions.Slots[slot]?.SetDemand(_presentingExtension[slot].Count > 0 && !Exiting);
+        bool after = _presentingExtension[slot].Count > 0;
+        // Only the change of the answer is news: a panel re-rendering while another already shows the page is not.
+        if (before != after) IslandExtensions.Notify(slot, after && !Exiting);
     }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }

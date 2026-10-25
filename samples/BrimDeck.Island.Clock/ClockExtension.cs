@@ -27,6 +27,8 @@ public sealed class ClockExtension : IIslandExtension
         var view = new ClockView(colors);
         _views.RemoveAll(reference => reference.Target is not ClockView);
         _views.Add(new WeakReference(view));
+        // A view taken off the page stops on its own, so a rebuild does not leave a timer running behind it.
+        view.Unloaded += (_, _) => { view.Tick(false); _views.RemoveAll(reference => reference.Target is not ClockView); };
         view.Tick(_shown);
         return view;
     }
