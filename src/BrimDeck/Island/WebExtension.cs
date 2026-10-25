@@ -1,0 +1,329 @@
+using System.IO;
+using System.Text.Json;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Threading;
+using BrimDeck.Core;
+using BrimDeck.Island;
+using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.WPF;
+
+namespace BrimDeck;
+
+// The palette fragment shared by a page's init message and the push a palette change sends.
+internal static class WebColors
+{
+    public static string Json { get; private set; } = "{}";
+    public static void Set(IslandColors colors) => Json = JsonSerializer.Serialize(colors);
+}
+
+// The pieces every web extension shares: one WebView2 environment and browser process for all four slots, the palette
+// and language pushed to live pages, and the single tick that fires registered alarms. A shared environment is what
+// keeps four plugin pages at "a few extra tabs" rather than four browser runtimes.
+internal static class WebRuntime
+{
+    private static Task<CoreWebView2Environment?>? _environment;
+    private static readonly List<WebExtension> _all = new();
+    private static readonly DispatcherTimer _alarmTick = new() { Interval = TimeSpan.FromSeconds(1) };
+
+    // Set when the WebView2 runtime itself is missing: every plugin page becomes a note about it instead of a blank
+    // rectangle. Cleared never — without the runtime there is nothing to retry into until the app restarts.
+    public static string? EnvironmentError { get; private set; }
+
+    // First asked at startup (IslandExtensions.Load), so by the time a page is created the answer is ready. Called on
+    // the UI thread only; the one environment is made once and shared by every control.
+    public static async Task<CoreWebView2Environment?> Environment()
+    {
+        _environment ??= MakeEnvironment();
+        try { return await _environment.ConfigureAwait(true); }
+        catch (Exception ex)
+        {
+            EnvironmentError = ex.Message.Split('\n')[0];
+            return null;
+        }
+    }
+
+    private static async Task<CoreWebView2Environment?> MakeEnvironment()
+    {
+        try
+        {
+            var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "extension-web");
+            return await CoreWebView2Environment.CreateAsync(null, folder, null).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            EnvironmentError = ex.Message.Split('\n')[0];
+            return null;
+        }
+    }
+
+    public static void Register(WebExtension extension) { if (!_all.Contains(extension)) _all.Add(extension); }
+    public static void Unregister(WebExtension extension)
+    {
+        _all.Remove(extension);
+        AlarmsChanged();
+    }
+
+    public static void SetColors(IslandColors colors)
+    {
+        WebColors.Set(colors);
+        foreach (var extension in _all.ToList()) extension.Push("{\"channel\":\"brimdeck\",\"kind\":\"colors\",\"data\":" + WebColors.Json + "}");
+    }
+
+    public static void SetLanguage(bool english)
+    {
+        var language = english ? "en" : "zh";
+        foreach (var extension in _all.ToList()) extension.Push("{\"channel\":\"brimdeck\",\"kind\":\"language\",\"data\":\"" + language + "\"}");
+    }
+
+    // The tick runs only while some extension has an alarm waiting; a sleeping app costs nothing here.
+    public static void AlarmsChanged()
+    {
+        if (_all.Any(extension => extension.HasAlarms)) _alarmTick.Start();
+        else _alarmTick.Stop();
+    }
+    static WebRuntime() => _alarmTick.Tick += (_, _) => { foreach (var extension in _all.ToList()) extension.CheckAlarms(); };
+}
+
+// One web plugin: its manifest, its live pages, and everything its pages hand the host — saved state, registered
+// alarms, the keep-alive wish. The pages are WebView2 controls pointed at the plugin's folder through a virtual host,
+// so a plugin is files the user dropped in a directory, never code the host runs outside the browser.
+//
+// Every message from a page is untrusted text: parsed defensively, answered best-effort, never allowed to throw into
+// the host. A page that misbehaves loses its bridge, nothing more.
+internal sealed class WebExtension : IIslandExtension
+{
+    private readonly ExtensionManifest _manifest;
+    private readonly string _folder;
+    private readonly string _host;
+    private readonly List<(WebView2CompositionControl Control, CoreWebView2 Core)> _pages = new();
+    // The plugin's state and alarms live in the host, not in the page, so they survive the page being reclaimed while
+    // nobody watches it: what the page hands over it gets back the next time it loads.
+    private string? _stateJson;
+    private readonly Dictionary<string, (DateTime Due, bool Fired)> _alarms = new(StringComparer.Ordinal);
+    private bool _shown, _keepAlive, _reclaimed;
+    private DispatcherTimer? _reclaim;
+
+    public WebExtension(ExtensionManifest manifest, string folder)
+    {
+        _manifest = manifest;
+        _folder = folder;
+        _host = manifest.Id.ToLowerInvariant().Replace('.', '-') + ".plugin.brimdeck";
+        WebRuntime.Register(this);
+    }
+
+    public string Id => _manifest.Id;
+    public string TitleZh => _manifest.TitleZh;
+    public string TitleEn => _manifest.TitleEn;
+    public string Glyph => _manifest.Glyph;
+
+    public FrameworkElement CreateView(IslandColors colors)
+    {
+        // On a machine without the WebView2 runtime (checked at startup, so the answer is ready by now) the page says
+        // so itself; the four slots share the one diagnosis.
+        if (WebRuntime.Environment().IsCompleted && WebRuntime.Environment().Result is null)
+        {
+            return new TextBlock
+            {
+                Text = Loc.T("需要 WebView2 运行时才能显示插件页面：", "The WebView2 runtime is needed to show plugin pages: ") + (WebRuntime.EnvironmentError ?? ""),
+                Margin = new Thickness(8), TextWrapping = TextWrapping.Wrap
+            };
+        }
+        var page = new WebView2CompositionControl
+        {
+            DefaultBackgroundColor = System.Drawing.Color.Transparent,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch
+        };
+        _ = InitializeAsync(page);
+        return page;
+    }
+
+    // The order matters: the shim must be in place before the first navigation, or the page's first scripts run with
+    // no bridge to call and its hello is never sent. Everything here runs on the UI thread.
+    private async Task InitializeAsync(WebView2CompositionControl page)
+    {
+        try
+        {
+            var environment = await WebRuntime.Environment().ConfigureAwait(true);
+            if (environment is null) return;
+            var core = await page.EnsureCoreWebView2Async(environment).ConfigureAwait(true);
+            core.SetVirtualHostNameToFolderMapping(_host, _folder, CoreWebView2HostResourceAccessKind.Allow);
+            core.WebMessageReceived += OnWebMessage;
+            _pages.Add((page, core));
+            await core.AddScriptToExecuteOnDocumentCreatedAsync(Shim).ConfigureAwait(true);
+            NavigateIn(core);
+        }
+        catch (Exception) { }
+    }
+
+    private void NavigateIn(CoreWebView2 core)
+    {
+        try { core.Navigate("https://" + _host + "/" + _manifest.Entry.Replace('\\', '/')); _reclaimed = false; }
+        catch (Exception) { }
+    }
+
+    // The demand a page hears as its visibility: true while any panel shows it, false once none does. Hidden and not
+    // kept alive, the page is navigated to blank after a grace period — its state and alarms stay with the host, and
+    // the next true hands them back — so a page nobody watches costs its renderer memory, not just its timers.
+    public void SetDemand(bool shown)
+    {
+        _shown = shown;
+        Push("{\"channel\":\"brimdeck\",\"kind\":\"visibility\",\"data\":" + (shown ? "true" : "false") + "}");
+        if (shown)
+        {
+            _reclaim?.Stop();
+            if (_reclaimed) foreach (var (_, core) in Pages()) NavigateIn(core);
+        }
+        else
+        {
+            if (_reclaim is null) { _reclaim = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) }; _reclaim.Tick += Reclaim; }
+            _reclaim.Stop();
+            if (!_keepAlive) _reclaim.Start();
+        }
+    }
+
+    private void Reclaim(object? sender, EventArgs e)
+    {
+        _reclaim?.Stop();
+        _reclaimed = true;
+        foreach (var (_, core) in Pages())
+            try { core.Navigate("about:blank"); } catch (Exception) { }
+    }
+
+    internal bool HasAlarms => _alarms.Count > 0;
+
+    internal void CheckAlarms()
+    {
+        var due = new List<string>();
+        foreach (var (id, alarm) in _alarms)
+            if (DateTime.UtcNow >= alarm.Due)
+            {
+                _alarms[id] = (alarm.Due, true);
+                due.Add(id);
+            }
+        // An alarm owed is delivered at once to pages that exist and held for the next load of any that do not.
+        if (due.Count > 0 && Pages().Count > 0)
+            foreach (var id in due) { _alarms.Remove(id); Push("{\"channel\":\"brimdeck\",\"kind\":\"alarm\",\"data\":" + JsonSerializer.Serialize(id) + "}"); }
+        WebRuntime.AlarmsChanged();
+    }
+
+    // One message to every live page of this plugin. A page mid-teardown or already disposed is dropped from the list,
+    // not fought: the next call simply has fewer pages to reach.
+    private void Push(string json)
+    {
+        foreach (var (_, core) in Pages())
+            try { core.PostWebMessageAsJson(json); } catch (ObjectDisposedException) { }
+    }
+
+    private List<(WebView2CompositionControl, CoreWebView2)> Pages()
+    {
+        for (int at = _pages.Count - 1; at >= 0; at--)
+            try { var _ = _pages[at].Core.Source; } catch (ObjectDisposedException) { _pages.RemoveAt(at); }
+        return _pages;
+    }
+
+    // The bridge's receive side. Every message is text a page chose to send: nothing here is trusted, nothing here
+    // throws into the host.
+    private void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(e.WebMessageAsJson);
+            var root = document.RootElement;
+            if (root.ValueKind is not JsonValueKind.Object) return;
+            if (root.TryGetProperty("channel", out var channel) && channel.ValueKind == JsonValueKind.String && channel.GetString() == "brimdeck"
+                && root.TryGetProperty("kind", out var kind) && kind.ValueKind == JsonValueKind.String)
+            {
+                switch (kind.GetString())
+                {
+                    case "hello": ReplyInit(); break;
+                    case "saveState":
+                        if (root.TryGetProperty("state", out var state) && state.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null))
+                            _stateJson = state.GetRawText();
+                        else _stateJson = null;
+                        break;
+                    case "alarmSet":
+                        if (root.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String && root.TryGetProperty("at", out var at) && at.ValueKind == JsonValueKind.Number && at.TryGetInt64(out var milliseconds))
+                        {
+                            var due = DateTimeOffset.FromUnixTimeMilliseconds(milliseconds).UtcDateTime;
+                            if (due > DateTime.UtcNow) _alarms[id.GetString()!] = (due, false);
+                        }
+                        WebRuntime.AlarmsChanged();
+                        break;
+                    case "alarmClear":
+                        if (root.TryGetProperty("id", out var clear) && clear.ValueKind == JsonValueKind.String) _alarms.Remove(clear.GetString()!);
+                        WebRuntime.AlarmsChanged();
+                        break;
+                    case "keepAlive":
+                        if (root.TryGetProperty("on", out var keep) && keep.ValueKind is JsonValueKind.True or JsonValueKind.False) _keepAlive = keep.GetBoolean();
+                        break;
+                }
+            }
+        }
+        catch (Exception) { }
+    }
+
+    // The hello a freshly loaded page sends is answered with everything it cannot know yet: the bridge's version, the
+    // palette and language, whether it is being shown, the state an earlier load handed over, and any alarm that came
+    // due while no page was there to hear it.
+    private void ReplyInit()
+    {
+        var missed = _alarms.Where(alarm => alarm.Value.Fired).Select(alarm => alarm.Key).ToList();
+        foreach (var id in missed) _alarms.Remove(id);
+        Push("{\"channel\":\"brimdeck\",\"kind\":\"init\",\"apiVersion\":1,\"language\":\"" + (Loc.IsEnglish ? "en" : "zh")
+            + "\",\"shown\":" + (_shown ? "true" : "false") + ",\"colors\":" + WebColors.Json + ",\"state\":" + (_stateJson ?? "null") + "}");
+        foreach (var id in missed) Push("{\"channel\":\"brimdeck\",\"kind\":\"alarm\",\"data\":" + JsonSerializer.Serialize(id) + "}");
+    }
+
+    public void Dispose()
+    {
+        _reclaim?.Stop();
+        foreach (var (control, core) in Pages())
+        {
+            try { core.WebMessageReceived -= OnWebMessage; } catch (Exception) { }
+            try { control.Dispose(); } catch (Exception) { }
+        }
+        _pages.Clear();
+        WebRuntime.Unregister(this);
+    }
+
+    // The bridge the host injects before any page script runs. It is deliberately small: a version, events for what
+    // the host pushes, and three calls — state, alarms, keep-alive. Pages run in a plain browser too (the bridge is
+    // simply absent there), which is what makes a plugin debuggable outside the app.
+    private const string Shim = """
+        (function () {
+            if (window.brimdeck) return;
+            var listeners = {};
+            function post(message) {
+                message.channel = 'brimdeck';
+                try { window.chrome && window.chrome.webview && window.chrome.webview.postMessage(message); } catch (e) { }
+            }
+            function emit(kind, data) {
+                (listeners[kind] || []).slice().forEach(function (fn) { try { fn(data); } catch (e) { } });
+            }
+            var api = {
+                version: 1,
+                on: function (kind, fn) { if (typeof kind === 'string' && typeof fn === 'function') (listeners[kind] = listeners[kind] || []).push(fn); },
+                saveState: function (state) { post({ kind: 'saveState', state: state === undefined ? null : state }); },
+                setKeepAlive: function (on) { post({ kind: 'keepAlive', on: !!on }); },
+                alarm: {
+                    set: function (id, at) {
+                        var ms = at instanceof Date ? at.getTime() : Number(at);
+                        if (typeof id !== 'string' || !id || !isFinite(ms)) return;
+                        post({ kind: 'alarmSet', id: id, at: ms });
+                    },
+                    clear: function (id) { if (typeof id === 'string' && id) post({ kind: 'alarmClear', id: id }); }
+                }
+            };
+            window.brimdeck = api;
+            window.addEventListener('message', function (event) {
+                var message = event.data;
+                if (!message || message.channel !== 'brimdeck') return;
+                if (message.kind === 'init') { api.colors = message.colors; api.language = message.language; }
+                emit(message.kind, message.data !== undefined ? message.data : message);
+            });
+            post({ kind: 'hello' });
+        })();
+        """;
+}

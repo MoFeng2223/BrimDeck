@@ -11,7 +11,7 @@ namespace BrimDeck;
 // The plugins page: the folder button and the scan button on the left, the loaded extensions under a divider, each row
 // opening like the app rules row to its page's size and origin, with an enable switch of its own in the header — off
 // takes the tab off the island and stops what the extension reads. The scan loads DLLs added or changed while the app
-// runs and retires the ones taken away; the DLLs that could not be loaded are listed by name and reason.
+// runs and retires the ones taken away; the plugins that could not be read are listed by name and reason.
 public sealed partial class SettingsWindow
 {
     // Holds the list, so a flip, a switch or a scan rebuilds the list alone.
@@ -24,12 +24,12 @@ public sealed partial class SettingsWindow
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 18) };
         actions.Children.Add(OutlineAction(Loc.T("打开插件文件夹", "Open plugins folder"),
             "M 1.5,4.4 H 4.4 L 5.6,3 H 10.5 V 9.5 H 1.5 Z", OpenPluginsFolder,
-            Loc.T("打开存放插件 DLL 的文件夹。", "Opens the folder the plugin DLLs live in.")));
+            Loc.T("打开存放插件文件夹的目录。", "Opens the folder the plugins live in.")));
         var reload = OutlineAction(Loc.T("重新加载", "Reload"),
             "M 9.1,4.2 A 3.7,3.7 0 1 0 9.9,7.4 M 9.1,2.2 V 4.2 H 7.1",
             () => { IslandExtensions.Scan(); ShowPage(PluginsPageNumber); },
             Loc.T("重新扫描插件文件夹：新放入的插件被装入，被修改的插件被替换，被删除的插件被停用；无需重启本软件。",
-                "Scans the plugins folder again: DLLs added are loaded, DLLs changed are replaced, DLLs taken away are retired; no restart needed."));
+                "Scans the plugins folder again: plugins added are loaded, plugins changed are replaced, plugins taken away are retired; no restart needed."));
         reload.Margin = new Thickness(8, 0, 0, 0);
         actions.Children.Add(reload);
         _content.Children.Add(actions);
@@ -100,7 +100,7 @@ public sealed partial class SettingsWindow
     }
 
     // One loaded plugin: a header row — its glyph and title, its enable switch, and the arrow that opens the settings
-    // under it; open, the page's size and the id and DLL it came from. The switch is the plugin's own: off takes its tab
+    // under it; open, the page's size and the id and folder it came from. The switch is the plugin's own: off takes its tab
     // off the island and stops what it reads, in every state of the panel.
     private FrameworkElement PluginRow(int slot)
     {

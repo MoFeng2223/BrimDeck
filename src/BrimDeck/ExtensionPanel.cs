@@ -4,15 +4,17 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// The extension pages' rendering: each panel keeps one view per occupied slot, built once per palette and language and
-// stretched by the page from then on. The extension owns its view's content entirely; the panel only owns the chrome
-// every page shares — the header, the margins, and which slot is showing.
+// The extension pages' rendering: each panel keeps one view per occupied slot and stretches it with the page. The
+// extension owns its view's content entirely; the panel only owns the chrome every page shares — the header, the
+// margins, and which slot is showing.
 public partial class MainWindow
 {
     private readonly FrameworkElement?[] _extensionViews = new FrameworkElement?[4];
     private readonly string?[] _extensionKeys = new string?[4];
 
-    private string ExtensionKey(int slot) => string.Join("|", Settings.MonitorPalette, Loc.Language, PanelTheme.Generation);
+    // A web page restyles itself from the pushes the host sends on every theme, palette or language change, so a view
+    // is built once per panel and kept: recreating it would throw away the page for no gain. The key stays a constant.
+    private string ExtensionKey(int slot) => "web";
 
     // A scan replaced or retired some slots: their views and tabs are dropped, the tabs are rebuilt, and the panel
     // re-renders — the page it stood on resolves to another when its slot is gone, and the fresh extension learns the

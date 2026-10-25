@@ -132,6 +132,8 @@ public partial class App : Application
     private void UseLanguage()
     {
         Loc.Use(Settings.Language);
+        // The extension pages hear the language as a push, the same way they hear the palette.
+        WebRuntime.SetLanguage(Loc.IsEnglish);
         Resources["PinSourceName"] = Loc.T("固定显示", "Pin");
         Resources["UnpinSourceName"] = Loc.T("取消固定", "Unpin");
     }

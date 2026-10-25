@@ -1,40 +1,33 @@
 using System.IO;
-using System.Reflection;
-using System.Runtime.Loader;
 using BrimDeck.Core;
 using BrimDeck.Island;
 
 namespace BrimDeck;
 
-// The extension pages' host: every DLL in the extensions folder that carries an IIslandExtension is loaded into a
-// collectible assembly context and given a slot, in file order, up to the four slots the page switch holds. A DLL that
-// fails to load is skipped, noted by name for the plugins page, and never takes the app with it.
+// The extension pages' host: every folder in the extensions folder that carries a manifest.json is one plugin, given a
+// slot in name order, up to the four slots the page switch holds. A plugin is files — a manifest and the web page it
+// points at — read by the browser, never run by the host, so a bad plugin is a row on the plugins page at worst.
 //
-// A scan is a full hot reload: a DLL that changed on disk is loaded fresh and every extension it exports replaces its
-// slot, a DLL taken away has its slots retired, and what did not change is kept as it is. Each DLL is loaded from a
-// copy in a cache folder, so the plugin folder itself stays writable while the app runs.
+// A scan is a full reload: a folder whose manifest or entry changed gets a fresh extension in its place, a folder
+// taken away has its slot retired, and what did not change keeps its pages alive exactly as they are — their state and
+// alarms live in the host, not in the pages. Nothing is locked: the folder stays editable while the app runs.
 internal static class IslandExtensions
 {
     public static readonly IIslandExtension?[] Slots = new IIslandExtension?[4];
-    private static readonly AssemblyLoadContext?[] _contexts = new AssemblyLoadContext?[4];
     private static readonly string?[] _sources = new string?[4];
-    // The id each extension reported when it was created; the host never asks a plugin for it a second time.
+    // The id each plugin declared in its manifest; plain data the host already has, asked of nobody at runtime.
     private static readonly string?[] _ids = new string?[4];
-    private static readonly (DateTime Written, long Size)[] _stamps = new (DateTime, long)[4];
+    // A folder's manifest and entry stamps as one key, so an edit to either is a changed plugin.
+    private static readonly string?[] _stamps = new string?[4];
 
     public static string Folder { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "extensions");
-    // The copies the contexts are loaded from: a loaded assembly locks its file on Windows, and the plugin folder must
-    // stay writable so a new DLL can be dropped over the old one.
-    private static string CacheFolder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "extension-cache");
     public static string Source(int slot) => _sources[slot] ?? "";
 
-    // The DLLs that could not be loaded, by file name with the error's first line. Cleared on each scan.
+    // The plugins that could not be read, by folder name with the error's first line. Cleared on each scan.
     public static readonly List<(string File, string Error)> Failures = new();
-    // DLLs that loaded but carry no extension — a dependency, a stray file, the contract itself — noted so a DLL put in
-    // the wrong folder is not silently ignored. Cleared on each scan.
+    // Folders in the extensions folder that are not plugins — no manifest.json in them — noted so a stray folder is
+    // not silently invisible. Cleared on each scan.
     public static readonly List<(string File, string Note)> Skipped = new();
-    // Files read without finding an extension, by stamp, so a dependency is not loaded into a context on every scan.
-    private static readonly Dictionary<string, (DateTime Written, long Size)> _withoutExtensions = new(StringComparer.OrdinalIgnoreCase);
 
     // Raised with the slots whose extension was replaced or retired; the app drops their tabs and views and re-renders.
     public static event Action<IReadOnlyList<int>>? ExtensionsChanged;
@@ -49,175 +42,105 @@ internal static class IslandExtensions
         try
         {
             if (Directory.Exists(Folder))
-                disk.AddRange(Directory.EnumerateFiles(Folder, "*.dll").OrderBy(file => file, StringComparer.OrdinalIgnoreCase));
+                disk.AddRange(Directory.EnumerateDirectories(Folder).OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             Failures.Add((Path.GetFileName(Folder), ex.Message.Split('\n')[0]));
         }
 
-        // A file whose stamp still matches every slot it filled is kept whole: all of its extensions stay, not only the
-        // first one found. Everything else — a changed file, a new file, a file whose slots did not all survive — is
-        // loaded fresh.
-        var stamps = new Dictionary<string, (DateTime Written, long Size)>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in disk)
+        // One pass over the folders: a manifest and its entry, or the reason the folder is not a plugin. The stamp
+        // covers the manifest and the entry file, so editing either is a change the next scan picks up. No extension
+        // exists yet — a manifest is read, an extension is only made for a slot it actually takes.
+        var read = new List<(string Name, string Stamp, ExtensionManifest? Manifest, string? Error)>();
+        foreach (var folder in disk)
         {
-            try { var info = new FileInfo(file); stamps[Path.GetFileName(file)] = (info.LastWriteTimeUtc, info.Length); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            { Failures.Add((Path.GetFileName(file), ex.Message.Split('\n')[0])); }
-        }
-        var kept = new bool[Slots.Length];
-        for (int slot = 0; slot < Slots.Length; slot++)
-        {
-            if (Slots[slot] is null || _sources[slot] is not { Length: > 0 } name) continue;
-            if (stamps.TryGetValue(name, out var stamp) && stamp == _stamps[slot]) kept[slot] = true;
-        }
-        // A file is unchanged only when it filled slots and every one of them is kept.
-        bool Unchanged(string name)
-        {
-            bool any = false;
-            for (int slot = 0; slot < Slots.Length; slot++)
-            {
-                if (!string.Equals(_sources[slot], name, StringComparison.OrdinalIgnoreCase)) continue;
-                any = true;
-                if (Slots[slot] is not null && !kept[slot]) return false;
-            }
-            return any;
-        }
-
-        // Load the fresh DLLs from cached copies, each into its own collectible context so a replaced one can be let go.
-        var fresh = new List<(IIslandExtension Extension, string Id, AssemblyLoadContext Context, string File, (DateTime, long) Stamp, int FromFile)>();
-        var perFile = new List<(AssemblyLoadContext Context, int Placed)>();
-        try { Directory.CreateDirectory(CacheFolder); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Failures.Add(("extension-cache", ex.Message.Split('\n')[0])); }
-        foreach (var file in disk)
-        {
-            string name = Path.GetFileName(file);
-            if (!stamps.TryGetValue(name, out var stamp) || Unchanged(name)) continue;
-            // The contract belongs to the host; a copy in the plugin folder is ignored rather than loaded again.
-            if (string.Equals(name, Path.GetFileName(typeof(IIslandExtension).Assembly.Location), StringComparison.OrdinalIgnoreCase)) continue;
-            if (_withoutExtensions.TryGetValue(name, out var empty) && empty == stamp)
-            {
-                Skipped.Add((name, Loc.T("不含扩展实现", "no extension in it")));
-                continue;
-            }
-            // Everything in here runs third-party code — the assembly's types and the extensions' own constructors and Id
-            // getters included — so every exception is caught per type: one bad extension is a row on the plugins page,
-            // never a failed startup.
-            AssemblyLoadContext? context = null;
-            bool listed = false;
-            int found = fresh.Count;
+            string name = Path.GetFileName(folder);
             try
             {
-                context = new AssemblyLoadContext("BrimDeck.Island:" + name, isCollectible: true);
-                context.Resolving += Resolve;
-                var assembly = context.LoadFromAssemblyPath(Shadow(file, name, stamp));
-                int fromFile = perFile.Count;
-                perFile.Add((context, 0));
-                listed = true;
-                foreach (var type in assembly.GetTypes())
+                var (manifest, error) = ExtensionManifests.Read(folder);
+                if (manifest is null)
                 {
-                    if (type.IsAbstract || !typeof(IIslandExtension).IsAssignableFrom(type)) continue;
-                    if (type.GetConstructor(Type.EmptyTypes) is null) continue;
-                    try
-                    {
-                        var extension = (IIslandExtension)Activator.CreateInstance(type)!;
-                        var id = extension.Id;
-                        if (string.IsNullOrWhiteSpace(id)) continue;
-                        fresh.Add((extension, id.Trim(), context, name, stamp, fromFile));
-                    }
-                    catch (Exception ex)
-                    {
-                        Failures.Add((name, ex.Message.Split('\n')[0]));
-                    }
+                    if (error is not null) Failures.Add((name, error));
+                    else Skipped.Add((name, Loc.T("缺少 manifest.json", "no manifest.json in it")));
+                    continue;
                 }
+                var stamp = Stamp(Path.Combine(folder, "manifest.json")) + "|" + Stamp(Path.Combine(folder, manifest.Entry));
+                read.Add((name, stamp, manifest, null));
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                if (context is not null && !listed) context.Unload();
                 Failures.Add((name, ex.Message.Split('\n')[0]));
             }
-            if (fresh.Count == found)
-            {
-                _withoutExtensions[name] = stamp;
-                if (!Failures.Any(failure => string.Equals(failure.File, name, StringComparison.OrdinalIgnoreCase)))
-                    Skipped.Add((name, Loc.T("不含扩展实现", "no extension in it")));
-            }
-            else _withoutExtensions.Remove(name);
         }
 
-        // Place: the kept slots stay where they were; the fresh extensions fill the rest in file order. A repeated id
-        // is skipped, and what does not fit a slot is noted by its file.
+        // The kept slots keep their extension — a plugin whose folder did not change keeps its pages and their state;
+        // everything else is placed fresh, in name order, into the slots that remain.
         var slots = new IIslandExtension?[4];
-        var contexts = new AssemblyLoadContext?[4];
         var sources = new string?[4];
         var ids = new string?[4];
-        var newStamps = new (DateTime, long)[4];
+        var stamps = new string?[4];
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var keptNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (int slot = 0; slot < 4; slot++)
         {
-            if (!kept[slot]) continue;
-            slots[slot] = Slots[slot]; contexts[slot] = _contexts[slot]; sources[slot] = _sources[slot]; ids[slot] = _ids[slot]; newStamps[slot] = _stamps[slot];
-            if (_ids[slot] is { } id) seen.Add(id);
+            var name = _sources[slot];
+            if (Slots[slot] is null || name is not { Length: > 0 }) continue;
+            var entry = read.FirstOrDefault(item => item.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (entry.Manifest is not null && entry.Stamp == _stamps[slot])
+            {
+                slots[slot] = Slots[slot]; sources[slot] = name; ids[slot] = _ids[slot]; stamps[slot] = _stamps[slot];
+                keptNames.Add(name);
+                if (_ids[slot] is { } id) seen.Add(id);
+            }
         }
         int at = 0;
-        foreach (var item in fresh)
+        foreach (var item in read)
         {
-            if (!seen.Add(item.Id)) continue;
+            if (item.Manifest is null || keptNames.Contains(item.Name)) continue;
+            if (!seen.Add(item.Manifest.Id))
+            {
+                Failures.Add((item.Name, Loc.T("插件 ID 重复：", "Duplicate plugin id: ") + item.Manifest.Id));
+                continue;
+            }
             while (at < 4 && slots[at] is not null) at++;
             if (at >= 4)
             {
-                Failures.Add((item.File, Loc.T("槽位已满", "All four slots are filled")));
+                Failures.Add((item.Name, Loc.T("槽位已满", "All four slots are filled")));
                 continue;
             }
-            slots[at] = item.Extension; contexts[at] = item.Context; sources[at] = item.File; ids[at] = item.Id; newStamps[at] = item.Stamp;
-            perFile[item.FromFile] = (perFile[item.FromFile].Context, perFile[item.FromFile].Placed + 1);
+            var extension = new WebExtension(item.Manifest, Path.Combine(Folder, item.Name));
+            slots[at] = extension; sources[at] = item.Name; ids[at] = extension.Id; stamps[at] = item.Stamp;
         }
-        // A context nothing was placed from is let go at once; so is the context of every slot that did not survive.
-        for (int i = 0; i < perFile.Count; i++)
-            if (perFile[i].Placed == 0) perFile[i].Context.Unload();
 
         var changed = new List<int>();
+        var retired = new List<WebExtension>();
         for (int slot = 0; slot < 4; slot++)
         {
             if (ReferenceEquals(Slots[slot], slots[slot])) continue;
             Notify(slot, false);
             changed.Add(slot);
+            if (Slots[slot] is WebExtension old) retired.Add(old);
         }
-        for (int slot = 0; slot < 4; slot++)
-        {
-            if (!ReferenceEquals(_contexts[slot], contexts[slot]) && _contexts[slot] is { } retired) retired.Unload();
-            Slots[slot] = slots[slot]; _contexts[slot] = contexts[slot]; _sources[slot] = sources[slot]; _ids[slot] = ids[slot]; _stamps[slot] = newStamps[slot];
-        }
+        for (int slot = 0; slot < 4; slot++) { Slots[slot] = slots[slot]; _sources[slot] = sources[slot]; _ids[slot] = ids[slot]; _stamps[slot] = stamps[slot]; }
 
         DeckPages.SlotOccupied = slot => Slots[slot] is not null;
         DeckPages.SlotId = slot => _ids[slot];
-        if (changed.Count > 0) ExtensionsChanged?.Invoke(changed);
-    }
-
-    // A dependency next to the plugin is loaded from the plugin folder; the contract always comes from the host, so both
-    // sides share one IIslandExtension type.
-    private static Assembly? Resolve(AssemblyLoadContext context, AssemblyName name)
-    {
-        if (string.Equals(name.Name, typeof(IIslandExtension).Assembly.GetName().Name, StringComparison.OrdinalIgnoreCase)) return null;
-        if (name.Name is not { Length: > 0 } simple) return null;
-        var candidate = Path.Combine(Folder, simple + ".dll");
-        return File.Exists(candidate) ? context.LoadFromAssemblyPath(candidate) : null;
-    }
-
-    // The cached copy a context loads from, made once per file version.
-    private static string Shadow(string file, string name, (DateTime Written, long Size) stamp)
-    {
-        var shadow = Path.Combine(CacheFolder, $"{name}.{stamp.Written.Ticks}.{stamp.Size}.dll");
-        if (!File.Exists(shadow))
+        // The WebView2 runtime is probed once, but only when there is a plugin to show: a machine without plugins never
+        // starts a browser process it has no use for, and a page created later still probes on its own.
+        if (Slots.Any(slot => slot is not null)) _ = WebRuntime.Environment();
+        if (changed.Count > 0)
         {
-            File.Copy(file, shadow, true);
-            // Older copies of the same DLL are no longer needed; a loaded one stays locked and is skipped.
-            foreach (var old in Directory.EnumerateFiles(CacheFolder, name + ".*.dll"))
-                if (!string.Equals(old, shadow, StringComparison.OrdinalIgnoreCase))
-                    try { File.Delete(old); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            ExtensionsChanged?.Invoke(changed);
+            // The panels have let go of the retired pages' views; only now may the extensions behind them go too.
+            foreach (var extension in retired) extension.Dispose();
         }
-        return shadow;
+    }
+
+    private static string Stamp(string file)
+    {
+        try { var info = new FileInfo(file); return info.LastWriteTimeUtc.Ticks + ":" + info.Length; }
+        catch (Exception) { return "?"; }
     }
 
     // A plugin's glyph as stroke path data on a 24 by 24 grid. A string that does not parse is a plugin's mistake, not
@@ -242,7 +165,8 @@ internal static class IslandExtensions
 
     public static int OccupiedCount => Slots.Count(slot => slot is not null);
 
-    // The demand a page hands to its extension, never letting a plugin's exception escape into the host.
+    // The demand a page hands to its extension; the web adapter is host code, but the guard stays so a bug in it is a
+    // missed message, not a thrown startup.
     public static void Notify(int slot, bool shown)
     {
         if (slot < 0 || slot >= Slots.Length) return;
@@ -250,18 +174,12 @@ internal static class IslandExtensions
         catch (Exception) { }
     }
 
-    public static string Title(int slot)
-    {
-        try
-        {
-            return Slots[slot] is { } extension ? (Loc.IsEnglish ? extension.TitleEn : extension.TitleZh) : "";
-        }
-        catch (Exception) { return _ids[slot] ?? ""; }
-    }
+    public static string Title(int slot) => Slots[slot] is { } extension ? (Loc.IsEnglish ? extension.TitleEn : extension.TitleZh) : "";
 
     // The colors an extension draws with: its monitor palette page's scheme on the theme's text and surface colors.
-    // The app sets the palette whenever the theme or the choice changes, before any view is created.
+    // The app sets the palette whenever the theme or the choice changes, before any view is created, and the pages
+    // that already exist hear about it as a push.
     public static IslandColors Colors { get; private set; } = new("#4FD17F", "#F0B54A", "#FF6B5E", "#F1F1F4", "#C5C5CB", "#8E8E93", "#2A2A30", "#1D1D21");
-    public static void SetPalette(MonitorPalette palette) => Colors = With(MonitorThemeColors.For(palette));
+    public static void SetPalette(MonitorPalette palette) { Colors = With(MonitorThemeColors.For(palette)); WebRuntime.SetColors(Colors); }
     private static IslandColors With(MonitorColors colors) => new(colors.Normal, colors.Warning, colors.Critical, UI.Primary, UI.Secondary, UI.Tertiary, UI.Track, UI.Fill);
 }
