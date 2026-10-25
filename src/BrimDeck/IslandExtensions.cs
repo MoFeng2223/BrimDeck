@@ -163,6 +163,11 @@ internal static class IslandExtensions
 
     public static bool Occupied(int slot) => Slots[slot] is not null;
 
+    // Whether a view a panel cached is still usable. A page leaves its WebView behind when the panel takes the view
+    // off the window, so the extension — not the panel — is asked before a cached view is put back.
+    public static bool Alive(int slot, System.Windows.FrameworkElement view)
+        => slot >= 0 && slot < Slots.Length && Slots[slot] is WebExtension extension ? extension.Alive(view) : true;
+
     public static int OccupiedCount => Slots.Count(slot => slot is not null);
 
     // The demand a page hands to its extension; the web adapter is host code, but the guard stays so a bug in it is a

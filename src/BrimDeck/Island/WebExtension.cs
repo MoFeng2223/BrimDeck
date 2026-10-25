@@ -39,6 +39,7 @@ internal static class WebRuntime
         catch (Exception ex)
         {
             EnvironmentError = ex.Message.Split('\n')[0];
+            ExtensionLog.Write("runtime: environment failed: " + EnvironmentError);
             return null;
         }
     }
@@ -48,11 +49,13 @@ internal static class WebRuntime
         try
         {
             var folder = Path.Combine(AppPaths.Data, "extension-web");
+            ExtensionLog.Write("runtime: creating environment at " + folder);
             return await CoreWebView2Environment.CreateAsync(null, folder, null).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
             EnvironmentError = ex.Message.Split('\n')[0];
+            ExtensionLog.Write("runtime: environment failed: " + EnvironmentError);
             return null;
         }
     }
@@ -97,6 +100,12 @@ internal sealed class WebExtension : IIslandExtension
     private readonly string _folder;
     private readonly string _host;
     private readonly List<(WebView2CompositionControl Control, CoreWebView2 Core)> _pages = new();
+    // Views whose control has been disposed. A panel may still hold one in its view cache for a moment; asking the
+    // extension first keeps a dead page from being put back on screen with nothing in it.
+    private readonly HashSet<WebView2CompositionControl> _retired = new();
+    // Controls this extension created and has not disposed. A control that is still initializing belongs here too:
+    // its CoreWebView2 being null is "not ready yet", not "dead".
+    private readonly HashSet<WebView2CompositionControl> _created = new();
     // The plugin's state and alarms live in the host, not in the page, so they survive the page being reclaimed while
     // nobody watches it: what the page hands over it gets back the next time it loads.
     private string? _stateJson;
@@ -122,6 +131,7 @@ internal sealed class WebExtension : IIslandExtension
 
     public FrameworkElement CreateView(IslandColors colors)
     {
+        ExtensionLog.Write("view: create " + Id);
         var page = new WebView2CompositionControl
         {
             DefaultBackgroundColor = System.Drawing.Color.Transparent,
@@ -136,10 +146,20 @@ internal sealed class WebExtension : IIslandExtension
         var host = new Grid();
         host.Children.Add(page);
         host.Children.Add(note);
+        _created.Add(page);
         page.Unloaded += (_, _) => RemovePage(page);
         _ = InitializeAsync(page, note);
         return host;
     }
+
+    // The panel asks before putting a cached view back: a control that left the tree was disposed with the page, and
+    // re-adding it would show an empty rectangle with no way to tell why.
+    internal bool Alive(FrameworkElement view) => view switch
+    {
+        WebView2CompositionControl page => _created.Contains(page) && !_retired.Contains(page),
+        Grid host => host.Children.OfType<WebView2CompositionControl>().All(page => _created.Contains(page) && !_retired.Contains(page)),
+        _ => true
+    };
 
     // The order matters: the shim must be in place before the first navigation, or the page's first scripts run with
     // no bridge to call and its hello is never sent. Everything here runs on the UI thread.
@@ -157,15 +177,18 @@ internal sealed class WebExtension : IIslandExtension
             // cannot become a browser tab pointed at the network.
             core.NavigationStarting += OnNavigationStarting;
             core.NewWindowRequested += OnNewWindowRequested;
+            core.ProcessFailed += OnProcessFailed;
             _pages.Add((page, core));
             await core.AddScriptToExecuteOnDocumentCreatedAsync(Shim).ConfigureAwait(true);
+            ExtensionLog.Write("view: ready " + Id);
             NavigateIn(core);
         }
         catch (Exception ex) { Fail(note, ex.Message.Split('\n')[0]); }
     }
 
-    private static void Fail(TextBlock note, string? reason)
+    private void Fail(TextBlock note, string? reason)
     {
+        ExtensionLog.Write("view: failed " + Id + ": " + (reason ?? "no core"));
         note.Text = Loc.T("需要 WebView2 运行时才能显示插件页面：", "The WebView2 runtime is needed to show plugin pages: ") + (reason ?? "");
         note.Visibility = Visibility.Visible;
     }
@@ -174,15 +197,37 @@ internal sealed class WebExtension : IIslandExtension
     {
         if (e.Uri == "about:blank") return;
         if (e.Uri.StartsWith("https://" + _host + "/", StringComparison.OrdinalIgnoreCase)) return;
+        ExtensionLog.Write("view: refused navigation " + Id + " -> " + e.Uri);
         e.Cancel = true;
     }
 
     private static void OnNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e) => e.Handled = true;
 
+    // A browser or renderer that dies leaves the control blank. It is logged (the log is on in development and in the
+    // UI test), and a renderer that exited once is reloaded; a second failure is left to the next visit instead of
+    // reloading in a loop.
+    private void OnProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs e)
+    {
+        ExtensionLog.Write("view: process failed " + Id + " kind=" + e.ProcessFailedKind);
+        if (e.ProcessFailedKind is CoreWebView2ProcessFailedKind.RenderProcessExited or CoreWebView2ProcessFailedKind.RenderProcessUnresponsive
+            && sender is CoreWebView2 core)
+        {
+            try { core.Reload(); } catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException) { }
+        }
+    }
+
     private void NavigateIn(CoreWebView2 core)
     {
-        try { core.Navigate("https://" + _host + "/" + _manifest.Entry.Replace('\\', '/')); _reclaimed = false; }
-        catch (Exception) { }
+        try
+        {
+            ExtensionLog.Write("view: navigate " + Id + " -> " + _manifest.Entry);
+            core.Navigate("https://" + _host + "/" + _manifest.Entry.Replace('\\', '/'));
+            _reclaimed = false;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+        {
+            ExtensionLog.Write("view: navigate failed " + Id + ": " + ex.Message);
+        }
     }
 
     // The demand a page hears as its visibility: true while any panel shows it, false once none does. Hidden and not
@@ -190,6 +235,7 @@ internal sealed class WebExtension : IIslandExtension
     // the next true hands them back — so a page nobody watches costs its renderer memory, not just its timers.
     public void SetDemand(bool shown)
     {
+        ExtensionLog.Write("view: demand " + Id + " shown=" + shown);
         _shown = shown;
         Push("{\"channel\":\"brimdeck\",\"kind\":\"visibility\",\"data\":" + (shown ? "true" : "false") + "}");
         if (shown)
@@ -209,6 +255,7 @@ internal sealed class WebExtension : IIslandExtension
     {
         _reclaim?.Stop();
         _reclaimed = true;
+        ExtensionLog.Write("view: reclaim " + Id);
         foreach (var (_, core) in Pages())
             try { core.Navigate("about:blank"); } catch (Exception) { }
     }
@@ -238,9 +285,13 @@ internal sealed class WebExtension : IIslandExtension
             try { core.PostWebMessageAsJson(json); } catch (ObjectDisposedException) { }
     }
 
-    // A panel's view was taken off the window: its page goes with it, so a closed panel leaves no WebView behind.
+    // A panel's view was taken off the window: its page goes with it, so a closed panel leaves no WebView behind. The
+    // control is also marked retired: a panel's view cache may still hold it, and Alive() must say no before it is
+    // put back on screen.
     private void RemovePage(WebView2CompositionControl control)
     {
+        ExtensionLog.Write("view: dispose " + Id);
+        _retired.Add(control);
         for (int at = _pages.Count - 1; at >= 0; at--)
             if (ReferenceEquals(_pages[at].Control, control))
             {
@@ -271,7 +322,7 @@ internal sealed class WebExtension : IIslandExtension
             {
                 switch (kind.GetString())
                 {
-                    case "hello": ReplyInit(); break;
+                    case "hello": ExtensionLog.Write("view: hello " + Id); ReplyInit(); break;
                     case "saveState":
                         if (root.TryGetProperty("state", out var state) && state.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null))
                         {
@@ -328,9 +379,11 @@ internal sealed class WebExtension : IIslandExtension
 
     public void Dispose()
     {
+        ExtensionLog.Write("view: extension disposed " + Id);
         _reclaim?.Stop();
         foreach (var (control, core) in Pages())
         {
+            _retired.Add(control);
             try { core.WebMessageReceived -= OnWebMessage; } catch (Exception) { }
             try { control.Dispose(); } catch (Exception) { }
         }

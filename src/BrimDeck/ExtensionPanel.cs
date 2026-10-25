@@ -49,7 +49,10 @@ public partial class MainWindow
         ApplyHeader(Settings.UsagePage ? header.WithControlsOf(CachedUsageHeader()) : header);
         ExtensionContent.Margin = new Thickness(_header.Side, 0, _header.Side, height < 170 ? 8 : 10);
         var key = ExtensionKey(slot);
-        if (_extensionViews[slot] is not { } view || _extensionKeys[slot] != key)
+        // A cached view is only reused while its page is still there. Taking the view off the window (another tab, a
+        // settings rebuild) disposes its WebView; the extension is asked before the old control goes back on screen.
+        bool cachedAlive = _extensionViews[slot] is { } cached && IslandExtensions.Alive(slot, cached);
+        if (_extensionViews[slot] is not { } view || _extensionKeys[slot] != key || !cachedAlive)
         {
             try { view = IslandExtensions.Slots[slot]!.CreateView(IslandExtensions.Colors); }
             catch (Exception ex)
@@ -62,11 +65,24 @@ public partial class MainWindow
             }
             _extensionViews[slot] = view;
             _extensionKeys[slot] = key;
+            // The view is cached for the page it belongs to, but it must not outlive its WebView: when it leaves the
+            // window the entry is dropped, and the next render builds a page instead of putting an empty control back.
+            int builtSlot = slot;
+            var builtView = view;
+            view.Unloaded += (_, _) =>
+            {
+                if (!ReferenceEquals(_extensionViews[builtSlot], builtView)) return;
+                ExtensionLog.Write("panel: view retired slot " + builtSlot);
+                _extensionViews[builtSlot] = null;
+                _extensionKeys[builtSlot] = null;
+            };
+            ExtensionLog.Write("panel: view built for slot " + slot);
             ExtensionContent.Children.Clear();
             ExtensionContent.Children.Add(view);
         }
         else if (!ExtensionContent.Children.Contains(view))
         {
+            ExtensionLog.Write("panel: view reused for slot " + slot);
             ExtensionContent.Children.Clear();
             ExtensionContent.Children.Add(view);
         }
