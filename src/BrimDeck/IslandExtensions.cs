@@ -20,7 +20,7 @@ internal static class IslandExtensions
     // A folder's manifest and entry stamps as one key, so an edit to either is a changed plugin.
     private static readonly string?[] _stamps = new string?[4];
 
-    public static string Folder { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "extensions");
+    public static string Folder { get; } = Path.Combine(AppPaths.Data, "extensions");
     public static string Source(int slot) => _sources[slot] ?? "";
 
     // The plugins that could not be read, by folder name with the error's first line. Cleared on each scan.

@@ -47,7 +47,7 @@ internal static class WebRuntime
     {
         try
         {
-            var folder = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "extension-web");
+            var folder = Path.Combine(AppPaths.Data, "extension-web");
             return await CoreWebView2Environment.CreateAsync(null, folder, null).ConfigureAwait(true);
         }
         catch (Exception ex)
