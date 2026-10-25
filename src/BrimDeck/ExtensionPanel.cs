@@ -48,12 +48,24 @@ public partial class MainWindow
         var header = PanelHeader.For(ToolbarFor(height), height < 170 ? 14 : 20);
         ApplyHeader(Settings.UsagePage ? header.WithControlsOf(CachedUsageHeader()) : header);
         ExtensionContent.Margin = new Thickness(_header.Side, 0, _header.Side, height < 170 ? 8 : 10);
-        var key = ExtensionKey(slot);
-        // A cached view is only reused while its page is still there. Taking the view off the window (another tab, a
-        // settings rebuild) disposes its WebView; the extension is asked before the old control goes back on screen.
-        bool cachedAlive = _extensionViews[slot] is { } cached && IslandExtensions.Alive(slot, cached);
-        if (_extensionViews[slot] is not { } view || _extensionKeys[slot] != key || !cachedAlive)
+        EnsureExtensionViews();
+        ShowExtensionView(slot);
+    }
+
+    // A view is built once for the panel's life and never taken off the window: a page switch hides it (Visibility),
+    // which keeps the page alive, so coming back is at once. What the page costs while nobody watches it is the host's
+    // to reclaim — after the usual grace it navigates the page to blank, and the next visit simply loads it again.
+    // Called when the panel expands, so every plugin page is ready before the first switch to it.
+    internal void EnsureExtensionViews()
+    {
+        if (IslandExtensions.OccupiedCount == 0) return;
+        for (int slot = 0; slot < IslandExtensions.Slots.Length; slot++)
         {
+            if (!IslandExtensions.Occupied(slot)) continue;
+            var key = ExtensionKey(slot);
+            if (_extensionViews[slot] is { } kept && _extensionKeys[slot] == key && IslandExtensions.Alive(slot, kept)) continue;
+            if (_extensionViews[slot] is { } old) ExtensionContent.Children.Remove(old);
+            FrameworkElement view;
             try { view = IslandExtensions.Slots[slot]!.CreateView(IslandExtensions.Colors); }
             catch (Exception ex)
             {
@@ -63,28 +75,19 @@ public partial class MainWindow
                     Margin = new Thickness(8), TextWrapping = TextWrapping.Wrap
                 };
             }
+            view.Visibility = Visibility.Collapsed;
             _extensionViews[slot] = view;
             _extensionKeys[slot] = key;
-            // The view is cached for the page it belongs to, but it must not outlive its WebView: when it leaves the
-            // window the entry is dropped, and the next render builds a page instead of putting an empty control back.
-            int builtSlot = slot;
-            var builtView = view;
-            view.Unloaded += (_, _) =>
-            {
-                if (!ReferenceEquals(_extensionViews[builtSlot], builtView)) return;
-                ExtensionLog.Write("panel: view retired slot " + builtSlot);
-                _extensionViews[builtSlot] = null;
-                _extensionKeys[builtSlot] = null;
-            };
+            ExtensionContent.Children.Add(view);
             ExtensionLog.Write("panel: view built for slot " + slot);
-            ExtensionContent.Children.Clear();
-            ExtensionContent.Children.Add(view);
         }
-        else if (!ExtensionContent.Children.Contains(view))
-        {
-            ExtensionLog.Write("panel: view reused for slot " + slot);
-            ExtensionContent.Children.Clear();
-            ExtensionContent.Children.Add(view);
-        }
+    }
+
+    // The chosen slot's view is the one that shows; the others stay in the tree, hidden and costless to switch back to.
+    private void ShowExtensionView(int slot)
+    {
+        for (int at = 0; at < _extensionViews.Length; at++)
+            if (_extensionViews[at] is { } view)
+                view.Visibility = at == slot ? Visibility.Visible : Visibility.Collapsed;
     }
 }

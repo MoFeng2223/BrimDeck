@@ -490,6 +490,9 @@ public partial class MainWindow : Window
         bool wasExpanded = _expanded;
         _expanded = expanded;
         if (wasExpanded != _expanded) ExtensionLog.Write("panel: expanded=" + _expanded + " page=" + CurrentPage + " context=" + _context);
+        // Opening the panel builds the plugin pages' views before the first switch to them, so no switch pays a cold
+        // WebView. Building is skipped while collapsed — a closed panel needs no pages.
+        if (expanded && !wasExpanded) EnsureExtensionViews();
         _escapeDismissal?.SetEnabled(expanded && !_preview);
         if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
         if (wasExpanded && !expanded) { HotkeyPanelCollapsed(); _app.RequestTrim(); }
