@@ -23,8 +23,7 @@ public static class AppPaths
 
     // True when this process runs on a folder of its own: the instance mutex and the settings event carry this tag, so
     // two profiles (the user's copy and a test run) can be open at once without one instance shutting the other down.
-    public static string ProfileTag
-        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Data.ToLowerInvariant())))[..8].ToLowerInvariant();
+    public static string ProfileTag => Tag(Data);
 
     public static bool IsOverridden => !string.Equals(Data, DefaultData, StringComparison.OrdinalIgnoreCase);
 
@@ -40,12 +39,25 @@ public static class AppPaths
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException)
         {
-            // Silently writing into the user's real profile after a bad --data-dir would be worse than falling back
-            // loudly: the caller records LastError in the crash log.
-            LastError = "Could not use the data folder \"" + requested + "\": " + ex.Message;
-            return DefaultData;
+            // Never fall back to the real profile after an explicit bad --data-dir: a test with a typo would then read
+            // and write the user's settings. A temporary folder keeps the run isolated; the error still reaches crash.log.
+            try
+            {
+                var fallback = Path.Combine(Path.GetTempPath(), "BrimDeck-data-" + Tag(requested));
+                Directory.CreateDirectory(fallback);
+                LastError = "Could not use the data folder \"" + requested + "\": " + ex.Message + " Using " + fallback + " instead.";
+                return fallback;
+            }
+            catch (Exception fallbackError) when (fallbackError is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                LastError = "Could not use the data folder \"" + requested + "\": " + ex.Message + " No temporary folder either: " + fallbackError.Message;
+                return DefaultData;
+            }
         }
     }
+
+    private static string Tag(string value)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value.ToLowerInvariant())))[..8].ToLowerInvariant();
 
     private static string? FromArguments()
     {
