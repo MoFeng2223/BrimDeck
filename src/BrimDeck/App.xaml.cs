@@ -75,7 +75,7 @@ public partial class App : Application
         Store = new SettingsStore(folder); Settings = Store.Load();
         UseLanguage();
         PanelTheme.Use(Settings);
-        IslandExtensions.SetPalette(Settings.MonitorPalette);
+        IslandExtensions.SetPalette(Settings);
         // The host is started once the single-instance check has passed and the language and theme are current: a second
         // instance leaves before running any plugin code, and the first views get the saved palette.
         IslandExtensions.Load();
@@ -100,7 +100,8 @@ public partial class App : Application
         Prices = new Pricing(folder);
         Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(folder), folder);
         Secrets = new ProviderSecrets(folder);
-        Usage = new UsageService(new DesktopSources(), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName));
+        Usage = new UsageService(new DesktopSources(), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
+            kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName));
         Deck = new MainWindow(this); MainWindow = Deck;
         Displays = Native.Displays.Current(); AssignDisplays();
         Deck.Show();
@@ -192,7 +193,7 @@ public partial class App : Application
             foreach (var deck in Decks.ToList()) deck.RefreshExtensionButtons();
         }
         PanelTheme.Use(settings);
-        IslandExtensions.SetPalette(settings.MonitorPalette);
+        IslandExtensions.SetPalette(settings);
         AssignDisplays();
         foreach (var deck in Decks.ToList()) { if (styleChanged) deck.MorphShape(); else deck.ApplySettings(); }
         // A page's own switch takes effect at once, closing or reopening what its extension reads.
@@ -221,7 +222,7 @@ public partial class App : Application
         var previous = PanelTheme.Current;
         if (!PanelTheme.Use(Settings, reload, systemChanged)) return;
         // The extension pages are drawn in the theme's text and surface colors, so a new theme gives them new ones.
-        IslandExtensions.SetPalette(Settings.MonitorPalette);
+        IslandExtensions.SetPalette(Settings);
         if (systemChanged && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
         foreach (var deck in Decks.ToList()) deck.ApplySettings();
         if (!reload) _settingsWindow?.PanelThemeChanged();

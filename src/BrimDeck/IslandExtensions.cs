@@ -185,6 +185,9 @@ internal static class IslandExtensions
     // The app sets the palette whenever the theme or the choice changes, before any view is created, and the pages
     // that already exist hear about it as a push.
     public static IslandColors Colors { get; private set; } = new("#4FD17F", "#F0B54A", "#FF6B5E", "#F1F1F4", "#C5C5CB", "#8E8E93", "#2A2A30", "#1D1D21");
-    public static void SetPalette(MonitorPalette palette) { Colors = With(MonitorThemeColors.For(palette)); WebRuntime.SetColors(Colors); }
-    private static IslandColors With(MonitorColors colors) => new(colors.Normal, colors.Warning, colors.Critical, UI.Primary, UI.Secondary, UI.Tertiary, UI.Track, UI.Fill);
+    public static void SetPalette(DeckSettings settings) { Colors = With(MonitorThemeColors.For(settings)); WebRuntime.SetColors(Colors); }
+    // The normal color is not part of MonitorColors any more; the green the readings have always used still fits a
+    // plugin's temperature gauge, on the theme's dark or light surface.
+    private static IslandColors With(MonitorColors colors)
+        => new(PanelTheme.Current.IsDark ? "#4FD17F" : "#1C9A50", colors.Warning, colors.Critical, UI.Primary, UI.Secondary, UI.Tertiary, UI.Track, UI.Fill);
 }
