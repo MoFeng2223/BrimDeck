@@ -344,17 +344,31 @@ internal sealed class WebExtension : IIslandExtension
     private const string Shim = """
         (function () {
             if (window.brimdeck) return;
-            var listeners = {};
+            var listeners = {}, pending = {};
             function post(message) {
                 message.channel = 'brimdeck';
                 try { window.chrome && window.chrome.webview && window.chrome.webview.postMessage(message); } catch (e) { }
             }
+            // The host answers hello at once, possibly before the page's own script has run. Events a kind has no
+            // listener for yet are held (at most the last few) and handed over when the page subscribes.
             function emit(kind, data) {
-                (listeners[kind] || []).slice().forEach(function (fn) { try { fn(data); } catch (e) { } });
+                var list = listeners[kind];
+                if (!list || !list.length) {
+                    var queued = pending[kind] || (pending[kind] = []);
+                    queued.push(data);
+                    if (queued.length > 8) queued.shift();
+                    return;
+                }
+                list.slice().forEach(function (fn) { try { fn(data); } catch (e) { } });
             }
             var api = {
                 version: 1,
-                on: function (kind, fn) { if (typeof kind === 'string' && typeof fn === 'function') (listeners[kind] = listeners[kind] || []).push(fn); },
+                on: function (kind, fn) {
+                    if (typeof kind !== 'string' || typeof fn !== 'function') return;
+                    (listeners[kind] = listeners[kind] || []).push(fn);
+                    var queued = pending[kind];
+                    if (queued) { delete pending[kind]; queued.forEach(function (data) { try { fn(data); } catch (e) { } }); }
+                },
                 saveState: function (state) { post({ kind: 'saveState', state: state === undefined ? null : state }); },
                 setKeepAlive: function (on) { post({ kind: 'keepAlive', on: !!on }); },
                 alarm: {
@@ -367,7 +381,8 @@ internal sealed class WebExtension : IIslandExtension
                 }
             };
             window.brimdeck = api;
-            window.addEventListener('message', function (event) {
+            var inbox = (window.chrome && window.chrome.webview) || window;
+            inbox.addEventListener('message', function (event) {
                 var message = event.data;
                 if (!message || message.channel !== 'brimdeck') return;
                 if (message.kind === 'init') { api.colors = message.colors; api.language = message.language; }
