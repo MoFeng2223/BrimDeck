@@ -10,7 +10,7 @@ namespace BrimDeck;
 
 // The plugins page: the folder button and the scan button on the left, the loaded extensions under a divider, each row
 // opening like the app rules row to its page's size and origin, with an enable switch of its own in the header — off
-// takes the tab off the island and stops what the extension reads. The scan loads DLLs added or changed while the app
+// takes the tab off the island and stops what the extension reads. The scan loads plugin folders added or changed while the app
 // runs and retires the ones taken away; the plugins that could not be read are listed by name and reason.
 public sealed partial class SettingsWindow
 {

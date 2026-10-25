@@ -6,7 +6,7 @@ using System.Windows.Threading;
 using BrimDeck.Core;
 using BrimDeck.Island;
 using Microsoft.Web.WebView2.Core;
-using Microsoft.Web.WebView2.WPF;
+using Microsoft.Web.WebView2.Wpf;
 
 namespace BrimDeck;
 
@@ -47,7 +47,7 @@ internal static class WebRuntime
     {
         try
         {
-            var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "extension-web");
+            var folder = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "extension-web");
             return await CoreWebView2Environment.CreateAsync(null, folder, null).ConfigureAwait(true);
         }
         catch (Exception ex)
@@ -108,7 +108,10 @@ internal sealed class WebExtension : IIslandExtension
     {
         _manifest = manifest;
         _folder = folder;
-        _host = manifest.Id.ToLowerInvariant().Replace('.', '-') + ".plugin.brimdeck";
+        // The readable part plus a short digest, so ids that differ only in '.' versus '-' do not share one virtual host.
+        var digest = System.Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(manifest.Id.ToLowerInvariant())))[..8].ToLowerInvariant();
+        _host = manifest.Id.ToLowerInvariant().Replace('.', '-') + "-" + digest + ".plugin.brimdeck";
         WebRuntime.Register(this);
     }
 
@@ -119,43 +122,62 @@ internal sealed class WebExtension : IIslandExtension
 
     public FrameworkElement CreateView(IslandColors colors)
     {
-        // On a machine without the WebView2 runtime (checked at startup, so the answer is ready by now) the page says
-        // so itself; the four slots share the one diagnosis.
-        if (WebRuntime.Environment().IsCompleted && WebRuntime.Environment().Result is null)
-        {
-            return new TextBlock
-            {
-                Text = Loc.T("需要 WebView2 运行时才能显示插件页面：", "The WebView2 runtime is needed to show plugin pages: ") + (WebRuntime.EnvironmentError ?? ""),
-                Margin = new Thickness(8), TextWrapping = TextWrapping.Wrap
-            };
-        }
         var page = new WebView2CompositionControl
         {
             DefaultBackgroundColor = System.Drawing.Color.Transparent,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Stretch
         };
-        _ = InitializeAsync(page);
-        return page;
+        // A machine without the WebView2 runtime gets the reason in place of the page, not a blank rectangle.
+        var note = new TextBlock
+        {
+            Margin = new Thickness(8), TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed
+        };
+        var host = new Grid();
+        host.Children.Add(page);
+        host.Children.Add(note);
+        page.Unloaded += (_, _) => RemovePage(page);
+        _ = InitializeAsync(page, note);
+        return host;
     }
 
     // The order matters: the shim must be in place before the first navigation, or the page's first scripts run with
     // no bridge to call and its hello is never sent. Everything here runs on the UI thread.
-    private async Task InitializeAsync(WebView2CompositionControl page)
+    private async Task InitializeAsync(WebView2CompositionControl page, TextBlock note)
     {
         try
         {
             var environment = await WebRuntime.Environment().ConfigureAwait(true);
-            if (environment is null) return;
-            var core = await page.EnsureCoreWebView2Async(environment).ConfigureAwait(true);
+            if (environment is null) { Fail(note, WebRuntime.EnvironmentError); return; }
+            await page.EnsureCoreWebView2Async(environment).ConfigureAwait(true);
+            if (page.CoreWebView2 is not { } core) { Fail(note, ""); return; }
             core.SetVirtualHostNameToFolderMapping(_host, _folder, CoreWebView2HostResourceAccessKind.Allow);
             core.WebMessageReceived += OnWebMessage;
+            // A plugin page stays on its own virtual host: navigation elsewhere and new windows are refused, so the page
+            // cannot become a browser tab pointed at the network.
+            core.NavigationStarting += OnNavigationStarting;
+            core.NewWindowRequested += OnNewWindowRequested;
             _pages.Add((page, core));
             await core.AddScriptToExecuteOnDocumentCreatedAsync(Shim).ConfigureAwait(true);
             NavigateIn(core);
         }
-        catch (Exception) { }
+        catch (Exception ex) { Fail(note, ex.Message.Split('\n')[0]); }
     }
+
+    private static void Fail(TextBlock note, string? reason)
+    {
+        note.Text = Loc.T("需要 WebView2 运行时才能显示插件页面：", "The WebView2 runtime is needed to show plugin pages: ") + (reason ?? "");
+        note.Visibility = Visibility.Visible;
+    }
+
+    private void OnNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
+    {
+        if (e.Uri == "about:blank") return;
+        if (e.Uri.StartsWith("https://" + _host + "/", StringComparison.OrdinalIgnoreCase)) return;
+        e.Cancel = true;
+    }
+
+    private static void OnNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e) => e.Handled = true;
 
     private void NavigateIn(CoreWebView2 core)
     {
@@ -210,10 +232,22 @@ internal sealed class WebExtension : IIslandExtension
 
     // One message to every live page of this plugin. A page mid-teardown or already disposed is dropped from the list,
     // not fought: the next call simply has fewer pages to reach.
-    private void Push(string json)
+    internal void Push(string json)
     {
         foreach (var (_, core) in Pages())
             try { core.PostWebMessageAsJson(json); } catch (ObjectDisposedException) { }
+    }
+
+    // A panel's view was taken off the window: its page goes with it, so a closed panel leaves no WebView behind.
+    private void RemovePage(WebView2CompositionControl control)
+    {
+        for (int at = _pages.Count - 1; at >= 0; at--)
+            if (ReferenceEquals(_pages[at].Control, control))
+            {
+                try { _pages[at].Core.WebMessageReceived -= OnWebMessage; } catch (Exception) { }
+                _pages.RemoveAt(at);
+            }
+        try { control.Dispose(); } catch (Exception) { }
     }
 
     private List<(WebView2CompositionControl, CoreWebView2)> Pages()
@@ -240,14 +274,21 @@ internal sealed class WebExtension : IIslandExtension
                     case "hello": ReplyInit(); break;
                     case "saveState":
                         if (root.TryGetProperty("state", out var state) && state.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null))
-                            _stateJson = state.GetRawText();
+                        {
+                            // State is untrusted text kept for a later load; anything past 64 KB is dropped rather than
+                            // held in memory for good.
+                            var json = state.GetRawText();
+                            if (json.Length <= 64 * 1024) _stateJson = json;
+                        }
                         else _stateJson = null;
                         break;
                     case "alarmSet":
-                        if (root.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String && root.TryGetProperty("at", out var at) && at.ValueKind == JsonValueKind.Number && at.TryGetInt64(out var milliseconds))
+                        if (root.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String
+                            && id.GetString() is { Length: > 0 and <= 64 } alarmId
+                            && root.TryGetProperty("at", out var at) && at.ValueKind == JsonValueKind.Number && at.TryGetInt64(out var milliseconds))
                         {
                             var due = DateTimeOffset.FromUnixTimeMilliseconds(milliseconds).UtcDateTime;
-                            if (due > DateTime.UtcNow) _alarms[id.GetString()!] = (due, false);
+                            if (due > DateTime.UtcNow && (_alarms.ContainsKey(alarmId) || _alarms.Count < 32)) _alarms[alarmId] = (due, false);
                         }
                         WebRuntime.AlarmsChanged();
                         break;
@@ -256,7 +297,16 @@ internal sealed class WebExtension : IIslandExtension
                         WebRuntime.AlarmsChanged();
                         break;
                     case "keepAlive":
-                        if (root.TryGetProperty("on", out var keep) && keep.ValueKind is JsonValueKind.True or JsonValueKind.False) _keepAlive = keep.GetBoolean();
+                        if (root.TryGetProperty("on", out var keep) && keep.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                        {
+                            _keepAlive = keep.GetBoolean();
+                            if (!_shown && _reclaim is not null)
+                            {
+                                // Turning it on saves a page already counting down; turning it off starts the count again.
+                                _reclaim.Stop();
+                                if (!_keepAlive) _reclaim.Start();
+                            }
+                        }
                         break;
                 }
             }
