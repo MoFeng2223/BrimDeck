@@ -55,14 +55,6 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
-        IslandExtensions.Load();
-        IslandExtensions.ExtensionsChanged += slots =>
-        {
-            // A replaced instance starts knowing nothing; the panels showing its page tell it again.
-            foreach (var slot in slots)
-                if (_presentingExtension[slot].Count > 0) IslandExtensions.Notify(slot, true);
-            foreach (var deck in Decks.ToList()) deck.OnExtensionsChanged(slots);
-        };
         base.OnStartup(e);
         Resources[SystemParameters.VerticalScrollBarWidthKey] = 7.0;
         var suffix = Environment.UserName;
@@ -80,6 +72,16 @@ public partial class App : Application
         UseLanguage();
         PanelTheme.Use(Settings);
         IslandExtensions.SetPalette(Settings.MonitorPalette);
+        // The host is started once the single-instance check has passed and the language and theme are current: a second
+        // instance leaves before running any plugin code, and the first views get the saved palette.
+        IslandExtensions.Load();
+        IslandExtensions.ExtensionsChanged += slots =>
+        {
+            // A replaced instance starts knowing nothing; the panels showing its page tell it again.
+            foreach (var slot in slots)
+                if (_presentingExtension[slot].Count > 0) IslandExtensions.Notify(slot, true);
+            foreach (var deck in Decks.ToList()) deck.OnExtensionsChanged(slots);
+        };
         // "跟随系统" follows the Windows app theme while BrimDeck runs.
         Microsoft.Win32.SystemEvents.UserPreferenceChanged += SystemThemeChanged;
         // The language a first start takes from Windows is kept, even if the display language changes later.
@@ -177,7 +179,12 @@ public partial class App : Application
         ApplyHotkeys();
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
         bool languageChanged = Loc.Normalize(settings.Language) != Loc.Language;
-        if (languageChanged) UseLanguage();
+        if (languageChanged)
+        {
+            UseLanguage();
+            // The extension tabs carry the language too: their tooltip and accessible name.
+            foreach (var deck in Decks.ToList()) deck.RefreshExtensionButtons();
+        }
         PanelTheme.Use(settings);
         IslandExtensions.SetPalette(settings.MonitorPalette);
         AssignDisplays();

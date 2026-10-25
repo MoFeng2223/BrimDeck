@@ -190,7 +190,7 @@ public partial class MainWindow
             var page = DeckPages.ExtensionPage(slot);
             var path = new System.Windows.Shapes.Path
             {
-                Data = Geometry.Parse(extension.Glyph),
+                Data = IslandExtensions.SafeGlyph(extension.Glyph),
                 StrokeThickness = 1.65, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, StrokeLineJoin = PenLineJoin.Round
             };
             path.SetBinding(System.Windows.Shapes.Shape.StrokeProperty, new System.Windows.Data.Binding("Foreground") { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.FindAncestor, typeof(Button), 1) });
@@ -207,6 +207,14 @@ public partial class MainWindow
         }
     }
     private readonly Button?[] _extensionButtons = new Button?[4];
+    // Called when the interface language changes: a tab's tooltip and accessible name are text, so the tabs are made again.
+    internal void RefreshExtensionButtons()
+    {
+        foreach (var button in _extensionButtons.OfType<Button>()) PageButtons.Children.Remove(button);
+        Array.Clear(_extensionButtons);
+        BuildExtensionButtons();
+        RenderPageSwitch();
+    }
     // Where the usage page's application tabs start: after the page switch, which holds one 28 DIP button per shown page.
     private double ApplicationPagesLeft(double side) { int pages = DeckPages.Visible(Settings).Count; return side + (pages <= 1 ? 36 : 72 + 29 * (pages - 2)); }
     // The header shared by both pages (see PanelHeader). Its row holds the page's top margin, so the clock, the switch and the

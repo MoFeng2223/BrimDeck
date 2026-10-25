@@ -30,6 +30,11 @@ internal static class IslandExtensions
 
     // The DLLs that could not be loaded, by file name with the error's first line. Cleared on each scan.
     public static readonly List<(string File, string Error)> Failures = new();
+    // DLLs that loaded but carry no extension — a dependency, a stray file, the contract itself — noted so a DLL put in
+    // the wrong folder is not silently ignored. Cleared on each scan.
+    public static readonly List<(string File, string Note)> Skipped = new();
+    // Files read without finding an extension, by stamp, so a dependency is not loaded into a context on every scan.
+    private static readonly Dictionary<string, (DateTime Written, long Size)> _withoutExtensions = new(StringComparer.OrdinalIgnoreCase);
 
     // Raised with the slots whose extension was replaced or retired; the app drops their tabs and views and re-renders.
     public static event Action<IReadOnlyList<int>>? ExtensionsChanged;
@@ -39,6 +44,7 @@ internal static class IslandExtensions
     public static void Scan()
     {
         Failures.Clear();
+        Skipped.Clear();
         var disk = new List<string>();
         try
         {
@@ -88,11 +94,19 @@ internal static class IslandExtensions
         {
             string name = Path.GetFileName(file);
             if (!stamps.TryGetValue(name, out var stamp) || Unchanged(name)) continue;
+            // The contract belongs to the host; a copy in the plugin folder is ignored rather than loaded again.
+            if (string.Equals(name, Path.GetFileName(typeof(IIslandExtension).Assembly.Location), StringComparison.OrdinalIgnoreCase)) continue;
+            if (_withoutExtensions.TryGetValue(name, out var empty) && empty == stamp)
+            {
+                Skipped.Add((name, Loc.T("不含扩展实现", "no extension in it")));
+                continue;
+            }
             // Everything in here runs third-party code — the assembly's types and the extensions' own constructors and Id
             // getters included — so every exception is caught per type: one bad extension is a row on the plugins page,
             // never a failed startup.
             AssemblyLoadContext? context = null;
             bool listed = false;
+            int found = fresh.Count;
             try
             {
                 context = new AssemblyLoadContext("BrimDeck.Island:" + name, isCollectible: true);
@@ -123,6 +137,13 @@ internal static class IslandExtensions
                 if (context is not null && !listed) context.Unload();
                 Failures.Add((name, ex.Message.Split('\n')[0]));
             }
+            if (fresh.Count == found)
+            {
+                _withoutExtensions[name] = stamp;
+                if (!Failures.Any(failure => string.Equals(failure.File, name, StringComparison.OrdinalIgnoreCase)))
+                    Skipped.Add((name, Loc.T("不含扩展实现", "no extension in it")));
+            }
+            else _withoutExtensions.Remove(name);
         }
 
         // Place: the kept slots stay where they were; the fresh extensions fill the rest in file order. A repeated id
@@ -197,6 +218,24 @@ internal static class IslandExtensions
                     try { File.Delete(old); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
         return shadow;
+    }
+
+    // A plugin's glyph as stroke path data on a 24 by 24 grid. A string that does not parse is a plugin's mistake, not
+    // the panel's: a plain square stands in so the tab and its row keep their place.
+    public static System.Windows.Media.Geometry SafeGlyph(string? data)
+    {
+        try
+        {
+            var geometry = System.Windows.Media.Geometry.Parse(data ?? "");
+            geometry.Freeze();
+            return geometry;
+        }
+        catch (Exception)
+        {
+            var fallback = System.Windows.Media.Geometry.Parse("M 4,4 H 20 V 20 H 4 Z");
+            fallback.Freeze();
+            return fallback;
+        }
     }
 
     public static bool Occupied(int slot) => Slots[slot] is not null;

@@ -43,6 +43,11 @@ public sealed partial class SettingsWindow
             SectionTitle(Loc.T("未能加载", "Could not load"));
             Group(IslandExtensions.Failures.Select(failure => Row(System.IO.Path.GetFileName(failure.File), Wrapped(failure.Error, true))).ToArray());
         }
+        if (IslandExtensions.Skipped.Count > 0)
+        {
+            SectionTitle(Loc.T("已跳过", "Skipped"));
+            Group(IslandExtensions.Skipped.Select(skipped => Row(System.IO.Path.GetFileName(skipped.File), Wrapped(skipped.Note, false))).ToArray());
+        }
     }
 
     // An outline button with a small stroke glyph before its text, as the app rules' Add app button is.
@@ -113,7 +118,7 @@ public sealed partial class SettingsWindow
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var glyph = new System.Windows.Shapes.Path
         {
-            Data = Geometry.Parse(extension.Glyph), Stroke = UI.Brush(TextSecondary), StrokeThickness = 1.4,
+            Data = IslandExtensions.SafeGlyph(extension.Glyph), Stroke = UI.Brush(TextSecondary), StrokeThickness = 1.4,
             StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, StrokeLineJoin = PenLineJoin.Round,
             Width = 16, Height = 16, Stretch = Stretch.Uniform, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0)
         };
