@@ -152,6 +152,25 @@ internal sealed class WebExtension : IIslandExtension
         return host;
     }
 
+    // A freshly built page loads its document for a moment — longer than a page switch's own arrival — and then
+    // appeared in one step. The shim holds the document unseen from its very first paint; the first finished
+    // navigation fades it in inside the browser, where WPF's own opacity does not reliably reach the composition
+    // content. The shim also clears the hold by itself after a moment, so a host that stops mid-way cannot leave a
+    // page invisible.
+    private static void ArriveWhenLoaded(CoreWebView2 core)
+    {
+        bool arrived = false;
+        core.NavigationCompleted += async (_, _) =>
+        {
+            if (arrived) return;
+            arrived = true;
+            var script = Soft.Enabled
+                ? "document.documentElement.style.transition='opacity 350ms ease-out';document.documentElement.style.opacity='1';"
+                : "document.documentElement.style.opacity='1';";
+            try { await core.ExecuteScriptAsync(script).ConfigureAwait(true); } catch (Exception) { }
+        };
+    }
+
     // The panel asks before putting a cached view back: a control that left the tree was disposed with the page, and
     // re-adding it would show an empty rectangle with no way to tell why.
     internal bool Alive(FrameworkElement view) => view switch
@@ -171,6 +190,7 @@ internal sealed class WebExtension : IIslandExtension
             if (environment is null) { Fail(note, WebRuntime.EnvironmentError); return; }
             await page.EnsureCoreWebView2Async(environment).ConfigureAwait(true);
             if (page.CoreWebView2 is not { } core) { Fail(note, ""); return; }
+            ArriveWhenLoaded(core);
             core.SetVirtualHostNameToFolderMapping(_host, _folder, CoreWebView2HostResourceAccessKind.Allow);
             core.WebMessageReceived += OnWebMessage;
             // A plugin page stays on its own virtual host: navigation elsewhere and new windows are refused, so the page
@@ -403,6 +423,16 @@ internal sealed class WebExtension : IIslandExtension
     private const string Shim = """
         (function () {
             if (window.brimdeck) return;
+            // Held unseen from the first paint; the host fades the document in when its first navigation completes.
+            // If the host never comes back to do that, the document appears by itself rather than staying invisible.
+            var held = document.documentElement;
+            if (held) {
+                held.style.opacity = '0';
+                setTimeout(function () {
+                    var root = document.documentElement;
+                    if (root && root.style.opacity === '0') root.style.opacity = '1';
+                }, 1500);
+            }
             var listeners = {}, pending = {};
             function post(message) {
                 message.channel = 'brimdeck';

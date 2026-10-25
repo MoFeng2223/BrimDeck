@@ -129,9 +129,20 @@ public partial class MainWindow
         var place = PageHandover.Place(from);
         ShowPage(page, animatePage: changed && _expanded && !_preview);
         bool back = DeckPages.Order.ToList().IndexOf(page) < DeckPages.Order.ToList().IndexOf(before);
-        _handover.Send(picture, place, PageContent(page), back ? Handover.Back : Handover.Forward);
+        // An extension page arrives already in place beneath the leaving picture (its WebView content does not follow
+        // WPF opacity); every other page arrives with the switch's own fade and slide.
+        _handover.Send(picture, place, PageContent(page), back ? Handover.Back : Handover.Forward,
+            animateArrival: DeckPages.SlotOf(page) < 0);
     }
-    private FrameworkElement PageContent(DeckPage page) => page switch { DeckPage.Music => MusicContent, DeckPage.Monitor => MonitorContent, _ => UsageContent };
+    // The page switch's hand-over animates the content of the page it leaves and the page it enters, so every page —
+    // the extension slots included — must resolve to the grid that shows it.
+    private FrameworkElement PageContent(DeckPage page) => page switch
+    {
+        DeckPage.Music => MusicContent,
+        DeckPage.Monitor => MonitorContent,
+        DeckPage.Extension0 or DeckPage.Extension1 or DeckPage.Extension2 or DeckPage.Extension3 => ExtensionContent,
+        _ => UsageContent
+    };
     private void ShowPage(DeckPage page, bool animatePage)
     {
         _detailPopup?.Close(); _details = false; _page = page; _musicRenderKey = ""; _handover.Drop();

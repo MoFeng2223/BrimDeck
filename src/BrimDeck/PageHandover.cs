@@ -96,11 +96,13 @@ internal sealed class PageHandover
     }
 
     // Lets a captured page leave while content arrives. The picture keeps the place the page had (Place, taken before the
-    // switch) and is centred as the page was.
-    public void Send(UIElement? picture, Thickness place, FrameworkElement content, Handover motion)
+    // switch) and is centred as the page was. Arriving content that must not be animated itself — a WebView composition
+    // page, whose content does not follow WPF opacity — is uncovered instead: it already lies beneath the leaving
+    // picture, which fades off it toward the side.
+    public void Send(UIElement? picture, Thickness place, FrameworkElement content, Handover motion, bool animateArrival = true)
     {
         if (picture is null || motion == Handover.None || !Soft.Enabled) return;
-        Begin([picture], new Thickness(0, place.Top, 0, 0), content, motion);
+        Begin([picture], new Thickness(0, place.Top, 0, 0), content, motion, animateArrival);
     }
 
     // The rebuilt content waiting for its arrival to start; it is held out of sight until then.
@@ -110,7 +112,7 @@ internal sealed class PageHandover
     // started at once lost its first part to them and jumped. Until then the old content stays as it was and the new one out
     // of sight. Timing and curve are the system monitor's (Soft.Follow): what leaves goes in about a fifth of a second, what
     // arrives takes the monitor's move.
-    private void Begin(List<UIElement> leaving, Thickness margin, FrameworkElement content, Handover motion)
+    private void Begin(List<UIElement> leaving, Thickness margin, FrameworkElement content, Handover motion, bool animateArrival = true)
     {
         Drop();
         int version = _version;
@@ -118,7 +120,7 @@ internal sealed class PageHandover
         foreach (var child in leaving) _layer.Children.Add(child);
         var shift = content.RenderTransform as TranslateTransform;
         if (shift is null || shift.IsFrozen) content.RenderTransform = shift = new TranslateTransform();
-        bool arrives = motion != Handover.Dissolve;
+        bool arrives = motion != Handover.Dissolve && animateArrival;
         if (motion == Handover.Dissolve)
         {
             // Nothing leaves; the rebuilt content brightens from faint once it has been laid out.
