@@ -27,6 +27,8 @@ public partial class MainWindow
             _app.MonitorUpdated -= MonitorUpdated; _app.PresentMonitor(this, false, false);
             if (_extensionSlot >= 0) _app.PresentExtension(this, _extensionSlot, false);
             _extensionSlot = -1;
+            // A panel going away can be the last open one; the pages nobody watches then start their grace.
+            _app.PanelUseChanged();
         };
     }
 

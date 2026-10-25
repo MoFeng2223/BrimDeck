@@ -188,6 +188,14 @@ internal static class IslandExtensions
         catch (Exception) { }
     }
 
+    // Whether any panel is open, told as it changes: an open panel keeps its pre-built pages ready to switch to, so
+    // the reclaim of a page nobody watches waits for the panel itself to close.
+    public static void PanelInUse(bool inUse)
+    {
+        try { WebRuntime.PanelInUse(inUse); }
+        catch (Exception) { }
+    }
+
     public static string Title(int slot) => Slots[slot] is { } extension ? (Loc.IsEnglish ? extension.TitleEn : extension.TitleZh) : "";
 
     // The colors an extension draws with: its monitor palette page's scheme on the theme's text and surface colors.

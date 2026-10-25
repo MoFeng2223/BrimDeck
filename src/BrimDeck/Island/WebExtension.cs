@@ -67,6 +67,12 @@ internal static class WebRuntime
         AlarmsChanged();
     }
 
+    // Whether any panel is open, told by the app as that changes: pages are reclaimed only while the panel is closed.
+    public static void PanelInUse(bool inUse)
+    {
+        foreach (var extension in _all.ToList()) extension.PanelInUse(inUse);
+    }
+
     public static void SetColors(IslandColors colors)
     {
         WebColors.Set(colors);
@@ -111,9 +117,14 @@ internal sealed class WebExtension : IIslandExtension
     private string? _stateJson;
     private readonly Dictionary<string, (DateTime Due, bool Fired)> _alarms = new(StringComparer.Ordinal);
     private bool _shown, _keepAlive, _reclaimed;
+    // Whether any panel is open: pages are only reclaimed while the panel itself is closed (see SetDemand).
+    private bool _inUse;
     // Whether some page has finished a navigation and not been reclaimed since: the switch entrance needs a loaded
     // page; a cold page arrives by the fade-in of its first navigation instead.
     private bool _loaded;
+    // The side a switch came in from while the page was still loading: the first navigation arrives from that side
+    // instead of fading in place. Null when the load was not caused by a switch (the panel opening on the page).
+    private bool? _enterForward;
     private DispatcherTimer? _reclaim;
 
     public WebExtension(ExtensionManifest manifest, string folder)
@@ -168,8 +179,16 @@ internal sealed class WebExtension : IIslandExtension
             _loaded = true;
             if (arrived) return;
             arrived = true;
+            // A load a switch is waiting for comes in from that side; a load the panel opened on fades in place.
+            int from = _enterForward is { } forward ? (forward ? 16 : -16) : 0;
+            _enterForward = null;
             var script = Soft.Enabled
-                ? "document.documentElement.style.transition='opacity 350ms ease-out';document.documentElement.style.opacity='1';"
+                ? $$"""
+                  (function(){var d=document.documentElement||document.body;if(!d)return;var s=d.style;
+                  s.transition='none';s.transform='translateX({{from}}px)';
+                  s.transition='opacity 350ms ease-out, transform 350ms ease-out';
+                  requestAnimationFrame(function(){requestAnimationFrame(function(){s.opacity='1';s.transform='none';});});})()
+                  """
                 : "document.documentElement.style.opacity='1';";
             try { await core.ExecuteScriptAsync(script).ConfigureAwait(true); } catch (Exception) { }
         };
@@ -177,10 +196,12 @@ internal sealed class WebExtension : IIslandExtension
 
     // The switch's own arrival cannot animate a WebView through WPF opacity. A page that is already loaded gets its
     // entrance inside the browser instead — from the side it is switched in from, fading up — while the page left
-    // behind leaves as a picture above it. A page still loading takes the fade-in of its first navigation instead.
+    // behind leaves as a picture above it. A page still loading takes the entrance of its first navigation.
     internal void Enter(bool forward)
     {
-        if (!_loaded || !Soft.Enabled) return;
+        if (!Soft.Enabled) return;
+        _enterForward = forward;
+        if (!_loaded) return;
         var script = $$"""
             (function(){var d=document.documentElement||document.body;if(!d)return;var s=d.style;
             s.transition='none';s.transform='translateX({{(forward ? 16 : -16)}}px)';s.opacity='0';
@@ -276,9 +297,11 @@ internal sealed class WebExtension : IIslandExtension
         }
     }
 
-    // The demand a page hears as its visibility: true while any panel shows it, false once none does. Hidden and not
-    // kept alive, the page is navigated to blank after a grace period — its state and alarms stay with the host, and
-    // the next true hands them back — so a page nobody watches costs its renderer memory, not just its timers.
+    // The demand a page hears as its visibility: true while any panel shows it, false once none does. A page nobody
+    // watches is navigated to blank after a grace period — its state and alarms stay with the host, and the next true
+    // hands them back — so a page nobody watches costs its renderer memory, not just its timers. The grace only runs
+    // while the panel itself is closed: an open panel keeps its pre-built pages ready, because a switch between them
+    // is meant to be at once and animated, and the whole panel closing is the real "nobody is watching".
     public void SetDemand(bool shown)
     {
         ExtensionLog.Write("view: demand " + Id + " shown=" + shown);
@@ -289,12 +312,24 @@ internal sealed class WebExtension : IIslandExtension
             _reclaim?.Stop();
             if (_reclaimed) foreach (var (_, core) in Pages()) NavigateIn(core);
         }
-        else
-        {
-            if (_reclaim is null) { _reclaim = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) }; _reclaim.Tick += Reclaim; }
-            _reclaim.Stop();
-            if (!_keepAlive) _reclaim.Start();
-        }
+        else ArmReclaim();
+    }
+
+    // Whether any panel is open. Opening stops every grace period; closing starts them for the pages not shown.
+    internal void PanelInUse(bool inUse)
+    {
+        ExtensionLog.Write("view: panel use " + Id + " inUse=" + inUse);
+        _inUse = inUse;
+        if (inUse) _reclaim?.Stop();
+        else ArmReclaim();
+    }
+
+    private void ArmReclaim()
+    {
+        if (_keepAlive || _shown || _inUse) return;
+        _reclaim ??= new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
+        _reclaim.Stop();
+        _reclaim.Start();
     }
 
     private void Reclaim(object? sender, EventArgs e)
@@ -303,6 +338,7 @@ internal sealed class WebExtension : IIslandExtension
         _reclaimed = true;
         // The blank page is no content: the next load arrives by its own fade-in, not by a switch entrance.
         _loaded = false;
+        _enterForward = null;
         ExtensionLog.Write("view: reclaim " + Id);
         foreach (var (_, core) in Pages())
             try { core.Navigate("about:blank"); } catch (Exception) { }

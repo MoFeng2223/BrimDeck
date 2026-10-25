@@ -297,6 +297,11 @@ public partial class App : Application
     }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }
+
+    // Told by a panel whenever it opens or closes (MainWindow.SetExpanded, window close): while any panel is open the
+    // pre-built plugin pages stay ready to switch to; once the last one closes, the pages nobody watches are
+    // reclaimed after the usual grace.
+    internal void PanelUseChanged() => IslandExtensions.PanelInUse(Decks.Any(deck => deck.IsExpanded));
     // The settings are turned into text here, where they live, and written on the thread pool: writing the file (and the virus
     // scan that follows a write) took 60 ms and more, which showed as a stall after every page switch. Writes run one after
     // another in the order they were asked for, so the newest settings always land last.
