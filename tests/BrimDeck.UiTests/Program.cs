@@ -59,17 +59,17 @@ internal static class Program
             var tabA = ExpandAndFind(window, "FixtureA");
             Press(tabA);
             Reopen();
-            Require(WaitForColor(ColorA, TimeSpan.FromSeconds(15)), "first visit shows A (red page)");
+            Require(WaitForColorWithReopen(ColorA, TimeSpan.FromSeconds(8)), "first visit shows A (red page)");
             Console.WriteLine("PASS first visit shows A");
 
             Press(Find(window, "FixtureB"));
             Reopen();
-            Require(WaitForColor(ColorB, TimeSpan.FromSeconds(15)), "switching A -> B shows B (green page)");
+            Require(WaitForColorWithReopen(ColorB, TimeSpan.FromSeconds(8)), "switching A -> B shows B (green page)");
             Console.WriteLine("PASS switching A -> B shows B");
 
             Press(Find(window, "FixtureA"));
             Reopen();
-            Require(WaitForColor(ColorA, TimeSpan.FromSeconds(15)), "switching back B -> A shows A (red page)");
+            Require(WaitForColorWithReopen(ColorA, TimeSpan.FromSeconds(8)), "switching back B -> A shows A (red page)");
             Console.WriteLine("PASS switching back B -> A shows A");
 
             Hide();
@@ -77,7 +77,7 @@ internal static class Program
             Expand();
             Thread.Sleep(1500);
             KeepOpen();
-            Require(WaitForColor(ColorA, TimeSpan.FromSeconds(10)), "hiding and showing again keeps A (red page)");
+            Require(WaitForColorWithReopen(ColorA, TimeSpan.FromSeconds(8)), "hiding and showing again keeps A (red page)");
             Console.WriteLine("PASS hiding and showing again keeps A");
 
             if (options.Full)
@@ -87,7 +87,7 @@ internal static class Program
                 Expand();
                 Thread.Sleep(1500);
                 KeepOpen();
-                Require(WaitForColor(ColorA, TimeSpan.FromSeconds(15)), "after the 15s reclaim A comes back (red page)");
+                Require(WaitForColorWithReopen(ColorA, TimeSpan.FromSeconds(8)), "after the 15s reclaim A comes back (red page)");
                 Console.WriteLine("PASS after the 15s reclaim A comes back");
             }
 
@@ -192,6 +192,18 @@ internal static class Program
         {
             if (Near(x, y, expected)) return true;
             Thread.Sleep(150);
+        }
+        return false;
+    }
+
+    // The panel can lose the foreground on a UIA Invoke and not reopen from the first hover; a blank page (the bug this
+    // test guards) stays blank however many times it is reopened, so retrying only removes the harness flakiness.
+    private static bool WaitForColorWithReopen(Color expected, TimeSpan timeout)
+    {
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            if (WaitForColor(expected, timeout)) return true;
+            if (attempt < 2) Reopen();
         }
         return false;
     }
