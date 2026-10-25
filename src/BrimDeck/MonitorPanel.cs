@@ -14,7 +14,7 @@ public partial class MainWindow
     private MonitorStrip? _compactStrip;
     // Which readings the collapsed row shows and how far each has come in or gone out, kept while the row is built again.
     private readonly StripPresence _stripPresence = new();
-    private bool _monitorShowing, _stripShowing, _monitorFade, _extensionShowing;
+    private bool _monitorShowing, _stripShowing, _monitorFade;
     // The extension slot this panel last told the app it was showing, so leaving that page releases it.
     private int _extensionSlot = -1;
 
@@ -54,7 +54,7 @@ public partial class MainWindow
         // figures they showed last time.
         if (page && !_monitorShowing) _monitorView?.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
         if (strip && !_stripShowing) _compactStrip?.Update(_app.Monitor?.Latest);
-        _monitorShowing = page; _stripShowing = strip; _extensionShowing = extension;
+        _monitorShowing = page; _stripShowing = strip;
     }
     private static MonitorSnapshot WaitingSnapshot => MonitorSnapshot.Empty(Environment.ProcessorCount, Loc.T("正在读取", "Reading"));
 

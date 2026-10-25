@@ -12,8 +12,14 @@ public static class DeckPages
     // Without them the slots read as empty, which is what the plain tests see.
     public static Func<int, bool>? SlotOccupied;
     public static Func<int, string?>? SlotId;
-    public static DeckPage ExtensionPage(int slot) => (DeckPage)(3 + Math.Clamp(slot, 0, 3));
-    public static int SlotOf(DeckPage page) => (int)page >= 3 ? (int)page - 3 : -1;
+    public static DeckPage ExtensionPage(int slot) => slot switch
+    {
+        <= 0 => DeckPage.Extension0, 1 => DeckPage.Extension1, 2 => DeckPage.Extension2, _ => DeckPage.Extension3
+    };
+    public static int SlotOf(DeckPage page) => page switch
+    {
+        DeckPage.Extension0 => 0, DeckPage.Extension1 => 1, DeckPage.Extension2 => 2, DeckPage.Extension3 => 3, _ => -1
+    };
 
     public static bool Shown(DeckSettings settings, DeckPage page) => page switch
     {

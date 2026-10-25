@@ -304,7 +304,13 @@ internal sealed class WebExtension : IIslandExtension
     private List<(WebView2CompositionControl, CoreWebView2)> Pages()
     {
         for (int at = _pages.Count - 1; at >= 0; at--)
-            try { var _ = _pages[at].Core.Source; } catch (ObjectDisposedException) { _pages.RemoveAt(at); }
+            try { var _ = _pages[at].Core.Source; }
+            catch (ObjectDisposedException)
+            {
+                // A core disposed outside RemovePage must retire its view too, or a panel could put it back on screen.
+                _retired.Add(_pages[at].Control);
+                _pages.RemoveAt(at);
+            }
         return _pages;
     }
 
