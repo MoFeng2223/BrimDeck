@@ -391,11 +391,14 @@ internal sealed class WebExtension : IIslandExtension
     }
 
     // One message to every live page of this plugin. A page mid-teardown or already disposed is dropped from the list,
-    // not fought: the next call simply has fewer pages to reach.
+    // not fought: the next call simply has fewer pages to reach. A control disposed by the window closing reports
+    // itself as "wrong state" (InvalidOperationException over a COM error), not as ObjectDisposedException, and the
+    // exit path pushes to every page after the panels are gone.
     internal void Push(string json)
     {
         foreach (var (_, core) in Pages())
-            try { core.PostWebMessageAsJson(json); } catch (ObjectDisposedException) { }
+            try { core.PostWebMessageAsJson(json); }
+            catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException) { }
     }
 
     // A panel's view was taken off the window: its page goes with it, so a closed panel leaves no WebView behind. The
@@ -418,7 +421,7 @@ internal sealed class WebExtension : IIslandExtension
     {
         for (int at = _pages.Count - 1; at >= 0; at--)
             try { var _ = _pages[at].Core.Source; }
-            catch (ObjectDisposedException)
+            catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException)
             {
                 // A core disposed outside RemovePage must retire its view too, or a panel could put it back on screen.
                 _retired.Add(_pages[at].Control);
