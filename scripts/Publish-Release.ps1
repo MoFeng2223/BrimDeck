@@ -22,6 +22,20 @@ try {
     & $iscc -qp "-dAppVersion=$Version" "-dSourceDir=$publishPath" "-o$outputPath" installer/BrimDeck.iss
     if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
     $installer = Get-Item -LiteralPath (Join-Path $outputPath "BrimDeck-$Version-Setup.exe")
+    # The portable package is the same publish output in a zip: extract it anywhere and run BrimDeck.exe. It registers no
+    # uninstall entry and creates no shortcuts, so it keeps its settings in %LOCALAPPDATA%\BrimDeck like an installed copy
+    # does (the two share one set of settings), and it updates by downloading this file again: AppUpdates offers the
+    # installer only to a copy the installer registered (GitHubUpdates.IsInstalled).
+    $portable = Join-Path $outputPath "BrimDeck-$Version-Portable.zip"
+    # Every entry sits in one top-level folder, so extracting into Downloads or the root of a drive keeps the files together.
+    $zip = [IO.Compression.ZipFile]::Open($portable, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        Get-ChildItem -LiteralPath $publishPath -File -Recurse | ForEach-Object {
+            $entry = 'BrimDeck/' + [IO.Path]::GetRelativePath($publishPath, $_.FullName).Replace('\', '/')
+            [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $entry, [IO.Compression.CompressionLevel]::Optimal)
+        }
+    }
+    finally { $zip.Dispose() }
     # The app reads update.json from the latest release and verifies the installer against it before running it.
     $manifest = [ordered]@{
         version = $Version

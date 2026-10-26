@@ -113,6 +113,8 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 1. 从 [Releases](https://github.com/MoFeng2223/BrimDeck/releases/latest) 下载并运行 `BrimDeck-<版本>-Setup.exe`。
 2. 如出现“Windows 已保护你的电脑”提示，点击“更多信息”→“仍要运行”。
 
+如不想安装，可下载 `BrimDeck-<版本>-Portable.zip`，解压到任意位置后运行 `BrimDeck.exe`。便携版不写入卸载项，也不创建开始菜单与桌面快捷方式；设置保存在与安装版相同的 `%LOCALAPPDATA%\BrimDeck` 文件夹中；更新时重新下载该文件，不使用安装程序。
+
 ## 快速开始
 
 1. 安装并启动 BrimDeck 后，面板会出现在主显示器顶部中央，默认显示 Claude 和 Codex。
@@ -121,7 +123,7 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 ## 卸载
 
-前往 Windows 设置中的“应用”卸载。
+前往 Windows 设置中的“应用”卸载。便携版直接删除解压后的文件夹即可；设置仍保存在 `%LOCALAPPDATA%\BrimDeck`，删除该文件夹才会一并清除。
 
 ## 隐私
 

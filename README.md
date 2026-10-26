@@ -113,6 +113,8 @@ Requires Windows 11 (x64). Windows 10 (version 2004 or later) has limited suppor
 1. Download and run `BrimDeck-<version>-Setup.exe` from [Releases](https://github.com/MoFeng2223/BrimDeck/releases/latest).
 2. If Windows shows "Windows protected your PC", select "More info", then "Run anyway".
 
+To run BrimDeck without installing it, download `BrimDeck-<version>-Portable.zip` instead, extract it anywhere and start `BrimDeck.exe`. A portable copy writes no uninstall entry and creates no shortcuts, keeps its settings in the same `%LOCALAPPDATA%\BrimDeck` folder as an installed copy, and updates by downloading that file again rather than through the installer.
+
 ## Quick start
 
 1. After you install and start BrimDeck, the panel appears at the top center of the primary display, showing Claude and Codex by default.
@@ -121,7 +123,7 @@ Requires Windows 11 (x64). Windows 10 (version 2004 or later) has limited suppor
 
 ## Uninstall
 
-Uninstall BrimDeck from Apps in Windows Settings.
+Uninstall BrimDeck from Apps in Windows Settings. A portable copy is removed by deleting its folder; its settings stay in `%LOCALAPPDATA%\BrimDeck` until that folder is deleted too.
 
 ## Privacy
 
