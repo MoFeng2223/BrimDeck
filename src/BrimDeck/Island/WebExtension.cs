@@ -129,7 +129,7 @@ internal sealed class WebExtension : IIslandExtension
     // The plugin's state and alarms live in the host, not in the page, so they survive the page being reclaimed while
     // nobody watches it: what the page hands over it gets back the next time it loads.
     private string? _stateJson;
-    private bool _fitLogged;
+    private (double Width, double Height)? _fitLogged;
     private readonly Dictionary<string, (DateTime Due, bool Fired)> _alarms = new(StringComparer.Ordinal);
     private bool _shown, _keepAlive, _reclaimed;
     // Whether any panel is open: pages are only reclaimed while the panel itself is closed (see SetDemand).
@@ -264,10 +264,11 @@ internal sealed class WebExtension : IIslandExtension
         double want = VisualTreeHelper.GetDpi(control).DpiScaleX / baseScale;
         if (Math.Abs(want - control.ZoomFactor) <= 0.01)
         {
-            // The first report that needs no change is the page settled at the box it was given; that is the pair worth
-            // remembering, and the UI test reads it back to catch a page laid out in a smaller box than the panel made.
-            if (_fitLogged) return;
-            _fitLogged = true;
+            // A report that needs no change is the page settled at the box it was given — the pair the UI test reads
+            // back. It is worth a line each time the box moves by more than a step of rounding, so the last line in the
+            // log is always about the page as it now stands, and one long drag still cannot fill the log.
+            if (_fitLogged is { } logged && Math.Abs(logged.Width - control.ActualWidth) < 8 && Math.Abs(logged.Height - control.ActualHeight) < 8) return;
+            _fitLogged = (control.ActualWidth, control.ActualHeight);
             ExtensionLog.Write($"view: fit {Id} box={control.ActualWidth:0}x{control.ActualHeight:0} page={reportedWidth:0}x{reportedHeight:0}");
             return;
         }
