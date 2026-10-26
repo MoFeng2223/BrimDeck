@@ -28,6 +28,7 @@ try
     PanelHeaderTests.Run(Check);
     SystemMonitorTests.Run(Check);
     ExtensionManifestTests.Run(root, Check);
+    ExtensionSettingTests.Run(root, Check);
     ExternalLinkTests.Run(Check);
     BridgeTests.Run(Check);
     CompactReadingTests.Run(Check);
