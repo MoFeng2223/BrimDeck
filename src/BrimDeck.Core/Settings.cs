@@ -197,7 +197,6 @@ public static class MonitorSizes
 public sealed record ExtensionPageSettings(string Id = "", bool Shown = true, double Width = 440, double Height = 160)
 {
     public Dictionary<string, ExtensionSettingValue> Values { get; init; } = [];
-    public ExtensionSettingValue? Value(string key) => Values.TryGetValue(key, out var value) ? value : null;
 }
 
 // The size an extension page starts at, and its quick sizes: snug by default, with roomier steps for pages that
@@ -483,6 +482,9 @@ public sealed class DeckSettings
         Extensions = (Extensions ?? []).Where(e => e is not null && !string.IsNullOrWhiteSpace(e.Id))
             .Select(e => e with
             {
+                // A file can carry "Values": null — an editor that knows the key and has nothing to write. Repaired
+                // here, once, so every later use (the settings window's copy, the first value written) sees a dictionary.
+                Values = e.Values ?? [],
                 Width = double.IsFinite(e.Width) ? Math.Clamp(e.Width, DeckPages.MinWidth, DeckPages.MaxWidth) : ExtensionSizes.Default.Width,
                 Height = double.IsFinite(e.Height) ? Math.Clamp(e.Height, DeckPages.MinHeight, DeckPages.MaxHeight) : ExtensionSizes.Default.Height
             })

@@ -105,5 +105,23 @@ internal static class ExtensionStoreTests
         copy.SetExtensionValue("demo", "warn", new ExtensionSettingValue("number", false, 10));
         check("Store: a copied settings object does not share a plugin's values",
             settings.ExtensionValues("demo")["warn"].Number == 99 && copy.ExtensionValues("demo")["warn"].Number == 10);
+
+        // A settings file is text somebody can edit, and "Values": null is the shape an editor writes when it knows the
+        // key but has nothing to put in it. Read as a null dictionary it turns every later use — the copy the settings
+        // window makes, the first value written — into an exception, so Normalize is where it stops being one.
+        var handEdited = new DeckSettings();
+        handEdited.Extensions.Add(new ExtensionPageSettings("demo") { Values = null! });
+        handEdited.Normalize();
+        check("Store: a settings file that says \"Values\": null is repaired on load, not an exception later",
+            Survives(() => handEdited.Copy()) && handEdited.Extensions[0].Values.Count == 0
+            && handEdited.ExtensionValues("demo").Count == 0
+            && Survives(() => handEdited.SetExtensionValue("demo", "warn", new ExtensionSettingValue("number", false, 40)))
+            && handEdited.ExtensionValues("demo")["warn"].Number == 40);
+    }
+
+    // A crash is a finding, not a test result: run it and say whether it survived.
+    private static bool Survives(Action act)
+    {
+        try { act(); return true; } catch (Exception) { return false; }
     }
 }
