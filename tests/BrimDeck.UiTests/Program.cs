@@ -124,13 +124,21 @@ internal static class Program
             Press(Find(window, "FixtureD"));
             Reopen();
             Require(WaitForColorWithReopen(ColorD, TimeSpan.FromSeconds(8)),
-                "D turns purple once its declared values arrive and its written number comes back honoured");
+                "D turns purple once its declared values arrive and a real change comes back honoured");
             Console.WriteLine("PASS a plugin's declared settings round-trip through the host");
-            Require(CountLog(log, "view: setting fixture-d warn=65") > 0, "the host logged the value it kept, not the one it was sent");
+            Require(CountLog(log, "view: setting fixture-d warn=65") == 1, "the host kept the honoured number, not the one it was sent");
+            // Two writes, one answer: the number that honours to what the page already holds is nothing to store, and a
+            // page that got no second push is the point — pushing it would invite the page to write again, and every
+            // round would rebuild the settings row and queue a save.
+            Require(CountLog(log, "view: settings fixture-d") == 1, "one change was pushed once, and the unchanged write was pushed not at all");
             // The fourth entry declares a key with a space in it: the host must draw the three it can and say why the
             // other was skipped, in the log the author can read and on the plugins page the reader can see.
             Require(CountLog(log, "extension: note fixture-d settings[3].key") > 0, "a declared entry the host skipped is said out loud, not just dropped");
             Require(CountLog(log, "view: refused fixture-d unknown-setting") == 0, "a skipped declaration is not also a message the page is punished for");
+            // Once each: the page writes the value back unchanged and the host applies settings several times over the
+            // run (a theme, a size). Either would answer the other forever if a push or a write were not compared first.
+            Require(CountLog(log, "view: setting fixture-d warn=65") == 1 && CountLog(log, "view: settings fixture-d") == 1,
+                "a write that changes nothing is not written, and one change is not pushed twice");
             // Back to A: everything below watches A, and the panel's size follows the page it is on.
             Press(Find(window, "FixtureA"));
             Reopen();
@@ -485,8 +493,9 @@ internal static class Program
 
     // A plugin that declares its controls in the manifest instead of drawing them: the host has to read them back to the
     // page, honour what the page writes against its own range and step, and speak the plugin's own words in whichever
-    // language the interface is in. Purple is only painted when all three have happened, and the number the page wrote
-    // (63 on a step of fives) is only accepted once it has come back as 65.
+    // language the interface is in. Purple is only painted once a real change comes back — and only one change ever,
+    // because the page also writes a number that honours to what it was already given (63 on a step of fives is the 65
+    // it holds), which is nothing to store, push or rebuild.
     private static void WriteDeclaredFixture(string root)
     {
         var folder = Path.Combine(root, "extensions", "fixture-d");
@@ -530,11 +539,14 @@ internal static class Program
                     && typeof init.phrases.hot === 'string' && init.phrases.hot.length > 0
                     && brimdeck.phrase('absent') === 'absent'
                     && brimdeck.version >= 2;
-                  if (told) brimdeck.setSetting('warn', 63);
+                  if (told) {
+                    brimdeck.setSetting('warn', 63);   // honoured to 65: the value the page already holds
+                    brimdeck.setSetting('mode', 'auto'); // a real change, and the only one that comes back
+                  }
                   paint();
                 });
                 brimdeck.on('settings', function (values) {
-                  honored = values.warn === 65 && values.showFan === true;
+                  honored = values.warn === 65 && values.mode === 'auto' && values.showFan === true;
                   paint();
                 });
               }

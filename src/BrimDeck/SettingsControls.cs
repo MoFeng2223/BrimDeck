@@ -151,7 +151,9 @@ public sealed partial class SettingsWindow
             var next = Math.Clamp(snap
                 ? min + Math.Round((bounded - min) / grid, MidpointRounding.AwayFromZero) * grid
                 : Math.Round(bounded, places, MidpointRounding.AwayFromZero), min, max);
-            if(Math.Abs(slider.Value-next)<.01) { input.Text=next.ToString(format,CultureInfo.InvariantCulture);return; }
+            // The tolerance is a rounding guard, not a floor of its own: a declared step of 0.001 must still register as
+            // a change when the reader presses + or −, so it shrinks with the step rather than swallowing it.
+            if(Math.Abs(slider.Value-next)<Math.Min(.01,grid/100)) { input.Text=next.ToString(format,CultureInfo.InvariantCulture);return; }
             slider.Value=next;
         }
         slider.ValueChanged+=(_,_)=>{input.Text=slider.Value.ToString(format,CultureInfo.InvariantCulture);changed(slider.Value);};

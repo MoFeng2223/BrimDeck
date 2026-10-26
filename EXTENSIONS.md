@@ -38,7 +38,7 @@ BrimDeck 支持在不修改主程序源码的情况下添加自定义页面。�
 | `init` | `{ apiVersion, appVersion, limits, settings, phrases, colors, language, shown, state }` | 页面加载后立即到达一次，携带它需要的全部初始状态 |
 | `colors` | 八色对象 | 主题或监控配色变化时 |
 | `language` | `"zh"` / `"en"` | 界面语言切换时（`phrases` 紧跟着再推一次新的那份） |
-| `settings` | 声明项的当前值对象 | 读者在「设置 → 插件」改了，或页面自己 `setSetting` 之后（所有该插件的页面都收到同一份） |
+| `settings` | 声明项的当前值对象 | 有声明项的值真的变了之后（读者在「设置 → 插件」改了，或某个页面 `setSetting` 改成了不同的值）；所有该插件的页面收到同一份，没有变化就不推 |
 | `phrases` | 当前语言的文案对象 | 界面语言切换时 |
 | `visibility` | `true` / `false` | 任意面板开始/停止显示该页（切页、收起、停用都会到 `false`） |
 | `alarm` | 闹钟 id | 注册的闹钟到点（页面不在时到点的闹钟会在下次加载时补发） |
@@ -83,7 +83,7 @@ brimdeck.alarm.set(id, at)           // 登记闹钟：id 为字符串，at 为 
 brimdeck.alarm.clear(id)
 ```
 
-`setSetting` 之后**以推回来的 `settings` 为准**：宿主是决定的那一方——写进 step 为 5 的控件里的 63 会作为 65 交还，写一个不在 options 里的 choice 会落回该控件的默认值。这样页面不必复制一遍声明才知道自己能显示什么。
+`setSetting` 之后**以 `settings` 事件为准**：宿主是决定的那一方——写进 step 为 5 的控件里的 63 会作为 65 收下，写一个不在 options 里的 choice 会落回该控件的默认值。这样页面不必复制一遍声明才知道自己能显示什么。**值没变就不会再推**：宿主存的就是你已有的那份时，不会有第二条 `settings`（也不存盘、不重建设置行）——所以别把"没收到回推"当成"宿主没收到"，它收到且已经采纳。日志里每次 `setSetting` 都会留下一行 `view: setting <id> <key>=<兑现后的值>`，排查时用得上。
 
 `openUrl`、`window.open`、以及页面里**读者点到的外链**（宿主注入的脚本把不指向插件自己文件夹的 `<a>` 点击转成这条调用）都走同一个出口，也共用同一份频率：每个插件在 `limits.linkWindowSeconds` 秒内至多 `limits.linksPerWindow` 次，多出来的收到 `links-too-many`。之所以不区分"是不是人点的"：宿主看不见点击，只能看见消息——WebView2 会把脚本自己写的 `location.href` 也报成"用户发起"（这条是被 UI 测试逮到的），所以凡是需要"有人点了一下"才该做的事，都按最保守的算。
 

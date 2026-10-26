@@ -187,9 +187,21 @@ internal sealed class WebExtension : IIslandExtension
     // The declared entries the host could not use, in the author's own words: a control that vanished because its label
     // was written as a number is otherwise invisible to the person who wrote it.
     internal IReadOnlyList<string> Notes => _manifest.Notes;
+    // The values the pages of this plugin were last given. A settings event is a reason to re-render, so it is sent when
+    // there is something to re-render for — not on every theme change, panel resize or language switch, which is what
+    // pushing blindly from the palette made it.
+    private string? _pushedSettings;
     private string SettingsJson => ExtensionSettingStore.ValuesJson(_manifest.Settings, IslandExtensions.ValuesFor(Id));
     private string PhrasesJson => ExtensionSettingStore.PhrasesJson(_manifest.Phrases, Loc.IsEnglish);
-    internal void PushSettings() => Push("{\"channel\":\"brimdeck\",\"kind\":\"settings\",\"data\":" + SettingsJson + "}");
+    internal void PushSettings()
+    {
+        if (_manifest.Settings.Count == 0) return; // a plugin that declared nothing has nothing to hear about
+        var json = SettingsJson;
+        if (json == _pushedSettings) return;
+        _pushedSettings = json;
+        ExtensionLog.Write("view: settings " + Id); // one line per settings event that actually went out
+        Push("{\"channel\":\"brimdeck\",\"kind\":\"settings\",\"data\":" + json + "}");
+    }
     internal void PushPhrases() => Push("{\"channel\":\"brimdeck\",\"kind\":\"phrases\",\"data\":" + PhrasesJson + "}");
 
     // A page asked to change one of its own controls. Only a declared key is answerable, and the value is read as that
@@ -230,6 +242,11 @@ internal sealed class WebExtension : IIslandExtension
         // What the host kept, not what was asked for: a page that wrote 63 to a step of fives reads this line and knows
         // the number it will be given back is 65.
         ExtensionLog.Write($"view: setting {Id} {key}={honorValue(honored, setting)}");
+        // The declaration decides the value, and the value already in force is what the pages were last told: writing
+        // it again would queue a save, rebuild the settings row and push a settings event — which a page that normalizes
+        // inside its own settings handler would answer by writing again. Nothing changed is nothing to do, and the page
+        // needs no echo: what it already holds is what the host holds.
+        if (IslandExtensions.ValuesFor(Id).TryGetValue(key, out var kept) && kept == honored) return;
         IslandExtensions.Write(Id, key, honored);
 
         static string honorValue(ExtensionSettingValue value, ExtensionSetting setting) => setting.Kind switch
@@ -685,6 +702,7 @@ internal sealed class WebExtension : IIslandExtension
         // The version is the host's, never a number copied into two places: a page written against a newer bridge reads
         // this and degrades instead of waiting for messages that will never come. The ceilings come from Bridge whole, so
         // the page is told the rate as it is kept.
+        _pushedSettings = SettingsJson; // the init below carries it: a settings event with the same numbers is not a change
         Push("{\"channel\":\"brimdeck\",\"kind\":\"init\",\"apiVersion\":" + Bridge.Version
             + ",\"appVersion\":" + JsonSerializer.Serialize(ApplicationVersion.Current)
             + ",\"limits\":" + Bridge.LimitsJson
