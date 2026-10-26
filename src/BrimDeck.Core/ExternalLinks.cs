@@ -24,9 +24,11 @@ public static class ExternalLinks
     }
 }
 
-// How often one plugin may bring up the desktop browser with no click behind the request. A clicked link is user-
-// initiated and counted by nobody; an API call can come from a loop, and a page in a loop fills a desktop with tabs in
-// seconds. The caller brings the clock, so the ceiling is checkable without waiting for it.
+// How often one plugin may bring up the desktop browser. Nothing that reaches the host can prove a reader asked —
+// WebView2 calls a scripted location change "user initiated" — so every open is counted: a page's own call, a window it
+// asks for, and a link the injected shim read a click behind all spend the same allowance. A page in a loop fills a
+// desktop with tabs in seconds; a reader clicking six links in twenty seconds is not doing that. The caller brings the
+// clock, so the ceiling is checkable without waiting for it.
 public sealed class LinkBudget(int maximum, TimeSpan window)
 {
     private readonly Queue<DateTime> _opened = new();

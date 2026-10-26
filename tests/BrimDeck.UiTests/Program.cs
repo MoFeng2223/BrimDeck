@@ -107,8 +107,16 @@ internal static class Program
             Console.WriteLine("PASS the host's refusals reach the page as error events");
             Require(CountLog(log, "view: refused fixture-c state-too-large") > 0, "the host says why it dropped an oversized state");
             Require(CountLog(log, "view: refused fixture-c link-refused") > 0, "a link that is not a web address is refused, not opened");
+            // The page's own jump to a real web address must stay a refusal. It is the case that reads the browser's
+            // "was this clicked?" answer as the guardrail — and that answer says yes to a scripted location change,
+            // which is how a plugin would otherwise open a desktop tab nobody asked for.
             Require(CountLog(log, "view: refused navigation fixture-c") > 0, "a page that navigates itself out to the web stays inside the plugin");
+            Require(CountLog(log, "view: link fixture-c") == 0, "no desktop browser was opened for a link nobody clicked");
             Console.WriteLine("PASS the refusals the page got are the ones the host logged");
+            // Back to A: everything below watches A, and the panel's size follows the page it is on.
+            Press(Find(window, "FixtureA"));
+            Reopen();
+            Require(WaitForColorWithReopen(ColorA, TimeSpan.FromSeconds(8)), "switching back from C shows A (red page)");
 
             if (options.Full)
             {

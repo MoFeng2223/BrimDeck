@@ -132,7 +132,8 @@ internal sealed class WebExtension : IIslandExtension
     private (double Width, double Height)? _fitLogged;
     private readonly Dictionary<string, (DateTime Due, bool Fired)> _alarms = new(StringComparer.Ordinal);
     private bool _shown, _keepAlive, _reclaimed;
-    // How often this plugin has brought up the desktop browser lately; only requests with no click behind them are counted.
+    // How often this plugin has asked for the desktop browser lately; every ask is counted, because none of them can
+    // prove a reader was the one who asked.
     private readonly LinkBudget _links = new(Bridge.MaximumLinksPerWindow, Bridge.LinkWindow);
     // Whether any panel is open: pages are only reclaimed while the panel itself is closed (see SetDemand).
     private bool _inUse;
@@ -328,35 +329,36 @@ internal sealed class WebExtension : IIslandExtension
     {
         if (e.Uri == "about:blank") return;
         if (e.Uri.StartsWith("https://" + _host + "/", StringComparison.OrdinalIgnoreCase)) return;
-        // A link the reader clicked leaves the island for the desktop browser and never takes the page with it. A page
-        // that navigates itself is not owed that: following its own redirect would turn a plugin into a browser tab.
-        if (e.IsUserInitiated) Open(sender as CoreWebView2, e.Uri, true);
-        else ExtensionLog.Write("view: refused navigation " + Id + " -> " + Short(e.Uri));
+        // A page that takes its own frame somewhere else is not answered at all, whatever it claims: a plugin that
+        // wanted a reader out to a web address has a call for it (and a clicked anchor reaches that call through the
+        // shim). Following a self-navigation would turn the plugin page into a browser tab — and WebView2 reports a
+        // scripted location change as user-initiated, so the browser's own answer to "did someone click?" is not a
+        // guardrail here. Measured, in the UI test: location.href set 300ms after load arrived as IsUserInitiated.
+        ExtensionLog.Write("view: refused navigation " + Id + " -> " + Short(e.Uri));
         e.Cancel = true;
     }
 
-    // window.open and target="_blank" are how a page asks for the outside. The island never grows a browser window of
-    // its own, so every request is answered — a clicked web address goes to the desktop browser, anything else stops
-    // here with the reason.
+    // window.open is a page asking for the outside, and the island never grows a browser window of its own: the request
+    // goes to the desktop browser under the same rules and the same rate as the bridge's own call, and is always
+    // answered here so no window can be left half-open.
     private void OnNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e)
     {
-        if (e.IsUserInitiated) Open(sender as CoreWebView2, e.Uri, true);
-        else ExtensionLog.Write("view: refused new window " + Id + " -> " + Short(e.Uri));
+        Open(sender as CoreWebView2, e.Uri);
         e.Handled = true;
     }
 
-    // One link out. What the page wrote is checked, not trusted (ExternalLinks holds the rule and its ceilings), and a
-    // call with no click behind it is rationed: a page can call the bridge from a loop, a reader cannot.
-    private bool Open(CoreWebView2? core, string? text, bool gesture)
+    // One link out. What the page wrote is checked, not trusted (ExternalLinks holds the rule and its ceilings), and
+    // every ask is rationed: the host cannot see a reader's click, only a message, and a page can send one in a loop.
+    private bool Open(CoreWebView2? core, string? text)
     {
         var (url, reason) = ExternalLinks.Accept(text);
         if (url is null) { Refused(core, "link-refused", reason ?? ""); return false; }
-        if (!gesture && !_links.Allow(DateTime.UtcNow))
+        if (!_links.Allow(DateTime.UtcNow))
         {
             Refused(core, "links-too-many", Bridge.MaximumLinksPerWindow + " per " + (int)Bridge.LinkWindow.TotalSeconds + "s");
             return false;
         }
-        ExtensionLog.Write("view: link " + Id + (gesture ? " (clicked)" : " (bridge)") + " -> " + Short(url));
+        ExtensionLog.Write("view: link " + Id + " -> " + Short(url));
         try { UI.OpenUrl(url); return true; }
         catch (Exception ex) { Refused(core, "link-failed", ex.Message.Split('\n')[0]); return false; }
     }
@@ -561,7 +563,7 @@ internal sealed class WebExtension : IIslandExtension
                         else Refused(from, "bad-keepAlive", "setKeepAlive wants true or false");
                         break;
                     case "openUrl":
-                        if (root.TryGetProperty("url", out var url) && url.ValueKind == JsonValueKind.String) Open(from, url.GetString(), false);
+                        if (root.TryGetProperty("url", out var url) && url.ValueKind == JsonValueKind.String) Open(from, url.GetString());
                         else Refused(from, "bad-link", "openUrl wants a url string");
                         break;
                     default:
@@ -648,6 +650,19 @@ internal sealed class WebExtension : IIslandExtension
             function reportScale() { post({ kind: 'scale', dpr: window.devicePixelRatio || 1, width: window.innerWidth, height: window.innerHeight }); }
             reportScale();
             window.addEventListener('resize', reportScale);
+            // A reader's click is the one thing the host can be told about for real — a page that moves its own frame
+            // looks, to the browser, exactly like one a person moved. So the click is read here, inside the page: an
+            // anchor that does not point at the plugin's own folder leaves for the desktop browser instead of loading
+            // in the panel. A link to the page's own files is the browser's business, as it always was.
+            document.addEventListener('click', function (event) {
+                if (event.defaultPrevented || event.button !== 0) return;
+                var node = event.target;
+                while (node && (node.tagName || '').toUpperCase() !== 'A') node = node.parentElement;
+                if (!node || typeof node.href !== 'string' || !node.href) return;
+                if (node.href.indexOf(location.origin + '/') === 0) return;
+                event.preventDefault();
+                post({ kind: 'openUrl', url: node.href });
+            }, true);
             // The host answers hello at once, possibly before the page's own script has run. Events a kind has no
             // listener for yet are held (at most the last few) and handed over when the page subscribes.
             function emit(kind, data) {
@@ -673,7 +688,7 @@ internal sealed class WebExtension : IIslandExtension
                 saveState: function (state) { post({ kind: 'saveState', state: state === undefined ? null : state }); },
                 setKeepAlive: function (on) { post({ kind: 'keepAlive', on: !!on }); },
                 // A link leaves the island: the host opens it in the desktop browser, but only an http/https address,
-                // and at a rate a page cannot reach by calling this in a loop.
+                // and at a rate every plugin is held to — the host cannot tell this call from a loop.
                 openUrl: function (url) { if (typeof url === 'string') post({ kind: 'openUrl', url: url }); },
                 alarm: {
                     set: function (id, at) {
