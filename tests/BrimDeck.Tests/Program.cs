@@ -27,6 +27,8 @@ try
     CollapsedGeometryTests.Run(root, Check);
     PanelHeaderTests.Run(Check);
     SystemMonitorTests.Run(Check);
+    ExtensionManifestTests.Run(root, Check);
+    ExternalLinkTests.Run(Check);
     CompactReadingTests.Run(Check);
     CurvesTests.Run(Check);
     IdleCostTests.Run(Check);
