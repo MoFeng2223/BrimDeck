@@ -25,6 +25,9 @@ internal static class WebRuntime
     private static Task<CoreWebView2Environment?>? _environment;
     private static readonly List<WebExtension> _all = new();
     private static readonly DispatcherTimer _alarmTick = new() { Interval = TimeSpan.FromSeconds(1) };
+    // Kept for the extensions registered later: a plugin discovered while a panel is open must not start reclaiming its
+    // pages before that panel closes.
+    private static bool _panelInUse;
 
     // Set when the WebView2 runtime itself is missing: every plugin page becomes a note about it instead of a blank
     // rectangle. Cleared never — without the runtime there is nothing to retry into until the app restarts.
@@ -62,7 +65,14 @@ internal static class WebRuntime
         }
     }
 
-    public static void Register(WebExtension extension) { if (!_all.Contains(extension)) _all.Add(extension); }
+    public static void Register(WebExtension extension)
+    {
+        if (_all.Contains(extension)) return;
+        _all.Add(extension);
+        // A plugin found while a panel stands open learns that at once: its pages wait for the panel to close before
+        // they are reclaimed, like every page that was already here.
+        if (_panelInUse) extension.PanelInUse(true);
+    }
     public static void Unregister(WebExtension extension)
     {
         _all.Remove(extension);
@@ -72,6 +82,7 @@ internal static class WebRuntime
     // Whether any panel is open, told by the app as that changes: pages are reclaimed only while the panel is closed.
     public static void PanelInUse(bool inUse)
     {
+        _panelInUse = inUse;
         foreach (var extension in _all.ToList()) extension.PanelInUse(inUse);
     }
 

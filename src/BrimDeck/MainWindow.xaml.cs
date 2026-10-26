@@ -128,7 +128,13 @@ public partial class MainWindow : Window
         {
             ExtensionLog.Write("panel: context " + context + " expanded=" + _expanded);
             _context = context;
-            if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true) _expanded = false;
+            if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true)
+            {
+                // The app's rules put the panel away without the expand path running, so the pages would keep waiting
+                // for a panel that is already gone: the reclaim grace starts here too.
+                _expanded = false;
+                _app.PanelUseChanged();
+            }
             ApplySettings(true);
         };
         // The app under the same context changed. Only the app rules' answer can differ, so only a changed answer is

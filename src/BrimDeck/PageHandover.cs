@@ -145,12 +145,16 @@ internal sealed class PageHandover
             var away = Soft.Fade(1, 0, leave, Soft.Follow);
             away.Completed += (_, _) => { if (_version == version) EndLeave(); };
             _layer.BeginAnimation(UIElement.OpacityProperty, away);
+            // The way out belongs to the picture whoever is arriving: a page that brings itself in inside a browser (a
+            // plugin page) still leaves with the slide, so both directions of a switch keep moving together.
+            if (motion != Handover.Morph)
+            {
+                double direction = motion == Handover.Back ? -1 : 1;
+                _layerShift.BeginAnimation(TranslateTransform.XProperty, Soft.Fade(0, -direction * Travel, leave, Soft.Follow));
+                if (arrives) shift.BeginAnimation(TranslateTransform.XProperty, Arrival(direction * Travel, 0, arrive));
+            }
             if (!arrives) return;
             content.BeginAnimation(UIElement.OpacityProperty, Arrival(0, 1, arrive));
-            if (motion == Handover.Morph) return;
-            double direction = motion == Handover.Back ? -1 : 1;
-            _layerShift.BeginAnimation(TranslateTransform.XProperty, Soft.Fade(0, -direction * Travel, leave, Soft.Follow));
-            shift.BeginAnimation(TranslateTransform.XProperty, Arrival(direction * Travel, 0, arrive));
         });
     }
 
