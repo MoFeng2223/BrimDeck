@@ -29,5 +29,17 @@ internal static class BridgeTests
         check("Bridge: the range is the calendar DateTimeOffset itself holds",
             DateTimeOffset.FromUnixTimeMilliseconds(Bridge.MinimumAlarmMillis).UtcDateTime.Year == 1
             && DateTimeOffset.FromUnixTimeMilliseconds(Bridge.MaximumAlarmMillis).UtcDateTime.Year == 9999);
+
+        // The page is told the ceilings as JSON; the words in it are the host's own, in the units they are enforced in,
+        // so a page that plans around them cannot be refused for something it computed correctly.
+        check("Bridge: what a page is told is what the host keeps, spelled as it is kept",
+            Bridge.LimitsJson.Contains("\"stateBytes\":" + Bridge.MaximumStateBytes)
+            && Bridge.LimitsJson.Contains("\"alarms\":" + Bridge.MaximumAlarms)
+            && Bridge.LimitsJson.Contains("\"urlChars\":" + Bridge.MaximumUrlChars)
+            && Bridge.LimitsJson.Contains("\"linksPerWindow\":" + Bridge.MaximumLinksPerWindow)
+            && Bridge.LimitsJson.Contains("\"linkWindowSeconds\":" + (int)Bridge.LinkWindow.TotalSeconds)
+            && !Bridge.LimitsJson.Contains("PerMinute"));
+        check("Bridge: the ceilings arrive as one object a page can read",
+            System.Text.Json.JsonDocument.Parse(Bridge.LimitsJson).RootElement.ValueKind is System.Text.Json.JsonValueKind.Object);
     }
 }

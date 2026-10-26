@@ -604,12 +604,11 @@ internal sealed class WebExtension : IIslandExtension
         var missed = _alarms.Where(alarm => alarm.Value.Fired).Select(alarm => alarm.Key).ToList();
         foreach (var id in missed) _alarms.Remove(id);
         // The version is the host's, never a number copied into two places: a page written against a newer bridge reads
-        // this and degrades instead of waiting for messages that will never come.
-        var limits = "{\"stateBytes\":" + Bridge.MaximumStateBytes + ",\"alarms\":" + Bridge.MaximumAlarms
-            + ",\"urlChars\":" + Bridge.MaximumUrlChars + ",\"linksPerMinute\":" + (Bridge.MaximumLinksPerWindow * (int)(60 / Bridge.LinkWindow.TotalSeconds)) + "}";
+        // this and degrades instead of waiting for messages that will never come. The ceilings come from Bridge whole, so
+        // the page is told the rate as it is kept.
         Push("{\"channel\":\"brimdeck\",\"kind\":\"init\",\"apiVersion\":" + Bridge.Version
             + ",\"appVersion\":" + JsonSerializer.Serialize(ApplicationVersion.Current)
-            + ",\"limits\":" + limits
+            + ",\"limits\":" + Bridge.LimitsJson
             + ",\"language\":\"" + (Loc.IsEnglish ? "en" : "zh")
             + "\",\"shown\":" + (_shown ? "true" : "false") + ",\"colors\":" + WebColors.Json + ",\"state\":" + (_stateJson ?? "null") + "}");
         foreach (var id in missed) Push("{\"channel\":\"brimdeck\",\"kind\":\"alarm\",\"data\":" + JsonSerializer.Serialize(id) + "}");
@@ -660,15 +659,23 @@ internal sealed class WebExtension : IIslandExtension
             // looks, to the browser, exactly like one a person moved. So the click is read here, inside the page: an
             // anchor that does not point at the plugin's own folder leaves for the desktop browser instead of loading
             // in the panel. A link to the page's own files is the browser's business, as it always was.
+            //
+            // Last, not first: listening in the bubble phase is what lets the page say "I took that one" — its own
+            // handler runs before this one, and its preventDefault is then visible here. A page that also stops the
+            // click from reaching the document keeps the browser's own answer instead, which for a link out of the
+            // plugin's folder is a cancelled navigation: nothing opens.
             document.addEventListener('click', function (event) {
                 if (event.defaultPrevented || event.button !== 0) return;
                 var node = event.target;
                 while (node && (node.tagName || '').toUpperCase() !== 'A') node = node.parentElement;
                 if (!node || typeof node.href !== 'string' || !node.href) return;
+                // A javascript: href is a page's own action wearing a link's clothes, not an address anybody means to
+                // visit — the host would answer every click of it with a refusal.
+                if (/^javascript:/i.test(node.href)) return;
                 if (node.href.indexOf(location.origin + '/') === 0) return;
                 event.preventDefault();
                 post({ kind: 'openUrl', url: node.href });
-            }, true);
+            });
             // The host answers hello at once, possibly before the page's own script has run. Events a kind has no
             // listener for yet are held (at most the last few) and handed over when the page subscribes.
             function emit(kind, data) {

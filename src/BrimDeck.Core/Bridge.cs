@@ -23,7 +23,17 @@ public static class Bridge
     public const int BufferedEventsPerKind = 8;
     // A link a page hands out: a web address, not a payload. Longer than this it is something else.
     public const int MaximumUrlChars = 2048;
-    // How often one plugin may open the desktop browser without a click behind it, and over how long a stretch.
+    // How often one plugin may open the desktop browser, and over how long a stretch. Every ask is counted: what reaches
+    // the host is a message, and a message cannot show a reader's fingerprint.
     public const int MaximumLinksPerWindow = 6;
     public static readonly TimeSpan LinkWindow = TimeSpan.FromSeconds(20);
+
+    // The ceilings exactly as a page receives them in init.limits, so the words the docs use, the numbers the host keeps
+    // and the JSON a page reads are one definition rather than three that can drift apart. Rate is sent as the window it
+    // is enforced over — folded into "per minute" it would promise a burst the window does not allow.
+    public static string LimitsJson { get; } = "{\"stateBytes\":" + MaximumStateBytes
+        + ",\"alarms\":" + MaximumAlarms
+        + ",\"urlChars\":" + MaximumUrlChars
+        + ",\"linksPerWindow\":" + MaximumLinksPerWindow
+        + ",\"linkWindowSeconds\":" + (int)LinkWindow.TotalSeconds + "}";
 }

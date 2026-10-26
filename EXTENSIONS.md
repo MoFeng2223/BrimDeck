@@ -40,7 +40,7 @@ BrimDeck 支持在不修改主程序源码的情况下添加自定义页面。�
 
 `colors` 的八个字段：`Normal`、`Warning`、`Critical`、`Primary`、`Secondary`、`Tertiary`、`Track`、`Fill`，均为 `#RRGGBB` 字符串，来自面板当前的监控配色与主题。
 
-`init.limits` 把宿主当前的上限一并交给页面：`{ stateBytes, alarms, urlChars, linksPerMinute }`。要判断"我还剩多少闹钟""这段 JSON 能不能存"就按它来，不要把数字抄进代码里。
+`init.limits` 把宿主当前的上限一并交给页面：`{ stateBytes, alarms, urlChars, linksPerWindow, linkWindowSeconds }`。要判断"我还剩多少闹钟""这段 JSON 能不能存"就按它来，不要把数字抄进代码里。频率按**窗口**给出（`linksPerWindow` 次 / `linkWindowSeconds` 秒），别自己折算成每分钟——窗口滑动的含义是"20 秒里的第 7 次就会被拒"，折算后的数字并不存在。
 
 ### 被拒的原因（`error.code`）
 
@@ -53,7 +53,7 @@ BrimDeck 支持在不修改主程序源码的情况下添加自定义页面。�
 | `bad-keepAlive` | `setKeepAlive` 收到的不是布尔值 |
 | `bad-link` | `openUrl` 的参数不是字符串 |
 | `link-refused` | 地址不符合规则（见「安全模型」），或那正是插件自己文件夹的地址，宿主没有打开它 |
-| `links-too-many` | `openUrl` 太频繁：20 秒内已经超过 6 次 |
+| `links-too-many` | 出口用得太密：`limits.linkWindowSeconds` 秒内已超过 `limits.linksPerWindow` 次 |
 | `link-failed` | 地址合规，但系统浏览器没能启动 |
 | `unknown-kind` | 页面发了一条宿主不认识的消息——通常是两边按不同的桥版本写的 |
 
@@ -72,7 +72,9 @@ brimdeck.alarm.set(id, at)           // 登记闹钟：id 为字符串，at 为 
 brimdeck.alarm.clear(id)
 ```
 
-`openUrl`、`window.open`、以及页面里**读者点到的外链**（宿主注入的脚本把不指向插件自己文件夹的 `<a>` 点击转成这条调用）都走同一个出口，也共用同一份频率：每个插件 20 秒至多 6 次，多出来的收到 `links-too-many`。之所以不区分"是不是人点的"：宿主看不见点击，只能看见消息——WebView2 会把脚本自己写的 `location.href` 也报成"用户发起"（这条是被 UI 测试逮到的），所以凡是需要"有人点了一下"才该做的事，都按最保守的算。
+`openUrl`、`window.open`、以及页面里**读者点到的外链**（宿主注入的脚本把不指向插件自己文件夹的 `<a>` 点击转成这条调用）都走同一个出口，也共用同一份频率：每个插件在 `limits.linkWindowSeconds` 秒内至多 `limits.linksPerWindow` 次，多出来的收到 `links-too-many`。之所以不区分"是不是人点的"：宿主看不见点击，只能看见消息——WebView2 会把脚本自己写的 `location.href` 也报成"用户发起"（这条是被 UI 测试逮到的），所以凡是需要"有人点了一下"才该做的事，都按最保守的算。
+
+点击的读法有两处讲究，插件作者可以依赖：宿主的监听在**冒泡阶段**，所以你自己用 `onclick` 接管过的链接（`preventDefault` 过了）不会被当成出门的点击；`href="javascript:…"` 这种"穿着链接衣服的按钮"也不算，它不会变成一条 `link-refused` 回执。若你在处理函数里 `stopPropagation()`，宿主干预不到这一次点击，浏览器自己的默认动作会撞上"整页跳转一律取消"，结果同样是外面什么都不开——要出去就明确调用 `openUrl`。
 
 ## 生命周期
 
