@@ -20,8 +20,11 @@ internal static class Program
 {
     private const string MarkA = "fixture-a";
     private const string MarkB = "fixture-b";
+    private const string MarkC = "fixture-c";
     private static readonly Color ColorA = Color.FromArgb(192, 0, 0);
     private static readonly Color ColorB = Color.FromArgb(0, 192, 0);
+    // C starts dark and turns blue only when the bridge has said everything the page has to hear.
+    private static readonly Color ColorC = Color.FromArgb(0, 0, 192);
     private static AutomationElement? _window;
 
     [STAThread]
@@ -46,6 +49,7 @@ internal static class Program
         var log = Path.Combine(data, "extensions.log");
         WriteFixture(data, "fixture-a", "FixtureA", MarkA, "#C00000", minWidth: 440, minHeight: 220);
         WriteFixture(data, "fixture-b", "FixtureB", MarkB, "#00C000");
+        WriteFixture(data, "fixture-c", "FixtureC", MarkC, "#202020", bridgeProbe: true);
         Console.WriteLine("profile: " + data);
         Console.WriteLine("app: " + options.App);
 
@@ -91,6 +95,20 @@ internal static class Program
                     ? $"the page gets the viewport its manifest asked for, in the panel's own pixels (box {reported.Box.W}x{reported.Box.H}, page {reported.Page.W}x{reported.Page.H})"
                     : "the page reports the box it was laid out in");
             Console.WriteLine("PASS the page gets the viewport its manifest asked for");
+
+            // What the page hears back. A host that drops a message silently is indistinguishable, from inside a web
+            // page, from one that is busy: the author's only tool is the reason the host sends, so a refusal has to
+            // arrive as an event the page can act on — and C paints itself blue only once both refusals and the
+            // bridge's own version have come through.
+            Press(Find(window, "FixtureC"));
+            Reopen();
+            Require(WaitForColorWithReopen(ColorC, TimeSpan.FromSeconds(8)),
+                "C turns blue only after the host answers with its version and the two refusals");
+            Console.WriteLine("PASS the host's refusals reach the page as error events");
+            Require(CountLog(log, "view: refused fixture-c state-too-large") > 0, "the host says why it dropped an oversized state");
+            Require(CountLog(log, "view: refused fixture-c link-refused") > 0, "a link that is not a web address is refused, not opened");
+            Require(CountLog(log, "view: refused navigation fixture-c") > 0, "a page that navigates itself out to the web stays inside the plugin");
+            Console.WriteLine("PASS the refusals the page got are the ones the host logged");
 
             if (options.Full)
             {
@@ -380,7 +398,7 @@ internal static class Program
         Console.WriteLine("profile: " + data);
     }
 
-    private static void WriteFixture(string root, string id, string title, string mark, string color, int minWidth = 0, int minHeight = 0)
+    private static void WriteFixture(string root, string id, string title, string mark, string color, int minWidth = 0, int minHeight = 0, bool bridgeProbe = false)
     {
         var folder = Path.Combine(root, "extensions", id);
         Directory.CreateDirectory(folder);
@@ -395,6 +413,11 @@ internal static class Program
             """);
         // A solid page: the test reads the centre pixel, which is the paint a user sees even when WebView2's
         // accessibility tree is unavailable to the automation session.
+        var script = bridgeProbe ? BridgeProbe : """
+              if (window.brimdeck) brimdeck.on('init', function (init) {
+                if (init.shown) document.body.dataset.ready = '1';
+              });
+            """;
         File.WriteAllText(Path.Combine(folder, "index.html"), $$"""
             <!doctype html>
             <meta charset="utf-8">
@@ -404,12 +427,35 @@ internal static class Program
             </style>
             <div>{{mark}}</div>
             <script>
-              if (window.brimdeck) brimdeck.on('init', function (init) {
-                if (init.shown) document.body.dataset.ready = '1';
-              });
+            {{script}}
             </script>
             """);
     }
+
+    // A page that only paints once the host has told it three things: which bridge it is speaking, how much room the
+    // host will keep, and — after two asks the host must refuse — the reason each one was refused. A silent drop reads
+    // as a host that ignored the page on purpose, so the refusal arriving is what the colour proves. The page also
+    // tries to navigate itself out to a real web address, which is the one thing the link rules must never allow: a
+    // page that leaves the plugin's own origin was never clicked by anyone.
+    private const string BridgeProbe = """
+              var seen = {}, told = false;
+              function paint() {
+                if (!(told && seen['state-too-large'] && seen['link-refused'])) return;
+                var c = '#0000C0';
+                document.documentElement.style.background = c;
+                document.body.style.background = c;
+              }
+              if (window.brimdeck) {
+                brimdeck.on('error', function (reply) { seen[reply.code] = 1; paint(); });
+                brimdeck.on('init', function (init) {
+                  told = init.apiVersion >= 1 && init.limits && init.limits.stateBytes > 0 && init.limits.alarms > 0;
+                  brimdeck.saveState(new Array(70002).join('x'));
+                  brimdeck.openUrl('javascript:alert(1)');
+                  setTimeout(function () { location.href = 'https://example.com/'; }, 300);
+                  paint();
+                });
+              }
+            """;
 
     private static void DeleteWhenFree(string folder)
     {

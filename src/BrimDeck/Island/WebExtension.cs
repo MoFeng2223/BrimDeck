@@ -132,6 +132,8 @@ internal sealed class WebExtension : IIslandExtension
     private (double Width, double Height)? _fitLogged;
     private readonly Dictionary<string, (DateTime Due, bool Fired)> _alarms = new(StringComparer.Ordinal);
     private bool _shown, _keepAlive, _reclaimed;
+    // How often this plugin has brought up the desktop browser lately; only requests with no click behind them are counted.
+    private readonly LinkBudget _links = new(Bridge.MaximumLinksPerWindow, Bridge.LinkWindow);
     // Whether any panel is open: pages are only reclaimed while the panel itself is closed (see SetDemand).
     private bool _inUse;
     // Whether some page has finished a navigation and not been reclaimed since: the switch entrance needs a loaded
@@ -326,11 +328,38 @@ internal sealed class WebExtension : IIslandExtension
     {
         if (e.Uri == "about:blank") return;
         if (e.Uri.StartsWith("https://" + _host + "/", StringComparison.OrdinalIgnoreCase)) return;
-        ExtensionLog.Write("view: refused navigation " + Id + " -> " + e.Uri);
+        // A link the reader clicked leaves the island for the desktop browser and never takes the page with it. A page
+        // that navigates itself is not owed that: following its own redirect would turn a plugin into a browser tab.
+        if (e.IsUserInitiated) Open(sender as CoreWebView2, e.Uri, true);
+        else ExtensionLog.Write("view: refused navigation " + Id + " -> " + Short(e.Uri));
         e.Cancel = true;
     }
 
-    private static void OnNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e) => e.Handled = true;
+    // window.open and target="_blank" are how a page asks for the outside. The island never grows a browser window of
+    // its own, so every request is answered — a clicked web address goes to the desktop browser, anything else stops
+    // here with the reason.
+    private void OnNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e)
+    {
+        if (e.IsUserInitiated) Open(sender as CoreWebView2, e.Uri, true);
+        else ExtensionLog.Write("view: refused new window " + Id + " -> " + Short(e.Uri));
+        e.Handled = true;
+    }
+
+    // One link out. What the page wrote is checked, not trusted (ExternalLinks holds the rule and its ceilings), and a
+    // call with no click behind it is rationed: a page can call the bridge from a loop, a reader cannot.
+    private bool Open(CoreWebView2? core, string? text, bool gesture)
+    {
+        var (url, reason) = ExternalLinks.Accept(text);
+        if (url is null) { Refused(core, "link-refused", reason ?? ""); return false; }
+        if (!gesture && !_links.Allow(DateTime.UtcNow))
+        {
+            Refused(core, "links-too-many", Bridge.MaximumLinksPerWindow + " per " + (int)Bridge.LinkWindow.TotalSeconds + "s");
+            return false;
+        }
+        ExtensionLog.Write("view: link " + Id + (gesture ? " (clicked)" : " (bridge)") + " -> " + Short(url));
+        try { UI.OpenUrl(url); return true; }
+        catch (Exception ex) { Refused(core, "link-failed", ex.Message.Split('\n')[0]); return false; }
+    }
 
     // A browser or renderer that dies leaves the control blank. It is logged (the log is on in development and in the
     // UI test), and a renderer that exited once is reloaded; a second failure is left to the next visit instead of
@@ -471,6 +500,8 @@ internal sealed class WebExtension : IIslandExtension
     // throws into the host.
     private void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
+        // The page that sent this is the page that has to hear back about it, so it is read once, here.
+        var from = sender as CoreWebView2;
         try
         {
             using var document = JsonDocument.Parse(e.WebMessageAsJson);
@@ -485,15 +516,16 @@ internal sealed class WebExtension : IIslandExtension
                     case "scale":
                         if (Number(root, "dpr") is var ratio && ratio is > 0.2 and < 5
                             && Number(root, "width") is var width && width > 0 && Number(root, "height") is var height && height > 0
-                            && sender is CoreWebView2 reported) Fit(reported, ratio, width, height);
+                            && from is not null) Fit(from, ratio, width, height);
                         break;
                     case "saveState":
                         if (root.TryGetProperty("state", out var state) && state.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null))
                         {
-                            // State is untrusted text kept for a later load; anything past 64 KB is dropped rather than
-                            // held in memory for good.
+                            // State is untrusted text kept for a later load; anything past the ceiling is dropped rather
+                            // than held in memory for good — and the page is told, since nothing else says it failed.
                             var json = state.GetRawText();
-                            if (json.Length <= 64 * 1024) _stateJson = json;
+                            if (json.Length <= Bridge.MaximumStateBytes) _stateJson = json;
+                            else Refused(from, "state-too-large", Bridge.MaximumStateBytes + " bytes");
                         }
                         else _stateJson = null;
                         break;
@@ -503,8 +535,12 @@ internal sealed class WebExtension : IIslandExtension
                             && root.TryGetProperty("at", out var at) && at.ValueKind == JsonValueKind.Number && at.TryGetInt64(out var milliseconds))
                         {
                             var due = DateTimeOffset.FromUnixTimeMilliseconds(milliseconds).UtcDateTime;
-                            if (due > DateTime.UtcNow && (_alarms.ContainsKey(alarmId) || _alarms.Count < 32)) _alarms[alarmId] = (due, false);
+                            if (due <= DateTime.UtcNow) Refused(from, "alarm-in-the-past", alarmId);
+                            else if (!_alarms.ContainsKey(alarmId) && _alarms.Count >= Bridge.MaximumAlarms)
+                                Refused(from, "alarms-full", Bridge.MaximumAlarms + " per plugin");
+                            else _alarms[alarmId] = (due, false);
                         }
+                        else Refused(from, "bad-alarm", "alarm.set wants a name and a future time");
                         WebRuntime.AlarmsChanged();
                         break;
                     case "alarmClear":
@@ -522,6 +558,15 @@ internal sealed class WebExtension : IIslandExtension
                                 if (!_keepAlive) _reclaim.Start();
                             }
                         }
+                        else Refused(from, "bad-keepAlive", "setKeepAlive wants true or false");
+                        break;
+                    case "openUrl":
+                        if (root.TryGetProperty("url", out var url) && url.ValueKind == JsonValueKind.String) Open(from, url.GetString(), false);
+                        else Refused(from, "bad-link", "openUrl wants a url string");
+                        break;
+                    default:
+                        // A page that sends something the host does not know is a page written against another bridge.
+                        Refused(from, "unknown-kind", Short(kind.GetString() ?? ""));
                         break;
                 }
             }
@@ -529,14 +574,35 @@ internal sealed class WebExtension : IIslandExtension
         catch (Exception) { }
     }
 
-    // The hello a freshly loaded page sends is answered with everything it cannot know yet: the bridge's version, the
-    // palette and language, whether it is being shown, the state an earlier load handed over, and any alarm that came
-    // due while no page was there to hear it.
+    // A refusal the page can see. The host never fails a message quietly: a plugin author debugging a web page has
+    // nothing else to look at, and a silent drop reads as a host that ignored them on purpose.
+    private void Refused(CoreWebView2? core, string code, string detail)
+    {
+        if (core is null) return;
+        ExtensionLog.Write($"view: refused {Id} {code} {Short(detail)}");
+        try { core.PostWebMessageAsJson(JsonSerializer.Serialize(new { channel = "brimdeck", kind = "error", code, detail = Short(detail) })); }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException) { }
+    }
+
+    // Text a page wrote, shortened for a log line and for the reply: a refusal quotes back what was refused, and a
+    // 2000-character URL has no business in either.
+    private static string Short(string text) => text.Length <= 120 ? text : text[..120] + "…";
+
+    // The hello a freshly loaded page sends is answered with everything it cannot know yet: the bridge the host speaks
+    // and the ceilings it holds, the palette and language, whether the page is being shown, the state an earlier load
+    // handed over, and any alarm that came due while no page was there to hear it.
     private void ReplyInit()
     {
         var missed = _alarms.Where(alarm => alarm.Value.Fired).Select(alarm => alarm.Key).ToList();
         foreach (var id in missed) _alarms.Remove(id);
-        Push("{\"channel\":\"brimdeck\",\"kind\":\"init\",\"apiVersion\":1,\"language\":\"" + (Loc.IsEnglish ? "en" : "zh")
+        // The version is the host's, never a number copied into two places: a page written against a newer bridge reads
+        // this and degrades instead of waiting for messages that will never come.
+        var limits = "{\"stateBytes\":" + Bridge.MaximumStateBytes + ",\"alarms\":" + Bridge.MaximumAlarms
+            + ",\"urlChars\":" + Bridge.MaximumUrlChars + ",\"linksPerMinute\":" + (Bridge.MaximumLinksPerWindow * (int)(60 / Bridge.LinkWindow.TotalSeconds)) + "}";
+        Push("{\"channel\":\"brimdeck\",\"kind\":\"init\",\"apiVersion\":" + Bridge.Version
+            + ",\"appVersion\":" + JsonSerializer.Serialize(ApplicationVersion.Current)
+            + ",\"limits\":" + limits
+            + ",\"language\":\"" + (Loc.IsEnglish ? "en" : "zh")
             + "\",\"shown\":" + (_shown ? "true" : "false") + ",\"colors\":" + WebColors.Json + ",\"state\":" + (_stateJson ?? "null") + "}");
         foreach (var id in missed) Push("{\"channel\":\"brimdeck\",\"kind\":\"alarm\",\"data\":" + JsonSerializer.Serialize(id) + "}");
     }
@@ -556,9 +622,10 @@ internal sealed class WebExtension : IIslandExtension
     }
 
     // The bridge the host injects before any page script runs. It is deliberately small: a version, events for what
-    // the host pushes, and three calls — state, alarms, keep-alive. Pages run in a plain browser too (the bridge is
-    // simply absent there), which is what makes a plugin debuggable outside the app.
-    private const string Shim = """
+    // the host pushes, and four calls — state, alarms, keep-alive, links. Pages run in a plain browser too (the bridge
+    // is simply absent there), which is what makes a plugin debuggable outside the app. The version and the event queue
+    // come from Bridge, so the page sees the numbers the host actually enforces.
+    private static readonly string Shim = $$"""
         (function () {
             if (window.brimdeck) return;
             // Held unseen from the first paint; the host fades the document in when its first navigation completes.
@@ -588,13 +655,15 @@ internal sealed class WebExtension : IIslandExtension
                 if (!list || !list.length) {
                     var queued = pending[kind] || (pending[kind] = []);
                     queued.push(data);
-                    if (queued.length > 8) queued.shift();
+                    if (queued.length > {{Bridge.BufferedEventsPerKind}}) queued.shift();
                     return;
                 }
                 list.slice().forEach(function (fn) { try { fn(data); } catch (e) { } });
             }
             var api = {
-                version: 1,
+                version: {{Bridge.Version}},
+                limits: null,
+                appVersion: '',
                 on: function (kind, fn) {
                     if (typeof kind !== 'string' || typeof fn !== 'function') return;
                     (listeners[kind] = listeners[kind] || []).push(fn);
@@ -603,6 +672,9 @@ internal sealed class WebExtension : IIslandExtension
                 },
                 saveState: function (state) { post({ kind: 'saveState', state: state === undefined ? null : state }); },
                 setKeepAlive: function (on) { post({ kind: 'keepAlive', on: !!on }); },
+                // A link leaves the island: the host opens it in the desktop browser, but only an http/https address,
+                // and at a rate a page cannot reach by calling this in a loop.
+                openUrl: function (url) { if (typeof url === 'string') post({ kind: 'openUrl', url: url }); },
                 alarm: {
                     set: function (id, at) {
                         var ms = at instanceof Date ? at.getTime() : Number(at);
@@ -617,7 +689,13 @@ internal sealed class WebExtension : IIslandExtension
             inbox.addEventListener('message', function (event) {
                 var message = event.data;
                 if (!message || message.channel !== 'brimdeck') return;
-                if (message.kind === 'init') { api.colors = message.colors; api.language = message.language; }
+                // init carries the ceilings too, so a page can ask how much room it has rather than guessing.
+                if (message.kind === 'init') {
+                    api.appVersion = message.appVersion;
+                    api.limits = message.limits;
+                    api.colors = message.colors;
+                    api.language = message.language;
+                }
                 emit(message.kind, message.data !== undefined ? message.data : message);
             });
             post({ kind: 'hello' });

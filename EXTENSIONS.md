@@ -19,32 +19,60 @@ BrimDeck 支持在不修改主程序源码的情况下添加自定义页面。�
 | `glyph` | 否 | 页签图标：24×24 描边路径（Path Data），圆角端点；缺省或无法解析时显示一个方块 |
 | `entry` | 否 | 入口页面，默认 `index.html`；必须是插件文件夹内的相对路径 |
 | `minWidth` / `minHeight` | 否 | 页面不裁切所需的最小**视口**（CSS 像素，不小于 40）；不声明则用全局下限。宿主把它换算成面板尺寸（加上自己的标题行与边距），所以插件只需描述自己的页面，不必知道面板的布局。用户将面板拖得更小时，本页会停在这个尺寸上，其余页照常缩小 |
+| `minApiVersion` | 否 | 页面依赖的桥接版本，≥1 的整数，默认 1。声明得比宿主当前版本高时，这个文件夹在扫描时就被拒绝，原因显示在「未能加载」里（两个版本号都写上）——总比加载一个永远等不到所需消息的空白页好 |
 
 ## 桥接 API（version 1）
 
 页面里通过注入的 `brimdeck` 对象与宿主通信。宿主在页面任何脚本运行前注入它；在普通浏览器里直接打开页面时它不存在——所有用法都应降级（这也是插件的调试方式之一）。
 
+桥的版本号只有宿主里一处定义，页面看到的两个数字都来自它：`brimdeck.version`（注入时就可用）与 `init.apiVersion`（同一次握手带来的）。`init.appVersion` 是 BrimDeck 自己的版本号，用于「在某个版本上出问题」这类说明。版本只在**消息或事件的形状**发生会让老页面误读的变化时递增；新增一个 kind、新增一个可选字段都不算——所以写页面时按"字段可能不存在"来防御，尤其是 `init.limits` 这类后来加的。
+
 ### 事件（`brimdeck.on(kind, fn)`）
 
 | kind | 数据 | 时机 |
 | --- | --- | --- |
-| `init` | `{ colors, language, shown, state, apiVersion }` | 页面加载后立即到达一次，携带它需要的全部初始状态 |
+| `init` | `{ apiVersion, appVersion, limits, colors, language, shown, state }` | 页面加载后立即到达一次，携带它需要的全部初始状态 |
 | `colors` | 八色对象 | 主题或监控配色变化时 |
 | `language` | `"zh"` / `"en"` | 界面语言切换时 |
 | `visibility` | `true` / `false` | 任意面板开始/停止显示该页（切页、收起、停用都会到 `false`） |
 | `alarm` | 闹钟 id | 注册的闹钟到点（页面不在时到点的闹钟会在下次加载时补发） |
+| `error` | `{ code, detail }` | 宿主打消了页面的一项请求；`detail` 是给人看的一句话 |
 
 `colors` 的八个字段：`Normal`、`Warning`、`Critical`、`Primary`、`Secondary`、`Tertiary`、`Track`、`Fill`，均为 `#RRGGBB` 字符串，来自面板当前的监控配色与主题。
+
+`init.limits` 把宿主当前的上限一并交给页面：`{ stateBytes, alarms, urlChars, linksPerMinute }`。要判断"我还剩多少闹钟""这段 JSON 能不能存"就按它来，不要把数字抄进代码里。
+
+### 被拒的原因（`error.code`）
+
+| code | 什么时候到 |
+| --- | --- |
+| `state-too-large` | `saveState` 交出的 JSON 超过 `limits.stateBytes`：这一份没有被保存，之前那一份照旧 |
+| `bad-alarm` | `alarm.set` 的 id 或时间不对（要一个非空字符串和一个将来时刻） |
+| `alarm-in-the-past` | 闹钟时间已经过去 |
+| `alarms-full` | 该插件已占满 `limits.alarms` 个闹钟 |
+| `bad-keepAlive` | `setKeepAlive` 收到的不是布尔值 |
+| `bad-link` | `openUrl` 的参数不是字符串 |
+| `link-refused` | 地址不符合规则（见「安全模型」），宿主没有打开它 |
+| `links-too-many` | `openUrl` 太频繁：20 秒内已经超过 6 次 |
+| `link-failed` | 地址合规，但系统浏览器没能启动 |
+| `unknown-kind` | 页面发了一条宿主不认识的消息——通常是两边按不同的桥版本写的 |
+
+被拒的那一项不生效，其余一切照常。凡是你点名要求宿主做的事，失败都会有一条 `error` 回执——只有解析不动的文本（不是 JSON、不是这个桥的 channel）才被当作不是发给宿主的话，直接忽略。页面没有订阅 `error` 时也照样送达（订阅前的事件最多缓冲 `8` 条）。
 
 ### 方法
 
 ```js
 brimdeck.version                     // 1
+brimdeck.appVersion                  // 宿主版本；init 到达前是 ''
+brimdeck.limits                      // init 带来的上限；init 到达前是 null
 brimdeck.saveState(state)            // 把插件状态交给宿主保存；下次页面加载时随 init 交还
 brimdeck.setKeepAlive(true)          // 收起后不回收本页资源（默认会回收，见下）
+brimdeck.openUrl(url)                // 把链接交给系统默认浏览器；只有合规的 http/https 完整地址会真的打开
 brimdeck.alarm.set(id, at)           // 登记闹钟：id 为字符串，at 为 Date 或毫秒时间戳；到点触发一次 'alarm'
 brimdeck.alarm.clear(id)
 ```
+
+`openUrl` 与页面里点击的普通链接走同一套地址规则（见「安全模型」），区别只在频率：读者点击不计数，`openUrl` 每个插件在 20 秒内至多 6 次，多出来的那一次收到 `links-too-many`。
 
 ## 生命周期
 
@@ -96,6 +124,8 @@ brimdeck.alarm.clear(id)
 - 页面运行在浏览器渲染进程中，**读不到本机文件、宿主内存与 BrimDeck 保存的任何数据**；宿主也没有向页面提供任何执行本机代码的通道（与本地程序协作的插件将来单独讨论）。
 - 页面只能通过虚拟主机映射读取**自己文件夹内**的文件，各插件之间来源隔离。
 - 需要网络请求的插件自行 fetch；跨域由页面自己的 CSP 与浏览器策略约束。插件仍可向任意地址发起网络请求，**请只安装可信来源的插件**——恶意页面同样可以上报数据或展示误导内容。
+- **出去的链接一律交给系统默认浏览器**，宿主自己不开窗口：页面里点击的 `<a href>`、`target="_blank"` 与 `window.open`，以及 `brimdeck.openUrl(url)`，都按同一套地址规则判定——只接受 `http` / `https` 的完整绝对地址，`javascript:`、`data:`、`file:`、`mailto:`、自定义协议、相对路径、含空格或控制字符的地址、超过 2048 字符的地址全部拒绝，并通过 `error` 事件说明是哪一条。规则与频率上限只有一份实现（宿主里的 `ExternalLinks`），所以页面看到的拒绝理由就是实际执行的那一条。
+- 判定之外还有一道**是否读者点的**：非用户发起的整页跳转（页面自己 `location = ...`）一律取消，插件页不会变成一个浏览器标签页；`openUrl` 因为无法知道有没有点击，按每插件 20 秒 6 次计数。
 - 需要安装 WebView2 运行时（Windows 10/11 常见预装）；缺失时插件页会显示提示。
 
 ## 用户侧：设置 → 插件
