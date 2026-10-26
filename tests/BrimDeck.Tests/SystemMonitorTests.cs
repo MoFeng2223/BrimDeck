@@ -321,6 +321,9 @@ static class SystemMonitorTests
             check("Pages: an ask beyond a page's ceiling is read as that ceiling",
                 DeckPages.Limits(hooks, DeckPage.Extension1) == (DeckPages.MaxWidth, DeckPages.MaxWidth, DeckPages.MaxHeight, DeckPages.MaxHeight)
                 && DeckPages.Limits(hooks, DeckPage.Extension0).MinWidth == DeckPages.MinWidth);
+            DeckPages.SlotMinimum = slot => slot == 2 ? (700, 300) : (0, 0);
+            check("Pages: a plugin with no size saved yet starts at its floor, not below it",
+                DeckPages.Size(hooks, DeckPage.Extension2) == (700, 300) && DeckPages.Size(hooks, DeckPage.Extension3) == ExtensionSizes.Default);
         }
         finally { DeckPages.SlotOccupied = null; DeckPages.SlotId = null; DeckPages.SlotMinimum = null; }
         check("Pages: opening choices", DeckPages.Opening(DefaultDeckPage.Monitor) == DeckPage.Monitor && DeckPages.Opening(DefaultDeckPage.Last) is null

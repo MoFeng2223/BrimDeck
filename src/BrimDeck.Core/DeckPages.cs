@@ -45,11 +45,12 @@ public static class DeckPages
 
     internal static (double Width, double Height) SlotSize(DeckSettings settings, int slot)
     {
-        if (SlotId?.Invoke(slot) is not { } id || settings.Extensions.FirstOrDefault(e => e.Id == id) is not { } entry) return ExtensionSizes.Default;
-        // A size saved before the plugin asked for room, or one that a wider monitor's drag left behind, is read back
-        // at the floor: the page is never laid out in a box that clips it.
         var (minWidth, maxWidth, minHeight, maxHeight) = Limits(settings, ExtensionPage(slot));
-        return (Math.Clamp(entry.Width, minWidth, Math.Max(minWidth, maxWidth)), Math.Clamp(entry.Height, minHeight, maxHeight));
+        // Read back at the floor: a size older than the plugin's ask, one a wider monitor's drag left behind — and the
+        // size a plugin with no entry yet starts at, since its very first page must not be the clipped one.
+        (double Width, double Height) saved = SlotId?.Invoke(slot) is { } id && settings.Extensions.FirstOrDefault(e => e.Id == id) is { } entry
+            ? (entry.Width, entry.Height) : ExtensionSizes.Default;
+        return (Math.Clamp(saved.Width, minWidth, Math.Max(minWidth, maxWidth)), Math.Clamp(saved.Height, minHeight, maxHeight));
     }
 
     // The page the panel opens on; null keeps the last viewed page.
