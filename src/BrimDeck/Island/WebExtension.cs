@@ -169,18 +169,21 @@ internal sealed class WebExtension : IIslandExtension
     }
 
     // A freshly built page loads its document for a moment — longer than a page switch's own arrival — and then
-    // appeared in one step. The shim holds the document unseen from its very first paint; the first finished
-    // navigation fades it in inside the browser, where WPF's own opacity does not reliably reach the composition
-    // content. The shim also clears the hold by itself after a moment, so a host that stops mid-way cannot leave a
-    // page invisible.
+    // appeared in one step. The shim holds the document unseen from its very first paint; every finished navigation
+    // fades it in inside the browser, where WPF's own opacity does not reliably reach the composition content. The
+    // shim also clears the hold by itself after a moment, so a host that stops mid-way cannot leave a page invisible.
+    // A page reloaded after a reclaim arrives the same way: its new document is held by the shim again.
     private void ArriveWhenLoaded(CoreWebView2 core)
     {
-        bool arrived = false;
-        core.NavigationCompleted += async (_, _) =>
+        // The blank a reclaim navigates to is not content: its completion must neither mark the page loaded nor reveal
+        // an empty document. Every other document, reloads included, is revealed.
+        var blanks = new HashSet<ulong>();
+        core.NavigationStarting += (_, e) => { if (e.Uri == "about:blank") blanks.Add(e.NavigationId); };
+        core.NavigationCompleted += async (_, e) =>
         {
+            if (blanks.Remove(e.NavigationId) || !e.IsSuccess) return;
             _loaded = true;
-            if (arrived) return;
-            arrived = true;
+            ExtensionLog.Write("view: arrive " + Id);
             // A load a switch is waiting for comes in from that side; a load the panel opened on fades in place.
             int from = _enterForward is { } forward ? (forward ? 16 : -16) : 0;
             _enterForward = null;
@@ -203,8 +206,10 @@ internal sealed class WebExtension : IIslandExtension
     internal void Enter(bool forward)
     {
         if (!Soft.Enabled) return;
-        _enterForward = forward;
-        if (!_loaded) return;
+        // A loaded page takes its direction now; holding it for a later load would make the next arrival come in from
+        // a switch that already happened. Only a page still loading keeps the direction for its first document.
+        if (!_loaded) { _enterForward = forward; return; }
+        _enterForward = null;
         var script = $$"""
             (function(){var d=document.documentElement||document.body;if(!d)return;var s=d.style;
             s.transition='none';s.transform='translateX({{(forward ? 16 : -16)}}px)';s.opacity='0';
@@ -331,7 +336,11 @@ internal sealed class WebExtension : IIslandExtension
     private void ArmReclaim()
     {
         if (_keepAlive || _shown || _inUse) return;
-        _reclaim ??= new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
+        if (_reclaim is null)
+        {
+            _reclaim = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
+            _reclaim.Tick += Reclaim;
+        }
         _reclaim.Stop();
         _reclaim.Start();
     }

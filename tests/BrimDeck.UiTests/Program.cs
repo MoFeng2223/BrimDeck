@@ -82,13 +82,26 @@ internal static class Program
 
             if (options.Full)
             {
+                int reclaims = CountLog(log, "view: reclaim fixture-a");
+                int arrivals = CountLog(log, "view: arrive fixture-a");
                 Hide();
                 Thread.Sleep(17_000);
+                // The colour alone cannot tell whether the page was reclaimed: a page that was never reclaimed is still
+                // there and looks identical. The host's own log is the evidence the 15s grace actually ran.
+                Require(CountLog(log, "view: reclaim fixture-a") > reclaims, "the closed panel reclaims A after the 15s grace");
+                Console.WriteLine("PASS the closed panel reclaims A after the 15s grace");
+
                 Expand();
-                Thread.Sleep(1500);
+                var watch = Stopwatch.StartNew();
+                bool back = WaitForColor(ColorA, TimeSpan.FromSeconds(5));
+                double elapsed = watch.Elapsed.TotalMilliseconds;
                 KeepOpen();
-                Require(WaitForColorWithReopen(ColorA, TimeSpan.FromSeconds(8)), "after the 15s reclaim A comes back (red page)");
-                Console.WriteLine("PASS after the 15s reclaim A comes back");
+                Require(back, "after the 15s reclaim A comes back (red page)");
+                // The reloaded document is shown by its own arrival, not by the shim's 1.5s fallback: a page that only
+                // appears after that fallback is exactly the blank page this test exists for.
+                Require(elapsed < 1400, "after the reclaim A is drawn without the 1.5s fallback (" + (int)elapsed + " ms)");
+                Require(CountLog(log, "view: arrive fixture-a") > arrivals, "the reclaimed page's new document arrived");
+                Console.WriteLine("PASS after the 15s reclaim A comes back in " + (int)elapsed + " ms");
             }
 
             Console.WriteLine("UI SMOKE PASSED");
@@ -206,6 +219,22 @@ internal static class Program
             if (attempt < 2) Reopen();
         }
         return false;
+    }
+
+    // The host writes its log while the test reads it, and a missing or half-written line is not a test failure: a count
+    // only ever has to grow.
+    private static int CountLog(string log, string text)
+    {
+        try
+        {
+            using var stream = new FileStream(log, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            int count = 0;
+            while (reader.ReadLine() is { } line)
+                if (line.Contains(text, StringComparison.Ordinal)) count++;
+            return count;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return 0; }
     }
 
     private static bool Near(int x, int y, Color expected)

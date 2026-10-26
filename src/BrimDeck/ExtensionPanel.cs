@@ -32,7 +32,13 @@ public partial class MainWindow
         BuildExtensionButtons();
         RenderPageSwitch();
         UpdateMonitorDemand();
-        if (_expanded) ApplySettings();
+        if (_expanded)
+        {
+            ApplySettings();
+            // A plugin that just appeared gets its page built now, as an opening panel does: the first switch to it is
+            // warm instead of paying the page's whole load in front of the user.
+            EnsureExtensionViews();
+        }
     }
 
     internal void RenderExtension()
