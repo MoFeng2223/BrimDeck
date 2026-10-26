@@ -195,8 +195,10 @@ internal sealed class WebExtension : IIslandExtension
     }
 
     // The switch's own arrival cannot animate a WebView through WPF opacity. A page that is already loaded gets its
-    // entrance inside the browser instead — from the side it is switched in from, fading up — while the page left
-    // behind leaves as a picture above it. A page still loading takes the entrance of its first navigation.
+    // entrance inside the browser instead: it glides in from the side it is switched in from, staying fully visible —
+    // no fade, because a page held even briefly unseen reads as a hitch, and a dark page's fade is invisible anyway.
+    // The page left behind leaves as a fading picture above it. A page still loading takes the entrance of its first
+    // navigation.
     internal void Enter(bool forward)
     {
         if (!Soft.Enabled) return;
@@ -204,9 +206,9 @@ internal sealed class WebExtension : IIslandExtension
         if (!_loaded) return;
         var script = $$"""
             (function(){var d=document.documentElement||document.body;if(!d)return;var s=d.style;
-            s.transition='none';s.transform='translateX({{(forward ? 16 : -16)}}px)';s.opacity='0';
-            s.transition='opacity {{Soft.Move}}ms ease-out, transform {{Soft.Move}}ms ease-out';
-            requestAnimationFrame(function(){requestAnimationFrame(function(){s.transform='none';s.opacity='1';});});})()
+            s.transition='none';s.transform='translateX({{(forward ? 16 : -16)}}px)';s.opacity='1';
+            s.transition='transform {{Soft.Move}}ms ease-out';
+            requestAnimationFrame(function(){requestAnimationFrame(function(){s.transform='none';});});})()
             """;
         foreach (var (_, core) in Pages())
             _ = Run(core, script);
