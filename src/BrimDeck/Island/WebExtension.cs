@@ -155,6 +155,9 @@ internal sealed class WebExtension : IIslandExtension
     public string TitleZh => _manifest.TitleZh;
     public string TitleEn => _manifest.TitleEn;
     public string Glyph => _manifest.Glyph;
+    // The smallest page this plugin can show without losing content, as its manifest asks; zero on either axis means it
+    // asks for nothing beyond the panel's own floor.
+    internal (double Width, double Height) Minimum => (_manifest.MinWidth, _manifest.MinHeight);
 
     public FrameworkElement CreateView(IslandColors colors)
     {

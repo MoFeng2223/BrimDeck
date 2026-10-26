@@ -126,6 +126,8 @@ internal static class IslandExtensions
 
         DeckPages.SlotOccupied = slot => Slots[slot] is not null;
         DeckPages.SlotId = slot => _ids[slot];
+        // Each plugin's own floor for its page, so the panel cannot be dragged (or left saved) into a box that clips it.
+        DeckPages.SlotMinimum = slot => Slots[slot] is WebExtension web ? web.Minimum : (0, 0);
         // The WebView2 runtime is probed once, but only when there is a plugin to show: a machine without plugins never
         // starts a browser process it has no use for, and a page created later still probes on its own.
         if (Slots.Any(slot => slot is not null)) _ = WebRuntime.Environment();

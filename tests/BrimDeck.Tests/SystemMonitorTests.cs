@@ -305,8 +305,24 @@ static class SystemMonitorTests
             DeckPages.SetSize(hooks, DeckPage.Extension1, 500, 200);
             check("Pages: a drag resizes the extension page's own entry",
                 DeckPages.Size(hooks, DeckPage.Extension1) == (500, 200) && hooks.Extensions[1] is { Id: "sized", Width: 500 });
+            // A plugin can say how small its page may go; the host keeps the drag and the saved size above that.
+            DeckPages.SlotMinimum = slot => slot == 1 ? (620, 240) : (0, 0);
+            check("Pages: a plugin's own minimum raises that page's limits",
+                DeckPages.Limits(hooks, DeckPage.Extension1) is (>= 620, _, >= 240, _)
+                && DeckPages.Limits(hooks, DeckPage.Extension0).MinWidth == DeckPages.MinWidth
+                && DeckPages.Limits(hooks, DeckPage.Music).MinHeight == DeckPages.MinHeight);
+            DeckPages.SetSize(hooks, DeckPage.Extension1, 571, 199);
+            check("Pages: a drag that would clip the plugin stops at its minimum",
+                DeckPages.Size(hooks, DeckPage.Extension1) == (620, 240));
+            hooks.Extensions[1] = hooks.Extensions[1] with { Width = 500, Height = 180 };
+            check("Pages: a size saved before the plugin asked for room is read back at that floor",
+                DeckPages.Size(hooks, DeckPage.Extension1) == (620, 240));
+            DeckPages.SlotMinimum = slot => slot == 1 ? (4000, 4000) : (0, 0);
+            check("Pages: an ask beyond a page's ceiling is read as that ceiling",
+                DeckPages.Limits(hooks, DeckPage.Extension1) == (DeckPages.MaxWidth, DeckPages.MaxWidth, DeckPages.MaxHeight, DeckPages.MaxHeight)
+                && DeckPages.Limits(hooks, DeckPage.Extension0).MinWidth == DeckPages.MinWidth);
         }
-        finally { DeckPages.SlotOccupied = null; DeckPages.SlotId = null; }
+        finally { DeckPages.SlotOccupied = null; DeckPages.SlotId = null; DeckPages.SlotMinimum = null; }
         check("Pages: opening choices", DeckPages.Opening(DefaultDeckPage.Monitor) == DeckPage.Monitor && DeckPages.Opening(DefaultDeckPage.Last) is null
             && DeckPages.Opening(DefaultDeckPage.Usage) == DeckPage.Usage && DeckPages.Opening(DefaultDeckPage.Music) == DeckPage.Music
             && DeckPages.Opening(DefaultDeckPage.Extension0) == DeckPage.Extension0);

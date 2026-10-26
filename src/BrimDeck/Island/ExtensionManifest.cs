@@ -6,7 +6,8 @@ namespace BrimDeck.Island;
 
 // A plugin folder's manifest: the manifest.json a plugin author writes, read once per scan. Everything on it is plain
 // data from a local file — no code of any kind runs while loading a plugin, which is the whole point of the web model.
-internal sealed record ExtensionManifest(string Id, string TitleZh, string TitleEn, string Glyph, string Entry);
+// MinWidth/MinHeight are the smallest page the plugin can show without losing content; zero means it asks for none.
+internal sealed record ExtensionManifest(string Id, string TitleZh, string TitleEn, string Glyph, string Entry, double MinWidth, double MinHeight);
 
 internal static class ExtensionManifests
 {
@@ -23,6 +24,9 @@ internal static class ExtensionManifests
             using var document = JsonDocument.Parse(bytes);
             var root = document.RootElement;
             string Id(string name) => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString()!.Trim() : "";
+            // A page's floor is the author's claim about their own layout; a wild number is dropped rather than trusted.
+            double Min(string name) => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
+                && value.TryGetDouble(out var number) && number >= 40 && number <= 4000 ? Math.Round(number) : 0;
             var id = Id("id");
             var titleZh = Id("titleZh");
             var titleEn = Id("titleEn");
@@ -40,7 +44,8 @@ internal static class ExtensionManifests
             if (entry.Contains("..") || entry.Contains('\\') || Path.IsPathRooted(entry) || Uri.TryCreate(entry, UriKind.Absolute, out _))
                 return (null, "manifest.json: entry " + Loc.T("必须是插件文件夹内的相对路径", "must be a relative path inside the plugin folder"));
             if (!File.Exists(Path.Combine(folder, entry))) return (null, Loc.T("入口文件不存在：", "The entry file is missing: ") + entry);
-            return (new ExtensionManifest(id, titleZh.Length > 0 ? titleZh : titleEn, titleEn.Length > 0 ? titleEn : titleZh, glyph, entry), null);
+            return (new ExtensionManifest(id, titleZh.Length > 0 ? titleZh : titleEn, titleEn.Length > 0 ? titleEn : titleZh, glyph, entry,
+                Min("minWidth"), Min("minHeight")), null);
         }
         catch (Exception ex)
         {

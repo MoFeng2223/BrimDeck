@@ -143,9 +143,14 @@ public sealed partial class SettingsWindow
 
         var details = new StackPanel { Margin = new Thickness(26, 0, 0, 10), Visibility = _pluginOpen[slot] ? Visibility.Visible : Visibility.Collapsed };
         var dimensions = new Grid { MinHeight = 44 }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
-        var width = Dimension(Loc.T("宽度", "Width"), entry?.Width ?? ExtensionSizes.Default.Width, 440, 1200, value => Resize(s => SetSlotSize(s, slot, value, null), DeckPages.ExtensionPage(slot)));
+        // The page's own limits, which a plugin's manifest can raise: the fields offer exactly the sizes the page can take,
+        // and show the size it is actually using even when an older file saved less.
+        var page = DeckPages.ExtensionPage(slot);
+        var (floorWidth, ceilingWidth, floorHeight, ceilingHeight) = DeckPages.Limits(S, page);
+        var (usedWidth, usedHeight) = DeckPages.Size(S, page);
+        var width = Dimension(Loc.T("宽度", "Width"), usedWidth, floorWidth, ceilingWidth, value => Resize(s => SetSlotSize(s, slot, value, null), page));
         width.Margin = new Thickness(0, 0, 20, 0); dimensions.Children.Add(width);
-        var height = Dimension(Loc.T("高度", "Height"), entry?.Height ?? ExtensionSizes.Default.Height, 140, 400, value => Resize(s => SetSlotSize(s, slot, null, value), DeckPages.ExtensionPage(slot)));
+        var height = Dimension(Loc.T("高度", "Height"), usedHeight, floorHeight, ceilingHeight, value => Resize(s => SetSlotSize(s, slot, null, value), page));
         height.Margin = new Thickness(20, 0, 0, 0); Grid.SetColumn(height, 1); dimensions.Children.Add(height);
         details.Children.Add(dimensions);
         var source = TextLine(id + (file.Length > 0 ? " · " + file : ""), 11.5, TextTertiary);
@@ -157,14 +162,13 @@ public sealed partial class SettingsWindow
         return column;
     }
 
-    // Writes one dimension of an extension page's size into its own settings entry.
+    // Writes one dimension of an extension page's size into its own settings entry. The other dimension is read back
+    // first, and the host clamps both: a page never ends up smaller than its plugin asked for.
     private static void SetSlotSize(DeckSettings settings, int slot, double? width, double? height)
     {
-        if (DeckPages.SlotId?.Invoke(slot) is not { } id) return;
-        var at = settings.Extensions.FindIndex(e => e.Id == id);
-        if (at < 0) { settings.Extensions.Add(new ExtensionPageSettings(id)); at = settings.Extensions.Count - 1; }
-        var entry = settings.Extensions[at];
-        settings.Extensions[at] = entry with { Width = width ?? entry.Width, Height = height ?? entry.Height };
+        var page = DeckPages.ExtensionPage(slot);
+        var (nowWidth, nowHeight) = DeckPages.Size(settings, page);
+        DeckPages.SetSize(settings, page, width ?? nowWidth, height ?? nowHeight);
     }
 
     // Writes the plugin's own entry, creating it on the first change so an untouched plugin keeps its defaults.
