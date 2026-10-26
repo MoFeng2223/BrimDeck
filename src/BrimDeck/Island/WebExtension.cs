@@ -202,8 +202,9 @@ internal sealed class WebExtension : IIslandExtension
                 ? $$"""
                   (function(){var d=document.documentElement||document.body;if(!d)return;var s=d.style;
                   s.transition='none';s.transform='translateX({{from}}px)';
+                  void d.offsetHeight;
                   s.transition='opacity 350ms ease-out, transform 350ms ease-out';
-                  requestAnimationFrame(function(){requestAnimationFrame(function(){s.opacity='1';s.transform='none';});});})()
+                  s.opacity='1';s.transform='none';})()
                   """
                 : "document.documentElement.style.opacity='1';";
             try { await core.ExecuteScriptAsync(script).ConfigureAwait(true); } catch (Exception) { }
@@ -217,16 +218,20 @@ internal sealed class WebExtension : IIslandExtension
     internal void Enter(bool forward)
     {
         if (!Soft.Enabled) return;
+        ExtensionLog.Write("view: enter " + Id + " forward=" + forward + " loaded=" + _loaded);
         // A loaded page takes its direction now; holding it for a later load would make the next arrival come in from
         // a switch that already happened. Only a page still loading keeps the direction for its first document.
         if (!_loaded) { _enterForward = forward; return; }
         _enterForward = null;
+        // Reading a layout property between the two writes is what makes this animate: without the flush the browser
+        // never commits the held start, sees no change from full to full, and the page simply appears at full
+        // brightness. A frame callback is not enough — a view that has just been shown can run both in one batch.
         var script = $$"""
             (function(){var d=document.documentElement||document.body;if(!d)return;var s=d.style;
             s.transition='none';s.transform='translateX({{(forward ? 16 : -16)}}px)';s.opacity='0';
-            requestAnimationFrame(function(){requestAnimationFrame(function(){
+            void d.offsetHeight;
             s.transition='transform {{Soft.Move}}ms ease-out, opacity {{Soft.Move}}ms ease-out';
-            s.transform='none';s.opacity='1';});});})()
+            s.transform='none';s.opacity='1';})()
             """;
         foreach (var (_, core) in Pages())
             _ = Run(core, script);
