@@ -96,7 +96,26 @@ internal static class WebRuntime
     public static void SetLanguage(bool english)
     {
         var language = english ? "en" : "zh";
-        foreach (var extension in _all.ToList()) extension.Push("{\"channel\":\"brimdeck\",\"kind\":\"language\",\"data\":\"" + language + "\"}");
+        // A plugin's own words are read in the interface's language, so they follow the language wherever it changes.
+        foreach (var extension in _all.ToList())
+        {
+            extension.Push("{\"channel\":\"brimdeck\",\"kind\":\"language\",\"data\":\"" + language + "\"}");
+            extension.PushPhrases();
+        }
+    }
+
+    // A reader changed one plugin's control in the settings window, or a page wrote one: every live page of that plugin
+    // gets the whole set again, in the shape its own manifest declares.
+    public static void ValuesChanged(string id)
+    {
+        foreach (var extension in _all.ToList()) if (extension.Id == id) extension.PushSettings();
+    }
+
+    // Every plugin's values, pushed: the settings window applied a change, and each page should read what the file says
+    // now rather than what it read when it loaded.
+    public static void PushValues()
+    {
+        foreach (var extension in _all.ToList()) extension.PushSettings();
     }
 
     // The tick runs only while some extension has an alarm waiting; a sleeping app costs nothing here.
@@ -163,6 +182,60 @@ internal sealed class WebExtension : IIslandExtension
     // The smallest page this plugin can show without losing content, as its manifest asks; zero on either axis means it
     // asks for nothing beyond the panel's own floor.
     internal (double Width, double Height) Minimum => (_manifest.MinWidth, _manifest.MinHeight);
+    // What the plugin declared for the host to draw and speak: the controls it offers and the words it needs.
+    internal IReadOnlyList<ExtensionSetting> Declared => _manifest.Settings;
+    private string SettingsJson => ExtensionSettingStore.ValuesJson(_manifest.Settings, IslandExtensions.ValuesFor(Id));
+    private string PhrasesJson => ExtensionSettingStore.PhrasesJson(_manifest.Phrases, Loc.IsEnglish);
+    internal void PushSettings() => Push("{\"channel\":\"brimdeck\",\"kind\":\"settings\",\"data\":" + SettingsJson + "}");
+    internal void PushPhrases() => Push("{\"channel\":\"brimdeck\",\"kind\":\"phrases\",\"data\":" + PhrasesJson + "}");
+
+    // A page asked to change one of its own controls. Only a declared key is answerable, and the value is read as that
+    // control reads it: a page that writes 63 to a step of fives gets 65 back, because the declaration — not the page —
+    // decides what a value means. The write goes to the app, which owns the file and the other views of it.
+    private void WriteSetting(JsonElement root, CoreWebView2? from)
+    {
+        if (!root.TryGetProperty("key", out var keyNode) || keyNode.ValueKind != JsonValueKind.String)
+        {
+            Refused(from, "bad-setting", "setSetting wants a key and a value");
+            return;
+        }
+        var key = keyNode.GetString()!;
+        var setting = _manifest.Settings.FirstOrDefault(item => item.Key == key);
+        if (setting is null)
+        {
+            Refused(from, "unknown-setting", key);
+            return;
+        }
+        if (!root.TryGetProperty("value", out var value))
+        {
+            Refused(from, "bad-setting", setting.Key + " wants a value");
+            return;
+        }
+        ExtensionSettingValue? parsed = setting.Kind switch
+        {
+            ExtensionSettingKind.Toggle when value.ValueKind is JsonValueKind.True or JsonValueKind.False => new ExtensionSettingValue("toggle", value.GetBoolean()),
+            ExtensionSettingKind.Number when value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var number) => new ExtensionSettingValue("number", false, number),
+            ExtensionSettingKind.Choice when value.ValueKind == JsonValueKind.String => new ExtensionSettingValue("choice", false, 0, value.GetString() ?? ""),
+            _ => null
+        };
+        if (parsed is null)
+        {
+            Refused(from, "bad-setting", setting.Key + " takes a " + setting.Type);
+            return;
+        }
+        var honored = ExtensionSettingStore.Honor(setting, parsed);
+        // What the host kept, not what was asked for: a page that wrote 63 to a step of fives reads this line and knows
+        // the number it will be given back is 65.
+        ExtensionLog.Write($"view: setting {Id} {key}={honorValue(honored, setting)}");
+        IslandExtensions.Write(Id, key, honored);
+
+        static string honorValue(ExtensionSettingValue value, ExtensionSetting setting) => setting.Kind switch
+        {
+            ExtensionSettingKind.Toggle => value.On ? "true" : "false",
+            ExtensionSettingKind.Number => value.Number.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            _ => value.Choice
+        };
+    }
 
     public FrameworkElement CreateView(IslandColors colors)
     {
@@ -572,6 +645,9 @@ internal sealed class WebExtension : IIslandExtension
                         if (root.TryGetProperty("url", out var url) && url.ValueKind == JsonValueKind.String) Open(from, url.GetString());
                         else Refused(from, "bad-link", "openUrl wants a url string");
                         break;
+                    case "setSetting":
+                        WriteSetting(root, from);
+                        break;
                     default:
                         // A page that sends something the host does not know is a page written against another bridge.
                         Refused(from, "unknown-kind", Short(kind.GetString() ?? ""));
@@ -609,6 +685,8 @@ internal sealed class WebExtension : IIslandExtension
         Push("{\"channel\":\"brimdeck\",\"kind\":\"init\",\"apiVersion\":" + Bridge.Version
             + ",\"appVersion\":" + JsonSerializer.Serialize(ApplicationVersion.Current)
             + ",\"limits\":" + Bridge.LimitsJson
+            + ",\"settings\":" + SettingsJson
+            + ",\"phrases\":" + PhrasesJson
             + ",\"language\":\"" + (Loc.IsEnglish ? "en" : "zh")
             + "\",\"shown\":" + (_shown ? "true" : "false") + ",\"colors\":" + WebColors.Json + ",\"state\":" + (_stateJson ?? "null") + "}");
         foreach (var id in missed) Push("{\"channel\":\"brimdeck\",\"kind\":\"alarm\",\"data\":" + JsonSerializer.Serialize(id) + "}");
@@ -692,17 +770,25 @@ internal sealed class WebExtension : IIslandExtension
                 version: {{Bridge.Version}},
                 limits: null,
                 appVersion: '',
+                settings: {},
+                phrases: {},
                 on: function (kind, fn) {
                     if (typeof kind !== 'string' || typeof fn !== 'function') return;
                     (listeners[kind] = listeners[kind] || []).push(fn);
                     var queued = pending[kind];
                     if (queued) { delete pending[kind]; queued.forEach(function (data) { try { fn(data); } catch (e) { } }); }
                 },
+                // The plugin's own words, in the language the interface is spoken in. A key the author left out reads
+                // back as itself, so a missing phrase shows the author's name for it instead of a hole.
+                phrase: function (key) { return api.phrases[key] !== undefined ? api.phrases[key] : key; },
                 saveState: function (state) { post({ kind: 'saveState', state: state === undefined ? null : state }); },
                 setKeepAlive: function (on) { post({ kind: 'keepAlive', on: !!on }); },
                 // A link leaves the island: the host opens it in the desktop browser, but only an http/https address,
                 // and at a rate every plugin is held to — the host cannot tell this call from a loop.
                 openUrl: function (url) { if (typeof url === 'string') post({ kind: 'openUrl', url: url }); },
+                // One of the controls the manifest declared. The host answers with the value it kept, which is that
+                // control's own range and step applied to what was written here.
+                setSetting: function (key, value) { if (typeof key === 'string') post({ kind: 'setSetting', key: key, value: value }); },
                 alarm: {
                     set: function (id, at) {
                         var ms = at instanceof Date ? at.getTime() : Number(at);
@@ -723,7 +809,13 @@ internal sealed class WebExtension : IIslandExtension
                     api.limits = message.limits;
                     api.colors = message.colors;
                     api.language = message.language;
+                    api.settings = message.settings || {};
+                    api.phrases = message.phrases || {};
                 }
+                // The live copies are replaced before the page hears about them: brimdeck.settings and brimdeck.phrase
+                // should never answer with a value the event has already superseded.
+                if (message.kind === 'settings') api.settings = message.data || {};
+                if (message.kind === 'phrases') api.phrases = message.data || {};
                 emit(message.kind, message.data !== undefined ? message.data : message);
             });
             post({ kind: 'hello' });
