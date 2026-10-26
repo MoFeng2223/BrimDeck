@@ -95,5 +95,47 @@ public partial class MainWindow
         for (int at = 0; at < _extensionViews.Length; at++)
             if (_extensionViews[at] is { } view)
                 view.Visibility = at == slot ? Visibility.Visible : Visibility.Hidden;
+        if (slot < 0) return;
+        if (EnteringExtension) VeilArrival(); else LiftVeil();
+    }
+
+    // Set while a page switch is arriving at a plugin page: the arriving page is covered for the beat it cannot be
+    // trusted to show, and its entrance plays inside the browser.
+    internal bool EnteringExtension { get; set; }
+
+    // A WebView that was off screen keeps handing out its last composited frame for a few frames after it comes back,
+    // so the arriving page is briefly seen at full brightness over the page it replaces — the overlap that reads as a
+    // stutter. The panel's own surface covers that beat, then lifts while the page fades in behind it.
+    private void VeilArrival()
+    {
+        ArrivalVeil.Background = _surface;
+        ArrivalVeil.Opacity = 1;
+        ArrivalVeil.Visibility = Visibility.Visible;
+        // Last child, so it lies over every page view: a Grid draws its children in document order.
+        ExtensionContent.Children.Remove(ArrivalVeil);
+        ExtensionContent.Children.Add(ArrivalVeil);
+        if (!Soft.Enabled) return;
+        // Held for the beat the stale frame lasts, then lifted quickly: the page's own entrance carries the rest of the
+        // way in, and a cover still half-opaque that late would only make the arrival drag.
+        var lift = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(120))
+        {
+            BeginTime = TimeSpan.FromMilliseconds(90),
+            FillBehavior = FillBehavior.Stop
+        };
+        lift.Completed += (_, _) =>
+        {
+            ArrivalVeil.BeginAnimation(OpacityProperty, null);
+            ArrivalVeil.Opacity = 1;
+            ArrivalVeil.Visibility = Visibility.Collapsed;
+        };
+        ArrivalVeil.BeginAnimation(UIElement.OpacityProperty, lift);
+    }
+
+    // A page shown without a switch's entrance (the panel reopened on it, a theme change) needs no cover at all.
+    private void LiftVeil()
+    {
+        ArrivalVeil.BeginAnimation(OpacityProperty, null);
+        ArrivalVeil.Opacity = 1;
+        ArrivalVeil.Visibility = Visibility.Collapsed;
     }
 }

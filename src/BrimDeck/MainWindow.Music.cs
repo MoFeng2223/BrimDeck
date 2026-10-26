@@ -129,9 +129,13 @@ public partial class MainWindow
         // its own fill, so what slides away reads as a page, not a wisp of strokes.
         var picture = animate ? PageHandover.Capture(from, DeckPages.SlotOf(before) >= 0 ? _surface : null) : null;
         var place = PageHandover.Place(from);
-        ShowPage(page, animatePage: changed && _expanded && !_preview);
+        int arriving = DeckPages.SlotOf(page);
+        // The arriving plugin page is covered for its first frames (see VeilArrival): the show has to say so.
+        EnteringExtension = arriving >= 0 && animate;
+        try { ShowPage(page, animatePage: changed && _expanded && !_preview); }
+        finally { EnteringExtension = false; }
         bool back = DeckPages.Order.ToList().IndexOf(page) < DeckPages.Order.ToList().IndexOf(before);
-        if (DeckPages.SlotOf(page) is var extension and >= 0)
+        if (arriving is var extension and >= 0)
         {
             // The page switch's own arrival cannot animate a WebView through WPF opacity: the plugin page arrives by
             // an entrance the host plays inside the browser, while the page left behind leaves as a picture above it.
