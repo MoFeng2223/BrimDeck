@@ -50,7 +50,9 @@ internal static class WebRuntime
         {
             var folder = Path.Combine(AppPaths.Data, "extension-web");
             ExtensionLog.Write("runtime: creating environment at " + folder);
-            return await CoreWebView2Environment.CreateAsync(null, folder, null).ConfigureAwait(true);
+            var environment = await CoreWebView2Environment.CreateAsync(null, folder, null).ConfigureAwait(true);
+            ExtensionLog.Write("runtime: environment ready");
+            return environment;
         }
         catch (Exception ex)
         {
@@ -195,10 +197,9 @@ internal sealed class WebExtension : IIslandExtension
     }
 
     // The switch's own arrival cannot animate a WebView through WPF opacity. A page that is already loaded gets its
-    // entrance inside the browser instead: it glides in from the side it is switched in from, staying fully visible —
-    // no fade, because a page held even briefly unseen reads as a hitch, and a dark page's fade is invisible anyway.
-    // The page left behind leaves as a fading picture above it. A page still loading takes the entrance of its first
-    // navigation.
+    // entrance inside the browser instead: it comes in from the side it is switched in from while the picture of the
+    // page left behind fades off it. The page carries the switch's own arrival too — faint to full over the same move —
+    // so the motion stays visible after the picture has gone rather than finishing unseen beneath it.
     internal void Enter(bool forward)
     {
         if (!Soft.Enabled) return;
@@ -206,9 +207,10 @@ internal sealed class WebExtension : IIslandExtension
         if (!_loaded) return;
         var script = $$"""
             (function(){var d=document.documentElement||document.body;if(!d)return;var s=d.style;
-            s.transition='none';s.transform='translateX({{(forward ? 16 : -16)}}px)';s.opacity='1';
-            s.transition='transform {{Soft.Move}}ms ease-out';
-            requestAnimationFrame(function(){requestAnimationFrame(function(){s.transform='none';});});})()
+            s.transition='none';s.transform='translateX({{(forward ? 16 : -16)}}px)';s.opacity='0';
+            requestAnimationFrame(function(){requestAnimationFrame(function(){
+            s.transition='transform {{Soft.Move}}ms ease-out, opacity {{Soft.Move}}ms ease-out';
+            s.transform='none';s.opacity='1';});});})()
             """;
         foreach (var (_, core) in Pages())
             _ = Run(core, script);

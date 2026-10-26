@@ -75,7 +75,7 @@ public partial class MainWindow
                     Margin = new Thickness(8), TextWrapping = TextWrapping.Wrap
                 };
             }
-            view.Visibility = Visibility.Collapsed;
+            view.Visibility = Visibility.Hidden;
             _extensionViews[slot] = view;
             _extensionKeys[slot] = key;
             ExtensionContent.Children.Add(view);
@@ -88,6 +88,6 @@ public partial class MainWindow
     {
         for (int at = 0; at < _extensionViews.Length; at++)
             if (_extensionViews[at] is { } view)
-                view.Visibility = at == slot ? Visibility.Visible : Visibility.Collapsed;
+                view.Visibility = at == slot ? Visibility.Visible : Visibility.Hidden;
     }
 }

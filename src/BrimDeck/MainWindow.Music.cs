@@ -135,7 +135,7 @@ public partial class MainWindow
         {
             // The page switch's own arrival cannot animate a WebView through WPF opacity: the plugin page arrives by
             // an entrance the host plays inside the browser, while the page left behind leaves as a picture above it.
-            IslandExtensions.Enter(extension, forward: !back);
+            if (animate) IslandExtensions.Enter(extension, forward: !back);
             _handover.Send(picture, place, PageContent(page), back ? Handover.Back : Handover.Forward, animateArrival: false);
         }
         else
@@ -480,7 +480,8 @@ public partial class MainWindow
         // Only a page that was on screen hands over; one that arrives by the page switch or with the panel opening comes in whole.
         bool shown = MusicContent.IsVisible && _expanded && !_preview;
         RefreshStatus();
-        UsageContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ExtensionContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Visible;
+        UsageContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ExtensionContent.Visibility = Visibility.Visible; MusicContent.Visibility = Visibility.Visible;
+        ShowExtensionView(-1);
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         double h = ContentCanvas.Height, w = ContentCanvas.Width;
         var track = _mediaTrack;
