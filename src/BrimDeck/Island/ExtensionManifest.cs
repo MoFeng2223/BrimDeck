@@ -24,10 +24,11 @@ internal static class ExtensionManifests
             using var document = JsonDocument.Parse(bytes);
             var root = document.RootElement;
             string Id(string name) => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString()!.Trim() : "";
-            // A page's floor is the author's claim about their own layout: a number of at least 40 pixels, and larger
-            // than the panel's own limits is honored as far as a page can go (DeckPages.Limits caps it).
+            // A page's floor is the author's claim about their own layout: a number of at least 40 pixels, rounded up —
+            // a floor rounded down would let the page go under it — and larger than the panel's own limits is honored as
+            // far as a page can go (DeckPages.Limits caps it).
             double Min(string name) => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
-                && value.TryGetDouble(out var number) && number >= 40 ? Math.Round(number) : 0;
+                && value.TryGetDouble(out var number) && number >= 40 ? Math.Ceiling(number) : 0;
             var id = Id("id");
             var titleZh = Id("titleZh");
             var titleEn = Id("titleEn");
