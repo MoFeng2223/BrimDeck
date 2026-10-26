@@ -52,6 +52,21 @@ public sealed record ExtensionSetting(
         ExtensionSettingKind.Number => "number",
         _ => "choice"
     };
+
+    // The grid this control's values live on: min, then whole steps, counted from min, with the float dust swept off —
+    // step 0.1 three times from 0 is 0.30000000000000004, and a page should not be asked to compare against that.
+    // Everything that can name a value goes through here, so the row in the settings page, the number a page reads at
+    // init and the answer the host stores are one number rather than three that nearly agree.
+    public double Snap(double value)
+    {
+        if (!double.IsFinite(value)) return DefaultNumber;
+        var clamped = Math.Clamp(value, Minimum, Maximum);
+        if (!(Step > 0) || !double.IsFinite(Step)) return Round(clamped);
+        var steps = Math.Round((clamped - Minimum) / Step, MidpointRounding.AwayFromZero);
+        return Round(Math.Clamp(Minimum + steps * Step, Minimum, Maximum));
+    }
+
+    private static double Round(double value) => Math.Round(value, 6, MidpointRounding.AwayFromZero);
 }
 
 // Reading a plugin's declarations: the controls it wants the host to show, and the words it wants the host to speak in
@@ -151,10 +166,12 @@ public static class ExtensionDeclarations
         double step = Decimal(item, "step", 1);
         if (!(double.IsFinite(step) && step > 0)) step = 1;
         // An author's default that misses the range is pulled into it rather than dropped: the row still says what they
-        // meant, and the page reads a value the host can honour.
+        // meant, and the page reads a value the host can honour. Then onto the step as well — a default between two
+        // steps is a value the page reads once and cannot write back unchanged.
         double fallback = item.TryGetProperty("default", out var asked) && asked.ValueKind == JsonValueKind.Number && asked.TryGetDouble(out var wanted)
             ? Math.Clamp(wanted, minimum, maximum) : Math.Clamp(0, minimum, maximum);
-        return new ExtensionSetting(key, ExtensionSettingKind.Number, label, false, fallback, "", minimum, maximum, step, Array.Empty<ExtensionSettingOption>());
+        var setting = new ExtensionSetting(key, ExtensionSettingKind.Number, label, false, fallback, "", minimum, maximum, step, Array.Empty<ExtensionSettingOption>());
+        return setting with { DefaultNumber = setting.Snap(fallback) };
     }
 
     private static ExtensionSetting? Choice(JsonElement item, string key, ExtensionText label, List<string> notes, string where)

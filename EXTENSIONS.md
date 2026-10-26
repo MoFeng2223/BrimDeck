@@ -20,7 +20,7 @@ BrimDeck 支持在不修改主程序源码的情况下添加自定义页面。�
 | `entry` | 否 | 入口页面，默认 `index.html`；必须是插件文件夹内的相对路径 |
 | `minWidth` / `minHeight` | 否 | 页面不裁切所需的最小**视口**（CSS 像素，不小于 40）；不声明则用全局下限。宿主把它换算成面板尺寸（加上自己的标题行与边距），所以插件只需描述自己的页面，不必知道面板的布局。用户将面板拖得更小时，本页会停在这个尺寸上，其余页照常缩小 |
 | `minApiVersion` | 否 | 页面依赖的桥接版本，≥1 的整数，默认 1。声明得比宿主当前版本高时，这个文件夹在扫描时就被拒绝，原因显示在「未能加载」里（两个版本号都写上）——总比加载一个永远等不到所需消息的空白页好 |
-| `settings` | 否 | 交给宿主渲染的设置项数组（至多 16 项）：`{key, type: "toggle"｜"number"｜"choice", label, default, …}`。number 另有 `min`/`max`/`step`，choice 另有 `options:[{value,label}]`。`label` 可以是字符串（中英同字），也可以写 `{"zh":"…","en":"…"}`；不写就用 key 顶上。宿主把它画在「设置 → 插件」那一行里，值随插件保存，读者不用打开文件夹，作者不用写一行设置界面 |
+| `settings` | 否 | 交给宿主渲染的设置项数组（至多 16 项）：`{key, type: "toggle"｜"number"｜"choice", label, default, …}`。number 另有 `min`/`max`/`step`，choice 另有 `options:[{value,label}]`；number 的 `default` 先夹进 `min`–`max`，再落到从 `min` 数起的 `step` 格点上，所以页面第一次读到的值也是它写回来时不会被改动的值。`label` 可以是字符串（中英同字），也可以写 `{"zh":"…","en":"…"}`；不写就用 key 顶上。宿主把它画在「设置 → 插件」那一行里，值随插件保存，读者不用打开文件夹，作者不用写一行设置界面 |
 | `phrases` | 否 | 页面文案的字典（至多 64 条）：`{"hot":"过热"}` 或 `{"hot":{"zh":"过热","en":"Overheating"}}`。宿主按界面语言把当前那份交给页面（`brimdeck.phrase(key)`），语言切换时再推一次；缺的条目页面读回 key 本身 |
 
 `settings` 与 `phrases` 里有一项写错不会让插件失效：那一项被跳过，说明列在「设置 → 插件」里该插件行展开后的「已忽略的声明项」下（开了扩展日志时也会写一行 `extension: note …`），其余照常。会被跳过的写法：key 越出字母数字与 `- . _`、同 key 重复、type 不是那三种、number 的 `min` 不小于 `max` 或不是有限数、choice 没有带 `value` 的 option。

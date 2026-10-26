@@ -30,11 +30,20 @@ internal static class ExtensionSettingTests
         check("Settings: a toggle without a default starts off, and the type is not case-sensitive",
             One("""{"id":"demo","titleZh":"演示","settings":[{"key":"a","type":"TOGGLE","label":"A"}]}""") is { DefaultToggle: false, Type: "toggle" });
 
-        var gauge = One("""{"id":"demo","titleZh":"演示","settings":[{"key":"warn","type":"number","label":{"zh":"告警温度","en":"Warn at"},"min":30,"max":110,"step":2,"default":65}]}""");
+        var gauge = One("""{"id":"demo","titleZh":"演示","settings":[{"key":"warn","type":"number","label":{"zh":"告警温度","en":"Warn at"},"min":30,"max":110,"step":2,"default":64}]}""");
         check("Settings: a number carries its range, step and default in the language pair the author wrote",
-            gauge is { Kind: ExtensionSettingKind.Number, Minimum: 30, Maximum: 110, Step: 2, DefaultNumber: 65, Label.Zh: "告警温度", Label.En: "Warn at" });
+            gauge is { Kind: ExtensionSettingKind.Number, Minimum: 30, Maximum: 110, Step: 2, DefaultNumber: 64, Label.Zh: "告警温度", Label.En: "Warn at" });
         check("Settings: a number default outside the range is pulled into it, not thrown away",
             One("""{"id":"demo","titleZh":"演示","settings":[{"key":"a","type":"number","min":30,"max":40,"default":900}]}""") is { DefaultNumber: 40 });
+        // The page reads its first value from the declaration and writes it back through the gate the host honours, so a
+        // default between two steps is a number that moves when nobody touches it: the first setSetting lands it on the
+        // grid, saves it and pushes the row again. The declaration is made self-consistent here, once, for every reader.
+        var offGrid = One("""{"id":"demo","titleZh":"演示","settings":[{"key":"warn","type":"number","min":30,"max":110,"step":5,"default":66}]}""");
+        check("Settings: a number default between the steps lands on one, so a read value writes back unchanged",
+            offGrid is { DefaultNumber: 65 }
+            && ExtensionSettingStore.Initial(offGrid) is { Number: 65 }
+            && ExtensionSettingStore.Honor(offGrid, new ExtensionSettingValue("number", false, 66)) is { Number: 65 }
+            && ExtensionSettingStore.ValuesJson([offGrid], new Dictionary<string, ExtensionSettingValue>(StringComparer.Ordinal)) == "{\"warn\":65}");
         check("Settings: a number without a default gets the closest the author allowed to zero",
             One("""{"id":"demo","titleZh":"演示","settings":[{"key":"a","type":"number","min":30,"max":40}]}""") is { DefaultNumber: 30 }
             && One("""{"id":"demo","titleZh":"演示","settings":[{"key":"a","type":"number","min":-5,"max":-1}]}""") is { DefaultNumber: -1 });

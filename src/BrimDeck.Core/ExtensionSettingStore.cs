@@ -44,24 +44,11 @@ public static class ExtensionSettingStore
         return setting.Kind switch
         {
             ExtensionSettingKind.Toggle => new ExtensionSettingValue("toggle", stored.On),
-            ExtensionSettingKind.Number => new ExtensionSettingValue("number", false, Snap(stored.Number, setting)),
+            ExtensionSettingKind.Number => new ExtensionSettingValue("number", false, setting.Snap(stored.Number)),
             _ => new ExtensionSettingValue("choice", false, 0,
                 setting.Options.Any(option => option.Value == stored.Choice) ? stored.Choice : setting.DefaultChoice)
         };
     }
-
-    // Onto the range, then onto the step grid measured from min. The rounding at the end is float dust: step 0.1 three
-    // times from 0 is 0.30000000000000004, and a page should not be asked to compare against that.
-    private static double Snap(double value, ExtensionSetting setting)
-    {
-        if (!double.IsFinite(value)) return setting.DefaultNumber;
-        var clamped = Math.Clamp(value, setting.Minimum, setting.Maximum);
-        if (!(setting.Step > 0) || !double.IsFinite(setting.Step)) return Round(clamped);
-        var steps = Math.Round((clamped - setting.Minimum) / setting.Step, MidpointRounding.AwayFromZero);
-        return Round(Math.Clamp(setting.Minimum + steps * setting.Step, setting.Minimum, setting.Maximum));
-    }
-
-    private static double Round(double value) => System.Math.Round(value, 6, MidpointRounding.AwayFromZero);
 
     // Every declared control's value, plus anything stored that the plugin no longer declares — kept, because a plugin
     // taken away and put back should come back as it was left, and hidden, because the page only ever reads what its own
