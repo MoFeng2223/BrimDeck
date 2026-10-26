@@ -351,7 +351,7 @@ internal sealed class WebExtension : IIslandExtension
     // every ask is rationed: the host cannot see a reader's click, only a message, and a page can send one in a loop.
     private bool Open(CoreWebView2? core, string? text)
     {
-        var (url, reason) = ExternalLinks.Accept(text);
+        var (url, reason) = ExternalLinks.Accept(text, _host);
         if (url is null) { Refused(core, "link-refused", reason ?? ""); return false; }
         if (!_links.Allow(DateTime.UtcNow))
         {
@@ -525,16 +525,22 @@ internal sealed class WebExtension : IIslandExtension
                         {
                             // State is untrusted text kept for a later load; anything past the ceiling is dropped rather
                             // than held in memory for good — and the page is told, since nothing else says it failed.
+                            // The ceiling is in UTF-8 bytes, the unit its name and the docs state: a state written in
+                            // Chinese costs about three of them per character the page counted.
                             var json = state.GetRawText();
-                            if (json.Length <= Bridge.MaximumStateBytes) _stateJson = json;
-                            else Refused(from, "state-too-large", Bridge.MaximumStateBytes + " bytes");
+                            if (Bridge.StateFits(json)) _stateJson = json;
+                            else Refused(from, "state-too-large", Bridge.StateBytes(json) + " / " + Bridge.MaximumStateBytes + " bytes");
                         }
                         else _stateJson = null;
                         break;
                     case "alarmSet":
+                        // The reachable range is checked before the conversion: past either end DateTimeOffset throws,
+                        // and an exception here would leave the page with no answer at all — the one thing the bridge
+                        // promises it never does.
                         if (root.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String
                             && id.GetString() is { Length: > 0 and <= 64 } alarmId
-                            && root.TryGetProperty("at", out var at) && at.ValueKind == JsonValueKind.Number && at.TryGetInt64(out var milliseconds))
+                            && root.TryGetProperty("at", out var at) && at.ValueKind == JsonValueKind.Number && at.TryGetInt64(out var milliseconds)
+                            && Bridge.AlarmTimeReachable(milliseconds))
                         {
                             var due = DateTimeOffset.FromUnixTimeMilliseconds(milliseconds).UtcDateTime;
                             if (due <= DateTime.UtcNow) Refused(from, "alarm-in-the-past", alarmId);
@@ -542,7 +548,7 @@ internal sealed class WebExtension : IIslandExtension
                                 Refused(from, "alarms-full", Bridge.MaximumAlarms + " per plugin");
                             else _alarms[alarmId] = (due, false);
                         }
-                        else Refused(from, "bad-alarm", "alarm.set wants a name and a future time");
+                        else Refused(from, "bad-alarm", "alarm.set wants a name and a time the host can reach");
                         WebRuntime.AlarmsChanged();
                         break;
                     case "alarmClear":

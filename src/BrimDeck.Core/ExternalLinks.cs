@@ -10,7 +10,10 @@ public static class ExternalLinks
     // passes: javascript:, data:, file:, mailto: and any custom protocol are each a way to start something other than a
     // browser page, and the shell would obey them without asking. A relative path is not a refusal but a question — the
     // host answers it inside the plugin folder, where the page's own files are.
-    public static (string? Url, string? Reason) Accept(string? text)
+    //
+    // pluginHost is the asking plugin's own virtual host. Its address exists only inside a plugin page's browser — the
+    // mapping lives with the control, not with the desktop — so handing it out would open an unresolvable page there.
+    public static (string? Url, string? Reason) Accept(string? text, string? pluginHost = null)
     {
         var url = (text ?? "").Trim();
         if (url.Length == 0) return (null, Loc.T("链接为空", "the link is empty"));
@@ -20,6 +23,8 @@ public static class ExternalLinks
         if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed)) return (null, Loc.T("链接不是完整地址（需要 https:// 开头）", "the link is not a full address — it needs a scheme such as https://"));
         if (parsed.Scheme is not ("http" or "https")) return (null, Loc.T("只打开 http/https 链接，收到的是 " + parsed.Scheme, "only http and https links open; this one is " + parsed.Scheme));
         if (parsed.Host.Length == 0) return (null, Loc.T("链接没有主机名", "the link has no host name"));
+        if (pluginHost is { Length: > 0 } own && string.Equals(parsed.Host, own, StringComparison.OrdinalIgnoreCase))
+            return (null, Loc.T("插件自己的文件在面板里加载，不交给浏览器", "a plugin's own files load in the panel, not in the browser"));
         return (parsed.AbsoluteUri, null);
     }
 }

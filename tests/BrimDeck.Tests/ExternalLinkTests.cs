@@ -44,6 +44,20 @@ internal static class ExternalLinkTests
             ExternalLinks.Accept("https://example.com/" + new string('x', Bridge.MaximumUrlChars)) is (null, { Length: > 0 })
             && ExternalLinks.Accept("https://example.com/" + new string('x', 100)) is { Url: { Length: > 0 } });
 
+        // A plugin's own virtual host exists only inside its own page — the folder mapping lives with the control, not
+        // with the desktop — so the address the browser would be handed resolves to nothing there.
+        const string own = "demo-1234abcd.plugin.brimdeck";
+        var selfRefusal = ExternalLinks.Accept("https://" + own + "/page.html", own);
+        check("Links: the asking plugin's own address is not handed to the browser, with a reason of its own",
+            selfRefusal.Url is null && selfRefusal.Reason is { Length: > 0 });
+        check("Links: the host is matched the way a host is matched — not by case",
+            ExternalLinks.Accept("https://" + own.ToUpperInvariant() + "/x", own) is (null, { Length: > 0 }));
+        check("Links: another plugin's address, or any other address, is not this refusal",
+            ExternalLinks.Accept("https://other-9999ffff.plugin.brimdeck/x", own) is { Url: { Length: > 0 } }
+            && ExternalLinks.Accept("https://example.com/x", own) is { Url: { Length: > 0 } });
+        check("Links: without a plugin to ask for, the same address is a plain web page",
+            ExternalLinks.Accept("https://" + own + "/page.html") is { Url: { Length: > 0 } });
+
         // The rate a page with no click behind it is held to: the count is by wall clock the caller brings.
         var start = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         var budget = new LinkBudget(3, TimeSpan.FromSeconds(10));
