@@ -184,6 +184,9 @@ internal sealed class WebExtension : IIslandExtension
     internal (double Width, double Height) Minimum => (_manifest.MinWidth, _manifest.MinHeight);
     // What the plugin declared for the host to draw and speak: the controls it offers and the words it needs.
     internal IReadOnlyList<ExtensionSetting> Declared => _manifest.Settings;
+    // The declared entries the host could not use, in the author's own words: a control that vanished because its label
+    // was written as a number is otherwise invisible to the person who wrote it.
+    internal IReadOnlyList<string> Notes => _manifest.Notes;
     private string SettingsJson => ExtensionSettingStore.ValuesJson(_manifest.Settings, IslandExtensions.ValuesFor(Id));
     private string PhrasesJson => ExtensionSettingStore.PhrasesJson(_manifest.Phrases, Loc.IsEnglish);
     internal void PushSettings() => Push("{\"channel\":\"brimdeck\",\"kind\":\"settings\",\"data\":" + SettingsJson + "}");

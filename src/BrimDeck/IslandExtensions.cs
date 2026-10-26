@@ -132,6 +132,11 @@ internal static class IslandExtensions
         // The WebView2 runtime is probed once, but only when there is a plugin to show: a machine without plugins never
         // starts a browser process it has no use for, and a page created later still probes on its own.
         if (Slots.Any(slot => slot is not null)) _ = WebRuntime.Environment();
+        // An author whose declared control was skipped is told in two places, because either is where they would look:
+        // under that plugin's row on the plugins page, and in the extension log for anyone debugging with it switched on.
+        for (int slot = 0; slot < Slots.Length; slot++)
+            if (Slots[slot] is WebExtension placed)
+                foreach (var note in placed.Notes) ExtensionLog.Write("extension: note " + placed.Id + " " + note);
         if (changed.Count > 0)
         {
             ExtensionsChanged?.Invoke(changed);
@@ -224,6 +229,8 @@ internal static class IslandExtensions
     // What a loaded plugin declared for the settings page to draw; nothing at all for a built-in page or a plugin with
     // no declared controls, which is most of them and leaves the row as it always was.
     public static IReadOnlyList<ExtensionSetting> Declared(int slot) => Slots[slot] is WebExtension web ? web.Declared : [];
+    // The declared entries that plugin wrote which the host could not use — shown under its row on the plugins page.
+    public static IReadOnlyList<string> Notes(int slot) => Slots[slot] is WebExtension web ? web.Notes : [];
     // The values chosen for one plugin, honoured against what its manifest declares — so a stale or hand-edited value
     // reads as the declaration would allow, and a page never sees a control its own author would not have drawn.
     public static IReadOnlyDictionary<string, ExtensionSettingValue> ValuesFor(string id)

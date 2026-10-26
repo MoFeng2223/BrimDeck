@@ -127,6 +127,10 @@ internal static class Program
                 "D turns purple once its declared values arrive and its written number comes back honoured");
             Console.WriteLine("PASS a plugin's declared settings round-trip through the host");
             Require(CountLog(log, "view: setting fixture-d warn=65") > 0, "the host logged the value it kept, not the one it was sent");
+            // The fourth entry declares a key with a space in it: the host must draw the three it can and say why the
+            // other was skipped, in the log the author can read and on the plugins page the reader can see.
+            Require(CountLog(log, "extension: note fixture-d settings[3].key") > 0, "a declared entry the host skipped is said out loud, not just dropped");
+            Require(CountLog(log, "view: refused fixture-d unknown-setting") == 0, "a skipped declaration is not also a message the page is punished for");
             // Back to A: everything below watches A, and the panel's size follows the page it is on.
             Press(Find(window, "FixtureA"));
             Reopen();
@@ -497,7 +501,8 @@ internal static class Program
                 { "key": "showFan", "type": "toggle", "label": "风扇", "default": true },
                 { "key": "warn", "type": "number", "label": { "zh": "告警温度", "en": "Warn at" }, "min": 30, "max": 110, "step": 5, "default": 65 },
                 { "key": "mode", "type": "choice", "label": "配色", "default": "cool",
-                  "options": [ { "value": "auto", "label": "自动" }, { "value": "cool", "label": "冷静" } ] }
+                  "options": [ { "value": "auto", "label": "自动" }, { "value": "cool", "label": "冷静" } ] },
+                { "key": "bad key", "type": "toggle", "label": "这一项该被跳过" }
               ],
               "phrases": { "hot": { "zh": "过热", "en": "Overheating" } }
             }

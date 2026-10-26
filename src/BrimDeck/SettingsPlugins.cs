@@ -157,6 +157,28 @@ public sealed partial class SettingsWindow
         // The controls the plugin's own manifest declared. The host draws them — a reader sets a plugin up here instead
         // of opening its folder, and an author writes no settings interface at all.
         foreach (var row in DeclaredRows(id, IslandExtensions.Declared(slot))) details.Children.Add(row);
+        // What the author declared that the host could not use. Without this a control that vanished reads as the host
+        // ignoring it on purpose — the same reason a refused bridge message is answered.
+        var notes = IslandExtensions.Notes(slot);
+        if (notes.Count > 0)
+        {
+            var heading = TextLine(Loc.T("已忽略的声明项", "Declared entries the host skipped"), 11.5, TextTertiary);
+            heading.Margin = new Thickness(0, 8, 0, 0);
+            details.Children.Add(heading);
+            foreach (var note in notes.Take(6))
+            {
+                var line = TextLine(note, 11.5, TextTertiary);
+                line.TextWrapping = TextWrapping.Wrap;
+                line.Margin = new Thickness(0, 2, 0, 0);
+                details.Children.Add(line);
+            }
+            if (notes.Count > 6)
+            {
+                var more = TextLine(Loc.T($"另有 {notes.Count - 6} 条", $"{notes.Count - 6} more"), 11.5, TextTertiary);
+                more.Margin = new Thickness(0, 2, 0, 0);
+                details.Children.Add(more);
+            }
+        }
         var source = TextLine(id + (file.Length > 0 ? " · " + file : ""), 11.5, TextTertiary);
         source.Margin = new Thickness(0, 2, 0, 0);
         if (file.Length > 0) source.ToolTip = IslandExtensions.Folder + "\\" + file;
