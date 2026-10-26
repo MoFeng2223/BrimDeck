@@ -1,0 +1,36 @@
+src/BrimDeck.Core/QqLyrics.cs
+  h_dc4d9c798f1bc1 49,57
+src/BrimDeck/MainWindow.Music.cs
+  h_dc4d9c798f1bc1 41-42,297,302,308-321,326-341,460,464,471,575-583
+src/BrimDeck/Native/AppleMusicAccount.cs
+  h_dc4d9c798f1bc1 1-71
+tests/BrimDeck.Tests/AppleMusicLyricsTests.cs
+  h_dc4d9c798f1bc1 1-189
+src/BrimDeck/BrimDeck.csproj
+  h_dc4d9c798f1bc1 9
+tests/BrimDeck.Tests/Program.cs
+  h_dc4d9c798f1bc1 19
+src/BrimDeck/SettingsMusic.cs
+  h_dc4d9c798f1bc1 9,119-120,122-150
+src/BrimDeck/App.xaml.cs
+  h_dc4d9c798f1bc1 36-37,87-93,135,313
+src/BrimDeck.Core/AppleMusicLyrics.cs
+  h_dc4d9c798f1bc1 1-310
+src/BrimDeck/AppleMusicSignInWindow.cs
+  h_dc4d9c798f1bc1 1-72
+src/BrimDeck.Core/Lyrics.cs
+  h_dc4d9c798f1bc1 85,87-88,102-106,110-114,126,180,187,195-196,198
+src/BrimDeck/ThirdPartyNotices.txt
+  h_dc4d9c798f1bc1 127-157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b77bbbfeec071d5e1dd8c3d010a8718a74a8fec2",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
