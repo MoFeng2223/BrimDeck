@@ -125,7 +125,9 @@ public partial class MainWindow
         bool animate = changed && _expanded && !_preview && Soft.Enabled;
         var before = CurrentPage;
         var from = PageContent(before);
-        var picture = animate ? PageHandover.Capture(from) : null;
+        // A plugin page draws on transparency over the panel's surface; its leaving picture carries the surface as
+        // its own fill, so what slides away reads as a page, not a wisp of strokes.
+        var picture = animate ? PageHandover.Capture(from, DeckPages.SlotOf(before) >= 0 ? _surface : null) : null;
         var place = PageHandover.Place(from);
         ShowPage(page, animatePage: changed && _expanded && !_preview);
         bool back = DeckPages.Order.ToList().IndexOf(page) < DeckPages.Order.ToList().IndexOf(before);

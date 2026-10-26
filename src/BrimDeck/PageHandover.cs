@@ -71,14 +71,21 @@ internal sealed class PageHandover
     }
 
     // A picture of a page as it is on screen, to leave in its place; null for a page that is not laid out.
-    public static Image? Capture(FrameworkElement page)
+    public static Image? Capture(FrameworkElement page, Brush? backdrop = null)
     {
         double width = page.ActualWidth, height = page.ActualHeight;
         if (!page.IsVisible || width < 1 || height < 1 || PresentationSource.FromVisual(page) is null) return null;
         var dpi = VisualTreeHelper.GetDpi(page);
         var picture = new RenderTargetBitmap((int)Math.Ceiling(width * dpi.DpiScaleX), (int)Math.Ceiling(height * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
         var drawing = new DrawingVisual();
-        using (var context = drawing.RenderOpen()) context.DrawRectangle(Exactly(page, width, height), null, new Rect(0, 0, width, height));
+        using (var context = drawing.RenderOpen())
+        {
+            // A page that draws on transparency (a WebView plugin page over the panel's surface) would leave as a
+            // wisp of its own strokes; a backdrop fills the picture as the page itself is filled, so it reads as a
+            // page leaving, like any other.
+            if (backdrop is not null) context.DrawRectangle(backdrop, null, new Rect(0, 0, width, height));
+            context.DrawRectangle(Exactly(page, width, height), null, new Rect(0, 0, width, height));
+        }
         picture.Render(drawing);
         picture.Freeze();
         return new Image { Source = picture, Width = width, Height = height, Stretch = Stretch.None, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top };
