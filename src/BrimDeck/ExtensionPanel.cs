@@ -16,6 +16,19 @@ public partial class MainWindow
     // is built once per panel and kept: recreating it would throw away the page for no gain. The key stays a constant.
     private string ExtensionKey(int slot) => "web";
 
+    // What a plugin's page never sees: the header row above it, the margin below, and the two side insets — the panel's
+    // own spending, in the same steps RenderExtension applies them. A manifest's minimum is written in the page's own
+    // pixels, so it becomes a panel size only once these are added back; asking the author to know them would make every
+    // plugin re-derive the panel's layout rules.
+    public static (double Width, double Height) PanelFloorFor(double viewportWidth, double viewportHeight)
+    {
+        if (viewportWidth <= 0 && viewportHeight <= 0) return (0, 0);
+        double height = viewportHeight + 46; // a 36 row over a 10 margin is the common case; the loop settles the tiers
+        for (int at = 0; at < 3; at++) height = viewportHeight + ToolbarFor(height) + (height < 170 ? 8 : 10);
+        double side = Math.Max(height < 170 ? 14 : 20, PanelHeader.CornerClear);
+        return (viewportWidth <= 0 ? 0 : viewportWidth + 2 * side, height);
+    }
+
     // A scan replaced or retired some slots: their views and tabs are dropped, the tabs are rebuilt, and the panel
     // re-renders — the page it stood on resolves to another when its slot is gone, and the fresh extension learns the
     // demand of the page that survived.

@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using System.Windows.Threading;
 using BrimDeck.Core;
 using BrimDeck.Island;
@@ -128,6 +129,7 @@ internal sealed class WebExtension : IIslandExtension
     // The plugin's state and alarms live in the host, not in the page, so they survive the page being reclaimed while
     // nobody watches it: what the page hands over it gets back the next time it loads.
     private string? _stateJson;
+    private bool _fitLogged;
     private readonly Dictionary<string, (DateTime Due, bool Fired)> _alarms = new(StringComparer.Ordinal);
     private bool _shown, _keepAlive, _reclaimed;
     // Whether any panel is open: pages are only reclaimed while the panel itself is closed (see SetDemand).
@@ -245,6 +247,37 @@ internal sealed class WebExtension : IIslandExtension
         // A page mid-teardown or already disposed loses its entrance, nothing more; the page itself stays as it was.
         try { await core.ExecuteScriptAsync(script).ConfigureAwait(true); } catch (Exception) { }
     }
+
+    // One CSS pixel per panel DIP. The page reports its own scale, which is the only number that says how many CSS
+    // pixels it will lay out in, and the browser's scale for this window need not be the scale the panel is drawn at
+    // (measured: a 400×174 box came out 352×153 CSS pixels where the browser works at 1.14 and the window at 1.0). The
+    // control's zoom is what makes the two agree — the unit a plugin's own layout, and its manifest minimum, are
+    // written in. Dividing the reported scale by the zoom already applied keeps this stable: once corrected the page
+    // reports a scale of 1, the same base comes back out, and the value settles instead of oscillating.
+    private void Fit(CoreWebView2 core, double reportedDpr, double reportedWidth, double reportedHeight)
+    {
+        int at = _pages.FindIndex(pair => ReferenceEquals(pair.Core, core));
+        if (at < 0) return;
+        var control = _pages[at].Control;
+        double baseScale = reportedDpr / control.ZoomFactor;
+        if (!double.IsFinite(baseScale) || baseScale <= 0) return;
+        double want = VisualTreeHelper.GetDpi(control).DpiScaleX / baseScale;
+        if (Math.Abs(want - control.ZoomFactor) <= 0.01)
+        {
+            // The first report that needs no change is the page settled at the box it was given; that is the pair worth
+            // remembering, and the UI test reads it back to catch a page laid out in a smaller box than the panel made.
+            if (_fitLogged) return;
+            _fitLogged = true;
+            ExtensionLog.Write($"view: fit {Id} box={control.ActualWidth:0}x{control.ActualHeight:0} page={reportedWidth:0}x{reportedHeight:0}");
+            return;
+        }
+        control.ZoomFactor = (float)Math.Clamp(want, 0.2, 5);
+        ExtensionLog.Write($"view: scale {Id} zoom={control.ZoomFactor:0.###} browser={baseScale:0.###}");
+    }
+
+    // A number a page chose to send; absent or non-numeric reads as zero, which every caller rejects.
+    private static double Number(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var number) ? number : 0;
 
     // The panel asks before putting a cached view back: a control that left the tree was disposed with the page, and
     // re-adding it would show an empty rectangle with no way to tell why.
@@ -448,6 +481,11 @@ internal sealed class WebExtension : IIslandExtension
                 switch (kind.GetString())
                 {
                     case "hello": ExtensionLog.Write("view: hello " + Id); ReplyInit(); break;
+                    case "scale":
+                        if (Number(root, "dpr") is var ratio && ratio is > 0.2 and < 5
+                            && Number(root, "width") is var width && width > 0 && Number(root, "height") is var height && height > 0
+                            && sender is CoreWebView2 reported) Fit(reported, ratio, width, height);
+                        break;
                     case "saveState":
                         if (root.TryGetProperty("state", out var state) && state.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null))
                         {
@@ -537,6 +575,11 @@ internal sealed class WebExtension : IIslandExtension
                 message.channel = 'brimdeck';
                 try { window.chrome && window.chrome.webview && window.chrome.webview.postMessage(message); } catch (e) { }
             }
+            // How many CSS pixels the page actually gets is the browser's business, not the panel's: it reports the
+            // number, and the resize that follows any change of it, so the host can keep one CSS pixel one panel DIP.
+            function reportScale() { post({ kind: 'scale', dpr: window.devicePixelRatio || 1, width: window.innerWidth, height: window.innerHeight }); }
+            reportScale();
+            window.addEventListener('resize', reportScale);
             // The host answers hello at once, possibly before the page's own script has run. Events a kind has no
             // listener for yet are held (at most the last few) and handed over when the page subscribes.
             function emit(kind, data) {

@@ -44,7 +44,7 @@ internal static class Program
         var data = options.Data ?? Path.Combine(Path.GetTempPath(), "BrimDeck-UiTests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(data);
         var log = Path.Combine(data, "extensions.log");
-        WriteFixture(data, "fixture-a", "FixtureA", MarkA, "#C00000");
+        WriteFixture(data, "fixture-a", "FixtureA", MarkA, "#C00000", minWidth: 440, minHeight: 220);
         WriteFixture(data, "fixture-b", "FixtureB", MarkB, "#00C000");
         Console.WriteLine("profile: " + data);
         Console.WriteLine("app: " + options.App);
@@ -79,6 +79,18 @@ internal static class Program
             KeepOpen();
             Require(WaitForColorWithReopen(ColorA, TimeSpan.FromSeconds(8)), "hiding and showing again keeps A (red page)");
             Console.WriteLine("PASS hiding and showing again keeps A");
+
+            // Two units the plugin author writes in, and the panel has to honour both. Its manifest minimum is the page's
+            // own viewport, so the panel's header and margins go on top — a 440×220 ask means a 480×266 panel. And one CSS
+            // pixel has to be one panel DIP: a browser works at the display's scale, which need not be the scale this
+            // window is drawn at (measured 1.14 against 1.0, where a 400×174 box handed the page 352×153 CSS pixels).
+            var fit = WaitForFit(log, "fixture-a", TimeSpan.FromSeconds(4));
+            Require(fit is { } seen && seen.Box.W is >= 438 and <= 442 && seen.Box.H is >= 218 and <= 222
+                    && Math.Abs(seen.Box.W - seen.Page.W) <= 2 && Math.Abs(seen.Box.H - seen.Page.H) <= 2,
+                fit is { } reported
+                    ? $"the page gets the viewport its manifest asked for, in the panel's own pixels (box {reported.Box.W}x{reported.Box.H}, page {reported.Page.W}x{reported.Page.H})"
+                    : "the page reports the box it was laid out in");
+            Console.WriteLine("PASS the page gets the viewport its manifest asked for");
 
             if (options.Full)
             {
@@ -237,6 +249,52 @@ internal static class Program
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return 0; }
     }
 
+    // The last "view: fit <id> box=WxH page=WxH" the host wrote: what box the panel made, and how many CSS pixels the
+    // page was actually laid out in. Null while the page has not reported its settled size yet.
+    private static ((int W, int H) Box, (int W, int H) Page)? LastFit(string log, string id)
+    {
+        ((int W, int H) Box, (int W, int H) Page)? last = null;
+        string mark = "view: fit " + id + " ";
+        try
+        {
+            using var stream = new FileStream(log, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            while (reader.ReadLine() is { } line)
+            {
+                int at = line.IndexOf(mark, StringComparison.Ordinal);
+                if (at < 0) continue;
+                var parts = line[(at + mark.Length)..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 2 || !TrySize(parts[0], "box=", out var box) || !TrySize(parts[1], "page=", out var page)) continue;
+                last = (box, page);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return last; }
+        return last;
+    }
+
+    private static bool TrySize(string text, string prefix, out (int W, int H) size)
+    {
+        size = default;
+        if (!text.StartsWith(prefix, StringComparison.Ordinal)) return false;
+        var axes = text[prefix.Length..].Split('x');
+        if (axes.Length != 2 || !int.TryParse(axes[0], out int width) || !int.TryParse(axes[1], out int height)) return false;
+        size = (width, height);
+        return true;
+    }
+
+    private static ((int W, int H) Box, (int W, int H) Page)? WaitForFit(string log, string id, TimeSpan timeout)
+    {
+        var end = DateTime.UtcNow + timeout;
+        ((int W, int H) Box, (int W, int H) Page)? fit;
+        while (DateTime.UtcNow < end)
+        {
+            fit = LastFit(log, id);
+            if (fit is not null) return fit;
+            Thread.Sleep(200);
+        }
+        return LastFit(log, id);
+    }
+
     private static bool Near(int x, int y, Color expected)
     {
         try
@@ -322,7 +380,7 @@ internal static class Program
         Console.WriteLine("profile: " + data);
     }
 
-    private static void WriteFixture(string root, string id, string title, string mark, string color)
+    private static void WriteFixture(string root, string id, string title, string mark, string color, int minWidth = 0, int minHeight = 0)
     {
         var folder = Path.Combine(root, "extensions", id);
         Directory.CreateDirectory(folder);
@@ -332,7 +390,7 @@ internal static class Program
               "titleZh": "{{title}}",
               "titleEn": "{{title}}",
               "glyph": "M 4,4 H 20 V 20 H 4 Z",
-              "entry": "index.html"
+              "entry": "index.html"{{(minWidth > 0 ? ",\n  \"minWidth\": " + minWidth + ",\n  \"minHeight\": " + minHeight : "")}}
             }
             """);
         // A solid page: the test reads the centre pixel, which is the paint a user sees even when WebView2's
