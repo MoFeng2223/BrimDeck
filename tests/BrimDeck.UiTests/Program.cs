@@ -28,6 +28,8 @@ internal static class Program
     private static readonly Color ColorC = Color.FromArgb(0, 0, 192);
     // D turns purple only when its declared controls arrived, and came back the way the host honours them.
     private static readonly Color ColorD = Color.FromArgb(156, 39, 176);
+    // A turns this once an alarm it registered before being reclaimed reaches it after the reload.
+    private static readonly Color ColorAlarmed = Color.FromArgb(255, 140, 0);
     private static AutomationElement? _window;
 
     [STAThread]
@@ -37,7 +39,13 @@ internal static class Program
         if (options is null) return 2;
         if (!options.AllowParallel && Process.GetProcessesByName("BrimDeck").Length > 0)
         {
-            Console.Error.WriteLine("A BrimDeck instance is already running; close it first (or pass --allow-parallel).");
+            // A running instance is not just a nuisance: it owns the foreground, and the only way to make the island
+            // expand in this test is to move the pointer onto it — which cannot be done while another BrimDeck window
+            // is in front. The failure it produces looks like "the panel never expanded", so the reason is said here,
+            // long before that assertion fails with no clue.
+            Console.Error.WriteLine("A BrimDeck instance is already running. Close it first: this test drives its own instance to the"
+                + " foreground and cannot do that while another one is on screen."
+                + " (--skip-running-check runs anyway, and will usually fail at the first expansion.)");
             return 2;
         }
         if (!File.Exists(options.App))
@@ -46,7 +54,11 @@ internal static class Program
             return 2;
         }
 
-        SetProcessDpiAwarenessContext(-4);
+        // A handle-sized value, not an int: DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 is -4, and on x64 a 32-bit
+        // argument is not sign-extended — the OS would see 0x00000000FFFFFFFC, refuse it, and leave this process
+        // DPI-unaware. The call's result is not checked, so the only symptom would be wrong coordinates on a scaled
+        // display. Declared as a pointer, which is what the API actually takes.
+        SetProcessDpiAwarenessContext(new IntPtr(-4));
         var data = options.Data ?? Path.Combine(Path.GetTempPath(), "BrimDeck-UiTests-" + Guid.NewGuid().ToString("N"));
         // This is a test profile: the suite writes fixture plugins into it, lets their pages save into it, and
         // rearranges the plugin order it holds. A --data naming the folder BrimDeck really uses is refused at the door,
@@ -60,7 +72,7 @@ internal static class Program
         }
         Directory.CreateDirectory(data);
         var log = Path.Combine(data, "extensions.log");
-        WriteFixture(data, "fixture-a", "FixtureA", MarkA, "#C00000", minWidth: 440, minHeight: 220);
+        WriteFixture(data, "fixture-a", "FixtureA", MarkA, "#C00000", minWidth: 440, minHeight: 220, alarmProbe: true);
         WriteFixture(data, "fixture-b", "FixtureB", MarkB, "#00C000");
         WriteFixture(data, "fixture-c", "FixtureC", MarkC, "#202020", bridgeProbe: true);
         WriteDeclaredFixture(data);
@@ -158,8 +170,13 @@ internal static class Program
             {
                 int reclaims = CountLog(log, "view: reclaim fixture-a");
                 int arrivals = CountLog(log, "view: arrive fixture-a");
+                // An alarm owed while no page could hear it must survive the reclaim, not be handed to the blank page
+                // the reclaim leaves behind and dropped there. The page arms one when it is hidden, 18s out: the 15s
+                // grace reclaims it first, so the alarm comes due against a blank document and can only arrive after
+                // the reload — which is the "nothing is ever lost" promise, and the one a page with a timer break
+                // depends on. The wait below covers the grace, the alarm and the reload.
                 Hide();
-                Thread.Sleep(17_000);
+                Thread.Sleep(20_000);
                 // The colour alone cannot tell whether the page was reclaimed: a page that was never reclaimed is still
                 // there and looks identical. The host's own log is the evidence the 15s grace actually ran.
                 Require(CountLog(log, "view: reclaim fixture-a") > reclaims, "the closed panel reclaims A after the 15s grace");
@@ -176,6 +193,11 @@ internal static class Program
                 Require(elapsed < 1400, "after the reclaim A is drawn without the 1.5s fallback (" + (int)elapsed + " ms)");
                 Require(CountLog(log, "view: arrive fixture-a") > arrivals, "the reclaimed page's new document arrived");
                 Console.WriteLine("PASS after the 15s reclaim A comes back in " + (int)elapsed + " ms");
+                // The alarm was due while the page was blank. It reaches the page only if the host held it, which is
+                // what colours the page after its reload.
+                Require(WaitForColor(ColorAlarmed, TimeSpan.FromSeconds(6)),
+                    "an alarm that came due while the page was reclaimed still reaches it after the reload");
+                Console.WriteLine("PASS an alarm that came due during the reclaim reaches the page after its reload");
             }
 
             // One order, not two. The strip is laid out by slot and the wheel walks those same slots, so a reload that
@@ -597,7 +619,7 @@ internal static class Program
         Console.WriteLine("profile: " + data);
     }
 
-    private static void WriteFixture(string root, string id, string title, string mark, string color, int minWidth = 0, int minHeight = 0, bool bridgeProbe = false)
+    private static void WriteFixture(string root, string id, string title, string mark, string color, int minWidth = 0, int minHeight = 0, bool bridgeProbe = false, bool alarmProbe = false)
     {
         var folder = Path.Combine(root, "extensions", id);
         Directory.CreateDirectory(folder);
@@ -612,7 +634,7 @@ internal static class Program
             """);
         // A solid page: the test reads the centre pixel, which is the paint a user sees even when WebView2's
         // accessibility tree is unavailable to the automation session.
-        var script = bridgeProbe ? BridgeProbe : """
+        var script = bridgeProbe ? BridgeProbe : alarmProbe ? AlarmProbe : """
               if (window.brimdeck) brimdeck.on('init', function (init) {
                 if (init.shown) document.body.dataset.ready = '1';
               });
@@ -655,6 +677,33 @@ internal static class Program
                 });
               }
             """;
+
+    // A page that hands the host an alarm and waits to see it come back. It arms one every time it is hidden, 18s out —
+    // past the 15s reclaim grace, so by the time it is due the document is already blank — and the host has to hold it
+    // and hand it over after the reload. Painting is gated on this document being a reload: the page records that it
+    // loaded once (`saveState`), so an alarm delivered to the first document — where a page keeping its own timer would
+    // have been enough — stays silent, and only the one that arrived on a reloaded page turns orange.
+    private const string AlarmProbe = """
+          if (window.brimdeck) {
+            var reloaded = false;
+            brimdeck.on('init', function (init) {
+              var saved = init.state || {};
+              reloaded = saved.loaded === true;
+              if (!reloaded) brimdeck.saveState({ loaded: true });
+            });
+            brimdeck.on('visibility', function (shown) {
+              if (!shown) brimdeck.alarm.set('probe', Date.now() + 18000);
+            });
+            brimdeck.on('alarm', function (id) {
+              if (id !== 'probe' || !reloaded) return;
+              setTimeout(function () {
+                var c = '#FF8C00';
+                document.documentElement.style.background = c;
+                document.body.style.background = c;
+              }, 1800);
+            });
+          }
+        """;
 
     // A plugin that declares its controls in the manifest instead of drawing them: the host has to read them back to the
     // page, honour what the page writes against its own range and step, and speak the plugin's own words in whichever
@@ -735,7 +784,7 @@ internal static class Program
     private const uint LeftDown = 0x0002, LeftUp = 0x0004;
     [DllImport("user32.dll")] private static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
     [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
-    [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(int value);
+    [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
 
     private sealed class TestFailure(string message) : Exception(message);
 
@@ -755,10 +804,12 @@ internal static class Program
                     case "--data" when at + 1 < args.Length: data = Path.GetFullPath(args[++at]); break;
                     case "--full": full = true; break;
                     case "--keep": keep = true; break;
+                    // Named for what it does. The old name read as "run two suites at once", which it never did.
+                    case "--skip-running-check":
                     case "--allow-parallel": allowParallel = true; break;
                     default:
                         Console.Error.WriteLine("Unknown argument: " + args[at]);
-                        Console.Error.WriteLine("Usage: BrimDeck.UiTests [--app <BrimDeck.exe>] [--data <folder>] [--full] [--keep] [--allow-parallel]");
+                        Console.Error.WriteLine("Usage: BrimDeck.UiTests [--app <BrimDeck.exe>] [--data <folder>] [--full] [--keep] [--skip-running-check]");
                         return null;
                 }
             }
