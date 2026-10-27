@@ -1,0 +1,40 @@
+src/BrimDeck/MonitorView.cs
+  h_dc4d9c798f1bc1 67,134-135
+src/BrimDeck/MonitorPanel.cs
+  h_dc4d9c798f1bc1 104-108,111-118,122-123
+src/BrimDeck.Core/MonitorLayout.cs
+  h_dc4d9c798f1bc1 149-152,154-161,164-168,170-171,192,214,227-234
+  s_aac60195f5d29a::t_fb1b9619248f03 169
+tests/BrimDeck.Tests/StorageTests.cs
+  h_dc4d9c798f1bc1 4-5,74,77-83,85,87-92,94,96,100-106,108-109,129
+src/BrimDeck/MonitorGauges.cs
+  h_dc4d9c798f1bc1 442-447,450-451,454,457,460-461,463-464,472-473,475,479,486,527-528,532-537,541,549,554-555
+  s_aac60195f5d29a::t_dbf4e6b8c69392 552-553
+src/BrimDeck/Native/StorageReader.cs
+  h_dc4d9c798f1bc1 33,115
+tests/BrimDeck.Tests/ResizeMotionTests.cs
+  h_dc4d9c798f1bc1 82
+src/BrimDeck.Core/Storage.cs
+  h_dc4d9c798f1bc1 30-32,73-78,82-83,85-93,97,101,122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a0e19dfc68af8511367fc0084026305067205f9f",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_aac60195f5d29a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6dc156c9-bcc1-4fc5-ba00-7aa7f59ed16f",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
