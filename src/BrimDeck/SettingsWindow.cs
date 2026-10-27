@@ -97,6 +97,7 @@ public sealed partial class SettingsWindow : Window
         SystemEvents.UserPreferenceChanged += SystemThemeChanged;
         Deactivated += (_, _) => { EndAppDrag(false); QueuePreviewDismissal(); };
         PreviewMouseDown += (_, e) => DismissPreviewOutsideControl(e.OriginalSource);
+        DismissPreviewOnCaptionPress();
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape && _appDrag is not null) { EndAppDrag(false); e.Handled = true; } };
         ReleaseFocusOnEmptyClick(this, () => RootVisual);
         // Moving focus scrolls the control just into view; a little more keeps its focus outline visible at the edges.
@@ -422,7 +423,7 @@ public sealed partial class SettingsWindow : Window
         (string Value, string Name)[] languages = [(Loc.Chinese, "简体中文"), (Loc.English, "English")];
         var language = new ComboBox { Width=150,Style=(Style)FindResource("SettingsCombo"),ItemsSource=languages.Select(l=>l.Name).ToList(),
             SelectedIndex=Math.Max(0,Array.FindIndex(languages,l=>l.Value==S.Language)) };
-        AutomationProperties.SetName(language,Loc.T("语言", "Language")); AutomationProperties.SetAutomationId(language,"language");
+        AutomationProperties.SetName(language,Loc.T("语言", "Language")); AutomationProperties.SetAutomationId(language,"language"); PopupMotion.Attach(language);
         language.SelectionChanged+=(_,_)=>
         {
             if(language.SelectedIndex<0||languages[language.SelectedIndex].Value==S.Language) return;
@@ -511,7 +512,7 @@ public sealed partial class SettingsWindow : Window
         // reads as the last viewed page, which is what the panel does then, and returns when the page is shown again.
         // Switching a page on or off refills the list in place, so the page is not rebuilt and the switch keeps its animation.
         var start = new ComboBox { Width = 150, Style = (Style)FindResource("SettingsCombo") };
-        AutomationProperties.SetName(start, Loc.T("每次打开时显示", "Page shown on opening"));
+        AutomationProperties.SetName(start, Loc.T("每次打开时显示", "Page shown on opening")); PopupMotion.Attach(start);
         List<(DefaultDeckPage Value, string Label)> starts = [];
         bool filling = false;
         void FillStarts()
@@ -539,6 +540,7 @@ public sealed partial class SettingsWindow : Window
         Group(Row(Loc.T("每次打开时显示", "Page shown on opening"), start),
             Toggle(Loc.T("右键点击打开设置", "Right-click opens settings"), S.RightClickSettings, value => Change(s => s.RightClickSettings = value),
                 help: Loc.T("面板展开时，在面板内任意位置单击右键即可打开设置。", "When the panel is expanded, right-click anywhere inside it to open settings.")),
+            MouseWheelRow(),
             HotkeyRow(false));
     }
     private FrameworkElement SizeRow(string title, string name, DeckPage page, bool shown, Action<bool> show, StackPanel sizes)
@@ -615,16 +617,16 @@ public sealed partial class SettingsWindow : Window
             {
                 case InputMethodsPage:s.InputMethods=new();break;
                 case MiniAppsPage:ResetMiniAppsModule(s.MiniApps, defaults.MiniApps);break;
-                case 0:s.LaunchAtStartup=false;s.TrimMemoryWhenIdle=defaults.TrimMemoryWhenIdle;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.FullscreenExceptions=[];s.Display=defaults.Display;s.DisplayMonitors=[];break;
+                case 0:s.LaunchAtStartup=false;s.TrimMemoryWhenIdle=defaults.TrimMemoryWhenIdle;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.FullscreenRules=[];s.Display=defaults.Display;s.DisplayMonitors=[];break;
                 case 1:s.Style=defaults.Style;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;
                     s.NotchClock=defaults.NotchClock;s.CapsuleClock=defaults.CapsuleClock;s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=[.. PanelTheme.Current.ClockGradients[0].Stops];s.Clock24Hour=defaults.Clock24Hour;CopyCollapsedSize(s,defaults);s.HideHotkey=defaults.HideHotkey;
                     s.NotchMonitor=defaults.NotchMonitor;s.CapsuleMonitor=defaults.CapsuleMonitor;s.NotchOrder=defaults.NotchOrder;s.CapsuleOrder=defaults.CapsuleOrder;
                     // The clock goes back to the one the panel theme suggests, as choosing the theme gives.
                     PanelThemes.ApplyClock(PanelTheme.Current,s);break;
-                case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.RightClickSettings=defaults.RightClickSettings;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;s.ExpandHotkey=defaults.ExpandHotkey;
+                case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.RightClickSettings=defaults.RightClickSettings;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;s.ExpandHotkey=defaults.ExpandHotkey;s.MouseWheel=defaults.MouseWheel;
                     s.MonitorPage=defaults.MonitorPage;s.MonitorWidth=defaults.MonitorWidth;s.MonitorHeight=defaults.MonitorHeight;s.MiniApps.Enabled=defaults.MiniApps.Enabled;s.MiniApps.Width=defaults.MiniApps.Width;s.MiniApps.Height=defaults.MiniApps.Height;break;
-                case MonitorSettingsPage:s.MonitorPalette=defaults.MonitorPalette;s.MonitorInterval=defaults.MonitorInterval;s.MonitorProcesses=defaults.MonitorProcesses;s.MonitorSort=defaults.MonitorSort;s.MonitorMain=defaults.MonitorMain;s.MonitorProcessView=defaults.MonitorProcessView;
-                    s.CompactMonitor=defaults.CompactMonitor;s.CompactMonitorItems=defaults.CompactMonitorItems;s.CompactReadings=defaults.CompactReadings;s.NotchAutoWidth=defaults.NotchAutoWidth;s.CapsuleAutoWidth=defaults.CapsuleAutoWidth;break;
+                case MonitorSettingsPage:s.MonitorPalette=defaults.MonitorPalette;s.MonitorCustomColors=defaults.MonitorCustomColors;s.CompactWarningColor=null;s.CompactCriticalColor=null;s.MonitorInterval=defaults.MonitorInterval;s.MonitorProcesses=defaults.MonitorProcesses;s.MonitorSort=defaults.MonitorSort;s.MonitorMain=defaults.MonitorMain;s.MonitorProcessView=defaults.MonitorProcessView;
+                    s.CompactMonitor=defaults.CompactMonitor;s.CompactMonitorItems=defaults.CompactMonitorItems;s.CompactReadings=defaults.CompactReadings;s.NotchAutoWidth=defaults.NotchAutoWidth;s.CapsuleAutoWidth=defaults.CapsuleAutoWidth;s.MonitorTemperatures=defaults.MonitorTemperatures;s.MonitorStorage=defaults.MonitorStorage;break;
                 // The current theme's application colors go back to its own; the other themes keep what was saved for them.
                 case 3:{var previous=s.Apps;s.QuotaAlerts=defaults.QuotaAlerts;s.IncludeWsl=defaults.IncludeWsl;s.Apps=defaults.Apps;PanelThemes.CarryAppChoices(s,previous);break;}
                 case 5:s.MusicText=defaults.MusicText;s.MusicCoverColor=defaults.MusicCoverColor;s.MusicTrackNotice=defaults.MusicTrackNotice;s.LyricsEnabled=defaults.LyricsEnabled;break;
@@ -647,7 +649,8 @@ public sealed partial class SettingsWindow : Window
     {
         SectionTitle(Loc.T("悬停与动画", "Hover and animation"));
         var duration = SliderRow(Loc.T("展开与收起动画时长", "Animation duration"), S.AnimationDuration, 100, 1000, 20, Loc.T("毫秒", "ms"), value => Change(s => s.AnimationDuration = (int)value),
-            Loc.T("设置每次展开或收起动画的持续时间。时间越短，动画越快。", "How long each expand or collapse animation lasts. The shorter the time, the faster the animation."));
+            Loc.T("设置面板展开和换页变形的动画时长。时间越短，动画越快；收起用其 0.75 倍，快捷键或 Esc 触发的展开收起用其 0.6 倍。悬停、按压等反馈有各自固定的节奏，不受此项影响。",
+                "How long the panel takes to expand and to change shape between pages. The shorter the time, the faster the animation; collapsing takes 0.75 of it, and expanding or collapsing with a hotkey or Esc 0.6 of it. Hover and press feedback keep their own pace and are not affected."));
         void EnableDuration(bool enabled)
         {
             foreach (var control in duration.Children.OfType<FrameworkElement>().Where(control => Grid.GetColumn(control) > 0)) control.IsEnabled = enabled;
@@ -748,11 +751,13 @@ public sealed partial class SettingsWindow : Window
         }
     }
 
+    // The color columns fit their headings and help marks: "Warning" and "Critical" need more room than "预警" and "告警".
+    private static GridLength SwatchColumn => new(Loc.IsEnglish ? 60 : 50);
+
     private static Grid AppColumns()
     {
         var grid = new Grid { Background = Brushes.Transparent };
-        // The three color columns fit their headings and help marks: "Warning" and "Critical" need more room than "预警" and "告警".
-        var swatch = new GridLength(Loc.IsEnglish ? 60 : 50);
+        var swatch = SwatchColumn;
         foreach (var width in new[] { new GridLength(40), new GridLength(1, GridUnitType.Star), new GridLength(1, GridUnitType.Star),
             new GridLength(1.12, GridUnitType.Star), swatch, swatch, swatch, new GridLength(50), new GridLength(26) })
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
@@ -837,6 +842,10 @@ public sealed partial class SettingsWindow : Window
             item.Click += (_, _) =>
             {
                 menu.IsOpen = false;
+                PopupMotion.AfterClose(Choose);
+            };
+            void Choose()
+            {
                 if (id != selected) Change(s =>
                 {
                     var current = s.Entry(entry.InstanceId)!;
@@ -848,7 +857,7 @@ public sealed partial class SettingsWindow : Window
                 });
                 if (quota && !ProviderCatalog.IsBuiltIn(id)) { CollapseSourceRows(); _expandedSource = entry.InstanceId; }
                 RefreshAppRow(entry.InstanceId);
-            };
+            }
             AutomationProperties.SetName(item, Loc.T("选择 ", "Select ") + Label(id)); items.Children.Add(item);
         }
         // The list grows as sources are added; past the room on screen it scrolls instead of running off the screen.
@@ -901,6 +910,7 @@ public sealed partial class SettingsWindow : Window
     private static void TogglePopup(ButtonBase button, Popup popup)
     {
         popup.Opened += (_, _) => button.IsHitTestVisible = false;
+        PopupMotion.Attach(popup);
         popup.Closed += (_, _) => button.IsHitTestVisible = true;
         button.Click += (_, _) => popup.IsOpen = !popup.IsOpen;
     }
@@ -929,7 +939,7 @@ public sealed partial class SettingsWindow : Window
         // The column heading explains each color; the swatch itself carries no hover note.
         AutomationProperties.SetName(button, Loc.T($"{app} {label}颜色", $"{app} {label} color")); AutomationProperties.SetHelpText(button, color + (isDefault ? Loc.T("（默认）", " (default)") : ""));
         var popup = new Popup { PlacementTarget = button, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
-        popup.Child = ColorPicker(color, isDefault, value => { popup.IsOpen = false; apply(value); if (owner is { } id) RefreshAppRow(id); else ShowPage(3); });
+        popup.Child = ColorPicker(color, isDefault, value => { popup.IsOpen = false; PopupMotion.AfterClose(() => { apply(value); if (owner is { } id) RefreshAppRow(id); else ShowPage(3); }); });
         TogglePopup(button, popup);
         return button;
     }
@@ -938,7 +948,7 @@ public sealed partial class SettingsWindow : Window
     // color shown by every part without closing the popup; "确定" or Enter applies it. A swatch applies its color at once, "默认"
     // restores the preset value, and a click outside closes the popup without changes.
     // choose receives the new color, or "" for the default; the caller closes the popup.
-    private Border ColorPicker(string current, bool isDefault, Action<string> choose, bool allowDefault = true)
+    private Border ColorPicker(string current, bool isDefault, Action<string> choose, bool allowDefault = true, string? resetLabel = null)
     {
         const double width = 224;
         static Color Parse(string value) => (Color)ColorConverter.ConvertFromString(value);
@@ -954,7 +964,7 @@ public sealed partial class SettingsWindow : Window
 
         var entry = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
         var ok = ActionButton(Loc.T("确定", "OK"), () => { }, primary: true); ok.Margin = new Thickness(6, 0, 0, 0); DockPanel.SetDock(ok, Dock.Right);
-        var reset = ActionButton(Loc.T("默认", "Default"), () => choose("")); reset.IsEnabled = !isDefault; reset.Margin = new Thickness(6, 0, 0, 0); DockPanel.SetDock(reset, Dock.Right);
+        var reset = ActionButton(resetLabel ?? Loc.T("默认", "Default"), () => choose("")); reset.IsEnabled = !isDefault; reset.Margin = new Thickness(6, 0, 0, 0); DockPanel.SetDock(reset, Dock.Right);
         entry.Children.Add(ok); entry.Children.Add(reset);
         if (!allowDefault) reset.Visibility = Visibility.Collapsed;
         var dot = new Ellipse { Width = 20, Height = 20, Stroke = UI.Brush(_palette.Border), StrokeThickness = 1, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
@@ -1090,9 +1100,11 @@ public sealed partial class SettingsWindow : Window
         return row;
     }
 
-    private FrameworkElement Toggle(string title, bool value, Action<bool> changed, bool enabled = true, string? help = null)
+    // keepPreview marks the switch alone as a preview control, so a press on the rest of the row still ends the preview.
+    private FrameworkElement Toggle(string title, bool value, Action<bool> changed, bool enabled = true, string? help = null, bool keepPreview = false)
     {
         var toggle = new CheckBox { Content = TextLine(title, 13, TextPrimary, FontWeights.SemiBold), Style = (Style)FindResource("SettingsToggle"), IsChecked = value, IsEnabled = enabled, VerticalAlignment = VerticalAlignment.Center };
+        if (keepPreview) KeepPreview(toggle);
         AutomationProperties.SetName(toggle, title); toggle.Checked += (_, _) => changed(true); toggle.Unchecked += (_, _) => changed(false);
         if (help is not null)
         {
@@ -1109,6 +1121,20 @@ public sealed partial class SettingsWindow : Window
         row.Children.Add(SettingLabel(title, help is null ? null : () => help));
         var controls=NumericControls(title,value,min,max,tick,unit,changed,fractional);controls.Slider.Margin=new Thickness(0,0,18,0);Grid.SetColumn(controls.Slider,1);row.Children.Add(controls.Slider);Grid.SetColumn(controls.Number,2);controls.Number.VerticalAlignment=VerticalAlignment.Center;row.Children.Add(controls.Number);
         return row;
+    }
+
+    private FrameworkElement MouseWheelRow()
+    {
+        var title = Loc.T("鼠标滚轮", "Mouse wheel");
+        var options = new UniformGrid { Columns = 3, Width = 324 };
+        foreach (var (action, label) in new[] { (MouseWheelAction.None, Loc.T("不做任何事", "Nothing")),
+            (MouseWheelAction.Pages, Loc.T("切换页面", "Switch pages")), (MouseWheelAction.Volume, Loc.T("调整音量", "Volume")) })
+        {
+            var option = new RadioButton { Content = label, Style = (Style)FindResource("SettingsSegment"), GroupName = "MouseWheel", IsChecked = S.MouseWheel == action };
+            AutomationProperties.SetName(option, title + " · " + label); option.Checked += (_, _) => Change(s => s.MouseWheel = action); options.Children.Add(option);
+        }
+        return Row(title, SegmentBorder(options), help: () => Loc.T("仅在展开的面板区域内滚动时生效；歌词、明细等会滚动的区域不受影响。",
+            "Works only when the wheel is rolled over the expanded panel; areas that scroll, such as the lyrics and the details, are not affected."));
     }
 
     private FrameworkElement BehaviorRow(string title, WindowBehavior selected, Action<WindowBehavior> changed)

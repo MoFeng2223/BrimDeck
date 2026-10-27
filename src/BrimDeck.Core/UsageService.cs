@@ -17,7 +17,8 @@ public interface IDesktopSources
 }
 
 // quotaCache is the file that keeps the last Claude quota read online across restarts (ClaudeQuotaCache); null keeps none.
-public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null, Func<IReadOnlyList<WslHome>>? wsl = null, TimeSpan? wslTimeout = null, string? quotaCache = null) : IDisposable
+// kimiQuotaCache does the same for Kimi Code (KimiQuotaCache).
+public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null, Func<IReadOnlyList<WslHome>>? wsl = null, TimeSpan? wslTimeout = null, string? quotaCache = null, string? kimiQuotaCache = null) : IDisposable
 {
     // Every provider uses the panel's shared refresh cycle. Claude may display local history
     // after an unsuccessful request, but it does not delay the next scheduled refresh.
@@ -42,6 +43,18 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private bool _includeWsl;
     private readonly AntigravityUsage _antigravity = new();
     private readonly DshSessions _dsh = new();
+    private readonly KimiSessions _kimi = new();
+    // The Kimi Code membership level, read from /me at most every few hours, for the hash of the token it was read with.
+    private (string Account, string Plan, DateTimeOffset Time)? _kimiPlan;
+    // The last Kimi Code quota read online and the hash of its account; kimiQuotaCache keeps it across restarts.
+    private KimiQuotaReading? _kimiRetained;
+    private string _kimiAccount = "", _kimiSaved = "";
+    private bool _kimiCacheRead;
+    private DateTimeOffset _kimiSavedTime;
+    // Cursor token details by local day, for the account they were read for (the sub claim of its token). A day is read again
+    // until a full read ends an hour after the day did, so records the service adds late still count; older days are kept.
+    private readonly Dictionary<DateTime, (List<TokenEntry> Entries, DateTimeOffset ReadAt)> _cursorDays = [];
+    private string _cursorAccount = "";
     private readonly SemaphoreSlim _gate = new(1);
     private ClaudeQuotaSnapshot? _grokBotRetained;
     // The last Claude quota read online; until this run reads its own, the previous run's (ClaudeQuotaCache), which is read on
@@ -213,6 +226,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (id == ProviderId.ZCode) ZCodeUsage.Read(snapshot, desktop, _locations.ZCodeHome, start, now);
         if (id == ProviderId.Antigravity) _antigravity.Read(snapshot, desktop, _locations.AntigravityConversations, start, now);
         if (id == ProviderId.Dsh) _dsh.Read(snapshot, _locations.DshHome, start, now);
+        if (id == ProviderId.Kimi) _kimi.Read(snapshot, _locations.KimiHome, start, now);
+        if (id == ProviderId.OpenCode) OpenCodeUsage.Read(snapshot, desktop, _locations.OpenCodeDatabase, start, now);
         try
         {
             switch (id)
@@ -253,6 +268,12 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     break;
                 case ProviderId.GrokBot:
                     await ReadGrokBotAsync(snapshot, now, ct);
+                    break;
+                case ProviderId.Kimi:
+                    await ReadKimiAsync(snapshot, now, ct);
+                    break;
+                case ProviderId.OpenCode:
+                    await ReadOpenCodeAsync(snapshot, now, ct);
                     break;
             }
         }
@@ -622,12 +643,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         {
             try
             {
-                var parts = token.Split('.');
-                if (parts.Length < 2) throw new InvalidDataException();
-                var payload = parts[1].Replace('-', '+').Replace('_', '/');
-                payload = payload.PadRight((payload.Length + 3) / 4 * 4, '=');
-                using var jwt = JsonDocument.Parse(Convert.FromBase64String(payload));
-                var subject = jwt.RootElement.Get("sub").Text();
+                var subject = CursorAccount(token);
                 if (subject.Length == 0) throw new InvalidDataException();
                 using var request = new HttpRequestMessage(HttpMethod.Get, "https://cursor.com/api/usage-summary");
                 request.Headers.TryAddWithoutValidation("Cookie", "WorkosCursorSessionToken=" + Uri.EscapeDataString(subject + "::" + token));
@@ -651,44 +667,83 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidDataException or TaskCanceledException && !ct.IsCancellationRequested) { }
         Connected(snapshot, Loc.T("Cursor 当前账期", "Cursor current billing period"), now);
-        try { await ReadCursorEvents(snapshot, token, now, start, ct); }
-        catch (Exception ex) when (ex is HttpRequestException or JsonException or IOException or InvalidDataException or TaskCanceledException)
-        { snapshot.UsageAvailable = false; snapshot.Entries.Clear(); snapshot.UsageNote = Loc.T("配额已读取，账户 Token 明细暂时不可用或尚未读取完整。", "The quota was read, but the account's token details are unavailable or not fully read yet."); }
+        await ReadCursorEvents(snapshot, token, now, start, ct);
     }
 
+    // The account's records can run to thousands a day, more than one refresh can read, so they are read a day at a time,
+    // newest first, and every day read in full is kept. The days a refresh did not reach are read by the next ones.
     private async Task ReadCursorEvents(ProviderSnapshot snapshot, string token, DateTimeOffset now, DateTimeOffset start, CancellationToken ct)
     {
+        var account = CursorAccount(token);
+        // Details are shown only for the account signed in now; a token that names no account keeps nothing between refreshes.
+        if (account.Length == 0 || account != _cursorAccount) { _cursorDays.Clear(); _cursorAccount = account; }
+        DateTime first = start.LocalDateTime.Date, last = now.LocalDateTime.Date;
+        foreach (var day in _cursorDays.Keys.Where(day => day < first || day > last).ToList()) _cursorDays.Remove(day);
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
         budget.CancelAfter(TimeSpan.FromSeconds(20));
+        try
+        {
+            for (var day = last; day >= first; day = day.AddDays(-1))
+            {
+                var end = new DateTimeOffset(day.AddDays(1));
+                if (_cursorDays.TryGetValue(day, out var kept) && kept.ReadAt >= end.AddHours(1)) continue;
+                _cursorDays[day] = (await ReadCursorDay(token, new DateTimeOffset(day), end, budget.Token), now);
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or IOException or InvalidDataException ||
+            ex is OperationCanceledException && !ct.IsCancellationRequested) { }
+        int days = (int)(last - first).TotalDays + 1, missing = days - _cursorDays.Count;
+        if (missing == days)
+        { snapshot.UsageAvailable = false; snapshot.UsageNote = Loc.T("配额已读取，账户 Token 明细暂时不可用或尚未读取完整。", "The quota was read, but the account's token details are unavailable or not fully read yet."); return; }
+        snapshot.Entries = _cursorDays.Values.SelectMany(read => read.Entries).Where(entry => entry.Time >= start && entry.Time <= now).OrderBy(entry => entry.Time).ToList();
+        snapshot.UsageAvailable = true;
+        snapshot.UsageComplete = missing == 0;
+        if (missing > 0) snapshot.UsageNote += Loc.T($"其中 {missing} 天的明细尚未读取，将在之后的刷新中补全。", " " + Loc.Count(missing, "day", "days") + " not read yet; later refreshes fill them in.");
+    }
+
+    // One local day's records, [from, to). An empty day, or a page past the last, comes back without the list.
+    private async Task<List<TokenEntry>> ReadCursorDay(string token, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
+    {
         var entries = new Dictionary<string, TokenEntry>();
         long rowsRead = 0;
         for (int page = 1; page <= 100; page++)
         {
             using var request = Bearer(HttpMethod.Post, "https://api2.cursor.sh/aiserver.v1.DashboardService/GetFilteredUsageEvents", token);
             request.Headers.TryAddWithoutValidation("Connect-Protocol-Version", "1");
-            request.Content = JsonBody(new { startDate = start.ToUnixTimeMilliseconds().ToString(), endDate = now.ToUnixTimeMilliseconds().ToString(), page, pageSize = 1000 });
-            using var response = await SendAsync(_http, request, budget.Token);
+            request.Content = JsonBody(new { startDate = from.ToUnixTimeMilliseconds().ToString(), endDate = (to.ToUnixTimeMilliseconds() - 1).ToString(), page, pageSize = 1000 });
+            using var response = await SendAsync(_http, request, ct);
             var events = response.RootElement.Get("usageEventsDisplay");
-            if (events.ValueKind != JsonValueKind.Array) throw new InvalidDataException();
-            foreach (var item in events.EnumerateArray())
-            {
-                var entry = ParseCursorEvent(item);
-                if (entry is not null && entry.Time >= start && entry.Time <= now) entries.TryAdd(entry.Key, entry);
-            }
-            rowsRead += events.GetArrayLength();
+            if (events.ValueKind is not (JsonValueKind.Array or JsonValueKind.Undefined)) throw new InvalidDataException();
+            int rows = events.ValueKind == JsonValueKind.Array ? events.GetArrayLength() : 0;
+            if (rows > 0)
+                foreach (var item in events.EnumerateArray())
+                    if (ParseCursorEvent(item) is { } entry && entry.Time >= from && entry.Time < to) entries.TryAdd(entry.Key, entry);
+            rowsRead += rows;
             var total = response.RootElement.Get("totalUsageEventsCount").Number();
-            if ((total is { } expected && rowsRead >= expected) || (total is null && events.GetArrayLength() < 1000))
-            { snapshot.Entries = entries.Values.ToList(); snapshot.UsageAvailable = true; return; }
-            if (events.GetArrayLength() == 0) throw new InvalidDataException();
+            if (rows == 0 || (total is { } expected && rowsRead >= expected) || (total is null && rows < 1000)) return entries.Values.ToList();
         }
         throw new InvalidDataException();
     }
+
+    // The account a Cursor sign-in belongs to: the sub claim of its token, read without checking the signature, since it
+    // only tells accounts apart. "" when the token names none.
+    private static string CursorAccount(string token)
+    {
+        var parts = token.Split('.');
+        if (parts.Length < 2) return "";
+        var payload = parts[1].Replace('-', '+').Replace('_', '/');
+        payload = payload.PadRight((payload.Length + 3) / 4 * 4, '=');
+        try { using var jwt = JsonDocument.Parse(Convert.FromBase64String(payload)); return jwt.RootElement.Get("sub").Text(); }
+        catch (Exception ex) when (ex is FormatException or JsonException) { return ""; }
+    }
+
     public static TokenEntry? ParseCursorEvent(JsonElement item)
     {
         var usage = item.Get("tokenUsage");
         if (usage.ValueKind != JsonValueKind.Object || item.Get("timestamp").Date() is not { } time) return null;
         var model = item.Get("model").Text();
-        var identity = item.Get("id").Text();
+        var identity = item.Get("usageEventId").Text();
+        if (identity.Length == 0) identity = item.Get("id").Text();
         if (identity.Length == 0) identity = time.ToString("O") + ":" + model + ":" + item.Get("conversationId").Text() + ":" + usage.GetRawText();
         decimal? cost = usage.Get("totalCents").Number() is { } cents && cents >= 0 ? (decimal)cents / 100m : null;
         return new("cursor:" + identity, time, model, usage.Get("inputTokens").Count(), usage.Get("cacheReadTokens").Count(),
@@ -857,6 +912,194 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (doc.RootElement.Get("code").Number() == 40003) { Expired(); return; }
         snapshot.Metrics = DshUsage.Summary(doc.RootElement) ?? throw new InvalidDataException();
         Connected(snapshot, Loc.T("DeepSeek Harness · DeepSeek 账户", "DeepSeek Harness · DeepSeek account"), now);
+    }
+
+    // OpenCode's own sign-in to OpenCode Console reads the Go allowance of its workspace (OpenCodeUsage). The token is used as
+    // it is and never renewed; an expired one is not sent. A workspace without Go is refused with HTTP 403.
+    private async Task ReadOpenCodeAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
+        var credential = OpenCodeUsage.ReadCredential(desktop, _locations.OpenCodeDatabase, _locations.OpenCodeData);
+        if (credential is null)
+        {
+            snapshot.StatusLabel = Loc.T("未连接", "Not connected");
+            snapshot.Status = Loc.T("请先在 OpenCode 中登录 OpenCode Console", "Sign in to OpenCode Console in OpenCode first.");
+            return;
+        }
+        if (credential.Expired(now))
+        {
+            snapshot.StatusLabel = Loc.T("登录已过期", "Sign-in expired");
+            snapshot.Status = Loc.T("OpenCode 的登录已过期，在 OpenCode 中使用一次即可续期", "The OpenCode sign-in has expired. Using OpenCode once renews it.");
+            return;
+        }
+        if (OpenCodeUsage.UsageAddress(credential.Server) is not { } address) throw new InvalidDataException();
+        snapshot.Scope = "account";
+        using var request = Bearer(HttpMethod.Get, address.AbsoluteUri, credential.Token);
+        if (credential.Workspace.Length > 0) request.Headers.TryAddWithoutValidation("x-opencode-org-id", credential.Workspace);
+        using var response = await _http.SendAsync(request, ct);
+        if (response.StatusCode == HttpStatusCode.Forbidden)
+        {
+            // Cloudflare in front of opencode.ai answers 403 as well when it blocks a request; only OpenCode's own 403 means no Go.
+            if ((await response.Content.ReadAsStringAsync(ct)).Contains("\"cloudflare_error\"", StringComparison.Ordinal)) throw new HttpRequestException(null, null, HttpStatusCode.ServiceUnavailable);
+            snapshot.StatusLabel = Loc.T("未订阅 Go", "No Go plan");
+            snapshot.Status = Loc.T("OpenCode 登录的工作区没有订阅 OpenCode Go", "The workspace OpenCode signed in to has no OpenCode Go plan.");
+            return;
+        }
+        response.EnsureSuccessStatusCode();
+        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        var quotas = OpenCodeUsage.Allowance(doc.RootElement, out bool limited);
+        if (quotas.Count == 0) throw new InvalidDataException();
+        snapshot.Quotas = quotas;
+        Connected(snapshot, "OpenCode Go", now);
+        if (limited) snapshot.Status = Loc.T("已达到 OpenCode Go 的用量上限，重置前请求会被拒绝", "The OpenCode Go limit is reached; requests are refused until it resets.");
+    }
+
+    // Kimi Code's own sign-in reads the plan quota. The token is used as it is: an expired one is not sent and never renewed,
+    // since renewing would replace the sign-in Kimi Code holds. Kimi Code renews it only while in use, so most refreshes find
+    // it expired; the last reading (KimiQuotaCache) then stands in, marked as old, until Kimi Code is used again. A rejected
+    // token is treated the same way, since Kimi Code renews it on its next use.
+    private async Task ReadKimiAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
+        var service = KimiUsage.Service(_locations.KimiHome, _locations.KimiEnvironment);
+        var source = KimiAccount(service.Global);
+        var credential = KimiUsage.ReadCredential(_locations.KimiHome, service.CredentialName);
+        if (credential is null)
+        {
+            ForgetKimi();
+            snapshot.StatusLabel = Loc.T("未连接", "Not connected"); snapshot.Status = Loc.T("请先登录 Kimi Code", "Sign in to Kimi Code first");
+            return;
+        }
+        snapshot.Scope = "account";
+        var baseUrl = service.BaseUrl;
+        // The hash covers the service address, so a reading kept for one region is never shown for the other.
+        var accountHash = KimiQuotaCache.AccountHash(baseUrl, credential.Account);
+        if (credential.Expired(now)) { ShowKimiRetained(snapshot, accountHash, source, null, now); return; }
+        var planKey = accountHash.Length > 0 ? accountHash
+            : Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(baseUrl + "\n" + credential.AccessToken)));
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(TimeSpan.FromSeconds(10));
+        var cached = _kimiPlan is { } plan && plan.Account == planKey && now - plan.Time < TimeSpan.FromHours(6) ? plan.Plan : null;
+        var planTask = cached is null ? ReadKimiPlanAsync(baseUrl, credential.AccessToken, deadline.Token) : Task.FromResult<string?>(cached);
+        // Leaving early stops the membership request still under way.
+        using var stop = new CancelOnExit(deadline);
+        List<UsageMetric> metrics;
+        try
+        {
+            using var request = Bearer(HttpMethod.Get, baseUrl + "/usages", credential.AccessToken);
+            using var response = await _http.SendAsync(request, deadline.Token);
+            if (response.StatusCode == HttpStatusCode.PaymentRequired) { NoKimiPlan(snapshot); return; }
+            response.EnsureSuccessStatusCode();
+            using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: deadline.Token);
+            metrics = KimiUsage.Usages(doc.RootElement, service.Global ? "USD" : "CNY");
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested && ex is HttpRequestException or OperationCanceledException or InvalidDataException or JsonException or IOException or FormatException)
+        {
+            if (ShowKimiRetained(snapshot, accountHash, source, ex, now)) return;
+            if (ex is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized }) return;
+            if (ex is HttpRequestException { StatusCode: HttpStatusCode.NotFound })
+            {
+                snapshot.StatusLabel = Loc.T("暂不可用", "Unavailable");
+                snapshot.Status = Loc.T("未找到 Kimi Code 用量接口，请检查 Kimi Code 的服务地址", "The Kimi Code usage API was not found. Check the service address Kimi Code uses.");
+                return;
+            }
+            throw;
+        }
+        if (metrics.Count == 0) { NoKimiPlan(snapshot); return; }
+        var name = await planTask;
+        if (name is not null && cached is null) _kimiPlan = (planKey, name, now);
+        snapshot.Metrics = metrics;
+        snapshot.Plan = name ?? "";
+        if (snapshot.Plan.Length > 0) snapshot.PlanSource = source;
+        Connected(snapshot, source, now);
+        KeepKimi(new(now, snapshot.Plan, metrics), accountHash);
+    }
+
+    // As with ZCode's two regions, the account names its service: kimi.com in mainland China, kimi.ai elsewhere.
+    private static string KimiAccount(bool global) => KimiUsage.Source("Kimi Code", global);
+
+    // An account without a Kimi Code plan has no quota to keep.
+    private void NoKimiPlan(ProviderSnapshot snapshot)
+    {
+        ForgetKimi();
+        snapshot.StatusLabel = Loc.T("未订阅", "No plan");
+        snapshot.Status = Loc.T("未订阅 Kimi Code 套餐", "No Kimi Code plan");
+    }
+
+    // The last reading, for the account signed in now: read from the file once that account is known. A reading of another
+    // known account is set aside.
+    private KimiQuotaReading? KimiRetained(string accountHash, DateTimeOffset now)
+    {
+        if (accountHash.Length > 0 && _kimiAccount.Length > 0 && accountHash != _kimiAccount) { _kimiRetained = null; _kimiCacheRead = false; }
+        if (_kimiRetained is null && !_kimiCacheRead && kimiQuotaCache is not null && accountHash.Length > 0)
+        {
+            _kimiCacheRead = true;
+            _kimiRetained = KimiQuotaCache.Load(kimiQuotaCache, now, accountHash);
+            _kimiAccount = accountHash;
+        }
+        return _kimiRetained is null ? null : KimiQuotaCache.Usable(_kimiRetained, now);
+    }
+
+    // The file is written when the reading changed, and otherwise once it is RewriteAfter old. A reading whose account is not
+    // known is kept for this run only.
+    private void KeepKimi(KimiQuotaReading reading, string accountHash)
+    {
+        _kimiRetained = reading; _kimiAccount = accountHash; _kimiCacheRead = true;
+        if (kimiQuotaCache is null || accountHash.Length == 0) return;
+        var key = KimiQuotaCache.Serialize(reading with { Time = default }, accountHash);
+        if (key == _kimiSaved && reading.Time - _kimiSavedTime < KimiQuotaCache.RewriteAfter) return;
+        _kimiSaved = key; _kimiSavedTime = reading.Time;
+        KimiQuotaCache.Save(kimiQuotaCache, reading, accountHash);
+    }
+
+    private void ForgetKimi()
+    {
+        _kimiRetained = null; _kimiAccount = ""; _kimiSaved = "";
+        if (kimiQuotaCache is null) return;
+        _kimiCacheRead = true;
+        KimiQuotaCache.Delete(kimiQuotaCache);
+    }
+
+    // Shows the last reading in place of one that could not be taken: failure is null when the token had expired and no request
+    // was sent. Without a reading, an expired or rejected sign-in waits for Kimi Code to renew it; other failures return false.
+    private bool ShowKimiRetained(ProviderSnapshot snapshot, string accountHash, string source, Exception? failure, DateTimeOffset now)
+    {
+        bool renew = failure is null or HttpRequestException { StatusCode: HttpStatusCode.Unauthorized };
+        if (KimiRetained(accountHash, now) is not { } kept)
+        {
+            if (!renew) return false;
+            snapshot.StatusLabel = Loc.T("等待更新", "Waiting for update");
+            snapshot.Status = Loc.T("使用 Kimi Code 后自动更新", "Updates automatically after Kimi Code is used");
+            return true;
+        }
+        snapshot.IsStale = true;
+        snapshot.Metrics = kept.Metrics.ToList();
+        if (kept.Plan.Length > 0) { snapshot.Plan = kept.Plan; snapshot.PlanSource = source; }
+        snapshot.LiveQuota = true; snapshot.QuotaTime = kept.Time; snapshot.Source = source;
+        var time = kept.Time.LocalDateTime.ToString(kept.Time.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
+        var shown = Loc.T($"显示 {time} 读取的额度", $"showing the allowance read at {time}");
+        (snapshot.StatusLabel, snapshot.Status) = failure switch
+        {
+            _ when renew => (Loc.T("等待更新", "Waiting for update"), Loc.T($"使用 Kimi Code 后自动更新；{shown}", $"Updates automatically after Kimi Code is used; {shown}")),
+            HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } => (Loc.T("稍后重试", "Retrying later"), Loc.T($"请求频繁，{shown}，稍后自动重试", $"Too many requests; {shown}. Retrying automatically later.")),
+            OperationCanceledException => (Loc.T("稍后重试", "Retrying later"), Loc.T($"读取超时，{shown}，稍后自动重试", $"Reading timed out; {shown}. Retrying automatically later.")),
+            InvalidDataException or JsonException or FormatException => (Loc.T("稍后重试", "Retrying later"), Loc.T($"数据格式发生变化，{shown}", $"The data format has changed; {shown}.")),
+            IOException => (Loc.T("稍后重试", "Retrying later"), Loc.T($"暂时无法读取数据，{shown}，稍后自动重试", $"The data cannot be read right now; {shown}. Retrying automatically later.")),
+            _ => (Loc.T("稍后重试", "Retrying later"), Loc.T($"账户接口暂时不可用，{shown}，稍后自动重试", $"The account API is temporarily unavailable; {shown}. Retrying automatically later."))
+        };
+        return true;
+    }
+
+    private sealed class CancelOnExit(CancellationTokenSource source) : IDisposable { public void Dispose() => source.Cancel(); }
+
+    // The membership level only labels the column, so a failed read leaves the label out instead of failing the quota.
+    private async Task<string?> ReadKimiPlanAsync(string baseUrl, string token, CancellationToken ct)
+    {
+        try
+        {
+            using var request = Bearer(HttpMethod.Get, baseUrl + "/me", token);
+            using var doc = await SendAsync(_http, request, ct);
+            return KimiUsage.Plan(doc.RootElement) is { Length: > 0 } plan ? plan : null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException or IOException) { return null; }
     }
 
     private static HttpRequestMessage Bearer(HttpMethod method, string uri, string token)

@@ -10,6 +10,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\BrimDeck.Core\BrimDeck.Core.csproj" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+    <Compile Include="..\..\src\BrimDeck\Native\PdhQuery.cs" Link="PdhQuery.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\TemperatureSensors.cs" Link="TemperatureSensors.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\StorageReader.cs" Link="StorageReader.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\SettingsChrome.cs" Link="SettingsChrome.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\ProcessLoopbackCapture.cs" Link="ProcessLoopbackCapture.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\WindowsHost.cs" Link="WindowsHost.cs" />
@@ -20,6 +23,13 @@
     <Compile Include="..\..\src\BrimDeck\HotkeyGesture.cs" Link="HotkeyGesture.cs" />
     <Compile Include="..\..\src\BrimDeck\InputMethodController.cs" Link="InputMethodController.cs" />
     <Compile Include="..\..\src\BrimDeck\InputMethodController.Notifications.cs" Link="InputMethodController.Notifications.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\GpuProvider.cs" Link="GpuProvider.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\Why.cs" Link="Why.cs" />
+    <Compile Include="..\..\src\BrimDeck\MainWindow.Shadow.cs" Link="MainWindow.Shadow.cs" />
+    <!-- The island itself: the shadow observes its properties, and the settled clip is checked on its drawing. -->
+    <Compile Include="..\..\src\BrimDeck.UI\IslandBorder.cs" Link="IslandBorder.cs" />
+    <Compile Include="..\..\src\BrimDeck.UI\IslandDecor.cs" Link="IslandDecor.cs" />
+    <Compile Include="..\..\src\BrimDeck\PageToolTips.cs" Link="PageToolTips.cs" />
   </ItemGroup>
   <Import Project="..\..\src\BrimDeck\InputMethods.Native.targets" />
 </Project>

@@ -140,6 +140,80 @@ internal static class ConfiguredProviderTests
             deepseek.Scope == "account" && deepseek.Metrics.Count == 2 && deepseek.Metrics[0] is { Kind: MetricKind.Balance, Currency: "USD", UsedPercent: 100 } && deepseek.Status.Contains("余额不足"));
         handler.Respond = _ => new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("""{"error":{"message":"Authentication Fails"}}""") };
         check("A rejected DeepSeek key explains what to check", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: false, StatusLabel: "密钥无效" } rejected && rejected.Status.Contains("DeepSeek"));
+        // Kimi Code API: a key from the Kimi Code console reads the plan quota the Kimi Code sign-in reads.
+        var manual = ProviderCatalog.Sources.Where(id => !ProviderCatalog.IsBuiltIn(id)).ToList();
+        check("Kimi Code API is entered by hand, right after DeepSeek, then OpenCode Go, then New API",
+            manual.IndexOf(ProviderId.KimiApi) == manual.IndexOf(ProviderId.DeepSeek) + 1 && manual.IndexOf(ProviderId.OpenCodeGo) == manual.IndexOf(ProviderId.KimiApi) + 1 &&
+            manual.IndexOf(ProviderId.NewApi) == manual.IndexOf(ProviderId.OpenCodeGo) + 1 &&
+            ProviderCatalog.Group(ProviderId.KimiApi) == "手动填写" && ProviderCatalog.Name(ProviderId.KimiApi) == "Kimi Code API" && !ProviderCatalog.NeedsSite(ProviderId.KimiApi) &&
+            !ProviderCatalog.IsUsageSource(ProviderId.KimiApi) && (int)ProviderId.KimiApi == 16);
+        var kimiSaved = JsonSerializer.Deserialize<DeckSettings>(JsonSerializer.Serialize(new DeckSettings { Apps = [new AppEntry { QuotaSource = ProviderId.KimiApi }] }))!;
+        check("Kimi Code API is saved as kimi-api and shares the color of sources entered by hand",
+            ProviderCatalog.Key(ProviderId.KimiApi) == "kimi-api" && kimiSaved.Apps.Single().QuotaSource == ProviderId.KimiApi &&
+            AppPresets.ThemeColor(ProviderId.KimiApi) == AppPresets.ManualColor && PanelThemes.AppKey(ProviderId.KimiApi) == "manual");
+        entry.QuotaSource = ProviderId.KimiApi;
+        var hosts = new List<string>();
+        HttpResponseMessage Rejected() => new(HttpStatusCode.Unauthorized) { Content = new StringContent("""{"error":"unauthorized"}""") };
+        HttpResponseMessage KimiReply(HttpRequestMessage request, string me) => request.RequestUri!.AbsolutePath.EndsWith("/me", StringComparison.Ordinal) ? Reply(me)
+            : Reply("""{"usages":{"limit_5h":{"used_ratio":0.25,"reset_time":"2026-09-20T15:00:00Z"},"limit_7d":{"used_ratio":0.5},"limit_month_total":{"used_ratio":0.1}},"boosterWallet":{"balance":{"type":"BOOSTER","amount":"500000000","amountLeft":"200000000"}}}""");
+        handler.Respond = request => { lock (hosts) hosts.Add(request.RequestUri!.Host); return KimiReply(request, """{"user_level_name":"Allegretto","region":"REGION_CN"}"""); };
+        handler.Calls.Clear();
+        var kimi = (await providers.TestAsync(entry)).Snapshot;
+        check("A Kimi Code API key reads kimi.com's quota and membership with the Bearer key, parsed as the sign-in's",
+            hosts.All(h => h == "api.kimi.com") && handler.Calls.Select(c => c.Path).SequenceEqual(["/coding/v1/usages", "/coding/v1/me"]) && handler.Calls.All(c => c.Authorization == "Bearer fixture-key-a") &&
+            kimi.LiveQuota && kimi.Plan == "Allegretto" && kimi.Scope == "plan" && kimi.Source == "Kimi Code API · kimi.com 账户" &&
+            kimi.Metrics.Select(m => m.Window).Take(3).SequenceEqual(new int?[] { 300, 10080, 43200 }) && kimi.Metrics[3] is { Kind: MetricKind.Balance, Currency: "CNY" });
+        hosts.Clear();
+        handler.Respond = request => { lock (hosts) hosts.Add(request.RequestUri!.Host); return request.RequestUri!.Host == "api.kimi.com" ? Rejected() : KimiReply(request, """{"user_level_name":"Vivace","region":"REGION_GLOBAL"}"""); };
+        kimi = (await providers.TestAsync(entry)).Snapshot;
+        check("A key kimi.com rejects is read on kimi.ai, shown as a kimi.ai account in dollars",
+            hosts.SequenceEqual(["api.kimi.com", "api.kimi.ai", "api.kimi.ai"]) && kimi.LiveQuota && kimi.Plan == "Vivace" && kimi.Source == "Kimi Code API · kimi.ai 账户" &&
+            kimi.Metrics.Last() is { Kind: MetricKind.Balance, Currency: "USD" } && kimi.StatusLabel == "已连接");
+        handler.Respond = request => KimiReply(request, """{"user_level_name":"Plus","region":"REGION_GLOBAL"}""");
+        check("The region shown follows /me", (await providers.TestAsync(entry)).Snapshot is { Source: "Kimi Code API · kimi.ai 账户", Plan: "Plus" });
+        handler.Respond = request => request.RequestUri!.AbsolutePath.EndsWith("/me", StringComparison.Ordinal) ? new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("") } : KimiReply(request, "");
+        check("Without the membership the quota still shows, named by the service that answered", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: true, Plan: "", Source: "Kimi Code API · kimi.com 账户" });
+        handler.Respond = _ => Reply("""{"usages":{}}""");
+        check("An account without a Kimi Code plan says so", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: false } none && none.Status.Contains("没有 Kimi Code"));
+        handler.Respond = request => KimiReply(request, """{"user_level_name":"Allegretto","region":"REGION_CN"}""");
+        await providers.TestAsync(entry);
+        handler.Respond = _ => new HttpResponseMessage(HttpStatusCode.BadGateway) { Content = new StringContent("") };
+        check("A passing failure keeps the last quota, marked stale", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: false, IsStale: true, StatusLabel: "读取失败" } kimiStale && kimiStale.Metrics.Count == 4);
+        hosts.Clear();
+        handler.Respond = request => { lock (hosts) hosts.Add(request.RequestUri!.Host); return Rejected(); };
+        var invalid = (await providers.TestAsync(entry)).Snapshot;
+        check("A key both services reject is reported invalid without showing the key", hosts.SequenceEqual(["api.kimi.com", "api.kimi.ai"]) && invalid is { LiveQuota: false, StatusLabel: "密钥无效" } &&
+            invalid.Status.Contains("sk-kimi-") && !invalid.Status.Contains("fixture-key"));
+        check("Kimi's region comes from /me", KimiUsage.GlobalRegion(Json("""{"region":"REGION_CN"}""")) == false && KimiUsage.GlobalRegion(Json("""{"region":"REGION_GLOBAL"}""")) == true &&
+            KimiUsage.GlobalRegion(Json("{}")) is null && KimiUsage.GlobalRegion(default) is null && KimiUsage.GlobalRegion(Json("""{"region":"cn"}""")) is null);
+        // OpenCode Go: an OpenCode Console API key reads the Go allowance OpenCode's own sign-in reads.
+        entry.QuotaSource = ProviderId.OpenCodeGo;
+        string agent = "";
+        const string goUsage = """{"usage":{"rolling":{"status":"ok","percent":4,"resetsAt":"2026-09-20T15:00:00.000Z"},"weekly":{"status":"ok","percent":1},"monthly":{"status":"ok","percent":0}}}""";
+        HttpResponseMessage GoReply(HttpRequestMessage request, Func<HttpResponseMessage> answer)
+        {
+            agent = request.Headers.UserAgent.ToString();
+            return request.RequestUri!.AbsoluteUri == "https://opencode.ai/zen/go/v1/usage" ? answer() : new(HttpStatusCode.NotFound) { Content = new StringContent("") };
+        }
+        handler.Respond = request => GoReply(request, () => Reply(goUsage));
+        handler.Calls.Clear();
+        var go = (await providers.TestAsync(entry)).Snapshot;
+        check("An OpenCode Go key reads the Go allowance with the Bearer key and a user agent Cloudflare accepts",
+            handler.Calls.Select(c => c.Path).SequenceEqual(["/zen/go/v1/usage"]) && handler.Calls.Single().Authorization == "Bearer fixture-key-a" &&
+            agent.StartsWith("BrimDeck/", StringComparison.Ordinal) && go.LiveQuota && go.Scope == "plan" && go.Source == "OpenCode Go" && go.StatusLabel == "已连接" &&
+            go.Metrics.Select(m => m.Window).SequenceEqual(new int?[] { 300, 10080, null }) && go.Metrics[0] is { Label: "5 小时额度", Percent: 4 });
+        handler.Respond = request => GoReply(request, () => Reply("""{"usage":{"rolling":{"status":"rate-limited","percent":100},"weekly":{"percent":30},"monthly":{"percent":10}}}"""));
+        check("A reached Go limit is told after the connected state", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: true } limitedGo && limitedGo.Status.Contains("上限"));
+        handler.Respond = request => GoReply(request, () => new(HttpStatusCode.Unauthorized) { Content = new StringContent("""{"type":"error","error":{"type":"AuthError"}}""") });
+        var goRejected = (await providers.TestAsync(entry)).Snapshot;
+        check("A rejected OpenCode Go key explains what to check without showing the key", goRejected is { LiveQuota: false, StatusLabel: "密钥无效" } &&
+            goRejected.Status.Contains("oc_sk_") && !goRejected.Status.Contains("fixture-key"));
+        handler.Respond = request => GoReply(request, () => new(HttpStatusCode.Forbidden) { Content = new StringContent("""{"type":"error","error":{"type":"AuthError","message":"No subscription"}}""") });
+        check("OpenCode's own 403 means the key's workspace has no Go plan", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: false } noGo && noGo.Status.Contains("没有订阅 OpenCode Go"));
+        handler.Respond = request => GoReply(request, () => new(HttpStatusCode.Forbidden) { Content = new StringContent("""{"cloudflare_error":true,"error_code":1010}""") });
+        check("A Cloudflare refusal is not taken for a missing Go plan", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: false } blocked && !blocked.Status.Contains("没有订阅"));
+        handler.Respond = request => GoReply(request, () => Reply("""{"usage":{}}"""));
+        check("An answer without windows is reported as unrecognized", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: false } empty && empty.Status.Contains("无法识别"));
         entry.QuotaSource = ProviderId.Custom;
         entry.Script = """async function fetchUsage(ctx) { const [a,b] = await Promise.all([ctx.http.get("https://example.test/a"),ctx.http.post("https://example.test/b",{body:{value:1}})]); ctx.log(ctx.secrets.key); return {metrics:[{kind:"balance",label:"余额",amount:a.json().balance+b.json().balance,currency:"USD"}]}; }""";
         handler.Respond = _ => Reply("""{"balance":2}""");

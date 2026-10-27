@@ -7,18 +7,18 @@
 
 # BrimDeck - Windows 灵动岛
 
-BrimDeck 是 Windows 10 和 11 上的灵动岛，在屏幕顶部集中显示 AI 编程工具的额度与用量，以及正在播放的音乐。<br>
+BrimDeck 是 Windows 11 上的灵动岛，在屏幕顶部集中显示 AI 编程工具的额度与用量，以及正在播放的音乐。<br>
 平时收起在屏幕顶部，只在需要时展开。<br>
 Windows 原生应用，使用 C# 与 WPF 开发，注重性能与流畅度。
 
-[![下载](https://img.shields.io/badge/下载-Windows%2010%20%2F%2011%20x64-9CB9FF?style=flat-square)](https://github.com/MoFeng2223/BrimDeck/releases/latest)
+[![下载](https://img.shields.io/badge/下载-Windows%2011%20x64-9CB9FF?style=flat-square)](https://github.com/MoFeng2223/BrimDeck/releases/latest)
 [![最新版本](https://img.shields.io/github/v/release/MoFeng2223/BrimDeck?style=flat-square&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=98DBB0)](https://github.com/MoFeng2223/BrimDeck/releases/latest)
 [![许可证](https://img.shields.io/badge/许可证-Apache%202.0-E5A385?style=flat-square)](LICENSE)
 ![界面语言](https://img.shields.io/badge/界面-简体中文%20%7C%20English-B9A8FF?style=flat-square)
 
 <p><a href="#功能">功能</a> · <a href="#安装">安装</a> · <a href="#快速开始">快速开始</a> · <a href="#隐私">隐私</a> · <a href="#常见问题">常见问题</a> · <a href="#参与开发">参与开发</a> · <a href="README.md">English</a></p>
 
-<img src="docs/zh-CN/images/hero.png" width="100%" alt="BrimDeck 从屏幕顶部的刘海展开为 AI 用量面板，再切换到音乐页，最后收起">
+<img src="docs/zh-CN/images/hero.png" width="100%" alt="BrimDeck 从屏幕顶部的刘海展开为 AI 用量面板，依次切换到音乐页和系统监控页，最后收起">
 
 </div>
 
@@ -27,6 +27,7 @@ Windows 原生应用，使用 C# 与 WPF 开发，注重性能与流畅度。
 - **额度集中显示**：Claude、Codex、Cursor、Antigravity 等工具的额度集中在一个面板上，不必逐个打开网页、命令行或应用查看。
 - **简化额度查询操作**：平时收起在屏幕顶部，鼠标移上去即展开，移开即收起。
 - **媒体控制**：内联预览与控制正在播放的歌曲，封面、律动条与歌词随音乐变化。
+- **系统监控**：CPU、内存、网速等读数常驻在刘海或胶囊中，一眼即可看到。
 - **全屏免打扰**：全屏玩游戏或看视频时自动隐藏，避免误触展开；可在设置中调整。
 - **开箱即用**：自动识别本机已登录的 Claude、Codex、Cursor 等工具，无需填写密钥或重新登录。
 - **Windows 原生**：基于 .NET 与 WPF 构建，以较低的资源占用提供流畅的动画体验。
@@ -57,11 +58,13 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
   <img src="docs/zh-CN/images/compact-alert.png" width="388" alt="配额提醒：Claude 5 小时已用 91%">
 
+- 刘海与胶囊可以显示系统读数，与配额环、音乐并排显示。
+
+  <img src="docs/zh-CN/images/compact-monitor.png" width="474" alt="刘海中的系统读数：配额环旁显示核心柱、CPU、内存、GPU 与网速">
+
 - 刘海、胶囊和指示条的尺寸与位置可在设置中调整。
 
 - 窗口最大化时默认切换为指示条，全屏游戏或视频播放时默认隐藏，避免误触展开。
-
-- 刘海、胶囊、提示与展开面板支持面板主题：跟随系统、深色、浅色，内置 One Dark Pro、GitHub、Dracula、Night Owl 等开源主题，也可以按[主题制作指南](docs/zh-CN/themes.md)制作自定义主题；任何主题下文字与数据都会保持清晰可读。
 
 ### 输入法切换
 
@@ -81,17 +84,6 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 可自定义配额提供商，并分别设置各列的配额与用量统计来源，详见[支持的工具](docs/zh-CN/ai-tools.md)。
 
-### 系统监控
-
-- 大号显示 CPU 占用，旁边以柔和曲线显示最近一分钟走势；每个逻辑处理器一根柱，性能核与能效核分色显示，柱上刻度表示当前频率（指向柱可看数值）；旁边以小图显示 GPU。点击即可改为以 GPU 为主：按引擎（3D、复制、视频解码与编码等）各一根柱，专用显存与显卡名称悬停可见，CPU 则缩为小图。
-- 内存占用、缓存与已提交内存；物理网卡的下载与上传速度，附最近一分钟的曲线。
-- 按 CPU 或内存列出占用最高的应用，同一程序的多个进程合并为一行，可选简略或详细，面板够宽时分两列；两个应用只差一点时列表不会来回跳动。点击应用可查看详情卡片。
-- 拖动展开面板的底边、左右两边或底角即可调整大小（AI 用量、系统监控、媒体三个页面都支持），布局随之逐级变化。可抓取范围略超出边缘，指针靠近时浮现把手，悬停的边缘以主题强调色发光；尺寸以柔和的弹簧跟随指针。
-- 刘海和胶囊也能显示系统读数：ftop 式的核心柱、CPU、内存、GPU 与网速，或三个环形仪表，或自选内容，与配额环、音乐并排显示。放不下时自动加宽；拖动两端可手动设定宽度（最大化窗口时显示的细线也可以），双击两端恢复自动。
-- 默认跟随面板主题取色；也可选 ftop 的海洋、石墨、暖色三套配色，并按主题深浅自动使用对应的深色或浅色版本。只在页面或读数显示时读取系统数据，进程只在页面打开时读取。
-
-本页参考并改编自 Nongfsq 的 macOS 系统监控 [ftop](https://github.com/Nongfsq/ftop)（MIT 许可证）。
-
 ### 音乐
 
 <img src="docs/zh-CN/images/music.png" width="63%" alt="音乐页：封面、歌名、歌词、进度条和播放控制">
@@ -101,16 +93,35 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 支持接入 Windows 系统媒体控制的播放器，并对部分播放器做了专门优化，详见[播放器支持](docs/zh-CN/music-players.md)。
 
+### 系统监控
+
+<img src="docs/zh-CN/images/monitor.png" width="100%" alt="系统监控页：CPU 占用与各核心使用率、GPU、内存、网速，以及占用最高的应用">
+
+- 实时显示 CPU、GPU、内存的占用和网络速度，以及每个核心的使用率。有多块显卡时默认显示独显；点击大号 GPU 读数可切换到下一块，也可在“设置 › 系统监控 › 显卡”中指定。
+- 按 CPU 或内存列出占用最高的应用，点击应用可查看详情。
+- 按物理硬盘逐行显示已用空间，一块硬盘分成多个盘符时按盘符分段；只列内置硬盘，不含 U 盘、SD 卡、移动硬盘和网络盘。
+- 显示 CPU、GPU 和固态硬盘的温度（可在设置中关闭；刘海或胶囊中的 CPU、GPU 和硬盘读数也可显示温度）。无需管理员权限，也不安装驱动；读不到的项不显示。GPU 温度与任务管理器相同；CPU 温度来自主板固件的 ACPI 热区，可能是主板而非 CPU 本身的温度，许多电脑不提供。
+- 配色默认跟随面板主题，也提供多种预设配色，并支持自定义。
+
+本页参考并改编自 Nongfsq 的 macOS 系统监控 [ftop](https://github.com/Nongfsq/ftop)（MIT 许可证）。
+
+### 面板主题
+
+<img src="docs/zh-CN/images/themes.png" width="100%" alt="同一个 AI 用量页在深色、浅色、Night Owl、Dracula、赛博朋克：边缘行者主题，以及一个自定义主题示例下的样子">
+
+- 内置深色、浅色、One Dark Pro、GitHub Dark、GitHub Light、Dracula、Night Owl、赛博朋克：边缘行者等主题。
+- 可以在设置的“面板主题”页修改背景、前景、强调色等颜色，并保存为自定义主题；也可以按[主题制作指南](docs/zh-CN/themes.md)编写主题文件。
+
 ## 安装
 
-需要 Windows 10 2004（内部版本 19041）及以上，或 Windows 11（x64）。
+需要 Windows 11（x64）。对 Windows 10（2004 及以上版本）提供有限支持。
 
-在 Windows 10 上，设置窗口使用直角外框和 WPF 主题，不启用 Windows 11 专用的 DWM 窗口效果。音乐控制仍然可用；无法按进程采集音频时，律动条使用播放器音频会话的峰值表。
-
-1. 从 [Releases](https://github.com/MoFeng2223/BrimDeck/releases/latest) 下载并运行 `BrimDeck-<版本>-Setup.exe`。
+1. 从 [Releases](https://github.com/MoFeng2223/BrimDeck/releases/latest) 下载以下任一文件：
+   - 安装版：`BrimDeck-<版本>-Setup.exe`，运行后按提示安装。
+   - 免安装版：`BrimDeck-<版本>-Portable-x64.zip`，解压后运行 `BrimDeck` 文件夹中的 `BrimDeck.exe`。
 2. 如出现“Windows 已保护你的电脑”提示，点击“更多信息”→“仍要运行”。
 
-有新版本时，打开设置即可收到更新提示，下载并校验后可直接在应用内安装。
+两种版本都可以在应用内更新，设置和数据都保存在 `%LOCALAPPDATA%\BrimDeck`。免安装版放在需要管理员权限才能修改的文件夹（例如 `C:\Program Files`）中时，更新会请求管理员确认。不再使用免安装版时，先在设置中关闭开机自启动（如已开启），再删除它的文件夹；如需同时删除设置和数据，再删除 `%LOCALAPPDATA%\BrimDeck`。
 
 ## 快速开始
 
@@ -120,7 +131,7 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 ## 卸载
 
-前往 Windows 设置中的“应用”卸载。
+安装版：前往 Windows 设置中的“应用”卸载。免安装版：先在设置中关闭开机自启动（如已开启），再删除它的文件夹。
 
 ## 隐私
 
@@ -143,6 +154,9 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 构建输入法原生适配组件还需要 Visual Studio 2022 的“使用 C++ 的桌面开发”工作负载和 Windows SDK；常规 .NET 构建会自动生成并复制该组件。
 
 欢迎通过 [Issues](https://github.com/MoFeng2223/BrimDeck/issues) 反馈问题、提出功能建议，或申请适配更多工具与播放器，也欢迎提交 Pull Request 参与开发。
+
+- Pull Request 请以 `dev` 分支为目标，不要直接合入 `main`。
+- 后续规划见 [BrimDeck 路线图](https://github.com/MoFeng2223/BrimDeck/discussions/57)。功能建议可以在帖子下讨论，想认领其中某项功能时，也可以直接在帖子下留言。其他话题可以在 [Discussions](https://github.com/MoFeng2223/BrimDeck/discussions) 中讨论。
 
 ## 许可证
 

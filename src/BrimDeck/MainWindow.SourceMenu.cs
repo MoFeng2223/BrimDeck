@@ -61,6 +61,7 @@ public partial class MainWindow
 
     private void WatchSourceMenu(ContextMenu menu)
     {
+        PopupMotion.Attach(menu, () => menu.Template?.FindName("Chrome", menu) as UIElement);
         SizeChangedEventHandler resized = (_, _) => { if (menu.IsOpen) ResizeSourceMenu(menu); };
         menu.Opened += (_, _) =>
         {
@@ -80,7 +81,7 @@ public partial class MainWindow
             CheckSourceMenuPointer(WindowsHost.Cursor(), pressed: true)), true);
         menu.PreviewKeyDown += (_, e) =>
         {
-            if (e.Key == Key.Escape) { CloseSourceMenu(); SetExpanded(false); e.Handled = true; }
+            if (e.Key == Key.Escape) { CloseSourceMenu(); SetExpanded(false, keyboard: true); e.Handled = true; }
         };
         menu.Closed += (_, _) =>
         {

@@ -40,9 +40,6 @@ public sealed partial class SettingsWindow
         _themesFresh = false;
         var chosen = PanelThemes.NormalizeId(S.PanelTheme);
         var users = PanelTheme.UserThemes;
-        Note(Loc.T("每个主题会分别记住你在它下面修改的应用颜色、预警与告警颜色和时间样式，切换回来时恢复；第一次选择的主题使用它自己的配色。",
-            "Each theme remembers the app, warning and critical colors and the clock style you change while using it, and brings them back when you return to it. A theme chosen for the first time uses its own colors."),
-            12, TextSecondary, new Thickness(0, -6, 0, 24));
         ThemeSection(Loc.T("基础", "Basics"));
         ThemeCards([(PanelThemes.SystemId, Loc.T("跟随系统", "System"), PanelTheme.Find(PanelThemes.SystemId)),
             .. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Basic).Select(Card)], chosen);
@@ -77,6 +74,8 @@ public sealed partial class SettingsWindow
         foreach (var (id, name, theme) in themes)
         {
             bool own = theme.Path is not null;
+            // The chosen theme of the user's with unsaved changes offers to save them over it in place of its card.
+            if (own && id == chosen && !PanelTheme.KeptLastGood && PanelTheme.DraftOf(id) is not null) { grid.Children.Add(OverwriteCard(theme)); continue; }
             var card = KeepPreview(new RadioButton { Style = (Style)FindResource("SettingsChoice"), Content = ThemePreview(id, theme),
                 Margin = new Thickness(6, 3, 6, 6), Tag = own ? "" : name, GroupName = "PanelTheme", IsChecked = id == chosen });
             AutomationProperties.SetName(card, Loc.T("面板主题 ", "Panel theme ") + name);
@@ -133,6 +132,7 @@ public sealed partial class SettingsWindow
         rows.Add(Row(Loc.T("名称", "Name"), TextLine(title, 12, TextSecondary)));
         string description = chosen == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.") : theme.DisplayDescription;
         if (description.Length > 0) rows.Add(Row(Loc.T("说明", "About"), Wrapped(description, false)));
+        if (theme.File.Night is not null) rows.Add(DaylightRow(theme.File));
         // A file that carries the chosen id (or is named after it) but cannot be used is there, with its error listed below.
         bool broken = missing && users.Any(t => !t.Usable && (PanelThemes.NormalizeId(t.File.Id) == chosen || t.Path is { } file && PanelThemes.NormalizeId(PanelThemes.FileName(file)) == chosen));
         if (missing)
@@ -154,12 +154,74 @@ public sealed partial class SettingsWindow
             var open = ActionButton(Path.GetFileName(path) + " ↗", () => OpenThemeFile(path)); open.Style = (Style)FindResource("SettingsLink"); open.ToolTip = path;
             rows.Add(Row(Loc.T("文件", "File"), open));
         }
-        var adjustments = PanelThemes.Resolve(theme).Adjustments;
-        if (adjustments.Count > 0)
-            rows.Add(Row(Loc.T("可读性调整", "Readability"), Wrapped(string.Join("\n", adjustments.Select(adjustment => adjustment.Describe())), false),
-                help: () => Loc.T("为保证文字与信息清晰可读，低于对比度下限的颜色会沿原色相自动调亮或调暗到刚好达标，不影响主题文件本身。",
-                    "To keep text and figures readable, a color below its contrast minimum is lightened or darkened along its own hue just enough to pass. The theme file is not changed.")));
+        // The colors moved to stay readable, counted here and listed once opened; with unsaved changes, those of the theme as
+        // it would be saved.
+        rows.AddRange(ReadabilityRows(PanelTheme.PaletteOf(theme).Adjustments));
         Group([.. rows]);
+        // A theme shown in place of a missing or broken one is not the one chosen, so it is not offered for editing.
+        if (!missing && !kept) ThemeEditor(theme);
+    }
+
+    // A theme with a night look: when its day begins and ends, in half hours. The theme's own hours are saved as no setting,
+    // so a later change to the theme's hours still reaches those who never moved them. A time between the half hours (a theme
+    // file's 06:45) is listed as it is, so moving the other box does not round it.
+    private FrameworkElement DaylightRow(PanelThemeFile file)
+    {
+        var (day, night) = PanelThemes.DaylightHours(file, S.ThemeDaylight);
+        var steps = Enumerable.Range(0, 48).Select(i => TimeSpan.FromMinutes(30 * i)).ToList();
+        (ComboBox Box, List<TimeSpan> Times) Pick(TimeSpan value, string name)
+        {
+            var times = steps.Contains(value) ? steps : [.. steps.Append(value).Order()];
+            // The time stands in the middle of its box and of the list; the list opens on the chosen time, a few rows down.
+            var box = new ComboBox { Width = 84, Style = (Style)FindResource("SettingsCombo"), ItemsSource = times.Select(PanelThemes.FormatTimeOfDay).ToList(),
+                SelectedIndex = times.IndexOf(value) is var at and >= 0 ? at : 0, HorizontalContentAlignment = HorizontalAlignment.Center };
+            box.DropDownOpened += (_, _) => box.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => ShowChosen(box));
+            AutomationProperties.SetName(box, name); PopupMotion.Attach(box);
+            return (box, times);
+        }
+        var (from, fromTimes) = Pick(day, Loc.T("白天开始", "Day begins"));
+        var (to, toTimes) = Pick(night, Loc.T("夜晚开始", "Night begins"));
+        // A day of no length would never end, so it is no choice: the box just changed goes back to what it showed, and the row
+        // never shows unsaved hours. Going back changes the selection again, which saves nothing.
+        int shownFrom = from.SelectedIndex, shownTo = to.SelectedIndex;
+        bool reverting = false;
+        void Save(ComboBox changed)
+        {
+            if (reverting) return;
+            var (d, n) = (fromTimes[Math.Max(0, from.SelectedIndex)], toTimes[Math.Max(0, to.SelectedIndex)]);
+            if (d == n)
+            {
+                reverting = true;
+                changed.SelectedIndex = ReferenceEquals(changed, from) ? shownFrom : shownTo;
+                reverting = false;
+                return;
+            }
+            shownFrom = from.SelectedIndex; shownTo = to.SelectedIndex;
+            Change(s => s.ThemeDaylight = (d, n) == PanelThemes.DaylightHours(file) ? "" : PanelThemes.FormatDaylight(d, n));
+        }
+        from.SelectionChanged += (_, _) => Save(from); to.SelectionChanged += (_, _) => Save(to);
+        var dash = TextLine("–", 12, TextSecondary);
+        dash.Margin = new Thickness(8, 0, 8, 0); dash.VerticalAlignment = VerticalAlignment.Center;
+        var pair = new StackPanel { Orientation = Orientation.Horizontal };
+        pair.Children.Add(from); pair.Children.Add(dash); pair.Children.Add(to);
+        return Row(Loc.T("白天时段", "Daytime"), pair, help: () => Loc.T("在这段时间内使用白天外观，其余时间使用夜间外观；到点时自动渐变切换。",
+            "The day look is shown between these times and the night look the rest of the day; it changes over by itself, with a slow fade."));
+    }
+
+    // Scrolls an open list so its chosen item stands about a third of the way down, with the times before it in view.
+    private static void ShowChosen(ComboBox box)
+    {
+        if (box.ItemContainerGenerator.ContainerFromIndex(box.SelectedIndex) is not FrameworkElement item
+            || FindParent<ScrollViewer>(item) is not { } scroll) return;
+        double top = item.TransformToAncestor(scroll).Transform(new Point()).Y + scroll.VerticalOffset;
+        scroll.ScrollToVerticalOffset(Math.Max(0, top - (scroll.ViewportHeight - item.ActualHeight) / 3));
+    }
+
+    private static T? FindParent<T>(DependencyObject child) where T : DependencyObject
+    {
+        for (var node = System.Windows.Media.VisualTreeHelper.GetParent(child); node is not null; node = System.Windows.Media.VisualTreeHelper.GetParent(node))
+            if (node is T found) return found;
+        return null;
     }
 
     private TextBlock Wrapped(string text, bool error)
@@ -196,36 +258,43 @@ public sealed partial class SettingsWindow
         head.Children.Add(reload);
         Target.Children.Add(head);
         Target.Children.Add(new Border { Height = 1, Background = UI.Brush(Divider), Margin = new Thickness(0, 0, 0, 12) });
-        var own = users.Where(t => t.Usable).ToList();
+        // In the order they were added, so a new theme takes the place of the card that made it, at the end.
+        var own = PanelThemes.InAddedOrder(users.Where(t => t.Usable)).ToList();
         ThemeCards([.. own.Select(t => (t.Id, t.DisplayName, t))], chosen, CustomTile());
         var broken = users.Where(t => !t.Usable).ToList();
         if (broken.Count > 0)
             Group([.. broken.Select(t => (FrameworkElement)Row(t.Path is { } file ? PanelThemes.DisplayFileName(file) : t.Id, Wrapped(Loc.T("无法使用：", "Cannot be used: ") + t.Error, true)))]);
     }
 
-    // The new-theme card: a theme card's frame with a plus in place of the preview. The new theme starts as a copy of the current one.
+    // The new-theme card: a theme card's frame with a plus in place of the preview. The new theme starts as a copy of the current
+    // one and is chosen at once. While the current theme has unsaved changes, the card saves the theme as changed as a new theme
+    // instead (SaveCard).
     private FrameworkElement CustomTile()
     {
+        if (!PanelTheme.KeptLastGood && PanelTheme.DraftOf(PanelTheme.ShownTheme.Id) is not null)
+        {
+            var save = SaveCard(Loc.T("保存当前主题", "Save current theme"), null, SaveThemeDraftAsNew);
+            save.ToolTip = Loc.T("把当前主题连同尚未保存的修改保存为一个新的自定义主题，并切换到它。",
+                "Saves the current theme with its unsaved changes as a new custom theme and switches to it.");
+            AutomationProperties.SetName(save, Loc.T("保存当前主题为新主题", "Save current theme as a new theme"));
+            return save;
+        }
         var create = ActionButton(Loc.T("以当前主题新建", "New from current theme"), () =>
         {
             try
             {
                 // The theme on screen, which is the last good version while the chosen file has an error.
                 var current = PanelTheme.ShownTheme;
-                var path = PanelThemes.CreateFromTemplate(PanelTheme.Folder, PanelTheme.Current, current.BuiltIn ? current.Id : null);
+                // A theme with a night look starts from its day look and carries its night look along, whichever is on screen.
+                var path = PanelThemes.CreateFromTemplate(PanelTheme.Folder, current.File.Night is null ? PanelTheme.Current : PanelThemes.Resolve(current), current.BuiltIn ? current.Id : null, current.File);
                 PanelTheme.Reload();
-                // The folder as just read, including this new file, so the watcher's report of the write reloads nothing.
-                _themeStamp = ThemeFolderStamp();
-                var id = PanelTheme.UserThemes.FirstOrDefault(t => t.Usable && string.Equals(t.Path, path, StringComparison.OrdinalIgnoreCase))?.Id;
                 // The new theme copies the current one, so it starts with what was changed under the current one.
-                if (id is not null) Change(s => { var kept = ThemeChoices.From(s); ChooseTheme(s, id); kept.ApplyTo(s); });
-                OpenThemeFile(path);
+                ChooseOwnTheme(path);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { SaveStatus(Loc.T("无法创建主题文件：", "Could not create the theme file: ") + ex.Message, true); }
             _themesFresh = true; ShowPage(ThemePage);
         });
-        create.ToolTip = Loc.T("把当前主题的全部颜色写入一个带注释的模板文件并打开它；改好后保存，本页会自动重新加载。",
-            "Writes every color of the current theme into a commented template file and opens it; save your changes and this page reloads them.");
+        create.ToolTip = Loc.T("把当前主题的全部颜色写入一个新的自定义主题，并切换到它。", "Writes every color of the current theme into a new custom theme and switches to it.");
         create.Style = (Style)FindResource("SettingsAddCard"); create.Content = null;
         create.Tag = Loc.T("以当前主题新建", "New from current theme"); create.Margin = new Thickness(6, 3, 6, 6);
         AutomationProperties.SetName(create, Loc.T("以当前主题新建主题", "New theme from current theme"));
@@ -308,6 +377,7 @@ public sealed partial class SettingsWindow
         var target = string.Equals(Path.GetFileName(path), "theme.json", StringComparison.OrdinalIgnoreCase) ? Path.GetDirectoryName(path)! : path;
         if (!Native.RecycleBin.Send(target)) { SaveStatus(Loc.T("无法删除主题文件：", "Could not delete the theme file: ") + target, true); return; }
         string id = theme.Id;
+        PanelTheme.Discard(id);
         Change(s =>
         {
             if (PanelThemes.NormalizeId(s.PanelTheme) == id) ChooseTheme(s, PanelThemes.Dark);

@@ -25,9 +25,17 @@ public sealed class Pricing : IDisposable
     private readonly bool _ownsHttp;
     private readonly string _cacheFile;
     private readonly string _manualFile;
+    private readonly string _officialFile;
     private readonly object _sync = new();
     private readonly Dictionary<string, ModelPrice> _remote = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, ModelPrice> _manual = new(StringComparer.OrdinalIgnoreCase);
+    // Models priced at their maker's own endpoint, by catalog ID (see the official prices below).
+    private readonly Dictionary<string, ModelPrice> _official = new(StringComparer.OrdinalIgnoreCase);
+    // Catalog entries for Kimi K3 and K3.1 Pro that still carry the catalog's own price, which Kimi Code records do not use.
+    private HashSet<ModelPrice> _unofficial = new(ReferenceEqualityComparer.Instance);
+    // Catalog IDs that records were priced with, and when the endpoints of each were last asked for.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _wanted = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTimeOffset> _officialAsked = new(StringComparer.OrdinalIgnoreCase);
     private readonly Func<DateTimeOffset> _now;
     private readonly SemaphoreSlim _gate = new(1);
     private DateTimeOffset? _lastAttempt;
@@ -53,6 +61,7 @@ public sealed class Pricing : IDisposable
     {
         _cacheFile = Path.Combine(directory, "model-prices.json");
         _manualFile = Path.Combine(directory, "manual-model-prices.json");
+        _officialFile = Path.Combine(directory, OfficialFile);
         _http = http ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(15) };
         _ownsHttp = http is null; _now = now ?? (() => DateTimeOffset.UtcNow);
         try
@@ -85,44 +94,166 @@ public sealed class Pricing : IDisposable
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or InvalidDataException)
         { ManualLoadWarning = Loc.T("无法读取手动模型价格，原文件已保留。", "The prices added by hand could not be read; the original file is kept. "); }
+        try
+        {
+            // Before every model had official prices, only Kimi K3 and K3.1 Pro were kept, in moonshot-prices.json.
+            var saved = File.Exists(_officialFile) ? _officialFile : Path.Combine(directory, LegacyOfficialFile);
+            if (File.Exists(saved))
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(saved));
+                var models = doc.RootElement.Get("models").Deserialize<List<ModelPrice>>() ?? [];
+                lock (_sync)
+                {
+                    foreach (var model in models.Where(m => ValidModel(m) && m.Model.Contains('/'))) _official[Normalize(model.Model)] = model;
+                    RebuildLookup();
+                }
+            }
+        }
+        // Without saved prices, those models stay unpriced until the next update.
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or NotSupportedException) { }
     }
 
-    // The first call in each process fetches online even when a disk cache exists.
+    // The first call in each process fetches online even when a disk cache exists. The official prices of models that records
+    // were priced with since are asked for on later calls, each model once a day.
     public async Task RefreshAsync(bool force = false, CancellationToken cancellation = default)
     {
         await _gate.WaitAsync(cancellation).ConfigureAwait(false);
         try
         {
             var now = _now();
-            if (!force && _lastAttempt is { } previous && now - previous < RefreshInterval) return;
-            _lastAttempt = now;
-            try
-            {
-                using var request = new HttpRequestMessage(HttpMethod.Get, Source);
-                request.Headers.UserAgent.ParseAdd("BrimDeck/0.1.0");
-                using var response = await _http.SendAsync(request, cancellation).ConfigureAwait(false);
-                response.EnsureSuccessStatusCode();
-                var json = await response.Content.ReadAsStringAsync(cancellation).ConfigureAwait(false);
-                using var catalog = JsonDocument.Parse(json);
-                var models = Parse(catalog.RootElement);
-                var updated = _now();
-                SetCatalog(models, updated); LastError = null;
-                try
-                {
-                    Directory.CreateDirectory(Path.GetDirectoryName(_cacheFile)!);
-                    var temporary = _cacheFile + ".tmp";
-                    string payload;
-                    lock (_sync) payload = JsonSerializer.Serialize(new { updatedAt = updated, models = _remote.Values.ToArray() });
-                    await File.WriteAllTextAsync(temporary, payload, cancellation).ConfigureAwait(false);
-                    File.Move(temporary, _cacheFile, true);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { LastError = Loc.T("价格已更新，缓存保存失败", "Prices were updated, but the cache could not be saved"); }
-            }
-            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { throw; }
-            catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException or IOException or InvalidDataException)
-            { LastError = ModelCount > 0 ? Loc.T("更新失败，使用缓存价格", "Update failed; cached prices are used") : Loc.T("价格暂不可用", "Prices are not available yet"); }
+            if (force || _lastAttempt is not { } previous || now - previous >= RefreshInterval) await RefreshCatalogAsync(now, cancellation).ConfigureAwait(false);
+            await RefreshOfficialAsync(force, cancellation).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
+    }
+
+    private async Task RefreshCatalogAsync(DateTimeOffset now, CancellationToken cancellation)
+    {
+        _lastAttempt = now;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, Source);
+            request.Headers.UserAgent.ParseAdd("BrimDeck/0.1.0");
+            using var response = await _http.SendAsync(request, cancellation).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            var json = await response.Content.ReadAsStringAsync(cancellation).ConfigureAwait(false);
+            using var catalog = JsonDocument.Parse(json);
+            var models = Parse(catalog.RootElement);
+            var updated = _now();
+            SetCatalog(models, updated); LastError = null;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(_cacheFile)!);
+                var temporary = _cacheFile + ".tmp";
+                string payload;
+                lock (_sync) payload = JsonSerializer.Serialize(new { updatedAt = updated, models = _remote.Values.ToArray() });
+                await File.WriteAllTextAsync(temporary, payload, cancellation).ConfigureAwait(false);
+                File.Move(temporary, _cacheFile, true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { LastError = Loc.T("价格已更新，缓存保存失败", "Prices were updated, but the cache could not be saved"); }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { throw; }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException or IOException or InvalidDataException)
+        { LastError = ModelCount > 0 ? Loc.T("更新失败，使用缓存价格", "Update failed; cached prices are used") : Loc.T("价格暂不可用", "Prices are not available yet"); }
+    }
+
+    // A catalog entry carries the price of whichever provider is cheapest, often a quantized third-party host, rather than the
+    // maker's list price (Z.ai's GLM-5.3: 0.07 and 1.4 USD per million input and output tokens in the catalog, 1.4 and 4.4 at
+    // Z.AI). So a model that records were priced with takes the price of its maker's own endpoint from
+    // https://openrouter.ai/api/v1/models/{id}/endpoints, asked for once a day per model. The maker's endpoint is the one whose
+    // tag starts with the maker's slug in the catalog ID ("z-ai/fp8" for "z-ai/glm-5.3"), or with the slug the maker's
+    // endpoints use where it differs (OfficialSlugs). Of those, one whose tag names nothing but a quantization prices the model;
+    // one tagged "highspeed" prices "<model>-highspeed" (Kimi K3.1 Pro Highspeed); other tags (flex, priority, batch, a region,
+    // zero data retention) are left out, and the first left wins. These prices replace the catalog entry, are added when the
+    // catalog has no entry, and are kept on disk. A model without such an endpoint keeps the catalog price; a failed or empty
+    // answer keeps the official price saved before. Prices added by hand still win.
+    // Kimi Code bills its models at Moonshot AI's list prices, so Kimi K3 and K3.1 Pro are always asked for, and Kimi Code
+    // records of these models stay unpriced rather than taking the catalog price until Moonshot AI's has been read.
+    public const string OfficialFile = "official-prices.json", LegacyOfficialFile = "moonshot-prices.json";
+    public static readonly IReadOnlyList<string> OfficialModels = ["moonshotai/kimi-k3", "moonshotai/kimi-k3.1-pro"];
+    private static readonly HashSet<string> OfficialIds = OfficialModels.SelectMany(m => new[] { m, m + "-highspeed" }).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    // Makers whose endpoints are tagged with another slug than their catalog IDs (checked on OpenRouter, 2026-10-26).
+    private static readonly Dictionary<string, string[]> OfficialSlugs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["google"] = ["google-ai-studio", "google-vertex"], ["x-ai"] = ["xai"], ["qwen"] = ["alibaba"], ["mistralai"] = ["mistral"],
+        ["amazon"] = ["amazon-bedrock"], ["bytedance-seed"] = ["seed"]
+    };
+    // Each refresh asks for at most this many models, four at a time, so a first refresh with many new models stays short.
+    private const int OfficialBatch = 16;
+    public static string EndpointsSource(string model) => $"https://openrouter.ai/api/v1/models/{model}/endpoints";
+
+    private async Task RefreshOfficialAsync(bool force, CancellationToken cancellation)
+    {
+        var now = _now();
+        string[] due;
+        lock (_sync)
+            due = OfficialModels.Concat(_wanted.Keys).Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(model => force || !_officialAsked.TryGetValue(model, out var asked) || now - asked >= RefreshInterval || now < asked)
+                .Take(OfficialBatch).ToArray();
+        if (due.Length == 0) return;
+        lock (_sync) foreach (var model in due) _officialAsked[model] = now;
+        var found = new System.Collections.Concurrent.ConcurrentBag<ModelPrice>();
+        await Parallel.ForEachAsync(due, new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellation }, async (model, ct) =>
+        {
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, EndpointsSource(model));
+                request.Headers.UserAgent.ParseAdd("BrimDeck/0.1.0");
+                using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
+                response.EnsureSuccessStatusCode();
+                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
+                foreach (var price in ParseOfficial(doc.RootElement, model)) found.Add(price);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException or IOException) { }
+        }).ConfigureAwait(false);
+        if (found.IsEmpty) return;
+        string payload;
+        lock (_sync)
+        {
+            // A model whose answer named no endpoint of its maker keeps its earlier price.
+            foreach (var group in found.GroupBy(m => OfficialBase(m.Model)))
+            {
+                foreach (var key in _official.Keys.Where(k => OfficialBase(k) == group.Key).ToList()) _official.Remove(key);
+                foreach (var model in group) _official[Normalize(model.Model)] = model;
+            }
+            RebuildLookup();
+            payload = JsonSerializer.Serialize(new { updatedAt = _now(), models = _official.Values.ToArray() });
+        }
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_officialFile)!);
+            var temporary = _officialFile + ".tmp";
+            await File.WriteAllTextAsync(temporary, payload, cancellation).ConfigureAwait(false);
+            File.Move(temporary, _officialFile, true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+    private static string OfficialBase(string model)
+    {
+        var key = Normalize(model);
+        return key.EndsWith("-highspeed", StringComparison.Ordinal) ? key[..^"-highspeed".Length] : key;
+    }
+
+    // The endpoints of one model run by its maker (see the official prices above).
+    public static IReadOnlyList<ModelPrice> ParseOfficial(JsonElement root, string model)
+    {
+        var prices = new Dictionary<string, ModelPrice>(StringComparer.OrdinalIgnoreCase);
+        var maker = model.TrimStart('~');
+        maker = maker.Contains('/') ? maker[..maker.IndexOf('/')] : "";
+        if (maker.Length == 0) return [];
+        string[] slugs = OfficialSlugs.TryGetValue(maker, out var others) ? others : [maker];
+        foreach (var endpoint in root.Get("data").Get("endpoints").Items())
+        {
+            var tag = endpoint.Get("tag").Text().Trim().ToLowerInvariant();
+            if (!slugs.Contains(tag.Contains('/') ? tag[..tag.IndexOf('/')] : tag, StringComparer.OrdinalIgnoreCase)) continue;
+            var words = tag.Contains('/') ? tag[(tag.IndexOf('/') + 1)..].Split('/', StringSplitOptions.RemoveEmptyEntries) : [];
+            string? id = words.Contains("highspeed") ? model + "-highspeed"
+                : words.All(word => Regex.IsMatch(word, @"^(mx)?(fp|int|bf)\d+$|^unknown$")) ? model : null;
+            if (id is null || prices.ContainsKey(id) || ReadModel(id, endpoint.Get("pricing")) is not { } price) continue;
+            prices[id] = price;
+        }
+        return prices.Values.ToArray();
     }
 
     public static IReadOnlyList<ModelPrice> Parse(JsonElement catalog)
@@ -131,21 +262,25 @@ public sealed class Pricing : IDisposable
         foreach (var item in catalog.Get("data").Items())
         {
             var id = item.Get("id").Text();
-            var pricing = item.Get("pricing");
-            if (string.IsNullOrWhiteSpace(id) || !id.Contains('/') || ReadPrice(pricing, "prompt") is not { } input || ReadPrice(pricing, "completion") is not { } output) continue;
-            var prices = new TokenPrices(input, output, ReadPrice(pricing, "input_cache_read"), ReadPrice(pricing, "input_cache_write"), ReadPrice(pricing, "input_cache_write_1h"));
-            var tiers = new List<PriceTier>();
-            foreach (var tier in pricing.Get("overrides").Items())
-            {
-                if (tier.Get("min_prompt_tokens").Number() is not { } threshold || threshold < 0 || threshold > 1e15) continue;
-                tiers.Add(new((long)threshold, new(ReadPrice(tier, "prompt") ?? input, ReadPrice(tier, "completion") ?? output,
-                    ReadPrice(tier, "input_cache_read") ?? prices.CacheRead, ReadPrice(tier, "input_cache_write") ?? prices.CacheWrite,
-                    ReadPrice(tier, "input_cache_write_1h") ?? prices.CacheWriteHour)));
-            }
-            models.Add(new(id, prices, tiers.OrderBy(x => x.MinimumPromptTokens).ToArray()));
+            if (string.IsNullOrWhiteSpace(id) || !id.Contains('/') || ReadModel(id, item.Get("pricing")) is not { } model) continue;
+            models.Add(model);
         }
         if (models.Count == 0) throw new InvalidDataException("No usable model prices.");
         return models;
+    }
+    private static ModelPrice? ReadModel(string id, JsonElement pricing)
+    {
+        if (ReadPrice(pricing, "prompt") is not { } input || ReadPrice(pricing, "completion") is not { } output) return null;
+        var prices = new TokenPrices(input, output, ReadPrice(pricing, "input_cache_read"), ReadPrice(pricing, "input_cache_write"), ReadPrice(pricing, "input_cache_write_1h"));
+        var tiers = new List<PriceTier>();
+        foreach (var tier in pricing.Get("overrides").Items())
+        {
+            if (tier.Get("min_prompt_tokens").Number() is not { } threshold || threshold < 0 || threshold > 1e15) continue;
+            tiers.Add(new((long)threshold, new(ReadPrice(tier, "prompt") ?? input, ReadPrice(tier, "completion") ?? output,
+                ReadPrice(tier, "input_cache_read") ?? prices.CacheRead, ReadPrice(tier, "input_cache_write") ?? prices.CacheWrite,
+                ReadPrice(tier, "input_cache_write_1h") ?? prices.CacheWriteHour)));
+        }
+        return new(id, prices, tiers.OrderBy(x => x.MinimumPromptTokens).ToArray());
     }
     private static decimal? ReadPrice(JsonElement pricing, string name)
     {
@@ -190,6 +325,10 @@ public sealed class Pricing : IDisposable
             foreach (var word in segments[(shape.Version + 1)..]) if (word.Length > 0 && !char.IsDigit(word[0])) words.Add(word);
         }
         // The table is replaced before the cache, so a concurrent Find never stores an old answer in the new cache.
+        var unofficial = new HashSet<ModelPrice>(ReferenceEqualityComparer.Instance);
+        foreach (var model in models)
+            if (OfficialIds.Contains(Normalize(model.Model)) && _remote.TryGetValue(Normalize(model.Model), out var remote) && ReferenceEquals(remote, model)) unofficial.Add(model);
+        _unofficial = unofficial;
         _lookup = lookup; _tiers = tiers; _found = new(StringComparer.Ordinal); ModelCount = models.Length;
         Changed?.Invoke();
     }
@@ -202,6 +341,8 @@ public sealed class Pricing : IDisposable
             // A manually added bare model ID also protects the same model when it later arrives online.
             if (!_manual.ContainsKey(model.Key) && !_manual.ContainsKey(bare)) merged[model.Key] = model.Value;
         }
+        foreach (var model in _official)
+            if (!_manual.ContainsKey(model.Key) && !_manual.ContainsKey(Normalize(model.Value.Model[(model.Value.Model.IndexOf('/') + 1)..]))) merged[model.Key] = model.Value;
         foreach (var model in _manual) merged[model.Key] = model.Value;
         return merged;
     }
@@ -259,6 +400,13 @@ public sealed class Pricing : IDisposable
         var model = Find(entry.Model);
         if (model is null && entry.Key.StartsWith("ag:", StringComparison.Ordinal))
             model = FindAntigravityBase(entry.Model);
+        else if (entry.Key.StartsWith("kimi:", StringComparison.Ordinal))
+        {
+            if (model is null && KimiUsage.PriceModel(entry.Model) is { } priced) model = Find(priced);
+            if (model is not null && _unofficial.Contains(model)) model = null;
+        }
+        // A catalog model that prices records is asked for its maker's price on the next refresh.
+        if (model is not null && model.Model.Contains('/') && !_manual.ContainsKey(Normalize(model.Model))) _wanted.TryAdd(OfficialBase(model.Model), 0);
         return model;
     }
     // Blank cache prices in a manual entry: a cache read costs nothing, a cache write costs the input price, and a

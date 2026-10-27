@@ -16,9 +16,12 @@ try
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
+    await AppleMusicLyricsTests.Run(root, Check);
     EqualizerSignalTests.Run(Check);
     ColorMathTests.Run(Check);
     PanelThemeTests.Run(root, Check);
+    PanelThemeEditorTests.Run(root, Check);
+    PixelBlocksTests.Run(root, Check);
     DisplayLayoutTests.Run(Check);
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);
@@ -30,20 +33,36 @@ try
     PanelHeaderTests.Run(Check);
     SystemMonitorTests.Run(Check);
     CompactReadingTests.Run(Check);
+    TemperatureTests.Run(Check);
+    StorageTests.Run(Check);
+    StripAdmissionTests.Run(Check);
+    ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);
+    MotionReviewTests.Run(Check);
+    IdleCostTests.Run(Check);
+    MusicCostTests.Run(Check);
+    DisplayWatchTests.Run(Check);
     DotMotionTests.Run(Check);
+    DatePickerMotionTests.Run(Check);
     SystemMonitorTests.Store(root, Check);
+    GpuAdapterTests.Run(root, Check);
+    GpuIdentityTests.Run(Check);
     NeteaseLogTests.Run(Check);
     await DashboardUsageTests.Run(root, Check);
     await AppUpdateTests.Run(root, Check);
     await InstallerUpdateTests.Run(root, Check);
+    await PortableUpdateTests.Run(root, Check);
     SettingsMigrationTests.Run(root, Check);
-    FullscreenExceptionTests.Run(Check);
+    FullscreenRuleTests.Run(Check);
     LanguageTests.Run(root, Check);
     await ConfiguredProviderTests.Run(Check);
     await ZCodeUsageTests.Run(root, Check);
     await DshUsageTests.Run(root, Check);
+    await KimiUsageTests.Run(root, Check);
+    await OpenCodeUsageTests.Run(root, Check);
+    await OfficialPriceTests.Run(root, Check);
     await GrokBotUsageTests.Run(root, Check);
+    await CursorUsageTests.Run(root, Check);
     var priceTime = DateTimeOffset.UtcNow;
     const string catalogJson = """
         {"data":[
@@ -718,7 +737,9 @@ sealed class CatalogHandler(string json) : HttpMessageHandler
     public bool SawAuthorization { get; private set; }
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        Calls++; SawAuthorization |= request.Headers.Authorization is not null;
+        // Only catalog requests are counted; the Moonshot AI endpoint requests that follow each update are not.
+        if (request.RequestUri!.AbsolutePath == "/api/v1/models") Calls++;
+        SawAuthorization |= request.Headers.Authorization is not null;
         return Task.FromResult(new HttpResponseMessage(Fail ? System.Net.HttpStatusCode.ServiceUnavailable : System.Net.HttpStatusCode.OK) { Content = new StringContent(Json) });
     }
 }

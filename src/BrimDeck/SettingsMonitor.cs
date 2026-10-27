@@ -14,51 +14,212 @@ namespace BrimDeck;
 // switches that show the readings in the notch or the capsule stay under "收起外观 › 显示内容", next to the quota rings.
 public sealed partial class SettingsWindow
 {
+    // The colors come first on their own, as they color both the collapsed readings and the expanded page: a color per reading,
+    // with ftop's schemes and the panel theme's colors under them as quick presets. Then what the collapsed row shows and how the
+    // expanded page looks, under the music page's "收起时" and "展开时".
     private void MonitorSettings()
     {
-        SectionTitle(Loc.T("展开面板", "Expanded panel"));
-        // Each scheme is shown by the colors it has on the panel with the panel theme in use.
-        var schemes = KeepPreview(new UniformGrid { Columns = 4, Width = 388 });
-        foreach (var palette in Enum.GetValues<MonitorPalette>())
+        bool syncing = false;
+        var refresh = new List<Action>();
+        _refreshReadings = null;
+        // Shows what the settings hold in place: the colors, the preset they match, and the readings' colors in the table.
+        void Refresh() { syncing = true; try { foreach (var update in refresh) update(); } finally { syncing = false; } _refreshReadings?.Invoke(); }
+        // A color per reading, three to a row.
+        var roles = KeepPreview(new UniformGrid { Columns = 3, Width = Loc.IsEnglish ? 450 : 330, Margin = new Thickness(0, 6, 0, 6) });
+        foreach (var role in Enum.GetValues<MonitorRole>()) roles.Children.Add(SwatchCell(RoleName(role), RoleHelp(role), () => RoleSwatch(role, Refresh), refresh));
+        // Quick presets under the colors, as under the collapsed readings' table: one sets every color, and the one the colors
+        // match is lit, else none (the colors are then the user's own). Each is shown by its CPU, memory and GPU colors as the
+        // panel draws them with the panel theme in use. Each segment fits its three dots and "跟随主题" inside its padding; at 97
+        // DIPs the centred content overflowed and lost the first dot's left edge.
+        var presets = KeepPreview(new UniformGrid { Columns = 4, Width = 420 });
+        foreach (var palette in Enum.GetValues<MonitorPalette>().Where(palette => palette != MonitorPalette.Custom))
         {
-            var colors = MonitorThemeColors.For(palette);
+            var colors = MonitorThemeColors.For(palette, S.MonitorCustomColors);
             var content = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
-            foreach (var color in new[] { colors.Performance, colors.Efficiency, colors.Gpu })
+            foreach (var color in new[] { colors.Performance, colors.Memory, colors.Gpu })
                 content.Children.Add(new Ellipse { Width = 7, Height = 7, Fill = UI.Brush(color), Margin = new Thickness(0, 0, 3, 0), VerticalAlignment = VerticalAlignment.Center });
             content.Children.Add(new TextBlock { Text = MonitorColors.Name(palette), Margin = new Thickness(3, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
-            var choice = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = content, GroupName = "MonitorPalette", IsChecked = S.MonitorPalette == palette };
-            AutomationProperties.SetName(choice, Loc.T("配色 ", "Colors ") + MonitorColors.Name(palette));
-            // Choosing a scheme shows it on the open monitor page, as a size change does.
-            choice.Checked += (_, _) => { Resize(s => s.MonitorPalette = palette, DeckPage.Monitor); _refreshReadings?.Invoke(); };
-            schemes.Children.Add(choice);
+            string help = palette == MonitorPalette.Theme
+                ? Loc.T("使用当前面板主题的颜色，切换主题时随之改变。", "Takes the colors of the panel theme in use, and changes with it.")
+                : Loc.T($"将各项颜色设为“{MonitorColors.Name(palette)}”配色。", $"Sets every color to the {MonitorColors.Name(palette)} scheme.");
+            var choice = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = content, GroupName = "MonitorPalette" };
+            AutomationProperties.SetName(choice, Loc.T("颜色预设 ", "Color preset ") + MonitorColors.Name(palette)); AutomationProperties.SetHelpText(choice, help);
+            // Choosing a preset shows it on the open monitor page, as a size change does.
+            choice.Checked += (_, _) =>
+            {
+                if (syncing) return;
+                Resize(s => { s.MonitorPalette = palette; s.MonitorCustomColors = new() { Base = palette }; }, DeckPage.Monitor);
+                Refresh();
+            };
+            refresh.Add(() => choice.IsChecked = S.MonitorPalette == palette);
+            presets.Children.Add(choice);
         }
+        Refresh();
         // The options stay available while the page is off, so they can be set before it is shown.
-        Group(Row(Loc.T("配色", "Colors"), SegmentBorder(schemes)),
-            ChoiceRow(Loc.T("主视图", "Large gauge"), S.MonitorMain, [(MonitorMain.Cpu, "CPU"), (MonitorMain.Gpu, "GPU")], v => Resize(s => s.MonitorMain = v, DeckPage.Monitor)),
-            ChoiceRow(Loc.T("刷新间隔", "Update interval"), S.MonitorInterval, [(1, Loc.T("1 秒", "1 s")), (2, Loc.T("2 秒", "2 s"))], v => Change(s => s.MonitorInterval = v)),
-            ChoiceRow(Loc.T("进程行", "Process rows"), S.MonitorProcessView,
+        SectionTitle(Loc.T("通用", "General"));
+        Group(Row(Loc.T("各项颜色", "Reading colors"), roles),
+            QuickRow(Loc.T("快捷预设", "Presets"), presets));
+        CompactMonitorOptions();
+        SectionTitle(Loc.T("展开时", "When expanded"));
+        // The choices that show themselves on the monitor page keep its preview open, so switching between them does not collapse it first.
+        Group(MusicChoice(Loc.T("主视图", "Large gauge"), S.MonitorMain, [(MonitorMain.Cpu, "CPU"), (MonitorMain.Gpu, "GPU")], v => Resize(s => s.MonitorMain = v, DeckPage.Monitor), keepPreview: true),
+            GpuChoiceRow(),
+            MusicChoice(Loc.T("刷新间隔", "Update interval"), S.MonitorInterval, [(1, Loc.T("1 秒", "1 s")), (2, Loc.T("2 秒", "2 s"))], v => Change(s => s.MonitorInterval = v)),
+            MusicChoice(Loc.T("进程行", "Process rows"), S.MonitorProcessView,
                 [(MonitorProcessView.Auto, Loc.T("自动", "Auto")), (MonitorProcessView.Compact, Loc.T("简略", "Compact")), (MonitorProcessView.Detailed, Loc.T("详细", "Detailed"))],
-                v => Resize(s => s.MonitorProcessView = v, DeckPage.Monitor)),
-            KeepPreview(Toggle(Loc.T("显示进程列表", "Show the process list"), S.MonitorProcesses, v => Resize(s => s.MonitorProcesses = v, DeckPage.Monitor),
+                v => Resize(s => s.MonitorProcessView = v, DeckPage.Monitor), keepPreview: true),
+            Toggle(Loc.T("显示进程列表", "Show the process list"), S.MonitorProcesses, v => Resize(s => s.MonitorProcesses = v, DeckPage.Monitor),
                 help:
                 Loc.T("按 CPU 或内存列出占用最高的应用，同一程序的多个进程合并为一行。面板足够大时显示。",
-                    "Lists the apps using the most CPU or memory, with the processes of one program folded into one row. Shown when the panel is large enough."))));
-        CompactMonitorOptions();
+                    "Lists the apps using the most CPU or memory, with the processes of one program folded into one row. Shown when the panel is large enough."),
+                keepPreview: true),
+            Toggle(Loc.T("显示硬盘", "Show drives"), S.MonitorStorage, v => Resize(s => s.MonitorStorage = v, DeckPage.Monitor),
+                help:
+                Loc.T("在内存和网速下方按物理硬盘逐行显示已用空间：一块硬盘分成多个盘符时，一行内按盘符分段。只列出内置硬盘上 1 GB 以上的固定分区，不含 U 盘、SD 卡、移动硬盘、网络盘和光驱；Dev Drive 和长期挂载的 VHD 照常列出。面板放不下时，其余硬盘合并为最后一行。每 10 秒读取一次。",
+                    "Shows the space in use on each physical drive, one line per drive, under memory and network: a drive split into several letters has a segment per letter. Only fixed volumes of 1 GB or more on internal drives are listed, not USB sticks, SD cards, external, network or optical drives; a Dev Drive or a VHD mounted for good is listed. When the panel has no room for all, the rest share the last line. Read every 10 seconds."),
+                keepPreview: true),
+            Toggle(Loc.T("显示温度", "Show temperatures"), S.MonitorTemperatures, v => Resize(s => s.MonitorTemperatures = v, DeckPage.Monitor),
+                help:
+                Loc.T("在 CPU 和 GPU 读数后、各硬盘行的末尾显示温度。读不到的项不显示。GPU 温度与任务管理器相同；CPU 温度来自主板固件的 ACPI 热区，可能是主板而非 CPU 本身的温度，许多电脑不提供；热区读数变化过才显示，从不变化的固定值不显示，此后 10 分钟不变也会隐藏；硬盘温度每 30 秒读取一次。",
+                    "Shows temperatures after the CPU and GPU readings and at the end of each drive's line. Sensors that cannot be read are left out. The GPU temperature is the one Task Manager shows; the CPU temperature comes from the firmware's ACPI thermal zones, may be the board's rather than the CPU's own, and many PCs do not provide it; a zone shows only once its value has changed, so a fixed value never shows, and it is left out again after 10 minutes without change; drives are read every 30 seconds."),
+                keepPreview: true));
     }
 
+    // The graphics adapter the monitor shows, on the page and in the collapsed readings alike: 自动, or one of the adapters found,
+    // named with its kind. The adapters are the ones the monitor reads while it runs, else the ones DXGI lists. A chosen adapter
+    // that is not connected stays in the list, marked, so the choice can be seen and changed.
+    private Grid GpuChoiceRow()
+    {
+        var found = _app.Monitor?.Latest?.Gpus is { Count: > 0 } read ? read.Select(gpu => (gpu.Key, gpu.LegacyKey, gpu.Name, gpu.Luid, gpu.Kind, gpu.NoReadings)).ToList()
+            : Native.GpuAdapters.Read().Adapters.Values.Where(adapter => !adapter.Software).OrderBy(adapter => GpuReadings.Rank(adapter.Kind))
+                .ThenBy(adapter => adapter.Name, StringComparer.Ordinal).Select(adapter => (adapter.Key, adapter.LegacyKey, Name: (string?)adapter.Name, adapter.Luid, adapter.Kind, NoReadings: false)).ToList();
+        var options = new List<(string? Key, string? Name, string Label)> { (null, null, Loc.T("自动", "Auto")) };
+        // An adapter without readings at the moment stays in the list, marked.
+        options.AddRange(found.Select(gpu => ((string?)gpu.Key, gpu.Name, GpuChoice.Describe(gpu.Name, gpu.Kind) + (gpu.NoReadings ? Loc.T("（暂无读数）", " (no reading)") : ""))));
+        // The saved card is found as the monitor finds it (GpuChoice.Find): while it is not connected, another card of the same model
+        // is never shown as chosen; the saved one is listed as not connected instead, and the monitor shows 自动 meanwhile.
+        int selected = S.MonitorGpu is not { } saved ? 0 : GpuChoice.Find(found, gpu => (gpu.Key, gpu.LegacyKey, gpu.Name, gpu.Luid), saved, S.MonitorGpuName) is var at and >= 0 ? at + 1 : -1;
+        if (selected < 0)
+        {
+            options.Add((S.MonitorGpu, S.MonitorGpuName, Loc.T($"{S.MonitorGpuName ?? "GPU"}（未连接，暂按自动显示）", $"{S.MonitorGpuName ?? "GPU"} (not connected; showing Auto meanwhile)")));
+            selected = options.Count - 1;
+        }
+        var choice = new ComboBox { Width = 292, Style = (Style)FindResource("SettingsCombo"), ItemsSource = options.Select(option => option.Label).ToList(), SelectedIndex = selected };
+        AutomationProperties.SetName(choice, Loc.T("显卡", "GPU")); PopupMotion.Attach(choice);
+        choice.SelectionChanged += (_, _) =>
+        {
+            if (choice.SelectedIndex < 0) return;
+            var (key, name, _) = options[choice.SelectedIndex];
+            if (key == S.MonitorGpu) return;
+            Change(s => { s.MonitorGpu = key; s.MonitorGpuName = name; });
+            // The open page and the collapsed readings show the new adapter at once.
+            _app.Monitor?.ShowGpuChoice();
+        };
+        return Row(Loc.T("显卡", "GPU"), choice, help: () => Loc.T(
+            "系统监控页和收起时的 GPU 读数显示这块显卡。自动：有独显时显示独显，否则显示占用最高的显卡，之后不随占用来回切换。有多块显卡时，以 GPU 为主视图时点击 GPU 读数可切换到下一块。",
+            "The GPU readings on the monitor page and in the collapsed row show this adapter. Auto shows the discrete GPU when there is one, else the busiest, and then stays on it whatever the load. With more than one GPU, click the GPU reading while the GPU is the large gauge to show the next one."));
+    }
+
+    // A color circle with its name beside it. refresh builds the circle again, so it shows the color the settings hold. The note
+    // shows on hover over the cell, or, with info, by an info icon after the name, for a note the user needs to find.
+    private StackPanel SwatchCell(string name, string? help, Func<Button> swatch, List<Action> refresh, bool info = false)
+    {
+        var cell = new StackPanel { Orientation = Orientation.Horizontal, Background = Brushes.Transparent, Margin = new Thickness(0, 3, 0, 3), ToolTip = info ? null : help };
+        Button? shown = null;
+        refresh.Add(() =>
+        {
+            var next = swatch();
+            // A panel will not take a new child at an index still holding one, so the old circle leaves first.
+            if (shown is not null) cell.Children.Remove(shown);
+            cell.Children.Insert(0, next);
+            shown = next;
+        });
+        var label = TextLine(name, 12.5, TextPrimary); label.VerticalAlignment = VerticalAlignment.Center; label.Margin = new Thickness(8, 0, 0, 0);
+        cell.Children.Add(label);
+        if (info && help is not null) cell.Children.Add(HelpIcon(name, () => help, 12, nudge: 0));
+        return cell;
+    }
+
+    // Changing a color of a preset makes the colors the user's own, starting from that preset; null returns a color to the
+    // preset's, and with none changed the preset is lit again.
+    private static void SetSchemeColor(DeckSettings settings, MonitorRole role, string? color)
+    {
+        if (settings.MonitorPalette != MonitorPalette.Custom) settings.MonitorCustomColors = new() { Base = settings.MonitorPalette };
+        settings.MonitorCustomColors.Set(role, color);
+        settings.MonitorPalette = settings.MonitorCustomColors.Changed ? MonitorPalette.Custom : settings.MonitorCustomColors.Base;
+    }
+
+    // A reading's color as the panel draws it. The picker's "默认" returns it to the preset's.
+    private Button RoleSwatch(MonitorRole role, Action refreshed)
+    {
+        string? own = S.MonitorPalette == MonitorPalette.Custom ? S.MonitorCustomColors.Get(role) : null;
+        string color = MonitorThemeColors.For(S)[role], name = RoleName(role);
+        var button = new Button { Style = (Style)FindResource("SettingsColorButton"), Foreground = UI.Brush(color) };
+        AutomationProperties.SetName(button, Loc.T($"{name}颜色", $"{name} color"));
+        AutomationProperties.SetHelpText(button, color + (own is null ? Loc.T("（默认）", " (default)") : ""));
+        var popup = new Popup { PlacementTarget = button, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
+        popup.Child = ColorPicker(own ?? color, own is null, value =>
+        {
+            popup.IsOpen = false;
+            Resize(s => SetSchemeColor(s, role, value.Length > 0 ? value : null), DeckPage.Monitor);
+            refreshed();
+        });
+        TogglePopup(button, popup);
+        return button;
+    }
+
+    // The collapsed readings' color at the warning or critical level, as the panel draws it; "默认" returns it to the panel theme's.
+    private Button LevelSwatch(MemoryLevel level, Action refreshed)
+    {
+        bool critical = level == MemoryLevel.Critical;
+        string? own = critical ? S.CompactCriticalColor : S.CompactWarningColor;
+        string color = critical ? MonitorThemeColors.Critical(S) : MonitorThemeColors.Warning(S), name = LevelName(level);
+        var button = new Button { Style = (Style)FindResource("SettingsColorButton"), Foreground = UI.Brush(color) };
+        AutomationProperties.SetName(button, Loc.T($"收起时{name}颜色", $"Collapsed {name} color"));
+        AutomationProperties.SetHelpText(button, color + (own is null ? Loc.T("（默认）", " (default)") : ""));
+        var popup = new Popup { PlacementTarget = button, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
+        popup.Child = ColorPicker(own ?? (critical ? PanelTheme.CriticalDefault : PanelTheme.WarningDefault), own is null, value =>
+        {
+            popup.IsOpen = false;
+            string? chosen = value.Length > 0 ? value : null;
+            Change(s => { if (critical) s.CompactCriticalColor = chosen; else s.CompactWarningColor = chosen; });
+            refreshed();
+        });
+        TogglePopup(button, popup);
+        return button;
+    }
+
+    private static string RoleName(MonitorRole role) => role switch
+    {
+        MonitorRole.Efficiency => Loc.T("能效核", "Efficiency cores"), MonitorRole.Memory => Loc.T("内存", "Memory"), MonitorRole.Gpu => "GPU",
+        MonitorRole.Download => Loc.T("下载", "Download"), MonitorRole.Upload => Loc.T("上传", "Upload"), _ => "CPU"
+    };
+    private static string LevelName(MemoryLevel level) => level == MemoryLevel.Critical ? Loc.T("告警", "Critical") : Loc.T("预警", "Warning");
+
+    // Only CPU and the efficiency cores say where they show, as both color the core columns; the others' names say it.
+    private static string? RoleHelp(MonitorRole role) => role switch
+    {
+        MonitorRole.Cpu => Loc.T("CPU 读数与核心柱中性能核的颜色。", "The color of the CPU readings and of the performance cores in the core columns."),
+        MonitorRole.Efficiency => Loc.T("核心柱中能效核的颜色。", "The color of the efficiency cores in the core columns."),
+        MonitorRole.Memory => Loc.T("内存与硬盘已用空间的颜色。", "The color of the memory and of the drives' space in use."),
+        _ => null
+    };
+
     // What the collapsed notch or capsule shows when its "系统监控" switch is on: a table of the readings, laid out as the app list
-    // is (drag handle, color circle, switches), with Full and Brief under it as quick presets; and whether each surface widens to its content.
+    // is (drag handle, the reading's colors from the scheme, switches), CPU, GPU and the drives each with a menu of what they
+    // show, with Full and Brief under it as quick presets, then the readings' warning and critical colors; and whether each
+    // surface widens to its content.
     private Action? _refreshReadings;
     private const double ReadingRowHeight = 53;
     private void CompactMonitorOptions()
     {
-        SectionTitle(Loc.T("收起时的读数", "Collapsed readings"));
         bool syncing = false;
         var refresh = new List<Action>();
         // Shows what the settings hold in place, without saving anything: the preset the table matches, the switches, the colors.
         void Refresh() { syncing = true; try { foreach (var update in refresh) update(); } finally { syncing = false; } }
         _refreshReadings = Refresh;
         void Edit(Action<DeckSettings> edit) { if (syncing) return; Change(edit); Refresh(); }
+        SectionTitle(Loc.T("收起时", "When collapsed"));
 
         var rows = new StackPanel();
         foreach (var reading in S.CompactReadings) rows.Children.Add(ReadingRow(reading.Item, rows, refresh, Edit));
@@ -66,13 +227,12 @@ public sealed partial class SettingsWindow
         var headings = ReadingColumns(); headings.Height = 34;
         AddHeadings(headings, new[]
         {
-            (Loc.T("监控项", "Item"), 1, ""),
-            (Loc.T("主题色", "Color"), 2, ""),
+            (Loc.T("监控项", "Item"), 2, ""),
             (Loc.T("显示数值", "Value"), 3, ""),
             (Loc.T("显示", "Show"), 4, "")
         });
         // The names in the rows start at the left of their column, so their heading does too rather than floating in its middle.
-        var nameHeading = headings.Children.OfType<FrameworkElement>().First(heading => Grid.GetColumn(heading) == 1);
+        var nameHeading = headings.Children.OfType<FrameworkElement>().First(heading => Grid.GetColumn(heading) == 2);
         nameHeading.HorizontalAlignment = HorizontalAlignment.Left; nameHeading.Margin = new Thickness(6, 0, 6, 0);
         var table = new StackPanel();
         table.Children.Add(headings);
@@ -83,34 +243,58 @@ public sealed partial class SettingsWindow
         var presets = new UniformGrid { Columns = 2, Width = 196 };
         foreach (var (mode, label, help) in new[]
         {
-            (CompactMonitorMode.Full, Loc.T("完整", "Full"), Loc.T("显示全部读数，CPU、内存和 GPU 带百分比。不改变顺序和颜色。", "Shows every reading, with the percentages of CPU, memory and GPU. The order and the colors stay.")),
-            (CompactMonitorMode.Brief, Loc.T("简洁", "Brief"), Loc.T("只显示 CPU、内存和 GPU 的圆环，不带数值。不改变顺序和颜色。", "Shows only the CPU, memory and GPU rings, without figures. The order and the colors stay."))
+            (CompactMonitorMode.Full, Loc.T("完整", "Full"), Loc.T("显示全部占用和网速读数，CPU、内存和 GPU 带数值。不改变硬盘、显示的数值、顺序和颜色。", "Shows every usage and network reading, with the figures of CPU, memory and GPU. The drives, the figures chosen, the order and the colors stay.")),
+            (CompactMonitorMode.Brief, Loc.T("简洁", "Brief"), Loc.T("只显示 CPU、内存和 GPU 的圆环，不带数值，隐藏硬盘。不改变顺序和颜色。", "Shows only the CPU, memory and GPU rings, without figures, and hides the drives. The order and the colors stay."))
         })
         {
-            var choice = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = label, GroupName = "CompactMonitorPreset", ToolTip = help };
+            var choice = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = label, GroupName = "CompactMonitorPreset" };
             AutomationProperties.SetName(choice, Loc.T("快捷预设 ", "Preset ") + label); AutomationProperties.SetHelpText(choice, help);
             choice.Checked += (_, _) => { if (!syncing) Edit(s => CompactMonitor.Apply(s.CompactReadings, mode)); };
             refresh.Add(() => choice.IsChecked = CompactMonitor.Preset(S.CompactReadings) == mode);
             presets.Children.Add(choice);
         }
         var quick = QuickRow(Loc.T("快捷预设", "Presets"), presets);
+        // The readings' colors when usage is high; the expanded page does not change color by level, except for its temperatures.
+        var levels = KeepPreview(new UniformGrid { Columns = 2, Width = Loc.IsEnglish ? 300 : 220, Margin = new Thickness(0, 6, 0, 6) });
+        foreach (var level in new[] { MemoryLevel.Elevated, MemoryLevel.Critical })
+            levels.Children.Add(SwatchCell(LevelName(level), LevelHelp(level), () => LevelSwatch(level, Refresh), refresh, info: true));
+        var status = Row(Loc.T("状态颜色", "Level colors"), levels, help: () => Loc.T("用于收起时的读数；展开时只有温度会变色，占用不变色。",
+            "Used by the collapsed readings; on the expanded page only temperatures change color, usage does not."));
         Refresh();
-        Group(table, quick);
+        Group(table, quick, status);
     }
 
     private static Grid ReadingColumns()
     {
         var grid = new Grid { Background = Brushes.Transparent };
-        foreach (var width in new[] { new GridLength(40), new GridLength(1, GridUnitType.Star), new GridLength(Loc.IsEnglish ? 64 : 56),
-            new GridLength(Loc.IsEnglish ? 76 : 84), new GridLength(64) })
+        // The handle, the reading's color dots (one per channel, CompactMonitor.Channels), the name, the two switches.
+        foreach (var width in new[] { new GridLength(40), new GridLength(ReadingDot * CompactMonitor.Order.Max(CompactMonitor.Channels) + 3 + 6),
+            new GridLength(1, GridUnitType.Star), new GridLength(Loc.IsEnglish ? 76 : 84), new GridLength(64) })
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
         return grid;
     }
 
+    // The note of a level's color column, from the thresholds the levels are read with (ReadingLevels, MemorySample.Level).
+    private static string LevelHelp(MemoryLevel level)
+    {
+        bool critical = level == MemoryLevel.Critical;
+        double share = critical ? ReadingLevels.CriticalShare : ReadingLevels.ElevatedShare,
+            commit = critical ? MemorySample.CriticalCommit : MemorySample.ElevatedCommit,
+            rate = (critical ? ReadingLevels.CriticalRate : ReadingLevels.ElevatedRate) / 1_000_000;
+        // The memory commit charge is always named: by its own threshold where it differs from the shares', else as part of memory.
+        bool apart = commit != share;
+        double cpu = critical ? Temperatures.CpuCritical : Temperatures.CpuWarning, gpu = critical ? Temperatures.GpuCritical : Temperatures.GpuWarning;
+        return Loc.T($"占用达到 {share * 100:0}%{(apart ? $"（内存提交量为 {commit * 100:0}%）" : "（内存包括内存提交量）")}、网速达到 {rate:0} MB/s，或 CPU 温度达到 {cpu:0} °C、GPU 温度达到 {gpu:0} °C 时的颜色；硬盘按其自身报告的{(critical ? "临界" : "警告")}温度。",
+            $"The color when usage reaches {share * 100:0}%{(apart ? $" ({commit * 100:0}% for the memory commit charge)" : " (for memory, including the commit charge)")}, the network rate reaches {rate:0} MB/s, or the CPU temperature reaches {cpu:0} °C and the GPU's {gpu:0} °C; drives by the {(critical ? "critical" : "warning")} temperature they report.");
+    }
+
+    private const double ReadingDot = 10;
+
     private static string ReadingName(CompactMonitorItems item) => item switch
     {
         CompactMonitorItems.Columns => Loc.T("核心柱", "Core columns"), CompactMonitorItems.Memory => Loc.T("内存", "Memory"), CompactMonitorItems.Gpu => "GPU",
-        CompactMonitorItems.Download => Loc.T("下载", "Download"), CompactMonitorItems.Upload => Loc.T("上传", "Upload"), _ => "CPU"
+        CompactMonitorItems.Download => Loc.T("下载", "Download"), CompactMonitorItems.Upload => Loc.T("上传", "Upload"),
+        CompactMonitorItems.Storage => Loc.T("硬盘", "Drives"), _ => "CPU"
     };
     private static CompactReading Reading(DeckSettings settings, CompactMonitorItems item) => settings.CompactReadings.First(reading => reading.Item == item);
 
@@ -122,24 +306,40 @@ public sealed partial class SettingsWindow
         var handle = new Border { Width = 22, Background = Brushes.Transparent, Cursor = Cursors.SizeAll, HorizontalAlignment = HorizontalAlignment.Left, Child = Grip(TextTertiary) };
         row.Children.Add(handle);
         var label = TextLine(name, 13, TextPrimary); label.VerticalAlignment = VerticalAlignment.Center; label.Margin = new Thickness(6, 0, 6, 0);
-        Grid.SetColumn(label, 1); row.Children.Add(label);
-        Button? swatch = null;
-        void Swatch()
+        Grid.SetColumn(label, 2); row.Children.Add(label);
+        // CPU, GPU and the drives choose what they show in a menu at the right of their name.
+        if (CompactFigures.Has(item))
         {
-            if (swatch is not null) row.Children.Remove(swatch);
-            swatch = ReadingSwatch(item, Swatch); Grid.SetColumn(swatch, 2); row.Children.Add(swatch);
+            var menu = FiguresMenu(item, refresh, edit);
+            Grid.SetColumn(menu, 2); row.Children.Add(menu);
         }
-        Swatch();
-        refresh.Add(Swatch);
+        // The reading's colors in the normal state as the scheme gives them, one per channel (the core columns: one per kind of
+        // core). They are set under "配色", so they only show here.
+        var dots = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Background = Brushes.Transparent,
+            ToolTip = Loc.T("颜色在上方“各项颜色”中设置。", "Set under Reading colors above.") };
+        var fills = Enumerable.Range(0, CompactMonitor.Channels(item)).Select(channel =>
+            new Ellipse { Width = ReadingDot, Height = ReadingDot, Margin = new Thickness(channel == 0 ? 0 : 3, 0, 0, 0) }).ToArray();
+        foreach (var fill in fills) dots.Children.Add(fill);
+        refresh.Add(() =>
+        {
+            var colors = MonitorThemeColors.For(S);
+            for (int channel = 0; channel < fills.Length; channel++) fills[channel].Fill = UI.Brush(colors[CompactMonitor.Role(item, channel)]);
+        });
+        Grid.SetColumn(dots, 1); row.Children.Add(dots);
 
         // The figure switch is for the rings only; the core columns (no figure) and the rates (always text) show it off and dimmed.
         bool choice = CompactMonitor.HasValueChoice(item);
         var value = new CheckBox { Style = (Style)FindResource("SettingsToggle"), Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload };
+            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload or CompactMonitorItems.Storage };
         AutomationProperties.SetName(value, Loc.T("显示数值 ", "Show figure ") + name);
         if (!choice)
         {
-            value.ToolTip = item == CompactMonitorItems.Columns ? Loc.T("核心柱没有数值。", "The core columns have no figure.") : Loc.T("下载和上传始终显示速率。", "Download and upload always show their rate.");
+            value.ToolTip = item switch
+            {
+                CompactMonitorItems.Columns => Loc.T("核心柱没有数值。", "The core columns have no figure."),
+                CompactMonitorItems.Storage => Loc.T("硬盘始终显示数值，在左侧的菜单中选择显示什么。", "The drives always show figures; choose which in the menu at the left."),
+                _ => Loc.T("下载和上传始终显示速率。", "Download and upload always show their rate.")
+            };
             ToolTipService.SetShowOnDisabled(value, true);
         }
         else
@@ -159,29 +359,151 @@ public sealed partial class SettingsWindow
         AttachDrag(handle, () => rows, ReadingRowHeight, list =>
         {
             var order = list.Children.OfType<Border>().Where(b => b.Tag is CompactMonitorItems).Select(b => (CompactMonitorItems)b.Tag).ToArray();
-            Change(s => s.CompactReadings = order.Select(id => Reading(s, id)).ToList());
+            Change(s => s.CompactReadings = [.. order.Select(id => Reading(s, id))]);
         });
         return new Border { Child = row, Height = ReadingRowHeight, BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(0), Tag = item, RenderTransform = new TranslateTransform() };
     }
 
-    // The reading's color circle: its own color, or the palette's as the strip draws it. The picker's "默认" follows the palette again.
-    private Button ReadingSwatch(CompactMonitorItems item, Action refreshed)
+    // The menu of what CPU, GPU or the drives show after their glyph: the share in use, the temperature or both (one above the
+    // other), at least one; for the drives also which lettered volumes, at least one. A chosen letter not found now (a drive taken
+    // out) is listed as not connected. The drives come from the sampler's last reading, or, when it has none, are read once as the
+    // menu opens. The menu is as wide as its button.
+    private Button FiguresMenu(CompactMonitorItems item, List<Action> refresh, Action<Action<DeckSettings>> edit)
     {
-        var colors = MonitorThemeColors.Strip(S.MonitorPalette, S.CompactReadings);
-        string? own = Reading(S, item).Color;
-        string color = own ?? colors.Default(item), name = ReadingName(item);
-        var button = new Button { Style = (Style)FindResource("SettingsColorButton"), Foreground = UI.Brush(colors.Normal(item)) };
-        AutomationProperties.SetName(button, Loc.T($"{name} 主题颜色", $"{name} theme color"));
-        AutomationProperties.SetHelpText(button, color + (own is null ? Loc.T("（跟随配色）", " (follows Colors)") : ""));
-        var popup = new Popup { PlacementTarget = button, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
-        popup.Child = ColorPicker(color, own is null, value =>
+        bool drives = item == CompactMonitorItems.Storage;
+        string name = ReadingName(item), role = Loc.T($"{name}显示的数值", $"Figures shown for {name}");
+        const double Wide = 150;
+        var select = ActionButton("", () => { });
+        var content = new DockPanel();
+        var chevron = Chevron(); chevron.Foreground = UI.Brush(TextSecondary); chevron.Margin = new Thickness(8, ChevronDrop.Top, 0, ChevronDrop.Bottom); DockPanel.SetDock(chevron, Dock.Right); content.Children.Add(chevron);
+        var summary = TextLine("", 12.5, TextPrimary); summary.VerticalAlignment = VerticalAlignment.Center; summary.TextTrimming = TextTrimming.CharacterEllipsis;
+        content.Children.Add(summary);
+        select.Content = content; select.Height = 30; select.Width = Wide;
+        select.HorizontalAlignment = HorizontalAlignment.Right; select.HorizontalContentAlignment = HorizontalAlignment.Stretch; select.VerticalAlignment = VerticalAlignment.Center;
+        select.Padding = new Thickness(9, 0, 9, 0); select.Margin = new Thickness(6, 0, 6, 0);
+        select.Background = UI.Brush(_palette.Input); select.BorderBrush = UI.Brush(_palette.Border);
+        ToolTipService.SetShowOnDisabled(select, true);
+        AutomationProperties.SetName(select, role);
+
+        static string FigureName(string figure) => figure == CompactFigures.Usage ? Loc.T("占用", "Usage") : Loc.T("温度", "Temperature");
+        refresh.Add(() =>
         {
-            popup.IsOpen = false;
-            Change(s => Reading(s, item).Color = value.Length > 0 ? value : null);
-            refreshed();
+            var reading = Reading(S, item);
+            var figures = string.Join(Loc.T("、", ", "), CompactFigures.Of(reading).Select(FigureName));
+            summary.Text = drives ? string.Join(" ", CompactSources.Of(reading)) + " · " + figures : figures;
+            // A ring set to show no figure shows none of these either.
+            select.IsEnabled = drives || reading.ShowValue;
+            select.ToolTip = select.IsEnabled ? role + Loc.T("：", ": ") + summary.Text : Loc.T("先打开“显示数值”。", "Switch Value on first.");
         });
-        TogglePopup(button, popup);
-        return button;
+
+        IReadOnlyList<StorageDrive>? listed = _app.Monitor?.Latest?.Storage is { Count: > 0 } latest ? latest : null;
+        List<(string Letter, string Label)> Letters()
+        {
+            var chosen = CompactSources.Of(Reading(S, item));
+            var options = new List<(string, string)>();
+            foreach (var volume in (listed ?? []).SelectMany(drive => drive.Volumes))
+                options.Add((volume.Letter.ToUpperInvariant(), volume.Label.Length > 0 ? volume.Letter + " " + volume.Label : volume.Letter));
+            foreach (var letter in chosen.Where(letter => options.All(option => option.Item1 != letter)))
+                options.Add((letter, listed is null ? letter : letter + Loc.T("（未连接）", " (not connected)")));
+            return [.. options.OrderBy(option => CompactSources.Rank(option.Item1))];
+        }
+
+        var menu = new Popup { PlacementTarget = select, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
+        var items = new StackPanel();
+        var list = new ScrollViewer
+        {
+            Style = (Style)FindResource("SettingsScrollViewer"), Content = items, Focusable = false,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        };
+        var surface = new Border
+        {
+            Child = list, Width = Wide, Background = UI.Brush(_palette.Popup), BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8), Padding = new Thickness(4)
+        };
+        menu.Child = surface;
+        // One line: a check when chosen, then the label. The last one chosen of its group stays.
+        void Entry(string label, bool on, bool last, string? help, Action toggle)
+        {
+            var line = new DockPanel();
+            line.Children.Add(new TextBlock
+            {
+                Text = on ? "" : "", FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 12, Width = 20,
+                Foreground = UI.Brush(TextPrimary), VerticalAlignment = VerticalAlignment.Center
+            });
+            var text = TextLine(label, 12.5, TextPrimary); text.VerticalAlignment = VerticalAlignment.Center; text.TextTrimming = TextTrimming.CharacterEllipsis;
+            line.Children.Add(text);
+            var entry = ActionButton("", () => { }); entry.Content = line;
+            entry.HorizontalContentAlignment = HorizontalAlignment.Stretch; entry.Padding = new Thickness(7, 3, 7, 3);
+            entry.IsEnabled = !last;
+            entry.ToolTip = last ? Loc.T("至少保留一项。", "At least one stays.") : help;
+            ToolTipService.SetShowOnDisabled(entry, true);
+            AutomationProperties.SetName(entry, label); AutomationProperties.SetHelpText(entry, on ? Loc.T("已选", "Chosen") : Loc.T("未选", "Not chosen"));
+            entry.Click += (_, _) => { toggle(); Fill(); };
+            items.Children.Add(entry);
+        }
+        void Header(string text)
+        {
+            if (items.Children.Count > 0) items.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider), Margin = new Thickness(4, 3, 4, 2) });
+            var header = TextLine(text, 10.5, TextTertiary); header.Margin = new Thickness(8, 2, 8, 1); items.Children.Add(header);
+        }
+        void Fill()
+        {
+            items.Children.Clear();
+            var reading = Reading(S, item);
+            var figures = CompactFigures.Of(reading);
+            if (drives) Header(Loc.T("数值", "Figures"));
+            foreach (var figure in new[] { CompactFigures.Usage, CompactFigures.Temperature })
+            {
+                bool on = figures.Contains(figure);
+                string? help = figure == CompactFigures.Temperature
+                    ? drives ? Loc.T("固态硬盘的温度，显示在已用空间下方；机械硬盘不显示。", "A solid-state drive's temperature, under its space in use; not shown for hard disks.")
+                        : Loc.T("显示在占用下方；读不到温度的电脑上不显示。", "Shown under the usage; not shown on a PC whose temperature cannot be read.")
+                    : null;
+                Entry(FigureName(figure), on, on && figures.Count == 1, help, () =>
+                {
+                    var next = CompactFigures.Of(Reading(S, item)).ToList();
+                    if (!next.Remove(figure)) next.Add(figure);
+                    edit(s => Reading(s, item).Figures = CompactFigures.Normalize(item, next));
+                });
+            }
+            if (!drives) return;
+            Header(Loc.T("盘符", "Letters"));
+            var chosen = CompactSources.Of(reading);
+            foreach (var (letter, label) in Letters())
+            {
+                bool on = chosen.Contains(letter);
+                Entry(label, on, on && chosen.Count == 1, null, () =>
+                {
+                    var next = CompactSources.Of(Reading(S, item)).ToList();
+                    if (!next.Remove(letter)) next.Add(letter);
+                    edit(s => Reading(s, item).Sources = CompactSources.Normalize(item, next));
+                });
+            }
+            if (listed is null)
+            {
+                var note = TextLine(Loc.T("正在读取硬盘…", "Reading the drives…"), 11.5, TextTertiary); note.Margin = new Thickness(8, 4, 8, 4);
+                items.Children.Add(note);
+            }
+        }
+        // The menu is filled before it opens: filled as it opened, it grew while dropping into place (Soft.Enter), and WPF placed
+        // it again with the drop's offset, six DIPs below its button.
+        if (drives && listed is null)
+        {
+            // Nothing read the drives yet: they are read once here, off the UI thread, while the page is open.
+            var reader = new Native.StorageReader();
+            reader.Start(false);
+            reader.Pending.ContinueWith(_ => Dispatcher.BeginInvoke(() => { listed = reader.Listed; if (menu.IsOpen) Fill(); }));
+        }
+        // The menu sits right against its button rather than the app list's four DIPs below it.
+        select.Click += (_, _) =>
+        {
+            if (menu.IsOpen) return;
+            Fill();
+            FitMenuToScreen(select, menu, surface);
+            menu.VerticalOffset = 0;
+        };
+        TogglePopup(select, menu);
+        return select;
     }
 
     private void MonitorSizeControls()
