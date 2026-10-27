@@ -33,6 +33,8 @@ try
     PageOrderTests.Run(Check);
     ExternalLinkTests.Run(Check);
     BridgeTests.Run(Check);
+    AlarmBookTests.Run(Check);
+    ExtensionStampTests.Run(root, Check);
     CompactReadingTests.Run(Check);
     CurvesTests.Run(Check);
     IdleCostTests.Run(Check);

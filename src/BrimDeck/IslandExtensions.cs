@@ -146,28 +146,16 @@ internal static class IslandExtensions
         }
     }
 
-    // The stamp of a plugin folder: the newest write anywhere inside it, plus the total size and file count. Stamping
-    // only the manifest and the entry would leave an edited stylesheet or script looking unchanged — the reload this
-    // page offers would do nothing, which is the one thing a plugin author does all day. The folder is the plugin, so
-    // the folder is what is stamped. A folder too broken to enumerate stamps as "?" and is treated as changed.
+    // The stamp of a plugin folder, so "Reload" knows whether anything changed. ExtensionStamp hashes every file's
+    // relative path and content — a timestamp cannot tell a restored-from-source stylesheet from the one it replaced.
+    //
+    // A folder that cannot be read answers with something unique rather than a constant: a scanner that fails must not
+    // look like "nothing changed", or a broken folder would be silently reused forever.
     private static string Stamp(string folder)
     {
-        try
-        {
-            long newest = 0, length = 0;
-            int files = 0;
-            foreach (var file in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories))
-                try
-                {
-                    var info = new FileInfo(file);
-                    if (info.LastWriteTimeUtc.Ticks > newest) newest = info.LastWriteTimeUtc.Ticks;
-                    length += info.Length;
-                    files++;
-                }
-                catch (Exception) { }
-            return newest + ":" + length + ":" + files;
-        }
-        catch (Exception) { return "?"; }
+        if (ExtensionStamp.Of(folder) is { } stamp) return stamp;
+        ExtensionLog.Write("extension: stamp failed for " + Path.GetFileName(folder));
+        return "failed:" + Guid.NewGuid().ToString("N");
     }
 
     // A plugin's glyph as stroke path data on a 24 by 24 grid. A string that does not parse is a plugin's mistake, not

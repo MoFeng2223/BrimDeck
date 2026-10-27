@@ -149,7 +149,13 @@ internal sealed class WebExtension : IIslandExtension
     // nobody watches it: what the page hands over it gets back the next time it loads.
     private string? _stateJson;
     private (double Width, double Height)? _fitLogged;
-    private readonly Dictionary<string, (DateTime Due, bool Fired)> _alarms = new(StringComparer.Ordinal);
+    // Which pages heard which alarm is a per-page question: two displays showing this plugin are two pages, and an
+    // alarm one of them was told is not the other's answer. AlarmBook holds that bookkeeping, in Core, where the rules
+    // are testable without a browser.
+    private readonly AlarmBook _alarms = new();
+    // Pages currently showing the blank a reclaim left behind, rather than the plugin's document. They exist, so their
+    // alarms must not be retired when a sibling hears them, but they cannot hear anything themselves.
+    private readonly HashSet<CoreWebView2> _blankPages = new();
     private bool _shown, _keepAlive, _reclaimed;
     // How often this plugin has asked for the desktop browser lately; every ask is counted, because none of them can
     // prove a reader was the one who asked.
@@ -290,7 +296,14 @@ internal sealed class WebExtension : IIslandExtension
         // The blank a reclaim navigates to is not content: its completion must neither mark the page loaded nor reveal
         // an empty document. Every other document, reloads included, is revealed.
         var blanks = new HashSet<ulong>();
-        core.NavigationStarting += (_, e) => { if (e.Uri == "about:blank") blanks.Add(e.NavigationId); };
+        core.NavigationStarting += (_, e) =>
+        {
+            if (e.Uri == "about:blank") { blanks.Add(e.NavigationId); _blankPages.Add(core); }
+            // The plugin's own document is being loaded: from this navigation on, the page is the plugin again and the
+            // alarms it is owed belong to it. Set here, not when the navigation completes — the shim says hello as the
+            // document starts running, which is before completion.
+            else _blankPages.Remove(core);
+        };
         core.NavigationCompleted += async (_, e) =>
         {
             if (blanks.Remove(e.NavigationId) || !e.IsSuccess) return;
@@ -476,6 +489,9 @@ internal sealed class WebExtension : IIslandExtension
             ExtensionLog.Write("view: navigate " + Id + " -> " + _manifest.Entry);
             core.Navigate(EntryUrl());
             _reclaimed = false;
+            // The document is on its way to the plugin again. Cleared here rather than on the first hello because the
+            // blank document's own shim says hello first, and that one must still be refused.
+            _blankPages.Remove(core);
         }
         catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
         {
@@ -541,42 +557,52 @@ internal sealed class WebExtension : IIslandExtension
         _enterForward = null;
         ExtensionLog.Write("view: reclaim " + Id);
         foreach (var (_, core) in Pages())
+        {
+            // Marked before the navigation, not after: between the two calls the page still looks alive, and an alarm
+            // due in that window would be pushed into a document about to be replaced.
+            _blankPages.Add(core);
             try { core.Navigate("about:blank"); } catch (Exception) { }
+        }
     }
 
     // Only an alarm still waiting for its moment needs the tick. One already fired and held for a page that cannot hear
     // it is handed over by that page's own hello (ReplyInit), so keeping the timer awake for it would be a wake a second
     // with nothing left to decide.
-    internal bool HasAlarms => _alarms.Any(alarm => !alarm.Value.Fired);
+    internal bool HasAlarms => _alarms.HasPending;
 
     internal void CheckAlarms()
     {
-        var due = new List<string>();
-        foreach (var (id, alarm) in _alarms)
-            if (DateTime.UtcNow >= alarm.Due)
-            {
-                _alarms[id] = (alarm.Due, true);
-                due.Add(id);
-            }
-        // An alarm owed is delivered at once to pages that can hear it, and held for the next load of any that cannot.
-        // A reclaimed page is still in _pages — it was navigated to blank, not disposed — so counting pages alone would
-        // hand the alarm to a blank document and then drop it, which is exactly the "nothing is ever lost" promise
-        // broken. Delivery therefore needs a page that finished a navigation and has not been reclaimed since.
-        if (due.Count > 0 && Deliverable())
-            foreach (var id in due)
-            {
-                _alarms.Remove(id);
-                ExtensionLog.Write("view: alarm fired " + Id + " " + Short(id));
-                Push("{\"channel\":\"brimdeck\",\"kind\":\"alarm\",\"data\":" + JsonSerializer.Serialize(id) + "}");
-            }
-        else if (due.Count > 0)
-            ExtensionLog.Write("view: alarm held " + Id + " " + due.Count + " for a page that cannot hear it yet");
+        var now = DateTime.UtcNow;
+        // Every page that exists is told about what came due, in one pass — but only pages that can actually hear take
+        // delivery. A reclaimed page is still in _pages (it was navigated to blank, not disposed), and pushing to it
+        // would hand the alarm to a blank document and lose it. What it is owed waits for its own hello.
+        var all = PageKeys();
+        var allKeys = all.Cast<object>().ToList();
+        _alarms.Sweep(allKeys, now);
+        var listening = all.Where(Listening).Cast<object>().ToList();
+        if (listening.Count == 0)
+        {
+            if (_alarms.HasFired) ExtensionLog.Write("view: alarm held " + Id + " for a page that cannot hear it yet");
+            WebRuntime.AlarmsChanged();
+            return;
+        }
+        foreach (var (page, id) in _alarms.Deliver(listening, now))
+        {
+            if (page is not CoreWebView2 core) continue;
+            ExtensionLog.Write("view: alarm fired " + Id + " " + Short(id));
+            Send(core, "{\"channel\":\"brimdeck\",\"kind\":\"alarm\",\"data\":" + JsonSerializer.Serialize(id) + "}");
+        }
         WebRuntime.AlarmsChanged();
     }
 
-    // Whether some page of this plugin could actually receive a message now: it is loaded, not reclaimed, and its
-    // document is the plugin's own rather than the blank a reclaim leaves behind.
-    private bool Deliverable() => _loaded && !_reclaimed && Pages().Count > 0;
+    // The identity of each live page. The core itself is the identity: it lives exactly as long as the page, and two
+    // displays showing one plugin are two distinct pages with distinct alarms owed to them.
+    private List<CoreWebView2> PageKeys() => Pages().Select(pair => pair.Item2).ToList();
+
+    // Whether this page is showing the plugin rather than the blank a reclaim left. A page is blank from the moment the
+    // reclaim starts until the plugin's own document has been navigated to again: the shim on the blank document runs
+    // and says hello in between, and that hello must not be answered with the plugin's state and alarms.
+    private bool Listening(CoreWebView2 core) => !_blankPages.Contains(core);
 
     // One message to every live page of this plugin. A page mid-teardown or already disposed is dropped from the list,
     // not fought: the next call simply has fewer pages to reach. A control disposed by the window closing reports
@@ -599,6 +625,7 @@ internal sealed class WebExtension : IIslandExtension
         for (int at = _pages.Count - 1; at >= 0; at--)
             if (ReferenceEquals(_pages[at].Control, control))
             {
+                _blankPages.Remove(_pages[at].Core);
                 try { _pages[at].Core.WebMessageReceived -= OnWebMessage; } catch (Exception) { }
                 _pages.RemoveAt(at);
             }
@@ -613,6 +640,7 @@ internal sealed class WebExtension : IIslandExtension
             {
                 // A core disposed outside RemovePage must retire its view too, or a panel could put it back on screen.
                 _retired.Add(_pages[at].Control);
+                _blankPages.Remove(_pages[at].Core);
                 _pages.RemoveAt(at);
             }
         return _pages;
@@ -664,11 +692,11 @@ internal sealed class WebExtension : IIslandExtension
                         {
                             var due = DateTimeOffset.FromUnixTimeMilliseconds(milliseconds).UtcDateTime;
                             if (due <= DateTime.UtcNow) Refused(from, "alarm-in-the-past", alarmId);
-                            else if (!_alarms.ContainsKey(alarmId) && _alarms.Count >= Bridge.MaximumAlarms)
+                            else if (!_alarms.Has(alarmId) && _alarms.Count >= Bridge.MaximumAlarms)
                                 Refused(from, "alarms-full", Bridge.MaximumAlarms + " per plugin");
                             else
                             {
-                                _alarms[alarmId] = (due, false);
+                                _alarms.Set(alarmId, due);
                                 // Logged because an alarm's whole story happens while nobody can see the page: which
                                 // ones were asked for, and which arrived after a reclaim, is otherwise guesswork.
                                 ExtensionLog.Write("view: alarm " + Id + " " + Short(alarmId));
@@ -678,7 +706,7 @@ internal sealed class WebExtension : IIslandExtension
                         WebRuntime.AlarmsChanged();
                         break;
                     case "alarmClear":
-                        if (root.TryGetProperty("id", out var clear) && clear.ValueKind == JsonValueKind.String) _alarms.Remove(clear.GetString()!);
+                        if (root.TryGetProperty("id", out var clear) && clear.ValueKind == JsonValueKind.String) _alarms.Clear(clear.GetString()!);
                         WebRuntime.AlarmsChanged();
                         break;
                     case "keepAlive":
@@ -727,14 +755,27 @@ internal sealed class WebExtension : IIslandExtension
 
     // The hello a freshly loaded page sends is answered with everything it cannot know yet: the bridge the host speaks
     // and the ceilings it holds, the palette and language, whether the page is being shown, the state an earlier load
-    // handed over, and any alarm that came due while no page was there to hear it. The answer goes to the page that
+    // handed over, and any alarm that came due while this page could not hear it. The answer goes to the page that
     // said hello and no other: each panel builds its own page, so a blank push to all of them would run a sibling's
     // init logic a second time — restoring state, counting a visit — for a load that happened in this one.
+    //
+    // The alarms it hands over are marked against this page alone. Deleting them would answer for the whole plugin: a
+    // second display showing the same plugin was not there to hear it, and would load afterwards to nothing.
     private void ReplyInit(CoreWebView2? to)
     {
         if (to is null) return;
-        var missed = _alarms.Where(alarm => alarm.Value.Fired).Select(alarm => alarm.Key).ToList();
-        foreach (var id in missed) _alarms.Remove(id);
+        // The blank a reclaim navigates to loads the shim too, so it says hello like any page — but it is not the
+        // plugin, it is the empty document the plugin was replaced by. Answering it would hand the plugin's state and
+        // its owed alarms to a page with nothing to receive them, which is the loss this whole bookkeeping prevents.
+        if (!Listening(to))
+        {
+            ExtensionLog.Write("view: hello from a blank page " + Id);
+            return;
+        }
+        // A page showing the plugin is not blank: from here it can hear, and what it is owed is handed over.
+        _blankPages.Remove(to);
+        var all = PageKeys().Cast<object>().ToList();
+        var missed = _alarms.Hear(to, all, DateTime.UtcNow);
         // The version is the host's, never a number copied into two places: a page written against a newer bridge reads
         // this and degrades instead of waiting for messages that will never come. The ceilings come from Bridge whole, so
         // the page is told the rate as it is kept.
