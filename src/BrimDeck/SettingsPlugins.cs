@@ -3,11 +3,8 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
-using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Shapes;
-using System.Windows.Threading;
 using BrimDeck.Core;
 
 namespace BrimDeck;
@@ -97,36 +94,16 @@ public sealed partial class SettingsWindow
         }
         _pluginRows = DeckPages.Order(S).Select(DeckPages.SlotOf).Where(slot => slot >= 0 && IslandExtensions.Occupied(slot)).ToList();
         var list = new StackPanel();
-        _pluginRowElements = [];
         Array.Clear(_pluginHandles, 0, _pluginHandles.Length);
-        for (int at = 0; at < _pluginRows.Count; at++)
-        {
-            if (list.Children.Count > 0) list.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
-            var row = PluginRow(_pluginRows[at], at, _pluginRows.Count);
-            _pluginRowElements.Add(row);
-            list.Children.Add(row);
-        }
+        for (int at = 0; at < _pluginRows.Count; at++) list.Children.Add(PluginRow(_pluginRows[at], at, _pluginRows.Count));
+        // The rows carry their own divider, as the app list's do, so moving one moves its line with it.
+        UpdateDividers(list);
         _pluginList = list;
-        // Where a dragged row will land, drawn over the list rather than inserted into it: a child added between rows
-        // would shift the very indices the drag is measuring.
-        var host = new Grid();
-        host.Children.Add(list);
-        _dropLine = new Border
-        {
-            Height = 2, CornerRadius = new CornerRadius(1), Background = UI.Brush(TextSecondary), IsHitTestVisible = false,
-            VerticalAlignment = VerticalAlignment.Top, Visibility = Visibility.Collapsed, Margin = new Thickness(0, -8, 0, 0)
-        };
-        host.Children.Add(_dropLine);
-        return host;
+        return list;
     }
 
     private List<int> _pluginRows = [];
-    private List<FrameworkElement> _pluginRowElements = [];
     private StackPanel? _pluginList;
-    private Border? _dropLine;
-    private int _dragSlot = -1, _dragTarget = -1;
-    private Point _dragFrom;
-    private bool _dragging;
 
     // One loaded plugin: a header row — the handle it is dragged by, its glyph and title, its enable switch, and the arrow
     // that opens the settings under it; open, the page's size and the id and folder it came from. The switch is the plugin's
@@ -146,7 +123,7 @@ public sealed partial class SettingsWindow
         header.ColumnDefinitions.Add(new ColumnDefinition());
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.Children.Add(DragHandle(slot, position, total, title));
+        header.Children.Add(DragHandle(slot, position, total));
         var glyph = new System.Windows.Shapes.Path
         {
             Data = IslandExtensions.SafeGlyph(extension.Glyph), Stroke = UI.Brush(TextSecondary), StrokeThickness = 1.4,
@@ -216,7 +193,13 @@ public sealed partial class SettingsWindow
         details.Children.Add(source);
         column.Children.Add(details);
         PointArrow(arrow, _pluginOpen[slot]);
-        return column;
+        // The row is what the list measures and moves: its own divider, its place marked by the slot it shows, and the
+        // transform a drag lives in.
+        return new Border
+        {
+            Child = column, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0),
+            Tag = slot, RenderTransform = new TranslateTransform()
+        };
     }
 
     // Writes one dimension of an extension page's size into its own settings entry. The other dimension is read back
@@ -228,124 +211,52 @@ public sealed partial class SettingsWindow
         DeckPages.SetSize(settings, page, width ?? nowWidth, height ?? nowHeight);
     }
 
-    // The six dots a reader drags by. Only this starts a drag, so a click anywhere else on the row keeps opening and
-    // closing it the way it always did. The keyboard moves it one place at a time, and its name says which place that
-    // is, since the position is the whole point of the control. With a single plugin there is no place to move it to,
-    // so the space is kept — the rows line up either way — and the handle is not offered.
-    private FrameworkElement DragHandle(int slot, int position, int total, string title)
+    // The six dots a reader drags the row by, as the app list and the collapsed content are dragged: press and move, the
+    // row lifts onto the page's own surface, and the rows it passes make room for it. Only this handle drags, so a click
+    // anywhere else keeps opening and closing the row the way it always did. Reordering is by mouse only, like every
+    // other arrangement in the product — so this handle is not a tab stop and offers no keys. With a single plugin there
+    // is no place to move it to, so the space is kept — the rows line up either way — and the handle is not offered.
+    private FrameworkElement DragHandle(int slot, int position, int total)
     {
-        if (total < 2) return new Border { Width = 16, Margin = new Thickness(0, 0, 4, 0) };
-        var dots = Stroke("M 9,7 L 9.01,7 M 15,7 L 15.01,7 M 9,12 L 9.01,12 M 15,12 L 15.01,12 M 9,17 L 9.01,17 M 15,17 L 15.01,17", 14, 14, TextTertiary);
-        dots.StrokeThickness = 2.4; dots.StrokeStartLineCap = dots.StrokeEndLineCap = PenLineCap.Round;
-        dots.SetBinding(Shape.StrokeProperty, new Binding("Foreground") { RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(Button), 1) });
+        if (total < 2) return new Border { Width = 22, Margin = new Thickness(0, 0, 4, 0) };
+        // The same six dots as the app list and the collapsed content: two columns of three, in the same 22-wide strip.
         var handle = new Button
         {
-            Content = dots, Style = (Style)FindResource("SettingsGlyphButton"), Cursor = Cursors.SizeNS,
-            Margin = new Thickness(0, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center,
-            ToolTip = Loc.T("拖动可调整这个插件在面板里的位置；Alt+↑ / Alt+↓ 上移、下移。", "Drag to move this plugin's place in the panel; Alt+Up and Alt+Down move it one step.")
+            Content = Grip(TextTertiary), Style = (Style)FindResource("SettingsGlyphButton"), Cursor = Cursors.SizeAll,
+            Width = 22, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0)
         };
         _pluginHandles[slot] = handle;
-        AutomationProperties.SetName(handle, Loc.T($"{title} 的位置，第 {position + 1} 个，共 {total} 个", $"{title} position, {position + 1} of {total}"));
-        handle.PreviewMouseLeftButtonDown += (_, e) =>
-        {
-            _dragSlot = slot; _dragTarget = position; _dragFrom = e.GetPosition(null); _dragging = false;
-            // Taking the focus the button would have taken itself: the gesture is marked handled before the class
-            // handler runs, so a reader who clicks the handle and then reaches for Alt+↑ would otherwise press into a
-            // control that never had the keyboard.
-            handle.Focus();
-            handle.CaptureMouse(); e.Handled = true;
-        };
-        handle.PreviewMouseMove += (_, e) =>
-        {
-            if (e.LeftButton != MouseButtonState.Pressed || _dragSlot < 0) return;
-            if (!_dragging && Math.Abs(e.GetPosition(null).Y - _dragFrom.Y) < SystemParameters.MinimumVerticalDragDistance) return;
-            _dragging = true;
-            _dragTarget = BoundaryAt(e.GetPosition(_pluginList).Y);
-            ShowDropLine(_dragTarget);
-            e.Handled = true;
-        };
-        handle.PreviewMouseLeftButtonUp += (_, e) =>
-        {
-            // Letting go of the mouse before the list is rebuilt: the row that commits the move is on its way out, and
-            // a capture held by a vanished element is only dropped when WPF notices.
-            bool commit = _dragging && _dragSlot == slot;
-            int boundary = _dragTarget;
-            handle.ReleaseMouseCapture();
-            if (commit) MoveTo(slot, boundary);
-            ReleaseDrag();
-            e.Handled = true;
-        };
-        handle.LostMouseCapture += (_, _) => ReleaseDrag();
-        handle.PreviewKeyDown += (_, e) =>
-        {
-            if (Keyboard.Modifiers != ModifierKeys.Alt) return;
-            // With Alt held WPF reports the key as System and keeps the arrow in SystemKey — the arrow is the whole
-            // gesture here, so reading Key alone is reading the modifier.
-            var arrow = e.Key == Key.System ? e.SystemKey : e.Key;
-            if (arrow == Key.Up) { MoveTo(slot, position - 1); RefocusHandle(slot); e.Handled = true; }
-            else if (arrow == Key.Down) { MoveTo(slot, position + 2); RefocusHandle(slot); e.Handled = true; }
-        };
+        // The page's own drag, the one the app list and the collapsed content move by. The button would take the press
+        // and let go of it itself first, so this handle is wired to what happens before that.
+        AttachDrag(handle, () => _pluginList, PluginsReordered, preview: true);
+        // Where the row stands is the point of the control, so its name says it: a screen reader hears which place this
+        // row holds, and a reader who moves rows by mouse hears the row arrive at its new place.
+        AutomationProperties.SetName(handle, PluginHandleName(slot, position, total));
         return handle;
     }
 
-    // The handle of each loaded slot, so a move made at the keyboard can be repeated: the list is rebuilt by every
-    // change, and the new handle for the same plugin is where the focus belongs.
-    private readonly Button?[] _pluginHandles = new Button?[4];
-
-    // The boundary the pointer is over: 0 is above the first row, the count is below the last one. Rows measure
-    // against the list they live in, so a scrolled page still reads the right place.
-    private int BoundaryAt(double y)
+    private string PluginHandleName(int slot, int position, int total)
     {
-        if (_pluginList is not { } list) return 0;
-        for (int at = 0; at < _pluginRowElements.Count; at++)
-        {
-            var row = _pluginRowElements[at];
-            if (y < row.TranslatePoint(new Point(0, 0), list).Y + row.ActualHeight / 2) return at;
-        }
-        return _pluginRowElements.Count;
+        var title = IslandExtensions.Title(slot);
+        return Loc.T($"{title} 的位置，第 {position + 1} 个，共 {total} 个", $"{title} position, {position + 1} of {total}");
     }
 
-    private void ShowDropLine(int boundary)
+    // After a drop the rows already stand in their new order: nothing is rebuilt, or the rows would jump from where the
+    // drag set them down. What the page says is what the settings are about to say — the same places the tabs will take.
+    private void PluginsReordered(Panel list)
     {
-        if (_dropLine is not { } line || _pluginList is not { } list || _pluginRowElements.Count == 0) return;
-        var rows = _pluginRowElements;
-        double y = boundary >= rows.Count
-            ? rows[^1].TranslatePoint(new Point(0, 0), list).Y + rows[^1].ActualHeight
-            : rows[boundary].TranslatePoint(new Point(0, 0), list).Y;
-        line.Margin = new Thickness(0, Math.Max(0, y - 1), 0, 0);
-        line.Visibility = Visibility.Visible;
-    }
-
-    private void ReleaseDrag()
-    {
-        if (_dropLine is { } line) line.Visibility = Visibility.Collapsed;
-        _dragSlot = -1; _dragTarget = -1; _dragging = false;
-    }
-
-    // The dragged plugin leaves its place and enters the boundary the line showed. Moving down shifts by one, because
-    // the boundary counted the row before it was taken out.
-    private void MoveTo(int slot, int boundary)
-    {
-        var ids = _pluginRows.Select(row => IslandExtensions.Slots[row]?.Id).ToList();
+        _pluginRows = list.Children.OfType<Border>().Select(row => (int)row.Tag!).ToList();
+        for (int at = 0; at < _pluginRows.Count; at++)
+            if (_pluginHandles[_pluginRows[at]] is { } handle)
+                AutomationProperties.SetName(handle, PluginHandleName(_pluginRows[at], at, _pluginRows.Count));
+        var ids = _pluginRows.Select(slot => IslandExtensions.Slots[slot]?.Id).ToList();
         if (ids.Any(id => string.IsNullOrEmpty(id))) return;
-        int from = _pluginRows.IndexOf(slot);
-        if (from < 0) return;
-        var order = ids.Select(id => id!).ToList();
-        var moved = order[from];
-        order.RemoveAt(from);
-        order.Insert(Math.Clamp(boundary > from ? boundary - 1 : boundary, 0, order.Count), moved);
-        Change(settings => settings.ReorderExtensions(order));
-        RefreshPlugins();
+        Change(settings => settings.ReorderExtensions(ids.Select(id => id!).ToList()));
     }
 
-    // The keyboard moves a row one place at a time, so the handle must still hold the focus once the list is made again:
-    // a second Alt+↓ landing on nothing would leave a plugin movable exactly once. The rebuilt handle does not exist in
-    // the layout yet, so the focus waits for the list to be measured.
-    private void RefocusHandle(int slot)
-    {
-        if (_pluginHandles[slot] is not { } handle) return;
-        Dispatcher.BeginInvoke(new Action(() => { if (handle.IsVisible) Keyboard.Focus(handle); }), DispatcherPriority.Input);
-    }
+    // The handle of each loaded slot, so a drop can rename the rows it moved: the list is not built again after a drag,
+    // and each handle's name is the only place its row says where it stands.
+    private readonly Button?[] _pluginHandles = new Button?[4];
 
     // Writes the plugin's own entry, creating it on the first change so an untouched plugin keeps its defaults.
     private void ChangePlugin(string id, Func<ExtensionPageSettings, ExtensionPageSettings> edit)
