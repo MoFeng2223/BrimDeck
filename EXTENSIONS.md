@@ -155,8 +155,8 @@ brimdeck.alarm.clear(id)
 
 ## 示例
 
-`samples/clock-web/` 是一个最小示例：显示时间与日期，用宿主配色绘制，`visibility(false)` 后停止计时，并用 `saveState` 记录显示次数以演示状态的保存与交还。可直接作为新插件的骨架。
+`samples/clock-web/` 是一个最小示例，也是声明式清单的一整个来回：显示时间与日期，用宿主配色绘制，`visibility(false)` 后停止计时，用 `saveState` 记录显示次数——而「显示秒 / 字号 24–64 / 日期」三个控件与「星期日…星期六 / 第 {n} 次显示」八条文案全部写在 `manifest.json` 里，页面一个字都不自己画、一个词都不自己存，只读 `brimdeck.settings` 与 `brimdeck.phrase()`，收到 `settings`/`phrases` 就重绘。点一下时间会走一趟 `setSetting`：宿主按声明兑现后推回 `settings`，页面照着**被兑现的值**重画。它同时声明 `"minApiVersion": 2`——桥低于这个版本时文件夹在扫描阶段就被拒绝，而不是加载后永远等不到 `settings`。可直接作为新插件的骨架。
 
-安装：把整个 `clock-web` 文件夹拷进 `%LOCALAPPDATA%\BrimDeck\extensions\`，在「设置 → 插件」点「重新加载」，页签立即出现。
+安装：把整个 `clock-web` 文件夹拷进 `%LOCALAPPDATA%\BrimDeck\extensions\`，在「设置 → 插件」点「重新加载」，页签立即出现，插件那一行也会展开这三个控件。
 
-开发：直接双击 `index.html` 在浏览器里调试（桥不存在，页面按默认样式运行）；或装进插件目录后用 WebView2 的 DevTools（右键 → 检查）调试真实环境。改完文件点「重新加载」即生效。
+开发：直接双击 `index.html` 在浏览器里调试（没有桥，页面用与清单同款的默认值和英文兜底词，照样能跑）；或装进插件目录后用 WebView2 的 DevTools（右键 → 检查）调试真实环境。改完文件点「重新加载」即生效。
