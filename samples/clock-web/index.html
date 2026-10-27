@@ -78,6 +78,10 @@
     brimdeck.on('init', function (init) {
       applyColors(init.colors);
       visits = (init.state && init.state.visits || 0) + 1;
+      // Saved the moment it changes, not on a timer and not on the way out: this note is what survives the page being
+      // reclaimed, and the docs say plainly not to rely on beforeunload. A periodic save would also keep waking a page
+      // nobody is looking at, which is the one thing visibility(false) asks a plugin not to do.
+      brimdeck.saveState({ visits: visits });
       document.getElementById('time').style.cursor = 'pointer';
       tick(init.shown);
     });
@@ -90,8 +94,6 @@
     document.getElementById('time').addEventListener('click', function () {
       brimdeck.setSetting('seconds', !setting('seconds'));
     });
-    window.addEventListener('beforeunload', function () { brimdeck.saveState({ visits: visits }); });
-    setInterval(function () { if (shown) brimdeck.saveState({ visits: visits }); }, 5000);
   } else {
     tick(true); // opened in a plain browser: the same page, without the bridge
   }

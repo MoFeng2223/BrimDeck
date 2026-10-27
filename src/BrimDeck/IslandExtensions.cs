@@ -49,9 +49,10 @@ internal static class IslandExtensions
             Failures.Add((Path.GetFileName(Folder), ex.Message.Split('\n')[0]));
         }
 
-        // One pass over the folders: a manifest and its entry, or the reason the folder is not a plugin. The stamp
-        // covers the manifest and the entry file, so editing either is a change the next scan picks up. No extension
-        // exists yet — a manifest is read, an extension is only made for a slot it actually takes.
+        // One pass over the folders: a manifest and its entry, or the reason the folder is not a plugin. The stamp is
+        // the whole folder — every file in it, manifest and entry included — so editing a stylesheet or a script is a
+        // change the next scan picks up, exactly as editing the manifest is. No extension exists yet — a manifest is
+        // read, an extension is only made for a slot it actually takes.
         var read = new List<(string Name, string Stamp, ExtensionManifest? Manifest, string? Error)>();
         foreach (var folder in disk)
         {
@@ -65,7 +66,7 @@ internal static class IslandExtensions
                     else Skipped.Add((name, Loc.T("缺少 manifest.json", "no manifest.json in it")));
                     continue;
                 }
-                var stamp = Stamp(Path.Combine(folder, "manifest.json")) + "|" + Stamp(Path.Combine(folder, manifest.Entry));
+                var stamp = Stamp(folder);
                 read.Add((name, stamp, manifest, null));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -145,9 +146,27 @@ internal static class IslandExtensions
         }
     }
 
-    private static string Stamp(string file)
+    // The stamp of a plugin folder: the newest write anywhere inside it, plus the total size and file count. Stamping
+    // only the manifest and the entry would leave an edited stylesheet or script looking unchanged — the reload this
+    // page offers would do nothing, which is the one thing a plugin author does all day. The folder is the plugin, so
+    // the folder is what is stamped. A folder too broken to enumerate stamps as "?" and is treated as changed.
+    private static string Stamp(string folder)
     {
-        try { var info = new FileInfo(file); return info.LastWriteTimeUtc.Ticks + ":" + info.Length; }
+        try
+        {
+            long newest = 0, length = 0;
+            int files = 0;
+            foreach (var file in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories))
+                try
+                {
+                    var info = new FileInfo(file);
+                    if (info.LastWriteTimeUtc.Ticks > newest) newest = info.LastWriteTimeUtc.Ticks;
+                    length += info.Length;
+                    files++;
+                }
+                catch (Exception) { }
+            return newest + ":" + length + ":" + files;
+        }
         catch (Exception) { return "?"; }
     }
 

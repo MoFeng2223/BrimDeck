@@ -474,13 +474,23 @@ internal sealed class WebExtension : IIslandExtension
         try
         {
             ExtensionLog.Write("view: navigate " + Id + " -> " + _manifest.Entry);
-            core.Navigate("https://" + _host + "/" + _manifest.Entry.Replace('\\', '/'));
+            core.Navigate(EntryUrl());
             _reclaimed = false;
         }
         catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
         {
             ExtensionLog.Write("view: navigate failed " + Id + ": " + ex.Message);
         }
+    }
+
+    // The entry as a URL, one escaped segment at a time. A manifest may name a file Windows allows and a URL does not:
+    // "main#v1.html" is a plain filename to the file system, and to the browser the start of a fragment — the host would
+    // request "/main" and the plugin would arrive blank. Each segment is encoded, and the separators are kept.
+    private string EntryUrl()
+    {
+        var segments = _manifest.Entry.Replace('\\', '/').Split('/');
+        for (int at = 0; at < segments.Length; at++) segments[at] = Uri.EscapeDataString(segments[at]);
+        return "https://" + _host + "/" + string.Join("/", segments);
     }
 
     // The demand a page hears as its visibility: true while any panel shows it, false once none does. A page nobody
@@ -534,7 +544,10 @@ internal sealed class WebExtension : IIslandExtension
             try { core.Navigate("about:blank"); } catch (Exception) { }
     }
 
-    internal bool HasAlarms => _alarms.Count > 0;
+    // Only an alarm still waiting for its moment needs the tick. One already fired and held for a page that cannot hear
+    // it is handed over by that page's own hello (ReplyInit), so keeping the timer awake for it would be a wake a second
+    // with nothing left to decide.
+    internal bool HasAlarms => _alarms.Any(alarm => !alarm.Value.Fired);
 
     internal void CheckAlarms()
     {
@@ -545,11 +558,25 @@ internal sealed class WebExtension : IIslandExtension
                 _alarms[id] = (alarm.Due, true);
                 due.Add(id);
             }
-        // An alarm owed is delivered at once to pages that exist and held for the next load of any that do not.
-        if (due.Count > 0 && Pages().Count > 0)
-            foreach (var id in due) { _alarms.Remove(id); Push("{\"channel\":\"brimdeck\",\"kind\":\"alarm\",\"data\":" + JsonSerializer.Serialize(id) + "}"); }
+        // An alarm owed is delivered at once to pages that can hear it, and held for the next load of any that cannot.
+        // A reclaimed page is still in _pages — it was navigated to blank, not disposed — so counting pages alone would
+        // hand the alarm to a blank document and then drop it, which is exactly the "nothing is ever lost" promise
+        // broken. Delivery therefore needs a page that finished a navigation and has not been reclaimed since.
+        if (due.Count > 0 && Deliverable())
+            foreach (var id in due)
+            {
+                _alarms.Remove(id);
+                ExtensionLog.Write("view: alarm fired " + Id + " " + Short(id));
+                Push("{\"channel\":\"brimdeck\",\"kind\":\"alarm\",\"data\":" + JsonSerializer.Serialize(id) + "}");
+            }
+        else if (due.Count > 0)
+            ExtensionLog.Write("view: alarm held " + Id + " " + due.Count + " for a page that cannot hear it yet");
         WebRuntime.AlarmsChanged();
     }
+
+    // Whether some page of this plugin could actually receive a message now: it is loaded, not reclaimed, and its
+    // document is the plugin's own rather than the blank a reclaim leaves behind.
+    private bool Deliverable() => _loaded && !_reclaimed && Pages().Count > 0;
 
     // One message to every live page of this plugin. A page mid-teardown or already disposed is dropped from the list,
     // not fought: the next call simply has fewer pages to reach. A control disposed by the window closing reports
@@ -607,7 +634,7 @@ internal sealed class WebExtension : IIslandExtension
             {
                 switch (kind.GetString())
                 {
-                    case "hello": ExtensionLog.Write("view: hello " + Id); ReplyInit(); break;
+                    case "hello": ExtensionLog.Write("view: hello " + Id); ReplyInit(from); break;
                     case "scale":
                         if (Number(root, "dpr") is var ratio && ratio is > 0.2 and < 5
                             && Number(root, "width") is var width && width > 0 && Number(root, "height") is var height && height > 0
@@ -639,7 +666,13 @@ internal sealed class WebExtension : IIslandExtension
                             if (due <= DateTime.UtcNow) Refused(from, "alarm-in-the-past", alarmId);
                             else if (!_alarms.ContainsKey(alarmId) && _alarms.Count >= Bridge.MaximumAlarms)
                                 Refused(from, "alarms-full", Bridge.MaximumAlarms + " per plugin");
-                            else _alarms[alarmId] = (due, false);
+                            else
+                            {
+                                _alarms[alarmId] = (due, false);
+                                // Logged because an alarm's whole story happens while nobody can see the page: which
+                                // ones were asked for, and which arrived after a reclaim, is otherwise guesswork.
+                                ExtensionLog.Write("view: alarm " + Id + " " + Short(alarmId));
+                            }
                         }
                         else Refused(from, "bad-alarm", "alarm.set wants a name and a time the host can reach");
                         WebRuntime.AlarmsChanged();
@@ -694,23 +727,33 @@ internal sealed class WebExtension : IIslandExtension
 
     // The hello a freshly loaded page sends is answered with everything it cannot know yet: the bridge the host speaks
     // and the ceilings it holds, the palette and language, whether the page is being shown, the state an earlier load
-    // handed over, and any alarm that came due while no page was there to hear it.
-    private void ReplyInit()
+    // handed over, and any alarm that came due while no page was there to hear it. The answer goes to the page that
+    // said hello and no other: each panel builds its own page, so a blank push to all of them would run a sibling's
+    // init logic a second time — restoring state, counting a visit — for a load that happened in this one.
+    private void ReplyInit(CoreWebView2? to)
     {
+        if (to is null) return;
         var missed = _alarms.Where(alarm => alarm.Value.Fired).Select(alarm => alarm.Key).ToList();
         foreach (var id in missed) _alarms.Remove(id);
         // The version is the host's, never a number copied into two places: a page written against a newer bridge reads
         // this and degrades instead of waiting for messages that will never come. The ceilings come from Bridge whole, so
         // the page is told the rate as it is kept.
         _pushedSettings = SettingsJson; // the init below carries it: a settings event with the same numbers is not a change
-        Push("{\"channel\":\"brimdeck\",\"kind\":\"init\",\"apiVersion\":" + Bridge.Version
+        Send(to, "{\"channel\":\"brimdeck\",\"kind\":\"init\",\"apiVersion\":" + Bridge.Version
             + ",\"appVersion\":" + JsonSerializer.Serialize(ApplicationVersion.Current)
             + ",\"limits\":" + Bridge.LimitsJson
             + ",\"settings\":" + SettingsJson
             + ",\"phrases\":" + PhrasesJson
             + ",\"language\":\"" + (Loc.IsEnglish ? "en" : "zh")
             + "\",\"shown\":" + (_shown ? "true" : "false") + ",\"colors\":" + WebColors.Json + ",\"state\":" + (_stateJson ?? "null") + "}");
-        foreach (var id in missed) Push("{\"channel\":\"brimdeck\",\"kind\":\"alarm\",\"data\":" + JsonSerializer.Serialize(id) + "}");
+        foreach (var id in missed) Send(to, "{\"channel\":\"brimdeck\",\"kind\":\"alarm\",\"data\":" + JsonSerializer.Serialize(id) + "}");
+    }
+
+    // One message to one page, for the answers that belong to the page that asked.
+    private static void Send(CoreWebView2 core, string json)
+    {
+        try { core.PostWebMessageAsJson(json); }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException) { }
     }
 
     public void Dispose()
