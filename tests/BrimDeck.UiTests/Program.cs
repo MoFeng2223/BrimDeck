@@ -48,6 +48,16 @@ internal static class Program
 
         SetProcessDpiAwarenessContext(-4);
         var data = options.Data ?? Path.Combine(Path.GetTempPath(), "BrimDeck-UiTests-" + Guid.NewGuid().ToString("N"));
+        // This is a test profile: the suite writes fixture plugins into it, lets their pages save into it, and
+        // rearranges the plugin order it holds. A --data naming the folder BrimDeck really uses is refused at the door,
+        // where one guard covers every step, instead of being noticed in the settings file the run rewrote.
+        var real = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck");
+        if (string.Equals(data.TrimEnd('\\', '/'), real, StringComparison.OrdinalIgnoreCase))
+        {
+            Console.Error.WriteLine("--data is the profile BrimDeck uses for real settings (" + real
+                + "). Leave --data out to run on a throwaway folder.");
+            return 2;
+        }
         Directory.CreateDirectory(data);
         var log = Path.Combine(data, "extensions.log");
         WriteFixture(data, "fixture-a", "FixtureA", MarkA, "#C00000", minWidth: 440, minHeight: 220);
@@ -200,11 +210,16 @@ internal static class Program
             var delivery = "foreground=" + IsForeground(settings) + " focused=\"" + FocusedName() + "\"";
             Require(IsForeground(settings), "the settings window is foreground before the first move — " + delivery);
             System.Windows.Forms.SendKeys.SendWait("%{DOWN}");
-            Thread.Sleep(700);
+            // The rows name their own place, so they are what to wait on between two keys: SendKeys hands the key to
+            // Windows and does not wait for another process to finish with it, and a second Alt+↓ aimed at a list that
+            // is still rebuilding would fail an app that is working.
+            Require(WaitTitles(settings, ["FixtureB", "FixtureA", "FixtureC", "FixtureD"]),
+                "the first move reaches the rows before the second key — rows: " + string.Join(", ", RowTitles(settings)));
             delivery = "foreground=" + IsForeground(settings) + " focused=\"" + FocusedName() + "\"";
             Require(IsForeground(settings), "the settings window is foreground before the second move — " + delivery);
             System.Windows.Forms.SendKeys.SendWait("%{DOWN}");
-            Thread.Sleep(900);
+            Require(WaitTitles(settings, ["FixtureB", "FixtureC", "FixtureA", "FixtureD"]),
+                "the second move reaches the rows — rows: " + string.Join(", ", RowTitles(settings)));
             // The rows say their own place in the name they carry, so a move that reached the app is visible here even
             // before the panel is read: rows unmoved means the keys did not arrive, rows moved and tabs still in the old
             // order means the panel did not follow.
@@ -346,6 +361,31 @@ internal static class Program
     }
 
     private static bool IsForeground(AutomationElement window) => GetForegroundWindow().ToInt64() == window.Current.NativeWindowHandle;
+
+    // The row titles read top to bottom, taken from what each handle says about itself — the app's own report of the
+    // arrangement, which is the thing worth waiting on between two keys.
+    private static string[] RowTitles(AutomationElement settings)
+    {
+        var titles = new List<string>();
+        foreach (var handle in OrderHandles(settings))
+        {
+            var name = Place(handle);
+            int at = name.IndexOf(" 的位置，", StringComparison.Ordinal);
+            if (at < 0) at = name.IndexOf(" position, ", StringComparison.Ordinal);
+            titles.Add(at >= 0 ? name[..at] : name);
+        }
+        return titles.ToArray();
+    }
+
+    private static bool WaitTitles(AutomationElement settings, string[] expected)
+    {
+        for (int attempt = 0; attempt < 20; attempt++)
+        {
+            if (RowTitles(settings).SequenceEqual(expected)) return true;
+            Thread.Sleep(250);
+        }
+        return false;
+    }
 
     // The control that would read a key, as Windows sees it. A keyboard action that changes nothing is either a key
     // that never arrived or a handler that refused it, and this is the line between the two.
