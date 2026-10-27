@@ -249,6 +249,10 @@ public sealed partial class SettingsWindow
         handle.PreviewMouseLeftButtonDown += (_, e) =>
         {
             _dragSlot = slot; _dragTarget = position; _dragFrom = e.GetPosition(null); _dragging = false;
+            // Taking the focus the button would have taken itself: the gesture is marked handled before the class
+            // handler runs, so a reader who clicks the handle and then reaches for Alt+↑ would otherwise press into a
+            // control that never had the keyboard.
+            handle.Focus();
             handle.CaptureMouse(); e.Handled = true;
         };
         handle.PreviewMouseMove += (_, e) =>
