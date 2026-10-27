@@ -1,0 +1,22 @@
+src/BrimDeck/App.xaml.cs
+  h_dc4d9c798f1bc1 281-282
+src/BrimDeck.Core/Settings.cs
+  h_dc4d9c798f1bc1 255-256
+src/BrimDeck/SettingsMusic.cs
+  h_dc4d9c798f1bc1 118-120
+src/BrimDeck/SettingsWindow.cs
+  h_dc4d9c798f1bc1 599
+src/BrimDeck/Native/MediaSessions.cs
+  h_dc4d9c798f1bc1 116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8522c31d6a01740df283e3d96d07a5ae616fdf87",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
