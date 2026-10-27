@@ -8,6 +8,10 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
     public string DshHome { get; init; } = "";
     // Kimi Code resolves its data directory as KIMI_CODE_HOME, otherwise %USERPROFILE%\.kimi-code; its CLI, desktop app and VS Code extension share it.
     public string KimiHome { get; init; } = "";
+    // Pi's session root, never its credential/config files.
+    public string PiSessions { get; init; } = "";
+    public string PiAuthFile { get; init; } = "";
+    public string PiAccountsFile => PiAuthFile.Length == 0 ? "" : Path.Combine(Path.GetDirectoryName(PiAuthFile)!, "antigravity-accounts.json");
     // The environment variables that change which Kimi Code service is used (KIMI_CODE_BASE_URL, KIMI_CODE_OAUTH_HOST and
     // the others in KimiEnvironment); all null when unset.
     public KimiEnvironment KimiEnvironment { get; init; } = new();
@@ -20,7 +24,12 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR"), Environment.GetEnvironmentVariable("CODEX_HOME"),
         Environment.GetEnvironmentVariable("ZCODE_HOME"), Environment.GetEnvironmentVariable("DSH_HOME"), Environment.GetEnvironmentVariable("KIMI_CODE_HOME"))
-    with { KimiEnvironment = new(Environment.GetEnvironmentVariable("KIMI_CODE_BASE_URL"),
+    with { PiAuthFile = Path.Combine(ConfigDirectory(Environment.GetEnvironmentVariable("PI_CODING_AGENT_DIR"),
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pi", "agent")), "auth.json"),
+        PiSessions = ConfigDirectory(Environment.GetEnvironmentVariable("PI_CODING_AGENT_SESSION_DIR"),
+        Path.Combine(ConfigDirectory(Environment.GetEnvironmentVariable("PI_CODING_AGENT_DIR"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pi", "agent")), "sessions")),
+        KimiEnvironment = new(Environment.GetEnvironmentVariable("KIMI_CODE_BASE_URL"),
         Environment.GetEnvironmentVariable("KIMI_CODE_OAUTH_HOST") ?? Environment.GetEnvironmentVariable("KIMI_OAUTH_HOST"),
         Environment.GetEnvironmentVariable("KIMI_CODE_REGION_MARKER")) };
 
@@ -28,7 +37,7 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
         ConfigDirectory(claudeOverride, Path.Combine(home, ".claude")),
         ConfigDirectory(codexOverride, Path.Combine(home, ".codex")),
         Path.Combine(roaming, "Cursor", "User", "globalStorage", "state.vscdb"), roaming, local)
-    { ZCodeHome = ConfigDirectory(zcodeOverride, Path.Combine(home, ".zcode")), DshHome = ConfigDirectory(dshOverride, Path.Combine(home, ".dsh")), KimiHome = ConfigDirectory(kimiOverride, Path.Combine(home, ".kimi-code")), AntigravityConversations = AntigravityUsage.Folders(home) };
+    { ZCodeHome = ConfigDirectory(zcodeOverride, Path.Combine(home, ".zcode")), DshHome = ConfigDirectory(dshOverride, Path.Combine(home, ".dsh")), KimiHome = ConfigDirectory(kimiOverride, Path.Combine(home, ".kimi-code")), AntigravityConversations = AntigravityUsage.Folders(home), PiSessions = Path.Combine(home, ".pi", "agent", "sessions"), PiAuthFile = Path.Combine(home, ".pi", "agent", "auth.json") };
 
     private static string ConfigDirectory(string? value, string fallback) =>
         !string.IsNullOrWhiteSpace(value) && Path.IsPathFullyQualified(value) ? Path.GetFullPath(value) : fallback;

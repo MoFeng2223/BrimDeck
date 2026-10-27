@@ -36,7 +36,7 @@ public sealed class LogReader
         var result = new ProviderSnapshot(id);
         var cutoff = new DateTimeOffset(startDate?.Date ?? now.LocalDateTime.Date.AddDays(-29));
         result.UsageStart = cutoff.LocalDateTime.Date;
-        var folders = id == ProviderId.Codex ? new[] { "sessions", "archived_sessions" } : new[] { "projects" };
+        var folders = id == ProviderId.Pi ? new[] { "" } : id == ProviderId.Codex ? new[] { "sessions", "archived_sessions" } : new[] { "projects" };
         if (!_caches.TryGetValue(id, out var cache)) _caches[id] = cache = new(StringComparer.OrdinalIgnoreCase);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var entries = new Dictionary<string, TokenEntry>();
@@ -162,6 +162,37 @@ public sealed class LogReader
         return false;
     }
 
+    // Pi records disjoint token categories. Read only accounting metadata, never message content or auth files.
+    // Entry ids and timestamps survive forks/clones, so copied history is counted once across session files.
+    private static void ParsePi(JsonElement obj, DateTimeOffset? time, CacheItem item)
+    {
+        var type = obj.Get("type").Text();
+        var message = obj.Get("message");
+        var source = type == "message" ? message : obj;
+        if (type == "message" && message.Get("role").Text() != "assistant") return;
+        if (type is not ("message" or "usage" or "compaction" or "branch_summary")) return;
+        if (message.Get("stopReason").Text() == "pending") return;
+        time = source.Get("timestamp").Date() ?? time;
+        if (time is null || time < item.Cutoff) return;
+        var usage = source.Get("usage");
+        if (usage.ValueKind != JsonValueKind.Object) return;
+        long input = usage.Get("input").Count(), read = usage.Get("cacheRead").Count();
+        long write = usage.Get("cacheWrite").Count(), output = usage.Get("output").Count();
+        long hour = Math.Min(write, usage.Get("cacheWrite1h").Count());
+        var model = source.Get("model").Text();
+        if (model.Length == 0) model = "unknown";
+        var provider = source.Get("provider").Text();
+        // Do not mix provider-specific recorded costs into one inferred model price.
+        var modelName = provider.Length == 0 ? model : provider + "/" + model;
+        decimal? cost = null;
+        var reported = usage.Get("cost").Get("total");
+        if (reported.ValueKind == JsonValueKind.Number && reported.TryGetDecimal(out var value) && value >= 0) cost = value;
+        var identity = obj.Get("id").Text();
+        if (identity.Length == 0) identity = usage.GetRawText();
+        item.Entries.Add(new($"pi:{time:O}:{provider}:{model}:{identity}", time.Value, modelName,
+            input, read, write - hour, hour, output, cost, provider));
+    }
+
     private static void ParseLine(ReadOnlyMemory<byte> line, ProviderId id, CacheItem item)
     {
         if (line.Span.StartsWith((ReadOnlySpan<byte>)[0xEF, 0xBB, 0xBF])) line = line[3..]; // UTF-8 byte order mark
@@ -172,7 +203,11 @@ public sealed class LogReader
             var obj = doc.RootElement;
             var time = obj.Get("timestamp").Date();
             var type = obj.Get("type").Text();
-            if (id == ProviderId.Codex)
+            if (id == ProviderId.Pi)
+            {
+                ParsePi(obj, time, item);
+            }
+            else if (id == ProviderId.Codex)
             {
                 var payload = obj.Get("payload");
                 if (type == "turn_context") { item.Model = payload.Get("model").Text(); return; }
@@ -293,8 +328,22 @@ public static class QuotaParser
                 if (bucket.Get("remainingFraction").Number() is { } fraction)
                 {
                     var id = bucket.Get("bucketId").Text();
-                    var label = id switch { "gemini-5h" => "Gemini · 5 小时", "gemini-weekly" => "Gemini · 每周", "3p-5h" => "Claude · 5 小时", "3p-weekly" => "Claude · 每周", _ => id };
-                    int? minutes = id switch { "gemini-5h" or "3p-5h" => 300, "gemini-weekly" or "3p-weekly" => 10080, _ => null };
+                    var label = id switch
+                    {
+                        "gemini-5h" => "Gemini · 5 小时",
+                        "gemini-weekly" => "Gemini · 每周",
+                        "gemini-argon-wtu-5h" => "Gemini 4 · 5 小时",
+                        "gemini-argon-wtu-weekly" => "Gemini 4 · 每周",
+                        "3p-5h" => "Claude · 5 小时",
+                        "3p-weekly" => "Claude · 每周",
+                        _ => id
+                    };
+                    int? minutes = id switch
+                    {
+                        "gemini-5h" or "gemini-argon-wtu-5h" or "3p-5h" => 300,
+                        "gemini-weekly" or "gemini-argon-wtu-weekly" or "3p-weekly" => 10080,
+                        _ => null
+                    };
                     result.Add(new(label, (1 - Math.Clamp(fraction, 0, 1)) * 100, bucket.Get("resetTime").Date(), minutes));
                 }
         if (result.Count > 0) return result;

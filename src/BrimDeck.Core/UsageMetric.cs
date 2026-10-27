@@ -34,8 +34,10 @@ public sealed record UsageMetric(MetricKind Kind, string Label)
         MetricKind.Count when Total is > 0 && Used is { } used => (double)(used / Total.Value * 100),
         _ => null
     };
-    public string ValueText => Kind == MetricKind.Text ? Value : Kind is MetricKind.Balance or MetricKind.Spend ? (AtLeast ? "≥" : "") + Money(Amount!.Value, Currency) : UsedPercent is { } p ? $"{p:0.#}%" : "—";
-    public string ValueSuffix => Kind switch { MetricKind.Text => Value.Length > 0 ? Suffix : "", MetricKind.Balance => Loc.T("可用", "left"), _ => Loc.T("已用", "used") };
+    // Pi quota display uses the remaining share; thresholds and bars still use the consumed share.
+    public bool ShowRemaining { get; init; }
+    public string ValueText => ShowRemaining && UsedPercent is { } remainingUsed ? $"{Math.Clamp(100 - remainingUsed, 0, 100):0.#}%" : Kind == MetricKind.Text ? Value : Kind is MetricKind.Balance or MetricKind.Spend ? (AtLeast ? "≥" : "") + Money(Amount!.Value, Currency) : UsedPercent is { } p ? $"{p:0.#}%" : "—";
+    public string ValueSuffix => ShowRemaining ? Loc.T("剩余", "left") : Kind switch { MetricKind.Text => Value.Length > 0 ? Suffix : "", MetricKind.Balance => Loc.T("可用", "left"), _ => Loc.T("已用", "used") };
     public string CountText => Kind == MetricKind.Count ? $"{Used:N0} / {Total:N0}" : "";
     public string Description => string.Join("\n", new[] { Kind == MetricKind.Text ? Label : Loc.Label(Label), (ValueText + " " + ValueSuffix).Trim(), Note, ResetText,
         Total is { } total ? Loc.T("总额：", "Total: ") + (Kind == MetricKind.Count ? total.ToString("N0") + " " + Loc.Label(Unit) : Money(total, Currency)) : "",

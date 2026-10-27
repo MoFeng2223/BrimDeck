@@ -126,10 +126,51 @@ public sealed partial class SettingsWindow
         return grid;
     }
 
+    private FrameworkElement PiQuotaDetails(AppEntry entry)
+    {
+        var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, 12);
+        var panel = new StackPanel { Margin = new Thickness(16, 6, 16, 6) };
+        var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.PiReadLogin, Content = Loc.T("读取 Pi 登录并查询额度（全局）", "Read Pi sign-in and fetch quota (global)") };
+        AutomationProperties.SetName(toggle, Loc.T("读取 Pi 登录并查询额度", "Read Pi sign-in and fetch quota"));
+        var help = TextLine(Loc.T("默认关闭。只向对应官方接口发送授权，不安装插件、不修改 Pi 文件。每列可独立选择账号；账号列不伪造按账号拆分的 Token。",
+            "Off by default. Credentials go only to matching official APIs; no extension or Pi file changes. Each column selects its own account; no fabricated per-account token accounting."), 12, TextSecondary);
+        help.TextWrapping = TextWrapping.Wrap; help.Margin = new Thickness(0, 8, 0, 8);
+        var selectedProvider = entry.PiProvider.Length > 0 ? entry.PiProvider : S.PiQuotaProvider;
+        var provider = new ComboBox { Width = 260, HorizontalAlignment = HorizontalAlignment.Left, Style = (Style)FindResource("SettingsCombo"), ItemsSource = new[] { "Codex", "Antigravity" }, SelectedIndex = selectedProvider == "antigravity" ? 1 : 0 };
+        AutomationProperties.SetName(provider, Loc.T("此列 Pi 额度来源", "This column's Pi quota provider"));
+        toggle.Checked += (_, _) => { Change(s => s.PiReadLogin = true); ShowPage(3); };
+        toggle.Unchecked += (_, _) => { Change(s => s.PiReadLogin = false); ShowPage(3); };
+        provider.SelectionChanged += (_, _) =>
+        {
+            Change(s => { var current = s.Entry(entry.InstanceId)!; current.PiProvider = provider.SelectedIndex == 1 ? "antigravity" : "openai-codex"; current.PiAccountKey = ""; });
+            RefreshAppRow(entry.InstanceId);
+        };
+        panel.Children.Add(toggle); panel.Children.Add(help); panel.Children.Add(provider);
+        if (selectedProvider == "antigravity")
+        {
+            var accounts = S.PiReadLogin ? PiAntigravityAccounts.List(DataLocations.Detect().PiAccountsFile, DateTimeOffset.Now) : [];
+            var choices = new[] { new PiAccountInfo("", Loc.T("当前 Pi 活动账号（只读）", "Current Pi account (read-only)"), false, false) }.Concat(accounts).ToArray();
+            var account = new ComboBox { Width = 300, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 8), Style = (Style)FindResource("SettingsCombo"),
+                ItemsSource = choices, DisplayMemberPath = nameof(PiAccountInfo.Label), SelectedValuePath = nameof(PiAccountInfo.Key), SelectedValue = entry.PiAccountKey };
+            AutomationProperties.SetName(account, Loc.T("此列 Antigravity 账号", "This column's Antigravity account"));
+            account.SelectionChanged += (_, _) => { if (account.SelectedValue is string key) Change(s => s.Entry(entry.InstanceId)!.PiAccountKey = key); };
+            var renewal = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.PiGoogleRefresh, Content = Loc.T("允许 Google 自动续期（仅内存）", "Allow Google renewal (memory only)") };
+            AutomationProperties.SetName(renewal, Loc.T("允许 Google 自动续期", "Allow Google renewal"));
+            renewal.Checked += (_, _) => Change(s => s.PiGoogleRefresh = true);
+            renewal.Unchecked += (_, _) => Change(s => s.PiGoogleRefresh = false);
+            var renewalHelp = TextLine(Loc.T("独立授权，默认关闭。为账号池中的账号向 Google 换取短期访问令牌以支持即时切换，不保存新令牌、不切换 Pi 活动账号。", "Separate consent, off by default. Obtains short-lived access from Google for accounts in the pool to support instant switching; never saves new tokens or switches Pi's active account."), 12, TextSecondary);
+            renewalHelp.TextWrapping = TextWrapping.Wrap; renewalHelp.Margin = new Thickness(0, 8, 0, 0);
+            panel.Children.Add(account); panel.Children.Add(renewal); panel.Children.Add(renewalHelp);
+        }
+        Grid.SetColumn(panel, 1); Grid.SetColumnSpan(panel, 6); grid.Children.Add(panel);
+        return grid;
+    }
+
     // The expanded configuration starts under the quota source: a short label column, then fields that end midway
     // between the warning and critical colors. Labels share one width so every field starts at the same place.
     private FrameworkElement SourceDetails(AppEntry entry)
     {
+        if (entry.QuotaSource == ProviderId.Pi) return PiQuotaDetails(entry);
         if (ProviderCatalog.HasOnlineSwitch(entry.QuotaSource)) return OnlineQuotaDetails(entry);
         var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, 12); Grid.SetIsSharedSizeScope(grid, true);
         var result = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(6, 4, 6, 4) };

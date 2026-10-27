@@ -10,7 +10,7 @@ public sealed record Quota(string Label, double UsedPercent, DateTimeOffset? Res
 
 // Each input category is disjoint. Reasoning tokens are already included in Output.
 public sealed record TokenEntry(string Key, DateTimeOffset Time, string Model,
-    long Input, long CacheRead, long CacheWrite, long CacheWriteHour, long Output, decimal? ReportedCostUsd = null)
+    long Input, long CacheRead, long CacheWrite, long CacheWriteHour, long Output, decimal? ReportedCostUsd = null, string Provider = "")
 {
     public long Total => Input + CacheRead + CacheWrite + CacheWriteHour + Output;
 }
@@ -43,6 +43,7 @@ public sealed class ProviderSnapshot(ProviderId id)
     public DateTime? UsageStart { get; set; }
     public List<Quota> Quotas { get; set; } = [];
     public List<TokenEntry> Entries { get; set; } = [];
+    public IReadOnlyList<PiAccountInfo> PiAccounts { get; set; } = [];
 }
 
 public static class JsonValue

@@ -29,7 +29,7 @@ public sealed record FullscreenRule(string Name = "", string Path = "")
 // KimiApi reads the same plan quota with a Kimi Code API key entered by hand.
 // Statistics sources are saved as numbers. 8 and 9 were a short-lived split of Claude and are retired:
 // SettingsMigrations maps them back to Claude, and later members keep their saved numbers.
-public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16 }
+public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, Pi = 17 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckPages.Order.
 public enum DeckPage { Usage, Music, Monitor }
@@ -80,6 +80,9 @@ public sealed class AppEntry
     [JsonConverter(typeof(QuotaSourceConverter))]
     public ProviderId QuotaSource { get; set; }
     public ProviderId UsageSource { get => _usageSource ?? (ProviderCatalog.IsUsageSource(QuotaSource) ? QuotaSource : ProviderId.Claude); set => _usageSource = value; }
+    // Pi rows may independently select Codex or one remembered Antigravity account.
+    public string PiProvider { get; set; } = "";
+    public string PiAccountKey { get; set; } = "";
     public string Site { get; set; } = "";
     public string Script { get; set; } = "";
     public Guid SecretRevision { get; set; }
@@ -112,6 +115,7 @@ public sealed class AppEntry
     public void Normalize()
     {
         UsageSource = ProviderCatalog.IsUsageSource(UsageSource) ? UsageSource : ProviderId.Claude;
+        PiProvider ??= ""; PiAccountKey ??= "";
         Site = ProviderCatalog.NormalizeSite(Site ?? "", QuotaSource != ProviderId.Custom);
         Script ??= "";
         // A custom row always starts from the template, which is the only place its return format is described.
@@ -330,6 +334,11 @@ public sealed class DeckSettings
     // Shows the compact notice when a quota rises into the warning or critical level.
     public bool QuotaAlerts { get; set; } = true;
     // Also reads the Claude Code and Codex CLI session records inside WSL distributions. Off by default: it starts stopped distributions.
+    // Explicit opt-in. Never migrate old bridge users to credential access automatically.
+    public bool PiReadLogin { get; set; }
+    // Separate consent for Google renewal; refreshed access remains in this process only.
+    public bool PiGoogleRefresh { get; set; }
+    public string PiQuotaProvider { get; set; } = "openai-codex";
     public bool IncludeWsl { get; set; }
     // The ordered application list; the order is the column order of the expanded panel. Claude and Codex are shown
     // at first; the other built-in applications are listed but hidden.

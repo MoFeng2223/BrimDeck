@@ -18,6 +18,7 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | ZCode | ✓ | ✓ | Sign in to ZCode on this PC |
 | DeepSeek Harness | ✓ | ✓ | Sign in to a DeepSeek account in the DeepSeek Harness desktop app or local web app, or save an API key there |
 | Kimi Code | ✓ | ✓ | Sign in to Kimi Code (CLI, desktop app or VS Code extension) on this PC |
+| Pi | ✓ | ✓ | Use Pi Coding Agent on this PC (optional opt-in for Codex / Antigravity sign-in quotas) |
 | Zhipu GLM, Z.ai GLM | ✓ | | Enter an API key in settings |
 | DeepSeek | ✓ | | Enter an API key in settings |
 | Kimi Code API | ✓ | | Enter a Kimi Code API key in settings |
@@ -64,6 +65,13 @@ Kimi Code CLI, the desktop app and the VS Code extension share one data folder a
 - **Mainland China and international**: follows the site chosen when signing in to Kimi Code, kimi.com (API api.kimi.com) or kimi.ai (API api.kimi.ai), and reads that sign-in and API. The source reads "Kimi Code · kimi.com account" or "Kimi Code · kimi.ai account", and the membership level is shown as that site names it. Each site's quota is kept separately, so after switching site or account the other one's quota is never shown.
 - **Service address**: follows Kimi Code's settings. When `KIMI_CODE_BASE_URL` is set, that address is used; it must use HTTPS. `KIMI_CODE_OAUTH_HOST` and `KIMI_CODE_REGION_MARKER` are honored as Kimi Code uses them.
 - **Tokens and cost**: read from the Kimi Code session records on this PC, covering the CLI, the desktop app and the VS Code extension, including their subagents. K3 (`kimi-k3`), K3.1 Pro (`kimi-k3.1-pro`) and K3.1 Pro Highspeed (`kimi-k3.1-pro-highspeed`) are costed at the prices of the official Moonshot AI endpoint on OpenRouter (including cache reads, and cache writes when the endpoint lists them), never another provider's price. These prices are updated daily with the price list and saved on this PC; when an update fails the last saved prices are used, and until they have been read once these models show tokens only. `k3-256k` is listed on its own and costed at K3's price. `kimi-for-coding` and `kimi-for-coding-highspeed` are aliases that Kimi Code points at different models over time, so they show tokens only, with no cost. Prices added by hand take precedence, including one added for `k3-256k` itself.
+
+## Pi
+
+Reads local session usage and signed-in Codex / Antigravity quotas from Pi Coding Agent (`~/.pi/agent`) without installing any Pi extension.
+
+- **Quota**: expand a Pi row in settings and enable "Read Pi sign-in and fetch quota" (off by default) to choose Codex or Antigravity for that column. When multiple Antigravity accounts are present in `antigravity-accounts.json`, a compact `[1] [2] …` account switcher appears in the column header for instant inspection of each account's Gemini and Claude quotas without changing Pi's active account. Optional in-memory Google token renewal can be enabled without modifying Pi files.
+- **Tokens and cost**: reads session records from `~/.pi/agent/sessions` (honoring `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR`) and splits Today and Week token usage and cost by provider (`openai-codex`, `antigravity`) for the corresponding columns.
 
 ## Sources entered by hand
 
