@@ -242,6 +242,11 @@ public partial class MainWindow
             _extensionButtons[slot] = button;
             PageButtons.Children.Add(button);
         }
+        // Adding puts a tab at the end of the line, which is where a rebuilt one does not belong: a reload replaces a
+        // single slot, drops that one tab and makes it again, while the page switch keeps walking slots. Laying the tabs
+        // out in slot order here is what keeps the wheel arriving at the pages in the order the reader just looked at.
+        for (int slot = 0; slot < _extensionButtons.Length; slot++)
+            if (_extensionButtons[slot] is { } placed) { PageButtons.Children.Remove(placed); PageButtons.Children.Add(placed); }
     }
     private readonly Button?[] _extensionButtons = new Button?[4];
     // Called when the interface language changes: a tab's tooltip and accessible name are text, so the tabs are made again.

@@ -168,6 +168,24 @@ internal static class Program
                 Console.WriteLine("PASS after the 15s reclaim A comes back in " + (int)elapsed + " ms");
             }
 
+            // One order, not two. The strip is laid out by slot and the wheel walks those same slots, so a reload that
+            // replaces one plugin rebuilds exactly one tab — and a rebuilt tab that lands at the end of the line leaves
+            // the reader's wheel arriving at pages in a sequence their eyes never saw.
+            Reopen();
+            Require(Rising(TabLefts(window)), "the four plugin tabs lie in switch order");
+            Console.WriteLine("PASS the four plugin tabs lie in switch order");
+            File.AppendAllText(Path.Combine(data, "extensions", "fixture-b", "index.html"), "\n<!-- touched -->");
+            Press(FindAny(window, "设置", "Settings"));
+            var settings = WaitFor(app.SettingsWindow, TimeSpan.FromSeconds(8), "the settings window")
+                ?? throw new TestFailure("the settings window never opened");
+            Press(FindAny(settings, "插件", "Plugins"));
+            Press(FindAny(settings, "重新加载", "Reload"));
+            Thread.Sleep(1500);
+            Reopen();
+            var after = TabLefts(window);
+            Require(Rising(after), "a reload leaves the tabs in the order the page switch walks them (" + string.Join(", ", after) + ")");
+            Console.WriteLine("PASS a reload keeps the plugin tabs in switch order");
+
             Console.WriteLine("UI SMOKE PASSED");
             return 0;
         }
@@ -235,6 +253,30 @@ internal static class Program
                 new PropertyCondition(AutomationElement.NameProperty, name)));
         }
         catch (ElementNotAvailableException) { return null; }
+    }
+
+    // Either language: the throwaway profile's is not the harness's to know.
+    private static AutomationElement FindAny(AutomationElement window, params string[] names)
+    {
+        foreach (var name in names)
+            if (WaitFor(() => FindOrNull(window, name), TimeSpan.FromSeconds(3), name) is { } found) return found;
+        throw new TestFailure("none of \"" + string.Join("\" / \"", names) + "\" is in that window");
+    }
+
+    // The plugin tabs' left edges, listed in the order the page switch walks them. The strip tells the truth only when
+    // these rise: a tab rebuilt by a reload has to go back to its slot's place, not to the end of the line.
+    private static int[] TabLefts(AutomationElement window)
+    {
+        string[] names = ["FixtureA", "FixtureB", "FixtureC", "FixtureD"];
+        var lefts = new int[names.Length];
+        for (int i = 0; i < names.Length; i++) lefts[i] = (int)Find(window, names[i]).Current.BoundingRectangle.Left;
+        return lefts;
+    }
+
+    private static bool Rising(int[] lefts)
+    {
+        for (int i = 1; i < lefts.Length; i++) if (lefts[i] <= lefts[i - 1]) return false;
+        return true;
     }
 
     // UIA Invoke is used instead of a pointer click: the panel's buttons are exposed as invoke patterns, and clicking
@@ -622,6 +664,20 @@ internal static class Program
         public bool HasExited { get { try { return _process.HasExited; } catch (Exception) { return true; } } }
         public int? ExitCode { get { try { return _process.ExitCode; } catch (Exception) { return null; } } }
         public AutomationElement? MainWindow() => WaitWindow();
+        // The settings window is a second top-level window of the same process, told apart by its title.
+        public AutomationElement? SettingsWindow()
+        {
+            var condition = new AndCondition(
+                new PropertyCondition(AutomationElement.ProcessIdProperty, _process.Id),
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window));
+            try
+            {
+                foreach (AutomationElement element in AutomationElement.RootElement.FindAll(TreeScope.Children, condition))
+                    if (element.Current.Name is { } name && (name.Contains("设置") || name.Contains("Settings"))) return element;
+            }
+            catch (ElementNotAvailableException) { }
+            return null;
+        }
         private AutomationElement? WaitWindow()
         {
             var condition = new AndCondition(
