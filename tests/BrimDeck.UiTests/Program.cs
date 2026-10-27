@@ -186,6 +186,32 @@ internal static class Program
             Require(Rising(after), "a reload leaves the tabs in the order the page switch walks them (" + string.Join(", ", after) + ")");
             Console.WriteLine("PASS a reload keeps the plugin tabs in switch order");
 
+            // The order is the reader's to arrange, and the panel has to follow it. Two moves down from the first row,
+            // made at the keyboard: a second Alt+↓ only lands if the rebuilt row kept the focus, and the strip only
+            // reads A moved past two others if the tabs are laid out from the same list the settings page drags in.
+            var handles = OrderHandles(settings);
+            Require(handles.Length == 4, "every loaded plugin offers a handle to move it by (" + handles.Length + ")");
+            BringForward(settings);
+            handles[0].SetFocus();
+            Thread.Sleep(500);
+            // Which window and which control would the keys land in: a row that does not move because nothing was
+            // focused reads the same as a move that was refused, so the run says which one it was.
+            var delivery = "foreground=" + IsForeground(settings) + " focused=\"" + FocusedName() + "\"";
+            System.Windows.Forms.SendKeys.SendWait("%{DOWN}");
+            Thread.Sleep(700);
+            System.Windows.Forms.SendKeys.SendWait("%{DOWN}");
+            Thread.Sleep(900);
+            // The rows say their own place in the name they carry, so a move that reached the app is visible here even
+            // before the panel is read: rows unmoved means the keys did not arrive, rows moved and tabs still in the old
+            // order means the panel did not follow.
+            var rows = string.Join(" | ", OrderHandles(settings).Select(Place));
+            Reopen();
+            var arranged = TabsByLeft(window);
+            Require(arranged.SequenceEqual(new[] { "FixtureB", "FixtureC", "FixtureA", "FixtureD" }),
+                "two Alt+↓ moves the first plugin past two others, and the tabs move with it — " + delivery
+                + ", rows: " + rows + ", tabs: " + string.Join(", ", arranged));
+            Console.WriteLine("PASS the page switch follows the order the reader arranged: " + string.Join(", ", arranged));
+
             Console.WriteLine("UI SMOKE PASSED");
             return 0;
         }
@@ -277,6 +303,61 @@ internal static class Program
     {
         for (int i = 1; i < lefts.Length; i++) if (lefts[i] <= lefts[i - 1]) return false;
         return true;
+    }
+
+    // The plugin tabs read left to right, which is the only order the reader sees. Listed by name so a change of the
+    // arranged order shows up as a different sequence instead of merely a set of rising edges.
+    private static string[] TabsByLeft(AutomationElement window)
+    {
+        string[] names = ["FixtureA", "FixtureB", "FixtureC", "FixtureD"];
+        return names.OrderBy(name => Find(window, name).Current.BoundingRectangle.Left).ToArray();
+    }
+
+    // The six-dot handles on the plugins page, top row first. Their names carry the position they stand at, which is
+    // how a screen reader is told where the row is — and how this test finds them in either interface language.
+    private static AutomationElement[] OrderHandles(AutomationElement settings)
+    {
+        var found = settings.FindAll(TreeScope.Descendants, new AndCondition(
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
+            new PropertyCondition(AutomationElement.IsContentElementProperty, true)));
+        var handles = new List<AutomationElement>();
+        foreach (AutomationElement element in found)
+        {
+            try
+            {
+                string name = element.Current.Name;
+                if (name.Contains("位置") || name.Contains("position")) handles.Add(element);
+            }
+            catch (ElementNotAvailableException) { }
+        }
+        return handles.OrderBy(element => element.Current.BoundingRectangle.Top).ToArray();
+    }
+
+    // What the handle says its row is: "FixtureA position, 1 of 4" in English, "A 的位置，第 1 个，共 4 个" in Chinese.
+    // The name is the row's own report of its place, so it answers "did the key arrive?" without reading the app's file.
+    private static string Place(AutomationElement handle)
+    {
+        try { return handle.Current.Name; }
+        catch (ElementNotAvailableException) { return "(gone)"; }
+    }
+
+    private static bool IsForeground(AutomationElement window) => GetForegroundWindow().ToInt64() == window.Current.NativeWindowHandle;
+
+    // The control that would read a key, as Windows sees it. A keyboard action that changes nothing is either a key
+    // that never arrived or a handler that refused it, and this is the line between the two.
+    private static string FocusedName()
+    {
+        try { return AutomationElement.FocusedElement?.Current.Name ?? "(none)"; }
+        catch (ElementNotAvailableException) { return "(gone)"; }
+    }
+
+    // Keys go to the foreground window, so the window that must read them is made foreground first. The panel's own
+    // window is opened and closed by hover all through a run and may well be the one holding it.
+    private static void BringForward(AutomationElement window)
+    {
+        var handle = new IntPtr(window.Current.NativeWindowHandle);
+        if (handle == IntPtr.Zero || !SetForegroundWindow(handle)) throw new TestFailure("that window cannot be brought forward");
+        Thread.Sleep(300);
     }
 
     // UIA Invoke is used instead of a pointer click: the panel's buttons are exposed as invoke patterns, and clicking
@@ -608,6 +689,8 @@ internal static class Program
     private static (int Width, int Height) Screen() => (GetSystemMetrics(0), GetSystemMetrics(1));
 
     [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
     [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(int value);
 

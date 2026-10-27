@@ -3,8 +3,11 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using BrimDeck.Core;
 
 namespace BrimDeck;
@@ -82,6 +85,8 @@ public sealed partial class SettingsWindow
         if (_pluginsHost is not null) _pluginsHost.Child = PluginsList();
     }
 
+    // The rows stand in the order the reader arranged them — read from DeckPages.Order, the same list the island's tabs
+    // and the wheel walk — so this page cannot say one order and the panel another.
     private FrameworkElement PluginsList()
     {
         if (IslandExtensions.OccupiedCount == 0)
@@ -90,20 +95,43 @@ public sealed partial class SettingsWindow
             empty.Margin = new Thickness(0, 6, 0, 8);
             return empty;
         }
+        _pluginRows = DeckPages.Order(S).Select(DeckPages.SlotOf).Where(slot => slot >= 0 && IslandExtensions.Occupied(slot)).ToList();
         var list = new StackPanel();
-        for (int slot = 0; slot < IslandExtensions.Slots.Length; slot++)
+        _pluginRowElements = [];
+        Array.Clear(_pluginHandles, 0, _pluginHandles.Length);
+        for (int at = 0; at < _pluginRows.Count; at++)
         {
-            if (!IslandExtensions.Occupied(slot)) continue;
             if (list.Children.Count > 0) list.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
-            list.Children.Add(PluginRow(slot));
+            var row = PluginRow(_pluginRows[at], at, _pluginRows.Count);
+            _pluginRowElements.Add(row);
+            list.Children.Add(row);
         }
-        return list;
+        _pluginList = list;
+        // Where a dragged row will land, drawn over the list rather than inserted into it: a child added between rows
+        // would shift the very indices the drag is measuring.
+        var host = new Grid();
+        host.Children.Add(list);
+        _dropLine = new Border
+        {
+            Height = 2, CornerRadius = new CornerRadius(1), Background = UI.Brush(TextSecondary), IsHitTestVisible = false,
+            VerticalAlignment = VerticalAlignment.Top, Visibility = Visibility.Collapsed, Margin = new Thickness(0, -8, 0, 0)
+        };
+        host.Children.Add(_dropLine);
+        return host;
     }
 
-    // One loaded plugin: a header row — its glyph and title, its enable switch, and the arrow that opens the settings
-    // under it; open, the page's size and the id and folder it came from. The switch is the plugin's own: off takes its tab
-    // off the island and stops what it reads, in every state of the panel.
-    private FrameworkElement PluginRow(int slot)
+    private List<int> _pluginRows = [];
+    private List<FrameworkElement> _pluginRowElements = [];
+    private StackPanel? _pluginList;
+    private Border? _dropLine;
+    private int _dragSlot = -1, _dragTarget = -1;
+    private Point _dragFrom;
+    private bool _dragging;
+
+    // One loaded plugin: a header row — the handle it is dragged by, its glyph and title, its enable switch, and the arrow
+    // that opens the settings under it; open, the page's size and the id and folder it came from. The switch is the plugin's
+    // own: off takes its tab off the island and stops what it reads, in every state of the panel.
+    private FrameworkElement PluginRow(int slot, int position, int total)
     {
         var extension = IslandExtensions.Slots[slot]!;
         string id = extension.Id, title = IslandExtensions.Title(slot);
@@ -114,35 +142,38 @@ public sealed partial class SettingsWindow
         var column = new StackPanel();
         var header = new Grid { MinHeight = 44, Background = Brushes.Transparent };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new ColumnDefinition());
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(DragHandle(slot, position, total, title));
         var glyph = new System.Windows.Shapes.Path
         {
             Data = IslandExtensions.SafeGlyph(extension.Glyph), Stroke = UI.Brush(TextSecondary), StrokeThickness = 1.4,
             StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, StrokeLineJoin = PenLineJoin.Round,
             Width = 16, Height = 16, Stretch = Stretch.Uniform, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0)
         };
+        Grid.SetColumn(glyph, 1);
         header.Children.Add(glyph);
         var name = TextLine(title, 13, TextPrimary, FontWeights.SemiBold);
         name.VerticalAlignment = VerticalAlignment.Center; name.TextTrimming = TextTrimming.CharacterEllipsis;
-        Grid.SetColumn(name, 1);
+        Grid.SetColumn(name, 2);
         header.Children.Add(name);
         var enable = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = enabled, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
         AutomationProperties.SetName(enable, Loc.T("启用 ", "Enable ") + title);
         enable.Checked += (_, _) => ChangePlugin(id, current => current with { Shown = true });
         enable.Unchecked += (_, _) => ChangePlugin(id, current => current with { Shown = false });
-        Grid.SetColumn(enable, 2);
+        Grid.SetColumn(enable, 3);
         header.Children.Add(enable);
         void Flip() { _pluginOpen[slot] = !_pluginOpen[slot]; RefreshPlugins(); }
         var arrow = ChevronButton(Loc.T("展开 ", "Expand ") + title, Flip);
         arrow.Margin = new Thickness(2, 0, 0, 0);
-        Grid.SetColumn(arrow, 3);
+        Grid.SetColumn(arrow, 4);
         header.Children.Add(arrow);
         header.MouseLeftButtonDown += (_, e) => { Flip(); e.Handled = true; };
         column.Children.Add(header);
 
-        var details = new StackPanel { Margin = new Thickness(26, 0, 0, 10), Visibility = _pluginOpen[slot] ? Visibility.Visible : Visibility.Collapsed };
+        var details = new StackPanel { Margin = new Thickness(42, 0, 0, 10), Visibility = _pluginOpen[slot] ? Visibility.Visible : Visibility.Collapsed };
         var dimensions = new Grid { MinHeight = 44 }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
         // The page's own limits, which a plugin's manifest can raise: the fields offer exactly the sizes the page can take,
         // and show the size it is actually using even when an older file saved less.
@@ -195,6 +226,121 @@ public sealed partial class SettingsWindow
         var page = DeckPages.ExtensionPage(slot);
         var (nowWidth, nowHeight) = DeckPages.Size(settings, page);
         DeckPages.SetSize(settings, page, width ?? nowWidth, height ?? nowHeight);
+    }
+
+    // The six dots a reader drags by. Only this starts a drag, so a click anywhere else on the row keeps opening and
+    // closing it the way it always did. The keyboard moves it one place at a time, and its name says which place that
+    // is, since the position is the whole point of the control. With a single plugin there is no place to move it to,
+    // so the space is kept — the rows line up either way — and the handle is not offered.
+    private FrameworkElement DragHandle(int slot, int position, int total, string title)
+    {
+        if (total < 2) return new Border { Width = 16, Margin = new Thickness(0, 0, 4, 0) };
+        var dots = Stroke("M 9,7 L 9.01,7 M 15,7 L 15.01,7 M 9,12 L 9.01,12 M 15,12 L 15.01,12 M 9,17 L 9.01,17 M 15,17 L 15.01,17", 14, 14, TextTertiary);
+        dots.StrokeThickness = 2.4; dots.StrokeStartLineCap = dots.StrokeEndLineCap = PenLineCap.Round;
+        dots.SetBinding(Shape.StrokeProperty, new Binding("Foreground") { RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(Button), 1) });
+        var handle = new Button
+        {
+            Content = dots, Style = (Style)FindResource("SettingsGlyphButton"), Cursor = Cursors.SizeNS,
+            Margin = new Thickness(0, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center,
+            ToolTip = Loc.T("拖动可调整这个插件在面板里的位置；Alt+↑ / Alt+↓ 上移、下移。", "Drag to move this plugin's place in the panel; Alt+Up and Alt+Down move it one step.")
+        };
+        _pluginHandles[slot] = handle;
+        AutomationProperties.SetName(handle, Loc.T($"{title} 的位置，第 {position + 1} 个，共 {total} 个", $"{title} position, {position + 1} of {total}"));
+        handle.PreviewMouseLeftButtonDown += (_, e) =>
+        {
+            _dragSlot = slot; _dragTarget = position; _dragFrom = e.GetPosition(null); _dragging = false;
+            handle.CaptureMouse(); e.Handled = true;
+        };
+        handle.PreviewMouseMove += (_, e) =>
+        {
+            if (e.LeftButton != MouseButtonState.Pressed || _dragSlot < 0) return;
+            if (!_dragging && Math.Abs(e.GetPosition(null).Y - _dragFrom.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+            _dragging = true;
+            _dragTarget = BoundaryAt(e.GetPosition(_pluginList).Y);
+            ShowDropLine(_dragTarget);
+            e.Handled = true;
+        };
+        handle.PreviewMouseLeftButtonUp += (_, e) =>
+        {
+            // Letting go of the mouse before the list is rebuilt: the row that commits the move is on its way out, and
+            // a capture held by a vanished element is only dropped when WPF notices.
+            bool commit = _dragging && _dragSlot == slot;
+            int boundary = _dragTarget;
+            handle.ReleaseMouseCapture();
+            if (commit) MoveTo(slot, boundary);
+            ReleaseDrag();
+            e.Handled = true;
+        };
+        handle.LostMouseCapture += (_, _) => ReleaseDrag();
+        handle.PreviewKeyDown += (_, e) =>
+        {
+            if (Keyboard.Modifiers != ModifierKeys.Alt) return;
+            // With Alt held WPF reports the key as System and keeps the arrow in SystemKey — the arrow is the whole
+            // gesture here, so reading Key alone is reading the modifier.
+            var arrow = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (arrow == Key.Up) { MoveTo(slot, position - 1); RefocusHandle(slot); e.Handled = true; }
+            else if (arrow == Key.Down) { MoveTo(slot, position + 2); RefocusHandle(slot); e.Handled = true; }
+        };
+        return handle;
+    }
+
+    // The handle of each loaded slot, so a move made at the keyboard can be repeated: the list is rebuilt by every
+    // change, and the new handle for the same plugin is where the focus belongs.
+    private readonly Button?[] _pluginHandles = new Button?[4];
+
+    // The boundary the pointer is over: 0 is above the first row, the count is below the last one. Rows measure
+    // against the list they live in, so a scrolled page still reads the right place.
+    private int BoundaryAt(double y)
+    {
+        if (_pluginList is not { } list) return 0;
+        for (int at = 0; at < _pluginRowElements.Count; at++)
+        {
+            var row = _pluginRowElements[at];
+            if (y < row.TranslatePoint(new Point(0, 0), list).Y + row.ActualHeight / 2) return at;
+        }
+        return _pluginRowElements.Count;
+    }
+
+    private void ShowDropLine(int boundary)
+    {
+        if (_dropLine is not { } line || _pluginList is not { } list || _pluginRowElements.Count == 0) return;
+        var rows = _pluginRowElements;
+        double y = boundary >= rows.Count
+            ? rows[^1].TranslatePoint(new Point(0, 0), list).Y + rows[^1].ActualHeight
+            : rows[boundary].TranslatePoint(new Point(0, 0), list).Y;
+        line.Margin = new Thickness(0, Math.Max(0, y - 1), 0, 0);
+        line.Visibility = Visibility.Visible;
+    }
+
+    private void ReleaseDrag()
+    {
+        if (_dropLine is { } line) line.Visibility = Visibility.Collapsed;
+        _dragSlot = -1; _dragTarget = -1; _dragging = false;
+    }
+
+    // The dragged plugin leaves its place and enters the boundary the line showed. Moving down shifts by one, because
+    // the boundary counted the row before it was taken out.
+    private void MoveTo(int slot, int boundary)
+    {
+        var ids = _pluginRows.Select(row => IslandExtensions.Slots[row]?.Id).ToList();
+        if (ids.Any(id => string.IsNullOrEmpty(id))) return;
+        int from = _pluginRows.IndexOf(slot);
+        if (from < 0) return;
+        var order = ids.Select(id => id!).ToList();
+        var moved = order[from];
+        order.RemoveAt(from);
+        order.Insert(Math.Clamp(boundary > from ? boundary - 1 : boundary, 0, order.Count), moved);
+        Change(settings => settings.ReorderExtensions(order));
+        RefreshPlugins();
+    }
+
+    // The keyboard moves a row one place at a time, so the handle must still hold the focus once the list is made again:
+    // a second Alt+↓ landing on nothing would leave a plugin movable exactly once. The rebuilt handle does not exist in
+    // the layout yet, so the focus waits for the list to be measured.
+    private void RefocusHandle(int slot)
+    {
+        if (_pluginHandles[slot] is not { } handle) return;
+        Dispatcher.BeginInvoke(new Action(() => { if (handle.IsVisible) Keyboard.Focus(handle); }), DispatcherPriority.Input);
     }
 
     // Writes the plugin's own entry, creating it on the first change so an untouched plugin keeps its defaults.
