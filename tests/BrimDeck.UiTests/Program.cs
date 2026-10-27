@@ -194,11 +194,15 @@ internal static class Program
             BringForward(settings);
             handles[0].SetFocus();
             Thread.Sleep(500);
-            // Which window and which control would the keys land in: a row that does not move because nothing was
-            // focused reads the same as a move that was refused, so the run says which one it was.
+            // A key goes to whichever window holds the foreground, so a move sent while another window has it is a
+            // keystroke in whatever else is on screen. Every send asks first — and the line says what was focused,
+            // which is the difference between a key that never arrived and a handler that refused it.
             var delivery = "foreground=" + IsForeground(settings) + " focused=\"" + FocusedName() + "\"";
+            Require(IsForeground(settings), "the settings window is foreground before the first move — " + delivery);
             System.Windows.Forms.SendKeys.SendWait("%{DOWN}");
             Thread.Sleep(700);
+            delivery = "foreground=" + IsForeground(settings) + " focused=\"" + FocusedName() + "\"";
+            Require(IsForeground(settings), "the settings window is foreground before the second move — " + delivery);
             System.Windows.Forms.SendKeys.SendWait("%{DOWN}");
             Thread.Sleep(900);
             // The rows say their own place in the name they carry, so a move that reached the app is visible here even
