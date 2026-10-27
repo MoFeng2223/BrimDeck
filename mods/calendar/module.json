@@ -1,0 +1,15 @@
+{
+  "apiVersion": 1,
+  "apiMinor": 1,
+  "capabilities": ["ui.pages", "ui.activities", "ui.widgets", "ui.settings", "notifications.show"],
+  "permissions": ["notifications.show"],
+  "id": "calendar",
+  "name": "日历 / Calendar",
+  "version": "1.0.0",
+  "description": "月历与当日日程：农历节气、节日标记、本地增删改，以及岛内「距下一件事」提示。",
+  "descriptionEn": "A month calendar with lunar dates, festivals, local events and an island countdown to the next event.",
+  "author": "BrimDeck",
+  "assembly": "BrimDeck.Calendar.dll",
+  "entryType": "BrimDeck.Calendar.CalendarModule",
+  "dependencies": []
+}

@@ -23,8 +23,8 @@ public sealed record FullscreenException(string Name = "", string Path = "");
 public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckPages.Order.
-public enum DeckPage { Usage, Music, Monitor }
-public enum DefaultDeckPage { Last, Usage, Music, Monitor }
+public enum DeckPage { Usage, Music, Monitor, MiniApps }
+public enum DefaultDeckPage { Last, Usage, Music, Monitor, MiniApps }
 public enum CompactMusicText { None, Title, Lyrics }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left and the
 // equalizer and the clock at the right; Music places only the title or lyric. Saved as numbers, so new members go at the end.
@@ -214,6 +214,9 @@ public sealed class DeckSettings
     public double LineOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
     public string HideHotkey { get; set; } = "";
     public string ExpandHotkey { get; set; } = "";
+    public InputMethodSettings InputMethods { get; set; } = new();
+    public MiniAppsSettings MiniApps { get; set; } = new();
+    public ModuleSettings Modules { get; set; } = new();
     public bool MusicPage { get; set; } = true;
     public double MusicWidth { get; set; } = 440;
     public double MusicHeight { get; set; } = 200;
@@ -370,6 +373,10 @@ public sealed class DeckSettings
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
         copy.FullscreenExceptions = [.. FullscreenExceptions ?? []];
+        copy.MiniApps = MiniApps?.Copy() ?? new();
+        copy.Modules = Modules?.Copy() ?? new();
+        copy.InputMethods = new() { Enabled = InputMethods?.Enabled == true, Mode = InputMethods?.Mode ?? InputMethodMode.Control, Shortcut = InputMethods?.Shortcut ?? "Win+Space",
+            Profiles = (InputMethods?.Profiles ?? []).Select(p => new InputMethodChoice { Id = p.Id, Name = p.Name, Enabled = p.Enabled }).ToList() };
         return copy;
     }
     public void Normalize()
@@ -421,6 +428,10 @@ public sealed class DeckSettings
         OpenDelay = Math.Clamp(OpenDelay, 0, 2000);
         CloseDelay = Math.Clamp(CloseDelay, 0, 2000);
         AnimationDuration = Math.Clamp(AnimationDuration, 100, 1000);
+        InputMethods ??= new();
+        InputMethods.Normalize();
+        MiniApps ??= new(); MiniApps.Normalize();
+        Modules ??= new(); Modules.Normalize();
         if (!Enum.IsDefined(Theme)) Theme = SettingsTheme.System;
         PanelTheme = PanelThemes.NormalizeId(PanelTheme) is { Length: > 0 } panelTheme ? panelTheme : PanelThemes.Dark;
         Language = Loc.Normalize(Language);

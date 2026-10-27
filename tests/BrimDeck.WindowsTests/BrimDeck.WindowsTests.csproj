@@ -13,5 +13,13 @@
     <Compile Include="..\..\src\BrimDeck\Native\SettingsChrome.cs" Link="SettingsChrome.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\ProcessLoopbackCapture.cs" Link="ProcessLoopbackCapture.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\WindowsHost.cs" Link="WindowsHost.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\InputMethodProfiles.cs" Link="InputMethodProfiles.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\TargetInputMethod.cs" Link="TargetInputMethod.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\InputMethodShortcut.cs" Link="InputMethodShortcut.cs" />
+    <Compile Include="..\..\src\BrimDeck\InputMethodGesture.cs" Link="InputMethodGesture.cs" />
+    <Compile Include="..\..\src\BrimDeck\HotkeyGesture.cs" Link="HotkeyGesture.cs" />
+    <Compile Include="..\..\src\BrimDeck\InputMethodController.cs" Link="InputMethodController.cs" />
+    <Compile Include="..\..\src\BrimDeck\InputMethodController.Notifications.cs" Link="InputMethodController.Notifications.cs" />
   </ItemGroup>
+  <Import Project="..\..\src\BrimDeck\InputMethods.Native.targets" />
 </Project>

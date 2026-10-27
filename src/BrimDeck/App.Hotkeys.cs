@@ -74,6 +74,7 @@ public partial class App
     {
         if (UserHidden == hidden) return;
         UserHidden = hidden;
+        if (hidden) InputMethods?.Suspend();
         foreach (var deck in Decks.ToList()) deck.UserHiddenChanged();
         UserHiddenChanged?.Invoke(this, EventArgs.Empty);
     }

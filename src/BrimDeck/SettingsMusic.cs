@@ -12,16 +12,6 @@ namespace BrimDeck;
 public sealed partial class SettingsWindow
 {
     private DeckPage _previewPage;
-    private FrameworkElement MusicChoice<T>(string title, T selected, (T Value, string Label)[] options, Action<T> change, bool enabled = true) where T : notnull
-    {
-        var strip = new UniformGrid { Columns = options.Length, Width = 292, IsEnabled = enabled };
-        foreach (var option in options)
-        {
-            var choice = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = option.Label, GroupName = title, IsChecked = EqualityComparer<T>.Default.Equals(option.Value, selected) };
-            AutomationProperties.SetName(choice, title + " " + option.Label); choice.Checked += (_, _) => change(option.Value); strip.Children.Add(choice);
-        }
-        var row = Row(title, SegmentBorder(strip)); row.IsEnabled = enabled; return row;
-    }
     // The options under the style cards belong to the chosen style. Choosing another card slides the current options
     // out and the chosen style's options in, moving the way the chosen card lies from the previous one.
     private Grid? _styleOptions;
@@ -100,8 +90,8 @@ public sealed partial class SettingsWindow
     private void MusicStyle()
     {
         SectionTitle(Loc.T("收起时", "When collapsed"));
-        Group(MusicChoice(Loc.T("中间文字", "Middle text"), S.MusicText, new[] { (CompactMusicText.None, Loc.T("无", "None")), (CompactMusicText.Title, Loc.T("歌名", "Title")), (CompactMusicText.Lyrics, Loc.T("歌词", "Lyrics")) }, v => Change(s => s.MusicText = v)),
-            MusicChoice(Loc.T("律动条颜色", "Equalizer color"), S.MusicCoverColor, new[] { (true, Loc.T("封面主色", "Cover color")), (false, Loc.T("主题默认色", "Theme default")) }, v => Change(s => s.MusicCoverColor = v)),
+        Group(ChoiceRow(Loc.T("中间文字", "Middle text"), S.MusicText, new[] { (CompactMusicText.None, Loc.T("无", "None")), (CompactMusicText.Title, Loc.T("歌名", "Title")), (CompactMusicText.Lyrics, Loc.T("歌词", "Lyrics")) }, v => Change(s => s.MusicText = v)),
+            ChoiceRow(Loc.T("律动条颜色", "Equalizer color"), S.MusicCoverColor, new[] { (true, Loc.T("封面主色", "Cover color")), (false, Loc.T("主题默认色", "Theme default")) }, v => Change(s => s.MusicCoverColor = v)),
             Toggle(Loc.T("切歌时短暂显示歌名", "Briefly show the title on a track change"), S.MusicTrackNotice, v => Change(s => s.MusicTrackNotice = v)));
         SectionTitle(Loc.T("展开时", "When expanded"));
         Group(Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => Change(s => s.LyricsEnabled = v), S.MusicPage));

@@ -105,13 +105,14 @@ public partial class MainWindow : Window
         _handover = new PageHandover(LeavingContent);
         InitializeMusic();
         InitializeMonitor();
+        InitializeModuleViews();
         InitializeResize();
         Island.Background = _surface;
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
         _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false); };
-        _host.ContextChanged += context => { _context = context; if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true) _expanded = false; ApplySettings(true); };
-        SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escapeDismissal = new EscapeDismissal(this, () => SetExpanded(false)); };
+        _host.ContextChanged += context => { _context = context; if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true && _modulePageMenu?.IsOpen != true) _expanded = false; ApplySettings(true); };
+        SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escapeDismissal = new EscapeDismissal(this, DismissExpandedFromEscape); };
         Loaded += async (_, _) =>
         {
             _virtualDesktops ??= new VirtualDesktopPresence(this);
@@ -124,11 +125,11 @@ public partial class MainWindow : Window
             if (_lead is null) { _app.AssignDisplays(); await RefreshAutomaticallyAsync(); }
         };
         Closing += (_, e) => { if (!_app.Exiting && !_retiring) { e.Cancel = true; SetExpanded(false); } };
-        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _alertTimer.Stop(); };
+        Closed += (_, _) => { StopTransientTimer(); _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _alertTimer.Stop(); };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
         // The collapsed island opens on hover, so a right click there does nothing.
         MouseRightButtonUp += (_, e) => { if (!_expanded || !Settings.RightClickSettings) return; _app.OpenSettings(); e.Handled = true; };
-        PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { SetExpanded(false); e.Handled = true; } };
+        PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { DismissExpandedFromEscape(); e.Handled = true; } };
         // A scale change moves the window to a rectangle Windows suggests; the island is centred again.
         // DpiChanged is a bubbling event: every Image raises it when its own DPI changes. Once the window has moved to a
         // monitor with another scale, each image the panel rebuilds while it is laid out reports a change, and laying out
@@ -194,7 +195,7 @@ public partial class MainWindow : Window
         largest = (Math.Max(largest.Width, PageMaxWidth), Math.Max(largest.Height, DeckPages.MaxHeight));
         double widestSurface = Enum.GetValues<CompactStyle>().Max(style => CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip).Max);
         Width = Math.Min(MonitorBoundsDip.Width, Math.Max(Math.Max(Fit(largest.Width), widestSurface), Collapsed.Surface.Width) + 2 * ResizeGrips.Room);
-        double hostHeight = largest.Height;
+        double hostHeight = Math.Max(largest.Height, _transient?.Height ?? 0);
         // The window starts at the monitor top. A capsule's panel can start lower (at the top of a top taskbar's work area, or
         // just above a lowered capsule; see CollapsedGeometry.Panel), so the window reaches the panel's bottom; it always holds the collapsed surface and its shadow, and never passes the
         // bottom of the monitor. Its transparent parts let clicks through.
@@ -211,6 +212,8 @@ public partial class MainWindow : Window
         if (Opacity < 1) { BeginAnimation(OpacityProperty, null); Opacity = 1; }
         if (IsSuppressed)
         {
+            _app.InputMethods?.Suspend();
+            if (_transient is not null || _transientNotice is not null) ClearTransientPresentation();
             _hover.Stop(); _leave.Stop(); _pointerInside = false;
             // A boot cut short here never reaches its own reset: the dot's lift and squash would hold their last frame and
             // squash the whole surface once it shows again (without a boot).
@@ -260,8 +263,9 @@ public partial class MainWindow : Window
         WorkDip = new DipRect((work.Left - bounds.Left) / scale, (work.Top - bounds.Top) / scale, work.Width / scale, work.Height / scale);
         Collapsed = ShapeFor(EffectiveStyle);
     }
-    private CollapsedShape ShapeFor(CompactStyle style) => CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip,
-        Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null);
+    private CollapsedShape ShapeFor(CompactStyle style) => _transientCompactShape is { } frame && frame.Style == style ? frame
+        : CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip,
+            ModuleActivityPresented ? Settings.CompactAutoWidth(style) ? 140 * Math.Clamp((style == CompactStyle.Notch ? Settings.NotchHeight : Settings.CapsuleHeight) / 32, .75, 2) : null : Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null);
     // The width the collapsed content asks for (see CollapsedGeometry); NaN until the row is first built, which keeps the saved width.
     private double _compactWanted = double.NaN;
     // Where the pointer was when hovering opened the panel, in DIPs from the monitor's left edge; null when the panel was opened
@@ -271,6 +275,7 @@ public partial class MainWindow : Window
     // grows first when the surface would be wider than it.
     private void FitCompactToContent()
     {
+        if (_transientCompactShape is not null) return;
         var before = Collapsed;
         UpdateCollapsedGeometry();
         if (Equals(Collapsed.Surface, before.Surface)) return;
@@ -376,6 +381,7 @@ public partial class MainWindow : Window
     public void SetSnapshots(IReadOnlyList<ProviderSnapshot> snapshots)
     {
         Snapshots = snapshots; _updatedAt = DateTimeOffset.Now;
+        if (_lead is null) _app.PublishModuleUsage(snapshots);
         DetectThresholds();
         RenderCompact(); RenderUsage();
     }
@@ -383,6 +389,23 @@ public partial class MainWindow : Window
     // The compact island shows one ring per enabled application: the highest used share among its quotas.
     internal void RenderCompact()
     {
+        ModuleCompact.Visibility = Visibility.Collapsed;
+        ModuleNoticeContent.Visibility = Visibility.Collapsed;
+        if (_transientNotice is not null)
+        {
+            TransientFeedback.Text = Collapsed.ContentWidth < 116 && _transientNotice.Success ? "✓" : (_transientNotice.Success ? "✓  " : "!  ") + _transientNotice.Text;
+            CompactRings.Visibility = Visibility.Hidden; CompactAlert.Visibility = Visibility.Hidden;
+            TransientFeedback.Visibility = _transientNotice.Module is null ? Visibility.Visible : Visibility.Collapsed;
+            ModuleNoticeContent.Visibility = _transientNotice.Module is not null ? Visibility.Visible : Visibility.Collapsed;
+            ApplyCollapsedLayout(); return;
+        }
+        TransientFeedback.Visibility = Visibility.Collapsed;
+        if (_transient is not null)
+        {
+            CompactRings.Visibility = Visibility.Hidden; CompactAlert.Visibility = Visibility.Hidden;
+            ApplyCollapsedLayout(); return;
+        }
+        if (ModuleActivityPresented && _alert is null) { RenderModuleCompact(); ApplyCollapsedLayout(); return; }
         CompactRings.Children.Clear(); CompactAlert.Children.Clear();
         CompactRings.HorizontalAlignment = HorizontalAlignment.Center;
         if (_quotaCarousel is not null) { _quotaElapsed = _quotaCarousel.Elapsed; _quotaCarousel.SetRunning(false, false); }
@@ -438,38 +461,53 @@ public partial class MainWindow : Window
         if (!_expanded && !IsSuppressed) SetExpanded(false);
     }
 
-    private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
+    private CompactStyle EffectiveStyle => _transientCompactShape?.Style ?? NormalEffectiveStyle;
+    private CompactStyle NormalEffectiveStyle => !_preview && Settings.Behavior(_context) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
     // One animated track: where it starts and ends, as fractions of the configured duration.
     private readonly record struct Track(double Start, double End);
-    public void SetExpanded(bool expanded, bool instant = false)
+    public void SetExpanded(bool expanded, bool instant = false, bool transientRequest = false)
     {
+        if (_transient is not null && !transientRequest) return;
         if (expanded && IsSuppressed || _poweringOff) return;
         if (expanded && !_expanded) EndBoot();
         // Only the panel under the pointer is open; the others close at once and give up the Escape key.
         if (expanded && !_preview)
             foreach (var other in _app.Decks.Where(deck => deck != this && deck._expanded && !deck._preview).ToList()) other.SetExpanded(false);
-        if (expanded && !_expanded && !_preview) ApplyDefaultMusicPage();
+        if (expanded && !_expanded && !_preview && _transient is null)
+        {
+            if (ModuleActivityPresented) _moduleControls = true;
+            else
+            {
+                ApplyDefaultMusicPage();
+                if (IsMiniAppsPage) { _modulePage?.Refresh(); }
+            }
+        }
+        ApplyModuleControlsVisibility();
         // A hand-over cut short by closing the panel leaves nothing behind for the next opening.
         if (expanded && !_expanded) _handover.Drop();
         bool wasExpanded = _expanded;
         _expanded = expanded;
-        _escapeDismissal?.SetEnabled(expanded && !_preview);
+        RefreshModulePresentation();
+        _escapeDismissal?.SetEnabled(expanded && !_preview && _transient is null);
         if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
         if (wasExpanded && !expanded) { HotkeyPanelCollapsed(); _app.RequestTrim(); }
         Collapsed = ShapeFor(EffectiveStyle);
         var shape = Collapsed;
         var style = shape.Style;
         bool line = style == CompactStyle.Line, indicator = !expanded && line;
-        double wantedHeight = DeckPages.Size(Settings, CurrentPage).Height;
+        bool timerControls = ModuleControlsVisible;
+        bool timerNotch = timerControls && Settings.Style == CompactStyle.Notch;
+        double wantedHeight = _transient?.Height ?? (timerControls ? 76 : DeckPages.Size(Settings, CurrentPage).Height);
+        double pageWidth = _transient?.Width ?? (timerControls ? Math.Min(320, WorkDip.Width - 24) : _pageWidth);
         var panel = PanelFor(wantedHeight);
-        double panelTop = panel.Top, headerExtra = panel.HeaderExtra;
-        double pageHeight = PageHeight(wantedHeight, panel);
-        double width = expanded ? _pageWidth : shape.Surface.Width;
+        double panelTop = timerControls ? timerNotch ? 0 : Math.Clamp(shape.Surface.Y, 0, Math.Max(0, PanelBottom - 76)) : panel.Top, headerExtra = timerControls ? 0 : panel.HeaderExtra;
+        double pageHeight = timerControls ? 76 : PageHeight(wantedHeight, panel);
+        double width = expanded ? pageWidth : shape.Surface.Width;
         // A floating panel is taller than its page by headerExtra, the space above its header.
         double height = expanded ? pageHeight + headerExtra : shape.Surface.Height;
         // Every compact style opens into the same panel, hanging from the screen edge or, below a lowered capsule, rounded all round.
         double panelRadius = PanelHeader.PanelRadius;
-        var radius = expanded ? panelTop > 0 ? new CornerRadius(panelRadius) : new CornerRadius(0, 0, panelRadius, panelRadius)
+        var radius = expanded && timerControls ? timerNotch ? new CornerRadius(0, 0, 22, 22) : new CornerRadius(38) : expanded ? panelTop > 0 ? new CornerRadius(panelRadius) : new CornerRadius(0, 0, panelRadius, panelRadius)
             : new CornerRadius(shape.TopRadius, shape.TopRadius, shape.BottomRadius, shape.BottomRadius);
         double gap = expanded ? panelTop : shape.Surface.Y;
         // The island's left edge in window coordinates: the surface, or the open panel centred on it and kept on the monitor. A
@@ -477,9 +515,9 @@ public partial class MainWindow : Window
         // ends allow, and keeps that centre while open (page switches, resizing) without following the pointer.
         if (!expanded) _openCentre = null;
         double panelCentre = shape.Surface.X + shape.Surface.Width / 2;
-        if (_openCentre is { } pointer && double.IsFinite(pointer) && shape.Surface.Width > _pageWidth)
-            panelCentre = Math.Clamp(pointer, shape.Surface.X + _pageWidth / 2, shape.Surface.Right - _pageWidth / 2);
-        double panelLeft = Math.Clamp(panelCentre - _pageWidth / 2, 0, Math.Max(0, MonitorBoundsDip.Width - _pageWidth));
+        if (_openCentre is { } pointer && double.IsFinite(pointer) && shape.Surface.Width > pageWidth)
+            panelCentre = Math.Clamp(pointer, shape.Surface.X + pageWidth / 2, shape.Surface.Right - pageWidth / 2);
+        double panelLeft = Math.Clamp(panelCentre - pageWidth / 2, 0, Math.Max(0, MonitorBoundsDip.Width - pageWidth));
         double left = (expanded ? panelLeft : shape.Surface.X) - _windowOffset;
         ApplyCollapsedLayout();
         // The boot circle is still jumping: do not grow the island to the collapsed size under its lift.
@@ -490,8 +528,7 @@ public partial class MainWindow : Window
         // controls keep their size tier. Collapsing keeps the offset the content had, so it fades out without moving.
         if (expanded) ExpandedContent.Margin = new Thickness(0, headerExtra, 0, 0);
         // Lay out in device-independent pixels. Column typography adapts to its available space.
-        ContentCanvas.Width = _pageWidth;
-        ContentCanvas.Height = ExpandedContent.Height;
+        if (_transient is null) { ContentCanvas.Width = _pageWidth; ContentCanvas.Height = ExpandedContent.Height; }
         int duration = !instant && Settings.Animations && SystemParameters.ClientAreaAnimation ? Settings.AnimationDuration : 0;
         ExpandedContent.IsHitTestVisible = expanded;
         if (expanded) ExpandedContent.Visibility = Visibility.Visible;
@@ -545,7 +582,7 @@ public partial class MainWindow : Window
         // bounce (a radius would pass zero). A panel that has no room in the window for that give opens on the plain curve.
         // Booting does not use that give: Bounce on Margin and Height would bob the whole capsule or line after the round
         // dot has already finished its jumps (the notch sits at the top edge, so the same overshoot is barely seen).
-        bool bounce = !booting && expanded && !reshaping && duration > 0 && HasRoomToBounce(width, height, left, gap);
+        bool bounce = _transient is null && !booting && expanded && !reshaping && duration > 0 && HasRoomToBounce(width, height, left, gap);
         IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = morphing ? Soft.Follow : reshaping ? Soft.InOut : expanded || booting ? Soft.Out : Soft.Settle;
         IEasingFunction settle = bounce ? Soft.Bounce : corners;
         Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
@@ -553,7 +590,7 @@ public partial class MainWindow : Window
         Animate(ContentScale, ScaleTransform.ScaleYProperty, expanded ? 1 : .96, duration, content, expanded ? easeOut : easeInOut);
         Animate(Island, WidthProperty, width, duration, surface, settle);
         Animate(Island, HeightProperty, height, duration, surface, settle);
-        Animate(Island, IslandBorder.ShoulderRadiusProperty, expanded ? 0 : shape.Shoulder, duration, surface, corners);
+        Animate(Island, IslandBorder.ShoulderRadiusProperty, expanded ? timerNotch ? CollapsedLimits.NotchShoulder : 0 : shape.Shoulder, duration, surface, corners);
         // Compact notch and capsule hover over their full bounding box from the screen edge; the open panel uses its own outline.
         Animate(HoverExtension, HeightProperty, double.IsFinite(box.Height) ? Math.Max(0, box.Height) : 0, duration, surface, settle);
         if (duration == 0)
@@ -592,9 +629,11 @@ public partial class MainWindow : Window
         // Opening from the indicator, the surface takes its own color while it is still the thin line: the opening spring is
         // half way open within a few frames, and a tint still under way showed for those frames as a large block in the
         // indicator's color.
-        if (duration == 0 || expanded && line && !wasExpanded) SetImmediate(_surface, SolidColorBrush.ColorProperty, tone);
+        if (duration == 0 || expanded && (line || NormalEffectiveStyle == CompactStyle.Line) && !wasExpanded) SetImmediate(_surface, SolidColorBrush.ColorProperty, tone);
         else _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = tone, EasingFunction = easeInOut }, duration, tint), HandoffBehavior.SnapshotAndReplace);
         // The panel is rebuilt when data or settings change, never here: a rebuild on the first frame reads as a stall.
+        AnimateModuleContents(expanded, duration, content, compact);
+        if (!expanded) RenderModuleIndicator();
         if (expanded) { RefreshStatus(); UpdateMusicPosition(); }
         else RenderSyncButton();
         UpdateMusicTimer();
@@ -671,6 +710,8 @@ public partial class MainWindow : Window
         // Dragging an edge may take the pointer outside; the panel stays open until the drag ends.
         if (!inside && Resizing) return;
         _pointerInside = inside; UpdateQuotaCarousel();
+        if (_transient is not null) { _hover.Stop(); _leave.Stop(); return; }
+        if (inside && _transientNotice is not null) DismissInputMethodResult();
         if (inside) ReleaseHotkeyPin();
         if (inside)
         {
@@ -680,7 +721,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            _hover.Stop(); if (!_expanded || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) return;
+            _hover.Stop(); if (!_expanded || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true || _modulePageMenu?.IsOpen == true) return;
             int delay = Math.Max(_popupReturnArea is null ? 1 : 50, Settings.CloseDelay);
             _leftAt = Environment.TickCount64;
             _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(delay); _leave.Start();
@@ -689,7 +730,8 @@ public partial class MainWindow : Window
     internal void CheckPointerExit(Point screenPoint)
     {
         if (IsHotkeyPinned || Resizing) { _leave.Stop(); return; }
-        if (_pointerInside || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) { _leave.Stop(); return; }
+        if (HoldModuleAdjustment()) return;
+        if (_pointerInside || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true || _modulePageMenu?.IsOpen == true) { _leave.Stop(); return; }
         // Closing a calendar with either button must leave a path back to the results.
         // Keep checking until the cursor leaves that area; entering the island restores normal hover behavior.
         if (_popupReturnArea is { } area && area.Contains(screenPoint)) return;
@@ -699,7 +741,7 @@ public partial class MainWindow : Window
         if (_expanded && NearGrips(screenPoint) && Environment.TickCount64 - _leftAt < GripHold) { _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(120); _leave.Start(); return; }
         _leave.Stop(); SetExpanded(false);
     }
-    private void Settings_Click(object sender, RoutedEventArgs e) { if (_app.Updates.NoticeVersion is not null) _app.OpenUpdateSettings(); else _app.OpenSettings(); }
+    private void Settings_Click(object sender, RoutedEventArgs e) { if (_app.Updates.NoticeVersion is not null) _app.OpenUpdateSettings(); else if (IsMiniAppsPage) _app.OpenMiniAppsSettings(); else _app.OpenSettings(); }
     private async Task<IReadOnlyList<ProviderSnapshot>> LoadSnapshotsAsync(DateTime? historyStart)
     {
         var settings = Settings.Copy();

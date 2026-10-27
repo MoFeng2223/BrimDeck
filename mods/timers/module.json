@@ -1,0 +1,13 @@
+{
+  "apiVersion": 1,
+  "apiMinor": 5,
+  "capabilities": ["ui.pages", "ui.activities", "ui.widgets", "ui.settings", "ui.presentation", "storage.data"],
+  "id": "timers",
+  "name": "计时器 / Timers",
+  "version": "1.0.0",
+  "description": "完整的番茄钟、倒计时与秒表，包含独立设置、滚动数字、持续活动和分段记录。",
+  "descriptionEn": "Pomodoro, countdown and stopwatch with independent settings, rolling digits, persistent activities and laps.",
+  "author": "BrimDeck",
+  "assembly": "BrimDeck.Timers.dll",
+  "entryType": "BrimDeck.Timers.TimerModule"
+}

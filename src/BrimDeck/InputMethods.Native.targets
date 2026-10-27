@@ -1,0 +1,17 @@
+<Project>
+  <PropertyGroup>
+    <InputMethodNativeDirectory>$(MSBuildProjectDirectory)\obj\ime-native\$(Configuration)</InputMethodNativeDirectory>
+    <InputMethodNativeDll>$(InputMethodNativeDirectory)\BrimDeck.InputMethods.Native.dll</InputMethodNativeDll>
+  </PropertyGroup>
+  <Target Name="BuildInputMethodNative" BeforeTargets="CoreCompile" Condition="'$(OS)' == 'Windows_NT'"
+          Inputs="$(MSBuildThisFileDirectory)..\BrimDeck.InputMethods.Native\InputMethods.cpp;$(MSBuildThisFileDirectory)..\..\build\BuildInputMethodNative.ps1"
+          Outputs="$(InputMethodNativeDll)">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\..\build\BuildInputMethodNative.ps1&quot; -OutputDirectory &quot;$(InputMethodNativeDirectory)&quot;" />
+  </Target>
+  <Target Name="CopyInputMethodNative" AfterTargets="Build" DependsOnTargets="BuildInputMethodNative" Condition="'$(OS)' == 'Windows_NT'">
+    <Copy SourceFiles="$(InputMethodNativeDll)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="PublishInputMethodNative" AfterTargets="Publish" DependsOnTargets="BuildInputMethodNative" Condition="'$(OS)' == 'Windows_NT'">
+    <Copy SourceFiles="$(InputMethodNativeDll)" DestinationFolder="$(PublishDir)" />
+  </Target>
+</Project>

@@ -1,10 +1,10 @@
-<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:BrimDeck">
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:BrimDeck" xmlns:ui="clr-namespace:BrimDeck;assembly=BrimDeck.UI">
   <Style x:Key="DetailLinkButton" TargetType="Button">
     <Setter Property="Background" Value="Transparent"/><Setter Property="Padding" Value="0"/>
     <Setter Property="Foreground" Value="{DynamicResource PanelPrimary}"/><Setter Property="Cursor" Value="Hand"/>
     <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
     <Setter Property="FocusVisualStyle" Value="{StaticResource PanelKeyboardFocus}"/>
-    <Setter Property="local:Feedback.Fade" Value="True"/>
+    <Setter Property="ui:Feedback.Fade" Value="True"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
       <Grid>
         <Border x:Name="HoverLayer" Background="{DynamicResource PanelFill}" CornerRadius="5" Opacity="0"/>

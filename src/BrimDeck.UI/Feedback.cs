@@ -10,7 +10,7 @@ namespace BrimDeck;
 // or, for a bare icon (PanelGlyphButton), a "Glyph" whose opacity carries the feedback instead.
 // The press layer lies over the hover layer, which stays lit while pressed, so the two never dip in between. The state is
 // read after the button's own handlers have run, so IsPressed is already current.
-internal static class Feedback
+public static class Feedback
 {
     public static readonly DependencyProperty FadeProperty = DependencyProperty.RegisterAttached(
         "Fade", typeof(bool), typeof(Feedback), new PropertyMetadata(false, FadeChanged));

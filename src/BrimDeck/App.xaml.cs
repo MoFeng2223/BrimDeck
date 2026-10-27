@@ -68,6 +68,7 @@ public partial class App : Application
         var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck");
         Store = new SettingsStore(folder); Settings = Store.Load();
         UseLanguage();
+        Soft.AnimationsEnabled = Settings.Animations;
         PanelTheme.Use(Settings);
         // "跟随系统" follows the Windows app theme while BrimDeck runs.
         Microsoft.Win32.SystemEvents.UserPreferenceChanged += SystemThemeChanged;
@@ -84,16 +85,21 @@ public partial class App : Application
         Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(folder), folder);
         Secrets = new ProviderSecrets(folder);
         Usage = new UsageService(new DesktopSources(), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName));
+        InitializeModules();
         Deck = new MainWindow(this); MainWindow = Deck;
+        InitializeModuleStartup();
         Displays = Native.Displays.Current(); AssignDisplays();
         Deck.Show();
+        StartMedia(); UpdateSystemDemand();
         InitializeHotkeys();
+        InitializeInputMethods();
         StartBackgroundUpdates();
         _save.Tick += (_, _) => FlushSettings();
         _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden);
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
         _listener = ThreadPool.RegisterWaitForSingleObject(_settingsEvent, (_, _) => Dispatcher.BeginInvoke(OpenSettings), null, Timeout.Infinite, false);
         if (e.Args.Contains("--settings")) OpenSettings();
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { _ = ConfigureModulesAsync(refresh: true); });
     }
     // A resident app must not vanish without a trace. Unhandled errors are appended to crash.log in the data folder;
     // errors on the UI thread are logged and the app keeps running, and unobserved task errors are only logged.
@@ -123,6 +129,7 @@ public partial class App : Application
         Resources["UnpinSourceName"] = Loc.T("取消固定", "Unpin");
     }
     public void OpenSettings() => ShowSettings(false);
+    internal void OpenMiniAppsSettings() { ShowSettings(false); _settingsWindow?.ShowPage(SettingsWindow.MiniAppsPage); }
     // The panel ends a collapsed preview when the pointer reaches it. The settings window clears its own preview state; the
     // panel is resumed either way, in case the two disagree (ResumeAfterPreview does nothing when no preview is on).
     internal void EndPreviewFromDeck()
@@ -163,6 +170,7 @@ public partial class App : Application
         // A new collapsed style morphs every panel's surface into its form (MainWindow.MorphShape).
         bool styleChanged = settings.Style != Settings.Style;
         settings.Normalize(); Settings = settings;
+        Soft.AnimationsEnabled = settings.Animations;
         ApplyHotkeys();
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
         bool languageChanged = Loc.Normalize(settings.Language) != Loc.Language;
@@ -170,6 +178,11 @@ public partial class App : Application
         PanelTheme.Use(settings);
         AssignDisplays();
         foreach (var deck in Decks.ToList()) { if (styleChanged) deck.MorphShape(); else deck.ApplySettings(); }
+        if (InputMethods is not null) ConfigureInputMethods();
+        Modules.Publish(new BrimDeck.Modules.ModulePreferencesChanged());
+        Modules.Publish(new BrimDeck.Modules.ModuleUiChanged());
+        _ = ConfigureModulesAsync();
+        if (!settings.InputMethods.Enabled) foreach (var deck in Decks.ToList()) deck.ClearInputMethodPresentation();
         QueueSave();
         CollapsedChanged();
         if (dataChanged || syncEnabled || languageChanged) _ = Deck.RefreshAutomaticallyAsync(queueIfBusy: true);
@@ -195,6 +208,7 @@ public partial class App : Application
         if (!PanelTheme.Use(Settings, reload, systemChanged)) return;
         if (systemChanged && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
         foreach (var deck in Decks.ToList()) deck.ApplySettings();
+        Modules?.Publish(new BrimDeck.Modules.ModuleUiChanged());
         if (!reload) _settingsWindow?.PanelThemeChanged();
     }
     // A panel reports display changes (monitors added or removed, the primary changed, a work area or scale changed).
@@ -232,11 +246,11 @@ public partial class App : Application
     }
     internal void StartMedia()
     {
-        bool wanted = Settings.MediaWanted;
+        bool wanted = Settings.MediaWanted || ModuleMediaSource.SubscriberCount > 0;
         if (wanted && Media is null) { Media = new MediaSessions(Dispatcher); Media.Changed += RaiseMediaChanged; _ = Media.StartAsync(); }
         else if (!wanted && Media is not null) { Media.Changed -= RaiseMediaChanged; Media.Dispose(); Media = null; RaiseMediaChanged(); }
     }
-    private void RaiseMediaChanged() => MediaChanged?.Invoke();
+    private void RaiseMediaChanged() { PublishModuleMedia(); MediaChanged?.Invoke(); }
     // Audio levels are read while any panel shows music.
     internal void PresentMedia(MainWindow deck, bool active)
     {
@@ -249,9 +263,13 @@ public partial class App : Application
     {
         if (page) _presentingMonitor.Add(deck); else _presentingMonitor.Remove(deck);
         if (strip) _stripMonitor.Add(deck); else _stripMonitor.Remove(deck);
-        bool wanted = _presentingMonitor.Count + _stripMonitor.Count > 0;
+        UpdateSystemDemand();
+    }
+    private void UpdateSystemDemand()
+    {
+        bool wanted = _presentingMonitor.Count + _stripMonitor.Count + ModuleSystemSource.SubscriberCount > 0;
         if (Exiting || Monitor is null && !wanted) return;
-        if (Monitor is null) { Monitor = new SystemSampler(Dispatcher); Monitor.Updated += snapshot => MonitorUpdated?.Invoke(snapshot); }
+        if (Monitor is null) { Monitor = new SystemSampler(Dispatcher); Monitor.Updated += snapshot => { PublishModuleSystem(snapshot); MonitorUpdated?.Invoke(snapshot); }; }
         Monitor.SetDemand(wanted, Settings.MonitorInterval, _presentingMonitor.Count > 0);
     }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
@@ -281,7 +299,10 @@ public partial class App : Application
     public void ExitApplication()
     {
         if (Exiting) return;
+        PauseModulesForExit();
         Exiting = true; Lifetime.Cancel(); _settingsWindow?.RememberSize(); FlushSettings();
+        DisposeInputMethods();
+        foreach (var deck in Decks.ToList()) deck.ClearInputMethodPresentation();
         _settingsWindow?.Hide();
         var decks = Decks.ToList();
         int waiting = decks.Count;
@@ -299,8 +320,9 @@ public partial class App : Application
     }
     protected override void OnExit(ExitEventArgs e)
     {
-        Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
-        Media?.Dispose(); Monitor?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
+        PauseModulesForExit(); DisposeModules();
+        Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); DisposeInputMethods(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        Media?.Dispose(); Monitor?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); CompleteModuleStartupOnExit(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
 }

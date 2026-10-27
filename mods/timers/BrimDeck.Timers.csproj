@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0-windows10.0.19041.0</TargetFramework><UseWPF>true</UseWPF><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><ModuleId>timers</ModuleId></PropertyGroup>
+  <ItemGroup><Compile Remove="Core/**/*.cs" /><ProjectReference Include="Core/BrimDeck.Timers.Core.csproj" /><ProjectReference Include="../../src/BrimDeck.Modules.Abstractions/BrimDeck.Modules.Abstractions.csproj" /><ProjectReference Include="../../src/BrimDeck.UI/BrimDeck.UI.csproj" /></ItemGroup>
+  <ItemGroup><Content Include="module.json" CopyToOutputDirectory="PreserveNewest" /><InternalsVisibleTo Include="BrimDeck.ModuleTests" /></ItemGroup>
+  <Import Project="../../build/ModulePackage.targets" />
+</Project>

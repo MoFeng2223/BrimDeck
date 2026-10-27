@@ -27,7 +27,7 @@ public partial class MainWindow
     private void UpdateMonitorDemand()
     {
         bool page = _expanded && IsMonitorPage && IsVisible && !IsSuppressed;
-        bool strip = !_expanded && _compactStrip is not null && IsVisible && !IsSuppressed && _alert is null && EffectiveStyle != CompactStyle.Line;
+        bool strip = !ModuleActivityPresented && !_expanded && _compactStrip is not null && IsVisible && !IsSuppressed && _alert is null && EffectiveStyle != CompactStyle.Line;
         if (!page)
         {
             // A list that is not on screen cannot be under the pointer, and a closed page keeps no card open.

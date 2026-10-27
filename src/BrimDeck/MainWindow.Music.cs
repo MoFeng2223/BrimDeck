@@ -71,6 +71,7 @@ public partial class MainWindow
     internal DeckPage CurrentPage => DeckPages.Resolve(Settings, _page);
     internal bool IsMusicPage => CurrentPage == DeckPage.Music;
     internal bool IsMonitorPage => CurrentPage == DeckPage.Monitor;
+    internal bool IsMiniAppsPage => CurrentPage == DeckPage.MiniApps;
     internal bool IsUsagePage => CurrentPage == DeckPage.Usage;
     internal CompactMusicLayout? CurrentCompactLayout { get; private set; }
 
@@ -109,7 +110,9 @@ public partial class MainWindow
     internal void SelectPage(DeckPage page, bool remember = true)
     {
         if (!DeckPages.Shown(Settings, page)) return;
+        _moduleControls = false;
         bool changed = CurrentPage != page;
+        if (changed && page != DeckPage.MiniApps) ReleaseModulePage();
         if (changed) CloseSourceMenu();
         if (changed && _expanded && !_preview)
         {
@@ -126,7 +129,7 @@ public partial class MainWindow
         bool back = DeckPages.Order.ToList().IndexOf(page) < DeckPages.Order.ToList().IndexOf(before);
         _handover.Send(picture, place, PageContent(page), back ? Handover.Back : Handover.Forward);
     }
-    private FrameworkElement PageContent(DeckPage page) => page switch { DeckPage.Music => MusicContent, DeckPage.Monitor => MonitorContent, _ => UsageContent };
+    private FrameworkElement PageContent(DeckPage page) => page switch { DeckPage.Music => MusicContent, DeckPage.Monitor => MonitorContent, DeckPage.MiniApps => MiniAppsContent, _ => UsageContent };
     private void ShowPage(DeckPage page, bool animatePage)
     {
         _detailPopup?.Close(); _details = false; _page = page; _musicRenderKey = ""; _handover.Drop();
@@ -136,7 +139,7 @@ public partial class MainWindow
     // does; otherwise it is set in place. A switch whose buttons are not laid out yet places it once they are.
     private void PlacePageCapsule()
     {
-        var button = CurrentPage switch { DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, _ => AIUsageButton };
+        var button = CurrentPage switch { DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, DeckPage.MiniApps => MiniAppsPageButton, _ => AIUsageButton };
         if (button.Visibility != Visibility.Visible || !button.IsMeasureValid || button.ActualWidth <= 0 || PresentationSource.FromVisual(button) is null)
         {
             if (!_capsulePending) { _capsulePending = true; Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => { _capsulePending = false; if (button.ActualWidth > 0) PlacePageCapsule(); }); }
@@ -170,7 +173,7 @@ public partial class MainWindow
         ToolbarRow.Height = new GridLength(header.Row);
         Toolbar.Height = header.Height;
         PageSwitch.Margin = new Thickness(header.Side, 0, 0, 0);
-        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton })
+        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, MiniAppsPageButton })
         {
             button.Height = header.ButtonHeight;
             // A local corner for these two buttons only; PanelIconButton keeps its 5 DIP corner elsewhere.
@@ -185,10 +188,10 @@ public partial class MainWindow
     private void RenderPageSwitch()
     {
         SetValue(SuppressMusicToolTipsProperty, IsMusicPage);
-        foreach (var control in new FrameworkElement[] { AIUsageButton, MonitorPageButton, MusicPageButton, MediaSourceButton, ClockLabel })
+        foreach (var control in new FrameworkElement[] { AIUsageButton, MonitorPageButton, MusicPageButton, MiniAppsPageButton, MediaSourceButton, ClockLabel })
             ToolTipService.SetIsEnabled(control, !IsMusicPage);
         PageSwitch.Visibility = _details && IsUsagePage ? Visibility.Collapsed : Visibility.Visible;
-        foreach (var (button, page) in new[] { (AIUsageButton, DeckPage.Usage), (MusicPageButton, DeckPage.Music), (MonitorPageButton, DeckPage.Monitor) })
+        foreach (var (button, page) in new[] { (AIUsageButton, DeckPage.Usage), (MusicPageButton, DeckPage.Music), (MonitorPageButton, DeckPage.Monitor), (MiniAppsPageButton, DeckPage.MiniApps) })
         {
             bool current = CurrentPage == page;
             button.Visibility = DeckPages.Shown(Settings, page) ? Visibility.Visible : Visibility.Collapsed;
@@ -758,7 +761,7 @@ public partial class MainWindow
     }
     private void UpdateMusicPosition()
     {
-        if (_mediaTrack is not { } track || track.State == MediaState.Stopped) { MusicIndicator.Visibility = Visibility.Collapsed; return; }
+        if (_mediaTrack is not { } track || track.State == MediaState.Stopped) { if (!RenderModuleIndicator()) MusicIndicator.Visibility = Visibility.Collapsed; return; }
         var position = _seekPreview.Position(track, DateTimeOffset.UtcNow);
         // The expanded page's controls stay in the tree while collapsed; they are brought up to date when the panel opens.
         bool page = _expanded && IsMusicPage;
@@ -776,6 +779,7 @@ public partial class MainWindow
                 else RenderCompact();
             }
         }
+        if (RenderModuleIndicator()) return;
         MusicIndicator.Visibility = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.MusicIndicatorProgress && track.State != MediaState.Stopped && track.HasTimeline ? Visibility.Visible : Visibility.Collapsed;
         // The progress runs along the indicator's own length, whatever length is set.
         double length = double.IsFinite(Collapsed.Surface.Width) ? Math.Max(0, Collapsed.Surface.Width) : 0;

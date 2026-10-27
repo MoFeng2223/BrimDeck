@@ -63,6 +63,12 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 - 刘海、胶囊、提示与展开面板支持面板主题：跟随系统、深色、浅色，内置 One Dark Pro、GitHub、Dracula、Night Owl 等开源主题，也可以按[主题制作指南](docs/zh-CN/themes.md)制作自定义主题；任何主题下文字与数据都会保持清晰可读。
 
+### 输入法切换
+
+在设置的“输入法”中启用模块，可选择“仅通知”或“接管切换”。仅通知沿用系统快捷键，在实际切换后显示短暂结果；接管模式可录制快捷键、选择参与项并排序，默认按住 **Win**、点按 **空格**预选，松开后启用。反馈结束后恢复原内容，排除的输入法仍保留在 Windows 中。
+
+模块默认关闭。首版支持常规 64 位应用，无法接管的窗口继续使用 Windows 原生切换；详见[输入法使用说明](docs/zh-CN/input-methods.md)。
+
 ### AI 用量
 
 <img src="docs/zh-CN/images/usage.png" width="100%" alt="AI 用量页：Claude、Codex、Cursor、Antigravity 四列配额">
@@ -133,6 +139,8 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 不是。费用按接口金额或公开的模型单价计算，适合用来了解用量高低；订阅套餐的实际扣费以各服务商的账单为准。
 
 ## 参与开发
+
+构建输入法原生适配组件还需要 Visual Studio 2022 的“使用 C++ 的桌面开发”工作负载和 Windows SDK；常规 .NET 构建会自动生成并复制该组件。
 
 欢迎通过 [Issues](https://github.com/MoFeng2223/BrimDeck/issues) 反馈问题、提出功能建议，或申请适配更多工具与播放器，也欢迎提交 Pull Request 参与开发。
 

@@ -1,0 +1,29 @@
+<Project>
+  <!-- Imported by an external module project; no host source/project references. -->
+  <PropertyGroup>
+    <BrimDeckSdk Condition="'$(BrimDeckSdk)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))</BrimDeckSdk>
+    <TargetFramework Condition="'$(TargetFramework)' == ''">net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="BrimDeck.Modules.Abstractions">
+      <HintPath>$(BrimDeckSdk)/ref/BrimDeck.Modules.Abstractions.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BrimDeck.UI">
+      <HintPath>$(BrimDeckSdk)/ref/BrimDeck.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Required to resolve UI's transitive metadata; Core is not an author API. -->
+    <Reference Include="BrimDeck.Core">
+      <HintPath>$(BrimDeckSdk)/ref/BrimDeck.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+  <Target Name="ValidateBrimDeckSdk" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(BrimDeckSdk)/sdk.json') or !Exists('$(BrimDeckSdk)/ref/BrimDeck.Modules.Abstractions.dll') or !Exists('$(BrimDeckSdk)/ref/BrimDeck.UI.dll') or !Exists('$(BrimDeckSdk)/ref/BrimDeck.Core.dll')"
+      Text="BrimDeckSdk must point to an extracted BrimDeck module SDK containing sdk.json and ref/." />
+  </Target>
+</Project>

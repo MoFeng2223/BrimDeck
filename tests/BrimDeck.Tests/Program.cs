@@ -23,6 +23,9 @@ try
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);
     HotkeyTests.Run(Check);
+    InputMethodTests.Run(Check);
+    TimerTests.Run(root, Check);
+    RollingNumbersTests.Run(Check);
     CollapsedGeometryTests.Run(root, Check);
     PanelHeaderTests.Run(Check);
     SystemMonitorTests.Run(Check);
