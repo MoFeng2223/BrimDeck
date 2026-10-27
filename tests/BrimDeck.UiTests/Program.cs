@@ -196,38 +196,23 @@ internal static class Program
             Require(Rising(after), "a reload leaves the tabs in the order the page switch walks them (" + string.Join(", ", after) + ")");
             Console.WriteLine("PASS a reload keeps the plugin tabs in switch order");
 
-            // The order is the reader's to arrange, and the panel has to follow it. Two moves down from the first row,
-            // made at the keyboard: a second Alt+↓ only lands if the rebuilt row kept the focus, and the strip only
-            // reads A moved past two others if the tabs are laid out from the same list the settings page drags in.
+            // The order is the reader's to arrange, and the panel has to follow it. The arrangement is made the only way
+            // a reader makes it — press the six dots, walk the pointer down past two rows, let go — and it counts as
+            // tested only once the strip itself moves, since the tabs are what the reader actually sees.
             var handles = OrderHandles(settings);
             Require(handles.Length == 4, "every loaded plugin offers a handle to move it by (" + handles.Length + ")");
             BringForward(settings);
-            handles[0].SetFocus();
-            Thread.Sleep(500);
-            // A key goes to whichever window holds the foreground, so a move sent while another window has it is a
-            // keystroke in whatever else is on screen. Every send asks first — and the line says what was focused,
-            // which is the difference between a key that never arrived and a handler that refused it.
-            var delivery = "foreground=" + IsForeground(settings) + " focused=\"" + FocusedName() + "\"";
-            Require(IsForeground(settings), "the settings window is foreground before the first move — " + delivery);
-            System.Windows.Forms.SendKeys.SendWait("%{DOWN}");
-            // The rows name their own place, so they are what to wait on between two keys: SendKeys hands the key to
-            // Windows and does not wait for another process to finish with it, and a second Alt+↓ aimed at a list that
-            // is still rebuilding would fail an app that is working.
-            Require(WaitTitles(settings, ["FixtureB", "FixtureA", "FixtureC", "FixtureD"]),
-                "the first move reaches the rows before the second key — rows: " + string.Join(", ", RowTitles(settings)));
-            delivery = "foreground=" + IsForeground(settings) + " focused=\"" + FocusedName() + "\"";
-            Require(IsForeground(settings), "the settings window is foreground before the second move — " + delivery);
-            System.Windows.Forms.SendKeys.SendWait("%{DOWN}");
+            var pointer = DragRow(handles, 0, 2);
             Require(WaitTitles(settings, ["FixtureB", "FixtureC", "FixtureA", "FixtureD"]),
-                "the second move reaches the rows — rows: " + string.Join(", ", RowTitles(settings)));
-            // The rows say their own place in the name they carry, so a move that reached the app is visible here even
-            // before the panel is read: rows unmoved means the keys did not arrive, rows moved and tabs still in the old
-            // order means the panel did not follow.
+                "the pointer drag lands where it was taken — " + pointer + ", rows: " + string.Join(", ", RowTitles(settings)));
+            // The rows say their own place in the name they carry, so a drop that reached the app is visible here even
+            // before the panel is read: rows unmoved means the pointer never moved the row, rows moved and tabs still in
+            // the old order means the panel did not follow.
             var rows = string.Join(" | ", OrderHandles(settings).Select(Place));
             Reopen();
             var arranged = TabsByLeft(window);
             Require(arranged.SequenceEqual(new[] { "FixtureB", "FixtureC", "FixtureA", "FixtureD" }),
-                "two Alt+↓ moves the first plugin past two others, and the tabs move with it — " + delivery
+                "a drag past two rows moves the first plugin, and the tabs move with it — " + pointer
                 + ", rows: " + rows + ", tabs: " + string.Join(", ", arranged));
             Console.WriteLine("PASS the page switch follows the order the reader arranged: " + string.Join(", ", arranged));
 
@@ -353,17 +338,15 @@ internal static class Program
     }
 
     // What the handle says its row is: "FixtureA position, 1 of 4" in English, "A 的位置，第 1 个，共 4 个" in Chinese.
-    // The name is the row's own report of its place, so it answers "did the key arrive?" without reading the app's file.
+    // The name is the row's own report of its place, so it answers "did the drop reach the app?" without reading a file.
     private static string Place(AutomationElement handle)
     {
         try { return handle.Current.Name; }
         catch (ElementNotAvailableException) { return "(gone)"; }
     }
 
-    private static bool IsForeground(AutomationElement window) => GetForegroundWindow().ToInt64() == window.Current.NativeWindowHandle;
-
     // The row titles read top to bottom, taken from what each handle says about itself — the app's own report of the
-    // arrangement, which is the thing worth waiting on between two keys.
+    // arrangement, which is the thing worth waiting on before the panel is read.
     private static string[] RowTitles(AutomationElement settings)
     {
         var titles = new List<string>();
@@ -387,16 +370,31 @@ internal static class Program
         return false;
     }
 
-    // The control that would read a key, as Windows sees it. A keyboard action that changes nothing is either a key
-    // that never arrived or a handler that refused it, and this is the line between the two.
-    private static string FocusedName()
+    // A row moved the only way a reader moves it: press the six dots, walk the pointer down to the row it should pass,
+    // let go. No UIA pattern can do this — the drag lives on the mouse moves that follow a captured press — so the
+    // button events come from user32 and land on whatever sits under the cursor, which is why the window is brought
+    // forward first. The row centres are read before the press, because the rows shift under the pointer while it walks.
+    private static string DragRow(AutomationElement[] handles, int from, int to)
     {
-        try { return AutomationElement.FocusedElement?.Current.Name ?? "(none)"; }
-        catch (ElementNotAvailableException) { return "(gone)"; }
+        int X(AutomationElement element) => (int)((element.Current.BoundingRectangle.Left + element.Current.BoundingRectangle.Right) / 2);
+        int Y(AutomationElement element) => (int)((element.Current.BoundingRectangle.Top + element.Current.BoundingRectangle.Bottom) / 2);
+        int x = X(handles[from]), start = Y(handles[from]), end = Y(handles[to]);
+        SetCursorPos(x, start);
+        Thread.Sleep(150);
+        mouse_event(LeftDown, 0, 0, 0, UIntPtr.Zero);
+        for (int step = 1; step <= 8; step++)
+        {
+            SetCursorPos(x, start + (end - start) * step / 8);
+            Thread.Sleep(50);
+        }
+        Thread.Sleep(150);
+        mouse_event(LeftUp, 0, 0, 0, UIntPtr.Zero);
+        Thread.Sleep(200);
+        return "pointer " + x + "," + start + " -> " + x + "," + end;
     }
 
-    // Keys go to the foreground window, so the window that must read them is made foreground first. The panel's own
-    // window is opened and closed by hover all through a run and may well be the one holding it.
+    // The window whose rows are dragged has to be the one under those coordinates. The panel's own window is opened and
+    // closed by hover all through a run and may well be the one holding the foreground.
     private static void BringForward(AutomationElement window)
     {
         var handle = new IntPtr(window.Current.NativeWindowHandle);
@@ -734,7 +732,8 @@ internal static class Program
 
     [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
-    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    private const uint LeftDown = 0x0002, LeftUp = 0x0004;
+    [DllImport("user32.dll")] private static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
     [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
     [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(int value);
 
