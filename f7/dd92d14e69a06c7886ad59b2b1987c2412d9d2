@@ -1,0 +1,216 @@
+releases/1.2.2-alpha.3.md
+  h_dc4d9c798f1bc1 1-43
+docs/zh-CN/privacy.md
+  h_dc4d9c798f1bc1 18
+src/BrimDeck.Core/PanelThemeFile.cs
+  h_dc4d9c798f1bc1 41,79-107
+tests/BrimDeck.Tests/CollapsedGeometryTests.cs
+  h_dc4d9c798f1bc1 29,155-156,158
+tests/BrimDeck.Tests/KeyboardResizeTests.cs
+  h_dc4d9c798f1bc1 1-89
+src/BrimDeck.Core/CompactSpacing.cs
+  h_dc4d9c798f1bc1 1-183
+docs/en-US/privacy.md
+  h_dc4d9c798f1bc1 18
+src/BrimDeck.Core/Templates/theme-template.json
+  h_dc4d9c798f1bc1 18,24,26,45,62-63,70,103-108
+src/BrimDeck.Core/Themes/github-light.json
+  h_dc4d9c798f1bc1 16,37
+src/BrimDeck.Core/HotkeyText.cs
+  h_dc4d9c798f1bc1 3-4,7,82-135
+src/BrimDeck.Core/KeyboardResize.cs
+  h_dc4d9c798f1bc1 1-25
+src/BrimDeck.Core/Themes/dracula.json
+  h_dc4d9c798f1bc1 16
+src/BrimDeck/MusicVisuals.cs
+  h_dc4d9c798f1bc1 249-251,303,629,633-635,637-638,641-648,651,661-662,667-668,670-674,677-680,683,685-688,693-694,696
+src/BrimDeck/PanelTheme.cs
+  h_dc4d9c798f1bc1 21-23,67-68,81-84,96-100,102,109,114-115,162,189-197,199-205,212,218
+  h_dc4d9c798f1bc1 101
+src/BrimDeck/Native/TrayIcon.cs
+  h_dc4d9c798f1bc1 76-86,89
+src/BrimDeck/IslandBorder.cs
+  h_dc4d9c798f1bc1 26-28,70,86
+src/BrimDeck/SettingsResources.xaml
+  h_dc4d9c798f1bc1 11-12,81
+src/BrimDeck/MainWindow.xaml.cs
+  h_dc4d9c798f1bc1 127,129-140,194-203,274,278-279,287-308,343,346-347,367,371-373,565,813
+  h_dc4d9c798f1bc1 309
+docs/en-US/themes.md
+  h_dc4d9c798f1bc1 8,60-61,68,77,87,104,138,145-146
+src/BrimDeck/MainWindow.Music.cs
+  h_dc4d9c798f1bc1 136,166-178,242,908-909,934,938,945-952,954-975,977-979,981-987,989-991,993-1016,1030
+src/BrimDeck.Core/Themes/dark.json
+  h_dc4d9c798f1bc1 16,18
+src/BrimDeck/MainWindow.CompactLayout.cs
+  h_dc4d9c798f1bc1 92
+src/BrimDeck/MonitorPanel.cs
+  h_dc4d9c798f1bc1 156,194-201
+tests/BrimDeck.Tests/TemperatureTests.cs
+  h_dc4d9c798f1bc1 139-142
+src/BrimDeck.Core/CollapsedGeometry.cs
+  h_dc4d9c798f1bc1 11-13,15,69-72,76,84-85,105-106,114-116,118-141
+  h_dc4d9c798f1bc1 117
+docs/zh-CN/ai-tools.md
+  h_dc4d9c798f1bc1 26,89,113-116
+src/BrimDeck.Core/PanelThemes.Build.cs
+  h_dc4d9c798f1bc1 54,64-65,82-83,85,89,107-145,187-198,211-227
+src/BrimDeck/ClockFace.cs
+  h_dc4d9c798f1bc1 15,29,37-39,51-52,55-57,149-150,156,176-177,191
+src/BrimDeck.Core/Music.cs
+  h_dc4d9c798f1bc1 66-69,74,110-126
+src/BrimDeck/Native/GlobalHotkeys.cs
+  h_dc4d9c798f1bc1 9-10,13-14,16-17,26,28-29,33,36-41,49,53,58-59
+src/BrimDeck/SettingsHotkeys.cs
+  h_dc4d9c798f1bc1 11-15,23-24,33,36,38-68,81,96,107-108,113-115,121,129,143-144,146-150,152-156,158-161,170-175,177-178,181-183,192,199,202,213-223,228,230-239,245,256-258,261-263,267,291-292,295-296,316,327-329
+  h_dc4d9c798f1bc1 145,151,157,176,179-180
+src/BrimDeck/ThirdPartyNotices.txt
+  h_dc4d9c798f1bc1 211-214,221,226,232,238,242,253-259,263-264,268,275,284,289-295,300-303
+  h_dc4d9c798f1bc1 215-220,222-225,227-231,233-237,239-241,243-252,260-262,265-267,269-274,276-283,285-288,296-299,304-308
+src/BrimDeck/UsagePanel.cs
+  h_dc4d9c798f1bc1 463
+src/BrimDeck/SettingsPalette.cs
+  h_dc4d9c798f1bc1 15-16,33-36
+src/BrimDeck/MainWindow.Resize.cs
+  h_dc4d9c798f1bc1 24-25,31-33,56-57,59-60,161,188-189,195-201,207-209,213-214,217-219,266-273,279,286,308-337,353-354,365-366,368-370
+  h_dc4d9c798f1bc1 190-194
+src/BrimDeck.Core/PanelThemes.Files.cs
+  h_dc4d9c798f1bc1 110-112
+src/BrimDeck.Core/Themes/one-dark-pro.json
+  h_dc4d9c798f1bc1 16
+src/BrimDeck.Core/Settings.cs
+  h_dc4d9c798f1bc1 34,36,51-52,76-80,114-121,126,141-172,182,195,247,281-282,358-361,373-374,482,524-525,567
+src/BrimDeck/MonitorView.cs
+  h_dc4d9c798f1bc1 20-22,36-37,44-45,68-69,74,99,234-236,239-241,244-254,261-262
+tests/BrimDeck.Tests/PixelBlocksTests.cs
+  h_dc4d9c798f1bc1 23-24,27,65
+src/BrimDeck.Core/ProviderCatalog.cs
+  h_dc4d9c798f1bc1 13,45,53
+src/BrimDeck.Core/Themes/github-dark.json
+  h_dc4d9c798f1bc1 16,37
+tests/BrimDeck.Tests/GpuAdapterTests.cs
+  h_dc4d9c798f1bc1 1-156
+tests/BrimDeck.Tests/GpuIdentityTests.cs
+  h_dc4d9c798f1bc1 1-164
+src/BrimDeck.Core/DeckPages.cs
+  h_dc4d9c798f1bc1 7,9-10,17
+src/BrimDeck/Native/SystemSampler.cs
+  h_dc4d9c798f1bc1 46-54,56,66-68,128,143-150,180,184-187,190-211,214-243
+  h_dc4d9c798f1bc1 244
+src/BrimDeck.Core/Themes/island-holiday.json
+  h_dc4d9c798f1bc1 22,43,109
+README.zh-CN.md
+  h_dc4d9c798f1bc1 94
+docs/zh-CN/themes.md
+  h_dc4d9c798f1bc1 8,60-61,68,77,87,104,138,145-146
+src/BrimDeck.Core/CompactMonitor.cs
+  h_dc4d9c798f1bc1 37-38,45,146,253-254
+tests/BrimDeck.Tests/KimiUsageTests.cs
+  h_dc4d9c798f1bc1 196-197
+tests/BrimDeck.Tests/OffPeakTests.cs
+  h_dc4d9c798f1bc1 1-45
+src/BrimDeck.Core/Themes/night-owl.json
+  h_dc4d9c798f1bc1 16
+src/BrimDeck.Core/Themes/island-holiday-2.json
+  h_dc4d9c798f1bc1 1-166
+src/BrimDeck.Core/PanelThemes.cs
+  h_dc4d9c798f1bc1 23,36-50,57-58,60,79,100,129
+src/BrimDeck.Core/Themes/pixel-blocks.json
+  h_dc4d9c798f1bc1 21
+src/BrimDeck/SettingsMonitor.cs
+  h_dc4d9c798f1bc1 61-62,78-79,83-84,88-122,367-368,424-425,437-438,454,469-475
+  h_dc4d9c798f1bc1 476
+src/BrimDeck.Core/ProviderScripts.cs
+  h_dc4d9c798f1bc1 9,134-171
+tests/BrimDeck.Tests/CompactSpacingTests.cs
+  h_dc4d9c798f1bc1 1-155
+src/BrimDeck.Core/PanelThemes.Template.cs
+  h_dc4d9c798f1bc1 63-65,94-103,105
+  h_dc4d9c798f1bc1 104
+tests/BrimDeck.Tests/ConfiguredProviderTests.cs
+  h_dc4d9c798f1bc1 145,147,217-250
+src/BrimDeck.Core/SystemMonitor.cs
+  h_dc4d9c798f1bc1 128-131,143-151,231-232,236
+tests/BrimDeck.Tests/PanelThemeTests.cs
+  h_dc4d9c798f1bc1 45,239-287,302-311,321-330,384-408
+src/BrimDeck.Core/PanelPalette.cs
+  h_dc4d9c798f1bc1 24-35,52-55,70-73,77-78
+tests/BrimDeck.Tests/ThemeCoverageTests.cs
+  h_dc4d9c798f1bc1 1-183
+src/BrimDeck.Core/PanelThemes.HighContrast.cs
+  h_dc4d9c798f1bc1 1-38
+docs/en-US/ai-tools.md
+  h_dc4d9c798f1bc1 26,89,113-116
+src/BrimDeck/App.xaml.cs
+  h_dc4d9c798f1bc1 210-212,222,226-227,304-311
+src/BrimDeck/IslandDecor.cs
+  h_dc4d9c798f1bc1 1-194
+src/BrimDeck/MonitorGauges.cs
+  h_dc4d9c798f1bc1 17,22-24,39-54
+tests/BrimDeck.WindowsTests/TemperatureChecks.cs
+  h_dc4d9c798f1bc1 93
+tests/BrimDeck.Tests/DashboardUsageTests.cs
+  h_dc4d9c798f1bc1 94-97,100-101,103-108,114,145-147,149,154
+src/BrimDeck/Native/Why.cs
+  h_dc4d9c798f1bc1 1-17
+src/BrimDeck/SettingsClock.cs
+  h_dc4d9c798f1bc1 88,130,134-137,140
+README.md
+  h_dc4d9c798f1bc1 94
+src/BrimDeck.Core/PanelThemes.Derive.cs
+  h_dc4d9c798f1bc1 15
+tests/BrimDeck.Tests/ColorMathTests.cs
+  h_dc4d9c798f1bc1 32-40
+tests/BrimDeck.Tests/SystemMonitorTests.cs
+  h_dc4d9c798f1bc1 239-240,288-297
+src/BrimDeck.Core/CompactSources.cs
+  h_dc4d9c798f1bc1 11-12
+tests/BrimDeck.WindowsTests/BrimDeck.WindowsTests.csproj
+  h_dc4d9c798f1bc1 19-20,24
+src/BrimDeck/Native/GpuProvider.cs
+  h_dc4d9c798f1bc1 1-157
+tests/BrimDeck.Tests/PanelThemeEditorTests.cs
+  h_dc4d9c798f1bc1 96
+tests/BrimDeck.WindowsTests/Program.cs
+  h_dc4d9c798f1bc1 5,22,63-83,85-86
+  h_dc4d9c798f1bc1 84
+src/BrimDeck/HotkeyGesture.cs
+  h_dc4d9c798f1bc1 28-30,38,74
+src/BrimDeck.Core/Loc.cs
+  h_dc4d9c798f1bc1 35
+src/BrimDeck/MonitorStrip.cs
+  h_dc4d9c798f1bc1 11,13-15,38-40,62,66,96-98,100-102,105-106,116,156-179,195,211-212,240-242,246-248,270,316-317,326-333,386
+src/BrimDeck/OffPeakBar.cs
+  h_dc4d9c798f1bc1 1-132
+tests/BrimDeck.Tests/Program.cs
+  h_dc4d9c798f1bc1 22,26,31,48-49,56
+src/BrimDeck/App.Hotkeys.cs
+  h_dc4d9c798f1bc1 6-7,12-13,40-41,43-44,46,51,56,90-95,97,100-101,113,117-137,141
+  h_dc4d9c798f1bc1 96
+src/BrimDeck/SettingsProviders.cs
+  h_dc4d9c798f1bc1 67-70,90-92,97-100,113-114,117,120,140-141,144-145,266,392-400,405-490
+  h_dc4d9c798f1bc1 93-96,401-404,491-492
+src/BrimDeck.Core/GpuAdapters.cs
+  h_dc4d9c798f1bc1 1-313
+src/BrimDeck/SettingsWindow.cs
+  h_dc4d9c798f1bc1 493-499,509-520,527-528,530-533,537,543,557-577,631-632,808
+src/BrimDeck.Core/AccentColors.cs
+  h_dc4d9c798f1bc1 1-15
+src/BrimDeck.Core/Themes/light.json
+  h_dc4d9c798f1bc1 16,37,54
+src/BrimDeck/NeteaseControlResources.xaml
+  h_dc4d9c798f1bc1 28
+src/BrimDeck/App.xaml
+  h_dc4d9c798f1bc1 2,12,23-24,154-166,214-215,240
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f7dd92d14e69a06c7886ad59b2b1987c2412d9d2",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
