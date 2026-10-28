@@ -1,0 +1,18 @@
+src/BrimDeck/UsagePanel.cs
+  h_dc4d9c798f1bc1 497-502,507,511-512,517-518,528-531
+src/BrimDeck.Core/Settings.cs
+  h_dc4d9c798f1bc1 122-132
+tests/BrimDeck.Tests/OffPeakTests.cs
+  h_dc4d9c798f1bc1 26-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "37d11a36f8906c85000c7fcaa7809953110ee79b",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
