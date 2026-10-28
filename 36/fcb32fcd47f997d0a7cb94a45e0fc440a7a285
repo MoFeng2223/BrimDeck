@@ -1,0 +1,214 @@
+README.md
+  s_083bb2e6b55a74::t_96207af395e256 94
+README.zh-CN.md
+  s_083bb2e6b55a74::t_44a0169ff2351c 94
+docs/en-US/ai-tools.md
+  s_083bb2e6b55a74::t_388d4c18728a6a 26,89,113-116
+docs/en-US/privacy.md
+  s_083bb2e6b55a74::t_38448889ba0293 18
+docs/en-US/themes.md
+  s_083bb2e6b55a74::t_4662edcc75c2f9 8,60-61,68,77,87,104,138,145-146
+docs/zh-CN/ai-tools.md
+  s_083bb2e6b55a74::t_968c1b2f8084df 26,89,113-116
+docs/zh-CN/privacy.md
+  s_083bb2e6b55a74::t_bdeb2a6f903a6f 18
+docs/zh-CN/themes.md
+  s_083bb2e6b55a74::t_d75f371e1ce571 8,60-61,68,77,87,104,138,145-146
+releases/1.2.2-alpha.3.md
+  s_083bb2e6b55a74::t_c92dbb47356e66 1-43
+src/BrimDeck.Core/AccentColors.cs
+  s_083bb2e6b55a74::t_2057026661559c 1-15
+src/BrimDeck.Core/CollapsedGeometry.cs
+  s_083bb2e6b55a74::t_b91013a137e33c 11-13,15,69-72,76,84-85,105-106,114-141
+src/BrimDeck.Core/CompactMonitor.cs
+  s_083bb2e6b55a74::t_edd18c7e0d7175 37-38,45,146,253-254
+src/BrimDeck.Core/CompactSources.cs
+  s_083bb2e6b55a74::t_819ebd7cc0d096 11-12
+src/BrimDeck.Core/CompactSpacing.cs
+  s_083bb2e6b55a74::t_a9f28709beeb64 1-183
+src/BrimDeck.Core/DeckPages.cs
+  s_083bb2e6b55a74::t_09912397fc2db8 7,9-10,17
+src/BrimDeck.Core/GpuAdapters.cs
+  s_083bb2e6b55a74::t_62d250e543987a 1-313
+src/BrimDeck.Core/HotkeyText.cs
+  s_083bb2e6b55a74::t_d877e2a1c01d19 3-4,7,82-135
+src/BrimDeck.Core/KeyboardResize.cs
+  s_083bb2e6b55a74::t_7197156f39e882 1-25
+src/BrimDeck.Core/Loc.cs
+  s_083bb2e6b55a74::t_442424867d8907 35
+src/BrimDeck.Core/Music.cs
+  s_083bb2e6b55a74::t_1985434ec36bd0 66-69,74,110-126
+src/BrimDeck.Core/PanelPalette.cs
+  s_083bb2e6b55a74::t_eb6d9ba2e2f09e 24-35,52-55,70-73,77-78
+src/BrimDeck.Core/PanelThemeFile.cs
+  s_083bb2e6b55a74::t_84252d93bb2ecb 41,79-107
+src/BrimDeck.Core/PanelThemes.Build.cs
+  s_083bb2e6b55a74::t_4f823c8d3f5b71 54,64-65,82-83,85,89,107-145,187-198,211-227
+src/BrimDeck.Core/PanelThemes.Derive.cs
+  s_083bb2e6b55a74::t_eb3f3e7c9319e3 15
+src/BrimDeck.Core/PanelThemes.Files.cs
+  s_083bb2e6b55a74::t_383f3b701b0d20 110-112
+src/BrimDeck.Core/PanelThemes.HighContrast.cs
+  s_083bb2e6b55a74::t_53e043c1c98ce2 1-38
+src/BrimDeck.Core/PanelThemes.Template.cs
+  s_083bb2e6b55a74::t_f718b3a3e6004d 63-65,94-105
+src/BrimDeck.Core/PanelThemes.cs
+  s_083bb2e6b55a74::t_f27a248eefc93c 23,36-50,57-58,60,79,100,129
+src/BrimDeck.Core/ProviderCatalog.cs
+  s_083bb2e6b55a74::t_f594951851f79c 13,45,53
+src/BrimDeck.Core/ProviderScripts.cs
+  s_083bb2e6b55a74::t_b98e06da5f0ef6 9,134-171
+src/BrimDeck.Core/Settings.cs
+  s_083bb2e6b55a74::t_2fee6e18fac5b2 34,36,51-52,76-80,114-121,126,141-172,182,195,247,281-282,358-361,373-374,482,524-525,567
+src/BrimDeck.Core/SystemMonitor.cs
+  s_083bb2e6b55a74::t_24244625edfaea 128-131,143-151,231-232,236
+src/BrimDeck.Core/Templates/theme-template.json
+  s_083bb2e6b55a74::t_fc511cdee5d67d 18,24,26,45,62-63,70,103-108
+src/BrimDeck.Core/Themes/dark.json
+  s_083bb2e6b55a74::t_009ec8ad5b5a83 16,18
+src/BrimDeck.Core/Themes/dracula.json
+  s_083bb2e6b55a74::t_bd1d45d37f7ee4 16
+src/BrimDeck.Core/Themes/github-dark.json
+  s_083bb2e6b55a74::t_b9f6d0151cc541 16,37
+src/BrimDeck.Core/Themes/github-light.json
+  s_083bb2e6b55a74::t_1764d5ea3d0854 16,37
+src/BrimDeck.Core/Themes/island-holiday-2.json
+  s_083bb2e6b55a74::t_d71a53e1865836 1-166
+src/BrimDeck.Core/Themes/island-holiday.json
+  s_083bb2e6b55a74::t_4e03186678c607 22,43,109
+src/BrimDeck.Core/Themes/light.json
+  s_083bb2e6b55a74::t_8e688f404b46bd 16,37,54
+src/BrimDeck.Core/Themes/night-owl.json
+  s_083bb2e6b55a74::t_5a8412c50335e4 16
+src/BrimDeck.Core/Themes/one-dark-pro.json
+  s_083bb2e6b55a74::t_8c10e384f280ff 16
+src/BrimDeck.Core/Themes/pixel-blocks.json
+  s_083bb2e6b55a74::t_067f7e232e9963 21
+src/BrimDeck/App.Hotkeys.cs
+  s_083bb2e6b55a74::t_d6c018c342c7cc 6-7,12-13,40-41,43-44,46,51,56,90-97,100-101,113,117-137,141
+src/BrimDeck/App.xaml
+  s_083bb2e6b55a74::t_9f8139f7a10f61 2,12,23-24,154-166,214-215,240
+src/BrimDeck/App.xaml.cs
+  s_083bb2e6b55a74::t_c0350e889a0d89 210-212,222,226-227,304-311
+src/BrimDeck/ClockFace.cs
+  s_083bb2e6b55a74::t_869ce4b045b130 15,29,37-39,51-52,55-57,149-150,156,176-177,191
+src/BrimDeck/HotkeyGesture.cs
+  s_083bb2e6b55a74::t_8db6c8ed6eb82c 28-30,38,74
+src/BrimDeck/IslandBorder.cs
+  s_083bb2e6b55a74::t_e5d21583ce63f9 26-28,70,86
+src/BrimDeck/IslandDecor.cs
+  s_083bb2e6b55a74::t_2b9f344979629c 1-194
+src/BrimDeck/MainWindow.CompactLayout.cs
+  s_083bb2e6b55a74::t_0896706024eb65 92
+src/BrimDeck/MainWindow.Music.cs
+  s_083bb2e6b55a74::t_a953c557aec125 136,166-178,242,908-909,934,938,945-952,954-975,977-979,981-987,989-991,993-1016,1030
+src/BrimDeck/MainWindow.Resize.cs
+  s_083bb2e6b55a74::t_b089e9c7446c0b 24-25,31-33,56-57,59-60,161,188-201,207-209,213-214,217-219,266-273,279,286,308-337,353-354,365-366,368-370
+src/BrimDeck/MainWindow.xaml.cs
+  s_083bb2e6b55a74::t_fc45493024bd38 127,129-140,194-203,274,278-279,287-309,343,346-347,367,371-373,565,813
+src/BrimDeck/MonitorGauges.cs
+  s_083bb2e6b55a74::t_adde489f90d661 17,22-24,39-54
+src/BrimDeck/MonitorPanel.cs
+  s_083bb2e6b55a74::t_d27e9bbca37613 156,194-201
+src/BrimDeck/MonitorStrip.cs
+  s_083bb2e6b55a74::t_aed0b73017319c 11,13-15,38-40,62,66,96-98,100-102,105-106,116,156-179,195,211-212,240-242,246-248,270,316-317,326-333,386
+src/BrimDeck/MonitorView.cs
+  s_083bb2e6b55a74::t_885a9719e180d8 20-22,36-37,44-45,68-69,74,99,234-236,239-241,244-254,261-262
+src/BrimDeck/MusicVisuals.cs
+  s_083bb2e6b55a74::t_ca15af35a270c1 249-251,303,629,633-635,637-638,641-648,651,661-662,667-668,670-674,677-680,683,685-688,693-694,696
+src/BrimDeck/Native/GlobalHotkeys.cs
+  s_083bb2e6b55a74::t_1030974b073b53 9-10,13-14,16-17,26,28-29,33,36-41,49,53,58-59
+src/BrimDeck/Native/GpuProvider.cs
+  s_083bb2e6b55a74::t_6d8b06f33bc685 1-157
+src/BrimDeck/Native/SystemSampler.cs
+  s_083bb2e6b55a74::t_26dfd3e387094f 46-54,56,66-68,128,143-150,180,184-187,190-211,214-244
+src/BrimDeck/Native/TrayIcon.cs
+  s_083bb2e6b55a74::t_dabfb7b76783ab 76-86,89
+src/BrimDeck/Native/Why.cs
+  s_083bb2e6b55a74::t_06f5cec46d3503 1-17
+src/BrimDeck/NeteaseControlResources.xaml
+  s_083bb2e6b55a74::t_88868832003b6f 28
+src/BrimDeck/OffPeakBar.cs
+  s_083bb2e6b55a74::t_b8a7e95bb182b8 1-132
+src/BrimDeck/PanelTheme.cs
+  s_083bb2e6b55a74::t_cf5baa6f3ddf65 21-23,67-68,81-84,96-102,109,114-115,162,189-197,199-205,212,218
+src/BrimDeck/SettingsClock.cs
+  s_083bb2e6b55a74::t_64983f4afdeaf1 88,130,134-137,140
+src/BrimDeck/SettingsHotkeys.cs
+  s_083bb2e6b55a74::t_95ccc9e32c5501 11-15,23-24,33,36,38-68,81,96,107-108,113-115,121,129,143-161,170-183,192,199,202,213-223,228,230-239,245,256-258,261-263,267,291-292,295-296,316,327-329
+src/BrimDeck/SettingsMonitor.cs
+  s_083bb2e6b55a74::t_f8dd4085177647 61-62,78-79,83-84,88-122,367-368,424-425,437-438,454,469-476
+src/BrimDeck/SettingsPalette.cs
+  s_083bb2e6b55a74::t_6d0d4649fa2aa6 15-16,33-36
+src/BrimDeck/SettingsProviders.cs
+  s_083bb2e6b55a74::t_380b51c95a7171 67-70,90-100,113-114,117,120,140-141,144-145,266,392-492
+src/BrimDeck/SettingsResources.xaml
+  s_083bb2e6b55a74::t_06745fb2c6b51c 11-12,81
+src/BrimDeck/SettingsWindow.cs
+  s_083bb2e6b55a74::t_765986b423981d 493-499,509-520,527-528,530-533,537,543,557-577,631-632,808
+src/BrimDeck/ThirdPartyNotices.txt
+  s_083bb2e6b55a74::t_c8621ea1660c48 211-308
+src/BrimDeck/UsagePanel.cs
+  s_083bb2e6b55a74::t_de2f18b26a20f7 463
+tests/BrimDeck.Tests/CollapsedGeometryTests.cs
+  s_083bb2e6b55a74::t_3e2437582c1926 29,155-156,158
+tests/BrimDeck.Tests/ColorMathTests.cs
+  s_083bb2e6b55a74::t_f06569276bc9ec 32-40
+tests/BrimDeck.Tests/CompactSpacingTests.cs
+  s_083bb2e6b55a74::t_745e29ce0ecfc9 1-155
+tests/BrimDeck.Tests/ConfiguredProviderTests.cs
+  s_083bb2e6b55a74::t_7254181df06dbf 145,147,217-250
+tests/BrimDeck.Tests/DashboardUsageTests.cs
+  s_083bb2e6b55a74::t_681e7d475c5181 94-97,100-101,103-108,114,145-147,149,154
+tests/BrimDeck.Tests/GpuAdapterTests.cs
+  s_083bb2e6b55a74::t_e3307e4e201f69 1-156
+tests/BrimDeck.Tests/GpuIdentityTests.cs
+  s_083bb2e6b55a74::t_91ea983c6e3f64 1-164
+tests/BrimDeck.Tests/KeyboardResizeTests.cs
+  s_083bb2e6b55a74::t_4ea9a94ee62224 1-89
+tests/BrimDeck.Tests/KimiUsageTests.cs
+  s_083bb2e6b55a74::t_6c4e446cf7ee13 196-197
+tests/BrimDeck.Tests/OffPeakTests.cs
+  s_083bb2e6b55a74::t_de7a044d6ad253 1-45
+tests/BrimDeck.Tests/PanelThemeEditorTests.cs
+  s_083bb2e6b55a74::t_586c8ec0bfe08a 96
+tests/BrimDeck.Tests/PanelThemeTests.cs
+  s_083bb2e6b55a74::t_076e603e6a1f06 45,239-287,302-311,321-330,384-408
+tests/BrimDeck.Tests/PixelBlocksTests.cs
+  s_083bb2e6b55a74::t_6c47ac27fc8472 23-24,27,65
+tests/BrimDeck.Tests/Program.cs
+  s_083bb2e6b55a74::t_e3a9c7f6cbf335 22,26,31,48-49,56
+tests/BrimDeck.Tests/SystemMonitorTests.cs
+  s_083bb2e6b55a74::t_871957d6df54f1 239-240,288-297
+tests/BrimDeck.Tests/TemperatureTests.cs
+  s_083bb2e6b55a74::t_cac90ff3096853 139-142
+tests/BrimDeck.Tests/ThemeCoverageTests.cs
+  s_083bb2e6b55a74::t_23e1bf18aa3850 1-183
+tests/BrimDeck.WindowsTests/BrimDeck.WindowsTests.csproj
+  s_083bb2e6b55a74::t_338077ced51c91 19-20,24
+tests/BrimDeck.WindowsTests/Program.cs
+  s_083bb2e6b55a74::t_e8ad6a8c65e564 5,22,63-86
+tests/BrimDeck.WindowsTests/TemperatureChecks.cs
+  s_083bb2e6b55a74::t_dafe17b0e34805 93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "36fcb32fcd47f997d0a7cb94a45e0fc440a7a285",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_083bb2e6b55a74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0e17d8be-4a8c-4c4f-abb0-03517a25e9a7",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
