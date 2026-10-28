@@ -1,0 +1,34 @@
+.github/workflows/ci.yml
+  s_454e0795cb7c71::t_e5787e2c018567 2-4,8,24-36
+.github/workflows/release.yml
+  s_454e0795cb7c71::t_5470551d5d72a9 2-4,30,33-34
+README.md
+  s_454e0795cb7c71::t_f00d60dcddff32 150-152
+README.zh-CN.md
+  s_454e0795cb7c71::t_14b2694896e9ba 150-152
+scripts/Test-MigrationVersions.ps1
+  s_454e0795cb7c71::t_d8271ef5374d23 1-63
+src/BrimDeck.Core/SettingsMigrations.cs
+  s_454e0795cb7c71::t_74f75cf5b3df21 12-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "69c39553b62df58fd07527d422218bbf092a9599",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_454e0795cb7c71": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b293739d-88d3-4f60-9838-e2e65c590dd5",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
