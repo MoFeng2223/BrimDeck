@@ -1,0 +1,55 @@
+src/BrimDeck/MainWindow.Music.cs
+  h_dc4d9c798f1bc1 426-427
+src/BrimDeck/MainWindow.xaml
+  h_dc4d9c798f1bc1 49-50
+  s_083bb2e6b55a74::t_4d8215b7331af7 48
+src/BrimDeck/UI.cs
+  h_dc4d9c798f1bc1 14-27
+src/BrimDeck.Core/DeckPages.cs
+  h_dc4d9c798f1bc1 31,33-34,67-75
+src/BrimDeck/ModelDetails.cs
+  h_dc4d9c798f1bc1 204-206
+tests/BrimDeck.Tests/CollapsedGeometryTests.cs
+  h_dc4d9c798f1bc1 21-29
+src/BrimDeck/SettingsCollapsedSize.cs
+  h_dc4d9c798f1bc1 147-148
+src/BrimDeck/MainWindow.Resize.cs
+  h_dc4d9c798f1bc1 55,102,118,134,157-158,272,285-286,328
+src/BrimDeck/MonitorDraw.cs
+  h_dc4d9c798f1bc1 152
+src/BrimDeck/MainWindow.xaml.cs
+  h_dc4d9c798f1bc1 123,236,239-240,253-255,259,346,371-372,375,377,379,382-383,386,393,396-397,401-402,581-583,585,587,598-600
+src/BrimDeck.Core/Settings.cs
+  h_dc4d9c798f1bc1 324-326,521
+src/BrimDeck/SettingsWindow.cs
+  h_dc4d9c798f1bc1 404-410,631
+src/BrimDeck.Core/CollapsedGeometry.cs
+  h_dc4d9c798f1bc1 72-76,78,87-89,99-100,108-110,114,120-121,124,127-128,156-157,159,162-164,170-171
+src/BrimDeck/MainWindow.Scale.cs
+  h_dc4d9c798f1bc1 1-43
+src/BrimDeck/MainWindow.SourceMenu.cs
+  h_dc4d9c798f1bc1 33
+tests/BrimDeck.Tests/SystemMonitorTests.cs
+  h_dc4d9c798f1bc1 279-283
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "822d37f2d78918ec3fc34dfedd2e558e67677418",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_083bb2e6b55a74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0e17d8be-4a8c-4c4f-abb0-03517a25e9a7",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
