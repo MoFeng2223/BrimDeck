@@ -1,0 +1,29 @@
+src/BrimDeck/MonitorStrip.cs
+  h_dc4d9c798f1bc1 32,47,87,91-93,95-96,104,108,118-121,123-125,127-130,132-142,144,146,148,150-155,157-159,161-165,167-170,172,192,202,225-226,229-230,241,250-251,266-267,270,337-338
+  s_083bb2e6b55a74::t_12a813084e9e2f 51,171
+src/BrimDeck/MusicVisuals.cs
+  h_dc4d9c798f1bc1 502,676-677,687,698
+src/BrimDeck/MonitorPanel.cs
+  h_dc4d9c798f1bc1 50,80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6d6892cc243ecbcdfb794f7d9d62871890b3460a",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_083bb2e6b55a74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0e17d8be-4a8c-4c4f-abb0-03517a25e9a7",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
