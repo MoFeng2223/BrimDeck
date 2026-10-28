@@ -1,0 +1,18 @@
+src/BrimDeck.Core/CompactSpacing.cs
+  h_dc4d9c798f1bc1 7,9,26-28,118-123,135-138,140-142,144-145
+src/BrimDeck/MainWindow.Music.cs
+  h_dc4d9c798f1bc1 954-959,962,964-965,987
+tests/BrimDeck.Tests/CompactSpacingTests.cs
+  h_dc4d9c798f1bc1 98-99,102-104,110,113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "95340ea342fac3ce18b30fa847864c666f4e8b73",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
