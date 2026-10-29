@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -92,7 +92,7 @@ public sealed partial class SettingsWindow
             empty.Margin = new Thickness(0, 6, 0, 8);
             return empty;
         }
-        _pluginRows = DeckPages.Order(S).Select(DeckPages.SlotOf).Where(slot => slot >= 0 && IslandExtensions.Occupied(slot)).ToList();
+        _pluginRows = DeckPages.Arrangement(S).Select(DeckPages.SlotOf).Where(slot => slot >= 0 && IslandExtensions.Occupied(slot)).ToList();
         var list = new StackPanel();
         Array.Clear(_pluginHandles, 0, _pluginHandles.Length);
         for (int at = 0; at < _pluginRows.Count; at++) list.Children.Add(PluginRow(_pluginRows[at], at, _pluginRows.Count));
@@ -249,9 +249,8 @@ public sealed partial class SettingsWindow
         for (int at = 0; at < _pluginRows.Count; at++)
             if (_pluginHandles[_pluginRows[at]] is { } handle)
                 AutomationProperties.SetName(handle, PluginHandleName(_pluginRows[at], at, _pluginRows.Count));
-        var ids = _pluginRows.Select(slot => IslandExtensions.Slots[slot]?.Id).ToList();
-        if (ids.Any(id => string.IsNullOrEmpty(id))) return;
-        Change(settings => settings.ReorderExtensions(ids.Select(id => id!).ToList()));
+        if (_pluginRows.Any(slot => slot < 0 || !IslandExtensions.Occupied(slot))) return;
+        Change(settings => DeckPages.ReorderExtensions(settings, _pluginRows));
     }
 
     // The handle of each loaded slot, so a drop can rename the rows it moved: the list is not built again after a drag,

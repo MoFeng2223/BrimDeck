@@ -1,8 +1,8 @@
 using BrimDeck.Core;
 
-// Which page comes after which. The panel's tab strip, its wheel and its fallback page all read this one rule, so the
-// tests here are about the rule itself: the reader's own order decides the plugin pages, the built-in three stay first,
-// and a reorder writes that order down without losing anything the reader never touched.
+// Which page comes after which. The panel's tab strip, its wheel, its hand-over direction and its fallback page all read
+// this one list (DeckSettings.PageOrder), plugin pages included, so the tests here are about that list: what it says when
+// a file has never been arranged, what a drag writes into it, and that nothing the reader did not touch moves.
 internal static class PageOrderTests
 {
     // Slots stand up as if the scanner had loaded them; the hooks are restored afterwards because they are static.
@@ -21,117 +21,108 @@ internal static class PageOrderTests
     }
 
     private static ExtensionPageSettings Entry(string id, bool shown = true) => new(id, shown);
-    private static ExtensionPageSettings Placed(string id, int order) => new(id) { Order = order };
+    private static DeckSettings Listed(params DeckPage[] pages) => new() { PageOrder = [.. pages] };
 
     internal static void Run(Action<string, bool> check)
     {
         // ── the order the panel switches in ──────────────────────────────────────────────────────────────
         using (Load("alpha", "beta", "gamma", null))
         {
-            var listed = new DeckSettings();
-            listed.Extensions.Add(Placed("gamma", 0));
-            listed.Extensions.Add(Placed("alpha", 1));
-            check("Order: the places the reader wrote decide the plugin pages, and an unplaced plugin goes last",
-                DeckPages.Order(listed).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Extension2, DeckPage.Extension0, DeckPage.Extension1, DeckPage.Extension3]));
-            check("Order: the built-in three stay first no matter what the places say",
-                DeckPages.Order(listed)[0] == DeckPage.Usage && DeckPages.Order(listed)[1] == DeckPage.Music && DeckPages.Order(listed)[2] == DeckPage.Monitor);
+            check("Order: a file nobody arranged keeps the built-in three and adds the loaded plugins in slot order",
+                DeckPages.Arrangement(new DeckSettings()).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Extension0, DeckPage.Extension1, DeckPage.Extension2]));
+            check("Order: an empty slot adds no page",
+                !DeckPages.Arrangement(new DeckSettings()).Contains(DeckPage.Extension3));
 
-            // What the wheel and the tab strip actually walk: same order, minus the pages switched off.
+            var listed = Listed(DeckPage.Extension2, DeckPage.Usage, DeckPage.Music, DeckPage.Extension0, DeckPage.Monitor);
+            check("Order: the saved list is read as written, and a plugin installed since joins at the end",
+                DeckPages.Arrangement(listed).SequenceEqual([DeckPage.Extension2, DeckPage.Usage, DeckPage.Music, DeckPage.Extension0, DeckPage.Monitor, DeckPage.Extension1]));
+
             var hides = listed.Copy();
-            hides.Extensions[1] = hides.Extensions[1] with { Shown = false };
+            hides.Extensions.Add(Entry("alpha", shown: false));
             check("Order: a hidden plugin leaves the switch but does not move the others",
-                DeckPages.Visible(hides).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Extension2, DeckPage.Extension1])
-                && DeckPages.Order(hides).SequenceEqual(DeckPages.Order(listed)));
-            // The fallback is the first shown page in that order, which is a plugin only once the built-in three are off.
+                DeckPages.Visible(hides).SequenceEqual([DeckPage.Extension2, DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Extension1])
+                && DeckPages.Visible(listed.Copy()).Contains(DeckPage.Extension0));
+            // The fallback is the first shown page in that order, which is a plugin once the built-in three are off.
             var onlyPlugins = hides.Copy();
             onlyPlugins.UsagePage = onlyPlugins.MusicPage = onlyPlugins.MonitorPage = false;
             check("Order: the page the panel falls back to is the first shown one in that order",
                 DeckPages.Resolve(onlyPlugins, DeckPage.Extension0) == DeckPage.Extension2);
-
-            // Nothing placed at all is the order the panel had before a reader ever rearranged it.
-            check("Order: an untouched settings file keeps slot order",
-                DeckPages.Order(new DeckSettings()).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Extension0, DeckPage.Extension1, DeckPage.Extension2, DeckPage.Extension3]));
-            // One place written alone is still an arrangement: the plugin named goes first, the rest keep slot order
-            // behind it rather than being dragged along.
-            var partly = new DeckSettings();
-            partly.ReorderExtensions(["gamma"]);
-            check("Order: arranging one plugin puts it in front and leaves the others in slot order",
-                DeckPages.Order(partly).Skip(3).SequenceEqual([DeckPage.Extension2, DeckPage.Extension0, DeckPage.Extension1, DeckPage.Extension3]));
         }
 
-        // An empty slot has no plugin to rank, so it falls behind the loaded ones and the slots order what is left.
-        using (Load(null, "beta", "alpha", null))
+        // A page left behind by a plugin whose folder is gone is not shown, but the saved list is not edited either:
+        // putting the folder back puts the tab back where the reader left it.
+        using (Load("alpha", "beta", "gamma", null))
         {
-            var listed = new DeckSettings();
-            listed.Extensions.Add(Placed("alpha", 0));
-            listed.Extensions.Add(Placed("beta", 1));
-            check("Order: an empty slot has nothing to rank, so it falls back to slot order",
-                DeckPages.Order(listed).Skip(3).SequenceEqual([DeckPage.Extension2, DeckPage.Extension1, DeckPage.Extension0, DeckPage.Extension3]));
+            var ghost = Listed(DeckPage.Usage, DeckPage.Extension3, DeckPage.Music, DeckPage.Monitor);
+            check("Order: an entry for a slot nothing is loaded in is dropped from the switch, not from the file",
+                !DeckPages.Visible(ghost).Contains(DeckPage.Extension3) && ghost.PageOrder.Contains(DeckPage.Extension3));
+            DeckPages.ReorderExtensions(ghost, [2, 0, 1]);
+            check("Reorder: a ghost entry is not a place a drag may write into, and it does not shift the others",
+                ghost.PageOrder.SequenceEqual([DeckPage.Usage, DeckPage.Extension3, DeckPage.Music, DeckPage.Monitor, DeckPage.Extension2, DeckPage.Extension0, DeckPage.Extension1]));
         }
 
-        // A row a plugin's own page wrote is not an arrangement. This is how a real run failed: the demo plugin saved one
-        // declared value, which created its settings row, and its tab jumped in front of three plugins the reader had
-        // never moved — because the list standing there was being read as the reader's order.
-        using (Load("alpha", "beta", "gamma", "delta"))
+        // The settings file is read before the scanner has filled any slot, so normalizing it must not need to know
+        // which plugin pages exist: a plugin page dropped here would be gone from the reader's file for good.
         {
-            var written = new DeckSettings();
-            written.SetExtensionValue("delta", "warn", new ExtensionSettingValue("number", false, 65));
-            check("Order: a row created by a value the plugin wrote arranges nothing",
-                DeckPages.Order(written).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Extension0, DeckPage.Extension1, DeckPage.Extension2, DeckPage.Extension3]));
-            // The same for the other ways a row appears without the reader touching a position: its own switch, its page size.
-            written.Extensions.Add(new ExtensionPageSettings("beta") { Shown = false });
-            written.Extensions.Add(new ExtensionPageSettings("alpha") { Width = 640, Height = 220 });
-            check("Order: rows made by a switch or a size keep the plugins in slot order too",
-                DeckPages.Order(written).Skip(3).SequenceEqual([DeckPage.Extension0, DeckPage.Extension1, DeckPage.Extension2, DeckPage.Extension3]));
+            var saved = new[] { DeckPage.Extension1, DeckPage.Music, DeckPage.Usage, DeckPage.Monitor };
+            check("Normalize: a plugin page survives the list being read while no slot is known yet",
+                DeckPages.Normalize(saved).SequenceEqual(saved));
+            check("Normalize: each page comes once, and a page the file never had joins at the end",
+                DeckPages.Normalize([DeckPage.Music, DeckPage.Music]).SequenceEqual([DeckPage.Music, DeckPage.Usage, DeckPage.Monitor]));
+            check("Normalize: a page number from a newer version is dropped rather than kept as a hole",
+                !DeckPages.Normalize([DeckPage.Usage, (DeckPage)99, DeckPage.Music]).Contains((DeckPage)99));
         }
 
         // ── writing an order down ────────────────────────────────────────────────────────────────────────
-        using (Load("alpha", "beta", "gamma", null))
+        var before = Array.Empty<DeckPage>();
+        using (Load("alpha", "beta", "gamma", "delta"))
         {
             var settings = new DeckSettings();
-            settings.Extensions.Add(Entry("alpha"));
-            settings.Extensions.Add(Entry("gone"));   // a folder removed: its row stays so putting it back restores it
-            settings.Extensions.Add(Entry("gamma"));
-            settings.ReorderExtensions(["gamma", "alpha", "beta"]);
-            check("Reorder: the places are written on the rows and the row kept for a missing folder is left alone",
-                settings.Extensions.Select(e => e.Id).SequenceEqual(["alpha", "gone", "gamma", "beta"])
-                && settings.Extensions.Select(e => e.Order).SequenceEqual([1, -1, 0, 2]));
-            check("Reorder: the arrangement the panel reads comes from the places, not from the list",
-                DeckPages.Order(settings).Skip(3).SequenceEqual([DeckPage.Extension2, DeckPage.Extension0, DeckPage.Extension1, DeckPage.Extension3]));
-            check("Reorder: a row's own settings travel with it",
-                settings.Extensions.Single(e => e.Id == "gamma").Shown && settings.Extensions.Single(e => e.Id == "alpha").Shown);
+            DeckPages.ReorderExtensions(settings, [2, 0, 3, 1]);
+            check("Reorder: the drag writes the plugin pages into the one saved list, built-in pages first as always",
+                settings.PageOrder.SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Extension2, DeckPage.Extension0, DeckPage.Extension3, DeckPage.Extension1]));
+            check("Reorder: arranging and then reading back is a fixed point",
+                DeckPages.Arrangement(settings).SequenceEqual(settings.PageOrder)
+                && DeckPages.Visible(settings).Skip(3).SequenceEqual([DeckPage.Extension2, DeckPage.Extension0, DeckPage.Extension3, DeckPage.Extension1]));
+            before = settings.PageOrder.ToArray();
 
-            // beta had no row at all: rearranging it into place creates one rather than dropping the move.
-            var created = new DeckSettings();
-            created.Extensions.Add(Entry("alpha"));
-            created.ReorderExtensions(["beta", "alpha"]);
-            check("Reorder: a plugin with no row yet gets a default one, pinned where it was named",
-                created.Extensions.Select(e => e.Id).SequenceEqual(["alpha", "beta"])
-                && created.Extensions.Single(e => e.Id == "beta").Order == 0);
+            // The built-in pages keep their places: only the positions the plugin rows already held are rewritten.
+            var among = Listed(DeckPage.Extension0, DeckPage.Usage, DeckPage.Extension1, DeckPage.Music, DeckPage.Monitor, DeckPage.Extension2);
+            DeckPages.ReorderExtensions(among, [2, 0, 1]);
+            // delta's page was never listed (installed after the file), so it joins at the end rather than being dropped.
+            check("Reorder: built-in pages stay exactly where they stand, and the plugin pages take the places they held",
+                among.PageOrder.SequenceEqual([DeckPage.Extension2, DeckPage.Usage, DeckPage.Extension0, DeckPage.Music, DeckPage.Monitor, DeckPage.Extension1, DeckPage.Extension3]));
 
-            var untouched = new DeckSettings();
-            untouched.Extensions.Add(Entry("alpha"));
-            untouched.ReorderExtensions(["alpha"]);
-            var pinned = untouched.Extensions[0];
-            untouched.ReorderExtensions(["alpha"]);
+            var same = settings.Copy();
+            DeckPages.ReorderExtensions(same, [2, 0, 3, 1]);
             check("Reorder: asking for the order it already has changes nothing",
-                untouched.Extensions.Count == 1 && ReferenceEquals(untouched.Extensions[0], pinned));
-            untouched.ReorderExtensions(["alpha", "beta"]);
-            check("Reorder: naming a plugin with no row pins it there, in the order it was named",
-                untouched.Extensions.Select(e => e.Id).SequenceEqual(["alpha", "beta"])
-                && untouched.Extensions[1].Order == 1);
-            untouched.ReorderExtensions([]);
-            check("Reorder: an empty order is not a request to erase the list",
-                untouched.Extensions.Count == 2);
+                same.PageOrder.SequenceEqual(before));
 
-            // The sizes and values a reader set must survive the move, since they belong to the plugin and not to a slot.
-            var kept = new DeckSettings();
-            var alpha = new ExtensionPageSettings("alpha") { Width = 640, Height = 220 };
-            alpha.Values["warn"] = new ExtensionSettingValue("number", false, 65);
-            kept.Extensions.Add(alpha);
-            kept.ReorderExtensions(["beta", "alpha"]);
-            check("Reorder: size and declared values travel with the plugin",
-                kept.Extensions.Single(e => e.Id == "alpha") is { Width: 640, Height: 220 } moved && moved.Values["warn"].Number == 65);
+            // A plugin the caller left out of the request is not erased by the drag of the others.
+            var left = settings.Copy();
+            DeckPages.ReorderExtensions(left, [0, 1]);
+            check("Reorder: a loaded plugin the caller left out keeps a place rather than losing its tab",
+                DeckPages.Arrangement(left).Count(page => DeckPages.SlotOf(page) >= 0) == 4 && DeckPages.Visible(left).Count(page => DeckPages.SlotOf(page) >= 0) == 4);
+
+            var none = settings.Copy();
+            DeckPages.ReorderExtensions(none, []);
+            check("Reorder: an empty order is not a request to erase the list",
+                none.PageOrder.SequenceEqual(before));
+
+            // A row appears in 设置 → 插件 for reasons that say nothing about position: a declared value the plugin
+            // itself saved, its own switch, its page size. None of them may move a tab — this is how the old shape of
+            // the feature failed, with the rows standing in for the reader's arrangement.
+            settings.SetExtensionValue("delta", "warn", new ExtensionSettingValue("number", false, 65));
+            settings.Extensions.Add(new ExtensionPageSettings("beta") { Shown = false });
+            settings.Extensions.Add(new ExtensionPageSettings("alpha") { Width = 640, Height = 220 });
+            check("Reorder: rows made by a value, a switch or a size move nothing",
+                settings.PageOrder.SequenceEqual(before));
+            // What belongs to the plugin travels with it, since it is kept under the plugin's id and not under a place.
+            check("Reorder: size and declared values travel with the plugin, not with its place",
+                settings.Extensions.Single(e => e.Id == "alpha") is { Width: 640, Height: 220 } && settings.ExtensionValues("delta")["warn"].Number == 65);
+            // beta's tab now hides, but its place in the list is kept for when it is switched back on.
+            check("Reorder: switching a plugin off hides its tab and keeps its place",
+                !DeckPages.Visible(settings).Contains(DeckPage.Extension1) && settings.PageOrder.Contains(DeckPage.Extension1));
         }
     }
 }

@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -27,13 +27,15 @@ public sealed record FullscreenRule(string Name = "", string Path = "")
 // GrokBot reads the weekly allowance of the Grok Bot desktop app; it is a quota source only.
 // Kimi reads the plan quota of the account Kimi Code (CLI, desktop app or VS Code extension) signed in with, and its local session records;
 // KimiApi reads the same plan quota with a Kimi Code API key entered by hand.
+// OpenCode reads the OpenCode Go allowance of the workspace OpenCode (CLI or desktop app) signed in to OpenCode Console with, and its
+// local records; OpenCodeGo reads the same allowance with an OpenCode Console API key entered by hand.
 // Statistics sources are saved as numbers. 8 and 9 were a short-lived split of Claude and are retired:
 // SettingsMigrations maps them back to Claude, and later members keep their saved numbers.
-public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16 }
+public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, OpenCode = 17, OpenCodeGo = 18, OpenRouter = 19 }
 public enum SettingsTheme { System, Light, Dark }
-// Pages are saved as numbers, so new members go at the end; the order they switch in is DeckPages.Order(settings),
-// which keeps the built-in three first and reads each plugin page's place off its own settings row below.
-// Extension0..3 are the slots an extension page can occupy; the app loads the extensions and fills them in order.
+// Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckSettings.PageOrder.
+// Extension0..3 are the slots an extension page can occupy; the app loads the extensions and fills them in order, and a
+// plugin page enters that list the first time it is arranged (or installed) rather than being pruned out of it.
 public enum DeckPage { Usage, Music, Monitor, Extension0, Extension1, Extension2, Extension3 }
 public enum DefaultDeckPage { Last, Usage, Music, Monitor, Extension0, Extension1, Extension2, Extension3 }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
@@ -48,7 +50,8 @@ public static class CompactParts
     // Each known part once, in the saved order; a part missing from the file takes its default place after the others.
     public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Default).Distinct()];
 }
-public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed }
+// Saved settings keep the number, so a new style goes at the end.
+public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed, Pixel, Rounded }
 // Every clock style takes this one color. Gradient spreads ClockGradient across the digits, Custom is ClockCustomColor,
 // and Cover follows the color picked from the playing song's cover. Saved as numbers, so new members go at the end.
 public enum ClockColor { White, Amber, Cyan, Pink, Lime, Gradient, Cover, Custom }
@@ -72,6 +75,11 @@ public static class ClockColors
         (Loc.T("火焰", "Ember"), ["#FFE27A", "#FF9F43", "#FF5E5E"]),
         (Loc.T("霓虹", "Neon"), ["#FF5CF0", "#A66BFF", "#5CE1E6"])
     ];
+    // Under Windows' high contrast the clock is the system's window text (the high contrast palette's clock color, which "white"
+    // stands for) whatever color, gradient or cover was chosen, at full strength and with no glow. The choice itself is kept,
+    // so the clock is drawn as chosen again when high contrast is turned off.
+    public static ClockColor Shown(ClockColor chosen, bool highContrast) => highContrast ? ClockColor.White : chosen;
+    public static bool Glows(ClockStyle style, bool highContrast) => !highContrast && style is ClockStyle.Neon or ClockStyle.Segment;
 }
 
 // A dashboard column has an identity independent of either data source.
@@ -105,10 +113,30 @@ public sealed class AppEntry
     [JsonIgnore] public string Theme => ThemeColor.Length > 0 ? ThemeColor : AppPresets.ThemeColor(QuotaSource);
     [JsonIgnore] public string Warning => WarningColor.Length > 0 ? WarningColor : AppPresets.WarningColor;
     [JsonIgnore] public string Critical => CriticalColor.Length > 0 ? CriticalColor : AppPresets.CriticalColor;
+    // Daily off-peak periods in local time. Inside one, the panel draws this row's quotas in the off-peak colors: below the
+    // warning level in OffPeakColor, and at the warning and critical levels in OffPeakWarningColor and OffPeakCriticalColor.
+    // Each one left unchosen keeps the row's usual color for that level. Empty periods mean no off-peak time.
+    public List<OffPeakPeriod> OffPeak { get; set; } = [];
+    public string OffPeakColor { get; set; } = "";
+    public string OffPeakWarningColor { get; set; } = "";
+    public string OffPeakCriticalColor { get; set; } = "";
+    public bool IsOffPeak(DateTime local) => OffPeak?.Any(period => period.Contains(local)) == true;
+    // The next minute at which this row enters or leaves its off-peak time; null without periods, or when they cover the
+    // whole day. A boundary inside another period changes nothing, so the first boundary that flips the state is taken.
+    public DateTime? NextOffPeakChange(DateTime local)
+    {
+        if (OffPeak is not { Count: > 0 }) return null;
+        bool now = IsOffPeak(local);
+        var minute = local.Date.AddMinutes(local.Hour * 60 + local.Minute);
+        return OffPeak.SelectMany(period => new[] { period.Start, period.End }).Distinct()
+            .Select(boundary => local.Date.AddMinutes(boundary)).Select(at => at <= minute ? at.AddDays(1) : at)
+            .Order().Cast<DateTime?>().FirstOrDefault(at => IsOffPeak(at!.Value) != now);
+    }
     public AppEntry Copy()
     {
         var copy = (AppEntry)MemberwiseClone();
         copy.UsageSource = UsageSource;
+        copy.OffPeak = [.. (OffPeak ?? []).Select(period => period.Copy())];
         return copy;
     }
     public void Normalize()
@@ -123,6 +151,38 @@ public sealed class AppEntry
         ThemeColor = AppPresets.NormalizeColor(ThemeColor);
         WarningColor = AppPresets.NormalizeColor(WarningColor);
         CriticalColor = AppPresets.NormalizeColor(CriticalColor);
+        OffPeak = [.. (OffPeak ?? []).Where(period => period is not null).Take(AppPresets.MaximumOffPeakPeriods).Select(period => period.Normalized())];
+        OffPeakColor = AppPresets.NormalizeColor(OffPeakColor);
+        OffPeakWarningColor = AppPresets.NormalizeColor(OffPeakWarningColor);
+        OffPeakCriticalColor = AppPresets.NormalizeColor(OffPeakCriticalColor);
+    }
+}
+
+// One daily off-peak period: Start and End are minutes after local midnight. An End before Start runs past midnight
+// into the next day; an End equal to Start covers the whole day, as the settings bar dragged out to both edges gives.
+public sealed class OffPeakPeriod
+{
+    public const int Day = 24 * 60;
+    public int Start { get; set; }
+    public int End { get; set; } = 8 * 60;
+    public OffPeakPeriod Copy() => (OffPeakPeriod)MemberwiseClone();
+    public OffPeakPeriod Normalized() => new() { Start = Math.Clamp(Start, 0, Day - 1), End = Math.Clamp(End, 0, Day - 1) };
+    public bool Contains(DateTime local)
+    {
+        int minute = local.Hour * 60 + local.Minute;
+        return Start < End ? minute >= Start && minute < End : Start == End || minute >= Start || minute < End;
+    }
+    public static string Format(int minutes) => $"{minutes / 60:00}:{minutes % 60:00}";
+    // Accepts "8:30", "08:30", "0830" and "8"; anything else, or a time past 23:59, is refused.
+    public static bool TryParse(string text, out int minutes)
+    {
+        minutes = 0;
+        var match = Regex.Match(text.Trim().Replace('：', ':'), @"^(\d{1,2})(?::?(\d{2}))?$");
+        if (!match.Success) return false;
+        int hour = int.Parse(match.Groups[1].Value), minute = match.Groups[2].Success ? int.Parse(match.Groups[2].Value) : 0;
+        if (hour > 23 || minute > 59) return false;
+        minutes = hour * 60 + minute;
+        return true;
     }
 }
 
@@ -132,6 +192,7 @@ public static class AppPresets
     // A long list would be hard to review, and the exceptions are meant for a few shell-level apps.
     public const int MaximumFullscreenExceptions = 32;
     public const string WarningColor = "#E5C890", CriticalColor = "#E78284";
+    public const int MaximumOffPeakPeriods = 6;
     public const double WarningPercent = 70, CriticalPercent = 90;
     // Each column needs this much width; the panel's minimum width follows the number of enabled applications.
     public const double MinimumColumnWidth = 150;
@@ -143,8 +204,8 @@ public static class AppPresets
     public static string Name(ProviderId id) => ProviderCatalog.Name(id);
     // The original preset colors: coral for Claude, mint for Codex, periwinkle for Antigravity, light gray for Cursor.
     public static string ThemeColor(ProviderId id) => id switch
-    { ProviderId.Claude => "#E5A385", ProviderId.Codex => "#98DBB0", ProviderId.Antigravity => "#9CB9FF", ProviderId.ZCode => "#3A538D", ProviderId.Dsh => "#6081DA", ProviderId.Kimi => "#68CDEB",
-      ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.DeepSeek or ProviderId.KimiApi or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => ManualColor, _ => "#D4D5DF" };
+    { ProviderId.Claude => "#E5A385", ProviderId.Codex => "#98DBB0", ProviderId.Antigravity => "#9CB9FF", ProviderId.ZCode => "#3A538D", ProviderId.Dsh => "#6081DA", ProviderId.Kimi => "#68CDEB", ProviderId.OpenCode => "#8E8E93",
+      ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.DeepSeek or ProviderId.KimiApi or ProviderId.OpenCodeGo or ProviderId.OpenRouter or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => ManualColor, _ => "#D4D5DF" };
     // Sources entered by hand share one purple by default.
     public const string ManualColor = "#CC9EED";
     public static int Level(double usedPercent) => usedPercent >= CriticalPercent ? 2 : usedPercent >= WarningPercent ? 1 : 0;
@@ -195,7 +256,7 @@ public static class MonitorSizes
 // the controls its manifest declares. The id is the extension's; an entry whose extension is gone is kept, so a return
 // restores the page as it was — values included, which is why a value the manifest no longer declares is kept rather
 // than deleted (the page never reads it, and the author gets it back if they declare the control again).
-public sealed record ExtensionPageSettings(string Id = "", bool Shown = true, double Width = 440, double Height = 160, int Order = -1)
+public sealed record ExtensionPageSettings(string Id = "", bool Shown = true, double Width = 440, double Height = 160)
 {
     public Dictionary<string, ExtensionSettingValue> Values { get; init; } = [];
 }
@@ -214,6 +275,7 @@ public sealed class DeckSettings
     private List<AppEntry>? _apps;
     private List<CompactReading>? _readings;
     private List<CompactPart> _notchOrder = [.. CompactParts.Default], _capsuleOrder = [.. CompactParts.Default];
+    private List<DeckPage> _pageOrder = [.. DeckPages.Order];
     // Version of the BrimDeck that last saved settings.json; see SettingsMigrations. Empty in files saved before 0.1.0.
     public string AppVersion { get; set; } = "";
     public bool LaunchAtStartup { get; set; }
@@ -224,6 +286,8 @@ public sealed class DeckSettings
     // What the user changed under each panel theme, by theme id (see ThemeChoices); the theme in use keeps its choices in the
     // ordinary settings, and they are saved here when another theme is chosen.
     public Dictionary<string, ThemeChoices> ThemeChoices { get; set; } = [];
+    // When a theme with a night look shows its day look, "HH:mm-HH:mm" local time; empty keeps the theme's own hours.
+    public string ThemeDaylight { get; set; } = "";
     // A first start replaces the default with the Windows display language (SettingsStore.Load); files saved before
     // English existed are Chinese (SettingsMigrations).
     public string Language { get; set; } = Loc.English;
@@ -245,6 +309,8 @@ public sealed class DeckSettings
     public double LineOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
     public string HideHotkey { get; set; } = "";
     public string ExpandHotkey { get; set; } = "";
+    // The resize shortcut: modifiers with the arrow keys ("Ctrl+Alt+Arrows", HotkeyText.Arrows); unset by default.
+    public string ResizeHotkey { get; set; } = "";
     public bool MusicPage { get; set; } = true;
     public double MusicWidth { get; set; } = 440;
     public double MusicHeight { get; set; } = 200;
@@ -268,6 +334,10 @@ public sealed class DeckSettings
     public bool LyricsEnabled { get; set; } = true;
     // Offers "网易云音乐 · 完整控制" in the source menu, or alone in its place when nothing plays.
     public bool NeteaseFullControlEntry { get; set; }
+    // Restarts a player started the normal way with full control, without asking again; switching it on asks once.
+    public bool NeteaseAutoFullControl { get; set; }
+    // Enables Apple Music's full control when BrimDeck starts, without the entry and its explanation.
+    public bool AppleMusicFullControl { get; set; }
     public DefaultDeckPage DefaultPage { get; set; }
     // A right click on the expanded panel opens the settings window.
     public bool RightClickSettings { get; set; } = true;
@@ -282,6 +352,9 @@ public sealed class DeckSettings
     public double Height { get; set; } = 200;
     // The quick size last chosen in settings; cleared when the width or height is edited by hand.
     public PanelSize? QuickSize { get; set; }
+    // BrimDeck drawn larger, in percent (PanelScales): the collapsed surface and the expanded panel, its pages, header and menus
+    // grow together, as Windows' display scaling would for BrimDeck alone. Sizes stay saved before the scale.
+    public int PanelScale { get; set; } = PanelScales.Default;
     public int OpenDelay { get; set; } = 0;
     public int CloseDelay { get; set; } = 0;
     public int AnimationDuration { get; set; } = 360;
@@ -318,39 +391,36 @@ public sealed class DeckSettings
         if (at < 0) { var created = new ExtensionPageSettings(id); created.Values[key] = value; Extensions.Add(created); return; }
         Extensions[at].Values[key] = value;
     }
-    // Writes the reader's order down. The place belongs to the plugin's own row, because a row appears for reasons that
-    // say nothing about position: its switch was flipped, its page was resized, its own page saved a declared value.
-    // A plugin named here without a row yet gets a default one, since naming it is the reader saying where it belongs;
-    // a row kept for a plugin that is not loaded right now — one whose folder was taken away, held so it can come
-    // back — keeps the place it had and finds it again when the folder returns.
-    public void ReorderExtensions(IReadOnlyList<string> order)
-    {
-        var wanted = order.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToList();
-        for (int at = 0; at < wanted.Count; at++)
-        {
-            int index = Extensions.FindIndex(entry => entry.Id == wanted[at]);
-            if (index < 0) { Extensions.Add(new ExtensionPageSettings(wanted[at], Order: at)); continue; }
-            if (Extensions[index].Order != at) Extensions[index] = Extensions[index] with { Order = at };
-        }
-    }
     // The Custom scheme's colors; kept while another scheme is chosen.
     public MonitorCustomColors MonitorCustomColors { get; set; } = new();
     // The collapsed readings' colors at the warning and critical levels (ReadingLevels), "#RRGGBB", or null for the panel
     // theme's warning and critical colors. The expanded page does not change color by level.
     public string? CompactWarningColor { get; set; }
     public string? CompactCriticalColor { get; set; }
+    // The collapsed readings' dials and core columns ease to each reading at this many frames a second, or not at all.
+    public CompactSmoothing CompactSmoothing { get; set; } = CompactSmoothing.Ten;
     // Seconds between readings: 1 or 2.
     public int MonitorInterval { get; set; } = 1;
     public bool MonitorProcesses { get; set; } = true;
     public ProcessSort MonitorSort { get; set; }
     public MonitorMain MonitorMain { get; set; }
+    // The graphics adapter the monitor shows, by its key (GpuSample.Key), and its name to find it by should its ids change and to
+    // name it while it is not connected; null for 自动 (GpuChoice.Auto). Files saved before there was a choice read as 自动.
+    public string? MonitorGpu { get; set; }
+    public string? MonitorGpuName { get; set; }
     public MonitorProcessView MonitorProcessView { get; set; }
+    // The expanded page shows the temperatures the system reports (Temperatures); off, none are read for it.
+    public bool MonitorTemperatures { get; set; } = true;
+    // The expanded page shows the internal drives' space, one line per physical drive (Storage); off, the drives are not read for it.
+    public bool MonitorStorage { get; set; } = true;
     // The notch and the capsule each switch the system readings on; what they show is shared.
     public bool NotchMonitor { get; set; }
     public bool CapsuleMonitor { get; set; }
     // The order of the quota rings, the title or lyric and the system readings, for the notch and the capsule each.
     public List<CompactPart> NotchOrder { get => _notchOrder; set => _notchOrder = CompactParts.Normalize(value); }
     public List<CompactPart> CapsuleOrder { get => _capsuleOrder; set => _capsuleOrder = CompactParts.Normalize(value); }
+    // The order of the pages in the open panel's page switch, left to right.
+    public List<DeckPage> PageOrder { get => _pageOrder; set => _pageOrder = DeckPages.Normalize(value); }
     // Whether the notch and the capsule widen to their content (CollapsedGeometry.Resolve). Resizing one by dragging an end turns
     // its own off, so the width set by hand stays.
     public bool NotchAutoWidth { get; set; } = true;
@@ -458,7 +528,7 @@ public sealed class DeckSettings
         copy._apps = _apps?.Select(app => app.Copy()).ToList();
         copy._readings = _readings?.Select(reading => reading?.Copy()!).ToList();
         copy.MonitorCustomColors = (MonitorCustomColors ?? new()).Copy();
-        copy._notchOrder = [.. _notchOrder]; copy._capsuleOrder = [.. _capsuleOrder];
+        copy._notchOrder = [.. _notchOrder]; copy._capsuleOrder = [.. _capsuleOrder]; copy._pageOrder = [.. _pageOrder];
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
@@ -505,6 +575,7 @@ public sealed class DeckSettings
                 Height = double.IsFinite(e.Height) ? Math.Clamp(e.Height, DeckPages.MinHeight, DeckPages.MaxHeight) : ExtensionSizes.Default.Height
             })
             .DistinctBy(e => e.Id, StringComparer.Ordinal).ToList();
+        PanelScale = PanelScales.Fit(PanelScale);
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
         MonitorCustomColors ??= new();
         MonitorCustomColors.Normalize();
@@ -513,7 +584,10 @@ public sealed class DeckSettings
         MonitorInterval = Math.Clamp(MonitorInterval, 1, 2);
         if (!Enum.IsDefined(MonitorSort)) MonitorSort = ProcessSort.Cpu;
         if (!Enum.IsDefined(MonitorMain)) MonitorMain = MonitorMain.Cpu;
+        MonitorGpu = string.IsNullOrWhiteSpace(MonitorGpu) ? null : MonitorGpu.Trim();
+        MonitorGpuName = MonitorGpu is null || string.IsNullOrWhiteSpace(MonitorGpuName) ? null : MonitorGpuName.Trim();
         if (!Enum.IsDefined(MonitorProcessView)) MonitorProcessView = MonitorProcessView.Auto;
+        if (!Enum.IsDefined(CompactSmoothing)) CompactSmoothing = CompactSmoothing.Ten;
         if (!Enum.IsDefined(CompactMonitor)) CompactMonitor = CompactMonitorMode.Full;
         CompactMonitorItems &= CompactMonitorItems.All;
         if (CompactMonitorItems == CompactMonitorItems.None) CompactMonitorItems = CompactMonitorItems.Cpu;
@@ -534,6 +608,9 @@ public sealed class DeckSettings
         AnimationDuration = Math.Clamp(AnimationDuration, 100, 1000);
         if (!Enum.IsDefined(Theme)) Theme = SettingsTheme.System;
         PanelTheme = PanelThemes.NormalizeId(PanelTheme) is { Length: > 0 } panelTheme ? panelTheme : PanelThemes.Dark;
+        // Two valid, different times or none: anything else keeps the theme's own hours.
+        ThemeDaylight = (ThemeDaylight ?? "").Split('-', 2) is [var day, var night] && PanelThemes.ParseTimeOfDay(day) is { } d && PanelThemes.ParseTimeOfDay(night) is { } n && d != n
+            ? PanelThemes.FormatDaylight(d, n) : "";
         Language = Loc.Normalize(Language);
         if (!Enum.IsDefined(Style)) Style = CompactStyle.Notch;
         static double Fit(double value, double min, double max, double fallback) => double.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;
@@ -551,6 +628,7 @@ public sealed class DeckSettings
         LineOffsetX = Offset(LineOffsetX);
         HideHotkey ??= "";
         ExpandHotkey ??= "";
+        ResizeHotkey ??= "";
         if (QuickSize is { } quick && !Enum.IsDefined(quick)) QuickSize = null;
         if (!Enum.IsDefined(Maximized)) Maximized = WindowBehavior.Line;
         if (!Enum.IsDefined(Borderless)) Borderless = WindowBehavior.Hide;
@@ -645,11 +723,29 @@ public sealed class SettingsStore(string directory, string? appVersion = null)
             }
             return SettingsMigrations.Read(root, running, out _);
         }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
+        // Any exception, since a faulty migration step can throw anything. Defaults replace the file at the next save,
+        // so the file is copied aside first and can still be restored by hand.
+        catch (Exception)
         {
-            _loadWarning = () => Loc.T("无法读取已保存的设置，本次使用默认值。", "The saved settings could not be read. Default settings are used this time.");
+            var kept = KeepUnreadable();
+            _loadWarning = kept is null
+                ? () => Loc.T("无法读取已保存的设置，本次使用默认值。", "The saved settings could not be read. Default settings are used this time.")
+                : () => Loc.T($"无法读取已保存的设置，本次使用默认值。原文件已另存为 {kept}。", $"The saved settings could not be read. Default settings are used this time. The original file is kept as {kept}.");
             return FirstStart();
         }
+    }
+
+    // Copies an unreadable settings file next to it and returns the copy's name, or null when there is nothing to copy.
+    private string? KeepUnreadable()
+    {
+        try
+        {
+            if (!File.Exists(FilePath)) return null;
+            var name = $"settings.unreadable-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+            File.Copy(FilePath, Path.Combine(DirectoryPath, name), true);
+            return name;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
     public void Save(DeckSettings settings) => Write(Serialize(settings));
 
