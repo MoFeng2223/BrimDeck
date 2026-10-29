@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Media;
@@ -39,6 +39,8 @@ public partial class App : Application
     private readonly HashSet<MainWindow> _presentingMedia = [];
     // The system monitor page's readings, shared by every panel; created when a panel first shows the page.
     internal SystemSampler? Monitor { get; private set; }
+    // Which panels are showing each extension's page; an extension works while any of them is.
+    private readonly HashSet<MainWindow>[] _presentingExtension = [ [], [], [], [] ];
     internal event Action<MonitorSnapshot>? MonitorUpdated;
     private readonly HashSet<MainWindow> _presentingMonitor = [], _stripMonitor = [];
     public CancellationTokenSource Lifetime { get; } = new();
@@ -70,7 +72,9 @@ public partial class App : Application
         EventManager.RegisterClassHandler(typeof(System.Windows.Controls.ContextMenu), System.Windows.Controls.ContextMenu.OpenedEvent,
             new RoutedEventHandler((sender, _) => PanelTheme.Text((System.Windows.Controls.ContextMenu)sender, ((System.Windows.Controls.ContextMenu)sender).PlacementTarget)));
         Resources[SystemParameters.VerticalScrollBarWidthKey] = 7.0;
-        var suffix = Environment.UserName;
+        // A profile moved with --data-dir is an instance of its own: two profiles (the installed copy and a test run)
+        // can be open together, and the second instance of the same profile still leaves at once.
+        var suffix = Environment.UserName + (AppPaths.IsOverridden ? "." + AppPaths.ProfileTag : "");
         var eventName = "Local\\BrimDeck.Settings." + suffix;
         _mutex = new Mutex(true, "Local\\BrimDeck.Instance." + suffix, out var first);
         if (!first)
@@ -80,10 +84,35 @@ public partial class App : Application
         }
         SetCurrentProcessExplicitAppUserModelID("BrimDeck.Desktop");
         RecordCrashes();
-        var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck");
+        var folder = AppPaths.Data;
+        if (AppPaths.LastError is { } dataError)
+            try { File.AppendAllText(Path.Combine(folder, "crash.log"), $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}] {dataError}\n\n"); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         Store = new SettingsStore(folder); Settings = Store.Load();
         UseLanguage();
         PanelTheme.Use(Settings);
+        IslandExtensions.SetPalette(Settings);
+        // A plugin page that wrote one of its own declared controls reaches the file through the app, not through itself:
+        // the same queued save every other change uses, and the settings window redone so its row shows the new value.
+        // The pages of that plugin are told by the host, which does that whether the change came from a page or a click.
+        IslandExtensions.WriteValue = (id, key, value) =>
+        {
+            Settings.SetExtensionValue(id, key, value);
+            QueueSave();
+            _settingsWindow?.PluginValuesChanged();
+        };
+        // A scan that put a plugin in a new slot is a change to the file, the same as any other: queued like every
+        // other write, so four folders landing in one scan ask for one save.
+        IslandExtensions.WriteSlots = QueueSave;
+        // The host is started once the single-instance check has passed and the language and theme are current: a second
+        // instance leaves before running any plugin code, and the first views get the saved palette.
+        IslandExtensions.Load();
+        IslandExtensions.ExtensionsChanged += slots =>
+        {
+            // A replaced instance starts knowing nothing; the panels showing its page tell it again.
+            foreach (var slot in slots)
+                if (_presentingExtension[slot].Count > 0) IslandExtensions.Notify(slot, true);
+            foreach (var deck in Decks.ToList()) deck.OnExtensionsChanged(slots);
+        };
         ScheduleDaylight();
         // "跟随系统" follows the Windows app theme while BrimDeck runs.
         Microsoft.Win32.SystemEvents.UserPreferenceChanged += SystemThemeChanged;
@@ -121,7 +150,7 @@ public partial class App : Application
     // errors on the UI thread are logged and the app keeps running, and unobserved task errors are only logged.
     private void RecordCrashes()
     {
-        var log = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "crash.log");
+        var log = Path.Combine(AppPaths.Data, "crash.log");
         void Write(object error)
         {
             try
@@ -141,6 +170,8 @@ public partial class App : Application
     private void UseLanguage()
     {
         Loc.Use(Settings.Language);
+        // The extension pages hear the language as a push, the same way they hear the palette.
+        WebRuntime.SetLanguage(Loc.IsEnglish);
         Resources["PinSourceName"] = Loc.T("固定显示", "Pin");
         Resources["UnpinSourceName"] = Loc.T("取消固定", "Unpin");
     }
@@ -182,6 +213,9 @@ public partial class App : Application
         bool dataChanged = settings.IncludeWsl != Settings.IncludeWsl || !settings.RequiredProviders.SetEquals(Settings.RequiredProviders) ||
             !settings.EnabledApps.Select(e => e.ConfigurationKey).ToHashSet().SetEquals(Settings.EnabledApps.Select(e => e.ConfigurationKey));
         bool syncEnabled = settings.UsageAutoSync && !Settings.UsageAutoSync;
+        // The reader can arrange the pages themselves, which moves the tabs in the panel's page switch: one saved list
+        // says where every page stands, so a change to it is the only thing that needs the tabs and the wheel re-laid out.
+        bool orderChanged = !settings.PageOrder.SequenceEqual(Settings.PageOrder);
         // A new collapsed style morphs every panel's surface into its form (MainWindow.MorphShape).
         bool styleChanged = settings.Style != Settings.Style;
         settings.Normalize(); Settings = settings;
@@ -190,11 +224,22 @@ public partial class App : Application
         UpdateMonitorExtras();
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
         bool languageChanged = Loc.Normalize(settings.Language) != Loc.Language;
-        if (languageChanged) UseLanguage();
+        if (languageChanged)
+        {
+            UseLanguage();
+            // The extension tabs carry the language too: their tooltip and accessible name.
+            foreach (var deck in Decks.ToList()) deck.RefreshExtensionButtons();
+        }
         PanelTheme.Use(settings);
+        IslandExtensions.SetPalette(settings);
         ScheduleDaylight();
         AssignDisplays();
+        // The switch is made again before the panel reads its settings: the tabs are laid out in the order the reader
+        // arranged, and a page's own geometry is measured against where its tab now stands.
+        if (orderChanged) foreach (var deck in Decks.ToList()) deck.RefreshExtensionButtons();
         foreach (var deck in Decks.ToList()) { if (styleChanged) deck.MorphShape(); else deck.ApplySettings(); }
+        // A page's own switch takes effect at once, closing or reopening what its extension reads.
+        foreach (var deck in Decks.ToList()) deck.UpdateMonitorDemand();
         QueueSave();
         CollapsedChanged();
         if (dataChanged || syncEnabled || languageChanged) _ = Deck.RefreshAutomaticallyAsync(queueIfBusy: true);
@@ -223,6 +268,8 @@ public partial class App : Application
         bool changed = PanelTheme.Use(Settings, reload, systemChanged);
         ScheduleDaylight();
         if (!changed) return;
+        // The extension pages are drawn in the theme's text and surface colors, so a new theme gives them new ones.
+        IslandExtensions.SetPalette(Settings);
         // Into or out of high contrast the theme itself has not changed, so the clock's gradient stays as the user left it.
         if (systemChanged && !wasHigh && !PanelTheme.HighContrast && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
         foreach (var deck in Decks.ToList()) deck.ApplySettings();
@@ -327,8 +374,24 @@ public partial class App : Application
             page && Settings.MonitorStorage || stripDrives,
             page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage));
     }
+    // An extension's page being shown or stopped being shown by one panel; the extension learns whether any panel
+    // shows it, and nothing else — the page switch and the loading decide the rest.
+    internal void PresentExtension(MainWindow deck, int slot, bool shown)
+    {
+        if (slot < 0 || slot >= _presentingExtension.Length) return;
+        bool before = _presentingExtension[slot].Count > 0;
+        if (shown) _presentingExtension[slot].Add(deck); else _presentingExtension[slot].Remove(deck);
+        bool after = _presentingExtension[slot].Count > 0;
+        // Only the change of the answer is news: a panel re-rendering while another already shows the page is not.
+        if (before != after) IslandExtensions.Notify(slot, after && !Exiting);
+    }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }
+
+    // Told by a panel whenever it opens or closes (MainWindow.SetExpanded, window close): while any panel is open the
+    // pre-built plugin pages stay ready to switch to; once the last one closes, the pages nobody watches are
+    // reclaimed after the usual grace.
+    internal void PanelUseChanged() => IslandExtensions.PanelInUse(Decks.Any(deck => deck.IsExpanded));
     // The settings are turned into text here, where they live, and written on the thread pool: writing the file (and the virus
     // scan that follows a write) took 60 ms and more, which showed as a stall after every page switch. Writes run one after
     // another in the order they were asked for, so the newest settings always land last.
@@ -373,7 +436,11 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
-        Media?.Dispose(); Monitor?.Dispose(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
+        // Lyrics is only created once this instance is known to be the first one of its profile, so an instance that
+        // leaves at the mutex check reaches OnExit with it still null — the second process then died here on a bare call.
+        Media?.Dispose(); Monitor?.Dispose(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose();
+        for (int slot = 0; slot < IslandExtensions.Slots.Length; slot++) IslandExtensions.Slots[slot]?.SetDemand(false);
+        base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
 }

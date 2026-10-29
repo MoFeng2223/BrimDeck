@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media.Animation;
 using BrimDeck.Core;
 using BrimDeck.Native;
@@ -18,22 +18,34 @@ public partial class MainWindow
     // When the temperatures and the drives join the collapsed row: only once their first figures arrive (StripAdmission).
     private readonly StripAdmission _stripAdmission = new();
     private bool _monitorShowing, _monitorShown, _stripShowing, _monitorFade;
+    // The extension slot this panel last told the app it was showing, so leaving that page releases it.
+    private int _extensionSlot = -1;
 
     private void InitializeMonitor()
     {
         IsVisibleChanged += (_, _) => UpdateMonitorDemand();
         _app.MonitorUpdated += MonitorUpdated;
-        Closed += (_, _) => { _app.MonitorUpdated -= MonitorUpdated; _app.PresentMonitor(this, false, false); };
+        Closed += (_, _) =>
+        {
+            _app.MonitorUpdated -= MonitorUpdated; _app.PresentMonitor(this, false, false);
+            if (_extensionSlot >= 0) _app.PresentExtension(this, _extensionSlot, false);
+            _extensionSlot = -1;
+            // A panel going away can be the last open one; the pages nobody watches then start their grace.
+            _app.PanelUseChanged();
+        };
     }
 
     // Asked whenever the panel opens, closes, changes page or is hidden, and whenever the collapsed row is built.
-    private void UpdateMonitorDemand()
+    internal void UpdateMonitorDemand()
     {
         // Nothing is read for a display that is off (DisplayPower), nor for a row whose readings got no room (RenderCompactMusic).
         // A page left open while the display is off stays as it was (its card, the list held under the pointer); it only stops
         // being read, and takes the current readings when the display is back.
         bool shown = _expanded && IsMonitorPage && IsVisible && !IsSuppressed;
         bool page = shown && !DisplayPower.Off;
+        // A plugin page is watched whenever it is on screen: what it does while watched is its own business (setKeepAlive),
+        // not the sampler's, so a display that is off does not take its demand away.
+        bool extension = _expanded && IsExtensionPage && IsVisible && !IsSuppressed;
         // A row whose chosen readings all wait for their first figures has no width, yet must be read for them (StripAwaits).
         bool strip = !_expanded && (_compactStrip is not null || StripAwaits()) && IsVisible && !IsSuppressed && !DisplayPower.Off && _alert is null && EffectiveStyle != CompactStyle.Line;
         if (!shown)
@@ -44,6 +56,13 @@ public partial class MainWindow
         }
         _monitorShown = shown;
         _app.PresentMonitor(this, page, strip);
+        int slot = extension ? ExtensionSlot : -1;
+        if (_extensionSlot != slot)
+        {
+            if (_extensionSlot >= 0) _app.PresentExtension(this, _extensionSlot, false);
+            _extensionSlot = slot;
+        }
+        if (slot >= 0) _app.PresentExtension(this, slot, true);
         // Neither took readings while hidden: they show the current ones, or dashes once the sampler has paused, never the
         // figures they showed last time.
         if (page && !_monitorShowing) _monitorView?.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
@@ -133,7 +152,8 @@ public partial class MainWindow
         // the new one with a crossfade; a page opened from another one appears as it always has.
         bool shown = MonitorContent.Visibility == Visibility.Visible && _monitorView is not null && MonitorContent.Children.Contains(_monitorView);
         RefreshStatus();
-        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Visible;
+        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; ExtensionContent.Visibility = Visibility.Visible; MonitorContent.Visibility = Visibility.Visible;
+        ShowExtensionView(-1);
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         double width = ContentCanvas.Width, height = ContentCanvas.Height;
         if (!double.IsFinite(width) || !double.IsFinite(height)) return;

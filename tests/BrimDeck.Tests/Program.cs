@@ -33,6 +33,15 @@ try
     CollapsedGeometryTests.Run(root, Check);
     PanelHeaderTests.Run(Check);
     SystemMonitorTests.Run(Check);
+    ExtensionManifestTests.Run(root, Check);
+    ExtensionSettingTests.Run(root, Check);
+    ExtensionStoreTests.Run(Check);
+    PageOrderTests.Run(Check);
+    ExtensionPlacementTests.Run(Check);
+    ExternalLinkTests.Run(Check);
+    BridgeTests.Run(Check);
+    AlarmBookTests.Run(Check);
+    ExtensionStampTests.Run(root, Check);
     CompactReadingTests.Run(Check);
     TemperatureTests.Run(Check);
     StorageTests.Run(Check);

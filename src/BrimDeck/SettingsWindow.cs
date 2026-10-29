@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -29,10 +29,10 @@ public sealed partial class SettingsWindow : Window
     private readonly TextBlock _status = new() { Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
     private ScrollViewer _scroll = null!;
     private static string[] _pages => [Loc.T("常规", "General"), Loc.T("收起外观", "Collapsed view"), Loc.T("展开外观", "Expanded view"),
-        Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck"), Loc.T("面板主题", "Panel theme"), Loc.T("显示与读数", "Display and readings")];
+        Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck"), Loc.T("面板主题", "Panel theme"), Loc.T("显示与读数", "Display and readings"), Loc.T("插件", "Plugins")];
     // The order of the pages in the navigation; the theme page (ThemePage) is listed with the appearance pages, and the system
     // monitor's page (MonitorSettingsPage) has its own group after music, before About.
-    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, 3, 4, 5, 6, MonitorSettingsPage, 7];
+    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, 3, 4, 5, 6, MonitorSettingsPage, PluginsPageNumber, 7];
     private int _page;
     private bool _preview;
     private StackPanel? _appRows;
@@ -329,9 +329,9 @@ public sealed partial class SettingsWindow : Window
         _page = page; _navigation.Children.Clear(); _content.Children.Clear(); _aboutUpdateView = null; _scroll.ScrollToTop();
         foreach (int i in PageOrder)
         {
-            if (i is 0 or 3 or 5 or 7 or MonitorSettingsPage)
+            if (i is 0 or 3 or 5 or 7 or MonitorSettingsPage or PluginsPageNumber)
             {
-                var group = TextLine(i switch { 0 => Loc.T("基础设置", "Basics"), 3 => Loc.T("AI 用量", "AI usage"), MonitorSettingsPage => Loc.T("系统监控", "System monitor"), 5 => Loc.T("音乐", "Music"), _ => Loc.T("关于", "About") },10.5,TextTertiary);
+                var group = TextLine(i switch { 0 => Loc.T("基础设置", "Basics"), 3 => Loc.T("AI 用量", "AI usage"), MonitorSettingsPage => Loc.T("系统监控", "System monitor"), PluginsPageNumber => Loc.T("拓展", "Extensions"), 5 => Loc.T("音乐", "Music"), _ => Loc.T("关于", "About") },10.5,TextTertiary);
                 group.Margin = new Thickness(12, i == 0 ? 0 : 24, 0, 8); _navigation.Children.Add(group);
             }
             int target=i; bool selected=page==i;
@@ -346,12 +346,12 @@ public sealed partial class SettingsWindow : Window
         }
         // The About page is titled by the wordmark itself, so the name does not appear twice.
         var head = new DockPanel { Margin = new Thickness(0,0,0,page == 7 ? 10 : 20) };
-        if (page is < 4 or 5 or 6 or ThemePage or MonitorSettingsPage)
+        if (page is < 4 or 5 or 6 or ThemePage or MonitorSettingsPage or PluginsPageNumber)
         {
             var reset=ActionButton(Loc.T("恢复默认", "Restore defaults"),ResetPage); reset.FontSize=11; DockPanel.SetDock(reset,Dock.Right); head.Children.Add(reset);
         }
         head.Children.Add(page == 7 ? Wordmark(28) : TextLine(_pages[page],24,TextPrimary,FontWeights.SemiBold)); _content.Children.Add(head);
-        switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; case ThemePage: ThemesPage(); break; case MonitorSettingsPage: MonitorSettings(); break; }
+        switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; case ThemePage: ThemesPage(); break; case MonitorSettingsPage: MonitorSettings(); break; case PluginsPageNumber: PluginsPage(); break; }
         if (_content.Children[^1] is Border lastGroup) lastGroup.Margin = new Thickness(lastGroup.Margin.Left, lastGroup.Margin.Top, lastGroup.Margin.Right, 0);
         // Apply the offset before the frame is drawn, so the rebuilt page never shows its top for a frame.
         if (keep > 0) { _scroll.UpdateLayout(); _scroll.ScrollToVerticalOffset(keep); _scroll.UpdateLayout(); }
@@ -368,6 +368,7 @@ public sealed partial class SettingsWindow : Window
         4 => "M 1,2 H 15 V 14 H 1 Z M 1,6 H 15 M 1,10 H 15 M 6,2 V 14",
         6 => "M 1,2 H 15 V 14 H 1 Z M 6.5,5.5 L 11,8 L 6.5,10.5 Z",
         MonitorSettingsPage => "M 1,9 H 4 L 6,4 L 9,13 L 11,7 L 12,9 H 15",
+        PluginsPageNumber => "M 2.5,5 H 4.5 A 1.5,1.5 0 1 1 7.5,5 H 11.5 V 7 A 1.5,1.5 0 1 1 11.5,10 V 12 H 2.5 Z",
         ThemePage => "M 8,1 C 4,1 1,4 1,8 C 1,12 4,15 8,15 C 9.4,15 9.6,13.6 8.8,12.8 C 8,12 8.6,10.5 10,10.5 H 12 C 13.7,10.5 15,9.2 15,7.5 C 15,4 12,1 8,1 Z M 4.6,8 V 8.1 M 6,4.8 V 4.9 M 9.6,4.4 V 4.5 M 12,6.8 V 6.9",
         5 => "M 6,12.5 V 3 L 14,1.5 V 11 M 6,12.5 A 2,2 0 1 1 2,12.5 A 2,2 0 1 1 6,12.5 M 14,11 A 2,2 0 1 1 10,11 A 2,2 0 1 1 14,11",
         _ => "M 8,1 A 7,7 0 1 1 7.99,1 M 8,7 V 12 M 8,4 V 4.2"
@@ -496,13 +497,7 @@ public sealed partial class SettingsWindow : Window
         void FillStarts()
         {
             starts = [(DefaultDeckPage.Last, Loc.T("上次停留的页面", "Last viewed page"))];
-            foreach (var page in DeckPages.Visible(S))
-                starts.Add(page switch
-                {
-                    DeckPage.Music => (DefaultDeckPage.Music, Loc.T("音乐", "Music")),
-                    DeckPage.Monitor => (DefaultDeckPage.Monitor, Loc.T("系统监控", "System monitor")),
-                    _ => (DefaultDeckPage.Usage, Loc.T("AI 用量", "AI usage"))
-                });
+            foreach (var page in DeckPages.Visible(S)) starts.Add(StartEntry(page));
             filling = true;
             start.ItemsSource = starts.Select(option => option.Label).ToList();
             start.SelectedIndex = Math.Max(0, starts.FindIndex(option => option.Value == S.DefaultPage));
@@ -510,12 +505,14 @@ public sealed partial class SettingsWindow : Window
         }
         FillStarts();
         start.SelectionChanged += (_, _) => { if (!filling && start.SelectedIndex >= 0) Change(s => s.DefaultPage = starts[start.SelectedIndex].Value); };
-        SectionTitle(Loc.T("显示的页面", "Pages shown"), help: () => Loc.T("除了在下面设置宽度与高度，也可以把鼠标移到展开面板的左右两边、底边或底角，直接拖动调整大小。",
-            "Besides setting the width and height below, you can point at the expanded panel's sides, bottom edge or bottom corners and drag them to resize it."));
-        // The rows are in the order of the page switch; dragging one by its handle moves its page there at once.
+        SectionTitle(Loc.T("显示的页面", "Pages shown"), help: () => Loc.T("除了在下面设置宽度与高度，也可以把鼠标移到展开面板的左右两边、底边或底角，直接拖动调整大小。插件页不在这里：它的开关、尺寸和顺序在「插件」里设置。",
+            "Besides setting the width and height below, you can point at the expanded panel's sides, bottom edge or bottom corners and drag them to resize it. Plugin pages are not listed here: their switch, size and order are set under Plugins."));
+        // The rows are in the order of the page switch; dragging one by its handle moves its page there at once. A plugin
+        // page is in that same list but not in this section: its switch, its size and its place are set in 设置 → 插件, and
+        // drawing it here would put a second row under a name that is not its own.
         var pages = new StackPanel();
         _pageRows.Clear();
-        foreach (var page in S.PageOrder)
+        foreach (var page in S.PageOrder.Where(page => DeckPages.SlotOf(page) < 0))
             pages.Children.Add(page switch
             {
                 DeckPage.Music => SizeRow(Loc.T("显示音乐", "Show music"), Loc.T("音乐", "music"), page, S.MusicPage, value => { Change(s => s.MusicPage = value); FillStarts(); }, Collect(MusicSizeControls), pages, FillStarts),
@@ -534,6 +531,18 @@ public sealed partial class SettingsWindow : Window
             HotkeyRow(HotkeyKind.Resize));
     }
     private const double PageRowHeight = 44;
+    // The 每次打开时显示 choice for a page: the built-in three by their section names, a plugin page by the title its own
+    // manifest gives — the two enums number their members differently, so a plugin page is named rather than cast.
+    private (DefaultDeckPage Value, string Label) StartEntry(DeckPage page) => page switch
+    {
+        DeckPage.Music => (DefaultDeckPage.Music, Loc.T("音乐", "Music")),
+        DeckPage.Monitor => (DefaultDeckPage.Monitor, Loc.T("系统监控", "System monitor")),
+        DeckPage.Usage => (DefaultDeckPage.Usage, Loc.T("AI 用量", "AI usage")),
+        _ => (DeckPages.SlotOf(page) switch
+        {
+            0 => DefaultDeckPage.Extension0, 1 => DefaultDeckPage.Extension1, 2 => DefaultDeckPage.Extension2, _ => DefaultDeckPage.Extension3
+        }, IslandExtensions.Title(DeckPages.SlotOf(page)))
+    };
     private readonly List<(Border Row, StackPanel Sizes, Button Arrow)> _pageRows = [];
     // A page's row: the handle, then the switch with its sizes underneath. A closed row is one line high, as the drag needs.
     private Border SizeRow(string title, string name, DeckPage page, bool shown, Action<bool> show, StackPanel sizes, StackPanel rows, Action reordered)
@@ -568,11 +577,14 @@ public sealed partial class SettingsWindow : Window
         row.Children.Add(handle); row.Children.Add(body);
         item = new Border { Child = row, Height = open ? double.NaN : PageRowHeight, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0), Tag = page, RenderTransform = new TranslateTransform() };
         _pageRows.Add((item, sizes, arrow));
-        // The sizes close when a drag begins, so every row is one line high while they move.
-        AttachDrag(handle, () => rows, PageRowHeight, list =>
+        // The sizes close when a drag begins, so every row is one line high while they move. The engine reads each row's
+        // own height, which is why a page row opened to its sizes and a page row closed can share one line.
+        AttachDrag(handle, () => rows, list =>
         {
             var order = list.Children.OfType<Border>().Where(b => b.Tag is DeckPage).Select(b => (DeckPage)b.Tag).ToArray();
-            Change(s => s.PageOrder = [.. order]);
+            // The rows here are the built-in pages only, so only their places in the saved list are rewritten: a plugin
+            // the reader arranged in 设置 → 插件 keeps its place rather than being dropped from the order.
+            Change(s => DeckPages.ReorderBuiltInPages(s, order));
             reordered();
         }, ClosePageSizes);
         return item;
@@ -635,13 +647,15 @@ public sealed partial class SettingsWindow : Window
                     // The clock goes back to the one the panel theme suggests, as choosing the theme gives.
                     PanelThemes.ApplyClock(PanelTheme.Current,s);break;
                 case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.RightClickSettings=defaults.RightClickSettings;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;s.ExpandHotkey=defaults.ExpandHotkey;s.ResizeHotkey=defaults.ResizeHotkey;s.MouseWheel=defaults.MouseWheel;
-                    s.MonitorPage=defaults.MonitorPage;s.MonitorWidth=defaults.MonitorWidth;s.MonitorHeight=defaults.MonitorHeight;s.PageOrder=defaults.PageOrder;break;
+                    // Only this section's places go back: the order the 插件 page arranged for the plugins is not written here, so it is not erased here either.
+                    s.MonitorPage=defaults.MonitorPage;s.MonitorWidth=defaults.MonitorWidth;s.MonitorHeight=defaults.MonitorHeight;DeckPages.ReorderBuiltInPages(s,DeckPages.Order);break;
                 case MonitorSettingsPage:s.MonitorPalette=defaults.MonitorPalette;s.MonitorCustomColors=defaults.MonitorCustomColors;s.CompactWarningColor=null;s.CompactCriticalColor=null;s.CompactSmoothing=defaults.CompactSmoothing;s.MonitorInterval=defaults.MonitorInterval;s.MonitorProcesses=defaults.MonitorProcesses;s.MonitorSort=defaults.MonitorSort;s.MonitorMain=defaults.MonitorMain;s.MonitorProcessView=defaults.MonitorProcessView;
                     s.CompactMonitor=defaults.CompactMonitor;s.CompactMonitorItems=defaults.CompactMonitorItems;s.CompactReadings=defaults.CompactReadings;s.NotchAutoWidth=defaults.NotchAutoWidth;s.CapsuleAutoWidth=defaults.CapsuleAutoWidth;s.MonitorTemperatures=defaults.MonitorTemperatures;s.MonitorStorage=defaults.MonitorStorage;break;
                 // The current theme's application colors go back to its own; the other themes keep what was saved for them.
                 case 3:{var previous=s.Apps;s.QuotaAlerts=defaults.QuotaAlerts;s.IncludeWsl=defaults.IncludeWsl;s.Apps=defaults.Apps;PanelThemes.CarryAppChoices(s,previous);break;}
                 case 5:s.MusicText=defaults.MusicText;s.MusicCoverColor=defaults.MusicCoverColor;s.MusicTrackNotice=defaults.MusicTrackNotice;s.LyricsEnabled=defaults.LyricsEnabled;break;
                 case 6:s.NeteaseFullControlEntry=defaults.NeteaseFullControlEntry;s.NeteaseAutoFullControl=defaults.NeteaseAutoFullControl;s.AppleMusicFullControl=defaults.AppleMusicFullControl;break;
+                case PluginsPageNumber:s.Extensions=defaults.Extensions;DeckPages.ResetExtensionPlaces(s);break;
                 // The default theme, with its own colors and suggested clock, the clock reset as the collapsed page resets it; the
                 // other themes keep what was saved for them.
                 case ThemePage:{ChooseTheme(s,defaults.PanelTheme);var palette=PanelThemes.Resolve(PanelTheme.Find(defaults.PanelTheme));
@@ -1124,12 +1138,15 @@ public sealed partial class SettingsWindow : Window
         return new Border { Child = toggle, Padding = new Thickness(0), Height = 44 };
     }
 
-    private Grid SliderRow(string title, double value, double min, double max, double tick, string unit, Action<double> changed, string? help = null)
+    // snap is for the controls whose value the host re-reads against a declaration: a plugin's step of 5 stores 65 when
+    // the reader types 63, and the row would then show a number the page never gets. The settings' own sliders keep
+    // what was typed, because for them the typed number is what gets stored.
+    private Grid SliderRow(string title, double value, double min, double max, double tick, string unit, Action<double> changed, string? help = null, bool snap = false)
     {
         var row=new Grid { Height=44 };
         row.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(174)});row.ColumnDefinitions.Add(new ColumnDefinition());row.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
         row.Children.Add(SettingLabel(title, help is null ? null : () => help));
-        var controls=NumericControls(title,value,min,max,tick,unit,changed);controls.Slider.Margin=new Thickness(0,0,18,0);Grid.SetColumn(controls.Slider,1);row.Children.Add(controls.Slider);Grid.SetColumn(controls.Number,2);controls.Number.VerticalAlignment=VerticalAlignment.Center;row.Children.Add(controls.Number);
+        var controls=NumericControls(title,value,min,max,tick,unit,changed,snap:snap);controls.Slider.Margin=new Thickness(0,0,18,0);Grid.SetColumn(controls.Slider,1);row.Children.Add(controls.Slider);Grid.SetColumn(controls.Number,2);controls.Number.VerticalAlignment=VerticalAlignment.Center;row.Children.Add(controls.Number);
         return row;
     }
 

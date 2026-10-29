@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -34,8 +34,10 @@ public sealed record FullscreenRule(string Name = "", string Path = "")
 public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, OpenCode = 17, OpenCodeGo = 18, OpenRouter = 19 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckSettings.PageOrder.
-public enum DeckPage { Usage, Music, Monitor }
-public enum DefaultDeckPage { Last, Usage, Music, Monitor }
+// Extension0..3 are the slots an extension page can occupy; the app loads the extensions and fills them in order, and a
+// plugin page enters that list the first time it is arranged (or installed) rather than being pruned out of it.
+public enum DeckPage { Usage, Music, Monitor, Extension0, Extension1, Extension2, Extension3 }
+public enum DefaultDeckPage { Last, Usage, Music, Monitor, Extension0, Extension1, Extension2, Extension3 }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
 public enum CompactMusicText { None, Title, Lyrics }
@@ -250,6 +252,27 @@ public static class MonitorSizes
     { PanelSize.Compact => (480, 160), PanelSize.Spacious => (860, 320), _ => Default };
 }
 
+// One extension slot's own page settings: whether its tab is on the island, the page's size, and the values chosen for
+// the controls its manifest declares. The id is the extension's; an entry whose extension is gone is kept, so a return
+// restores the page as it was — values included, which is why a value the manifest no longer declares is kept rather
+// than deleted (the page never reads it, and the author gets it back if they declare the control again).
+// The slot is where the scan last put that plugin: the reader's arrangement and the page's size are written in slots, so
+// a plugin has to come back to the one it was in. -1 is "never placed", which is what a file written before this, or a
+// folder that has not been loaded yet, reads as.
+public sealed record ExtensionPageSettings(string Id = "", bool Shown = true, double Width = 440, double Height = 160, int Slot = -1)
+{
+    public Dictionary<string, ExtensionSettingValue> Values { get; init; } = [];
+}
+
+// The size an extension page starts at, and its quick sizes: snug by default, with roomier steps for pages that
+// draw more. An extension's own settings entry carries what the user chose.
+public static class ExtensionSizes
+{
+    public static readonly (double Width, double Height) Default = (440, 160);
+    public static (double Width, double Height) For(PanelSize size) => size switch
+    { PanelSize.Compact => (440, 160), PanelSize.Spacious => (660, 260), _ => (520, 200) };
+}
+
 public sealed class DeckSettings
 {
     private List<AppEntry>? _apps;
@@ -358,6 +381,31 @@ public sealed class DeckSettings
     public double MonitorWidth { get; set; } = MonitorSizes.Default.Width;
     public double MonitorHeight { get; set; } = MonitorSizes.Default.Height;
     public MonitorPalette MonitorPalette { get; set; } = MonitorPalette.Theme;
+    public List<ExtensionPageSettings> Extensions { get; set; } = [];
+    // The values a reader chose for one plugin's declared controls; empty until they touch one.
+    public IReadOnlyDictionary<string, ExtensionSettingValue> ExtensionValues(string id) =>
+        Extensions.FirstOrDefault(e => e.Id == id)?.Values ?? EmptySettingValues;
+    private static readonly IReadOnlyDictionary<string, ExtensionSettingValue> EmptySettingValues = new Dictionary<string, ExtensionSettingValue>();
+    // One value written back, with the row created on the first change the way a page size does. The caller hands over a
+    // value already honoured against the plugin's declaration, so nothing here has to know the control's range.
+    public void SetExtensionValue(string id, string key, ExtensionSettingValue value)
+    {
+        var at = Extensions.FindIndex(e => e.Id == id);
+        if (at < 0) { var created = new ExtensionPageSettings(id); created.Values[key] = value; Extensions.Add(created); return; }
+        Extensions[at].Values[key] = value;
+    }
+    // The slot a scan put a plugin in, written on its row so it comes back to that slot: the page switch's tabs and a
+    // page's own size are named by slot, so folders placed by name order alone would move every tab the reader
+    // arranged when one plugin was taken away. A row made here says only where the plugin sits — its switch and its
+    // size keep the defaults, and the arrangement of the tabs (PageOrder) is untouched, since that is a reader's doing.
+    public bool PlaceExtension(string id, int slot)
+    {
+        int at = Extensions.FindIndex(e => e.Id == id);
+        if (at < 0) { Extensions.Add(new ExtensionPageSettings(id, Slot: slot)); return true; }
+        if (Extensions[at].Slot == slot) return false;
+        Extensions[at] = Extensions[at] with { Slot = slot };
+        return true;
+    }
     // The Custom scheme's colors; kept while another scheme is chosen.
     public MonitorCustomColors MonitorCustomColors { get; set; } = new();
     // The collapsed readings' colors at the warning and critical levels (ReadingLevels), "#RRGGBB", or null for the panel
@@ -500,6 +548,9 @@ public sealed class DeckSettings
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
         copy.FullscreenRules = FullscreenRules.Select(rule => rule with { }).ToList();
+        // The values live in a mutable dictionary on the row: a copy that shared it would let a settings dialog's
+        // "cancel" write straight through to what was on screen.
+        copy.Extensions = Extensions.Select(entry => entry with { Values = new(entry.Values) }).ToList();
         return copy;
     }
     public void Normalize()
@@ -529,6 +580,18 @@ public sealed class DeckSettings
         MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
         MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : MonitorSizes.Default.Width;
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
+        Extensions = (Extensions ?? []).Where(e => e is not null && !string.IsNullOrWhiteSpace(e.Id))
+            .Select(e => e with
+            {
+                // A file can carry "Values": null — an editor that knows the key and has nothing to write. Repaired
+                // here, once, so every later use (the settings window's copy, the first value written) sees a dictionary.
+                Values = e.Values ?? [],
+                Width = double.IsFinite(e.Width) ? Math.Clamp(e.Width, DeckPages.MinWidth, DeckPages.MaxWidth) : ExtensionSizes.Default.Width,
+                Height = double.IsFinite(e.Height) ? Math.Clamp(e.Height, DeckPages.MinHeight, DeckPages.MaxHeight) : ExtensionSizes.Default.Height,
+                // A place outside the four slots is not a place: read as "never placed", which is where a new folder goes.
+                Slot = e.Slot >= 0 && e.Slot < ExtensionPlacement.SlotCount ? e.Slot : -1
+            })
+            .DistinctBy(e => e.Id, StringComparer.Ordinal).ToList();
         PanelScale = PanelScales.Fit(PanelScale);
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
         MonitorCustomColors ??= new();
