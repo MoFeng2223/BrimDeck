@@ -106,6 +106,15 @@ The page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq (MIT
 - Built-in themes include Dark, Light, One Dark Pro, GitHub Dark, GitHub Light, Dracula, Night Owl and Cyberpunk: Edgerunners.
 - On the Panel theme page in settings, you can change the background, foreground, accent and other colors and save them as a custom theme, or write a theme file by following the [theme guide](docs/en-US/themes.md).
 
+### Extensions
+
+An extension is a folder — a `manifest.json` and the web page it points at. Put it in `%LOCALAPPDATA%\BrimDeck\extensions\` and it appears as a page of the open panel: no rebuild and no restart, and the app never runs code from the folder, because the page runs in a browser process.
+
+- Settings → Plugins shows what is loaded, switches each one off, resizes its page and drags its tab into place, and reloads the folder while the app runs.
+- The host hands the page the theme colors, the language and whether it is shown, and keeps its state and its alarms for it while nobody is looking at it.
+- A page's own settings and wordings can be declared in the manifest instead of written: the host draws the controls in that plugin's row and stores what the reader chooses.
+- Extensions need the WebView2 runtime, which Windows 10 and 11 usually already have. A page can reach the network, so install only from sources you trust — see the [extension guide](EXTENSIONS.md).
+
 ## Install
 
 Requires Windows 11 (x64). Windows 10 (version 2004 or later) has limited support.
