@@ -75,43 +75,60 @@ internal static class IslandExtensions
             }
         }
 
-        // The kept slots keep their extension — a plugin whose folder did not change keeps its pages and their state;
-        // everything else is placed fresh, in name order, into the slots that remain.
-        var slots = new IIslandExtension?[4];
-        var sources = new string?[4];
-        var ids = new string?[4];
-        var stamps = new string?[4];
+        // One plugin per id: a folder declaring an id another folder already declares is a mistake the reader is told
+        // about, and it takes no slot. Folders that are not plugins at all, and ones that could not be read, are left
+        // out here and reported above.
+        var candidates = new List<(string Name, string Stamp, ExtensionManifest Manifest)>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var keptNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        for (int slot = 0; slot < 4; slot++)
-        {
-            var name = _sources[slot];
-            if (Slots[slot] is null || name is not { Length: > 0 }) continue;
-            var entry = read.FirstOrDefault(item => item.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-            if (entry.Manifest is not null && entry.Stamp == _stamps[slot])
-            {
-                slots[slot] = Slots[slot]; sources[slot] = name; ids[slot] = _ids[slot]; stamps[slot] = _stamps[slot];
-                keptNames.Add(name);
-                if (_ids[slot] is { } id) seen.Add(id);
-            }
-        }
-        int at = 0;
         foreach (var item in read)
         {
-            if (item.Manifest is null || keptNames.Contains(item.Name)) continue;
-            if (!seen.Add(item.Manifest.Id))
+            if (item.Manifest is not { } manifest) continue;
+            if (!seen.Add(manifest.Id))
             {
-                Failures.Add((item.Name, Loc.T("插件 ID 重复：", "Duplicate plugin id: ") + item.Manifest.Id));
+                Failures.Add((item.Name, Loc.T("插件 ID 重复：", "Duplicate plugin id: ") + manifest.Id));
                 continue;
             }
-            while (at < 4 && slots[at] is not null) at++;
-            if (at >= 4)
-            {
-                Failures.Add((item.Name, Loc.T("槽位已满", "All four slots are filled")));
-                continue;
-            }
-            var extension = new WebExtension(item.Manifest, Path.Combine(Folder, item.Name));
-            slots[at] = extension; sources[at] = item.Name; ids[at] = extension.Id; stamps[at] = item.Stamp;
+            candidates.Add((item.Name, item.Stamp, manifest));
+        }
+
+        // A slot whose folder is still on disk keeps that slot, whether or not the folder changed: the tabs the reader
+        // arranged and the sizes the reader set are named by slot, so a plugin that was only edited must not drift to
+        // another one. A folder whose manifest cannot be read holds nothing — its slot is free for the others to use.
+        var live = new string?[ExtensionPlacement.SlotCount];
+        for (int slot = 0; slot < ExtensionPlacement.SlotCount; slot++)
+            if (_sources[slot] is { Length: > 0 } standing && read.FirstOrDefault(item => item.Name.Equals(standing, StringComparison.OrdinalIgnoreCase)) is { Manifest: { } holds })
+                live[slot] = holds.Id;
+        // Where the file says each plugin sat, so a cold start puts the tabs back as the reader left them.
+        var saved = Settings is { } file ? ExtensionPlacement.SavedPlaces(file.Extensions) : null;
+        var seat = ExtensionPlacement.Place([.. candidates.Select(item => item.Manifest.Id)], live, saved);
+
+        var slots = new IIslandExtension?[ExtensionPlacement.SlotCount];
+        var sources = new string?[ExtensionPlacement.SlotCount];
+        var ids = new string?[ExtensionPlacement.SlotCount];
+        var stamps = new string?[ExtensionPlacement.SlotCount];
+        var going = new (string Name, string Stamp, ExtensionManifest Manifest)?[ExtensionPlacement.SlotCount];
+        for (int at = 0; at < candidates.Count; at++)
+            if (seat[at] is var slot and >= 0) going[slot] = candidates[at];
+            else Failures.Add((candidates[at].Name, Loc.T("槽位已满", "All four slots are filled")));
+        for (int slot = 0; slot < ExtensionPlacement.SlotCount; slot++)
+        {
+            if (going[slot] is not { } folder) continue;
+            // The folder that was already standing here with the same contents keeps its extension — its pages, its
+            // state, its alarms — exactly as they are; everything else is built fresh.
+            if (Slots[slot] is { } held && _sources[slot]?.Equals(folder.Name, StringComparison.OrdinalIgnoreCase) == true && _stamps[slot] == folder.Stamp)
+            { slots[slot] = held; sources[slot] = _sources[slot]; ids[slot] = _ids[slot]; stamps[slot] = folder.Stamp; continue; }
+            var extension = new WebExtension(folder.Manifest, Path.Combine(Folder, folder.Name));
+            slots[slot] = extension; sources[slot] = folder.Name; ids[slot] = extension.Id; stamps[slot] = folder.Stamp;
+        }
+
+        // What a scan decided is written down: the plugin's own row records the slot it stands in, so the next cold
+        // start puts the tab back there rather than handing the folders out in name order again. Only a scan that moved
+        // something asks for the file to be saved.
+        if (Settings is { } store)
+        {
+            bool recorded = false;
+            for (int slot = 0; slot < slots.Length; slot++) if (ids[slot] is { Length: > 0 } id) recorded |= store.PlaceExtension(id, slot);
+            if (recorded) WriteSlots?.Invoke();
         }
 
         var changed = new List<int>();
@@ -224,6 +241,23 @@ internal static class IslandExtensions
     // How a value a page wrote reaches the file, the settings page and every other panel showing that plugin. The app
     // installs it at startup; the host has no business deciding when settings are saved.
     public static Action<string, string, ExtensionSettingValue>? WriteValue;
+    // How a slot a scan placed a plugin in reaches the file. The scan decides where a plugin sits; the app decides when
+    // that is written down, and a scan that moved nothing never asks.
+    public static Action? WriteSlots;
+    // The scale the panels draw at (DeckSettings.PanelScale). A web page is given a box at that many times the panel's
+    // own size and shrunk back into it, so the browser rasterizes one pixel per pixel the reader sees — a panel's
+    // transform can stretch a page already drawn, but it cannot make the browser draw it again at the new size. The
+    // pages read this to keep one CSS pixel one unscaled panel DIP, which is the unit their manifests are written in.
+    public static double PanelScale => _panelScale;
+    private static double _panelScale = 1;
+    public static void SetPanelScale(double scale)
+    {
+        if (scale == _panelScale || !double.IsFinite(scale) || scale <= 0) return;
+        _panelScale = scale;
+        // Pages already on screen changed box with the scale and re-report as they settle; one that cannot report — a
+        // page mid-load, or one whose document is blank — is fitted from what it last said instead.
+        foreach (var slot in Slots) if (slot is WebExtension extension) extension.Refit();
+    }
     public static void SetPalette(DeckSettings settings)
     {
         Colors = With(MonitorThemeColors.For(settings));

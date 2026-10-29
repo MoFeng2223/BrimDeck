@@ -256,7 +256,10 @@ public static class MonitorSizes
 // the controls its manifest declares. The id is the extension's; an entry whose extension is gone is kept, so a return
 // restores the page as it was — values included, which is why a value the manifest no longer declares is kept rather
 // than deleted (the page never reads it, and the author gets it back if they declare the control again).
-public sealed record ExtensionPageSettings(string Id = "", bool Shown = true, double Width = 440, double Height = 160)
+// The slot is where the scan last put that plugin: the reader's arrangement and the page's size are written in slots, so
+// a plugin has to come back to the one it was in. -1 is "never placed", which is what a file written before this, or a
+// folder that has not been loaded yet, reads as.
+public sealed record ExtensionPageSettings(string Id = "", bool Shown = true, double Width = 440, double Height = 160, int Slot = -1)
 {
     public Dictionary<string, ExtensionSettingValue> Values { get; init; } = [];
 }
@@ -390,6 +393,18 @@ public sealed class DeckSettings
         var at = Extensions.FindIndex(e => e.Id == id);
         if (at < 0) { var created = new ExtensionPageSettings(id); created.Values[key] = value; Extensions.Add(created); return; }
         Extensions[at].Values[key] = value;
+    }
+    // The slot a scan put a plugin in, written on its row so it comes back to that slot: the page switch's tabs and a
+    // page's own size are named by slot, so folders placed by name order alone would move every tab the reader
+    // arranged when one plugin was taken away. A row made here says only where the plugin sits — its switch and its
+    // size keep the defaults, and the arrangement of the tabs (PageOrder) is untouched, since that is a reader's doing.
+    public bool PlaceExtension(string id, int slot)
+    {
+        int at = Extensions.FindIndex(e => e.Id == id);
+        if (at < 0) { Extensions.Add(new ExtensionPageSettings(id, Slot: slot)); return true; }
+        if (Extensions[at].Slot == slot) return false;
+        Extensions[at] = Extensions[at] with { Slot = slot };
+        return true;
     }
     // The Custom scheme's colors; kept while another scheme is chosen.
     public MonitorCustomColors MonitorCustomColors { get; set; } = new();
@@ -572,7 +587,9 @@ public sealed class DeckSettings
                 // here, once, so every later use (the settings window's copy, the first value written) sees a dictionary.
                 Values = e.Values ?? [],
                 Width = double.IsFinite(e.Width) ? Math.Clamp(e.Width, DeckPages.MinWidth, DeckPages.MaxWidth) : ExtensionSizes.Default.Width,
-                Height = double.IsFinite(e.Height) ? Math.Clamp(e.Height, DeckPages.MinHeight, DeckPages.MaxHeight) : ExtensionSizes.Default.Height
+                Height = double.IsFinite(e.Height) ? Math.Clamp(e.Height, DeckPages.MinHeight, DeckPages.MaxHeight) : ExtensionSizes.Default.Height,
+                // A place outside the four slots is not a place: read as "never placed", which is where a new folder goes.
+                Slot = e.Slot >= 0 && e.Slot < ExtensionPlacement.SlotCount ? e.Slot : -1
             })
             .DistinctBy(e => e.Id, StringComparer.Ordinal).ToList();
         PanelScale = PanelScales.Fit(PanelScale);

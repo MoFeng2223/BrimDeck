@@ -37,6 +37,7 @@ try
     ExtensionSettingTests.Run(root, Check);
     ExtensionStoreTests.Run(Check);
     PageOrderTests.Run(Check);
+    ExtensionPlacementTests.Run(Check);
     ExternalLinkTests.Run(Check);
     BridgeTests.Run(Check);
     AlarmBookTests.Run(Check);

@@ -100,6 +100,9 @@ public partial class App : Application
             QueueSave();
             _settingsWindow?.PluginValuesChanged();
         };
+        // A scan that put a plugin in a new slot is a change to the file, the same as any other: queued like every
+        // other write, so four folders landing in one scan ask for one save.
+        IslandExtensions.WriteSlots = QueueSave;
         // The host is started once the single-instance check has passed and the language and theme are current: a second
         // instance leaves before running any plugin code, and the first views get the saved palette.
         IslandExtensions.Load();
