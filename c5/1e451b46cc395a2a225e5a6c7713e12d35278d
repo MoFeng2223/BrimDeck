@@ -1,0 +1,70 @@
+tests/BrimDeck.WindowsTests/TemperatureChecks.cs
+  h_dc4d9c798f1bc1 15,21-22,24-25,27-31,34-36,46-48,52-53,62,68,73-74
+src/BrimDeck/Native/SensorGuard.cs
+  h_dc4d9c798f1bc1 1-187
+docs/zh-CN/privacy.md
+  h_dc4d9c798f1bc1 36
+tests/BrimDeck.Tests/SensorStopTests.cs
+  h_dc4d9c798f1bc1 1-43
+src/BrimDeck/SettingsMonitor.cs
+  h_dc4d9c798f1bc1 84,88,91-123
+src/BrimDeck/Native/PowerSensors.cs
+  h_dc4d9c798f1bc1 19-21,27-28,37-40,42-53,58,76
+tests/BrimDeck.Tests/Program.cs
+  h_dc4d9c798f1bc1 39
+src/BrimDeck/App.xaml.cs
+  h_dc4d9c798f1bc1 87-88,406
+src/BrimDeck/Native/StorageReader.cs
+  h_dc4d9c798f1bc1 15-16,33-34,50,53,55,71-72,74,76,80,110-112,115-120
+  s_c7d20caa2dfe57::t_c8d680d578337a 73,75
+src/BrimDeck/Native/TemperatureSensors.cs
+  h_dc4d9c798f1bc1 14-17,22,26-27,29-30,33-34,39,41-45,62-65,75,87-88,93-95,97,102,107-108,112-115,119
+tests/BrimDeck.WindowsTests/SensorGuardChecks.cs
+  h_dc4d9c798f1bc1 1-55
+src/BrimDeck/SettingsThemeEditor.cs
+  h_dc4d9c798f1bc1 272-274
+tests/BrimDeck.WindowsTests/BrimDeck.WindowsTests.csproj
+  h_dc4d9c798f1bc1 17
+src/BrimDeck/SettingsWindow.cs
+  h_dc4d9c798f1bc1 114,116
+docs/en-US/privacy.md
+  h_dc4d9c798f1bc1 36
+src/BrimDeck/Native/SystemSampler.cs
+  h_dc4d9c798f1bc1 14-15,28-29,33-35,39,104,108-114,116-124,141,150,154-160,163-165,168,202-203,218,234,251,297-299,358
+  s_19a2a506123028::t_aaa3799a4ecc45 115,149
+src/BrimDeck.Core/SensorStops.cs
+  h_dc4d9c798f1bc1 1-84
+tests/BrimDeck.WindowsTests/PowerChecks.cs
+  h_dc4d9c798f1bc1 43,48-49,52,54,60,64,66,69-70,77,79,87-89,91,93,103-104,107-109,111
+tests/BrimDeck.WindowsTests/Program.cs
+  h_dc4d9c798f1bc1 32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c51e451b46cc395a2a225e5a6c7713e12d35278d",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_19a2a506123028": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9000af51-0eb7-4248-ba29-dbc42183eebe",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_c7d20caa2dfe57": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dded69dd-f449-4386-b600-137872cd4441",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
