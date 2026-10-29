@@ -1,0 +1,56 @@
+src/BrimDeck/SettingsClock.cs
+  h_dc4d9c798f1bc1 16-17,20,24
+tests/BrimDeck.Tests/CompactReadingTests.cs
+  h_dc4d9c798f1bc1 24-25,266,268,270,272-293,300
+src/BrimDeck/Native/ProcessLoopbackCapture.cs
+  h_dc4d9c798f1bc1 10-11,38,49
+src/BrimDeck/Native/AudioLevelMeter.cs
+  h_dc4d9c798f1bc1 10-11,24-25,28,30,80-84,97,110,137-138,144-147
+  s_362064b2221d42::t_fcf2c9d5643bcc 139-143,148
+src/BrimDeck/Native/MediaSessions.cs
+  h_dc4d9c798f1bc1 70,206-207,209-212,673-678
+src/BrimDeck/SettingsWindow.cs
+  h_dc4d9c798f1bc1 633,643
+src/BrimDeck.Core/Music.cs
+  h_dc4d9c798f1bc1 64-67,83,107-111,124,129-131,145-146,148,150,152,154,156-158,177,181,183-188,200
+src/BrimDeck/SettingsMusic.cs
+  h_dc4d9c798f1bc1 16,25,57,59-61,63,67-69,78,98,101-116,118-208,216-219
+  s_362064b2221d42::t_510d371f9f384a 117
+src/BrimDeck.Core/SettingsMigrations.cs
+  h_dc4d9c798f1bc1 20,69-78
+src/BrimDeck.Core/Settings.cs
+  h_dc4d9c798f1bc1 42-44,47-48,260,304-314,327-328,403,446-447,461,463
+tests/BrimDeck.Tests/MusicTests.cs
+  h_dc4d9c798f1bc1 201-216
+src/BrimDeck.Core/EqualizerSignal.cs
+  h_dc4d9c798f1bc1 11,15
+src/BrimDeck/App.xaml.cs
+  h_dc4d9c798f1bc1 39,288,295-297,300-301
+tests/BrimDeck.Tests/EqualizerSignalTests.cs
+  h_dc4d9c798f1bc1 33-35
+src/BrimDeck/MusicVisuals.cs
+  h_dc4d9c798f1bc1 107
+src/BrimDeck/MainWindow.Music.cs
+  h_dc4d9c798f1bc1 67,507-508,527,886,900,905,908,913,918,929,969-970,985-986,988,1024-1033,1051-1052,1060,1062,1083-1088,1102-1106,1108,1110,1114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "302ce63b0c0a7bf2715226ea85416cbefc7cf3b3",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_362064b2221d42": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c3301f01-be7e-4e8d-b017-21772c5d5451",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
