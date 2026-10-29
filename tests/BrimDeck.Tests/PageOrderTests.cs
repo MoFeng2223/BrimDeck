@@ -1,4 +1,4 @@
-using BrimDeck.Core;
+﻿using BrimDeck.Core;
 
 // Which page comes after which. The panel's tab strip, its wheel, its hand-over direction and its fallback page all read
 // this one list (DeckSettings.PageOrder), plugin pages included, so the tests here are about that list: what it says when
@@ -123,6 +123,32 @@ internal static class PageOrderTests
             // beta's tab now hides, but its place in the list is kept for when it is switched back on.
             check("Reorder: switching a plugin off hides its tab and keeps its place",
                 !DeckPages.Visible(settings).Contains(DeckPage.Extension1) && settings.PageOrder.Contains(DeckPage.Extension1));
+        }
+
+        // A file written by the build that kept each plugin's place on its own row still reads: the row is about the
+        // plugin (its switch, its size, its declared values), and the one key this build no longer knows is ignored
+        // rather than taken as a damaged file.
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "BrimDeck-PageOrder-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(folder);
+            try
+            {
+                var store = new SettingsStore(folder, "1.2.2");
+                var saved = new DeckSettings();
+                saved.Extensions.Add(new ExtensionPageSettings("alpha") { Width = 640, Height = 220 });
+                saved.PageOrder = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Extension0];
+                store.Save(saved);
+                var root = System.Text.Json.Nodes.JsonObject.Parse(File.ReadAllText(store.FilePath))!.AsObject();
+                root["Extensions"]!.AsArray()[0].AsObject()["Order"] = 2;
+                File.WriteAllText(store.FilePath, root.ToJsonString());
+
+                var again = new SettingsStore(folder, "1.2.2");
+                var read = again.Load();
+                check("File: a place written on the row by an earlier build is ignored, not read as damage",
+                    again.LoadWarning is null && read.Extensions.Single(e => e.Id == "alpha") is { Width: 640, Height: 220 }
+                    && read.PageOrder.SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Extension0]));
+            }
+            finally { try { Directory.Delete(folder, true); } catch (IOException) { } }
         }
     }
 }
