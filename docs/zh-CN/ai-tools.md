@@ -18,7 +18,7 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 | ZCode | ✓ | ✓ | 在本机登录 ZCode |
 | DeepSeek Harness | ✓ | ✓ | 在 DeepSeek Harness 桌面版或本地 Web 版中登录 DeepSeek 账户，或在其中保存 API 密钥 |
 | Kimi Code | ✓ | ✓ | 在本机登录 Kimi Code（CLI、桌面版或 VS Code 扩展） |
-| Pi | ✓ | ✓ | 在本机使用 Pi Coding Agent（可选开启读取 Codex / Antigravity 登录配额） |
+| Pi | | ✓ | 在本机使用 Pi Coding Agent（读取会话 Token 与费用统计） |
 | 智谱 GLM、Z.ai GLM | ✓ | | 在设置中填写 API 密钥 |
 | DeepSeek | ✓ | | 在设置中填写 API 密钥 |
 | Kimi Code API | ✓ | | 在设置中填写 Kimi Code API 密钥 |
@@ -68,10 +68,9 @@ Kimi Code CLI、桌面版与 VS Code 扩展共用同一个数据目录与登录�
 
 ## Pi
 
-支持读取 Pi Coding Agent（`~/.pi/agent`）在本机的会话用量与已登录的 Codex / Antigravity 额度，无需安装任何 Pi 插件。
+支持读取 Pi Coding Agent（`~/.pi/agent`）在本机的会话用量与费用统计，无需安装任何 Pi 插件。
 
-- **配额**：在设置中展开 Pi 行并开启“读取 Pi 登录并查询额度”（默认关闭）后，每列可选择读取 Codex 或 Antigravity 额度。当本机 `antigravity-accounts.json` 中存在多个 Antigravity 账号时，面板列标题右侧会自动显示 `[1] [2] …` 账号切换胶囊，点击即可无感切换查看各账号的 Gemini 与 Claude 额度，不会修改 Pi 当前使用的活动账号；可选开启内存级 Google 令牌续期（不改写 Pi 的登录或账号池文件）。
-- **Token 用量与费用**：读取 `~/.pi/agent/sessions`（支持 `PI_CODING_AGENT_DIR` 与 `PI_CODING_AGENT_SESSION_DIR`）中的会话记录，按提供商（如 `openai-codex`、`antigravity`）自动分流对应列的今日与七日 Token 用量及费用。
+- **Token 用量与费用**：读取 `~/.pi/agent/sessions`（支持 `PI_CODING_AGENT_DIR` 与 `PI_CODING_AGENT_SESSION_DIR` 环境变量）中的会话记录，统计各模型的今日与七日 Token 用量；费用按 Pi 会话记录中的实际费用统计。
 
 ## 手动填写的来源
 

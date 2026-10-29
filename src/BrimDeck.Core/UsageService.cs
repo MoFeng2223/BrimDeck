@@ -41,9 +41,6 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     // Home folders are searched again every few minutes: listing them touches the distributions' file systems.
     private (DateTimeOffset Time, IReadOnlyList<WslHome> Homes)? _wsl;
     private bool _includeWsl;
-    private bool _piReadLogin;
-    private readonly PiAntigravityAccounts _piAccounts = new();
-    private string _piQuotaProvider = "openai-codex";
     private readonly AntigravityUsage _antigravity = new();
     private readonly DshSessions _dsh = new();
     private readonly KimiSessions _kimi = new();
@@ -115,9 +112,6 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             // Each underlying source is read once, even when several columns reuse it.
             var required = settings.RequiredProviders;
             _includeWsl = settings.IncludeWsl;
-            _piReadLogin = settings.PiReadLogin && settings.EnabledApps.Any(a => a.QuotaSource == ProviderId.Pi && a.PiProvider.Length == 0);
-            if (!settings.PiReadLogin || !settings.PiGoogleRefresh) _piAccounts.Clear();
-            _piQuotaProvider = settings.PiQuotaProvider;
             // The Claude and Grok Bot account APIs are asked only for rows that read online; rows that do not share one local snapshot.
             bool claudeOnline = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Claude && app.QuotaOnline);
             bool claudeLocal = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Claude && ProviderCatalog.ReadsLocalQuota(app));
@@ -131,68 +125,12 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             if (grokBotOnline) sources = sources.Append(ProviderId.GrokBot);
             var tasks = sources.Select(id => FetchAsync(id, usageStart, claudeOnline, deadline.Token, cancellation));
             var configured = _configured.RefreshAsync(settings.EnabledApps, deadline.Token);
-            var piRows = ReadPiRowsAsync(settings, deadline.Token, cancellation);
-            List<ProviderSnapshot> results = [.. await Task.WhenAll(tasks), .. await configured, .. await piRows];
+            List<ProviderSnapshot> results = [.. await Task.WhenAll(tasks), .. await configured];
             if (claudeLocal) results.Add(ReadClaudeLocal(usageStart));
             if (grokBotLocal) results.Add(ReadGrokBotLocal(usageStart));
             return results;
         }
         finally { _gate.Release(); }
-    }
-
-    // One failing source must not discard the others' results; errors not anticipated below still end as a status.
-    private async Task<List<ProviderSnapshot>> ReadPiRowsAsync(DeckSettings settings, CancellationToken ct, CancellationToken lifetime)
-    {
-        var results = new List<ProviderSnapshot>();
-        var piApps = settings.EnabledApps.Where(a => a.QuotaSource == ProviderId.Pi && a.PiProvider.Length > 0).ToList();
-        foreach (var group in piApps.Where(a => a.PiProvider != "antigravity").GroupBy(a => a.PiProvider))
-        {
-            var snapshot = new ProviderSnapshot(ProviderId.Pi);
-            try { await PiQuota.ReadAsync(snapshot, _locations.PiAuthFile, settings.PiReadLogin, group.Key, _http, _clock(), ct); }
-            catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { throw; }
-            catch (OperationCanceledException) { snapshot.StatusLabel = Loc.T("读取超时", "Timed out"); snapshot.Status = Loc.T("读取超时，稍后重试", "Reading timed out. Retrying later."); }
-            catch { snapshot.StatusLabel = Loc.T("账号额度暂不可用", "Account quota unavailable"); snapshot.Status = Loc.T("查询失败，稍后自动重试", "Query failed; retrying automatically later"); }
-            snapshot.Configurations.Add(ProviderCatalog.PiAccountKey(group.Key, ""));
-            foreach (var entry in group) snapshot.Configurations.Add(entry.ConfigurationKey);
-            results.Add(snapshot);
-        }
-        var agyApps = piApps.Where(a => a.PiProvider == "antigravity").ToList();
-        if (agyApps.Count > 0)
-        {
-            var pool = settings.PiReadLogin ? PiAntigravityAccounts.List(_locations.PiAccountsFile, _clock()) : [];
-            bool hasPoolFile = File.Exists(_locations.PiAccountsFile);
-            string activeKey = pool.FirstOrDefault(a => a.Active)?.Key ?? (pool.Count > 0 ? pool[0].Key : "");
-            var keys = pool.Select(a => a.Key)
-                .Concat(agyApps.Select(a => hasPoolFile ? a.PiAccountKey : ""))
-                .Select(k => k.Length == 0 && activeKey.Length > 0 ? activeKey : k)
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
-            if (keys.Count == 0) keys.Add("");
-            foreach (var key in keys)
-            {
-                var snapshot = new ProviderSnapshot(ProviderId.Pi) { PiAccounts = pool };
-                try
-                {
-                    if (key.Length > 0)
-                        await _piAccounts.ReadAsync(snapshot, _locations.PiAccountsFile, key, settings.PiReadLogin, settings.PiGoogleRefresh, _http, _clock(), ct);
-                    else
-                        await PiQuota.ReadAsync(snapshot, _locations.PiAuthFile, settings.PiReadLogin, "antigravity", _http, _clock(), ct);
-                }
-                catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { throw; }
-                catch (OperationCanceledException) { snapshot.StatusLabel = Loc.T("读取超时", "Timed out"); snapshot.Status = Loc.T("读取超时，稍后重试", "Reading timed out. Retrying later."); }
-                catch { snapshot.StatusLabel = Loc.T("账号额度暂不可用", "Account quota unavailable"); snapshot.Status = Loc.T("查询失败，稍后自动重试", "Query failed; retrying automatically later"); }
-                snapshot.Configurations.Add(ProviderCatalog.PiAccountKey("antigravity", key));
-                if (key == activeKey) snapshot.Configurations.Add(ProviderCatalog.PiAccountKey("antigravity", ""));
-                foreach (var entry in agyApps)
-                {
-                    var entryKey = hasPoolFile ? entry.PiAccountKey : "";
-                    if (entryKey == key || (entryKey.Length == 0 && key == activeKey))
-                        snapshot.Configurations.Add(entry.ConfigurationKey);
-                }
-                results.Add(snapshot);
-            }
-        }
-        return results;
     }
 
     private async Task<ProviderSnapshot> FetchAsync(ProviderId id, DateTime? usageStart, bool claudeOnline, CancellationToken ct, CancellationToken lifetime)
@@ -290,7 +228,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             {
                 case ProviderId.Pi:
                     snapshot.UsageNote += Loc.T(" · 费用取自 Pi 记录，非订阅账单", " · Costs recorded by Pi, not subscription charges");
-                    await PiQuota.ReadAsync(snapshot, _locations.PiAuthFile, _piReadLogin, _piQuotaProvider, _http, now, ct);
+                    snapshot.StatusLabel = Loc.T("仅本地统计", "Local usage only");
+                    snapshot.Status = Loc.T("Pi 仅统计本机会话的 Token 与费用，无在线额度", "Pi tracks local session tokens and costs; no online quota.");
                     break;
                 case ProviderId.Codex:
                 {
@@ -1112,5 +1051,5 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private static JsonDocument? ReadJson(string path) => SharedFile.ReadJson(path);
     private static void Connected(ProviderSnapshot snapshot, string source, DateTimeOffset now)
     { snapshot.LiveQuota = true; snapshot.QuotaTime = now; snapshot.Source = source; snapshot.Status = Loc.T("已连接", "Connected"); snapshot.StatusLabel = Loc.T("已连接", "Connected"); }
-    public void Dispose() { _piAccounts.Clear(); _configured.Dispose(); if (http is null) { _http.Dispose(); _zcodeHttp.Dispose(); } _gate.Dispose(); }
+    public void Dispose() { _configured.Dispose(); if (http is null) { _http.Dispose(); _zcodeHttp.Dispose(); } _gate.Dispose(); }
 }

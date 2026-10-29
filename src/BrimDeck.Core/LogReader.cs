@@ -190,7 +190,7 @@ public sealed class LogReader
         var identity = obj.Get("id").Text();
         if (identity.Length == 0) identity = usage.GetRawText();
         item.Entries.Add(new($"pi:{time:O}:{provider}:{model}:{identity}", time.Value, modelName,
-            input, read, write - hour, hour, output, cost, provider));
+            input, read, write - hour, hour, output, cost));
     }
 
     private static void ParseLine(ReadOnlyMemory<byte> line, ProviderId id, CacheItem item)
@@ -328,22 +328,8 @@ public static class QuotaParser
                 if (bucket.Get("remainingFraction").Number() is { } fraction)
                 {
                     var id = bucket.Get("bucketId").Text();
-                    var label = id switch
-                    {
-                        "gemini-5h" => "Gemini · 5 小时",
-                        "gemini-weekly" => "Gemini · 每周",
-                        "gemini-argon-wtu-5h" => "Gemini 4 · 5 小时",
-                        "gemini-argon-wtu-weekly" => "Gemini 4 · 每周",
-                        "3p-5h" => "Claude · 5 小时",
-                        "3p-weekly" => "Claude · 每周",
-                        _ => id
-                    };
-                    int? minutes = id switch
-                    {
-                        "gemini-5h" or "gemini-argon-wtu-5h" or "3p-5h" => 300,
-                        "gemini-weekly" or "gemini-argon-wtu-weekly" or "3p-weekly" => 10080,
-                        _ => null
-                    };
+                    var label = id switch { "gemini-5h" => "Gemini · 5 小时", "gemini-weekly" => "Gemini · 每周", "3p-5h" => "Claude · 5 小时", "3p-weekly" => "Claude · 每周", _ => id };
+                    int? minutes = id switch { "gemini-5h" or "3p-5h" => 300, "gemini-weekly" or "3p-weekly" => 10080, _ => null };
                     result.Add(new(label, (1 - Math.Clamp(fraction, 0, 1)) * 100, bucket.Get("resetTime").Date(), minutes));
                 }
         if (result.Count > 0) return result;

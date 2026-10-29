@@ -270,10 +270,8 @@ public partial class MainWindow
         // Antigravity labels its quotas "Gemini · 5 小时", "Claude · 每周" and so on. Each group starts its own page, Gemini first,
         // so the first page shows rows 1 and 2 (Gemini) and a click on the column shows rows 3 and 4 (Claude), the same rows and
         // click-to-page as any other app with more than two quotas. Labels without a group come last.
-        var sets = snapshot.Id == ProviderId.Antigravity || snapshot.Source == "Pi · Antigravity"
-            ? quotas.GroupBy(x => UI.QuotaGroup(new Quota(x.Label, 0, null)))
-                .OrderBy(x => x.Key switch { "Gemini 4" => 0, "Gemini" => 1, _ when x.Key.Length > 0 => 2, _ => 3 })
-                .Select(x => x.ToList()).ToList()
+        var sets = snapshot.Id == ProviderId.Antigravity
+            ? quotas.GroupBy(x => UI.QuotaGroup(new Quota(x.Label, 0, null))).OrderBy(x => x.Key == "Gemini" ? 0 : x.Key.Length > 0 ? 1 : 2).Select(x => x.ToList()).ToList()
             : [quotas];
         var pages = sets.SelectMany(set => set.Chunk(capacity)).Select(x => x.ToList()).ToList();
         if (pages.Count == 0) pages.Add([]);
@@ -346,45 +344,6 @@ public partial class MainWindow
             var chip = PlanChip(snapshot, layout);
             Grid.SetColumn(chip, 1); head.Children.Add(chip);
             chip.Measure(new Size(double.PositiveInfinity, layout.Head)); occupied += chip.DesiredSize.Width;
-        }
-        bool isPiAntigravity = entry.QuotaSource == ProviderId.Pi && entry.PiProvider == "antigravity";
-        if (isPiAntigravity && Settings.PiReadLogin)
-        {
-            var accounts = snapshot.PiAccounts;
-            if (accounts.Count > 1)
-            {
-                string activeKey = accounts.FirstOrDefault(a => a.Active)?.Key ?? accounts[0].Key;
-                string currentKey = entry.PiAccountKey.Length > 0 && accounts.Any(a => a.Key == entry.PiAccountKey) ? entry.PiAccountKey : activeKey;
-                double segFont = Math.Max(9.5, layout.Plan);
-                double segHeight = Math.Clamp(layout.Head - 4, 16, 20);
-                var items = accounts.Select((acc, idx) =>
-                {
-                    int num = idx + 1;
-                    string label = acc.Active ? $"{num}·" : $"{num}";
-                    string tip = acc.Active
-                        ? Loc.T($"账号 {num}（Pi 当前使用中）\n点击查看此账号额度", $"Account {num} (Active in Pi)\nClick to view this account's quota")
-                        : Loc.T($"账号 {num}\n点击查看此账号额度（不切换 Pi 当前账号）", $"Account {num}\nClick to view this account's quota (does not switch Pi's active account)");
-                    return new SegmentItem(label, Loc.T($"账号 {num}", $"Account {num}"), acc.Key == currentKey, () =>
-                    {
-                        string nextKey = acc.Key == activeKey ? "" : acc.Key;
-                        if (entry.PiAccountKey == nextKey) return;
-                        _flippedColumn = entry.InstanceId;
-                        var nextSettings = Settings.Copy();
-                        if (nextSettings.Entry(entry.InstanceId) is { } target) target.PiAccountKey = nextKey;
-                        _app.UpdateSettings(nextSettings);
-                    }, tip);
-                }).ToList();
-                var switcher = Segmented(items, segFont, segHeight, layout.Tier >= Tier.Dense ? 4 : 5, centerText: true, glide: $"pi-agy-{entry.InstanceId:N}");
-                switcher.HorizontalAlignment = HorizontalAlignment.Right;
-                switcher.VerticalAlignment = VerticalAlignment.Center;
-                switcher.Margin = new Thickness(6, 0, 0, 0);
-                switcher.MouseLeftButtonDown += (_, e) => e.Handled = true;
-                switcher.MouseLeftButtonUp += (_, e) => e.Handled = true;
-                Grid.SetColumn(switcher, 2);
-                head.Children.Add(switcher);
-                switcher.Measure(new Size(double.PositiveInfinity, layout.Head));
-                occupied += switcher.DesiredSize.Width;
-            }
         }
         name.MaxWidth = Math.Max(20, innerWidth - occupied);
         // The page stretches within its size step instead of being built again (RenderUsage), so the name gives way to the plan

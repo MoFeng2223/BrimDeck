@@ -158,10 +158,8 @@ public partial class App : Application
                 { _settingsWindow?.SaveStatus(Loc.T("密钥文件无法更新，请检查本机设置目录后重试。", "The key file could not be updated. Check the local settings folder and try again."), true); return; }
             }
         }
-        static string FetchScopeKey(AppEntry e) => e.QuotaSource == ProviderId.Pi && e.PiProvider == "antigravity"
-            ? $"pi:antigravity:{e.AllowHttp}" : e.ConfigurationKey;
-        bool dataChanged = settings.PiGoogleRefresh != Settings.PiGoogleRefresh || settings.PiReadLogin != Settings.PiReadLogin || settings.PiQuotaProvider != Settings.PiQuotaProvider || settings.IncludeWsl != Settings.IncludeWsl || !settings.RequiredProviders.SetEquals(Settings.RequiredProviders) ||
-            !settings.EnabledApps.Select(FetchScopeKey).ToHashSet().SetEquals(Settings.EnabledApps.Select(FetchScopeKey));
+        bool dataChanged = settings.IncludeWsl != Settings.IncludeWsl || !settings.RequiredProviders.SetEquals(Settings.RequiredProviders) ||
+            !settings.EnabledApps.Select(e => e.ConfigurationKey).ToHashSet().SetEquals(Settings.EnabledApps.Select(e => e.ConfigurationKey));
         bool syncEnabled = settings.UsageAutoSync && !Settings.UsageAutoSync;
         // A new collapsed style morphs every panel's surface into its form (MainWindow.MorphShape).
         bool styleChanged = settings.Style != Settings.Style;

@@ -31,7 +31,7 @@ public static class ProviderCatalog
     // Antigravity quotas come only from the desktop app's local service; the CLI's own service cannot be queried.
     public static string QuotaDescription(ProviderId id) => id switch
     {
-        ProviderId.Pi => Loc.T("经明确授权后使用 Pi 本机 OAuth 登录直接查询 Codex / Antigravity 额度；不安装插件、不修改 Pi 登录", "After explicit consent, queries Codex / Antigravity quotas with local Pi OAuth sign-in; no extension installation or Pi sign-in modification"),
+        ProviderId.Pi => Loc.T("Pi 仅统计本机会话的 Token 与费用，无在线额度", "Pi tracks local session tokens and costs; no online quota"),
         ProviderId.Antigravity => Loc.T("额度读取自 Antigravity 桌面版，需要桌面版正在运行；不读取 Antigravity CLI",
             "The quota is read from the Antigravity desktop app, which must be running; Antigravity CLI is not read"),
         ProviderId.Dsh => Loc.T("DeepSeek Harness 桌面版或本地 Web 版登录的 DeepSeek 账户余额；未登录账户时使用其中保存的 API 密钥",
@@ -61,9 +61,8 @@ public static class ProviderCatalog
     public const string LocalQuota = "local";
     public static bool ReadsLocalQuota(AppEntry entry) => HasOnlineSwitch(entry.QuotaSource) && !entry.QuotaOnline;
     // Rows that allow HTTP are read apart from otherwise identical rows that do not; the keys of other rows stay as they were.
-    public static string ConfigurationKey(AppEntry entry) => Hash(JsonSerializer.Serialize(new { entry.QuotaSource, entry.Site, entry.Script, entry.SecretRevision, entry.PiProvider, entry.PiAccountKey }))
+    public static string ConfigurationKey(AppEntry entry) => Hash(JsonSerializer.Serialize(new { entry.QuotaSource, entry.Site, entry.Script, entry.SecretRevision }))
         + (ReadsLocalQuota(entry) ? ":" + LocalQuota : "") + (entry.AllowHttp ? ":" + HttpAllowed : "");
-    public static string PiAccountKey(string provider, string accountKey) => $"pi:{provider}:{accountKey}";
     public static string RequestKey(AppEntry entry, string secret) => Hash(JsonSerializer.Serialize(new { entry.QuotaSource, entry.Site, entry.Script, secret }))
         + (entry.AllowHttp ? ":" + HttpAllowed : "");
     private const string HttpAllowed = "http";

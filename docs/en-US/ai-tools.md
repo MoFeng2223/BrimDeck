@@ -18,7 +18,7 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | ZCode | ✓ | ✓ | Sign in to ZCode on this PC |
 | DeepSeek Harness | ✓ | ✓ | Sign in to a DeepSeek account in the DeepSeek Harness desktop app or local web app, or save an API key there |
 | Kimi Code | ✓ | ✓ | Sign in to Kimi Code (CLI, desktop app or VS Code extension) on this PC |
-| Pi | ✓ | ✓ | Use Pi Coding Agent on this PC (optional opt-in for Codex / Antigravity sign-in quotas) |
+| Pi | | ✓ | Use Pi Coding Agent on this PC (reads session token and cost statistics) |
 | Zhipu GLM, Z.ai GLM | ✓ | | Enter an API key in settings |
 | DeepSeek | ✓ | | Enter an API key in settings |
 | Kimi Code API | ✓ | | Enter a Kimi Code API key in settings |
@@ -68,10 +68,9 @@ Kimi Code CLI, the desktop app and the VS Code extension share one data folder a
 
 ## Pi
 
-Reads local session usage and signed-in Codex / Antigravity quotas from Pi Coding Agent (`~/.pi/agent`) without installing any Pi extension.
+Reads local session usage and cost statistics from Pi Coding Agent (`~/.pi/agent`) without installing any Pi extension.
 
-- **Quota**: expand a Pi row in settings and enable "Read Pi sign-in and fetch quota" (off by default) to choose Codex or Antigravity for that column. When multiple Antigravity accounts are present in `antigravity-accounts.json`, a compact `[1] [2] …` account switcher appears in the column header for instant inspection of each account's Gemini and Claude quotas without changing Pi's active account. Optional in-memory Google token renewal can be enabled without modifying Pi files.
-- **Tokens and cost**: reads session records from `~/.pi/agent/sessions` (honoring `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR`) and splits Today and Week token usage and cost by provider (`openai-codex`, `antigravity`) for the corresponding columns.
+- **Tokens and cost**: reads session records from `~/.pi/agent/sessions` (honoring `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR`) and counts token usage and recorded costs for Today and Week.
 
 ## Sources entered by hand
 
