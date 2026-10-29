@@ -290,8 +290,10 @@ public sealed partial class SettingsWindow
                     yield return Row(label, toggle);
                     break;
                 case ExtensionSettingKind.Number:
+                    // snap: what this row shows is what the host kept. A step of 5 typed as 63 is stored as 65, and a row
+                    // still reading 63 would be the settings window saying something the plugin never receives.
                     yield return SliderRow(label, current.Number, setting.Minimum, setting.Maximum, setting.Step, "",
-                        value => WriteDeclared(id, setting, new ExtensionSettingValue("number", false, value)));
+                        value => WriteDeclared(id, setting, new ExtensionSettingValue("number", false, value)), snap: true);
                     break;
                 default:
                     var options = new UniformGrid { Columns = Math.Min(setting.Options.Count, 3) };

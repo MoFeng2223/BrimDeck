@@ -1129,12 +1129,15 @@ public sealed partial class SettingsWindow : Window
         return new Border { Child = toggle, Padding = new Thickness(0), Height = 44 };
     }
 
-    private Grid SliderRow(string title, double value, double min, double max, double tick, string unit, Action<double> changed, string? help = null)
+    // snap is for the controls whose value the host re-reads against a declaration: a plugin's step of 5 stores 65 when
+    // the reader types 63, and the row would then show a number the page never gets. The settings' own sliders keep
+    // what was typed, because for them the typed number is what gets stored.
+    private Grid SliderRow(string title, double value, double min, double max, double tick, string unit, Action<double> changed, string? help = null, bool snap = false)
     {
         var row=new Grid { Height=44 };
         row.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(174)});row.ColumnDefinitions.Add(new ColumnDefinition());row.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
         row.Children.Add(SettingLabel(title, help is null ? null : () => help));
-        var controls=NumericControls(title,value,min,max,tick,unit,changed);controls.Slider.Margin=new Thickness(0,0,18,0);Grid.SetColumn(controls.Slider,1);row.Children.Add(controls.Slider);Grid.SetColumn(controls.Number,2);controls.Number.VerticalAlignment=VerticalAlignment.Center;row.Children.Add(controls.Number);
+        var controls=NumericControls(title,value,min,max,tick,unit,changed,snap:snap);controls.Slider.Margin=new Thickness(0,0,18,0);Grid.SetColumn(controls.Slider,1);row.Children.Add(controls.Slider);Grid.SetColumn(controls.Number,2);controls.Number.VerticalAlignment=VerticalAlignment.Center;row.Children.Add(controls.Number);
         return row;
     }
 

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -713,12 +713,11 @@ internal sealed class WebExtension : IIslandExtension
                         if (root.TryGetProperty("on", out var keep) && keep.ValueKind is JsonValueKind.True or JsonValueKind.False)
                         {
                             _keepAlive = keep.GetBoolean();
-                            if (!_shown && _reclaim is not null)
-                            {
-                                // Turning it on saves a page already counting down; turning it off starts the count again.
-                                _reclaim.Stop();
-                                if (!_keepAlive) _reclaim.Start();
-                            }
+                            // Turning it on saves a page already counting down; turning it off arms the count again —
+                            // through ArmReclaim, so "the panel is open" stays the one rule it is everywhere else. A page
+                            // whose panel is merely on another tab must not start dying because this call bypassed it.
+                            if (_keepAlive) _reclaim?.Stop();
+                            else ArmReclaim();
                         }
                         else Refused(from, "bad-keepAlive", "setKeepAlive wants true or false");
                         break;
@@ -890,16 +889,15 @@ internal sealed class WebExtension : IIslandExtension
                 setKeepAlive: function (on) { post({ kind: 'keepAlive', on: !!on }); },
                 // A link leaves the island: the host opens it in the desktop browser, but only an http/https address,
                 // and at a rate every plugin is held to — the host cannot tell this call from a loop.
-                openUrl: function (url) { if (typeof url === 'string') post({ kind: 'openUrl', url: url }); },
+                openUrl: function (url) { post({ kind: 'openUrl', url: url }); },
                 // One of the controls the manifest declared. The host answers with the value it kept, which is that
                 // control's own range and step applied to what was written here.
-                setSetting: function (key, value) { if (typeof key === 'string') post({ kind: 'setSetting', key: key, value: value }); },
+                setSetting: function (key, value) { post({ kind: 'setSetting', key: key, value: value }); },
                 alarm: {
-                    set: function (id, at) {
-                        var ms = at instanceof Date ? at.getTime() : Number(at);
-                        if (typeof id !== 'string' || !id || !isFinite(ms)) return;
-                        post({ kind: 'alarmSet', id: id, at: ms });
-                    },
+                    // Nothing is filtered here on purpose: a call the host will not take has to come back as an `error`
+                    // the author can read, and a number the page handed over is exactly that. JSON turns a NaN into null
+                    // and drops an undefined property, and the host answers both with bad-alarm.
+                    set: function (id, at) { post({ kind: 'alarmSet', id: id, at: at instanceof Date ? at.getTime() : Number(at) }); },
                     clear: function (id) { if (typeof id === 'string' && id) post({ kind: 'alarmClear', id: id }); }
                 }
             };

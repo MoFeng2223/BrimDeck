@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -133,6 +133,8 @@ internal static class Program
             Console.WriteLine("PASS the host's refusals reach the page as error events");
             Require(CountLog(log, "view: refused fixture-c state-too-large") > 0, "the host says why it dropped an oversized state");
             Require(CountLog(log, "view: refused fixture-c link-refused") > 0, "a link that is not a web address is refused, not opened");
+            Require(CountLog(log, "view: refused fixture-c bad-link") > 0, "openUrl with something that is not a string is refused with a reason");
+            Require(CountLog(log, "view: refused fixture-c bad-alarm") > 0, "alarm.set with something that is not a time is refused with a reason");
             // The page's own jump to a real web address must stay a refusal. It is the case that reads the browser's
             // "was this clicked?" answer as the guardrail — and that answer says yes to a scripted location change,
             // which is how a plugin would otherwise open a desktop tab nobody asked for.
@@ -654,14 +656,14 @@ internal static class Program
     }
 
     // A page that only paints once the host has told it three things: which bridge it is speaking, how much room the
-    // host will keep, and — after two asks the host must refuse — the reason each one was refused. A silent drop reads
+    // host will keep, and — after four asks the host must refuse — the reason each one was refused. A silent drop reads
     // as a host that ignored the page on purpose, so the refusal arriving is what the colour proves. The page also
     // tries to navigate itself out to a real web address, which is the one thing the link rules must never allow: a
     // page that leaves the plugin's own origin was never clicked by anyone.
     private const string BridgeProbe = """
               var seen = {}, told = false;
               function paint() {
-                if (!(told && seen['state-too-large'] && seen['link-refused'])) return;
+                if (!(told && seen['state-too-large'] && seen['link-refused'] && seen['bad-link'] && seen['bad-alarm'])) return;
                 var c = '#0000C0';
                 document.documentElement.style.background = c;
                 document.body.style.background = c;
@@ -672,6 +674,11 @@ internal static class Program
                   told = init.apiVersion >= 1 && init.limits && init.limits.stateBytes > 0 && init.limits.alarms > 0;
                   brimdeck.saveState(new Array(70002).join('x'));
                   brimdeck.openUrl('javascript:alert(1)');
+                  // Two calls the page cannot have meant: an address that is not a string, and a time that is not a
+                  // number. The shim used to eat these before the host ever saw them, so the code the author was told
+                  // to expect never arrived.
+                  brimdeck.openUrl(42);
+                  brimdeck.alarm.set('probe', 'not-a-time');
                   setTimeout(function () { location.href = 'https://example.com/'; }, 300);
                   paint();
                 });
