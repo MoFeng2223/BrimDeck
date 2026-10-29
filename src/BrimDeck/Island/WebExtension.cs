@@ -139,11 +139,10 @@ internal sealed class WebExtension : IIslandExtension
     private readonly string _folder;
     private readonly string _host;
     private readonly List<(WebView2CompositionControl Control, CoreWebView2 Core)> _pages = new();
-    // Views whose control has been disposed. A panel may still hold one in its view cache for a moment; asking the
-    // extension first keeps a dead page from being put back on screen with nothing in it.
-    private readonly HashSet<WebView2CompositionControl> _retired = new();
-    // Controls this extension created and has not disposed. A control that is still initializing belongs here too:
-    // its CoreWebView2 being null is "not ready yet", not "dead".
+    // The controls this extension created and has not retired. Retiring takes a control out of here, so the set stays
+    // bounded by the pages actually on screen: a resident panel that keeps switching pages would otherwise grow it
+    // forever, and a disposed control held here is one the garbage collector cannot collect. A control still
+    // initializing belongs here too — its CoreWebView2 being null is "not ready yet", not "dead".
     private readonly HashSet<WebView2CompositionControl> _created = new();
     // The plugin's state and alarms live in the host, not in the page, so they survive the page being reclaimed while
     // nobody watches it: what the page hands over it gets back the next time it loads.
@@ -156,6 +155,8 @@ internal sealed class WebExtension : IIslandExtension
     // Pages currently showing the blank a reclaim left behind, rather than the plugin's document. They exist, so their
     // alarms must not be retired when a sibling hears them, but they cannot hear anything themselves.
     private readonly HashSet<CoreWebView2> _blankPages = new();
+    // Cores that already spent their one renderer reload, so a page that dies on load cannot loop.
+    private readonly HashSet<CoreWebView2> _reloaded = new();
     private bool _shown, _keepAlive, _reclaimed;
     // How often this plugin has asked for the desktop browser lately; every ask is counted, because none of them can
     // prove a reader was the one who asked.
@@ -393,8 +394,8 @@ internal sealed class WebExtension : IIslandExtension
     // re-adding it would show an empty rectangle with no way to tell why.
     internal bool Alive(FrameworkElement view) => view switch
     {
-        WebView2CompositionControl page => _created.Contains(page) && !_retired.Contains(page),
-        Grid host => host.Children.OfType<WebView2CompositionControl>().All(page => _created.Contains(page) && !_retired.Contains(page)),
+        WebView2CompositionControl page => _created.Contains(page),
+        Grid host => host.Children.OfType<WebView2CompositionControl>().All(page => _created.Contains(page)),
         _ => true
     };
 
@@ -471,13 +472,19 @@ internal sealed class WebExtension : IIslandExtension
 
     // A browser or renderer that dies leaves the control blank. It is logged (the log is on in development and in the
     // UI test), and a renderer that exited once is reloaded; a second failure is left to the next visit instead of
-    // reloading in a loop.
+    // reloading in a loop — a page that kills its renderer on load would otherwise drive crash → reload → crash forever
+    // inside a panel that is never closed.
     private void OnProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs e)
     {
         ExtensionLog.Write("view: process failed " + Id + " kind=" + e.ProcessFailedKind);
         if (e.ProcessFailedKind is CoreWebView2ProcessFailedKind.RenderProcessExited or CoreWebView2ProcessFailedKind.RenderProcessUnresponsive
             && sender is CoreWebView2 core)
         {
+            if (!_reloaded.Add(core))
+            {
+                ExtensionLog.Write("view: renderer gone again " + Id + ", left for the next visit");
+                return;
+            }
             try { core.Reload(); } catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException) { }
         }
     }
@@ -489,6 +496,8 @@ internal sealed class WebExtension : IIslandExtension
             ExtensionLog.Write("view: navigate " + Id + " -> " + _manifest.Entry);
             core.Navigate(EntryUrl());
             _reclaimed = false;
+            // A document of its own again: the page gets its one reload back.
+            _reloaded.Remove(core);
             // The document is on its way to the plugin again. Cleared here rather than on the first hello because the
             // blank document's own shim says hello first, and that one must still be refused.
             _blankPages.Remove(core);
@@ -621,7 +630,7 @@ internal sealed class WebExtension : IIslandExtension
     private void RemovePage(WebView2CompositionControl control)
     {
         ExtensionLog.Write("view: dispose " + Id);
-        _retired.Add(control);
+        _created.Remove(control);
         for (int at = _pages.Count - 1; at >= 0; at--)
             if (ReferenceEquals(_pages[at].Control, control))
             {
@@ -639,8 +648,9 @@ internal sealed class WebExtension : IIslandExtension
             catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException)
             {
                 // A core disposed outside RemovePage must retire its view too, or a panel could put it back on screen.
-                _retired.Add(_pages[at].Control);
+                _created.Remove(_pages[at].Control);
                 _blankPages.Remove(_pages[at].Core);
+                _reloaded.Remove(_pages[at].Core);
                 _pages.RemoveAt(at);
             }
         return _pages;
@@ -802,7 +812,7 @@ internal sealed class WebExtension : IIslandExtension
         _reclaim?.Stop();
         foreach (var (control, core) in Pages())
         {
-            _retired.Add(control);
+            _created.Remove(control);
             try { core.WebMessageReceived -= OnWebMessage; } catch (Exception) { }
             try { control.Dispose(); } catch (Exception) { }
         }
