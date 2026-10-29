@@ -1,0 +1,57 @@
+src/BrimDeck/Native/SystemSampler.cs
+  h_dc4d9c798f1bc1 45-46,146,227-229,244,253-254
+src/BrimDeck/MonitorStrip.cs
+  h_dc4d9c798f1bc1 95,389-390,393-396,401-402,430
+src/BrimDeck.Core/Power.cs
+  h_dc4d9c798f1bc1 68,95-98,102-110,164-166,169,172-193,195-197,208-210,213,223-227
+  s_5a5d43f21c335e::t_854a17e84ffced 194,228-229
+src/BrimDeck/PowerGlyphs.cs
+  h_dc4d9c798f1bc1 12,52-53,57,59,87-90,96-99,110-119,166,168,170,173-174,178,185,267,270-273,286-287,289-299
+  s_5a5d43f21c335e::t_c779492acfdce9 120
+src/BrimDeck/MonitorPanel.cs
+  h_dc4d9c798f1bc1 142-145
+src/BrimDeck.Core/BatteryModel.cs
+  h_dc4d9c798f1bc1 56,58-59,61,65-68
+tests/BrimDeck.Tests/PowerTests.cs
+  h_dc4d9c798f1bc1 38,78-81,94-108,163-171,369,372,374-381,383-392,396,399,403-408,411-413,415-417,419
+  s_5a5d43f21c335e::t_1ae52ecac14f01 409
+README.zh-CN.md
+  h_dc4d9c798f1bc1 98-99
+src/BrimDeck/SettingsMonitor.cs
+  h_dc4d9c798f1bc1 83-84,354
+src/BrimDeck/MonitorPower.cs
+  h_dc4d9c798f1bc1 3-4,18-28,34-38,43-46,51,53-54,63,67,70,74,77-78,89-90,92-93,95-125,127-162,164-165,167-172,174-175,177-184,186-203,209-210,212-214,219-231,241,251-253,255-259,262,264-265,267-270,273-274,276-277,280,283-291,294-295,297-298,300,305,310-312,314,317-320
+  s_5a5d43f21c335e::t_4e670a9f78fe45 176,185,232-233
+src/BrimDeck/PowerIcons.cs
+  h_dc4d9c798f1bc1 10-13,121
+src/BrimDeck.Core/SystemMonitor.cs
+  h_dc4d9c798f1bc1 250-252,258-259
+src/BrimDeck/MonitorView.cs
+  h_dc4d9c798f1bc1 150-151
+README.md
+  h_dc4d9c798f1bc1 98-99
+src/BrimDeck.Core/PowerText.cs
+  h_dc4d9c798f1bc1 3-10,23-24,26-28,30-31,33-40,42-68,71-72,74-77,81-82,86-92,100,105,112,116
+  s_5a5d43f21c335e::t_65e8a67f56ae9f 73,93-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "75224ab267f36bb4b4ec27f54ec5e40b2ab8c113",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_5a5d43f21c335e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e87203a8-7bdc-4956-9058-a2d0dcc22624",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
