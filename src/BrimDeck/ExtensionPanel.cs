@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Media;
 using System.Windows.Media.Animation;
 using BrimDeck.Core;
 
@@ -95,12 +96,19 @@ public partial class MainWindow
                 };
             }
             view.Visibility = Visibility.Hidden;
+            ApplyViewScale(view);
             _extensionViews[slot] = view;
             _extensionKeys[slot] = key;
             ExtensionContent.Children.Add(view);
             ExtensionLog.Write("panel: view built for slot " + slot);
         }
     }
+
+    // A web view is laid out at the panel's scale times the page and shrunk back into the page's own box, so the browser
+    // rasterizes the pixels the reader is shown instead of the ones the panel counted in (see MainWindow.ApplyScale). A
+    // view made while the panel was already scaled needs it the moment it joins the tree, as does one after a scale change.
+    private void ApplyViewScale(FrameworkElement view)
+        => view.LayoutTransform = Scale == 1 ? Transform.Identity : new ScaleTransform(1 / Scale, 1 / Scale);
 
     // The chosen slot's view is the one that shows; the others stay in the tree, hidden and costless to switch back to.
     private void ShowExtensionView(int slot)

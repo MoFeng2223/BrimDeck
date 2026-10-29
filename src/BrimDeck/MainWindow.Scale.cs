@@ -28,6 +28,12 @@ public partial class MainWindow
         _scale = scale; _unscaled.Scale = scale;
         UI.Scale(ExpandedContent, scale);
         BindingOperations.GetBindingExpression(ExpandedContent, WidthProperty)?.UpdateTarget();
+        // A plugin's page is painted by the browser, not by WPF: the transform above can stretch the picture the browser
+        // already made, which is what made a plugin page soft at 150 %. Its own box is made that many times bigger and
+        // shrunk back by the same amount, so the browser paints one pixel per pixel the reader gets while the page keeps
+        // the size, the position and the CSS units it had at 100 %.
+        IslandExtensions.SetPanelScale(scale);
+        foreach (var view in _extensionViews) if (view is { } shown) ApplyViewScale(shown);
     }
 
     internal double Scale => _scale;

@@ -157,6 +157,10 @@ internal sealed class WebExtension : IIslandExtension
     private readonly HashSet<CoreWebView2> _blankPages = new();
     // Cores that already spent their one renderer reload, so a page that dies on load cannot loop.
     private readonly HashSet<CoreWebView2> _reloaded = new();
+    // What each page last said about itself: its scale and its size in CSS pixels. The fit is worked out from the report,
+    // so a change the page never notices — the panel's own scale moving under it — is answered from the last one rather
+    // than waiting for a resize that may not come.
+    private readonly Dictionary<CoreWebView2, (double Dpr, double Width, double Height)> _reports = new();
     private bool _shown, _keepAlive, _reclaimed;
     // How often this plugin has asked for the desktop browser lately; every ask is counted, because none of them can
     // prove a reader was the one who asked.
@@ -358,20 +362,23 @@ internal sealed class WebExtension : IIslandExtension
         try { await core.ExecuteScriptAsync(script).ConfigureAwait(true); } catch (Exception) { }
     }
 
-    // One CSS pixel per panel DIP. The page reports its own scale, which is the only number that says how many CSS
-    // pixels it will lay out in, and the browser's scale for this window need not be the scale the panel is drawn at
-    // (measured: a 400×174 box came out 352×153 CSS pixels where the browser works at 1.14 and the window at 1.0). The
-    // control's zoom is what makes the two agree — the unit a plugin's own layout, and its manifest minimum, are
-    // written in. Dividing the reported scale by the zoom already applied keeps this stable: once corrected the page
-    // reports a scale of 1, the same base comes back out, and the value settles instead of oscillating.
+    // One CSS pixel per panel DIP at the scale the panel is drawn at. The page reports its own scale, which is the only
+    // number that says how many CSS pixels it will lay out in, and the browser's scale for this window need not be the
+    // scale the panel is drawn at (measured: a 400×174 box came out 352×153 CSS pixels where the browser works at 1.14
+    // and the window at 1.0). The control's zoom is what makes the two agree — the unit a plugin's own layout, and its
+    // manifest minimum, are written in. Dividing the reported scale by the zoom already applied keeps this stable: once
+    // corrected the page reports a scale of 1, the same base comes back out, and the value settles instead of oscillating.
+    // The panel's scale goes on top of that target: a page's box is made that many times the panel's DIPs and shrunk back
+    // into place (see MainWindow.ApplyScale), which is what buys the pixels — so the zoom has to hand the DIPs back.
     private void Fit(CoreWebView2 core, double reportedDpr, double reportedWidth, double reportedHeight)
     {
         int at = _pages.FindIndex(pair => ReferenceEquals(pair.Core, core));
         if (at < 0) return;
         var control = _pages[at].Control;
+        _reports[core] = (reportedDpr, reportedWidth, reportedHeight);
         double baseScale = reportedDpr / control.ZoomFactor;
         if (!double.IsFinite(baseScale) || baseScale <= 0) return;
-        double want = VisualTreeHelper.GetDpi(control).DpiScaleX / baseScale;
+        double want = IslandExtensions.PanelScale * VisualTreeHelper.GetDpi(control).DpiScaleX / baseScale;
         if (Math.Abs(want - control.ZoomFactor) <= 0.01)
         {
             // A report that needs no change is the page settled at the box it was given — the pair the UI test reads
@@ -384,6 +391,14 @@ internal sealed class WebExtension : IIslandExtension
         }
         control.ZoomFactor = (float)Math.Clamp(want, 0.2, 5);
         ExtensionLog.Write($"view: scale {Id} zoom={control.ZoomFactor:0.###} browser={baseScale:0.###}");
+    }
+
+    // The panel's scale moved under a page that may never hear about it: every page is fitted again from what it last
+    // reported, so a view sitting hidden behind another is ready at the new size before anyone switches to it.
+    internal void Refit()
+    {
+        foreach (var (_, core) in Pages())
+            if (_reports.TryGetValue(core, out var report)) Fit(core, report.Dpr, report.Width, report.Height);
     }
 
     // A number a page chose to send; absent or non-numeric reads as zero, which every caller rejects.
@@ -635,6 +650,7 @@ internal sealed class WebExtension : IIslandExtension
             if (ReferenceEquals(_pages[at].Control, control))
             {
                 _blankPages.Remove(_pages[at].Core);
+                _reports.Remove(_pages[at].Core);
                 try { _pages[at].Core.WebMessageReceived -= OnWebMessage; } catch (Exception) { }
                 _pages.RemoveAt(at);
             }
@@ -651,6 +667,7 @@ internal sealed class WebExtension : IIslandExtension
                 _created.Remove(_pages[at].Control);
                 _blankPages.Remove(_pages[at].Core);
                 _reloaded.Remove(_pages[at].Core);
+                _reports.Remove(_pages[at].Core);
                 _pages.RemoveAt(at);
             }
         return _pages;
@@ -817,6 +834,7 @@ internal sealed class WebExtension : IIslandExtension
             try { control.Dispose(); } catch (Exception) { }
         }
         _pages.Clear();
+        _reports.Clear();
         WebRuntime.Unregister(this);
     }
 
