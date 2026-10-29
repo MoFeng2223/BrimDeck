@@ -433,7 +433,9 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
-        Media?.Dispose(); Monitor?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose();
+        // Lyrics is only created once this instance is known to be the first one of its profile, so an instance that
+        // leaves at the mutex check reaches OnExit with it still null — the second process then died here on a bare call.
+        Media?.Dispose(); Monitor?.Dispose(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose();
         for (int slot = 0; slot < IslandExtensions.Slots.Length; slot++) IslandExtensions.Slots[slot]?.SetDemand(false);
         base.OnExit(e);
     }

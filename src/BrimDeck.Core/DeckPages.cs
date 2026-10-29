@@ -42,6 +42,11 @@ public static class DeckPages
 
     private static bool IsPluginPage(DeckPage page) => SlotOf(page) >= 0 && SlotOccupied?.Invoke(SlotOf(page)) == true;
 
+    // The plugins page's "restore defaults": the plugin rows go back to their own defaults and their places come out of
+    // the saved order, so the plugins stand in slot order again. The built-in pages keep the order their own page set —
+    // their places were not written here.
+    public static void ResetExtensionPlaces(DeckSettings settings) => settings.PageOrder = [.. settings.PageOrder.Where(page => SlotOf(page) < 0)];
+
     // Write `wanted` into the places of the saved list that belong to this section. A page the caller left out is not
     // dropped — it joins at the end, in the place it already holds — and a page nothing is loaded in is not a place.
     private static void Reorder(DeckSettings settings, List<DeckPage> wanted, Func<DeckPage, bool> isMine)

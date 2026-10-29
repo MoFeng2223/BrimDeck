@@ -73,6 +73,24 @@ internal static class PageOrderTests
                 !DeckPages.Normalize([DeckPage.Usage, (DeckPage)99, DeckPage.Music]).Contains((DeckPage)99));
         }
 
+        // ── restoring the plugins page to its defaults ─────────────────────────────────────────────────
+        using (Load("alpha", "beta", "gamma", null))
+        {
+            var arranged = Listed(DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Extension2, DeckPage.Extension0);
+            arranged.Extensions.Add(Entry("beta", shown: false));
+            DeckPages.ResetExtensionPlaces(arranged);
+            check("Reset: the plugins page's defaults clear the plugin places, and only those",
+                arranged.PageOrder.SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor]));
+            check("Reset: with the places gone the loaded plugins stand in slot order again",
+                DeckPages.Arrangement(arranged).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Extension0, DeckPage.Extension1, DeckPage.Extension2]));
+
+            // A built-in order the appearance page wrote is not this page's to undo.
+            var builtins = Listed(DeckPage.Monitor, DeckPage.Extension0, DeckPage.Usage, DeckPage.Music);
+            DeckPages.ResetExtensionPlaces(builtins);
+            check("Reset: the built-in pages keep the order their own page arranged",
+                builtins.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music]));
+        }
+
         // ── writing an order down ────────────────────────────────────────────────────────────────────────
         var before = Array.Empty<DeckPage>();
         using (Load("alpha", "beta", "gamma", "delta"))
@@ -139,7 +157,7 @@ internal static class PageOrderTests
                 saved.PageOrder = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Extension0];
                 store.Save(saved);
                 var root = System.Text.Json.Nodes.JsonObject.Parse(File.ReadAllText(store.FilePath))!.AsObject();
-                root["Extensions"]!.AsArray()[0].AsObject()["Order"] = 2;
+                root["Extensions"]!.AsArray()[0]!.AsObject()["Order"] = 2;
                 File.WriteAllText(store.FilePath, root.ToJsonString());
 
                 var again = new SettingsStore(folder, "1.2.2");
