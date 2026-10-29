@@ -240,6 +240,16 @@ internal static class Program
                 + ", rows: " + rows + ", tabs: " + string.Join(", ", arranged));
             Console.WriteLine("PASS the page switch follows the order the reader arranged: " + string.Join(", ", arranged));
 
+            // The same order, seen from the other settings page. A plugin page now sits in that one saved list, and the
+            // 展开外观 list reads the list to make its rows — which gave four loaded plugins four rows named after the
+            // usage page, since only three of the names were written there. One row per built-in page, and no more.
+            Press(FindAny(settings, "展开外观", "Expanded view"));
+            Thread.Sleep(600);
+            var (usage, music, monitor) = (CountNamed(settings, "显示 AI 用量", "Show AI usage"), CountNamed(settings, "显示音乐", "Show music"), CountNamed(settings, "显示系统监控", "Show system monitor"));
+            Require(usage == 1 && music == 1 && monitor == 1,
+                $"the pages-shown list holds one row per built-in page: {usage} usage, {music} music, {monitor} monitor");
+            Console.WriteLine("PASS the pages-shown section lists the three built-in pages, plugins included in neither");
+
             Console.WriteLine("UI SMOKE PASSED");
             return 0;
         }
@@ -315,6 +325,17 @@ internal static class Program
         foreach (var name in names)
             if (WaitFor(() => FindOrNull(window, name), TimeSpan.FromSeconds(3), name) is { } found) return found;
         throw new TestFailure("none of \"" + string.Join("\" / \"", names) + "\" is in that window");
+    }
+
+    // How many check boxes carry one of these names — the app's own labels, in either interface language. A row that
+    // should exist once and was drawn four times is caught here rather than by counting pixels.
+    private static int CountNamed(AutomationElement window, params string[] names)
+    {
+        var found = window.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.CheckBox));
+        int count = 0;
+        foreach (AutomationElement element in found)
+            try { if (names.Contains(element.Current.Name)) count++; } catch (ElementNotAvailableException) { }
+        return count;
     }
 
     // The plugin tabs' left edges, listed in the order the page switch walks them. The strip tells the truth only when

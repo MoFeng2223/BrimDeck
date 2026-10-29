@@ -497,13 +497,7 @@ public sealed partial class SettingsWindow : Window
         void FillStarts()
         {
             starts = [(DefaultDeckPage.Last, Loc.T("上次停留的页面", "Last viewed page"))];
-            foreach (var page in DeckPages.Visible(S))
-                starts.Add(page switch
-                {
-                    DeckPage.Music => (DefaultDeckPage.Music, Loc.T("音乐", "Music")),
-                    DeckPage.Monitor => (DefaultDeckPage.Monitor, Loc.T("系统监控", "System monitor")),
-                    _ => (DefaultDeckPage.Usage, Loc.T("AI 用量", "AI usage"))
-                });
+            foreach (var page in DeckPages.Visible(S)) starts.Add(StartEntry(page));
             filling = true;
             start.ItemsSource = starts.Select(option => option.Label).ToList();
             start.SelectedIndex = Math.Max(0, starts.FindIndex(option => option.Value == S.DefaultPage));
@@ -511,12 +505,14 @@ public sealed partial class SettingsWindow : Window
         }
         FillStarts();
         start.SelectionChanged += (_, _) => { if (!filling && start.SelectedIndex >= 0) Change(s => s.DefaultPage = starts[start.SelectedIndex].Value); };
-        SectionTitle(Loc.T("显示的页面", "Pages shown"), help: () => Loc.T("除了在下面设置宽度与高度，也可以把鼠标移到展开面板的左右两边、底边或底角，直接拖动调整大小。",
-            "Besides setting the width and height below, you can point at the expanded panel's sides, bottom edge or bottom corners and drag them to resize it."));
-        // The rows are in the order of the page switch; dragging one by its handle moves its page there at once.
+        SectionTitle(Loc.T("显示的页面", "Pages shown"), help: () => Loc.T("除了在下面设置宽度与高度，也可以把鼠标移到展开面板的左右两边、底边或底角，直接拖动调整大小。插件页不在这里：它的开关、尺寸和顺序在「拓展」里设置。",
+            "Besides setting the width and height below, you can point at the expanded panel's sides, bottom edge or bottom corners and drag them to resize it. Plugin pages are not listed here: their switch, size and order are set under Extensions."));
+        // The rows are in the order of the page switch; dragging one by its handle moves its page there at once. A plugin
+        // page is in that same list but not in this section: its switch, its size and its place are set in 设置 → 拓展, and
+        // drawing it here would put a second row under a name that is not its own.
         var pages = new StackPanel();
         _pageRows.Clear();
-        foreach (var page in S.PageOrder)
+        foreach (var page in S.PageOrder.Where(page => DeckPages.SlotOf(page) < 0))
             pages.Children.Add(page switch
             {
                 DeckPage.Music => SizeRow(Loc.T("显示音乐", "Show music"), Loc.T("音乐", "music"), page, S.MusicPage, value => { Change(s => s.MusicPage = value); FillStarts(); }, Collect(MusicSizeControls), pages, FillStarts),
@@ -535,6 +531,18 @@ public sealed partial class SettingsWindow : Window
             HotkeyRow(HotkeyKind.Resize));
     }
     private const double PageRowHeight = 44;
+    // The 每次打开时显示 choice for a page: the built-in three by their section names, a plugin page by the title its own
+    // manifest gives — the two enums number their members differently, so a plugin page is named rather than cast.
+    private (DefaultDeckPage Value, string Label) StartEntry(DeckPage page) => page switch
+    {
+        DeckPage.Music => (DefaultDeckPage.Music, Loc.T("音乐", "Music")),
+        DeckPage.Monitor => (DefaultDeckPage.Monitor, Loc.T("系统监控", "System monitor")),
+        DeckPage.Usage => (DefaultDeckPage.Usage, Loc.T("AI 用量", "AI usage")),
+        _ => (DeckPages.SlotOf(page) switch
+        {
+            0 => DefaultDeckPage.Extension0, 1 => DefaultDeckPage.Extension1, 2 => DefaultDeckPage.Extension2, _ => DefaultDeckPage.Extension3
+        }, IslandExtensions.Title(DeckPages.SlotOf(page)))
+    };
     private readonly List<(Border Row, StackPanel Sizes, Button Arrow)> _pageRows = [];
     // A page's row: the handle, then the switch with its sizes underneath. A closed row is one line high, as the drag needs.
     private Border SizeRow(string title, string name, DeckPage page, bool shown, Action<bool> show, StackPanel sizes, StackPanel rows, Action reordered)
@@ -639,7 +647,8 @@ public sealed partial class SettingsWindow : Window
                     // The clock goes back to the one the panel theme suggests, as choosing the theme gives.
                     PanelThemes.ApplyClock(PanelTheme.Current,s);break;
                 case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.RightClickSettings=defaults.RightClickSettings;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;s.ExpandHotkey=defaults.ExpandHotkey;s.ResizeHotkey=defaults.ResizeHotkey;s.MouseWheel=defaults.MouseWheel;
-                    s.MonitorPage=defaults.MonitorPage;s.MonitorWidth=defaults.MonitorWidth;s.MonitorHeight=defaults.MonitorHeight;s.PageOrder=defaults.PageOrder;break;
+                    // Only this section's places go back: the order the 拓展 page arranged for the plugins is not written here, so it is not erased here either.
+                    s.MonitorPage=defaults.MonitorPage;s.MonitorWidth=defaults.MonitorWidth;s.MonitorHeight=defaults.MonitorHeight;DeckPages.ReorderBuiltInPages(s,DeckPages.Order);break;
                 case MonitorSettingsPage:s.MonitorPalette=defaults.MonitorPalette;s.MonitorCustomColors=defaults.MonitorCustomColors;s.CompactWarningColor=null;s.CompactCriticalColor=null;s.CompactSmoothing=defaults.CompactSmoothing;s.MonitorInterval=defaults.MonitorInterval;s.MonitorProcesses=defaults.MonitorProcesses;s.MonitorSort=defaults.MonitorSort;s.MonitorMain=defaults.MonitorMain;s.MonitorProcessView=defaults.MonitorProcessView;
                     s.CompactMonitor=defaults.CompactMonitor;s.CompactMonitorItems=defaults.CompactMonitorItems;s.CompactReadings=defaults.CompactReadings;s.NotchAutoWidth=defaults.NotchAutoWidth;s.CapsuleAutoWidth=defaults.CapsuleAutoWidth;s.MonitorTemperatures=defaults.MonitorTemperatures;s.MonitorStorage=defaults.MonitorStorage;break;
                 // The current theme's application colors go back to its own; the other themes keep what was saved for them.
