@@ -1,0 +1,48 @@
+src/BrimDeck.Core/Power.cs
+  h_dc4d9c798f1bc1 156-158,160-167,171-172,174-176,182,188,192,200,226-227,231
+tests/BrimDeck.Tests/CompactReadingTests.cs
+  h_dc4d9c798f1bc1 151-155,157-164
+src/BrimDeck.Core/PowerText.cs
+  h_dc4d9c798f1bc1 23-25,27-30,40-41,69
+src/BrimDeck.Core/CompactMonitor.cs
+  h_dc4d9c798f1bc1 94-98
+src/BrimDeck/Native/SystemSampler.cs
+  h_dc4d9c798f1bc1 44,230
+  s_19a2a506123028::t_e76a67b599451c 45-47,149,231,249,259
+tests/BrimDeck.Tests/PowerTests.cs
+  h_dc4d9c798f1bc1 87,96-108,118-119,393,395-396,399,402-404,431-433
+  h_dc4d9c798f1bc1 430
+src/BrimDeck.Core/MonitorLayout.cs
+  h_dc4d9c798f1bc1 11-13,48-54,56-57,61,67-68,72-75,101-103,108,119-121
+  s_19a2a506123028::t_901305e4049566 62
+src/BrimDeck.Core/SystemMonitor.cs
+  h_dc4d9c798f1bc1 245
+src/BrimDeck/PowerGlyphs.cs
+  h_dc4d9c798f1bc1 28-30
+src/BrimDeck.Core/PowerLook.cs
+  h_dc4d9c798f1bc1 30,40-42,47-50
+src/BrimDeck/SettingsMonitor.cs
+  h_dc4d9c798f1bc1 73,77,81-82,204-205,331,340
+  s_19a2a506123028::t_103636d2e5e3a3 159,195-200,333
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2f7ae291133d1898e2dd119ceaf21a562c2323ff",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_19a2a506123028": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9000af51-0eb7-4248-ba29-dbc42183eebe",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
