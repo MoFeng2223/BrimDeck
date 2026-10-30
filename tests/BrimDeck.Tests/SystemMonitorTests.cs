@@ -268,6 +268,12 @@ static class SystemMonitorTests
     {
         var settings = new DeckSettings();
         check("Pages: monitor comes after usage and music", DeckPages.Visible(settings).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor]));
+        var withTray = new DeckSettings(); withTray.Tray.Enabled = true;
+        check("Pages: the file tray is the last page, and only while it is switched on",
+            DeckPages.Visible(withTray).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.FileTray])
+            && DeckPages.Resolve(withTray, DeckPage.FileTray) == DeckPage.FileTray);
+        withTray.Tray.Enabled = false;
+        check("Pages: a switched-off file tray falls back like any other page", DeckPages.Resolve(withTray, DeckPage.FileTray) == DeckPage.Usage);
         var sized = new DeckSettings();
         DeckPages.SetSize(sized, DeckPage.Music, 700, 300); DeckPages.SetSize(sized, DeckPage.Monitor, 800, 320); DeckPages.SetSize(sized, DeckPage.Usage, 900, 260);
         check("Pages: a drag sets the size of the page it is on and of no other",

@@ -32,6 +32,7 @@ try
     CompactReadingTests.Run(Check);
     TemperatureTests.Run(Check);
     StorageTests.Run(Check);
+    FileTrayTests.Run(Check);
     StripAdmissionTests.Run(Check);
     ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);

@@ -19,6 +19,9 @@ public partial class App : Application
     private readonly DispatcherTimer _save = new() { Interval = TimeSpan.FromMilliseconds(400) };
     public DeckSettings Settings { get; private set; } = new();
     public SettingsStore Store { get; private set; } = null!;
+    private FileTrayStore? _trayStore;
+    // The file tray's items, shared by the tray page and the floating tray.
+    public FileTray Tray { get; private set; } = new();
     public UsageService Usage { get; private set; } = null!;
     public ProviderSecrets Secrets { get; private set; } = null!;
     public Pricing Prices { get; private set; } = null!;
@@ -82,6 +85,9 @@ public partial class App : Application
         RecordCrashes();
         var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck");
         Store = new SettingsStore(folder); Settings = Store.Load();
+        _trayStore = new FileTrayStore(folder); Tray = _trayStore.Load();
+        // Every change is written at once: a tray that lost what it held on a crash would be worse than a slow save.
+        Tray.Changed += () => { _trayStore?.Save(Tray); foreach (var deck in Decks.ToList()) deck?.TrayChanged(); };
         UseLanguage();
         PanelTheme.Use(Settings);
         ScheduleDaylight();

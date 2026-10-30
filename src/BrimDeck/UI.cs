@@ -46,6 +46,19 @@ internal static class UI
         Typography.SetNumeralAlignment(block, FontNumeralAlignment.Tabular);
         return block;
     }
+    public static readonly FontFamily IconFont = new("Segoe Fluent Icons, Segoe MDL2 Assets");
+    // A glyph from the icon font, centered on its visible ink the way CenteredSymbol centers text.
+    public static Path CenteredIcon(string glyph, double size, string color)
+    {
+        var brush = Brush(color);
+        var formatted = new FormattedText(glyph, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+            new Typeface(IconFont, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal), size, brush, 1);
+        var geometry = formatted.BuildGeometry(new Point());
+        var bounds = geometry.Bounds;
+        geometry.Transform = new TranslateTransform(0, -bounds.Top);
+        return new Path { Data = geometry, Fill = brush, Width = formatted.WidthIncludingTrailingWhitespace,
+            Height = bounds.Height, Stretch = Stretch.None, VerticalAlignment = VerticalAlignment.Center, UseLayoutRounding = false };
+    }
     // Standalone symbols center their visible ink, without the font's baseline whitespace.
     public static Path CenteredSymbol(string text, double size, string color, FontWeight? weight = null)
     {

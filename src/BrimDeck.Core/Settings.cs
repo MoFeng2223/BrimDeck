@@ -34,8 +34,10 @@ public sealed record FullscreenRule(string Name = "", string Path = "")
 public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, OpenCode = 17, OpenCodeGo = 18 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckPages.Order.
-public enum DeckPage { Usage, Music, Monitor }
-public enum DefaultDeckPage { Last, Usage, Music, Monitor }
+public enum DeckPage { Usage, Music, Monitor, FileTray }
+public enum DefaultDeckPage { Last, Usage, Music, Monitor, FileTray }
+// Where the file tray appears: as a page of the open panel, as a window beside the cursor, or both.
+public enum FileTrayPlacement { Notch, Floating, Both }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
 public enum CompactMusicText { None, Title, Lyrics }
@@ -192,6 +194,49 @@ public static class MonitorSizes
     { PanelSize.Compact => (480, 160), PanelSize.Spacious => (860, 320), _ => Default };
 }
 
+// The file tray's own settings, one page in the settings window. "Where it appears" is the first question the page asks;
+// the rest only matters for the place that is on.
+public sealed class TraySettings
+{
+    // The switch in the page's toolbar: off hides the tray page and the floating tray both. Off at first: the tray is a
+    // page of the panel, and a panel that gains one by itself would change what everybody already has.
+    public bool Enabled { get; set; }
+    public FileTrayPlacement Placement { get; set; } = FileTrayPlacement.Both;
+    // Opens the tray page after a drop, so what was just added is on screen.
+    public bool OpenAfterDrop { get; set; } = true;
+    // Minutes an unpinned item waits before the clean-up takes it; 0 keeps everything.
+    public int RetentionMinutes { get; set; }
+    // The floating tray: whether it appears at once or after a short delay, and how long it stays without the pointer.
+    public bool FloatingInstant { get; set; } = true;
+    public int FloatingDelayMs { get; set; } = 250;
+    public int AutoHideDelayMs { get; set; } = 2400;
+    public bool MultipleFloatingTrays { get; set; }
+    // Shown only when the tray appears in both places: keeps the two lists and their removals in step.
+    public bool SyncTrays { get; set; } = true;
+    // Leaving: take the item off the tray once it is dragged out, and always copy rather than move the original.
+    public bool AutoRemoveAfterDragOut { get; set; } = true;
+    public bool ProtectOriginals { get; set; } = true;
+
+    public TraySettings Copy() => new()
+    {
+        Enabled = Enabled, Placement = Placement, OpenAfterDrop = OpenAfterDrop, RetentionMinutes = RetentionMinutes,
+        FloatingInstant = FloatingInstant, FloatingDelayMs = FloatingDelayMs, AutoHideDelayMs = AutoHideDelayMs,
+        MultipleFloatingTrays = MultipleFloatingTrays, SyncTrays = SyncTrays,
+        AutoRemoveAfterDragOut = AutoRemoveAfterDragOut, ProtectOriginals = ProtectOriginals,
+    };
+
+    public void Normalize()
+    {
+        if (!Enum.IsDefined(Placement)) Placement = FileTrayPlacement.Both;
+        RetentionMinutes = Math.Clamp(RetentionMinutes, 0, 1440);
+        FloatingDelayMs = Math.Clamp(FloatingDelayMs, 0, 3000);
+        AutoHideDelayMs = Math.Clamp(AutoHideDelayMs, 300, 20000);
+    }
+
+    // Seconds the retention means, for callers that work in time spans.
+    [System.Text.Json.Serialization.JsonIgnore] public TimeSpan Retention => TimeSpan.FromMinutes(Math.Clamp(RetentionMinutes, 0, 1440));
+}
+
 public sealed class DeckSettings
 {
     private List<AppEntry>? _apps;
@@ -289,6 +334,10 @@ public sealed class DeckSettings
     public bool MonitorPage { get; set; } = true;
     public double MonitorWidth { get; set; } = MonitorSizes.Default.Width;
     public double MonitorHeight { get; set; } = MonitorSizes.Default.Height;
+    public double TrayWidth { get; set; } = 520;
+    public double TrayHeight { get; set; } = 260;
+    // The file tray's own settings: where it appears, how long items wait, and what leaving does to them.
+    public TraySettings Tray { get; set; } = new();
     public MonitorPalette MonitorPalette { get; set; } = MonitorPalette.Theme;
     // The Custom scheme's colors; kept while another scheme is chosen.
     public MonitorCustomColors MonitorCustomColors { get; set; } = new();
@@ -427,6 +476,7 @@ public sealed class DeckSettings
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
+        copy.Tray = (Tray ?? new()).Copy();
         copy.FullscreenRules = FullscreenRules.Select(rule => rule with { }).ToList();
         return copy;
     }
@@ -457,6 +507,9 @@ public sealed class DeckSettings
         MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
         MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : MonitorSizes.Default.Width;
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
+        TrayWidth = double.IsFinite(TrayWidth) ? Math.Clamp(TrayWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : 520;
+        TrayHeight = double.IsFinite(TrayHeight) ? Math.Clamp(TrayHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 260;
+        Tray = Tray?.Copy() ?? new(); Tray.Normalize();
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
         MonitorCustomColors ??= new();
         MonitorCustomColors.Normalize();
