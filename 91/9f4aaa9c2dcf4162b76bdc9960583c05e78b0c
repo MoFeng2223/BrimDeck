@@ -1,0 +1,30 @@
+tests/BrimDeck.Tests/MediaAppTargetTests.cs
+  h_dc4d9c798f1bc1 12-42,68-69
+src/BrimDeck/Native/AudioLevelMeter.cs
+  h_dc4d9c798f1bc1 2,20,25-26,29,31,54,109,125
+tests/BrimDeck.WindowsTests/AppIdentityChecks.cs
+  h_dc4d9c798f1bc1 1-25
+src/BrimDeck.Core/MediaAppTarget.cs
+  h_dc4d9c798f1bc1 4-6,16-19,22-25,33-34,36-66
+src/BrimDeck/Native/MediaAppWindows.cs
+  h_dc4d9c798f1bc1 14,22,25-28,56-57
+src/BrimDeck/Native/AppIdentity.cs
+  h_dc4d9c798f1bc1 1-124
+src/BrimDeck/Native/MediaSessions.cs
+  h_dc4d9c798f1bc1 677,680,683
+tests/BrimDeck.WindowsTests/Program.cs
+  h_dc4d9c798f1bc1 32
+tests/BrimDeck.WindowsTests/BrimDeck.WindowsTests.csproj
+  h_dc4d9c798f1bc1 23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "919f4aaa9c2dcf4162b76bdc9960583c05e78b0c",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
