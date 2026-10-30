@@ -70,7 +70,9 @@ Kimi Code CLI, the desktop app and the VS Code extension share one data folder a
 
 Reads local session usage and cost statistics from Pi Coding Agent (`~/.pi/agent`) without installing any Pi extension.
 
-- **Tokens and cost**: reads session records from `~/.pi/agent/sessions` (honoring `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR`) and counts token usage and recorded costs for Today and Week.
+- **Usage app**: select Pi under "Usage app" and pair it with an existing quota source. Pi is not offered under "Quota source". No Pi sign-in, third-party subscription quota or Pi account switching is read or provided.
+- **Tokens and cost**: reads session records from `~/.pi/agent/sessions` and counts token usage and Pi-recorded costs for Today and Week, not subscription charges.
+- **Session path**: `PI_CODING_AGENT_SESSION_DIR` takes precedence; otherwise reads `sessions` under `PI_CODING_AGENT_DIR`, or the default directory when neither is set. Pi-specific resolution supports `~`, `~/...`, relative paths and local `file://` URLs; Windows also supports `~\...` and Git Bash/MSYS/Cygwin/WSL drive paths. Relative paths use the BrimDeck process working directory, which may differ from Pi running in another terminal. Only the selected directory is read; other Pi profiles are not automatically scanned.
 
 ## Sources entered by hand
 

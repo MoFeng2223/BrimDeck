@@ -21,22 +21,43 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR"), Environment.GetEnvironmentVariable("CODEX_HOME"),
-        Environment.GetEnvironmentVariable("ZCODE_HOME"), Environment.GetEnvironmentVariable("DSH_HOME"), Environment.GetEnvironmentVariable("KIMI_CODE_HOME"))
-    with { PiSessions = ConfigDirectory(Environment.GetEnvironmentVariable("PI_CODING_AGENT_SESSION_DIR"),
-        Path.Combine(ConfigDirectory(Environment.GetEnvironmentVariable("PI_CODING_AGENT_DIR"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pi", "agent")), "sessions")),
-        KimiEnvironment = new(Environment.GetEnvironmentVariable("KIMI_CODE_BASE_URL"),
+        Environment.GetEnvironmentVariable("ZCODE_HOME"), Environment.GetEnvironmentVariable("DSH_HOME"), Environment.GetEnvironmentVariable("KIMI_CODE_HOME"),
+        Environment.GetEnvironmentVariable("PI_CODING_AGENT_DIR"), Environment.GetEnvironmentVariable("PI_CODING_AGENT_SESSION_DIR"))
+    with { KimiEnvironment = new(Environment.GetEnvironmentVariable("KIMI_CODE_BASE_URL"),
         Environment.GetEnvironmentVariable("KIMI_CODE_OAUTH_HOST") ?? Environment.GetEnvironmentVariable("KIMI_OAUTH_HOST"),
         Environment.GetEnvironmentVariable("KIMI_CODE_REGION_MARKER")) };
 
-    public static DataLocations Resolve(string home, string roaming, string local, string? claudeOverride, string? codexOverride, string? zcodeOverride = null, string? dshOverride = null, string? kimiOverride = null) => new(
+    public static DataLocations Resolve(string home, string roaming, string local, string? claudeOverride, string? codexOverride, string? zcodeOverride = null, string? dshOverride = null, string? kimiOverride = null, string? piOverride = null, string? piSessionOverride = null) => new(
         ConfigDirectory(claudeOverride, Path.Combine(home, ".claude")),
         ConfigDirectory(codexOverride, Path.Combine(home, ".codex")),
         Path.Combine(roaming, "Cursor", "User", "globalStorage", "state.vscdb"), roaming, local)
-    { ZCodeHome = ConfigDirectory(zcodeOverride, Path.Combine(home, ".zcode")), DshHome = ConfigDirectory(dshOverride, Path.Combine(home, ".dsh")), KimiHome = ConfigDirectory(kimiOverride, Path.Combine(home, ".kimi-code")), AntigravityConversations = AntigravityUsage.Folders(home), PiSessions = Path.Combine(home, ".pi", "agent", "sessions") };
+    { ZCodeHome = ConfigDirectory(zcodeOverride, Path.Combine(home, ".zcode")), DshHome = ConfigDirectory(dshOverride, Path.Combine(home, ".dsh")), KimiHome = ConfigDirectory(kimiOverride, Path.Combine(home, ".kimi-code")), AntigravityConversations = AntigravityUsage.Folders(home), PiSessions = PiSessionDirectory(home, piOverride, piSessionOverride) };
 
     private static string ConfigDirectory(string? value, string fallback) =>
         !string.IsNullOrWhiteSpace(value) && Path.IsPathFullyQualified(value) ? Path.GetFullPath(value) : fallback;
+
+    // Pi accepts relative paths and expands ~ itself, unlike the other applications' directory overrides.
+    // Resolve only the selected override: a session override takes precedence even if the agent override is invalid.
+    private static string PiSessionDirectory(string home, string? agent, string? sessions) =>
+        !string.IsNullOrEmpty(sessions) ? PiDirectory(sessions, home) :
+        Path.Combine(!string.IsNullOrEmpty(agent) ? PiDirectory(agent, home) : Path.Combine(home, ".pi", "agent"), "sessions");
+
+    private static string PiDirectory(string value, string home)
+    {
+        // Match Pi's Windows normalization for Git Bash/MSYS/Cygwin/WSL drive paths.
+        if (OperatingSystem.IsWindows() && value.StartsWith('/') && !value.StartsWith("//", StringComparison.Ordinal) && !value.Contains('\\'))
+        {
+            var drive = System.Text.RegularExpressions.Regex.Match(value, @"^/(?:mnt/|cygdrive/)?([a-z])(?:/(.*))?$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (drive.Success) value = char.ToUpperInvariant(drive.Groups[1].Value[0]) + @":\" + drive.Groups[2].Value.Replace('/', '\\');
+        }
+        if (value == "~") value = home;
+        else if (value.StartsWith("~/", StringComparison.Ordinal) || (OperatingSystem.IsWindows() && value.StartsWith(@"~\", StringComparison.Ordinal)))
+            value = Path.Join(home, value[2..]);
+        else if (value.StartsWith("file://", StringComparison.Ordinal)) value = new Uri(value).LocalPath;
+        // Do not trim meaningful spaces, expand %variables%, or silently substitute the default for an explicit path.
+        return Path.GetFullPath(value);
+    }
 
     public IReadOnlyList<string> ClaudeDesktopProfiles()
     {

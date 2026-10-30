@@ -70,7 +70,9 @@ Kimi Code CLI、桌面版与 VS Code 扩展共用同一个数据目录与登录�
 
 支持读取 Pi Coding Agent（`~/.pi/agent`）在本机的会话用量与费用统计，无需安装任何 Pi 插件。
 
-- **Token 用量与费用**：读取 `~/.pi/agent/sessions`（支持 `PI_CODING_AGENT_DIR` 与 `PI_CODING_AGENT_SESSION_DIR` 环境变量）中的会话记录，统计各模型的今日与七日 Token 用量；费用按 Pi 会话记录中的实际费用统计。
+- **统计应用**：在“统计应用”中选择 Pi，可与现有配额来源搭配使用；“配额来源”中不提供 Pi。不读取 Pi 登录、不查询第三方订阅额度，也不提供 Pi 多账号切换。
+- **Token 用量与费用**：读取 `~/.pi/agent/sessions` 中的会话记录，统计各模型的今日与七日 Token 用量；费用采用 Pi 记录的数值，不代表订阅账单。
+- **会话路径**：`PI_CODING_AGENT_SESSION_DIR` 优先；未设置时读取 `PI_CODING_AGENT_DIR` 下的 `sessions`，两者均未设置时使用默认目录。Pi 专用解析支持 `~`、`~/...`、相对路径和本地 `file://` URL；Windows 下也支持 `~\...` 与 Git Bash/MSYS/Cygwin/WSL 的盘符路径。相对路径以 BrimDeck 进程的工作目录为基准，不保证与另一个终端中 Pi 的工作目录相同。只读取所选目录，不自动扫描所有 Pi 配置。
 
 ## 手动填写的来源
 

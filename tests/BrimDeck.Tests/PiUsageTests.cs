@@ -39,16 +39,54 @@ static class PiUsageTests
         check("Pi rereads truncated files", reader.Read(ProviderId.Pi, folder, now).Entries.Count == 3);
         check("Pi respects date cutoff", reader.Read(ProviderId.Pi, folder, now, now.LocalDateTime.Date.AddDays(1)).Entries.Count == 0);
         check("Pi missing folder is unavailable", !reader.Read(ProviderId.Pi, Path.Combine(root, "no-pi"), now).UsageAvailable);
-        check("Pi is selectable as quota and usage source", ProviderCatalog.IsBuiltIn(ProviderId.Pi) && ProviderCatalog.IsUsageSource(ProviderId.Pi));
-        var settings = new DeckSettings { Apps = [new AppEntry { QuotaSource = ProviderId.Pi }] };
+        check("Pi is selectable only as a usage app", ProviderCatalog.IsUsageSource(ProviderId.Pi) &&
+            !ProviderCatalog.Sources.Contains(ProviderId.Pi) && !ProviderCatalog.AutomaticSources.Contains(ProviderId.Pi) && !ProviderCatalog.IsBuiltIn(ProviderId.Pi));
+        var settings = new DeckSettings { Apps = [new AppEntry { QuotaSource = ProviderId.GlmChina, UsageSource = ProviderId.Pi }] };
         var serialized = JsonSerializer.Serialize(settings);
-        check("Pi settings round trip keeps stable source", JsonSerializer.Deserialize<DeckSettings>(serialized)!.Apps[0].QuotaSource == ProviderId.Pi);
+        check("Pi usage selection survives settings round trip", JsonSerializer.Deserialize<DeckSettings>(serialized)!.Apps[0] is
+            { QuotaSource: ProviderId.GlmChina, UsageSource: ProviderId.Pi });
+        settings.Normalize();
+        check("Normalizing settings preserves the independent Pi usage app", settings.Apps.Single() is
+            { QuotaSource: ProviderId.GlmChina, UsageSource: ProviderId.Pi } && settings.RequiredProviders.Contains(ProviderId.Pi));
+        CheckPaths(root, check);
         using var handler = new NoNetwork();
         using var http = new HttpClient(handler);
         using var service = new UsageService(new Desktop(), new DataLocations("", "", "", "", "") { PiSessions = folder }, http, () => now);
-        var snapshot = (await service.RefreshAsync(settings)).Single();
+        var snapshot = (await service.RefreshAsync(settings)).Single(s => s.Id == ProviderId.Pi);
         check("Pi service reads usage without credential access or HTTP", handler.Calls == 0 && snapshot.UsageAvailable && snapshot.Entries.Count == 3 && snapshot.Quotas.Count == 0 && !snapshot.LiveQuota);
 
+    }
+
+    private static void CheckPaths(string root, Action<string, bool> check)
+    {
+        var home = Path.Combine(root, "pi-home");
+        string Sessions(string? agent = null, string? sessions = null) =>
+            DataLocations.Resolve(home, root, root, null, null, piOverride: agent, piSessionOverride: sessions).PiSessions;
+        check("Pi defaults to its own agent session folder", Sessions() == Path.Combine(home, ".pi", "agent", "sessions"));
+        check("Pi empty overrides use the default", Sessions("", "") == Sessions());
+        check("Pi expands tilde in agent directory", Sessions("~/my-pi") == Path.Combine(home, "my-pi", "sessions"));
+        check("Pi expands a bare tilde", Sessions("~") == Path.Combine(home, "sessions") && Sessions(sessions: "~") == home);
+        check("Pi expands tilde in session directory", Sessions("~/other-agent", "~/my-sessions") == Path.Combine(home, "my-sessions"));
+        check("Pi session override wins over agent override", Sessions("bad\0agent", "~/my-sessions") == Path.Combine(home, "my-sessions"));
+        check("Pi accepts absolute paths", Sessions(Path.Combine(root, "absolute-agent")) == Path.Combine(root, "absolute-agent", "sessions") &&
+            Sessions(sessions: Path.Combine(root, "absolute-sessions")) == Path.Combine(root, "absolute-sessions"));
+        check("Pi resolves relative paths against the application working directory", Sessions("relative-agent") == Path.Combine(Path.GetFullPath("relative-agent"), "sessions") &&
+            Sessions("~/ignored", "relative-sessions") == Path.GetFullPath("relative-sessions"));
+        check("Pi normalizes parent segments", Sessions("~/one/../my-pi") == Path.Combine(home, "my-pi", "sessions"));
+        check("Pi preserves spaces within paths", Sessions("~/my pi") == Path.Combine(home, "my pi", "sessions"));
+        check("Pi accepts local file URLs", Sessions(sessions: new Uri(Path.Combine(root, "file-url-sessions")).AbsoluteUri) == Path.Combine(root, "file-url-sessions"));
+        bool rejected = false;
+        try { Sessions("bad\0agent"); } catch (ArgumentException) { rejected = true; }
+        check("Pi does not silently fall back for an invalid explicit override", rejected);
+        check("Other applications keep their existing absolute-path-only rule",
+            DataLocations.Resolve(home, root, root, "~/claude", "relative-codex").ClaudeHome == Path.Combine(home, ".claude") &&
+            DataLocations.Resolve(home, root, root, "~/claude", "relative-codex").CodexHome == Path.Combine(home, ".codex"));
+        if (OperatingSystem.IsWindows())
+        {
+            check("Pi accepts Windows tilde separators", Sessions(@"~\my-pi") == Path.Combine(home, "my-pi", "sessions"));
+            check("Pi normalizes Windows shell drive paths", new[] { "/c/my-pi", "/mnt/c/my-pi", "/cygdrive/c/my-pi" }
+                .All(agent => Sessions(agent) == @"C:\my-pi\sessions"));
+        }
     }
 
     sealed class NoNetwork : HttpMessageHandler

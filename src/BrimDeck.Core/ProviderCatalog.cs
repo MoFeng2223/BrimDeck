@@ -9,9 +9,9 @@ public static class ProviderCatalog
 {
     public static readonly ProviderId[] BuiltIns = [ProviderId.Claude, ProviderId.Codex, ProviderId.Antigravity, ProviderId.Cursor];
     // Sources read automatically from local applications; only the first four are added to new settings by default.
-    public static readonly ProviderId[] AutomaticSources = [.. BuiltIns, ProviderId.GrokBot, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.Pi];
+    public static readonly ProviderId[] AutomaticSources = [.. BuiltIns, ProviderId.GrokBot, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi];
     public static readonly ProviderId[] Sources = [.. AutomaticSources, ProviderId.GlmChina, ProviderId.GlmGlobal, ProviderId.DeepSeek, ProviderId.KimiApi, ProviderId.NewApi, ProviderId.Sub2Api, ProviderId.Custom];
-    // Grok Bot keeps no token records on this PC, so it is a quota source only.
+    // Grok Bot is quota-only; Pi is usage-only and must never appear in the quota-source menu.
     public static readonly ProviderId[] UsageSources = [.. BuiltIns, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.Pi];
     public static bool IsBuiltIn(ProviderId id) => AutomaticSources.Contains(id);
     public static bool IsUsageSource(ProviderId id) => UsageSources.Contains(id);
@@ -31,7 +31,6 @@ public static class ProviderCatalog
     // Antigravity quotas come only from the desktop app's local service; the CLI's own service cannot be queried.
     public static string QuotaDescription(ProviderId id) => id switch
     {
-        ProviderId.Pi => Loc.T("Pi 仅统计本机会话的 Token 与费用，无在线额度", "Pi tracks local session tokens and costs; no online quota"),
         ProviderId.Antigravity => Loc.T("额度读取自 Antigravity 桌面版，需要桌面版正在运行；不读取 Antigravity CLI",
             "The quota is read from the Antigravity desktop app, which must be running; Antigravity CLI is not read"),
         ProviderId.Dsh => Loc.T("DeepSeek Harness 桌面版或本地 Web 版登录的 DeepSeek 账户余额；未登录账户时使用其中保存的 API 密钥",
