@@ -10,47 +10,18 @@ namespace BrimDeck;
 
 public sealed partial class SettingsWindow
 {
-    // Whether the clock options are open. Kept while the page is rebuilt or the collapsed style changes.
-    private bool _clockOpen;
     private readonly List<(RadioButton Tile, ClockStyle Style)> _clockTiles = [];
     private readonly Dictionary<CompactStyle, RadioButton> _styleCards = [];
 
-    // The title and its arrow open and close the options under the row; the switch only turns the clock on or off. The title
-    // starts after indent, in line with the names of the draggable rows above it.
-    private FrameworkElement ClockRow(CompactStyle style, double indent = 0)
+    // The clock's row among the collapsed parts; the switch only turns the clock on or off.
+    private Border ClockRow(CompactStyle style, StackPanel rows)
     {
         bool notch = style == CompactStyle.Notch;
-        string title = Loc.T("时间", "Clock");
-        var options = new Border { Background = UI.Brush(Inset), CornerRadius = new CornerRadius(10), Padding = new Thickness(16, 14, 16, 0), Margin = new Thickness(0, 0, 0, 12), Child = ClockOptions(style) };
-        void Enable(bool on) { options.IsEnabled = on; options.Opacity = on ? 1 : .45; }
-        Enable(S.ShowsClock(style));
-        Button arrow = null!;
-        void Show(bool open)
-        {
-            options.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
-            PointArrow(arrow, open);
-        }
-        void Flip() { _clockOpen = !_clockOpen; Show(_clockOpen); }
-        arrow = ChevronButton(Loc.T("时间设置", "Clock settings"), Flip);
-        arrow.Margin = new Thickness(2, 0, 0, 0);
-        var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(indent, 0, 0, 0) };
-        heading.Children.Add(SettingLabel(title)); heading.Children.Add(arrow);
-        var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.ShowsClock(style), Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
-        AutomationProperties.SetName(toggle, title);
-        void Turn(bool on)
+        return OptionsPartRow(style, CompactPart.Clock, rows, Loc.T("时间", "Clock"), Loc.T("时间设置", "Clock settings"), S.ShowsClock(style), on =>
         {
             Change(s => { if (notch) s.NotchClock = on; else s.CapsuleClock = on; });
-            Enable(on);
             if (_styleCards.TryGetValue(style, out var card)) card.Content = CompactStylePreview.Create(style, _palette.Dark, on);
-        }
-        toggle.Checked += (_, _) => Turn(true); toggle.Unchecked += (_, _) => Turn(false);
-        var header = new Grid { MinHeight = 44, Background = Brushes.Transparent };
-        header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.Children.Add(heading); Grid.SetColumn(toggle, 1); header.Children.Add(toggle);
-        // The switch handles its own clicks; a click anywhere else on the row opens or closes it, as the size rows do.
-        header.MouseLeftButtonDown += (_, e) => { Flip(); e.Handled = true; };
-        Show(_clockOpen);
-        var row = new StackPanel(); row.Children.Add(header); row.Children.Add(options); return row;
+        }, ClockOptions(style), new Thickness(16, 14, 16, 0));
     }
 
     private FrameworkElement ClockOptions(CompactStyle compact)
@@ -85,7 +56,7 @@ public sealed partial class SettingsWindow
                 Change(s => s.ClockColor = color); RefreshClockTiles();
                 gradient.Visibility = color == ClockColor.Gradient ? Visibility.Visible : Visibility.Collapsed;
             };
-            if (color == ClockColor.Cover) swatch.Content = MusicVisuals.Icon("music", 13, UI.Brush("#FFFFFF"));
+            if (color == ClockColor.Cover) swatch.Content = MusicVisuals.Icon("music", 13, UI.Brush(SwatchInk(SampleCover)));
             if (color == ClockColor.Gradient) gradientSwatch = swatch;
             if (color == ClockColor.Custom)
             {
@@ -127,15 +98,17 @@ public sealed partial class SettingsWindow
     {
         ClockColor.Gradient => ClockFace.Fill(S.ClockGradient.Select(ClockFace.Parse).ToList()),
         ClockColor.Custom => ClockFace.Fill([ClockFace.Parse(S.ClockCustomColor)]),
-        ClockColor.Cover => ClockFace.Fill([Color.FromRgb(0xE0, 0xA4, 0x8C)]),
+        ClockColor.Cover => ClockFace.Fill([SampleCover]),
         // As the panel draws them on the current theme's surface.
         _ => ClockFace.Fill([PanelTheme.Readable(ClockFace.Preset(color), PanelThemes.TextContrast)])
     };
-    // A pencil over the custom color marks it as editable, dark on light colors and light on dark ones.
+    private static readonly Color SampleCover = Color.FromRgb(0xE0, 0xA4, 0x8C);
+    // A mark over a swatch (the cover's note, the custom color's pencil): dark on light colors and light on dark ones.
+    private static string SwatchInk(Color under) => .2126 * under.R + .7152 * under.G + .0722 * under.B > 150 ? "#B3202027" : "#E6FFFFFF";
+    // A pencil over the custom color marks it as editable.
     private static FrameworkElement Pencil(Color under)
     {
-        bool light = .2126 * under.R + .7152 * under.G + .0722 * under.B > 150;
-        var path = new Path { Data = Geometry.Parse("M 4,20 L 5,15.5 L 15.5,5 L 19,8.5 L 8.5,19 Z M 13.5,7 L 17,10.5"), Stroke = UI.Brush(light ? "#B3202027" : "#E6FFFFFF"),
+        var path = new Path { Data = Geometry.Parse("M 4,20 L 5,15.5 L 15.5,5 L 19,8.5 L 8.5,19 Z M 13.5,7 L 17,10.5"), Stroke = UI.Brush(SwatchInk(under)),
             StrokeThickness = 2, StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
         var canvas = new Canvas { Width = 24, Height = 24 }; canvas.Children.Add(path);
         return new Viewbox { Width = 12, Height = 12, Child = canvas, IsHitTestVisible = false };
