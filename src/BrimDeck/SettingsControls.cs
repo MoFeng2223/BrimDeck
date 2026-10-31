@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Windows;
 using BrimDeck.Core;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -75,7 +77,7 @@ public sealed partial class SettingsWindow
         // The geometry is drawn for a 14 DIP box; smaller icons scale it so the circle stays centered and unclipped.
         var icon = Stroke("M 7,1 A 6,6 0 1 1 6.99,1 M 7,6.5 V 10 M 7,4 V 4.1", 14, 14, TextTertiary);
         if (size != 14) icon.LayoutTransform = new ScaleTransform(size / 14, size / 14);
-        var info = new Border
+        var info = new HelpMark
         {
             Width = size + 8, Height = 24, Margin = new Thickness(3, 0, 0, 0), Background = Brushes.Transparent,
             VerticalAlignment = VerticalAlignment.Center, Focusable = true, Cursor = Cursors.Help,
@@ -83,6 +85,15 @@ public sealed partial class SettingsWindow
         };
         AttachSettingHelp(info, title, help);
         return info;
+    }
+
+    // An info mark (ⓘ). A Border has no automation peer, so a screen reader would find the mark's name and description empty:
+    // this one reads as a button named for its setting ("开机自启动说明") with the description as its help text (AttachSettingHelp),
+    // and invoking it opens or closes the description, as hovering or focusing it does.
+    private sealed class HelpMark : Border
+    {
+        protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Button, () => AutomationProperties.GetName(this),
+            () => { if (ToolTip is ToolTip tip) tip.IsOpen = !tip.IsOpen; });
     }
 
     private static void AttachSettingHelp(FrameworkElement info, string title, Func<string> help)
@@ -109,6 +120,21 @@ public sealed partial class SettingsWindow
         info.LostKeyboardFocus += (_, _) => tooltip.IsOpen = false;
         info.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { tooltip.IsOpen = false; e.Handled = true; } };
         info.Unloaded += (_, _) => tooltip.IsOpen = false;
+    }
+
+    // A text field's keyboard focus (SW-02): the field draws no outline of its own (FocusVisualStyle is off in SettingsNumber), so its
+    // frame turns to the accent color and 2 DIP thick while input has the focus, its padding giving the extra DIP back so the text
+    // does not move. rest: the frame's color without focus.
+    private void FieldFocus(Border frame, UIElement input, Func<Brush> rest)
+    {
+        var padding = frame.Padding;
+        void Show(bool focused)
+        {
+            frame.BorderBrush = focused ? UI.Brush(_palette.Accent) : rest();
+            frame.BorderThickness = new Thickness(focused ? 2 : 1);
+            frame.Padding = focused ? new Thickness(Math.Max(0, padding.Left - 1), padding.Top, Math.Max(0, padding.Right - 1), padding.Bottom) : padding;
+        }
+        input.IsKeyboardFocusWithinChanged += (_, _) => Show(input.IsKeyboardFocusWithin);
     }
 
     // Where each segmented control's highlight stood when the user last pressed it, so a page rebuilt by that
@@ -172,8 +198,7 @@ public sealed partial class SettingsWindow
         AutomationProperties.SetName(minus,Loc.T("减少"+title, "Decrease "+title));AutomationProperties.SetName(plus,Loc.T("增加"+title, "Increase "+title));
         line.Children.Add(new Border {Width=1,Background=UI.Brush(Divider),Margin=new Thickness(2,5,3,5)});line.Children.Add(minus);line.Children.Add(plus);
         var chip=new Border {Child=line,Height=30,CornerRadius=new CornerRadius(6),Background=UI.Brush(_palette.Input),BorderBrush=UI.Brush(_palette.Border),BorderThickness=new Thickness(1),Padding=new Thickness(7,0,2,0)};
-        input.GotKeyboardFocus+=(_,_)=>chip.BorderBrush=UI.Brush(_palette.Accent);
-        input.LostKeyboardFocus+=(_,_)=>chip.BorderBrush=UI.Brush(_palette.Border);
+        FieldFocus(chip, input, () => UI.Brush(_palette.Border));
         void Set(double number)
         {
             var next=Math.Clamp(Math.Round(number),min,max);
@@ -230,5 +255,43 @@ public sealed partial class SettingsWindow
         dialog.Loaded += (_, _) => cancel.Focus();
         dialog.ShowDialog();
         return confirmed;
+    }
+}
+
+// A drop-down drawn as a button with a popup list (the app rows' quota source and usage app). A button reads as one that only acts;
+// this one reads as a combo box with its chosen value and whether its list is open, and opens or closes it on request (SW-04).
+internal sealed class DropDownButton : System.Windows.Controls.Button
+{
+    public Func<string> Value { get; init; } = () => "";
+    public System.Windows.Controls.Primitives.Popup? Menu
+    {
+        get => _menu;
+        set
+        {
+            _menu = value;
+            if (value is null) return;
+            value.Opened += (_, _) => Changed(ExpandCollapseState.Collapsed, ExpandCollapseState.Expanded);
+            value.Closed += (_, _) => Changed(ExpandCollapseState.Expanded, ExpandCollapseState.Collapsed);
+        }
+    }
+    private System.Windows.Controls.Primitives.Popup? _menu;
+    private void Changed(ExpandCollapseState from, ExpandCollapseState to) =>
+        (UIElementAutomationPeer.FromElement(this) as Peer)?.RaisePropertyChangedEvent(ExpandCollapsePatternIdentifiers.ExpandCollapseStateProperty, from, to);
+
+    protected override AutomationPeer OnCreateAutomationPeer() => new Peer(this);
+
+    private sealed class Peer(DropDownButton owner) : ButtonAutomationPeer(owner), IExpandCollapseProvider, IValueProvider
+    {
+        protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.ComboBox;
+        protected override string GetClassNameCore() => nameof(DropDownButton);
+        public override object GetPattern(PatternInterface pattern) =>
+            pattern is PatternInterface.ExpandCollapse or PatternInterface.Value ? this : base.GetPattern(pattern);
+        public ExpandCollapseState ExpandCollapseState => owner._menu?.IsOpen == true ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed;
+        // Opening goes through the button's own click, which first fits the list to the screen.
+        public void Expand() { if (owner._menu?.IsOpen != true) ((IInvokeProvider)this).Invoke(); }
+        public void Collapse() { if (owner._menu is { IsOpen: true } menu) menu.IsOpen = false; }
+        public string Value => owner.Value();
+        public bool IsReadOnly => true;
+        public void SetValue(string value) => throw new InvalidOperationException();
     }
 }
