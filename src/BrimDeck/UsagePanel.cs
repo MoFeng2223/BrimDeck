@@ -376,10 +376,11 @@ public partial class MainWindow
         FrameworkElement body;
         if (off)
         {
-            // No readings: what the state is, why, and a way to sync now.
+            // No readings: what the state is, why, and a way to sync now, centered in the column. Left-aligned, the button's text sat
+            // inside its outline and padding, so it looked further right than the lines above it.
             var status = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             var label = UI.Fixed(snapshot.StatusLabel, Math.Max(11, layout.Label + 1), Math.Ceiling(layout.Label * 1.5), UI.Secondary, FontWeights.SemiBold);
-            label.ToolTip = snapshot.Status;
+            label.TextAlignment = TextAlignment.Center; label.ToolTip = snapshot.Status;
             status.Children.Add(label);
             // The detail is dropped when it only repeats the label, and when the column is too short for it (the smallest panel):
             // the label and the button stay, the full text is in the label's tip.
@@ -388,10 +389,11 @@ public partial class MainWindow
             {
                 detail = UI.Text(snapshot.Status, Math.Max(10, layout.Reset), UI.Tertiary);
                 detail.FontFamily = UI.PanelFont; detail.Margin = new Thickness(0, 3, 0, 0); detail.TextWrapping = TextWrapping.Wrap;
+                detail.TextAlignment = TextAlignment.Center;
                 status.Children.Add(detail);
             }
             var sync = new Button { Style = (Style)FindResource("PanelOutlineButton"), FontFamily = UI.TextFont, Padding = new Thickness(10, 2, 10, 2), Height = 24,
-                HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0), Content = Loc.T("立即同步", "Sync now") };
+                HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 6, 0, 0), Content = Loc.T("立即同步", "Sync now") };
             AutomationProperties.SetName(sync, Loc.T("立即同步用量", "Sync usage now"));
             sync.Click += (_, _) => _ = RefreshAsync();
             status.Children.Add(sync);
