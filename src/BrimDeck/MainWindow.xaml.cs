@@ -247,6 +247,8 @@ public partial class MainWindow : Window
         // An exception added or removed in settings changes the context before the next poll; read it again so that the
         // panel hides or returns in this pass.
         _context = _host.DetectNow();
+        // A new edge waits for the island to be cleared before the window moves (MainWindow.Edge.cs).
+        if (ClearBeforeMoving(animatePage)) return;
         bool wasVisible = IsVisible;
         var shapeBefore = Collapsed; double dipBefore = _pixelsPerDip;
         ApplyLanguage();
@@ -303,6 +305,7 @@ public partial class MainWindow : Window
             ++_boot; _bootWaiting = false; _bootEnds = 0; _bootDot = false;
             ResetDotPose();
             SetExpanded(false, true); HideBlank();
+            _edgeCleared = false;
         }
         else
         {
@@ -311,7 +314,9 @@ public partial class MainWindow : Window
             if (!IsVisible) Show();
             if (appearing) SetImmediate(HoverZone, OpacityProperty, 1d);
             SetExpanded(_expanded, !animatePage || !wasVisible || newEdge);
-            if (newEdge && wasVisible && !appearing) FadeInOnNewEdge();
+            bool cleared = _edgeCleared;
+            _edgeCleared = false;
+            if ((newEdge || cleared) && wasVisible && !appearing) FadeInOnNewEdge(cleared);
         }
         UpdatePointerTracking();
         RenderUsage();
@@ -377,6 +382,7 @@ public partial class MainWindow : Window
         // own settings put it.
         var (edge, overTaskbar) = Dock(EffectiveStyle);
         _frame = EdgeFrame.For(edge, bounds.Width / scale, bounds.Height / scale, screenWork, overTaskbar);
+        _framedDock = (edge, overTaskbar);
         var frame = _frame.Monitor;
         MonitorBoundsDip = new DipRect(bounds.Left / scale, bounds.Top / scale, frame.Width, frame.Height);
         WorkDip = _frame.FromScreen(screenWork);
@@ -405,7 +411,8 @@ public partial class MainWindow : Window
         _app.CollapsedChanged();
         if (_expanded) return;
         // A surface that no longer lies within the window (wider, or moved along a screen edge) places the window again.
-        if (Collapsed.Surface.X < _windowOffset || Collapsed.Surface.X + Collapsed.Surface.Width > _windowOffset + FrameWidth || Collapsed.Surface.Bottom + 24 > FrameHeight) ApplySettings(); else SetExpanded(false);
+        // Arriving on a new edge, still cleared, the surface takes its size at once (MainWindow.Edge.cs).
+        if (Collapsed.Surface.X < _windowOffset || Collapsed.Surface.X + Collapsed.Surface.Width > _windowOffset + FrameWidth || Collapsed.Surface.Bottom + 24 > FrameHeight) ApplySettings(); else SetExpanded(false, _edgeArriving);
     }
     // The limits the settings window offers for a collapsed style on this window's monitor, whatever values are saved.
     // OffsetMax is the largest offset either way (OffsetMin = -OffsetMax) for a surface of the given width. TopMin and TopMax
