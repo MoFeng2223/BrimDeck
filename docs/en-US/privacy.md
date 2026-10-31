@@ -53,7 +53,7 @@ All files are stored in `%LOCALAPPDATA%\BrimDeck`:
 - Before connecting, BrimDeck checks that the port listens only on this PC and belongs to NetEase Cloud Music, but this cannot remove the risk of the port itself.
 - Through this port, BrimDeck reads the song that is playing, its progress, the playback mode and whether the current song is liked, and has NetEase Cloud Music act only when you select a control. When you select the heart, NetEase Cloud Music itself adds the song to, or removes it from, the liked songs of your account. To show the heart, BrimDeck takes only two results, whether NetEase Cloud Music is signed in and whether the current song is liked; it neither reads nor keeps your account details or your other songs.
 - When enabled just once, the port stays open until NetEase Cloud Music is started again the normal way: quitting BrimDeck, or a full control connection that fails (BrimDeck then only reads what is playing), does not close it.
-- With the Full control switch on, BrimDeck changes 2 places in the `libcef.dll` in NetEase Cloud Music's install folder, after which every start opens this port. The port stays available until you turn full control off in Settings › Music › Players › NetEase Cloud Music and NetEase Cloud Music starts again, or an update replaces the file; quitting BrimDeck does not close it.
+- With the Always enable full control switch on, BrimDeck changes 2 places in the `libcef.dll` in NetEase Cloud Music's install folder, after which every start opens this port. The port stays available until you turn Always enable full control off in Settings › Music › Players › NetEase Cloud Music and NetEase Cloud Music starts again, or an update replaces the file; quitting BrimDeck does not close it.
 - Turn it on only in an environment you trust.
 
 ## KuGou Music full control
@@ -63,4 +63,4 @@ All files are stored in `%LOCALAPPDATA%\BrimDeck`:
 - Before connecting, BrimDeck checks that the port listens only on this PC and belongs to KuGou, but this cannot remove the risk of the port itself.
 - Through this port, BrimDeck reads only the song that is playing, the playback state, progress, length, cover address and the song's hash, and has KuGou act only when you select play, pause, previous or next. It neither reads nor keeps your account details.
 - The song's hash and length are sent to KuGou's lyrics service to look up the song's lyrics.
-- The port stays until KuGou starts again after Full control is turned off in Settings › Players › KuGou Music, or a KuGou update replaces the file; quitting BrimDeck does not close it. Turn it on only in an environment you trust.
+- The port stays until KuGou starts again after Always enable full control is turned off in Settings › Players › KuGou Music, or a KuGou update replaces the file; quitting BrimDeck does not close it. Turn it on only in an environment you trust.
