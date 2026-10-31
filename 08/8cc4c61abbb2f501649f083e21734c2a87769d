@@ -1,0 +1,22 @@
+src/BrimDeck/SettingsWindow.cs
+  h_dc4d9c798f1bc1 688-690
+tests/BrimDeck.Tests/FullscreenRuleTests.cs
+  h_dc4d9c798f1bc1 83-96,99,105,107
+src/BrimDeck/MainWindow.xaml.cs
+  h_dc4d9c798f1bc1 88
+src/BrimDeck.Core/Settings.cs
+  h_dc4d9c798f1bc1 383-385,387,519-521,525,530,538,541
+src/BrimDeck/Native/WindowsHost.cs
+  h_dc4d9c798f1bc1 46-48,50,56,228-229,235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "088cc4c61abbb2f501649f083e21734c2a87769d",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
