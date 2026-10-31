@@ -1,0 +1,82 @@
+src/BrimDeck.Core/Settings.cs
+  h_dc4d9c798f1bc1 428-429
+  s_76168c6b8fecdd::t_a969425b144dc8 430-431
+src/BrimDeck/SettingsMonitor.cs
+  h_dc4d9c798f1bc1 84-87,242,348,390,400-401
+  s_1cca3665b7b065::t_6cfce41d133adf 88,367-372,578-607
+src/BrimDeck.Core/CompactMonitor.cs
+  s_76168c6b8fecdd::t_5c8d44a27208c2 30-32,44-45,79-80,83,101-103,160,191,199-200,208
+src/BrimDeck.Core/CompactSources.cs
+  s_76168c6b8fecdd::t_0b622c3920131e 10-11,45-59
+src/BrimDeck.Core/MonitorLayout.cs
+  s_1cca3665b7b065::t_fb4c473a535223 12-14,49-51,55,64,70-71,77-78,108,113-114,128,205-208,231-233,237,240,242-243,251,253,257,261-263,283-287,289-291
+src/BrimDeck.Core/StripPresence.cs
+  s_76168c6b8fecdd::t_c1fc72f2d04244 49,54-56,98-99,120,125
+src/BrimDeck.Core/SystemMonitor.cs
+  s_1cca3665b7b065::t_6bdeb2dc060792 233-243,264-265
+src/BrimDeck/App.xaml.cs
+  s_76168c6b8fecdd::t_f03a15043adcda 331,345-347
+src/BrimDeck/MonitorDraw.cs
+  s_1cca3665b7b065::t_49285b5a254ce2 16,28-29
+src/BrimDeck/MonitorGauges.cs
+  s_1cca3665b7b065::t_e0da37602bc488 14-110
+src/BrimDeck/MonitorPanel.cs
+  s_1cca3665b7b065::t_4631073b763968 69,71-72,119,129-130,181,185-186
+src/BrimDeck/MonitorStrip.cs
+  s_1cca3665b7b065::t_3d3c0cd01d51ee 12-13,49-50,83-84,106-107,111-113,283,417-437,469
+src/BrimDeck/MonitorView.cs
+  s_1cca3665b7b065::t_cc35af07791a22 59,75,78,90,144-150,156,163,204-206,303
+src/BrimDeck/Native/Displays.cs
+  s_1cca3665b7b065::t_d9583a646858d9 9-13,33,47-48,50,60-61
+src/BrimDeck/Native/FrameRates.cs
+  s_76168c6b8fecdd::t_aefac5371ff88b 1-486
+src/BrimDeck/Native/SystemSampler.cs
+  s_76168c6b8fecdd::t_b422a6febc4efc 55-56,130-131,133,151-152,283-286,294-295,366
+tests/BrimDeck.Tests/CompactReadingTests.cs
+  s_1cca3665b7b065::t_97750d870e391c 52,151,154,216
+tests/BrimDeck.Tests/FrameRateTests.cs
+  s_76168c6b8fecdd::t_1a6cadd03abef2 1-113
+tests/BrimDeck.Tests/PowerTests.cs
+  s_1cca3665b7b065::t_bb94d08c48f34b 267-268,272
+tests/BrimDeck.Tests/Program.cs
+  s_1cca3665b7b065::t_dd69e5f1132f88 45
+tests/BrimDeck.Tests/StorageTests.cs
+  s_1cca3665b7b065::t_31b627b5fadb10 184-185
+tests/BrimDeck.Tests/StripAdmissionTests.cs
+  s_1cca3665b7b065::t_2d1efc20522796 9-12
+tests/BrimDeck.WindowsTests/BrimDeck.WindowsTests.csproj
+  s_1cca3665b7b065::t_2aaebaa87c758c 21-22
+tests/BrimDeck.WindowsTests/FrameRateChecks.cs
+  s_76168c6b8fecdd::t_94c4b79e6f502f 1-66
+tests/BrimDeck.WindowsTests/Program.cs
+  s_1cca3665b7b065::t_b4853ccd43fded 20,34,42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f381ca427ab55e63a19acafe56a830fa110803db",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_1cca3665b7b065": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a190b1-39ca-70a1-89b4-936de13374f3",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_76168c6b8fecdd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6728fb5a-a3ea-487e-a673-5cd2e349798f",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
