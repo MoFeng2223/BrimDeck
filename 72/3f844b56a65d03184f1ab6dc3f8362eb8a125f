@@ -1,0 +1,17 @@
+tests/BrimDeck.Tests/AppleMusicLyricsTests.cs
+  h_dc4d9c798f1bc1 145-155,157-160,162-172
+  h_dc4d9c798f1bc1 156,161
+src/BrimDeck.Core/AppleMusicLyrics.cs
+  h_dc4d9c798f1bc1 33-34,63-73,112-115,121-126,128
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "723f844b56a65d03184f1ab6dc3f8362eb8a125f",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
