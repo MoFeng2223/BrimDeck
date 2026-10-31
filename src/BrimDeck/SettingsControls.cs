@@ -122,20 +122,10 @@ public sealed partial class SettingsWindow
         info.Unloaded += (_, _) => tooltip.IsOpen = false;
     }
 
-    // A text field's keyboard focus (SW-02): the field draws no outline of its own (FocusVisualStyle is off in SettingsNumber), so its
-    // frame turns to the accent color and 2 DIP thick while input has the focus, its padding giving the extra DIP back so the text
-    // does not move. rest: the frame's color without focus.
-    private void FieldFocus(Border frame, UIElement input, Func<Brush> rest)
-    {
-        var padding = frame.Padding;
-        void Show(bool focused)
-        {
-            frame.BorderBrush = focused ? UI.Brush(_palette.Accent) : rest();
-            frame.BorderThickness = new Thickness(focused ? 2 : 1);
-            frame.Padding = focused ? new Thickness(Math.Max(0, padding.Left - 1), padding.Top, Math.Max(0, padding.Right - 1), padding.Bottom) : padding;
-        }
-        input.IsKeyboardFocusWithinChanged += (_, _) => Show(input.IsKeyboardFocusWithin);
-    }
+    // A text field's keyboard focus: the field draws no outline of its own (FocusVisualStyle is off in SettingsNumber), so its frame
+    // turns to the accent color while input has the focus. rest: the frame's color without focus.
+    private void FieldFocus(Border frame, UIElement input, Func<Brush> rest) =>
+        input.IsKeyboardFocusWithinChanged += (_, _) => frame.BorderBrush = input.IsKeyboardFocusWithin ? UI.Brush(_palette.Accent) : rest();
 
     // Where each segmented control's highlight stood when the user last pressed it, so a page rebuilt by that
     // choice (theme, quick size) can still slide the highlight from the old option instead of jumping.
