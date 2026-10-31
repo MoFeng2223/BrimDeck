@@ -1,0 +1,7 @@
+{
+  "id": "sample-clock",
+  "entry": "BrimDeck.Island.Clock.dll",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "repository": "https://github.com/MoFeng2223/BrimDeck"
+}

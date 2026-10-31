@@ -43,6 +43,7 @@
           <Grid x:Name="Compact" HorizontalAlignment="Center" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
             <Grid.RenderTransform><ScaleTransform x:Name="CompactScale"/></Grid.RenderTransform>
             <StackPanel x:Name="CompactRings" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <StackPanel x:Name="CompactPlugins" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,46,0" Visibility="Collapsed"/>
             <StackPanel x:Name="CompactAlert" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
           </Grid>
           <!-- Pinned to the top and scaled about the top center, so the content recedes toward the screen edge instead of sliding while the panel shrinks.
@@ -55,9 +56,7 @@
               <Grid Grid.Row="1" x:Name="UsageContent" Margin="6,0,6,10"/>
               <Grid Grid.Row="1" x:Name="MonitorContent" Visibility="Collapsed"/>
               <Grid Grid.Row="1" x:Name="ExtensionContent" Visibility="Collapsed">
-                <!-- Lifted over a plugin page a switch is arriving at, in the panel's own surface: a WebView that was
-                     off screen keeps showing its last composited frame for a few frames after it comes back, and that
-                     full-brightness beat is what reads as two pages overlapping. -->
+                <!-- Lifted over a plugin page while it attaches and lays out after a page switch. -->
                 <Border x:Name="ArrivalVeil" IsHitTestVisible="False" Visibility="Collapsed"/>
               </Grid>
               <Grid Grid.Row="1" x:Name="MusicContent" Visibility="Collapsed"/>

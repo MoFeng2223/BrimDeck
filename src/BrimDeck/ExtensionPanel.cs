@@ -46,6 +46,7 @@ public partial class MainWindow
         BuildExtensionButtons();
         RenderPageSwitch();
         UpdateMonitorDemand();
+        RenderCompact();
         if (_expanded)
         {
             ApplySettings();
@@ -86,7 +87,7 @@ public partial class MainWindow
             if (_extensionViews[slot] is { } kept && _extensionKeys[slot] == key && IslandExtensions.Alive(slot, kept)) continue;
             if (_extensionViews[slot] is { } old) ExtensionContent.Children.Remove(old);
             FrameworkElement view;
-            try { view = IslandExtensions.Slots[slot]!.CreateView(IslandExtensions.Colors); }
+            try { view = IslandExtensions.Slots[slot]!.CreateView(IslandExtensions.Context(slot), IslandExtensions.Colors); }
             catch (Exception ex)
             {
                 view = new System.Windows.Controls.TextBlock
@@ -124,9 +125,7 @@ public partial class MainWindow
     // trusted to show, and its entrance plays inside the browser.
     internal bool EnteringExtension { get; set; }
 
-    // A WebView that was off screen keeps handing out its last composited frame for a few frames after it comes back,
-    // so the arriving page is briefly seen at full brightness over the page it replaces — the overlap that reads as a
-    // stutter. The panel's own surface covers that beat, then lifts while the page fades in behind it.
+    // Cover the arriving plugin view while WPF attaches and lays it out, then lift the panel surface.
     private void VeilArrival()
     {
         ArrivalVeil.Background = _surface;

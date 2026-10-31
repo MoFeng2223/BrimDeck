@@ -381,6 +381,7 @@ public sealed class DeckSettings
     public double MonitorWidth { get; set; } = MonitorSizes.Default.Width;
     public double MonitorHeight { get; set; } = MonitorSizes.Default.Height;
     public MonitorPalette MonitorPalette { get; set; } = MonitorPalette.Theme;
+    public bool ExtensionsEnabled { get; set; }
     public List<ExtensionPageSettings> Extensions { get; set; } = [];
     // The values a reader chose for one plugin's declared controls; empty until they touch one.
     public IReadOnlyDictionary<string, ExtensionSettingValue> ExtensionValues(string id) =>

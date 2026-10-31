@@ -171,7 +171,6 @@ public partial class App : Application
     {
         Loc.Use(Settings.Language);
         // The extension pages hear the language as a push, the same way they hear the palette.
-        WebRuntime.SetLanguage(Loc.IsEnglish);
         Resources["PinSourceName"] = Loc.T("固定显示", "Pin");
         Resources["UnpinSourceName"] = Loc.T("取消固定", "Unpin");
     }
@@ -352,7 +351,7 @@ public partial class App : Application
         if (Monitor is null)
         {
             Monitor = new SystemSampler(Dispatcher, () => (Settings.MonitorGpu, Settings.MonitorGpuName));
-            Monitor.Updated += snapshot => MonitorUpdated?.Invoke(snapshot);
+            Monitor.Updated += snapshot => { IslandExtensions.PublishMonitor(snapshot); MonitorUpdated?.Invoke(snapshot); };
             // A choice saved under an older key is kept under the adapter's key from now on (GpuChoice.Resolve).
             Monitor.GpuKeyUpgraded += (old, key) => { if (Settings.MonitorGpu == old) { Settings.MonitorGpu = key; QueueSave(); } };
         }
@@ -384,6 +383,8 @@ public partial class App : Application
         bool after = _presentingExtension[slot].Count > 0;
         // Only the change of the answer is news: a panel re-rendering while another already shows the page is not.
         if (before != after) IslandExtensions.Notify(slot, after && !Exiting);
+        IslandExtensions.PublishEvent(shown ? "page-shown" : "page-hidden", new Dictionary<string, string>
+        { ["page"] = IslandExtensions.Slots[slot]?.Id ?? "" });
     }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }

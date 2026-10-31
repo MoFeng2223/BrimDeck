@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Media;
 using BrimDeck.Core;
+using BrimDeck.Island;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
@@ -94,6 +95,19 @@ public sealed class TrayIcon : IDisposable
         if (toggleHidden is not null) { var show = new MenuItem { Header = hidden ? Loc.T("显示面板", "Show panel") : Loc.T("隐藏面板", "Hide panel") }; show.Click += (_, _) => toggleHidden(); menu.Items.Add(show); }
         var open = new MenuItem { Header = Loc.T("设置", "Settings") }; open.Click += (_, _) => settings(); menu.Items.Add(open);
         menu.Items.Add(new Separator());
+        var pluginCommands = IslandExtensions.AllCommands();
+        if (pluginCommands.Count > 0)
+        {
+            menu.Items.Add(new Separator());
+            var plugins = new MenuItem { Header = Loc.T("插件命令", "Plugin commands") };
+            foreach (var item in pluginCommands)
+            {
+                var command = new MenuItem { Header = item.Title };
+                command.Click += (_, _) => IslandExtensions.RunCommand(item.Command);
+                plugins.Items.Add(command);
+            }
+            menu.Items.Add(plugins);
+        }
         var quit = new MenuItem { Header = Loc.T("退出", "Exit") }; quit.Click += (_, _) => exit(); menu.Items.Add(quit);
         return menu;
     }

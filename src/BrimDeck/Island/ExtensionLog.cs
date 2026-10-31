@@ -3,9 +3,8 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// The extension host's own record: which page was created, navigated, recycled or disposed, and why a WebView2 process
-// went away. It is off unless BRIMDECK_EXTENSION_LOG is set — to 1 for <data>\extensions.log, or to a file path — so a
-// normal install writes nothing. The UI test turns it on, and it is the first thing to read when a plugin page is blank.
+// The extension host's diagnostic record for plugin scan, load, page lifecycle, and disposal failures. It is off unless
+// BRIMDECK_EXTENSION_LOG is set — to 1 for <data>\extensions.log, or to a file path — so a normal install writes nothing.
 internal static class ExtensionLog
 {
     private const long Limit = 512 * 1024;

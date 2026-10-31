@@ -493,12 +493,14 @@ public partial class MainWindow : Window
     {
         var fade = RowFadeStart();
         CompactRings.Children.Clear(); CompactAlert.Children.Clear();
+        RenderCompactPlugins();
         CompactRings.HorizontalAlignment = HorizontalAlignment.Center;
         if (_quotaCarousel is not null) { _quotaElapsed = _quotaCarousel.Elapsed; _quotaCarousel.SetRunning(false, false); }
         if (_stripCarousel is not null) { _stripElapsed = _stripCarousel.Elapsed; _stripCarousel.SetRunning(false, false); }
         _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _stripCarousel = null; _compactClock = null; _compactStrip = null;
         if (_alert is not null)
         {
+            CompactPlugins.Visibility = Visibility.Collapsed;
             CompactAlert.Visibility = Visibility.Visible; CompactRings.Visibility = Visibility.Collapsed;
             // LayoutCompactAlert (MainWindow.CompactLayout.cs) builds the alert row from _alert and sizes it for the shape.
             ApplyCollapsedLayout();
@@ -507,9 +509,38 @@ public partial class MainWindow : Window
             return;
         }
         CompactAlert.Visibility = Visibility.Collapsed; CompactRings.Visibility = Visibility.Visible;
+        CompactPlugins.Visibility = CompactPlugins.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         RenderCompactMusic();
         ApplyCollapsedLayout();
         RowFadeRun(fade);
+    }
+
+    private readonly FrameworkElement?[] _compactPluginViews = new FrameworkElement?[4];
+    private void RenderCompactPlugins()
+    {
+        for (int slot = 0; slot < _compactPluginViews.Length; slot++)
+        {
+            if (!IslandExtensions.Occupied(slot))
+            {
+                if (_compactPluginViews[slot] is { } removed) CompactPlugins.Children.Remove(removed);
+                _compactPluginViews[slot] = null; IslandExtensions.CompactDemand(slot, false); continue;
+            }
+            if (_compactPluginViews[slot] is null)
+            {
+                try
+                {
+                    if (IslandExtensions.CompactView(slot) is { } view)
+                    {
+                        view.MaxWidth = 120;
+                        view.Height = 24;
+                        _compactPluginViews[slot] = view;
+                        CompactPlugins.Children.Add(view);
+                    }
+                }
+                catch (Exception ex) { ExtensionLog.Write("compact view failed: " + ex.Message.Split('\n')[0]); }
+            }
+            IslandExtensions.CompactDemand(slot, _compactPluginViews[slot] is not null && !_expanded && _alert is null);
+        }
     }
 
     private void DetectThresholds()
@@ -584,7 +615,7 @@ public partial class MainWindow : Window
         _expanded = expanded;
         if (wasExpanded != _expanded) ExtensionLog.Write("panel: expanded=" + _expanded + " page=" + CurrentPage + " context=" + _context);
         // Opening the panel builds the plugin pages' views before the first switch to them, so no switch pays a cold
-        // WebView. Building is skipped while collapsed — a closed panel needs no pages. The reclaim of pages nobody
+        // Plugin views. Building is skipped while collapsed — a closed panel needs no pages. The reclaim of pages nobody
         // watches also follows this: an open panel keeps its pages, a closed one gives them up after the grace.
         if (expanded && !wasExpanded) EnsureExtensionViews();
         if (wasExpanded != _expanded) _app.PanelUseChanged();

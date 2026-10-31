@@ -23,6 +23,30 @@ public sealed partial class SettingsWindow
     private void PluginsPage()
     {
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 18) };
+        var pluginMode = new CheckBox
+        {
+            Content = Loc.T("允许运行 DLL 插件（受信任的本机代码）", "Allow DLL plugins (trusted native code)"),
+            IsChecked = S.ExtensionsEnabled,
+            Style = (Style)FindResource("SettingsToggle"),
+            VerticalAlignment = VerticalAlignment.Center,
+            ToolTip = Loc.T("DLL 插件在 BrimDeck 进程内运行，可以访问本机文件和应用数据。只启用可信来源的插件。", "DLL plugins run inside BrimDeck and can access local files and app data. Only enable plugins from trusted sources.")
+        };
+        pluginMode.Checked += (_, _) =>
+        {
+            var answer = MessageBox.Show(this,
+                Loc.T("DLL 插件将在 BrimDeck 进程内运行，可能读取本机文件、应用数据（包括密钥）并影响程序稳定性。只继续运行你信任的插件。", "DLL plugins run inside BrimDeck. They can read local files and app data (including secrets) and can affect stability. Continue only with plugins you trust."),
+                Loc.T("启用 DLL 插件", "Enable DLL plugins"), MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (answer != MessageBoxResult.Yes) { S.ExtensionsEnabled = false; pluginMode.IsChecked = false; return; }
+            S.ExtensionsEnabled = true; ((App)Application.Current).QueueSave(); IslandExtensions.Scan(); ShowPage(PluginsPageNumber);
+        };
+        pluginMode.Unchecked += (_, _) =>
+        {
+            S.ExtensionsEnabled = false; ((App)Application.Current).QueueSave(); IslandExtensions.Scan(); ShowPage(PluginsPageNumber);
+        };
+        actions.Children.Add(pluginMode);
+        actions.Children.Add(OutlineAction(Loc.T("安装插件", "Install plugin"),
+            "M 6,2 V 8 M 3,5 H 9 M 2,10 H 10 V 12 H 2 Z", InstallPlugin,
+            Loc.T("从一个包含 plugin.json 和 DLL 的文件夹导入。", "Import a folder containing plugin.json and a DLL.")));
         actions.Children.Add(OutlineAction(Loc.T("打开插件文件夹", "Open plugins folder"),
             "M 1.5,4.4 H 4.4 L 5.6,3 H 10.5 V 9.5 H 1.5 Z", OpenPluginsFolder,
             Loc.T("打开存放插件文件夹的目录。", "Opens the folder the plugins live in.")));
@@ -151,6 +175,23 @@ public sealed partial class SettingsWindow
         column.Children.Add(header);
 
         var details = new StackPanel { Margin = new Thickness(42, 0, 0, 10), Visibility = _pluginOpen[slot] ? Visibility.Visible : Visibility.Collapsed };
+        var metadata = TextLine(string.Join(" · ", new[] { extension.Version, extension.Author }.Where(value => !string.IsNullOrWhiteSpace(value))), 11.5, TextTertiary);
+        metadata.Margin = new Thickness(0, 2, 0, 0);
+        details.Children.Add(metadata);
+        if (!string.IsNullOrWhiteSpace(extension.Description))
+        {
+            var description = TextLine(extension.Description, 11.5, TextSecondary);
+            description.TextWrapping = TextWrapping.Wrap;
+            description.Margin = new Thickness(0, 3, 0, 0);
+            details.Children.Add(description);
+        }
+        if (extension.RequestedPermissions.Count > 0)
+        {
+            var permissions = TextLine(Loc.T("请求能力：", "Requested capabilities: ") + string.Join("、", extension.RequestedPermissions), 11, TextTertiary);
+            permissions.TextWrapping = TextWrapping.Wrap;
+            permissions.Margin = new Thickness(0, 3, 0, 0);
+            details.Children.Add(permissions);
+        }
         var dimensions = new Grid { MinHeight = 44 }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
         // The page's own limits, which a plugin's manifest can raise: the fields offer exactly the sizes the page can take,
         // and show the size it is actually using even when an older file saved less.
@@ -162,6 +203,31 @@ public sealed partial class SettingsWindow
         var height = Dimension(Loc.T("高度", "Height"), usedHeight, floorHeight, ceilingHeight, value => Resize(s => SetSlotSize(s, slot, null, value), page));
         height.Margin = new Thickness(20, 0, 0, 0); Grid.SetColumn(height, 1); dimensions.Children.Add(height);
         details.Children.Add(dimensions);
+        try
+        {
+            if (IslandExtensions.SettingsView(slot) is { } pluginSettings)
+            {
+                var settingsGroup = new Border { Child = pluginSettings, Margin = new Thickness(0, 8, 0, 0) };
+                details.Children.Add(settingsGroup);
+            }
+        }
+        catch (Exception ex)
+        {
+            details.Children.Add(Wrapped(Loc.T("插件设置无法显示：", "Plugin settings could not be shown: ") + ex.Message.Split('\n')[0], true));
+        }
+        var commands = IslandExtensions.Commands(slot);
+        if (commands.Count > 0)
+        {
+            var commandRow = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+            foreach (var command in commands)
+            {
+                var run = OutlineAction(Loc.IsEnglish ? command.TitleEn : command.TitleZh, "M 3,6 H 9 M 6,3 V 9",
+                    () => IslandExtensions.RunCommand(command), Loc.T("运行插件命令", "Run plugin command"));
+                run.Margin = new Thickness(0, 0, 8, 6);
+                commandRow.Children.Add(run);
+            }
+            details.Children.Add(commandRow);
+        }
         // The controls the plugin's own manifest declared. The host draws them — a reader sets a plugin up here instead
         // of opening its folder, and an author writes no settings interface at all.
         foreach (var row in DeclaredRows(id, IslandExtensions.Declared(slot))) details.Children.Add(row);
@@ -191,6 +257,16 @@ public sealed partial class SettingsWindow
         source.Margin = new Thickness(0, 2, 0, 0);
         if (file.Length > 0) source.ToolTip = IslandExtensions.Folder + "\\" + file;
         details.Children.Add(source);
+        var pluginActions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+        pluginActions.Children.Add(OutlineAction(Loc.T("打开插件目录", "Open plugin folder"),
+            "M 1.5,4.4 H 4.4 L 5.6,3 H 10.5 V 9.5 H 1.5 Z", () => OpenPluginFolder(slot),
+            Loc.T("打开此插件的安装目录。", "Open this plugin's install folder.")));
+        var uninstall = OutlineAction(Loc.T("卸载", "Uninstall"),
+            "M 3,4 H 9 M 4,4 V 10 H 8 V 4 M 4.5,2.5 H 7.5", () => UninstallPlugin(slot, title),
+            Loc.T("卸载插件，并选择是否删除它保存的数据。", "Uninstall this plugin and choose whether to remove its data."));
+        uninstall.Margin = new Thickness(8, 0, 0, 0);
+        pluginActions.Children.Add(uninstall);
+        details.Children.Add(pluginActions);
         column.Children.Add(details);
         PointArrow(arrow, _pluginOpen[slot]);
         // The row is what the list measures and moves: its own divider, its place marked by the slot it shows, and the
@@ -200,6 +276,35 @@ public sealed partial class SettingsWindow
             Child = column, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0),
             Tag = slot, RenderTransform = new TranslateTransform()
         };
+    }
+
+    private void InstallPlugin()
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = Loc.T("选择插件文件夹", "Select plugin folder"), Multiselect = false };
+        if (dialog.ShowDialog(this) != true) return;
+        if (!IslandExtensions.InstallFromFolder(dialog.FolderName, out var error)) { SaveStatus(error, true); return; }
+        IslandExtensions.Scan();
+        ((App)Application.Current).QueueSave();
+        ShowPage(PluginsPageNumber);
+    }
+
+    private void OpenPluginFolder(int slot)
+    {
+        var file = IslandExtensions.Source(slot);
+        var folder = Path.Combine(IslandExtensions.Folder, Path.GetDirectoryName(file) ?? "");
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", "\"" + folder + "\"") { UseShellExecute = true }); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception) { SaveStatus(ex.Message, true); }
+    }
+
+    private void UninstallPlugin(int slot, string title)
+    {
+        var answer = MessageBox.Show(this,
+            Loc.T($"卸载“{title}”？选择“是”同时删除插件数据，选择“否”保留数据。", $"Uninstall “{title}”? Choose Yes to remove plugin data too, or No to keep it."),
+            Loc.T("卸载插件", "Uninstall plugin"), MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
+        if (answer == MessageBoxResult.Cancel) return;
+        if (!IslandExtensions.Uninstall(slot, answer == MessageBoxResult.Yes, out var error)) { SaveStatus(error, true); return; }
+        ((App)Application.Current).QueueSave();
+        ShowPage(PluginsPageNumber);
     }
 
     // Writes one dimension of an extension page's size into its own settings entry. The other dimension is read back

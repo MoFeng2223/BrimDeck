@@ -1,32 +1,42 @@
 using System.IO;
+using System.Reflection;
+using System.Runtime.Loader;
+using System.Text.Json;
 using BrimDeck.Core;
 using BrimDeck.Island;
 
 namespace BrimDeck;
 
-// The extension pages' host: every folder in the extensions folder that carries a manifest.json is one plugin, given a
-// slot in name order, up to the four slots the page switch holds. A plugin is files — a manifest and the web page it
-// points at — read by the browser, never run by the host, so a bad plugin is a row on the plugins page at worst.
+// The extension pages' host: every DLL in the extensions folder that carries an IIslandExtension is loaded into a
+// collectible assembly context and given a slot, in file order, up to the four slots the page switch holds. A DLL that
+// fails to load is skipped, noted by name for the plugins page, and never takes the app with it.
 //
-// A scan is a full reload: a folder whose manifest or entry changed gets a fresh extension in its place, a folder
-// taken away has its slot retired, and what did not change keeps its pages alive exactly as they are — their state and
-// alarms live in the host, not in the pages. Nothing is locked: the folder stays editable while the app runs.
+// A scan is a full hot reload: a DLL that changed on disk is loaded fresh and every extension it exports replaces its
+// slot, a DLL taken away has its slots retired, and what did not change is kept as it is. Each DLL is loaded from a
+// copy in a cache folder, so the plugin folder itself stays writable while the app runs.
 internal static class IslandExtensions
 {
+    public const int ApiVersion = 1;
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private sealed record PluginManifest(string Id, string Entry, int ApiVersion = 1, string Version = "1.0.0", string Repository = "");
+    private static bool ValidId(string? id) => id is { Length: > 0 and <= 64 } && id.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '.');
+
     public static readonly IIslandExtension?[] Slots = new IIslandExtension?[4];
+    private static readonly AssemblyLoadContext?[] _contexts = new AssemblyLoadContext?[4];
     private static readonly string?[] _sources = new string?[4];
-    // The id each plugin declared in its manifest; plain data the host already has, asked of nobody at runtime.
+    // The id each extension reported when it was created; the host never asks a plugin for it a second time.
     private static readonly string?[] _ids = new string?[4];
-    // A folder's manifest and entry stamps as one key, so an edit to either is a changed plugin.
     private static readonly string?[] _stamps = new string?[4];
+    private static readonly Dictionary<string, HashSet<string>> _subscriptions = new(StringComparer.OrdinalIgnoreCase);
 
     public static string Folder { get; } = Path.Combine(AppPaths.Data, "extensions");
-    public static string Source(int slot) => _sources[slot] ?? "";
+    // The copies the contexts are loaded from: a loaded assembly locks its file on Windows, and the plugin folder must
+    // stay writable so a new DLL can be dropped over the old one.
+    private static string CacheFolder => Path.Combine(AppPaths.Data, "extension-cache");
+    public static string Source(int slot) => _sources[slot] is { } file ? Path.GetRelativePath(Folder, file) : "";
 
-    // The plugins that could not be read, by folder name with the error's first line. Cleared on each scan.
+    // The DLLs that could not be loaded, by file name with the error's first line. Cleared on each scan.
     public static readonly List<(string File, string Error)> Failures = new();
-    // Folders in the extensions folder that are not plugins — no manifest.json in them — noted so a stray folder is
-    // not silently invisible. Cleared on each scan.
     public static readonly List<(string File, string Note)> Skipped = new();
 
     // Raised with the slots whose extension was replaced or retired; the app drops their tabs and views and re-renders.
@@ -38,172 +48,434 @@ internal static class IslandExtensions
     {
         Failures.Clear();
         Skipped.Clear();
+        if (Settings?.ExtensionsEnabled != true)
+        {
+            var disabledChanges = new List<int>();
+            for (int slot = 0; slot < Slots.Length; slot++)
+            {
+                if (Slots[slot] is null) continue;
+                Notify(slot, false);
+                try { Slots[slot]?.Dispose(); } catch { }
+                _contexts[slot]?.Unload();
+                Slots[slot] = null; _contexts[slot] = null; _sources[slot] = null; _ids[slot] = null; disabledChanges.Add(slot);
+            }
+            Skipped.Add((Folder, Loc.T("插件执行已关闭。", "Plugin execution is disabled.")));
+            if (disabledChanges.Count > 0) ExtensionsChanged?.Invoke(disabledChanges);
+            return;
+        }
         var disk = new List<string>();
+        var declarations = new Dictionary<string, PluginManifest>(StringComparer.OrdinalIgnoreCase);
         try
         {
             if (Directory.Exists(Folder))
-                disk.AddRange(Directory.EnumerateDirectories(Folder).OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase));
+            {
+                // Keep the original root-level DLL format working for existing plugin prototypes.
+                disk.AddRange(Directory.EnumerateFiles(Folder, "*.dll", SearchOption.TopDirectoryOnly));
+                foreach (var pluginFolder in Directory.EnumerateDirectories(Folder).OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+                {
+                    if (HasReparsePoints(pluginFolder)) { Failures.Add((pluginFolder, Loc.T("插件目录包含符号链接或联接点", "plugin folder contains a symbolic link or junction"))); continue; }
+                    var manifestPath = Path.Combine(pluginFolder, "plugin.json");
+                    if (!File.Exists(manifestPath)) { Skipped.Add((pluginFolder, Loc.T("缺少 plugin.json", "plugin.json is missing"))); continue; }
+                    try
+                    {
+                        var manifest = JsonSerializer.Deserialize<PluginManifest>(File.ReadAllText(manifestPath), JsonOptions);
+                        if (manifest is null || !ValidId(manifest.Id) || manifest.ApiVersion < 1 || manifest.ApiVersion > ApiVersion ||
+                            string.IsNullOrWhiteSpace(manifest.Entry) || Path.IsPathRooted(manifest.Entry) || manifest.Entry.Contains("..") ||
+                            !string.Equals(Path.GetExtension(manifest.Entry), ".dll", StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidDataException(Loc.T("清单字段无效或插件 API 版本不兼容", "manifest fields are invalid or plugin API version is incompatible"));
+                        var assemblyPath = Path.GetFullPath(Path.Combine(pluginFolder, manifest.Entry));
+                        var folderPath = Path.GetFullPath(pluginFolder).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                        if (!assemblyPath.StartsWith(folderPath, StringComparison.OrdinalIgnoreCase) || !File.Exists(assemblyPath))
+                            throw new InvalidDataException(Loc.T("清单指定的 DLL 不存在或路径越界", "manifest DLL is missing or outside the plugin folder"));
+                        disk.Add(assemblyPath);
+                        declarations[assemblyPath] = manifest;
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or ArgumentException)
+                    { Failures.Add((pluginFolder, ex.Message.Split('\n')[0])); }
+                }
+                disk = disk.OrderBy(file => file, StringComparer.OrdinalIgnoreCase).ToList();
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             Failures.Add((Path.GetFileName(Folder), ex.Message.Split('\n')[0]));
         }
 
-        // One pass over the folders: a manifest and its entry, or the reason the folder is not a plugin. The stamp is
-        // the whole folder — every file in it, manifest and entry included — so editing a stylesheet or a script is a
-        // change the next scan picks up, exactly as editing the manifest is. No extension exists yet — a manifest is
-        // read, an extension is only made for a slot it actually takes.
-        var read = new List<(string Name, string Stamp, ExtensionManifest? Manifest, string? Error)>();
-        foreach (var folder in disk)
+        // A file whose stamp still matches every slot it filled is kept whole: all of its extensions stay, not only the
+        // first one found. Everything else — a changed file, a new file, a file whose slots did not all survive — is
+        // loaded fresh.
+        var stamps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in disk)
         {
-            string name = Path.GetFileName(folder);
+            try { stamps[file] = ExtensionStamp.Of(Path.GetDirectoryName(file)!) ?? throw new IOException("Could not fingerprint plugin files."); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            { Failures.Add((Path.GetFileName(file), ex.Message.Split('\n')[0])); }
+        }
+        var kept = new bool[Slots.Length];
+        for (int slot = 0; slot < Slots.Length; slot++)
+        {
+            if (Slots[slot] is null || _sources[slot] is not { Length: > 0 } path) continue;
+            if (stamps.TryGetValue(path, out var stamp) && stamp == _stamps[slot]) kept[slot] = true;
+        }
+        // A file is unchanged only when it filled slots and every one of them is kept.
+        bool Unchanged(string path)
+        {
+            bool any = false;
+            for (int slot = 0; slot < Slots.Length; slot++)
+            {
+                if (!string.Equals(_sources[slot], path, StringComparison.OrdinalIgnoreCase)) continue;
+                any = true;
+                if (Slots[slot] is not null && !kept[slot]) return false;
+            }
+            return any;
+        }
+
+        // Load the fresh DLLs from cached copies, each into its own collectible context so a replaced one can be let go.
+        var fresh = new List<(IIslandExtension Extension, string Id, AssemblyLoadContext Context, string File, string Stamp, int FromFile)>();
+        var perFile = new List<(AssemblyLoadContext Context, int Placed)>();
+        try { Directory.CreateDirectory(CacheFolder); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Failures.Add(("extension-cache", ex.Message.Split('\n')[0])); }
+        foreach (var file in disk)
+        {
+            string name = Path.GetFileName(file);
+            if (!stamps.TryGetValue(file, out var stamp) || Unchanged(file)) continue;
+            // Everything in here runs third-party code — the assembly's types and the extensions' own constructors and Id
+            // getters included — so every exception is caught per type: one bad extension is a row on the plugins page,
+            // never a failed startup.
+            AssemblyLoadContext? context = null;
+            bool listed = false;
             try
             {
-                var (manifest, error) = ExtensionManifests.Read(folder);
-                if (manifest is null)
+                var shadow = Shadow(file, stamp);
+                context = new PluginLoadContext(shadow);
+                var assembly = context.LoadFromAssemblyPath(shadow);
+                int fromFile = perFile.Count;
+                perFile.Add((context, 0));
+                listed = true;
+                foreach (var type in assembly.GetTypes())
                 {
-                    if (error is not null) Failures.Add((name, error));
-                    else Skipped.Add((name, Loc.T("缺少 manifest.json", "no manifest.json in it")));
-                    continue;
+                    if (type.IsAbstract || !typeof(IIslandExtension).IsAssignableFrom(type)) continue;
+                    if (type.GetConstructor(Type.EmptyTypes) is null) continue;
+                    try
+                    {
+                        var extension = (IIslandExtension)Activator.CreateInstance(type)!;
+                        var id = extension.Id;
+                        if (!ValidId(id)) throw new InvalidDataException("Plugin id must contain 1–64 letters, digits, dots or dashes.");
+                        if (declarations.TryGetValue(file, out var manifest) && !string.Equals(manifest.Id, id, StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidDataException("Plugin id in plugin.json does not match the DLL.");
+                        var pages = extension.Pages;
+                        if (pages.Count == 0) throw new InvalidDataException("Plugin does not contribute any pages.");
+                        var runtime = new PluginRuntime(extension);
+                        foreach (var page in pages)
+                        {
+                            if (page is null || !ValidId(page.Id)) throw new InvalidDataException("Page ids must contain 1–64 letters, digits, dots or dashes.");
+                            string pageId = string.Equals(page.Id, "main", StringComparison.OrdinalIgnoreCase) ? id.Trim() : id.Trim() + "." + page.Id;
+                            if (!ValidId(pageId)) throw new InvalidDataException("Combined plugin and page id exceeds the supported length.");
+                            fresh.Add((new PluginPageAdapter(runtime, page, pageId), pageId, context, file, stamp, fromFile));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Failures.Add((name, ex.Message.Split('\n')[0]));
+                    }
                 }
-                var stamp = Stamp(folder);
-                read.Add((name, stamp, manifest, null));
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception ex)
             {
+                if (context is not null && !listed) context.Unload();
                 Failures.Add((name, ex.Message.Split('\n')[0]));
             }
         }
 
-        // One plugin per id: a folder declaring an id another folder already declares is a mistake the reader is told
-        // about, and it takes no slot. Folders that are not plugins at all, and ones that could not be read, are left
-        // out here and reported above.
-        var candidates = new List<(string Name, string Stamp, ExtensionManifest Manifest)>();
+        // Place: the kept slots stay where they were; the fresh extensions fill the rest in file order. A repeated id
+        // is skipped, and what does not fit a slot is noted by its file.
+        var slots = new IIslandExtension?[4];
+        var contexts = new AssemblyLoadContext?[4];
+        var sources = new string?[4];
+        var ids = new string?[4];
+        var newStamps = new string?[4];
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var item in read)
+        for (int slot = 0; slot < 4; slot++)
         {
-            if (item.Manifest is not { } manifest) continue;
-            if (!seen.Add(manifest.Id))
+            if (!kept[slot]) continue;
+            slots[slot] = Slots[slot]; contexts[slot] = _contexts[slot]; sources[slot] = _sources[slot]; ids[slot] = _ids[slot]; newStamps[slot] = _stamps[slot];
+            if (_ids[slot] is { } id) seen.Add(id);
+        }
+        int at = 0;
+        foreach (var item in fresh)
+        {
+            if (!seen.Add(item.Id)) continue;
+            while (at < 4 && slots[at] is not null) at++;
+            if (at >= 4)
             {
-                Failures.Add((item.Name, Loc.T("插件 ID 重复：", "Duplicate plugin id: ") + manifest.Id));
+                Failures.Add((item.File, Loc.T("槽位已满", "All four slots are filled")));
                 continue;
             }
-            candidates.Add((item.Name, item.Stamp, manifest));
+            slots[at] = item.Extension; contexts[at] = item.Context; sources[at] = item.File; ids[at] = item.Id; newStamps[at] = item.Stamp;
+            perFile[item.FromFile] = (perFile[item.FromFile].Context, perFile[item.FromFile].Placed + 1);
         }
-
-        // A slot whose folder is still on disk keeps that slot, whether or not the folder changed: the tabs the reader
-        // arranged and the sizes the reader set are named by slot, so a plugin that was only edited must not drift to
-        // another one. A folder whose manifest cannot be read holds nothing — its slot is free for the others to use.
-        var live = new string?[ExtensionPlacement.SlotCount];
-        for (int slot = 0; slot < ExtensionPlacement.SlotCount; slot++)
-            if (_sources[slot] is { Length: > 0 } standing && read.FirstOrDefault(item => item.Name.Equals(standing, StringComparison.OrdinalIgnoreCase)) is { Manifest: { } holds })
-                live[slot] = holds.Id;
-        // Where the file says each plugin sat, so a cold start puts the tabs back as the reader left them.
-        var saved = Settings is { } file ? ExtensionPlacement.SavedPlaces(file.Extensions) : null;
-        var seat = ExtensionPlacement.Place([.. candidates.Select(item => item.Manifest.Id)], live, saved);
-
-        var slots = new IIslandExtension?[ExtensionPlacement.SlotCount];
-        var sources = new string?[ExtensionPlacement.SlotCount];
-        var ids = new string?[ExtensionPlacement.SlotCount];
-        var stamps = new string?[ExtensionPlacement.SlotCount];
-        var going = new (string Name, string Stamp, ExtensionManifest Manifest)?[ExtensionPlacement.SlotCount];
-        for (int at = 0; at < candidates.Count; at++)
-            if (seat[at] is var slot and >= 0) going[slot] = candidates[at];
-            else Failures.Add((candidates[at].Name, Loc.T("槽位已满", "All four slots are filled")));
-        for (int slot = 0; slot < ExtensionPlacement.SlotCount; slot++)
-        {
-            if (going[slot] is not { } folder) continue;
-            // The folder that was already standing here with the same contents keeps its extension — its pages, its
-            // state, its alarms — exactly as they are; everything else is built fresh.
-            if (Slots[slot] is { } held && _sources[slot]?.Equals(folder.Name, StringComparison.OrdinalIgnoreCase) == true && _stamps[slot] == folder.Stamp)
-            { slots[slot] = held; sources[slot] = _sources[slot]; ids[slot] = _ids[slot]; stamps[slot] = folder.Stamp; continue; }
-            var extension = new WebExtension(folder.Manifest, Path.Combine(Folder, folder.Name));
-            slots[slot] = extension; sources[slot] = folder.Name; ids[slot] = extension.Id; stamps[slot] = folder.Stamp;
-        }
-
-        // What a scan decided is written down: the plugin's own row records the slot it stands in, so the next cold
-        // start puts the tab back there rather than handing the folders out in name order again. Only a scan that moved
-        // something asks for the file to be saved.
-        if (Settings is { } store)
-        {
-            bool recorded = false;
-            for (int slot = 0; slot < slots.Length; slot++) if (ids[slot] is { Length: > 0 } id) recorded |= store.PlaceExtension(id, slot);
-            if (recorded) WriteSlots?.Invoke();
-        }
+        // A context nothing was placed from is let go at once; so is the context of every slot that did not survive.
+        for (int i = 0; i < perFile.Count; i++)
+            if (perFile[i].Placed == 0) perFile[i].Context.Unload();
 
         var changed = new List<int>();
-        var retired = new List<WebExtension>();
         for (int slot = 0; slot < 4; slot++)
         {
             if (ReferenceEquals(Slots[slot], slots[slot])) continue;
             Notify(slot, false);
             changed.Add(slot);
-            if (Slots[slot] is WebExtension old) retired.Add(old);
         }
-        for (int slot = 0; slot < 4; slot++) { Slots[slot] = slots[slot]; _sources[slot] = sources[slot]; _ids[slot] = ids[slot]; _stamps[slot] = stamps[slot]; }
+        for (int slot = 0; slot < 4; slot++)
+        {
+            if (!ReferenceEquals(_contexts[slot], contexts[slot]) && _contexts[slot] is { } retired)
+            {
+                try { Slots[slot]?.Dispose(); } catch { }
+                retired.Unload();
+            }
+            Slots[slot] = slots[slot]; _contexts[slot] = contexts[slot]; _sources[slot] = sources[slot]; _ids[slot] = ids[slot]; _stamps[slot] = newStamps[slot];
+        }
 
         DeckPages.SlotOccupied = slot => Slots[slot] is not null;
         DeckPages.SlotId = slot => _ids[slot];
-        // Each plugin's own floor for its page: the manifest asks in the page's pixels, the panel keeps the floor in its
-        // own, so the host adds the chrome back — dragging can then never take a page under the box it was written for.
-        DeckPages.SlotMinimum = slot => Slots[slot] is WebExtension web ? MainWindow.PanelFloorFor(web.Minimum.Width, web.Minimum.Height) : (0, 0);
-        // The WebView2 runtime is probed once, but only when there is a plugin to show: a machine without plugins never
-        // starts a browser process it has no use for, and a page created later still probes on its own.
-        if (Slots.Any(slot => slot is not null)) _ = WebRuntime.Environment();
-        // An author whose declared control was skipped is told in two places, because either is where they would look:
-        // under that plugin's row on the plugins page, and in the extension log for anyone debugging with it switched on.
-        for (int slot = 0; slot < Slots.Length; slot++)
-            if (Slots[slot] is WebExtension placed)
-                foreach (var note in placed.Notes) ExtensionLog.Write("extension: note " + placed.Id + " " + note);
-        if (changed.Count > 0)
-        {
-            ExtensionsChanged?.Invoke(changed);
-            // The panels have let go of the retired pages' views; only now may the extensions behind them go too.
-            foreach (var extension in retired) extension.Dispose();
-        }
+        if (changed.Count > 0) ExtensionsChanged?.Invoke(changed);
     }
 
-    // The stamp of a plugin folder, so "Reload" knows whether anything changed. ExtensionStamp hashes every file's
-    // relative path and content — a timestamp cannot tell a restored-from-source stylesheet from the one it replaced.
-    //
-    // A folder that cannot be read answers with something unique rather than a constant: a scanner that fails must not
-    // look like "nothing changed", or a broken folder would be silently reused forever.
-    private static string Stamp(string folder)
+    // A dependency next to the plugin is loaded from the plugin folder; the contract always comes from the host, so both
+    // sides share one IIslandExtension type.
+    // The cached copy a context loads from, made once per file version.
+    private static string Shadow(string file, string stamp)
     {
-        if (ExtensionStamp.Of(folder) is { } stamp) return stamp;
-        ExtensionLog.Write("extension: stamp failed for " + Path.GetFileName(folder));
-        return "failed:" + Guid.NewGuid().ToString("N");
+        string sourceFolder = Path.GetDirectoryName(file)!;
+        string cacheFolder = Path.Combine(CacheFolder, Path.GetFileName(sourceFolder) + "." + stamp[..16]);
+        string relative = Path.GetRelativePath(sourceFolder, file);
+        string shadow = Path.Combine(cacheFolder, relative);
+        if (!File.Exists(shadow))
+        {
+            foreach (var source in Directory.EnumerateFiles(sourceFolder, "*", SearchOption.AllDirectories))
+            {
+                if ((File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0) continue;
+                string destination = Path.Combine(cacheFolder, Path.GetRelativePath(sourceFolder, source));
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(source, destination, true);
+            }
+        }
+        return shadow;
     }
 
-    // A plugin's glyph as stroke path data on a 24 by 24 grid. A string that does not parse is a plugin's mistake, not
-    // the panel's: a plain square stands in so the tab and its row keep their place.
-    public static System.Windows.Media.Geometry SafeGlyph(string? data)
+    private static bool HasReparsePoints(string root)
     {
-        try
+        var pending = new Stack<string>(); pending.Push(root);
+        while (pending.Count > 0)
         {
-            var geometry = System.Windows.Media.Geometry.Parse(data ?? "");
-            geometry.Freeze();
-            return geometry;
+            string folder = pending.Pop();
+            if ((File.GetAttributes(folder) & FileAttributes.ReparsePoint) != 0) return true;
+            foreach (var directory in Directory.EnumerateDirectories(folder))
+            {
+                if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0) return true;
+                pending.Push(directory);
+            }
+            foreach (var file in Directory.EnumerateFiles(folder))
+                if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0) return true;
         }
-        catch (Exception)
-        {
-            var fallback = System.Windows.Media.Geometry.Parse("M 4,4 H 20 V 20 H 4 Z");
-            fallback.Freeze();
-            return fallback;
-        }
+        return false;
     }
 
     public static bool Occupied(int slot) => Slots[slot] is not null;
 
-    // Whether a view a panel cached is still usable. A page leaves its WebView behind when the panel takes the view
-    // off the window, so the extension — not the panel — is asked before a cached view is put back.
-    public static bool Alive(int slot, System.Windows.FrameworkElement view)
-        => slot >= 0 && slot < Slots.Length && Slots[slot] is WebExtension extension ? extension.Alive(view) : true;
+    public static bool InstallFromFolder(string source, out string error)
+    {
+        error = "";
+        try
+        {
+            string manifestPath = Path.Combine(source, "plugin.json");
+            if (!File.Exists(manifestPath)) { error = Loc.T("所选文件夹缺少 plugin.json。", "The selected folder has no plugin.json."); return false; }
+            var manifest = JsonSerializer.Deserialize<PluginManifest>(File.ReadAllText(manifestPath), JsonOptions);
+            if (manifest is null || !ValidId(manifest.Id) || manifest.ApiVersion < 1 || manifest.ApiVersion > ApiVersion ||
+                string.IsNullOrWhiteSpace(manifest.Entry) || Path.IsPathRooted(manifest.Entry) || manifest.Entry.Contains("..") ||
+                !string.Equals(Path.GetExtension(manifest.Entry), ".dll", StringComparison.OrdinalIgnoreCase))
+            { error = Loc.T("插件清单无效或 API 版本不兼容。", "The plugin manifest is invalid or its API version is incompatible."); return false; }
+            if (HasReparsePoints(source)) { error = Loc.T("插件目录包含符号链接或联接点。", "The plugin folder contains a symbolic link or junction."); return false; }
+            string target = Path.Combine(Folder, manifest.Id);
+            if (Directory.Exists(target)) { error = Loc.T("同 ID 插件已安装，请先卸载旧版本。", "A plugin with this ID is already installed. Uninstall it before replacing it."); return false; }
+            Directory.CreateDirectory(Folder);
+            foreach (var directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
+                if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0) { error = Loc.T("插件包包含目录链接，已拒绝安装。", "The plugin package contains a directory link and was rejected."); return false; }
+            foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+                if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0) { error = Loc.T("插件包包含文件链接，已拒绝安装。", "The plugin package contains a file link and was rejected."); return false; }
+            Directory.CreateDirectory(target);
+            foreach (var directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
+                Directory.CreateDirectory(Path.Combine(target, Path.GetRelativePath(source, directory)));
+            foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+            {
+                string destination = Path.Combine(target, Path.GetRelativePath(source, file));
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(file, destination);
+            }
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
+        { error = ex.Message.Split('\n')[0]; return false; }
+    }
+
+    public static bool Uninstall(int slot, bool deleteData, out string error)
+    {
+        error = "";
+        if (slot < 0 || slot >= Slots.Length || Slots[slot] is null || _sources[slot] is not { } file) return false;
+        try
+        {
+            string? folder = Path.GetDirectoryName(file);
+            if (folder is not null && string.Equals(Path.GetDirectoryName(folder), Folder, StringComparison.OrdinalIgnoreCase))
+                Directory.Delete(folder, recursive: true);
+            else if (File.Exists(file)) File.Delete(file);
+            if (deleteData && _ids[slot] is { } id)
+            {
+                string data = Path.Combine(AppPaths.Data, "extension-data", id);
+                if (Directory.Exists(data)) Directory.Delete(data, recursive: true);
+            }
+            Scan();
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        { error = ex.Message.Split('\n')[0]; return false; }
+    }
 
     public static int OccupiedCount => Slots.Count(slot => slot is not null);
 
-    // The demand a page hands to its extension; the web adapter is host code, but the guard stays so a bug in it is a
-    // missed message, not a thrown startup.
+    public static Action<string, string, ExtensionSettingValue>? WriteValue;
+    public static Action? WriteSlots;
+    public static bool Alive(int slot, System.Windows.FrameworkElement view) => true;
+    public static void Enter(int slot, bool forward) { }
+    public static void PanelInUse(bool inUse) { }
+    public static void SetPanelScale(double scale) { }
+    public static IReadOnlyList<ExtensionSetting> Declared(int slot) => Array.Empty<ExtensionSetting>();
+    public static IReadOnlyList<string> Notes(int slot) => Array.Empty<string>();
+    public static IReadOnlyDictionary<string, ExtensionSettingValue> ValuesFor(string id) => Settings?.ExtensionValues(id) ?? new Dictionary<string, ExtensionSettingValue>();
+    public static DeckSettings? Settings { get; private set; }
+    public static void Write(string id, string key, ExtensionSettingValue value) => WriteValue?.Invoke(id, key, value);
+    public static IslandPluginContext Context(int slot)
+    {
+        string id = _ids[slot] ?? "unknown";
+        string folder = Path.Combine(AppPaths.Data, "extension-data", id);
+        Directory.CreateDirectory(folder);
+        return new IslandPluginContext(id, folder, Colors,
+            (plugin, key) => ReadPluginValue(plugin, key),
+            (plugin, key, value) => WritePluginValue(plugin, key, value),
+            action => System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
+            {
+                if (action == "expand") foreach (var deck in ((App)System.Windows.Application.Current).Decks) deck.SetExpanded(true);
+            }),
+            kind => Subscribe(id, kind));
+    }
+    private static void Subscribe(string id, string kind)
+    {
+        if (kind.Length is < 1 or > 64 || kind.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not '-' and not '_' and not '.')) return;
+        if (!_subscriptions.TryGetValue(id, out var kinds)) _subscriptions[id] = kinds = new(StringComparer.OrdinalIgnoreCase);
+        kinds.Add(kind);
+    }
+    public static System.Windows.FrameworkElement? SettingsView(int slot) => Slots[slot]?.CreateSettingsView(Context(slot));
+    public static System.Windows.FrameworkElement? CompactView(int slot) => Slots[slot]?.CreateCompactView(Context(slot));
+    public static void CompactDemand(int slot, bool shown)
+    {
+        if (slot >= 0 && slot < Slots.Length && Slots[slot] is PluginPageAdapter page) page.SetCompactDemand(shown);
+    }
+    public static IReadOnlyList<IslandCommand> Commands(int slot) => Slots[slot]?.Commands ?? Array.Empty<IslandCommand>();
+    public static IReadOnlyList<(string Title, IslandCommand Command)> AllCommands()
+        => Slots.Where(extension => extension is not null).SelectMany(extension => extension!.Commands
+            .Select(command => (Loc.IsEnglish ? command.TitleEn : command.TitleZh, command))).ToList();
+    public static void RunCommand(IslandCommand command)
+    {
+        try { command.Execute(); }
+        catch (Exception ex) { ExtensionLog.Write("plugin command failed: " + ex.Message.Split('\n')[0]); }
+    }
+    private static string DataPath(string id, string key)
+    {
+        if (key.Length is < 1 or > 100 || key.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not '-' and not '_' and not '.')) throw new ArgumentException("Invalid plugin data key", nameof(key));
+        var folder = Path.Combine(AppPaths.Data, "extension-data", id);
+        Directory.CreateDirectory(folder);
+        return Path.Combine(folder, key + ".json");
+    }
+    private static string? ReadPluginValue(string id, string key)
+    {
+        try { var path = DataPath(id, key); return File.Exists(path) ? File.ReadAllText(path) : null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { return null; }
+    }
+    private static void WritePluginValue(string id, string key, string value)
+    {
+        try { File.WriteAllText(DataPath(id, key), value.Length > 64 * 1024 ? value[..(64 * 1024)] : value); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { }
+    }
+    public static System.Windows.Media.Geometry SafeGlyph(string glyph)
+    {
+        try { return System.Windows.Media.Geometry.Parse(glyph); }
+        catch { return System.Windows.Media.Geometry.Parse("M 4,4 H 20 V 20 H 4 Z"); }
+    }
+
+    private sealed class PluginLoadContext : AssemblyLoadContext
+    {
+        private readonly AssemblyDependencyResolver _resolver;
+        public PluginLoadContext(string pluginPath) : base("BrimDeck.Island:" + Path.GetFileName(pluginPath), isCollectible: true)
+            => _resolver = new AssemblyDependencyResolver(pluginPath);
+        protected override Assembly? Load(AssemblyName name)
+        {
+            if (string.Equals(name.Name, typeof(IIslandExtension).Assembly.GetName().Name, StringComparison.OrdinalIgnoreCase)) return null;
+            var path = _resolver.ResolveAssemblyToPath(name);
+            return path is null ? null : LoadFromAssemblyPath(path);
+        }
+        protected override IntPtr LoadUnmanagedDll(string unmanagedDllName)
+        {
+            var path = _resolver.ResolveUnmanagedDllToPath(unmanagedDllName);
+            return path is null ? IntPtr.Zero : LoadUnmanagedDllFromPath(path);
+        }
+    }
+
+    private sealed class PluginRuntime(IIslandExtension plugin)
+    {
+        private readonly HashSet<string> _demandedPages = new(StringComparer.OrdinalIgnoreCase);
+        private bool _demand;
+        private bool _disposed;
+        public IIslandExtension Plugin { get; } = plugin;
+        public void SetDemand(string pageId, bool shown)
+        {
+            if (shown) _demandedPages.Add(pageId); else _demandedPages.Remove(pageId);
+            bool next = _demandedPages.Count > 0;
+            if (_demand == next) return;
+            _demand = next;
+            try { Plugin.SetDemand(next); } catch { }
+        }
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            try { Plugin.SetDemand(false); } catch { }
+            try { Plugin.Dispose(); } catch { }
+        }
+    }
+
+    private sealed class PluginPageAdapter(PluginRuntime runtime, IslandPage page, string id) : IIslandExtension
+    {
+        public string Id => id;
+        public string TitleZh => page.TitleZh;
+        public string TitleEn => page.TitleEn;
+        public string Glyph => page.Glyph;
+        public string Version => runtime.Plugin.Version;
+        public string Author => runtime.Plugin.Author;
+        public string Description => runtime.Plugin.Description;
+        public IReadOnlyList<string> RequestedPermissions => runtime.Plugin.RequestedPermissions;
+        public IReadOnlyList<IslandCommand> Commands => runtime.Plugin.Commands;
+        public System.Windows.FrameworkElement CreateView(IslandColors colors) => page.CreateView(new IslandPluginContext(id, Path.Combine(AppPaths.Data, "extension-data", id), Colors,
+            ReadPluginValue, WritePluginValue, _ => { }, _ => { }), colors);
+        public System.Windows.FrameworkElement CreateView(IslandPluginContext context, IslandColors colors) => page.CreateView(context, colors);
+        public System.Windows.FrameworkElement? CreateSettingsView(IslandPluginContext context) => runtime.Plugin.CreateSettingsView(context);
+        public System.Windows.FrameworkElement? CreateCompactView(IslandPluginContext context) => runtime.Plugin.CreateCompactView(context);
+        public void SetDemand(bool shown) => runtime.SetDemand(id, shown);
+        public void SetCompactDemand(bool shown) => runtime.SetDemand("compact:" + id, shown);
+        public void OnThemeChanged(IslandColors colors) { try { runtime.Plugin.OnThemeChanged(colors); } catch { } }
+        public void OnHostEvent(IslandHostEvent hostEvent) { try { runtime.Plugin.OnHostEvent(hostEvent); } catch { } }
+        public void OnDataChanged(IslandDataSnapshot snapshot) { try { runtime.Plugin.OnDataChanged(snapshot); } catch { } }
+        public void Dispose() => runtime.Dispose();
+    }
+
+    // The demand a page hands to its extension, never letting a plugin's exception escape into the host.
     public static void Notify(int slot, bool shown)
     {
         if (slot < 0 || slot >= Slots.Length) return;
@@ -211,83 +483,45 @@ internal static class IslandExtensions
         catch (Exception) { }
     }
 
-    // A page switch is arriving at this slot's page from this direction; a web page carries its entrance inside the
-    // browser, where the switch's own animation cannot reach it.
-    public static void Enter(int slot, bool forward)
+    public static string Title(int slot)
     {
-        if (slot < 0 || slot >= Slots.Length) return;
-        try { if (Slots[slot] is WebExtension web) web.Enter(forward); }
-        catch (Exception) { }
+        try
+        {
+            return Slots[slot] is { } extension ? (Loc.IsEnglish ? extension.TitleEn : extension.TitleZh) : "";
+        }
+        catch (Exception) { return _ids[slot] ?? ""; }
     }
-
-    // Whether any panel is open, told as it changes: an open panel keeps its pre-built pages ready to switch to, so
-    // the reclaim of a page nobody watches waits for the panel itself to close.
-    public static void PanelInUse(bool inUse)
-    {
-        try { WebRuntime.PanelInUse(inUse); }
-        catch (Exception) { }
-    }
-
-    public static string Title(int slot) => Slots[slot] is { } extension ? (Loc.IsEnglish ? extension.TitleEn : extension.TitleZh) : "";
 
     // The colors an extension draws with: its monitor palette page's scheme on the theme's text and surface colors.
-    // The app sets the palette whenever the theme or the choice changes, before any view is created, and the pages
-    // that already exist hear about it as a push.
+    // The app sets the palette whenever the theme or the choice changes, before any view is created.
     public static IslandColors Colors { get; private set; } = new("#4FD17F", "#F0B54A", "#FF6B5E", "#F1F1F4", "#C5C5CB", "#8E8E93", "#2A2A30", "#1D1D21");
-    // The settings file is adopted wherever the palette is, because both are read from the same object and every path
-    // that applies one applies the other: the declared controls a plugin draws its settings row from, and the values a
-    // reader chose, both live here.
-    public static DeckSettings? Settings { get; private set; }
-    // How a value a page wrote reaches the file, the settings page and every other panel showing that plugin. The app
-    // installs it at startup; the host has no business deciding when settings are saved.
-    public static Action<string, string, ExtensionSettingValue>? WriteValue;
-    // How a slot a scan placed a plugin in reaches the file. The scan decides where a plugin sits; the app decides when
-    // that is written down, and a scan that moved nothing never asks.
-    public static Action? WriteSlots;
-    // The scale the panels draw at (DeckSettings.PanelScale). A web page is given a box at that many times the panel's
-    // own size and shrunk back into it, so the browser rasterizes one pixel per pixel the reader sees — a panel's
-    // transform can stretch a page already drawn, but it cannot make the browser draw it again at the new size. The
-    // pages read this to keep one CSS pixel one unscaled panel DIP, which is the unit their manifests are written in.
-    public static double PanelScale => _panelScale;
-    private static double _panelScale = 1;
-    public static void SetPanelScale(double scale)
-    {
-        if (scale == _panelScale || !double.IsFinite(scale) || scale <= 0) return;
-        _panelScale = scale;
-        // Pages already on screen changed box with the scale and re-report as they settle; one that cannot report — a
-        // page mid-load, or one whose document is blank — is fitted from what it last said instead.
-        foreach (var slot in Slots) if (slot is WebExtension extension) extension.Refit();
-    }
     public static void SetPalette(DeckSettings settings)
     {
-        Colors = With(MonitorThemeColors.For(settings));
         Settings = settings;
-        WebRuntime.SetColors(Colors);
-        // Whatever the settings window just changed — a declared control's value, or the plugin list itself — the pages
-        // are told in the same breath, so a page and its row cannot be seen disagreeing.
-        WebRuntime.PushValues();
+        var monitor = MonitorThemeColors.For(settings);
+        Colors = new(PanelTheme.Current.IsDark ? "#4FD17F" : "#1C9A50", monitor.Warning, monitor.Critical,
+            UI.Primary, UI.Secondary, UI.Tertiary, UI.Track, UI.Fill);
+        foreach (var extension in Slots) if (extension is not null) try { extension.OnThemeChanged(Colors); } catch { }
     }
-    // What a loaded plugin declared for the settings page to draw; nothing at all for a built-in page or a plugin with
-    // no declared controls, which is most of them and leaves the row as it always was.
-    public static IReadOnlyList<ExtensionSetting> Declared(int slot) => Slots[slot] is WebExtension web ? web.Declared : [];
-    // The declared entries that plugin wrote which the host could not use — shown under its row on the plugins page.
-    public static IReadOnlyList<string> Notes(int slot) => Slots[slot] is WebExtension web ? web.Notes : [];
-    // The values chosen for one plugin, honoured against what its manifest declares — so a stale or hand-edited value
-    // reads as the declaration would allow, and a page never sees a control its own author would not have drawn.
-    public static IReadOnlyDictionary<string, ExtensionSettingValue> ValuesFor(string id)
-        => Slots.FirstOrDefault(slot => slot is WebExtension web && web.Id == id) is WebExtension extension
-            ? ExtensionSettingStore.Normalize(extension.Declared, Settings?.ExtensionValues(id))
-            : EmptyValues;
-    private static readonly IReadOnlyDictionary<string, ExtensionSettingValue> EmptyValues = new Dictionary<string, ExtensionSettingValue>();
-    // One value written, then told to every page of that plugin: a reader may have three panels open, and a control on
-    // one of them is the same control on all of them.
-    public static void Write(string id, string key, ExtensionSettingValue value)
+
+    public static void PublishEvent(string name, IReadOnlyDictionary<string, string>? values = null)
     {
-        WriteValue?.Invoke(id, key, value);
-        WebRuntime.ValuesChanged(id);
+        var item = new IslandHostEvent(name, values ?? new Dictionary<string, string>());
+        foreach (var extension in Slots) if (extension is not null) try { extension.OnHostEvent(item); } catch { }
     }
-    // The normal color is not part of MonitorColors any more; the green the readings have always used still fits a
-    // plugin's temperature gauge, on the theme's dark or light surface.
-    private static IslandColors With(MonitorColors colors)
-        => new(PanelTheme.Current.IsDark ? "#4FD17F" : "#1C9A50", colors.Warning, colors.Critical, UI.Primary, UI.Secondary, UI.Tertiary, UI.Track, UI.Fill);
+    public static void PublishData(IslandDataSnapshot snapshot)
+    {
+        for (int slot = 0; slot < Slots.Length; slot++)
+            if (Slots[slot] is { } extension && _ids[slot] is { } id && _subscriptions.ContainsKey(id))
+                try { extension.OnDataChanged(snapshot); } catch { }
+    }
+    public static void PublishMonitor(MonitorSnapshot snapshot)
+    {
+        var numbers = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        if (snapshot.Cpu.TryGet(out var cpu)) numbers["cpu.usage"] = cpu.Usage;
+        if (snapshot.Memory.TryGet(out var memory)) { numbers["memory.usedBytes"] = memory.Used; numbers["memory.totalBytes"] = memory.Total; }
+        if (snapshot.Network.TryGet(out var network)) { numbers["network.downloadBytesPerSecond"] = network.DownBytesPerSecond; numbers["network.uploadBytesPerSecond"] = network.UpBytesPerSecond; }
+        if (snapshot.Gpu.TryGet(out var gpu)) numbers["gpu.usage"] = gpu.Usage;
+        PublishData(new IslandDataSnapshot(snapshot.Time, numbers, new Dictionary<string, string>()));
+    }
 }
