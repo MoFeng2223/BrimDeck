@@ -218,8 +218,9 @@ public sealed partial class SettingsWindow
         return panel;
     }
 
-    // A question before an action that cannot be undone, in a small dialog over the settings: Cancel (Esc) or the action, in red.
-    private bool Confirm(string title, string message, string action)
+    // A question before an action that cannot be undone, in a small dialog over the settings: Cancel (Esc) or the action, in red
+    // (in the accent color when it is not a danger).
+    private bool Confirm(string title, string message, string action, bool danger = true)
     {
         var dialog = new Window { Title = title, Owner = this, Width = 400, SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false, FontFamily = UI.PanelFont,
@@ -233,7 +234,7 @@ public sealed partial class SettingsWindow
         var text = TextLine(message, 12.5, TextSecondary); text.TextWrapping = TextWrapping.Wrap; panel.Children.Add(text);
         bool confirmed = false;
         var cancel = ActionButton(Loc.T("取消", "Cancel"), dialog.Close); cancel.Style = (Style)dialog.FindResource("SettingsOutlineButton"); cancel.IsCancel = true;
-        var confirm = ActionButton(action, () => { confirmed = true; dialog.Close(); }); confirm.Style = (Style)dialog.FindResource("SettingsDangerButton");
+        var confirm = ActionButton(action, () => { confirmed = true; dialog.Close(); }); confirm.Style = (Style)dialog.FindResource(danger ? "SettingsDangerButton" : "SettingsPrimaryButton");
         foreach (var button in new[] { cancel, confirm }) { button.MinWidth = 84; button.Padding = new Thickness(14, 6, 14, 6); }
         confirm.Margin = new Thickness(8, 0, 0, 0);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 20, 0, 0) };

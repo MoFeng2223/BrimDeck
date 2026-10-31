@@ -29,6 +29,7 @@ namespace BrimDeck.Native;
 // Which program: the one whose window is in front. A browser or an Electron app draws in a child process of the same executable,
 // and an app built on WebView2 in msedgewebview2.exe children, so a window whose own process presents nothing takes the frames of
 // such descendants; any other descendant is a program of its own (everything started from the desktop descends from explorer).
+// A UWP app's window (Settings) is ApplicationFrameHost's frame around the app's own, so the app's process counts (Owner).
 // While the program in front presents nothing (a chat beside a game on another display), the figure stays with the last program
 // that did, so it does not drop to 0 at every click; once that one has stopped too, the program in front shows, at 0.
 // The session is named for this process ("BrimDeck Frames 1234"): a test or a second copy has a session of its own, and a session
@@ -44,10 +45,19 @@ internal sealed class FrameRates : IDisposable
         DxgKrnl = new("802EC45A-1E99-4B83-9920-87C98277BA9D");
     private const uint DxgiData1 = 0xCA11C036, D3D9Data1 = 0x783ACA0A, DxgKrnlData1 = 0x802EC45A;
     private readonly object _lock = new();
-    // Frames since the last Sample: runtime presents by process and swap chain, kernel present records by process (Kernel as the
-    // chain).
+    // The frames not yet counted, each at the time it was presented (the performance counter, as Sample's clock): runtime presents
+    // by process and swap chain, kernel present records by process (Kernel as the chain). Windows hands the events over in
+    // batches, about once a second (the session's flush timer, at least a second, and a buffer as it fills), so counting them as
+    // they arrive gave a second with two batches (twice the rate) after one with none; Sample counts by when they were presented
+    // instead, up to Lag seconds ago. The session is flushed every FlushEvery as well, so by then they have arrived (here within
+    // 0.2 s, 0.3 s at most); one that comes later still counts, in the next reading.
     private const long Kernel = -1;
-    private Dictionary<(int Pid, long Chain), long> _counts = [];
+    private const double Lag = 0.4;
+    private static readonly TimeSpan FlushEvery = TimeSpan.FromMilliseconds(100);
+    private Timer? _flusher;
+    private const int MostEvents = 200_000;
+    private List<(long Time, int Pid, long Chain)> _events = [];
+    private double _cutoff = double.NaN;
     private readonly EventRecordCallback _callback;
     private ulong _session, _trace;
     private Thread? _reader;
@@ -55,7 +65,6 @@ internal sealed class FrameRates : IDisposable
     private bool _wanted, _refused;
     // Set when the frame rate is wanted anew: the sampler's thread starts its count and its history over (Sample).
     private bool _reset = true;
-    private double _since = double.NaN;
     // The program shown (Desktop for the desktop) and its readings so far; the last that presented anything, for while the
     // program in front presents nothing.
     private const int Desktop = -1;
@@ -65,6 +74,14 @@ internal sealed class FrameRates : IDisposable
     private readonly Queue<double> _history = new(HistoryLength);
     private readonly Dictionary<int, (string Name, string? Path)> _names = [];
     private IReadOnlyList<DisplayInfo> _displays = [];
+    // Each process's parent and executable (Processes), kept between readings, as taking it costs about 5 ms with 280 processes
+    // and a browser in front needs it at every reading. Taken again when the program in front changes, when a process that
+    // presented frames (a child just started, or started again) or the program asked about is not in it, and every
+    // ProcessesSeconds, since Windows gives an ended process's number to a new one.
+    private Dictionary<int, (int Parent, string File)>? _processes;
+    private double _processesAt = double.NegativeInfinity;
+    private int _processesFront;
+    private const double ProcessesSeconds = 10;
 
     public FrameRates() => _callback = OnEvent;
 
@@ -96,7 +113,7 @@ internal sealed class FrameRates : IDisposable
     // without permission, or on the first call, which starts the count.
     public Reading<FrameSample> Sample(double now)
     {
-        Dictionary<(int Pid, long Chain), long> counts;
+        List<(long Time, int Pid, long Chain)> events;
         bool reset;
         lock (_lock)
         {
@@ -110,21 +127,37 @@ internal sealed class FrameRates : IDisposable
                 try { StartTrace(); _reset = true; }
                 catch (TraceRefused ex) { Debug.WriteLine(ex.Message); StopTrace(); }
             }
-            counts = _counts; _counts = [];
+            events = _events; _events = [];
             reset = _reset; _reset = false;
         }
-        if (reset) { _since = double.NaN; _history.Clear(); _shown = _lastDrawing = 0; }
+        // The frames presented up to the cutoff are counted (and dropped after a reset); the later ones wait for the next Sample.
+        double cutoff = now - Lag;
+        long through = (long)(cutoff * Stopwatch.Frequency);
+        var counts = new Dictionary<(int Pid, long Chain), long>();
+        var later = new List<(long Time, int Pid, long Chain)>();
+        foreach (var e in events)
+            if (e.Time > through) later.Add(e);
+            else if (!reset) counts[(e.Pid, e.Chain)] = counts.GetValueOrDefault((e.Pid, e.Chain)) + 1;
+        if (later.Count > 0) lock (_lock) { if (_wanted && _events.Count + later.Count <= MostEvents) _events.AddRange(later); }
+        if (reset) { _cutoff = double.NaN; _history.Clear(); _shown = _lastDrawing = 0; _processes = null; _processesAt = double.NegativeInfinity; }
         var front = GetForegroundWindow();
-        GetWindowThreadProcessId(front, out int frontPid);
-        double seconds = now - _since;
-        _since = now;
+        int frontPid = Owner(front);
+        double seconds = cutoff - _cutoff;
+        _cutoff = cutoff;
         if (!double.IsFinite(seconds) || seconds <= 0) return Reading<FrameSample>.Unavailable(Why.Waiting);
 
         // A process's frames: its busiest swap chain, or its kernel records if more.
         var busiest = new Dictionary<int, long>();
         foreach (var ((pid, _), count) in counts) busiest[pid] = Math.Max(busiest.GetValueOrDefault(pid), count);
         if (IsDesktop(front)) return DesktopRate(front, frontPid, busiest, seconds);
-        Dictionary<int, (int Parent, string File)>? processes = null;
+        Dictionary<int, (int Parent, string File)> Known(int pid)
+        {
+            bool stale = _processes is null || _processesFront != frontPid || now - _processesAt >= ProcessesSeconds
+                || !_processes.ContainsKey(pid) || busiest.Keys.Any(process => !_processes.ContainsKey(process));
+            // At most once a reading: a process that ended before the list was taken stays missing from it.
+            if (stale && _processesAt != now) { _processes = Processes(); _processesAt = now; _processesFront = frontPid; }
+            return _processes!;
+        }
         long Family(int pid)
         {
             if (pid == 0) return 0;
@@ -132,7 +165,7 @@ internal sealed class FrameRates : IDisposable
             if (own > 0) return own;
             // The window's process presents nothing itself: its own executable's descendants draw for it (a browser's GPU process),
             // or WebView2's.
-            processes ??= Processes();
+            var processes = Known(pid);
             if (!processes.TryGetValue(pid, out var self)) return 0;
             long most = 0;
             foreach (var (process, count) in busiest)
@@ -183,9 +216,7 @@ internal sealed class FrameRates : IDisposable
         int found = 0;
         EnumWindows((window, _) =>
         {
-            var name = new char[16];
-            int length = GetClassNameW(window, name, name.Length);
-            if (new string(name, 0, Math.Max(0, length)) is not ("Progman" or "WorkerW")) return true;
+            if (ClassName(window) is not ("Progman" or "WorkerW")) return true;
             EnumChildWindows(window, (child, _) =>
             {
                 GetWindowThreadProcessId(child, out int owner);
@@ -204,9 +235,31 @@ internal sealed class FrameRates : IDisposable
     {
         if (window == IntPtr.Zero) return false;
         if (window == GetShellWindow()) return true;
+        return ClassName(window) is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd";
+    }
+    private static string ClassName(IntPtr window)
+    {
         var name = new char[64];
         int length = GetClassNameW(window, name, name.Length);
-        return new string(name, 0, Math.Max(0, length)) is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd";
+        return new string(name, 0, Math.Max(0, length));
+    }
+
+    // The process that draws a window: its own, except for a UWP app (Settings, Calculator), whose window is ApplicationFrameHost's
+    // frame around the app's own window (a CoreWindow child of another process); the frame draws only its title bar.
+    private static int Owner(IntPtr window)
+    {
+        GetWindowThreadProcessId(window, out int pid);
+        if (window == IntPtr.Zero || ClassName(window) != "ApplicationFrameWindow") return pid;
+        int app = 0;
+        EnumChildWindows(window, (child, _) =>
+        {
+            if (ClassName(child) != "Windows.UI.Core.CoreWindow") return true;
+            GetWindowThreadProcessId(child, out int owner);
+            if (owner == pid || owner == 0) return true;
+            app = owner;
+            return false;
+        }, IntPtr.Zero);
+        return app != 0 ? app : pid;
     }
     private static bool Same(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
@@ -248,14 +301,13 @@ internal sealed class FrameRates : IDisposable
         return _names[pid] = (name, file);
     }
 
-    // The largest visible window of a program, for the display it is on.
+    // The largest visible window of a program (a UWP app's frame), for the display it is on.
     private static IntPtr MainWindow(int pid)
     {
         IntPtr best = IntPtr.Zero; long area = 0;
         EnumWindows((window, _) =>
         {
-            GetWindowThreadProcessId(window, out int owner);
-            if (owner != pid || !IsWindowVisible(window) || !GetWindowRect(window, out var r)) return true;
+            if (!IsWindowVisible(window) || Owner(window) != pid || !GetWindowRect(window, out var r)) return true;
             long size = (long)(r.Right - r.Left) * (r.Bottom - r.Top);
             if (size > area) { area = size; best = window; }
             return true;
@@ -303,14 +355,15 @@ internal sealed class FrameRates : IDisposable
         Enable(DxgKrnl, 0x8000001, 0x8000001, 0xAB);
         Enable(Dxgi, 0x8000000000000002, 0x8000000000000002, 0x2A);
         Enable(D3D9, 0x8000000000000002, 0x8000000000000002, 0x01);
-        // EVENT_TRACE_LOGFILEW, 448 bytes on x64: LoggerName at 8, ProcessTraceMode at 28 (real time, event records),
+        // EVENT_TRACE_LOGFILEW, 448 bytes on x64: LoggerName at 8, ProcessTraceMode at 28 (real time, event records, and raw
+        // timestamps: the performance counter the session records, not converted to the system time),
         // EventRecordCallback at 424.
         IntPtr logfile = Zeroed(448);
         try
         {
             _loggerName = Marshal.StringToHGlobalUni(Session);
             Marshal.WriteIntPtr(logfile, 8, _loggerName);
-            Marshal.WriteInt32(logfile, 28, 0x100 | 0x10000000);
+            Marshal.WriteInt32(logfile, 28, 0x100 | 0x10000000 | 0x1000);
             Marshal.WriteIntPtr(logfile, 424, Marshal.GetFunctionPointerForDelegate(_callback));
             _trace = OpenTraceW(logfile);
             if (_trace == ulong.MaxValue) throw new TraceRefused("OpenTrace", (uint)Marshal.GetLastWin32Error());
@@ -319,6 +372,7 @@ internal sealed class FrameRates : IDisposable
         ulong trace = _trace;
         _reader = new Thread(() => ProcessTrace([trace], 1, IntPtr.Zero, IntPtr.Zero)) { IsBackground = true, Name = "BrimDeck frame events" };
         _reader.Start();
+        _flusher = new Timer(_ => Control(0, Session, 3 /* EVENT_TRACE_CONTROL_FLUSH */), null, FlushEvery, FlushEvery);
     }
 
     private void StopTrace()
@@ -329,8 +383,9 @@ internal sealed class FrameRates : IDisposable
         _trace = 0;
         // Not joined: its thread may be waiting for the lock held here to count an event, and it ends once the session is closed.
         _reader = null;
+        _flusher?.Dispose(); _flusher = null;
         if (_loggerName != IntPtr.Zero) { Marshal.FreeHGlobal(_loggerName); _loggerName = IntPtr.Zero; }
-        _counts = [];
+        _events = [];
     }
 
     // Stops the sessions of BrimDecks no longer running (and the one this process may have left), found among all the machine's
@@ -413,8 +468,8 @@ internal sealed class FrameRates : IDisposable
         finally { Marshal.FreeHGlobal(filter); Marshal.FreeHGlobal(descriptor); Marshal.FreeHGlobal(parameters); }
     }
 
-    // EVENT_RECORD (112 bytes on x64): EventHeader.Flags at 4 (0x40: pointers in the data are 64 bits), ProcessId at 12, ProviderId
-    // at 24 (its first four bytes tell the three apart), UserDataLength at 86, UserData at 96. The data:
+    // EVENT_RECORD (112 bytes on x64): EventHeader.Flags at 4 (0x40: pointers in the data are 64 bits), ProcessId at 12, TimeStamp at
+    // 16 (the performance counter, as the session's ClientContext asks), ProviderId at 24 (its first four bytes tell the three apart), UserDataLength at 86, UserData at 96. The data:
     // DXGI's Present start pIDXGISwapChain then Flags, D3D9's pSwapchain then Flags.
     private void OnEvent(IntPtr record)
     {
@@ -423,11 +478,8 @@ internal sealed class FrameRates : IDisposable
         if (provider is not (DxgiData1 or D3D9Data1 or DxgKrnlData1)) return;
         int length = (ushort)Marshal.ReadInt16(record, 86);
         IntPtr data = Marshal.ReadIntPtr(record, 96);
-        if (provider == DxgKrnlData1)
-        {
-            lock (_lock) _counts[(pid, Kernel)] = _counts.GetValueOrDefault((pid, Kernel)) + 1;
-            return;
-        }
+        long time = Marshal.ReadInt64(record, 16);
+        if (provider == DxgKrnlData1) { Count(time, pid, Kernel); return; }
         int pointer = (Marshal.ReadInt16(record, 4) & 0x40) != 0 ? 8 : 4;
         long chain = 0;
         if (data != IntPtr.Zero && length >= pointer + 4)
@@ -435,7 +487,11 @@ internal sealed class FrameRates : IDisposable
             chain = pointer == 8 ? Marshal.ReadInt64(data, 0) : Marshal.ReadInt32(data, 0);
             if (provider == DxgiData1 && (Marshal.ReadInt32(data, pointer) & 1) != 0) return;
         }
-        lock (_lock) _counts[(pid, chain)] = _counts.GetValueOrDefault((pid, chain)) + 1;
+        Count(time, pid, chain);
+    }
+    private void Count(long time, int pid, long chain)
+    {
+        lock (_lock) if (_events.Count < MostEvents) _events.Add((time, pid, chain));
     }
 
     private static IntPtr Zeroed(int size)

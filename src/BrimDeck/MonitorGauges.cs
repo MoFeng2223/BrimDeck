@@ -49,8 +49,8 @@ internal sealed class FramesBlock : FrameworkElement
     {
         if (_frames is not { } frames)
         {
-            ToolTip = Loc.T("帧率：暂无读数。读取帧率需要当前用户属于“Performance Log Users”组，或以管理员身份运行 BrimDeck。",
-                "Frame rate: no reading. Reading frame rates needs the user to be in the Performance Log Users group, or BrimDeck to run as administrator.");
+            ToolTip = Loc.T("帧率：暂无读数。一直没有读数时，请在设置的“系统监控”页授权读取帧率。",
+                "Frame rate: no reading. If none comes, allow reading frame rates on the System monitor page of the settings.");
             AutomationProperties.SetName(this, Loc.T("帧率", "Frame rate"));
             return;
         }
