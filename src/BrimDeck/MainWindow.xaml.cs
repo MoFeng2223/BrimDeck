@@ -378,6 +378,7 @@ public partial class MainWindow : Window
         _pixelsPerDip = scale;
         // Both in the frame of the edge the panel hangs from (MainWindow.Edge.cs); for the top edge, the monitor's own.
         var screenWork = new DipRect((work.Left - bounds.Left) / scale, (work.Top - bounds.Top) / scale, work.Width / scale, work.Height / scale);
+        _screenMonitor = new DipRect(0, 0, bounds.Width / scale, bounds.Height / scale); _screenWork = screenWork;
         // The style shown decides the edge: a window rule that turns the notch or the capsule into the line shows it where the line's
         // own settings put it.
         var (edge, overTaskbar) = Dock(EffectiveStyle);
@@ -388,9 +389,18 @@ public partial class MainWindow : Window
         WorkDip = _frame.FromScreen(screenWork);
         Collapsed = ShapeFor(EffectiveStyle);
     }
-    private CollapsedShape ShapeFor(CompactStyle style) => CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip,
-        Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null, _compactRequired, _scale,
-        ColumnFor(style) ? double.IsNaN(_compactColumn) ? 0 : _compactColumn : null, style == CompactStyle.Line && Dock(style).OverTaskbar);
+    private CollapsedShape ShapeFor(CompactStyle style)
+    {
+        double? wanted = Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null;
+        // The capsule keeps its place on the screen; docked with the bottom (MainWindow.Edge.cs) it is only seen from there.
+        if (style == CompactStyle.Capsule && _frame.Edge != ScreenEdge.Top)
+        {
+            var onScreen = CollapsedGeometry.Resolve(Settings, style, _screenMonitor, _screenWork, _pixelsPerDip, wanted, _compactRequired, _scale);
+            return onScreen with { Surface = _frame.FromScreen(onScreen.Surface) };
+        }
+        return CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip, wanted, _compactRequired, _scale,
+            ColumnFor(style) ? double.IsNaN(_compactColumn) ? 0 : _compactColumn : null, style == CompactStyle.Line && Dock(style).OverTaskbar);
+    }
     // The width the collapsed column asks for (CompactColumn.Width); NaN until it is first built.
     private double _compactColumn = double.NaN;
     // The width the collapsed content asks for (see CollapsedGeometry); NaN until the row is first built, which keeps the saved width.
@@ -423,15 +433,17 @@ public partial class MainWindow : Window
     // surface as drawn at the scale.
     public (double OffsetMin, double OffsetMax, double TopMin, double TopMax, double WidthMin, double WidthMax) CurrentCollapsedRanges(CompactStyle style, double width, double height)
     {
-        var (widthMin, widthMax) = CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip, _scale);
+        // The capsule's settings are places on the screen, whichever edge it is docked with.
+        var (monitor, work) = style == CompactStyle.Capsule ? (_screenMonitor, _screenWork) : (MonitorBoundsDip, WorkDip);
+        var (widthMin, widthMax) = CollapsedGeometry.WidthRange(style, monitor, work, _scale);
         // At the height the surface takes, which a short screen or work area can lower below the saved one (as Resolve does).
-        double surfaceHeight = CollapsedGeometry.SurfaceHeight(style, height, MonitorBoundsDip, WorkDip, _scale);
+        double surfaceHeight = CollapsedGeometry.SurfaceHeight(style, height, monitor, work, _scale);
         widthMin = Math.Min(widthMax, Math.Max(widthMin, CollapsedGeometry.SurfaceWidth(style, surfaceHeight, _compactRequired)));
-        var (_, offsetMax) = CollapsedGeometry.OffsetXRange(style, width * _scale, MonitorBoundsDip, WorkDip);
+        var (_, offsetMax) = CollapsedGeometry.OffsetXRange(style, width * _scale, monitor, work);
         var (topMin, topMax) = style switch
         {
-            CompactStyle.Capsule => CollapsedGeometry.CapsuleTopRange(surfaceHeight, MonitorBoundsDip, WorkDip),
-            CompactStyle.Line => CollapsedGeometry.LineTopRange(CollapsedGeometry.SnapToDevicePixels(CollapsedGeometry.RoundLineThickness(height) * _scale, _pixelsPerDip), WorkDip),
+            CompactStyle.Capsule => CollapsedGeometry.CapsuleTopRange(surfaceHeight, monitor, work),
+            CompactStyle.Line => CollapsedGeometry.LineTopRange(CollapsedGeometry.SnapToDevicePixels(CollapsedGeometry.RoundLineThickness(height) * _scale, _pixelsPerDip), work),
             _ => (0d, 0d)
         };
         return (-offsetMax, offsetMax, topMin, topMax, widthMin / _scale, widthMax / _scale);
@@ -454,9 +466,10 @@ public partial class MainWindow : Window
     // pageHeight is unscaled; the panel's place depends on its height as drawn.
     // On the bottom, left and right edges the panel's top is a free side, rounded as a floating capsule panel's is, so it keeps the
     // same space above its header (CollapsedLimits.FloatingHeaderExtra) rather than the 4 DIPs under the screen edge.
+    // A capsule docked with the bottom hangs its panel from there, as a notch on that edge does.
     private PanelPlacement PanelFor(double pageHeight)
     {
-        var panel = CollapsedGeometry.Panel(Collapsed, WorkDip, pageHeight * _scale, PanelBottom);
+        var panel = Collapsed.Style == CompactStyle.Capsule && _frame.Edge != ScreenEdge.Top ? new PanelPlacement(0, 0) : CollapsedGeometry.Panel(Collapsed, WorkDip, pageHeight * _scale, PanelBottom);
         return _frame.Edge == ScreenEdge.Top ? panel : panel with { HeaderExtra = panel.HeaderExtra + CollapsedLimits.FloatingHeaderExtra };
     }
     // The lowest bottom edge of a panel below a lowered capsule: the work area's bottom, even when that is the monitor's bottom

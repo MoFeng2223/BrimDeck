@@ -36,7 +36,11 @@ public partial class MainWindow
     // While the notch or the line is dragged, the edge and anchor it is on: the hidden island lays itself out there (UpdateCollapsedGeometry)
     // and reports its size to the overlay (ReportMoveShape), which shows the surface at the size it takes there.
     private (ScreenEdge Edge, bool OverTaskbar)? _dockOverride;
-    private (ScreenEdge Edge, bool OverTaskbar) Dock(CompactStyle style) => _dockOverride is { } dragged && _moveOverlay is not null && style == _moveStyle ? dragged : Settings.Dock(style);
+    private (ScreenEdge Edge, bool OverTaskbar) Dock(CompactStyle style)
+    {
+        if (_dockOverride is { } dragged && _moveOverlay is not null && style == _moveStyle) return dragged;
+        return style == CompactStyle.Capsule && CapsuleBottomDock() is { } bottom ? bottom : Settings.Dock(style);
+    }
     private void ReportMoveShape()
     {
         if (_moveOverlay is { } overlay && _dockOverride is { } dock && _frame.Edge == dock.Edge && Collapsed.Style == _moveStyle)
@@ -219,8 +223,10 @@ public partial class MainWindow
             if (place.Anchor is { } anchor) moved.NotchAnchor = anchor;
         }
         EndMoveMode();
-        SetImmediate(HoverZone, OpacityProperty, 1d);
         _app.UpdateSettings(moved);
+        // A capsule dropped by the bottom or back at the top docks with another edge: the island comes in there once laid out
+        // (FadeInOnNewEdge); otherwise it shows at once under the fading overlay.
+        if (!_edgeArriving && !_edgeClearing) SetImmediate(HoverZone, OpacityProperty, 1d);
         overlay.FadeOut();
     }
 

@@ -77,6 +77,19 @@ public partial class MainWindow
         return transform;
     }
 
+    // The capsule floats below the top of the screen, but sitting by the bottom it is docked with it, as the notch on the bottom edge
+    // is: within CollapsedHover.BridgeMaxGap above the work area's bottom it hangs its panel from there, and below it, over a bottom
+    // taskbar, from the screen's bottom edge; the panel's corners on that edge are square, as they are under a capsule near the top.
+    // Its place stays a place on the screen (ShapeFor). _screenMonitor and _screenWork are this display's, relative to its corner.
+    private DipRect _screenMonitor = FallbackMonitor, _screenWork = FallbackWork;
+    private (ScreenEdge Edge, bool OverTaskbar)? CapsuleBottomDock()
+    {
+        var surface = CollapsedGeometry.Resolve(Settings, CompactStyle.Capsule, _screenMonitor, _screenWork, _pixelsPerDip, null, 0, _scale).Surface;
+        if (surface.Y - _screenWork.Y <= CollapsedHover.BridgeMaxGap) return null;
+        if (surface.Bottom > _screenWork.Bottom + .5) return (ScreenEdge.Bottom, true);
+        return _screenWork.Bottom - surface.Bottom <= CollapsedHover.BridgeMaxGap ? (ScreenEdge.Bottom, false) : null;
+    }
+
     // Moving to another edge or anchor moves and resizes the window, and Windows shows a layered window's last picture at its new
     // place and size before WPF draws again: the island flashed where the old picture put it (at the other end of the screen,
     // or in its middle for the side edges). As HideBlank does, the island is cleared first, and the window moves once that empty
