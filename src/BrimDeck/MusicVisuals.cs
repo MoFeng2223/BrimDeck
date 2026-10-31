@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using BrimDeck.Core;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -240,6 +241,8 @@ internal sealed class MusicMarquee : FrameworkElement
         get => _text;
         set { if (_text == value) return; _text = value; ResetText(); AutomationProperties.SetName(this, value); }
     }
+    // For screen readers: the whole line as text, however much of it shows.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => _text);
     public double FontSize
     {
         get => _fontSize;
@@ -631,6 +634,8 @@ internal abstract class GlideCarousel : Grid
 internal sealed class QuotaCarousel : GlideCarousel
 {
     private readonly Canvas _strip;
+    // For screen readers: its name, every ring's tooltip line, rotating or not.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => AutomationProperties.GetName(this).Replace("\n", Loc.T("；", "; ")));
     // One ring with its application's letter inside, at the size the system readings' dials carry theirs for this height, in the secondary text color.
     internal static Grid Ring((double Used, string Color, string Tip, string Letter) item, double size, double thickness, double scale)
     {
