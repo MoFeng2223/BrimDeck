@@ -12,8 +12,12 @@ public interface IAppUpdateBackend
     bool CanInstall { get; }
     AppRelease? PendingRelease { get; }
     Task<AppRelease?> CheckAsync(CancellationToken cancellation);
+    // beta also offers betas; a backend without a beta channel checks releases only.
+    Task<AppRelease?> CheckAsync(bool beta, CancellationToken cancellation) => CheckAsync(cancellation);
     Task DownloadAsync(AppRelease release, Action<int> progress, CancellationToken cancellation);
     void PrepareRestart();
+    // Why the last restart into a new version kept this one; read once at startup.
+    RestartFailure? LastRestartFailure => null;
 }
 
 // A version check the server refused; RetryAfter carries its Retry-After header when it sent one.
@@ -55,6 +59,7 @@ public sealed class AppUpdateState
     public string? PromptedVersion { get; set; }
     public string? SkippedVersion { get; set; }
     public bool AutoCheck { get; set; } = true;
+    public bool Beta { get; set; }
 }
 
 // All commands originate on the UI thread. The backend may report progress from a worker thread.
@@ -82,6 +87,8 @@ public sealed class AppUpdates
     public int Progress { get; private set; }
     public string? Error { get; private set; }
     public DateTimeOffset? LastChecked { get; private set; }
+    // The restart into a new version failed and this version started again; the app shows the error once.
+    public bool RestartFailed { get; }
     public DateTimeOffset NextBackgroundCheck => UpdateSchedule.NextCheck(_started, LastChecked, _failures, _lastFailure, _retryUntil);
 
     public AppUpdates(IAppUpdateBackend backend, string dataDirectory, Func<DateTimeOffset>? clock = null)
@@ -90,14 +97,41 @@ public sealed class AppUpdates
         _stateFile = Path.Combine(dataDirectory, "update-state.json");
         LoadState(Path.Combine(dataDirectory, "update-prompt.txt"));
         LastChecked = _state.LastSuccess;
+        var failure = backend.LastRestartFailure;
         Release = backend.PendingRelease;
         Stage = Release is null ? AppUpdateStage.Idle : AppUpdateStage.Ready;
+        RestartFailed = failure is not null;
+        Error = failure switch
+        {
+            RestartFailure.Declined => Loc.T("未获得管理员权限，已保留当前版本。可以前往 GitHub 下载新的免安装版本，解压后替换当前文件夹。",
+                "Administrator rights were not granted, so this version was kept. You can download the new portable version from GitHub and replace this folder with it."),
+            RestartFailure.Failed => Loc.T("无法替换程序文件，已保留当前版本。可以前往 GitHub 下载新的免安装版本，解压后替换当前文件夹。",
+                "The program files could not be replaced, so this version was kept. You can download the new portable version from GitHub and replace this folder with it."),
+            _ => null
+        };
     }
 
     public bool AutoCheck
     {
         get => _state.AutoCheck;
         set { if (_state.AutoCheck == value) return; _state.AutoCheck = value; SaveState(); Notify(); }
+    }
+
+    // Checks also offer betas. Turning it off withdraws a beta that was found but not downloaded; a downloaded one stays ready.
+    public bool Beta
+    {
+        get => _state.Beta;
+        set
+        {
+            if (_state.Beta == value) return;
+            _state.Beta = value;
+            if (!value)
+            {
+                if (ApplicationVersion.IsPrerelease(_state.AvailableVersion)) _state.AvailableVersion = null;
+                if (Stage == AppUpdateStage.Available && ApplicationVersion.IsPrerelease(Release?.Version)) { Release = null; Stage = AppUpdateStage.Idle; }
+            }
+            SaveState(); Notify();
+        }
     }
 
     public bool IsSkipped(string? version) => version is not null && version == _state.SkippedVersion;
@@ -148,7 +182,7 @@ public sealed class AppUpdates
         Stage = AppUpdateStage.Checking; Error = null; Notify();
         try
         {
-            var release = await _backend.CheckAsync(cancellation);
+            var release = await _backend.CheckAsync(Beta, cancellation);
             cancellation.ThrowIfCancellationRequested();
             Release = release; LastChecked = _clock();
             _failures = 0; _lastFailure = null; _retryUntil = null;
@@ -219,7 +253,7 @@ public sealed class AppUpdates
                 {
                     _state.LastSuccess = saved.LastSuccess is { } time && time <= _clock() ? time : null;
                     _state.AvailableVersion = saved.AvailableVersion; _state.PromptedVersion = saved.PromptedVersion;
-                    _state.SkippedVersion = saved.SkippedVersion; _state.AutoCheck = saved.AutoCheck;
+                    _state.SkippedVersion = saved.SkippedVersion; _state.AutoCheck = saved.AutoCheck; _state.Beta = saved.Beta;
                 }
             }
             else if (File.Exists(legacyFile))

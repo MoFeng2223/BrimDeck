@@ -7,8 +7,8 @@ using NAudio.Wave;
 
 namespace BrimDeck.Native;
 
-// Captures what one player process renders (Windows 10 build 20348 and later) and feeds
-// it to the level-bar analysis. Samples stay in memory and are discarded after analysis.
+// Captures what one player process renders (Windows 10 build 20348 and later), or with exclude
+// what every other process renders, and feeds it to the level-bar analysis. Samples stay in memory and are discarded after analysis.
 // Create, read and dispose on the same MTA thread.
 internal sealed class ProcessLoopbackCapture : IDisposable
 {
@@ -20,6 +20,7 @@ internal sealed class ProcessLoopbackCapture : IDisposable
     private float[] _buffer = new float[4096];
     private short[] _pcm = new short[4096];
     private double _analysed = double.NegativeInfinity;
+    public const double AnalysisInterval = 1 / 30d;
     public AutoResetEvent Ready { get; } = new(false);
     public EqualizerSignal Signal { get; } = new(Format.SampleRate);
     public uint ProcessId { get; }
@@ -34,7 +35,7 @@ internal sealed class ProcessLoopbackCapture : IDisposable
         _client.Start();
     }
 
-    public static ProcessLoopbackCapture? TryStart(uint processId)
+    public static ProcessLoopbackCapture? TryStart(uint processId, bool exclude = false)
     {
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 20348)) return null;
         IntPtr parameters = IntPtr.Zero, variant = IntPtr.Zero;
@@ -45,7 +46,7 @@ internal sealed class ProcessLoopbackCapture : IDisposable
             parameters = Marshal.AllocHGlobal(12);
             Marshal.WriteInt32(parameters, 0, 1);                 // AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK
             Marshal.WriteInt32(parameters, 4, (int)processId);    // TargetProcessId
-            Marshal.WriteInt32(parameters, 8, 0);                 // PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE
+            Marshal.WriteInt32(parameters, 8, exclude ? 1 : 0);   // PROCESS_LOOPBACK_MODE_EXCLUDE_ or _INCLUDE_TARGET_PROCESS_TREE
             // PROPVARIANT holding a VT_BLOB that points at the parameters.
             variant = Marshal.AllocHGlobal(Marshal.SizeOf<BlobVariant>());
             Marshal.StructureToPtr(new BlobVariant { Type = 65, Size = 12, Data = parameters }, variant, false);
@@ -87,8 +88,11 @@ internal sealed class ProcessLoopbackCapture : IDisposable
                 _capture.ReleaseBuffer(frames);
                 Signal.Push(_buffer.AsSpan(0, count), Format.Channels, now);
             }
-            // Packets arrive about every 10 ms; the bars need 60 analyses a second.
-            if (now - _analysed >= 1 / 60d) { _analysed = now; Signal.Advance(now); }
+            // The bars move 30 times a second (MainWindow.TickMusic) and read the analyses in between, so 30 analyses serve them.
+            // Packets arrive about every 10 ms and are drained as each arrives (AudioLevelMeter): the stream keeps only a few
+            // tens of ms whatever buffer is asked for, and draining once per analysis lost about 2 % of the audio unflagged. An
+            // analysis is due a few ms early, so it lands every third packet rather than every fourth.
+            if (now - _analysed >= AnalysisInterval - .005) { _analysed = now; Signal.Advance(now); }
             return true;
         }
         catch (COMException) { return false; }

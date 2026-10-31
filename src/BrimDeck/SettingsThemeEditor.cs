@@ -36,7 +36,7 @@ public sealed partial class SettingsWindow
     private static string AppColorName(string key) => key switch
     {
         "claude" => "Claude", "codex" => "Codex", "antigravity" => "Antigravity", "cursor" => "Cursor", "zcode" => "ZCode", "dsh" => "DeepSeek Harness",
-        "grokBot" => "Grok Bot", "kimi" => "Kimi Code", "manual" => Loc.T("手动填写的来源", "Sources entered by hand"), "other" => Loc.T("其他应用", "Other apps"),
+        "grokBot" => "Grok Bot", "kimi" => "Kimi Code", "opencode" => "OpenCode", "manual" => Loc.T("手动填写的来源", "Sources entered by hand"), "other" => Loc.T("其他应用", "Other apps"),
         "warning" => Loc.T("预警", "Warning"), "critical" => Loc.T("告警", "Critical"), _ => key
     };
 
@@ -269,7 +269,9 @@ public sealed partial class SettingsWindow
         if (color is null) card.SetResourceReference(ForegroundProperty, "SettingsAccent"); else card.Foreground = UI.Brush(color);
         return card;
     }
-    private string OverwriteColor => _palette.Dark ? "#E8B04B" : "#B7791F";
+    private string OverwriteColor => CautionColor;
+    // Amber, for what asks for care: overwriting a theme, a reading that was stopped.
+    private string CautionColor => _palette.Dark ? "#E8B04B" : "#B7791F";
 
     // The chosen theme of the user's while it has unsaved changes. Its frame stays the chosen card's color, so it is still seen as
     // the theme in use.
