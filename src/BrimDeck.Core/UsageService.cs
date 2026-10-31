@@ -593,7 +593,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             snapshot.Status = Loc.T("Claude 桌面版尚未在本机记录额度", "The Claude desktop app has not recorded a quota on this PC yet.");
             return snapshot;
         }
-        snapshot.Quotas = [new Quota("5 小时额度", sample.FiveHour, null, 300), new Quota("每周额度", sample.SevenDay, null, 10080)];
+        snapshot.Quotas = ClaudeUsageHistory.Quotas(sample, null, null);
         snapshot.IsStale = true;
         // The update time is when BrimDeck read the history; the status gives the time of the newest sample in it.
         snapshot.LiveQuota = true; snapshot.QuotaTime = now;
@@ -617,7 +617,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             var scoped = kept?.Quotas.Where(q => q.Label is not ("5 小时额度" or "每周额度")).ToList() ?? [];
             var scopedTime = scoped.Count == 0 ? null : kept!.Local ? kept.ScopedTime : kept.Time;
             kept = new(sample.Time, kept?.Plan ?? "", kept?.PlanSource ?? "", Loc.T("Claude 桌面版 · 本地用量记录", "Claude desktop app · local usage records"),
-                [new Quota("5 小时额度", sample.FiveHour, Reset(300), 300), new Quota("每周额度", sample.SevenDay, Reset(10080), 10080), .. scoped], true, scopedTime);
+                [.. ClaudeUsageHistory.Quotas(sample, Reset(300), Reset(10080)), .. scoped], true, scopedTime);
             Kept(organization).Retained = kept;
         }
         return kept;

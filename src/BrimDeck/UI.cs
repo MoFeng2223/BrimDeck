@@ -159,7 +159,7 @@ internal static class UI
         return Loc.T($"{minutes} 分后", $"in {minutes}m");
     }
     // "Gemini · 5 小时" → group "Gemini", which orders the quota pages. The group stays in the data's words.
-    public static string QuotaGroup(Quota quota) => quota.Label.Contains('·') ? quota.Label.Split('·')[0].Trim() : "";
+    public static string QuotaGroup(Quota quota) => QuotaDisplay.Group(quota.Label);
     // "5 小时额度" → "5 小时"; "Gemini · 5 小时" → "Gemini 5 小时" and "Claude · 每周" → "Claude 每周", written like
     // Claude's "Opus 每周", so a grouped quota names its group in its own row. The shown label is translated.
     public static string QuotaLabel(Quota quota)
