@@ -96,7 +96,8 @@ public sealed partial class SettingsWindow
     private FrameworkElement SmallHelp(string title, Func<string> help)
     {
         var mark = Stroke("M 6,1 A 5,5 0 1 1 6,11 A 5,5 0 1 1 6,1 Z M 6,5.4 V 8.4 M 6,3.6 V 3.7", 12, 12, TextTertiary); mark.StrokeThickness = 1.1;
-        var info = new HelpMark { Width = 12, Height = 12, Background = Brushes.Transparent, Margin = new Thickness(4, 0, 0, 0),
+        // The 12 DIP mark takes the pointer 24 DIP square (SW-08); the negative margin keeps its place.
+        var info = new HelpMark { Width = 24, Height = 24, Background = Brushes.Transparent, Margin = new Thickness(4 - 6, -6, -6, -6),
             VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Help, Focusable = true, Child = mark,
             FocusVisualStyle = (Style)FindResource("SettingsSmallHelpFocus") };
         AttachSettingHelp(info, title, help);
