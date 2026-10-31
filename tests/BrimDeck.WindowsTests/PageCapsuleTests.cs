@@ -82,15 +82,15 @@ public partial class MainWindow
             window.FitPageButtons(tall); window.UpdateLayout(); window.PlacePageCapsule();
             check("page capsule is as tall as the buttons draw in the tall header", window.PageCapsule.Height == tall.ButtonHeight && tall.ButtonHeight == 24);
 
-            // What ApplyHeader did before: the buttons are fitted to the shorter header and the capsule is left as the last
-            // PlacePageCapsule (run by RefreshStatus before ApplyHeader) set it, for the old tier.
-            foreach (var button in new[] { window.AIUsageButton, window.MonitorPageButton, window.MusicPageButton }) HitArea.Fit(button, short_.ButtonHeight, short_.Height);
-            check("without the capsule step the capsule stays at the old tier's height after the buttons change", window.PageCapsule.Height == tall.ButtonHeight && short_.ButtonHeight != tall.ButtonHeight);
-            check("a button's drawn height read before the next layout pass is still stale, so the capsule cannot be placed from it", HitArea.Look(window.AIUsageButton) != short_.ButtonHeight);
+            // The header moves to the shorter tier: the capsule follows the buttons at once, and a placement before the next layout
+            // pass (RefreshStatus runs PlacePageCapsule before ApplyHeader) keeps it there, though ActualHeight is still the old tier's.
             window.FitPageButtons(short_);
-            check("the capsule takes the new tier's drawn height as the buttons change", window.PageCapsule.Height == short_.ButtonHeight);
+            check("the capsule takes the new tier's height as the buttons change", window.PageCapsule.Height == short_.ButtonHeight && short_.ButtonHeight != tall.ButtonHeight);
+            check("a button's ActualHeight before the next layout pass is still the old tier's", window.AIUsageButton.ActualHeight == tall.ButtonHeight);
+            window.PlacePageCapsule();
+            check("a placement before the next layout pass keeps the new tier's height", window.PageCapsule.Height == short_.ButtonHeight);
             window.UpdateLayout(); window.PlacePageCapsule();
-            check("after layout the capsule and the buttons agree", window.PageCapsule.Height == HitArea.Look(window.AIUsageButton));
+            check("after layout the capsule and the buttons agree", window.PageCapsule.Height == window.AIUsageButton.ActualHeight);
         }
         finally { window.Close(); }
     }

@@ -97,7 +97,7 @@ public sealed partial class SettingsWindow
     {
         var mark = Stroke("M 6,1 A 5,5 0 1 1 6,11 A 5,5 0 1 1 6,1 Z M 6,5.4 V 8.4 M 6,3.6 V 3.7", 12, 12, TextTertiary); mark.StrokeThickness = 1.1;
         var info = new HelpMark { Width = 12, Height = 12, Background = Brushes.Transparent, Margin = new Thickness(4, 0, 0, 0),
-            VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Help, Focusable = true, Child = mark, RenderTransform = new TranslateTransform(0, 0.5),
+            VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Help, Focusable = true, Child = mark,
             FocusVisualStyle = (Style)FindResource("SettingsSmallHelpFocus") };
         AttachSettingHelp(info, title, help);
         return info;
@@ -119,10 +119,8 @@ public sealed partial class SettingsWindow
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "SourceLabel" });
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         line.ColumnDefinitions.Add(new ColumnDefinition());
-        var heading = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(16, 0, 16, 0), MinWidth = 52, VerticalAlignment = VerticalAlignment.Center };
-        var caption = TextLine(title, 12, TextSecondary); caption.VerticalAlignment = VerticalAlignment.Center;
-        heading.Children.Add(caption);
-        heading.Children.Add(SmallHelp(title, () => help));
+        var caption = TextLine(title, 12, TextSecondary);
+        var heading = new HelpHeading(caption, SmallHelp(title, () => help)) { Margin = new Thickness(16, 0, 16, 0), MinWidth = 52, VerticalAlignment = VerticalAlignment.Center };
         line.Children.Add(heading);
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = entry.QuotaOnline, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, title); AutomationProperties.SetHelpText(toggle, help);
@@ -153,10 +151,8 @@ public sealed partial class SettingsWindow
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "SourceLabel" });
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         line.ColumnDefinitions.Add(new ColumnDefinition());
-        var heading = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(16, 0, 16, 0), MinWidth = 52, VerticalAlignment = VerticalAlignment.Center };
-        var caption = TextLine(title, 12, TextSecondary); caption.VerticalAlignment = VerticalAlignment.Center;
-        heading.Children.Add(caption);
-        heading.Children.Add(SmallHelp(title, () => help));
+        var caption = TextLine(title, 12, TextSecondary);
+        var heading = new HelpHeading(caption, SmallHelp(title, () => help)) { Margin = new Thickness(16, 0, 16, 0), MinWidth = 52, VerticalAlignment = VerticalAlignment.Center };
         line.Children.Add(heading);
         static string Format(decimal? value) => value?.ToString("0.##", CultureInfo.InvariantCulture) ?? "";
         var input = new TextBox { Style = (Style)FindResource("SettingsNumber"), TextAlignment = TextAlignment.Left, FontSize = 12.5, MaxLength = 20,

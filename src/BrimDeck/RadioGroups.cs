@@ -7,9 +7,10 @@ using System.Windows.Media;
 namespace BrimDeck;
 
 // The settings window's radio groups (segmented controls, theme and style cards, clock tiles and swatches) behave as Windows' radio
-// groups (SW-06): the group is one Tab stop, on its chosen option (or its first), and the arrow keys choose the next or previous
-// option, wrapping at the ends. A group is the radio buttons of one panel with one group name. On for everything under an element
-// with Enabled set (the window's frame), so the panel's own radio buttons keep their behavior.
+// groups (SW-06): the group is one Tab stop, on its chosen option (or its first), and the arrow keys move the focus to the next or
+// previous option, wrapping at the ends. Space chooses the focused option, so moving through a group never changes a setting by
+// itself. A group is the radio buttons of one panel with one group name. On for everything under an element with Enabled set (the
+// window's frame), so the panel's own radio buttons keep their behavior.
 internal static class RadioGroups
 {
     public static readonly DependencyProperty EnabledProperty = DependencyProperty.RegisterAttached(
@@ -48,6 +49,6 @@ internal static class RadioGroups
         int at = open.IndexOf(radio);
         if (at < 0 || open.Count < 2) return;
         var next = open[(at + step + open.Count) % open.Count];
-        next.Focus(); next.IsChecked = true; e.Handled = true;
+        next.Focus(); e.Handled = true;
     }
 }

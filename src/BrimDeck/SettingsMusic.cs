@@ -160,44 +160,46 @@ public sealed partial class SettingsWindow
             v => Change(s => s.EqualizerAlways = v), help: Loc.T("始终显示时，没有音乐播放也会显示，读取系统的全部声音。", "When always shown, it also shows while no music plays, reading all system sound.")), when));
         options.Children.Add(Lighter(SliderRow(length, S.EqualizerBars, CompactMusicLayout.MinimumBars, CompactMusicLayout.MaximumBars, 1, Loc.T("根", "bars"),
             v => Change(s => s.EqualizerBars = (int)v)), length));
-        options.Children.Add(Lighter(Row(color, EqualizerSwatches(style)), color));
+        options.Children.Add(Lighter(Row(color, ColorSwatches("EqualizerColor" + style, Loc.T("律动条颜色 ", "Equalizer color "), S.EqualizerColor, S.EqualizerCustomColor,
+            UI.Brush(PanelTheme.Hex("equalizer")), (chosen, custom) => Change(s => { s.EqualizerColor = chosen; s.EqualizerCustomColor = custom; }))), color));
         return OptionsPartRow(style, CompactPart.Equalizer, rows, Loc.T("律动条", "Equalizer"), Loc.T("律动条设置", "Equalizer settings"), S.ShowsEqualizer(style),
             on => Change(s => { if (notch) s.NotchEqualizer = on; else s.CapsuleEqualizer = on; }), options);
     }
-    // The clock's swatches but the gradient: the theme's equalizer color, the presets, a custom color and the cover's.
-    private StackPanel EqualizerSwatches(CompactStyle compact)
+    // The clock's swatches but the gradient: the theme's color (theme), the presets, a custom color and the cover's. Used for the
+    // collapsed equalizer and for the music page's equalizer and current lyric; save gets the chosen color and the custom one.
+    private StackPanel ColorSwatches(string group, string label, ClockColor selected, string custom, Brush theme, Action<ClockColor, string> save)
     {
         var swatches = new StackPanel { Orientation = Orientation.Horizontal };
         ClockColor[] order = [ClockColor.White, ClockColor.Amber, ClockColor.Cyan, ClockColor.Pink, ClockColor.Lime, ClockColor.Custom, ClockColor.Cover];
         foreach (var color in order)
         {
             string name = ColorName(color);
-            var swatch = new RadioButton { Style = (Style)FindResource("SettingsClockSwatch"), GroupName = "EqualizerColor" + compact, IsChecked = S.EqualizerColor == color,
-                Background = EqualizerSwatchFill(color), ToolTip = name, Margin = new Thickness(swatches.Children.Count == 0 ? 0 : 6, 0, 0, 0) };
-            AutomationProperties.SetName(swatch, Loc.T("律动条颜色 ", "Equalizer color ") + name);
-            swatch.Checked += (_, _) => Change(s => s.EqualizerColor = color);
+            var swatch = new RadioButton { Style = (Style)FindResource("SettingsClockSwatch"), GroupName = group, IsChecked = selected == color,
+                Background = SwatchFill(color), ToolTip = name, Margin = new Thickness(swatches.Children.Count == 0 ? 0 : 6, 0, 0, 0) };
+            AutomationProperties.SetName(swatch, label + name);
+            swatch.Checked += (_, _) => save(color, custom);
             if (color == ClockColor.Cover) swatch.Content = MusicVisuals.Icon("music", 13, UI.Brush(SwatchInk(SampleCover)));
             if (color == ClockColor.Custom)
             {
                 // Choosing this swatch also opens the picker; each later click opens it again.
-                swatch.Content = Pencil(ClockFace.Parse(S.EqualizerCustomColor));
-                AttachClockPicker(swatch, () => S.EqualizerCustomColor, ClockColors.DefaultCustom, value =>
+                swatch.Content = Pencil(ClockFace.Parse(custom));
+                AttachClockPicker(swatch, () => custom, ClockColors.DefaultCustom, value =>
                 {
-                    Change(s => { s.EqualizerCustomColor = value; s.EqualizerColor = ClockColor.Custom; });
-                    swatch.Background = EqualizerSwatchFill(ClockColor.Custom); swatch.Content = Pencil(ClockFace.Parse(value));
+                    custom = value; save(ClockColor.Custom, value);
+                    swatch.Background = SwatchFill(ClockColor.Custom); swatch.Content = Pencil(ClockFace.Parse(value));
                 });
             }
             swatches.Children.Add(swatch);
         }
         return swatches;
+        Brush SwatchFill(ClockColor color) => color switch
+        {
+            ClockColor.Custom => ClockFace.Fill([ClockFace.Parse(custom)]),
+            ClockColor.Cover => ClockFace.Fill([SampleCover]),
+            ClockColor.White => theme,
+            _ => ClockFace.Fill([PanelTheme.Readable(ClockFace.Preset(color))])
+        };
     }
-    private Brush EqualizerSwatchFill(ClockColor color) => color switch
-    {
-        ClockColor.Custom => ClockFace.Fill([ClockFace.Parse(S.EqualizerCustomColor)]),
-        ClockColor.Cover => ClockFace.Fill([SampleCover]),
-        ClockColor.White => UI.Brush(PanelTheme.Hex("equalizer")),
-        _ => ClockFace.Fill([PanelTheme.Readable(ClockFace.Preset(color))])
-    };
     // Labels inside an open row are set lighter than the row's own title, as "快捷尺寸" is (QuickRow).
     private static FrameworkElement Lighter(FrameworkElement row, string title)
     {
@@ -217,14 +219,22 @@ public sealed partial class SettingsWindow
         var bars = SliderRow(Loc.T("律动条长度", "Equalizer length"), S.MusicEqualizerBars, CompactMusicLayout.MinimumBars, CompactMusicLayout.MaximumBars, 1, Loc.T("根", "bars"),
             v => Change(s => s.MusicEqualizerBars = (int)v));
         bars.IsEnabled = S.MusicPage;
+        var equalizerColor = Row(Loc.T("律动条颜色", "Equalizer color"), ColorSwatches("MusicPageEqualizerColor", Loc.T("音乐页律动条颜色 ", "Music page equalizer color "),
+            S.MusicPageEqualizerColor, S.MusicPageEqualizerCustomColor, UI.Brush(PanelTheme.Hex("equalizer")),
+            (chosen, custom) => Change(s => { s.MusicPageEqualizerColor = chosen; s.MusicPageEqualizerCustomColor = custom; })));
+        var lyricColor = Row(Loc.T("当前歌词颜色", "Current lyric color"), ColorSwatches("MusicLyricColor", Loc.T("当前歌词颜色 ", "Current lyric color "),
+            S.MusicLyricColor, S.MusicLyricCustomColor, UI.Brush(PanelTheme.Hex("textPrimary")),
+            (chosen, custom) => Change(s => { s.MusicLyricColor = chosen; s.MusicLyricCustomColor = custom; })));
+        equalizerColor.IsEnabled = lyricColor.IsEnabled = S.MusicPage;
         Group(Toggle(Loc.T("显示封面", "Show cover"), S.MusicPageCover, v => Change(s => s.MusicPageCover = v), S.MusicPage),
-            Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => Change(s => s.LyricsEnabled = v), S.MusicPage), bars);
+            Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => Change(s => s.LyricsEnabled = v), S.MusicPage), bars, equalizerColor, lyricColor);
     }
     // Operations only one player supports, grouped under that player's name.
     private void Players()
     {
         SectionTitle(Loc.T("网易云音乐", "NetEase Cloud Music"));
-        Group(Toggle(Loc.T("始终显示“启用完整控制”按钮", "Always show \"Enable full control\""), S.NeteaseFullControlEntry, v => Change(s => s.NeteaseFullControlEntry = v), S.MusicPage,
+        Group(NeteaseSwitch(),
+            Toggle(Loc.T("始终显示“启用完整控制”按钮", "Always show \"Enable full control\""), S.NeteaseFullControlEntry, v => Change(s => s.NeteaseFullControlEntry = v), S.MusicPage,
             Loc.T("在音乐页面右上角的来源菜单末尾固定显示“网易云音乐 · 完整控制”，以便随时启用完整控制。启用完整控制后，可以在面板中拖动网易云音乐的播放进度，并切换播放模式。",
                 "Keeps \"NetEase Cloud Music · Full control\" at the end of the source menu at the top right of the music page, so full control can be enabled at any time. With full control, NetEase Cloud Music's playback position can be dragged in the panel and its playback mode switched.")),
             Toggle(Loc.T("启动后自动启用完整控制", "Enable full control when it starts"), S.NeteaseAutoFullControl, NeteaseAutoFullControl, S.MusicPage,
@@ -244,7 +254,7 @@ public sealed partial class SettingsWindow
         var app = (App)Application.Current;
         string title = Loc.T("完整控制", "Full control");
         // A file another tool or an earlier change left changed is on as well: KuGou starts with full control either way.
-        bool changed = (app.Media is { } known ? known.KugouState : Native.KugouInstall.State()) == KugouPatchState.Patched;
+        bool changed = (app.Media is { } known ? known.KugouState : Native.KugouInstall.State()) == LibcefPatchState.Patched;
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.KugouFullControl || changed, VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, title);
         var note = TextLine("", 11, TextTertiary); note.TextWrapping = TextWrapping.Wrap;
@@ -282,11 +292,11 @@ public sealed partial class SettingsWindow
             var media = app.Media;
             var state = media is not null ? media.KugouState : Native.KugouInstall.State();
             bool working = busy || media is { RestartingKugou: true };
-            bool supported = state is KugouPatchState.Original or KugouPatchState.Patched or KugouPatchState.Partial;
+            bool supported = state is LibcefPatchState.Original or LibcefPatchState.Patched or LibcefPatchState.Partial;
             toggle.IsEnabled = supported && !working && S.MusicPage;
             string? error = working ? null : failure ?? media?.KugouError;
             // The port follows the file only from KuGou's next start.
-            bool pending = supported && (state == KugouPatchState.Patched) != (media is { KugouFullControl: true }) && Native.KugouInstall.Running();
+            bool pending = supported && (state == LibcefPatchState.Patched) != (media is { KugouFullControl: true }) && Native.KugouInstall.Running();
             note.Text = working ? Loc.T("正在处理…", "Working…")
                 : error is not null ? Loc.T("启用失败：", "Could not turn on: ") + error
                 : state is null ? Loc.T("未安装酷狗音乐", "KuGou Music is not installed")
@@ -299,6 +309,75 @@ public sealed partial class SettingsWindow
         Update();
         var row = Row(title, toggle, note, () => Loc.T("会修改酷狗的 libcef.dll，之后酷狗每次启动都是完整控制。",
             "Changes KuGou's libcef.dll; KuGou then starts with full control every time."));
+        row.Loaded += (_, _) => app.MediaChanged += Changed;
+        row.Unloaded += (_, _) => app.MediaChanged -= Changed;
+        return row;
+    }
+    // NetEase Cloud Music's full control as one switch, the same shape as KuGou's: a changed libcef.dll makes every start a full
+    // control start. On: after the explanation the file is changed and a running player restarts; off: the file is restored and the
+    // player keeps running until its next start.
+    private FrameworkElement NeteaseSwitch()
+    {
+        var app = (App)Application.Current;
+        string title = Loc.T("完整控制", "Full control");
+        bool changed = (app.Media is { } known ? known.NeteasePatchState : Native.NeteaseInstall.State()) == LibcefPatchState.Patched;
+        var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.NeteaseFullControl || changed, VerticalAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetName(toggle, title);
+        var note = TextLine("", 11, TextTertiary); note.TextWrapping = TextWrapping.Wrap;
+        bool busy = false, quiet = false;
+        string? failure = null;
+        async Task Switch(bool on)
+        {
+            if (quiet) return;
+            if (on && new NeteaseFileControlWindow(S.Theme) { Owner = this }.ShowDialog() != true) { Set(false); return; }
+            busy = true; failure = null; Update();
+            try
+            {
+                if (on)
+                {
+                    failure = app.Media is { } media ? await media.EnableNeteaseFileControlAsync()
+                        : await Task.Run(async () => { await Native.NeteaseInstall.EnableAsync(false, CancellationToken.None); return (string?)null; });
+                    if (failure is not null) Set(false);
+                    else Change(s => s.NeteaseFullControl = true);
+                }
+                else
+                {
+                    Change(s => s.NeteaseFullControl = false);
+                    if (app.Media is { } media) await media.DisableNeteaseFileControlAsync();
+                    else await Task.Run(() => Native.NeteaseInstall.ChangeFileAsync(false, CancellationToken.None));
+                }
+            }
+            catch (Exception ex) { failure = ex.Message; if (on) Set(false); }
+            finally { busy = false; Update(); }
+        }
+        void Set(bool on) { quiet = true; toggle.IsChecked = on; quiet = false; }
+        toggle.Checked += async (_, _) => await Switch(true);
+        toggle.Unchecked += async (_, _) => await Switch(false);
+        void Update()
+        {
+            var media = app.Media;
+            var state = media is not null ? media.NeteasePatchState : Native.NeteaseInstall.State();
+            bool working = busy || media is { RestartingNetease: true };
+            bool supported = state is LibcefPatchState.Original or LibcefPatchState.Patched or LibcefPatchState.Partial;
+            // With media on, the source reads the file state only while the setting is on, so a null state there does not mean "not
+            // installed"; media.NeteaseInstalled answers that. With media off, the state read above is null only when not installed.
+            bool installed = media is not null ? media.NeteaseInstalled : state is not null;
+            toggle.IsEnabled = (supported || state is null && installed) && !working && S.MusicPage;
+            string? error = working ? null : failure;
+            // The port follows the file only from NetEase's next start.
+            bool pending = supported && (state == LibcefPatchState.Patched) != (media is { NeteaseFullControl: true }) && Native.NeteaseInstall.Running();
+            note.Text = working ? Loc.T("正在处理…", "Working…")
+                : error is not null ? Loc.T("启用失败：", "Could not turn on: ") + error
+                : !installed ? Loc.T("未安装网易云音乐", "NetEase Cloud Music is not installed")
+                : state is not null && !supported ? Loc.T("不支持此版本", "This version is not supported")
+                : pending ? Loc.T("网易云重启后生效", "Takes effect when NetEase Cloud Music restarts") : "";
+            note.Foreground = UI.Brush(error is not null || state is not null && !supported ? _palette.Negative : TextTertiary);
+            note.Visibility = note.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        void Changed() => Dispatcher.BeginInvoke(Update);
+        Update();
+        var row = Row(title, toggle, note, () => Loc.T("会修改网易云的 libcef.dll，之后网易云每次启动都是完整控制。",
+            "Changes NetEase Cloud Music's libcef.dll; it then starts with full control every time."));
         row.Loaded += (_, _) => app.MediaChanged += Changed;
         row.Unloaded += (_, _) => app.MediaChanged -= Changed;
         return row;

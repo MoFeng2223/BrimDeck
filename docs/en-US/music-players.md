@@ -20,7 +20,9 @@ The music page and the collapsed view show the song that is playing and offer pl
 
 Full control needs NetEase Cloud Music to open a local debugging port, which carries some risk while it is open. Read [Data and privacy](privacy.md#netease-cloud-music-full-control) before you turn it on.
 
-To keep full control available at any time, turn on Always show "Enable full control" in Settings › Music › Players.
+- **Always on**: turn on Full control in Settings › Music › Players › NetEase Cloud Music and confirm; NetEase Cloud Music restarts once. This changes 2 places in the `libcef.dll` in its install folder; after that, NetEase Cloud Music starts with full control every time, whatever starts it, with nothing to enable again. Turning the switch off restores the file; it does not close NetEase Cloud Music, which returns to normal mode at its next start. While the switch is on, if an update replaces the file, BrimDeck changes it again and restarts NetEase Cloud Music once.
+- When NetEase Cloud Music is installed in a folder that needs administrator rights, such as `C:\Program Files`, Windows asks for them to change the file.
+- To enable it just once instead, select Enable full control on the music page, or turn on Always show "Enable full control" in Settings › Music › Players.
 
 ## Apple Music
 

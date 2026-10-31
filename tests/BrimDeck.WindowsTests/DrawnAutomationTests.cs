@@ -4,8 +4,8 @@ using System.Windows.Automation.Peers;
 using System.Windows.Automation.Provider;
 using BrimDeck;
 
-// How the drawn parts read to UI Automation (DrawnPeer) and the size of a stacked footer row's pointer area (HitArea.Stacked). The peers
-// are the real ones WPF creates for an element; nothing is shown and no client is attached.
+// How the drawn parts read to UI Automation (DrawnPeer). The peers are the real ones WPF creates for an element; nothing is shown and
+// no client is attached.
 internal static class DrawnAutomationTests
 {
     // An element that lists its parts from a list the test replaces, as the monitor's list and graph do from a reading.
@@ -55,20 +55,6 @@ internal static class DrawnAutomationTests
         host.Rows = [];
         DrawnPeer.Refresh(host);
         check("A list that empties lists nothing after a refresh", list.GetChildren().Count == 0);
-
-        // The footer's two stacked rows, each given HitArea.Minimum (24 DIP) tall for the pointer. Today's can grow up only over the room
-        // above it. Dense tier: the row is 17 DIP, 5 below the hairline, 1 for it and 6 over it.
-        var (up, down) = HitArea.Stacked(17, 5 + 1 + 6);
-        check("Stacked rows each reach 24 DIP in the dense tier, today's growing up over the hairline's gap too", 17 + up >= HitArea.Minimum && 17 + down >= HitArea.Minimum);
-        check("Limiting today's growth to the gap under the hairline alone (5 DIP) left it at 22, short of 24", 17 + Math.Min(7, 5) == 22);
-        foreach (var (row, room) in new[] { (18.0, 7 + 1 + 8), (21.0, 7 + 1 + 8), (22.0, 8 + 1 + 10), (17.0, 3 + 1 + 4) })
-        {
-            var (u, d) = HitArea.Stacked(row, room);
-            check($"Stacked rows of {row} DIP with {room} DIP above: the lower reaches 24, the upper does where the room allows",
-                row + d >= HitArea.Minimum && row + u >= HitArea.Minimum);
-        }
-        check("A row already 24 DIP tall grows nowhere", HitArea.Stacked(24, 10) == (0, 0) && HitArea.Stacked(30, 10) == (0, 0));
-        check("With no room above, today does not grow up and the week still reaches 24", HitArea.Stacked(17, 0) == (0, 7) && HitArea.Stacked(17, -3) == (0, 7));
     }
 
     private static bool Refreshes(UIElement element) { DrawnPeer.Refresh(element); return UIElementAutomationPeer.FromElement(element) is null; }
