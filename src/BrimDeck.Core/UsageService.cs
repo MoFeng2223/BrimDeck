@@ -395,7 +395,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             var oauth = auth?.RootElement.Get("claudeAiOauth") ?? default;
             var token = oauth.Get("accessToken").Text();
             var plan = PlanParser.ClaudeTier(oauth.Get("rateLimitTier").Text(), oauth.Get("subscriptionType").Text());
-            if (plan.Equals("max", StringComparison.OrdinalIgnoreCase) && snapshot.Plan.StartsWith("Max ", StringComparison.Ordinal)) plan = snapshot.Plan;
+            plan = PlanParser.RefineSignInPlan(plan, snapshot.Plan);
             if (token.Length > 0) codeCredential = new(token, plan, ClaudeSignIn.Code, code.Account, code.Organization);
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { codeReadFailed = true; }
