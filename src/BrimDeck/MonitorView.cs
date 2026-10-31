@@ -90,9 +90,9 @@ internal sealed class MonitorView : Grid
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        // The gauge shown small takes a fixed width at the right: a wide block for the GPU, thin columns for the processor. Its
-        // line is wider than the column under it, and wider still with a temperature after the figure.
-        double mini = cpuMain ? Math.Round(Math.Clamp(layout.Figure * 3.4, 54, 84)) : Math.Round(Math.Clamp(layout.Figure * 5, 80, 120));
+        // The gauge shown small takes a fixed width at the right, the same for either: a block for the GPU, thin columns for the
+        // processor. Its line is wider than the column under it, and wider still with a temperature after the figure.
+        double mini = Math.Round(Math.Clamp(layout.Figure * 3.4, 54, 84));
         double headMini = Math.Max(mini, temperatures && smallTemperature ? SmallLine(layout, gpu: cpuMain) : Math.Round(layout.Figure * 4.6));
         var head = new Grid();
         head.ColumnDefinitions.Add(new ColumnDefinition());
