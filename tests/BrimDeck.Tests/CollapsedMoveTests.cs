@@ -70,6 +70,8 @@ internal static class CollapsedMoveTests
         capsule = CollapsedMove.Capsule(-40, 400, 196, 32, H, work);
         var right = CollapsedMove.Capsule(5000, 400, 196, 32, H, work);
         check("At the work area's sides it keeps the same gap, with no guide", capsule.X == CollapsedMove.Gap && right.X == 1920 - 196 - CollapsedMove.Gap && capsule.GuideX is null);
+        capsule = CollapsedMove.Capsule(500, 506, 196, 32, H, work);
+        check("It is held on the work area's middle down the screen, with a horizontal guide there", capsule.Y == 500 && capsule.GuideY == 516);
         capsule = CollapsedMove.Capsule(500, 600, 196, 32, H, work);
         check("Elsewhere it follows the pointer", capsule.X == 500 && capsule.Y == 600 && capsule.GuideX is null && capsule.GuideY is null);
         var topBar = new DipRect(0, 48, 1920, 1032);

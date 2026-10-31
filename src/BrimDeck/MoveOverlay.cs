@@ -306,30 +306,29 @@ internal sealed class MoveGhost : FrameworkElement
     {
         double width = _start.Surface.Width, height = _start.Surface.Height;
         double cx = _x + width / 2, cy = _y + height / 2;
-        double a = Lit(_guideA, now), b = Lit(_guideB, now);
-        if (a > .01) MoveLook.Guide(drawing, new Rect(_guideAAt - .75, cy - height / 2 - 64, 1.5, height + 128), a);
-        if (b > .01)
-        {
-            double y = Math.Clamp(_guideBAt, .75, Math.Max(.75, _start.ScreenHeight - .75));
-            MoveLook.Guide(drawing, new Rect(cx - width / 2 - 96, y - .75, width + 192, 1.5), b);
-        }
         var outline = new RectangleGeometry(new Rect(_x, _y, width, height), height / 2, height / 2);
         MoveLook.Surface(drawing, outline, 1, veil: false);
         MoveLook.Outline(drawing, outline, 1, hangs: false);
         MoveLook.Icon(drawing, new Point(cx, cy), MoveLook.IconSize(height), 1);
+        // The guides cross the capsule and reach a little past it: the vertical one where its centre is held on the work area's
+        // middle, the horizontal one where its middle or one of its edges is held.
+        double a = Lit(_guideA, now), b = Lit(_guideB, now);
+        if (a > .01) MoveLook.Guide(drawing, new Rect(_guideAAt - .75, _y - GuideReach, 1.5, height + 2 * GuideReach), a);
+        if (b > .01)
+        {
+            double y = Math.Clamp(_guideBAt, .75, Math.Max(.75, _start.ScreenHeight - .75));
+            MoveLook.Guide(drawing, new Rect(_x - GuideReach, y - .75, width + 2 * GuideReach, 1.5), b);
+        }
     }
+
+    // How far a guide reaches past the surface it crosses.
+    private const double GuideReach = 32;
 
     // Each surface rises from its edge (or sinks into it) by its fill: it is that much of its depth, and from three quarters of its
     // length to all of it; the line keeps its distance from the edge and grows thicker.
     private void DrawDocked(DrawingContext drawing, double now)
     {
         var home = Home;
-        if (Lit(_guideA, now) is var guide && guide > .01)
-        {
-            drawing.PushTransform(new MatrixTransform(ToScreen(home.Edge, home.Line)));
-            MoveLook.Guide(drawing, new Rect(_guideAAt - .75, 0, 1.5, _start.Gap + home.Depth + 56), guide);
-            drawing.Pop();
-        }
         foreach (var docked in _docked)
         {
             double fill = Soft.Out.Ease(Lit(docked.Fill, now));
@@ -361,6 +360,13 @@ internal sealed class MoveGhost : FrameworkElement
                 }
             }
             drawing.Pop(); drawing.Pop();
+        }
+        // Held at the middle of its edge: the guide runs from the edge across the surface and a little past it, on every edge alike.
+        if (Lit(_guideA, now) is var guide && guide > .01)
+        {
+            drawing.PushTransform(new MatrixTransform(ToScreen(home.Edge, home.Line)));
+            MoveLook.Guide(drawing, new Rect(_guideAAt - .75, 0, 1.5, _start.Gap + home.Depth + GuideReach), guide);
+            drawing.Pop();
         }
     }
 

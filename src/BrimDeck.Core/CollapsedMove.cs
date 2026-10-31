@@ -5,8 +5,8 @@ namespace BrimDeck.Core;
 // - The notch and the line hang from the edge nearest the pointer (EdgeFrame): from the screen's edge while the pointer is over a
 //   taskbar there, otherwise from the taskbar's inner edge (AnchorAt). They move along that edge and are held at its middle.
 // - The capsule moves anywhere between the work area's sides, and from the work area's top down to the monitor's bottom, over a
-//   bottom taskbar (CollapsedGeometry.CapsuleTopRange). It is held at the work area's middle, at Gap from the work area's sides
-//   and top, at Gap above the taskbar, and at Gap above the monitor's bottom.
+//   bottom taskbar (CollapsedGeometry.CapsuleTopRange). It is held at the work area's middle across and down, at Gap from the work
+//   area's sides and top, at Gap above the taskbar, and at Gap above the monitor's bottom.
 public static class CollapsedMove
 {
     // How near a place the surface has to come to be held there, and the gap the capsule keeps from the edges it is held at (its
@@ -96,7 +96,8 @@ public static class CollapsedMove
     public static double Offset(double centre, double from, double to) => Math.Clamp(centre - (from + to) / 2, -CollapsedLimits.OffsetLimit, CollapsedLimits.OffsetLimit);
 
     // The capsule's top-left corner for the corner the pointer asks for, and what holds it: GuideX is the vertical line its centre
-    // is held on, GuideY the horizontal line one of its edges is held at (the work area's top or bottom, or the monitor's bottom);
+    // is held on, GuideY the horizontal line its middle is held on (the work area's middle) or one of its edges is held at (the work
+    // area's top or bottom, or the monitor's bottom);
     // null where nothing holds it that way. Being held at a side of the work area draws no guide: the side is the guide.
     public static (double X, double Y, double? GuideX, double? GuideY) Capsule(double x, double y, double width, double height, double screenHeight, DipRect work)
     {
@@ -110,7 +111,7 @@ public static class CollapsedMove
         var (sx, sxGuide) = Nearest(x, [(middle, work.X + work.Width / 2), (left + Gap, null), (right - Gap, null)]);
         if (sx is { } snappedX) { x = Math.Clamp(snappedX, left, right); guideX = sxGuide; }
         // Above a bottom taskbar the guide is the taskbar's top; at the monitor's bottom (or with no taskbar there) its bottom.
-        var places = new List<(double Place, double? Guide)> { (top + Gap, top), (Finite(screenHeight) - Gap - h, Finite(screenHeight)) };
+        var places = new List<(double Place, double? Guide)> { (top + Gap, top), (Finite(screenHeight) - Gap - h, Finite(screenHeight)), (work.Y + work.Height / 2 - h / 2, work.Y + work.Height / 2) };
         if (work.Bottom < Finite(screenHeight) - .5) places.Add((work.Bottom - Gap - h, work.Bottom));
         var (sy, syGuide) = Nearest(y, places);
         if (sy is { } snappedY) { y = Math.Clamp(snappedY, top, bottom); guideY = syGuide; }

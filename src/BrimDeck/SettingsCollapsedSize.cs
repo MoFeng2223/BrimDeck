@@ -153,7 +153,8 @@ public sealed partial class SettingsWindow
     // shows it; turning it off keeps the width the surface has at that moment.
     private FrameworkElement AutoWidthRow(CompactStyle style)
     {
-        string title = Loc.T("自适应宽度", "Fit width to content");
+        // On a side edge the notch's width runs down the screen, where the rows call it its length.
+        string title = Across(style) ? Loc.T("自适应长度", "Fit length to content") : Loc.T("自适应宽度", "Fit width to content");
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.CompactAutoWidth(style), VerticalAlignment = VerticalAlignment.Center, Padding = new Thickness(0) };
         AutomationProperties.SetName(toggle, title);
         toggle.Checked += (_, _) => ChangeCollapsed(s => s.SetCompactAutoWidth(style, true));
