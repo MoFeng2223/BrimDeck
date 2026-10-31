@@ -158,7 +158,8 @@ public partial class MainWindow : Window
             _context = context;
             ApplySettings(!_expanded);
         };
-        SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escapeDismissal = new EscapeDismissal(this, () => SetExpanded(false, keyboard: true)); };
+        // Esc also leaves move mode (MainWindow.Move.cs).
+        SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escapeDismissal = new EscapeDismissal(this, () => { if (_moveArmed) CancelMove(); else SetExpanded(false, keyboard: true); }); };
         Loaded += async (_, _) =>
         {
             _virtualDesktops ??= new VirtualDesktopPresence(this);
@@ -171,11 +172,11 @@ public partial class MainWindow : Window
             if (_lead is null) { _app.AssignDisplays(); await RefreshAutomaticallyAsync(); }
         };
         Closing += (_, e) => { if (!_app.Exiting && !_retiring) { e.Cancel = true; SetExpanded(false); } };
-        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _seconds.Stop(); _refresh.Stop(); _alertTimer.Stop(); _clipSettle?.Stop(); };
+        Closed += (_, _) => { CancelMove(); _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _seconds.Stop(); _refresh.Stop(); _alertTimer.Stop(); _clipSettle?.Stop(); };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
-        // The collapsed island opens on hover, so a right click there does nothing.
+        // The collapsed island opens on hover, so a right click there does nothing, except leave move mode.
         MouseWheel += PanelWheel;
-        MouseRightButtonUp += (_, e) => { if (!_expanded || !Settings.RightClickSettings) return; _app.OpenSettings(); e.Handled = true; };
+        MouseRightButtonUp += (_, e) => { if (_moveArmed) { CancelMove(); e.Handled = true; return; } if (!_expanded || !Settings.RightClickSettings) return; _app.OpenSettings(); e.Handled = true; };
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { SetExpanded(false, keyboard: true); e.Handled = true; } };
         // A scale change moves the window to a rectangle Windows suggests; the island is centred again.
         // DpiChanged is a bubbling event: every Image raises it when its own DPI changes. Once the window has moved to a
@@ -314,6 +315,8 @@ public partial class MainWindow : Window
         }
         UpdatePointerTracking();
         RenderUsage();
+        CheckMoveOvertaken();
+        ReportMoveShape();
     }
     // Windows keeps a layered window's last picture while it is hidden and puts it on screen the moment the window is shown,
     // before WPF draws again. Hidden straight away, the panel came back showing the frame it was hidden on: after the expand
@@ -370,7 +373,10 @@ public partial class MainWindow : Window
         _pixelsPerDip = scale;
         // Both in the frame of the edge the panel hangs from (MainWindow.Edge.cs); for the top edge, the monitor's own.
         var screenWork = new DipRect((work.Left - bounds.Left) / scale, (work.Top - bounds.Top) / scale, work.Width / scale, work.Height / scale);
-        _frame = EdgeFrame.For(Settings.DockEdge, bounds.Width / scale, bounds.Height / scale, screenWork);
+        // The style shown decides the edge: a window rule that turns the notch or the capsule into the line shows it where the line's
+        // own settings put it.
+        var (edge, overTaskbar) = Dock(EffectiveStyle);
+        _frame = EdgeFrame.For(edge, bounds.Width / scale, bounds.Height / scale, screenWork, overTaskbar);
         var frame = _frame.Monitor;
         MonitorBoundsDip = new DipRect(bounds.Left / scale, bounds.Top / scale, frame.Width, frame.Height);
         WorkDip = _frame.FromScreen(screenWork);
@@ -378,7 +384,7 @@ public partial class MainWindow : Window
     }
     private CollapsedShape ShapeFor(CompactStyle style) => CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip,
         Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null, _compactRequired, _scale,
-        ColumnFor(style) ? double.IsNaN(_compactColumn) ? 0 : _compactColumn : null);
+        ColumnFor(style) ? double.IsNaN(_compactColumn) ? 0 : _compactColumn : null, style == CompactStyle.Line && Dock(style).OverTaskbar);
     // The width the collapsed column asks for (CompactColumn.Width); NaN until it is first built.
     private double _compactColumn = double.NaN;
     // The width the collapsed content asks for (see CollapsedGeometry); NaN until the row is first built, which keeps the saved width.
@@ -395,6 +401,7 @@ public partial class MainWindow : Window
         var before = Collapsed;
         UpdateCollapsedGeometry();
         if (Equals(Collapsed.Surface, before.Surface)) return;
+        ReportMoveShape();
         _app.CollapsedChanged();
         if (_expanded) return;
         // A surface that no longer lies within the window (wider, or moved along a screen edge) places the window again.
@@ -620,7 +627,7 @@ public partial class MainWindow : Window
         if (expanded && !_expanded) _handover.Drop();
         bool wasExpanded = _expanded;
         _expanded = expanded;
-        _escapeDismissal?.SetEnabled(expanded && !_preview);
+        _escapeDismissal?.SetEnabled(expanded && !_preview || _moveArmed);
         if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
         if (wasExpanded && !expanded) { HotkeyPanelCollapsed(); ReplayCompactTitle(); _app.RequestTrim(); }
         Collapsed = ShapeFor(EffectiveStyle);
@@ -832,8 +839,11 @@ public partial class MainWindow : Window
     { if (_expanded) PointerChanged(false); }
     internal void TrackPointer()
     {
+        CheckMoveOvertaken();
         if (_preview && _previewExpanded || IsSuppressed || !IsVisible || PresentationSource.FromVisual(Stage) is null || Resizing || BootHoldsPointer) return;
         var cursor = WindowsHost.Cursor();
+        // Move mode: the panel does not open (MainWindow.Move.cs).
+        if (_moveArmed) { TrackMove(cursor); return; }
         var area = CompactHoverScreenRect();
         if (area.IsEmpty) return;
         // The surface's ends resize it (MainWindow.Resize.cs); pointing there does not open the panel.

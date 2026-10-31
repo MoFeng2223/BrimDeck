@@ -8,6 +8,9 @@ namespace BrimDeck.Core;
 public enum CompactStyle { Notch, Capsule, Line }
 // The screen edge the notch hangs from (DeckSettings.NotchEdge); see EdgeFrame.
 public enum ScreenEdge { Top, Bottom, Left, Right }
+// What the notch or the line hangs from on its edge where a taskbar is: the screen's edge, over the taskbar, or the taskbar's inner
+// edge. Without a taskbar on that edge the two are the same line. See DeckSettings.Dock.
+public enum EdgeAnchor { Screen, Taskbar }
 public enum WindowBehavior { Normal, Line, Hide }
 // BackgroundFullscreen: a full-screen window on the panel's monitor that is not the foreground window.
 public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive, BackgroundFullscreen }
@@ -42,7 +45,7 @@ public enum DefaultDeckPage { Last, Usage, Music, Monitor }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
 // What a double click on an end of the collapsed notch or capsule does: turn its auto width on or off, or start moving it
-// (MainWindow.Move.cs). The line always returns to its usual length.
+// (MainWindow.Move.cs); moving is the default. Saved as numbers, so new members go at the end.
 public enum GripDoubleClick { AutoWidth, Move }
 public enum CompactMusicText { None, Title, Lyrics }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left; Music places
@@ -295,9 +298,24 @@ public sealed class DeckSettings
     // The edge the notch hangs from. On the other edges it keeps its width (along the edge), height and offset (along the edge
     // too); see EdgeFrame. The capsule always sits below the top edge.
     public ScreenEdge NotchEdge { get; set; } = ScreenEdge.Top;
-    // The edge the panel works from: the notch's, or the top for the capsule and the line chosen as the style. A window rule that
-    // turns the notch into the line keeps the notch's edge.
-    [JsonIgnore] public ScreenEdge DockEdge => Style == CompactStyle.Notch ? NotchEdge : ScreenEdge.Top;
+    // What the notch hangs from on that edge; null until chosen, which is the screen's edge at the top and the taskbar's elsewhere,
+    // as before the choice existed.
+    public EdgeAnchor? NotchAnchor { get; set; }
+    // The edge and the anchor of the line, as the notch's; the line keeps to the taskbar's side by default. A window rule that turns
+    // the notch or the capsule into the line shows it where the line's own settings put it.
+    public ScreenEdge LineEdge { get; set; } = ScreenEdge.Top;
+    public EdgeAnchor? LineAnchor { get; set; }
+    // Where a style works from: the edge and whether it hangs from the screen's edge over a taskbar there (EdgeFrame.For). The
+    // capsule floats below the top of the screen.
+    public (ScreenEdge Edge, bool OverTaskbar) Dock(CompactStyle style) => style switch
+    {
+        CompactStyle.Notch => (NotchEdge, Anchor(style, NotchEdge, NotchAnchor) == EdgeAnchor.Screen),
+        CompactStyle.Line => (LineEdge, Anchor(style, LineEdge, LineAnchor) == EdgeAnchor.Screen),
+        _ => (ScreenEdge.Top, true)
+    };
+    public static EdgeAnchor Anchor(CompactStyle style, ScreenEdge edge, EdgeAnchor? chosen)
+        => chosen ?? (style == CompactStyle.Notch && edge == ScreenEdge.Top ? EdgeAnchor.Screen : EdgeAnchor.Taskbar);
+    public ScreenEdge CompactEdge(CompactStyle style) => style == CompactStyle.Line ? LineEdge : style == CompactStyle.Notch ? NotchEdge : ScreenEdge.Top;
     public double CapsuleWidth { get; set; } = CollapsedLimits.CapsuleWidthDefault;
     public double CapsuleHeight { get; set; } = CollapsedLimits.CapsuleHeightDefault;
     public double CapsuleOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
@@ -458,7 +476,7 @@ public sealed class DeckSettings
     // by default: the memory is read back in when the panel next opens, which can stutter.
     public bool TrimMemoryWhenIdle { get; set; }
     public bool CapsuleAutoWidth { get; set; } = true;
-    public GripDoubleClick GripDoubleClick { get; set; } = GripDoubleClick.AutoWidth;
+    public GripDoubleClick GripDoubleClick { get; set; } = GripDoubleClick.Move;
     // What the collapsed readings showed before their table (CompactReadings). Kept to read older files and, written to match the
     // table (the preset it matches and the readings shown), for older versions.
     public CompactMonitorMode CompactMonitor { get; set; }
@@ -644,7 +662,10 @@ public sealed class DeckSettings
         NotchHeight = Fit(NotchHeight, CollapsedLimits.NotchHeightMin, CollapsedLimits.NotchHeightMax, CollapsedLimits.NotchHeightDefault);
         NotchOffsetX = Offset(NotchOffsetX);
         if (!Enum.IsDefined(NotchEdge)) NotchEdge = ScreenEdge.Top;
-        if (!Enum.IsDefined(GripDoubleClick)) GripDoubleClick = GripDoubleClick.AutoWidth;
+        if (!Enum.IsDefined(LineEdge)) LineEdge = ScreenEdge.Top;
+        if (NotchAnchor is { } notchAnchor && !Enum.IsDefined(notchAnchor)) NotchAnchor = null;
+        if (LineAnchor is { } lineAnchor && !Enum.IsDefined(lineAnchor)) LineAnchor = null;
+        if (!Enum.IsDefined(GripDoubleClick)) GripDoubleClick = GripDoubleClick.Move;
         CapsuleWidth = Fit(CapsuleWidth, CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax, CollapsedLimits.CapsuleWidthDefault);
         CapsuleHeight = Fit(CapsuleHeight, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, CollapsedLimits.CapsuleHeightDefault);
         CapsuleOffsetX = Offset(CapsuleOffsetX);

@@ -6,7 +6,7 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// The edge the panel hangs from (DeckSettings.DockEdge). Everything is laid out in the edge's frame (EdgeFrame), as if the panel
+// The edge the panel hangs from (DeckSettings.Dock, for the style shown). Everything is laid out in the edge's frame (EdgeFrame), as if the panel
 // hung from the top: MonitorBoundsDip and WorkDip are the frame's, the collapsed shape, the hover area, the open panel and the
 // resize grips are computed in it, and Stage draws them through the frame's mapping (its layout transform). The island's content is
 // turned back upright (IslandContent), so text reads as usual on every edge and its pop-ups, tooltips and screen points need no
@@ -76,6 +76,8 @@ public partial class MainWindow
     // The panel moved to another edge while it was on show: it comes in there with a short fade rather than jumping.
     private void FadeInOnNewEdge()
     {
+        // While the surface is dragged the island stays hidden; it is laid out on the edge being dragged to (MainWindow.Move.cs).
+        if (_moveOverlay is not null) return;
         if (_bootWaiting || _bootDot || _poweringOff || !Soft.Enabled || Settings.AnimationDuration <= 0) return;
         HoverZone.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(Math.Max(120, Settings.AnimationDuration * .6))) { EasingFunction = Soft.Out, FillBehavior = FillBehavior.Stop });
     }
