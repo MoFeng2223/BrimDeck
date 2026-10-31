@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Windows;
 using BrimDeck.Core;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -16,21 +18,66 @@ public sealed partial class SettingsWindow
         var label = TextLine(title, 13, TextPrimary, FontWeights.SemiBold);
         label.VerticalAlignment = VerticalAlignment.Center;
         if (help is null) return label;
-        var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
-        heading.Children.Add(label);
-        heading.Children.Add(HelpIcon(title, help, 14));
-        return heading;
+        return new HelpHeading(label, HelpIcon(title, help, 14)) { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
+    }
+
+    // A label followed by its info icon. The label is centered in the height the panel is given, and the icon's center goes on
+    // the middle of the label's glyphs. The settings window draws text in Display mode, which snaps the baseline to device
+    // pixels, so the glyphs sit at a different height in the label's box at each display scale and a fixed offset cannot
+    // follow them: at 150% a 1 DIP nudge measured at another scale left the icon 1.5 pixels low.
+    private sealed class HelpHeading : Panel
+    {
+        // The middle of a capital letter and of an ideograph above the baseline, the same for Segoe UI Variable and
+        // Microsoft YaHei UI; measured from rendered glyphs at 11 to 13 DIP and 100% to 200% scale.
+        private const double GlyphMiddle = 0.36;
+        private readonly TextBlock _label;
+        private readonly FrameworkElement _icon;
+        private readonly TranslateTransform _shift = new();
+
+        public HelpHeading(TextBlock label, FrameworkElement icon)
+        {
+            _label = label; _icon = icon;
+            label.VerticalAlignment = VerticalAlignment.Top; icon.VerticalAlignment = VerticalAlignment.Top; icon.RenderTransform = _shift;
+            Children.Add(label); Children.Add(icon);
+        }
+
+        protected override Size MeasureOverride(Size available)
+        {
+            var free = new Size(double.PositiveInfinity, available.Height);
+            _label.Measure(free); _icon.Measure(free);
+            return new Size(_label.DesiredSize.Width + _icon.DesiredSize.Width, Math.Max(_label.DesiredSize.Height, _icon.DesiredSize.Height));
+        }
+
+        protected override Size ArrangeOverride(Size final)
+        {
+            double scale = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+            // Rounded as layout rounding would round it, so the baseline below is measured from where the label really is.
+            double top = Math.Round((final.Height - _label.DesiredSize.Height) / 2 * scale) / scale;
+            _label.Arrange(new Rect(0, top, _label.DesiredSize.Width, _label.DesiredSize.Height));
+            var text = new FormattedText(_label.Text, CultureInfo.CurrentUICulture, _label.FlowDirection,
+                new Typeface(_label.FontFamily, _label.FontStyle, _label.FontWeight, _label.FontStretch), _label.FontSize, Brushes.Black, null,
+                TextOptions.GetTextFormattingMode(_label), scale);
+            double middle = top + _label.Margin.Top + _label.Padding.Top + text.Baseline - GlyphMiddle * _label.FontSize;
+            _icon.Arrange(new Rect(_label.DesiredSize.Width, middle - _icon.DesiredSize.Height / 2, _icon.DesiredSize.Width, _icon.DesiredSize.Height));
+            // Layout rounding moves the icon's box, and again the mark inside it, to whole device pixels; at 150% the two
+            // together left the mark half a pixel low. The shift takes the remainder back.
+            var mark = (_icon as Decorator)?.Child as FrameworkElement ?? _icon;
+            double center = VisualTreeHelper.GetOffset(_icon).Y + mark.TranslatePoint(new Point(0, mark.RenderSize.Height / 2), _icon).Y;
+            _shift.Y = middle - center;
+            return final;
+        }
+
+        // The baseline moves with the display scale even when the label's size in DIPs stays the same.
+        protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi) => InvalidateArrange();
     }
 
     // The info icon that shows a setting's or a section's description on hover or focus.
-    private FrameworkElement HelpIcon(string title, Func<string> help, double size, double nudge = 1)
+    private FrameworkElement HelpIcon(string title, Func<string> help, double size)
     {
         // The geometry is drawn for a 14 DIP box; smaller icons scale it so the circle stays centered and unclipped.
         var icon = Stroke("M 7,1 A 6,6 0 1 1 6.99,1 M 7,6.5 V 10 M 7,4 V 4.1", 14, 14, TextTertiary);
         if (size != 14) icon.LayoutTransform = new ScaleTransform(size / 14, size / 14);
-        // Measured ink: beside a 13pt label the circle's center sat 1 DIP above the center of the label's glyphs.
-        if (nudge != 0) icon.RenderTransform = new TranslateTransform(0, nudge);
-        var info = new Border
+        var info = new HelpMark
         {
             Width = size + 8, Height = 24, Margin = new Thickness(3, 0, 0, 0), Background = Brushes.Transparent,
             VerticalAlignment = VerticalAlignment.Center, Focusable = true, Cursor = Cursors.Help,
@@ -38,6 +85,15 @@ public sealed partial class SettingsWindow
         };
         AttachSettingHelp(info, title, help);
         return info;
+    }
+
+    // An info mark (ⓘ). A Border has no automation peer, so a screen reader would find the mark's name and description empty:
+    // this one reads as a button named for its setting ("开机自启动说明") with the description as its help text (AttachSettingHelp),
+    // and invoking it opens or closes the description, as hovering or focusing it does.
+    private sealed class HelpMark : Border
+    {
+        protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Button, () => AutomationProperties.GetName(this),
+            () => { if (ToolTip is ToolTip tip) tip.IsOpen = !tip.IsOpen; });
     }
 
     private static void AttachSettingHelp(FrameworkElement info, string title, Func<string> help)
@@ -65,6 +121,11 @@ public sealed partial class SettingsWindow
         info.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { tooltip.IsOpen = false; e.Handled = true; } };
         info.Unloaded += (_, _) => tooltip.IsOpen = false;
     }
+
+    // A text field's keyboard focus: the field draws no outline of its own (FocusVisualStyle is off in SettingsNumber), so its frame
+    // turns to the accent color while input has the focus. rest: the frame's color without focus.
+    private void FieldFocus(Border frame, UIElement input, Func<Brush> rest) =>
+        input.IsKeyboardFocusWithinChanged += (_, _) => frame.BorderBrush = input.IsKeyboardFocusWithin ? UI.Brush(_palette.Accent) : rest();
 
     // Where each segmented control's highlight stood when the user last pressed it, so a page rebuilt by that
     // choice (theme, quick size) can still slide the highlight from the old option instead of jumping.
@@ -127,8 +188,7 @@ public sealed partial class SettingsWindow
         AutomationProperties.SetName(minus,Loc.T("减少"+title, "Decrease "+title));AutomationProperties.SetName(plus,Loc.T("增加"+title, "Increase "+title));
         line.Children.Add(new Border {Width=1,Background=UI.Brush(Divider),Margin=new Thickness(2,5,3,5)});line.Children.Add(minus);line.Children.Add(plus);
         var chip=new Border {Child=line,Height=30,CornerRadius=new CornerRadius(6),Background=UI.Brush(_palette.Input),BorderBrush=UI.Brush(_palette.Border),BorderThickness=new Thickness(1),Padding=new Thickness(7,0,2,0)};
-        input.GotKeyboardFocus+=(_,_)=>chip.BorderBrush=UI.Brush(_palette.Accent);
-        input.LostKeyboardFocus+=(_,_)=>chip.BorderBrush=UI.Brush(_palette.Border);
+        FieldFocus(chip, input, () => UI.Brush(_palette.Border));
         void Set(double number)
         {
             var next=Math.Clamp(Math.Round(number),min,max);
@@ -158,8 +218,9 @@ public sealed partial class SettingsWindow
         return panel;
     }
 
-    // A question before an action that cannot be undone, in a small dialog over the settings: Cancel (Esc) or the action, in red.
-    private bool Confirm(string title, string message, string action)
+    // A question before an action that cannot be undone, in a small dialog over the settings: Cancel (Esc) or the action, in red
+    // (in the accent color when it is not a danger).
+    private bool Confirm(string title, string message, string action, bool danger = true)
     {
         var dialog = new Window { Title = title, Owner = this, Width = 400, SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false, FontFamily = UI.PanelFont,
@@ -173,7 +234,7 @@ public sealed partial class SettingsWindow
         var text = TextLine(message, 12.5, TextSecondary); text.TextWrapping = TextWrapping.Wrap; panel.Children.Add(text);
         bool confirmed = false;
         var cancel = ActionButton(Loc.T("取消", "Cancel"), dialog.Close); cancel.Style = (Style)dialog.FindResource("SettingsOutlineButton"); cancel.IsCancel = true;
-        var confirm = ActionButton(action, () => { confirmed = true; dialog.Close(); }); confirm.Style = (Style)dialog.FindResource("SettingsDangerButton");
+        var confirm = ActionButton(action, () => { confirmed = true; dialog.Close(); }); confirm.Style = (Style)dialog.FindResource(danger ? "SettingsDangerButton" : "SettingsPrimaryButton");
         foreach (var button in new[] { cancel, confirm }) { button.MinWidth = 84; button.Padding = new Thickness(14, 6, 14, 6); }
         confirm.Margin = new Thickness(8, 0, 0, 0);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 20, 0, 0) };
@@ -185,5 +246,43 @@ public sealed partial class SettingsWindow
         dialog.Loaded += (_, _) => cancel.Focus();
         dialog.ShowDialog();
         return confirmed;
+    }
+}
+
+// A drop-down drawn as a button with a popup list (the app rows' quota source and usage app). A button reads as one that only acts;
+// this one reads as a combo box with its chosen value and whether its list is open, and opens or closes it on request (SW-04).
+internal sealed class DropDownButton : System.Windows.Controls.Button
+{
+    public Func<string> Value { get; init; } = () => "";
+    public System.Windows.Controls.Primitives.Popup? Menu
+    {
+        get => _menu;
+        set
+        {
+            _menu = value;
+            if (value is null) return;
+            value.Opened += (_, _) => Changed(ExpandCollapseState.Collapsed, ExpandCollapseState.Expanded);
+            value.Closed += (_, _) => Changed(ExpandCollapseState.Expanded, ExpandCollapseState.Collapsed);
+        }
+    }
+    private System.Windows.Controls.Primitives.Popup? _menu;
+    private void Changed(ExpandCollapseState from, ExpandCollapseState to) =>
+        (UIElementAutomationPeer.FromElement(this) as Peer)?.RaisePropertyChangedEvent(ExpandCollapsePatternIdentifiers.ExpandCollapseStateProperty, from, to);
+
+    protected override AutomationPeer OnCreateAutomationPeer() => new Peer(this);
+
+    private sealed class Peer(DropDownButton owner) : ButtonAutomationPeer(owner), IExpandCollapseProvider, IValueProvider
+    {
+        protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.ComboBox;
+        protected override string GetClassNameCore() => nameof(DropDownButton);
+        public override object GetPattern(PatternInterface pattern) =>
+            pattern is PatternInterface.ExpandCollapse or PatternInterface.Value ? this : base.GetPattern(pattern);
+        public ExpandCollapseState ExpandCollapseState => owner._menu?.IsOpen == true ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed;
+        // Opening goes through the button's own click, which first fits the list to the screen.
+        public void Expand() { if (owner._menu?.IsOpen != true) ((IInvokeProvider)this).Invoke(); }
+        public void Collapse() { if (owner._menu is { IsOpen: true } menu) menu.IsOpen = false; }
+        public string Value => owner.Value();
+        public bool IsReadOnly => true;
+        public void SetValue(string value) => throw new InvalidOperationException();
     }
 }

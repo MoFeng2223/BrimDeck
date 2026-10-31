@@ -60,8 +60,8 @@ static class DevicesPageTests
     private static void Strip(Action<string, bool> check)
     {
         var older = CompactMonitor.Normalize([new CompactReading { Item = CompactMonitorItems.Cpu }]);
-        check("Battery reading: an older table gains it hidden at the end", older[^1].Item == CompactMonitorItems.Battery && !older[^1].Visible);
-        check("Battery reading: it leaves first when the row is short", CompactMonitor.LeaveOrder[0] == CompactMonitorItems.Battery && (CompactMonitor.Every & CompactMonitorItems.Battery) != 0);
+        check("Battery reading: an older table gains it hidden, just before the frame rate at the end", older[^2].Item == CompactMonitorItems.Battery && !older[^2].Visible && older[^1].Item == CompactMonitorItems.Frames);
+        check("Battery reading: it leaves right after the frame rate when the row is short", CompactMonitor.LeaveOrder[1] == CompactMonitorItems.Battery && (CompactMonitor.Every & CompactMonitorItems.Battery) != 0);
         var readings = CompactMonitor.Normalize(null);
         foreach (var reading in readings) reading.Visible = reading.Item == CompactMonitorItems.Battery;
         CompactMonitor.Apply(readings, CompactMonitorMode.Full);

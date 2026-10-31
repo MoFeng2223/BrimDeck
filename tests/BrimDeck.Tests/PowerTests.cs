@@ -264,13 +264,15 @@ static class PowerTests
     private static void Readings(Action<string, bool> check)
     {
         var table = CompactMonitor.Normalize(null);
-        // The devices' lowest battery (DevicesPageTests) came after them and keeps its own place, last in the table and first to leave.
-        check("Readings: Power and Charge are last in the table, hidden",
-            table.Select(reading => reading.Item).Where(item => item != CompactMonitorItems.Battery).TakeLast(2).SequenceEqual([CompactMonitorItems.Power, CompactMonitorItems.Charge]) && table.Where(reading => reading.Item is CompactMonitorItems.Power or CompactMonitorItems.Charge).All(reading => !reading.Visible));
+        // The devices' lowest battery (DevicesPageTests) and the frame rate (FrameRateTests) came after them and keep their own places, last in the table and first to leave.
+        check("Readings: Power and Charge are last in the table but for the devices' battery and the frame rate, hidden",
+            table.Select(reading => reading.Item).Where(item => item is not (CompactMonitorItems.Battery or CompactMonitorItems.Frames)).TakeLast(2).SequenceEqual([CompactMonitorItems.Power, CompactMonitorItems.Charge]) && table.Where(reading => reading.Item is CompactMonitorItems.Power or CompactMonitorItems.Charge).All(reading => !reading.Visible));
         check("Readings: they are readings of the system",
             CompactMonitor.Order.Contains(CompactMonitorItems.Power) && CompactMonitor.Order.Contains(CompactMonitorItems.Charge)
             && (CompactMonitor.Every & CompactMonitorItems.Power) != 0 && (CompactMonitor.Every & CompactMonitorItems.Charge) != 0);
-        check("Readings: they leave a short row early, the machine's battery after the drives", CompactMonitor.LeaveOrder.Where(item => item != CompactMonitorItems.Battery).Take(3).SequenceEqual([CompactMonitorItems.Power, CompactMonitorItems.Storage, CompactMonitorItems.Charge]) && CompactMonitor.LeaveOrder.Count == CompactMonitor.Order.Count);
+        check("Readings: they leave a short row early, after the frame rate and the devices' battery, the machine's battery after the drives",
+            CompactMonitor.LeaveOrder.Take(2).SequenceEqual([CompactMonitorItems.Frames, CompactMonitorItems.Battery])
+            && CompactMonitor.LeaveOrder.Where(item => item is not (CompactMonitorItems.Battery or CompactMonitorItems.Frames)).Take(3).SequenceEqual([CompactMonitorItems.Power, CompactMonitorItems.Storage, CompactMonitorItems.Charge]) && CompactMonitor.LeaveOrder.Count == CompactMonitor.Order.Count);
 
         // The presets keep to the readings they had: Full does not turn the new ones on, Brief turns them off.
         var full = CompactMonitor.Normalize(null);

@@ -190,9 +190,9 @@ public partial class MainWindow
         ToolbarRow.Height = new GridLength(header.Row);
         Toolbar.Height = header.Height;
         PageSwitch.Margin = new Thickness(header.Side, 0, 0, 0);
+        FitPageButtons(header);
         foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, DevicesPageButton })
         {
-            button.Height = header.ButtonHeight;
             // A local corner for these two buttons only; PanelIconButton keeps its 5 DIP corner elsewhere.
             button.ApplyTemplate();
             if (button.Template?.FindName("Chrome", button) is Border chrome) chrome.CornerRadius = new CornerRadius(PanelTheme.Corner(PanelHeader.ButtonRadius));
@@ -453,7 +453,7 @@ public partial class MainWindow
         bool animate = Settings.Animations && SystemParameters.ClientAreaAnimation;
         // Without the cover the lyrics, or a message, take a column of their own; with neither the titles have the width.
         bool lyricColumn = !Settings.MusicPageCover && (hasLyrics || message.Length > 0);
-        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{animate}";
+        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.MusicPageEqualizerColor}|{Settings.MusicPageEqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
         _musicRenderKey = key;
         string song = track is null ? "" : $"{track.Id}|{track.SongKey}|{track.Title}|{track.Artist}";
@@ -534,7 +534,7 @@ public partial class MainWindow
             }
             header.Children.Add(titles);
             if (shown && songChanging) RiseIn(titles);
-            _musicEqualizer = new MusicEqualizer { Bars = Settings.MusicEqualizerBars, Width = equalizerWidth, Height = c.Equalizer, Color = _musicAccent, HorizontalAlignment = HorizontalAlignment.Right,
+            _musicEqualizer = new MusicEqualizer { Bars = Settings.MusicEqualizerBars, Width = equalizerWidth, Height = c.Equalizer, Color = PageEqualizerColor, HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, (c.TitleLine - c.Equalizer) / 2, 0, 0) };
             Grid.SetColumn(_musicEqualizer, 1); header.Children.Add(_musicEqualizer); right.Children.Add(header);
 
@@ -542,9 +542,10 @@ public partial class MainWindow
             if (hasLyrics && lyricLines > 0 && synchronized)
             {
                 var lyrics = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-                // All lines share one size; only the brightness marks the current one.
+                // All lines share one size; only its color (MusicLyricColor) marks the current one.
                 if (lyricLines == 3) { _lyricPrevious = UI.Fixed("", c.Lyric, c.LyricLine, UI.Tertiary); lyrics.Children.Add(_lyricPrevious); }
-                _lyricCurrent = new MusicMarquee { FontSize = c.Lyric, Height = c.LyricLine, CenterWhenFits = false, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
+                _lyricCurrent = new MusicMarquee { FontSize = c.Lyric, Height = c.LyricLine, CenterWhenFits = false, Foreground = LyricInk,
+                    Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
                 lyrics.Children.Add(_lyricCurrent); UpdateLyricScrolling();
                 if (lyricLines >= 2) { _lyricNext = UI.Fixed("", c.Lyric, c.LyricLine, UI.Tertiary); lyrics.Children.Add(_lyricNext); }
                 lyrics.Visibility = layout.ShowMessage ? Visibility.Collapsed : Visibility.Visible; middle.Children.Add(lyrics);
@@ -756,7 +757,7 @@ public partial class MainWindow
         return Math.Round(3 + (Settings.MusicEqualizerBars - 1) * (fiveBars - 3) / 4);
     }
     // The upper part without the cover (MusicLayout.Columns): the titles, with the equalizer below them, centred in the left
-    // column, and the lyrics or the message right of a divider. The current lyric is larger and in the song's color, the
+    // column, and the lyrics or the message right of a divider. The current lyric is larger and in its own color, the
     // others dim, so the lyrics do not read as more titles. Without a lyrics column the titles are centred across the width,
     // and a message that comes later (ShowMusicError) appears below them.
     private void MusicColumns(Grid body, MusicLayout layout, MediaTrack track, bool lyricColumn, bool hasLyrics, bool synchronized, bool playerLyrics,
@@ -777,7 +778,7 @@ public partial class MainWindow
         }
         if (columns.ShowEqualizer)
         {
-            _musicEqualizer = new MusicEqualizer { Bars = Settings.MusicEqualizerBars, Width = MusicEqualizerWidth(c), Height = c.Equalizer, Color = _musicAccent,
+            _musicEqualizer = new MusicEqualizer { Bars = Settings.MusicEqualizerBars, Width = MusicEqualizerWidth(c), Height = c.Equalizer, Color = PageEqualizerColor,
                 HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, columns.EqualizerGap, 0, 0) };
             info.Children.Add(_musicEqualizer);
         }
@@ -803,8 +804,7 @@ public partial class MainWindow
             var lyrics = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Visibility = lyricsVisibility };
             TextBlock Dim() { var line = UI.Fixed("", c.Lyric, c.LyricLine, UI.Tertiary); lyrics.Children.Add(line); return line; }
             _lyricsAbove = [.. Enumerable.Range(0, above).Select(_ => Dim())];
-            var ink = new SolidColorBrush(PanelTheme.Readable(((SolidColorBrush)_musicAccent).Color, PanelThemes.LevelContrast)); ink.Freeze();
-            _lyricCurrent = new MusicMarquee { FontSize = columns.CurrentLyric, Height = columns.CurrentLine, CenterWhenFits = false, Foreground = ink,
+            _lyricCurrent = new MusicMarquee { FontSize = columns.CurrentLyric, Height = columns.CurrentLine, CenterWhenFits = false, Foreground = LyricInk,
                 Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
             lyrics.Children.Add(_lyricCurrent); UpdateLyricScrolling();
             _lyricsBelow = [.. Enumerable.Range(0, below).Select(_ => Dim())];
@@ -1150,14 +1150,26 @@ public partial class MainWindow
             : snapshot.Metrics.Count > 0 ? string.Join(Loc.T("；", "; "), snapshot.Metrics.Select(m => m.ValueText.Length > 0 ? m.ValueText + " " + m.ValueSuffix : Loc.Label(m.Label))) : snapshot.StatusLabel);
         return (used, PanelTheme.QuotaTheme(entry), tip);
     }).ToArray();
-    // The collapsed bars' color, drawn as the theme can show it on its surface; under high contrast always the theme's.
-    private Brush CompactEqualizerColor => ClockColors.Shown(Settings.EqualizerColor, PanelTheme.HighContrast) switch
+    private Brush CompactEqualizerColor => MusicColor(Settings.EqualizerColor, Settings.EqualizerCustomColor, "equalizer");
+    private Brush PageEqualizerColor => MusicColor(Settings.MusicPageEqualizerColor, Settings.MusicPageEqualizerCustomColor, "equalizer");
+    private Brush LyricInk => MusicColor(Settings.MusicLyricColor, Settings.MusicLyricCustomColor, "textPrimary", text: true);
+    // A color chosen among the clock's swatches, drawn as the theme can show it on its surface; text needs more contrast than
+    // bars. White, and every choice under high contrast, is the theme's own color (theme).
+    private Brush MusicColor(ClockColor chosen, string custom, string theme, bool text = false)
     {
-        ClockColor.Cover => _musicAccent,
-        ClockColor.Custom => new SolidColorBrush(PanelTheme.Readable(ClockFace.Parse(Settings.EqualizerCustomColor))),
-        var preset when ClockColors.Swatches.Contains(preset) => new SolidColorBrush(PanelTheme.Readable(ClockFace.Preset(preset))),
-        _ => UI.Brush(PanelTheme.Hex("equalizer"))
-    };
+        Brush Readable(Color color)
+        {
+            var brush = new SolidColorBrush(PanelTheme.Readable(color, text ? PanelThemes.LevelContrast : PanelThemes.GraphicContrast)); brush.Freeze();
+            return brush;
+        }
+        return ClockColors.Shown(chosen, PanelTheme.HighContrast) switch
+        {
+            ClockColor.Cover => text ? Readable(((SolidColorBrush)_musicAccent).Color) : _musicAccent,
+            ClockColor.Custom => Readable(ClockFace.Parse(custom)),
+            var preset when ClockColors.Swatches.Contains(preset) => Readable(ClockFace.Preset(preset)),
+            _ => UI.Brush(PanelTheme.Hex(theme))
+        };
+    }
     // The collapsed bars: while a song plays or is paused, or at all times when chosen (EqualizerAlways).
     private bool CompactEqualizerShown => Settings.ShowsEqualizer(EffectiveStyle) && (Settings.EqualizerAlways || _mediaTrack is { State: not MediaState.Stopped });
     private bool TitleGliding => !_expanded && _alert is null && _compactEqualizer is not null && _compactMarquee?.IsGliding == true;
