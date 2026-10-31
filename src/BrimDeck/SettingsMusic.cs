@@ -233,18 +233,34 @@ public sealed partial class SettingsWindow
     private void Players()
     {
         SectionTitle(Loc.T("网易云音乐", "NetEase Cloud Music"));
-        Group(NeteaseSwitch(),
-            Toggle(Loc.T("始终显示“启用完整控制”按钮", "Always show \"Enable full control\""), S.NeteaseFullControlEntry, v => Change(s => s.NeteaseFullControlEntry = v), S.MusicPage,
-            Loc.T("在音乐页面右上角的来源菜单末尾固定显示“网易云音乐 · 完整控制”，以便随时启用完整控制。启用完整控制后，可以在面板中拖动网易云音乐的播放进度，并切换播放模式。",
-                "Keeps \"NetEase Cloud Music · Full control\" at the end of the source menu at the top right of the music page, so full control can be enabled at any time. With full control, NetEase Cloud Music's playback position can be dragged in the panel and its playback mode switched.")),
+        // Without full control NetEase is controlled through its system media session, an option in its own settings.
+        PlayerNote(Loc.T("在网易云音乐“设置 › 系统”中打开“开启 SMTC”，即可控制播放。",
+            "Turn on \"开启 SMTC\" in NetEase Cloud Music's 设置 › 系统 to control playback."));
+        Group(Toggle(Loc.T("始终显示“启用完整控制”按钮", "Always show \"Enable full control\""), S.NeteaseFullControlEntry, v => Change(s => s.NeteaseFullControlEntry = v), S.MusicPage,
+            Loc.T("在音乐页面右上角的来源菜单末尾固定显示“网易云音乐 · 完整控制”，以便随时启用完整控制。启用完整控制后，可以在面板中拖动网易云音乐的播放进度、切换播放模式，以及喜欢或取消喜欢当前歌曲。",
+                "Keeps \"NetEase Cloud Music · Full control\" at the end of the source menu at the top right of the music page, so full control can be enabled at any time. With full control, NetEase Cloud Music's playback position can be dragged in the panel, its playback mode switched, and the current song liked or unliked.")),
             Toggle(Loc.T("启动后自动启用完整控制", "Enable full control when it starts"), S.NeteaseAutoFullControl, NeteaseAutoFullControl, S.MusicPage,
                 Loc.T("网易云音乐以普通方式启动后，BrimDeck 会自动将它重启一次，改为完整控制，通常需要几秒钟。",
-                    "When NetEase Cloud Music is started the normal way, BrimDeck restarts it once with full control, which usually takes a few seconds.")));
+                    "When NetEase Cloud Music is started the normal way, BrimDeck restarts it once with full control, which usually takes a few seconds.")),
+            NeteaseSwitch());
         SectionTitle(Loc.T("酷狗音乐", "KuGou Music"));
+        // Without full control KuGou is seen only through its system media session, an option in KuGou's own settings.
+        PlayerNote(Loc.T("在酷狗“设置 › 常规设置 › 播放”中勾选“支持系统播放控件，如锁屏界面”，即可显示曲目并控制播放。",
+            "Check \"支持系统播放控件，如锁屏界面\" in KuGou's 设置 › 常规设置 › 播放 to show the track and control playback."));
         Group(KugouSwitch());
         SectionTitle("Apple Music");
         Group(Toggle(Loc.T("始终启用完整控制", "Always enable full control"), S.AppleMusicFullControl, v => Change(s => s.AppleMusicFullControl = v), S.MusicPage,
             Loc.T("BrimDeck 启动后自动启用 Apple Music 的完整控制。", "Enables full control of Apple Music when BrimDeck starts.")));
+        // QQ Music is read through its own pipe; it has nothing to set.
+        SectionTitle(Loc.T("QQ 音乐", "QQ Music"));
+        PlayerNote(Loc.T("无需任何设置。", "Needs no setup."), last: true);
+    }
+    // A line of small text between a player's title and its settings; last: the player has no settings, so the line ends the
+    // section with a group's spacing.
+    private void PlayerNote(string text, bool last = false)
+    {
+        var note = TextLine(text, 11, TextTertiary);
+        note.TextWrapping = TextWrapping.Wrap; note.Margin = new Thickness(0, 0, 0, last ? 28 : 8); Target.Children.Add(note);
     }
     // KuGou's full control as one switch, since a changed libcef.dll makes every start of KuGou a full control start. On: after
     // the explanation the file is changed and a running KuGou restarts; off: the file is restored and KuGou keeps running until
@@ -252,7 +268,7 @@ public sealed partial class SettingsWindow
     private FrameworkElement KugouSwitch()
     {
         var app = (App)Application.Current;
-        string title = Loc.T("完整控制", "Full control");
+        string title = Loc.T("始终启用完整控制", "Always enable full control");
         // A file another tool or an earlier change left changed is on as well: KuGou starts with full control either way.
         bool changed = (app.Media is { } known ? known.KugouState : Native.KugouInstall.State()) == LibcefPatchState.Patched;
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.KugouFullControl || changed, VerticalAlignment = VerticalAlignment.Center };
@@ -307,8 +323,10 @@ public sealed partial class SettingsWindow
         }
         void Changed() => Dispatcher.BeginInvoke(Update);
         Update();
-        var row = Row(title, toggle, note, () => Loc.T("会修改酷狗的 libcef.dll，之后酷狗每次启动都是完整控制。",
-            "Changes KuGou's libcef.dll; KuGou then starts with full control every time."));
+        var row = Row(title, toggle, note, () => Loc.T("与上面勾选酷狗选项的方式相比，还会显示实际播放进度和更清晰的封面，歌词随进度滚动。\n"
+            + "启用时会修改酷狗的 libcef.dll，之后酷狗每次启动都是完整控制模式。",
+            "Compared with checking the KuGou option above, the actual progress and a sharper cover are also shown, and the lyrics follow the song.\n"
+            + "Turning it on changes KuGou's libcef.dll; KuGou then starts in full control mode every time."));
         row.Loaded += (_, _) => app.MediaChanged += Changed;
         row.Unloaded += (_, _) => app.MediaChanged -= Changed;
         return row;
@@ -319,7 +337,7 @@ public sealed partial class SettingsWindow
     private FrameworkElement NeteaseSwitch()
     {
         var app = (App)Application.Current;
-        string title = Loc.T("完整控制", "Full control");
+        string title = Loc.T("始终启用完整控制", "Always enable full control");
         bool changed = (app.Media is { } known ? known.NeteasePatchState : Native.NeteaseInstall.State()) == LibcefPatchState.Patched;
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.NeteaseFullControl || changed, VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, title);
@@ -376,8 +394,8 @@ public sealed partial class SettingsWindow
         }
         void Changed() => Dispatcher.BeginInvoke(Update);
         Update();
-        var row = Row(title, toggle, note, () => Loc.T("会修改网易云的 libcef.dll，之后网易云每次启动都是完整控制。",
-            "Changes NetEase Cloud Music's libcef.dll; it then starts with full control every time."));
+        var row = Row(title, toggle, note, () => Loc.T("会修改网易云的 libcef.dll，之后网易云每次启动都是完整控制模式。",
+            "Changes NetEase Cloud Music's libcef.dll; it then starts in full control mode every time."));
         row.Loaded += (_, _) => app.MediaChanged += Changed;
         row.Unloaded += (_, _) => app.MediaChanged -= Changed;
         return row;
