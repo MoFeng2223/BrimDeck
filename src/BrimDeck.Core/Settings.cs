@@ -41,6 +41,9 @@ public enum DeckPage { Usage, Music, Monitor }
 public enum DefaultDeckPage { Last, Usage, Music, Monitor }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
+// What a double click on an end of the collapsed notch or capsule does: turn its auto width on or off, or start moving it
+// (MainWindow.Move.cs). The line always returns to its usual length.
+public enum GripDoubleClick { AutoWidth, Move }
 public enum CompactMusicText { None, Title, Lyrics }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left; Music places
 // only the title or lyric. Saved as numbers, so new members go at the end.
@@ -356,6 +359,9 @@ public sealed class DeckSettings
     public bool NeteaseFullControlEntry { get; set; }
     // Restarts a player started the normal way with full control, without asking again; switching it on asks once.
     public bool NeteaseAutoFullControl { get; set; }
+    // NetEase Cloud Music's full control, which the user confirmed when switching it on: its libcef.dll is kept changed, also after
+    // an update replaces it (a running player then restarts once), so every start opens the port. Switching it off restores the file.
+    public bool NeteaseFullControl { get; set; }
     // KuGou's full control, which the user confirmed when switching it on: its libcef.dll is kept changed, also after a KuGou
     // update replaces it (a running KuGou then restarts once). Switching it off restores the file.
     public bool KugouFullControl { get; set; }
@@ -452,6 +458,7 @@ public sealed class DeckSettings
     // by default: the memory is read back in when the panel next opens, which can stutter.
     public bool TrimMemoryWhenIdle { get; set; }
     public bool CapsuleAutoWidth { get; set; } = true;
+    public GripDoubleClick GripDoubleClick { get; set; } = GripDoubleClick.AutoWidth;
     // What the collapsed readings showed before their table (CompactReadings). Kept to read older files and, written to match the
     // table (the preset it matches and the readings shown), for older versions.
     public CompactMonitorMode CompactMonitor { get; set; }
@@ -637,6 +644,7 @@ public sealed class DeckSettings
         NotchHeight = Fit(NotchHeight, CollapsedLimits.NotchHeightMin, CollapsedLimits.NotchHeightMax, CollapsedLimits.NotchHeightDefault);
         NotchOffsetX = Offset(NotchOffsetX);
         if (!Enum.IsDefined(NotchEdge)) NotchEdge = ScreenEdge.Top;
+        if (!Enum.IsDefined(GripDoubleClick)) GripDoubleClick = GripDoubleClick.AutoWidth;
         CapsuleWidth = Fit(CapsuleWidth, CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax, CollapsedLimits.CapsuleWidthDefault);
         CapsuleHeight = Fit(CapsuleHeight, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, CollapsedLimits.CapsuleHeightDefault);
         CapsuleOffsetX = Offset(CapsuleOffsetX);
