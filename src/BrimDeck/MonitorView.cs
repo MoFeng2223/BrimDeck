@@ -80,6 +80,7 @@ internal sealed class MonitorView : Grid
         _layout = layout; _colors = colors; _main = main; _temperatures = temperatures;
         bool cpuMain = main == MonitorMain.Cpu;
         string swapToGpu = Loc.T("切换为以 GPU 为主", "Show the GPU large"), swapToCpu = Loc.T("切换为以 CPU 为主", "Show the CPU large");
+        string cores = Loc.T("CPU 各核心占用", "CPU usage by core");
         var readings = _readings;
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 16 });
@@ -112,7 +113,7 @@ internal sealed class MonitorView : Grid
         if (cpuMain)
         {
             // The cores carry no figures: the fill is the load, the tick the clock, and pointing at a core gives both.
-            _cpuGraph = new ColumnGraph(26, layout.Caption, labels: false);
+            _cpuGraph = new ColumnGraph(26, layout.Caption, labels: false, name: cores);
             _gpuBlock = new BlockGauge(colors.Gpu, swapToGpu);
             _gpuBlock.Clicked += () => mainChanged(MonitorMain.Gpu);
             SetColumn(_gpuBlock, 2); graphs.Children.Add(_cpuGraph); graphs.Children.Add(_gpuBlock);
@@ -120,8 +121,8 @@ internal sealed class MonitorView : Grid
         else
         {
             // The engines spread over the room the graph has, so a wide page leaves no gap between them and the processor's columns.
-            _gpuGraph = new ColumnGraph(EngineColumn, layout.Caption, !layout.CompactMetrics, gap: 6);
-            _cpuGraph = new ColumnGraph(6, layout.Caption, false, gap: 1.5, button: swapToCpu);
+            _gpuGraph = new ColumnGraph(EngineColumn, layout.Caption, !layout.CompactMetrics, gap: 6, name: Loc.T("GPU 各引擎占用", "GPU usage by engine"));
+            _cpuGraph = new ColumnGraph(6, layout.Caption, false, gap: 1.5, button: swapToCpu, name: cores);
             _cpuGraph.Clicked += () => mainChanged(MonitorMain.Cpu);
             SetColumn(_cpuGraph, 2); graphs.Children.Add(_gpuGraph); graphs.Children.Add(_cpuGraph);
         }
@@ -280,7 +281,7 @@ internal sealed class MonitorView : Grid
             string detail = kind.Length > 0 && heatText.Length > 0 ? kind + " · " + heatText : kind + heatText;
             _gpuGauge.Set(idle ? null : gpu.Usage, idle ? "—" : MonitorFormat.Percent(gpu.Usage), idle ? "" : "%", detail, switchTo.Length > 0 ? tip + "\n" + switchTo : tip, motion,
                 heat is { } c ? Hot(Temperatures.OfGpu(c)) : null);
-            _gpuBlock?.Set(idle ? 0 : gpu.Usage, idle ? null : gpu.DedicatedFraction, tip, motion);
+            _gpuBlock?.Set(idle ? null : gpu.Usage, idle ? null : gpu.DedicatedFraction, tip, motion);
             _gpuGraph?.Set(gpu.Engines.Select(engine => new GraphColumn(engine.Usage, null, _colors.Gpu, 0,
                 GpuEngines.Label(engine.Kind) + " · " + MonitorFormat.Percent(engine.Usage) + "%", GpuEngines.Short(engine.Kind))).ToList(), motion);
         }
@@ -290,7 +291,7 @@ internal sealed class MonitorView : Grid
             _nextGpu = null;
             if (!cpuMain) _gpuGauge.Button = null;
             _gpuGauge.Set(null, "—", "", "", reason, motion);
-            _gpuBlock?.Set(0, null, reason, motion);
+            _gpuBlock?.Set(null, null, reason, motion);
             _gpuGraph?.Set([], motion);
         }
 
