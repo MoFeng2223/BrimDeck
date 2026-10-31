@@ -1,0 +1,22 @@
+src/BrimDeck/SettingsControls.cs
+  h_dc4d9c798f1bc1 19-69,73
+src/BrimDeck/SettingsProviders.cs
+  h_dc4d9c798f1bc1 97,119-120,151-152
+src/BrimDeck/SettingsMonitor.cs
+  h_dc4d9c798f1bc1 174
+src/BrimDeck/SettingsFullscreen.cs
+  h_dc4d9c798f1bc1 88
+src/BrimDeck/SettingsWindow.cs
+  h_dc4d9c798f1bc1 1121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "69aa017f12727969e56883858fa617b11ebf0dc0",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
