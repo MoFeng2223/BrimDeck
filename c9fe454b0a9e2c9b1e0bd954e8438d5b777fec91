@@ -1,0 +1,38 @@
+src/BrimDeck.Core/Settings.cs
+  s_94b37512a2de7e::t_070028f16a6cd7 378
+src/BrimDeck/MainWindow.xaml.cs
+  s_7b509064d545fb::t_0f40cbb4d3a1b6 87-88
+src/BrimDeck/Native/WindowsHost.cs
+  s_94b37512a2de7e::t_7619ea90c4fbd6 31,33,38,62-63,87,89-91,96,164-170
+src/BrimDeck/SettingsWindow.cs
+  s_94b37512a2de7e::t_0a7e95d448d72c 632,689-701
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c9fe454b0a9e2c9b1e0bd954e8438d5b777fec91",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_7b509064d545fb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2ce32393-70d8-4824-81f6-9f08c98cb433",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_94b37512a2de7e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18f7f-45e5-70d2-bfad-c12231828db9",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}

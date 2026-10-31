@@ -1,0 +1,65 @@
+src/BrimDeck/MonitorStrip.cs
+  h_dc4d9c798f1bc1 22-24,52-53,55,57,76,123,372,374
+  s_0ad419025dbc93::t_3fbe94f6481a5b 373
+src/BrimDeck.Core/EdgeFrame.cs
+  h_dc4d9c798f1bc1 1-98
+src/BrimDeck/MainWindow.Lifecycle.cs
+  h_dc4d9c798f1bc1 71-72,77
+src/BrimDeck/MainWindow.Resize.cs
+  h_dc4d9c798f1bc1 141,145-151,153,161-162,165-170,178,332-333
+  s_0ad419025dbc93::t_adf509de065c2e 152
+src/BrimDeck/MainWindow.xaml
+  h_dc4d9c798f1bc1 40-41
+src/BrimDeck/MainWindow.Scale.cs
+  h_dc4d9c798f1bc1 30
+src/BrimDeck/ResizeGripLayer.cs
+  h_dc4d9c798f1bc1 33-35,283-293,297
+src/BrimDeck/MainWindow.Music.cs
+  h_dc4d9c798f1bc1 855,1080-1081
+src/BrimDeck/MainWindow.xaml.cs
+  h_dc4d9c798f1bc1 91-92,95,255-257,274-275,280-284,307-308,343,347-348,350,352-353,366-371,375-378,396,426,429-430,436-442,527-529,531,542-543,630-635,637,658-659,666
+src/BrimDeck/MainWindow.CompactColumn.cs
+  h_dc4d9c798f1bc1 1-174
+src/BrimDeck/MainWindow.CompactLayout.cs
+  h_dc4d9c798f1bc1 39-51,54-55,58-59,103-121
+src/BrimDeck/SettingsCollapsedSize.cs
+  h_dc4d9c798f1bc1 29,32-34,44-50,52-55,64,202,204,257-260
+  s_0ad419025dbc93::t_41a55ffbf82759 261
+src/BrimDeck.Core/Settings.cs
+  h_dc4d9c798f1bc1 9-10,290-295,610
+tests/BrimDeck.Tests/EdgeFrameTests.cs
+  h_dc4d9c798f1bc1 1-69
+src/BrimDeck/MonitorPanel.cs
+  h_dc4d9c798f1bc1 58,97
+src/BrimDeck/MainWindow.Edge.cs
+  h_dc4d9c798f1bc1 1-82
+tests/BrimDeck.Tests/Program.cs
+  h_dc4d9c798f1bc1 31
+src/BrimDeck/MusicVisuals.cs
+  h_dc4d9c798f1bc1 492-496,499,522,577,616,625,715-740
+src/BrimDeck.Core/CompactColumn.cs
+  h_dc4d9c798f1bc1 1-56
+src/BrimDeck.Core/CollapsedGeometry.cs
+  h_dc4d9c798f1bc1 33-35,50,80-83,85,122-123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5737487c94e836548cb9d562a028cdeb59ca8de6",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_0ad419025dbc93": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d224113c-94f5-4f2b-a9ef-e1aca6a0db9b",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}

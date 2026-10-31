@@ -1,0 +1,34 @@
+src/BrimDeck/MonitorPanel.cs
+  h_dc4d9c798f1bc1 25-26
+src/BrimDeck/ToolbarResources.xaml
+  h_dc4d9c798f1bc1 5,15,158-160
+  s_166f4c4144fcb5::t_94f0847fe99c66 161
+src/BrimDeck/MonitorView.cs
+  h_dc4d9c798f1bc1 185-191,322
+src/BrimDeck/MonitorProcesses.cs
+  h_dc4d9c798f1bc1 11,253-255,315-316,322-323,325-326,335-343,374-376
+  s_166f4c4144fcb5::t_f5bb3632944b5e 344
+src/BrimDeck/Native/ProcessWindows.cs
+  h_dc4d9c798f1bc1 1-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "eb72e88dd0979eeade3b8bcfc0e1a7d5e30db15d",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_166f4c4144fcb5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3298f069-2114-4502-9cb8-fa746c070a2d",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}

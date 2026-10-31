@@ -1,0 +1,19 @@
+README.md
+  s_3d6c368d2a02a6::t_d288b0fee3ff7a 1-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "19a5ca1f1e2121b2b9c7399563e37582949fa527",
+  "prompts": {},
+  "sessions": {
+    "s_3d6c368d2a02a6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff644a5b-0c72-4e95-a438-05f1e552767a",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}

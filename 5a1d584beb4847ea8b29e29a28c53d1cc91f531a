@@ -1,0 +1,14 @@
+src/BrimDeck/SettingsWindow.cs
+  h_dc4d9c798f1bc1 894-910,914,918-919,931,934
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5a1d584beb4847ea8b29e29a28c53d1cc91f531a",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}

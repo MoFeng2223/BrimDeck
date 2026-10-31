@@ -1,0 +1,14 @@
+src/BrimDeck/App.xaml
+  h_dc4d9c798f1bc1 153-155,159
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f121e7dc3bc29a416f1c2cb6ccad8b32ea56d7f4",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,34 @@
+README.md
+  h_dc4d9c798f1bc1 120
+README.zh-CN.md
+  h_dc4d9c798f1bc1 120
+src/BrimDeck/SettingsUpdates.cs
+  h_dc4d9c798f1bc1 123-128
+src/BrimDeck/Updates/GitHubUpdates.cs
+  h_dc4d9c798f1bc1 16-17,19-20,22-24
+tests/BrimDeck.Tests/AppUpdateTests.cs
+  h_dc4d9c798f1bc1 117-128,144,156
+.github/workflows/release.yml
+  h_dc4d9c798f1bc1 90-104
+src/BrimDeck.Core/AppUpdates.cs
+  h_dc4d9c798f1bc1 15-16,62,120-136,185,256
+scripts/Update-ReleaseNotes.ps1
+  h_dc4d9c798f1bc1 38-46
+tests/BrimDeck.Tests/InstallerUpdateTests.cs
+  h_dc4d9c798f1bc1 9,94-105,112-113,115,119,121
+src/BrimDeck.Core/ApplicationVersion.cs
+  h_dc4d9c798f1bc1 18-20
+src/BrimDeck.Core/InstallerUpdates.cs
+  h_dc4d9c798f1bc1 70,77-78,80,82,119-123,127-137,142-148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f2ae8d2cd289b49475c3528319aa860bbc6b5f32",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}

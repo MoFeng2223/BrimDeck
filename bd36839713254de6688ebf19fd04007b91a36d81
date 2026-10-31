@@ -1,0 +1,39 @@
+src/BrimDeck/SettingsProviders.cs
+  h_dc4d9c798f1bc1 1,71,140-198
+  s_862d7bc4d7ba4e::t_c15ec018e35dd4 199-203
+src/BrimDeck.Core/DashboardUsage.cs
+  h_dc4d9c798f1bc1 20-32
+src/BrimDeck.Core/Usage.cs
+  h_dc4d9c798f1bc1 46-47
+src/BrimDeck.Core/UsageMetric.cs
+  h_dc4d9c798f1bc1 23-24,43
+tests/BrimDeck.Tests/DashboardUsageTests.cs
+  h_dc4d9c798f1bc1 61-82
+src/BrimDeck.Core/ProviderCatalog.cs
+  h_dc4d9c798f1bc1 66-69
+src/BrimDeck/UsagePanel.cs
+  h_dc4d9c798f1bc1 482-484
+src/BrimDeck.Core/Settings.cs
+  h_dc4d9c798f1bc1 101-104,157,200
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bd36839713254de6688ebf19fd04007b91a36d81",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_862d7bc4d7ba4e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d176f6f-4e3f-412d-a5b7-309921e201fb",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}

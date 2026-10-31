@@ -1,0 +1,23 @@
+tests/BrimDeck.Tests/CollapsedGeometryTests.cs
+  h_dc4d9c798f1bc1 63-67,73-74,76,124-125,140-141,143-144,147-149,214
+src/BrimDeck.Core/CollapsedGeometry.cs
+  h_dc4d9c798f1bc1 18,62-64,92,173-179
+src/BrimDeck/MainWindow.xaml.cs
+  h_dc4d9c798f1bc1 402,424-426
+src/BrimDeck/SettingsCollapsedSize.cs
+  h_dc4d9c798f1bc1 70
+src/BrimDeck/Native/WindowsHost.cs
+  h_dc4d9c798f1bc1 62-63,86-89,111-115
+  h_dc4d9c798f1bc1 84-85,90,116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "86895699171c42e9ad15519a47b673d2248e29d1",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}

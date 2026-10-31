@@ -1,0 +1,14 @@
+releases/1.2.3.md
+  h_dc4d9c798f1bc1 1-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "db858c42cb2bf7a708448ef2aedcf4ded44cbd51",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}

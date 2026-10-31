@@ -1,0 +1,40 @@
+src/BrimDeck/SettingsWindow.cs
+  h_dc4d9c798f1bc1 644
+tests/BrimDeck.Tests/MusicTests.cs
+  h_dc4d9c798f1bc1 48-54,123-141,243-249
+src/BrimDeck.Core/Music.cs
+  h_dc4d9c798f1bc1 124,129,145-146,148,152-153,179-180,185-186,190
+src/BrimDeck.Core/MusicLayout.cs
+  h_dc4d9c798f1bc1 59-60,100,102-128
+src/BrimDeck.Core/Lyrics.cs
+  h_dc4d9c798f1bc1 9-14,22-27,29-30,35,38,42,45,48,50-52,55-56,59-61
+src/BrimDeck/MainWindow.Music.cs
+  h_dc4d9c798f1bc1 61-62,450-452,458,479,495,511-514,525-526,564,743-809,814-816,919-929,955-959,984,1004,1007,1012,1017,1028
+  s_80fbc204cf4615::t_20ca7a566f17b9 498-510,515-524,527-535,537-563,810-813,960
+src/BrimDeck.Core/Settings.cs
+  h_dc4d9c798f1bc1 332-334
+src/BrimDeck/SettingsMusic.cs
+  h_dc4d9c798f1bc1 214-215,220
+  s_80fbc204cf4615::t_7069a8ee6a2259 221
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "588195196647152313d746dd39710d3e09f2a290",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_80fbc204cf4615": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "87261481-e415-489a-872f-87b24567382a",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}

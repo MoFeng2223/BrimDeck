@@ -1,0 +1,20 @@
+tests/BrimDeck.Tests/SystemMonitorTests.cs
+  h_dc4d9c798f1bc1 162
+src/BrimDeck.Core/MonitorLayout.cs
+  h_dc4d9c798f1bc1 125-126,197-198
+src/BrimDeck/MonitorGauges.cs
+  h_dc4d9c798f1bc1 395-396,408-409,443-447
+tests/BrimDeck.Tests/PowerTests.cs
+  h_dc4d9c798f1bc1 300-301
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b0690bb18d5ae1dcc3b1f8ecb109748deedf4365",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
