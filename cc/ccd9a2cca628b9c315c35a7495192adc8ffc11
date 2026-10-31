@@ -1,0 +1,51 @@
+tests/BrimDeck.Tests/ReleaseHistoryTests.cs
+  h_dc4d9c798f1bc1 1-60
+tests/BrimDeck.Tests/AppUpdateTests.cs
+  h_dc4d9c798f1bc1 134
+src/BrimDeck/App.xaml.cs
+  h_dc4d9c798f1bc1 164-166,177
+tests/BrimDeck.Tests/Program.cs
+  h_dc4d9c798f1bc1 58
+src/BrimDeck/UsagePanel.cs
+  h_dc4d9c798f1bc1 126-128
+src/BrimDeck.Core/BrimDeck.Core.csproj
+  h_dc4d9c798f1bc1 14-15
+src/BrimDeck.Core/ReleaseHistory.cs
+  h_dc4d9c798f1bc1 1-72
+src/BrimDeck.Core/AppUpdates.cs
+  h_dc4d9c798f1bc1 63-65,101-104,143-164,285
+src/BrimDeck/SettingsUpdates.cs
+  h_dc4d9c798f1bc1 92,165-169
+src/BrimDeck/App.UpdateChecks.cs
+  h_dc4d9c798f1bc1 12,20,58,62-63
+src/BrimDeck/MainWindow.UpdateNotice.cs
+  h_dc4d9c798f1bc1 14-15,19
+src/BrimDeck/SettingsReleaseNotes.cs
+  h_dc4d9c798f1bc1 1-126
+src/BrimDeck/MainWindow.xaml.cs
+  h_dc4d9c798f1bc1 913-914
+  s_131fbf901448c4::t_d6e5061c1a4036 910-912,915
+src/BrimDeck/SettingsWindow.cs
+  h_dc4d9c798f1bc1 1082-1087
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ccccd9a2cca628b9c315c35a7495192adc8ffc11",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_131fbf901448c4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18abb-f69d-72e0-84e9-d10c77840b1c",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
