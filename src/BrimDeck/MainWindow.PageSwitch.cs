@@ -19,7 +19,7 @@ public partial class MainWindow
             if (!_capsulePending) { _capsulePending = true; LayoutRetry.WhenReady(this, () => LayoutRetry.Laid(PageButton(CurrentPage)), () => { _capsulePending = false; PlacePageCapsule(); }); }
             return;
         }
-        double x = button.TranslatePoint(new Point(), (UIElement)PageCapsule.Parent).X, width = button.ActualWidth, height = button.ActualHeight;
+        double x = button.TranslatePoint(new Point(), (UIElement)PageCapsule.Parent).X, width = button.ActualWidth, height = HitArea.Look(button);
         bool glide = _expanded && !_preview && PageSwitch.IsVisible && Soft.Enabled && PageCapsule.Width > 0 && Math.Abs(PageCapsuleShift.X - x) > .5;
         PageCapsule.Height = height;
         PageHandover.Glide(PageCapsule, WidthProperty, width, glide, Soft.Choose);
@@ -30,6 +30,14 @@ public partial class MainWindow
         { EasingFunction = Soft.Follow, FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop });
     }
     private bool _capsulePending;
+    // The page buttons take the header's band for their pointer area (HitArea.Fit), and the capsule is as tall as they now draw. The
+    // capsule is set here, not read back from a button: after Fit a button's ActualHeight is still the old tier's until the next
+    // layout pass, so PlacePageCapsule, which RefreshStatus runs before ApplyHeader, would size it for the tier left behind.
+    private void FitPageButtons(PanelHeader header)
+    {
+        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton }) HitArea.Fit(button, header.ButtonHeight, header.Height);
+        PageCapsule.Height = header.ButtonHeight;
+    }
     // The buttons stand in the order chosen in the settings; the first has no gap before it.
     private void OrderPageButtons()
     {
