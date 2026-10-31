@@ -171,8 +171,7 @@ public sealed partial class SettingsWindow
             shown = next;
         });
         var label = TextLine(name, 12.5, TextPrimary); label.VerticalAlignment = VerticalAlignment.Center; label.Margin = new Thickness(8, 0, 0, 0);
-        cell.Children.Add(label);
-        if (info && help is not null) cell.Children.Add(HelpIcon(name, () => help, 12, nudge: 0));
+        cell.Children.Add(info && help is not null ? new HelpHeading(label, HelpIcon(name, () => help, 12)) : label);
         return cell;
     }
 
