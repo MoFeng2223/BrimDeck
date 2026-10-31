@@ -160,44 +160,46 @@ public sealed partial class SettingsWindow
             v => Change(s => s.EqualizerAlways = v), help: Loc.T("始终显示时，没有音乐播放也会显示，读取系统的全部声音。", "When always shown, it also shows while no music plays, reading all system sound.")), when));
         options.Children.Add(Lighter(SliderRow(length, S.EqualizerBars, CompactMusicLayout.MinimumBars, CompactMusicLayout.MaximumBars, 1, Loc.T("根", "bars"),
             v => Change(s => s.EqualizerBars = (int)v)), length));
-        options.Children.Add(Lighter(Row(color, EqualizerSwatches(style)), color));
+        options.Children.Add(Lighter(Row(color, ColorSwatches("EqualizerColor" + style, Loc.T("律动条颜色 ", "Equalizer color "), S.EqualizerColor, S.EqualizerCustomColor,
+            UI.Brush(PanelTheme.Hex("equalizer")), (chosen, custom) => Change(s => { s.EqualizerColor = chosen; s.EqualizerCustomColor = custom; }))), color));
         return OptionsPartRow(style, CompactPart.Equalizer, rows, Loc.T("律动条", "Equalizer"), Loc.T("律动条设置", "Equalizer settings"), S.ShowsEqualizer(style),
             on => Change(s => { if (notch) s.NotchEqualizer = on; else s.CapsuleEqualizer = on; }), options);
     }
-    // The clock's swatches but the gradient: the theme's equalizer color, the presets, a custom color and the cover's.
-    private StackPanel EqualizerSwatches(CompactStyle compact)
+    // The clock's swatches but the gradient: the theme's color (theme), the presets, a custom color and the cover's. Used for the
+    // collapsed equalizer and for the music page's equalizer and current lyric; save gets the chosen color and the custom one.
+    private StackPanel ColorSwatches(string group, string label, ClockColor selected, string custom, Brush theme, Action<ClockColor, string> save)
     {
         var swatches = new StackPanel { Orientation = Orientation.Horizontal };
         ClockColor[] order = [ClockColor.White, ClockColor.Amber, ClockColor.Cyan, ClockColor.Pink, ClockColor.Lime, ClockColor.Custom, ClockColor.Cover];
         foreach (var color in order)
         {
             string name = ColorName(color);
-            var swatch = new RadioButton { Style = (Style)FindResource("SettingsClockSwatch"), GroupName = "EqualizerColor" + compact, IsChecked = S.EqualizerColor == color,
-                Background = EqualizerSwatchFill(color), ToolTip = name, Margin = new Thickness(swatches.Children.Count == 0 ? 0 : 6, 0, 0, 0) };
-            AutomationProperties.SetName(swatch, Loc.T("律动条颜色 ", "Equalizer color ") + name);
-            swatch.Checked += (_, _) => Change(s => s.EqualizerColor = color);
+            var swatch = new RadioButton { Style = (Style)FindResource("SettingsClockSwatch"), GroupName = group, IsChecked = selected == color,
+                Background = SwatchFill(color), ToolTip = name, Margin = new Thickness(swatches.Children.Count == 0 ? 0 : 6, 0, 0, 0) };
+            AutomationProperties.SetName(swatch, label + name);
+            swatch.Checked += (_, _) => save(color, custom);
             if (color == ClockColor.Cover) swatch.Content = MusicVisuals.Icon("music", 13, UI.Brush(SwatchInk(SampleCover)));
             if (color == ClockColor.Custom)
             {
                 // Choosing this swatch also opens the picker; each later click opens it again.
-                swatch.Content = Pencil(ClockFace.Parse(S.EqualizerCustomColor));
-                AttachClockPicker(swatch, () => S.EqualizerCustomColor, ClockColors.DefaultCustom, value =>
+                swatch.Content = Pencil(ClockFace.Parse(custom));
+                AttachClockPicker(swatch, () => custom, ClockColors.DefaultCustom, value =>
                 {
-                    Change(s => { s.EqualizerCustomColor = value; s.EqualizerColor = ClockColor.Custom; });
-                    swatch.Background = EqualizerSwatchFill(ClockColor.Custom); swatch.Content = Pencil(ClockFace.Parse(value));
+                    custom = value; save(ClockColor.Custom, value);
+                    swatch.Background = SwatchFill(ClockColor.Custom); swatch.Content = Pencil(ClockFace.Parse(value));
                 });
             }
             swatches.Children.Add(swatch);
         }
         return swatches;
+        Brush SwatchFill(ClockColor color) => color switch
+        {
+            ClockColor.Custom => ClockFace.Fill([ClockFace.Parse(custom)]),
+            ClockColor.Cover => ClockFace.Fill([SampleCover]),
+            ClockColor.White => theme,
+            _ => ClockFace.Fill([PanelTheme.Readable(ClockFace.Preset(color))])
+        };
     }
-    private Brush EqualizerSwatchFill(ClockColor color) => color switch
-    {
-        ClockColor.Custom => ClockFace.Fill([ClockFace.Parse(S.EqualizerCustomColor)]),
-        ClockColor.Cover => ClockFace.Fill([SampleCover]),
-        ClockColor.White => UI.Brush(PanelTheme.Hex("equalizer")),
-        _ => ClockFace.Fill([PanelTheme.Readable(ClockFace.Preset(color))])
-    };
     // Labels inside an open row are set lighter than the row's own title, as "快捷尺寸" is (QuickRow).
     private static FrameworkElement Lighter(FrameworkElement row, string title)
     {
@@ -217,8 +219,15 @@ public sealed partial class SettingsWindow
         var bars = SliderRow(Loc.T("律动条长度", "Equalizer length"), S.MusicEqualizerBars, CompactMusicLayout.MinimumBars, CompactMusicLayout.MaximumBars, 1, Loc.T("根", "bars"),
             v => Change(s => s.MusicEqualizerBars = (int)v));
         bars.IsEnabled = S.MusicPage;
+        var equalizerColor = Row(Loc.T("律动条颜色", "Equalizer color"), ColorSwatches("MusicPageEqualizerColor", Loc.T("音乐页律动条颜色 ", "Music page equalizer color "),
+            S.MusicPageEqualizerColor, S.MusicPageEqualizerCustomColor, UI.Brush(PanelTheme.Hex("equalizer")),
+            (chosen, custom) => Change(s => { s.MusicPageEqualizerColor = chosen; s.MusicPageEqualizerCustomColor = custom; })));
+        var lyricColor = Row(Loc.T("当前歌词颜色", "Current lyric color"), ColorSwatches("MusicLyricColor", Loc.T("当前歌词颜色 ", "Current lyric color "),
+            S.MusicLyricColor, S.MusicLyricCustomColor, UI.Brush(PanelTheme.Hex("textPrimary")),
+            (chosen, custom) => Change(s => { s.MusicLyricColor = chosen; s.MusicLyricCustomColor = custom; })));
+        equalizerColor.IsEnabled = lyricColor.IsEnabled = S.MusicPage;
         Group(Toggle(Loc.T("显示封面", "Show cover"), S.MusicPageCover, v => Change(s => s.MusicPageCover = v), S.MusicPage),
-            Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => Change(s => s.LyricsEnabled = v), S.MusicPage), bars);
+            Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => Change(s => s.LyricsEnabled = v), S.MusicPage), bars, equalizerColor, lyricColor);
     }
     // Operations only one player supports, grouped under that player's name.
     private void Players()

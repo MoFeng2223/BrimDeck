@@ -346,6 +346,12 @@ public sealed class DeckSettings
     public bool LyricsEnabled { get; set; } = true;
     // How many bars the music page's equalizer has, beside the title; its bars keep their spacing, so more bars make it longer.
     public int MusicEqualizerBars { get => _musicEqualizerBars; set => _musicEqualizerBars = CompactMusicLayout.SafeBars(value); }
+    // The music page's equalizer and current lyric each take their own color, chosen as the collapsed equalizer's is
+    // (EqualizerColor): White is the theme's equalizer color for the bars and its primary text color for the lyric.
+    public ClockColor MusicPageEqualizerColor { get; set; } = ClockColor.Cover;
+    public string MusicPageEqualizerCustomColor { get; set; } = ClockColors.DefaultCustom;
+    public ClockColor MusicLyricColor { get; set; } = ClockColor.Cover;
+    public string MusicLyricCustomColor { get; set; } = ClockColors.DefaultCustom;
     // Offers "网易云音乐 · 完整控制" in the source menu, or alone in its place when nothing plays.
     public bool NeteaseFullControlEntry { get; set; }
     // Restarts a player started the normal way with full control, without asking again; switching it on asks once.
