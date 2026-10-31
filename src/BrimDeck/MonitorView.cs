@@ -56,6 +56,7 @@ internal sealed class MonitorView : Grid
     private readonly NetworkBlock _network;
     private readonly StorageBlock? _storage;
     private readonly PowerBlock? _power;
+    private readonly FramesBlock? _frames;
     private readonly bool _temperatures;
     private readonly Grid _readings = new();
     // How far the readings stop above the page's foot, so their last line ends level with the list's last row (AlignFoot).
@@ -71,9 +72,10 @@ internal sealed class MonitorView : Grid
 
     // temperatures: the gauges carry the processor's and the graphics adapter's temperatures after their figures, and the drives'
     // entries theirs (the layout's StorageLines and StorageColumns are the places kept for the volumes under memory and network); smallTemperature: the gauge shown small may have a temperature, so its line is widened for one.
+    // frames: the line under memory and network shows the frame rate of the program in front, when the layout has room for it (FrameLine).
     public MonitorView(MonitorLayout layout, MonitorColors colors, MonitorMain main, ProcessSort sort, MonitorProcessView processView,
         Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold, Action<GpuSample> gpuChanged, bool temperatures = false, bool smallTemperature = false,
-        PowerOptions? power = null)
+        PowerOptions? power = null, bool frames = false)
     {
         _layout = layout; _colors = colors; _main = main; _temperatures = temperatures;
         bool cpuMain = main == MonitorMain.Cpu;
@@ -81,6 +83,7 @@ internal sealed class MonitorView : Grid
         var readings = _readings;
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 16 });
+        readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -138,19 +141,26 @@ internal sealed class MonitorView : Grid
             _network.Margin = new Thickness(0, layout.Metrics == MetricsMode.Blocks ? 10 : 6, 0, 0);
             SetRow(_memory, 2); SetRow(_network, 3); readings.Children.Add(_memory); readings.Children.Add(_network);
         }
+        double lineGap = layout.Metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 };
+        if (layout.FrameLine && frames)
+        {
+            // Right under memory and network, at the drives' distance; one line of a drive line's height.
+            _frames = new FramesBlock(colors[MonitorRole.Frames], layout.Body, layout.Caption, layout.StorageRow) { Margin = new Thickness(0, lineGap, 0, 0) };
+            SetRow(_frames, 4); readings.Children.Add(_frames);
+        }
         if (layout.StorageLines > 0)
         {
             // Under the line memory and network share, or under network; its lines are tighter than the list's rows.
             _storage = new StorageBlock(colors, layout.Body, layout.Caption, layout.StorageRow, layout.StorageLines, layout.StorageColumns, temperatures)
             { Margin = new Thickness(0, layout.Metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 }, 0, 0) };
-            SetRow(_storage, layout.Metrics == MetricsMode.Line ? 3 : 4); readings.Children.Add(_storage);
+            SetRow(_storage, 5); readings.Children.Add(_storage);
         }
         if (layout.PowerLines > 0 && power is not null)
         {
             // Under the drives (or under network), at the same distance; one line of a list row's height.
             _power = new PowerBlock(colors, power, layout.Body, layout.Caption, layout.StorageRow)
             { Margin = new Thickness(0, layout.Metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 }, 0, 0) };
-            SetRow(_power, 5); readings.Children.Add(_power);
+            SetRow(_power, 6); readings.Children.Add(_power);
         }
 
         if (layout.List == ListPlacement.None) Children.Add(readings);
@@ -191,6 +201,9 @@ internal sealed class MonitorView : Grid
     }
     // Whether the page has the power line (the layout had room for it): the power is read only then.
     public bool ShowsPower => _power is not null;
+    // Whether the page has the frame rate's line (the layout had room for it): the frame rate is read for it only then.
+    public bool ShowsFrames => _frames is not null;
+    // Another monitor on the frame rate's line, without building the page again.
     // The widest a graphics engine's column grows on the page with the GPU large: no narrower than the graph's room needs, so the
     // few kinds of engine an adapter has always fill it.
     public const double EngineColumn = 1000;
@@ -287,6 +300,7 @@ internal sealed class MonitorView : Grid
         _network.Set(snapshot.Network, snapshot.DownHistory, snapshot.UpHistory);
         _storage?.Set(snapshot.Storage, motion);
         _power?.Set(snapshot, motion);
+        _frames?.Set(snapshot);
         _list?.Set(snapshot.Processes, _cores, motion);
         _processes = snapshot.Processes.OrDefault;
         // An open card follows its app's readings; it closes when the app has left the list.

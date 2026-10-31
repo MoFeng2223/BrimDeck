@@ -425,6 +425,10 @@ public sealed class DeckSettings
     // The expanded page shows the whole machine's power draw with its curve, and the machine's own battery when it has one (PowerResolver,
     // BatteryModel); off, neither is read for it. The collapsed row's Power and Charge readings are chosen in its table.
     public bool MonitorPower { get; set; } = true;
+    // The expanded page shows a line under memory and network with the frame rate of the program in front, its name and its display's
+    // refresh rate (FrameRates). Off by default; read only while the page is open, and only where the user may read Windows' frame
+    // events (the Performance Log Users group, or BrimDeck elevated).
+    public bool MonitorFrames { get; set; }
     // The notch and the capsule each switch the system readings on; what they show is shared.
     public bool NotchMonitor { get; set; }
     public bool CapsuleMonitor { get; set; }

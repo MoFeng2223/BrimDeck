@@ -328,7 +328,7 @@ public partial class App : Application
     // Temperatures and drives are read for an open page with them on; also for a collapsed row showing them: the processor's and
     // the graphics adapter's temperatures for a ring showing its own, the drives for the drive reading, and their temperatures when
     // it shows those.
-    private void UpdateMonitorExtras()
+    internal void UpdateMonitorExtras()
     {
         bool page = _presentingMonitor.Count > 0;
         bool strip = _stripMonitor.Count > 0;
@@ -342,7 +342,9 @@ public partial class App : Application
             // The watts (the counters, NVIDIA's helper) only for a page that shows the power line or a row that chose the reading; the battery
             // alone also for the row's charge reading.
             _presentingPower.Count > 0 && Settings.MonitorPower && PowerKnownToExist || (shown & CompactMonitorItems.Power) != 0,
-            (shown & CompactMonitorItems.Charge) != 0);
+            (shown & CompactMonitorItems.Charge) != 0,
+            // The frame rate for a row that shows it, or an open page with room for its line.
+            (shown & CompactMonitorItems.Frames) != 0 || Settings.MonitorFrames && _presentingMonitor.Any(deck => deck.PageShowsFrames));
     }
     // The page reads the machine's power only where there may be something to read: not once the sampler knows there is neither a power
     // source nor a battery (a desktop with nothing), so such a page does not keep asking.

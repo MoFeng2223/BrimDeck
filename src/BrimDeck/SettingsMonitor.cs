@@ -81,6 +81,11 @@ public sealed partial class SettingsWindow
                 Loc.T("在硬盘下方显示整机功耗和本机电池。只在面板展开到系统监控页时读取。",
                     "Shows system power and this PC's battery under the drives. Read only while the panel is open on the system monitor page."),
                 keepPreview: true),
+            Toggle(Loc.T("显示帧率", "Show the frame rate"), S.MonitorFrames, v => Resize(s => s.MonitorFrames = v, DeckPage.Monitor),
+                help:
+                Loc.T("在网速下方显示前台程序的帧率、程序名称和所在显示器的刷新率；前台程序不在绘制时，显示最近一个在绘制的程序。只在面板展开到系统监控页时读取。需要当前用户属于“Performance Log Users”组，或以管理员身份运行。",
+                    "Shows the frame rate of the program in front under the network rates, with its name and its display's refresh rate; while it draws nothing, the last program that did. Read only while the panel is open on the system monitor page. Needs the user to be in the Performance Log Users group, or BrimDeck to run as administrator."),
+                keepPreview: true),
             WithSensorStops(Toggle(Loc.T("显示温度", "Show temperatures"), S.MonitorTemperatures, v => Resize(s => s.MonitorTemperatures = v, DeckPage.Monitor),
                 help:
                 Loc.T("读不到的温度不显示。CPU 温度由主板固件提供，许多电脑没有这项数据；有的电脑读到的是主板的温度，不是 CPU 本身的温度。",
@@ -234,7 +239,7 @@ public sealed partial class SettingsWindow
     {
         MonitorRole.Efficiency => Loc.T("能效核", "Efficiency cores"), MonitorRole.Memory => Loc.T("内存", "Memory"), MonitorRole.Gpu => "GPU",
         MonitorRole.Download => Loc.T("下载", "Download"), MonitorRole.Upload => Loc.T("上传", "Upload"), MonitorRole.Storage => Loc.T("硬盘", "Drives"),
-        MonitorRole.Power => Loc.T("整机功耗", "System power"), MonitorRole.Battery => Loc.T("本机电池", "Battery"), _ => "CPU"
+        MonitorRole.Power => Loc.T("整机功耗", "System power"), MonitorRole.Battery => Loc.T("本机电池", "Battery"), MonitorRole.Frames => Loc.T("帧率", "Frame rate"), _ => "CPU"
     };
     private static string LevelName(MemoryLevel level) => level == MemoryLevel.Critical ? Loc.T("告警", "Critical") : Loc.T("预警", "Warning");
 
@@ -340,7 +345,7 @@ public sealed partial class SettingsWindow
         CompactMonitorItems.Columns => Loc.T("核心柱", "Core columns"), CompactMonitorItems.Memory => Loc.T("内存", "Memory"), CompactMonitorItems.Gpu => "GPU",
         CompactMonitorItems.Download => Loc.T("下载", "Download"), CompactMonitorItems.Upload => Loc.T("上传", "Upload"),
         CompactMonitorItems.Storage => Loc.T("硬盘", "Drives"), CompactMonitorItems.Power => Loc.T("整机功耗", "System power"),
-        CompactMonitorItems.Charge => Loc.T("本机电池", "This PC's battery"), _ => "CPU"
+        CompactMonitorItems.Charge => Loc.T("本机电池", "This PC's battery"), CompactMonitorItems.Frames => Loc.T("帧率", "Frame rate"), _ => "CPU"
     };
     private static CompactReading Reading(DeckSettings settings, CompactMonitorItems item) => settings.CompactReadings.First(reading => reading.Item == item);
 
@@ -357,6 +362,12 @@ public sealed partial class SettingsWindow
         if (CompactFigures.Has(item))
         {
             var menu = FiguresMenu(item, refresh, edit);
+            Grid.SetColumn(menu, 2); row.Children.Add(menu);
+        }
+        // The frame rate chooses what it shows of its program in a menu at the same place.
+        if (item == CompactMonitorItems.Frames)
+        {
+            var menu = FramesPartsMenu(refresh, edit);
             Grid.SetColumn(menu, 2); row.Children.Add(menu);
         }
         // The reading's colors in the normal state as the scheme gives them, one per channel (the core columns: one per kind of
@@ -376,7 +387,7 @@ public sealed partial class SettingsWindow
         // The figure switch is for the rings only; the core columns (no figure) and the rates (always text) show it off and dimmed.
         bool choice = CompactMonitor.HasValueChoice(item);
         var value = new CheckBox { Style = (Style)FindResource("SettingsToggle"), Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload or CompactMonitorItems.Storage or CompactMonitorItems.Power or CompactMonitorItems.Charge };
+            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload or CompactMonitorItems.Storage or CompactMonitorItems.Power or CompactMonitorItems.Charge or CompactMonitorItems.Frames };
         AutomationProperties.SetName(value, Loc.T("显示数值 ", "Show figure ") + name);
         if (!choice)
         {
@@ -386,6 +397,8 @@ public sealed partial class SettingsWindow
                 CompactMonitorItems.Storage => Loc.T("硬盘始终显示数值，在左侧的菜单中选择显示什么。", "The drives always show figures; choose which in the menu at the left."),
                 CompactMonitorItems.Power => Loc.T("整机功耗，单位 W；是否为估算见悬停提示。无读数的电脑不显示。", "System power in W; the tooltip says whether it is an estimate. Hidden on PCs with no reading."),
                 CompactMonitorItems.Charge => Loc.T("本机电池电量，以电池图形显示。无电池的电脑不显示。", "This PC's battery charge, shown as a battery icon. Hidden on PCs without a battery."),
+                CompactMonitorItems.Frames => Loc.T("前台程序每秒绘制的帧数；前台程序不在绘制时，显示最近一个在绘制的程序。需要当前用户属于“Performance Log Users”组，或以管理员身份运行；没有权限的电脑不显示。",
+                    "The frames the program in front draws each second; while it draws nothing, the last program that did. Needs the user to be in the Performance Log Users group, or BrimDeck to run as administrator; hidden on PCs without it."),
                 _ => Loc.T("下载和上传始终显示速率。", "Download and upload always show their rate.")
             };
             ToolTipService.SetShowOnDisabled(value, true);
@@ -560,6 +573,36 @@ public sealed partial class SettingsWindow
         };
         TogglePopup(select, menu);
         return select;
+    }
+
+    // Whether the collapsed frame rate shows the icon of the program it counts (CompactFrames): the icon (the default), or the screen
+    // glyph. As wide as the other readings' menus.
+    private ComboBox FramesPartsMenu(List<Action> refresh, Action<Action<DeckSettings>> edit)
+    {
+        var options = new (string[] Parts, string Label)[]
+        {
+            ([CompactFrames.Icon], Loc.T("显示程序图标", "Program icon")), ([], Loc.T("不显示图标", "No program icon"))
+        };
+        var choice = new ComboBox { Width = 150, Height = 30, Style = (Style)FindResource("SettingsCombo"), ItemsSource = options.Select(option => option.Label).ToList(),
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 6, 0),
+            ToolTip = Loc.T("在帧率前显示所统计程序的图标；不显示时用显示器图标。程序名称在展开页显示。",
+                "Shows the icon of the program counted before the frame rate; without it, a screen. The program's name shows on the expanded page.") };
+        AutomationProperties.SetName(choice, Loc.T("帧率前的程序图标", "Program icon before the frame rate")); PopupMotion.Attach(choice);
+        bool syncing = false;
+        refresh.Add(() =>
+        {
+            syncing = true;
+            try { var parts = CompactFrames.Of(Reading(S, CompactMonitorItems.Frames)); choice.SelectedIndex = Math.Max(0, Array.FindIndex(options, option => option.Parts.SequenceEqual(parts))); }
+            finally { syncing = false; }
+        });
+        choice.SelectionChanged += (_, _) =>
+        {
+            if (syncing || choice.SelectedIndex < 0) return;
+            var parts = options[choice.SelectedIndex].Parts;
+            if (parts.SequenceEqual(CompactFrames.Of(Reading(S, CompactMonitorItems.Frames)))) return;
+            edit(s => Reading(s, CompactMonitorItems.Frames).Figures = [.. parts]);
+        };
+        return choice;
     }
 
     private void MonitorSizeControls()

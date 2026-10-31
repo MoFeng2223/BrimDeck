@@ -11,6 +11,103 @@ namespace BrimDeck;
 // measuring anything; values ease to each reading in a little under half a second (Eased, Motion) and then rest. Hover and press
 // feedback fades in and out over Soft.Quick in the same way.
 
+// The frame rate's line under memory and network, laid out as the power line is: the program's icon (or a screen in the frame
+// rate's color, for the desktop or a program without one), the frames a
+// second and "FPS", the program's name, its readings so far as a curve, and the refresh rate of the display it is on at the right
+// end, which is also the curve's top, so it shows how far the frames stay below what the display can show (a game drawing faster
+// than its display raises the top to its highest reading). A dash while there is no reading, as without permission to read
+// Windows' frame events.
+internal sealed class FramesBlock : FrameworkElement
+{
+    private readonly string _color;
+    private readonly double _body, _caption;
+    private FrameSample? _frames;
+    private readonly DrawingCache<(IReadOnlyList<double>, double, double, double)> _curve = new();
+
+    public FramesBlock(string color, double body, double caption, double row)
+    {
+        _color = color; _body = body; _caption = caption;
+        Height = row; Focusable = false;
+        Describe();
+    }
+
+    public void Set(MonitorSnapshot snapshot)
+    {
+        var frames = snapshot.Frames.OrDefault;
+        if (ReferenceEquals(frames, _frames)) return;
+        _frames = frames;
+        Describe();
+        InvalidateVisual();
+    }
+
+    private string Figure => _frames is { } frames && double.IsFinite(frames.PerSecond)
+        ? Math.Clamp(Math.Round(frames.PerSecond, MidpointRounding.AwayFromZero), 0, 999).ToString("0", System.Globalization.CultureInfo.InvariantCulture) : "—";
+    private static string Hertz(double hertz) => Math.Round(hertz).ToString("0", System.Globalization.CultureInfo.InvariantCulture) + " Hz";
+
+    private void Describe()
+    {
+        if (_frames is not { } frames)
+        {
+            ToolTip = Loc.T("帧率：暂无读数。读取帧率需要当前用户属于“Performance Log Users”组，或以管理员身份运行 BrimDeck。",
+                "Frame rate: no reading. Reading frame rates needs the user to be in the Performance Log Users group, or BrimDeck to run as administrator.");
+            AutomationProperties.SetName(this, Loc.T("帧率", "Frame rate"));
+            return;
+        }
+        ToolTip = Loc.T($"{frames.Program}：每秒 {Figure} 帧", $"{frames.Program}: {Figure} frames a second")
+            + Loc.T("\n前台程序的帧率；前台程序不在绘制时，显示最近一个在绘制的程序。", "\nThe frame rate of the program in front; while it draws nothing, of the last program that did.")
+            + (frames.Refresh is { } hertz ? Loc.T($"\n所在显示器刷新率 {Hertz(hertz)}", $"\nIts display's refresh rate: {Hertz(hertz)}") : "");
+        AutomationProperties.SetName(this, Loc.T($"帧率 {Figure} FPS，{frames.Program}", $"Frame rate {Figure} FPS, {frames.Program}"));
+    }
+
+    protected override Size MeasureOverride(Size availableSize) => new(0, Height);
+
+    protected override void OnRender(DrawingContext drawing)
+    {
+        double w = ActualWidth, h = ActualHeight, ppd = MonitorDraw.PixelsPerDip(this);
+        drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, h));
+        // The glyph in the room a dial takes, as the network line's arrows are, so the figures line up with memory's.
+        double badge = Math.Round(_body + 5), glyph = Math.Round(badge * .72), baseline = Math.Round(h / 2 + _body * .38), gap = Math.Round(_body * .8);
+        if (ProcessIcons.For(_frames?.Path) is { } icon)
+        {
+            double size = Math.Round(_body + 3);
+            drawing.DrawImage(icon, new Rect((badge - size) / 2, Math.Round(h / 2 - size / 2), size, size));
+        }
+        else MonitorDraw.Arrow(drawing, new Point((badge - glyph) / 2, h / 2 - glyph / 2), glyph, Math.Max(1, glyph * .09), MonitorGlyph.Screen, _frames is null ? UI.Tertiary : _color);
+        double x = badge + Math.Round(_body * .5);
+        var number = MonitorDraw.Text(Figure, _body + 1, UI.Primary, ppd, strong: true);
+        MonitorDraw.Baseline(drawing, number, x, baseline); x += number.WidthIncludingTrailingWhitespace;
+        var unit = MonitorDraw.Text("FPS", _caption, UI.Tertiary, ppd);
+        MonitorDraw.Baseline(drawing, unit, x + 3, baseline); x += 3 + unit.WidthIncludingTrailingWhitespace;
+        if (_frames is not { } frames) return;
+        // The refresh rate at the right end, then the name after the figure, cut to the room between them.
+        double right = w;
+        if (frames.Refresh is { } hertz)
+        {
+            var rate = MonitorDraw.Text(Hertz(hertz), _caption, UI.Tertiary, ppd);
+            right = w - rate.WidthIncludingTrailingWhitespace;
+            MonitorDraw.Baseline(drawing, rate, right, baseline);
+            right -= gap;
+        }
+        double nameRoom = Math.Min(right - x - gap, Math.Max(60, (right - x) * .4));
+        if (nameRoom > 24)
+        {
+            var name = MonitorDraw.Trimmed(frames.Program, _caption, UI.Tertiary, nameRoom, ppd);
+            MonitorDraw.Baseline(drawing, name, x + gap, baseline);
+            x += gap + Math.Min(nameRoom, name.WidthIncludingTrailingWhitespace);
+        }
+        // The curve in the room left, as tall as the power line's, scaled to the refresh rate (or the highest reading above it).
+        var history = frames.History;
+        double start = Math.Max(x + 10, w * .45), areaWidth = right - start, areaHeight = Math.Min(h - 4, Math.Ceiling(_body * 1.5) - 4);
+        if (history.Count >= 3 && areaWidth >= 24 && areaHeight >= 6)
+        {
+            double top = Math.Max(frames.Refresh ?? 60, history.Max());
+            var area = new Rect(start, Math.Round((h - areaHeight) / 2), areaWidth, areaHeight);
+            MonitorDraw.Place(drawing, area.TopLeft, _curve.Get((history, area.Width, area.Height, top), context =>
+                MonitorDraw.Sparkline(context, new Rect(0, 0, area.Width, area.Height), history, top, _color, .16)));
+        }
+    }
+}
+
 // A dial with the reading's letter (MonitorDraw.Dial, as the collapsed strip has it), a figure with its unit, and a detail after
 // it, on one baseline: "(C) 47 % 3.41 GHz". Aligned right, the dial still leads and the whole line ends at the right edge. As a
 // button it lights its dial under the pointer and takes clicks.

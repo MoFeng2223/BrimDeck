@@ -42,6 +42,7 @@ try
     SensorStopTests.Run(Check);
     StripAdmissionTests.Run(Check);
     PowerTests.Run(Check);
+    FrameRateTests.Run(Check);
     ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);
     ExpandBounceTests.Run(Check);
