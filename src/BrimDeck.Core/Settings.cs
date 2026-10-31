@@ -358,6 +358,8 @@ public sealed class DeckSettings
     public DefaultDeckPage DefaultPage { get; set; }
     // A right click on the expanded panel opens the settings window.
     public bool RightClickSettings { get; set; } = true;
+    // A notch or capsule wider than every page opens its panel under the pointer when hovered, instead of at its middle.
+    public bool ExpandAtPointer { get; set; }
     // What the mouse wheel does while the panel is expanded; scrolling parts of a page keep their wheel.
     public MouseWheelAction MouseWheel { get; set; } = MouseWheelAction.Pages;
     // Read only to carry the switch of a file saved before MouseWheel existed; Normalize moves it across and the member

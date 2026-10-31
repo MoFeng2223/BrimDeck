@@ -104,8 +104,8 @@ public partial class MainWindow : Window
         {
             _hover!.Stop();
             if (IsSuppressed || !_pointerInside) return;
-            // Opened by hovering: the panel centres on the pointer (see SetExpanded).
-            if (PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
+            // Opened by hovering: the panel may centre on the pointer (see SetExpanded).
+            if (Settings.ExpandAtPointer && PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
             SetExpanded(true);
         });
         _leave = new(Dispatcher, () => CheckPointerExit(WindowsHost.Cursor()));
@@ -646,9 +646,9 @@ public partial class MainWindow : Window
             : new CornerRadius(shape.TopRadius, shape.TopRadius, shape.BottomRadius, shape.BottomRadius);
         double gap = expanded ? panelTop : shape.Surface.Y;
         // The island's left edge in window coordinates: the surface, or the open panel centred on it and kept on the monitor. A
-        // panel opened by hovering a surface wider than every shown page centres on where the pointer was instead, as far as the
-        // surface's ends allow, and keeps that centre while open (page switches, resizing) without following the pointer. The
-        // choice is the same for every page: decided per page, a capsule that the music widens past the narrow pages but not the
+        // panel opened by hovering a surface wider than every shown page centres, with ExpandAtPointer on, on where the pointer
+        // was instead, as far as the surface's ends allow, and keeps that centre while open (page switches, resizing) without
+        // following the pointer. The choice is the same for every page: decided per page, a capsule that the music widens past the narrow pages but not the
         // wide ones put some pages at the pointer and others at the middle, so switching pages moved the panel sideways.
         if (!expanded) _openCentre = null;
         double panelCentre = shape.Surface.X + shape.Surface.Width / 2;
