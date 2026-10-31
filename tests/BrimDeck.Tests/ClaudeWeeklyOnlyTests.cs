@@ -22,6 +22,7 @@ static class ClaudeWeeklyOnlyTests
         Cache(check);
         History(check);
         await LocalReading(root, check);
+        await Fallbacks(root, check);
     }
 
     // The rows of a usage column (UsagePanel builds one block for each metric of a page).
@@ -109,12 +110,81 @@ static class ClaudeWeeklyOnlyTests
         check("History: a newest sample with both shares is used as before", full is { FiveHour: 37, SevenDay: 7 } && ClaudeUsageHistory.Quotas(full, null, null).Select(q => q.Minutes).SequenceEqual([300, 10080]));
         var gap = ClaudeUsageHistory.Parse(Json(Samples((0, null, 8), (15, 41, 7), (30, 40, 7))));
         check("History: a newer sample that skips the five-hour share does not replace the five-hour quota while the account has sent one lately",
-            gap is { FiveHour: 41, SevenDay: 7 });
+            gap is { FiveHour: 41 });
+        check("History: the newest sample keeps its own time and weekly share, the five-hour share comes with its own time",
+            gap is { SevenDay: 8 } && gap.Time == Now && gap.FiveHourTime == Now.AddMinutes(-15));
+        check("History: a sample with its own five-hour share has no separate five-hour time", full is { FiveHourTime: null });
+        // The reset known from an earlier reading against the five-hour share carried over from the older sample.
+        var carried = new ClaudeUsageSample(Now, 41, 8, "", Now.AddMinutes(-15));
+        check("History quotas: a reset ahead of the newest sample keeps the carried five-hour share and its reset",
+            ClaudeUsageHistory.Quotas(carried, Now.AddHours(2), Now.AddDays(3)) is [{ Minutes: 300, UsedPercent: 41, ResetAt: var ahead }, { Minutes: 10080, UsedPercent: 8 }] && ahead == Now.AddHours(2));
+        check("History quotas: a reset between the two samples drops the carried five-hour share, not the weekly one",
+            ClaudeUsageHistory.Quotas(carried, Now.AddMinutes(-10), Now.AddDays(3)) is [{ Minutes: 10080, UsedPercent: 8 }]);
+        check("History quotas: a reset at the newest sample's time has ended too", ClaudeUsageHistory.Quotas(carried, Now, null) is [{ Minutes: 10080 }]);
+        check("History quotas: a reset from before the older sample is of an earlier window and does not end it",
+            ClaudeUsageHistory.Quotas(carried, Now.AddMinutes(-40), null) is [{ Minutes: 300, UsedPercent: 41, ResetAt: null }, { Minutes: 10080 }]);
+        check("History quotas: a five-hour share from the newest sample itself is shown whatever reset was known",
+            ClaudeUsageHistory.Quotas(carried with { FiveHourTime = null }, Now.AddMinutes(-10), null) is [{ Minutes: 300, UsedPercent: 41, ResetAt: null }, { Minutes: 10080 }]);
         var edge = ClaudeUsageHistory.Parse(Json(Samples((0, null, 8), (6 * 60, 41, 7))));
         var past = ClaudeUsageHistory.Parse(Json(Samples((0, null, 8), (6 * 60 + 1, 41, 7))));
         check("History: the gap is six hours; past it the account is taken to have no five-hour window", edge is { FiveHour: 41 } && past is { FiveHour: null, SevenDay: 8 });
         check("History: samples without any share, or without a time, are skipped", ClaudeUsageHistory.Parse(Json("""{"samples":[{"t":1,"u":{}},{"u":{"sd":5}}]}""")) is null);
         check("History: a share of the five-hour window of zero is a real zero", ClaudeUsageHistory.Parse(Json(Samples((0, 0, 3)))) is { FiveHour: 0 });
+    }
+
+    // The fallback after a rate limit when the last reading had a five-hour window (UsageService.Freshest): an online reading at t0
+    // with the five-hour window resetting at t0 + fiveHourReset, then the desktop history, then a 429.
+    static async Task<IReadOnlyList<Quota>> Fallback(string root, string name, Action<string, bool> check, double fiveHourResetMinutes, (int Minute, int? FiveHour, int SevenDay)[] history, int minutesLater, DateTimeOffset[] times)
+    {
+        var home = Path.Combine(root, "claude-fallback-" + name);
+        var locations = DataLocations.Resolve(Path.Combine(home, "home"), Path.Combine(home, "roaming"), Path.Combine(home, "local"), null, "");
+        var desktop = Path.Combine(locations.Roaming, "Claude");
+        Directory.CreateDirectory(desktop); Directory.CreateDirectory(locations.ClaudeHome);
+        File.WriteAllText(Path.Combine(locations.ClaudeHome, ".credentials.json"), """{"claudeAiOauth":{"accessToken":"test-fallback","subscriptionType":"pro"}}""");
+        var clock = Now;
+        bool limited = false;
+        using var handler = new ClaudeQuotaHandler
+        {
+            Override = (_, _) => limited ? new(System.Net.HttpStatusCode.TooManyRequests) : new(System.Net.HttpStatusCode.OK)
+            { Content = new StringContent(JsonSerializer.Serialize(new { five_hour = new { utilization = 30, resets_at = Now.AddMinutes(fiveHourResetMinutes) }, seven_day = new { utilization = 10, resets_at = Now.AddDays(3) } })) }
+        };
+        using var client = new HttpClient(handler);
+        using var service = new UsageService(new ClaudeFixtureSources(), locations, client, () => clock);
+        var settings = new DeckSettings { Apps = [new AppEntry { Id = ProviderId.Claude }] };
+        clock = Now.AddSeconds(30);
+        var online = (await service.RefreshAsync(settings)).Single(s => !s.Configurations.Contains(ProviderCatalog.LocalQuota));
+        check($"Fallback ({name}): the online reading has both windows", online.Quotas.Count == 2 && online.Quotas.Any(q => q.Minutes == 300 && q.UsedPercent == 30));
+        limited = true;
+        File.WriteAllText(Path.Combine(desktop, "plan-usage-history.json"), JsonSerializer.Serialize(new
+        {
+            version = 2,
+            samples = history.Select(s => new { t = Now.AddMinutes(s.Minute).ToUnixTimeMilliseconds(), org = "org", u = s.FiveHour is { } fh ? (object)new { fh, sd = s.SevenDay } : new { sd = s.SevenDay } }).ToArray()
+        }));
+        clock = Now.AddMinutes(minutesLater);
+        var result = (await service.RefreshAsync(settings)).Single(s => !s.Configurations.Contains(ProviderCatalog.LocalQuota));
+        times[0] = result.QuotaTime ?? default;
+        check($"Fallback ({name}): the quota interface was limited and the history stands in", result.IsStale && result.LiveQuota);
+        return result.Quotas;
+    }
+
+    static async Task Fallbacks(string root, Action<string, bool> check)
+    {
+        var time = new DateTimeOffset[1];
+        // No five-hour share in the newest sample, none for hours before it: a five-hour window the last reading still has ahead stays.
+        var kept = await Fallback(root, "kept", check, 180, [(10, null, 11)], 11, time);
+        check("Fallback: a newest sample without a five-hour share keeps the five-hour quota the last reading still has ahead, and takes the new weekly share",
+            kept.Count == 2 && kept[0] is { Minutes: 300, UsedPercent: 30 } && kept[1] is { Minutes: 10080, UsedPercent: 11 } && time[0] == Now.AddMinutes(10));
+        // The same, but the window has ended by the newest sample: none is made up.
+        var ended = await Fallback(root, "ended", check, 60, [(10, null, 11)], 90, time);
+        check("Fallback: a five-hour window that has ended is not kept, and the account then has the weekly quota alone", ended.Count == 1 && ended[0] is { Minutes: 10080, UsedPercent: 11 });
+        // A skipped five-hour share within hours: the share of the older sample is carried, the newest sample's time and weekly share stand.
+        var carried = await Fallback(root, "carried", check, 180, [(30, 60, 10), (90, null, 12)], 95, time);
+        check("Fallback: a skipped five-hour share carries the older share, with the newest sample's weekly share and time",
+            carried.Count == 2 && carried[0] is { Minutes: 300, UsedPercent: 60 } && carried[1] is { Minutes: 10080, UsedPercent: 12 } && time[0] == Now.AddMinutes(90));
+        // The window reset between the two samples: the older share belongs to the ended window and is not shown as the present one.
+        var between = await Fallback(root, "between", check, 60, [(30, 60, 10), (90, null, 12)], 95, time);
+        check("Fallback: a five-hour reset between the two samples drops the older five-hour share and keeps the new weekly share and time",
+            between.Count == 1 && between[0] is { Minutes: 10080, UsedPercent: 12 } && time[0] == Now.AddMinutes(90));
     }
 
     // The service's offline reading and its fallback after the quota interface failed, by the real code path.
