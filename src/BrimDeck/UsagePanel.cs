@@ -138,9 +138,10 @@ public partial class MainWindow
     // What the quota columns were last built from: their form and the data, page and settings they show, not the panel's exact
     // size. As the monitor page is built once per layout step and stretches within it, a render with the same key keeps the
     // page instead of building it again: a drag that stays within a size step, a return from another page, the sync button.
+    // The screen's and the panel's scales are part of it, as the title rows are placed on the screen's pixels (TitlePlaces).
     private UsageBuild? _usageBuilt;
     private PanelHeader _usageHeaderBuilt = PanelHeader.For(36, 20);
-    private sealed record UsageBuild(string Form, object Snapshots, object Settings, int ApplicationPage, string QuotaPages, int Theme, string Language, long Minute);
+    private sealed record UsageBuild(string Form, object Snapshots, object Settings, int ApplicationPage, string QuotaPages, int Theme, string Language, long Minute, double Dpi, double Scale);
 
     private UsageBuild? ColumnsBuild()
     {
@@ -150,7 +151,7 @@ public partial class MainWindow
         var fit = FitColumns(columns, ContentCanvas.Width, ContentCanvas.Height);
         return new UsageBuild($"{fit.Layout.Tier}|{fit.Layout.Footer}|{fit.Inline}|{fit.Wide}|{fit.Count}", Snapshots, Settings, _applicationPage,
             string.Join(",", _quotaPages.OrderBy(page => page.Key).Select(page => $"{page.Key:N}:{page.Value}")), PanelTheme.Generation, Loc.Language,
-            DateTime.Now.Ticks / TimeSpan.TicksPerMinute);
+            DateTime.Now.Ticks / TimeSpan.TicksPerMinute, VisualTreeHelper.GetDpi(this).DpiScaleY, _scale);
     }
 
     public void RenderUsage()
@@ -355,15 +356,17 @@ public partial class MainWindow
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.ColumnDefinitions.Add(new ColumnDefinition());
+        var (nameTop, chipTop, chipLift) = TitlePlaces(layout, VisualTreeHelper.GetDpi(this).DpiScaleY, _scale);
         var name = UI.Centered(entry.Name, layout.Name, off ? UI.Secondary : UI.Primary, FontWeights.SemiBold);
         name.HorizontalAlignment = HorizontalAlignment.Left;
+        name.VerticalAlignment = VerticalAlignment.Top; name.Margin = new Thickness(0, nameTop, 0, 0);
         name.ToolTip = QuotaTooltip(snapshot);
         AutomationProperties.SetAutomationId(name, "quota-title-" + entry.InstanceId.ToString("N"));
         head.Children.Add(name);
         double occupied = 0;
         if (snapshot.Plan.Length > 0)
         {
-            var chip = PlanChip(snapshot, layout);
+            var chip = PlanChip(snapshot, layout, chipTop, chipLift);
             Grid.SetColumn(chip, 1); head.Children.Add(chip);
             chip.Measure(new Size(double.PositiveInfinity, layout.Head)); occupied += chip.DesiredSize.Width;
         }
@@ -492,14 +495,38 @@ public partial class MainWindow
         return surface;
     }
 
-    private static Border PlanChip(ProviderSnapshot snapshot, Layout layout)
+    // Where the name and the plan chip go in the title row, from its top. Centered on their own line boxes and rounded to pixels
+    // apart, the smaller plan ended up as much as two pixels above the name; instead the chip goes where its capitals' middle
+    // comes closest to the name's as drawn. Positions fall on the layout's pixels (1 / dpi), text baselines on the screen's
+    // (the panel's scale applied), and the border is a whole number of pixels thick. At 150 % a layout pixel is one and a half
+    // screen pixels, too coarse to reach the name's line: the chip's text then also moves by whole screen pixels (Lift), which
+    // keeps it sharp. At 100 % it never moves.
+    private static (double Name, double Chip, double Lift) TitlePlaces(Layout layout, double dpi, double scale)
+    {
+        double pixel = 1 / dpi, screen = dpi * scale;
+        double Snap(double value) => Math.Round(value / pixel) * pixel;
+        double Capitals(double top, double size) => Math.Round((top + UI.Baseline(size)) * screen) / screen - UI.CapHeight(size) / 2;
+        double name = Snap((layout.Head - UI.LineBox(layout.Name)) / 2), border = Snap(1);
+        double target = Capitals(name, layout.Name), ideal = target - border - UI.Baseline(layout.Plan) + UI.CapHeight(layout.Plan) / 2;
+        // Of equally close places, the one nearest the ideal.
+        double Miss(double top) => Math.Abs(Capitals(top + border, layout.Plan) - target) + 1e-6 * Math.Abs(top - ideal);
+        var chip = Enumerable.Range(-3, 7).Select(step => Snap(ideal) + step * pixel).MinBy(Miss);
+        double lift = Math.Round((target - Capitals(chip + border, layout.Plan)) * screen) / screen;
+        return (name, chip, lift);
+    }
+
+    // top and lift: from TitlePlaces. The text sits right below the border: centered, it moved by a pixel where the rounded
+    // border leaves the chip half a pixel short of or over the text.
+    private static Border PlanChip(ProviderSnapshot snapshot, Layout layout, double top, double lift)
     {
         var text = UI.Centered(UI.DisplayPlan(snapshot.Plan), layout.Plan, UI.Tertiary);
+        text.VerticalAlignment = VerticalAlignment.Top;
+        if (lift != 0) text.RenderTransform = new TranslateTransform(0, lift);
         return new Border
         {
             Child = text, BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(PanelTheme.Corner(4)),
-            Padding = new Thickness(layout.Tier >= Tier.Dense ? 4 : 5, 0, layout.Tier >= Tier.Dense ? 4 : 5, 0), Margin = new Thickness(6, 0, 0, 0),
-            VerticalAlignment = VerticalAlignment.Center
+            Padding = new Thickness(layout.Tier >= Tier.Dense ? 4 : 5, 0, layout.Tier >= Tier.Dense ? 4 : 5, 0),
+            Margin = new Thickness(6, top, 0, 0), VerticalAlignment = VerticalAlignment.Top
         };
     }
 
