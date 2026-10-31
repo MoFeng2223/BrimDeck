@@ -64,7 +64,10 @@ public sealed partial class SettingsWindow
         var arrow = ChevronButton(Loc.T("展开 " + entry.Name + " 配额配置", "Show " + entry.Name + " quota configuration"), () => ToggleSourceRow(entry.InstanceId));
         arrow.HorizontalAlignment = HorizontalAlignment.Right; arrow.VerticalAlignment = VerticalAlignment.Center;
         AutomationProperties.SetAutomationId(arrow, "expand-source-" + entry.InstanceId.ToString("N"));
-        row.Children.Add(arrow);
+        // Right after the drag handle, so Tab reaches the arrow at the row's left before the row's other controls (SW-05). The two
+        // share the first column side by side (22 + 18 DIP), so the order changes nothing on screen.
+        int handle = row.Children.OfType<UIElement>().ToList().FindIndex(child => child is GripHandle);
+        row.Children.Insert(handle + 1, arrow);
         var detail = new StackPanel { Margin = new Thickness(0, 0, 0, 12) }; Grid.SetIsSharedSizeScope(detail, true);
         Grid.SetRow(detail, 1); Grid.SetColumnSpan(detail, 9);
         if (SourceDetails(entry) is { } source) { source.Margin = new Thickness(0); detail.Children.Add(source); }
@@ -93,8 +96,8 @@ public sealed partial class SettingsWindow
     private FrameworkElement SmallHelp(string title, Func<string> help)
     {
         var mark = Stroke("M 6,1 A 5,5 0 1 1 6,11 A 5,5 0 1 1 6,1 Z M 6,5.4 V 8.4 M 6,3.6 V 3.7", 12, 12, TextTertiary); mark.StrokeThickness = 1.1;
-        var info = new Border { Width = 12, Height = 12, Background = Brushes.Transparent, Margin = new Thickness(4, 0, 0, 0),
-            VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Help, Focusable = true, Child = mark, RenderTransform = new TranslateTransform(0, 0.5),
+        var info = new HelpMark { Width = 12, Height = 12, Background = Brushes.Transparent, Margin = new Thickness(4, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Help, Focusable = true, Child = mark,
             FocusVisualStyle = (Style)FindResource("SettingsSmallHelpFocus") };
         AttachSettingHelp(info, title, help);
         return info;
@@ -116,10 +119,8 @@ public sealed partial class SettingsWindow
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "SourceLabel" });
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         line.ColumnDefinitions.Add(new ColumnDefinition());
-        var heading = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(16, 0, 16, 0), MinWidth = 52, VerticalAlignment = VerticalAlignment.Center };
-        var caption = TextLine(title, 12, TextSecondary); caption.VerticalAlignment = VerticalAlignment.Center;
-        heading.Children.Add(caption);
-        heading.Children.Add(SmallHelp(title, () => help));
+        var caption = TextLine(title, 12, TextSecondary);
+        var heading = new HelpHeading(caption, SmallHelp(title, () => help)) { Margin = new Thickness(16, 0, 16, 0), MinWidth = 52, VerticalAlignment = VerticalAlignment.Center };
         line.Children.Add(heading);
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = entry.QuotaOnline, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, title); AutomationProperties.SetHelpText(toggle, help);
@@ -150,10 +151,8 @@ public sealed partial class SettingsWindow
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "SourceLabel" });
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         line.ColumnDefinitions.Add(new ColumnDefinition());
-        var heading = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(16, 0, 16, 0), MinWidth = 52, VerticalAlignment = VerticalAlignment.Center };
-        var caption = TextLine(title, 12, TextSecondary); caption.VerticalAlignment = VerticalAlignment.Center;
-        heading.Children.Add(caption);
-        heading.Children.Add(SmallHelp(title, () => help));
+        var caption = TextLine(title, 12, TextSecondary);
+        var heading = new HelpHeading(caption, SmallHelp(title, () => help)) { Margin = new Thickness(16, 0, 16, 0), MinWidth = 52, VerticalAlignment = VerticalAlignment.Center };
         line.Children.Add(heading);
         static string Format(decimal? value) => value?.ToString("0.##", CultureInfo.InvariantCulture) ?? "";
         var input = new TextBox { Style = (Style)FindResource("SettingsNumber"), TextAlignment = TextAlignment.Left, FontSize = 12.5, MaxLength = 20,
@@ -165,7 +164,7 @@ public sealed partial class SettingsWindow
         var content = new Grid(); content.Children.Add(hint); content.Children.Add(input);
         var field = new Border { Child = content, Width = 140, Height = 34, CornerRadius = new CornerRadius(6), Padding = new Thickness(10, 0, 10, 0), Margin = new Thickness(0, 5, 0, 5),
             Background = UI.Brush(_palette.Input), BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1) };
-        field.IsKeyboardFocusWithinChanged += (_, _) => field.BorderBrush = UI.Brush(field.IsKeyboardFocusWithin ? _palette.Accent : _palette.Border);
+        FieldFocus(field, field, () => UI.Brush(_palette.Border));
         field.MouseLeftButtonDown += (_, e) => { input.Focus(); e.Handled = true; };
         void Hint() => hint.Visibility = input.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         void Commit()
@@ -239,7 +238,7 @@ public sealed partial class SettingsWindow
             if (trailing is not null) { Grid.SetColumn(trailing, 1); content.Children.Add(trailing); }
             var field = new Border { Child = content, Height = 34, CornerRadius = new CornerRadius(6), Padding = new Thickness(10, 0, 4, 0),
                 Background = UI.Brush(_palette.Input), BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1) };
-            field.IsKeyboardFocusWithinChanged += (_, _) => field.BorderBrush = UI.Brush(field.IsKeyboardFocusWithin ? _palette.Accent : _palette.Border);
+            FieldFocus(field, field, () => UI.Brush(_palette.Border));
             return field;
         }
         TextBox Plain(string id, string name)
