@@ -128,6 +128,31 @@ public sealed record MusicColumns(double Height, double InfoWidth, double Divide
     public int LyricLines => LyricsWidth > 0 ? Before + 1 + After : 0;
 }
 
+// What the open music page's title needs worked out outside the window. The title's room is decided by the page's grid (the line
+// less the equalizer's column, EqualizerWidth + EqualizerGap) and whether it scrolls by the MusicMarquee itself, which measures
+// its text against its room with Overflow; this holds the equalizer's width from the bar count (3 to 20), that measure, and the
+// name a screen reader reads.
+public static class MusicTitleFit
+{
+    // The gap between the title's room and the equalizer.
+    public const double EqualizerGap = 16;
+    // Five bars span 1.7 times their height (at least 27); other counts keep the five bars' spacing.
+    public static double EqualizerWidth(double equalizerHeight, int bars)
+    {
+        double fiveBars = Math.Max(27, Math.Round(equalizerHeight * 1.7));
+        return Math.Round(3 + (CompactMusicLayout.SafeBars(bars) - 1) * (fiveBars - 3) / 4);
+    }
+    // What a screen reader reads for the title: the whole title, and the artist when the short page merges it into the line.
+    public static string ReadAs(string title, string tail = "") => Loc.T("歌名 ", "Title ") + title + tail;
+    // How far the text overhangs its room, in whole device pixels (scale: device pixels per DIP). The small allowance keeps
+    // rounding noise from starting a one-pixel scroll.
+    public static double Overflow(double textWidth, double room, double scale)
+    {
+        if (scale <= 0 || double.IsNaN(textWidth) || double.IsNaN(room)) return 0;
+        return Math.Max(0, Math.Ceiling((textWidth - room) * scale - .01) / scale);
+    }
+}
+
 public enum MusicPlaybackMode { List, Track, Shuffle, Order }
 
 public static class MusicPlaybackModes

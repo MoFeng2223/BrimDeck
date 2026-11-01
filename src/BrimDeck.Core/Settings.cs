@@ -48,6 +48,10 @@ public enum MouseWheelAction { None, Pages, Volume }
 // (MainWindow.Move.cs); moving is the default. Saved as numbers, so new members go at the end.
 public enum GripDoubleClick { AutoWidth, Move }
 public enum CompactMusicText { None, Title, Lyrics }
+// How the level bars show the sound. Flow: one value for the whole sound that runs from one end of the bars to the other, so a
+// drum beat or a voice is seen crossing them. Spectrum: the sound split by pitch, each bar one band, low on the left and high
+// on the right. Saved as numbers, so new members go at the end; a file without it, or with a number not listed, is Flow.
+public enum EqualizerMode { Flow = 0, Spectrum = 1 }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left; Music places
 // only the title or lyric. Saved as numbers, so new members go at the end.
 public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock }
@@ -274,9 +278,13 @@ public sealed class DeckSettings
     private List<CompactPart> _notchOrder = [.. CompactParts.Default], _capsuleOrder = [.. CompactParts.Default];
     private List<DeckPage> _pageOrder = [.. DeckPages.Order];
     private int _equalizerBars = CompactMusicLayout.DefaultBars, _musicEqualizerBars = 5;
+    private EqualizerMode _equalizerMode = EqualizerMode.Flow, _musicEqualizerMode = EqualizerMode.Flow;
     // Version of the BrimDeck that last saved settings.json; see SettingsMigrations. Empty in files saved before 0.1.0.
     public string AppVersion { get; set; } = "";
     public bool LaunchAtStartup { get; set; }
+    // Off, the notification area has no BrimDeck icon. Starting BrimDeck again then shows the panels and the settings
+    // (App.ShowFromRelaunch), and the settings window has its own exit button.
+    public bool ShowTrayIcon { get; set; } = true;
     public SettingsTheme Theme { get; set; } = SettingsTheme.System;
     // The panel's color theme (see PanelThemes): "system", "dark", "light", a built-in theme or a theme file's id.
     // The dark default is the original look. An id whose file is missing is kept and shown as the dark theme meanwhile.
@@ -337,6 +345,9 @@ public sealed class DeckSettings
     public bool NotchSummary { get; set; } = true;
     public bool NotchMusic { get; set; } = true;
     public bool CapsuleSummary { get; set; } = true;
+    // Writes each application's first letter (or digit) of its name inside its collapsed quota ring, in the notch, the capsule and
+    // the side column. Off by default; a file without it reads as off.
+    public bool QuotaRingLetters { get; set; }
     public bool CapsuleMusic { get; set; } = true;
     // The notch and the capsule each switch the equalizer on. It shows while a song plays (or is paused), or, with EqualizerAlways,
     // at all times: then it reads the whole system's sound while no song plays.
@@ -367,6 +378,9 @@ public sealed class DeckSettings
     public bool LyricsEnabled { get; set; } = true;
     // How many bars the music page's equalizer has, beside the title; its bars keep their spacing, so more bars make it longer.
     public int MusicEqualizerBars { get => _musicEqualizerBars; set => _musicEqualizerBars = CompactMusicLayout.SafeBars(value); }
+    // How the collapsed equalizer and the music page's equalizer show the sound, each its own choice, as their lengths are.
+    public EqualizerMode EqualizerMode { get => _equalizerMode; set => _equalizerMode = Enum.IsDefined(value) ? value : EqualizerMode.Flow; }
+    public EqualizerMode MusicEqualizerMode { get => _musicEqualizerMode; set => _musicEqualizerMode = Enum.IsDefined(value) ? value : EqualizerMode.Flow; }
     // The music page's equalizer and current lyric each take their own color, chosen as the collapsed equalizer's is
     // (EqualizerColor): White is the theme's equalizer color for the bars and its primary text color for the lyric.
     public ClockColor MusicPageEqualizerColor { get; set; } = ClockColor.Cover;
@@ -472,9 +486,9 @@ public sealed class DeckSettings
     // Whether the notch and the capsule widen to their content (CollapsedGeometry.Resolve). Resizing one by dragging an end turns
     // its own off, so the width set by hand stays.
     public bool NotchAutoWidth { get; set; } = true;
-    // Compacts the heap and trims the working set after the panel has been collapsed and idle for a while (App.Memory.cs). Off
-    // by default: the memory is read back in when the panel next opens, which can stutter.
-    public bool TrimMemoryWhenIdle { get; set; }
+    // Compacts the heap and trims the working set after the panel has been collapsed and idle for a while (App.Memory.cs). On by
+    // default; the memory is read back in when the panel next opens, which can stutter, so it can be turned off.
+    public bool TrimMemoryWhenIdle { get; set; } = true;
     public bool CapsuleAutoWidth { get; set; } = true;
     public GripDoubleClick GripDoubleClick { get; set; } = GripDoubleClick.Move;
     // What the collapsed readings showed before their table (CompactReadings). Kept to read older files and, written to match the

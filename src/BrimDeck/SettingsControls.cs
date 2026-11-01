@@ -140,6 +140,8 @@ public sealed partial class SettingsWindow
         var highlight = new Border { CornerRadius = new CornerRadius(6), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
             IsHitTestVisible = false, RenderTransform = move, Visibility = Visibility.Hidden };
         highlight.SetResourceReference(Border.BackgroundProperty, "SettingsFillSelected");
+        // The chosen option is outlined as well: its fill alone stands too close to the control's own (SW-07).
+        highlight.BorderThickness = new Thickness(1); highlight.SetResourceReference(Border.BorderBrushProperty, "SettingsInputBorder");
         var host = new Grid(); host.Children.Add(highlight); host.Children.Add(content);
         void Slide(double from, double to)
         {
@@ -181,14 +183,13 @@ public sealed partial class SettingsWindow
             SmallChange=tick,LargeChange=tick*2,TickFrequency=tick,IsSnapToTickEnabled=true,IsMoveToPointEnabled=true,VerticalAlignment=VerticalAlignment.Center };
         var input = new TextBox { Style=(Style)FindResource("SettingsNumber"),Width=40,Text=slider.Value.ToString("0",CultureInfo.InvariantCulture),VerticalAlignment=VerticalAlignment.Center };
         AutomationProperties.SetName(slider,title); AutomationProperties.SetName(input,Loc.T(title+"数值", title+" value"));
-        var line=new StackPanel {Orientation=Orientation.Horizontal};line.Children.Add(input);
-        var units=TextLine(unit,10,TextTertiary);units.Margin=new Thickness(4,0,6,0);units.VerticalAlignment=VerticalAlignment.Center;line.Children.Add(units);
+        var units=TextLine(unit,10,TextTertiary);units.Margin=new Thickness(4,0,6,0);units.VerticalAlignment=VerticalAlignment.Center;
         var minus=new RepeatButton { Style=(Style)FindResource("SettingsStepper"),Content="−" };
         var plus=new RepeatButton { Style=(Style)FindResource("SettingsStepper"),Content="+" };
         AutomationProperties.SetName(minus,Loc.T("减少"+title, "Decrease "+title));AutomationProperties.SetName(plus,Loc.T("增加"+title, "Increase "+title));
-        line.Children.Add(new Border {Width=1,Background=UI.Brush(Divider),Margin=new Thickness(2,5,3,5)});line.Children.Add(minus);line.Children.Add(plus);
-        var chip=new Border {Child=line,Height=30,CornerRadius=new CornerRadius(6),Background=UI.Brush(_palette.Input),BorderBrush=UI.Brush(_palette.Border),BorderThickness=new Thickness(1),Padding=new Thickness(7,0,2,0)};
-        FieldFocus(chip, input, () => UI.Brush(_palette.Border));
+        // The framed box: the number, its unit, a divider and the steppers (NumberBox).
+        var chip=NumberBox.Create(input,units,minus,plus,UI.Brush(Divider),UI.Brush(_palette.Input),UI.Brush(_palette.InputBorder));
+        FieldFocus(chip, input, () => UI.Brush(_palette.InputBorder));
         void Set(double number)
         {
             var next=Math.Clamp(Math.Round(number),min,max);
