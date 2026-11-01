@@ -56,7 +56,7 @@ internal static class SettingsFocusTests
         if (!leftButtonFirst) target.RaiseEvent(Args(UIElement.MouseLeftButtonDownEvent));
     }
 
-    // The number box of the settings window as it is built there (NumericControls): a framed field with its unit, a divider and two
+    // The number box of the settings window as it is built there (NumberBox.Create): a framed field with its unit, a divider and two
     // steppers, in a window that takes the focus off a field when empty space is clicked. Clicking its padding or its unit puts the
     // focus in the field and selects its number; clicking a stepper does not; clicking empty space still releases the focus.
     private static void NumberBoxClicks(Action<string, bool> check)
@@ -65,10 +65,10 @@ internal static class SettingsFocusTests
         var field = new TextBox { Text = "260", Width = 40 };
         var unit = new TextBlock { Text = "ms" };
         var plus = new System.Windows.Controls.Primitives.RepeatButton { Width = 21, Height = 26, Content = "+" };
-        var line = new StackPanel { Orientation = Orientation.Horizontal };
-        line.Children.Add(field); line.Children.Add(unit); line.Children.Add(plus);
-        var chip = new Border { Child = line, Height = 30, Background = System.Windows.Media.Brushes.White, Padding = new Thickness(7, 0, 2, 0) };
-        FieldBox.Attach(chip, field);
+        var minus = new System.Windows.Controls.Primitives.RepeatButton { Width = 21, Height = 26, Content = "-" };
+        var brush = System.Windows.Media.Brushes.White;
+        // The box through the factory the settings window builds its own with.
+        var chip = NumberBox.Create(field, unit, minus, plus, brush, brush, brush);
         var other = new TextBox { Text = "other" };
         var empty = new Border { Height = 20, Background = System.Windows.Media.Brushes.Transparent };
         var host = new StackPanel(); host.Children.Add(holder); host.Children.Add(chip); host.Children.Add(other); host.Children.Add(empty);

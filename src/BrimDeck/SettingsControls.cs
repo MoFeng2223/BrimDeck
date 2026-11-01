@@ -183,13 +183,12 @@ public sealed partial class SettingsWindow
             SmallChange=tick,LargeChange=tick*2,TickFrequency=tick,IsSnapToTickEnabled=true,IsMoveToPointEnabled=true,VerticalAlignment=VerticalAlignment.Center };
         var input = new TextBox { Style=(Style)FindResource("SettingsNumber"),Width=40,Text=slider.Value.ToString("0",CultureInfo.InvariantCulture),VerticalAlignment=VerticalAlignment.Center };
         AutomationProperties.SetName(slider,title); AutomationProperties.SetName(input,Loc.T(title+"数值", title+" value"));
-        var line=new StackPanel {Orientation=Orientation.Horizontal};line.Children.Add(input);
-        var units=TextLine(unit,10,TextTertiary);units.Margin=new Thickness(4,0,6,0);units.VerticalAlignment=VerticalAlignment.Center;line.Children.Add(units);
+        var units=TextLine(unit,10,TextTertiary);units.Margin=new Thickness(4,0,6,0);units.VerticalAlignment=VerticalAlignment.Center;
         var minus=new RepeatButton { Style=(Style)FindResource("SettingsStepper"),Content="−" };
         var plus=new RepeatButton { Style=(Style)FindResource("SettingsStepper"),Content="+" };
         AutomationProperties.SetName(minus,Loc.T("减少"+title, "Decrease "+title));AutomationProperties.SetName(plus,Loc.T("增加"+title, "Increase "+title));
-        line.Children.Add(new Border {Width=1,Background=UI.Brush(Divider),Margin=new Thickness(2,5,3,5)});line.Children.Add(minus);line.Children.Add(plus);
-        var chip=new Border {Child=line,Height=30,CornerRadius=new CornerRadius(6),Background=UI.Brush(_palette.Input),BorderBrush=UI.Brush(_palette.InputBorder),BorderThickness=new Thickness(1),Padding=new Thickness(7,0,2,0)};
+        // The framed box: the number, its unit, a divider and the steppers (NumberBox).
+        var chip=NumberBox.Create(input,units,minus,plus,UI.Brush(Divider),UI.Brush(_palette.Input),UI.Brush(_palette.InputBorder));
         FieldFocus(chip, input, () => UI.Brush(_palette.InputBorder));
         void Set(double number)
         {
@@ -206,8 +205,6 @@ public sealed partial class SettingsWindow
         minus.Click+=(_,_)=>Set(slider.Value-tick);plus.Click+=(_,_)=>Set(slider.Value+tick);
         input.LostKeyboardFocus+=(_,_)=>Commit();
         input.KeyDown+=(_,e)=>{if(e.Key==Key.Enter){Commit();e.Handled=true;}if(e.Key==Key.Escape){input.Text=slider.Value.ToString("0",CultureInfo.InvariantCulture);e.Handled=true;}};
-        // The whole box is the number's click target, not only the 16 DIP line of text in it (SW-08); the steppers take their own clicks.
-        FieldBox.Attach(chip, input);
         return(slider,chip);
     }
     private FrameworkElement Dimension(string title, double value, double min, double max, Action<double> changed)
