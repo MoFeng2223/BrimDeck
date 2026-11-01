@@ -180,7 +180,7 @@ internal static partial class Program
         _ = new Application(); Soft.AnimationsEnabled = false;
         string xaml = File.ReadAllText(Path.Combine(repo, "src", "BrimDeck", "App.xaml"));
         int start = xaml.IndexOf("<ResourceDictionary>", StringComparison.Ordinal) + "<ResourceDictionary>".Length;
-        string dictionary = "<ResourceDictionary xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" xmlns:ui=\"clr-namespace:BrimDeck;assembly=BrimDeck.UI\">" + xaml[start..xaml.LastIndexOf("</ResourceDictionary>", StringComparison.Ordinal)] + "</ResourceDictionary>";
+        string dictionary = "<ResourceDictionary xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" xmlns:ui=\"clr-namespace:BrimDeck;assembly=BrimDeck.UI\" xmlns:sys=\"clr-namespace:System;assembly=System.Runtime\">" + xaml[start..xaml.LastIndexOf("</ResourceDictionary>", StringComparison.Ordinal)] + "</ResourceDictionary>";
         Application.Current.Resources = (ResourceDictionary)XamlReader.Parse(dictionary);
         var owner = new Grid(); owner.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/BrimDeck.UI;component/PanelControls.xaml", UriKind.Relative) });
         owner.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/BrimDeck.UI;component/TimerResources.xaml", UriKind.Relative) });

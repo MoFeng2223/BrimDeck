@@ -81,7 +81,7 @@ public sealed partial class SettingsWindow
         });
         AutomationProperties.SetAutomationId(toggle, "widget-enable-" + entry.Id); actions.Children.Add(toggle);
         Grid.SetColumn(actions, 2); row.Children.Add(actions);
-        if (entry.Value.MoveTo is not null) AttachDrag(handle, () => rows, PartRowHeight, list =>
+        if (entry.Value.MoveTo is not null) AttachDrag(handle, title, () => rows, PartRowHeight, list =>
         {
             var order = list.Children.OfType<Border>().Select(item => item.Tag as string).Where(id => id is not null).ToArray();
             _miniAppsReordering = true;

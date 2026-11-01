@@ -58,6 +58,28 @@ internal static class DashboardUsageTests
         copied.Apps.Add(copied.Apps[0].Copy()); copied.Normalize();
         check("Copied instance IDs are repaired without dropping repeated rows", copied.Apps.Count == 2 && copied.Apps.Select(a => a.InstanceId).Distinct().Count() == 2);
 
+        var balanceRow = new AppEntry { QuotaSource = ProviderId.DeepSeek, BalanceTarget = 100 };
+        var balanceSnapshot = new ProviderSnapshot(ProviderId.DeepSeek) { LiveQuota = true, Configurations = [balanceRow.ConfigurationKey], Metrics =
+            [new(MetricKind.Balance, "账户余额") { Id = "total:CNY", Amount = 20, Currency = "CNY" }, new(MetricKind.Balance, "赠送余额") { Id = "granted:CNY", Amount = 5, Currency = "CNY" }] };
+        double? Used(AppEntry row, decimal amount)
+        {
+            balanceSnapshot.Metrics = [balanceSnapshot.Metrics[0] with { Amount = amount }, balanceSnapshot.Metrics[1]];
+            return DashboardUsage.Quota(row, [balanceSnapshot]).Metrics[0].UsedPercent;
+        }
+        var targeted = DashboardUsage.Quota(balanceRow, [balanceSnapshot]);
+        check("A target balance gives the account balance a used share and leaves other balances bare", Used(balanceRow, 20) == 80 && Used(balanceRow, 60) == 40
+            && targeted.Metrics[0] is { Total: 100, TotalIsTarget: true } && targeted.Metrics[1].Total is null && targeted.Metrics[1].UsedPercent is null);
+        check("A balance above the target is drawn as unused", Used(balanceRow, 150) is < 0 && AppPresets.Level(Math.Clamp(Used(balanceRow, 150)!.Value, 0, 100)) == 0);
+        check("The target leaves the shared snapshot unchanged", balanceSnapshot.Metrics[0].Total is null && !ReferenceEquals(DashboardUsage.Quota(balanceRow, [balanceSnapshot]), balanceSnapshot));
+        var untargeted = new AppEntry { QuotaSource = ProviderId.DeepSeek, BalanceTarget = null };
+        check("Without a target the account balance stays an amount", Used(untargeted, 20) is null && ReferenceEquals(DashboardUsage.Quota(untargeted, [balanceSnapshot]), balanceSnapshot));
+        var limited = new ProviderSnapshot(ProviderId.OpenRouter) { Configurations = [new AppEntry { QuotaSource = ProviderId.OpenRouter }.ConfigurationKey],
+            Metrics = [new(MetricKind.Balance, "密钥余额") { Amount = 3, Total = 10, Currency = "USD" }] };
+        var openRouter = new AppEntry { QuotaSource = ProviderId.OpenRouter, BalanceTarget = 100 };
+        check("A balance with its own total keeps it", DashboardUsage.Quota(openRouter, [limited]).Metrics[0] is { Total: 10, TotalIsTarget: false });
+        var normalized = new[] { 0m, -5m, 0.001m, 12.345m, 2_000_000_000m }.Select(value => { var row = new AppEntry { QuotaSource = ProviderId.DeepSeek, BalanceTarget = value }; row.Normalize(); return row.BalanceTarget; }).ToList();
+        check("Target balances keep positive amounts to the cent", normalized.SequenceEqual([null, null, null, 12.35m, null]));
+
         var oversized = new DeckSettings { Apps = Enumerable.Range(1, 9).Select(i => new AppEntry
             { QuotaSource = ProviderId.Claude, UsageSource = ProviderId.Claude, DisplayName = "应用 " + i, Enabled = i != 1 }).ToList() };
         var retained = oversized.Apps.Take(7).Select(a => a.InstanceId).ToArray();
@@ -91,19 +113,27 @@ internal static class DashboardUsageTests
             check("WSL statistics are left out while the option is off", withoutWsl.Entries.Sum(entry => entry.Total) == 100);
         }
         // The WSL read runs beside the network requests of the same refresh, so the round takes the longer of the two, not both.
-        // Checked by when each was under way rather than by the round's length: a slow build machine stretches both, and a time
-        // limit failed there although the two did overlap.
+        // Checked by when each was under way rather than by the round's length, and by a handshake rather than by sleeps: a request
+        // waits until the WSL read has begun and the read until a request has begun (each for at most 5 s), so the two overlap
+        // exactly when they run at the same time, however slow or busy the machine is. Run one after the other, one of them waits in
+        // vain and the spans do not meet.
         var timeline = System.Diagnostics.Stopwatch.StartNew();
         TimeSpan wslStart = default, wslEnd = default;
-        handler.DelayMs = 800; handler.Timeline = timeline;
+        using var wslBegun = new ManualResetEventSlim();
+        handler.Timeline = timeline; handler.HoldUntil = wslBegun;
         using (var overlapping = new UsageService(new SourceDesktop(), locations, client, null, null,
-            () => { wslStart = timeline.Elapsed; Thread.Sleep(800); wslEnd = timeline.Elapsed; return [new WslHome("Test", wslClaude, "")]; }, TimeSpan.FromSeconds(5)))
+            () =>
+            {
+                handler.Begun.Wait(TimeSpan.FromSeconds(5));
+                wslStart = timeline.Elapsed; wslBegun.Set(); Thread.Sleep(50); wslEnd = timeline.Elapsed;
+                return [new WslHome("Test", wslClaude, "")];
+            }, TimeSpan.FromSeconds(15)))
         {
             var round = await overlapping.RefreshAsync(wslSettings);
             check("The WSL read overlaps the network requests", handler.Busy is { } busy && wslStart < busy.End && busy.Start < wslEnd &&
                 round.Single(s => s.Id == ProviderId.Claude).Entries.Sum(entry => entry.Total) == 120);
         }
-        handler.Timeline = null;
+        handler.Timeline = null; handler.HoldUntil = null;
         handler.DelayMs = 0;
         using var release = new ManualResetEventSlim();
         using (var stuck = new UsageService(new SourceDesktop(), locations, client, null, null, () => { release.Wait(TimeSpan.FromSeconds(20)); return [new WslHome("Test", wslClaude, "")]; }, TimeSpan.FromMilliseconds(1000)))
@@ -134,11 +164,16 @@ internal static class DashboardUsageTests
         // While set, the span from the first request's start to the last one's end on this clock (Busy).
         public System.Diagnostics.Stopwatch? Timeline { get; set; }
         public (TimeSpan Start, TimeSpan End)? Busy { get; private set; }
+        // Set as a request begins while Timeline is set; a request then waits for HoldUntil, if given, for at most 5 s.
+        public ManualResetEventSlim Begun { get; } = new();
+        public ManualResetEventSlim? HoldUntil { get; set; }
         private readonly object _gate = new();
+        protected override void Dispose(bool disposing) { if (disposing) Begun.Dispose(); base.Dispose(disposing); }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var timeline = Timeline;
             var start = timeline?.Elapsed;
+            if (timeline is not null) { Begun.Set(); if (HoldUntil is { } hold) await Task.Run(() => hold.Wait(TimeSpan.FromSeconds(5)), cancellationToken); }
             if (DelayMs > 0) await Task.Delay(DelayMs, cancellationToken);
             if (timeline is not null && start is { } began)
                 lock (_gate) Busy = Busy is { } busy ? (busy.Start < began ? busy.Start : began, timeline.Elapsed) : (began, timeline.Elapsed);

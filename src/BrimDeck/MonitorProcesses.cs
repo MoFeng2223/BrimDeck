@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -8,6 +9,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using BrimDeck.Core;
+using BrimDeck.Native;
 
 namespace BrimDeck;
 
@@ -51,6 +53,29 @@ internal sealed class ProcessListView : FrameworkElement
     }
 
     private (int Rows, int Columns) Grid => MonitorLayout.ListGrid(ActualWidth, ActualHeight, _layout.RowHeight);
+
+    // For screen readers: the two sort pills, then each app's row as it shows ("Chrome，CPU 12%，内存 1.2 GB"); invoking a row
+    // opens its card, as a click does.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.List, () => Loc.T("进程列表", "Process list"), parts: Parts);
+    private IEnumerable<DrawnPart> Parts()
+    {
+        string[] sorts = [Loc.T("按 CPU 排序", "Sort by CPU"), Loc.T("按内存排序", "Sort by memory")];
+        for (int i = 0; i < _sortRects.Length && i < sorts.Length; i++)
+        {
+            var sort = (ProcessSort)i;
+            yield return new DrawnPart("sort " + i, sorts[i] + ((int)_sort == i ? Loc.T("（当前）", " (current)") : ""), _sortRects[i], AutomationControlType.Button,
+                () => { if (sort != _sort) _sortChanged(sort); });
+        }
+        var (rows, columns) = Grid;
+        for (int i = 0; i < _rows.Count && i < rows * columns; i++)
+        {
+            var sample = _rows[i];
+            var box = RowRect(i, rows, columns);
+            if (box.Bottom > ActualHeight + .5) continue;
+            yield return new DrawnPart(sample.Id, sample.Name + Loc.T("，CPU ", ", CPU ") + MonitorFormat.ProcessShare(sample.CpuPercent, _cores) + "%"
+                + Loc.T("，内存 ", ", memory ") + MonitorFormat.ProcessMemory(sample.MemoryBytes), box, Invoke: () => _open(sample, box));
+        }
+    }
     private double ColumnWidth(int columns) => columns <= 1 ? ActualWidth : (ActualWidth - ColumnGap * (columns - 1)) / columns;
 
     // A new sort from another panel or from this one's pills: the rows reorder as a new reading would, and the pill slides.
@@ -70,7 +95,7 @@ internal sealed class ProcessListView : FrameworkElement
         _cores = Math.Max(1, cores);
         var (rows, columns) = Grid;
         int capacity = Math.Max(rows * columns, MonitorLayout.MaximumRows * MonitorLayout.MaximumColumns);
-        if (!reading.TryGet(out var list)) { _rows = []; _message = Loc.T("正在读取进程…", "Reading processes…"); _motion.Clear(); InvalidateVisual(); return; }
+        if (!reading.TryGet(out var list)) { _rows = []; _message = Loc.T("正在读取进程…", "Reading processes…"); _motion.Clear(); InvalidateVisual(); DrawnPeer.Refresh(this); return; }
         var ranked = list.Ranked(_sort).Take(capacity).ToList();
         _message = ranked.Count == 0 ? Loc.T("没有进程", "No processes") : "";
         bool moving = false;
@@ -98,6 +123,8 @@ internal sealed class ProcessListView : FrameworkElement
         _rows = ranked;
         if (_hover is not null) moving |= Highlight(_hover, motion);
         if (moving) Motion.Start(this, Step); else InvalidateVisual();
+        // Once per reading, not per frame: the rows a screen reader lists are these.
+        DrawnPeer.Refresh(this);
     }
     private bool Step(double now)
     {
@@ -113,12 +140,12 @@ internal sealed class ProcessListView : FrameworkElement
     {
         int slot = -1;
         for (int i = 0; id is not null && i < _rows.Count; i++) if (_rows[i].Id == id) { slot = i; break; }
-        if (slot < 0) return _highlight.Set(0, motion);
+        if (slot < 0) return _highlight.Fade(false, motion);
         int rows = Grid.Rows;
         bool visible = _highlight.Target > .5 || _highlight.Moving(Eased.Now);
         bool glide = visible && rows > 0 && (int)Math.Round(_highlightSlot.Target) / rows == slot / rows;
         bool moving = _highlightSlot.Set(slot, motion && glide);
-        return _highlight.Set(1, motion) | moving;
+        return _highlight.Fade(true, motion) | moving;
     }
 
     protected override Size MeasureOverride(Size availableSize) => new(0, 0);
@@ -249,6 +276,9 @@ internal sealed class ProcessListView : FrameworkElement
         MonitorDraw.Baseline(drawing, MonitorDraw.Trimmed(sample.Name, _layout.Body, UI.Primary, Math.Max(10, right - nameLeft - 6), ppd), nameLeft, baseline);
     }
 
+    // Whether the pointer is on an app's row: a click there opens or closes its card (Open), so the page leaves the card to it.
+    public bool PointerOnRow => IsMouseOver && At(Mouse.GetPosition(this), out _) is not null;
+
     private ProcessSample? At(Point point, out Rect box)
     {
         box = Rect.Empty;
@@ -268,12 +298,12 @@ internal sealed class ProcessListView : FrameworkElement
         if (_hover is null && _pressed is null && _hoverSort < 0) return;
         _hover = _pressed = null; Cursor = null;
         HoverPill(-1);
-        _highlight.Set(0, Motion.Enabled); _press.Set(0, Motion.Enabled);
+        _highlight.Fade(false, Motion.Enabled); _press.Set(0, Motion.Enabled);
         Motion.Start(this, Step);
     }
     private void HoverPill(int sort)
     {
-        for (int i = 0; i < 2; i++) _pillHover[i].Set(i == sort && i != (int)_sort ? 1 : 0, Motion.Enabled);
+        for (int i = 0; i < 2; i++) _pillHover[i].Fade(i == sort && i != (int)_sort, Motion.Enabled);
         _hoverSort = sort;
     }
     protected override void OnMouseMove(MouseEventArgs e)
@@ -308,13 +338,26 @@ internal sealed class ProcessListView : FrameworkElement
 }
 
 // An app's card, opened from its row: its icon and name, where it runs from, its CPU and memory, how many processes it has and
-// the busiest of them. It grows in from just smaller than itself, follows the readings while open, and closes on a click.
+// the busiest of them; for an app with a window, a button that brings it to the front. It grows in from just smaller than
+// itself, follows the readings while open, and closes on a click.
 internal sealed class ProcessCard : Border
 {
     private readonly TextBlock _name, _where, _cpu, _memory, _count;
     private readonly StackPanel _members;
     private readonly Image _icon;
+    private readonly Button _switch;
+    private string? _executable;
+    private const long WindowCheck = 3000;
+    private long _windowCheckedAt;
     public string Id { get; private set; } = "";
+    // The app's window was brought to the front from the card.
+    public event Action? Switched;
+
+    private string _spoken = "";
+
+    // For screen readers: the card's app and its figures; the busiest processes follow as its text shows them.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Group,
+        () => Loc.T("进程详情：", "Process details: ") + _spoken);
 
     public ProcessCard(double body, double caption)
     {
@@ -323,7 +366,16 @@ internal sealed class ProcessCard : Border
         Cursor = Cursors.Hand; AutomationProperties.SetName(this, Loc.T("进程详情", "Process details"));
         var stack = new StackPanel();
         var head = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
-        _icon = new Image { Width = 26, Height = 26, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center };
+        // At the top right, beside the name, which gives up the room it takes.
+        _switch = new Button { Content = Loc.T("打开", "Open"), FontFamily = UI.PanelFont, FontSize = caption, Height = 22, Padding = new Thickness(8, 0, 8, 0),
+            Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Top, Visibility = Visibility.Collapsed };
+        _switch.SetResourceReference(StyleProperty, "PanelOutlineButton");
+        AutomationProperties.SetName(_switch, Loc.T("打开应用窗口", "Open the app's window"));
+        // Looked up again on the click, since the window may have changed since the card last looked; synchronous on purpose:
+        // the foreground can only be handed over while this click is being handled.
+        _switch.Click += (_, _) => { if (ProcessWindows.Activate(ProcessWindows.Find(_executable))) Switched?.Invoke(); };
+        DockPanel.SetDock(_switch, Dock.Right); head.Children.Add(_switch);
+        _icon =new Image { Width = 26, Height = 26, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center };
         RenderOptions.SetBitmapScalingMode(_icon, BitmapScalingMode.HighQuality);
         head.Children.Add(_icon);
         var titles = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
@@ -353,6 +405,14 @@ internal sealed class ProcessCard : Border
     public void Show(ProcessSample sample, int cores, double body, double caption)
     {
         Id = sample.Id;
+        // The button only for an app that has a window to show: not for background processes or an app left in the tray.
+        // Looked for as the card opens and then every few seconds, not with every reading: it lists every window.
+        string executable = sample.AppKey ?? System.IO.Path.GetFileName(sample.Path) ?? "";
+        if (executable != _executable || Environment.TickCount64 - _windowCheckedAt >= WindowCheck)
+        {
+            _executable = executable; _windowCheckedAt = Environment.TickCount64;
+            _switch.Visibility = ProcessWindows.Find(_executable) != 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
         _icon.Source = ProcessIcons.For(sample.Path); _icon.Visibility = _icon.Source is null ? Visibility.Collapsed : Visibility.Visible;
         _name.Text = sample.Name;
         _where.Text = sample.Path ?? (sample.AppKey ?? "") + " · PID " + sample.Pid;
@@ -360,6 +420,7 @@ internal sealed class ProcessCard : Border
         _cpu.Text = MonitorFormat.ProcessShare(sample.CpuPercent, cores) + "%";
         _memory.Text = MonitorFormat.ProcessMemory(sample.MemoryBytes);
         _count.Text = Math.Max(1, sample.Members.Count).ToString();
+        _spoken = sample.Name + " · CPU " + _cpu.Text + Loc.T(" · 内存 ", " · memory ") + _memory.Text + Loc.T($" · {_count.Text} 个进程", $" · {_count.Text} processes");
         _members.Children.Clear();
         // The busiest of the app's processes, up to five.
         foreach (var member in sample.Members.Take(5))
@@ -402,6 +463,7 @@ internal static class ProcessIcons
 {
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, ImageSource?> Cache = new(StringComparer.OrdinalIgnoreCase);
 
+    public static void Clear() => Cache.Clear();
     public static ImageSource? For(string? path) => !string.IsNullOrEmpty(path) && Cache.TryGetValue(path, out var icon) ? icon : null;
 
     public static void Prepare(string? path)

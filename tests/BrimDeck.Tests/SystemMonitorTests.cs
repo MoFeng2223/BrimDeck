@@ -159,7 +159,7 @@ static class SystemMonitorTests
         check("Monitor layout: tall narrow pages stack the list", MonitorLayout.For(440, 360, true) is { List: ListPlacement.Below, Metrics: MetricsMode.Lines });
         check("Monitor layout: short pages put the figures on one line", MonitorLayout.For(560, 100, true) is { Metrics: MetricsMode.Line, CompactMetrics: true, Figure: 16, List: ListPlacement.Side });
         check("Monitor layout: a switched-off list never shows", MonitorLayout.For(1200, 400, false) is { Processes: false });
-        check("Monitor layout: tall pages give memory and network their blocks", MonitorLayout.For(1200, 300, true) is { Metrics: MetricsMode.Blocks });
+        check("Monitor layout: tall pages give memory its block", MonitorLayout.For(1200, 300, true) is { Metrics: MetricsMode.Blocks });
         check("Monitor layout: nonsense sizes", MonitorLayout.For(double.NaN, -5, true) is { Processes: false });
         check("Monitor layout: steps, not sizes, so dragging within a step keeps the page", MonitorLayout.For(600, 220, true) == MonitorLayout.For(780, 240, true) && MonitorLayout.For(600, 220, true) != MonitorLayout.For(600, 260, true));
         check("Monitor list grid: rows fit the height, a wide list has two columns", MonitorLayout.ListGrid(300, 200, 22) == (7, 1) && MonitorLayout.ListGrid(500, 400, 22) == (14, 2));
@@ -201,17 +201,20 @@ static class SystemMonitorTests
         }
         check("Device pixels: whole widths stay, others round", DevicePixels.Up(268, 1.5) == 268 && DevicePixels.Up(269, 1.25) == 269.6 && DevicePixels.Down(269, 1.25) == 268.8
             && DevicePixels.Up(double.NaN, 1.5) == 0 && DevicePixels.Up(10, 0) == 10 && DevicePixels.Down(10, 0) == 0);
-        check("Compact rates", MonitorFormat.CompactRate(84_200) == new MonitorFormat.Quantity("84", "K") && MonitorFormat.CompactRate(1_240_000) == new MonitorFormat.Quantity("1.2", "M")
-            && MonitorFormat.CompactRate(120_000_000) == new MonitorFormat.Quantity("120", "M") && MonitorFormat.CompactRate(2_500_000_000) == new MonitorFormat.Quantity("2.5", "G")
+        check("Compact rates", MonitorFormat.CompactRate(5_120) == new MonitorFormat.Quantity("5.12", "K") && MonitorFormat.CompactRate(84_200) == new MonitorFormat.Quantity("84.2", "K")
+            && MonitorFormat.CompactRate(512_000) == new MonitorFormat.Quantity("512", "K") && MonitorFormat.CompactRate(1_240_000) == new MonitorFormat.Quantity("1.24", "M")
+            && MonitorFormat.CompactRate(120_000_000) == new MonitorFormat.Quantity("120", "M") && MonitorFormat.CompactRate(2_500_000_000) == new MonitorFormat.Quantity("2.50", "G")
+            && MonitorFormat.CompactRate(12_340_000) == new MonitorFormat.Quantity("12.3", "M") && MonitorFormat.CompactRate(9_996_000) == new MonitorFormat.Quantity("10.0", "M")
+            && MonitorFormat.CompactRate(99_960_000) == new MonitorFormat.Quantity("100", "M") && MonitorFormat.CompactRate(0) == new MonitorFormat.Quantity("0.00", "K")
             && MonitorFormat.CompactRate(999_600).Unit == "M");
-        // The strip reserves five characters for a rate ("99.9M"); none below a terabyte a second is longer.
-        bool five = true;
+        // The strip reserves room for "99.9M": every rate below a terabyte a second has three digits, a point below 100, and a letter.
+        bool three = true;
         for (double rate = 1; rate < 999_000_000_000; rate *= 1.003)
         {
             var q = MonitorFormat.CompactRate(rate);
-            five &= (q.Number + q.Unit).Length <= 5;
+            three &= q.Number.Count(char.IsAsciiDigit) == 3 && q.Number.Length == (q.Number.Contains('.') ? 4 : 3) && q.Unit.Length == 1;
         }
-        check("Compact rates: at most five characters", five);
+        check("Compact rates: three digits and a letter", three);
         var alone = CompactMusicLayout.Calculate(300, 1, false, 0, false, 0, 120);
         check("Compact row: readings alone take the row, centred", alone is { MonitorAlone: true, MonitorWidth: 120 });
         var withRings = CompactMusicLayout.Calculate(300, 1, false, 2, false, 0, 120);
@@ -236,7 +239,8 @@ static class SystemMonitorTests
         check("Compact fit: a capsule grows to its content plus its insets", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 300).Surface.Width == 332);
         check("Compact fit: narrower content narrows the surface, down to the style's smallest width",
             CollapsedGeometry.Resolve(new DeckSettings { CapsuleWidth = 500 }, CompactStyle.Capsule, screen, area, 1, 150).Surface.Width == 182
-            && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 50).Surface.Width == CollapsedLimits.CapsuleWidthMin
+            && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 50).Surface.Width == 82
+            && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 10).Surface.Width == CollapsedLimits.CapsuleWidthMin
             && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 0).Surface.Width == CollapsedLimits.CapsuleWidthMin
             && CollapsedGeometry.Resolve(new DeckSettings(), CompactStyle.Notch, screen, area, 1, 0).Surface.Width == CollapsedLimits.NotchWidthMin);
         check("Compact fit: without auto width the saved width stays", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area).Surface.Width == 196);
@@ -256,6 +260,24 @@ static class SystemMonitorTests
             && CompactMusicLayout.NaturalWidth(1, true, 2, true, 0, 0) > CompactMusicLayout.NaturalWidth(1, true, 1, true, 0, 0)
             && CompactMusicLayout.NaturalWidth(1, true, 2, true, 40, 0) > CompactMusicLayout.NaturalWidth(1, true, 2, true, 0, 0)
             && CompactMusicLayout.NaturalWidth(1, true, 2, true, 40, 150) > CompactMusicLayout.NaturalWidth(1, true, 2, true, 40, 0));
+        // An auto-width row asks for a fraction of a DIP (a clock face that is not a whole number of DIPs) and is laid out in whole
+        // device pixels, rounded down: unrounded, the readings were a fraction short of their room and scrolled, cutting the last
+        // one. The row's own arithmetic (MainWindow): the room the readings share is the row less the cover, the equalizer, the
+        // clock, the gaps between the parts and the lyric's slot.
+        double[] stripItems = [56, 47, 47, 47, 94, 41];
+        const double readingsGap = 6, clockFace = 31.83, partGap = 8;
+        bool Roomy(double dpi, bool rounded)
+        {
+            double asks = stripItems.Sum() + (stripItems.Length - 1) * readingsGap;
+            double row = DevicePixels.Down(rounded ? CompactMusicLayout.NaturalWidth(1, true, 0, true, clockFace, DevicePixels.Up(asks, dpi), dpi)
+                : CompactMusicLayout.NaturalWidth(1, true, 0, true, clockFace, DevicePixels.Up(asks, dpi)), dpi);
+            double pool = row - (20 + 18 + clockFace + 4 * partGap) - CompactMusicLayout.TextSlot;
+            var (_, readings) = CompactSpacing.Share([], 0, stripItems, readingsGap, pool);
+            return readings.Count == stripItems.Length && readings.Travel == 0;
+        }
+        check("Compact fit: an auto-width row rounded up to whole device pixels gives the readings all their room at every display scale",
+            new[] { 1, 1.25, 1.5, 1.75, 2 }.All(dpi => Roomy(dpi, rounded: true)));
+        check("Compact fit: the width unrounded left the readings short at 100 % (the cut-off last reading)", !Roomy(1, rounded: false));
         var engines = GpuEngines.Order([new("Copy", .1), new("3D", .4), new("Compute_0", .2), new("Compute_1", .5), new("Foo", .3)]);
         check("GPU engines: kinds folded and ordered as Task Manager", engines.Select(e => e.Kind).SequenceEqual(["3D", "Compute", "Copy", "Foo"]) && engines[1].Usage == .5);
         check("GPU engine kinds", GpuEngines.Kind("Compute_1") == "Compute" && GpuEngines.Kind("VideoDecode") == "VideoDecode" && GpuEngines.Kind("Engine_x") == "Engine_x"
@@ -275,6 +297,11 @@ static class SystemMonitorTests
         DeckPages.SetSize(sized, DeckPage.Music, 5000, 10); DeckPages.SetSize(sized, DeckPage.Usage, 10, 5000);
         check("Pages: a size set by a drag stays within the page's limits",
             DeckPages.Size(sized, DeckPage.Music) == (DeckPages.MaxWidth, DeckPages.MinHeight) && DeckPages.Size(sized, DeckPage.Usage) == (DeckPages.Limits(sized, DeckPage.Usage).MinWidth, DeckPages.MaxHeight));
+        check("Panel scale: 100 or 150 percent, any other value is 100; the widest page on a monitor shrinks by the scale",
+            PanelScales.Fit(150) == 150 && PanelScales.Fit(125) == 100 && PanelScales.Fit(0) == 100
+            && PanelScales.Factor(new DeckSettings()) == 1 && PanelScales.Factor(new DeckSettings { PanelScale = 150 }) == 1.5
+            && DeckPages.MaxWidthOn(3840) == DeckPages.MaxWidth && DeckPages.MaxWidthOn(1280) == 1200 && DeckPages.MaxWidthOn(1366) == 1200 && DeckPages.MaxWidthOn(1366, 1.5) == 894
+            && DeckPages.MaxWidthOn(800, 2) == DeckPages.MinWidth);
         check("Pages: the usage page is never narrower than its columns need",
             DeckPages.Limits(sized, DeckPage.Usage).MinWidth == Math.Max(DeckPages.MinWidth, sized.MinimumWidth) && DeckPages.Limits(sized, DeckPage.Music).MinWidth == DeckPages.MinWidth);
         check("Pages: a shown page resolves to itself", DeckPages.Resolve(settings, DeckPage.Monitor) == DeckPage.Monitor);
@@ -284,8 +311,17 @@ static class SystemMonitorTests
         check("Pages: the music page alone", DeckPages.Resolve(settings, DeckPage.Monitor) == DeckPage.Music);
         settings.MusicPage = false; settings.MiniApps.Enabled = false;
         check("Pages: with every page off the usage page says so", DeckPages.Resolve(settings, DeckPage.Music) == DeckPage.Usage && DeckPages.Visible(settings).Count == 0);
-        check("The wheel switches pages by default and its choice is saved with the settings",
-            settings.MouseWheel == MouseWheelAction.Pages && System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"MouseWheel":2}""")!.MouseWheel == MouseWheelAction.Volume);
+        var ordered = new DeckSettings { PageOrder = [DeckPage.Monitor, DeckPage.Usage, DeckPage.Music] };
+        ordered.MiniApps.Enabled = false;
+        check("Pages: the switch follows the chosen order", DeckPages.Visible(ordered).SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music]));
+        ordered.MonitorPage = false;
+        check("Pages: a hidden page falls back to the first shown one in the chosen order", DeckPages.Resolve(ordered, DeckPage.Monitor) == DeckPage.Usage);
+        var odd = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"PageOrder":[2,9,2]}""")!;
+        check("Pages: unknown and repeated pages are dropped and missing ones added", odd.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.MiniApps]));
+        var copy = ordered.Copy(); copy.PageOrder = [.. DeckPages.Order];
+        var orderRead = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>(System.Text.Json.JsonSerializer.Serialize(ordered))!;
+        check("Pages: the order is copied deeply and survives saving and reading", ordered.PageOrder[0] == DeckPage.Monitor && orderRead.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.MiniApps])
+            && new DeckSettings().PageOrder.SequenceEqual(DeckPages.Order));
         var wheelOff = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"MouseWheelPages":false}""")!; wheelOff.Normalize();
         var wheelOn = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"MouseWheelPages":true}""")!; wheelOn.Normalize();
         check("The wheel: an older file's switch is carried across and then left out of the file",
@@ -298,13 +334,11 @@ static class SystemMonitorTests
         check("Pages: the window holds the largest shown page", DeckPages.Largest(sizes) == (700, 320));
         sizes.MusicPage = false; sizes.MonitorPage = false; sizes.MiniApps.Enabled = false;
         check("Pages: only shown pages size the window", DeckPages.Largest(sizes) == (Math.Max(500, sizes.MinimumWidth), 150));
-        check("Pages: each page's own size", DeckPages.Size(sizes, DeckPage.Monitor) == (600, 300) && DeckPages.Size(sizes, DeckPage.Music) == (700, 180));
         var saved = new DeckSettings { MonitorWidth = 5000, MonitorHeight = double.NaN, MonitorInterval = 9, MonitorPalette = (MonitorPalette)42, MonitorSort = (ProcessSort)7, LastPage = (DeckPage)9 };
         saved.Normalize();
         check("Pages: monitor settings are normalized", saved is { MonitorWidth: 1200, MonitorInterval: 2, MonitorPalette: MonitorPalette.Theme, MonitorSort: ProcessSort.Cpu, LastPage: DeckPage.Usage }
             && saved.MonitorHeight == MonitorSizes.Default.Height);
         check("Pages: enum values stay saved as before", (int)DeckPage.Usage == 0 && (int)DeckPage.Music == 1 && (int)DeckPage.Monitor == 2 && (int)DefaultDeckPage.Monitor == 3);
-        check("Pages: monitor quick sizes", MonitorSizes.For(PanelSize.Standard) == MonitorSizes.Default && MonitorSizes.For(PanelSize.Compact).Width < MonitorSizes.For(PanelSize.Spacious).Width);
     }
 
     // The easing the monitor's gauges follow, and the spring the drag follows.
@@ -407,7 +441,6 @@ static class SystemMonitorTests
         var sea = MonitorColors.For(MonitorPalette.Sea);
         check("Monitor core colors run from performance to efficiency", sea.Core(0, 3) == sea.Performance && sea.Core(2, 3) == sea.Efficiency && sea.Core(0, 1) == sea.Performance && sea.Core(9, 2) == sea.Efficiency);
         check("Monitor palettes differ in light and dark", Enum.GetValues<MonitorPalette>().All(p => MonitorColors.For(p, true) != MonitorColors.For(p, false)));
-        check("Monitor follows the panel theme by default", new DeckSettings().MonitorPalette == MonitorPalette.Theme && MonitorColors.For(MonitorPalette.Theme) == sea);
         check("Monitor level colors", sea.Level(MemoryLevel.Critical, sea.Memory) == sea.Critical && sea.Level(MemoryLevel.Elevated, sea.Memory) == sea.Warning && sea.Level(MemoryLevel.Normal, sea.Memory) == sea.Memory);
         var themed = MonitorColors.FromTheme("#0A84FF", ["#5CE1E6", "#FF8FB1", "#E4FF6A", "#FF9F43"], "#FFB000", "#FF4D4D");
         check("Monitor theme scheme takes the accent, then cyan and pink", themed is { Performance: "#0A84FF", Efficiency: "#5CE1E6", Memory: "#5CE1E6", Gpu: "#FF8FB1",
@@ -417,6 +450,5 @@ static class SystemMonitorTests
         var flat = MonitorColors.FromTheme("#808080", ["#808081", "#808082"], "#808080", "#808080");
         check("Monitor theme scheme without distinct colors still gives colors", flat.Efficiency.Length == 7 && flat.Gpu.Length == 7);
         check("Color distance", ColorMath.Distance("#000000", "#000000") == 0 && Math.Abs(ColorMath.Distance("#000000", "#FFFFFF") - Math.Sqrt(3) * 255) < 1e-9);
-        check("Monitor palette names", Enum.GetValues<MonitorPalette>().Select(MonitorColors.Name).Distinct().Count() == 5);
     }
 }

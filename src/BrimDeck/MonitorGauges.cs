@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -10,6 +11,106 @@ namespace BrimDeck;
 // The system monitor page's gauges. Each draws itself and takes the size its cell gives it, so a new reading redraws it without
 // measuring anything; values ease to each reading in a little under half a second (Eased, Motion) and then rest. Hover and press
 // feedback fades in and out over Soft.Quick in the same way.
+
+// The frame rate's line under memory and network, laid out as the power line is: the program's icon (or a screen in the frame
+// rate's color, for the desktop or a program without one), the frames a
+// second and "FPS", the program's name, its readings so far as a curve, and the refresh rate of the display it is on at the right
+// end, which is also the curve's top, so it shows how far the frames stay below what the display can show (a game drawing faster
+// than its display raises the top to its highest reading). A dash while there is no reading, as without permission to read
+// Windows' frame events.
+internal sealed class FramesBlock : FrameworkElement
+{
+    private readonly string _color;
+    private readonly double _body, _caption;
+    private FrameSample? _frames;
+    private readonly DrawingCache<(IReadOnlyList<double>, double, double, double)> _curve = new();
+
+    public FramesBlock(string color, double body, double caption, double row)
+    {
+        _color = color; _body = body; _caption = caption;
+        Height = row; Focusable = false;
+        Describe();
+    }
+
+    public void Set(MonitorSnapshot snapshot)
+    {
+        var frames = snapshot.Frames.OrDefault;
+        if (ReferenceEquals(frames, _frames)) return;
+        // The curve moves with every reading; the tooltip's words only when the figure, the program or the display change.
+        string figure = Figure;
+        bool same = frames is not null && _frames is not null && frames.Program == _frames.Program && frames.Refresh == _frames.Refresh;
+        _frames = frames;
+        if (!same || Figure != figure) Describe();
+        InvalidateVisual();
+    }
+
+    private string Figure => _frames is { } frames && double.IsFinite(frames.PerSecond)
+        ? Math.Clamp(Math.Round(frames.PerSecond, MidpointRounding.AwayFromZero), 0, 999).ToString("0", System.Globalization.CultureInfo.InvariantCulture) : "—";
+    private static string Hertz(double hertz) => Math.Round(hertz).ToString("0", System.Globalization.CultureInfo.InvariantCulture) + " Hz";
+
+    private void Describe()
+    {
+        if (_frames is not { } frames)
+        {
+            ToolTip = Loc.T("帧率：暂无读数。一直没有读数时，请在设置的“系统监控”页授权读取帧率。",
+                "Frame rate: no reading. If none comes, allow reading frame rates on the System monitor page of the settings.");
+            AutomationProperties.SetName(this, Loc.T("帧率", "Frame rate"));
+            return;
+        }
+        ToolTip = Loc.T($"{frames.Program}：每秒 {Figure} 帧", $"{frames.Program}: {Figure} frames a second")
+            + Loc.T("\n前台程序的帧率；前台程序不在绘制时，显示最近一个在绘制的程序。", "\nThe frame rate of the program in front; while it draws nothing, of the last program that did.")
+            + (frames.Refresh is { } hertz ? Loc.T($"\n所在显示器刷新率 {Hertz(hertz)}", $"\nIts display's refresh rate: {Hertz(hertz)}") : "");
+        AutomationProperties.SetName(this, Loc.T($"帧率 {Figure} FPS，{frames.Program}", $"Frame rate {Figure} FPS, {frames.Program}"));
+    }
+
+    protected override Size MeasureOverride(Size availableSize) => new(0, Height);
+
+    protected override void OnRender(DrawingContext drawing)
+    {
+        double w = ActualWidth, h = ActualHeight, ppd = MonitorDraw.PixelsPerDip(this);
+        drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, h));
+        // The glyph in the room a dial takes, as the network line's arrows are, so the figures line up with memory's.
+        double badge = Math.Round(_body + 5), glyph = Math.Round(badge * .72), baseline = Math.Round(h / 2 + _body * .38), gap = Math.Round(_body * .8);
+        if (ProcessIcons.For(_frames?.Path) is { } icon)
+        {
+            double size = Math.Round(_body + 3);
+            drawing.DrawImage(icon, new Rect((badge - size) / 2, Math.Round(h / 2 - size / 2), size, size));
+        }
+        else MonitorDraw.Arrow(drawing, new Point((badge - glyph) / 2, h / 2 - glyph / 2), glyph, Math.Max(1, glyph * .09), MonitorGlyph.Screen, _frames is null ? UI.Tertiary : _color);
+        double x = badge + Math.Round(_body * .5);
+        var number = MonitorDraw.Text(Figure, _body + 1, UI.Primary, ppd, strong: true);
+        MonitorDraw.Baseline(drawing, number, x, baseline); x += number.WidthIncludingTrailingWhitespace;
+        var unit = MonitorDraw.Text("FPS", _caption, UI.Tertiary, ppd);
+        MonitorDraw.Baseline(drawing, unit, x + 3, baseline); x += 3 + unit.WidthIncludingTrailingWhitespace;
+        if (_frames is not { } frames) return;
+        // The refresh rate at the right end, then the name after the figure, cut to the room between them.
+        double right = w;
+        if (frames.Refresh is { } hertz)
+        {
+            var rate = MonitorDraw.Text(Hertz(hertz), _caption, UI.Tertiary, ppd);
+            right = w - rate.WidthIncludingTrailingWhitespace;
+            MonitorDraw.Baseline(drawing, rate, right, baseline);
+            right -= gap;
+        }
+        double nameRoom = Math.Min(right - x - gap, Math.Max(60, (right - x) * .4));
+        if (nameRoom > 24)
+        {
+            var name = MonitorDraw.Trimmed(frames.Program, _caption, UI.Tertiary, nameRoom, ppd);
+            MonitorDraw.Baseline(drawing, name, x + gap, baseline);
+            x += gap + Math.Min(nameRoom, name.WidthIncludingTrailingWhitespace);
+        }
+        // The curve in the room left, as tall as the power line's, scaled to the refresh rate (or the highest reading above it).
+        var history = frames.History;
+        double start = Math.Max(x + 10, w * .45), areaWidth = right - start, areaHeight = Math.Min(h - 4, Math.Ceiling(_body * 1.5) - 4);
+        if (history.Count >= 3 && areaWidth >= 24 && areaHeight >= 6)
+        {
+            double top = Math.Max(frames.Refresh ?? 60, history.Max());
+            var area = new Rect(start, Math.Round((h - areaHeight) / 2), areaWidth, areaHeight);
+            MonitorDraw.Place(drawing, area.TopLeft, _curve.Get((history, area.Width, area.Height, top), context =>
+                MonitorDraw.Sparkline(context, new Rect(0, 0, area.Width, area.Height), history, top, _color, .16)));
+        }
+    }
+}
 
 // A dial with the reading's letter (MonitorDraw.Dial, as the collapsed strip has it), a figure with its unit, and a detail after
 // it, on one baseline: "(C) 47 % 3.41 GHz". Aligned right, the dial still leads and the whole line ends at the right edge. As a
@@ -54,6 +155,17 @@ internal sealed class FigureGauge : FrameworkElement
         }
     }
 
+    // For screen readers: the reading and what it shows after the figure, "CPU 占用 47% · 62 °C", and on the small gauge what a
+    // click does (its Button name, which can change); the tooltip stays the help text.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.ProgressBar, Spoken,
+        () => Clicked?.Invoke(), () => _button, () => _hasShare ? _share.Target : null);
+    private string Spoken()
+    {
+        string name = _letter switch { "C" => "CPU", "G" => "GPU", _ => _letter };
+        string reading = _hasShare ? Loc.T($"{name} 占用 {_number}{_unit}", $"{name} usage {_number}{_unit}") : name + " · " + DrawnPeer.FirstLine(ToolTip);
+        return reading + (_detail.Length > 0 ? " · " + _detail : "") + (_button && !string.IsNullOrEmpty(_buttonName) ? Loc.T("，", ", ") + _buttonName : "");
+    }
+
     // detailColor: the detail's color, the tertiary text color by default (a temperature takes its level's).
     public void Set(double? share, string number, string unit, string detail, string tip, bool motion, string? detailColor = null)
     {
@@ -69,7 +181,7 @@ internal sealed class FigureGauge : FrameworkElement
     // as the page's dials are larger; a letter seven sixteenths of it).
     public static double DialRing(double size) => Math.Max(1.2, size * .1);
     public static double DialLetter(double size) => Math.Max(1, size * 7 / 16);
-    private void Hover(bool on) { if (_hover.Set(on ? 1 : 0, Motion.Enabled)) Motion.Start(this, Step); else InvalidateVisual(); }
+    private void Hover(bool on) { if (_hover.Fade(on, Motion.Enabled)) Motion.Start(this, Step); else InvalidateVisual(); }
 
     protected override Size MeasureOverride(Size availableSize) => new(0, Height);
 
@@ -154,11 +266,13 @@ internal sealed class ColumnGraph : FrameworkElement
     // The tracks and the figures under the columns, drawn again only when the figures or the size change (_labelsVersion).
     private readonly DrawingCache<(int, double, double, double)> _fixed = new();
     private int _labelsVersion;
+    private readonly string _name, _action;
     public event Action? Clicked;
 
-    public ColumnGraph(double maxColumn, double label, bool labels, double gap = 3, string? button = null)
+    // name: what the graph shows, for screen readers ("CPU 各核心占用").
+    public ColumnGraph(double maxColumn, double label, bool labels, double gap = 3, string? button = null, string name = "")
     {
-        _maxColumn = maxColumn; _label = label; _labels = labels; _gap = gap; _button = button is not null;
+        _maxColumn = maxColumn; _label = label; _labels = labels; _gap = gap; _button = button is not null; _name = name; _action = button ?? "";
         ClipToBounds = true; SnapsToDevicePixels = true;
         if (button is not null) { Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); }
         else ToolTipService.SetPlacement(this, System.Windows.Controls.Primitives.PlacementMode.Mouse);
@@ -180,10 +294,24 @@ internal sealed class ColumnGraph : FrameworkElement
         _columns = columns;
         if (_tipIndex >= 0 && _tipIndex < columns.Count && _tip.IsOpen) _tip.Content = columns[_tipIndex].Tip;
         if (moving) Motion.Start(this, Step); else InvalidateVisual();
+        // Once per reading, not per frame: the columns a screen reader lists are these.
+        DrawnPeer.Refresh(this);
     }
     private bool Step(double now) { InvalidateVisual(); return _values.Any(v => v.Moving(now)) || _ticks.Any(t => t.Moving(now)); }
 
     protected override Size MeasureOverride(Size availableSize) => new(0, 0);
+
+    // For screen readers: a list of the columns, each read as its tooltip says ("性能核 3 · 47% · 3.41 GHz"); as a button, the
+    // graph's name and what a click does.
+    protected override AutomationPeer OnCreateAutomationPeer() => _button
+        ? new DrawnPeer(this, AutomationControlType.Button, () => _name + Loc.T("，", ", ") + _action, () => Clicked?.Invoke())
+        : new DrawnPeer(this, AutomationControlType.List, () => _name, parts: Parts);
+    private IEnumerable<DrawnPart> Parts()
+    {
+        var (xs, column) = Geometry(ActualWidth);
+        for (int i = 0; i < xs.Length; i++)
+            yield return new DrawnPart(i.ToString(), _columns[i].Tip.Replace("\n", Loc.T("，", ", ")), new Rect(xs[i], 0, column, ActualHeight));
+    }
 
     // The room under the columns for their figures. With the figure line alone, the line's baseline sits on the graph's bottom
     // edge, level with the foot of the graph beside it (the engines' names and the small cores); a second line needs room for both.
@@ -264,21 +392,30 @@ internal sealed class BlockGauge : FrameworkElement
 {
     private readonly string _color;
     private Eased _value, _tick, _hover = new(0, Eased.Hover);
-    private bool _hasTick;
+    private bool _hasTick, _hasValue;
+    private readonly string _action;
     public event Action? Clicked;
 
-    public BlockGauge(string color, string button) { _color = color; Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); SnapsToDevicePixels = true; }
+    public BlockGauge(string color, string button) { _color = color; _action = button; Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); SnapsToDevicePixels = true; }
 
-    public void Set(double value, double? tick, string tip, bool motion)
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Button, Spoken, () => Clicked?.Invoke());
+    // For screen readers, named as the block it is, with the memory its line shows, so it never reads the same as the small GPU figure beside the main
+    // gauge that does the same thing (I-02): "GPU 占用块：占用 12% · 显存 18%，切换为以 GPU 为主".
+    // Without a reading it says what the tooltip says (the adapter has none, and why), never a usage of zero.
+    private string Spoken() => MonitorSpeech.GpuBlock(_hasValue ? _value.Target : null, _hasTick ? _tick.Target : null, DrawnPeer.FirstLine(ToolTip), _action);
+
+    // value: the adapter's usage, or null while it has no reading (the block then draws empty and reads as having none).
+    public void Set(double? value, double? tick, string tip, bool motion)
     {
         ToolTip = tip;
-        bool moving = _value.Set(value, motion);
+        _hasValue = value is not null;
+        bool moving = _value.Set(value ?? 0, motion);
         if (tick is { } t) moving |= _tick.Set(t, motion && _hasTick);
         _hasTick = tick is not null;
         if (moving) Motion.Start(this, Step); else InvalidateVisual();
     }
     private bool Step(double now) { InvalidateVisual(); return _value.Moving(now) || _tick.Moving(now) || _hover.Moving(now); }
-    private void Hover(bool on) { if (_hover.Set(on ? 1 : 0, Motion.Enabled)) Motion.Start(this, Step); else InvalidateVisual(); }
+    private void Hover(bool on) { if (_hover.Fade(on, Motion.Enabled)) Motion.Start(this, Step); else InvalidateVisual(); }
 
     protected override Size MeasureOverride(Size availableSize) => new(0, 0);
 
@@ -318,6 +455,10 @@ internal sealed class MemoryBlock : FrameworkElement
         _colors = colors; _compact = compact; _body = body; _caption = caption;
         Height = compact ? Math.Ceiling(body * 1.7) : Math.Ceiling(body * 1.7 + 6 + 5 + 5 + 3);
     }
+
+    // For screen readers: "物理内存 63% · 正常", the memory in use as its value.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.ProgressBar, () => DrawnPeer.FirstLine(ToolTip),
+        share: () => _memory?.UsedFraction);
 
     public void Set(Reading<MemorySample> reading, bool motion)
     {
@@ -392,7 +533,8 @@ internal sealed class MemoryBlock : FrameworkElement
 }
 
 // Download and upload: a badge with the arrow, the rate, and the last minute as a soft line, each scaled to its own highest
-// reading: under the rate in a block, after it on a line (Lines), or not at all where both share a line with memory (Line).
+// reading: after the rate on a line (Lines, and Blocks too: a block of its own under the rate took twice the height for a line that
+// says little more, and the core columns use it better), or not at all where both share a line with memory (Line).
 internal sealed class NetworkBlock : FrameworkElement
 {
     private readonly MonitorColors _colors;
@@ -404,9 +546,12 @@ internal sealed class NetworkBlock : FrameworkElement
 
     public NetworkBlock(MonitorColors colors, MetricsMode mode, double body, double caption)
     {
-        _colors = colors; _mode = mode; _body = body; _caption = caption;
-        Height = mode == MetricsMode.Blocks ? Math.Ceiling(body * 1.7 + 4 + body * 2) : Math.Ceiling(body * 1.7);
+        _colors = colors; _mode = mode == MetricsMode.Blocks ? MetricsMode.Lines : mode; _body = body; _caption = caption;
+        Height = Math.Ceiling(body * 1.7);
     }
+
+    // For screen readers: "网络 · 下载 1.2 MB/s · 上传 85 KB/s".
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => Loc.T("网络 · ", "Network · ") + DrawnPeer.FirstLine(ToolTip));
 
     public void Set(Reading<NetworkSample> reading, IReadOnlyList<double> down, IReadOnlyList<double> up)
     {
@@ -439,11 +584,11 @@ internal sealed class NetworkBlock : FrameworkElement
         x += number.WidthIncludingTrailingWhitespace;
         if (q.Unit.Length > 0) { var unit = MonitorDraw.Text(q.Unit, _caption, UI.Tertiary, ppd); MonitorDraw.Baseline(drawing, unit, x + 3, baseline); x += 3 + unit.WidthIncludingTrailingWhitespace; }
         if (_mode == MetricsMode.Line || history.Count < 3) return;
-        // On a line the sparkline takes the rest of the half after the rate, at the line's height; in a block, the row under it.
-        // Measured before a Rect is made: a Rect does not take a negative size, and a narrow half leaves none.
-        double start = _mode == MetricsMode.Lines ? Math.Max(x + 10, left + width * .45) : left;
-        double areaWidth = left + width - start, areaTop = _mode == MetricsMode.Lines ? 2 : line + 4;
-        double areaHeight = _mode == MetricsMode.Lines ? line - 4 : ActualHeight - line - 4;
+        // The sparkline takes the rest of the half after the rate, centred on the line and as tall as the power line's curve (a drive
+        // line less 4), so the page's small curves are one size. Measured before a Rect is made: a Rect does not take a negative size,
+        // and a narrow half leaves none.
+        double start = Math.Max(x + 10, left + width * .45);
+        double areaWidth = left + width - start, areaHeight = Math.Min(line - 4, Math.Ceiling(_body * 1.5) - 4), areaTop = Math.Round((line - areaHeight) / 2);
         if (areaWidth >= 24 && areaHeight >= 6) Sparkline(drawing, new Rect(start, areaTop, areaWidth, areaHeight), history, color);
     }
 
@@ -455,51 +600,71 @@ internal sealed class NetworkBlock : FrameworkElement
 
 }
 
-// The internal drives, one line per physical drive (Storage.Rows), as tall as a row of the process list so its lines and the
-// list's share their baselines: a drive glyph, the drive's letters ("C:", or "C: D:" for a drive split into volumes), its space
-// in use against its size, a bar of the space in use as memory's bar draws it, split into a segment per volume, and, where the
-// drive reports one, its temperature at the end in its level's color. The columns line up from line to line; the temperature
-// column takes room only while a line has a temperature, so no line ends in a gap. With more drives than lines the last line
-// holds the others ("+2"). The bars ease to each reading, and the lines fade in when the first reading arrives.
+// The internal drives' volumes, an entry each (Storage.Rows) in lines tighter than the process list's rows (MonitorLayout.StorageRow),
+// filled left to right in one or two columns: a drive glyph, the volume's letter, its space in use
+// against its size, a bar of the space in use as memory's bar draws it, and, where its physical drive reports one, that drive's
+// temperature at the end in its level's color (volumes on one drive show the same). The parts line up from entry to entry; the
+// temperature takes room only while an entry has one, so no entry ends in a gap. With more volumes than places the last entry
+// holds the others ("+2"). The bars ease to each reading, and the entries fade in when the first reading arrives.
 internal sealed class StorageBlock : FrameworkElement
 {
-    private const double Gap = 2;
+    // Between the columns.
+    private const double ColumnGap = 20;
     private readonly MonitorColors _colors;
     private readonly double _body, _caption, _row;
-    private readonly int _room;
+    private readonly int _columns, _room;
     private readonly bool _temperatures;
     private IReadOnlyList<StorageRow> _rows = [];
-    private Eased[][] _segments = [];
+    private Eased[] _used = [];
     private Eased _shown, _heat;
 
-    // lines: the lines the page keeps for the drives; room: the most it shows; temperatures: whether lines carry temperatures.
-    public StorageBlock(MonitorColors colors, double body, double caption, double row, int lines, int room, bool temperatures)
+    // lines and columns: the places the page keeps for the volumes; temperatures: whether entries carry temperatures.
+    public StorageBlock(MonitorColors colors, double body, double caption, double row, int lines, int columns, bool temperatures)
     {
-        _colors = colors; _body = body; _caption = caption; _row = row; _room = Math.Max(1, room); _temperatures = temperatures;
+        _colors = colors; _body = body; _caption = caption; _row = row; _columns = Math.Max(1, columns);
+        _room = Math.Max(1, lines) * _columns; _temperatures = temperatures;
         Height = Math.Max(1, lines) * row;
         SnapsToDevicePixels = true;
+    }
+
+    // For screen readers: a list of the volumes' entries, each read as its line shows it; the entries lie as OnRender places them,
+    // filled left to right across the columns.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.List, () => Loc.T("硬盘", "Drives"), parts: Parts);
+    private IEnumerable<DrawnPart> Parts()
+    {
+        if (_shown.Target <= 0) yield break;
+        double cell = Math.Floor((ActualWidth - ColumnGap * (_columns - 1)) / _columns);
+        for (int i = 0; i < _rows.Count; i++)
+            yield return new DrawnPart(i + " " + _rows[i].Label, Spoken(_rows[i]),
+                new Rect(i % _columns * (cell + ColumnGap), i / _columns * _row, Math.Max(0, cell), _row));
+    }
+    // An entry as its line shows it: "C: · 246 / 300 GB · 44 °C".
+    private static string Spoken(StorageRow row)
+    {
+        var (used, total, unit) = Storage.Sizes(row.Used, row.Total);
+        return $"{row.Label} · {used} / {total} {unit}" + (row.Celsius is { } celsius ? " · " + Temperatures.Detail(celsius) : "");
     }
 
     public void Set(IReadOnlyList<StorageDrive> drives, bool motion)
     {
         var rows = Storage.Rows(drives, _room, _temperatures);
-        bool same = rows.Count == _segments.Length && rows.Select(row => row.Segments.Count).SequenceEqual(_segments.Select(segments => segments.Length));
-        // New lines start from an empty bar, so a first reading grows into place as the page's other values do.
-        if (!same) _segments = [.. rows.Select(row => new Eased[row.Segments.Count])];
+        // New entries start from an empty bar, so a first reading grows into place as the page's other values do.
+        if (rows.Count != _used.Length) _used = new Eased[rows.Count];
         bool moving = false;
-        for (int i = 0; i < rows.Count; i++)
-            for (int s = 0; s < rows[i].Segments.Count; s++) moving |= _segments[i][s].Set(rows[i].Segments[s].Used, motion);
+        for (int i = 0; i < rows.Count; i++) moving |= _used[i].Set(rows[i].UsedFraction, motion);
         if (rows.Count > 0) _rows = rows;
         moving |= _shown.Set(rows.Count > 0 ? 1 : 0, motion);
         moving |= _heat.Set(rows.Any(row => row.Celsius is not null) ? 1 : 0, motion);
-        ToolTip = rows.Count == 0 ? null : string.Join("\n", rows.SelectMany(row => row.Drives).Select(Describe));
+        ToolTip = rows.Count == 0 ? null : string.Join("\n", drives.Select(Describe));
         if (moving) Motion.Start(this, Step); else InvalidateVisual();
+        // Once per reading, not per frame: the entries a screen reader lists are these.
+        DrawnPeer.Refresh(this);
     }
     private bool Step(double now)
     {
         InvalidateVisual();
         if (_shown.Moving(now) || _heat.Moving(now)) return true;
-        foreach (var segments in _segments) foreach (var segment in segments) if (segment.Moving(now)) return true;
+        foreach (var used in _used) if (used.Moving(now)) return true;
         return false;
     }
 
@@ -540,20 +705,21 @@ internal sealed class StorageBlock : FrameworkElement
         double heatWidth = (MonitorDraw.Text("100", _body, UI.Primary, ppd, strong: true).WidthIncludingTrailingWhitespace + 2 + unitText.WidthIncludingTrailingWhitespace + space)
             * Math.Clamp(_heat.At(now), 0, 1);
         double glyph = Math.Round(badge * 9 / 16), labelX = badge + Math.Round(_body * .5), figureX = labelX + labels + space, barX = figureX + figures + space;
-        double barEnd = Math.Max(barX, w - heatWidth);
+        double cell = Math.Floor((w - ColumnGap * (_columns - 1)) / _columns);
+        double barEnd = Math.Max(barX, cell - heatWidth);
         for (int i = 0; i < _rows.Count; i++)
         {
             var row = _rows[i]; var t = texts[i];
-            double top = i * _row, baseline = Math.Round(top + _row / 2 + _body * .36), middle = top + _row / 2;
-            MonitorDraw.Arrow(drawing, new Point((badge - glyph) / 2, middle - glyph / 2), glyph, Math.Max(1, glyph * .13), MonitorGlyph.Drive, UI.Secondary);
-            MonitorDraw.Baseline(drawing, t.Label, labelX, baseline);
-            MonitorDraw.Baseline(drawing, t.Used, figureX, baseline);
-            MonitorDraw.Baseline(drawing, t.Size, figureX + t.Used.WidthIncludingTrailingWhitespace, baseline);
-            if (barEnd - barX >= 16) Bar(drawing, new Rect(barX, Math.Round(middle - 2), barEnd - barX, 4), row, i, now);
+            double left = i % _columns * (cell + ColumnGap), top = i / _columns * _row, baseline = Math.Round(top + _row / 2 + _body * .36), middle = top + _row / 2;
+            MonitorDraw.Arrow(drawing, new Point(left + (badge - glyph) / 2, middle - glyph / 2), glyph, Math.Max(1, glyph * .13), MonitorGlyph.Drive, UI.Secondary);
+            MonitorDraw.Baseline(drawing, t.Label, left + labelX, baseline);
+            MonitorDraw.Baseline(drawing, t.Used, left + figureX, baseline);
+            MonitorDraw.Baseline(drawing, t.Size, left + figureX + t.Used.WidthIncludingTrailingWhitespace, baseline);
+            if (barEnd - barX >= 16) Bar(drawing, new Rect(left + barX, Math.Round(middle - 2), barEnd - barX, 4), row, i, now);
             if (row.Celsius is { } celsius && heatWidth > 1)
             {
                 var number = MonitorDraw.Text(Temperatures.Format(celsius), _body, _colors.Level(row.Level, UI.Primary), ppd, strong: true);
-                double right = w - unitText.WidthIncludingTrailingWhitespace;
+                double right = left + cell - unitText.WidthIncludingTrailingWhitespace;
                 MonitorDraw.Baseline(drawing, unitText, right, baseline);
                 MonitorDraw.Baseline(drawing, number, right - 2 - number.WidthIncludingTrailingWhitespace, baseline);
             }
@@ -561,20 +727,12 @@ internal sealed class StorageBlock : FrameworkElement
         if (opacity < .999) drawing.Pop();
     }
 
-    // The volumes side by side, each its share of the bar, each filled to its own used share, as memory's bar is drawn.
+    // The space in use, as memory's bar is drawn.
     private void Bar(DrawingContext drawing, Rect r, StorageRow row, int index, double now)
     {
-        double radius = r.Height / 2, gaps = Gap * (row.Segments.Count - 1), x = r.X, room = Math.Max(0, r.Width - gaps);
-        var track = UI.Brush(UI.Track); var fill = UI.Brush(_colors.Storage);
-        var eased = index < _segments.Length ? _segments[index] : [];
-        for (int s = 0; s < row.Segments.Count; s++)
-        {
-            double width = s == row.Segments.Count - 1 ? r.Right - x : Math.Round(room * row.Segments[s].Width);
-            if (width <= 0) continue;
-            drawing.DrawRoundedRectangle(track, null, new Rect(x, r.Y, width, r.Height), radius, radius);
-            double used = Math.Clamp(s < eased.Length ? eased[s].At(now) : row.Segments[s].Used, 0, 1) * width;
-            if (used > .5) drawing.DrawRoundedRectangle(fill, null, new Rect(x, r.Y, Math.Max(r.Height, used), r.Height), radius, radius);
-            x += width + Gap;
-        }
+        double radius = r.Height / 2;
+        drawing.DrawRoundedRectangle(UI.Brush(UI.Track), null, r, radius, radius);
+        double used = Math.Clamp(index < _used.Length ? _used[index].At(now) : row.UsedFraction, 0, 1) * r.Width;
+        if (used > .5) drawing.DrawRoundedRectangle(UI.Brush(_colors.Storage), null, new Rect(r.X, r.Y, Math.Max(r.Height, used), r.Height), radius, radius);
     }
 }

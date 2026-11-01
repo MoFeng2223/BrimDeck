@@ -13,7 +13,7 @@ public sealed partial class SettingsWindow
 {
     internal const int ModulesPage = 15;
     private readonly Dictionary<string, int> _moduleSettingsPages = [];
-    private int _nextModuleSettingsPage = 16;
+    private int _nextModuleSettingsPage = _pages.Length;
     private int _moduleTab;
     private string? _moduleActionMessage;
     private readonly HashSet<string> _expandedModules = [];

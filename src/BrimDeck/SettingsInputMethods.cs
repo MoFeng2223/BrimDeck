@@ -59,7 +59,7 @@ public sealed partial class SettingsWindow
     private void InputMethodControlSettings()
     {
         SectionTitle(Loc.T("快捷切换", "Quick switching"));
-        Group(HotkeyRow(false, inputMethod: true));
+        Group(HotkeyRow(HotkeyKind.Expand, inputMethod: true));
         var gestureHelp = TextLine(InputMethodGesture.Hint(S.InputMethods.Shortcut), 12, TextSecondary);
         gestureHelp.TextWrapping = TextWrapping.Wrap; gestureHelp.Margin = new Thickness(0, 0, 0, 10); _content.Children.Add(gestureHelp);
         var resetShortcut = ActionButton(Loc.T("恢复 Win + 空格", "Restore Win + Space"), () => { Change(s => s.InputMethods.Shortcut = "Win+Space"); ShowPage(InputMethodsPage); });
@@ -138,7 +138,7 @@ public sealed partial class SettingsWindow
             up.ToolTip = Loc.T("上移", "Move up"); down.ToolTip = Loc.T("下移", "Move down");
             buttons.Children.Add(up); buttons.Children.Add(down); Grid.SetColumn(buttons, 3); grid.Children.Add(buttons);
             actions[row] = (up, down);
-            AttachDrag(handle, () => rows, InputMethodRowHeight, _ => SaveOrder());
+            AttachDrag(handle, item.Name, () => rows, InputMethodRowHeight, _ => SaveOrder());
             rows.Children.Add(row);
         }
         RefreshArrows();
@@ -166,8 +166,8 @@ public sealed partial class SettingsWindow
         if (string.IsNullOrWhiteSpace(saved)) return "";
         if (!InputMethodGesture.TryParse(saved, out _, out string canonical))
             return Loc.T("无法使用这个组合键，请重新录制。", "This combination cannot be used. Record another shortcut.");
-        if (SameHotkey(canonical, S.HideHotkey) || SameHotkey(canonical, S.ExpandHotkey))
-            return Loc.T("与隐藏/显示或展开快捷键重复。", "This conflicts with the hide/show or expand shortcut.");
+        if (SameHotkey(canonical, S.HideHotkey) || SameHotkey(canonical, S.ExpandHotkey) || SameHotkey(canonical, S.ResizeHotkey))
+            return Loc.T("与隐藏/显示、展开或调整大小快捷键重复。", "This conflicts with the hide/show, expand or resize shortcut.");
         return "";
     }
 }

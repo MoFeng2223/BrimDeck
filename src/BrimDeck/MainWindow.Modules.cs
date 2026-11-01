@@ -106,8 +106,9 @@ public partial class MainWindow
     { if (_modulePageMenu is not null) _modulePageMenu.IsOpen = false; _modulePageMenu = null; _modulePage?.Dispose(); _modulePage = null; _modulePageEntry = null; MiniAppsContent.Children.Clear(); }
     private void DismissExpandedFromEscape()
     {
+        if (_moveArmed) { CancelMove(); return; }
         if (IsMiniAppsPage && !ModuleControlsVisible && _modulePage?.CancelAdjustment() == true) return;
-        SetExpanded(false);
+        SetExpanded(false, keyboard: true);
     }
     private bool HoldModuleAdjustment()
     {

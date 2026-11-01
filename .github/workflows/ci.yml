@@ -1,9 +1,11 @@
 name: Checks
-# Every pull request into dev or main must build and pass the tests that need no installed players or accounts.
+# Every pull request into dev, main or a release/<version> branch must build and pass the tests that need no installed
+# players or accounts, leave releases/ to the maintainer, and label a new settings migration step with the version its
+# target branch builds.
 # The install, in-app update and uninstall test stays in the release workflow: it installs software and takes minutes.
 on:
   pull_request:
-    branches: [dev, main]
+    branches: [dev, main, 'release/**']
   workflow_dispatch:
 permissions:
   contents: read
@@ -19,10 +21,24 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          # The checks below compare with the target branch and look for release branches and tags.
+          fetch-depth: 0
+      # Release notes files set the version every build takes, so only the repository owner adds or changes them.
+      - name: Release notes files
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
+        run: |
+          $changed = @(git diff --name-only "origin/$env:GITHUB_BASE_REF...HEAD" -- releases/)
+          if ($LASTEXITCODE -ne 0) { throw 'The changes could not be compared with the target branch.' }
+          if ($changed.Count -gt 0) { throw "Files under releases/ are changed by the maintainer only. Remove these changes: $($changed -join ', ')" }
+      - name: Settings migration labels
+        if: github.event_name == 'pull_request'
+        run: ./scripts/Test-MigrationVersions.ps1 -TargetBranch $env:GITHUB_BASE_REF
       - uses: actions/setup-dotnet@v6.0.0
         with:
           dotnet-version: '10.0.x'
       - name: Build
+        id: build
         run: |
           dotnet build BrimDeck.sln -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
@@ -34,3 +50,19 @@ jobs:
         run: |
           dotnet run --project tests/BrimDeck.MediaTests -c Release --no-build
           if ($LASTEXITCODE -ne 0) { throw 'Media tests failed.' }
+      # The Windows-native checks that hold on a hosted runner: WPF layout and drawing, dispatcher behaviour and the sensor guard.
+      # "--hosted" leaves out what reads the machine itself (graphics adapters, the display, temperatures, power and battery),
+      # which a virtual machine without a GPU or battery cannot answer for the code; a developer runs all of it without the flag.
+      - name: Windows tests (hosted subset)
+        run: |
+          dotnet run --project tests/BrimDeck.WindowsTests -c Release --no-build -- --hosted
+          if ($LASTEXITCODE -ne 0) { throw 'Windows tests failed.' }
+      # Started by hand from the Actions tab: every Windows check, to see which of the left-out ones this runner can answer.
+      # It never fails the run; the log is the result.
+      - name: Windows tests (everything, for information)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && github.event_name == 'workflow_dispatch' }}
+        continue-on-error: true
+        timeout-minutes: 8
+        run: |
+          dotnet run --project tests/BrimDeck.WindowsTests -c Release --no-build
+          if ($LASTEXITCODE -ne 0) { throw 'Windows tests failed.' }
