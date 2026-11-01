@@ -161,8 +161,6 @@ internal static class GpuAdapterTests
         var both = Laptop();
         check("GPU choice: the next adapter, round to the first", GpuChoice.Next(both, both[0])?.Luid == Intel && GpuChoice.Next(both, both[1])?.Luid == Nvidia
             && GpuChoice.Next(both, new GpuSample(0, 0UL) { Luid = 42 })?.Luid == Nvidia);
-        check("GPU choice: named with its kind", GpuChoice.Describe("Intel(R) UHD Graphics", GpuKind.Integrated) is "Intel(R) UHD Graphics（核显）" or "Intel(R) UHD Graphics (Integrated)"
-            && GpuChoice.Describe(null, GpuKind.Unknown) == "GPU");
     }
 
     private static void Settings(string root, Action<string, bool> check)

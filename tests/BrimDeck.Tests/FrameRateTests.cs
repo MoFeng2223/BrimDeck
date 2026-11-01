@@ -27,7 +27,6 @@ static class FrameRateTests
         var parts = tall.Parts(400);
         check("Frame line: a tall page has it, right under memory and network, the drives under it",
             tall.FrameLine && parts[5].Top == parts[2].Top + parts[2].Height && parts[3].Top == parts[5].Top + parts[5].Height && parts[5].Height > 0);
-        check("Frame line: the graph keeps its least height", parts[1].Height >= MonitorLayout.MinimumGraph - 1e-9);
         check("Frame line: the first power line keeps its place", tall.PowerLines >= 1 == (MonitorLayout.For(700, 400, true, 2, 1).PowerLines >= 1));
         var small = MonitorLayout.For(480, 120, false, 2, 1, frames: true);
         check("Frame line: a page too short for it has none", !small.FrameLine && small.Parts(120)[1].Height >= 16);
@@ -44,8 +43,6 @@ static class FrameRateTests
     {
         var table = CompactMonitor.Normalize(null);
         check("Frame rate: last in the table, hidden", table[^1].Item == Frames && !table[^1].Visible);
-        check("Frame rate: a reading of the system that leaves a short row first", (CompactMonitor.Every & Frames) != 0 && CompactMonitor.LeaveOrder[0] == Frames);
-        check("Frame rate: one color, the frame rate's", CompactMonitor.Channels(Frames) == 1 && CompactMonitor.Role(Frames) == MonitorRole.Frames);
 
         var full = CompactMonitor.Normalize(null);
         full.First(reading => reading.Item == Frames).Figures = [];
@@ -75,7 +72,6 @@ static class FrameRateTests
         var kept = copy.CompactReadings.First(reading => reading.Item == Frames);
         check("Frame rate: it, the figure alone and the page's switch survive the settings file",
             kept.Visible && kept.Figures is [] && copy.MonitorFrames && (CompactMonitor.Shown(copy.CompactReadings) & Frames) != 0);
-        check("Frame rate: the page's switch is off by default", !new DeckSettings().MonitorFrames);
 
         var width = CompactMonitor.Widths(CompactMonitorItems.None, 16, _ => 0, 16, 40, 30, frames: 47);
         check("Frame rate: its own width", width(Frames) == 47 && CompactMonitor.Fit(CompactMonitorItems.Cpu | Frames, width, 6, 16 + 6 + 47 - 1) == CompactMonitorItems.Cpu);

@@ -319,15 +319,36 @@ internal sealed class BatteryProvider
             status.BatteryLifeTime != uint.MaxValue ? TimeSpan.FromSeconds(status.BatteryLifeTime) : null, (status.SystemStatusFlag & 1) != 0);
     }
 
-    // The effective power mode; the zero GUID (Balanced) when the call is not there.
+    // The effective power mode; the zero GUID (Balanced) when the call is not there. Asking for it waits on the power service, 130 ms and
+    // more on some machines, so it is asked once and again only after Windows reports that the effective power mode changed (the power
+    // slider or Battery saver, version 1 of the notifications; Windows calls back once at once on registering). Without the notifications
+    // it is asked every time, as before.
+    private static readonly Lock OverlayGate = new();
+    private static readonly ModeChanged OnModeChanged = (_, _) => Interlocked.Increment(ref _modeChanges);
+    private static int _modeChanges;
+    private static bool _modeWatched, _modeTried;
+    private static (Guid Scheme, int At)? _overlay;
     private static Guid Overlay()
     {
-        try { return PowerGetEffectiveOverlayScheme(out var scheme) == 0 ? scheme : Guid.Empty; }
-        catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException) { return Guid.Empty; }
+        lock (OverlayGate)
+        {
+            try
+            {
+                if (!_modeTried) { _modeTried = true; _modeWatched = PowerRegisterForEffectivePowerModeNotifications(1, OnModeChanged, IntPtr.Zero, out _) == 0; }
+                int changes = Volatile.Read(ref _modeChanges);
+                if (_modeWatched && _overlay is { } known && known.At == changes) return known.Scheme;
+                var scheme = PowerGetEffectiveOverlayScheme(out var read) == 0 ? read : Guid.Empty;
+                _overlay = (scheme, changes);
+                return scheme;
+            }
+            catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException) { return Guid.Empty; }
+        }
     }
+    private delegate void ModeChanged(int mode, IntPtr context);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct SystemPowerStatus { public byte ACLineStatus, BatteryFlag, BatteryLifePercent, SystemStatusFlag; public uint BatteryLifeTime, BatteryFullLifeTime; }
     [DllImport("kernel32.dll")] private static extern bool GetSystemPowerStatus(out SystemPowerStatus status);
     [DllImport("powrprof.dll")] private static extern uint PowerGetEffectiveOverlayScheme(out Guid scheme);
+    [DllImport("powrprof.dll")] private static extern int PowerRegisterForEffectivePowerModeNotifications(uint version, ModeChanged callback, IntPtr context, out IntPtr registration);
 }

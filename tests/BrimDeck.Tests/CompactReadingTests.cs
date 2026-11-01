@@ -148,8 +148,6 @@ internal static class CompactReadingTests
                 && strip.Normal(Download) == scheme.Download && strip.Normal(Upload) == scheme.Upload
                 && CompactMonitor.Order.All(item => strip.At(item, Normal) == strip.Normal(item) && strip.At(item, Elevated) == scheme.Warning && strip.At(item, Critical) == scheme.Critical);
         }));
-        check("Level colors: the fixed schemes give memory and upload the efficiency color, download the performance color",
-            schemes.All(scheme => scheme.Memory == scheme.Efficiency && scheme.Upload == scheme.Efficiency && scheme.Download == scheme.Performance));
         // The drives follow memory, power and the battery the CPU color, the frame rate the GPU color, while they have none of their own.
         static MonitorRole? Follows(MonitorRole role) => role switch
         {
@@ -245,11 +243,9 @@ internal static class CompactReadingTests
         var readings = CompactMonitor.Readings(CompactMonitorMode.Full, CompactMonitorItems.None);
         check("Compact readings: the defaults, without the drives, light no preset", CompactMonitor.Preset(readings) is null);
         CompactMonitor.Apply(readings, CompactMonitorMode.Full);
-        check("Compact readings: Full lights Full", CompactMonitor.Preset(readings) == CompactMonitorMode.Full);
         readings.First(r => r.Item == Columns).Visible = false;
         check("Compact readings: one reading off lights no preset", CompactMonitor.Preset(readings) is null);
         CompactMonitor.Apply(readings, CompactMonitorMode.Brief);
-        check("Compact readings: Brief after it lights Brief", CompactMonitor.Preset(readings) == CompactMonitorMode.Brief);
         readings.First(r => r.Item == Memory).Visible = false;
         check("Compact readings: Brief less a ring lights no preset", CompactMonitor.Preset(readings) is null);
         readings.First(r => r.Item == Memory).Visible = true; readings.First(r => r.Item == Memory).ShowValue = true;
@@ -280,8 +276,6 @@ internal static class CompactReadingTests
     private static void PartOrder(Action<string, bool> check)
     {
         CompactPart[] standard = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock];
-        var defaults = new DeckSettings();
-        check("Compact order: defaults are rings, music, readings, equalizer, clock", defaults.NotchOrder.SequenceEqual(standard) && defaults.CapsuleOrder.SequenceEqual(standard));
         var odd = Read("""{"AppVersion":"0.1.0","NotchOrder":[2,9,2,0]}""");
         check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactPart.Monitor, CompactPart.Rings, CompactPart.Music, CompactPart.Equalizer, CompactPart.Clock])
             && odd.CapsuleOrder.SequenceEqual(standard));

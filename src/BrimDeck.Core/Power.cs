@@ -109,16 +109,6 @@ public static class PowerResolver
         return sum;
     }
 
-    // Where a figure comes from, in the words the page shows beside it.
-    public static string SourceName(PowerSample sample) => sample.Source switch
-    {
-        PowerSource.SystemMeter => Loc.T("整机能量计", "System meter"),
-        PowerSource.Battery => Loc.T("电池放电", "Battery discharge"),
-        _ => Loc.T("部件合计", "Sum of parts")
-    };
-    // "实测" or "估算": a figure that is not a measurement is always marked.
-    public static string OriginName(PowerSample sample) => sample.Origin == PowerOrigin.Measured ? Loc.T("实测", "Measured") : Loc.T("估算", "Estimate");
-
     // The counters behind the first source and the components: instance names of the Energy Meter and Power Meter counters
     // (milliwatts) turned into watts. RAPL domains are named "RAPL_Package<N>_<domain>": PKG is the package (cores, graphics and the
     // uncore; one per socket), DRAM the memory behind it; PP0 and PP1 are parts of PKG and not added to it. Any other channel is a

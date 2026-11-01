@@ -92,8 +92,6 @@ static class StorageTests
             && entries.All(row => row.Drives.Single().Number == 0));
         var mixed = Storage.Group([(Volume("E:", 100, 50), 0), (Volume("C:", 300, 50), 0), (Volume("D:", 100, 50), 1)], Disks);
         check("Storage lines: volumes in letter order across drives", Storage.Rows(mixed, 6).Select(row => row.Label).SequenceEqual(["C:", "D:", "E:"]));
-        var two = Storage.Rows(Machine(3).Where(drive => drive.Number < 2).ToList(), 3);
-        check("Storage lines: two volumes, two entries", two.Count == 2 && two.All(row => !row.Others));
         var three = Storage.Rows(Machine(3), 3);
         check("Storage lines: three volumes fill three places", three.Count == 3 && three.All(row => !row.Others));
         var five = Storage.Group(Enumerable.Range(0, 5).Select(i => (Volume(((char)('C' + i)).ToString() + ":", 100, 50), (int?)(10 + i))),

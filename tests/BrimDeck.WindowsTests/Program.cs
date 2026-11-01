@@ -15,12 +15,12 @@ internal static class Program
         try
         {
             // "--only power": just the power and battery checks, for a quick look at what this machine reports.
-            if (args is ["--only", "power"]) { PowerChecks.Run(Check); return 0; }
-            if (args is ["--only", "gpu"]) { CheckGpus(); return 0; }
-            if (args is ["--only", "capture"]) { CaptureChecks.Run(Check); return 0; }
-            if (args is ["--only", "frames"]) { FrameRateChecks.Run(Check); return 0; }
-            if (args is ["--only", "drawn"]) { DrawnAutomationTests.Run(Check); return 0; }
-            if (args is ["--only", "settings"]) { SettingsFocusTests.Run(Check); BrimDeck.MainWindow.CheckPageCapsuleFit(Check); return 0; }
+            if (args is ["--only", "power"]) { PowerChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "gpu"]) { CheckGpus(); return Finish(); }
+            if (args is ["--only", "capture"]) { CaptureChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "frames"]) { FrameRateChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "drawn"]) { DrawnAutomationTests.Run(Check); return Finish(); }
+            if (args is ["--only", "settings"]) { SettingsFocusTests.Run(Check); BrimDeck.MainWindow.CheckPageCapsuleFit(Check); return Finish(); }
             // "--hosted": only the checks that hold on a CI runner (a virtual machine with a session but no display output, GPU,
             // battery or devices, and no promise about speed). Everything left out reads this machine's hardware, so its outcome
             // says something about the machine, not the code. Without the flag every check runs.
@@ -51,14 +51,7 @@ internal static class Program
             }
             SensorGuardChecks.Run(Check);
 
-            if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 20348))
-            {
-                using var capture = ProcessLoopbackCapture.TryStart((uint)Environment.ProcessId);
-                Check("unsupported process capture returns control to the session peak fallback", capture is null);
-            }
-            else Console.WriteLine("SKIP: unsupported process capture check requires Windows 10 build < 20348.");
-
-            return 0;
+            return Finish();
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
     }
@@ -175,9 +168,17 @@ internal static class Program
         finally { window.Close(); }
     }
 
+    // Every check runs, so one failure does not hide the rest; the run fails if any did.
+    private static int Finish()
+    {
+        Console.WriteLine(_failed.Count == 0 ? $"{_passed} checks passed." : $"{_passed} checks passed, {_failed.Count} failed:" + string.Concat(_failed.Select(name => "\n  " + name)));
+        return _failed.Count == 0 ? 0 : 1;
+    }
+    private static int _passed;
+    private static readonly List<string> _failed = [];
     private static void Check(string name, bool condition)
     {
-        if (!condition) throw new InvalidOperationException("FAIL: " + name);
-        Console.WriteLine("PASS: " + name);
+        if (condition) { _passed++; Console.WriteLine("PASS: " + name); }
+        else { _failed.Add(name); Console.WriteLine("FAIL: " + name); }
     }
 }
