@@ -502,6 +502,7 @@ public partial class MainWindow : Window
     // ApplySettings runs next. Pop-ups are closed rather than repainted.
     private void ApplyTheme()
     {
+        _surface.Opacity = Settings.PanelOpacity / 100.0;
         double dpi = PresentationSource.FromVisual(this) is null ? 1 : VisualTreeHelper.GetDpi(this).DpiScaleX;
         if (_themeGeneration == PanelTheme.Generation && _themeDpi == dpi) return;
         // A new scale alone only redraws the scan lines or texture, which are laid out in device pixels.
