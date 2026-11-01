@@ -113,7 +113,7 @@ internal static class Program
         Thread.Sleep(1000);
         foreach (var gpu in drivers.Read(gpus, 1))
             Console.WriteLine($"GPU driver: {gpu.Name ?? "(unnamed)"} usage {gpu.Usage:P0} from {gpu.UsageSource ?? "Windows engines"}, engines {gpu.EngineUsage:P0}"
-                + (gpu.DriverWatts is { } watts ? $", {watts:0.0} W" : ""));
+                + (gpu.DriverWatts is { } watts ? $", {watts:0.0} W" : "") + (gpu.DriverTemperature is { } heat ? $", {heat:0} °C" : ""));
         Check("GPU driver usage is a share, and only for an adapter Windows saw working", drivers.Read(gpus, 2).All(gpu => gpu.Usage is >= 0 and <= 1
             && (gpu.UsageSource is null || gpu.EngineUsage > 0)));
     }

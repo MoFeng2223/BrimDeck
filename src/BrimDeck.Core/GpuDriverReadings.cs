@@ -14,13 +14,15 @@ public static class GpuDriverReadings
         Nvidia => Loc.T("NVIDIA 驱动", "NVIDIA driver"), Amd => Loc.T("AMD 驱动", "AMD driver"), Intel => Loc.T("Intel 驱动", "Intel driver"), _ => null
     };
 
-    // The adapter with the driver's usage (percent) and board power (watts) where they were read. An integrated adapter's power is
-    // inside the processor package already (PowerInputs.Cpu), so it is never taken: it would be counted twice.
-    public static GpuSample Apply(GpuSample gpu, double? percent, double? watts)
+    // The adapter with the driver's usage (percent), board power (watts) and temperature (°C) where they were read. An integrated
+    // adapter's power is inside the processor package already (PowerInputs.Cpu), so it is never taken: it would be counted twice.
+    public static GpuSample Apply(GpuSample gpu, double? percent, double? watts, double? celsius = null)
     {
         if (percent is { } usage && double.IsFinite(usage))
             gpu = gpu with { Usage = Math.Clamp(usage / 100, 0, 1), UsageSource = SourceName(gpu.VendorId) };
         if (watts is { } power && PowerResolver.Plausible(power) && gpu.Kind != GpuKind.Integrated) gpu = gpu with { DriverWatts = power };
+        // Zero is what a driver gives without a sensor, as the graphics kernel does (GpuTemperatures).
+        if (celsius is { } heat && heat > 0 && Temperatures.Plausible(heat) is { } temperature) gpu = gpu with { DriverTemperature = temperature };
         return gpu;
     }
 

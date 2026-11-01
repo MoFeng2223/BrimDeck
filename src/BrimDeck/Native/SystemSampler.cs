@@ -36,6 +36,10 @@ internal sealed class SystemSampler : IDisposable
     private CpuProvider? _cpu;
     private GpuProvider? _gpu;
     private GpuDrivers? _drivers;
+    private SensorClient? _sensors;
+    private readonly MonitorBridgeReader _bridges = new();
+    // The processor's temperature has come from its own sensors or a hardware monitor (CpuTemperatureSource).
+    private volatile bool _processorHeat;
     private ThermalZones? _zones;
     private GpuTemperatures? _gpuTemperatures;
     private readonly StorageReader _storage = new();
@@ -141,8 +145,10 @@ internal sealed class SystemSampler : IDisposable
     }
     // Whether the processor's zones, the graphics adapters and the drives have given temperatures, and whether drives were found and
     // how many (-1 until read); the page keeps room for what has turned up or has not been asked yet.
-    public SensorState CpuSensor => _zones?.State ?? SensorState.Unknown;
-    public SensorState GpuSensor => _gpuTemperatures?.State ?? SensorState.Unknown;
+    public SensorState CpuSensor => _processorHeat ? SensorState.Found : _zones?.State ?? SensorState.Unknown;
+    public SensorState GpuSensor => _driverHeat ? SensorState.Found : _gpuTemperatures?.State ?? SensorState.Unknown;
+    // An adapter's driver gave a temperature where the graphics kernel gave none (GpuSample.DriverTemperature).
+    private volatile bool _driverHeat;
     public SensorState DriveSensor => _storage.Temperatures;
     public SensorState StorageState => _storage.Drives;
     public int StorageCount => _storage.Count;
@@ -167,6 +173,7 @@ internal sealed class SystemSampler : IDisposable
         _cpu = new CpuProvider(_pdh);
         _gpu = new GpuProvider(_pdh);
         _drivers = new GpuDrivers(stuck);
+        _sensors = new SensorClient();
         _zones = new ThermalZones(_zonesPdh, stuck);
         _power = new PowerProvider(_meterPdh, stuck);
         _gpuTemperatures = new GpuTemperatures(stuck);
@@ -186,7 +193,8 @@ internal sealed class SystemSampler : IDisposable
                     // one collection now, and the next (the first snapshot) has the two samples a rate needs.
                     bool primeProcesses = _primeProcesses;
                     _primeProcesses = false;
-                    if (!primed) Collect(listProcesses: true);
+                    // Readings starting (the monitor opened or came back): a hardware monitor started meanwhile is looked for again.
+                    if (!primed) { _bridges.Rescan(); Collect(listProcesses: true); }
                     else if (primePower) Collect(listProcesses: primeProcesses && _listProcesses);
                     else if (_listProcesses) _processes.Sample(Now());
                     primed = true; first = true;
@@ -239,6 +247,20 @@ internal sealed class SystemSampler : IDisposable
         var cpu = _cpu!.Sample(pdh); var gpus = _gpu!.Sample(pdh);
         // Asked on every tick, so the zones' counters leave the query once temperatures are no longer wanted.
         if (_zones!.Sample(temperatures, now) is { } zone) cpu = cpu.Map(sample => sample with { Temperature = zone.Celsius, TemperatureZone = zone.Zone });
+        // The processor's own sensors through the sensor service where enhanced sensors are set up, else a hardware monitor the user
+        // runs; either stands in front of the zones. Neither is asked while nothing shows a temperature or power.
+        bool processorWanted = temperatures || _powerWanted;
+        var report = _sensors!.Read(processorWanted, now) is { Status: SensorStatus.Ok } ok ? ok : null;
+        var bridge = processorWanted && (report?.Package is null || report.PackageWatts is null) ? _bridges.Read(now) : default;
+        if (temperatures && report?.Package is { } package)
+            cpu = cpu.Map(sample => sample with
+            {
+                Temperature = package, TemperatureZone = null, TemperatureSource = CpuTemperatureSource.Processor,
+                CoreTemperatures = report.Cores, CoreTemperaturesAreCcds = report.CoresAreCcds
+            });
+        else if (temperatures && bridge.Celsius is { } bridged)
+            cpu = cpu.Map(sample => sample with { Temperature = bridged, TemperatureZone = null, TemperatureSource = bridge.Source });
+        if (cpu.OrDefault?.TemperatureSource is not null and not CpuTemperatureSource.Zone) _processorHeat = true;
         IReadOnlyList<StorageDrive> storage = _storageWanted ? _storage.Sample(now, _driveTemperatures) : [];
         Remember(_cpuHistory, cpu.OrDefault?.Usage);
         // The usage each adapter's driver gives, where it gives one (GpuDrivers); the curves follow the figure shown.
@@ -256,7 +278,8 @@ internal sealed class SystemSampler : IDisposable
                 battery = batterySample;
                 if (powerWanted)
                 {
-                    power = _power!.Sample(meter, true, now, adapters, BatteryModel.Discharge(batteryInputs, batterySample), _battery.Present);
+                    power = _power!.Sample(meter, true, now, adapters, BatteryModel.Discharge(batteryInputs, batterySample), _battery.Present,
+                        report?.PackageWatts, report?.MemoryWatts, bridge.Watts);
                     if (power.TryGet(out var drawn))
                     {
                         if (_powerHistory.Count == HistoryLength) _powerHistory.Dequeue();
@@ -309,7 +332,13 @@ internal sealed class SystemSampler : IDisposable
         var working = snapshot.Gpus.Where(adapter => adapter.EngineUsage > 0).Select(adapter => GpuReadings.LuidText(adapter.Luid)).Order(StringComparer.OrdinalIgnoreCase).ToList();
         var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var adapter in snapshot.Gpus) names.TryAdd(GpuReadings.LuidText(adapter.Luid), adapter.Name ?? "GPU");
-        if (_gpuTemperatures!.ReadFor(GpuReadings.LuidText(gpu.Luid), working, names, now) is not { } heat) return snapshot;
+        if (_gpuTemperatures!.ReadFor(GpuReadings.LuidText(gpu.Luid), working, names, now) is not { } heat)
+        {
+            // The graphics kernel gives none: the temperature the adapter's own driver gave with its usage (GpuDrivers).
+            if (gpu.DriverTemperature is not { } own) return snapshot;
+            _driverHeat = true;
+            return snapshot with { Gpu = gpu with { Temperature = own } };
+        }
         var from = heat.Adapter == GpuReadings.LuidText(gpu.Luid) ? null : snapshot.Gpus.FirstOrDefault(adapter => GpuReadings.LuidText(adapter.Luid) == heat.Adapter);
         return snapshot with
         {

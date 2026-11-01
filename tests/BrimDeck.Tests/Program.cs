@@ -58,6 +58,7 @@ try
     DatePickerMotionTests.Run(Check);
     SystemMonitorTests.Store(root, Check);
     GpuAdapterTests.Run(root, Check);
+    CpuSensorTests.Run(Check);
     GpuIdentityTests.Run(Check);
     NeteaseLogTests.Run(Check);
     await DashboardUsageTests.Run(root, Check);

@@ -57,7 +57,10 @@ internal sealed class PowerProvider(PdhQuery? pdh, Action stuck) : IDisposable
     // gpus: the adapters read this tick (usage tells whether one is awake); discharge: the battery's supply (BatteryModel.Discharge);
     // hasBattery: the machine runs on a battery, so a missing source may only be for the moment.
     // collected: what Prepare returned this tick.
-    public Reading<PowerSample> Sample(bool collected, bool wanted, double now, IReadOnlyList<GpuSample> gpus, Reading<double> discharge, bool hasBattery)
+    // processorWatts, processorMemory: the package's and the memory's power from the sensor service (enhanced sensors), which come
+    // first; bridgeWatts: the package's from a hardware monitor the user runs, taken only where Windows gives none.
+    public Reading<PowerSample> Sample(bool collected, bool wanted, double now, IReadOnlyList<GpuSample> gpus, Reading<double> discharge, bool hasBattery,
+        double? processorWatts = null, double? processorMemory = null, double? bridgeWatts = null)
     {
         if (!wanted)
         {
@@ -68,6 +71,9 @@ internal sealed class PowerProvider(PdhQuery? pdh, Action stuck) : IDisposable
         Reading<double> system = Reading<double>.Unavailable(""), cpu = system, memory = system;
         if (_available && collected && pdh is not null)
             (system, cpu, memory) = PowerResolver.FromCounters(pdh.Read(EnergyPath), pdh.Read(MeterPath));
+        if (processorWatts is { } package) cpu = package;
+        else if (!cpu.HasValue && bridgeWatts is { } bridged) cpu = bridged;
+        if (!memory.HasValue && processorMemory is { } dram) memory = dram;
         var inputs = new PowerInputs { SystemMeter = system, BatteryDischarge = discharge, Cpu = cpu, Memory = memory, Gpus = ReadGpus(gpus, now) };
         var power = PowerResolver.Resolve(inputs);
         if (power.HasValue) { _empty = 0; _everFound = true; _state = SensorState.Found; }

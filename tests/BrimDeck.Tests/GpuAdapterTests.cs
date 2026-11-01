@@ -96,6 +96,8 @@ internal static class GpuAdapterTests
         var integrated = discrete with { VendorId = GpuDriverReadings.Amd, Kind = GpuKind.Integrated };
         check("GPU driver: an integrated adapter's power is the processor's, never added again", GpuDriverReadings.Apply(integrated, 12, 8).DriverWatts is null
             && GpuDriverReadings.Apply(integrated, 12, 8).UsageSource == "AMD 驱动");
+        check("GPU driver: a temperature is kept, a zero or absurd one is none", GpuDriverReadings.Apply(discrete, null, null, 61).DriverTemperature == 61
+            && GpuDriverReadings.Apply(discrete, null, null, 0).DriverTemperature is null && GpuDriverReadings.Apply(discrete, null, null, 900).DriverTemperature is null);
         check("GPU driver: rates from growing counters", GpuDriverReadings.Rate(10, 100, 10.5, 101) == .5 && GpuDriverReadings.Rate(10, 100, 9, 101) is null
             && GpuDriverReadings.Rate(10, 100, 11, 100) is null);
         check("GPU driver: the bus of a location", GpuDriverReadings.Bus("1:0.0") == 1 && GpuDriverReadings.Bus("10:2.1") == 10 && GpuDriverReadings.Bus(null) is null && GpuDriverReadings.Bus("x") is null);

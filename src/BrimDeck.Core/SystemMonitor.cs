@@ -32,12 +32,21 @@ public sealed record CoreSample(int Id, int Group, CoreTier Tier, int Number, do
     public double? FrequencyFraction => FrequencyMhz.TryGet(out var mhz) && MaxFrequencyMhz is { } top && top > 0 ? Math.Clamp(mhz / top, 0, 1) : null;
 }
 
-// Temperature is the processor's from the ACPI thermal zones in degrees Celsius, TemperatureZone the zone it came from; null
-// where no zone gives one (Temperatures.Cpu).
+// Where the processor's temperature comes from, the best first: its own sensors through the sensor service (enhanced sensors,
+// PawnIO), a monitor already running (HWiNFO's shared memory, LibreHardwareMonitor's WMI), else the ACPI thermal zones, which may
+// be the board near the processor.
+public enum CpuTemperatureSource { Zone, Processor, HwInfo, LibreHardwareMonitor }
+
+// Temperature is the processor's in degrees Celsius, null where no source gives one; TemperatureZone the ACPI zone it came from
+// when it came from one (Temperatures.Cpu).
 public sealed record CpuSample(IReadOnlyList<CoreSample> Cores, Reading<double> FrequencyMhz)
 {
     public double? Temperature { get; init; }
     public string? TemperatureZone { get; init; }
+    // Where the temperature was read (CpuTemperatureSource); with the processor's own sensors, each core's or each CCD's too.
+    public CpuTemperatureSource TemperatureSource { get; init; }
+    public IReadOnlyList<double> CoreTemperatures { get; init; } = [];
+    public bool CoreTemperaturesAreCcds { get; init; }
     // By index, as Average and Max add up: both are read on every redraw of the collapsed readings, which allocate nothing.
     public double Usage
     {
@@ -137,6 +146,8 @@ public sealed record GpuSample(double Usage, Reading<ulong> DedicatedBytes)
     public string? UsageSource { get; init; }
     // The board power the driver reports where it is read with the usage (AMD and Intel discrete adapters), in watts.
     public double? DriverWatts { get; init; }
+    // The temperature the driver reports with the usage, for an adapter whose graphics kernel gives none (GpuTemperatures).
+    public double? DriverTemperature { get; init; }
     // PCI vendor id (0x10DE NVIDIA, 0x1002 AMD, 0x8086 Intel) and where the adapter sits on the bus ("1:0.0"), to find it in its driver.
     public uint VendorId { get; init; }
     public string? Location { get; init; }
