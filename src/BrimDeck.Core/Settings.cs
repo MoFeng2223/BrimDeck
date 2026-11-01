@@ -349,6 +349,9 @@ public sealed class DeckSettings
     public bool NotchSummary { get; set; } = true;
     public bool NotchMusic { get; set; } = true;
     public bool CapsuleSummary { get; set; } = true;
+    // Writes each application's first letter (or digit) of its name inside its collapsed quota ring, in the notch, the capsule and
+    // the side column. Off by default; a file without it reads as off.
+    public bool QuotaRingLetters { get; set; }
     public bool CapsuleMusic { get; set; } = true;
     // The notch and the capsule each switch the equalizer on. It shows while a song plays (or is paused), or, with EqualizerAlways,
     // at all times: then it reads the whole system's sound while no song plays.
