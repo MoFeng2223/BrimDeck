@@ -350,9 +350,8 @@ public sealed partial class SettingsWindow : Window
         var head = new DockPanel { Margin = new Thickness(0,0,0,page == 7 ? 10 : 20) };
         if (page is < 4 or 5 or 6 or ThemePage or MonitorSettingsPage)
         {
-            // Resets every setting on the page, so it is an outlined button and asks first (SW-09, S-03).
-            var reset=ActionButton(Loc.T("恢复默认", "Restore defaults"),()=>{ if(Confirm(Loc.T("恢复默认", "Restore defaults"),ResetConfirmText(page),Loc.T("恢复默认", "Restore defaults")))ResetPage(); });
-            reset.Style=(Style)FindResource("SettingsOutlineButton"); reset.FontSize=12; reset.Padding=new Thickness(12,4,12,4); reset.VerticalAlignment=VerticalAlignment.Center; DockPanel.SetDock(reset,Dock.Right); head.Children.Add(reset);
+            // Resets every setting on the page, so it asks first (SW-09, S-03); it keeps the look of the other "restore defaults" links.
+            var reset=ActionButton(Loc.T("恢复默认", "Restore defaults"),()=>{ if(Confirm(Loc.T("恢复默认", "Restore defaults"),ResetConfirmText(page),Loc.T("恢复默认", "Restore defaults")))ResetPage(); }); reset.FontSize=11; DockPanel.SetDock(reset,Dock.Right); head.Children.Add(reset);
         }
         head.Children.Add(page == 7 ? Wordmark(28) : TextLine(_pages[page],24,TextPrimary,FontWeights.SemiBold)); _content.Children.Add(head);
         switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; case ThemePage: ThemesPage(); break; case MonitorSettingsPage: MonitorSettings(); break; }
@@ -838,7 +837,7 @@ public sealed partial class SettingsWindow : Window
         remove.Style = (Style)FindResource("SettingsGlyphButton"); remove.Content = cross; remove.Width = 24; remove.Height = 26; remove.Padding = new Thickness(0);
         AutomationProperties.SetName(remove, Loc.T("移除 ", "Remove ") + name); AutomationProperties.SetAutomationId(remove, "remove-" + entry.InstanceId.ToString("N"));
         // At the column's right edge, at least 12 DIP from the switch beside it.
-        remove.HorizontalAlignment = HorizontalAlignment.Right; remove.ToolTip = Loc.T("移除 ", "Remove ") + name;
+        remove.HorizontalAlignment = HorizontalAlignment.Right;
         Grid.SetColumn(remove, 8); row.Children.Add(remove);
         var border = new Border { Child = row, Height = AppRowHeight, BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(0), Tag = entry,
             RenderTransform = new TranslateTransform() };
