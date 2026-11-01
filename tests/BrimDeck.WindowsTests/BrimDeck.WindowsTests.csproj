@@ -21,6 +21,7 @@
     <Compile Include="..\..\src\BrimDeck\Native\FrameRates.cs" Link="FrameRates.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\Displays.cs" Link="Displays.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\GpuProvider.cs" Link="GpuProvider.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\GpuDrivers.cs" Link="GpuDrivers.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\Why.cs" Link="Why.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\AppIdentity.cs" Link="AppIdentity.cs" />
     <Compile Include="..\..\src\BrimDeck\MainWindow.Shadow.cs" Link="MainWindow.Shadow.cs" />

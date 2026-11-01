@@ -35,6 +35,7 @@ internal sealed class SystemSampler : IDisposable
     private PdhQuery? _pdh, _zonesPdh, _meterPdh;
     private CpuProvider? _cpu;
     private GpuProvider? _gpu;
+    private GpuDrivers? _drivers;
     private ThermalZones? _zones;
     private GpuTemperatures? _gpuTemperatures;
     private readonly StorageReader _storage = new();
@@ -165,6 +166,7 @@ internal sealed class SystemSampler : IDisposable
         _pdh = Query(); _zonesPdh = Query(); _meterPdh = Query();
         _cpu = new CpuProvider(_pdh);
         _gpu = new GpuProvider(_pdh);
+        _drivers = new GpuDrivers(stuck);
         _zones = new ThermalZones(_zonesPdh, stuck);
         _power = new PowerProvider(_meterPdh, stuck);
         _gpuTemperatures = new GpuTemperatures(stuck);
@@ -239,7 +241,8 @@ internal sealed class SystemSampler : IDisposable
         if (_zones!.Sample(temperatures, now) is { } zone) cpu = cpu.Map(sample => sample with { Temperature = zone.Celsius, TemperatureZone = zone.Zone });
         IReadOnlyList<StorageDrive> storage = _storageWanted ? _storage.Sample(now, _driveTemperatures) : [];
         Remember(_cpuHistory, cpu.OrDefault?.Usage);
-        var adapters = gpus.TryGet(out var read) ? Remember(read) : [];
+        // The usage each adapter's driver gives, where it gives one (GpuDrivers); the curves follow the figure shown.
+        var adapters = gpus.TryGet(out var read) ? Remember(_drivers!.Read(read, now)) : [];
         // The machine's power and battery: read only while something shows them; the history and the peak start over once none does.
         var power = Reading<PowerSample>.Unavailable(Why.Waiting);
         var battery = Reading<BatterySample>.Unavailable(Why.Waiting);
@@ -303,7 +306,7 @@ internal sealed class SystemSampler : IDisposable
     private MonitorSnapshot WithTemperature(MonitorSnapshot snapshot, double now)
     {
         if (!snapshot.Gpu.TryGet(out var gpu)) return snapshot;
-        var working = snapshot.Gpus.Where(adapter => adapter.Usage > 0).Select(adapter => GpuReadings.LuidText(adapter.Luid)).Order(StringComparer.OrdinalIgnoreCase).ToList();
+        var working = snapshot.Gpus.Where(adapter => adapter.EngineUsage > 0).Select(adapter => GpuReadings.LuidText(adapter.Luid)).Order(StringComparer.OrdinalIgnoreCase).ToList();
         var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var adapter in snapshot.Gpus) names.TryAdd(GpuReadings.LuidText(adapter.Luid), adapter.Name ?? "GPU");
         if (_gpuTemperatures!.ReadFor(GpuReadings.LuidText(gpu.Luid), working, names, now) is not { } heat) return snapshot;

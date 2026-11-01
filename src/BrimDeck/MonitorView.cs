@@ -268,7 +268,9 @@ internal sealed class MonitorView : Grid
             string temperature = heat is { } celsius ? Temperatures.Format(celsius) + " °C" : "";
             // An adapter without engine readings at the moment (NoReadings) shows a dash and says so; it can still be switched from.
             bool idle = gpu.NoReadings;
-            string tip = (several ? GpuChoice.Describe(gpu.Name, gpu.Kind) : gpu.Name ?? "GPU") + " · " + (idle ? Loc.T("暂无读数", "No reading") : MonitorFormat.Percent(gpu.Usage) + "%") + (memory.Length > 0 ? " · " + memory : "")
+            // The usage says where it was read when its driver gave it; the engines' columns are always Windows' own.
+            string usage = MonitorFormat.Percent(gpu.Usage) + "%" + (gpu.UsageSource is { } source ? Loc.T($"（{source}）", $" ({source})") : "");
+            string tip = (several ? GpuChoice.Describe(gpu.Name, gpu.Kind) : gpu.Name ?? "GPU") + " · " + (idle ? Loc.T("暂无读数", "No reading") : usage) + (memory.Length > 0 ? " · " + memory : "")
                 + (gpu.SharedBytes.TryGet(out var shared) ? Loc.T(" · 共享 ", " · shared ") + MonitorFormat.Gigabytes(shared) + " GB" : "")
                 + (temperature.Length > 0 ? " · " + temperature + (gpu.TemperatureFrom is { } from ? Loc.T($"（{from} 的温度）", $" ({from}'s temperature)") : "") : "");
             string switchTo = _nextGpu is { } next ? Loc.T("点击切换到 ", "Click to show ") + GpuChoice.Describe(next.Name, next.Kind) : "";

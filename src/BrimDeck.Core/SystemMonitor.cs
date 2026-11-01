@@ -129,8 +129,17 @@ public sealed record GpuEngine(string Kind, double Usage);
 // of engine in a fixed order (GpuEngines.Order); Name and DedicatedTotal come from the adapter's description and are null where the
 // system does not give them. Luid names the adapter until the next restart, Key for good (GpuReadings.Keyed); History is its last
 // usage readings, oldest first, 0 to 1.
+// Usage is the figure shown: the driver's own where it gives one (UsageSource names the driver), else EngineUsage, the busiest engine
+// as Windows counts it (Task Manager's figure), which also tells whether the adapter is awake.
 public sealed record GpuSample(double Usage, Reading<ulong> DedicatedBytes)
 {
+    public double EngineUsage { get; init; }
+    public string? UsageSource { get; init; }
+    // The board power the driver reports where it is read with the usage (AMD and Intel discrete adapters), in watts.
+    public double? DriverWatts { get; init; }
+    // PCI vendor id (0x10DE NVIDIA, 0x1002 AMD, 0x8086 Intel) and where the adapter sits on the bus ("1:0.0"), to find it in its driver.
+    public uint VendorId { get; init; }
+    public string? Location { get; init; }
     // In degrees Celsius as Task Manager reads it; null without a sensor. TemperatureFrom names the adapter it was read from
     // when that is not this one (this adapter has no sensor and another has), and TemperatureKind says its kind ("独显").
     public double? Temperature { get; init; }

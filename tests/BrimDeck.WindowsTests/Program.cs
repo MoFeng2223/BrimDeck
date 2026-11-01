@@ -16,6 +16,7 @@ internal static class Program
         {
             // "--only power": just the power and battery checks, for a quick look at what this machine reports.
             if (args is ["--only", "power"]) { PowerChecks.Run(Check); return 0; }
+            if (args is ["--only", "gpu"]) { CheckGpus(); return 0; }
             if (args is ["--only", "capture"]) { CaptureChecks.Run(Check); return 0; }
             if (args is ["--only", "frames"]) { FrameRateChecks.Run(Check); return 0; }
             if (args is ["--only", "drawn"]) { DrawnAutomationTests.Run(Check); return 0; }
@@ -106,6 +107,15 @@ internal static class Program
         Check("GPU readings give each adapter its own key", gpus.Select(gpu => gpu.Key).Distinct().Count() == gpus.Count);
         if (gpus.Any(gpu => gpu.Kind == GpuKind.Discrete))
             Check("GPU auto shows a discrete adapter", GpuChoice.Auto(gpus, 0)?.Kind == GpuKind.Discrete);
+        // The drivers' own usage: asked twice, as Intel's counters need two readings; an adapter Windows saw idle is not asked.
+        var drivers = new GpuDrivers(() => { });
+        drivers.Read(gpus, 0);
+        Thread.Sleep(1000);
+        foreach (var gpu in drivers.Read(gpus, 1))
+            Console.WriteLine($"GPU driver: {gpu.Name ?? "(unnamed)"} usage {gpu.Usage:P0} from {gpu.UsageSource ?? "Windows engines"}, engines {gpu.EngineUsage:P0}"
+                + (gpu.DriverWatts is { } watts ? $", {watts:0.0} W" : ""));
+        Check("GPU driver usage is a share, and only for an adapter Windows saw working", drivers.Read(gpus, 2).All(gpu => gpu.Usage is >= 0 and <= 1
+            && (gpu.UsageSource is null || gpu.EngineUsage > 0)));
     }
     private static string Gigabytes(Reading<ulong> bytes) => bytes.TryGet(out var value) ? $"{value / 1e9:0.00} GB" : "?";
 
