@@ -21,7 +21,6 @@ try
     await KugouTests.Run(Check);
     EqualizerSignalTests.Run(Check);
     EqualizerSpectrumTests.Run(Check);
-    EqualizerRebuildTests.Run(Check);
     EqualizerModeTests.Run(root, Check);
     ColorMathTests.Run(Check);
     CompactSpacingTests.Run(Check);

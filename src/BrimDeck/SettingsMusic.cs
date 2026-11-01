@@ -161,17 +161,17 @@ public sealed partial class SettingsWindow
         options.Children.Add(Lighter(SliderRow(length, S.EqualizerBars, CompactMusicLayout.MinimumBars, CompactMusicLayout.MaximumBars, 1, Loc.T("根", "bars"),
             v => Change(s => s.EqualizerBars = (int)v)), length));
         string way = Loc.T("方式", "Mode");
-        options.Children.Add(Lighter(EqualizerModeChoice(way), way));
+        options.Children.Add(Lighter(EqualizerModeChoice(way, S.EqualizerMode, v => Change(s => s.EqualizerMode = v)), way));
         options.Children.Add(Lighter(Row(color, ColorSwatches("EqualizerColor" + style, Loc.T("律动条颜色 ", "Equalizer color "), S.EqualizerColor, S.EqualizerCustomColor,
             UI.Brush(PanelTheme.Hex("equalizer")), (chosen, custom) => Change(s => { s.EqualizerColor = chosen; s.EqualizerCustomColor = custom; }))), color));
         return OptionsPartRow(style, CompactPart.Equalizer, rows, Loc.T("律动条", "Equalizer"), Loc.T("律动条设置", "Equalizer settings"), S.ShowsEqualizer(style),
             on => Change(s => { if (notch) s.NotchEqualizer = on; else s.CapsuleEqualizer = on; }), options);
     }
-    // How the equalizers show the sound, one choice for the collapsed and the expanded equalizer.
-    private FrameworkElement EqualizerModeChoice(string title, bool enabled = true) => MusicChoice(title, S.EqualizerMode,
-        [(EqualizerMode.Flow, Loc.T("流动", "Flow")), (EqualizerMode.Spectrum, Loc.T("频谱", "Spectrum"))], v => Change(s => s.EqualizerMode = v), enabled,
-        help: Loc.T("流动：声音的整体起伏从一端流向另一端。频谱：按音高拆成频段，每根条各取一段。",
-            "Flow: the sound's overall rise and fall runs from one end of the bars to the other. Spectrum: the sound is split into bands by pitch, and each bar takes one."));
+    // How an equalizer shows the sound; the collapsed and the expanded equalizer each have their own.
+    private FrameworkElement EqualizerModeChoice(string title, EqualizerMode selected, Action<EqualizerMode> change, bool enabled = true) => MusicChoice(title, selected,
+        [(EqualizerMode.Flow, Loc.T("流动", "Flow")), (EqualizerMode.Spectrum, Loc.T("频谱", "Spectrum"))], change, enabled,
+        help: Loc.T("流动：声音的起伏从左流到右。频谱：每根条显示一段音高，左低右高。",
+            "Flow: the rise and fall of the sound runs from left to right. Spectrum: each bar shows a range of pitch, low on the left."));
     // The clock's swatches but the gradient: the theme's color (theme), the presets, a custom color and the cover's. Used for the
     // collapsed equalizer and for the music page's equalizer and current lyric; save gets the chosen color and the custom one.
     private StackPanel ColorSwatches(string group, string label, ClockColor selected, string custom, Brush theme, Action<ClockColor, string> save)
@@ -235,7 +235,7 @@ public sealed partial class SettingsWindow
         equalizerColor.IsEnabled = lyricColor.IsEnabled = S.MusicPage;
         Group(Toggle(Loc.T("显示封面", "Show cover"), S.MusicPageCover, v => Change(s => s.MusicPageCover = v), S.MusicPage),
             Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => Change(s => s.LyricsEnabled = v), S.MusicPage), bars,
-            EqualizerModeChoice(Loc.T("律动方式", "Equalizer mode"), S.MusicPage), equalizerColor, lyricColor);
+            EqualizerModeChoice(Loc.T("律动方式", "Equalizer mode"), S.MusicEqualizerMode, v => Change(s => s.MusicEqualizerMode = v), S.MusicPage), equalizerColor, lyricColor);
     }
     // Operations only one player supports, grouped under that player's name.
     private void Players()
