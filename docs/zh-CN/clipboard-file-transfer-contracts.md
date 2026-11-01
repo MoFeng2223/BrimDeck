@@ -132,6 +132,8 @@
 
 复制失败留在当前交互中并使用静音反馈，不继续回贴或因该动作收起窗口。仅复制成功使用「已复制」；不把“已请求”覆盖在真实失败之上。
 
+岛内卡片按下遵循 Edge-Drop 非夺焦点规则：`ClipboardDragDrop.AttachEntries` 在存在卡片动作回调时自行选择条目并处理预览按下事件，阻止 WPF `ListBoxItem` 默认的 `Focus()`。仅有 `WM_MOUSEACTIVATE → MA_NOACTIVATE` 不能阻止控件主动获取焦点；否则释放时才捕获目标会丢失外部输入框。搜索／快捷键显式输入仍可借用焦点，普通库列表不套用此卡片动作规则。
+
 ### 单次回贴事务与诊断
 
 `Native/ClipboardPaste.cs` 的 `ClipboardPasteSession` 持有不可变的接收窗口、线程／进程身份、捕获的输入焦点以及本次剪贴板代次。岛内、完整库和各个预览窗口分别保留目标；另一窗口唤出不能改写已经开始的事务。自身前台的普通入口清除旧目标，同次键盘输入借用可显式保留刚捕获的目标。
@@ -303,7 +305,7 @@ Remove-Item Env:BRIMDECK_PASTE_E2E
 | --- | --- |
 | `BrimDeck.Tests` 全量 | 2577 项通过 |
 | Windows `prompts`／`clipboard-paste` | 37／18 项通过；回贴为可注入原生边界检查，不发送真实输入 |
-| Windows `clipboard` | 首次 421 项通过、1 项失败：搜索框无障碍说明缺少 Alt+数字。补回 `HelpText` 后 422 项通过，未放宽断言或恢复长悬浮提示 |
+| Windows `clipboard` | 前次补回 Alt+数字 `HelpText` 后为 422 项通过。本次对照 Edge-Drop 增加完整 WPF 预览＋冒泡鼠标路由检查，修复前「恰好一次请求」及「不夺焦点」两项均失败，修复后 **424 项通过、退出码 0**。直接向离屏 HWND 发送鼠标消息未进入 WPF 路由，已移除该无效检查及临时日志；本结果不等于真实跨应用插入验收 |
 | Windows `clipboard-applications`／`file-share`／`shelves` | 101／23／70 项通过 |
 | 生产 Dock `--only-module-lifecycle` | 33 项通过，包括故障提示抑制后仍阻止失败关闭 |
 | 生产 Dock `--only-exit-lifecycle`／`--only-panel-layout` | 12 项子进程＋1 项父进程／21 项通过 |

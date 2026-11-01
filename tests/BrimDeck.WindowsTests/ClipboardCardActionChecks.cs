@@ -46,6 +46,19 @@ internal static partial class ClipboardChecks
             check("card click: copy-only preference applies to a single release", activations.Count == 1 && activations[0].Entry.Id == rich.Id && activations[0].CopyOnly);
             settings.PasteOnActivate = true; Click(Card(rich.Id));
             check("card click: paste preference requests exactly one recall", activations.Count == 2 && !activations[^1].CopyOnly);
+            var routedCard = Card(rich.Id);
+            var routedRow = (ListBoxItem)list.ItemContainerGenerator.ContainerFromItem(routedCard.Entry!);
+            int routedBefore = activations.Count;
+            BrimDeck.Native.WindowsHost.ConfigureOverlay(window);
+            bool activeBefore = window.IsActive;
+            // Preview-only tests skip ListBoxItem's bubbling mouse handler, which may acquire keyboard focus.
+            var down = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = Mouse.PreviewMouseDownEvent };
+            routedCard.RaiseEvent(down); down.RoutedEvent = Mouse.MouseDownEvent; routedCard.RaiseEvent(down); Pump();
+            bool tookFocus = !activeBefore && window.IsActive || routedRow.IsKeyboardFocusWithin;
+            var up = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = Mouse.PreviewMouseUpEvent };
+            routedCard.RaiseEvent(up); up.RoutedEvent = Mouse.MouseUpEvent; routedCard.RaiseEvent(up); Pump();
+            check("EdgeDrop routed card click: preview and bubbling handlers request exactly one paste", activations.Count == routedBefore + 1 && !activations[^1].CopyOnly);
+            check("EdgeDrop routed card click: browsing never borrows keyboard focus from the receiver", !tookFocus);
             settings.PasteOnActivate = false;
             list.SelectedItem = list.Items.OfType<ClipboardEntry>().Single(entry => entry.Id == rich.Id);
             var focusedRow = (ListBoxItem)list.ItemContainerGenerator.ContainerFromItem(list.SelectedItem);

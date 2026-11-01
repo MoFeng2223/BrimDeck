@@ -67,7 +67,7 @@ internal sealed class ClipboardDragDrop(ClipboardHistory history, Action<bool>? 
     {
         AttachSource(list, source => Find<ButtonBase>(source) is null && Find<TextBoxBase>(source) is null
             && Find<ListBoxItem>(source)?.DataContext is ClipboardEntry entry ? new(entry.Id, false) : null,
-            payload => { if (history.Items.FirstOrDefault(entry => entry.Id == payload.Id) is { } entry) click?.Invoke(entry); });
+            click is null ? null : payload => { if (history.Items.FirstOrDefault(entry => entry.Id == payload.Id) is { } entry) click(entry); });
         if (click is null) AutomationProperties.SetHelpText(list, Loc.T("拖到收藏夹整理，或拖出到其他应用；拖动不会写入系统剪贴板。", "Drag to a collection to organize, or out to another application. Dragging does not write to the system clipboard."));
     }
     internal void AttachCollection(Button button, string id, Orientation orientation)
@@ -92,8 +92,16 @@ internal sealed class ClipboardDragDrop(ClipboardHistory history, Action<bool>? 
         source.PreviewMouseDown += (_, e) =>
         {
             if (e.ChangedButton != MouseButton.Left) return;
-            _pressed = e.ClickCount == 1 ? pick(e.OriginalSource as DependencyObject) : null;
+            var picked = pick(e.OriginalSource as DependencyObject);
+            _pressed = e.ClickCount == 1 ? picked : null;
             _pressAt = e.GetPosition(source);
+            if (click is not null && picked is not null && source is ListBox list)
+            {
+                // Edge-Drop's non-focusable shelf: WPF's default item press calls Focus() even behind MA_NOACTIVATE.
+                // Select without that handler so the external caret survives until the release requests paste.
+                list.SelectedItem = Find<ListBoxItem>(e.OriginalSource as DependencyObject)?.DataContext;
+                e.Handled = true;
+            }
         };
         // ClipboardItem.handleCardClick: a drag, an attempted drag, or a release over another card is never a paste.
         source.PreviewMouseUp += (_, e) =>
