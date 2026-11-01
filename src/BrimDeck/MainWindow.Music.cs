@@ -57,7 +57,7 @@ public partial class MainWindow
     internal MusicLayout? CurrentMusicLayout { get; private set; }
     private TextBlock? _musicElapsed, _musicDuration, _lyricPrevious, _lyricNext, _musicMessage;
     // The current line scrolls when it is wider than the column; the lines around it are cut off with an ellipsis.
-    private MusicMarquee? _lyricCurrent;
+    private MusicMarquee? _lyricCurrent, _musicTitle;
     // Without the cover the lyrics column shows more lines around the current one (MusicLayout.Columns).
     private TextBlock[] _lyricsAbove = [], _lyricsBelow = [];
     private Grid? _musicInfo;
@@ -480,7 +480,7 @@ public partial class MainWindow
         // Keep the transport layer attached: replacing a hovered button restarts
         // hit testing and its fade-in on every metadata, artwork or lyric update.
         _handover.Hold(MusicContent, keep: _musicControls);
-        _musicSeek = null; _musicElapsed = null; _musicDuration = null; _musicEqualizer = null; _lyricCurrent = null; _lyricPrevious = null; _lyricNext = null; _lyricsAbove = []; _lyricsBelow = []; _musicMessage = null; _musicInfo = null;
+        _musicSeek = null; _musicElapsed = null; _musicDuration = null; _musicEqualizer = null; _musicTitle = null; _lyricCurrent = null; _lyricPrevious = null; _lyricNext = null; _lyricsAbove = []; _lyricsBelow = []; _musicMessage = null; _musicInfo = null;
         MusicContent.Margin = new Thickness(c.Side, 0, c.Side, c.Bottom);
         if (track is null)
         {
@@ -517,20 +517,16 @@ public partial class MainWindow
             right.RowDefinitions.Add(new RowDefinition());
             double equalizerWidth = MusicEqualizerWidth(c);
             var header = new Grid();
-            header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(equalizerWidth + 16) });
+            header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(equalizerWidth + MusicTitleFit.EqualizerGap) });
             var titles = new StackPanel { VerticalAlignment = VerticalAlignment.Top };
-            var title = UI.Fixed(track.Title, c.Title, c.TitleLine, UI.Primary, FontWeights.SemiBold);
-            AutomationProperties.SetName(title, Loc.T("歌名 ", "Title ") + track.Title); titles.Children.Add(title);
-            if (layout.MergeTitle)
-            {
-                if (track.Artist.Length > 0) title.Inlines.Add(new Run(" · " + track.Artist) { Foreground = UI.Brush(UI.Secondary), FontSize = c.Artist, FontWeight = FontWeights.Normal });
-                ShowCutText(title, track.Artist.Length > 0 ? track.Title + " · " + track.Artist : track.Title);
-            }
-            else
+            // The title shares its line with the equalizer, so its room shrinks as the bars grow (MusicTitleFit); it rests when it
+            // fits and scrolls when it does not. The merged title of a short page carries the artist as a second run.
+            var title = PageTitle(track, c, center: false, merge: layout.MergeTitle); titles.Children.Add(title);
+            if (!layout.MergeTitle)
             {
                 string artist = string.Join(" · ", new[] { track.Artist, track.Album }.Where(s => s.Length > 0));
                 var line = UI.Fixed(artist, c.Artist, c.ArtistLine, UI.Secondary); titles.Children.Add(line);
-                ShowCutText(title, track.Title); ShowCutText(line, artist);
+                ShowCutText(line, artist);
             }
             header.Children.Add(titles);
             if (shown && songChanging) RiseIn(titles);
@@ -748,13 +744,18 @@ public partial class MainWindow
         if (_musicFullControl is not null) _musicFullControl.Visibility = entryLabel is not null ? Visibility.Visible : Visibility.Collapsed;
         MusicContent.Children.Insert(0, body); _handover.Release(body, motion); UpdateMusicPosition();
     }
-    // The page suppresses tooltips. A line cut off by its ellipsis (a title, an artist, a long message) still shows its whole
-    // text on hover. A later text goes in ToolTip alone: whether it is cut is checked when the tooltip would open.
-    // Five bars span 1.7 times their height; other counts keep the five bars' spacing.
-    private double MusicEqualizerWidth(MusicMetrics c)
+    private double MusicEqualizerWidth(MusicMetrics c) => MusicTitleFit.EqualizerWidth(c.Equalizer, Settings.MusicEqualizerBars);
+    // The open page's title: one MusicMarquee, the collapsed row's, so a title that does not fit its room scrolls the same way. Its
+    // name for screen readers is the whole title; a tooltip shows it whole while it overhangs.
+    private MusicMarquee PageTitle(MediaTrack track, MusicMetrics c, bool center, bool merge)
     {
-        double fiveBars = Math.Max(27, Math.Round(c.Equalizer * 1.7));
-        return Math.Round(3 + (Settings.MusicEqualizerBars - 1) * (fiveBars - 3) / 4);
+        string tail = merge && track.Artist.Length > 0 ? " · " + track.Artist : "";
+        var title = new MusicMarquee { Text = track.Title, Tail = tail, AccessibleName = MusicTitleFit.ReadAs(track.Title, tail), TailFontSize = c.Artist, TailForeground = UI.Brush(UI.Secondary), FontSize = c.Title,
+            FontWeight = FontWeights.SemiBold, Height = c.TitleLine, CenterWhenFits = center, EdgeWidth = Math.Max(MusicMarquee.Edge, Math.Round(c.Title * .6)), Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
+        AutomationProperties.SetName(title, MusicTitleFit.ReadAs(track.Title, tail));
+        ShowCutText(title, track.Title + tail);
+        _musicTitle = title; UpdateLyricScrolling();
+        return title;
     }
     // The upper part without the cover (MusicLayout.Columns): the titles, with the equalizer below them, centred in the left
     // column, and the lyrics or the message right of a divider. The current lyric is larger and in its own color, the
@@ -768,8 +769,8 @@ public partial class MainWindow
         var upper = new Grid { Height = columns.Height, VerticalAlignment = VerticalAlignment.Top };
         body.Children.Add(upper);
         var info = new StackPanel { Width = columns.InfoWidth, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
-        var title = UI.Fixed(track.Title, c.Title, c.TitleLine, UI.Primary, FontWeights.SemiBold); title.TextAlignment = TextAlignment.Center;
-        AutomationProperties.SetName(title, Loc.T("歌名 ", "Title ") + track.Title); ShowCutText(title, track.Title); info.Children.Add(title);
+        // Centred while it fits, scrolling when it does not: the column is as wide as the info column, whatever the bars.
+        info.Children.Add(PageTitle(track, c, center: true, merge: false));
         var details = columns.ShowAlbum ? new[] { (Text: track.Artist, Color: UI.Secondary), (Text: track.Album, Color: UI.Tertiary) }
             : [(Text: string.Join(" · ", new[] { track.Artist, track.Album }.Where(text => text.Length > 0)), Color: UI.Secondary)];
         foreach (var (text, color) in details.Where(detail => detail.Text.Length > 0))
@@ -822,6 +823,15 @@ public partial class MainWindow
         }
         middle.Children.Add(_musicMessage);
         if (lyricsArrive) { var fade = Soft.Fade(0, 1, Soft.Move, Soft.Follow); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop; middle.BeginAnimation(OpacityProperty, fade); }
+    }
+    // The page suppresses tooltips. A line cut off by its ellipsis (an artist, a long message) still shows its whole
+    // text on hover. A later text goes in ToolTip alone: whether it is cut is checked when the tooltip would open.
+    // The scrolling title does the same while it overhangs its room.
+    private static void ShowCutText(MusicMarquee title, string text)
+    {
+        title.SetValue(SuppressMusicToolTipsProperty, false);
+        title.ToolTip = text.Length > 0 ? text : null;
+        title.ToolTipOpening += (_, e) => { if (!title.Overflows) e.Handled = true; };
     }
     private static void ShowCutText(TextBlock block, string text)
     {
@@ -1021,7 +1031,9 @@ public partial class MainWindow
                 if (text.Length == 0) text = _mediaTrack!.Caption;
             }
         }
-        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
+        // A quota ring with nothing read yet would be an empty grey circle that says nothing: it is left out until its quota has
+        // a reading (QuotaRings).
+        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? [.. Settings.EnabledApps.Where(HasQuotaReading)] : new List<AppEntry>();
         // The clock keeps its own width; shown alone, it is centred.
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
         double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
@@ -1037,7 +1049,7 @@ public partial class MainWindow
         var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, equalizer, Settings.EqualizerBars, showCover); CurrentCompactLayout = layout;
         // An auto-width surface takes the width of what the row shows; the new shape builds the row again. The track notice
         // and the lyric's changing length are left out, so the width changes only when the content itself does.
-        int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count : 0;
+        int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count(HasQuotaReading) : 0;
         bool steadyText = media && Settings.MusicText != CompactMusicText.None;
         double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, dpi, equalizer, Settings.EqualizerBars, showCover);
         // The surface is never narrower than what the row must show (CompactMusicLayout.RequiredWidth); like the width it asks
@@ -1117,7 +1129,7 @@ public partial class MainWindow
                 case CompactPart.Clock:
                     element = CompactRegion(clock!, room, clock!.ReservedWidth, clock.Height, row, RegionAnchor.Left, dpi); _compactClock = clock; break;
                 case CompactPart.Rings:
-                    element = _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout.RingSize, layout.RingThickness, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), _quotaElapsed, animate,
+                    element = _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout.RingSize, layout.RingThickness, layout.Scale, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), _quotaElapsed, animate,
                         flow > 0 ? rings.Window : null, ringCut); break;
                 case CompactPart.Music:
                     element = _compactMarquee = CompactTitle(text, room, layout); break;
@@ -1140,15 +1152,19 @@ public partial class MainWindow
         // The readings were built with the row; they start or stop the sampler and take the newest reading.
         _stripShowing = false; UpdateMonitorDemand();
     }
-    // One ring per application: the highest used share among its quotas, with every quota in the tooltip.
-    private (double Used, string Color, string Tip)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>
+    // Whether an application's quota has anything read, which its collapsed ring needs.
+    private bool HasQuotaReading(AppEntry entry) => DashboardUsage.Quota(entry, Snapshots).Metrics.Count > 0;
+    // One ring per application: the highest used share among its quotas, with every quota in the tooltip, and the application's
+    // letter inside when the setting asks for it, so the rings are told apart by more than their color.
+    private (double Used, string Color, string Tip, string Letter)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>
     {
         var snapshot = DashboardUsage.Quota(entry, Snapshots);
         var percentages = snapshot.Metrics.Where(m => m.UsedPercent is not null).Select(m => Math.Clamp(m.UsedPercent!.Value, 0, 100)).ToArray();
         double used = percentages.Length > 0 ? percentages.Max() : snapshot.Metrics.Count > 0 ? 100 : 0;
         string tip = entry.Name + " · " + (percentages.Length > 0 ? Loc.T($"已用 {used:0.#}%", $"{used:0.#}% used")
             : snapshot.Metrics.Count > 0 ? string.Join(Loc.T("；", "; "), snapshot.Metrics.Select(m => m.ValueText.Length > 0 ? m.ValueText + " " + m.ValueSuffix : Loc.Label(m.Label))) : snapshot.StatusLabel);
-        return (used, PanelTheme.QuotaTheme(entry), tip);
+        // The display name (AppEntry.Name: the name the user gave the application, else the source's own), so a renamed application's letter follows.
+        return (used, PanelTheme.QuotaTheme(entry), tip, CompactMusicLayout.RingLetterFor(Settings.QuotaRingLetters, entry.Name));
     }).ToArray();
     private Brush CompactEqualizerColor => MusicColor(Settings.EqualizerColor, Settings.EqualizerCustomColor, "equalizer");
     private Brush PageEqualizerColor => MusicColor(Settings.MusicPageEqualizerColor, Settings.MusicPageEqualizerCustomColor, "equalizer");
@@ -1210,8 +1226,15 @@ public partial class MainWindow
         else _musicTick.Stop();
         if (_expanded || EffectiveStyle != CompactStyle.Line || !Settings.MusicIndicatorProgress || _mediaTrack is not { HasTimeline: true, State: not MediaState.Stopped }) MusicIndicator.Visibility = Visibility.Collapsed;
     }
-    private void UpdateLyricScrolling() => _lyricCurrent?.SetScrolling(Settings.Animations && SystemParameters.ClientAreaAnimation
-        && MusicAudioActive && IsVisible && !IsSuppressed && !DisplayPower.Off && _expanded && IsMusicPage);
+    // The open page: the current lyric scrolls only while a song plays, the panel is open on this page and animation is on. The title
+    // is the song's name, not its audio, so it scrolls whenever the page is open and the title does not fit; paused, it would otherwise
+    // rest cut at its start with no way to read the rest.
+    private void UpdateLyricScrolling()
+    {
+        bool open = Settings.Animations && SystemParameters.ClientAreaAnimation
+            && IsVisible && !IsSuppressed && !DisplayPower.Off && _expanded && IsMusicPage;
+        _lyricCurrent?.SetScrolling(open && MusicAudioActive); _musicTitle?.SetScrolling(open);
+    }
     // The carousel runs its own timer and WPF animation; it only needs to know when it may move.
     private void UpdateQuotaCarousel()
     {
@@ -1248,10 +1271,11 @@ public partial class MainWindow
         bool levels = playerVisible || systemVisible;
         float peak = levels ? _media?.Peak() ?? 0 : 0;
         // Captured audio drives the bars, as many values as the equalizer on show has bars (at whatever length it is set to), flowing
-        // along them or one frequency band for each bar, as the setting chooses; the session peak is the fallback.
+        // along them or one frequency band for each bar, as that equalizer's setting chooses; the session peak is the fallback.
         var shown = _expanded ? IsMusicPage ? _musicEqualizer : null : _alert is null ? _compactEqualizer : null;
         var bandLevels = shown is null ? default : _flowLevels.AsSpan(0, Math.Clamp(shown.Bars, 1, _flowLevels.Length));
-        bool flowing = levels && shown is not null && _media?.FlowLevels(bandLevels, Settings.EqualizerMode) == true;
+        var mode = _expanded ? Settings.MusicEqualizerMode : Settings.EqualizerMode;
+        bool flowing = levels && shown is not null && _media?.FlowLevels(bandLevels, mode) == true;
         if (_expanded && IsMusicPage) { if (flowing) _musicEqualizer?.Show(bandLevels, playing); else _musicEqualizer?.Tick(peak, playing, seconds); }
         if (!_expanded && _alert is null) { if (flowing) _compactEqualizer?.Show(bandLevels, compactPlaying); else _compactEqualizer?.Tick(peak, compactPlaying, seconds); }
         if (_trackNoticeUntil != default && now >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }

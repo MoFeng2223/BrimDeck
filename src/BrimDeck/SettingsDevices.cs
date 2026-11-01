@@ -10,7 +10,7 @@ namespace BrimDeck;
 // which a battery shows as low. Whether the page shows, and its size, are set with the other pages under 展开外观.
 public partial class SettingsWindow
 {
-    private const int DevicesSettingsPage = 10;
+    private const int DevicesSettingsPage = 11;
 
     private void DevicesSettings()
     {

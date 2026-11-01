@@ -65,7 +65,7 @@ static class DevicesPageTests
         var readings = CompactMonitor.Normalize(null);
         foreach (var reading in readings) reading.Visible = reading.Item == CompactMonitorItems.Battery;
         CompactMonitor.Apply(readings, CompactMonitorMode.Full);
-        check("Battery reading: the Full preset leaves it as it is", readings.Single(r => r.Item == CompactMonitorItems.Battery).Visible);
+        check("Battery reading: the Full preset shows it, as it shows every reading", readings.All(r => r.Visible));
         CompactMonitor.Apply(readings, CompactMonitorMode.Brief);
         check("Battery reading: the Brief preset hides it", !readings.Single(r => r.Item == CompactMonitorItems.Battery).Visible);
         var alone = CompactMonitor.Normalize(null);
