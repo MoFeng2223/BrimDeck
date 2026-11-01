@@ -58,7 +58,7 @@ public sealed partial class SettingsWindow
         var rows = new StackPanel();
         _partOptions.Clear();
         foreach (var part in S.CompactOrder(style))
-            rows.Children.Add(part switch { CompactPart.Equalizer => EqualizerRow(style, rows), CompactPart.Clock => ClockRow(style, rows), _ => PartRow(style, part, rows) });
+            rows.Children.Add(part switch { CompactPart.Equalizer => EqualizerRow(style, rows), CompactPart.Clock => ClockRow(style, rows), CompactPart.Rings => RingsRow(style, rows), _ => PartRow(style, part, rows) });
         UpdateDividers(rows);
         Group(rows);
     }
@@ -150,6 +150,18 @@ public sealed partial class SettingsWindow
         _partOptions.Add((item, options, arrow));
         Show(_openParts.Contains(part));
         return item;
+    }
+    // The quota rings: the switch turns them on or off; the option under the title writes each application's letter inside its ring.
+    private Border RingsRow(CompactStyle style, StackPanel rows)
+    {
+        bool notch = style == CompactStyle.Notch;
+        string letters = Loc.T("环内显示首字母", "Letter in the rings");
+        var options = new StackPanel();
+        options.Children.Add(Lighter(Toggle(letters, S.QuotaRingLetters, v => Change(s => s.QuotaRingLetters = v),
+            help: Loc.T("在每个配额环中间写出应用显示名称的首个字母或数字，改名后随之变化。刘海、胶囊和侧边列都适用。",
+                "Writes the first letter or digit of each application's display name inside its ring; renaming an application changes it. Applies to the notch, the capsule and the side column.")), letters));
+        return OptionsPartRow(style, CompactPart.Rings, rows, Loc.T("配额环", "Quota rings"), Loc.T("配额环设置", "Quota ring settings"), S.ShowsSummary(style),
+            on => Change(s => { if (notch) s.NotchSummary = on; else s.CapsuleSummary = on; }), options);
     }
     private Border EqualizerRow(CompactStyle style, StackPanel rows)
     {

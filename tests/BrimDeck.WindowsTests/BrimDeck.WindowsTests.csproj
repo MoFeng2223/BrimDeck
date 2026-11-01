@@ -32,6 +32,7 @@
     <Compile Include="..\..\src\BrimDeck\RowFocus.cs" Link="RowFocus.cs" />
     <Compile Include="..\..\src\BrimDeck\DrawnAutomation.cs" Link="DrawnAutomation.cs" />
     <Compile Include="..\..\src\BrimDeck\Soft.cs" Link="Soft.cs" />
+    <Compile Include="..\..\src\BrimDeck\RingLetter.cs" Link="RingLetter.cs" />
     <!-- The island itself: the shadow observes its properties, and the settled clip is checked on its drawing. -->
     <Compile Include="..\..\src\BrimDeck\IslandBorder.cs" Link="IslandBorder.cs" />
     <Compile Include="..\..\src\BrimDeck\IslandDecor.cs" Link="IslandDecor.cs" />

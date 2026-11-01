@@ -121,6 +121,18 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
         foreach (var r in (name ?? "").EnumerateRunes()) if (System.Text.Rune.IsLetterOrDigit(r)) return System.Text.Rune.ToUpperInvariant(r).ToString();
         return "";
     }
+    // The letter to draw: empty unless the setting is on (DeckSettings.QuotaRingLetters), else the name's (RingLetter).
+    public static string RingLetterFor(bool enabled, string? name) => enabled ? RingLetter(name) : "";
+    // Where the origin of a letter's outline goes so that its ink box (inkX, inkY, inkWidth, inkHeight: the glyph's own bounds,
+    // not the line box with its ascent and descent) is centred in a square cell of the ring's size, with the box's top left corner
+    // on a whole device pixel (so the centre is off the cell's by at most half a device pixel, on each axis, at any scale).
+    public static (double X, double Y) RingLetterOffset(double inkX, double inkY, double inkWidth, double inkHeight, double cell, double pixelsPerDip)
+    {
+        if (!double.IsFinite(inkX) || !double.IsFinite(inkY) || !double.IsFinite(inkWidth) || !double.IsFinite(inkHeight) || !double.IsFinite(cell)) return (0, 0);
+        double ppd = double.IsFinite(pixelsPerDip) && pixelsPerDip > 0 ? pixelsPerDip : 1;
+        double Axis(double ink, double extent) => Math.Round((cell - extent) / 2 * ppd, MidpointRounding.AwayFromZero) / ppd - ink;
+        return (Axis(inkX, inkWidth), Axis(inkY, inkHeight));
+    }
     // The gap between any two neighbours in the row, and between two rings or two readings (CompactSpacing).
     public static double Gap(double scale) => Whole(8 * SafeScale(scale));
 

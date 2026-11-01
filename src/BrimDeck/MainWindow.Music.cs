@@ -1140,7 +1140,7 @@ public partial class MainWindow
     // Whether an application's quota has anything read, which its collapsed ring needs.
     private bool HasQuotaReading(AppEntry entry) => DashboardUsage.Quota(entry, Snapshots).Metrics.Count > 0;
     // One ring per application: the highest used share among its quotas, with every quota in the tooltip, and the application's
-    // letter inside so the rings are told apart by more than their color.
+    // letter inside when the setting asks for it, so the rings are told apart by more than their color.
     private (double Used, string Color, string Tip, string Letter)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>
     {
         var snapshot = DashboardUsage.Quota(entry, Snapshots);
@@ -1148,7 +1148,8 @@ public partial class MainWindow
         double used = percentages.Length > 0 ? percentages.Max() : snapshot.Metrics.Count > 0 ? 100 : 0;
         string tip = entry.Name + " · " + (percentages.Length > 0 ? Loc.T($"已用 {used:0.#}%", $"{used:0.#}% used")
             : snapshot.Metrics.Count > 0 ? string.Join(Loc.T("；", "; "), snapshot.Metrics.Select(m => m.ValueText.Length > 0 ? m.ValueText + " " + m.ValueSuffix : Loc.Label(m.Label))) : snapshot.StatusLabel);
-        return (used, PanelTheme.QuotaTheme(entry), tip, CompactMusicLayout.RingLetter(entry.Name));
+        // The display name (AppEntry.Name: the name the user gave the application, else the source's own), so a renamed application's letter follows.
+        return (used, PanelTheme.QuotaTheme(entry), tip, CompactMusicLayout.RingLetterFor(Settings.QuotaRingLetters, entry.Name));
     }).ToArray();
     private Brush CompactEqualizerColor => MusicColor(Settings.EqualizerColor, Settings.EqualizerCustomColor, "equalizer");
     private Brush PageEqualizerColor => MusicColor(Settings.MusicPageEqualizerColor, Settings.MusicPageEqualizerCustomColor, "equalizer");

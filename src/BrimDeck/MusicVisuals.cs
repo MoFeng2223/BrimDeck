@@ -640,9 +640,11 @@ internal sealed class QuotaCarousel : GlideCarousel
     internal static Grid Ring((double Used, string Color, string Tip, string Letter) item, double size, double thickness, double scale)
     {
         var ring = UI.Ring(item.Used, item.Color, size, thickness);
-        if (item.Letter.Length > 0)
-            ring.Children.Add(new TextBlock { Text = item.Letter, FontFamily = UI.PanelFont, FontWeight = FontWeights.SemiBold, FontSize = Math.Max(1, BrimDeck.Core.CompactMusicLayout.Half(7 * scale)),
-                Foreground = UI.Brush(UI.Secondary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Center });
+        // Empty without the setting (DeckSettings.QuotaRingLetters): the ring is then as it was without letters.
+        if (item.Letter.Length > 0
+            && RingLetter.Create(item.Letter, Math.Max(1, BrimDeck.Core.CompactMusicLayout.Half(7 * scale)), size,
+                Application.Current?.MainWindow is { } window ? VisualTreeHelper.GetDpi(window).PixelsPerDip : 1, UI.PanelFont, UI.Brush(UI.Secondary)) is { } letter)
+            ring.Children.Add(letter);
         return ring;
     }
 

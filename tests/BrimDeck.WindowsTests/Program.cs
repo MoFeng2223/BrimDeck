@@ -19,6 +19,7 @@ internal static class Program
             if (args is ["--only", "gpu"]) { CheckGpus(); return Finish(); }
             if (args is ["--only", "capture"]) { CaptureChecks.Run(Check); return Finish(); }
             if (args is ["--only", "frames"]) { FrameRateChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "ringletter", ..]) { RingLetterChecks.Run(Check, args.Length > 2 ? args[2] : null); return Finish(); }
             if (args is ["--only", "drawn"]) { DrawnAutomationTests.Run(Check); return Finish(); }
             if (args is ["--only", "settings"]) { SettingsFocusTests.Run(Check); BrimDeck.MainWindow.CheckPageCapsuleFit(Check); return Finish(); }
             // "--hosted": only the checks that hold on a CI runner (a virtual machine with a session but no display output, GPU,
@@ -33,6 +34,7 @@ internal static class Program
             CheckPageToolTips();
             LayoutRetryTests.Run(Check);
             DrawnAutomationTests.Run(Check);
+            RingLetterChecks.Run(Check);
             SettingsFocusTests.Run(Check);
             BrimDeck.MainWindow.CheckPageCapsule(Check);
             BrimDeck.MainWindow.CheckPageCapsuleFit(Check);
