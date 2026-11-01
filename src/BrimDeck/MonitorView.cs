@@ -112,8 +112,9 @@ internal sealed class MonitorView : Grid
         graphs.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(mini) });
         if (cpuMain)
         {
-            // The cores carry no figures: the fill is the load, the tick the clock, and pointing at a core gives both.
-            _cpuGraph = new ColumnGraph(26, layout.Caption, labels: false, name: cores);
+            // Fill the main graph's width even on CPUs with few cores. The fill is the
+            // load, the tick the clock, and pointing at a core gives both.
+            _cpuGraph = new ColumnGraph(double.PositiveInfinity, layout.Caption, labels: false, name: cores);
             _gpuBlock = new BlockGauge(colors.Gpu, swapToGpu);
             _gpuBlock.Clicked += () => mainChanged(MonitorMain.Gpu);
             SetColumn(_gpuBlock, 2); graphs.Children.Add(_cpuGraph); graphs.Children.Add(_gpuBlock);
