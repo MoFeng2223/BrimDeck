@@ -491,8 +491,8 @@ public sealed class DeckSettings
     public bool MonitorPage { get; set; } = true;
     public double MonitorWidth { get; set; } = MonitorSizes.Default.Width;
     public double MonitorHeight { get; set; } = MonitorSizes.Default.Height;
-    public double TrayWidth { get; set; } = ClipboardDockLayout.Width;
-    public double TrayHeight { get; set; } = ClipboardDockLayout.Height;
+    public double TrayWidth { get; set; } = ShelfDockLayout.Width;
+    public double TrayHeight { get; set; } = ShelfDockLayout.Height;
     public int TrayLayoutVersion { get; set; }
     public bool TrayReferenceSize { get; set; } = true;
     public ShelfLayoutBackup? TrayPreviousLayout { get; set; }
@@ -698,14 +698,13 @@ public sealed class DeckSettings
         MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
         MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : MonitorSizes.Default.Width;
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
-        TrayWidth = double.IsFinite(TrayWidth) ? Math.Clamp(TrayWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : ClipboardDockLayout.Width;
-        TrayHeight = double.IsFinite(TrayHeight) ? Math.Clamp(TrayHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ClipboardDockLayout.Height;
+        TrayWidth = double.IsFinite(TrayWidth) ? Math.Clamp(TrayWidth, ShelfDockLayout.Width, DeckPages.MaxWidth) : ShelfDockLayout.Width;
+        TrayHeight = double.IsFinite(TrayHeight) ? Math.Clamp(TrayHeight, ShelfDockLayout.Height, DeckPages.MaxHeight) : ShelfDockLayout.Height;
         ClipboardWidth = double.IsFinite(ClipboardWidth) ? Math.Clamp(ClipboardWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : ClipboardDockLayout.Width;
         ClipboardHeight = double.IsFinite(ClipboardHeight) ? Math.Clamp(ClipboardHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ClipboardDockLayout.Height;
         Tray = Tray?.Copy() ?? new(); Tray.Normalize();
         Clipboard = Clipboard?.Copy() ?? new(); Clipboard.Normalize();
         ShelfDockLayout.Migrate(this);
-        TrayHeight = Math.Max(ClipboardDockLayout.Height, TrayHeight);
         ClipboardDockLayout.Migrate(this);
         ClipboardHeight = Math.Max(ClipboardDockLayout.Height, ClipboardHeight);
         PanelScale = PanelScales.Fit(PanelScale);

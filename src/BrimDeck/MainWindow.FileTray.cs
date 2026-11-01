@@ -151,7 +151,7 @@ public partial class MainWindow
             {
                 if (!_layingOutTray && (args.HorizontalChange != 0 || args.VerticalChange != 0 || args.ViewportWidthChange != 0 || args.ViewportHeightChange != 0))
                 {
-                    if (args.ViewportWidthChange != 0 && Settings.Tray.GridView) LayoutTrayCards();
+                    if (args.ViewportWidthChange != 0 && Settings.Tray.GridView || args.ViewportHeightChange != 0) LayoutTrayCards();
                     else UpdateVisibleTrayCards();
                 }
             };
@@ -416,6 +416,8 @@ public partial class MainWindow
             option.Click += (_, _) => action(); menu.Items.Add(option);
         }
         Add(Loc.T("选择当前置物架…", "Choose current shelf…"), () => { menu.IsOpen = false; OpenShelfChooser(anchor); });
+        if (TrayContent.ActualWidth < ClipboardDockLayout.MinWidth)
+            Add(_trayPinnedOnly ? Loc.T("显示所有项目", "Show all items") : Loc.T("只看已固定", "Pinned only"), () => { _trayPinnedOnly = !_trayPinnedOnly; RefreshTrayProjection(resetScroll: true); });
         Add(Loc.T("新建置物架", "New shelf"), _app.NewShelf);
         Add(Loc.T("打开当前浮动置物架", "Open current floating shelf"), _app.OpenShelf);
         Add(Tray.Items.All(item => item.Pinned) ? Loc.T("全部取消固定", "Unpin everything") : Loc.T("全部固定", "Pin everything"), PinAllTray);

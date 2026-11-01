@@ -79,6 +79,8 @@
 
 关闭模块不是完整会话备份：当前架快照只保存普通文件／文件夹原路径及相应元数据；最近关闭历史最多 10 个架、每架 500 项，文本、链接、临时附件以及其他架的固定／加入时间不能完整恢复。不可将此描述为所有内容都能无损重启恢复。
 
+正常应用退出也必须在保存屏障成功后、调用 WPF `Shutdown()` 之前释放置物架视图与适配器／控制器，而不是等到 `OnExit` 才释放。WPF 会先关闭全部窗口；若活动架订阅仍在，关闭最后一个架可能补建隐藏架，令关窗循环无法结束。`OnExit` 保留幂等兜底释放。
+
 共享图像工作线程通过 `HostedResources.AcquireImaging()` 分别取得引用；附件缓存也有独立持有者。当前 `ConfigureCacheRoot` 对同一规范化目录直接返回，若仍有持有者则禁止切换到不同目录。模块重新启用不得重置其他持有者或清理其附件。
 
 ## 4. 文件、存储与隐私边界
@@ -111,7 +113,7 @@
 - **拖动与单击分离**：开始或尝试拖出后不再当作单击回贴；自身导出回流与收藏夹内部整理不得当作新的外部接收或重复分享。取消拖动不计成功复用。
 - **计数与时间分离**：`CopyCount` 记录重复复制及成功复用，与 `UseCount` 和采集时间分开；编辑、内部整理及取消操作不伪增次数。按次数排序使用稳定 ID 与确定性次序，不用整列重建冒充重排。
 - **预览所有权分离**：自动悬停预览属于视图，可按最新卡片重定向并在隐藏时取消；手动「预览浮窗」属于应用窗口登记，关闭岛内视图不关闭它，同一条记录复用浮窗，删除记录才关闭对应浮窗。
-- **统一布局资源**：岛内两模块复用顶部 Dock 契约，参考 1080×210 DIP、40 DIP 头部、210×146 卡片、10 DIP 间距和两侧 14 DIP 留白；独立管理窗口与原版浮动架不强制套用此布局。
+- **统一布局资源**：剪贴板默认横向 1200×210 DIP，网格临时增加为两行完整卡片所需的 366 DIP 页高，退出网格恢复保存的横向高度；公共页眉另占 36 DIP。文件中转岛内默认 240×120 DIP，显示单行紧凑卡片，窄工具栏的类型筛选可横向滚动，搜索展开时借用筛选区。两模块共享 40 DIP 头部、10 DIP 间距和两侧 14 DIP 留白；剪贴板及较高的中转面板继续使用 210×146 参考卡片。默认尺寸升级不覆盖明确自定义的尺寸或首次迁移备份；独立管理窗口与原版浮动架不受影响。
 - **自适应而非截图常量**：网格按真实视口分配等宽列，保留滚动锚和稳定卡片；设备像素、WPF DPI 和本体缩放不得重复应用。窄屏固定操作保持可达。
 - **共用宿主动效**：页面变形、重排、菜单和通知接入本体主题与 `Soft` 等现有机制；禁动画／性能模式立即就位并释放快照。结果胶囊在当前面板右下角显示 3 秒，替换重新计时，隐藏清空且不抢点击。
 
@@ -193,6 +195,8 @@ dotnet run --project tests/BrimDeck.WindowsTests -c Release --no-build -- --only
 ```powershell
 dotnet build tests/BrimDeck.Dock.Tests/BrimDeck.Dock.Tests.csproj -c Release --no-restore -m:1 --tl:off
 dotnet run --project tests/BrimDeck.Dock.Tests -c Release --no-build -- ../output/module-contract-check --only-module-lifecycle
+dotnet run --project tests/BrimDeck.Dock.Tests -c Release --no-build -- ../output/module-contract-check --only-exit-lifecycle
+dotnet run --project tests/BrimDeck.Dock.Tests -c Release --no-build -- ../output/module-contract-check --only-panel-layout
 dotnet run --project tests/BrimDeck.Dock.Tests -c Release --no-build -- ../output/module-contract-check --only-shelf
 ```
 

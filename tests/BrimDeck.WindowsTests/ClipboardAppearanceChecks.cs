@@ -46,7 +46,6 @@ internal static partial class ClipboardChecks
             var popup = Open(true); var editor = popup.Child;
             check("clipboard appearance: island picker opens locally with the common popup motion and scaled content", popup.IsOpen && island.PopupOpen
                 && editor.RenderTransform is TranslateTransform && editor is FrameworkElement { LayoutTransform: ScaleTransform scale } && scale.ScaleX > 1);
-            Click(editor, "clipboard-appearance-more");
             Descendants<TextBox>(editor).Single(field => AutomationProperties.GetAutomationId(field) == "clipboard-appearance-color").Text = "#DCEBFF"; Click(editor, "clipboard-appearance-icon-star");
             var preview = Button(editor, "clipboard-appearance-preview");
             check("clipboard appearance: choosing color and icon previews without committing", history.Collections.Single(group => group.Id == "prompts") is { BackgroundColor: "", Icon: "" }
@@ -58,14 +57,12 @@ internal static partial class ClipboardChecks
             Click(editor, "clipboard-appearance-cancel"); Pump();
             check("clipboard appearance: cancelling keeps both surfaces unchanged", !popup.IsOpen && !ClipboardCollectionVisuals.GetHasColor(Category(island, "prompts")));
             popup = Open(true); editor = popup.Child;
-            Click(editor, "clipboard-appearance-more");
             Descendants<TextBox>(editor).Single(field => AutomationProperties.GetAutomationId(field) == "clipboard-appearance-color").Text = "#DCEBFF"; Click(editor, "clipboard-appearance-icon-star"); Click(editor, "clipboard-appearance-save"); Pump();
             check("clipboard appearance: saving in island synchronizes fill and vector icon to manager", !popup.IsOpen && history.Collections.Single(group => group.Id == "prompts") is { BackgroundColor: "#DCEBFF", Icon: "star" }
                 && Category(island, "prompts").Background is SolidColorBrush islandFill && Category(library, "prompts").Background is SolidColorBrush libraryFill && islandFill.Color == libraryFill.Color
                 && Descendants<Path>(Category(island, "prompts")).Count() == 1
                 && Descendants<Path>(Category(library, "prompts")).Count() == 1 && Contrast(Category(island, "prompts")) >= 4.5 && Contrast(Category(library, "prompts")) >= 4.5);
             popup = Open(false); editor = popup.Child;
-            Click(editor, "clipboard-appearance-more");
             var hex = Descendants<TextBox>(editor).Single(field => AutomationProperties.GetAutomationId(field) == "clipboard-appearance-color"); hex.Text = "invalid"; Click(editor, "clipboard-appearance-save");
             check("clipboard appearance: invalid custom input stays open and never partially saves", popup.IsOpen && history.Collections.Single(group => group.Id == "prompts") is { BackgroundColor: "#DCEBFF", Icon: "star" });
             hex.Text = "#123456"; Click(editor, "clipboard-appearance-icon-code"); Click(editor, "clipboard-appearance-save");
@@ -107,7 +104,7 @@ internal static partial class ClipboardChecks
             popup = Open(false); editor = popup.Child; Click(editor, "clipboard-appearance-color-default"); Click(editor, "clipboard-appearance-save");
             check("clipboard appearance: default background can keep the chosen icon", history.Collections.Single(group => group.Id == "prompts") is { BackgroundColor: "", Icon: "code" }
                 && !ClipboardCollectionVisuals.GetHasColor(Category(island, "prompts")) && Descendants<Path>(Category(island, "prompts")).Count() == 1);
-            popup = Open(true); editor = popup.Child; Click(editor, "clipboard-appearance-more"); Click(editor, "clipboard-appearance-reset"); Click(editor, "clipboard-appearance-save");
+            popup = Open(true); editor = popup.Child; Click(editor, "clipboard-appearance-reset"); Click(editor, "clipboard-appearance-save");
             check("clipboard appearance: full reset restores the original label style in both surfaces", history.Collections.Single(group => group.Id == "prompts") is { BackgroundColor: "", Icon: "" }
                 && !Descendants<Path>(Category(island, "prompts")).Any() && Equals(Category(island, "prompts").Background, Application.Current.Resources["PanelSwitchFill"])
                 && Category(library, "prompts").Background == Brushes.Transparent);

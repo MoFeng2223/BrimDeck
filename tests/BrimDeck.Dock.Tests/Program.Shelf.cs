@@ -80,6 +80,25 @@ internal static partial class Program
                 Render(island, directory, "shelf-search-" + scenario + ".png");
                 Check("shelf " + scenario + ": empty search Escape collapses only the search", Shortcut(Key.Escape) && !(bool)Get(window, "_traySearchOpen")!); Pump();
             }
+            foreach (int percent in new[] { 100, 150 })
+            {
+                Palette(palettes[1]); settings.PanelScale = percent; Call(window, "ApplyScale"); Call(window, "ApplyTheme"); Show(240, 120);
+                var scroll = (ScrollViewer)Get(window, "_trayScroll")!; scroll.ScrollToHorizontalOffset(0); Pump();
+                var cards = All<ShelfIslandCard>(content).ToArray();
+                Check("shelf compact " + percent + ": a whole single row fits the 240 by 120 panel", Near(island.ActualWidth, 240 * percent / 100d) && Near(island.ActualHeight, 120 * percent / 100d)
+                    && cards.Length > 0 && cards.All(card => Near(card.ActualHeight, 66) && card.TranslatePoint(new Point(), content).Y + card.ActualHeight <= 112));
+                Check("shelf compact " + percent + ": search, More and settings stay inside the header", new[] { "shelf-search-toggle", "shelf-more", "shelf-settings" }.All(id =>
+                { var button = Button(id); double x = button.TranslatePoint(new Point(), content).X; return button.IsVisible && x >= 0 && x + button.ActualWidth <= 241; }));
+                var filters = (ScrollViewer)Get(window, "_trayTypesScroll")!; filters.ScrollToRightEnd(); Pump();
+                var lastFilter = Button("shelf-type-links"); double lastX = lastFilter.TranslatePoint(new Point(), filters).X;
+                Check("shelf compact " + percent + ": overflow filters remain reachable by scrolling", filters.ScrollableWidth > 0 && lastX >= 0 && lastX + lastFilter.ActualWidth <= filters.ViewportWidth + 1);
+                filters.ScrollToLeftEnd();
+                Render(island, directory, "shelf-compact-" + percent + ".png");
+                Button("shelf-search-toggle").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); Pump();
+                var compactSearch = (TextBox)Get(window, "_traySearch")!;
+                Check("shelf compact " + percent + ": explicit search borrows filter space without clipping input", compactSearch.IsVisible && compactSearch.ActualWidth >= 70 && Button("shelf-settings").TranslatePoint(new Point(), content).X + Button("shelf-settings").ActualWidth <= 241);
+                Shortcut(Key.Escape); Pump();
+            }
             Palette(palettes[0]); settings.PanelScale = 100; Call(window, "ApplyScale"); Call(window, "ApplyTheme"); Show(1080);
             Check("shelf ownership: island references original current collection and paths", ReferenceEquals(tray.Items, controller.Shelves.ActiveWindow.ViewModel.Items) && model.Items[0].Value == ordinary && File.Exists(ordinary));
             var initialCard = All<ShelfIslandCard>(content).First(card => card.Item!.Id == "shelf-file"); var initialBody = initialCard.PreviewBody;
@@ -175,7 +194,7 @@ internal static partial class Program
     {
         var settings = new DeckSettings { TrayWidth = 620, TrayHeight = 280, ClipboardLayoutVersion = ClipboardDockLayout.Version, ClipboardWidth = 880, ClipboardHeight = 340 };
         settings.Tray.GridView = true; settings.Tray.Placement = FileTrayPlacement.Both; settings.Normalize();
-        Check("shelf migration: reference Dock replaces old dimensions with recoverable backup", settings.TrayWidth == 1080 && settings.TrayHeight == 210 && !settings.Tray.GridView && settings.TrayReferenceSize && settings.TrayPreviousLayout is { Width: 620, Height: 280, GridView: true });
+        Check("shelf migration: reference Dock replaces old dimensions with recoverable backup", settings.TrayWidth == 240 && settings.TrayHeight == 120 && !settings.Tray.GridView && settings.TrayReferenceSize && settings.TrayPreviousLayout is { Width: 620, Height: 280, GridView: true });
         Check("shelf migration: clipboard, floating placement and capture preferences stay unchanged", settings.ClipboardWidth == 880 && settings.ClipboardHeight == 340 && settings.Tray.Placement == FileTrayPlacement.Both && !settings.Clipboard.Enabled);
         DeckPages.SetSize(settings, DeckPage.FileTray, 900, 300); settings.Normalize();
         Check("shelf migration: custom resize survives subsequent normalization", settings.TrayWidth == 900 && settings.TrayHeight == 300 && !settings.TrayReferenceSize && settings.TrayPreviousLayout!.Width == 620);

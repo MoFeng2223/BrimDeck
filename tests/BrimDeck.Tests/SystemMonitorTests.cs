@@ -298,6 +298,21 @@ static class SystemMonitorTests
         check("Pages: hiding clipboard does not change recording or its dimensions", DeckPages.Resolve(clipboard, DeckPage.Clipboard) == DeckPage.Usage && !clipboard.Clipboard.Enabled && DeckPages.Size(clipboard, DeckPage.Clipboard) == (880, 340));
         var invalidClipboard = new DeckSettings { ClipboardLayoutVersion = ClipboardDockLayout.Version, ClipboardWidth = double.NaN, ClipboardHeight = 5000 }; invalidClipboard.Normalize();
         check("Pages: clipboard size is normalized", invalidClipboard.ClipboardWidth == ClipboardDockLayout.Width && invalidClipboard.ClipboardHeight == DeckPages.MaxHeight);
+        var compact = new DeckSettings(); compact.Normalize();
+        check("Pages: independent reference sizes keep one clipboard and compact shelf row", DeckPages.Size(compact, DeckPage.Clipboard) == (1200, 210) && DeckPages.Size(compact, DeckPage.FileTray) == (240, 120));
+        compact.Clipboard.GridView = true;
+        check("Pages: grid reserves two complete card rows without overwriting the saved strip size", DeckPages.ExpandedSize(compact, DeckPage.Clipboard) == (1200, 366) && compact.ClipboardHeight == 210 && DeckPages.Largest(compact).Height == 366);
+        DeckPages.SetSize(compact, DeckPage.Clipboard, 900, 366); compact.Normalize(); compact.Clipboard.GridView = false;
+        check("Pages: width-only grid resize returns to the previous single-row height", DeckPages.ExpandedSize(compact, DeckPage.Clipboard) == (900, 210));
+        DeckPages.SetSize(compact, DeckPage.FileTray, 240, 120); compact.Normalize();
+        check("Pages: compact shelf limits survive normalization without changing other pages", compact.TrayWidth == 240 && compact.TrayHeight == 120 && compact.MusicWidth >= DeckPages.MinWidth);
+        var upgraded = new DeckSettings { ClipboardLayoutVersion = 1, TrayLayoutVersion = 1, ClipboardWidth = 1080, ClipboardHeight = 210, TrayWidth = 1080, TrayHeight = 210 };
+        upgraded.Clipboard.GridView = upgraded.Tray.GridView = true; upgraded.Normalize();
+        check("Pages: reference upgrade changes only default dimensions, not grid preference", upgraded.ClipboardWidth == 1200 && upgraded.TrayWidth == 240 && upgraded.TrayHeight == 120 && upgraded.Clipboard.GridView && upgraded.Tray.GridView);
+        var custom = new DeckSettings { ClipboardLayoutVersion = 1, TrayLayoutVersion = 1, ClipboardReferenceSize = false, TrayReferenceSize = false, ClipboardWidth = 880, ClipboardHeight = 280, TrayWidth = 620, TrayHeight = 300,
+            ClipboardPreviousLayout = new() { Width = 700, Height = 250 }, TrayPreviousLayout = new() { Width = 540, Height = 260 } };
+        custom.Normalize();
+        check("Pages: upgrading preserves explicit sizes and the original layout backups", custom.ClipboardWidth == 880 && custom.ClipboardHeight == 280 && custom.TrayWidth == 620 && custom.TrayHeight == 300 && custom.ClipboardPreviousLayout.Width == 700 && custom.TrayPreviousLayout.Width == 540);
         check("Pages: new clipboard members preserve saved enum values", (int)DeckPage.FileTray == 3 && (int)DeckPage.Clipboard == 4 && (int)DefaultDeckPage.FileTray == 4 && (int)DefaultDeckPage.Clipboard == 5);
         var withTray = new DeckSettings { ClipboardPage = false };
         check("Pages: the file tray is last when its mode and placement show it in the island",

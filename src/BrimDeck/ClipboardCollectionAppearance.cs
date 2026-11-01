@@ -97,10 +97,10 @@ internal sealed class ClipboardCollectionAppearance : StackPanel
         _history = history; _id = collection.Id; _icon = collection.Icon; _close = close; Width = 272;
         Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri($"/{typeof(ClipboardCollectionAppearance).Assembly.GetName().Name};component/ClipboardLibraryResources.xaml", UriKind.Relative) });
         AutomationProperties.SetName(this, Loc.T("名称与标签外观", "Name & label appearance"));
-        _name = new TextBox { Style = (Style)FindResource("LibraryField"), Text = collection.Name, MaxLength = 32, Height = 36, Padding = new Thickness(10, 6, 10, 6), Tag = Loc.T("名称", "Name"), BorderThickness = new Thickness(0) };
+        _name = new TextBox { Style = (Style)FindResource("LibraryField"), Text = collection.Name, MaxLength = 32, MinHeight = 36, Padding = new Thickness(10, 6, 10, 6), Tag = Loc.T("名称", "Name"), BorderThickness = new Thickness(0) };
         AutomationProperties.SetAutomationId(_name, "clipboard-appearance-name"); AutomationProperties.SetName(_name, Loc.T("收藏夹名称", "Collection name")); Children.Add(_name);
         _ribbon = new ClipboardCollectionColorRibbon { Margin = new Thickness(0, 14, 0, 6) }; Children.Add(_ribbon);
-        var details = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(0, 6, 0, 10) };
+        var details = new StackPanel { Margin = new Thickness(0, 6, 0, 10) };
         AutomationProperties.SetAutomationId(details, "clipboard-appearance-details"); Children.Add(details);
         _hex = new TextBox { Style = (Style)FindResource("LibraryField"), MaxLength = 7, Text = collection.BackgroundColor, Tag = "#RRGGBB", ToolTip = Loc.T("自定义背景色，留空使用默认样式", "Custom background color; leave empty for the default style"), MinHeight = 30 };
         AutomationProperties.SetAutomationId(_hex, "clipboard-appearance-color"); AutomationProperties.SetName(_hex, (string)_hex.ToolTip); details.Children.Add(_hex);
@@ -123,8 +123,6 @@ internal sealed class ClipboardCollectionAppearance : StackPanel
         var options = new StackPanel { Orientation = Orientation.Horizontal }; DockPanel.SetDock(options, Dock.Left); actions.Children.Add(options);
         _default = Button(Loc.T("默认", "Default"), Loc.T("使用当前主题的默认标签背景", "Use the current theme's default label background"), () => { _hex.Clear(); UpdatePreview(); });
         AutomationProperties.SetAutomationId(_default, "clipboard-appearance-color-default"); options.Children.Add(_default);
-        var more = Button("⋯", Loc.T("图标与自定义颜色", "Icon & custom color"), () => { details.Visibility = details.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible; });
-        AutomationProperties.SetAutomationId(more, "clipboard-appearance-more"); more.Width = 28; options.Children.Add(more);
         var commit = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right }; actions.Children.Add(commit);
         var cancel = Button(Loc.T("取消", "Cancel"), Loc.T("取消", "Cancel"), close); AutomationProperties.SetAutomationId(cancel, "clipboard-appearance-cancel"); commit.Children.Add(cancel);
         var save = Button(Loc.T("保存", "Save"), Loc.T("保存名称与外观", "Save name and appearance"), Save); save.Style = (Style)FindResource("LibraryPrimaryButton"); AutomationProperties.SetAutomationId(save, "clipboard-appearance-save"); commit.Children.Add(save);

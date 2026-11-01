@@ -16,7 +16,7 @@ public sealed partial class SettingsWindow
         height.Margin = new Thickness(20, 0, 0, 0); Grid.SetColumn(height, 1); dimensions.Children.Add(height);
         Target.Children.Add(dimensions);
         var restore = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
-        restore.Children.Add(ActionButton(Loc.T("恢复参考尺寸 · 1080×210", "Reference size · 1080×210"), () => { Change(ClipboardDockLayout.Reset); ShowPage(_page); }));
+        restore.Children.Add(ActionButton(Loc.T("恢复参考尺寸 · 1200×210", "Reference size · 1200×210"), () => { Change(ClipboardDockLayout.Reset); ShowPage(_page); }));
         if (S.ClipboardPreviousLayout is not null) restore.Children.Add(ActionButton(Loc.T("恢复迁移前布局", "Restore previous layout"), () => { Change(ClipboardDockLayout.RestorePrevious); ShowPage(_page); }));
         Target.Children.Add(restore);
     }

@@ -37,7 +37,8 @@ public static class DeckPages
     public static double MaxWidthOn(double workWidth, double scale = 1) => Math.Max(MinWidth, Math.Min(MaxWidth, Math.Floor((workWidth - 24) / scale)));
 
     public static (double MinWidth, double MaxWidth, double MinHeight, double MaxHeight) Limits(DeckSettings settings, DeckPage page)
-        => (page == DeckPage.Usage ? Math.Max(MinWidth, settings.MinimumWidth) : MinWidth, MaxWidth, page is DeckPage.Clipboard or DeckPage.FileTray ? ClipboardDockLayout.Height : MinHeight, MaxHeight);
+        => (page == DeckPage.Usage ? Math.Max(MinWidth, settings.MinimumWidth) : page == DeckPage.FileTray ? ShelfDockLayout.Width : MinWidth, MaxWidth,
+            page == DeckPage.FileTray ? ShelfDockLayout.Height : page == DeckPage.Clipboard ? settings.Clipboard.GridView ? ClipboardDockLayout.GridHeight : ClipboardDockLayout.Height : MinHeight, MaxHeight);
 
     // Sets a page's size, as dragging an edge of the open panel does; the values are kept within the page's limits.
     public static void SetSize(DeckSettings settings, DeckPage page, double width, double height)
@@ -49,7 +50,10 @@ public static class DeckPages
             case DeckPage.Music: settings.MusicWidth = width; settings.MusicHeight = height; break;
             case DeckPage.Monitor: settings.MonitorWidth = width; settings.MonitorHeight = height; break;
             case DeckPage.FileTray: settings.TrayWidth = width; settings.TrayHeight = height; settings.TrayReferenceSize = false; break;
-            case DeckPage.Clipboard: settings.ClipboardWidth = width; settings.ClipboardHeight = height; settings.ClipboardReferenceSize = false; break;
+            case DeckPage.Clipboard:
+                // A width-only resize must not persist the automatic two-row height as the strip's new height.
+                if (!settings.Clipboard.GridView || height != ExpandedSize(settings, page).Height) settings.ClipboardHeight = height;
+                settings.ClipboardWidth = width; settings.ClipboardReferenceSize = false; break;
             default: settings.Width = width; settings.Height = height; break;
         }
     }
@@ -63,12 +67,19 @@ public static class DeckPages
         _ => (Math.Max(settings.Width, settings.MinimumWidth), settings.Height)
     };
 
+    // Automatic grid room is presentation-only: switching back restores the saved strip height.
+    public static (double Width, double Height) ExpandedSize(DeckSettings settings, DeckPage page)
+    {
+        var size = Size(settings, page);
+        return page == DeckPage.Clipboard && settings.Clipboard.GridView ? (size.Width, Math.Max(size.Height, ClipboardDockLayout.GridHeight)) : size;
+    }
+
     // The largest width and height among the shown pages (the usage page when none is): the window holds any of them, so
     // switching pages never resizes the window itself.
     public static (double Width, double Height) Largest(DeckSettings settings)
     {
         var pages = Visible(settings) is { Count: > 0 } visible ? visible : [DeckPage.Usage];
-        return (pages.Max(page => Size(settings, page).Width), pages.Max(page => Size(settings, page).Height));
+        return (pages.Max(page => ExpandedSize(settings, page).Width), pages.Max(page => ExpandedSize(settings, page).Height));
     }
 }
 

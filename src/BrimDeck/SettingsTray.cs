@@ -38,13 +38,13 @@ public sealed partial class SettingsWindow
     private void TraySizeControls()
     {
         var dimensions = new Grid { Margin = new Thickness(0, 8, 0, 0) }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
-        var width = Dimension(Loc.T("宽度", "Width"), S.TrayWidth, ClipboardDockLayout.MinWidth, DeckPages.MaxWidth, value => Resize(s => { s.TrayWidth = value; s.TrayReferenceSize = false; }, DeckPage.FileTray));
+        var width = Dimension(Loc.T("宽度", "Width"), S.TrayWidth, ShelfDockLayout.Width, DeckPages.MaxWidth, value => Resize(s => { s.TrayWidth = value; s.TrayReferenceSize = false; }, DeckPage.FileTray));
         width.Margin = new Thickness(0, 0, 20, 0); dimensions.Children.Add(width);
-        var height = Dimension(Loc.T("高度", "Height"), S.TrayHeight, ClipboardDockLayout.Height, DeckPages.MaxHeight, value => Resize(s => { s.TrayHeight = value; s.TrayReferenceSize = false; }, DeckPage.FileTray));
+        var height = Dimension(Loc.T("高度", "Height"), S.TrayHeight, ShelfDockLayout.Height, DeckPages.MaxHeight, value => Resize(s => { s.TrayHeight = value; s.TrayReferenceSize = false; }, DeckPage.FileTray));
         height.Margin = new Thickness(20, 0, 0, 0); Grid.SetColumn(height, 1); dimensions.Children.Add(height);
         Target.Children.Add(dimensions);
         var restore = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
-        restore.Children.Add(ActionButton(Loc.T("恢复参考尺寸 · 1080×210", "Reference size · 1080×210"), () => { Change(ShelfDockLayout.Reset); ShowPage(_page); }));
+        restore.Children.Add(ActionButton(Loc.T("恢复参考尺寸 · 240×120", "Reference size · 240×120"), () => { Change(ShelfDockLayout.Reset); ShowPage(_page); }));
         if (S.TrayPreviousLayout is not null) restore.Children.Add(ActionButton(Loc.T("恢复迁移前布局", "Restore previous layout"), () => { Change(ShelfDockLayout.RestorePrevious); ShowPage(_page); }));
         Target.Children.Add(restore);
     }

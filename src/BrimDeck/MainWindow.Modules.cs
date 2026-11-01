@@ -43,7 +43,7 @@ public partial class MainWindow
         ReleaseTrayViewport(); CloseTrayPopups(); HideTrayNotice();
         TrayContent.Children.Clear(); _trayCards.Clear(); _trayResults.Clear(); _trayTypes.Clear();
         _trayFrame = null; _trayGrid = null; _trayScroll = null; _trayBar = null; _trayGhostLayer = null;
-        _trayTypesHost = null; _trayRight = null; _trayCenter = null; _traySearchField = null;
+        _trayTypesHost = null; _trayTypesScroll = null; _trayRight = null; _trayCenter = null; _traySearchField = null;
         _traySearchCapsule = null; _traySearch = null; _trayPickerText = null; _traySearchPlaceholder = null; _trayEmpty = null;
         _trayPicker = _traySearchToggle = _traySearchClear = _trayPinned = _trayLayout = _trayActions = _trayMore = _traySettings = null;
         _trayPressed = _trayDragItem = null; _trayPressCard = _trayDragCard = null; _trayGhost = null;

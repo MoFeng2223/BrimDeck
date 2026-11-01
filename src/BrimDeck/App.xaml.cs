@@ -423,6 +423,10 @@ public partial class App : Application
         finally { _exitPreparing = false; }
         Exiting = true; Lifetime.Cancel(); _settingsWindow?.RememberSize(); FlushSettings();
         _settingsWindow?.Hide();
+        // WPF closes windows before OnExit. Detach the active-shelf adapter first, or each closed shelf creates a replacement.
+        _settingsWindow?.ReleaseShelfSettings();
+        foreach (var deck in Decks) deck.ReleaseShelfView();
+        DisposeShelves(); _shelfImages?.Dispose(); _shelfImages = null;
         var decks = Decks.ToList();
         int waiting = decks.Count;
         var fallback = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(BrimDeck.MainWindow.PowerOffLength(Settings.AnimationDuration) + 500) };

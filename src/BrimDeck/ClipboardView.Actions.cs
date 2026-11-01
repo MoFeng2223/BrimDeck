@@ -71,7 +71,7 @@ internal sealed partial class ClipboardView
         if (item.Content.Text.Length > 0 && (item.Content.Html.Length > 0 || item.Content.Rtf.Length > 0 || item.Content.Text.Contains('\t')))
             Row("plain", Loc.T("粘贴为纯文本", "Paste as plain text"), "textT", () => _activate(PlainEntry(item), false));
         Row("copy", Loc.T("仅复制 · Ctrl+Enter", "Copy only · Ctrl+Enter"), "copy", () => _activate(item, true));
-        menu.Items.Add(new Separator());
+        menu.Items.Add(new Separator { Style = (Style)FindResource("TrayMenuSeparator") });
         Row("details", Loc.T("详情 / 重命名 / 编辑…", "Details / rename / edit…"), "textT", () => ShowDetails(item));
         Row("favorite", item.Favorite ? Loc.T("取消收藏", "Remove favorite") : Loc.T("收藏", "Favorite"), "pushPin", () => _history.ToggleFavorite(item.Id));
         Row("archive", item.Archived ? Loc.T("取消归档", "Unarchive") : Loc.T("归档", "Archive"), "folderOpen", () => _history.Archive(item.Id, !item.Archived));
@@ -83,7 +83,7 @@ internal sealed partial class ClipboardView
         }
         menu.Items.Add(collections);
         if (item.CollectionId.Length > 0) Row("unfile", Loc.T("移出分类", "Remove from collection"), "folderOpen", () => _history.Move(item.Id, ""));
-        menu.Items.Add(new Separator());
+        menu.Items.Add(new Separator { Style = (Style)FindResource("TrayMenuSeparator") });
         if (item.Content.Kind == ClipboardContentKind.Link)
         {
             Row("open-link", Loc.T("打开链接", "Open link"), "arrowSquareOut", () => OpenLink(item.Content.Text));
@@ -100,7 +100,7 @@ internal sealed partial class ClipboardView
         }
         if (item.Content.Kind is ClipboardContentKind.Image or ClipboardContentKind.Screenshot)
             Row("save-image", Loc.T("图片另存为…", "Save image as…"), "downloadSimple", () => SaveImage(item));
-        menu.Items.Add(new Separator());
+        if (menu.Items[^1] is not Separator) menu.Items.Add(new Separator { Style = (Style)FindResource("TrayMenuSeparator") });
         Row("preview", Loc.T("预览浮窗…", "Preview window…"), "arrowsOutSimple", () => ShowPreview(item));
         if (_openLibrary is not null) Row("library", Loc.T("在剪贴板库中管理…", "Manage in Clipboard Library…"), "folderOpen", () => _openLibrary(item));
         Row("delete", Loc.T("删除记录… · Delete", "Delete entry… · Delete"), "trash", () => DeleteEntry(item));

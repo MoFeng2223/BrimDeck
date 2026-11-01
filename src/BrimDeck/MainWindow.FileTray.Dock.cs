@@ -23,6 +23,7 @@ public partial class MainWindow
     private List<ShelfEntry> _trayResults = [];
     private readonly List<(Button Button, ShelfFilter Filter, string Name)> _trayTypes = [];
     private StackPanel? _trayTypesHost, _trayRight;
+    private ScrollViewer? _trayTypesScroll;
     private Grid? _trayCenter, _traySearchField;
     private Border? _traySearchCapsule;
     private TextBox? _traySearch;
@@ -50,7 +51,13 @@ public partial class MainWindow
         _trayTypesHost = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(16, 0, 8, 0) };
         var track = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(2) };
         var trackFill = new Border { Child = track }; trackFill.SetResourceReference(Border.BackgroundProperty, "PanelSwitchFill"); trackFill.SetResourceReference(Border.CornerRadiusProperty, "PanelR8");
-        _trayTypesHost.Children.Add(trackFill); _trayBar.Children.Add(_trayTypesHost);
+        _trayTypesScroll = new ScrollViewer { Content = trackFill, HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false };
+        _trayTypesScroll.PreviewMouseWheel += (_, e) =>
+        {
+            if (_trayTypesScroll.ScrollableWidth <= 0 || e.Delta == 0) return;
+            _trayTypesScroll.ScrollToHorizontalOffset(_trayTypesScroll.HorizontalOffset - e.Delta); e.Handled = true;
+        };
+        _trayTypesHost.Children.Add(_trayTypesScroll); _trayBar.Children.Add(_trayTypesHost);
         void Type(ShelfFilter filter, string glyph, string name)
         {
             var button = ShelfDockButton(EdgeDropGlyph.Create(glyph), name, () => { _trayFilter = filter; RefreshTrayProjection(resetScroll: true); }, "shelf-type-" + filter.ToString().ToLowerInvariant());
@@ -144,11 +151,15 @@ public partial class MainWindow
     }
     private void FitTrayDockHeader(bool animate = false)
     {
-        if (_trayCenter is null || _trayCenter.ActualWidth <= 0) return;
-        bool narrow = TrayContent.ActualWidth < 600;
-        // Keep six type filters, pin, more and settings reachable; secondary actions remain in More.
+        if (_trayCenter is null) return;
+        bool narrow = TrayContent.ActualWidth < 600, compact = TrayContent.ActualWidth < ClipboardDockLayout.MinWidth;
+        // The 240-DIP shelf scrolls its filters; search borrows that space and secondary actions stay in More.
         _trayLayout!.Visibility = _trayActions!.Visibility = narrow ? Visibility.Collapsed : Visibility.Visible;
-        _trayTypesHost!.Margin = new Thickness(narrow ? 8 : 16, 0, narrow ? 4 : 8, 0); _trayRight!.Margin = new Thickness(narrow ? 4 : 8, 0, narrow ? 8 : 16, 0);
+        _trayPinned!.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        _trayTypesHost!.Visibility = compact && _traySearchOpen ? Visibility.Collapsed : Visibility.Visible;
+        _trayTypesScroll!.MaxWidth = compact ? Math.Max(28, TrayContent.ActualWidth - 160) : double.PositiveInfinity;
+        _trayTypesHost.Margin = new Thickness(narrow ? 8 : 16, 0, narrow ? 4 : 8, 0); _trayRight!.Margin = new Thickness(narrow ? 4 : 8, 0, narrow ? 8 : 16, 0);
+        if (_trayCenter.ActualWidth <= 0) return;
         double available = Math.Max(30, _trayCenter.ActualWidth - 8);
         _trayPicker!.Visibility = !_traySearchOpen && available >= 100 || _traySearchOpen && available >= ClipboardDockLayout.SearchWidth + 100 ? Visibility.Visible : Visibility.Collapsed;
         double width = _traySearchOpen ? Math.Min(ClipboardDockLayout.SearchWidth, available) : 30;
@@ -197,7 +208,8 @@ public partial class MainWindow
             double width = _trayScroll.ViewportWidth > 0 ? _trayScroll.ViewportWidth : Math.Max(1, TrayContent.ActualWidth - ClipboardDockLayout.ListInset * 2);
             _trayColumns = grid ? Math.Max(1, (int)Math.Floor((width + ClipboardDockLayout.CardGap) / (ClipboardDockLayout.CardWidth + ClipboardDockLayout.CardGap))) : Math.Max(1, _trayResults.Count);
             _trayCardWidth = grid ? (width + ClipboardDockLayout.CardGap) / _trayColumns - ClipboardDockLayout.CardGap : ClipboardDockLayout.CardWidth;
-            _trayCardHeight = ClipboardDockLayout.CardHeight;
+            _trayCardHeight = Math.Clamp(TrayContent.ActualHeight - ClipboardDockLayout.HeaderHeight - ClipboardDockLayout.ListTop - ClipboardDockLayout.ListBottom,
+                ShelfDockLayout.Height - ClipboardDockLayout.HeaderHeight - ClipboardDockLayout.ListTop - ClipboardDockLayout.ListBottom, ClipboardDockLayout.CardHeight);
             double pitch = _trayCardWidth + ClipboardDockLayout.CardGap;
             int rows = grid ? Math.Max(1, (_trayResults.Count + _trayColumns - 1) / _trayColumns) : 1;
             _trayGrid.ColumnDefinitions.Clear(); _trayGrid.RowDefinitions.Clear();

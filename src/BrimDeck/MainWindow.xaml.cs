@@ -274,7 +274,7 @@ public partial class MainWindow : Window
         NoteCollapsedWidth(shapeBefore, dipBefore);
         // Page widths are unscaled; drawn at the panel's scale they fit the work area less 12 DIP each side.
         double Fit(double width) => Math.Max(240, Math.Min(width, (work.Width / scale - 24) / _scale));
-        _pageWidth = IsClipboardPage && Settings.ClipboardReferenceSize || IsTrayPage && Settings.TrayReferenceSize
+        _pageWidth = IsClipboardPage && Settings.ClipboardReferenceSize
             ? ClipboardDockLayout.ReferenceWidth(work.Width / scale, _scale) : Fit(DeckPages.Size(Settings, CurrentPage).Width);
         _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width);
         // The widest shown page as it fits this monitor, measured as _pageWidth is (SetExpanded centres on it). A drag resizes
@@ -287,7 +287,7 @@ public partial class MainWindow : Window
         // monitor, with room on either side for the resize grips just outside them (ResizeGrips). The notch and the capsule may be
         // as wide as the monitor, so the window is as wide as the monitor too. Only Island animates.
         var largest = DeckPages.Largest(Settings);
-        largest = (Math.Max(largest.Width, PageMaxWidth), Math.Max(largest.Height, DeckPages.MaxHeight));
+        largest = (Math.Max(largest.Width, PageMaxWidth), Math.Max(largest.Height, DeckPages.MaxHeight) + (DeckPages.Visible(Settings).Any(page => page is DeckPage.Clipboard or DeckPage.FileTray) ? ClipboardHeaderHeight : 0));
         double widestSurface = Enum.GetValues<CompactStyle>().Max(style => CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip, _scale).Max);
         // In the edge's frame: on a side edge a page's height runs along the edge and its width away from it.
         // The window starts at the monitor top (the frame's edge). A capsule's panel can start lower (at the top of a top taskbar's work area, or
@@ -668,7 +668,7 @@ public partial class MainWindow : Window
         var shape = Collapsed;
         var style = shape.Style;
         bool line = style == CompactStyle.Line, indicator = !expanded && line;
-        double wantedHeight = DeckPages.Size(Settings, CurrentPage).Height + (IsDockPage ? _clipboardHeaderTarget : 0);
+        double wantedHeight = DeckPages.ExpandedSize(Settings, CurrentPage).Height + (IsDockPage ? _clipboardHeaderTarget : 0);
         var panel = PanelFor(wantedHeight);
         double panelTop = panel.Top, headerExtra = panel.HeaderExtra;
         double pageHeight = PageHeight(wantedHeight, panel);

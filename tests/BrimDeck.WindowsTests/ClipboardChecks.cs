@@ -188,7 +188,8 @@ internal static partial class ClipboardChecks
             check("clipboard keyboard: folded-search Escape asks the native owner to collapse", collapses == 1 && window.IsVisible);
             settings.GridView = true; view.ApplyLayout(); view.Refresh(); WaitClipboardMotion(Soft.Move + 80); Pump();
             cards = Descendants<ClipboardCard>(view).ToList();
-            check("clipboard UI: grid mode wraps within the existing island size", view.ResultCount == 5 && window.Width == ClipboardDockLayout.Width && window.Height == ClipboardDockLayout.Height && cards.Count(card => Math.Abs(card.TranslatePoint(new Point(), view).Y - cards[0].TranslatePoint(new Point(), view).Y) < 1) == 4);
+            check("clipboard UI: grid columns follow the supplied viewport independently of host sizing", view.ResultCount == 5 && window.Width == ClipboardDockLayout.Width && window.Height == ClipboardDockLayout.Height
+                && cards.Count(card => Math.Abs(card.TranslatePoint(new Point(), view).Y - cards[0].TranslatePoint(new Point(), view).Y) < 1) == Math.Min(view.ResultCount, (int)Math.Floor((view.ActualWidth - 28 + 10) / 220)));
             Theme(PanelThemes.Light); Pump();
             check("clipboard UI: theme changes repaint the same cards", cards.All(card => Equals(card.Background, application.Resources["PanelFill"])) && Equals(searchField.Foreground, application.Resources["PanelPrimary"]));
             if (renderDirectory is not null) Render(island, renderDirectory, "clipboard-island-light-grid.png");
@@ -202,7 +203,7 @@ internal static partial class ClipboardChecks
             cards = Descendants<ClipboardCard>(view).ToList();
             check("clipboard UI: compact native page keeps the whole card above its bottom edge", cards.All(card => card.TranslatePoint(new Point(), window).Y + card.ActualHeight <= window.Height - 8));
             if (renderDirectory is not null) Render(island, renderDirectory, "clipboard-island-compact.png");
-            window.Width = 1620; window.Height = 315; scaledHost.LayoutTransform = new ScaleTransform(1.5, 1.5); view.Refresh(); Pump();
+            window.Width = ClipboardDockLayout.Width * 1.5; window.Height = ClipboardDockLayout.Height * 1.5; scaledHost.LayoutTransform = new ScaleTransform(1.5, 1.5); view.Refresh(); Pump();
             check("clipboard UI: native 150 percent scale preserves the page's logical width", Math.Abs(view.ActualWidth - ClipboardDockLayout.Width) < 2 && view.ResultCount == 5);
             CheckLibrary(history, settings, view, check, Theme, renderDirectory);
             var actionsDirectory = Path.Combine(Path.GetTempPath(), "BrimDeck-CardActions-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(actionsDirectory);

@@ -66,7 +66,7 @@ internal static partial class ClipboardChecks
             var ribbon = Descendants<ClipboardCollectionColorRibbon>(root).Single();
             var scroll = Descendants<ScrollViewer>(ribbon).Single();
             void Press(Key key) { ribbon.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(ribbon)!, Environment.TickCount, key) { RoutedEvent = Keyboard.KeyDownEvent }); Pump(); }
-            check("collection ribbon: compact panel starts with only name, swatches and actions", editor.ActualHeight <= 160 && Field("name").IsVisible && !Field("color").IsVisible && Button("more").IsVisible
+            check("collection ribbon: name, exact color and icons are expanded on first open", editor.ActualHeight > 240 && Field("name").IsVisible && Field("color").IsVisible && Button("icon-star").IsVisible
                 && ribbon.ActualWidth >= 260 && scroll.ScrollableWidth > ribbon.ActualWidth * 5 && scroll.HorizontalScrollBarVisibility == ScrollBarVisibility.Hidden);
             Press(Key.End); double end = scroll.HorizontalOffset; Press(Key.Home);
             check("collection ribbon: keyboard browses both ends without selecting or committing", end > 2500 && scroll.HorizontalOffset == 0 && Field("color").Text == "" && changes == 0);
@@ -82,7 +82,7 @@ internal static partial class ClipboardChecks
             var swatch = Descendants<Button>(ribbon).First(button => AutomationProperties.GetName(button) == "#FF8000");
             swatch.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Pump();
             check("collection ribbon: swatch invocation selects exact color without writing history", Field("color").Text == "#FF8000" && ribbon.SelectedColor == "#FF8000" && changes == 0);
-            Field("name").Text = "Updated synthetic collection"; Click("more"); Field("color").Text = "#123456"; Click("icon-star");
+            Field("name").Text = "Updated synthetic collection"; Field("color").Text = "#123456"; Click("icon-star");
             check("collection ribbon: custom HEX remains exact even between palette swatches", ribbon.SelectedColor == "#123456" && ClipboardCollectionVisuals.GetColor(Button("preview")) == "#123456" && changes == 0);
             Field("name").Text = "Assets"; Click("save");
             check("collection ribbon: duplicate name cannot partially apply appearance", popup.IsOpen && changes == 0 && history.Collections.Single(group => group.Id == "prompts") is { Name: "Prompts", BackgroundColor: "", Icon: "" });

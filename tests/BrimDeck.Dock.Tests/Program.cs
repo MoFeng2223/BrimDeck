@@ -21,10 +21,11 @@ internal static partial class Program
     private static int Main(string[] args)
     {
         string directory = args.Length > 0 ? Path.GetFullPath(args[0]) : Path.Combine(Path.GetTempPath(), "BrimDeck-Dock-Renders");
-        string scratch = Path.Combine(Path.GetTempPath(), "BrimDeck-Dock-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(scratch);
+        string scratch = args.Skip(1).Contains("--exit-lifecycle-child") ? directory : Path.Combine(Path.GetTempPath(), "BrimDeck-Dock-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(scratch);
         MainWindow? window = null; LyricsService? lyrics = null;
         try
         {
+            if (args.Skip(1).Contains("--only-exit-lifecycle")) return CheckExitLifecycleProcess(scratch);
             Migration();
             var app = new LayoutApplication { ShutdownMode = ShutdownMode.OnExplicitShutdown };
             using (var source = Assembly.GetExecutingAssembly().GetManifestResourceStream("BrimDeck.Dock.App.xaml")!)
@@ -68,6 +69,12 @@ internal static partial class Program
                 PanelThemes.Build("fixture-custom", new PanelThemeFile { Base = PanelThemes.Light, Colors = new() { ["fill"] = "#E7EFF7", ["accent"] = "#285DA8" } }),
                 PanelThemes.HighContrast(new(255, 0, 0, 0), new(255, 255, 255, 255), new(255, 190, 190, 190), new(255, 255, 255, 0), new(255, 0, 0, 0)) };
             Palette(palettes[0]); window.Show(); Pump();
+            if (args.Skip(1).Contains("--exit-lifecycle-child"))
+            {
+                CheckExitLifecycleHost(app, window, scratch);
+                Console.WriteLine($"EXIT CHILD RESULT: {_checks} checks passed.");
+                return 0;
+            }
             if (args.Skip(1).Contains("--only-module-lifecycle"))
             {
                 CheckModuleLifecycleHost(app, window, scratch);
@@ -84,6 +91,12 @@ internal static partial class Program
             {
                 CheckShelfDockHost(app, window, settings, palettes, scratch, directory);
                 Console.WriteLine($"SHELF DOCK RESULT: {_checks} checks passed; actual MainWindow renders in {directory}");
+                return 0;
+            }
+            if (args.Skip(1).Contains("--only-panel-layout"))
+            {
+                CheckPanelLayoutHost(app, window, settings, history, palettes, directory);
+                Console.WriteLine($"PANEL LAYOUT RESULT: {_checks} checks passed; production panel renders in {directory}");
                 return 0;
             }
             if (args.Skip(1).Contains("--only-collections"))
@@ -127,7 +140,7 @@ internal static partial class Program
                 Check(scenario + ": sort sits directly left of settings beside favorites", actions.Select(AutomationProperties.GetAutomationId).SequenceEqual(new[] { "clipboard-drop-favorites", "clipboard-sort", "clipboard-settings" }));
                 Check(scenario + ": fixed cards and exact horizontal gap", cards.Length >= 2 && cards.All(card => Near(card.ActualWidth, 210) && Near(card.ActualHeight, 146)) && Near(cards[1].TranslatePoint(new Point(), view).X - cards[0].TranslatePoint(new Point(), view).X, 220));
                 Check(scenario + ": list inset and no date or wrapping", Near(cards[0].TranslatePoint(new Point(), view).X, 14) && Near(cards[0].TranslatePoint(new Point(), view).Y, 46) && cards.All(card => Near(card.TranslatePoint(new Point(), view).Y, 46)) && view.TimelineHeaderHeight == 0);
-                Check(scenario + ": partially visible next card", cards.Any(card => { double x = card.TranslatePoint(new Point(), view).X; return x < width - 14 && x + 210 > width - 14; }));
+                Check(scenario + ": partially visible next card", cards.Any(card => { double x = card.TranslatePoint(new Point(), view).X; return x < width - 14 && x + 210 > width - 14; }) || width - 28 >= cards.Length * 220);
                 var meta = All<Grid>(cards[0]).Single(element => AutomationProperties.GetAutomationId(element) == "clipboard-card-meta");
                 var time = All<TextBlock>(cards[0]).Single(element => AutomationProperties.GetAutomationId(element) == "clipboard-card-time");
                 var copies = All<TextBlock>(cards[0]).Single(element => AutomationProperties.GetAutomationId(element) == "clipboard-card-copy-count");
@@ -240,20 +253,20 @@ internal static partial class Program
             return 0;
         }
         catch (Exception error) { Console.Error.WriteLine(error); return 1; }
-        finally { if (window is not null) { Set(window, "_retiring", true); window.Close(); } lyrics?.Dispose(); Directory.Delete(scratch, true); }
+        finally { if (window is not null && !window.Dispatcher.HasShutdownStarted) { Set(window, "_retiring", true); window.Close(); } lyrics?.Dispose(); Directory.Delete(scratch, true); }
     }
     private static void Migration()
     {
         var settings = new DeckSettings { ClipboardWidth = 620, ClipboardHeight = 280, PanelScale = 150, TrayWidth = 567, TrayLayoutVersion = ShelfDockLayout.Version, MusicWidth = 543 };
         settings.Clipboard.GridView = true; settings.Clipboard.Enabled = false; settings.Clipboard.MaximumItems = 500; settings.Normalize();
-        Check("migration changes current saved dimensions and backs up original layout", settings.ClipboardWidth == 1080 && settings.ClipboardHeight == 210 && !settings.Clipboard.GridView && settings.ClipboardPreviousLayout is { Width: 620, Height: 280, GridView: true });
+        Check("migration changes current saved dimensions and backs up original layout", settings.ClipboardWidth == 1200 && settings.ClipboardHeight == 210 && !settings.Clipboard.GridView && settings.ClipboardPreviousLayout is { Width: 620, Height: 280, GridView: true });
         Check("migration leaves scale, other pages, capture and retention alone", settings.PanelScale == 150 && settings.TrayWidth == 567 && settings.MusicWidth == 543 && !settings.Clipboard.Enabled && settings.Clipboard.MaximumItems == 500);
         DeckPages.SetSize(settings, DeckPage.Clipboard, 900, 120); settings.Normalize();
         Check("migration runs once and clipboard-specific minimum protects full cards", settings.ClipboardWidth == 900 && settings.ClipboardHeight == 210 && !settings.ClipboardReferenceSize && settings.ClipboardPreviousLayout!.Width == 620);
         ClipboardDockLayout.RestorePrevious(settings); settings.Normalize();
         Check("previous geometry and grid are restorable without remigration", settings.ClipboardWidth == 620 && settings.ClipboardHeight == 280 && settings.Clipboard.GridView && !settings.ClipboardReferenceSize);
-        ClipboardDockLayout.Reset(settings); Check("reference reset opts back into work-area fitting", settings.ClipboardWidth == 1080 && settings.ClipboardHeight == 210 && settings.ClipboardReferenceSize && !settings.Clipboard.GridView);
-        Check("100 and 150 percent work-area fitting applies scale once", ClipboardDockLayout.ReferenceWidth(1920, 1.5) == 1080 && ClipboardDockLayout.ReferenceWidth(720, 1.5) == 440);
+        ClipboardDockLayout.Reset(settings); Check("reference reset opts back into work-area fitting", settings.ClipboardWidth == 1200 && settings.ClipboardHeight == 210 && settings.ClipboardReferenceSize && !settings.Clipboard.GridView);
+        Check("100 and 150 percent work-area fitting applies scale once", ClipboardDockLayout.ReferenceWidth(1920, 1.5) == 1200 && ClipboardDockLayout.ReferenceWidth(720, 1.5) == 440);
     }
     private static void Palette(PanelPalette palette)
     {

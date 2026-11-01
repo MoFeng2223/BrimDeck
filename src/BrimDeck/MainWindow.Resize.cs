@@ -220,7 +220,7 @@ public partial class MainWindow
         else
         {
             var (minWidth, maxWidth, minHeight, maxHeight) = PageLimitsOf(CurrentPage);
-            var (width, height) = DeckPages.Size(Settings, CurrentPage);
+            var (width, height) = DeckPages.ExpandedSize(Settings, CurrentPage);
             if (IsClipboardPage && Settings.ClipboardReferenceSize || IsTrayPage && Settings.TrayReferenceSize) width = _pageWidth;
             _resizeFrom = compact ? (Collapsed.Surface.Width, 0) : (Math.Clamp(width, minWidth, maxWidth), Math.Clamp(height, minHeight, maxHeight));
             _springWidth = new Spring(_resizeFrom.Width); _springHeight = new Spring(_resizeFrom.Height);
@@ -306,7 +306,7 @@ public partial class MainWindow
         var (minWidth, maxWidth, minHeight, maxHeight) = PageLimits;
         width = Math.Clamp(width, minWidth, maxWidth);
         height = Math.Clamp(height, minHeight, maxHeight);
-        if ((width, height) == DeckPages.Size(Settings, _resizePage)) return;
+        if ((width, height) == DeckPages.ExpandedSize(Settings, _resizePage)) return;
         _resizeChanged = true;
         DeckPages.SetSize(Settings, _resizePage, width, height);
         _pageWidth = width;
@@ -342,7 +342,7 @@ public partial class MainWindow
         var (min, max) = !horizontal ? (limits.MinHeight, limits.MaxHeight)
             : compact ? CollapsedGeometry.WidthRange(EffectiveStyle, MonitorBoundsDip, WorkDip, _scale) : (limits.MinWidth, limits.MaxWidth);
         double current = settling ? horizontal ? _springWidth.Target : _springHeight.Target
-            : Math.Clamp(compact ? Collapsed.Surface.Width : horizontal ? (IsClipboardPage && Settings.ClipboardReferenceSize || IsTrayPage && Settings.TrayReferenceSize) ? _pageWidth : DeckPages.Size(Settings, CurrentPage).Width : DeckPages.Size(Settings, CurrentPage).Height, min, max);
+            : Math.Clamp(compact ? Collapsed.Surface.Width : horizontal ? (IsClipboardPage && Settings.ClipboardReferenceSize || IsTrayPage && Settings.TrayReferenceSize) ? _pageWidth : DeckPages.Size(Settings, CurrentPage).Width : DeckPages.ExpandedSize(Settings, CurrentPage).Height, min, max);
         double next = KeyboardResize.Next(current, direction, min, max);
         // At a limit nothing moves and nothing is saved: a key held there costs nothing, and a collapsed surface that widens to
         // its content keeps doing so.

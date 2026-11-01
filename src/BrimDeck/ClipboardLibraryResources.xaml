@@ -85,9 +85,10 @@
     <Setter Property="BorderBrush" Value="{DynamicResource PanelPopupBorder}"/><Setter Property="BorderThickness" Value="1"/>
     <Setter Property="Padding" Value="8,6"/><Setter Property="FontSize" Value="12"/><Setter Property="VerticalContentAlignment" Value="Center"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox">
-      <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{DynamicResource PanelR6}" Padding="{TemplateBinding Padding}">
+      <!-- TextBoxView already applies the control's padding; repeating it on the border clips a single line. -->
+      <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{DynamicResource PanelR6}">
         <Grid>
-          <TextBlock x:Name="Watermark" Text="{TemplateBinding Tag}" Foreground="{DynamicResource PanelTertiary}" Visibility="Collapsed" IsHitTestVisible="False" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+          <TextBlock x:Name="Watermark" Text="{TemplateBinding Tag}" Foreground="{DynamicResource PanelTertiary}" Margin="{TemplateBinding Padding}" Visibility="Collapsed" IsHitTestVisible="False" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
           <ScrollViewer x:Name="PART_ContentHost" Focusable="False"/>
         </Grid>
       </Border>

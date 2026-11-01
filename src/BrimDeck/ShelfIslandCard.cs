@@ -15,7 +15,7 @@ internal sealed class ShelfIslandCard : IslandContentCard
     private readonly TextBlock _detail = ClipboardPreview.Text("", 10, "PanelTertiary");
     private readonly Action<ShelfItem> _pin;
     private Grid? _dockFooter;
-    private TextBlock? _dockLabel, _dockSize;
+    private TextBlock? _dockLabel, _dockSize, _compactDetail;
     private bool _dockMode;
     internal bool DockMode { get => _dockMode; set { if (_dockMode == value) return; _dockMode = value; _contentKey = ""; } }
     internal ShelfItem? Item => _item;
@@ -25,22 +25,40 @@ internal sealed class ShelfIslandCard : IslandContentCard
         AddAction("⧉", Loc.T("复制", "Copy"), () => { if (_item is { } item) copy(item); });
         AddAction("×", Loc.T("移除记录", "Remove entry"), () => { if (_item is { } item) remove(item); });
         _detail.TextWrapping = TextWrapping.NoWrap; _detail.VerticalAlignment = VerticalAlignment.Center; Footer.Children.Add(_detail);
+        SizeChanged += (_, _) => { if (DockMode && ActualHeight < 100) Footer.Visibility = Visibility.Collapsed; };
     }
     protected override void OnPin() { if (_item is { } item) _pin(item); }
     internal void Update(ShelfItem item, double width, double height)
     {
         _item = item; Tag = item; Width = width; Height = height;
+        bool compact = DockMode && height < 100;
         if (DockMode)
         {
             SetResourceReference(CornerRadiusProperty, "ClipboardDockCardRadius");
-            Layers.RowDefinitions[1].Height = new GridLength(28); Footer.Margin = new Thickness(14, 2, 14, 8); Footer.Height = 18;
+            Layers.RowDefinitions[1].Height = new GridLength(compact ? 0 : 28); Footer.Margin = new Thickness(14, 2, 14, 8); Footer.Height = 18;
+            Footer.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
         }
         var mode = Soft.GetReduced(this) ? ModuleMode.Performance : ModuleMode.Full;
-        string key = $"{item.Kind}|{item.Value}|{item.Title}|{item.Exists}|{mode}";
+        string key = $"{item.Kind}|{item.Value}|{item.Title}|{item.Exists}|{mode}|{compact}";
         if (_contentKey != key || !ReferenceEquals(_thumbnail, item.Thumbnail) || _language != Loc.Language)
         {
             _contentKey = key; _thumbnail = item.Thumbnail; _language = Loc.Language;
-            if (item.Kind is ShelfItemKind.Text or ShelfItemKind.Link)
+            if (compact)
+            {
+                // One compact row retains the original item and thumbnail, without squeezing the full card's footer into its body.
+                var row = new Grid { Margin = new Thickness(12, 8, 12, 8) };
+                row.ColumnDefinitions.Add(new() { Width = new GridLength(40) }); row.ColumnDefinitions.Add(new());
+                FrameworkElement art = item.IsFileSystem ? IslandFilePreview.Art(item.Value, 32, item.Thumbnail, item.Exists, item.Kind == ShelfItemKind.Folder, loadThumbnail: false)
+                    : EdgeDropGlyph.Create(item.Kind == ShelfItemKind.Link ? "link" : "textT", 26);
+                art.HorizontalAlignment = HorizontalAlignment.Left; art.VerticalAlignment = VerticalAlignment.Center; row.Children.Add(art);
+                var label = new StackPanel { VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(label, 1); row.Children.Add(label);
+                var name = ClipboardPreview.Text(item.DisplayName, 11.5, item.Exists ? "PanelPrimary" : "PanelTertiary");
+                name.TextWrapping = TextWrapping.NoWrap; name.TextTrimming = TextTrimming.CharacterEllipsis; label.Children.Add(name);
+                _compactDetail = ClipboardPreview.Text("", 10, "PanelTertiary");
+                _compactDetail.TextWrapping = TextWrapping.NoWrap; _compactDetail.TextTrimming = TextTrimming.CharacterEllipsis; _compactDetail.Margin = new Thickness(0, 3, 0, 0); label.Children.Add(_compactDetail);
+                Body.Content = row;
+            }
+            else if (item.Kind is ShelfItemKind.Text or ShelfItemKind.Link)
             {
                 Body.Content = ClipboardPreview.Create(ClipboardContent.FromText(item.Value), mode: mode);
                 if (DockMode && Body.Content is TextBlock text) { text.Margin = new Thickness(14, 10, 14, 2); text.FontSize = 12; text.LineHeight = 12 * 1.34; text.LineStackingStrategy = LineStackingStrategy.BlockLineHeight; text.MaxHeight = 5 * text.LineHeight; text.VerticalAlignment = VerticalAlignment.Top; }
@@ -58,9 +76,10 @@ internal sealed class ShelfIslandCard : IslandContentCard
             }
         }
         // Geometry changes do not reread files; the same art is resized in place.
-        if (Body.Content is Grid picture && item.IsFileSystem && picture.Children.Count > 0 && picture.Children[0] is FrameworkElement artElement)
+        if (!compact && Body.Content is Grid picture && item.IsFileSystem && picture.Children.Count > 0 && picture.Children[0] is FrameworkElement artElement)
             artElement.Width = artElement.Height = Math.Clamp(height - 60, 28, 72);
         _detail.Text = item.Exists ? item.Detail : Loc.T("源文件已失效", "Original unavailable");
+        if (compact && _compactDetail is not null) _compactDetail.Text = _detail.Text;
         if (DockMode)
         {
             if (_dockFooter is null)

@@ -45,15 +45,18 @@ internal static partial class Program
                 var surface = (FrameworkElement)PresentationSource.FromVisual(chrome)!.RootVisual;
                 var field = All<TextBox>(chrome).Single(text => AutomationProperties.GetAutomationId(text) == "clipboard-appearance-name");
                 var save = Button(chrome, "save"); var saveBounds = save.TransformToAncestor(surface).TransformBounds(new Rect(save.RenderSize));
-                Check("collection host " + palette.Id + "-" + scale + ": compact name and palette layout keeps actions in bounds", editor.ActualHeight <= 160 && field.Text == "Design ideas"
+                Check("collection host " + palette.Id + "-" + scale + ": full name, color and icon layout keeps actions in bounds", editor.ActualHeight > 240 && field.Text == "Design ideas"
                     && ribbon.IsVisible && saveBounds.Bottom <= surface.ActualHeight + 1 && saveBounds.Right <= surface.ActualWidth + 1 && chrome.LayoutTransform is ScaleTransform transform && Math.Abs(transform.ScaleX - scale) < .01);
+                var textHost = All<ScrollViewer>(field).Single();
+                var glyph = field.GetRectFromCharacterIndex(0, true);
+                Check("collection host " + palette.Id + "-" + scale + ": a full text line and caret fit without vertical scrolling", !glyph.IsEmpty && glyph.Height <= textHost.ViewportHeight + 1
+                    && textHost.ScrollableHeight < 1 && textHost.VerticalOffset == 0 && glyph.Top >= 0 && glyph.Bottom <= field.ActualHeight);
                 Check("collection host " + palette.Id + "-" + scale + ": host palette, pixel corners and exact chosen color are retained", chrome is Border border && border.Background is SolidColorBrush fill && fill.Color == PanelTheme.ColorOf("popup")
                     && border.CornerRadius.TopLeft == (palette.Effects.Pixel > 0 ? 0 : 16) && ribbon.SelectedColor == (scale == 1 ? "#FF8000" : "#8000FF"));
                 Render(surface, directory, "collection-editor-" + palette.Id + "-" + scale + ".png");
                 if (palette.Id == palettes[1].Id && scale == 1)
                 {
-                    Button(chrome, "more").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Pump();
-                    Check("collection host: optional exact HEX and original icons remain reachable", All<TextBox>(chrome).Single(text => AutomationProperties.GetAutomationId(text) == "clipboard-appearance-color").IsVisible
+                    Check("collection host: exact HEX and original icons are expanded by default", All<TextBox>(chrome).Single(text => AutomationProperties.GetAutomationId(text) == "clipboard-appearance-color").IsVisible
                         && Button(chrome, "icon-star").IsVisible && Button(chrome, "reset").IsVisible);
                     Render(surface, directory, "collection-editor-light-options.png");
                 }
