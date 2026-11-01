@@ -483,9 +483,9 @@ public sealed class DeckSettings
     // Whether the notch and the capsule widen to their content (CollapsedGeometry.Resolve). Resizing one by dragging an end turns
     // its own off, so the width set by hand stays.
     public bool NotchAutoWidth { get; set; } = true;
-    // Compacts the heap and trims the working set after the panel has been collapsed and idle for a while (App.Memory.cs). Off
-    // by default: the memory is read back in when the panel next opens, which can stutter.
-    public bool TrimMemoryWhenIdle { get; set; }
+    // Compacts the heap and trims the working set after the panel has been collapsed and idle for a while (App.Memory.cs). On by
+    // default; the memory is read back in when the panel next opens, which can stutter, so it can be turned off.
+    public bool TrimMemoryWhenIdle { get; set; } = true;
     public bool CapsuleAutoWidth { get; set; } = true;
     public GripDoubleClick GripDoubleClick { get; set; } = GripDoubleClick.Move;
     // What the collapsed readings showed before their table (CompactReadings). Kept to read older files and, written to match the

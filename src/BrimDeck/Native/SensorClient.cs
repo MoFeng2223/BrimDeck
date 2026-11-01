@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -67,11 +68,15 @@ internal sealed class SensorClient
             pipe.Write("read\n"u8);
             pipe.Flush();
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            using var reply = new MemoryStream();
-            var buffer = new byte[4096];
-            int read;
-            while ((read = pipe.ReadAsync(buffer, timeout.Token).AsTask().GetAwaiter().GetResult()) > 0 && reply.Length < 65536) reply.Write(buffer, 0, read);
-            return SensorReport.Parse(Encoding.UTF8.GetString(reply.ToArray()));
+            // A reply is a few hundred bytes: read into one pooled buffer, asked every second, and decoded from it.
+            var buffer = ArrayPool<byte>.Shared.Rent(8192);
+            try
+            {
+                int length = 0, read;
+                while (length < buffer.Length && (read = pipe.ReadAsync(buffer.AsMemory(length), timeout.Token).AsTask().GetAwaiter().GetResult()) > 0) length += read;
+                return SensorReport.Parse(Encoding.UTF8.GetString(buffer, 0, length));
+            }
+            finally { ArrayPool<byte>.Shared.Return(buffer); }
         }
         catch (Exception ex) when (ex is System.TimeoutException or IOException or UnauthorizedAccessException or OperationCanceledException) { return null; }
     }

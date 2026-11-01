@@ -20,7 +20,9 @@ internal sealed class MonitorBridgeReader
     private static readonly double[] Looks = [30, 120, 300];
     private const string HwInfoMap = @"Global\HWiNFO_SENS_SM2", HwInfoMutex = @"Global\HWiNFO_SM2_MUTEX";
     private static readonly Uri LibreUri = new("http://localhost:8085/data.json");
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMilliseconds(400) };
+    // Made when LibreHardwareMonitor is first looked for, so the network stack is not loaded for nothing.
+    private static HttpClient? _http;
+    private static HttpClient Http => _http ??= new() { Timeout = TimeSpan.FromMilliseconds(400) };
 
     // One monitor: whether it answered last time, the time of its next look, and how many of Looks are spent.
     private sealed class Bridge(Func<List<BridgeSensor>> read, CpuTemperatureSource source)
@@ -45,6 +47,8 @@ internal sealed class MonitorBridgeReader
     private readonly Bridge _hwInfo = new(HwInfo, CpuTemperatureSource.HwInfo), _libre = new(Libre, CpuTemperatureSource.LibreHardwareMonitor);
 
     public void Rescan() { _hwInfo.Rescan(); _libre.Rescan(); }
+    // The readings paused: HWiNFO's copy is let go until they start again. On the sampling thread, whose copy it is.
+    public void Rest() => _copy = null;
 
     public (double? Celsius, double? Watts, CpuTemperatureSource Source) Read(double now) =>
         _hwInfo.Read(now) ?? _libre.Read(now) ?? (null, null, CpuTemperatureSource.Zone);
@@ -109,7 +113,12 @@ internal sealed class MonitorBridgeReader
         var sensors = new List<BridgeSensor>();
         try
         {
-            using var document = JsonDocument.Parse(Http.GetStringAsync(LibreUri).GetAwaiter().GetResult());
+            // Parsed as it arrives, within the same time as the request: the whole document as one string was large enough for the
+            // large object heap, every second.
+            using var timeout = new CancellationTokenSource(Http.Timeout);
+            using var response = Http.GetAsync(LibreUri, HttpCompletionOption.ResponseHeadersRead, timeout.Token).GetAwaiter().GetResult().EnsureSuccessStatusCode();
+            using var stream = response.Content.ReadAsStream(timeout.Token);
+            using var document = JsonDocument.ParseAsync(stream, default, timeout.Token).GetAwaiter().GetResult();
             void Walk(JsonElement node)
             {
                 if (node.TryGetProperty("SensorId", out var id) && node.TryGetProperty("Type", out var type) && node.TryGetProperty("RawValue", out var raw)
@@ -123,7 +132,7 @@ internal sealed class MonitorBridgeReader
             }
             Walk(document.RootElement);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException) { Debug.WriteLine(ex.Message); }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException or JsonException or InvalidOperationException) { Debug.WriteLine(ex.Message); }
         return sensors;
     }
 }
