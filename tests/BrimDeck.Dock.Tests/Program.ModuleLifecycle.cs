@@ -23,6 +23,8 @@ internal static partial class Program
         typeof(PanelTheme).GetField("_loaded", BindingFlags.Static | BindingFlags.NonPublic)!.SetValue(null, true);
         // Keep dialog captions stable across UpdateSettings, which normally reapplies the saved language.
         app.Settings.Language = Loc.English; Loc.Use(Loc.English);
+        // Settings updates now apply tray visibility; an isolated lifecycle fixture must not install a real tray icon.
+        app.Settings.ShowTrayIcon = false;
         app.Settings.Clipboard.Enabled = false; app.Settings.Clipboard.Hotkey = "";
         app.Settings.Clipboard.RetentionDays = 0; app.Settings.Clipboard.PersistHistory = true;
         app.Settings.Clipboard.Mode = app.Settings.Tray.Mode = ModuleMode.Off;

@@ -120,11 +120,12 @@ internal static partial class ClipboardChecks
             Theme(PanelThemes.Dark); window.Show(); Pump();
             var handle = new WindowInteropHelper(window).Handle;
             WindowsHost.ConfigureOverlay(window);
-            check("clipboard focus: native hover overlay does not activate", (GetWindowLongPtr(handle, -20).ToInt64() & 0x08000000) != 0 && !window.IsActive);
+            check("clipboard focus: hover blocks mouse activation without the WGC-incompatible style", SendMessage(handle, 0x21, IntPtr.Zero, new IntPtr(0x02010001)) == new IntPtr(3)
+                && (GetWindowLongPtr(handle, -20).ToInt64() & 0x08000000) == 0 && !window.IsActive);
             WindowsHost.SetOverlayInput(window, true);
-            check("clipboard focus: explicit input removes the non-activation flag", (GetWindowLongPtr(handle, -20).ToInt64() & 0x08000000) == 0);
+            check("clipboard focus: explicit input releases the mouse-activation block", SendMessage(handle, 0x21, IntPtr.Zero, new IntPtr(0x02010001)) != new IntPtr(3));
             WindowsHost.SetOverlayInput(window, false);
-            check("clipboard focus: leaving input restores the hover flag", (GetWindowLongPtr(handle, -20).ToInt64() & 0x08000000) != 0);
+            check("clipboard focus: leaving input restores non-activating clicks", SendMessage(handle, 0x21, IntPtr.Zero, new IntPtr(0x02010001)) == new IntPtr(3));
             check("clipboard paste: own windows can never receive injected paste", !ClipboardPaste.IsExternalWindow(handle) && !ClipboardPaste.Restore(handle) && !ClipboardPaste.Send(handle));
             check("clipboard paste: absent focus targets are refused", !ClipboardPaste.RestoreFocus(IntPtr.Zero) && !ClipboardPaste.Restore(IntPtr.Zero));
             check("clipboard UI: page content is not a second Window or island shell", !typeof(Window).IsAssignableFrom(typeof(ClipboardView)) && !Descendants<IslandBorder>(view).Any());
@@ -213,6 +214,7 @@ internal static partial class ClipboardChecks
         finally { window.Close(); }
     }
     [System.Runtime.InteropServices.DllImport("user32", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+    [System.Runtime.InteropServices.DllImport("user32", EntryPoint = "SendMessageW")] private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
     private static DataObject Text(string value) { var data = new DataObject(); data.SetText(value); return data; }
     private static byte[] Image()
     {

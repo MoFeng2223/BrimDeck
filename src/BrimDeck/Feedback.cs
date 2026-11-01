@@ -42,13 +42,14 @@ internal static class Feedback
         if (sender is not ButtonBase { Template: { } template } button) return;
         bool enabled = button.IsEnabled, animate = !initialize && Soft.For(button) && button.IsVisible;
         bool over = enabled && button.IsMouseOver, pressed = enabled && button.IsPressed;
-        Show(template.FindName("HoverLayer", button) as UIElement, over ? 1 : 0, animate, initialize);
-        Show(template.FindName("PressLayer", button) as UIElement, pressed ? 1 : 0, animate, initialize);
-        Show(template.FindName("Glyph", button) as UIElement, pressed ? GlyphPressed : over ? 1 : GlyphRest, animate, initialize);
+        Show(template.FindName("HoverLayer", button) as UIElement, over ? 1 : 0, animate, over, initialize);
+        Show(template.FindName("PressLayer", button) as UIElement, pressed ? 1 : 0, animate, pressed, initialize);
+        Show(template.FindName("Glyph", button) as UIElement, pressed ? GlyphPressed : over ? 1 : GlyphRest, animate, over, initialize);
     }
     private const double GlyphRest = .78, GlyphPressed = .6;
 
-    private static void Show(UIElement? layer, double target, bool animate, bool initialize)
+    // arriving: the feedback comes (Soft.Hover); otherwise it leaves, a little quicker (Soft.HoverOut).
+    private static void Show(UIElement? layer, double target, bool animate, bool arriving, bool initialize)
     {
         if (layer is null) return;
         double from = layer.Opacity;
@@ -57,6 +58,6 @@ internal static class Feedback
         layer.BeginAnimation(UIElement.OpacityProperty, null);
         layer.Opacity = target;
         if (animate) layer.BeginAnimation(UIElement.OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(from, target,
-            TimeSpan.FromMilliseconds(Soft.Hover)) { EasingFunction = Soft.Follow, FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop });
+            TimeSpan.FromMilliseconds(arriving ? Soft.Hover : Soft.HoverOut)) { EasingFunction = Soft.Follow, FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop });
     }
 }

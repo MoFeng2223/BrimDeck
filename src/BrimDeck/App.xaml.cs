@@ -123,9 +123,9 @@ public partial class App : Application
         WarmSettingsWriter();
         DisplayPower.Install(Dispatcher);
         _save.Tick += (_, _) => FlushSettings();
-        _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden, ToggleClipboard, OpenClipboardLibrary, OpenShelf, OpenShelfSettings);
+        ApplyTray();
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
-        _listener = ThreadPool.RegisterWaitForSingleObject(_settingsEvent, (_, _) => Dispatcher.BeginInvoke(OpenSettings), null, Timeout.Infinite, false);
+        _listener = ThreadPool.RegisterWaitForSingleObject(_settingsEvent, (_, _) => Dispatcher.BeginInvoke(ShowFromRelaunch), null, Timeout.Infinite, false);
         if (DropShelf.AppController.IsShelfRequest(e.Args)) { if (Shelves is not null) Shelves.HandleArguments(e.Args); else OpenShelfSettings(); }
         else if (e.Args.Contains("--settings")) OpenSettings();
         // A portable update that kept this version says why on the About page.
@@ -160,6 +160,19 @@ public partial class App : Application
         _clipboardPreviews?.RefreshText();
     }
     public void OpenSettings() => ShowSettings(false);
+    // Starting BrimDeck while it runs shows the hidden panels as well as the settings, so the panels come back even without
+    // the tray icon.
+    private void ShowFromRelaunch()
+    {
+        if (Exiting) return;
+        SetUserHidden(false); OpenSettings();
+    }
+    // Adds or removes the tray icon to match the settings.
+    private void ApplyTray()
+    {
+        if (Settings.ShowTrayIcon && _tray is null) _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden, ToggleClipboard, OpenClipboardLibrary, OpenShelf, OpenShelfSettings);
+        else if (!Settings.ShowTrayIcon && _tray is not null) { _tray.Dispose(); _tray = null; }
+    }
     // The panel ends a collapsed preview when the pointer reaches it. The settings window clears its own preview state; the
     // panel is resumed either way, in case the two disagree (ResumeAfterPreview does nothing when no preview is on).
     internal void EndPreviewFromDeck()
@@ -169,7 +182,9 @@ public partial class App : Application
     }
     // The panel's update dot opens the About page with the update dialog.
     internal void OpenUpdateSettings() => ShowSettings(true);
-    private void ShowSettings(bool update)
+    // After an update the gear's dot opens the About page with the What's new window.
+    internal void OpenReleaseNotes() => ShowSettings(false, notes: true);
+    private void ShowSettings(bool update, bool notes = false)
     {
         if (_settingsWindow is null)
         {
@@ -180,7 +195,7 @@ public partial class App : Application
         }
         if (_settingsWindow.WindowState == WindowState.Minimized) _settingsWindow.WindowState = WindowState.Normal;
         _settingsWindow.Activate();
-        _ = update ? _settingsWindow.ShowUpdateNoticeAsync() : _settingsWindow.CheckUpdatesOnOpenAsync();
+        _ = notes ? _settingsWindow.ShowReleaseNotesAsync() : update ? _settingsWindow.ShowUpdateNoticeAsync() : _settingsWindow.CheckUpdatesOnOpenAsync();
     }
     public void UpdateSettings(DeckSettings settings)
     {
@@ -203,6 +218,7 @@ public partial class App : Application
         ApplyHotkeys();
         ApplyClipboardSettings();
         ApplyShelfSettings();
+        ApplyTray();
         // A panel whose collapsed row changes asks again as it is built (PresentMonitor).
         UpdateMonitorExtras();
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
@@ -301,7 +317,7 @@ public partial class App : Application
         else if (!wanted && Media is not null) { Media.Changed -= RaiseMediaChanged; Media.Dispose(); Media = null; RaiseMediaChanged(); }
         // Switching the setting off leaves full control on until BrimDeck restarts.
         if (Settings.AppleMusicFullControl && Media is { AppleMusicFullControl: false } media) media.EnableAppleMusicFullControl();
-        if (Media is not null) Media.NeteaseAutoFullControl = Settings.NeteaseAutoFullControl;
+        if (Media is not null) { Media.NeteaseAutoFullControl = Settings.NeteaseAutoFullControl; Media.NeteaseFileControlWanted = Settings.NeteaseFullControl; Media.KugouFullControlWanted = Settings.KugouFullControl; }
     }
     private void RaiseMediaChanged() => MediaChanged?.Invoke();
     // Audio levels are read while any panel shows music: the player's while it shows a song's bars, the whole system's while
@@ -336,7 +352,7 @@ public partial class App : Application
     // Temperatures and drives are read for an open page with them on; also for a collapsed row showing them: the processor's and
     // the graphics adapter's temperatures for a ring showing its own, the drives for the drive reading, and their temperatures when
     // it shows those.
-    private void UpdateMonitorExtras()
+    internal void UpdateMonitorExtras()
     {
         bool page = _presentingMonitor.Count > 0;
         bool strip = _stripMonitor.Count > 0;
@@ -350,7 +366,11 @@ public partial class App : Application
             // The watts (the counters, NVIDIA's helper) only for a page that shows the power line or a row that chose the reading; the battery
             // alone also for the row's charge reading.
             _presentingPower.Count > 0 && Settings.MonitorPower && PowerKnownToExist || (shown & CompactMonitorItems.Power) != 0,
-            (shown & CompactMonitorItems.Charge) != 0);
+            (shown & CompactMonitorItems.Charge) != 0,
+            // The frame rate for a row that shows it, or an open page with room for its line.
+            (shown & CompactMonitorItems.Frames) != 0 || Settings.MonitorFrames && _presentingMonitor.Any(deck => deck.PageShowsFrames),
+            // The graphics adapters for the page and the row's GPU reading (the power asks for them itself).
+            page || (shown & CompactMonitorItems.Gpu) != 0);
     }
     // The page reads the machine's power only where there may be something to read: not once the sampler knows there is neither a power
     // source nor a battery (a desktop with nothing), so such a page does not keep asking.

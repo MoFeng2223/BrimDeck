@@ -73,6 +73,10 @@ internal static class UI
         return new Path { Data = geometry, Fill = brush, Width = formatted.WidthIncludingTrailingWhitespace,
             Height = bounds.Height, Stretch = Stretch.None, VerticalAlignment = VerticalAlignment.Center, UseLayoutRounding = false };
     }
+    // A Centered line's own height, its baseline below its top, and the height of its capitals.
+    public static double LineBox(double size) => PanelFont.LineSpacing * size;
+    public static double Baseline(double size) => PanelFont.Baseline * size;
+    public static double CapHeight(double size) => new Typeface(PanelFont, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal).CapsHeight * size;
     // Standalone symbols center their visible ink, without the font's baseline whitespace.
     public static Path CenteredSymbol(string text, double size, string color, FontWeight? weight = null)
     {

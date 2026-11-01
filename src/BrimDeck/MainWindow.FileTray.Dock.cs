@@ -83,7 +83,7 @@ public partial class MainWindow
         _traySearchClear.Width = _traySearchClear.Height = 18; Grid.SetColumn(_traySearchClear, 2); field.Children.Add(_traySearchClear);
         _traySearchCapsule.Child = field; _trayCenter.Children.Add(_traySearchCapsule);
         _trayPickerText = ClipboardPreview.Text("", 11, "PanelSecondary"); _trayPickerText.TextWrapping = TextWrapping.NoWrap; _trayPickerText.TextTrimming = TextTrimming.CharacterEllipsis;
-        var pickerContent = new DockPanel(); var caret = EdgeDropGlyph.Create("caretDown", 9); caret.Margin = new Thickness(6, 0, 0, 0); DockPanel.SetDock(caret, Dock.Right); pickerContent.Children.Add(caret); pickerContent.Children.Add(_trayPickerText);
+        var pickerContent = new DockPanel(); var caret = EdgeDropGlyph.Create("caretDown", 9); caret.Margin = new Thickness(6, 0, 0, 0); DockPanel.SetDock(caret, System.Windows.Controls.Dock.Right); pickerContent.Children.Add(caret); pickerContent.Children.Add(_trayPickerText);
         _trayPicker = ShelfDockButton(pickerContent, Loc.T("选择当前置物架", "Choose current shelf"), () => OpenShelfChooser(_trayPicker!), "shelf-picker");
         _trayPicker.Width = double.NaN; _trayPicker.HorizontalContentAlignment = HorizontalAlignment.Stretch; _trayPicker.Padding = new Thickness(8, 0, 8, 0);
         Grid.SetColumn(_trayPicker, 1); _trayCenter.Children.Add(_trayPicker);

@@ -124,6 +124,7 @@ public partial class MainWindow
 
     private void DismissPanelFromKeyboard()
     {
+        if (_moveArmed) { CancelMove(); return; }
         if (_trayDragging) { EndTrayReorder(false); _trayPressed = null; _trayPressCard = null; }
         else if (_expanded && IsTrayPage && HandleTrayShortcut(Key.Escape, ModifierKeys.None, null)) { }
         else if (_expanded && IsClipboardPage && _clipboardView is { } view) view.DismissFromKeyboard();

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using BrimDeck.Core;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -240,6 +241,8 @@ internal sealed class MusicMarquee : FrameworkElement
         get => _text;
         set { if (_text == value) return; _text = value; ResetText(); AutomationProperties.SetName(this, value); }
     }
+    // For screen readers: the whole line as text, however much of it shows.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => _text);
     public double FontSize
     {
         get => _fontSize;
@@ -489,10 +492,14 @@ internal abstract class GlideCarousel : Grid
     // Position within the cycle; the window hands it to the next carousel so a rebuild continues where this one was.
     public TimeSpan Elapsed => _cycle is not null ? TimeSpan.FromSeconds(Position(Eased.Now)) : _elapsed;
 
-    // Starts the cycle that moves the strip (with a TranslateTransform) left by travel and back.
-    protected void Glide(FrameworkElement strip, double travel, TimeSpan elapsed, bool animate)
+    // The direction the strip moves in: left, or up for the collapsed column (ColumnCarousel).
+    private DependencyProperty _axis = TranslateTransform.XProperty;
+
+    // Starts the cycle that moves the strip (with a TranslateTransform) left by travel and back; up when vertical.
+    protected void Glide(FrameworkElement strip, double travel, TimeSpan elapsed, bool animate, bool vertical = false)
     {
         _strip = strip; _discrete = !animate; _elapsed = elapsed;
+        _axis = vertical ? TranslateTransform.YProperty : TranslateTransform.XProperty;
         Loaded += (_, _) => Update();
         Unloaded += (_, _) => Update();
         IsVisibleChanged += (_, _) => Update();
@@ -515,7 +522,7 @@ internal abstract class GlideCarousel : Grid
         if (Travel <= 0)
         {
             _cycle = null; _turn?.Stop(); _since = double.NaN;
-            if (_strip?.RenderTransform is TranslateTransform shift) shift.X = 0;
+            if (_strip?.RenderTransform is TranslateTransform shift) shift.SetValue(_axis, 0d);
             if (_strip is not null) _strip.Opacity = 1;
             return;
         }
@@ -570,7 +577,7 @@ internal abstract class GlideCarousel : Grid
             return;
         }
         Release();
-        shift.X = cycle.Shift(at); _strip.Opacity = cycle.Opacity(at);
+        shift.SetValue(_axis, cycle.Shift(at)); _strip.Opacity = cycle.Opacity(at);
         if (!running) { _turn.Stop(); return; }
         var stretch = cycle.StretchAt(at);
         var turn = CycleTurn.Plan(stretch, cycle.StretchAt(stretch.End), at);
@@ -609,7 +616,7 @@ internal abstract class GlideCarousel : Grid
             group.Children.Add(back); group.Children.Add(fade);
         }
         _move = (ClockGroup)group.CreateClock(true); _moving = move;
-        shift.ApplyAnimationClock(TranslateTransform.XProperty, (AnimationClock)_move.Children[0]);
+        shift.ApplyAnimationClock(_axis, (AnimationClock)_move.Children[0]);
         if (!glide) _strip!.ApplyAnimationClock(OpacityProperty, (AnimationClock)_move.Children[1]);
     }
 
@@ -618,7 +625,7 @@ internal abstract class GlideCarousel : Grid
     {
         if (_move is null) return;
         _move.Controller?.Remove(); _move = null; _moving = null;
-        if (_strip?.RenderTransform is TranslateTransform shift) shift.ApplyAnimationClock(TranslateTransform.XProperty, null);
+        if (_strip?.RenderTransform is TranslateTransform shift) shift.ApplyAnimationClock(_axis, null);
         _strip?.ApplyAnimationClock(OpacityProperty, null);
     }
 }
@@ -627,6 +634,8 @@ internal abstract class GlideCarousel : Grid
 internal sealed class QuotaCarousel : GlideCarousel
 {
     private readonly Canvas _strip;
+    // For screen readers: its name, every ring's tooltip line, rotating or not.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => AutomationProperties.GetName(this).Replace("\n", Loc.T("；", "; ")));
     // count: the whole rings the window holds (CompactSpacing.Window); gap: the row's gap, which the rings keep between them too.
     // flowing: the window as wide as the room gives it, not whole rings (the surface is being dragged; CompactSpacing.ShareFlowing),
     // with the ring it cuts faded over cut DIPs; nothing glides then.
@@ -707,5 +716,31 @@ internal sealed class ReadingsCarousel : GlideCarousel
             Background = Brushes.Transparent;
         }
         Glide(strip, travel, elapsed, animate);
+    }
+}
+
+// The collapsed column on a side edge (MainWindow.CompactColumn.cs) when it is longer than the notch: it rests with its start in
+// view, glides up until its end is, rests there and fades back, as the readings do sideways. The fades lie over the window's top
+// and bottom edges, outside it (over the notch's ends), so nothing at rest is faded.
+internal sealed class ColumnCarousel : GlideCarousel
+{
+    public ColumnCarousel(FrameworkElement column, double width, double window, double travel, double edge, TimeSpan elapsed, bool animate)
+    {
+        window = Math.Max(0, window); travel = Math.Max(0, travel);
+        Rotates = travel > 0;
+        edge = Rotates ? Math.Max(0, edge) : 0;
+        Width = width; Height = edge + window + edge; ClipToBounds = true;
+        column.VerticalAlignment = VerticalAlignment.Top; column.RenderTransform = new TranslateTransform();
+        Canvas.SetTop(column, edge);
+        // A Canvas measures the column at its full length, as for the rings.
+        var host = new Canvas(); host.Children.Add(column); Children.Add(host);
+        if (Rotates && edge > 0)
+        {
+            Margin = new Thickness(0, -edge, 0, -edge);
+            OpacityMask = new LinearGradientBrush(new GradientStopCollection { new(Colors.Transparent, 0), new(Colors.White, edge / Height),
+                new(Colors.White, (Height - edge) / Height), new(Colors.Transparent, 1) }, new Point(0, 0), new Point(0, Height)) { MappingMode = BrushMappingMode.Absolute };
+            Background = Brushes.Transparent;
+        }
+        Glide(column, travel, elapsed, animate, vertical: true);
     }
 }
