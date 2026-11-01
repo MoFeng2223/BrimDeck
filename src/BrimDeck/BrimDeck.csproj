@@ -36,8 +36,12 @@
          than keeping room to grow into (see App.Memory.cs). -->
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
   </PropertyGroup>
+  <!-- Gen0MaxBudget: the youngest generation is collected after 4 MB of allocation instead of a budget taken from the processor's
+       cache (12 MB on a 24 MB cache). What the panel allocates while it sits (readings, players) otherwise refills that room within
+       a minute of a trim, and it all counts in the working set; a collection of this generation takes well under a millisecond. -->
   <ItemGroup>
     <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
+    <RuntimeHostConfigurationOption Include="System.GC.Gen0MaxBudget" Value="4194304" />
   </ItemGroup>
 
   <Import Project="ReleaseVersion.targets" />

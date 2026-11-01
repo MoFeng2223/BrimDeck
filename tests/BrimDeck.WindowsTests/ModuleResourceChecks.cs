@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Controls;
@@ -32,6 +33,7 @@ internal static class ModuleResourceChecks
                 CheckViewports(root, check);
             }
             CheckEvents(check);
+            CheckWindowHost(check);
             // A canceled thumbnail still owns its short STA lease until its started operation returns.
             Wait(() => ImagingThread.LeaseCount == 0);
             check("resource teardown: no imaging lease or presentation cache remains", ImagingThread.LeaseCount == 0 && DecodedImageCache.Bytes == 0);
@@ -167,6 +169,38 @@ internal static class ModuleResourceChecks
         finally { first.Dispose(); second.Dispose(); Pump(); }
         check("context events: final release removes all module subscriptions", WindowContextEvents.SubscriberCount == initial);
     }
+
+    private static void CheckWindowHost(Action<string, bool> check)
+    {
+        int initial = WindowContextEvents.SubscriberCount, windowReads = 0;
+        using var host = new WindowsHost(() => IntPtr.Zero, () => { windowReads++; return IntPtr.Zero; }, () => null);
+        const BindingFlags fields = BindingFlags.Instance | BindingFlags.NonPublic;
+        var timer = (DispatcherTimer)typeof(WindowsHost).GetField("_timer", fields)!.GetValue(host)!;
+        var hooks = (IntPtr[])typeof(WindowsHost).GetField("_hooks", fields)!.GetValue(host)!;
+        var registered = hooks.ToArray();
+        var orderEvent = typeof(WindowsHost).GetMethod("OnOrderEvent", fields)!;
+        var schedule = typeof(WindowContextEvents).GetMethod("Schedule", BindingFlags.Static | BindingFlags.NonPublic)!;
+        check("window host: full mode retains the upstream order hooks and fallback timer", registered.Length == 3 && registered.All(hook => hook != IntPtr.Zero) && timer.IsEnabled);
+        host.EventDriven = true;
+        check("window host: event-driven mode stops polling without losing its subscription", !timer.IsEnabled && host.EventDriven && WindowContextEvents.SubscriberCount == initial + 1);
+        orderEvent.Invoke(host, [IntPtr.Zero, 0x0003u, IntPtr.Zero, 0, 0, 0u, 0u]);
+        schedule.Invoke(null, null);
+        check("window host: an order check is pending before disposal", (bool)typeof(WindowsHost).GetField("_orderCheckPending", fields)!.GetValue(host)!);
+        int beforeDispose = windowReads;
+        host.Dispose();
+        check("window host: disposal stops polling and releases the shared context subscription", !timer.IsEnabled && !host.EventDriven && WindowContextEvents.SubscriberCount == initial);
+        check("window host: disposal releases every upstream native order hook", registered.All(hook => !UnhookWinEvent(hook)) && hooks.All(hook => hook == IntPtr.Zero));
+        Pump();
+        check("window host: queued order and context callbacks do not read the disposed window", windowReads == beforeDispose);
+        host.Dispose();
+        host.EventDriven = true;
+        orderEvent.Invoke(host, [IntPtr.Zero, 0x0003u, IntPtr.Zero, 0, 0, 0u, 0u]);
+        Pump();
+        check("window host: repeated disposal and late events cannot restart or enqueue the host", windowReads == beforeDispose && !timer.IsEnabled && !host.EventDriven
+            && WindowContextEvents.SubscriberCount == initial && !(bool)typeof(WindowsHost).GetField("_orderCheckPending", fields)!.GetValue(host)!);
+    }
+
+    [DllImport("user32")] private static extern bool UnhookWinEvent(IntPtr hook);
 
     private static byte[] Png(int width, int height)
     {

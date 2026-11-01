@@ -201,18 +201,20 @@ static class SystemMonitorTests
         }
         check("Device pixels: whole widths stay, others round", DevicePixels.Up(268, 1.5) == 268 && DevicePixels.Up(269, 1.25) == 269.6 && DevicePixels.Down(269, 1.25) == 268.8
             && DevicePixels.Up(double.NaN, 1.5) == 0 && DevicePixels.Up(10, 0) == 10 && DevicePixels.Down(10, 0) == 0);
-        check("Compact rates", MonitorFormat.CompactRate(84_200) == new MonitorFormat.Quantity("84", "K") && MonitorFormat.CompactRate(1_240_000) == new MonitorFormat.Quantity("1.2", "M")
-            && MonitorFormat.CompactRate(120_000_000) == new MonitorFormat.Quantity("120", "M") && MonitorFormat.CompactRate(2_500_000_000) == new MonitorFormat.Quantity("2.5", "G")
-            && MonitorFormat.CompactRate(12_340_000) == new MonitorFormat.Quantity("12", "M") && MonitorFormat.CompactRate(9_960_000) == new MonitorFormat.Quantity("10", "M")
+        check("Compact rates", MonitorFormat.CompactRate(5_120) == new MonitorFormat.Quantity("5.12", "K") && MonitorFormat.CompactRate(84_200) == new MonitorFormat.Quantity("84.2", "K")
+            && MonitorFormat.CompactRate(512_000) == new MonitorFormat.Quantity("512", "K") && MonitorFormat.CompactRate(1_240_000) == new MonitorFormat.Quantity("1.24", "M")
+            && MonitorFormat.CompactRate(120_000_000) == new MonitorFormat.Quantity("120", "M") && MonitorFormat.CompactRate(2_500_000_000) == new MonitorFormat.Quantity("2.50", "G")
+            && MonitorFormat.CompactRate(12_340_000) == new MonitorFormat.Quantity("12.3", "M") && MonitorFormat.CompactRate(9_996_000) == new MonitorFormat.Quantity("10.0", "M")
+            && MonitorFormat.CompactRate(99_960_000) == new MonitorFormat.Quantity("100", "M") && MonitorFormat.CompactRate(0) == new MonitorFormat.Quantity("0.00", "K")
             && MonitorFormat.CompactRate(999_600).Unit == "M");
-        // The strip reserves four characters for a rate ("999M"); none below a terabyte a second is longer.
-        bool four = true;
+        // The strip reserves room for "99.9M": every rate below a terabyte a second has three digits, a point below 100, and a letter.
+        bool three = true;
         for (double rate = 1; rate < 999_000_000_000; rate *= 1.003)
         {
             var q = MonitorFormat.CompactRate(rate);
-            four &= (q.Number + q.Unit).Length <= 4;
+            three &= q.Number.Count(char.IsAsciiDigit) == 3 && q.Number.Length == (q.Number.Contains('.') ? 4 : 3) && q.Unit.Length == 1;
         }
-        check("Compact rates: at most four characters", four);
+        check("Compact rates: three digits and a letter", three);
         var alone = CompactMusicLayout.Calculate(300, 1, false, 0, false, 0, 120);
         check("Compact row: readings alone take the row, centred", alone is { MonitorAlone: true, MonitorWidth: 120 });
         var withRings = CompactMusicLayout.Calculate(300, 1, false, 2, false, 0, 120);

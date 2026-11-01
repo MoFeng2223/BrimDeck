@@ -189,7 +189,8 @@ public partial class App : Application
         if (_settingsWindow is null)
         {
             _settingsWindow = new SettingsWindow(this);
-            _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+            // What the window built is garbage once it closes: given back like a panel's after it collapses.
+            _settingsWindow.Closed += (_, _) => { _settingsWindow = null; RequestTrim(); };
             _settingsWindow.Show();
             if (Store.LoadWarning is { } warning) _settingsWindow.SaveStatus(warning, true);
         }

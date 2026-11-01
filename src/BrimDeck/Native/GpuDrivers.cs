@@ -228,14 +228,17 @@ internal sealed class AmdDriver : DriverLibrary
         : _adapters.Count == 1 ? _adapters.Values.First() : null;
     protected override bool Listed(GpuSample gpu) => Index(gpu) is not null;
 
+    // Kept between readings, as NVIDIA's are.
+    private readonly int[] _output = new int[1 + Sensors * 2], _activityInfo = new int[10];
+
     protected override (double? Percent, double? Watts, double? Celsius) Sample(GpuSample gpu, double now)
     {
         int adapter = Index(gpu)!.Value;
         double? percent = null, watts = null, celsius = null;
         if (_log is not null)
         {
-            var output = new int[1 + Sensors * 2];
-            output[0] = output.Length * 4;
+            var output = _output;
+            Array.Clear(output); output[0] = output.Length * 4;
             if (_log(_context, adapter, output) == 0)
             {
                 int? Sensor(int sensor) => output[1 + sensor * 2] != 0 ? output[2 + sensor * 2] : null;
@@ -246,8 +249,8 @@ internal sealed class AmdDriver : DriverLibrary
         }
         if (percent is null && _activity is not null)
         {
-            var activity = new int[10];
-            activity[0] = activity.Length * 4;
+            var activity = _activityInfo;
+            Array.Clear(activity); activity[0] = activity.Length * 4;
             if (_activity(_context, adapter, activity) == 0) percent = activity[4];
         }
         if (watts is null && _power is not null && _power(_context, adapter, 0, out int power) == 0) watts = power / 256.0;
@@ -277,6 +280,7 @@ internal sealed class IntelDriver : DriverLibrary
     private TelemetryFunction? _telemetry;
     private readonly Dictionary<ulong, IntPtr> _devices = [];
     private readonly Dictionary<ulong, (double At, double Busy, double Card, double Chip)> _last = [];
+    private readonly byte[] _telemetryData = new byte[TelemetrySize];
 
     protected override string FileName => "ControlLib.dll";
 
@@ -319,7 +323,8 @@ internal sealed class IntelDriver : DriverLibrary
 
     protected override (double? Percent, double? Watts, double? Celsius) Sample(GpuSample gpu, double now)
     {
-        var telemetry = new byte[TelemetrySize];
+        var telemetry = _telemetryData;
+        Array.Clear(telemetry);
         BitConverter.TryWriteBytes(telemetry.AsSpan(0), TelemetrySize);
         telemetry[4] = 1;
         if (_telemetry!(_devices[gpu.Luid], telemetry) != 0) { Forget(); return default; }
