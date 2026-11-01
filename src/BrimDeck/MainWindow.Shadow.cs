@@ -57,7 +57,8 @@ public partial class MainWindow
 
     private void ShadowChanging()
     {
-        if (_shadowSettle is null || !Soft.For(ShadowHost)) return;
+        // Shape changes invalidate cached pixels even with animations off; a collapsed performance shadow has nothing to settle.
+        if (_shadowSettle is null || ShadowHost.Visibility != Visibility.Visible) return;
         ShadowHost.CacheMode = null; _shadowSettle.Stop(); _shadowSettle.Start();
     }
 

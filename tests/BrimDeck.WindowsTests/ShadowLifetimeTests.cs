@@ -8,7 +8,7 @@ using System.Windows.Threading;
 
 namespace BrimDeck;
 
-// A minimal window for the linked production MainWindow.Shadow.cs. No App, settings or account data is loaded.
+// A minimal window for the linked production MainWindow.Shadow.cs. Only the test App is used; no user settings or account data is loaded.
 public partial class MainWindow : Window
 {
     private readonly Grid ShadowHost = new() { CacheMode = new BitmapCache(), Opacity = 0 };
@@ -31,17 +31,29 @@ public partial class MainWindow : Window
 
     internal static void CheckShadowLifetime()
     {
-        var references = CreateAndClose();
-        // Let native-window cleanup and dispatcher operations finish before checking managed lifetime.
-        var frame = new DispatcherFrame();
-        Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => frame.Continue = false);
-        Dispatcher.PushFrame(frame);
-        for (int i = 0; i < 3; i++)
+        var app = Application.Current as App ?? new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+        bool savedAnimations = app.Settings.Animations;
+        try
         {
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
+            // CI may disable Windows animations; cache correctness must not depend on motion preferences.
+            foreach (bool animations in new[] { true, false })
+            {
+                app.Settings.Animations = animations;
+                Console.WriteLine($"Shadow lifetime: app animations={animations}, effective animations={Soft.Enabled}");
+                var references = CreateAndClose();
+                // Let native-window cleanup and dispatcher operations finish before checking managed lifetime.
+                var frame = new DispatcherFrame();
+                Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => frame.Continue = false);
+                Dispatcher.PushFrame(frame);
+                for (int i = 0; i < 3; i++)
+                {
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                }
+                Check("closed shadow window and elements can be collected", references.All(reference => !reference.IsAlive));
+            }
         }
-        Check("closed shadow window and elements can be collected", references.All(reference => !reference.IsAlive));
+        finally { app.Settings.Animations = savedAnimations; }
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -62,6 +74,13 @@ public partial class MainWindow : Window
             window.ShadowHost.CacheMode = window._shadowCache;
             window.Island.ShoulderRadius = 10;
             Check("shoulder changes suspend the shadow cache", window.ShadowHost.CacheMode is null && window._shadowSettle.IsEnabled);
+            window._shadowSettle.Stop();
+            window.ShadowHost.Visibility = Visibility.Collapsed;
+            window.ShadowHost.CacheMode = null;
+            Soft.SetReduced(window.ShadowHost, true);
+            window.Island.CornerRadius = new CornerRadius(4);
+            window.Island.ShoulderRadius = 6;
+            Check("a collapsed performance shadow does not restart its settle timer", window.ShadowHost.CacheMode is null && !window._shadowSettle.IsEnabled);
         }
         finally { window.Close(); }
 
