@@ -29,10 +29,10 @@ public sealed partial class SettingsWindow : Window
     private readonly TextBlock _status = new() { Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
     private ScrollViewer _scroll = null!;
     private static string[] _pages => [Loc.T("常规", "General"), Loc.T("收起外观", "Collapsed view"), Loc.T("展开外观", "Expanded view"),
-        Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck"), Loc.T("面板主题", "Panel theme"), Loc.T("显示与读数", "Display and readings")];
+        Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck"), Loc.T("面板主题", "Panel theme"), Loc.T("显示与读数", "Display and readings"), Loc.T("增强传感器", "Enhanced sensors")];
     // The order of the pages in the navigation; the theme page (ThemePage) is listed with the appearance pages, and the system
     // monitor's page (MonitorSettingsPage) has its own group after music, before About.
-    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, 3, 4, 5, 6, MonitorSettingsPage, 7];
+    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, 3, 4, 5, 6, MonitorSettingsPage, SensorsPage, 7];
     private int _page;
     private bool _preview;
     private StackPanel? _appRows;
@@ -96,6 +96,8 @@ public sealed partial class SettingsWindow : Window
         SourceInitialized += (_, _) => Native.SettingsChrome.SetTheme(this, _palette.Dark);
         SystemEvents.UserPreferenceChanged += SystemThemeChanged;
         Deactivated += (_, _) => { EndAppDrag(false); QueuePreviewDismissal(); };
+        // Back from PawnIO's installer or uninstaller: the enhanced sensors page shows what changed.
+        Activated += (_, _) => _refreshSensors?.Invoke();
         PreviewMouseDown += (_, e) => DismissPreviewOutsideControl(e.OriginalSource);
         DismissPreviewOnCaptionPress();
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape && _appDrag is not null) { EndAppDrag(false); e.Handled = true; } };
@@ -328,6 +330,7 @@ public sealed partial class SettingsWindow : Window
         // The exception list's reserved height only lasts for this visit of the page.
         _exceptionsReservedHeight = 0; _exceptionsOpen = false; _exceptionsHost = null;
         _scroll.ScrollChanged -= ExceptionsScrollChanged;
+        _refreshSensors = null;
         _page = page; _navigation.Children.Clear(); _content.Children.Clear(); _aboutUpdateView = null; _scroll.ScrollToTop();
         foreach (int i in PageOrder)
         {
@@ -353,7 +356,7 @@ public sealed partial class SettingsWindow : Window
             var reset=ActionButton(Loc.T("恢复默认", "Restore defaults"),ResetPage); reset.FontSize=11; DockPanel.SetDock(reset,Dock.Right); head.Children.Add(reset);
         }
         head.Children.Add(page == 7 ? Wordmark(28) : TextLine(_pages[page],24,TextPrimary,FontWeights.SemiBold)); _content.Children.Add(head);
-        switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; case ThemePage: ThemesPage(); break; case MonitorSettingsPage: MonitorSettings(); break; }
+        switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; case ThemePage: ThemesPage(); break; case MonitorSettingsPage: MonitorSettings(); break; case SensorsPage: SensorsSettings(); break; }
         if (_content.Children[^1] is Border lastGroup) lastGroup.Margin = new Thickness(lastGroup.Margin.Left, lastGroup.Margin.Top, lastGroup.Margin.Right, 0);
         // Apply the offset before the frame is drawn, so the rebuilt page never shows its top for a frame.
         if (keep > 0) { _scroll.UpdateLayout(); _scroll.ScrollToVerticalOffset(keep); _scroll.UpdateLayout(); }
@@ -370,6 +373,7 @@ public sealed partial class SettingsWindow : Window
         4 => "M 1,2 H 15 V 14 H 1 Z M 1,6 H 15 M 1,10 H 15 M 6,2 V 14",
         6 => "M 1,2 H 15 V 14 H 1 Z M 6.5,5.5 L 11,8 L 6.5,10.5 Z",
         MonitorSettingsPage => "M 1,9 H 4 L 6,4 L 9,13 L 11,7 L 12,9 H 15",
+        SensorsPage => "M 4,4 H 12 V 12 H 4 Z M 6,1 V 4 M 10,1 V 4 M 6,12 V 15 M 10,12 V 15 M 1,6 H 4 M 1,10 H 4 M 12,6 H 15 M 12,10 H 15",
         ThemePage => "M 8,1 C 4,1 1,4 1,8 C 1,12 4,15 8,15 C 9.4,15 9.6,13.6 8.8,12.8 C 8,12 8.6,10.5 10,10.5 H 12 C 13.7,10.5 15,9.2 15,7.5 C 15,4 12,1 8,1 Z M 4.6,8 V 8.1 M 6,4.8 V 4.9 M 9.6,4.4 V 4.5 M 12,6.8 V 6.9",
         5 => "M 6,12.5 V 3 L 14,1.5 V 11 M 6,12.5 A 2,2 0 1 1 2,12.5 A 2,2 0 1 1 6,12.5 M 14,11 A 2,2 0 1 1 10,11 A 2,2 0 1 1 14,11",
         _ => "M 8,1 A 7,7 0 1 1 7.99,1 M 8,7 V 12 M 8,4 V 4.2"
@@ -382,9 +386,13 @@ public sealed partial class SettingsWindow : Window
             catch(Exception ex) when(ex is System.IO.IOException or UnauthorizedAccessException or System.Security.SecurityException)
             { SaveStatus(Loc.T("无法设置自启动：", "Could not change the startup setting: ")+ex.Message,true); ShowPage(0); }
         }),
+            Toggle(Loc.T("显示托盘图标", "Show tray icon"), S.ShowTrayIcon, value => Change(s => s.ShowTrayIcon = value),
+                help: Loc.T("关闭后，再次打开 BrimDeck 即可显示隐藏的面板并打开设置。",
+                    "When off, open BrimDeck again to show hidden panels and open the settings.")),
             Toggle(Loc.T("空闲时释放内存", "Free memory when idle"), S.TrimMemoryWhenIdle, value => Change(s => s.TrimMemoryWhenIdle = value),
                 help: Loc.T("面板收起 45 秒后释放暂时不用的内存，最多每 5 分钟一次。开启后内存占用更低，但下次展开时可能稍有卡顿。",
-                    "45 seconds after the panel collapses, memory not in use is released, at most once every 5 minutes. Memory use is lower, but the next time the panel opens it may stutter slightly.")));
+                    "45 seconds after the panel collapses, memory not in use is released, at most once every 5 minutes. Memory use is lower, but the next time the panel opens it may stutter slightly.")),
+            Row(Loc.T("退出 BrimDeck", "Exit BrimDeck"), ActionButton(Loc.T("退出", "Exit"), _app.ExitApplication)));
         SectionTitle(Loc.T("外观与语言", "Appearance and language"));
         var themes = new UniformGrid { Columns=3,Width=292 };
         foreach(var theme in Enum.GetValues<SettingsTheme>())
@@ -634,7 +642,7 @@ public sealed partial class SettingsWindow : Window
         {
             switch(_page)
             {
-                case 0:s.LaunchAtStartup=false;s.TrimMemoryWhenIdle=defaults.TrimMemoryWhenIdle;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.ForceTopmost=defaults.ForceTopmost;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.FullscreenRules=[];s.Display=defaults.Display;s.DisplayMonitors=[];s.PanelScale=defaults.PanelScale;break;
+                case 0:s.LaunchAtStartup=false;s.ShowTrayIcon=defaults.ShowTrayIcon;s.TrimMemoryWhenIdle=defaults.TrimMemoryWhenIdle;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.ForceTopmost=defaults.ForceTopmost;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.FullscreenRules=[];s.Display=defaults.Display;s.DisplayMonitors=[];s.PanelScale=defaults.PanelScale;break;
                 case 1:s.Style=defaults.Style;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;
                     s.NotchEqualizer=defaults.NotchEqualizer;s.CapsuleEqualizer=defaults.CapsuleEqualizer;s.EqualizerAlways=defaults.EqualizerAlways;s.EqualizerBars=defaults.EqualizerBars;s.EqualizerMode=defaults.EqualizerMode;s.EqualizerColor=defaults.EqualizerColor;s.EqualizerCustomColor=defaults.EqualizerCustomColor;s.NotchClock=defaults.NotchClock;s.CapsuleClock=defaults.CapsuleClock;s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=[.. PanelTheme.Current.ClockGradients[0].Stops];s.Clock24Hour=defaults.Clock24Hour;s.ClockSeconds=defaults.ClockSeconds;CopyCollapsedSize(s,defaults);s.GripDoubleClick=defaults.GripDoubleClick;s.HideHotkey=defaults.HideHotkey;
                     s.NotchMonitor=defaults.NotchMonitor;s.CapsuleMonitor=defaults.CapsuleMonitor;s.NotchOrder=defaults.NotchOrder;s.CapsuleOrder=defaults.CapsuleOrder;
@@ -646,7 +654,7 @@ public sealed partial class SettingsWindow : Window
                     s.CompactMonitor=defaults.CompactMonitor;s.CompactMonitorItems=defaults.CompactMonitorItems;s.CompactReadings=defaults.CompactReadings;s.NotchAutoWidth=defaults.NotchAutoWidth;s.CapsuleAutoWidth=defaults.CapsuleAutoWidth;s.MonitorTemperatures=defaults.MonitorTemperatures;s.MonitorStorage=defaults.MonitorStorage;s.MonitorPower=defaults.MonitorPower;break;
                 // The current theme's application colors go back to its own; the other themes keep what was saved for them.
                 case 3:{var previous=s.Apps;s.QuotaAlerts=defaults.QuotaAlerts;s.IncludeWsl=defaults.IncludeWsl;s.Apps=defaults.Apps;PanelThemes.CarryAppChoices(s,previous);break;}
-                case 5:s.MusicText=defaults.MusicText;s.MusicEqualizerBars=defaults.MusicEqualizerBars;s.EqualizerMode=defaults.EqualizerMode;s.MusicTrackNotice=defaults.MusicTrackNotice;s.MusicCompactCover=defaults.MusicCompactCover;s.MusicPageCover=defaults.MusicPageCover;s.LyricsEnabled=defaults.LyricsEnabled;
+                case 5:s.MusicText=defaults.MusicText;s.MusicEqualizerBars=defaults.MusicEqualizerBars;s.MusicEqualizerMode=defaults.MusicEqualizerMode;s.MusicTrackNotice=defaults.MusicTrackNotice;s.MusicCompactCover=defaults.MusicCompactCover;s.MusicPageCover=defaults.MusicPageCover;s.LyricsEnabled=defaults.LyricsEnabled;
                     s.MusicPageEqualizerColor=defaults.MusicPageEqualizerColor;s.MusicPageEqualizerCustomColor=defaults.MusicPageEqualizerCustomColor;s.MusicLyricColor=defaults.MusicLyricColor;s.MusicLyricCustomColor=defaults.MusicLyricCustomColor;break;
                 case 6:s.NeteaseFullControlEntry=defaults.NeteaseFullControlEntry;s.NeteaseAutoFullControl=defaults.NeteaseAutoFullControl;s.AppleMusicFullControl=defaults.AppleMusicFullControl;break;
                 // The default theme, with its own colors and suggested clock, the clock reset as the collapsed page resets it; the
@@ -707,8 +715,8 @@ public sealed partial class SettingsWindow : Window
         raise.Background = UI.Brush(_palette.Input);
         Group(Toggle(Loc.T("持续置顶", "Keep on top"), S.ForceTopmost,
             value => Change(s => s.ForceTopmost = value), help:
-            Loc.T("开启后，面板被其他置顶窗口遮挡时会自动恢复到上方。仍遵循上面的显示与隐藏规则。若其他应用也持续置顶，可能出现闪烁。",
-                "Restores the panel above other always-on-top windows when covered. Display and hide rules above still apply. Apps that repeatedly raise themselves may cause flickering.")),
+            Loc.T("开启后，面板被其他置顶窗口遮挡时会立即恢复到上方，其他应用打开的菜单除外。仍遵循上面的显示与隐藏规则。若其他应用反复置顶自己，面板会暂停恢复几秒。",
+                "Restores the panel above other always-on-top windows as soon as it is covered, except for menus other apps open. Display and hide rules above still apply. If an app keeps raising itself, the panel pauses for a few seconds.")),
             Row(Loc.T("单次置顶", "Raise once"), raise, help: () => Loc.T("每次点击仅置顶一次。若面板再次被其他窗口遮挡，需要重新点击。",
                 "Each click raises the panel once. If another window covers it again, click again.")));
     }
