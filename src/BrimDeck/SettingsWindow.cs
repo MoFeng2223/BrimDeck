@@ -339,7 +339,8 @@ public sealed partial class SettingsWindow : Window
         var head = new DockPanel { Margin = new Thickness(0,0,0,page == 7 ? 10 : 20) };
         if (page is < 4 or 5 or 6 or ThemePage or MonitorSettingsPage)
         {
-            var reset=ActionButton(Loc.T("恢复默认", "Restore defaults"),ResetPage); reset.FontSize=11; DockPanel.SetDock(reset,Dock.Right); head.Children.Add(reset);
+            // Resets every setting on the page, so it asks first (SW-09, S-03); it keeps the look of the other "restore defaults" links.
+            var reset=ActionButton(Loc.T("恢复默认", "Restore defaults"),()=>{ if(Confirm(Loc.T("恢复默认", "Restore defaults"),ResetConfirmText(page),Loc.T("恢复默认", "Restore defaults")))ResetPage(); }); reset.FontSize=11; DockPanel.SetDock(reset,Dock.Right); head.Children.Add(reset);
         }
         head.Children.Add(page == 7 ? Wordmark(28) : TextLine(_pages[page],24,TextPrimary,FontWeights.SemiBold)); _content.Children.Add(head);
         switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; case ThemePage: ThemesPage(); break; case MonitorSettingsPage: MonitorSettings(); break; case SensorsPage: SensorsSettings(); break; }
@@ -613,6 +614,10 @@ public sealed partial class SettingsWindow : Window
         }
         QuickSizeRow(sizes);
     }
+    // What the "restore defaults" confirmation says. The quota page also puts the application list back (ResetPage, case 3), which removes the applications
+    // the user added and their quota sources, the largest loss of any page, so it says so.
+    private string ResetConfirmText(int page) => Loc.T($"将把“{_pages[page]}”页的全部设置恢复为默认值。", $"This puts every setting on the {_pages[page]} page back to its default.")
+        + (page == 3 ? Loc.T("\n\n应用列表也会换回默认：你添加的应用、各应用的额度来源与自定义设置都会消失。", "\n\nThe application list also goes back to the default: the applications you added, and each one's quota source and custom settings, are removed.") : "");
     private void ResetPage()
     {
         var defaults=new DeckSettings();
@@ -788,7 +793,7 @@ public sealed partial class SettingsWindow : Window
         var grid = new Grid { Background = Brushes.Transparent };
         var swatch = SwatchColumn;
         foreach (var width in new[] { new GridLength(40), new GridLength(1, GridUnitType.Star), new GridLength(1, GridUnitType.Star),
-            new GridLength(1.12, GridUnitType.Star), swatch, swatch, swatch, new GridLength(50), new GridLength(26) })
+            new GridLength(1.12, GridUnitType.Star), swatch, swatch, swatch, new GridLength(50), new GridLength(32) })
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
         return grid;
     }
@@ -817,8 +822,10 @@ public sealed partial class SettingsWindow : Window
         toggle.Checked += (_, _) => Change(s => s.Entry(entry.InstanceId)!.Enabled = true); toggle.Unchecked += (_, _) => Change(s => s.Entry(entry.InstanceId)!.Enabled = false);
         Grid.SetColumn(toggle, 7); row.Children.Add(toggle);
         AttachDrag(handle, name);
+        // Removing drops the app's colors and sources with it, so it asks first (SW-09).
         var remove = ActionButton("", () =>
         {
+            if (!Confirm(Loc.T("移除应用", "Remove app"), Loc.T($"将从看板移除“{name}”，连同它的颜色和来源设置。", $"This removes {name} from the panel, with its colors and sources."), Loc.T("移除", "Remove"))) return;
             Change(s => s.Apps.RemoveAll(app => app.InstanceId == entry.InstanceId));
             ShowPage(3);
         });
@@ -826,6 +833,8 @@ public sealed partial class SettingsWindow : Window
         cross.SetBinding(Shape.StrokeProperty, new System.Windows.Data.Binding("Foreground") { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.FindAncestor, typeof(Button), 1) });
         remove.Style = (Style)FindResource("SettingsGlyphButton"); remove.Content = cross; remove.Width = 24; remove.Height = 26; remove.Padding = new Thickness(0);
         AutomationProperties.SetName(remove, Loc.T("移除 ", "Remove ") + name); AutomationProperties.SetAutomationId(remove, "remove-" + entry.InstanceId.ToString("N"));
+        // At the column's right edge, at least 12 DIP from the switch beside it.
+        remove.HorizontalAlignment = HorizontalAlignment.Right;
         Grid.SetColumn(remove, 8); row.Children.Add(remove);
         var border = new Border { Child = row, Height = AppRowHeight, BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(0), Tag = entry,
             RenderTransform = new TranslateTransform() };
