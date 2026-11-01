@@ -277,6 +277,9 @@ public sealed class DeckSettings
     // Version of the BrimDeck that last saved settings.json; see SettingsMigrations. Empty in files saved before 0.1.0.
     public string AppVersion { get; set; } = "";
     public bool LaunchAtStartup { get; set; }
+    // Off, the notification area has no BrimDeck icon. Starting BrimDeck again then shows the panels and the settings
+    // (App.ShowFromRelaunch), and the settings window has its own exit button.
+    public bool ShowTrayIcon { get; set; } = true;
     public SettingsTheme Theme { get; set; } = SettingsTheme.System;
     // The panel's color theme (see PanelThemes): "system", "dark", "light", a built-in theme or a theme file's id.
     // The dark default is the original look. An id whose file is missing is kept and shown as the dark theme meanwhile.
