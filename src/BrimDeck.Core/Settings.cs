@@ -48,6 +48,9 @@ public enum MouseWheelAction { None, Pages, Volume }
 // (MainWindow.Move.cs); moving is the default. Saved as numbers, so new members go at the end.
 public enum GripDoubleClick { AutoWidth, Move }
 public enum CompactMusicText { None, Title, Lyrics }
+// What the collapsed music hides while the song is paused: the title or lyric, the cover, or both. Saved as numbers, so new
+// members go at the end.
+public enum PausedMusicHide { None, Text, Cover, Both }
 // How the level bars show the sound. Flow: one value for the whole sound that runs from one end of the bars to the other, so a
 // drum beat or a voice is seen crossing them. Spectrum: the sound split by pitch, each bar one band, low on the left and high
 // on the right. Saved as numbers, so new members go at the end; a file without it, or with a number not listed, is Flow.
@@ -279,6 +282,7 @@ public sealed class DeckSettings
     private List<DeckPage> _pageOrder = [.. DeckPages.Order];
     private int _equalizerBars = CompactMusicLayout.DefaultBars, _musicEqualizerBars = 5;
     private EqualizerMode _equalizerMode = EqualizerMode.Flow, _musicEqualizerMode = EqualizerMode.Flow;
+    private PausedMusicHide _musicPausedHide;
     // Version of the BrimDeck that last saved settings.json; see SettingsMigrations. Empty in files saved before 0.1.0.
     public string AppVersion { get; set; } = "";
     public bool LaunchAtStartup { get; set; }
@@ -371,6 +375,10 @@ public sealed class DeckSettings
     public bool ClockSeconds { get; set; }
     public CompactMusicText MusicText { get; set; }
     public bool MusicTrackNotice { get; set; } = true;
+    // A song taken as instrumental (Lyrics.Instrumental) shows its title in the collapsed lyric's place instead of "♪".
+    public bool MusicInstrumentalTitle { get; set; }
+    // The surface narrows without what is hidden; a number not listed shows everything.
+    public PausedMusicHide MusicPausedHide { get => _musicPausedHide; set => _musicPausedHide = Enum.IsDefined(value) ? value : PausedMusicHide.None; }
     // The album cover at the left of the collapsed row and on the music page; some players give no cover, only a placeholder.
     public bool MusicCompactCover { get; set; } = true;
     public bool MusicPageCover { get; set; } = true;
