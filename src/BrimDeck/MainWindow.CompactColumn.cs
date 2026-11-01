@@ -44,7 +44,7 @@ public partial class MainWindow
                 text = CompactLyricText(_mediaTrack!, _compactLyric);
             }
         }
-        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? [.. Settings.EnabledApps.Where(HasQuotaReading)] : new List<AppEntry>();
+        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
         var layout = CompactMusicLayout.Calculate(10000, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, 0, equalizer, Settings.EqualizerBars); CurrentCompactLayout = layout;
         // One strip per reading, each alone on its line and centred in it. The drives show no glyph here: each drive has a line with its
