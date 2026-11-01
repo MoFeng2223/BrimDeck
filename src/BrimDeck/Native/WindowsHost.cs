@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -128,12 +129,12 @@ public sealed class WindowsHost : IDisposable
         if (!(island.Width > 0) || !GetWindowRect(above, out var r)) return false;
         return r.Left < island.Right && r.Right > island.Left && r.Top < island.Bottom && r.Bottom > island.Top;
     }
-    private static bool IsTaskbar(IntPtr window)
-    {
-        var name = new System.Text.StringBuilder(32);
-        GetClassName(window, name, name.Capacity);
-        return name.ToString() is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd";
-    }
+    private static bool IsTaskbar(IntPtr window) => ClassName(window, stackalloc char[32]) is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd";
+    // The desktop and the taskbars.
+    private static bool IsShell(IntPtr window) => ClassName(window, stackalloc char[32]) is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd";
+    // The window's class name, read into the caller's buffer: the windows are polled several times a second.
+    private static ReadOnlySpan<char> ClassName(IntPtr window, Span<char> buffer) =>
+        buffer[..Math.Max(0, GetClassName(window, ref Unsafe.As<char, ushort>(ref MemoryMarshal.GetReference(buffer)), buffer.Length))];
     private static string ProcessName(IntPtr window)
     {
         try
@@ -249,9 +250,7 @@ public sealed class WindowsHost : IDisposable
         GetWindowThreadProcessId(foreground, out var pid);
         if (pid == Environment.ProcessId) { _appName = ""; _appPath = ""; return Desktop(); }
         if (MonitorFromWindow(foreground, 2) != monitor) { _appName = ""; _appPath = ""; return Desktop(); }
-        var name = new System.Text.StringBuilder(256);
-        GetClassName(foreground, name, name.Capacity);
-        if (name.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") { _appName = ""; _appPath = ""; return Desktop(); }
+        if (IsShell(foreground)) { _appName = ""; _appPath = ""; return Desktop(); }
         // The window's app travels with its context, so the app rules can answer for it; the read is cached per window.
         Describe(foreground, pid, out _appName, out _appPath);
         if (SHQueryUserNotificationState(out var state) == 0 && state == 3) return ScreenContext.Exclusive;
@@ -280,12 +279,6 @@ public sealed class WindowsHost : IDisposable
             if (!IsWindowVisible(window) || IsIconic(window)) return true;
             if ((GetWindowLongPtr(window, -20).ToInt64() & 0x00000080) != 0) return true;              // WS_EX_TOOLWINDOW
             if (MonitorFromWindow(window, 2) != monitor) return true;
-            if (DwmGetWindowAttribute(window, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
-            GetWindowThreadProcessId(window, out var pid);
-            if (pid == Environment.ProcessId) return true;
-            var cls = new System.Text.StringBuilder(256);
-            GetClassName(window, cls, cls.Capacity);
-            if (cls.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") return true;
             // A maximised window counts here too. The island is a topmost strip at the top of the screen, so a window that
             // fills the screen is partly hidden behind it even when that window is not in front — the case reported for a
             // browser left maximised behind another app. Only the window the user is actually working in is excluded, by
@@ -299,6 +292,10 @@ public sealed class WindowsHost : IDisposable
             var caption = (GetWindowLongPtr(window, -16).ToInt64() & 0x00C00000) != 0;
             // Maximised, or frameless across the whole monitor (browser F11, a borderless game, a full-screen video).
             if (!IsZoomed(window) && !(coversMonitor && !caption)) return true;
+            // Asked only of a window that fills the screen, which few do.
+            if (DwmGetWindowAttribute(window, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
+            GetWindowThreadProcessId(window, out var pid);
+            if (pid == Environment.ProcessId || IsShell(window)) return true;
             found = window;
             return false;
         }, IntPtr.Zero);
@@ -368,7 +365,8 @@ public sealed class WindowsHost : IDisposable
     [DllImport("user32")] private static extern bool IsIconic(IntPtr window);
     [DllImport("user32")] private static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
-    [DllImport("user32", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr window, System.Text.StringBuilder name, int max);
+    // ushort: a char is not blittable to DllImport, which would copy a single ANSI byte.
+    [DllImport("user32", EntryPoint = "GetClassNameW")] private static extern int GetClassName(IntPtr window, ref ushort name, int max);
     [DllImport("user32")] private static extern bool GetCursorPos(out POINT point);
     [DllImport("user32")] private static extern bool GetWindowRect(IntPtr window, out RECT rect);
     [DllImport("user32")] private static extern IntPtr MonitorFromPoint(POINT point, uint flags);

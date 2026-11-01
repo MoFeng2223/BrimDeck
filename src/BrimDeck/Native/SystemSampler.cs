@@ -237,7 +237,7 @@ internal sealed class SystemSampler : IDisposable
     private void Rest()
     {
         _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _powerHistory.Clear(); _powerStats.Reset(); _powerSource = null; _cpuPower.Clear(); _gpuPower.Clear();
-        _power!.Sample(false, false, 0, [], default, false); _storage.Rest();
+        _power!.Sample(false, false, 0, [], default, false); _storage.Rest(); _bridges.Rest();
         _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting); _processes.Dispose(); ProcessIcons.Clear();
     }
 
