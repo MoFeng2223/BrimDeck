@@ -286,9 +286,10 @@ static class SystemMonitorTests
 
     private static void Pages(Action<string, bool> check)
     {
-        var settings = new DeckSettings { ClipboardPage = false };
+        // Isolate the original pages from modules that are visible by default.
+        var settings = new DeckSettings { ClipboardPage = false, Tray = new() { Mode = ModuleMode.Off } };
         check("Pages: monitor comes after usage and music", DeckPages.Visible(settings).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor]));
-        var clipboard = new DeckSettings();
+        var clipboard = new DeckSettings { Tray = new() { Mode = ModuleMode.Off } };
         check("Pages: clipboard is native and visible without opting into recording", DeckPages.Visible(clipboard).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Clipboard]) && !clipboard.Clipboard.Enabled);
         check("Pages: clipboard can be the default opening page", DeckPages.Opening(DefaultDeckPage.Clipboard) == DeckPage.Clipboard && DeckPages.Resolve(clipboard, DeckPage.Clipboard) == DeckPage.Clipboard);
         DeckPages.SetSize(clipboard, DeckPage.Clipboard, 880, 340);
@@ -298,11 +299,11 @@ static class SystemMonitorTests
         var invalidClipboard = new DeckSettings { ClipboardLayoutVersion = ClipboardDockLayout.Version, ClipboardWidth = double.NaN, ClipboardHeight = 5000 }; invalidClipboard.Normalize();
         check("Pages: clipboard size is normalized", invalidClipboard.ClipboardWidth == ClipboardDockLayout.Width && invalidClipboard.ClipboardHeight == DeckPages.MaxHeight);
         check("Pages: new clipboard members preserve saved enum values", (int)DeckPage.FileTray == 3 && (int)DeckPage.Clipboard == 4 && (int)DefaultDeckPage.FileTray == 4 && (int)DefaultDeckPage.Clipboard == 5);
-        var withTray = new DeckSettings { ClipboardPage = false }; withTray.Tray.Enabled = true;
-        check("Pages: the file tray is the last page, and only while it is switched on",
+        var withTray = new DeckSettings { ClipboardPage = false };
+        check("Pages: the file tray is last when its mode and placement show it in the island",
             DeckPages.Visible(withTray).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.FileTray])
             && DeckPages.Resolve(withTray, DeckPage.FileTray) == DeckPage.FileTray);
-        withTray.Tray.Enabled = false;
+        withTray.Tray.Mode = ModuleMode.Off;
         check("Pages: a switched-off file tray falls back like any other page", DeckPages.Resolve(withTray, DeckPage.FileTray) == DeckPage.Usage);
         var sized = new DeckSettings();
         DeckPages.SetSize(sized, DeckPage.Music, 700, 300); DeckPages.SetSize(sized, DeckPage.Monitor, 800, 320); DeckPages.SetSize(sized, DeckPage.Usage, 900, 260);
@@ -325,7 +326,7 @@ static class SystemMonitorTests
         check("Pages: the music page alone", DeckPages.Resolve(settings, DeckPage.Monitor) == DeckPage.Music);
         settings.MusicPage = false;
         check("Pages: with every page off the usage page says so", DeckPages.Resolve(settings, DeckPage.Music) == DeckPage.Usage && DeckPages.Visible(settings).Count == 0);
-        var ordered = new DeckSettings { ClipboardPage = false, PageOrder = [DeckPage.Monitor, DeckPage.Usage, DeckPage.Music] };
+        var ordered = new DeckSettings { ClipboardPage = false, Tray = new() { Mode = ModuleMode.Off }, PageOrder = [DeckPage.Monitor, DeckPage.Usage, DeckPage.Music] };
         check("Pages: the switch follows the chosen order", DeckPages.Visible(ordered).SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music]));
         ordered.MonitorPage = false;
         check("Pages: a hidden page falls back to the first shown one in the chosen order", DeckPages.Resolve(ordered, DeckPage.Monitor) == DeckPage.Usage);
@@ -343,7 +344,7 @@ static class SystemMonitorTests
         check("The wheel: enum values stay saved as before", (int)MouseWheelAction.None == 0 && (int)MouseWheelAction.Pages == 1 && (int)MouseWheelAction.Volume == 2);
         check("Pages: opening choices", DeckPages.Opening(DefaultDeckPage.Monitor) == DeckPage.Monitor && DeckPages.Opening(DefaultDeckPage.Last) is null
             && DeckPages.Opening(DefaultDeckPage.Usage) == DeckPage.Usage && DeckPages.Opening(DefaultDeckPage.Music) == DeckPage.Music);
-        var sizes = new DeckSettings { ClipboardPage = false, Width = 500, Height = 150, MusicWidth = 700, MusicHeight = 180, MonitorWidth = 600, MonitorHeight = 300 };
+        var sizes = new DeckSettings { ClipboardPage = false, Tray = new() { Mode = ModuleMode.Off }, Width = 500, Height = 150, MusicWidth = 700, MusicHeight = 180, MonitorWidth = 600, MonitorHeight = 300 };
         check("Pages: the window holds the largest shown page", DeckPages.Largest(sizes) == (700, 300));
         sizes.MusicPage = false; sizes.MonitorPage = false;
         check("Pages: only shown pages size the window", DeckPages.Largest(sizes) == (Math.Max(500, sizes.MinimumWidth), 150));

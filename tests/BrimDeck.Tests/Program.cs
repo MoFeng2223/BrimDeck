@@ -45,6 +45,7 @@ try
     KeyboardResizeTests.Run(Check);
     CollapsedGeometryTests.Run(root, Check);
     PanelHeaderTests.Run(Check);
+    ModulePolicyTests.Run(Check);
     SystemMonitorTests.Run(Check);
     MonitorSpeechTests.Run(Check);
     CompactReadingTests.Run(Check);

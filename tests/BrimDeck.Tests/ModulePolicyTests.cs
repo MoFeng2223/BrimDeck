@@ -20,9 +20,23 @@ internal static class ModulePolicyTests
                 ModuleRuntimePolicy.ForPage(copy, DeckPage.Clipboard) == clipboard && ModuleRuntimePolicy.ForPage(copy, DeckPage.FileTray) == shelf
                 && ModuleRuntimePolicy.For(clipboard).Running == (clipboard != ModuleMode.Off)
                 && ModuleRuntimePolicy.For(shelf).Automatic == (shelf == ModuleMode.Full) && !copy.Clipboard.Enabled);
-            check($"modules navigation {clipboard}/{shelf}/{placement}: Off cannot be a selectable module page",
-                (clipboard != ModuleMode.Off || !DeckPages.Shown(copy, DeckPage.Clipboard))
-                && (shelf != ModuleMode.Off || !DeckPages.Shown(copy, DeckPage.FileTray)));
+            var clipboardShown = clipboard != ModuleMode.Off;
+            var shelfShown = shelf != ModuleMode.Off && placement is FileTrayPlacement.Notch or FileTrayPlacement.Both;
+            var expected = new List<DeckPage> { DeckPage.Usage, DeckPage.Music, DeckPage.Monitor };
+            if (shelfShown) expected.Add(DeckPage.FileTray);
+            if (clipboardShown) expected.Add(DeckPage.Clipboard);
+            check($"modules navigation {clipboard}/{shelf}/{placement}: visibility and fallback follow mode and placement",
+                DeckPages.Shown(copy, DeckPage.Clipboard) == clipboardShown && DeckPages.Shown(copy, DeckPage.FileTray) == shelfShown
+                && DeckPages.Visible(copy).SequenceEqual(expected)
+                && DeckPages.Resolve(copy, DeckPage.Clipboard) == (clipboardShown ? DeckPage.Clipboard : DeckPage.Usage)
+                && DeckPages.Resolve(copy, DeckPage.FileTray) == (shelfShown ? DeckPage.FileTray : DeckPage.Usage));
+            copy.Tray.Enabled = true; copy.Clipboard.Enabled = true;
+            check($"modules consent {clipboard}/{shelf}/{placement}: legacy tray switch and capture consent do not change navigation",
+                DeckPages.Visible(copy).SequenceEqual(expected));
+            copy.ClipboardPage = false;
+            check($"modules page toggle {clipboard}/{shelf}/{placement}: hiding clipboard preserves the shelf and capture consent",
+                DeckPages.Visible(copy).SequenceEqual(expected.Where(page => page != DeckPage.Clipboard))
+                && DeckPages.Resolve(copy, DeckPage.Clipboard) == DeckPage.Usage && copy.Clipboard.Enabled);
         }
         var original = new DeckSettings { Animations = true };
         original.Clipboard.Mode = ModuleMode.Performance; original.Tray.Mode = ModuleMode.Off;
