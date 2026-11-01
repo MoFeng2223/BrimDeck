@@ -123,15 +123,32 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     }
     // The letter to draw: empty unless the setting is on (DeckSettings.QuotaRingLetters), else the name's (RingLetter).
     public static string RingLetterFor(bool enabled, string? name) => enabled ? RingLetter(name) : "";
-    // Where the origin of a letter's outline goes so that its ink box (inkX, inkY, inkWidth, inkHeight: the glyph's own bounds,
-    // not the line box with its ascent and descent) is centred in a square cell of the ring's size, with the box's top left corner
-    // on a whole device pixel (so the centre is off the cell's by at most half a device pixel, on each axis, at any scale).
-    public static (double X, double Y) RingLetterOffset(double inkX, double inkY, double inkWidth, double inkHeight, double cell, double pixelsPerDip)
+    // The box (in whole device pixels) a letter's ink fills inside a ring, so that the box is centred on the ring's centre exactly.
+    // A box with whole-pixel edges is symmetric about a centre only when its width has the parity of the cell's: a ring 12 pixels
+    // across centres a letter 4 or 6 pixels wide, not 5 (which leaves the ink half a pixel to one side, as the eye sees). So the
+    // ink (inkWidth, inkHeight: the glyph's own box in device pixels, stroke included, never the line box with its ascent and
+    // descent) takes the nearest size of the cell's parity, never more than limit pixels (the ring's inner diameter less one), and
+    // the glyph is scaled to it (about a fifth of the letter's size at most at 6 pixels, less in larger rings).
+    // twiceCenter: twice the ring's centre in device pixels from the cell's corner (the cell's width, whole for a ring on whole
+    // pixels), which keeps a cell half a pixel off whole centred too. centroidX/centroidY: where the letter's mass lies in its box,
+    // 0 to 1 from left/top. The box is centred, then moved toward the mass (a V's is above, a T's near the bar) by half the mass's
+    // distance from the centre, to whole pixels: the box and the mass each end up that far off the centre, instead of one of them
+    // all of it. A mass within a pixel of the centre moves nothing, so the small letters of a small ring stay exactly centred; larger ones get the move.
+    public static (int Left, int Top, int Width, int Height) RingLetterBox(double inkWidth, double inkHeight, int twiceCenter, double centroidX, double centroidY, double limit)
     {
-        if (!double.IsFinite(inkX) || !double.IsFinite(inkY) || !double.IsFinite(inkWidth) || !double.IsFinite(inkHeight) || !double.IsFinite(cell)) return (0, 0);
-        double ppd = double.IsFinite(pixelsPerDip) && pixelsPerDip > 0 ? pixelsPerDip : 1;
-        double Axis(double ink, double extent) => Math.Round((cell - extent) / 2 * ppd, MidpointRounding.AwayFromZero) / ppd - ink;
-        return (Axis(inkX, inkWidth), Axis(inkY, inkHeight));
+        int Size(double ink, int twice)
+        {
+            int parity = Math.Abs(twice) & 1, most = Math.Max(parity == 0 ? 2 : 1, (int)Math.Floor(double.IsFinite(limit) ? limit : twice / 2.0));
+            if ((most & 1) != parity) most--;
+            if (!double.IsFinite(ink) || ink <= 0) return Math.Max(1, parity == 0 ? 2 : 1);
+            int near = (int)Math.Round(ink);
+            if ((near & 1) != parity) near = Math.Abs(ink - (near - 1)) <= Math.Abs(ink - (near + 1)) ? near - 1 : near + 1;
+            return Math.Clamp(near, parity == 0 ? 2 : 1, Math.Max(most, parity == 0 ? 2 : 1));
+        }
+        int width = Size(inkWidth, twiceCenter), height = Size(inkHeight, twiceCenter);
+        static double Fraction(double value) => double.IsFinite(value) ? Math.Clamp(value, 0, 1) : .5;
+        int Move(int size, double fraction) => -(int)Math.Round((Fraction(fraction) - .5) * size / 2, MidpointRounding.ToEven);
+        return ((twiceCenter - width) / 2 + Move(width, centroidX), (twiceCenter - height) / 2 + Move(height, centroidY), width, height);
     }
     // The gap between any two neighbours in the row, and between two rings or two readings (CompactSpacing).
     public static double Gap(double scale) => Whole(8 * SafeScale(scale));

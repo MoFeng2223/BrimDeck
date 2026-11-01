@@ -28,27 +28,35 @@ internal static class RingLetterTests
         check("Ring letter follows the display name when the application is renamed",
             sourceLetter.Length > 0 && renamedLetter == "Z" && CompactMusicLayout.RingLetterFor(true, entry.Name) == "工");
 
-        // Placing the letter: its ink box (the glyph's own bounds), not the line box with the font's ascent and descent, is centred
-        // in the ring's cell, on whole device pixels. A capital at 7 DIP is about 4.9 high inside a 9.3 high line box (Segoe UI) whose
-        // ink starts about 2.65 down: centring the line box leaves the ink 0.45 DIP below the centre (0.9 device pixel at 200 %).
-        var scales = new[] { 1.0, 1.25, 1.5, 1.75, 2.0 };
-        var inks = new[] { (X: .6, Y: 2.65, W: 4.8, H: 4.9), (X: .5, Y: 2.65, W: 5.6, H: 4.9), (X: .3, Y: 2.7, W: 1.9, H: 4.9), (X: .2, Y: 2.6, W: 6.4, H: 5.1) };
-        double worst = 0, worstLineBox = 0;
-        bool onPixels = true;
-        foreach (double ppd in scales)
-            foreach (double cell in new[] { 14d, 16d, 18d, 21d, 24d })
-                foreach (var ink in inks)
+        // Placing the letter: a box of whole pixels is symmetric about the ring's centre only if its width and height have the ring's
+        // parity, so the ink takes the nearest such size (a 5 pixel letter in a 12 pixel ring becomes 4 or 6, not half a pixel off), never
+        // more than the ring's inside, and the box is centred exactly on the centre.
+        bool exact = true, parity = true, inside = true, wrongParityOff = false;
+        foreach (int cell in new[] { 10, 12, 14, 15, 16, 20, 21, 25 })
+            foreach (double w in new[] { 1.2, 2.4, 3.9, 4.6, 5.0, 5.3, 6.4, 7.7 })
+                foreach (double h in new[] { 4.1, 4.9, 5.3, 6.2, 7.0 })
                 {
-                    var (x, y) = CompactMusicLayout.RingLetterOffset(ink.X, ink.Y, ink.W, ink.H, cell, ppd);
-                    worst = Math.Max(worst, Math.Max(Math.Abs(x + ink.X + ink.W / 2 - cell / 2), Math.Abs(y + ink.Y + ink.H / 2 - cell / 2)) * ppd);
-                    onPixels &= Math.Abs((x + ink.X) * ppd - Math.Round((x + ink.X) * ppd)) < 1e-9 && Math.Abs((y + ink.Y) * ppd - Math.Round((y + ink.Y) * ppd)) < 1e-9;
-                    // What a line box does: the box (9.3 high) centred, the ink where the font leaves it.
-                    worstLineBox = Math.Max(worstLineBox, Math.Abs((cell - 9.3) / 2 + ink.Y + ink.H / 2 - cell / 2) * ppd);
+                    var box = CompactMusicLayout.RingLetterBox(w, h, cell, .5, .5, cell - 5);
+                    exact &= box.Left * 2 + box.Width == cell && box.Top * 2 + box.Height == cell;
+                    parity &= (box.Width & 1) == (cell & 1) && (box.Height & 1) == (cell & 1);
+                    inside &= box.Width <= Math.Max(cell - 5, 2) && box.Height <= Math.Max(cell - 5, 2);
+                    // The box the ink as it is (rounded to whole pixels, the parity left alone) would be centred at best half a pixel off.
+                    int plain = (int)Math.Round(w);
+                    if (cell % 2 == 0 && plain % 2 == 1 && plain <= cell) wrongParityOff = true;
                 }
-        check("Ring letter ink centre is the ring's centre to half a device pixel at 100 to 200 %, the ink box on whole device pixels", worst <= .5 + 1e-9 && onPixels);
-        check("Ring letter: centring the line box instead leaves the ink more than half a device pixel off (the cause of the uncentred letter)", worstLineBox > .5);
-        check("Ring letter offset ignores a non-number and a non-positive scale",
-            CompactMusicLayout.RingLetterOffset(double.NaN, 0, 5, 5, 16, 1) == (0, 0) && CompactMusicLayout.RingLetterOffset(.5, 2, 5, 5, 16, 0) == CompactMusicLayout.RingLetterOffset(.5, 2, 5, 5, 16, 1));
+        check("Ring letter box is centred on the ring's centre exactly, with the ring's parity, inside the ring", exact && parity && inside);
+        check("Ring letter: an ink of the other parity (the 5 pixels of a 12 pixel ring) could only sit half a pixel off, which the eye sees", wrongParityOff);
+        var tall = CompactMusicLayout.RingLetterBox(5.3, 5.3, 12, .5, .5, 7);
+        check("Ring letter in a 12 pixel ring with 5.3 pixels of ink is 6 by 6 at 3,3", tall == (3, 3, 6, 6));
+        // The mass of a letter (an A's below the middle, a V's above it) moves the box by half its distance from the centre, to whole
+        // pixels: nothing within a pixel (small letters stay exactly centred), a pixel for two.
+        var small = CompactMusicLayout.RingLetterBox(5.3, 5.3, 12, .5, .6, 7);
+        var big = CompactMusicLayout.RingLetterBox(13.3, 13.3, 30, .5, .65, 20);
+        var up = CompactMusicLayout.RingLetterBox(13.3, 13.3, 30, .5, .35, 20);
+        check("Ring letter keeps its box centred when the mass is within a pixel of the middle, moves it toward the mass beyond",
+            small.Top * 2 + small.Height == 12 && big.Top * 2 + big.Height == 30 - 2 && up.Top * 2 + up.Height == 30 + 2 && big.Left * 2 + big.Width == 30);
+        check("Ring letter box ignores a non-number",
+            CompactMusicLayout.RingLetterBox(double.NaN, 5, 12, double.NaN, .5, 7) is { Width: >= 1, Height: >= 1 });
 
         check("Ring letter is the upper-case first letter", CompactMusicLayout.RingLetter("claude") == "C" && CompactMusicLayout.RingLetter("Codex") == "C");
         check("Ring letter skips leading punctuation and spaces", CompactMusicLayout.RingLetter("  [dsh]") == "D" && CompactMusicLayout.RingLetter("-- kimi") == "K");

@@ -5,21 +5,24 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using BrimDeck;
-using BrimDeck.Core;
 
 // The letter inside a collapsed quota ring, rendered offscreen at 100 to 200 %: where its ink lands against the ring's centre, drawn
-// as it is now (RingLetter) and as it was (a TextBlock centred in the ring). Nothing is shown. With a folder given, the enlarged
-// pictures are saved there too.
+// as it is now (RingLetter) and as it was (a TextBlock centred in the ring). Nothing is shown. Rings are sized in device pixels
+// (10 to 20 across, whole, on whole pixels, as the carousel places them). The ink is measured two ways, as the eye does: its box
+// (every pixel with a thirty-second of full alpha or more) and its mass (the pixels' alpha-weighted centre), in device pixels
+// against the ring's centre. With a folder given, the enlarged pictures are saved there too.
 internal static class RingLetterChecks
 {
     private static readonly FontFamily Font = new("Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI");
     private static readonly Brush Ink = Frozen(Color.FromRgb(0xC8, 0xC8, 0xC8));
+    private const int Pad = 4;
 
     private static Brush Frozen(Color color) { var brush = new SolidColorBrush(color); brush.Freeze(); return brush; }
 
-    // The ring's cell: the ring (a track, and an arc when drawn) with the letter or without it, on whole device pixels.
-    private static FrameworkElement Ring(double size, double thickness, string letter, double fontSize, double ppd, bool now, bool drawn)
+    // A ring cells pixels across with a track of thick pixels, at scale ppd; the letter 7/12 of the ring across, as in the row.
+    private static FrameworkElement Ring(int cell, int thick, string letter, double ppd, bool now, bool drawn)
     {
+        double size = cell / ppd, thickness = thick / ppd, font = 7.0 / 12 * cell / ppd;
         var ring = new Grid { Width = size, Height = size };
         if (drawn)
         {
@@ -31,92 +34,114 @@ internal static class RingLetterChecks
                 StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round });
         }
         if (letter.Length == 0) return ring;
-        if (now) { if (RingLetter.Create(letter, fontSize, size, ppd, Font, Ink) is { } path) ring.Children.Add(path); }
-        else ring.Children.Add(new TextBlock { Text = letter, FontFamily = Font, FontWeight = FontWeights.SemiBold, FontSize = fontSize, Foreground = Ink,
+        if (now) { if (RingLetter.Create(letter, font, size, size - 2 * thickness, ppd, Font, Ink) is { } path) ring.Children.Add(path); }
+        else ring.Children.Add(new TextBlock { Text = letter, FontFamily = Font, FontWeight = FontWeights.SemiBold, FontSize = font, Foreground = Ink,
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Center });
         return ring;
     }
 
-    private const double Pad = 4;
-    // The picture (BGRA, device pixels) of the ring in a cell Pad DIP in from the corner, whole pixels as the carousel places it.
-    private static (byte[] Pixels, int Width, int Height, double CenterX, double CenterY) Render(double size, double thickness, string letter, double fontSize, double ppd, bool now, bool drawn, bool dark)
+    // The picture (BGRA, device pixels): the ring Pad pixels in from the corner.
+    private static (byte[] Pixels, int Size) Render(int cell, int thick, string letter, double ppd, bool now, bool drawn, bool dark)
     {
-        double pad = Math.Round(Pad * ppd) / ppd, side = size + 2 * pad;
-        var host = new Grid { Width = side, Height = side, UseLayoutRounding = true, Background = dark ? Frozen(Color.FromRgb(0x20, 0x20, 0x20)) : null };
-        var ring = Ring(size, thickness, letter, fontSize, ppd, now, drawn);
-        ring.HorizontalAlignment = HorizontalAlignment.Left; ring.VerticalAlignment = VerticalAlignment.Top; ring.Margin = new Thickness(pad);
+        int pixels = cell + 2 * Pad;
+        double side = pixels / ppd;
+        // No layout rounding: an element outside a window rounds to the system scale, not to the one rendered at; every size here is whole device pixels already.
+        var host = new Grid { Width = side, Height = side, UseLayoutRounding = false, Background = dark ? Frozen(Color.FromRgb(0x20, 0x20, 0x20)) : null };
+        var ring = Ring(cell, thick, letter, ppd, now, drawn);
+        ring.HorizontalAlignment = HorizontalAlignment.Left; ring.VerticalAlignment = VerticalAlignment.Top; ring.Margin = new Thickness(Pad / ppd);
         host.Children.Add(ring);
         host.Measure(new Size(side, side)); host.Arrange(new Rect(0, 0, side, side)); host.UpdateLayout();
-        int w = (int)Math.Ceiling(side * ppd), h = w;
-        var bitmap = new RenderTargetBitmap(w, h, 96 * ppd, 96 * ppd, PixelFormats.Pbgra32);
+        var bitmap = new RenderTargetBitmap(pixels, pixels, 96 * ppd, 96 * ppd, PixelFormats.Pbgra32);
         bitmap.Render(host);
-        var pixels = new byte[w * h * 4]; bitmap.CopyPixels(pixels, w * 4, 0);
-        return (pixels, w, h, (pad + size / 2) * ppd, (pad + size / 2) * ppd);
+        var data = new byte[pixels * pixels * 4]; bitmap.CopyPixels(data, pixels * 4, 0);
+        return (data, pixels);
     }
 
-    // The ink's box (pixels with at least a thirty-second of full alpha) against the ring's centre, in device pixels.
-    private static (double Dx, double Dy) Deviation(double size, double thickness, string letter, double fontSize, double ppd, bool now)
+    // The ink's box centre and its mass centre against the ring's centre, device pixels (x, y of each); NaN with no ink.
+    private static (double BoxX, double BoxY, double MassX, double MassY) Deviation(int cell, int thick, string letter, double ppd, bool now)
     {
-        var (pixels, w, h, cx, cy) = Render(size, thickness, letter, fontSize, ppd, now, drawn: false, dark: false);
-        int x0 = w, y0 = h, x1 = -1, y1 = -1;
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++)
-                if (pixels[(y * w + x) * 4 + 3] >= 8) { x0 = Math.Min(x0, x); x1 = Math.Max(x1, x); y0 = Math.Min(y0, y); y1 = Math.Max(y1, y); }
-        if (x1 < 0) return (double.NaN, double.NaN);
-        return ((x0 + x1 + 1) / 2.0 - cx, (y0 + y1 + 1) / 2.0 - cy);
+        var (data, n) = Render(cell, thick, letter, ppd, now, drawn: false, dark: false);
+        int x0 = n, y0 = n, x1 = -1, y1 = -1;
+        double sum = 0, sx = 0, sy = 0;
+        for (int y = 0; y < n; y++)
+            for (int x = 0; x < n; x++)
+            {
+                int alpha = data[(y * n + x) * 4 + 3];
+                if (alpha >= 8) { x0 = Math.Min(x0, x); x1 = Math.Max(x1, x); y0 = Math.Min(y0, y); y1 = Math.Max(y1, y); }
+                sum += alpha; sx += alpha * (x + .5); sy += alpha * (y + .5);
+            }
+        if (x1 < 0) return (double.NaN, double.NaN, double.NaN, double.NaN);
+        double centre = Pad + cell / 2.0;
+        return ((x0 + x1 + 1) / 2.0 - centre, (y0 + y1 + 1) / 2.0 - centre, sx / sum - centre, sy / sum - centre);
     }
 
     public static void Run(Action<string, bool> check, string? folder = null)
     {
-        var results = new List<(double Ppd, string Letter, (double Dx, double Dy) Old, (double Dx, double Dy) New)>();
-        double worstNow = 0, worstThen = 0;
-        foreach (double ppd in new[] { 1.0, 1.25, 1.5, 1.75, 2.0 })
-            foreach (string letter in new[] { "C", "G", "K", "O", "1", "文" })
+        double[] scales = [1.0, 1.25, 1.5, 1.75, 2.0];
+        int[] cells = [10, 12, 14, 16, 20];
+        string[] checked_ = ["A", "C", "K", "O", "1", "文"], heavy = ["V", "W", "T", "Y", "L", "7"];
+        int thick(int cell) => Math.Max(1, (int)Math.Round(cell / 6.0));
+        double worstBox = 0, worstMass = 0, worstSmall = 0;
+        string worstWhere = "";
+        foreach (double ppd in scales)
+            foreach (int cell in cells)
+                foreach (string letter in checked_)
+                {
+                    var now = Deviation(cell, thick(cell), letter, ppd, now: true);
+                    double box = Math.Max(Math.Abs(now.BoxX), Math.Abs(now.BoxY)), mass = Math.Max(Math.Abs(now.MassX), Math.Abs(now.MassY));
+                    worstBox = Math.Max(worstBox, box);
+                    if (cell <= 14) worstSmall = Math.Max(worstSmall, mass);
+                    if (mass > worstMass) { worstMass = mass; worstWhere = $"{letter} in {cell} px at {ppd * 100:0}%"; }
+                    if (box > 1e-9) Console.WriteLine($"  box off: {letter} in {cell} px at {ppd * 100:0}%: dx={now.BoxX:+0.00;-0.00} dy={now.BoxY:+0.00;-0.00}");
+                    if (mass > .4 && ppd is 1.0 or 1.5) Console.WriteLine($"  mass off: {letter} in {cell} px at {ppd * 100:0}%: dx={now.MassX:+0.00;-0.00} dy={now.MassY:+0.00;-0.00}");
+                }
+        // The row's own ring (12 px at its scale 1, with a 2 px track): what the maintainer saw before and what is drawn now.
+        double beforeBox = 0, beforeMass = 0, nowBox = 0, nowMass = 0;
+        foreach (double ppd in scales)
+            foreach (string letter in checked_.Concat(heavy))
             {
-                // The collapsed row at its scale 1: the ring 12 DIP across with a 2 DIP track, the letter 7 DIP (MusicVisuals.Ring).
-                double size = 12, thickness = 2, font = 7;
-                var then = Deviation(size, thickness, letter, font, ppd, now: false);
-                var now = Deviation(size, thickness, letter, font, ppd, now: true);
-                results.Add((ppd, letter, then, now));
-                worstNow = Math.Max(worstNow, Math.Max(Math.Abs(now.Dx), Math.Abs(now.Dy)));
-                worstThen = Math.Max(worstThen, Math.Max(Math.Abs(then.Dx), Math.Abs(then.Dy)));
+                var then = Deviation(12, 2, letter, ppd, now: false); var now = Deviation(12, 2, letter, ppd, now: true);
+                beforeBox = Math.Max(beforeBox, Math.Max(Math.Abs(then.BoxX), Math.Abs(then.BoxY))); beforeMass = Math.Max(beforeMass, Math.Max(Math.Abs(then.MassX), Math.Abs(then.MassY)));
+                nowBox = Math.Max(nowBox, Math.Max(Math.Abs(now.BoxX), Math.Abs(now.BoxY))); nowMass = Math.Max(nowMass, Math.Max(Math.Abs(now.MassX), Math.Abs(now.MassY)));
+                if (letter is "A" or "V" or "T" && ppd is 1.0 or 1.5)
+                    Console.WriteLine($"ring letter {letter}, 12 px ring at {ppd * 100:0}%: box dx/dy before {then.BoxX:+0.00;-0.00}/{then.BoxY:+0.00;-0.00} now {now.BoxX:+0.00;-0.00}/{now.BoxY:+0.00;-0.00}; mass before {then.MassX:+0.00;-0.00}/{then.MassY:+0.00;-0.00} now {now.MassX:+0.00;-0.00}/{now.MassY:+0.00;-0.00}");
             }
-        foreach (var r in results.Where(r => r.Letter is "C" or "G"))
-            Console.WriteLine($"ring letter {r.Letter} at {r.Ppd * 100:0}%: ink centre minus ring centre (device px) before dx={r.Old.Dx:+0.00;-0.00} dy={r.Old.Dy:+0.00;-0.00}, now dx={r.New.Dx:+0.00;-0.00} dy={r.New.Dy:+0.00;-0.00}");
-        foreach (var r in results.Where(r => Math.Max(Math.Abs(r.New.Dx), Math.Abs(r.New.Dy)) > .5))
-            Console.WriteLine($"  over half a pixel: {r.Letter} at {r.Ppd * 100:0}%: now dx={r.New.Dx:+0.00;-0.00} dy={r.New.Dy:+0.00;-0.00}");
-        Console.WriteLine($"ring letter worst offset over {results.Count} cases (device px): before {worstThen:0.00}, now {worstNow:0.00}");
-        check("Ring letter, rendered: the ink box's centre is within 0.75 device pixel of the ring's centre at 100 to 200 %, for letters, a digit and a CJK character", worstNow <= .75);
-        check("Ring letter, rendered: a TextBlock centred in the ring (before) was further off than the outline placed by its ink box", worstThen > worstNow);
+        Console.WriteLine($"ring letter, 12 px ring, 12 letters, 5 scales, worst device px: box before {beforeBox:0.00} now {nowBox:0.00}; mass before {beforeMass:0.00} now {nowMass:0.00}");
+        Console.WriteLine($"ring letter, rings 10 to 20 px, A C K O 1 and a CJK character: worst box {worstBox:0.00}, worst mass {worstMass:0.00} ({worstWhere})");
+        check("Ring letter, rendered: the ink box's centre is the ring's centre exactly (rings 10 to 20 px, 100 to 200 %, A C K O 1 and a CJK character)", worstBox < 1e-9);
+        // Beyond 14 px the box and the mass cannot both be nearer: moving the box a whole pixel toward the mass would put the box a
+        // pixel off to bring the mass in by less than that (the rule in RingLetterBox), so the mass keeps up to 0.7 there.
+        check("Ring letter, rendered: the ink's mass is within 0.4 device pixel of the ring's centre in rings of 10 to 14 px, within 0.7 in 16 and 20 px", worstSmall <= .4 && worstMass <= .7);
+        check("Ring letter, rendered: a TextBlock centred in the ring (before) was further off, box and mass, than the letter placed by its ink", beforeBox > nowBox && beforeMass > nowMass);
         if (folder is null) return;
 
         Directory.CreateDirectory(folder);
+        // 100 % and 150 %, before (left) and now (right), the ring 12 px across, enlarged 14 times; the pink lines are the ring's centre.
         const int Zoom = 14, Gap = 12;
-        var cells = new List<(byte[] Pixels, int Width, int Height, double Cx, double Cy)>();
+        var cellsDrawn = new List<(byte[] Pixels, int Size)>();
         foreach (double ppd in new[] { 1.0, 1.5 })
-            foreach (bool now in new[] { false, true })
-            {
-                var (p, w, h, cx, cy) = Render(12, 2, "C", 7, ppd, now, drawn: true, dark: true);
-                cells.Add((p, w, h, cx, cy));
-            }
-        int cell = cells.Max(c => c.Width) * Zoom, total = cell * 2 + Gap * 3;
-        var sheet = new byte[total * total * 4];
+            foreach (string letter in new[] { "A", "C" })
+                foreach (bool now in new[] { false, true })
+                    cellsDrawn.Add(Render(12, 2, letter, ppd, now, drawn: true, dark: true));
+        int rows = 4, columns = 2, edge = cellsDrawn[0].Size * Zoom;
+        int width = columns * edge + (columns + 1) * Gap, height = rows * edge + (rows + 1) * Gap;
+        var sheet = new byte[width * height * 4];
         for (int i = 0; i < sheet.Length; i += 4) { sheet[i] = 0x10; sheet[i + 1] = 0x10; sheet[i + 2] = 0x10; sheet[i + 3] = 0xFF; }
-        for (int n = 0; n < cells.Count; n++)
+        for (int n = 0; n < cellsDrawn.Count; n++)
         {
-            var (p, w, h, cx, cy) = cells[n];
-            int left = Gap + (n % 2) * (cell + Gap), top = Gap + (n / 2) * (cell + Gap);
-            for (int y = 0; y < h * Zoom; y++)
-                for (int x = 0; x < w * Zoom; x++)
+            var (p, size) = cellsDrawn[n];
+            int left = Gap + (n % columns) * (edge + Gap), top = Gap + (n / columns) * (edge + Gap);
+            double centre = (Pad + 6.0) * Zoom;
+            for (int y = 0; y < size * Zoom; y++)
+                for (int x = 0; x < size * Zoom; x++)
                 {
-                    int src = ((y / Zoom) * w + x / Zoom) * 4, dst = ((top + y) * total + left + x) * 4;
+                    int src = ((y / Zoom) * size + x / Zoom) * 4, dst = ((top + y) * width + left + x) * 4;
                     Array.Copy(p, src, sheet, dst, 4);
-                    // The ring's centre, as thin lines across the enlarged picture.
-                    if (Math.Abs(y - cy * Zoom) < 1 || Math.Abs(x - cx * Zoom) < 1) { sheet[dst] = 0xFF; sheet[dst + 1] = 0x40; sheet[dst + 2] = 0xFF; }
+                    if (Math.Abs(y + .5 - centre) < 1 || Math.Abs(x + .5 - centre) < 1) { sheet[dst] = 0xFF; sheet[dst + 1] = 0x40; sheet[dst + 2] = 0xFF; }
                 }
         }
         var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(BitmapSource.Create(total, total, 96, 96, PixelFormats.Pbgra32, null, sheet, total * 4)));
+        encoder.Frames.Add(BitmapFrame.Create(BitmapSource.Create(width, height, 96, 96, PixelFormats.Pbgra32, null, sheet, width * 4)));
         using var file = File.Create(System.IO.Path.Combine(folder, "ring-letter-compare.png"));
         encoder.Save(file);
     }
