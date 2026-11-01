@@ -70,10 +70,16 @@ public partial class MainWindow
     {
         double w = Island.ActualWidth, h = Island.ActualHeight;
         if (!(w > 0) || !(h > 0)) { IslandShadow.OpacityMask = null; return; }
-        var mask = Geometry.Combine(new RectangleGeometry(new Rect(0, 0, w, h)), Island.Outline(), GeometryCombineMode.Exclude, null);
+        // The mask's frame must reach past the effect's blur, or everything outside the island's rectangle would be cut:
+        // the brush paints nothing beyond its viewbox, and the shadow's reach is the blur radius plus the shadow depth,
+        // plus a small margin — the same reach the shadow bounds use below.
+        var effect = IslandShadow.Effect as System.Windows.Media.Effects.DropShadowEffect;
+        double reach = effect is null ? 0 : effect.BlurRadius + effect.ShadowDepth + 2;
+        var area = new Rect(-reach, -reach, w + 2 * reach, h + 2 * reach);
+        var mask = Geometry.Combine(new RectangleGeometry(area), Island.Outline(), GeometryCombineMode.Exclude, null);
         IslandShadow.OpacityMask = new DrawingBrush
         {
-            Viewbox = new Rect(0, 0, w, h), Viewport = new Rect(0, 0, w, h), Stretch = Stretch.None,
+            Viewbox = area, Viewport = area, Stretch = Stretch.None,
             Drawing = new GeometryDrawing { Geometry = mask, Brush = Brushes.White }
         };
     }

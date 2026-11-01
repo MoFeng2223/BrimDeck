@@ -438,9 +438,10 @@ public partial class MainWindow : Window
     // ApplySettings runs next. Pop-ups are closed rather than repainted.
     private void ApplyTheme()
     {
-        // The background's own opacity, as set on the theme page; every other brush (text, icons, controls) keeps its own, so
-        // the panel goes see-through without the content fading with it.
-        _surface.Opacity = Settings.PanelOpacity / 100.0;
+        // The background's own opacity, as set on the theme page, applied to everything the island paints itself; text,
+        // icons and controls are child elements and keep their own, so the panel goes see-through without the content
+        // fading with it.
+        Island.BackgroundOpacity = Settings.PanelOpacity / 100.0;
         double dpi = PresentationSource.FromVisual(this) is null ? 1 : VisualTreeHelper.GetDpi(this).DpiScaleX;
         if (_themeGeneration == PanelTheme.Generation && _themeDpi == dpi) return;
         // A new scale alone only redraws the scan lines or texture, which are laid out in device pixels.

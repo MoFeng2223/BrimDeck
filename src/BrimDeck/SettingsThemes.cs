@@ -161,7 +161,7 @@ public sealed partial class SettingsWindow
         // How opaque the panel's background is. It belongs to the panel, not to a theme file, so it stays even while a broken
         // theme is shown in place of the chosen one.
         SectionTitle(Loc.T("透明度", "Transparency"));
-        Group(SliderRow(Loc.T("背景透明度", "Background opacity"), S.PanelOpacity, 0, 100, 10, "%",
+        Group(SliderRow(Loc.T("背景不透明度", "Background opacity"), S.PanelOpacity, 0, 100, 10, "%",
             value => Change(s => s.PanelOpacity = (int)value),
             help: Loc.T("面板背景的不透明度，每 10% 一档；文字与图标不受影响。",
                 "How opaque the panel's background is, in 10% steps; text and icons stay as they are.")));
