@@ -338,6 +338,7 @@ public sealed class DeckSettings
     public string ExpandHotkey { get; set; } = "";
     public InputMethodSettings InputMethods { get; set; } = new();
     public MiniAppsSettings MiniApps { get; set; } = new();
+    public DeckPagePreferences Pages { get; set; } = new();
     public ModuleSettings Modules { get; set; } = new();
     // The resize shortcut: modifiers with the arrow keys ("Ctrl+Alt+Arrows", HotkeyText.Arrows); unset by default.
     public string ResizeHotkey { get; set; } = "";
@@ -604,6 +605,7 @@ public sealed class DeckSettings
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
         copy.FullscreenRules = FullscreenRules.Select(rule => rule with { }).ToList();
         copy.MiniApps = MiniApps?.Copy() ?? new();
+        copy.Pages = Pages?.Copy() ?? new();
         copy.Modules = Modules?.Copy() ?? new();
         copy.InputMethods = new() { Enabled = InputMethods?.Enabled == true, Mode = InputMethods?.Mode ?? InputMethodMode.Control, Shortcut = InputMethods?.Shortcut ?? "Win+Space",
             Profiles = (InputMethods?.Profiles ?? []).Select(p => new InputMethodChoice { Id = p.Id, Name = p.Name, Enabled = p.Enabled }).ToList() };
@@ -670,6 +672,7 @@ public sealed class DeckSettings
         InputMethods ??= new();
         InputMethods.Normalize();
         MiniApps ??= new(); MiniApps.Normalize();
+        Pages ??= new(); Pages.Normalize(this);
         Modules ??= new(); Modules.Normalize();
         if (!Enum.IsDefined(Theme)) Theme = SettingsTheme.System;
         PanelTheme = PanelThemes.NormalizeId(PanelTheme) is { Length: > 0 } panelTheme ? panelTheme : PanelThemes.Dark;

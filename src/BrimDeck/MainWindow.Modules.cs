@@ -18,10 +18,8 @@ public partial class MainWindow
     private Contribution<ModulePage>? _modulePageEntry;
     private Contribution<IModuleActivity>? _moduleActivity;
     private readonly List<(IModuleActivity Activity, string Owner, Action Handler)> _moduleWatches = [];
-    private string? _modulePageId;
     private string? _preferredModuleActivityId;
     private bool _moduleOpening;
-    private string _modulePageListKey = "";
     private ContextMenu? _modulePageMenu;
     private int _moduleCompletion, _modulePresentationVersion;
     private readonly Grid _moduleLeaving = new() { IsHitTestVisible = false };
@@ -126,40 +124,19 @@ public partial class MainWindow
         ApplyHeader(PanelHeader.For(ToolbarFor(ContentCanvas.Height), 20));
         double bottom = ContentCanvas.Height < 180 ? 8 : 10;
         MiniAppsContent.Margin = new Thickness(_header.Side, 0, _header.Side, bottom);
-        var entries = _app.Modules.Registry.List<ModulePage>().OrderBy(e => e.Value.Order).ThenBy(e => e.Id).ToArray();
-        var selected = entries.FirstOrDefault(e => e.Id == _modulePageId) ?? entries.FirstOrDefault();
-        string listKey = Loc.Language + ":" + string.Join(",", entries.Select(e => e.Id));
-        if (!ReferenceEquals(selected, _modulePageEntry) || _modulePage is null || listKey != _modulePageListKey)
+        var selected = _app.Modules.Registry.List<ModulePage>().FirstOrDefault(e => e.Id == CurrentPageId);
+        if (!ReferenceEquals(selected, _modulePageEntry) || _modulePage is null)
         {
-            ReleaseModulePage(); _modulePageEntry = selected; _modulePageListKey = listKey;
+            ReleaseModulePage(); _modulePageEntry = selected;
             if (selected is not null)
             {
-                _modulePageId ??= selected.Id;
-                var root = new Grid(); root.RowDefinitions.Add(new() { Height = GridLength.Auto }); root.RowDefinitions.Add(new());
-                if (entries.Length > 1)
-                {
-                    var caption = new StackPanel { Orientation = Orientation.Horizontal };
-                    caption.Children.Add(UI.Text(Loc.T(selected.Value.Title, selected.Value.TitleEn), 12, UI.Secondary));
-                    var arrow = UI.Text("⌄", 12, UI.Secondary); arrow.Margin = new Thickness(12, 0, 0, 0); caption.Children.Add(arrow);
-                    var picker = new Button { Style = (Style)FindResource("PanelSourceButton"), Content = caption, Width = double.NaN, Height = 26, Padding = new Thickness(8, 0, 8, 0), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 8) };
-                    AutomationProperties.SetName(picker, Loc.T("切换小程序", "Switch mini app"));
-                    var menu = new ContextMenu { Style = (Style)FindResource("MediaSourceMenu"), Width = 220, PlacementTarget = picker, Placement = PlacementMode.Bottom };
-                    foreach (var entry in entries)
-                    {
-                        var item = new MenuItem { Style = (Style)FindResource("ModulePageMenuItem"), Header = Loc.T(entry.Value.Title, entry.Value.TitleEn), IsCheckable = true, IsChecked = entry.Id == selected.Id };
-                        item.Click += (_, _) => OpenModulePage(entry.Id); menu.Items.Add(item);
-                    }
-                    _modulePageMenu = menu; picker.ContextMenu = menu; picker.Click += (_, _) => menu.IsOpen = !menu.IsOpen; root.Children.Add(picker);
-                    menu.Opened += (_, _) => _leave.Stop();
-                    menu.Closed += (_, _) => { if (ReferenceEquals(_modulePageMenu, menu) && _expanded) PointerChanged(InsideOpenPanel(WindowsHost.Cursor())); };
-                }
+                // One page per stable navigation entry; language and theme updates keep this mount.
                 _modulePage = new(_app.Modules, selected.ModuleId, ModuleContext, context => selected.Value.CreateView(context), selected.Value.CreateViewAsync);
-                Grid.SetRow(_modulePage, 1); root.Children.Add(_modulePage); MiniAppsContent.Children.Add(root);
+                MiniAppsContent.Children.Add(_modulePage);
             }
             else MiniAppsContent.Children.Add(UI.Centered(Loc.T("没有已启用的小程序，请在模组设置中启用。", "Enable a mini app in module settings."), 13, UI.Secondary));
         }
-        double selector = entries.Length > 1 ? 34 : 0;
-        _modulePage?.SetViewport(ContentCanvas.Width - 2 * _header.Side, ContentCanvas.Height - _header.Row - bottom - selector);
+        _modulePage?.SetViewport(new ModuleViewport(ContentCanvas.Width - 2 * _header.Side, ContentCanvas.Height - _header.Row - bottom) { DeviceScale = _pixelsPerDip, ContentScale = _scale });
         RefreshModulePresentation(); _modulePage?.Refresh(); RefreshStatus();
     }
     internal void OpenModulePageFromSettings(string id) => OpenModulePage(id);
@@ -174,10 +151,11 @@ public partial class MainWindow
     {
         if (_transient is not null || _app.Modules.Registry.List<ModulePage>().FirstOrDefault(e => e.Id == id) is not { } requested) return;
         if (!AllowModuleOpening(new ModulePageOpening(id)) || !_app.Modules.Registry.List<ModulePage>().Any(e => ReferenceEquals(e, requested))) return;
-        _modulePageId = id; _moduleHandover?.Drop();
+        if (PageDirectory.Find(id) is not { } definition || !PageDirectory.Shown(definition)) return;
+        _moduleHandover?.Drop();
         var leaving = PageHandover.Capture(ModuleControlHost);
         _moduleControls = false; _moduleClosing = false;
-        SelectPage(DeckPage.MiniApps); RenderMiniApps(); SetExpanded(true);
+        SelectPage(id); RenderMiniApps(); SetExpanded(true);
         if (leaving is not null) _handover.Send(leaving, new Thickness(0), MiniAppsContent, Handover.Morph);
     }
     internal void ShowModuleControls()

@@ -55,7 +55,7 @@ public sealed class RollingStepper : Grid
         _less = MakeButton(owner, "−", -1); _more = MakeButton(owner, "+", 1);
         row.Children.Add(_less); SetColumn(_more, 2); row.Children.Add(_more);
         var center = new Grid();
-        _digits.Foreground = UI.Brush(UI.Primary); _digits.HorizontalAlignment = HorizontalAlignment.Center;
+        _digits.SetResourceReference(RollingDigitsView.ForegroundProperty, "PanelPrimary"); _digits.HorizontalAlignment = HorizontalAlignment.Center;
         center.Children.Add(_digits);
         _editor = new TextBox { Visibility = Visibility.Collapsed, FontFamily = UI.PanelFont, FontSize = 22, TextAlignment = TextAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center, BorderThickness = new Thickness(0), Padding = new Thickness(0), Background = Brushes.Transparent };
@@ -98,7 +98,7 @@ public sealed class RollingStepper : Grid
     public void SetValue(int value, bool notify = true)
     {
         int next = Math.Clamp(value, Minimum, Maximum); bool changed = next != Value; Value = next;
-        _digits.Foreground = UI.Brush(UI.Primary); _digits.Text = Value.ToString();
+        _digits.SetResourceReference(RollingDigitsView.ForegroundProperty, "PanelPrimary"); _digits.Text = Value.ToString();
         _less.IsEnabled = Value > Minimum; _more.IsEnabled = Value < Maximum;
         if (changed && notify) ValueChanged?.Invoke(Value);
     }

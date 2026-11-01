@@ -91,9 +91,10 @@ internal sealed class TimerPageView : Grid, IModuleView
             TimerMode.Stopwatch when timer.Active => $"{_layout.LapRows}/{_layout.DetailHeight < 70}",
             _ => $"{_layout.DetailHeight < 50}"
         };
-        string key = $"{mode}/{timer.Status}/{timer.Phase}/{Loc.Language}/{PanelTheme.Generation}/{Soft.Enabled}/" +
+        string key = $"{mode}/{timer.Status}/{timer.Phase}/{Loc.Language}/{Soft.Enabled}/" +
             $"{string.Join(',', options.Modes)}/{_layout.SideBySide}/{(_layout.SideBySide ? _layout.HeroHeight >= 120 ? 120 : 0 : _layout.HeroHeight)}/{_layout.Tabs}/{_layout.Gap}/{form}/{_fieldEdit?.Id}/{_countdownEdit}";
-        if (key != _key)
+        // Semantic brushes update in place; defer language/layout reconstruction while an editor owns input or IME.
+        if (key != _key && !_inputs.Any(input => input.IsAdjusting))
         {
             _building = true;
             var drafts = _inputs.Select(input => (Label: (string)input.Tag, Draft: input.TakeDraft()))

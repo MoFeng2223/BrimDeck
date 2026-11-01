@@ -16,14 +16,14 @@ public sealed class NotesModule : IModule
         _notesEnabled = context.Storage.Read<bool?>("notes-enabled") ?? true;
         _clock = context.Storage.Read<bool?>("clock") ?? true;
         IDisposable? notes = null;
-        void RegisterNotes() => notes = context.Register("notes", new ModulePage("便笺", "Notes", view => new NotesView(view, _draft, text => _draft = text), 200));
+        void RegisterNotes() => notes = context.Register("notes", new ModulePage("便笺", "Notes", view => new NotesView(view, _draft, text => { if (!view.Appearance.Preview) _draft = text; }), 200) { SupportsLocalTheme = true });
         if (_notesEnabled) RegisterNotes();
         context.Register("about", ModulePage.Async("示例说明", Greeting.Text, async view =>
         {
             // A short, cancellable delay makes the async lifecycle visible in this SDK demonstration.
             await Task.Delay(150, view.Lifetime);
             return new InfoView(view, () => _clock);
-        }, 300));
+        }, 300) with { SupportsLocalTheme = true });
         context.Register<IModuleSettings>("preferences", new Preferences(this, context));
         context.Register("notes", new ModuleWidget("便笺", "Notes", context.ModuleId + ":preferences", () => _notesEnabled, enabled =>
         {
@@ -42,6 +42,10 @@ public sealed class NotesModule : IModule
             _root.RowDefinitions.Add(new() { Height = GridLength.Auto }); _root.RowDefinitions.Add(new());
             var title = ModuleUi.Text("便笺 · 页面切换后保留内容", 16); title.Margin = new Thickness(0, 0, 0, 12); _root.Children.Add(title);
             var editor = new TextBox { Text = draft, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Padding = new Thickness(12) };
+            editor.SetResourceReference(Control.ForegroundProperty, "PanelPrimary");
+            editor.SetResourceReference(Control.BackgroundProperty, "PanelFill");
+            editor.SetResourceReference(TextBox.CaretBrushProperty, "PanelPrimary");
+            context.OnAppearanceChanged(_ => title.Text = context.Translate("便笺 · 页面切换后保留内容", "Notes · contents survive page changes"));
             TextChangedEventHandler handler = (_, _) => changed(editor.Text); editor.TextChanged += handler;
             context.OnDispose(() => editor.TextChanged -= handler); Grid.SetRow(editor, 1); _root.Children.Add(editor);
         }

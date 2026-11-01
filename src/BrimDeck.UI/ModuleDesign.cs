@@ -14,7 +14,12 @@ public static partial class ModuleUi
     public static string FillSelected => UI.FillSelected;
     public static Brush Brush(string color) => UI.Brush(color);
     public static System.Windows.Controls.TextBlock Centered(string text, double size, string color)
-        => UI.Centered(text, size, color);
+    {
+        var result = UI.Centered(text, size, color);
+        string? token = color == UI.Primary ? "PanelPrimary" : color == UI.Secondary ? "PanelSecondary" : color == UI.Tertiary ? "PanelTertiary" : color == UI.Accent ? "PanelAccent" : null;
+        if (token is not null) result.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, token);
+        return result;
+    }
 }
 
 // These adapters share the host's implementation. Modules never need friend-assembly access.

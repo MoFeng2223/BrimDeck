@@ -6,6 +6,8 @@ public sealed class ModuleRegistry
     private readonly Dictionary<(Type, string), object> _entries = [];
     private int _batch;
     private bool _dirty;
+    private long _revision;
+    internal long Revision => Interlocked.Read(ref _revision);
     public event Action? Changed;
     public IReadOnlyList<Contribution<T>> List<T>() where T : class
     { lock (_gate) return _entries.Where(pair => pair.Key.Item1 == typeof(T)).Select(pair => (Contribution<T>)pair.Value).ToArray(); }
@@ -34,6 +36,7 @@ public sealed class ModuleRegistry
     private void Notify()
     {
         lock (_gate) { if (_batch > 0) { _dirty = true; return; } }
+        Interlocked.Increment(ref _revision);
         foreach (var listener in Changed?.GetInvocationList() ?? [])
             try { ((Action)listener)(); } catch { /* An observer cannot invalidate an accepted registration. */ }
     }

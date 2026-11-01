@@ -24,6 +24,7 @@ public sealed partial class ModuleViewContext(FrameworkElement owner, Action<str
         {
             ObjectDisposedException.ThrowIf(_ended || _lifetime.IsCancellationRequested, this);
             if (!Owner.Dispatcher.CheckAccess()) throw new ModuleApiException("ui-thread-required", "View navigation must run on the UI thread.");
+            if (Appearance.Preview) throw new ModuleApiException("preview-navigation-disabled", "Preview views cannot request host navigation.");
             ArgumentNullException.ThrowIfNull(target);
             if (target != moduleId && !target.StartsWith(moduleId + ":", StringComparison.Ordinal))
                 throw new ModuleApiException("navigation-owner-mismatch", "A view can navigate only to its own module contributions.");
@@ -107,8 +108,12 @@ public sealed record ModuleViewport(double Width, double Height)
     }
 }
 public interface IModuleLayoutView { void SetViewport(ModuleViewport viewport); }
+public sealed record ModulePageSize(double Width = 480, double Height = 266, double MinWidth = 440, double MaxWidth = 1200, double MinHeight = 140, double MaxHeight = 400);
 public sealed record ModulePage(string Title, string TitleEn, Func<ModuleViewContext, IModuleView> CreateView, int Order = 500)
 {
+    public string? IconPath { get; init; }
+    public ModulePageSize? Size { get; init; }
+    public bool SupportsLocalTheme { get; init; }
     public Func<ModuleViewContext, ValueTask<IModuleView>>? CreateViewAsync { get; init; }
     public static ModulePage Async(string title, string titleEn, Func<ModuleViewContext, ValueTask<IModuleView>> create, int order = 500)
     {
@@ -179,6 +184,9 @@ public static partial class ModuleUi
     public static bool Dark => PanelTheme.Current.IsDark;
     public static string Primary => UI.Primary;
     public static string Accent => UI.Accent;
-    public static TextBlock Text(string text, double size = 13) => UI.Centered(text, size, UI.Primary);
+    public static TextBlock Text(string text, double size = 13)
+    {
+        var result = UI.Centered(text, size, UI.Primary); result.SetResourceReference(TextBlock.ForegroundProperty, "PanelPrimary"); return result;
+    }
     public static void Appear(UIElement element) => PageHandover.Appear(element);
 }

@@ -78,7 +78,10 @@ public partial class MainWindow
     private ReadingsCarousel? _stripCarousel;
     private TimeSpan _stripElapsed;
     // The page on screen: the chosen one while it is shown, otherwise the one DeckPages falls back to.
-    internal DeckPage CurrentPage => DeckPages.Resolve(Settings, _page);
+    private string? _requestedPageId;
+    private DeckPageDirectory PageDirectory => _app.PageDirectory(Settings);
+    internal string CurrentPageId => PageDirectory.Resolve(_requestedPageId ?? DeckPageIds.Of(_page)).Id;
+    internal DeckPage CurrentPage => PageDirectory.Resolve(CurrentPageId).BuiltIn ?? DeckPage.MiniApps;
     internal bool IsMusicPage => CurrentPage == DeckPage.Music;
     internal bool IsMonitorPage => CurrentPage == DeckPage.Monitor;
     internal bool IsMiniAppsPage => CurrentPage == DeckPage.MiniApps;
@@ -88,6 +91,7 @@ public partial class MainWindow
     private void InitializeMusic()
     {
         _page = Settings.LastPage;
+        _requestedPageId = Settings.Pages.LastId ?? DeckPageIds.Of(_page);
         _sourceMenuWatch = new(Dispatcher, TickSourceMenu) { Interval = TimeSpan.FromMilliseconds(40) };
         _musicTick = new(Dispatcher, TickMusic) { Interval = TimeSpan.FromMilliseconds(33) };
         IsVisibleChanged += (_, _) => UpdateMusicTimer();
@@ -105,7 +109,7 @@ public partial class MainWindow
     private void ApplyMusicSettings()
     {
         if (!Settings.MusicPage) CloseSourceMenu();
-        _page = CurrentPage;
+        // Keep the requested identity while its plugin is temporarily unavailable.
         if (!Settings.UsagePage || !IsUsagePage) _details = false;
         if (_musicStarted) _app.StartMedia();
         if (!Settings.MediaWanted) { _mediaTrack = null; _mediaCover = null; _mediaTracks = []; _seekPreview.Observe(null, DateTimeOffset.UtcNow); }
@@ -114,31 +118,46 @@ public partial class MainWindow
     }
     private void ApplyDefaultMusicPage()
     {
-        var wanted = DeckPages.Opening(Settings.DefaultPage) ?? _page;
-        if (wanted != _page && DeckPages.Shown(Settings, wanted)) SelectPage(wanted, remember: false);
+        var wanted = PageDirectory.Opening(_requestedPageId);
+        if (wanted != _requestedPageId) SelectPage(wanted, remember: false, allowUnavailable: true);
     }
     // The page switch moves as one: the page left behind leaves as a picture toward the side it is left for, while the next
     // page is built at once and comes in from the other side and the panel takes its size (PageHandover).
     internal void SelectPage(DeckPage page, bool remember = true)
     {
-        if (!DeckPages.Shown(Settings, page)) return;
+        if (page == DeckPage.MiniApps)
+        {
+            var target = PageDirectory.Visible.FirstOrDefault(p => p.BuiltIn is null);
+            if (target is not null) SelectPage(target.Id, remember);
+            return;
+        }
+        SelectPage(DeckPageIds.Of(page), remember);
+    }
+    internal void SelectPage(string id, bool remember = true, bool allowUnavailable = false)
+    {
+        var directory = PageDirectory;
+        if (!allowUnavailable && (directory.Find(id) is not { } target || !directory.Shown(target))) return;
+        var resolved = directory.Resolve(id);
+        DeckPage page = resolved.BuiltIn ?? DeckPage.MiniApps;
         _moduleControls = false;
-        bool changed = CurrentPage != page;
-        if (changed && page != DeckPage.MiniApps) ReleaseModulePage();
+        bool changed = CurrentPageId != resolved.Id;
+        string beforeId = CurrentPageId;
+        if (changed) ReleaseModulePage();
         if (changed) { CloseSourceMenu(); PageToolTips.CloseWithin(PageContent(CurrentPage)); }
         if (changed && _expanded && !_preview)
         {
             // Start before resizing: the shrinking surface can immediately fire MouseLeave.
             _hover.Stop(); _leave.Stop(); _pageSwitchHold.Stop(); _pageSwitchHold.Start();
         }
-        if (remember) { Settings.LastPage = page; _app.QueueSave(); }
+        if (remember) { Settings.LastPage = page; Settings.Pages.LastId = id; _app.QueueSave(); }
         bool animate = changed && _expanded && !_preview && Soft.Enabled;
         var before = CurrentPage;
         var from = PageContent(before);
         var picture = animate ? PageHandover.Capture(from) : null;
         var place = PageHandover.Place(from);
+        _requestedPageId = id;
         ShowPage(page, animatePage: changed && _expanded && !_preview);
-        bool back = Settings.PageOrder.IndexOf(page) < Settings.PageOrder.IndexOf(before);
+        bool back = directory.All.ToList().FindIndex(p => p.Id == resolved.Id) < directory.All.ToList().FindIndex(p => p.Id == beforeId);
         _handover.Send(picture, place, PageContent(page), back ? Handover.Back : Handover.Forward);
     }
     private FrameworkElement PageContent(DeckPage page) => page switch { DeckPage.Music => MusicContent, DeckPage.Monitor => MonitorContent, DeckPage.MiniApps => MiniAppsContent, _ => UsageContent };
@@ -154,13 +173,13 @@ public partial class MainWindow
     {
         if (Settings.MouseWheel == MouseWheelAction.None || !_expanded || _preview || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) return;
         if (Settings.MouseWheel == MouseWheelAction.Volume) { WheelVolume(e.Delta); e.Handled = true; return; }
-        var shown = DeckPages.Visible(Settings);
+        var shown = PageDirectory.Visible;
         if (shown.Count < 2) return;
-        int at = shown.ToList().IndexOf(CurrentPage);
+        int at = shown.ToList().FindIndex(p => p.Id == CurrentPageId);
         if (at < 0) return;
         int next = e.Delta > 0 ? at - 1 : at + 1;
         if (next < 0 || next >= shown.Count) return;
-        SelectPage(shown[next]);
+        SelectPage(shown[next].Id);
         e.Handled = true;
     }
     // A precision touchpad sends parts of a notch; they add up until a whole notch (120) presses the volume key once.
@@ -178,7 +197,7 @@ public partial class MainWindow
     private void MusicPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Music);
     private void MonitorPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Monitor);
     // Where the usage page's application tabs start: after the page switch, which holds one 28 DIP button per shown page.
-    private double ApplicationPagesLeft(double side) { int pages = DeckPages.Visible(Settings).Count; return side + (pages <= 1 ? 36 : 72 + 29 * (pages - 2)); }
+    private double ApplicationPagesLeft(double side) => side + PageSwitchRoom + 12;
     // The header shared by both pages (see PanelHeader). Its row holds the page's top margin, so the clock, the switch and the
     // right group are centred on one line, and the switch and the gear line up with the page's content edges. Toolbar's own
     // height replaces its binding to the row: the music page takes the usage page's controls (PanelHeader.WithControlsOf), so
@@ -193,7 +212,7 @@ public partial class MainWindow
         Toolbar.Height = header.Height;
         PageSwitch.Margin = new Thickness(header.Side, 0, 0, 0);
         FitPageButtons(header);
-        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, MiniAppsPageButton })
+        foreach (var button in PageNavigationButtons)
         {
             // A local corner for these two buttons only; PanelIconButton keeps its 5 DIP corner elsewhere.
             button.ApplyTemplate();
@@ -207,16 +226,10 @@ public partial class MainWindow
     private void RenderPageSwitch()
     {
         SetValue(SuppressMusicToolTipsProperty, IsMusicPage);
-        foreach (var control in new FrameworkElement[] { AIUsageButton, MonitorPageButton, MusicPageButton, MiniAppsPageButton, MediaSourceButton, ClockLabel })
+        foreach (var control in PageNavigationButtons.Cast<FrameworkElement>().Concat([MediaSourceButton, ClockLabel]))
             ToolTipService.SetIsEnabled(control, !IsMusicPage);
         PageSwitch.Visibility = _details && IsUsagePage ? Visibility.Collapsed : Visibility.Visible;
-        OrderPageButtons();
-        foreach (var (button, page) in new[] { (AIUsageButton, DeckPage.Usage), (MusicPageButton, DeckPage.Music), (MonitorPageButton, DeckPage.Monitor), (MiniAppsPageButton, DeckPage.MiniApps) })
-        {
-            bool current = CurrentPage == page;
-            button.Visibility = DeckPages.Shown(Settings, page) ? Visibility.Visible : Visibility.Collapsed;
-            button.Foreground = UI.Brush(current ? UI.Primary : UI.Secondary);
-        }
+        RenderPageNavigation();
         PlacePageCapsule();
         ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(_header.Side), 0, 0, 0);
         // With the entry switched on the source menu has one more row. Without a source that row stands alone in the button.

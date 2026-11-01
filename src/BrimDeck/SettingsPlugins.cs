@@ -57,6 +57,13 @@ public sealed partial class SettingsWindow
             _app.RevokeModulePermissions(id); SaveStatus(Loc.T("敏感能力授权已撤销，旧句柄和排队操作立即失效。", "Sensitive permissions revoked; old handles and queued operations are no longer authorized."), false);
         }));
         _content.Children.Add(actions);
+        foreach (var page in _app.Modules.Registry.List<ModulePage>().Where(p => p.ModuleId == id))
+        {
+            string title = Loc.T(page.Value.Title, page.Value.TitleEn);
+            if (page.Value.SupportsLocalTheme)
+                _content.Children.Add(ModuleLink(Loc.T("预览：", "Preview: ") + title, () => new ModulePreviewWindow(_app.Modules, page, this) { Owner = this }.Show()));
+            else _content.Children.Add(TextLine(title + Loc.T("：此旧页面未声明支持局部主题预览。", ": this legacy page does not declare local theme preview support."), 12, TextSecondary));
+        }
         if (package is not null)
         {
             IReadOnlyList<string> points;

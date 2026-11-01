@@ -157,17 +157,23 @@ internal static class PanelTheme
     private static void Publish(ResourceDictionary? resources)
     {
         if (resources is null) return;
-        var next = new ResourceDictionary();
-        foreach (var (resource, token) in Resources) next[resource] = UI.Brush(Hex(token));
-        next["PanelScrollThumbRest"] = Current.ThumbRestOpacity;
-        // Corners in the panel's XAML (App.xaml has the defaults): square in a pixel theme.
-        for (int r = 1; r <= 16; r++) next["PanelR" + r] = new CornerRadius(Corner(r));
-        next["SegmentCorner"] = new CornerRadius(Corner(5));
+        var next = CreateResources(Current);
         var merged = resources.MergedDictionaries;
         int at = _published is not null ? merged.IndexOf(_published) : -1;
         if (at < 0) for (int i = 0; i < merged.Count && at < 0; i++) if (merged[i].Contains("PanelSurface")) at = i;
         if (at >= 0) merged[at] = next; else merged.Insert(0, next);
         _published = next;
+    }
+
+    // Local mounts and previews share the semantic palette without changing the application's selected theme.
+    internal static ResourceDictionary CreateResources(PanelPalette palette)
+    {
+        var resources = new ResourceDictionary();
+        foreach (var (resource, token) in Resources) resources[resource] = UI.Brush(palette[token].ToString());
+        resources["PanelScrollThumbRest"] = palette.ThumbRestOpacity;
+        for (int r = 1; r <= 16; r++) resources["PanelR" + r] = new CornerRadius(palette.Effects.Pixel > 0 ? 0 : r);
+        resources["SegmentCorner"] = new CornerRadius(palette.Effects.Pixel > 0 ? 0 : 5);
+        return resources;
     }
 
     // A color chosen outside the theme (an application's color, a clock color, the cover's color), as the panel draws it:

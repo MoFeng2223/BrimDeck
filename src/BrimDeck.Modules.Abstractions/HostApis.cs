@@ -2,7 +2,7 @@ namespace BrimDeck.Modules;
 
 public static class ModuleApi
 {
-    public const int Major = 1, Minor = 7;
+    public const int Major = 1, Minor = 8;
     public const string HostInfo = "host.info", UsageRead = "usage.read", MediaRead = "media.read", SystemRead = "system.read", NotificationsShow = "notifications.show";
     public const string UiPresentation = "ui.presentation";
     public const string UiPages = "ui.pages", UiActivities = "ui.activities", UiWidgets = "ui.widgets", UiSettings = "ui.settings", StorageData = "storage.data";

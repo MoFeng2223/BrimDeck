@@ -511,63 +511,74 @@ public sealed partial class SettingsWindow : Window
     }
     // One row per expanded page: its switch at the right, and its sizes under the row while the row is open, set in
     // from the row's title. A row opens and closes only by its own arrow or a click on it, whether or not its page is shown.
-    private readonly HashSet<DeckPage> _openSizes = [];
+    private readonly HashSet<string> _openSizes = [];
     private void Expanded()
     {
-        // The last viewed page is always offered, followed by each page that is shown. A choice whose page is switched off
-        // reads as the last viewed page, which is what the panel does then, and returns when the page is shown again.
-        // Switching a page on or off refills the list in place, so the page is not rebuilt and the switch keeps its animation.
-        var start = new ComboBox { Width = 150, Style = (Style)FindResource("SettingsCombo") };
+        var directory = _app.PageDirectory(S);
+        var start = new ComboBox { Width = 190, Style = (Style)FindResource("SettingsCombo") };
         AutomationProperties.SetName(start, Loc.T("每次打开时显示", "Page shown on opening")); PopupMotion.Attach(start);
-        List<(DefaultDeckPage Value, string Label)> starts = [];
+        List<(string? Id, string Label)> starts = [];
         bool filling = false;
         void FillStarts()
         {
-            starts = [(DefaultDeckPage.Last, Loc.T("上次停留的页面", "Last viewed page"))];
-            foreach (var page in DeckPages.Visible(S))
-                starts.Add(page switch
-                {
-                    DeckPage.Music => (DefaultDeckPage.Music, Loc.T("音乐", "Music")),
-                    DeckPage.Monitor => (DefaultDeckPage.Monitor, Loc.T("系统监控", "System monitor")),
-                    DeckPage.MiniApps => (DefaultDeckPage.MiniApps, Loc.T("小程序", "Mini apps")),
-                    _ => (DefaultDeckPage.Usage, Loc.T("AI 用量", "AI usage"))
-                });
-            filling = true;
-            start.ItemsSource = starts.Select(option => option.Label).ToList();
-            start.SelectedIndex = Math.Max(0, starts.FindIndex(option => option.Value == S.DefaultPage));
-            filling = false;
+            var current = _app.PageDirectory(S);
+            starts = [(null, Loc.T("上次停留的页面", "Last viewed page"))];
+            foreach (var page in current.Visible) starts.Add((page.Id, Loc.T(page.Title, page.TitleEn)));
+            if (S.Pages.DefaultId is { } saved && starts.All(p => p.Id != saved))
+                starts.Add((saved, (current.Find(saved) is { } missing ? Loc.T(missing.Title, missing.TitleEn) : saved) + Loc.T("（暂不可用）", " (unavailable)")));
+            filling = true; start.ItemsSource = starts.Select(p => p.Label).ToList();
+            start.SelectedIndex = Math.Max(0, starts.FindIndex(p => p.Id == S.Pages.DefaultId)); filling = false;
         }
         FillStarts();
-        start.SelectionChanged += (_, _) => { if (!filling && start.SelectedIndex >= 0) Change(s => s.DefaultPage = starts[start.SelectedIndex].Value); };
-        SectionTitle(Loc.T("显示的页面", "Pages shown"), help: () => Loc.T("除了在下面设置宽度与高度，也可以把鼠标移到展开面板的左右两边、底边或底角，直接拖动调整大小。",
-            "Besides setting the width and height below, you can point at the expanded panel's sides, bottom edge or bottom corners and drag them to resize it."));
-        // The rows are in the order of the page switch; dragging one by its handle moves its page there at once.
-        var pages = new StackPanel();
-        _pageRows.Clear();
-        foreach (var page in S.PageOrder)
-            pages.Children.Add(page switch
-            {
-                DeckPage.Music => SizeRow(Loc.T("显示音乐", "Show music"), Loc.T("音乐", "music"), page, S.MusicPage, value => { Change(s => s.MusicPage = value); FillStarts(); }, Collect(MusicSizeControls), pages, FillStarts),
-                DeckPage.Monitor => SizeRow(Loc.T("显示系统监控", "Show system monitor"), Loc.T("系统监控", "system monitor"), page, S.MonitorPage, value => { Change(s => s.MonitorPage = value); FillStarts(); }, Collect(MonitorSizeControls), pages, FillStarts),
-                DeckPage.MiniApps => SizeRow(Loc.T("显示小程序", "Show mini apps"), Loc.T("小程序", "mini apps"), page, S.MiniApps.Enabled, value => { Change(s => s.MiniApps.Enabled = value); FillStarts(); }, Collect(MiniAppsSizeControls), pages, FillStarts),
-                _ => SizeRow(Loc.T("显示 AI 用量", "Show AI usage"), Loc.T("AI 用量", "AI usage"), page, S.UsagePage, value => { Change(s => s.UsagePage = value); FillStarts(); }, Collect(UsageSizes), pages, FillStarts)
-            });
-        UpdateDividers(pages);
-        Group(pages);
-        // Settings that apply across the expanded pages rather than to one of them.
+        start.SelectionChanged += (_, _) => { if (!filling && start.SelectedIndex >= 0) Change(s => s.Pages.DefaultId = starts[start.SelectedIndex].Id); };
+        SectionTitle(Loc.T("显示的页面", "Pages shown"), help: () => Loc.T("内置与插件页面共用顺序、默认页面和独立尺寸。暂时缺失的插件保留偏好；屏幕约束不会覆盖期望尺寸。", "Built-in and plugin pages share order, defaults and independent sizes. Missing plugins keep their preferences; screen constraints do not overwrite desired sizes."));
+        var pages = new StackPanel(); _pageRows.Clear();
+        foreach (var page in directory.All)
+        {
+            string id = page.Id;
+            var sizes = Collect(() => StablePageSizes(id));
+            pages.Children.Add(SizeRow(Loc.T(page.Title, page.TitleEn), Loc.T(page.Title, page.TitleEn), id, directory.Shown(page), value =>
+            { Change(s => _app.PageDirectory(s).SetVisible(id, value)); FillStarts(); }, sizes, pages, FillStarts));
+        }
+        UpdateDividers(pages); Group(pages);
+        if (S.Pages.DefaultId == DeckPageIds.LegacyMiniApps || S.Pages.LastId == DeckPageIds.LegacyMiniApps)
+            Group(TextLine(Loc.T("旧版默认小程序没有保存具体页面，暂时显示首个可用页面；请选择明确的默认目标。", "The legacy mini-app default did not identify a page. The first available page is shown temporarily; choose an explicit default."), 12, TextSecondary));
         SectionTitle(Loc.T("通用", "General"));
         Group(Row(Loc.T("每次打开时显示", "Page shown on opening"), start),
-            Toggle(Loc.T("右键点击打开设置", "Right-click opens settings"), S.RightClickSettings, value => Change(s => s.RightClickSettings = value),
-                help: Loc.T("面板展开时，在面板内任意位置单击右键即可打开设置。", "When the panel is expanded, right-click anywhere inside it to open settings.")),
-            MouseWheelRow(),
-            ExpandPlaceRow(),
-            HotkeyRow(HotkeyKind.Expand),
-            HotkeyRow(HotkeyKind.Resize));
+            Toggle(Loc.T("右键点击打开设置", "Right-click opens settings"), S.RightClickSettings, value => Change(s => s.RightClickSettings = value)),
+            MouseWheelRow(), ExpandPlaceRow(), HotkeyRow(HotkeyKind.Expand), HotkeyRow(HotkeyKind.Resize));
+    }
+    private void StablePageSizes(string id)
+    {
+        var directory = _app.PageDirectory(S); if (directory.Find(id) is not { } page) return;
+        var size = directory.Size(page); var limits = directory.Limits(page);
+        var dimensions = new Grid { Margin = new Thickness(0, 8, 0, 0) }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
+        void Set(double? width, double? height)
+        {
+            Change(s => { var d = _app.PageDirectory(s); var p = d.Find(id)!; var old = d.Size(p); d.SetSize(id, width ?? old.Width, height ?? old.Height); });
+            if (!_app.PageDirectory(S).Shown(page)) return;
+            _preview = true; _app.Deck.Preview(true); _app.Deck.SelectPage(id, remember: false);
+        }
+        var width = Dimension(Loc.T("宽度", "Width"), size.Width, limits.MinWidth, limits.MaxWidth, value => Set(value, null));
+        width.Margin = new Thickness(0, 0, 20, 0); dimensions.Children.Add(width);
+        var height = Dimension(Loc.T("高度", "Height"), size.Height, limits.MinHeight, limits.MaxHeight, value => Set(null, value));
+        height.Margin = new Thickness(20, 0, 0, 0); Grid.SetColumn(height, 1); dimensions.Children.Add(height); Target.Children.Add(dimensions);
+        if (id == DeckPageIds.Usage)
+        {
+            var choices = KeepPreview(new UniformGrid { Columns = 3, Width = 292 });
+            foreach (var preset in Enum.GetValues<PanelSize>())
+            {
+                var wanted = S.PresetSize(preset);
+                var choice = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = PanelSizes.Name(preset), GroupName = "PanelSize", IsChecked = S.CurrentPreset == preset };
+                choice.Checked += (_, _) => { Set(wanted.Width, wanted.Height); ShowPage(2); }; choices.Children.Add(choice);
+            }
+            QuickSizeRow(choices);
+        }
     }
     private const double PageRowHeight = 44;
     private readonly List<(Border Row, StackPanel Sizes, Button Arrow)> _pageRows = [];
     // A page's row: the handle, then the switch with its sizes underneath. A closed row is one line high, as the drag needs.
-    private Border SizeRow(string title, string name, DeckPage page, bool shown, Action<bool> show, StackPanel sizes, StackPanel rows, Action reordered)
+    private Border SizeRow(string title, string name, string page, bool shown, Action<bool> show, StackPanel sizes, StackPanel rows, Action reordered)
     {
         bool open = _openSizes.Contains(page);
         Button arrow = null!;
@@ -602,8 +613,8 @@ public sealed partial class SettingsWindow : Window
         // The sizes close when a drag begins, so every row is one line high while they move.
         AttachDrag(handle, title, () => rows, PageRowHeight, list =>
         {
-            var order = list.Children.OfType<Border>().Where(b => b.Tag is DeckPage).Select(b => (DeckPage)b.Tag).ToArray();
-            Change(s => s.PageOrder = [.. order]);
+            var order = list.Children.OfType<Border>().Where(b => b.Tag is string).Select(b => (string)b.Tag).ToArray();
+            Change(s => s.Pages.Order = [.. order, .. s.Pages.Order.Except(order, StringComparer.Ordinal)]);
             reordered();
         }, ClosePageSizes);
         return item;
@@ -674,7 +685,7 @@ public sealed partial class SettingsWindow : Window
                     // The clock goes back to the one the panel theme suggests, as choosing the theme gives.
                     PanelThemes.ApplyClock(PanelTheme.Current,s);break;
                 case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.RightClickSettings=defaults.RightClickSettings;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;s.ExpandHotkey=defaults.ExpandHotkey;s.ResizeHotkey=defaults.ResizeHotkey;s.MouseWheel=defaults.MouseWheel;s.ExpandAtPointer=defaults.ExpandAtPointer;
-                    s.MonitorPage=defaults.MonitorPage;s.MonitorWidth=defaults.MonitorWidth;s.MonitorHeight=defaults.MonitorHeight;s.PageOrder=defaults.PageOrder;s.MiniApps.Enabled=defaults.MiniApps.Enabled;s.MiniApps.Width=defaults.MiniApps.Width;s.MiniApps.Height=defaults.MiniApps.Height;break;
+                    s.Pages=new() { Version=1 };s.MonitorPage=defaults.MonitorPage;s.MonitorWidth=defaults.MonitorWidth;s.MonitorHeight=defaults.MonitorHeight;s.PageOrder=defaults.PageOrder;s.MiniApps.Enabled=defaults.MiniApps.Enabled;s.MiniApps.Width=defaults.MiniApps.Width;s.MiniApps.Height=defaults.MiniApps.Height;break;
                 case MonitorSettingsPage:s.MonitorPalette=defaults.MonitorPalette;s.MonitorCustomColors=defaults.MonitorCustomColors;s.CompactWarningColor=null;s.CompactCriticalColor=null;s.CompactSmoothing=defaults.CompactSmoothing;s.MonitorInterval=defaults.MonitorInterval;s.MonitorProcesses=defaults.MonitorProcesses;s.MonitorSort=defaults.MonitorSort;s.MonitorMain=defaults.MonitorMain;s.MonitorProcessView=defaults.MonitorProcessView;
                     s.CompactMonitor=defaults.CompactMonitor;s.CompactMonitorItems=defaults.CompactMonitorItems;s.CompactReadings=defaults.CompactReadings;s.NotchAutoWidth=defaults.NotchAutoWidth;s.CapsuleAutoWidth=defaults.CapsuleAutoWidth;s.MonitorTemperatures=defaults.MonitorTemperatures;s.MonitorStorage=defaults.MonitorStorage;s.MonitorPower=defaults.MonitorPower;break;
                 // The current theme's application colors go back to its own; the other themes keep what was saved for them.

@@ -75,7 +75,7 @@ internal static partial class Program
             ("files", () => ModuleFileChecks(_artifacts.Notes).GetAwaiter().GetResult()), ("management", () => ManagementChecks().GetAwaiter().GetResult()), ("management-window", () => ManagementWindowProcess(repository)), ("boundaries", ModuleBoundaryAuditChecks),
             ("continuations", () => ModuleContinuationAuditChecks(_artifacts.Notes)), ("orphans", ModuleOrphanChecks),
             ("ui", () => UiChecks(repository)), ("async-views", AsyncViewChecks), ("visibility", ViewVisibilityChecks),
-            ("settings-navigation", SettingsNavigationChecks), ("settings-schema", SettingsSchemaChecks), ("deprecations", ModuleDeprecationChecks),
+            ("settings-navigation", SettingsNavigationChecks), ("page-theme", PageThemeChecks), ("settings-schema", SettingsSchemaChecks), ("deprecations", ModuleDeprecationChecks),
             ("startup", StartupGuardChecks), ("inspector", () => PackageInspectorChecks(_artifacts.Notes)), ("host-range", () => ModuleHostRangeChecks(_artifacts.Notes)),
             ("signatures", ModuleSignatureChecks), ("platform", () => PlatformChecks().GetAwaiter().GetResult()),
             ("timers", () => TimerPluginChecks(_artifacts.Notes)), ("sdk-boundary", () => BoundaryChecks(repository))
@@ -85,9 +85,9 @@ internal static partial class Program
         bool uiReady = false;
         foreach (var group in groups)
         {
-            if (selected.Count > 0 && !selected.Contains(group.Name) && !(group.Name == "ui" && selected.Overlaps(["async-views", "visibility", "settings-navigation", "settings-schema", "timers"])))
+            if (selected.Count > 0 && !selected.Contains(group.Name) && !(group.Name == "ui" && selected.Overlaps(["async-views", "visibility", "settings-navigation", "page-theme", "settings-schema", "timers"])))
             { results.Add(new { name = group.Name, status = "not-selected", checks = 0, failures = 0 }); continue; }
-            if (group.Name is "async-views" or "visibility" or "settings-navigation" or "settings-schema" or "timers" && !uiReady)
+            if (group.Name is "async-views" or "visibility" or "settings-navigation" or "page-theme" or "settings-schema" or "timers" && !uiReady)
             { results.Add(new { name = group.Name, status = "blocked-by-ui", checks = 0, failures = 0 }); Failures.Add(group.Name + ": UI initialization failed; group not executed."); continue; }
             int before = _checks, failed = Failures.Count;
             try { group.Run(); if (group.Name == "ui") uiReady = true; }

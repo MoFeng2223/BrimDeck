@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Media;
 using BrimDeck;
 using BrimDeck.Core;
 using BrimDeck.Modules;
@@ -35,6 +36,39 @@ internal static partial class Program
         public Task DownloadAsync(AppRelease release, Action<int> progress, CancellationToken cancellation) => throw new InvalidOperationException();
         public void PrepareRestart() => throw new InvalidOperationException();
     }
+    private static void CheckUnifiedPagesWindow(App app, ModuleHost host)
+    {
+        var options = app.Settings; options.Animations = false; options.UsageAutoSync = false;
+        int mounts = 0; TextBox? editor = null;
+        var definitions = Enumerable.Range(0, 15).Select(n => Def("nav-" + n, c =>
+        {
+            c.Register("page", new ModulePage("页面 " + n, "Page " + n, _ =>
+            {
+                mounts++; editor = new TextBox { Text = "isolated draft" }; var root = new Grid(); root.Children.Add(editor); return new ProbeView(root);
+            })); return ValueTask.CompletedTask;
+        })).ToArray();
+        host.ReconcileAsync(definitions).GetAwaiter().GetResult();
+        options.Pages = new() { Version = 1, Order = ["nav-0:page", DeckPageIds.Usage, "nav-1:page"] };
+        MainWindow? deck = null;
+        try
+        {
+            // Never show this window: Loaded starts production media and usage acquisition. Render its existing tree only.
+            deck = new MainWindow(app);
+            typeof(App).GetProperty("Deck", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(app, deck);
+            var native = typeof(MainWindow).GetField("_host", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(deck) as IDisposable; native!.Dispose();
+            deck.OpenModulePageFromSettings("nav-0:page");
+            deck.Measure(new Size(1000, 600)); deck.Arrange(new Rect(0, 0, 1000, 600)); deck.UpdateLayout();
+            Check("production navigation addresses plugin pages directly", deck.CurrentPageId == "nav-0:page" && mounts == 1);
+            editor!.Select(2, 5); var original = editor; deck.ApplySettings(); deck.RenderUsage();
+            Check("production refresh keeps the actual editing control and selection", ReferenceEquals(editor, original) && original.Text == "isolated draft" && original.SelectionStart == 2 && original.SelectionLength == 5 && mounts == 1);
+            var buttons = Descendants(deck).OfType<Button>().Where(b => AutomationProperties.GetName(b).StartsWith("页面 ", StringComparison.Ordinal)).ToArray();
+            Check("production page switch includes mixed ordered plugin tabs and overflow", buttons.Length >= 1 && Descendants(deck).OfType<Button>().Any(b => AutomationProperties.GetName(b) == "更多页面"));
+            deck.SelectPage("nav-14:page");
+            Check("production navigation opens an overflow page without a second selector", deck.CurrentPageId == "nav-14:page" && !Descendants(deck).OfType<Button>().Any(b => AutomationProperties.GetName(b) == "切换小程序"));
+            var image = new System.Windows.Shapes.Rectangle { Fill = new VisualBrush((Visual)deck.Content) { Stretch = Stretch.Fill } }; Render(image, new Size(1000, 600), "unified-pages.png");
+        }
+        finally { deck?.Close(); }
+    }
     private static int ManagementWindowChecks(string repository, string root)
     {
         _root = root; Directory.CreateDirectory(root);
@@ -49,6 +83,7 @@ internal static partial class Program
         Set("ModuleFiles", new ModuleFiles(root)); Set("ModuleCatalog", new ModuleCatalog(Path.Combine(root, "mods"), Path.Combine(root, "modules-cache"), []));
         using var prices = new Pricing(root); Set("Prices", prices); Set("Updates", new AppUpdates(new OfflineUpdates(), root));
         using var inputs = new InputMethodController(action => action(), _ => false); Set("InputMethods", inputs);
+        using var lyrics = new LyricsService(appleCacheRoots: () => []); Set("Lyrics", lyrics);
         var options = app.Settings; options.Language = Loc.Chinese; options.Theme = SettingsTheme.Dark; Loc.Use(options.Language);
         options.Modules.EnabledModules.AddRange(["window-test", "no-settings"]);
         var settings = new ModuleSettingsStore("Synthetic settings", "Synthetic settings", [new("text", "Text", "Text", ModuleSettingKind.Text) { DefaultValue = "synthetic" }], new ModuleStorage(Path.Combine(root, "modules-data", "window-test")));
@@ -62,6 +97,7 @@ internal static partial class Program
             Check("plugin deep link reaches its detail rather than bouncing to management", Descendants(window).OfType<TextBox>().Any(t => t.Text == "synthetic"));
             window.ShowModuleSettings("no-settings"); Pump();
             Check("enabled plugin without settings still has a dedicated detail page", Descendants(window).OfType<TextBlock>().Any(t => t.Text.Contains("没有自定义设置", StringComparison.Ordinal)));
+            CheckUnifiedPagesWindow(app, host);
             options.Modules.Enabled = false; host.ReconcileAsync([]).GetAwaiter().GetResult(); window.ShowPage(SettingsWindow.ModulesPage); Pump();
             Check("system off hides runtime cards and exposes explicit maintenance", !Descendants(window).OfType<CheckBox>().Any(c => AutomationProperties.GetAutomationId(c).StartsWith("module-enable-", StringComparison.Ordinal)) && Descendants(window).OfType<Expander>().Any());
             var picture = new System.Windows.Shapes.Rectangle { Fill = new System.Windows.Media.VisualBrush(window.RootVisual) { Stretch = System.Windows.Media.Stretch.Fill } };

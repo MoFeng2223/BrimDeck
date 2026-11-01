@@ -67,16 +67,15 @@ public sealed class RollingDigitsView : Grid
             if (_text.Length > 0) Text = _text;
         }
     }
-    public Brush Foreground
+    public static readonly DependencyProperty ForegroundProperty = DependencyProperty.Register(nameof(Foreground), typeof(Brush), typeof(RollingDigitsView),
+        new FrameworkPropertyMetadata(Brushes.White, (sender, e) => ((RollingDigitsView)sender).ApplyForeground((Brush)e.NewValue)));
+    public Brush Foreground { get => (Brush)GetValue(ForegroundProperty); set => SetValue(ForegroundProperty, value); }
+    private void ApplyForeground(Brush value)
     {
-        get => _ink;
-        set
-        {
-            if (ReferenceEquals(_ink, value)) return;
-            _ink = value; _symbol.Foreground = value;
-            foreach (var cell in _cells) { cell.Ink = value; cell.InvalidateVisual(); }
-            foreach (var separator in _separators) separator.Foreground = value;
-        }
+        if (ReferenceEquals(_ink, value)) return;
+        _ink = value; if (_symbol is not null) _symbol.Foreground = value;
+        foreach (var cell in _cells) if (cell is not null) { cell.Ink = value; cell.InvalidateVisual(); }
+        foreach (var separator in _separators) if (separator is not null) separator.Foreground = value;
     }
     public string Text
     {

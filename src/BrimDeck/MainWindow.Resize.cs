@@ -49,15 +49,15 @@ public partial class MainWindow
     private bool Resizing => Dragging || _resizeSettling;
     internal bool IsResizing => Resizing;
     // The page being resized, and when its content was last laid out again during the drag.
-    private DeckPage _resizePage;
+    private string _resizePage = DeckPageIds.Usage;
     private long _resizeRendered;
     // The widest a page can be on this monitor, and the limits of the page being resized.
     private double PageMaxWidth => DeckPages.MaxWidthOn(WorkDip.Width, _scale);
     private (double MinWidth, double MaxWidth, double MinHeight, double MaxHeight) PageLimits => PageLimitsOf(_resizePage);
-    private (double MinWidth, double MaxWidth, double MinHeight, double MaxHeight) PageLimitsOf(DeckPage page)
+    private (double MinWidth, double MaxWidth, double MinHeight, double MaxHeight) PageLimitsOf(string page)
     {
-        var (minWidth, _, minHeight, maxHeight) = DeckPages.Limits(Settings, page);
-        return (minWidth, Math.Max(minWidth, PageMaxWidth), minHeight, maxHeight);
+        var (minWidth, maxWidth, minHeight, maxHeight) = PageDirectory.Limits(PageDirectory.Resolve(page));
+        return (minWidth, Math.Max(minWidth, Math.Min(maxWidth, PageMaxWidth)), minHeight, maxHeight);
     }
 
     private void InitializeResize()
@@ -218,18 +218,18 @@ public partial class MainWindow
         if (settling) _resizeFrom = (_springWidth.Target, _springHeight.Target);
         else
         {
-            var (minWidth, maxWidth, minHeight, maxHeight) = PageLimitsOf(CurrentPage);
-            var (width, height) = DeckPages.Size(Settings, CurrentPage);
+            var (minWidth, maxWidth, minHeight, maxHeight) = PageLimitsOf(CurrentPageId);
+            var (width, height) = PageDirectory.Size(PageDirectory.Resolve(CurrentPageId));
             _resizeFrom = compact ? (Collapsed.Surface.Width, 0) : (Math.Clamp(width, minWidth, maxWidth), Math.Clamp(height, minHeight, maxHeight));
             _springWidth = new Spring(_resizeFrom.Width); _springHeight = new Spring(_resizeFrom.Height);
             _resizeChanged = false;
         }
-        _resizeCompact = compact; _resizeStyle = EffectiveStyle; _resizePage = CurrentPage; Island.SettledClip = false;
+        _resizeCompact = compact; _resizeStyle = EffectiveStyle; _resizePage = CurrentPageId; Island.SettledClip = false;
         return settling;
     }
 
     // A resize of this form, and of the page or style still shown, is settling.
-    private bool SettlingHere(bool compact) => _resizeSettling && _resizeCompact == compact && (compact ? EffectiveStyle == _resizeStyle : CurrentPage == _resizePage);
+    private bool SettlingHere(bool compact) => _resizeSettling && _resizeCompact == compact && (compact ? EffectiveStyle == _resizeStyle : CurrentPageId == _resizePage);
 
     private string SizeLabel(double width, double height) => _resizeCompact ? $"{width:0}" : $"{width:0} × {height:0}";
 
@@ -269,7 +269,7 @@ public partial class MainWindow
     // ends where it is and the size reached so far is kept; it is never applied to the other form or page.
     private bool ResizeOvertaken()
     {
-        if (!Resizing || _resizeCompact != _expanded && (_resizeCompact ? EffectiveStyle == _resizeStyle : CurrentPage == _resizePage)) return false;
+        if (!Resizing || _resizeCompact != _expanded && (_resizeCompact ? EffectiveStyle == _resizeStyle : CurrentPageId == _resizePage)) return false;
         StopSpring();
         _resizeEdge = ResizeEdges.None; _resizeSettling = true;
         if (_grips.IsMouseCaptured) _grips.ReleaseMouseCapture();
@@ -304,21 +304,21 @@ public partial class MainWindow
         var (minWidth, maxWidth, minHeight, maxHeight) = PageLimits;
         width = Math.Clamp(width, minWidth, maxWidth);
         height = Math.Clamp(height, minHeight, maxHeight);
-        if ((width, height) == DeckPages.Size(Settings, _resizePage)) return;
+        if ((width, height) == PageDirectory.Size(PageDirectory.Resolve(_resizePage))) return;
         _resizeChanged = true;
-        DeckPages.SetSize(Settings, _resizePage, width, height);
+        PageDirectory.SetSize(_resizePage, width, height);
         _pageWidth = width;
-        if (_resizePage == DeckPage.Usage) _usageWidth = width;
+        if (_resizePage == DeckPageIds.Usage) _usageWidth = width;
         SetExpanded(true, instant: true);
         // The surface follows every frame. The monitor page and the usage page's columns are built again only where they cross a
         // layout step and stretch in between, so they follow too; the model details and the media page are built again whole,
         // about 25 times a second during the drag, and once more when it ends (FinishResize saves the size).
-        if (_resizePage == DeckPage.Monitor) RenderMonitor();
+        if (_resizePage == DeckPageIds.Monitor) RenderMonitor();
         else if (Environment.TickCount64 - _resizeRendered >= 40)
         {
             _resizeRendered = Environment.TickCount64;
             // Columns that stay within their size step stretch; nothing else in the panel changes meanwhile.
-            if (_resizePage != DeckPage.Usage || _details || ColumnsBuild() != _usageBuilt) RenderUsage();
+            if (_resizePage != DeckPageIds.Usage || _details || ColumnsBuild() != _usageBuilt) RenderUsage();
         }
         _grips.Light(LitEdges, true, SizeLabel(width, height));
     }
@@ -336,11 +336,11 @@ public partial class MainWindow
         if (Dragging || (compact ? !CompactResizable || !horizontal : !PanelResizable)) return;
         // A press while the surface still settles moves on from where it is heading, as holding a key repeats.
         bool settling = SettlingHere(compact);
-        var limits = PageLimitsOf(CurrentPage);
+        var limits = PageLimitsOf(CurrentPageId);
         var (min, max) = !horizontal ? (limits.MinHeight, limits.MaxHeight)
             : compact ? CollapsedGeometry.WidthRange(EffectiveStyle, MonitorBoundsDip, WorkDip, _scale) : (limits.MinWidth, limits.MaxWidth);
         double current = settling ? horizontal ? _springWidth.Target : _springHeight.Target
-            : Math.Clamp(compact ? Collapsed.Surface.Width : horizontal ? DeckPages.Size(Settings, CurrentPage).Width : DeckPages.Size(Settings, CurrentPage).Height, min, max);
+            : Math.Clamp(compact ? Collapsed.Surface.Width : horizontal ? PageDirectory.Size(PageDirectory.Resolve(CurrentPageId)).Width : PageDirectory.Size(PageDirectory.Resolve(CurrentPageId)).Height, min, max);
         double next = KeyboardResize.Next(current, direction, min, max);
         // At a limit nothing moves and nothing is saved: a key held there costs nothing, and a collapsed surface that widens to
         // its content keeps doing so.

@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Threading;
 using BrimDeck.Modules;
@@ -27,14 +28,18 @@ internal sealed class ModuleViewHost : Grid, IDisposable
     private ModuleViewport? _viewport;
     private bool _disposed, _cleaning;
     private bool _presented;
+    private readonly bool _preview;
+    private PanelPalette? _localPalette;
+    private ResourceDictionary? _themeResources;
+    private int _themeGeneration = -1;
     internal bool IsLoading { get; private set; }
     internal bool IsPresented => _context.IsVisible;
     private bool Live => !_disposed && !_context.Lifetime.IsCancellationRequested && _lease?.Current == true;
 
     internal ModuleViewHost(ModuleHost host, string owner, ModuleViewContext context, Func<ModuleViewContext, IModuleView> create,
-        Func<ModuleViewContext, ValueTask<IModuleView>>? createAsync = null)
+        Func<ModuleViewContext, ValueTask<IModuleView>>? createAsync = null, PanelPalette? palette = null, bool preview = false)
     {
-        _host = host; _owner = owner; _context = context; _lease = host.CaptureView(owner);
+        _host = host; _owner = owner; _context = context; _lease = host.CaptureView(owner); _preview = preview; _localPalette = palette;
         _handover = new(_leaving); Children.Add(_content); Children.Add(_leaving);
         IsVisibleChanged += (_, _) => UpdatePresentation();
         Loaded += (_, _) => UpdatePresentation();
@@ -42,7 +47,11 @@ internal sealed class ModuleViewHost : Grid, IDisposable
         if (_lease is null) { _context.Dispose(); ShowMessage(Loc.T("此模组当前未运行。", "This module is not running.")); return; }
         context.Fault = error => { if (!_disposed || _cleaning) _lease.Report("view resource", error); };
         foreach (var dictionary in context.Owner.Resources.MergedDictionaries) Resources.MergedDictionaries.Add(dictionary);
+        foreach (var key in context.Owner.Resources.Keys) Resources[key] = context.Owner.Resources[key];
+        SetResourceReference(BackgroundProperty, "PanelSurface");
+        TextElement.SetFontFamily(this, UI.PanelFont);
         context.Attach(this, owner); context.BindLifetime(_lease.Lifetime);
+        UpdateAppearance();
         context.OnDispose(DisposeOnDispatcher);
         context.RunCallback = callback => { if (Live) _lease.Invoke("view timer", callback); };
         context.RunVisibilityCallback = callback => _lease.Invoke("view visibility", callback);
@@ -129,11 +138,32 @@ internal sealed class ModuleViewHost : Grid, IDisposable
         if (!before && _context.IsVisible) Refresh();
     }
     internal bool CancelAdjustment() => Query("cancel adjustment", () => _view!.CancelAdjustment());
-    internal void Refresh() => Query("refresh view", () => { _view!.Refresh(); return true; });
+    internal void Refresh()
+    {
+        UpdateAppearance(); Query("refresh view", () => { _view!.Refresh(); return true; });
+    }
+    internal void SetTheme(PanelPalette palette)
+    {
+        _localPalette = palette; _themeGeneration = -1; Refresh();
+    }
+    private void UpdateAppearance()
+    {
+        if (_disposed) return;
+        var palette = _localPalette ?? PanelTheme.Current;
+        if (_themeGeneration != PanelTheme.Generation || _themeResources is null)
+        {
+            var next = PanelTheme.CreateResources(palette);
+            foreach (var key in next.Keys) Resources.Remove(key);
+            int at = _themeResources is null ? -1 : Resources.MergedDictionaries.IndexOf(_themeResources);
+            if (at < 0) Resources.MergedDictionaries.Add(next); else Resources.MergedDictionaries[at] = next;
+            _themeResources = next; _themeGeneration = PanelTheme.Generation;
+        }
+        _context.SetAppearance(new(0, palette.IsDark, PanelTheme.HighContrast && !_preview, Loc.Language, _viewport?.DeviceScale ?? 1, _viewport?.ContentScale ?? 1, !Soft.Enabled, _preview));
+    }
     internal void SetViewport(double width, double height, double scale = 1) => SetViewport(new ModuleViewport(width, height) { ContentScale = scale });
     internal void SetViewport(ModuleViewport viewport)
     {
-        var normalized = viewport.Normalize(); if (_viewport == normalized) return; _viewport = normalized;
+        var normalized = viewport.Normalize(); if (_viewport == normalized) return; _viewport = normalized; UpdateAppearance();
         Query("layout view", () => { ApplyViewport(normalized); return true; });
     }
     private void ApplyViewport(ModuleViewport viewport)

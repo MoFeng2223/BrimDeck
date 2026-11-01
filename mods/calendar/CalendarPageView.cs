@@ -49,7 +49,7 @@ internal sealed class CalendarPageView : Grid, IModuleView
         // An external mirror is read while this page is on screen; closing the page stops the polling.
         // Until the host exposes page visibility, WPF's own IsVisible (false after switching to another
         // panel or when the window is minimised) is the closest signal available.
-        context.Every(TimeSpan.FromSeconds(5), Poll);
+        context.EveryVisible(TimeSpan.FromSeconds(5), Poll);
         _workspace.SyncExternal(true);
         Update();
     }
@@ -103,7 +103,8 @@ internal sealed class CalendarPageView : Grid, IModuleView
     {
         if (_building) return;
         string key = BuildKey();
-        if (key != _key) { Rebuild(key); return; }
+        // Keep the actual editor attached, including selection, focus and IME composition, across appearance/layout updates.
+        if (key != _key && _editor is null && !_steppers.Any(s => s.IsAdjusting)) { Rebuild(key); return; }
         RefreshCells();
         RefreshAgenda();
     }
@@ -114,7 +115,7 @@ internal sealed class CalendarPageView : Grid, IModuleView
         _layout.SideBySide, _layout.WeekView, (int)Math.Round(_layout.MonthWidth), (int)Math.Round(_layout.CellHeight),
         _layout.AgendaRows, _layout.ShowLunar, _layout.ShowDots, (int)_layout.Padding, (int)_layout.Gap,
         _workspace.Options.FirstDay, _workspace.Options.ShowLunar, _workspace.Options.ShowHoliday,
-        ModuleTheme.Generation, Loc.Language, ModuleMotion.Enabled, _agendaOnly
+        Loc.Language, ModuleMotion.Enabled, _agendaOnly
     });
 
     private void Rebuild(string key)

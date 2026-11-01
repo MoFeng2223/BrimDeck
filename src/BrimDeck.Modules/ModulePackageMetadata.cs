@@ -130,6 +130,10 @@ public static partial class ModulePackageInspector
                     Warning("sdk-permission-not-declared", location, "SDK type references a service requiring " + permission + ". Type references alone do not prove a call.");
             }
             int minor = capability?.IntroducedMinor ?? 0;
+            if (type.Name is "BrimDeck.ModuleAppearance" or "BrimDeck.ModulePageSize") minor = 8;
+            if (type.Name == "BrimDeck.ModuleUi" && member is "Button" or "Ring" or "Progress" or "Row" or "ValueCard") minor = 8;
+            if (type.Name == "BrimDeck.ModuleViewContext" && member is "get_Appearance" or "OnAppearanceChanged" or "Translate") minor = 8;
+            if (type.Name == "BrimDeck.ModulePage" && member is "get_Size" or "set_Size" or "get_IconPath" or "set_IconPath" or "get_SupportsLocalTheme" or "set_SupportsLocalTheme") minor = 8;
             if (type.Name is "BrimDeck.ModuleSettingsStore" or "BrimDeck.IModuleVersionedSettings" or "BrimDeck.IModuleCustomSettings" or "BrimDeck.ModuleSettingsSnapshot" or "BrimDeck.ModuleSettingsPatch" or "BrimDeck.ModuleSettingsWriteStatus" or "BrimDeck.ModuleSettingsWriteResult") minor = 7;
             if (type.Name == "BrimDeck.ModuleSetting" && member is "set_DefaultValue" or "get_DefaultValue") minor = 7;
             if (type.Name is "BrimDeck.IModuleSettingsNavigation" or "BrimDeck.ModuleSettingsPlacement" or "BrimDeck.Modules.ModuleDiagnostic" or "BrimDeck.Modules.ModuleDiagnosticSeverity") minor = 6;

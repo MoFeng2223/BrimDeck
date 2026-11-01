@@ -9,14 +9,19 @@ public partial class MainWindow
 {
     // Places the chosen page's fill under its button. While the open panel shows it, it glides there as the monitor page's sort pill
     // does; otherwise it is set in place. A switch whose buttons are not laid out yet places it once they are.
+    private List<Button>? _navigationButtons;
+    private Button? _navigationSelection;
+    private IReadOnlyList<Button> PageNavigationButtons => _navigationButtons ?? [AIUsageButton, MonitorPageButton, MusicPageButton, MiniAppsPageButton];
+    private Button ActivePageButton => _navigationSelection ?? PageButton(CurrentPage);
     private void PlacePageCapsule()
     {
-        var button = PageButton(CurrentPage);
+        var button = ActivePageButton;
+        if (_navigationButtons is { Count: 0 }) return;
         if (!LayoutRetry.Laid(button))
         {
             // Retried after a layout pass, never by posting itself again: the switch is collapsed while the usage details show, its
             // buttons then keep an invalid measure and their old width, and a retry that posted itself spun the UI thread at 90%.
-            if (!_capsulePending) { _capsulePending = true; LayoutRetry.WhenReady(this, () => LayoutRetry.Laid(PageButton(CurrentPage)), () => { _capsulePending = false; PlacePageCapsule(); }); }
+            if (!_capsulePending) { _capsulePending = true; LayoutRetry.WhenReady(this, () => LayoutRetry.Laid(ActivePageButton), () => { _capsulePending = false; PlacePageCapsule(); }); }
             return;
         }
         // The button's set height, not ActualHeight: a height ApplyHeader just set shows in ActualHeight only after the next layout pass.
@@ -35,14 +40,14 @@ public partial class MainWindow
     // which RefreshStatus runs before ApplyHeader, would otherwise leave it at the size tier left behind until the next refresh.
     private void FitPageButtons(PanelHeader header)
     {
-        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, MiniAppsPageButton }) button.Height = header.ButtonHeight;
+        foreach (var button in PageNavigationButtons) button.Height = header.ButtonHeight;
         PageCapsule.Height = header.ButtonHeight;
     }
     // The buttons stand in the order chosen in the settings; the first has no gap before it.
     private void OrderPageButtons()
     {
         if (AIUsageButton.Parent is not Panel buttons) return;
-        var order = Settings.PageOrder.Select(PageButton).ToList();
+        var order = _navigationButtons ?? Settings.PageOrder.Select(PageButton).ToList();
         if (!buttons.Children.Cast<UIElement>().SequenceEqual(order))
         {
             buttons.Children.Clear();

@@ -66,6 +66,14 @@ public partial class MainWindow
             var miniAt = window.MiniAppsPageButton.TranslatePoint(new Point(), window.PageSwitch).X;
             check("mini apps use their own page capsule and reorder without duplicate buttons", buttons.Children.Count == 4 && ReferenceEquals(buttons.Children[0], window.MiniAppsPageButton)
                 && Math.Abs((double)window.PageCapsuleShift.GetAnimationBaseValue(TranslateTransform.XProperty) - miniAt) < .5);
+            var pluginButton = new Button { Content = "Plugin", Width = 45, Height = 24 };
+            var moreButton = new Button { Content = "More", Width = 36, Height = 24 };
+            window._navigationButtons = [pluginButton, window.AIUsageButton, moreButton]; window._navigationSelection = moreButton;
+            window.OrderPageButtons(); PumpCapsule(() => window.PlacePageCapsule(), check);
+            double moreAt = moreButton.TranslatePoint(new Point(), window.PageSwitch).X;
+            check("an overflow page anchors its capsule to the more button", Math.Abs((double)window.PageCapsuleShift.GetAnimationBaseValue(TranslateTransform.XProperty) - moreAt) < .5 && buttons.Children.Count == 3);
+            window._navigationButtons = null; window._navigationSelection = null;
+            buttons.Children.Clear(); buttons.Children.Add(window.AIUsageButton); window.OrderPageButtons();
             window.CurrentPage = DeckPage.Monitor;
 
             // An invisible/retired panel must yield too, even though its controls keep their previous size.

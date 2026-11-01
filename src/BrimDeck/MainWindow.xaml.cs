@@ -176,6 +176,13 @@ public partial class MainWindow : Window
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
         // The collapsed island opens on hover, so a right click there does nothing, except leave move mode.
         MouseWheel += PanelWheel;
+        KeyDown += (_, e) =>
+        {
+            if (!_expanded || e.Handled || System.Windows.Input.Keyboard.Modifiers != System.Windows.Input.ModifierKeys.Control || e.Key is not (Key.PageDown or Key.PageUp)) return;
+            var shown = PageDirectory.Visible; int at = shown.ToList().FindIndex(p => p.Id == CurrentPageId);
+            int next = at + (e.Key == Key.PageDown ? 1 : -1);
+            if (next >= 0 && next < shown.Count) { SelectPage(shown[next].Id); e.Handled = true; }
+        };
         MouseRightButtonUp += (_, e) => { if (_moveArmed) { CancelMove(); e.Handled = true; return; } if (!_expanded || !Settings.RightClickSettings) return; _app.OpenSettings(); e.Handled = true; };
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { DismissExpandedFromEscape(); e.Handled = true; } };
         // A scale change moves the window to a rectangle Windows suggests; the island is centred again.
@@ -266,17 +273,17 @@ public partial class MainWindow : Window
         NoteCollapsedWidth(shapeBefore, dipBefore);
         // Page widths are unscaled; drawn at the panel's scale they fit the work area less 12 DIP each side.
         double Fit(double width) => Math.Max(240, Math.Min(width, (work.Width / scale - 24) / _scale));
-        _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width); _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width);
+        _pageWidth = Fit(PageDirectory.Size(PageDirectory.Resolve(CurrentPageId)).Width); _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width);
         // The widest shown page as it fits this monitor, measured as _pageWidth is (SetExpanded centres on it). A drag resizes
         // only the page that shows, which SetExpanded takes from _pageWidth; this is set again when the size is saved (ApplySettings).
-        _widestPage = Fit(DeckPages.Largest(Settings).Width);
+        _widestPage = Fit(LargestPageSize().Width);
         // The layered HWND keeps the largest size anything it shows can take, so that it is not resized or moved while the panel
         // is used: Windows shows a layered window's last picture at its new size and place before WPF draws it again, so every
         // resize flashed the panel cut off or shifted for a frame (it did on each press and release of a resize drag). That is
         // every page at the largest size a drag can give it, and the collapsed surface at the widest any form can be on this
         // monitor, with room on either side for the resize grips just outside them (ResizeGrips). The notch and the capsule may be
         // as wide as the monitor, so the window is as wide as the monitor too. Only Island animates.
-        var largest = DeckPages.Largest(Settings);
+        var largest = LargestPageSize();
         largest = (Math.Max(Math.Max(largest.Width, PageMaxWidth), _transient?.Width ?? 0), Math.Max(Math.Max(largest.Height, DeckPages.MaxHeight), _transient?.Height ?? 0));
         double widestSurface = Enum.GetValues<CompactStyle>().Max(style => CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip, _scale).Max);
         // In the edge's frame: on a side edge a page's height runs along the edge and its width away from it.
@@ -693,7 +700,7 @@ public partial class MainWindow : Window
         bool line = style == CompactStyle.Line, indicator = !expanded && line;
         bool timerControls = ModuleControlsVisible;
         bool timerNotch = timerControls && Settings.Style == CompactStyle.Notch;
-        double wantedHeight = _transient?.Height ?? (timerControls ? 76 : DeckPages.Size(Settings, CurrentPage).Height);
+        double wantedHeight = _transient?.Height ?? (timerControls ? 76 : PageDirectory.Size(PageDirectory.Resolve(CurrentPageId)).Height);
         double contentWidth = _transient?.Width ?? (timerControls ? Math.Min(320, WorkDip.Width / _scale - 24) : _pageWidth);
         var panel = PanelFor(wantedHeight);
         double panelTop = timerControls ? timerNotch ? 0 : Math.Clamp(shape.Surface.Y, 0, Math.Max(0, PanelBottom - 76 * _scale)) : panel.Top;
