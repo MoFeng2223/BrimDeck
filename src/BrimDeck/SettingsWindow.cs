@@ -188,22 +188,8 @@ public sealed partial class SettingsWindow : Window
         Content = frame; RootVisual = frame; UpdateCaption(); Native.SettingsChrome.SetTheme(this, _palette.Dark); ShowPage(_page);
         _status.SetResourceReference(TextBlock.ForegroundProperty, "SettingsError"); PaletteChanged?.Invoke();
     }
-    // Clicking anything that is not a control takes focus off a text field, as elsewhere in Windows. WPF leaves the
-    // field focused otherwise, since panels and scroll areas do not take focus. The holder is a focusable frame that
-    // draws no outline and is skipped by Tab.
-    private static void ReleaseFocusOnEmptyClick(Window window, Func<UIElement> holder)
-    {
-        window.AddHandler(MouseDownEvent, new MouseButtonEventHandler((_, e) =>
-        {
-            // Any focused control counts: the script editor, for one, keeps focus in its own text area rather than a TextBox.
-            if (Keyboard.FocusedElement is not Visual focused || ReferenceEquals(focused, holder()) || !window.IsAncestorOf(focused)) return;
-            for (var node = e.OriginalSource as DependencyObject; node is not null && !ReferenceEquals(node, window);
-                 node = node is Visual ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node))
-                if (node is Control { Focusable: true, IsEnabled: true }) return;
-            // The window itself would hand focus straight back to the field, so the frame takes it.
-            Keyboard.Focus(holder());
-        }), true);
-    }
+    // Clicking anything that is not a control takes focus off a text field, as elsewhere in Windows (EmptyClickFocus).
+    private static void ReleaseFocusOnEmptyClick(Window window, Func<UIElement> holder) => EmptyClickFocus.Attach(window, holder);
     private StackPanel Brand(double size, Thickness margin)
     {
         var brand = new StackPanel { Margin = margin, VerticalAlignment = VerticalAlignment.Center };
@@ -678,6 +664,8 @@ public sealed partial class SettingsWindow : Window
         void EnableDuration(bool enabled)
         {
             foreach (var control in duration.Children.OfType<FrameworkElement>().Where(control => Grid.GetColumn(control) > 0)) control.IsEnabled = enabled;
+            // The whole row reads as off (SW-12): the title and the number box fade as the slider does (its own 0.35).
+            foreach (var part in duration.Children.OfType<FrameworkElement>().Where(control => control is not Slider)) part.Opacity = enabled ? 1 : .4;
         }
         EnableDuration(S.Animations);
         Group(SliderRow(Loc.T("展开延迟", "Expand delay"), S.OpenDelay, 0, 2000, 50, Loc.T("毫秒", "ms"), value => Change(s => s.OpenDelay = (int)value),
@@ -781,7 +769,8 @@ public sealed partial class SettingsWindow : Window
                 // centred mark otherwise sits higher than the Chinese label beside it. The box leaves half a unit around the
                 // circle's stroke: a box exactly the circle's size clips the outer edge of the stroke on all four sides.
                 var mark = Stroke("M 6,1 A 5,5 0 1 1 6,11 A 5,5 0 1 1 6,1 Z M 6,5.4 V 8.4 M 6,3.6 V 3.7", 12, 12, TextTertiary); mark.StrokeThickness = 1.1;
-                var info = new HelpMark { Width = 12, Height = 12, Background = Brushes.Transparent, Margin = new Thickness(2.5, 0, 0, 0),
+                // The 12 DIP mark takes the pointer 24 DIP square (SW-08); the negative margin keeps its place.
+                var info = new HelpMark { Width = 24, Height = 24, Background = Brushes.Transparent, Margin = new Thickness(2.5 - 6, -6, -6, -6),
                     VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Help, Focusable = true, Child = mark, RenderTransform = new TranslateTransform(0, 0.5),
                     FocusVisualStyle = (Style)FindResource("SettingsSmallHelpFocus") };
                 AttachSettingHelp(info, title, () => help);
