@@ -278,10 +278,13 @@ public sealed class DeckSettings
     private List<CompactPart> _notchOrder = [.. CompactParts.Default], _capsuleOrder = [.. CompactParts.Default];
     private List<DeckPage> _pageOrder = [.. DeckPages.Order];
     private int _equalizerBars = CompactMusicLayout.DefaultBars, _musicEqualizerBars = 5;
-    private EqualizerMode _equalizerMode = EqualizerMode.Flow;
+    private EqualizerMode _equalizerMode = EqualizerMode.Flow, _musicEqualizerMode = EqualizerMode.Flow;
     // Version of the BrimDeck that last saved settings.json; see SettingsMigrations. Empty in files saved before 0.1.0.
     public string AppVersion { get; set; } = "";
     public bool LaunchAtStartup { get; set; }
+    // Off, the notification area has no BrimDeck icon. Starting BrimDeck again then shows the panels and the settings
+    // (App.ShowFromRelaunch), and the settings window has its own exit button.
+    public bool ShowTrayIcon { get; set; } = true;
     public SettingsTheme Theme { get; set; } = SettingsTheme.System;
     // The panel's color theme (see PanelThemes): "system", "dark", "light", a built-in theme or a theme file's id.
     // The dark default is the original look. An id whose file is missing is kept and shown as the dark theme meanwhile.
@@ -372,8 +375,9 @@ public sealed class DeckSettings
     public bool LyricsEnabled { get; set; } = true;
     // How many bars the music page's equalizer has, beside the title; its bars keep their spacing, so more bars make it longer.
     public int MusicEqualizerBars { get => _musicEqualizerBars; set => _musicEqualizerBars = CompactMusicLayout.SafeBars(value); }
-    // How the collapsed and the music page's equalizers show the sound (one choice for both); Flow keeps the original look.
+    // How the collapsed equalizer and the music page's equalizer show the sound, each its own choice, as their lengths are.
     public EqualizerMode EqualizerMode { get => _equalizerMode; set => _equalizerMode = Enum.IsDefined(value) ? value : EqualizerMode.Flow; }
+    public EqualizerMode MusicEqualizerMode { get => _musicEqualizerMode; set => _musicEqualizerMode = Enum.IsDefined(value) ? value : EqualizerMode.Flow; }
     // The music page's equalizer and current lyric each take their own color, chosen as the collapsed equalizer's is
     // (EqualizerColor): White is the theme's equalizer color for the bars and its primary text color for the lyric.
     public ClockColor MusicPageEqualizerColor { get; set; } = ClockColor.Cover;

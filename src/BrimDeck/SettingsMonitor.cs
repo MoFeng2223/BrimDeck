@@ -345,7 +345,7 @@ public sealed partial class SettingsWindow
         var presets = new UniformGrid { Columns = 2, Width = 196 };
         foreach (var (mode, label, help) in new[]
         {
-            (CompactMonitorMode.Full, Loc.T("完整", "Full"), Loc.T("显示全部占用和网速读数，CPU、内存和 GPU 带数值。不改变硬盘、显示的数值、顺序和颜色。", "Shows every usage and network reading, with the figures of CPU, memory and GPU. The drives, the figures chosen, the order and the colors stay.")),
+            (CompactMonitorMode.Full, Loc.T("完整", "Full"), Loc.T("显示全部监控项和全部数值。不改变硬盘的盘符、顺序和颜色。", "Shows every reading with every figure. The drive letters, the order and the colors stay.")),
             (CompactMonitorMode.Brief, Loc.T("简洁", "Brief"), Loc.T("只显示 CPU、内存和 GPU 的圆环，不带数值，隐藏硬盘。不改变顺序和颜色。", "Shows only the CPU, memory and GPU rings, without figures, and hides the drives. The order and the colors stay."))
         })
         {

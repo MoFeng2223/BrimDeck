@@ -62,8 +62,10 @@ internal sealed class KugouCdpConnection : IMediaPlayerConnection
     // A DevTools server of KuGou at the loopback address. Other tools that patch KuGou the same way open the same port, and
     // others open one of their own, so every port a KuGou process alone listens on at 127.0.0.1 is asked, 12233 first.
     // A port that is also open beyond this PC is never used.
+    // The ports are read only while KuGou runs: without it every 3 seconds would read the port tables for nothing.
     private async Task<Owner?> FindAsync(CancellationToken token)
     {
+        if (!ProcessSnapshot.Any("KuGou.exe")) return null;
         foreach (var candidate in Candidates())
         {
             if (_rejected.Contains((candidate.Id, candidate.Started, candidate.Port))) continue;
