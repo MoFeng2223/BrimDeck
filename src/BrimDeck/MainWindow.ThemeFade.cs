@@ -42,8 +42,9 @@ public partial class MainWindow
         var material = new IslandBorder
         {
             Width = width, Height = height, CornerRadius = Island.CornerRadius, ShoulderRadius = Island.ShoulderRadius, MaterialOpacity = Island.MaterialOpacity,
-            // The brush's opacity too, whatever it is, so the copy looks exactly as the surface does.
-            Background = new SolidColorBrush(_surface.Color) { Opacity = _surface.Opacity }
+            // The island's background opacity too, whatever it is, so the copy looks exactly as the surface does.
+            BackgroundOpacity = Island.BackgroundOpacity,
+            Background = new SolidColorBrush(_surface.Color)
         };
         PanelTheme.Dress(material, dpiScale: VisualTreeHelper.GetDpi(Island).DpiScaleX);
         _materialFade = Fade(Picture(material, width, height), daylight ? DaylightFadeMs : ThemeFadeMs);
