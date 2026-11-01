@@ -543,7 +543,7 @@ public partial class MainWindow
                 // All lines share one size; only its color (MusicLyricColor) marks the current one.
                 if (lyricLines == 3) { _lyricPrevious = UI.Fixed("", c.Lyric, c.LyricLine, UI.Tertiary); lyrics.Children.Add(_lyricPrevious); }
                 _lyricCurrent = new MusicMarquee { FontSize = c.Lyric, Height = c.LyricLine, CenterWhenFits = false, Foreground = LyricInk,
-                    Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
+                    Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay || PanelTheme.IslandTransparent };
                 lyrics.Children.Add(_lyricCurrent); UpdateLyricScrolling();
                 if (lyricLines >= 2) { _lyricNext = UI.Fixed("", c.Lyric, c.LyricLine, UI.Tertiary); lyrics.Children.Add(_lyricNext); }
                 lyrics.Visibility = layout.ShowMessage ? Visibility.Collapsed : Visibility.Visible; middle.Children.Add(lyrics);
@@ -753,7 +753,7 @@ public partial class MainWindow
     {
         string tail = merge && track.Artist.Length > 0 ? " · " + track.Artist : "";
         var title = new MusicMarquee { Text = track.Title, Tail = tail, AccessibleName = MusicTitleFit.ReadAs(track.Title, tail), TailFontSize = c.Artist, TailForeground = UI.Brush(UI.Secondary), FontSize = c.Title,
-            FontWeight = FontWeights.SemiBold, Height = c.TitleLine, CenterWhenFits = center, EdgeWidth = Math.Max(MusicMarquee.Edge, Math.Round(c.Title * .6)), Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
+            FontWeight = FontWeights.SemiBold, Height = c.TitleLine, CenterWhenFits = center, EdgeWidth = Math.Max(MusicMarquee.Edge, Math.Round(c.Title * .6)), Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay || PanelTheme.IslandTransparent };
         AutomationProperties.SetName(title, MusicTitleFit.ReadAs(track.Title, tail));
         ShowCutText(title, track.Title + tail);
         _musicTitle = title; UpdateLyricScrolling();
@@ -808,7 +808,7 @@ public partial class MainWindow
             TextBlock Dim() { var line = UI.Fixed("", c.Lyric, c.LyricLine, UI.Tertiary); lyrics.Children.Add(line); return line; }
             _lyricsAbove = [.. Enumerable.Range(0, above).Select(_ => Dim())];
             _lyricCurrent = new MusicMarquee { FontSize = columns.CurrentLyric, Height = columns.CurrentLine, CenterWhenFits = false, Foreground = LyricInk,
-                Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
+                Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay || PanelTheme.IslandTransparent };
             lyrics.Children.Add(_lyricCurrent); UpdateLyricScrolling();
             _lyricsBelow = [.. Enumerable.Range(0, below).Select(_ => Dim())];
             middle.Children.Add(lyrics);
@@ -1006,7 +1006,7 @@ public partial class MainWindow
     private MusicMarquee CompactTitle(string text, double width, CompactMusicLayout layout)
     {
         var title = new MusicMarquee { Text = text, Width = width, Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
-            ScrollAllowed = layout.TextScrolls, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay,
+            ScrollAllowed = layout.TextScrolls, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay || PanelTheme.IslandTransparent,
             Laps = true, Rested = text.Length > 0 && text == _compactTitleRested };
         title.Finished += () => { if (ReferenceEquals(_compactMarquee, title)) _compactTitleRested = title.Text; };
         title.Gliding += gliding => { if (ReferenceEquals(_compactMarquee, title)) MusicGliding(gliding); };

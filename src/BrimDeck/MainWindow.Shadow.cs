@@ -75,7 +75,8 @@ public partial class MainWindow
         var mask = Geometry.Combine(new RectangleGeometry(area), Island.Outline(), GeometryCombineMode.Exclude, null);
         IslandShadow.OpacityMask = new DrawingBrush
         {
-            Viewbox = area, Viewport = area, Stretch = Stretch.None,
+            Viewbox = area, ViewboxUnits = BrushMappingMode.Absolute, Viewport = area, ViewportUnits = BrushMappingMode.Absolute,
+            Stretch = Stretch.None,
             Drawing = new GeometryDrawing { Geometry = mask, Brush = Brushes.White }
         };
     }

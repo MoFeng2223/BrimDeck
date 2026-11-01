@@ -504,8 +504,10 @@ public partial class MainWindow : Window
     {
         // The background's own opacity, as set on the theme page, applied to everything the island paints itself; text,
         // icons and controls are child elements and keep their own, so the panel goes see-through without the content
-        // fading with it.
-        Island.BackgroundOpacity = Settings.PanelOpacity / 100.0;
+        // fading with it. High contrast keeps the panel opaque, or its system colors would blend into the windows behind it.
+        Island.BackgroundOpacity = PanelTheme.HighContrast ? 1.0 : Settings.PanelOpacity / 100.0;
+        // The marquees pick their edge-fade mode at creation time (MusicMarquee.Backdrop/InkFade), so they need to know now.
+        PanelTheme.IslandTransparent = Island.BackgroundOpacity < 1;
         double dpi = PresentationSource.FromVisual(this) is null ? 1 : VisualTreeHelper.GetDpi(this).DpiScaleX;
         if (_themeGeneration == PanelTheme.Generation && _themeDpi == dpi) return;
         // A new scale alone only redraws the scan lines or texture, which are laid out in device pixels.
@@ -513,14 +515,15 @@ public partial class MainWindow : Window
         _themeGeneration = PanelTheme.Generation; _themeDpi = dpi;
         // The resize hints take the theme's colors when they are drawn.
         _grips?.InvalidateVisual();
-        if (sameTheme) { Island.Pattern = PanelTheme.Texture(dpiScale: dpi) ?? PanelTheme.Scanlines(dpiScale: dpi); FitShadowCache(dpi); return; }
+        if (sameTheme) { Island.Pattern = PanelTheme.Texture(dpiScale: dpi) ?? PanelTheme.Scanlines(dpiScale: dpi); FitShadowCache(dpi); UpdateShadowMask(); return; }
         Foreground = UI.Brush(UI.Primary);
         PanelTheme.Dress(Island, dpiScale: dpi);
         if (IslandShadow.Effect is System.Windows.Media.Effects.DropShadowEffect shadow) PanelTheme.Dress(shadow);
         // Pixel art draws the island's text unsmoothed, as on a pixel screen, and casts a stepped shadow.
         PanelTheme.Text(Island);
         if (IslandShadow.Children.OfType<IslandBorder>().FirstOrDefault() is { } caster) caster.Pixel = PanelTheme.Current.Effects.Pixel;
-        FitShadowCache(dpi);
+        // The theme can change the shadow's blur and depth, which the mask's frame must reach past (UpdateShadowMask).
+        FitShadowCache(dpi); UpdateShadowMask();
         MusicIndicator.Background = UI.Brush(PanelTheme.Hex("indicatorProgress"));
         SetImmediate(_surface, SolidColorBrush.ColorProperty, PanelTheme.ColorOf(!_expanded && Collapsed.Style == CompactStyle.Line ? "indicator" : "surface"));
         _musicAccent = MusicVisuals.Accent(_mediaCover, out _coverAccent);
