@@ -18,6 +18,7 @@ public sealed class EmbeddedHostOptions
     public Func<DropShelf.Models.AppLanguage>? Language { get; init; }
     public Action? ShowSettings { get; init; }
     public Action? ShowHelp { get; init; }
+    public Action? UninstallFailed { get; init; }
     public Func<bool>? FloatingEnabled { get; init; }
     public Action? ShowIsland { get; init; }
     public Func<bool>? IsIslandBusy { get; init; }

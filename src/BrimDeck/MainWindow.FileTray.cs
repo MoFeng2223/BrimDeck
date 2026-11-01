@@ -97,7 +97,7 @@ public partial class MainWindow
     {
         _trayKey = "";
         if (IsTrayPage && _expanded) { RenderFileTray(); ShowTrayNotice(problem); }
-        else MessageBox.Show(this, problem, Loc.T("文件操作", "File operations"), MessageBoxButton.OK, MessageBoxImage.Information);
+        else ShowModuleFeedback("file-operation-failed", problem);
     }
 
     private void RenderFileTray()

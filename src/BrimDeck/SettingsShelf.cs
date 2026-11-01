@@ -16,7 +16,11 @@ public sealed partial class SettingsWindow
 
     private ShelfSettingsContent CreateShelfContent()
     {
-        var control = new ShelfSettingsContent(_app.Shelves!) { EnterContent = element => Soft.Enter(element) };
+        var control = new ShelfSettingsContent(_app.Shelves!)
+        {
+            EnterContent = element => Soft.Enter(element),
+            ConfirmDeleteAction = message => UserPrompts.Show(this, new(PromptId.ShelfDeleteAction, message))
+        };
         control.RecordingChanged += recording =>
         {
             if (_shelfRecording == recording) return;

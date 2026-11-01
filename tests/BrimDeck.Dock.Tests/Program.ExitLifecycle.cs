@@ -59,7 +59,14 @@ internal static partial class Program
         app.ExitApplication(); Pump();
         Check("exit lifecycle: an in-flight operation keeps the original owner alive until the barrier", !app.Exiting && ReferenceEquals(app.Shelves, controller) && !controller.Accepting && tray.Items.Single().Value == original);
         operation.Dispose();
-        app.Run();
+        var prompts = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(10) };
+        prompts.Tick += (_, _) =>
+        {
+            foreach (var prompt in app.Windows.OfType<PromptWindow>().Where(prompt => prompt.IsVisible).ToArray())
+                prompt.AcceptButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        };
+        prompts.Start();
+        try { app.Run(); } finally { prompts.Stop(); }
         Check("exit lifecycle: production OnExit was reached exactly once", shutdowns == 1 && app.Exiting && app.Dispatcher.HasShutdownFinished);
         Check("exit lifecycle: closing windows never overwrites the saved ordinary path", new FileTrayStore(scratch).Load().Items.Single().Path == original);
         Check("exit lifecycle: shutdown preserves ordinary source bytes and capture consent", File.ReadAllText(original) == bytes && !app.Settings.Clipboard.Enabled);

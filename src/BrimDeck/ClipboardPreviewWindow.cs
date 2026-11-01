@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using BrimDeck.Core;
+using BrimDeck.Native;
 using DropShelf.Views;
 
 namespace BrimDeck;
@@ -24,7 +25,7 @@ internal sealed class ClipboardPreviewWindow : ShelfToolWindow
     private readonly TextBlock _entryTitle, _metadata, _feedback;
     private readonly Button _copy, _paste, _export;
     private readonly DispatcherTimer _notice = new() { Interval = TimeSpan.FromSeconds(3) };
-    internal IntPtr PasteTarget { get; set; }
+    internal ClipboardPasteTarget PasteTarget { get; set; }
     internal ClipboardEntry Entry => _entry;
     internal FrameworkElement? PreviewBody => _previewBody.Content as FrameworkElement;
 
@@ -138,7 +139,7 @@ internal sealed class ClipboardPreviewWindow : ShelfToolWindow
         while (node is not null) { if (node is ButtonBase or TextBoxBase) return true; node = node is Visual ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node); }
         return false;
     }
-    private void ShowFeedback(string text)
+    internal void ShowFeedback(string text)
     {
         if (IsClosing) return;
         _notice.Stop(); _feedback.Text = text; _feedback.Visibility = Visibility.Visible; _notice.Start();

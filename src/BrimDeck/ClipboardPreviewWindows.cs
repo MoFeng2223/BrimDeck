@@ -18,15 +18,15 @@ internal sealed class ClipboardPreviewWindows : IDisposable
         });
     private readonly ClipboardHistory _history;
     private readonly Func<ClipboardSettings> _settings;
-    private readonly Func<ClipboardEntry, bool, IntPtr, bool> _activate;
-    private readonly Func<IntPtr> _target;
+    private readonly Func<ClipboardEntry, bool, ClipboardPasteTarget, bool> _activate;
+    private readonly Func<ClipboardPasteTarget> _target;
     private readonly Dictionary<string, ClipboardPreviewWindow> _windows = new(StringComparer.Ordinal);
     private bool _disposed;
     internal IReadOnlyCollection<ClipboardPreviewWindow> Windows => _windows.Values;
 
-    internal ClipboardPreviewWindows(ClipboardHistory history, Func<ClipboardSettings> settings, Func<ClipboardEntry, bool, IntPtr, bool> activate, Func<IntPtr>? target = null)
+    internal ClipboardPreviewWindows(ClipboardHistory history, Func<ClipboardSettings> settings, Func<ClipboardEntry, bool, ClipboardPasteTarget, bool> activate, Func<ClipboardPasteTarget>? target = null)
     {
-        _history = history; _settings = settings; _activate = activate; _target = target ?? (() => IntPtr.Zero);
+        _history = history; _settings = settings; _activate = activate; _target = target ?? (() => default);
         _history.Changed += Refresh;
     }
     internal void Show(ClipboardEntry entry, Rect card, Rect panel, double scale)
@@ -41,7 +41,7 @@ internal sealed class ClipboardPreviewWindows : IDisposable
         // A real switch to another app updates this window's receiver, not another preview's saved paste target.
         window.Deactivated += (_, _) => window.Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
         {
-            if (!_disposed && !window.IsClosing && ClipboardPaste.IsExternalWindow(ClipboardPaste.Foreground)) window.PasteTarget = ClipboardPaste.Foreground;
+            if (!_disposed && !window.IsClosing && ClipboardPaste.IsExternalWindow(ClipboardPaste.Foreground)) window.PasteTarget = ClipboardPaste.Capture(ClipboardPaste.Foreground);
         });
         window.ShowNear(card, panel, scale);
     }

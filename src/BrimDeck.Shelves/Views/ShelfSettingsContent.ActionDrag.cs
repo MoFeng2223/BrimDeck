@@ -71,6 +71,13 @@ public partial class ShelfSettingsContent
 
     private void ConfirmDeleteCustomAction(ActionCardViewModel card)
     {
+        if (ConfirmDeleteAction is { } confirm)
+        {
+            ModalChanged?.Invoke(true);
+            try { if (confirm(Strings.ConfirmDeleteAction(card.Title)) && card.Action.Custom is { } custom) ViewModel.DeleteCustomAction(custom); }
+            finally { ModalChanged?.Invoke(IsModal); }
+            return;
+        }
         _pendingDelete = card; ConfirmMessage.Text = Strings.ConfirmDeleteAction(card.Title);
         ConfirmOverlay.Visibility = Visibility.Visible; SectionTabs.IsEnabled = false; ModalChanged?.Invoke(true);
         EnterContent?.Invoke(ConfirmOverlay);

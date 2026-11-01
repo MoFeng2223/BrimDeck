@@ -650,7 +650,7 @@ public partial class MainWindow : Window
     public void SetExpanded(bool expanded, bool instant = false, bool keyboard = false)
     {
         if (expanded && IsSuppressed || _poweringOff) return;
-        if (expanded && !_expanded) EndBoot();
+        if (expanded && !_expanded) { EndBoot(); ReplayModuleFeedback(); }
         // Only the panel under the pointer is open; the others close at once and give up the Escape key.
         if (expanded && !_preview)
             foreach (var other in _app.Decks.Where(deck => deck != this && deck._expanded && !deck._preview).ToList()) other.SetExpanded(false);

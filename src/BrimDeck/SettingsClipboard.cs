@@ -48,9 +48,10 @@ public sealed partial class SettingsWindow
                 Loc.T("仅保存路径，不复制或删除原文件；原文件不存在时不能重新填充。", "Only paths are saved; original files are never copied or deleted. Missing originals cannot be recalled.")));
 
         SectionTitle(Loc.T("面板与粘贴", "Panel and paste"));
-        Group(Toggle(Loc.T("选择后快速粘贴", "Paste on activation"), S.Clipboard.PasteOnActivate, value => Change(s => s.Clipboard.PasteOnActivate = value), help:
-                Loc.T("控制 Enter 或 Alt+数字是否同时粘贴。灵动岛卡片单击始终回贴；Ctrl+Enter 始终只复制。系统阻止按键时请手动 Ctrl+V。",
-                    "Controls whether Enter or Alt+number also pastes. A single click on an island card always pastes; Ctrl+Enter always copies only. Use Ctrl+V if Windows blocks simulated keys.")),
+        Group(MusicChoice(Loc.T("卡片与快捷键默认动作", "Default card and shortcut action"), S.Clipboard.PasteOnActivate,
+                [(true, Loc.T("复制并回贴", "Copy and paste")), (false, Loc.T("仅复制", "Copy only"))], value => Change(s => s.Clipboard.PasteOnActivate = value), help:
+                Loc.T("控制岛内卡片单击、Enter 和 Alt+数字。复制按钮和 Ctrl+Enter 始终只复制；明确的「回贴」仍会请求粘贴。系统阻止按键时可手动 Ctrl+V。",
+                    "Applies to island card clicks, Enter and Alt+number. Copy buttons and Ctrl+Enter always copy only; explicit Paste still requests paste. Use Ctrl+V if Windows blocks input.")),
             Toggle(Loc.T("复制后收起面板", "Collapse after copying"), S.Clipboard.CloseAfterAction, value => Change(s => s.Clipboard.CloseAfterAction = value)),
             Toggle(Loc.T("输入时失焦收起面板", "Collapse when input loses focus"), S.Clipboard.HideOnDeactivate, value => Change(s => s.Clipboard.HideOnDeactivate = value)),
             Toggle(Loc.T("网格视图", "Grid view"), S.Clipboard.GridView, value => Change(s => s.Clipboard.GridView = value)));
@@ -78,11 +79,14 @@ public sealed partial class SettingsWindow
         Group(persistence);
         ClipboardDataStorageControls();
         Group(Row(Loc.T("不记录的程序", "Excluded applications"), exclusions, help: () => Loc.T("填写程序进程名，以逗号分隔，例如 KeePassXC,1Password。保存于本机，不记录窗口标题。", "Comma-separated process names, e.g. KeePassXC,1Password. Stored locally; window titles are never captured.")),
-            Row(Loc.T("清空未收藏记录", "Clear non-favorites"), ActionButton(Loc.T("清空历史", "Clear history"), () => _app.ClipboardHistoryService?.History.Clear())),
+            Row(Loc.T("清空普通历史", "Clear unprotected history"), ActionButton(Loc.T("清空历史…", "Clear history…"), () =>
+            {
+                if (UserPrompts.Show(this, new(PromptId.ClipboardClearHistory, Loc.T("清空未收藏、未归档的历史？此操作不可撤销。原文件和系统剪贴板不会更改。", "Clear non-favorite, non-archived history? This cannot be undone. Original files and the system clipboard are unchanged."))))
+                    _app.ClipboardHistoryService?.History.Clear();
+            })),
             Row(Loc.T("删除所有历史（包括收藏）", "Delete all history (including favorites)"), ActionButton(Loc.T("删除全部…", "Delete all…"), () =>
             {
-                if (MessageBox.Show(this, Loc.T("删除全部剪贴板历史及收藏？此操作不可撤销。系统剪贴板和原文件不会被更改。", "Delete all clipboard history and favorites? This cannot be undone. The system clipboard and original files will not be changed."),
-                    Loc.T("删除剪贴板历史", "Delete clipboard history"), MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes)
+                if (UserPrompts.Show(this, new(PromptId.ClipboardClearAll, Loc.T("删除全部剪贴板历史、收藏和归档？此操作不可撤销。系统剪贴板和原文件不会被更改。", "Delete all clipboard history, favorites and archived entries? This cannot be undone. The system clipboard and original files will not be changed."))))
                     _app.ClipboardHistoryService?.History.Clear(false);
             })));
     }

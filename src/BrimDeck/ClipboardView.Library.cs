@@ -16,7 +16,7 @@ internal sealed partial class ClipboardView
     private readonly HashSet<ClipboardContentKind> _kindFilter = [];
     private ClipboardArchiveScope _archiveScope;
     private Action<ClipboardEntry?>? _openLibrary;
-    private Func<string, bool>? _confirmation;
+    private Func<PromptRequest, bool>? _confirmation;
     private Button? _filter;
     private ClipboardEntryEditor? _inspector;
     internal static readonly DependencyProperty TimelineHeaderHeightProperty = DependencyProperty.Register(nameof(TimelineHeaderHeight), typeof(double), typeof(ClipboardView), new PropertyMetadata(0d));
@@ -118,11 +118,10 @@ internal sealed partial class ClipboardView
         var anchor = _filter is { IsVisible: true } ? _filter : _settingsButton;
         anchor.ContextMenu = menu; menu.PlacementTarget = anchor; menu.Placement = PlacementMode.Bottom; menu.IsOpen = true;
     }
-    private bool Confirm(string message) => _confirmation?.Invoke(message) ?? MessageBox.Show(Window.GetWindow(this), message,
-        Loc.T("剪贴板库", "Clipboard Library"), MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
+    private bool Confirm(PromptRequest request) => _confirmation?.Invoke(request) ?? UserPrompts.Show(Window.GetWindow(this), request);
     private void DeleteEntry(ClipboardEntry item)
     {
-        if (Confirm(Loc.T("删除此剪贴板记录及其备注？原文件和系统剪贴板不会更改，此操作不可撤销。", "Delete this clipboard entry and its notes? Original files and the clipboard are unchanged. This cannot be undone."))) _history.Remove(item.Id);
+        if (Confirm(new(PromptId.ClipboardDeleteEntry, Loc.T("删除此剪贴板记录及其备注？原文件和系统剪贴板不会更改，此操作不可撤销。", "Delete this clipboard entry and its notes? Original files and the clipboard are unchanged. This cannot be undone.")))) _history.Remove(item.Id);
     }
     internal void ShowDetails(ClipboardEntry? item, bool create = false)
     {

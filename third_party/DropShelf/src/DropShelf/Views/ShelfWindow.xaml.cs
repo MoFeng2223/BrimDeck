@@ -64,6 +64,7 @@ public partial class ShelfWindow : Window
     private readonly IShelfHost _host;
     private readonly DropTargetHelper _dropHelper = new();
     private readonly DispatcherTimer _toastTimer;
+    private int _toastGeneration;
     private readonly DispatcherTimer _leaveCheck;
     /// <summary>窗口关闭时取消还在接收的附件。</summary>
     private readonly CancellationTokenSource _lifetime = new();
@@ -103,7 +104,7 @@ public partial class ShelfWindow : Window
         viewModel.NewItemsProduced += NewItemsProduced;
         IsVisibleChanged += (_, _) => viewModel.SetWindowVisible(IsVisible);
 
-        _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.4) };
+        _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
         _toastTimer.Tick += (_, _) => HideToast();
         _leaveCheck = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(220) };
         _leaveCheck.Tick += OnLeaveCheck;
@@ -464,9 +465,10 @@ public partial class ShelfWindow : Window
     private void ShowToast(ShelfToast toast)
     {
         if (IsClosing) return;
+        ++_toastGeneration; Toast.Visibility = Visibility.Visible;
         ToastText.Text = toast.Message;
         ToastGlyph.Text = toast.Success ? "" : "";
-        ToastGlyph.SetResourceReference(TextBlock.ForegroundProperty, toast.Success ? "SuccessBrush" : "CautionBrush");
+        ToastGlyph.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
         var ease = HostedResources.MotionEase ?? new CubicEase { EasingMode = EasingMode.EaseOut };
         Toast.BeginAnimation(OpacityProperty, null); ToastOffset.BeginAnimation(TranslateTransform.YProperty, null);
         Toast.Opacity = 1; ToastOffset.Y = 0;
@@ -483,8 +485,18 @@ public partial class ShelfWindow : Window
     {
         _toastTimer.Stop();
         Toast.BeginAnimation(OpacityProperty, null);
-        if (ShelfMotion.Enabled) Toast.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(180)));
-        else Toast.Opacity = 0;
+        int generation = ++_toastGeneration;
+        void Clear()
+        {
+            if (generation != _toastGeneration) return;
+            Toast.Visibility = Visibility.Collapsed; Toast.Opacity = 0; ToastText.Text = "";
+        }
+        if (ShelfMotion.Enabled)
+        {
+            var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(180));
+            fade.Completed += (_, _) => Clear(); Toast.BeginAnimation(OpacityProperty, fade);
+        }
+        else Clear();
     }
 
     private static T? FindAncestor<T>(DependencyObject? source) where T : DependencyObject

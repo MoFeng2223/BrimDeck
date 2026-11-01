@@ -20,7 +20,7 @@ internal static partial class Program
         string file = System.IO.Path.Combine(scratch, "application-source.txt"); File.WriteAllText(file, "Synthetic application clearing fixture.");
         Set(view, "_setApplicationPinned", (Action<string, bool>)((source, value) => { settings.Clipboard.SetApplicationPinned(source, value); pins++; view.Refresh(); }));
         Set(view, "_setApplicationHidden", (Action<string, bool>)((source, value) => { settings.Clipboard.SetApplicationHidden(source, value); hides++; view.Refresh(); }));
-        Set(view, "_confirmation", (Func<string, bool>)(_ => confirm));
+        Set(view, "_confirmation", (Func<PromptRequest, bool>)(_ => confirm));
         Button Button(string id) => All<Button>(view).Single(button => AutomationProperties.GetAutomationId(button).Equals(id, StringComparison.OrdinalIgnoreCase));
         Button Source(string name) => Button(name.Length == 0 ? "clipboard-application-unknown" : "clipboard-application-source-" + name);
         MenuItem Item(Button button, string action) => button.ContextMenu!.Items.OfType<MenuItem>().Single(item => AutomationProperties.GetAutomationId(item) == "clipboard-application-" + action);

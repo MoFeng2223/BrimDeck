@@ -25,6 +25,7 @@ public partial class ShelfSettingsContent : UserControl, IDisposable
     public event Action<bool>? RecordingChanged;
     public event Action<bool>? ModalChanged;
     public Action<UIElement>? EnterContent { get; set; }
+    public Func<string, bool>? ConfirmDeleteAction { get; set; }
 
     public ShelfSettingsContent(AppController controller)
     {

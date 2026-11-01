@@ -12,7 +12,7 @@ internal sealed class ClipboardEntryEditor : StackPanel
     private readonly ClipboardHistory _history;
     private readonly Func<ClipboardSettings> _settings;
     private readonly Action<ClipboardEntry, bool> _activate;
-    private readonly Func<string, bool> _confirm;
+    private readonly Func<PromptRequest, bool> _confirm;
     private TextBox? _title, _tags, _notes, _content;
     private ClipboardEntry? _entry;
     private Border? _preview;
@@ -32,14 +32,14 @@ internal sealed class ClipboardEntryEditor : StackPanel
     internal event Action? Removed;
 
     internal ClipboardEntryEditor(ClipboardHistory history, Func<ClipboardSettings> settings,
-        Action<ClipboardEntry, bool> activate, Func<string, bool> confirm)
+        Action<ClipboardEntry, bool> activate, Func<PromptRequest, bool> confirm)
     {
         _history = history; _settings = settings; _activate = activate; _confirm = confirm;
         Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri($"/{typeof(ClipboardEntryEditor).Assembly.GetName().Name};component/ClipboardLibraryResources.xaml", UriKind.Relative) });
     }
     internal bool TryDiscard()
     {
-        if (IsDirty && !_confirm(Loc.T("放弃尚未保存的修改？", "Discard unsaved changes?"))) return false;
+        if (IsDirty && !_confirm(new(PromptId.ClipboardDiscardDraft, Loc.T("放弃尚未保存的修改？", "Discard unsaved changes?")))) return false;
         IsDirty = false; return true;
     }
     internal void RefreshEntry()
@@ -138,13 +138,13 @@ internal sealed class ClipboardEntryEditor : StackPanel
     }
     internal void Delete()
     {
-        if (EntryId is not { } id || !_confirm(Loc.T("删除此记录及其备注？原文件和系统剪贴板不会更改，此操作不可撤销。", "Delete this entry and its notes? Original files and the system clipboard are unchanged. This cannot be undone."))) return;
+        if (EntryId is not { } id || !_confirm(new(PromptId.ClipboardDeleteEntry, Loc.T("删除此记录及其备注？原文件和系统剪贴板不会更改，此操作不可撤销。", "Delete this entry and its notes? Original files and the system clipboard are unchanged. This cannot be undone.")))) return;
         IsDirty = false; IsNew = false; Load(null); _history.Remove(id); Removed?.Invoke();
     }
     private void Recall(bool copyOnly) { if (_history.Items.FirstOrDefault(item => item.Id == EntryId) is { } item) _activate(item, copyOnly); }
     private TextBox Field(string id, string name, int limit, string text)
     {
-        var field = new TextBox { Style = (Style)FindResource("LibraryField"), MaxLength = limit, Text = text, MinHeight = 30, ToolTip = name };
+        var field = new TextBox { Style = (Style)FindResource("LibraryField"), MaxLength = limit, Text = text, MinHeight = 30 };
         AutomationProperties.SetName(field, name); AutomationProperties.SetAutomationId(field, "clipboard-edit-" + id);
         field.TextChanged += (_, _) => { if (!_loading) { IsDirty = true; Feedback?.Invoke(Loc.T("有未保存的修改 · Ctrl+S 保存", "Unsaved changes · Ctrl+S to save")); } }; return field;
     }

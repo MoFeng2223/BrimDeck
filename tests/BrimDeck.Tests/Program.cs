@@ -16,6 +16,7 @@ try
     if (args is ["--only", "modules"])
     {
         ModulePolicyTests.Run(Check);
+        PromptPreferenceTests.Run(root, Check);
         ClipboardHistoryTests.Run(Check);
         Console.WriteLine($"MODULE CORE RESULT: {passed} checks passed.");
         return;
@@ -46,6 +47,7 @@ try
     CollapsedGeometryTests.Run(root, Check);
     PanelHeaderTests.Run(Check);
     ModulePolicyTests.Run(Check);
+    PromptPreferenceTests.Run(root, Check);
     SystemMonitorTests.Run(Check);
     MonitorSpeechTests.Run(Check);
     CompactReadingTests.Run(Check);

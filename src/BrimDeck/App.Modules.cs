@@ -18,19 +18,31 @@ public partial class App
     private void InitializeSharedModules(string folder)
     {
         _moduleDirectory = folder;
+        InitializeFeedback();
         HostedResources.ConfigureHost(() => Settings.Animations && Settings.Tray.Mode == ModuleMode.Full,
             Path.Combine(Path.GetTempPath(), "BrimDeck", "Shelves", "Attachments"));
         InitializeShelfTheme();
     }
-    private MessageBoxResult ShowModuleMessage(string message, string caption, MessageBoxButton buttons, MessageBoxResult defaultResult)
+    private bool ConfirmModuleClose(bool clipboard, bool shelf)
     {
-        // Exit and tray actions can reach this boundary without a settings window to own the native dialog.
-        return _settingsWindow is { IsVisible: true } owner
-            ? MessageBox.Show(owner, message, caption, buttons, MessageBoxImage.Warning, defaultResult)
-            : MessageBox.Show(message, caption, buttons, MessageBoxImage.Warning, defaultResult);
+        var risks = new List<PromptRequest>();
+        if (clipboard)
+        {
+            if (_clipboardLibrary?.HasUnsavedChanges == true || Decks.Any(deck => deck?.ClipboardHasDraft == true))
+                risks.Add(new(PromptId.ClipboardDiscardDraft, Loc.T("结束会话将放弃尚未保存的剪贴板编辑草稿。", "Ending the session discards unsaved clipboard drafts.")));
+            if (_clipboard is { Loaded: true } transient && !Settings.Clipboard.PersistHistory && transient.History.Items.Count > 0)
+                risks.Add(new(PromptId.ClipboardEndSession, Loc.T("持久化存储未开启，本次会话历史将丢失；系统剪贴板与原文件不变。", "Persistence is off. Session history will be lost; the system clipboard and original files are unchanged.")));
+        }
+        if (shelf)
+        {
+            if (_settingsWindow?.ShelfHasUnsavedDraft == true)
+                risks.Add(new(PromptId.ShelfDiscardDraft, Loc.T("结束会话将放弃尚未保存的快速操作编辑。", "Ending the session discards unsaved quick-action edits.")));
+            if (Shelves?.Shelves.OpenShelves.Any(window => window.ViewModel.HasItems) == true)
+                risks.Add(new(PromptId.ShelfEndSession, Loc.T("全部置物架会话将结束。当前架的普通文件路径会保存，最近关闭最多保留 10 个架、每架 500 项；文本、链接、临时附件及其他架的固定/加入时间不能完整恢复，原文件不会删除。", "All shelf sessions will end. Current ordinary paths are saved; recent history holds up to 10 shelves of 500 items. Text, links, temporary attachments and other shelves' pin/time metadata cannot be fully restored. Original files are not deleted.")));
+        }
+        return risks.Count == 0 || ConfirmPrompt(_settingsWindow is { IsVisible: true } ? _settingsWindow : Decks.FirstOrDefault(deck => deck?.IsVisible == true),
+            risks[0] with { Additional = risks.Skip(1).ToArray() });
     }
-    private bool ConfirmModuleClose(string message) => ShowModuleMessage(message,
-        Loc.T("关闭模块", "Turn off module"), MessageBoxButton.YesNo, MessageBoxResult.No) == MessageBoxResult.Yes;
 
     internal async Task<bool> ChangeModuleModeAsync(bool clipboard, ModuleMode mode)
     {
@@ -45,30 +57,24 @@ public partial class App
                 if (clipboard)
                 {
                     if (_clipboard?.ChangingStorage == true) return false;
-                    if (_clipboardLibrary?.HasUnsavedChanges == true || Decks.Any(deck => deck?.ClipboardHasDraft == true))
-                        if (!ConfirmModuleClose(Loc.T("关闭剪贴板将放弃尚未保存的编辑草稿，继续？", "Turning off clipboard discards unsaved drafts. Continue?"))) return false;
-                    if (_clipboard is { Loaded: true } transient && !Settings.Clipboard.PersistHistory && transient.History.Items.Count > 0)
-                        if (!ConfirmModuleClose(Loc.T("持久化存储未开启，关闭后本次会话历史将丢失；系统剪贴板与原文件不变。继续？", "Persistence is off. Turning off discards session history, not the system clipboard or original files. Continue?"))) return false;
-                    _clipboardPasteWait.Stop();
+                    if (!ConfirmModuleClose(true, false)) return false;
+                    CancelClipboardPaste();
                     _clipboard?.SuspendCapture();
                     foreach (var deck in Decks) deck?.PrepareClipboardStop();
                     if (_clipboard is { Loaded: true } dragging) await ClipboardDragDrop.SuspendAsync(dragging.History);
                     if (_clipboard is { } service && !await service.FlushAsync())
-                    { ClipboardDragDrop.Resume(service.History); service.ResumeCapture(); ModuleFailure(service.Status); return false; }
+                    { ClipboardDragDrop.Resume(service.History); service.ResumeCapture(); ModuleFailure(service.Status, PromptId.ClipboardSaveFailed); return false; }
                     foreach (var deck in Decks) deck?.ReleaseClipboardView();
                     DisposeClipboard(); DecodedImageCache.RemovePrefix("clipboard:"); _clipboardImages?.Dispose(); _clipboardImages = null;
                 }
                 else if (Shelves is { } controller)
                 {
-                    if (_settingsWindow?.ConfirmShelfModuleClose() == false) return false;
                     controller.Accepting = false;
                     foreach (var deck in Decks) deck?.PrepareShelfStop();
                     // Each lease ends after its payload/output has been applied. No timer waits for IsBusy.
                     await controller.Shelves.Operations.WhenIdle;
-                    if (controller.Shelves.OpenShelves.Any(window => window.ViewModel.HasItems))
-                        if (!ConfirmModuleClose(Loc.T("关闭将结束全部置物架会话。当前架的普通文件路径会保存，最近关闭最多保留 10 个架、每架 500 项；文本、链接、临时附件及其他架的固定/加入时间不能完整恢复，原文件不会删除。继续？",
-                            "Turning off ends all shelf sessions. Current ordinary paths are saved; recent history holds up to 10 shelves of 500 items. Text, links, temporary attachments and other shelves' pin/time metadata cannot be fully restored. Original files are not deleted. Continue?")))
-                        { controller.Accepting = true; foreach (var deck in Decks) deck?.ResumeShelfInput(); return false; }
+                    if (!ConfirmModuleClose(false, true))
+                    { controller.Accepting = true; foreach (var deck in Decks) deck?.ResumeShelfInput(); return false; }
                     if (!await SaveShelfBeforeStopAsync())
                     { controller.Accepting = true; foreach (var deck in Decks) deck?.ResumeShelfInput(); return false; }
                     _settingsWindow?.ReleaseShelfSettings();
@@ -86,6 +92,7 @@ public partial class App
             }
             foreach (var deck in Decks) if (deck is not null) { deck.ResumeShelfInput(); deck.ApplyModulePresentation(); deck.ApplySettings(); }
             _clipboardPreviews?.Refresh(); _clipboardLibrary?.Refresh();
+            ModuleProblem = "";
             return true;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)
@@ -118,14 +125,11 @@ public partial class App
     }
     private async Task<bool> PrepareModuleExitAsync()
     {
-        if (_clipboardLibrary?.HasUnsavedChanges == true || Decks.Any(deck => deck.ClipboardHasDraft))
-            if (!ConfirmModuleClose(Loc.T("退出将放弃未保存的剪贴板草稿，继续？", "Exit and discard unsaved clipboard drafts?"))) return false;
-        if (_settingsWindow?.ConfirmShelfModuleClose() == false) return false;
         _modulesChanging = true;
         bool prepared = false;
         try
         {
-            _clipboardPasteWait.Stop(); _clipboard?.SuspendCapture();
+            CancelClipboardPaste(); _clipboard?.SuspendCapture();
             if (_clipboard is { Loaded: true } dragging) await ClipboardDragDrop.SuspendAsync(dragging.History);
             if (Shelves is { } controller)
             {
@@ -133,7 +137,8 @@ public partial class App
                 foreach (var deck in Decks) deck.PrepareShelfStop();
                 await controller.Shelves.Operations.WhenIdle;
             }
-            if (_clipboard is { } service && !await service.FlushAsync()) { ModuleFailure(service.Status); return false; }
+            if (!ConfirmModuleClose(true, true)) return false;
+            if (_clipboard is { } service && !await service.FlushAsync()) { ModuleFailure(service.Status, PromptId.ClipboardSaveFailed); return false; }
             if (!await SaveShelfBeforeStopAsync()) return false;
             prepared = true; return true;
         }
@@ -150,17 +155,24 @@ public partial class App
             }
         }
     }
-    private void ModuleFailure(string text) => ShowModuleMessage(text, Loc.T("模块状态", "Module status"), MessageBoxButton.OK, MessageBoxResult.OK);
+    private void ModuleFailure(string text, PromptId id = PromptId.ModuleChangeFailed)
+    {
+        ModuleProblem = text;
+        _settingsWindow?.SaveStatus(text, true);
+        ReportFeedback("module-save-failed", text);
+        // Suppression controls presentation only. Every caller still returns failure and retains the live session.
+        ConfirmPrompt(_settingsWindow, new(id, text));
+    }
 
     private async Task<bool> SaveShelfBeforeStopAsync()
     {
         if (Shelves is not { } controller) return true;
         var snapshot = IslandShelfSnapshot();
         if (_trayStore is not null && !await Task.Run(() => _trayStore.TrySave(snapshot)))
-        { ModuleFailure(Loc.T("文件路径保存失败，置物架仍保持开启。", "Could not save file paths. The shelf remains running.")); return false; }
+        { ModuleFailure(Loc.T("文件路径保存失败，置物架仍保持开启。", "Could not save file paths. The shelf remains running."), PromptId.ShelfSaveFailed); return false; }
         foreach (var shelf in controller.Shelves.OpenShelves) controller.History.Record(shelf.ViewModel.Items);
         if (!await controller.FlushAsync())
-        { ModuleFailure(Loc.T("置物架设置或历史保存失败，内容仍保留在当前会话。", "Shelf settings/history could not be saved. Content remains in this session.")); return false; }
+        { ModuleFailure(Loc.T("置物架设置或历史保存失败，内容仍保留在当前会话。", "Shelf settings/history could not be saved. Content remains in this session."), PromptId.ShelfSaveFailed); return false; }
         controller.ShutdownPrepared = true;
         return true;
     }

@@ -92,7 +92,7 @@ public partial class MainWindow
     private void BeginClipboardInput()
     {
         if (_preview || !_expanded || !IsDockPage) return;
-        if (!_clipboardInput) _app.CaptureClipboardTarget();
+        if (!_clipboardInput) _app.CaptureClipboardTarget(preserveInternal: true);
         _clipboardInput = true; _hover.Stop(); _leave.Stop();
         // The non-activating hover overlay borrows focus only for an explicit search or hotkey recall, never on hover.
         WindowsHost.SetOverlayInput(this, true);

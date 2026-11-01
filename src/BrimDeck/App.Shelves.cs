@@ -27,6 +27,7 @@ public partial class App
             Language = () => Loc.Language == "zh-CN" ? AppLanguage.Chinese : AppLanguage.English,
             ShowSettings = OpenShelfSettings,
             ShowHelp = () => OpenShelfSettings("Help"),
+            UninstallFailed = () => ConfirmPrompt(_settingsWindow, new(PromptId.ShelfUninstallFailed, DropShelf.Localization.Strings.UninstallFailed)),
             SettingsWindow = () => _settingsWindow,
             FloatingEnabled = () => Settings.Tray.Placement != FileTrayPlacement.Notch,
             ShowIsland = ShowIslandShelf,

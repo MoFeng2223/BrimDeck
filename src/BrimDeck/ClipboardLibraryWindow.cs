@@ -23,7 +23,7 @@ internal sealed class ClipboardLibraryWindow : Window
     private readonly Action<ClipboardEntry, bool> _activate;
     private readonly Func<(bool Enabled, bool Paused, string Problem)> _status;
     private readonly Action _recording, _settings;
-    private readonly Func<string, bool> _confirm;
+    private readonly Func<PromptRequest, bool> _confirm;
     private readonly TextBox _search, _categoryName;
     private readonly TextBlock _stats, _results, _message, _recordingLabel;
     private readonly StackPanel _categories = new(), _typeBar = new() { Orientation = Orientation.Horizontal };
@@ -41,20 +41,21 @@ internal sealed class ClipboardLibraryWindow : Window
     private ClipboardArchiveScope _archive;
     private string _collection = "", _sourceName = "", _selectedId = "";
     private bool _favorites, _unknownSourceOnly, _byApplication, _refreshing, _disposed, _forceClose;
+    internal void ShowFeedback(string message) => _message.Text = message;
     internal int ResultCount => _list.Items.Count;
     internal bool HasUnsavedChanges => _inspector.IsDirty;
     internal string SearchText { get => _search.Text; set => _search.Text = value; }
     internal ClipboardEntry? SelectedEntry => _list.SelectedItem as ClipboardEntry;
 
     internal ClipboardLibraryWindow(ClipboardHistory history, Action<ClipboardEntry, bool> activate,
-        Func<(bool Enabled, bool Paused, string Problem)> status, Action recording, Action settings, Func<string, bool>? confirm = null, Func<ClipboardSettings>? preferences = null, Action<string, bool>? setApplicationPinned = null, Action<string, bool>? setApplicationHidden = null)
+        Func<(bool Enabled, bool Paused, string Problem)> status, Action recording, Action settings, Func<PromptRequest, bool>? confirm = null, Func<ClipboardSettings>? preferences = null, Action<string, bool>? setApplicationPinned = null, Action<string, bool>? setApplicationHidden = null)
     {
         var localPreferences = new ClipboardSettings();
         _history = history; _activate = activate; _status = status; _recording = recording; _settings = settings; _preferences = preferences ?? (() => localPreferences);
         _setApplicationPinned = setApplicationPinned; _setApplicationHidden = setApplicationHidden;
         Soft.SetReduced(this, _preferences().Mode == ModuleMode.Performance);
         _drag = new ClipboardDragDrop(history, dragging => { if (!dragging) Refresh(); }, text => { if (_message is not null) _message.Text = text; });
-        _confirm = confirm ?? (message => MessageBox.Show(this, message, Loc.T("剪贴板库", "Clipboard Library"), MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes);
+        _confirm = confirm ?? (request => UserPrompts.Show(this, request));
         Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri($"/{typeof(ClipboardLibraryWindow).Assembly.GetName().Name};component/ClipboardLibraryResources.xaml", UriKind.Relative) });
         _inspector = new ClipboardEntryEditor(history, _preferences, activate, _confirm);
         _inspector.Feedback += text => { if (_message is not null) _message.Text = text; };
@@ -258,7 +259,7 @@ internal sealed class ClipboardLibraryWindow : Window
             Menu(Loc.T("移到最后", "Move to end"), () => { if (_history.Collections.LastOrDefault() is { } last) _history.ReorderCollection(id, last.Id, true); });
             Menu(Loc.T("删除分类（保留记录）…", "Delete collection (keep entries)…"), () =>
             {
-                if (!_confirm(Loc.T("删除分类？其中的条目将保留在历史中，原文件和系统剪贴板不会更改。", "Delete this collection? Its entries stay in history; original files and the system clipboard are unchanged."))) return;
+                if (!_confirm(new(PromptId.ClipboardDeleteCollection, Loc.T("删除分类？其中的条目将保留在历史中，原文件和系统剪贴板不会更改。", "Delete this collection? Its entries stay in history; original files and the system clipboard are unchanged.")))) return;
                 _history.RemoveCollection(id);
             });
             button.ContextMenu = menu;
@@ -354,7 +355,7 @@ internal sealed class ClipboardLibraryWindow : Window
         if (_inspector.EntryId != entry.Id && DiscardDraft()) LoadDraft(entry);
         if (_inspector.EntryId == entry.Id) _inspector.Delete();
     }
-    private void Activate(ClipboardEntry entry, bool copyOnly) { _activate(entry, copyOnly); _message.Text = copyOnly ? Loc.T("已请求复制", "Copy requested") : Loc.T("已请求回贴；系统阻止时可手动 Ctrl+V", "Paste requested; use Ctrl+V if Windows blocks it"); }
+    private void Activate(ClipboardEntry entry, bool copyOnly) => _activate(entry, copyOnly);
     private void KeyPressed(object sender, KeyEventArgs e)
     {
         if (e.Key is Key.ImeProcessed or Key.DeadCharProcessed || e.Handled) return;
@@ -387,7 +388,7 @@ internal sealed class ClipboardLibraryWindow : Window
     }
     private TextBox Field(string name)
     {
-        var field = new TextBox { Style = (Style)FindResource("LibraryField"), MinHeight = 30, ToolTip = name, Tag = name };
+        var field = new TextBox { Style = (Style)FindResource("LibraryField"), MinHeight = 30, Tag = name };
         AutomationProperties.SetName(field, name); return field;
     }
     private void ApplyResponsiveLayout()

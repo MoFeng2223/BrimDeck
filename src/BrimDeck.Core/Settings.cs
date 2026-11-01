@@ -506,6 +506,7 @@ public sealed class DeckSettings
     // The file tray's own settings: where it appears, how long items wait, and what leaving does to them.
     public TraySettings Tray { get; set; } = new();
     public ClipboardSettings Clipboard { get; set; } = new();
+    public PromptPreferences Prompts { get; set; } = new();
     public MonitorPalette MonitorPalette { get; set; } = MonitorPalette.Theme;
     // The Custom scheme's colors; kept while another scheme is chosen.
     public MonitorCustomColors MonitorCustomColors { get; set; } = new();
@@ -667,6 +668,7 @@ public sealed class DeckSettings
         copy.Tray = (Tray ?? new()).Copy();
         copy.TrayPreviousLayout = TrayPreviousLayout is { } trayOld ? new ShelfLayoutBackup { Width = trayOld.Width, Height = trayOld.Height, GridView = trayOld.GridView } : null;
         copy.Clipboard = (Clipboard ?? new()).Copy();
+        copy.Prompts = (Prompts ?? new()).Copy();
         copy.ClipboardPreviousLayout = ClipboardPreviousLayout is { } old ? new ClipboardLayoutBackup { Width = old.Width, Height = old.Height, GridView = old.GridView } : null;
         copy.FullscreenRules = FullscreenRules.Select(rule => rule with { }).ToList();
         return copy;
@@ -704,6 +706,7 @@ public sealed class DeckSettings
         ClipboardHeight = double.IsFinite(ClipboardHeight) ? Math.Clamp(ClipboardHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ClipboardDockLayout.Height;
         Tray = Tray?.Copy() ?? new(); Tray.Normalize();
         Clipboard = Clipboard?.Copy() ?? new(); Clipboard.Normalize();
+        Prompts = Prompts?.Copy() ?? new(); Prompts.Normalize();
         ShelfDockLayout.Migrate(this);
         ClipboardDockLayout.Migrate(this);
         ClipboardHeight = Math.Max(ClipboardDockLayout.Height, ClipboardHeight);

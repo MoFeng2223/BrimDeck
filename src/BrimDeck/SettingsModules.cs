@@ -22,12 +22,7 @@ public sealed partial class SettingsWindow
         Group(choice);
     }
 
-    internal bool ConfirmShelfModuleClose()
-    {
-        if (_shelfContent?.IsModal != true) return true;
-        return MessageBox.Show(this, Loc.T("关闭文件中转将放弃尚未保存的快速操作编辑，继续？", "Turning off the shelf discards the unsaved action editor. Continue?"),
-            Loc.T("关闭模块", "Turn off module"), MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
-    }
+    internal bool ShelfHasUnsavedDraft => _shelfContent?.ViewModel.IsEditorOpen == true;
     internal void ReleaseShelfSettings()
     {
         _shelfContent?.Dispose(); _shelfContent = null;

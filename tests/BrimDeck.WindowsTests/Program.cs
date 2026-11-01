@@ -20,6 +20,9 @@ internal static class Program
             if (args is ["--only", "edgedrop", "--render", var edgeDirectory]) { EdgeDropPortChecks.Run(Check, edgeDirectory); return Finish(); }
             if (args is ["--only", "clipboard-collections"]) { ClipboardChecks.RunCollections(Check); return Finish(); }
             if (args is ["--only", "clipboard-collections", "--render", var collectionsDirectory]) { ClipboardChecks.RunCollections(Check, collectionsDirectory); return Finish(); }
+            if (args is ["--only", "prompts"]) { PromptChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "prompts", "--render", var promptDirectory]) { PromptChecks.Run(Check, promptDirectory); return Finish(); }
+            if (args is ["--only", "clipboard-paste"]) { ClipboardPasteChecks.Run(Check); return Finish(); }
             if (args is ["--only", "clipboard-preview"]) { ClipboardChecks.RunPreview(Check); return Finish(); }
             if (args is ["--only", "clipboard-toolbar"]) { ClipboardChecks.RunToolbar(Check); return Finish(); }
             if (args is ["--only", "clipboard-applications"]) { ClipboardChecks.RunApplicationActions(Check); return Finish(); }

@@ -43,7 +43,16 @@ internal static partial class ClipboardChecks
             MenuItem Row(string id) => list.ContextMenu!.Items.OfType<MenuItem>().Single(row => AutomationProperties.GetAutomationId(row) == "clipboard-card-menu-" + id);
             void Choose(string id) { Row(id).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); Pump(); }
             Click(Card(rich.Id));
-            check("EdgeDrop card click: a single release requests paste even with keyboard copy-only preference", activations.Count == 1 && activations[0].Entry.Id == rich.Id && !activations[0].CopyOnly);
+            check("card click: copy-only preference applies to a single release", activations.Count == 1 && activations[0].Entry.Id == rich.Id && activations[0].CopyOnly);
+            settings.PasteOnActivate = true; Click(Card(rich.Id));
+            check("card click: paste preference requests exactly one recall", activations.Count == 2 && !activations[^1].CopyOnly);
+            settings.PasteOnActivate = false;
+            list.SelectedItem = list.Items.OfType<ClipboardEntry>().Single(entry => entry.Id == rich.Id);
+            var focusedRow = (ListBoxItem)list.ItemContainerGenerator.ContainerFromItem(list.SelectedItem);
+            check("card keyboard: Enter follows copy-only preference", view.HandleShortcut(Key.Enter, ModifierKeys.None, focusedRow) && activations[^1].CopyOnly);
+            settings.PasteOnActivate = true;
+            check("card keyboard: Ctrl+Enter always copies only", view.HandleShortcut(Key.Enter, ModifierKeys.Control, focusedRow) && activations[^1].CopyOnly);
+            settings.PasteOnActivate = false;
             var card = Card(rich.Id); var button = Descendants<Button>(card).First(); int before = activations.Count;
             Click(button);
             check("EdgeDrop card click: action-button mouse gestures never paste the card body", activations.Count == before);

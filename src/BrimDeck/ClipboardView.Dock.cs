@@ -69,8 +69,7 @@ internal sealed partial class ClipboardView
         var placeholder = new TextBlock { Text = Loc.T("搜索…", "Search..."), FontSize = 12, IsHitTestVisible = false, VerticalAlignment = VerticalAlignment.Center };
         placeholder.SetResourceReference(TextBlock.ForegroundProperty, "PanelTertiary"); _searchField.Children.Add(placeholder); _searchField.Children.Add(search);
         search.PreviewMouseLeftButtonDown += (_, _) => InputRequested?.Invoke();
-        search.ToolTip = Loc.T("Ctrl+F 搜索 · ↓ 选择 · Enter 复用 · Ctrl+Enter 仅复制 · Alt+1–9 复用前九项", "Ctrl+F search · ↓ select · Enter reuse · Ctrl+Enter copy only · Alt+1–9 reuse first nine");
-        AutomationProperties.SetHelpText(search, (string)search.ToolTip);
+        AutomationProperties.SetHelpText(search, Loc.T("Ctrl+F 搜索，↓ 选择，Enter 或 Alt+1…9 使用默认动作，Ctrl+Enter 仅复制", "Ctrl+F searches; Down selects; Enter or Alt+1…9 uses the default action; Ctrl+Enter copies only"));
         _searchClear = Round(EdgeDropGlyph.Create("x", 9), Loc.T("清除搜索／收起搜索", "Clear / collapse search"), () => { if (search.Text.Length > 0) search.Clear(); else SetSearchOpen(false); });
         _searchClear.Width = _searchClear.Height = 18; _searchClear.Focusable = false; _searchClear.Visibility = Visibility.Collapsed;
         AutomationProperties.SetAutomationId(_searchClear, "clipboard-search-clear"); Grid.SetColumn(_searchClear, 2); field.Children.Add(_searchClear);
@@ -132,7 +131,7 @@ internal sealed partial class ClipboardView
 
     private void ClearHistory()
     {
-        if (Confirm(Loc.T("清空未收藏、未归档的历史？此操作不可撤销。原文件和系统剪贴板不会更改。", "Clear non-favorite, non-archived history? This cannot be undone. Original files and the system clipboard are unchanged."))) _history.Clear();
+        if (Confirm(new(PromptId.ClipboardClearHistory, Loc.T("清空未收藏、未归档的历史？此操作不可撤销。原文件和系统剪贴板不会更改。", "Clear non-favorite, non-archived history? This cannot be undone. Original files and the system clipboard are unchanged.")))) _history.Clear();
     }
     private void RefreshDockHeader(int count)
     {

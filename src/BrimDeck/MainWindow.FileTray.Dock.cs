@@ -36,7 +36,7 @@ public partial class MainWindow
     private Button ShelfDockButton(object content, string name, Action action, string id)
     {
         var button = new Button { Content = content, Width = 28, Height = 28, Style = (Style)_trayFrame!.FindResource("ClipboardRoundButton") };
-        AutomationProperties.SetName(button, name); AutomationProperties.SetAutomationId(button, id); button.ToolTip = name;
+        AutomationProperties.SetName(button, name); AutomationProperties.SetAutomationId(button, id); button.ToolTip = name; ToolTipService.SetInitialShowDelay(button, 700);
         button.Click += (_, e) => { e.Handled = true; action(); };
         // Pickers are explicit left-click/keyboard actions; toolbar right-click belongs to the host setting.
         ContextMenuService.SetIsEnabled(button, false);

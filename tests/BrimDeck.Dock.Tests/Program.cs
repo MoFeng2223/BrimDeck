@@ -20,6 +20,8 @@ internal static partial class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args is ["--paste-receiver", var receiverDirectory, var receiverNonce]) return RunPasteReceiver(receiverDirectory, receiverNonce);
+        if (args.Length > 0 && args[0] == "--paste-e2e") return CheckPasteIntegration(args);
         string directory = args.Length > 0 ? Path.GetFullPath(args[0]) : Path.Combine(Path.GetTempPath(), "BrimDeck-Dock-Renders");
         string scratch = args.Skip(1).Contains("--exit-lifecycle-child") ? directory : Path.Combine(Path.GetTempPath(), "BrimDeck-Dock-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(scratch);
         MainWindow? window = null; LyricsService? lyrics = null;
@@ -73,6 +75,12 @@ internal static partial class Program
             {
                 CheckExitLifecycleHost(app, window, scratch);
                 Console.WriteLine($"EXIT CHILD RESULT: {_checks} checks passed.");
+                return 0;
+            }
+            if (args.Skip(1).Contains("--only-feedback"))
+            {
+                CheckFeedbackHost(app, window, settings, history, palettes, scratch, directory);
+                Console.WriteLine($"FEEDBACK HOST RESULT: {_checks} checks passed.");
                 return 0;
             }
             if (args.Skip(1).Contains("--only-module-lifecycle"))

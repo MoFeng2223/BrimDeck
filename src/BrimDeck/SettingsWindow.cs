@@ -30,9 +30,9 @@ public sealed partial class SettingsWindow : Window
     private ScrollViewer _scroll = null!;
     private static string[] _pages => [Loc.T("常规", "General"), Loc.T("收起外观", "Collapsed view"), Loc.T("展开外观", "Expanded view"),
         Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck"), Loc.T("面板主题", "Panel theme"), Loc.T("显示与读数", "Display and readings"),
-        Loc.T("文件中转置物架", "File transfer shelf"), Loc.T("剪贴板", "Clipboard"), Loc.T("增强传感器", "Enhanced sensors")];
+        Loc.T("文件中转置物架", "File transfer shelf"), Loc.T("剪贴板", "Clipboard"), Loc.T("增强传感器", "Enhanced sensors"), Loc.T("提示与确认", "Prompts and confirmations")];
     // Keep module page indices stable; the sensor page is appended and grouped with monitor settings.
-    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, 3, 4, 5, 6, MonitorSettingsPage, SensorsPage, TrayPage, ClipboardPage, 7];
+    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, 3, 4, 5, 6, MonitorSettingsPage, SensorsPage, TrayPage, ClipboardPage, PromptsPage, 7];
     private int _page;
     private bool _preview;
     private StackPanel? _appRows;
@@ -246,7 +246,7 @@ public sealed partial class SettingsWindow : Window
         return block;
     }
     public void SaveStatus(string message, bool error = false)
-    { _status.Text = error ? message : ""; _status.Foreground = UI.Brush(_palette.Dark ? "#F0A6AA" : "#B12E3A"); _status.Visibility = error ? Visibility.Visible : Visibility.Collapsed; }
+    { if (!error && _app.ModuleProblem.Length > 0) { message = _app.ModuleProblem; error = true; } _status.Text = error ? message : ""; _status.Foreground = UI.Brush(_palette.Dark ? "#F0A6AA" : "#B12E3A"); _status.Visibility = error ? Visibility.Visible : Visibility.Collapsed; }
 
     private Button ActionButton(string text, Action action, bool primary = false)
     {
@@ -345,6 +345,7 @@ public sealed partial class SettingsWindow : Window
         _exceptionsReservedHeight = 0; _exceptionsOpen = false; _exceptionsHost = null;
         _scroll.ScrollChanged -= ExceptionsScrollChanged;
         _refreshSensors = null;
+        if (_app.ModuleProblem.Length > 0) SaveStatus(_app.ModuleProblem, true);
         _page = page; _navigation.Children.Clear(); _content.Children.Clear(); _aboutUpdateView = null; _scroll.ScrollToTop();
         foreach (int i in PageOrder)
         {
@@ -370,7 +371,7 @@ public sealed partial class SettingsWindow : Window
             var reset=ActionButton(Loc.T("恢复默认", "Restore defaults"),ResetPage); reset.FontSize=11; DockPanel.SetDock(reset,Dock.Right); head.Children.Add(reset);
         }
         head.Children.Add(page == 7 ? Wordmark(28) : TextLine(_pages[page],24,TextPrimary,FontWeights.SemiBold)); _content.Children.Add(head);
-        switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; case ThemePage: ThemesPage(); break; case MonitorSettingsPage: MonitorSettings(); break; case SensorsPage: SensorsSettings(); break; case TrayPage: TraySettingsPage(); break; case ClipboardPage: ClipboardSettingsPage(); break; }
+        switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; case ThemePage: ThemesPage(); break; case MonitorSettingsPage: MonitorSettings(); break; case SensorsPage: SensorsSettings(); break; case TrayPage: TraySettingsPage(); break; case ClipboardPage: ClipboardSettingsPage(); break; case PromptsPage: PromptSettingsPage(); break; }
         if (_content.Children[^1] is Border lastGroup) lastGroup.Margin = new Thickness(lastGroup.Margin.Left, lastGroup.Margin.Top, lastGroup.Margin.Right, 0);
         // Apply the offset before the frame is drawn, so the rebuilt page never shows its top for a frame.
         if (keep > 0) { _scroll.UpdateLayout(); _scroll.ScrollToVerticalOffset(keep); _scroll.UpdateLayout(); }

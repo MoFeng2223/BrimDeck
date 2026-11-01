@@ -26,7 +26,7 @@ internal static partial class ClipboardChecks
         history.Add(ClipboardContent.FromText("Synthetic unknown ordinary"), "", "", now, settings);
         history.Add(ClipboardContent.FromText("Synthetic actual Unknown app"), "Unknown app", "", now, settings);
         bool confirm = false; string prompt = ""; int activations = 0, hides = 0;
-        bool Confirm(string text) { prompt = text; return confirm; }
+        bool Confirm(PromptRequest request) { prompt = request.Message; return confirm; }
         ClipboardLibraryWindow? library = null; ClipboardView? view = null;
         void Hide(string source, bool hidden) { if (settings.SetApplicationHidden(source, hidden)) hides++; view!.Refresh(); library?.Refresh(); }
         using var island = view = new ClipboardView(history, () => settings, (_, _) => activations++, () => { }, () => { }, () => { }, () => (false, false, ""), _ => { }, () => { }, confirm: Confirm, setApplicationHidden: Hide);

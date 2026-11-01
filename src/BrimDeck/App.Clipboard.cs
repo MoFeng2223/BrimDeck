@@ -11,10 +11,12 @@ public partial class App
     private ClipboardService? _clipboard;
     private ClipboardLibraryWindow? _clipboardLibrary;
     private ClipboardPreviewWindows? _clipboardPreviews;
-    private IntPtr _clipboardTarget, _clipboardFocusTarget;
+    private ClipboardPasteTarget _clipboardTarget, _libraryPasteTarget;
+    private IntPtr _clipboardFocusTarget;
     private readonly DispatcherTimer _clipboardPasteWait = new() { Interval = TimeSpan.FromMilliseconds(30) };
-    private int _clipboardPasteTicks;
-    private bool _pasteRestored;
+    private ClipboardPasteSession? _pasteSession;
+    private Window? _pasteOwner;
+    private long _pasteRequest, _pasteStarted;
 
     internal ClipboardService? ClipboardHistoryService => _clipboard;
     internal void InitializeClipboard(string folder)
@@ -43,14 +45,14 @@ public partial class App
         service.OpenedOrResumed();
         _clipboardPreviews.Show(entry, card, panel, scale);
     }
-    private bool ActivatePreviewEntry(ClipboardEntry entry, bool copyOnly, IntPtr target)
+    private bool ActivatePreviewEntry(ClipboardEntry entry, bool copyOnly, ClipboardPasteTarget target)
     {
-        _clipboardPasteWait.Stop();
+        CancelClipboardPaste();
         if (ModulesChanging || _clipboard is null || !_clipboard.Copy(entry)) return false;
         if (!copyOnly)
         {
             // The floating window keeps its own receiver; another island recall cannot overwrite this target.
-            _clipboardTarget = target; BeginClipboardPaste();
+            BeginClipboardPaste(target);
         }
         return true;
     }
@@ -59,8 +61,9 @@ public partial class App
     {
         if (Exiting || ModulesChanging) return;
         if (!ClipboardRunning || _clipboard is not { } service) { OpenClipboardSettings(); return; }
-        _clipboardPasteWait.Stop();
-        if (ClipboardPaste.IsExternalWindow(ClipboardPaste.Foreground) || _clipboardLibrary?.IsVisible != true) CaptureClipboardTarget();
+        CancelClipboardPaste();
+        if (ClipboardPaste.IsExternalWindow(ClipboardPaste.Foreground) || _clipboardLibrary?.IsVisible != true)
+        { CaptureClipboardTarget(); _libraryPasteTarget = _clipboardTarget; }
         if (_clipboardLibrary is null)
         {
             var library = _clipboardLibrary = new ClipboardLibraryWindow(service.History, ActivateLibraryEntry,
@@ -70,7 +73,7 @@ public partial class App
             library.Closed += (_, _) => { if (_clipboardLibrary == library) _clipboardLibrary = null; };
             // Remember the last external focus on a real switch away, not a stale target from a previous island recall.
             library.Deactivated += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
-            { if (!Exiting && library.IsVisible && ClipboardPaste.IsExternalWindow(ClipboardPaste.Foreground)) CaptureClipboardTarget(); });
+            { if (!Exiting && library.IsVisible && ClipboardPaste.IsExternalWindow(ClipboardPaste.Foreground)) _libraryPasteTarget = ClipboardPaste.Capture(ClipboardPaste.Foreground); });
         }
         if (_clipboardLibrary.WindowState == WindowState.Minimized) _clipboardLibrary.WindowState = WindowState.Normal;
         service.OpenedOrResumed();
@@ -78,20 +81,32 @@ public partial class App
     }
     private void ActivateLibraryEntry(ClipboardEntry item, bool copyOnly)
     {
-        if (ModulesChanging || _clipboard is null || !_clipboard.Copy(item)) return;
-        if (copyOnly) return;
-        _clipboardLibrary?.Hide(); BeginClipboardPaste();
+        CancelClipboardPaste();
+        if (ModulesChanging || _clipboard is null) return;
+        if (!_clipboard.Copy(item)) { ReportFeedback("clipboard-copy-failed", _clipboard.Status, _clipboardLibrary); return; }
+        if (copyOnly) { ReportFeedback("clipboard-copied", Loc.T("已复制", "Copied"), _clipboardLibrary); return; }
+        var target = _libraryPasteTarget;
+        _clipboardLibrary?.Hide(); BeginClipboardPaste(target);
     }
-    private void BeginClipboardPaste()
+    private void CancelClipboardPaste()
     {
-        _pasteRestored = false; _clipboardPasteTicks = 0; _clipboardPasteWait.Start();
+        _clipboardPasteWait.Stop(); _pasteSession?.Cancel(); _pasteSession = null; _pasteOwner = null;
+        ++_pasteRequest;
+    }
+    private void BeginClipboardPaste(ClipboardPasteTarget target, Window? owner = null)
+    {
+        _pasteStarted = ClipboardPaste.Platform.Now; _pasteOwner = owner;
+        _pasteSession = new(target, ClipboardPaste.Sequence, _pasteStarted);
+        _clipboardPasteWait.Start();
+        // Request activation in the initiating user action rather than waiting until that activation grant is stale.
+        PasteClipboardWhenReady(null, EventArgs.Empty);
     }
 
     public void ToggleClipboard()
     {
         if (Exiting || ModulesChanging) return;
         if (!ClipboardRunning || _clipboard is null) { OpenClipboardSettings(); return; }
-        _clipboardPasteWait.Stop();
+        CancelClipboardPaste();
         if (Decks.FirstOrDefault(deck => deck.IsOpenForHotkey && deck.IsClipboardPage) is { } open) { open.CollapseFromHotkey(); return; }
         CaptureClipboardTarget(); _clipboard.OpenedOrResumed();
         // Showing the page does not enable recording. A page hidden in appearance settings is made visible on explicit recall.
@@ -99,13 +114,14 @@ public partial class App
         var monitor = GlobalHotkeys.CursorMonitor();
         (Decks.FirstOrDefault(deck => deck.HotkeyMonitor == monitor) ?? Deck).OpenClipboardPage();
     }
-    internal void CaptureClipboardTarget()
+    internal void CaptureClipboardTarget(bool preserveInternal = false)
     {
         var previous = ClipboardPaste.Foreground;
         // Focus can return to our settings window, but pasted content may only go to an external application.
         // A tray/settings click must never reuse a stale paste target from an earlier recall.
-        _clipboardFocusTarget = previous;
-        _clipboardTarget = ClipboardPaste.IsExternalWindow(previous) ? previous : IntPtr.Zero;
+        if (ClipboardPaste.IsExternalWindow(previous))
+        { _clipboardFocusTarget = previous; _clipboardTarget = ClipboardPaste.Capture(previous); }
+        else if (!preserveInternal) { _clipboardTarget = default; _clipboardFocusTarget = previous; }
     }
     internal void RestoreClipboardFocus() => ClipboardPaste.RestoreFocus(_clipboardFocusTarget);
     internal void EnableClipboard() => EditClipboardSettings(settings => settings.Enabled = true);
@@ -160,40 +176,39 @@ public partial class App
     }
     internal void ActivateClipboardEntry(MainWindow deck, ClipboardEntry item, bool copyOnly)
     {
+        CancelClipboardPaste();
         if (ModulesChanging || _clipboard is null) return;
-        // A non-activating mouse browse still has the external application in the foreground.
-        var foreground = ClipboardPaste.Foreground;
-        if (ClipboardPaste.IsExternalWindow(foreground)) _clipboardTarget = foreground;
-        if (!_clipboard.Copy(item)) return;
-        bool paste = !copyOnly;
-        if (paste || Settings.Clipboard.CloseAfterAction) deck.CollapseFromHotkey();
-        if (!paste) return;
-        BeginClipboardPaste();
+        // Browsing the non-activating island leaves the external input focused. Copy-only never changes the paste receiver.
+        if (!copyOnly && ClipboardPaste.IsExternalWindow(ClipboardPaste.Foreground)) CaptureClipboardTarget();
+        var target = _clipboardTarget;
+        if (!_clipboard.Copy(item)) { ReportFeedback("clipboard-copy-failed", _clipboard.Status, deck); return; }
+        if (!copyOnly || Settings.Clipboard.CloseAfterAction) deck.CollapseFromHotkey();
+        if (copyOnly) { ReportFeedback("clipboard-copied", Loc.T("已复制", "Copied"), deck); return; }
+        BeginClipboardPaste(target, deck);
     }
     private void PasteClipboardWhenReady(object? sender, EventArgs args)
     {
-        if (++_clipboardPasteTicks > 30 || Exiting) { _clipboardPasteWait.Stop(); PasteClipboardFailed(); return; }
-        if (!ClipboardPaste.ModifiersReleased) return;
-        if (!_pasteRestored)
+        if (Exiting || ModulesChanging) { CancelClipboardPaste(); return; }
+        if (_pasteSession is not { } session) { _clipboardPasteWait.Stop(); return; }
+        var result = session.Advance(ClipboardPaste.Platform);
+        if (result == ClipboardPasteResult.Waiting) return;
+        _clipboardPasteWait.Stop(); _pasteSession = null;
+        var owner = _pasteOwner; _pasteOwner = null;
+        System.Diagnostics.Trace.WriteLine($"Clipboard paste request={_pasteRequest} phase={result} target={session.Target.Window} pid={session.Target.Process} elapsed={ClipboardPaste.Platform.Now - _pasteStarted} sent={session.Input.Sent} error={session.Input.Error}");
+        if (result is ClipboardPasteResult.Submitted or ClipboardPasteResult.Cancelled or ClipboardPasteResult.TargetChanged or ClipboardPasteResult.ClipboardChanged) return;
+        string detail = result switch
         {
-            _pasteRestored = true;
-            if (!ClipboardPaste.Restore(_clipboardTarget)) { _clipboardPasteWait.Stop(); PasteClipboardFailed(); }
-            return;
-        }
-        _clipboardPasteWait.Stop();
-        if (!ClipboardPaste.Send(_clipboardTarget)) PasteClipboardFailed();
-    }
-    private void PasteClipboardFailed()
-    {
-        if (Exiting || ModulesChanging) return;
-        // UIPI and focus restrictions are real boundaries: retain the copied payload and explain the manual Ctrl+V path.
-        MessageBox.Show(Loc.T("内容已复制，但无法向原窗口自动粘贴。请切回目标程序按 Ctrl+V（管理员窗口可能会阻止模拟按键）。",
-            "The content was copied, but automatic paste into the original window was blocked. Switch to your target app and press Ctrl+V (elevated windows may block simulated input)."),
-            Loc.T("剪贴板", "Clipboard"), MessageBoxButton.OK, MessageBoxImage.Information);
+            ClipboardPasteResult.NoTarget => Loc.T("未选择接收窗口", "No target window"),
+            ClipboardPasteResult.TargetUnavailable => Loc.T("原窗口已关闭或不可用", "The original window is unavailable"),
+            ClipboardPasteResult.ModifiersTimeout => Loc.T("快捷键尚未释放", "Shortcut keys are still held"),
+            ClipboardPasteResult.FocusTimeout => Loc.T("目标输入焦点未就绪", "Target input focus is not ready"),
+            _ => Loc.T("目标程序未接受模拟按键", "The target did not accept simulated input")
+        };
+        ReportFeedback("clipboard-paste-unavailable", Loc.T("已复制，可按 Ctrl+V 粘贴", "Copied; press Ctrl+V to paste") + " · " + detail, owner);
     }
     private void DisposeClipboard()
     {
-        _clipboardPasteWait.Stop(); _clipboardPasteWait.Tick -= PasteClipboardWhenReady;
+        CancelClipboardPaste(); _clipboardPasteWait.Tick -= PasteClipboardWhenReady;
         _clipboardPreviews?.Dispose(); _clipboardPreviews = null;
         _clipboardLibrary?.ForceClose(); _clipboardLibrary = null;
         if (_clipboard is not null) { _clipboard.StatusChanged -= ClipboardStatusChanged; _clipboard.Dispose(); _clipboard = null; }

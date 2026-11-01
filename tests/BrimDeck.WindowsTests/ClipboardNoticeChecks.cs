@@ -15,7 +15,7 @@ internal static partial class ClipboardChecks
         void Show(string message) => typeof(ClipboardView).GetMethod("ShowNotice", hidden)!.Invoke(view, [message]);
         var notice = Descendants<Border>(view).Single(element => AutomationProperties.GetAutomationId(element) == "clipboard-notice");
         var text = (TextBlock)notice.Child;
-        var timer = (DispatcherTimer)typeof(ClipboardView).GetField("_noticeTimer", hidden)!.GetValue(view)!;
+        var timer = ((QuietNotice)notice).Timer;
         var state = view.CapturePresentation(); var source = list.ItemsSource;
         try
         {

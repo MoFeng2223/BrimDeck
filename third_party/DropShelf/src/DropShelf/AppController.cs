@@ -93,6 +93,11 @@ public sealed class AppController : IDisposable
     public bool IsHotkeyRegistered { get; private set; }
     public string SettingsPath => _settingsService.SettingsPath;
     public bool IsEmbedded => _host is not null;
+    internal bool TryReportUninstallFailure()
+    {
+        if (_host?.UninstallFailed is not { } report) return false;
+        report(); return true;
+    }
     public bool IsFloatingAvailable => _enabled && (_host?.FloatingEnabled?.Invoke() ?? true);
     public bool IsHotkeyConflict => _host?.HotkeyConflicts?.Invoke(_settings.HotkeyGesture) == true;
     public bool AreHotkeysPaused => _hotkeysPaused;

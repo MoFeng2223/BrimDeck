@@ -67,6 +67,9 @@
     <Compile Include="..\..\src\BrimDeck\IslandSegmentedControl.cs" Link="IslandSegmentedControl.cs" />
     <Compile Include="..\..\src\BrimDeck\ShelfIslandCard.cs" Link="ShelfIslandCard.cs" />
     <Compile Include="..\..\src\BrimDeck\Feedback.cs" Link="Feedback.cs" />
+    <Compile Include="..\..\src\BrimDeck\UserPrompts.cs" Link="UserPrompts.cs" />
+    <Compile Include="..\..\src\BrimDeck\QuietNotice.cs" Link="QuietNotice.cs" />
+    <Page Include="..\..\src\BrimDeck\FeedbackResources.xaml" Link="FeedbackResources.xaml" />
     <Compile Include="..\..\src\BrimDeck\ClipboardCard.cs" Link="ClipboardCard.cs" />
     <Compile Include="..\..\src\BrimDeck\IslandContentCard.cs" Link="IslandContentCard.cs" />
     <Compile Include="..\..\src\BrimDeck\IslandFilePreview.cs" Link="IslandFilePreview.cs" />

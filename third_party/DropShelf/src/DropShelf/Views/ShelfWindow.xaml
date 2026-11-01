@@ -324,9 +324,9 @@
             </Grid>
 
             <!-- 结果提示 -->
-            <Border x:Name="Toast" Grid.RowSpan="3" VerticalAlignment="Bottom" Margin="10,0,10,10" Padding="10,7,12,8"
+            <Border x:Name="Toast" Grid.RowSpan="3" VerticalAlignment="Bottom" HorizontalAlignment="Right" MaxWidth="520" Margin="14,0,14,12" Padding="12,6"
                     CornerRadius="{DynamicResource ShelfR8}" Background="{DynamicResource FlyoutBrush}" BorderBrush="{DynamicResource FlyoutBorderBrush}"
-                    BorderThickness="1" Opacity="0" IsHitTestVisible="False">
+                    BorderThickness="1" Opacity="0" Visibility="Collapsed" IsHitTestVisible="False">
                 <Border.RenderTransform>
                     <TranslateTransform x:Name="ToastOffset" />
                 </Border.RenderTransform>
@@ -337,7 +337,7 @@
                     </Grid.ColumnDefinitions>
                     <TextBlock x:Name="ToastGlyph" Text="{StaticResource Glyph.Completed}" FontFamily="{StaticResource IconFont}"
                                FontSize="14" Margin="0,1,8,0" VerticalAlignment="Top" Foreground="{DynamicResource SuccessBrush}" />
-                    <TextBlock x:Name="ToastText" Grid.Column="1" FontSize="12" TextWrapping="Wrap" />
+                    <TextBlock x:Name="ToastText" Grid.Column="1" FontSize="11.5" MaxHeight="36" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Polite" />
                 </Grid>
             </Border>
         </Grid>

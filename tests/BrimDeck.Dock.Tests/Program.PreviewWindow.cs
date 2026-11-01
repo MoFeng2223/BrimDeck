@@ -10,6 +10,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using BrimDeck;
 using BrimDeck.Core;
+using BrimDeck.Native;
 using DropShelf;
 using DropShelf.Views;
 
@@ -42,7 +43,7 @@ internal static partial class Program
         var image = history.Add(new ClipboardContent { Kind = ClipboardContentKind.Image, Image = Image(), PixelWidth = 400, PixelHeight = 300 }, "Fixture", "", now.AddMinutes(-1), preferences)!;
         var files = history.Add(new ClipboardContent { Kind = ClipboardContentKind.Files, Files = [file] }, "Fixture", "", now.AddMinutes(-2), preferences)!;
         var calls = new List<(ClipboardEntry Entry, bool CopyOnly, IntPtr Target)>();
-        using var previews = new ClipboardPreviewWindows(history, () => preferences, (entry, copyOnly, target) => { calls.Add((entry, copyOnly, target)); return true; }, () => new IntPtr(123));
+        using var previews = new ClipboardPreviewWindows(history, () => preferences, (entry, copyOnly, target) => { calls.Add((entry, copyOnly, target.Window)); return true; }, () => new ClipboardPasteTarget(new IntPtr(123), 1, 2, new IntPtr(124)));
         var view = new ClipboardView(history, () => preferences, (_, _) => throw new InvalidOperationException("Unexpected island activation"), () => { }, () => { }, () => { }, () => (true, false, ""), _ => { }, () => { }, openPreviewWindow: previews.Show);
         var owner = new Window { Content = view, Width = 1080, Height = 210, Left = -20000, Top = -20000, ShowInTaskbar = false, ShowActivated = false, WindowStyle = WindowStyle.None };
         Button Button(ClipboardPreviewWindow window, string id) => All<Button>(window).Single(button => AutomationProperties.GetAutomationId(button) == "preview-window-" + id);

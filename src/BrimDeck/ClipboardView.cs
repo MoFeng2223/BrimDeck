@@ -63,7 +63,7 @@ internal sealed partial class ClipboardView : Grid, IDisposable
     internal string CollectionId { get => _collection; set { _byApplication = false; _collection = value; _sourceFilter = ""; _unknownSourceOnly = false; Refresh(); } }
 
     internal ClipboardView(ClipboardHistory history, Func<ClipboardSettings> settings, Action<ClipboardEntry, bool> activate,
-        Action openSettings, Action togglePause, Action enable, Func<(bool Enabled, bool Paused, string Problem)> status, Action<bool> setGrid, Action collapse, Action<ClipboardEntry?>? openLibrary = null, Func<string, bool>? confirm = null, Action<ClipboardSort>? setSort = null, Action<string, bool>? setApplicationPinned = null, Action<ClipboardEntry, Rect, Rect, double>? openPreviewWindow = null, Action<string, bool>? setApplicationHidden = null)
+        Action openSettings, Action togglePause, Action enable, Func<(bool Enabled, bool Paused, string Problem)> status, Action<bool> setGrid, Action collapse, Action<ClipboardEntry?>? openLibrary = null, Func<PromptRequest, bool>? confirm = null, Action<ClipboardSort>? setSort = null, Action<string, bool>? setApplicationPinned = null, Action<ClipboardEntry, Rect, Rect, double>? openPreviewWindow = null, Action<string, bool>? setApplicationHidden = null)
     {
         _openPreviewWindow = openPreviewWindow; _setApplicationHidden = setApplicationHidden;
         _history = history; _settings = settings; _activate = activate; _openSettings = openSettings; _togglePause = togglePause; _enable = enable; _status = status; _setGrid = setGrid;
@@ -181,7 +181,7 @@ internal sealed partial class ClipboardView : Grid, IDisposable
             : _favoritesOnly ? Loc.T("还没有收藏 · 在卡片上点击星标", "No favorites yet · star a card to keep it")
             : _byApplication && (_sourceFilter.Length > 0 || _unknownSourceOnly) ? Loc.T("此应用下没有匹配记录 · 调整筛选或切换到全部历史", "No matching entries for this app · Adjust filters or switch to All history")
             : _collection.Length > 0 ? Loc.T("这里还没有内容 · 从历史拖动条目到此分类，或右键条目整理", "Nothing here yet · drag entries here from History, or organize with their context menu")
-            : Loc.T("复制文字、图片、颜色或文件后，会出现在这里\n双击或 Enter 粘贴 · Ctrl+Enter 仅复制 · Esc 收起", "Copy text, images, colors or files to see them here\nDouble-click or Enter to paste · Ctrl+Enter to copy · Esc to collapse");
+            : Loc.T("复制文字、图片、颜色或文件后，会出现在这里\n单击或 Enter 使用默认动作 · Ctrl+Enter 仅复制 · Esc 收起", "Copy text, images, colors or files to see them here\nClick or Enter uses the default action · Ctrl+Enter copies only · Esc collapses");
     }
     private void HistoryChanged()
     {
@@ -250,7 +250,7 @@ internal sealed partial class ClipboardView : Grid, IDisposable
                 var tab = new Button { Style = (Style)FindResource("ClipboardTab"), Content = inner, Margin = new Thickness(0, 0, 3, 0), AllowDrop = false,
                     Tag = _unknownSourceOnly == unknown && string.Equals(_sourceFilter, source, StringComparison.OrdinalIgnoreCase) ? "Selected" : null };
                 AutomationProperties.SetAutomationId(tab, automationId); AutomationProperties.SetName(tab, title + " · " + count);
-                tab.ToolTip = title + Loc.T(" · 根据复制来源自动分类，不改变收藏夹", " · Automatically grouped by copy source; collections are unchanged");
+                AutomationProperties.SetHelpText(tab, Loc.T("根据复制来源自动分类，不改变收藏夹", "Automatically grouped by copy source; collections are unchanged"));
                 AutomationProperties.SetItemStatus(tab, pinned ? Loc.T("已固定", "Pinned") : "");
                 tab.Click += (_, _) => SelectApplication(source, unknown);
                 if (application || _settings().HiddenApplications.Length > 0)
@@ -297,7 +297,7 @@ internal sealed partial class ClipboardView : Grid, IDisposable
         {
             if (_history.Collections.FirstOrDefault(group => group.Id == id) is { } collection) ClipboardCollectionVisuals.Apply(tab, collection, inner);
             _drag.AttachCollection(tab, id, Orientation.Horizontal);
-            tab.ToolTip = title + Loc.T(" · 右键管理 · 拖动排序 · 拖入条目整理", " · Right-click to manage · Drag to reorder or drop entries here");
+            AutomationProperties.SetHelpText(tab, Loc.T("右键管理，拖动排序或拖入条目整理", "Right-click to manage; drag to reorder or organize entries"));
             var menu = Menu();
             AddMenu(menu, Loc.T("名称与标签外观…", "Name & label appearance…"), () =>
             {
@@ -308,7 +308,7 @@ internal sealed partial class ClipboardView : Grid, IDisposable
             AddMenu(menu, Loc.T("移到最前", "Move to start"), () => { if (_history.Collections.FirstOrDefault() is { } first) _history.ReorderCollection(id, first.Id); });
             AddMenu(menu, Loc.T("移到最后", "Move to end"), () => { if (_history.Collections.LastOrDefault() is { } last) _history.ReorderCollection(id, last.Id, true); });
             AddMenu(menu, Loc.T("删除分类（保留记录）…", "Delete collection (keep entries)…"), () =>
-            { if (Confirm(Loc.T("删除分类？其中的条目将保留在历史中，原文件和系统剪贴板不会更改。", "Delete this collection? Its entries stay in history; original files and the system clipboard are unchanged."))) _history.RemoveCollection(id); });
+            { if (Confirm(new(PromptId.ClipboardDeleteCollection, Loc.T("删除分类？其中的条目将保留在历史中，原文件和系统剪贴板不会更改。", "Delete this collection? Its entries stay in history; original files and the system clipboard are unchanged.")))) _history.RemoveCollection(id); });
             tab.ContextMenu = menu;
             tab.MouseRightButtonUp += (_, e) => { menu.PlacementTarget = tab; menu.Placement = PlacementMode.Bottom; menu.IsOpen = true; e.Handled = true; };
         }
@@ -394,6 +394,7 @@ internal sealed partial class ClipboardView : Grid, IDisposable
     private Button Round(object content, string name, Action action)
     {
         var button = new Button { Style = (Style)FindResource("ClipboardRoundButton"), Content = content, ToolTip = name };
+        ToolTipService.SetInitialShowDelay(button, 700);
         AutomationProperties.SetName(button, name); button.Click += (_, _) => action(); return button;
     }
     internal void DismissFromKeyboard()

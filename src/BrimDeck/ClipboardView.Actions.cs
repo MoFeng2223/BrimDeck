@@ -36,7 +36,7 @@ internal sealed partial class ClipboardView
                 || Find<ListBoxItem>(e.OriginalSource as DependencyObject)?.DataContext is not ClipboardEntry entry) return;
             OpenItemMenu(entry, true); e.Handled = true;
         }), true);
-        AutomationProperties.SetHelpText(_list, Loc.T("单击粘贴到当前应用；Shift+单击粘贴纯文本；拖出到支持接收的窗口；右键管理卡片。", "Click to paste into the current app; Shift+click for plain text; drag out to a compatible window; right-click for card actions."));
+        AutomationProperties.SetHelpText(_list, Loc.T("单击按默认动作复制或回贴；Shift+单击使用纯文本；Ctrl+Enter 仅复制；右键管理卡片。", "Click follows the default copy/paste action; Shift+click uses plain text; Ctrl+Enter copies only; right-click for card actions."));
     }
     private void ClickCard(ClipboardEntry entry)
     {
@@ -44,7 +44,7 @@ internal sealed partial class ClipboardView
         // A detached preview is not a dismiss gesture: clicking its original card still performs the normal action.
         if (_preview is not null) _preview.IsOpen = false;
         if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) && entry.Content.Text.Length > 0) entry = PlainEntry(entry);
-        _activate(entry, false);
+        _activate(entry, !_settings().PasteOnActivate);
     }
     private static ClipboardEntry PlainEntry(ClipboardEntry entry) => entry with { Content = new ClipboardContent { Kind = ClipboardContentKind.Text, Text = entry.Content.Text } };
     private void CopyText(ClipboardEntry entry, string text) => _activate(entry with { Content = ClipboardContent.FromText(text) }, true);
@@ -67,7 +67,7 @@ internal sealed partial class ClipboardView
             var row = (MenuItem)menu.Items[^1]; row.Icon = EdgeDropGlyph.Create(glyph, 14);
             AutomationProperties.SetAutomationId(row, "clipboard-card-menu-" + id);
         }
-        Row("paste", Loc.T("粘贴 · Enter", "Paste · Enter"), "clipboardText", () => _activate(item, false));
+        Row("paste", Loc.T("粘贴到目标应用", "Paste into target app"), "clipboardText", () => _activate(item, false));
         if (item.Content.Text.Length > 0 && (item.Content.Html.Length > 0 || item.Content.Rtf.Length > 0 || item.Content.Text.Contains('\t')))
             Row("plain", Loc.T("粘贴为纯文本", "Paste as plain text"), "textT", () => _activate(PlainEntry(item), false));
         Row("copy", Loc.T("仅复制 · Ctrl+Enter", "Copy only · Ctrl+Enter"), "copy", () => _activate(item, true));

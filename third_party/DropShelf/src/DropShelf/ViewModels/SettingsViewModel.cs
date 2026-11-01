@@ -405,7 +405,9 @@ public sealed class SettingsViewModel : ObservableObject
         catch (Exception exception)
         {
             LogService.Error("启动卸载程序失败", exception);
-            System.Windows.MessageBox.Show(Strings.UninstallFailed, "DropShelf", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            // 独立原版保留系统兜底；嵌入宿主使用宿主的主题提示及分项偏好。
+            if (!_controller.TryReportUninstallFailure())
+                System.Windows.MessageBox.Show(Strings.UninstallFailed, "DropShelf", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
         }
     }
 

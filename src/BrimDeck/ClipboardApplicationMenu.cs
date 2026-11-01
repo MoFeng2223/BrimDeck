@@ -9,7 +9,7 @@ namespace BrimDeck;
 internal static class ClipboardApplicationMenu
 {
     internal static void Populate(ContextMenu menu, FrameworkElement owner, FrameworkElement anchor, string source, bool unknown, ClipboardHistory history,
-        Func<ClipboardSettings> preferences, Action<string, bool> pin, Action<string, bool> hide, Func<string, bool> confirm,
+        Func<ClipboardSettings> preferences, Action<string, bool> pin, Action<string, bool> hide, Func<PromptRequest, bool> confirm,
         Action<FrameworkElement, Action> removeLabel, Action<string> feedback)
     {
         Style leaf = (Style)owner.FindResource("TrayMenuItem");
@@ -35,8 +35,8 @@ internal static class ClipboardApplicationMenu
                 int count = history.ApplicationCount(source);
                 if (count == 0) return;
                 string name = unknown ? Loc.T("未知应用", "Unknown app") : source;
-                if (!confirm(Loc.T($"清空“{name}”的全部 {count} 条记录（包括收藏、归档和收藏夹中的记录）？此操作不可撤销。原文件、系统剪贴板和其他应用的记录不会更改。",
-                    $"Clear all {count} entries from “{name}”, including favorites, archived entries and entries in collections? This cannot be undone. Original files, the system clipboard and other apps' entries are unchanged."))) return;
+                if (!confirm(new(PromptId.ClipboardClearApplication, Loc.T($"清空“{name}”的全部 {count} 条记录（包括收藏、归档和收藏夹中的记录）？此操作不可撤销。原文件、系统剪贴板和其他应用的记录不会更改。",
+                    $"Clear all {count} entries from “{name}”, including favorites, archived entries and entries in collections? This cannot be undone. Original files, the system clipboard and other apps' entries are unchanged.")))) return;
                 int removed = 0;
                 removeLabel(anchor, () => removed = history.ClearApplication(source));
                 feedback(Loc.T($"已清空该应用的 {removed} 条记录", $"Cleared {removed} entries from this app"));
