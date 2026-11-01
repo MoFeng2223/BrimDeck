@@ -120,13 +120,13 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
     private string? _autoRestarted;
     // The setting NeteaseFullControl: the libcef.dll is kept changed so every start opens the fixed port on its own. While it is
     // on, a running player not yet exposing the port is restarted once (as with the automatic setting), and a file left original
-    // by an update is changed again. State is read off the UI thread, throttled; _filePatching guards the one write at a time.
-    private volatile bool _fileFullControl;
+    // by an update is changed again. State is read off the UI thread (MaintainFile); _filePatching guards the one write at a time.
+    private volatile bool _fileFullControl, _fileAsked;
     private LibcefPatchState? _fileState;
     private DateTime _fileStamp;
-    private long _fileCheckedAt = -FileCheckInterval;
+    private long _fileCheckedAt = long.MinValue / 2;
     private int _filePatching;
-    private const long FileCheckInterval = 60_000;
+    private const long FileCheckInterval = 5_000;
     // A player that has only just started is given time to finish starting before it is asked to quit.
     private const long AutoRestartAge = 3_000;
     // Installation rarely changes while the app runs, and a running player already counts as installed.
@@ -150,10 +150,12 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
     public bool FileFullControl
     {
         get => _fileFullControl;
-        set { if (_fileFullControl == value) return; _fileFullControl = value; _fileCheckedAt = -FileCheckInterval; Signal(); }
+        set { if (_fileFullControl == value) return; _fileFullControl = value; CheckFile(); }
     }
     // The file's patch state as last read, for the settings switch; null until it has been read.
     public LibcefPatchState? FilePatchState => _fileState;
+    // Reads the file's state at the next refresh, for the settings page.
+    public void CheckFile() { _fileAsked = true; Signal(); }
     // A restart may be due when either full-control setting is on and the running player has no debugging port yet.
     private bool AutoPending => (AutoFullControl || FileFullControl) && (_process is null || _process.DebugPort is null && _autoRestarted != _process.Identity);
     // The file-patched player opens the port a moment after it starts, so a port-less player is looked for every second.
@@ -334,14 +336,17 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
             settled = DateTimeOffset.UtcNow.AddSeconds(2);
         }
     }
-    // Reads the libcef.dll's patch state off the UI thread, throttled, so the settings switch can show it whether the setting is
-    // on or off (as KuGou does); the 150 MB file is re-read only when it has changed since the last read. While the setting is on,
-    // a file an update left original is changed again. One write or read runs at a time.
+    // Reads the libcef.dll's patch state off the UI thread only when it is needed: when the settings page asks (CheckFile), and
+    // while the setting is on and the running player has no port, as when an update left the file original, which is then
+    // changed again (at most every FileCheckInterval). The 150 MB file is re-read only when it has changed since the last
+    // read. One write or read runs at a time.
     private void MaintainFile()
     {
         if (_filePatching != 0) return;
-        long interval = FileFullControl && _fileState is not LibcefPatchState.Patched ? 5_000 : FileCheckInterval;
-        if (Environment.TickCount64 - _fileCheckedAt < interval || Interlocked.CompareExchange(ref _filePatching, 1, 0) != 0) return;
+        bool asked = _fileAsked;
+        if (!asked && (!FilePending || Environment.TickCount64 - _fileCheckedAt < FileCheckInterval)) return;
+        if (Interlocked.CompareExchange(ref _filePatching, 1, 0) != 0) return;
+        _fileAsked = false;
         _fileCheckedAt = Environment.TickCount64;
         _ = Task.Run(async () =>
         {

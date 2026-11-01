@@ -269,8 +269,12 @@ public sealed partial class SettingsWindow
     {
         var app = (App)Application.Current;
         string title = Loc.T("始终启用完整控制", "Always enable full control");
-        // A file another tool or an earlier change left changed is on as well: KuGou starts with full control either way.
-        bool changed = (app.Media is { } known ? known.KugouState : Native.KugouInstall.State()) == LibcefPatchState.Patched;
+        // The file is read when the page opens: here for the switch, and by media to change it again when an update left it
+        // original while the setting is on. A file another tool or an earlier change left changed is on as well: KuGou starts
+        // with full control either way.
+        var read = app.Media?.KugouState ?? Native.KugouInstall.State();
+        app.Media?.CheckKugouInstall(now: true);
+        bool changed = read == LibcefPatchState.Patched;
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.KugouFullControl || changed, VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, title);
         var note = TextLine("", 11, TextTertiary); note.TextWrapping = TextWrapping.Wrap;
@@ -306,7 +310,7 @@ public sealed partial class SettingsWindow
         void Update()
         {
             var media = app.Media;
-            var state = media is not null ? media.KugouState : Native.KugouInstall.State();
+            var state = media is not null ? media.KugouState ?? read : Native.KugouInstall.State();
             bool working = busy || media is { RestartingKugou: true };
             bool supported = state is LibcefPatchState.Original or LibcefPatchState.Patched or LibcefPatchState.Partial;
             toggle.IsEnabled = supported && !working && S.MusicPage;
@@ -338,7 +342,10 @@ public sealed partial class SettingsWindow
     {
         var app = (App)Application.Current;
         string title = Loc.T("始终启用完整控制", "Always enable full control");
-        bool changed = (app.Media is { } known ? known.NeteasePatchState : Native.NeteaseInstall.State()) == LibcefPatchState.Patched;
+        // Read when the page opens, as KuGou's.
+        var read = app.Media?.NeteasePatchState ?? Native.NeteaseInstall.State();
+        app.Media?.CheckNeteaseFile();
+        bool changed = read == LibcefPatchState.Patched;
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.NeteaseFullControl || changed, VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, title);
         var note = TextLine("", 11, TextTertiary); note.TextWrapping = TextWrapping.Wrap;
@@ -374,11 +381,11 @@ public sealed partial class SettingsWindow
         void Update()
         {
             var media = app.Media;
-            var state = media is not null ? media.NeteasePatchState : Native.NeteaseInstall.State();
+            var state = media is not null ? media.NeteasePatchState ?? read : Native.NeteaseInstall.State();
             bool working = busy || media is { RestartingNetease: true };
             bool supported = state is LibcefPatchState.Original or LibcefPatchState.Patched or LibcefPatchState.Partial;
-            // With media on, the source reads the file state only while the setting is on, so a null state there does not mean "not
-            // installed"; media.NeteaseInstalled answers that. With media off, the state read above is null only when not installed.
+            // With media on, a null state there may only mean the source has not read the file yet; media.NeteaseInstalled
+            // answers whether it is installed. With media off, the state read above is null only when not installed.
             bool installed = media is not null ? media.NeteaseInstalled : state is not null;
             toggle.IsEnabled = (supported || state is null && installed) && !working && S.MusicPage;
             string? error = working ? null : failure;
