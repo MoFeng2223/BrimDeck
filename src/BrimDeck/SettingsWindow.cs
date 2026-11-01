@@ -182,6 +182,7 @@ public sealed partial class SettingsWindow : Window
         // Focusable only to hold focus after a click on empty space; Tab never stops on it and it draws no outline.
         var frame = new Border { Child = outer, BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1), Focusable = true, FocusVisualStyle = null };
         KeyboardNavigation.SetIsTabStop(frame, false);
+        RadioGroups.Use(); RadioGroups.SetEnabled(frame, true);
         Content = frame; RootVisual = frame; UpdateCaption(); Native.SettingsChrome.SetTheme(this, _palette.Dark); ShowPage(_page);
         _status.SetResourceReference(TextBlock.ForegroundProperty, "SettingsError"); PaletteChanged?.Invoke();
     }
@@ -464,7 +465,8 @@ public sealed partial class SettingsWindow : Window
         Group([.. rows]);
     }
     // Monitors were connected, removed or rearranged; the list of displays is built again.
-    internal void DisplaysChanged() { if (!IsLoaded) return; if (_page == 0) ShowPage(0); else if (_page == 1) _refreshCollapsedRanges?.Invoke(); }
+    // A taskbar that appeared, moved or went away also shows or hides the collapsed group's anchor row.
+    internal void DisplaysChanged() { if (!IsLoaded) return; if (_page is 0 or 1) ShowPage(_page); }
     private void Compact()
     {
         HideHotkeySection();
@@ -531,6 +533,7 @@ public sealed partial class SettingsWindow : Window
             Toggle(Loc.T("右键点击打开设置", "Right-click opens settings"), S.RightClickSettings, value => Change(s => s.RightClickSettings = value),
                 help: Loc.T("面板展开时，在面板内任意位置单击右键即可打开设置。", "When the panel is expanded, right-click anywhere inside it to open settings.")),
             MouseWheelRow(),
+            ExpandPlaceRow(),
             HotkeyRow(HotkeyKind.Expand),
             HotkeyRow(HotkeyKind.Resize));
     }
@@ -562,7 +565,7 @@ public sealed partial class SettingsWindow : Window
         header.MouseLeftButtonDown += (_, e) => { Flip(); e.Handled = true; };
         sizes.Visibility = open ? Visibility.Visible : Visibility.Collapsed; sizes.Margin = new Thickness(20, 4, 0, 8);
         var body = new StackPanel(); body.Children.Add(header); body.Children.Add(sizes); Grid.SetColumn(body, 1);
-        var handle = new Border { Width = 22, Height = PageRowHeight, VerticalAlignment = VerticalAlignment.Top, Background = Brushes.Transparent, Cursor = Cursors.SizeAll,
+        var handle = new GripHandle { Width = 22, Height = PageRowHeight, VerticalAlignment = VerticalAlignment.Top, Background = Brushes.Transparent, Cursor = Cursors.SizeAll,
             HorizontalAlignment = HorizontalAlignment.Left, Child = Grip(TextTertiary) };
         var row = new Grid { Background = Brushes.Transparent };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(PartHandleWidth) }); row.ColumnDefinitions.Add(new ColumnDefinition());
@@ -570,7 +573,7 @@ public sealed partial class SettingsWindow : Window
         item = new Border { Child = row, Height = open ? double.NaN : PageRowHeight, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0), Tag = page, RenderTransform = new TranslateTransform() };
         _pageRows.Add((item, sizes, arrow));
         // The sizes close when a drag begins, so every row is one line high while they move.
-        AttachDrag(handle, () => rows, PageRowHeight, list =>
+        AttachDrag(handle, title, () => rows, PageRowHeight, list =>
         {
             var order = list.Children.OfType<Border>().Where(b => b.Tag is DeckPage).Select(b => (DeckPage)b.Tag).ToArray();
             Change(s => s.PageOrder = [.. order]);
@@ -631,17 +634,18 @@ public sealed partial class SettingsWindow : Window
             {
                 case 0:s.LaunchAtStartup=false;s.TrimMemoryWhenIdle=defaults.TrimMemoryWhenIdle;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.ForceTopmost=defaults.ForceTopmost;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.FullscreenRules=[];s.Display=defaults.Display;s.DisplayMonitors=[];s.PanelScale=defaults.PanelScale;break;
                 case 1:s.Style=defaults.Style;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;
-                    s.NotchEqualizer=defaults.NotchEqualizer;s.CapsuleEqualizer=defaults.CapsuleEqualizer;s.EqualizerAlways=defaults.EqualizerAlways;s.EqualizerBars=defaults.EqualizerBars;s.EqualizerColor=defaults.EqualizerColor;s.EqualizerCustomColor=defaults.EqualizerCustomColor;s.NotchClock=defaults.NotchClock;s.CapsuleClock=defaults.CapsuleClock;s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=[.. PanelTheme.Current.ClockGradients[0].Stops];s.Clock24Hour=defaults.Clock24Hour;s.ClockSeconds=defaults.ClockSeconds;CopyCollapsedSize(s,defaults);s.HideHotkey=defaults.HideHotkey;
+                    s.NotchEqualizer=defaults.NotchEqualizer;s.CapsuleEqualizer=defaults.CapsuleEqualizer;s.EqualizerAlways=defaults.EqualizerAlways;s.EqualizerBars=defaults.EqualizerBars;s.EqualizerColor=defaults.EqualizerColor;s.EqualizerCustomColor=defaults.EqualizerCustomColor;s.NotchClock=defaults.NotchClock;s.CapsuleClock=defaults.CapsuleClock;s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=[.. PanelTheme.Current.ClockGradients[0].Stops];s.Clock24Hour=defaults.Clock24Hour;s.ClockSeconds=defaults.ClockSeconds;CopyCollapsedSize(s,defaults);s.GripDoubleClick=defaults.GripDoubleClick;s.HideHotkey=defaults.HideHotkey;
                     s.NotchMonitor=defaults.NotchMonitor;s.CapsuleMonitor=defaults.CapsuleMonitor;s.NotchOrder=defaults.NotchOrder;s.CapsuleOrder=defaults.CapsuleOrder;
                     // The clock goes back to the one the panel theme suggests, as choosing the theme gives.
                     PanelThemes.ApplyClock(PanelTheme.Current,s);break;
-                case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.RightClickSettings=defaults.RightClickSettings;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;s.ExpandHotkey=defaults.ExpandHotkey;s.ResizeHotkey=defaults.ResizeHotkey;s.MouseWheel=defaults.MouseWheel;
+                case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.RightClickSettings=defaults.RightClickSettings;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;s.ExpandHotkey=defaults.ExpandHotkey;s.ResizeHotkey=defaults.ResizeHotkey;s.MouseWheel=defaults.MouseWheel;s.ExpandAtPointer=defaults.ExpandAtPointer;
                     s.MonitorPage=defaults.MonitorPage;s.MonitorWidth=defaults.MonitorWidth;s.MonitorHeight=defaults.MonitorHeight;s.PageOrder=defaults.PageOrder;break;
                 case MonitorSettingsPage:s.MonitorPalette=defaults.MonitorPalette;s.MonitorCustomColors=defaults.MonitorCustomColors;s.CompactWarningColor=null;s.CompactCriticalColor=null;s.CompactSmoothing=defaults.CompactSmoothing;s.MonitorInterval=defaults.MonitorInterval;s.MonitorProcesses=defaults.MonitorProcesses;s.MonitorSort=defaults.MonitorSort;s.MonitorMain=defaults.MonitorMain;s.MonitorProcessView=defaults.MonitorProcessView;
                     s.CompactMonitor=defaults.CompactMonitor;s.CompactMonitorItems=defaults.CompactMonitorItems;s.CompactReadings=defaults.CompactReadings;s.NotchAutoWidth=defaults.NotchAutoWidth;s.CapsuleAutoWidth=defaults.CapsuleAutoWidth;s.MonitorTemperatures=defaults.MonitorTemperatures;s.MonitorStorage=defaults.MonitorStorage;s.MonitorPower=defaults.MonitorPower;break;
                 // The current theme's application colors go back to its own; the other themes keep what was saved for them.
                 case 3:{var previous=s.Apps;s.QuotaAlerts=defaults.QuotaAlerts;s.IncludeWsl=defaults.IncludeWsl;s.Apps=defaults.Apps;PanelThemes.CarryAppChoices(s,previous);break;}
-                case 5:s.MusicText=defaults.MusicText;s.MusicEqualizerBars=defaults.MusicEqualizerBars;s.MusicTrackNotice=defaults.MusicTrackNotice;s.MusicCompactCover=defaults.MusicCompactCover;s.MusicPageCover=defaults.MusicPageCover;s.LyricsEnabled=defaults.LyricsEnabled;break;
+                case 5:s.MusicText=defaults.MusicText;s.MusicEqualizerBars=defaults.MusicEqualizerBars;s.MusicTrackNotice=defaults.MusicTrackNotice;s.MusicCompactCover=defaults.MusicCompactCover;s.MusicPageCover=defaults.MusicPageCover;s.LyricsEnabled=defaults.LyricsEnabled;
+                    s.MusicPageEqualizerColor=defaults.MusicPageEqualizerColor;s.MusicPageEqualizerCustomColor=defaults.MusicPageEqualizerCustomColor;s.MusicLyricColor=defaults.MusicLyricColor;s.MusicLyricCustomColor=defaults.MusicLyricCustomColor;break;
                 case 6:s.NeteaseFullControlEntry=defaults.NeteaseFullControlEntry;s.NeteaseAutoFullControl=defaults.NeteaseAutoFullControl;s.AppleMusicFullControl=defaults.AppleMusicFullControl;break;
                 // The default theme, with its own colors and suggested clock, the clock reset as the collapsed page resets it; the
                 // other themes keep what was saved for them.
@@ -769,7 +773,7 @@ public sealed partial class SettingsWindow : Window
                 // centred mark otherwise sits higher than the Chinese label beside it. The box leaves half a unit around the
                 // circle's stroke: a box exactly the circle's size clips the outer edge of the stroke on all four sides.
                 var mark = Stroke("M 6,1 A 5,5 0 1 1 6,11 A 5,5 0 1 1 6,1 Z M 6,5.4 V 8.4 M 6,3.6 V 3.7", 12, 12, TextTertiary); mark.StrokeThickness = 1.1;
-                var info = new Border { Width = 12, Height = 12, Background = Brushes.Transparent, Margin = new Thickness(2.5, 0, 0, 0),
+                var info = new HelpMark { Width = 12, Height = 12, Background = Brushes.Transparent, Margin = new Thickness(2.5, 0, 0, 0),
                     VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Help, Focusable = true, Child = mark, RenderTransform = new TranslateTransform(0, 0.5),
                     FocusVisualStyle = (Style)FindResource("SettingsSmallHelpFocus") };
                 AttachSettingHelp(info, title, () => help);
@@ -797,7 +801,7 @@ public sealed partial class SettingsWindow : Window
         var row = AppColumns();
         row.RowDefinitions.Add(new RowDefinition { Height = new GridLength(68) });
         row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var handle = new Border { Width = 22, Background = Brushes.Transparent, Cursor = Cursors.SizeAll,
+        var handle = new GripHandle { Width = 22, Background = Brushes.Transparent, Cursor = Cursors.SizeAll,
             HorizontalAlignment = HorizontalAlignment.Left, Child = Grip(TextTertiary) };
         row.Children.Add(handle);
         string name = entry.Name;
@@ -815,7 +819,7 @@ public sealed partial class SettingsWindow : Window
         AutomationProperties.SetName(toggle, Loc.T("显示 ", "Show ") + name); AutomationProperties.SetAutomationId(toggle, "enabled-" + entry.InstanceId.ToString("N"));
         toggle.Checked += (_, _) => Change(s => s.Entry(entry.InstanceId)!.Enabled = true); toggle.Unchecked += (_, _) => Change(s => s.Entry(entry.InstanceId)!.Enabled = false);
         Grid.SetColumn(toggle, 7); row.Children.Add(toggle);
-        AttachDrag(handle);
+        AttachDrag(handle, name);
         var remove = ActionButton("", () =>
         {
             Change(s => s.Apps.RemoveAll(app => app.InstanceId == entry.InstanceId));
@@ -837,7 +841,7 @@ public sealed partial class SettingsWindow : Window
         string role = quota ? Loc.T("配额来源", "Quota source") : Loc.T("统计应用", "Usage app");
         ProviderId selected = quota ? entry.QuotaSource : entry.UsageSource;
         string Label(ProviderId id) => AppPresets.Name(id);
-        var select = ActionButton("", () => { });
+        var select = new DropDownButton { Style = (Style)FindResource("SettingsButton"), Value = () => Label(selected) };
         var selectContent = new DockPanel();
         var chevron = Chevron(); chevron.Foreground = UI.Brush(TextSecondary); chevron.Margin = new Thickness(8, ChevronDrop.Top, 0, ChevronDrop.Bottom); DockPanel.SetDock(chevron, Dock.Right); selectContent.Children.Add(chevron);
         var selectLabel = TextLine(Label(selected), 12.5, TextPrimary, FontWeights.SemiBold);
@@ -847,7 +851,7 @@ public sealed partial class SettingsWindow : Window
         select.ToolTip = quota ? ProviderCatalog.QuotaTip(selected) : ProviderCatalog.UsageTip(selected);
         select.HorizontalContentAlignment = HorizontalAlignment.Stretch; select.VerticalAlignment = VerticalAlignment.Center;
         select.Padding = new Thickness(9, 0, 9, 0); select.Margin = new Thickness(6, 0, 6, 0);
-        select.Background = UI.Brush(_palette.Input); select.BorderBrush = UI.Brush(_palette.Border);
+        select.Background = UI.Brush(_palette.Input); select.BorderBrush = UI.Brush(_palette.InputBorder);
         AutomationProperties.SetName(select, role + " " + entry.Name);
         AutomationProperties.SetAutomationId(select, (quota ? "quota-" : "usage-") + entry.InstanceId.ToString("N"));
         // The application menu is a styled popup list: dark surface, rounded corners, no icon column.
@@ -907,6 +911,7 @@ public sealed partial class SettingsWindow : Window
             if (current is { } chosen) Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => chosen.BringIntoView());
         };
         select.Tag = menu;
+        select.Menu = menu;
         // At most MenuRows sources show at once, with the next one cut through the middle so the list reads as one that scrolls.
         // Headers and the divider above them count toward the height but not the rows. A shorter list shows whole.
         double MenuLimit()
@@ -1018,7 +1023,7 @@ public sealed partial class SettingsWindow : Window
         var input = new TextBox { Style = (Style)FindResource("SettingsNumber"), Width = 60, TextAlignment = TextAlignment.Left, VerticalAlignment = VerticalAlignment.Center, MaxLength = 6 };
         AutomationProperties.SetName(input, Loc.T("颜色值", "Color value")); field.Children.Add(input);
         var chip = new Border { Child = field, Height = 28, CornerRadius = new CornerRadius(6), Background = UI.Brush(Inset), BorderBrush = Brushes.Transparent, BorderThickness = new Thickness(1), Padding = new Thickness(9, 0, 9, 0) };
-        input.GotKeyboardFocus += (_, _) => chip.BorderBrush = (Brush)FindResource("SettingsAccent"); input.LostKeyboardFocus += (_, _) => chip.BorderBrush = Brushes.Transparent;
+        FieldFocus(chip, input, () => Brushes.Transparent);
         entry.Children.Add(chip); panel.Children.Add(entry);
 
         var rings = new List<(Ellipse Ring, string Color)>();
@@ -1118,9 +1123,7 @@ public sealed partial class SettingsWindow : Window
         else
         {
             // An info icon right after the title, as the settings rows carry theirs.
-            var heading = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left };
-            heading.Children.Add(label); heading.Children.Add(HelpIcon(title, help, 13, nudge: 0));
-            row.Children.Add(heading);
+            row.Children.Add(new HelpHeading(label, HelpIcon(title, help, 13)) { HorizontalAlignment = HorizontalAlignment.Left });
         }
         Target.Children.Add(row);
     }
@@ -1184,6 +1187,19 @@ public sealed partial class SettingsWindow : Window
         }
         return Row(title, SegmentBorder(options), help: () => Loc.T("仅在展开的面板区域内滚动时生效；歌词、明细等会滚动的区域不受影响。",
             "Works only when the wheel is rolled over the expanded panel; areas that scroll, such as the lyrics and the details, are not affected."));
+    }
+
+    private FrameworkElement ExpandPlaceRow()
+    {
+        var title = Loc.T("展开位置", "Expand at");
+        var options = new UniformGrid { Columns = 2, Width = 216 };
+        foreach (var (atPointer, label) in new[] { (false, Loc.T("正中间", "Middle")), (true, Loc.T("跟随鼠标", "Pointer")) })
+        {
+            var option = new RadioButton { Content = label, Style = (Style)FindResource("SettingsSegment"), GroupName = "ExpandPlace", IsChecked = S.ExpandAtPointer == atPointer };
+            AutomationProperties.SetName(option, title + " · " + label); option.Checked += (_, _) => Change(s => s.ExpandAtPointer = atPointer); options.Children.Add(option);
+        }
+        return Row(title, SegmentBorder(options), help: () => Loc.T("刘海或胶囊比展开面板更宽时，悬停展开的面板所在的位置。",
+            "Where the panel opens when hovered, if the notch or capsule is wider than the expanded panel."));
     }
 
     private FrameworkElement BehaviorRow(string title, WindowBehavior selected, Action<WindowBehavior> changed)

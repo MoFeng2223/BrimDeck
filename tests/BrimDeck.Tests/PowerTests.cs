@@ -264,12 +264,12 @@ static class PowerTests
     private static void Readings(Action<string, bool> check)
     {
         var table = CompactMonitor.Normalize(null);
-        check("Readings: Power and Charge are last in the table, hidden",
-            table.Select(reading => reading.Item).TakeLast(2).SequenceEqual([CompactMonitorItems.Power, CompactMonitorItems.Charge]) && table.Where(reading => reading.Item is CompactMonitorItems.Power or CompactMonitorItems.Charge).All(reading => !reading.Visible));
+        check("Readings: Power and Charge are last in the table but for the frame rate, hidden",
+            table.Select(reading => reading.Item).TakeLast(3).SequenceEqual([CompactMonitorItems.Power, CompactMonitorItems.Charge, CompactMonitorItems.Frames]) && table.Where(reading => reading.Item is CompactMonitorItems.Power or CompactMonitorItems.Charge).All(reading => !reading.Visible));
         check("Readings: they are readings of the system",
             CompactMonitor.Order.Contains(CompactMonitorItems.Power) && CompactMonitor.Order.Contains(CompactMonitorItems.Charge)
             && (CompactMonitor.Every & CompactMonitorItems.Power) != 0 && (CompactMonitor.Every & CompactMonitorItems.Charge) != 0);
-        check("Readings: they leave a short row early, the machine's battery after the drives", CompactMonitor.LeaveOrder.Take(3).SequenceEqual([CompactMonitorItems.Power, CompactMonitorItems.Storage, CompactMonitorItems.Charge]) && CompactMonitor.LeaveOrder.Count == CompactMonitor.Order.Count);
+        check("Readings: they leave a short row early, after the frame rate, the machine's battery after the drives", CompactMonitor.LeaveOrder.Take(4).SequenceEqual([CompactMonitorItems.Frames, CompactMonitorItems.Power, CompactMonitorItems.Storage, CompactMonitorItems.Charge]) && CompactMonitor.LeaveOrder.Count == CompactMonitor.Order.Count);
 
         // The presets keep to the readings they had: Full does not turn the new ones on, Brief turns them off.
         var full = CompactMonitor.Normalize(null);
