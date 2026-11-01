@@ -54,6 +54,8 @@ internal sealed class PowerBlock : FrameworkElement
         Height = row;
         SnapsToDevicePixels = true;
         _battery = options.Quick;
+        ToolTip = _tip;
+        ToolTipOpening += (_, _) => Tip(opening: true);
     }
 
     // For screen readers: the items in one line (PowerText.Spoken).
@@ -115,11 +117,11 @@ internal sealed class PowerBlock : FrameworkElement
     private IEnumerable<PowerView> Views => Enum.GetValues<PowerView>().Where(Has);
 
     // One tooltip whose content follows the readings, so an open one shows each new reading: the power's table or the battery's lines,
-    // whichever part is under the pointer.
+    // whichever part is under the pointer. Built only as it opens and while it is open, not for every reading nobody looks at.
     private readonly ToolTip _tip = new() { MaxWidth = 640 };
-    private void Tip()
+    private void Tip(bool opening = false)
     {
-        if (!ReferenceEquals(ToolTip, _tip)) ToolTip = _tip;
+        if (!opening && !_tip.IsOpen) return;
         if (_overBattery && _options.Battery) _tip.Content = PowerText.Battery(_battery);
         else _tip.Content = PowerText.Table(_power, _summary, _cpu, _gpu) is { } table ? TableView(table) : PowerText.NoPower(_power.Reason);
     }

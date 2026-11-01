@@ -193,7 +193,6 @@ internal sealed class MonitorView : Grid
         Children.Add(_overlay);
     }
 
-    public bool CardOpen => _card is not null;
     // A press anywhere in the window outside the card and the list's rows closes the card: the page's blank room, the list's own
     // blank room and its sort buttons, the window's top bar. The click still reaches what it was meant for. On a row the row
     // decides (Open): its own row closes the card, another row opens its own.

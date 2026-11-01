@@ -33,7 +33,7 @@ internal static class Program
 
 internal sealed class SensorService : ServiceBase
 {
-    private const double IdleSeconds = 60;
+    private const double IdleSeconds = 60, RetrySeconds = 30;
     private readonly CancellationTokenSource _stop = new();
     private Thread? _worker;
 
@@ -49,12 +49,13 @@ internal sealed class SensorService : ServiceBase
     protected override void OnShutdown() => OnStop();
 
     // Readings are taken on this one thread (a core's registers need the thread on that core), one per request; the energy
-    // counters give their watts over the time between two requests.
+    // counters give their watts over the time between two requests. A driver that was not running yet (the service started with
+    // Windows before it) is looked for again every RetrySeconds while BrimDeck keeps asking.
     private void Serve()
     {
-        using var reader = new CpuReader(AppContext.BaseDirectory);
         var clock = Stopwatch.StartNew();
-        double lastAsked = 0;
+        double lastAsked = 0, builtAt = 0;
+        var reader = Reader();
         // Only this computer's signed-in users and the system may connect; nobody over the network.
         var security = new PipeSecurity();
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), PipeAccessRights.FullControl, AccessControlType.Allow));
@@ -76,7 +77,8 @@ internal sealed class SensorService : ServiceBase
                     if (read == 0 || !Encoding.ASCII.GetString(request, 0, read).StartsWith("read", StringComparison.Ordinal)) continue;
                 }
                 lastAsked = clock.Elapsed.TotalSeconds;
-                var reply = Encoding.UTF8.GetBytes(reader.Read(lastAsked).Format());
+                if (reader?.Status is null or SensorStatus.NoDriver && lastAsked - builtAt >= RetrySeconds) { reader?.Dispose(); reader = Reader(); builtAt = lastAsked; }
+                var reply = Encoding.UTF8.GetBytes((reader?.Read(lastAsked) ?? new SensorReport(SensorStatus.Failed)).Format());
                 pipe.Write(reply);
                 pipe.Flush();
                 pipe.WaitForPipeDrain();
@@ -84,8 +86,16 @@ internal sealed class SensorService : ServiceBase
             catch (OperationCanceledException) { if (_stop.IsCancellationRequested) break; }
             catch (AggregateException ex) when (ex.InnerException is OperationCanceledException) { if (_stop.IsCancellationRequested) break; }
             catch (IOException) { }
-            catch (UnauthorizedAccessException) { Thread.Sleep(1000); }
+            // Another process holds the pipe's name: tried again, and given up like an idle wait.
+            catch (UnauthorizedAccessException) { if (clock.Elapsed.TotalSeconds - lastAsked >= IdleSeconds) break; Thread.Sleep(1000); }
         }
+        reader?.Dispose();
         if (!_stop.IsCancellationRequested) ThreadPool.QueueUserWorkItem(_ => Stop());
+    }
+
+    private static CpuReader? Reader()
+    {
+        try { return new CpuReader(AppContext.BaseDirectory); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception) { Debug.WriteLine(ex); return null; }
     }
 }

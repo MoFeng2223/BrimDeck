@@ -144,8 +144,9 @@ internal static class SensorSetup
             if (process is null) throw new InvalidOperationException(Loc.T("无法以管理员身份运行", "Could not run as administrator"));
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
             timeout.CancelAfter(TimeSpan.FromMinutes(2));
-            await process.WaitForExitAsync(timeout.Token);
-            Interlocked.Increment(ref _generation);
+            // Looked at again even when the wait ends early: the elevated copy may have registered the service by then.
+            try { await process.WaitForExitAsync(timeout.Token); }
+            finally { Interlocked.Increment(ref _generation); }
             if (process.ExitCode != 0) throw new InvalidOperationException(ElevatedFailure(process.ExitCode));
         }
     }

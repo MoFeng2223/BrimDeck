@@ -18,9 +18,11 @@ internal sealed class GpuDrivers(Action stuck)
     private readonly AmdDriver _amd = new();
     private readonly IntelDriver _intel = new();
 
-    public List<GpuSample> Read(IReadOnlyList<GpuSample> gpus, double now)
+    // temperatures: whether anything shows a temperature; only NVIDIA's costs a call of its own, made only then.
+    public List<GpuSample> Read(IReadOnlyList<GpuSample> gpus, double now, bool temperatures)
     {
         _gate.Keep(gpus.Select(gpu => gpu.Luid));
+        _nvidia.Temperatures = temperatures;
         var read = new List<GpuSample>(gpus.Count);
         foreach (var gpu in gpus)
         {
@@ -114,6 +116,8 @@ internal sealed class NvidiaDriver : DriverLibrary
     private BusIdFunction? _busId;
     private PstatesFunction? _pstates;
     private readonly Dictionary<uint, IntPtr> _gpus = [];
+    private readonly int[] _info = new int[PstatesInts], _thermalSettings = new int[ThermalInts];
+    public bool Temperatures;
 
     protected override string FileName => "nvapi64.dll";
 
@@ -145,14 +149,14 @@ internal sealed class NvidiaDriver : DriverLibrary
 
     protected override (double? Percent, double? Watts, double? Celsius) Sample(GpuSample gpu, double now)
     {
-        var info = new int[PstatesInts];
-        info[0] = PstatesVersion;
+        var info = _info;
+        Array.Clear(info); info[0] = PstatesVersion;
         var handle = Handle(gpu)!.Value;
         if (_pstates!(handle, info) != 0) { Forget(); return default; }
         double? celsius = null;
-        var thermal = new int[ThermalInts];
-        thermal[0] = ThermalVersion;
-        if (_thermal is not null && _thermal(handle, AllSensors, thermal) == 0)
+        var thermal = _thermalSettings;
+        Array.Clear(thermal); thermal[0] = ThermalVersion;
+        if (Temperatures && _thermal is not null && _thermal(handle, AllSensors, thermal) == 0)
             for (int i = 0; i < Math.Min(thermal[1], 3); i++)
                 if (thermal[2 + i * 5 + 4] == GpuTarget) { celsius = thermal[2 + i * 5 + 3]; break; }
         return ((info[2] & 1) != 0 ? (uint)info[3] : null, null, celsius);

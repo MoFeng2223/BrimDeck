@@ -122,7 +122,6 @@ internal sealed class MediaSessions : IDisposable
     private KugouCdpConnection? Kugou => _connections.OfType<KugouCdpConnection>().FirstOrDefault();
     public bool RestartingKugou { get; private set; }
     public LibcefPatchState? KugouState { get; private set; }
-    public bool KugouInstalled => KugouState is not null;
     public bool KugouFullControl => Kugou?.Ready == true;
     // Why the last attempt to enable full control failed; cleared by the next attempt.
     public string? KugouError { get; private set; }
@@ -664,12 +663,15 @@ internal sealed class MediaSessions : IDisposable
         }
         catch { return null; }
 
+        // At most CoverPixels wide, and never wider than the picture itself: a smaller cover is not enlarged into a larger bitmap.
         BitmapSource Decode(BitmapCreateOptions options)
         {
             using var memory = new MemoryStream(bytes);
+            int width = BitmapDecoder.Create(memory, options | BitmapCreateOptions.DelayCreation, BitmapCacheOption.None).Frames[0].PixelWidth;
+            memory.Position = 0;
             var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad;
             image.CreateOptions = options;
-            image.DecodePixelWidth = CoverPixels; image.StreamSource = memory; image.EndInit(); image.Freeze(); return image;
+            image.DecodePixelWidth = Math.Clamp(width, 1, CoverPixels); image.StreamSource = memory; image.EndInit(); image.Freeze(); return image;
         }
     }
 

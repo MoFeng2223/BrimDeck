@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
+using System.Security.Principal;
 using System.ServiceProcess;
 using System.Text;
 using BrimDeck.Core;
@@ -60,7 +61,8 @@ internal sealed class SensorClient
     {
         try
         {
-            using var pipe = new NamedPipeClientStream(".", "BrimDeck.Sensors", PipeDirection.InOut, PipeOptions.Asynchronous);
+            // Identification: whoever answers on the pipe's name may learn who asks, never act as them.
+            using var pipe = new NamedPipeClientStream(".", "BrimDeck.Sensors", PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Identification);
             pipe.Connect(connect);
             pipe.Write("read\n"u8);
             pipe.Flush();

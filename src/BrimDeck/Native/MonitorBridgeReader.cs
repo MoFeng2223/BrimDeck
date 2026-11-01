@@ -49,10 +49,14 @@ internal sealed class MonitorBridgeReader
     public (double? Celsius, double? Watts, CpuTemperatureSource Source) Read(double now) =>
         _hwInfo.Read(now) ?? _libre.Read(now) ?? (null, null, CpuTemperatureSource.Zone);
 
+    // The copy of HWiNFO's memory, kept between readings so a second's reading does not allocate it again.
+    [ThreadStatic] private static byte[]? _copy;
+
     private static List<BridgeSensor> HwInfo()
     {
         var sensors = new List<BridgeSensor>();
         byte[] copy;
+        int length;
         try
         {
             using var map = MemoryMappedFile.OpenExisting(HwInfoMap, MemoryMappedFileRights.Read);
@@ -63,27 +67,34 @@ internal sealed class MonitorBridgeReader
             try
             {
                 try { held = mutex?.WaitOne(50) ?? false; } catch (AbandonedMutexException) { held = true; }
-                copy = new byte[Math.Min(view.Capacity, 16 << 20)];
-                view.ReadArray(0, copy, 0, copy.Length);
+                // Only as far as the readings end: the header (below) says where that is.
+                long end = view.Capacity < 44 ? view.Capacity : Math.Max(44, Math.Max(view.ReadInt32(20) + (long)view.ReadInt32(24) * view.ReadInt32(28),
+                    view.ReadInt32(32) + (long)view.ReadInt32(36) * view.ReadInt32(40)));
+                length = (int)Math.Clamp(end, 0, Math.Min(view.Capacity, 16 << 20));
+                copy = _copy is { } kept && kept.Length >= length ? kept : _copy = new byte[length];
+                view.ReadArray(0, copy, 0, length);
             }
             finally { if (held) mutex!.ReleaseMutex(); mutex?.Dispose(); }
         }
-        catch (Exception ex) when (ex is FileNotFoundException or IOException or UnauthorizedAccessException) { return sensors; }
+        catch (Exception ex) when (ex is FileNotFoundException or IOException or UnauthorizedAccessException) { _copy = null; return sensors; }
         // The header: "HWiS", version, revision, poll time (8), then offset, size and count of the sensors and of the readings.
-        if (copy.Length < 44 || Encoding.ASCII.GetString(copy, 0, 4) != "SiWH" && Encoding.ASCII.GetString(copy, 0, 4) != "HWiS") return sensors;
+        if (length < 44 || Encoding.ASCII.GetString(copy, 0, 4) != "SiWH" && Encoding.ASCII.GetString(copy, 0, 4) != "HWiS") return sensors;
         int sensorAt = BitConverter.ToInt32(copy, 20), sensorSize = BitConverter.ToInt32(copy, 24), sensorCount = BitConverter.ToInt32(copy, 28);
         int readingAt = BitConverter.ToInt32(copy, 32), readingSize = BitConverter.ToInt32(copy, 36), readingCount = BitConverter.ToInt32(copy, 40);
         if (sensorSize < 136 || readingSize < 292 || sensorCount < 0 || readingCount < 0) return sensors;
-        var names = new string[sensorCount];
-        for (int i = 0; i < sensorCount && sensorAt + (long)(i + 1) * sensorSize <= copy.Length; i++) names[i] = Text(copy, sensorAt + i * sensorSize + 8, 128);
-        // A reading: type, sensor index, reading id, original label (128), the user's label (128), unit (16), then the value.
-        for (int i = 0; i < readingCount && readingAt + (long)(i + 1) * readingSize <= copy.Length; i++)
+        var names = new string?[sensorCount];
+        // A reading: type, sensor index, reading id, original label (128), the user's label (128), unit (16), then the value. Only the
+        // sensors that have a temperature or power reading are named.
+        for (int i = 0; i < readingCount && readingAt + (long)(i + 1) * readingSize <= length; i++)
         {
             int at = readingAt + i * readingSize;
             int type = BitConverter.ToInt32(copy, at), sensor = BitConverter.ToInt32(copy, at + 4);
             BridgeReading? kind = type switch { 1 => BridgeReading.Temperature, 5 => BridgeReading.Power, _ => null };
-            if (kind is null || sensor < 0 || sensor >= names.Length || names[sensor] is null) continue;
-            sensors.Add(new BridgeSensor(names[sensor], Text(copy, at + 12, 128), kind.Value, BitConverter.ToDouble(copy, at + 284)));
+            if (kind is null || sensor < 0 || sensor >= names.Length || sensorAt + (long)(sensor + 1) * sensorSize > length) continue;
+            double value = BitConverter.ToDouble(copy, at + 284);
+            // HWiNFO gives temperatures in the unit its user chose.
+            if (kind == BridgeReading.Temperature && Text(copy, at + 268, 16).EndsWith('F')) value = (value - 32) * 5 / 9;
+            sensors.Add(new BridgeSensor(names[sensor] ??= Text(copy, sensorAt + sensor * sensorSize + 8, 128), Text(copy, at + 12, 128), kind.Value, value));
         }
         return sensors;
     }

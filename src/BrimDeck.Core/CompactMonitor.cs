@@ -273,9 +273,6 @@ public static class CompactMonitor
         return Width(shown, width, gap) <= available + 1e-9 ? shown : CompactMonitorItems.None;
     }
 
-    // Whether a region of the collapsed row this wide shows any of the readings; a region squeezed to nothing shows none, and the
-    // sampler is not run for them.
-    public static bool HasRoom(double region) => double.IsFinite(region) && region > 0;
 }
 
 // The colors of the collapsed readings at each level (ReadingLevels), from the color scheme. The normal state has a color per

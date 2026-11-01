@@ -162,7 +162,6 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
     private bool FilePending => FileFullControl && _process is { DebugPort: null };
     // A running player counts as installed even when neither registry entry is present.
     public bool Installed => _process is not null || Volatile.Read(ref _installed) is not null;
-    internal bool LogWatching => _log?.Watching == true;
     public event Action? Changed;
     public Task StartAsync() { _supervisor ??= Task.Run(SuperviseAsync); return Task.CompletedTask; }
     private void Signal() { if (_wake.CurrentCount == 0) { try { _wake.Release(); } catch (SemaphoreFullException) { } } }
@@ -193,6 +192,8 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
             if (_process?.IsAlive() != true)
             {
                 Clear();
+                // Looked for every second while a full-control setting waits for the player: the snapshot is the cheap check.
+                if (!ProcessSnapshot.Any("cloudmusic.exe")) { _unidentified = []; return; }
                 var processes = Process.GetProcessesByName("cloudmusic");
                 int[] ids;
                 try { ids = processes.Select(p => p.Id).Order().ToArray(); }

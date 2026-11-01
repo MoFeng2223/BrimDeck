@@ -163,10 +163,6 @@ internal static class IdleCostTests
 
     private static void Readings(Action<string, bool> check)
     {
-        // Only a region with room shows readings; squeezed to nothing, the sampler is not run for them.
-        check("Idle cost: readings with room are sampled", CompactMonitor.HasRoom(.5) && CompactMonitor.HasRoom(120));
-        check("Idle cost: readings without room are not sampled", !CompactMonitor.HasRoom(0) && !CompactMonitor.HasRoom(-3) && !CompactMonitor.HasRoom(double.NaN) && !CompactMonitor.HasRoom(double.PositiveInfinity));
-
         // The figure kept for each whole percent is the one the format gives.
         check("Idle cost: every whole percent's figure is the formatted one", Enumerable.Range(0, 2001).Select(i => i / 2000d - .0001)
             .Append(double.NaN).Append(2).Append(-1).All(share => MonitorFormat.WholePercent(share).ToString(System.Globalization.CultureInfo.InvariantCulture) == MonitorFormat.Percent(share)));

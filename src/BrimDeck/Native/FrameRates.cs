@@ -155,7 +155,7 @@ internal sealed class FrameRates : IDisposable
             bool stale = _processes is null || _processesFront != frontPid || now - _processesAt >= ProcessesSeconds
                 || !_processes.ContainsKey(pid) || busiest.Keys.Any(process => !_processes.ContainsKey(process));
             // At most once a reading: a process that ended before the list was taken stays missing from it.
-            if (stale && _processesAt != now) { _processes = Processes(); _processesAt = now; _processesFront = frontPid; }
+            if (stale && _processesAt != now) { _processes = ProcessSnapshot.Read(); _processesAt = now; _processesFront = frontPid; }
             return _processes!;
         }
         long Family(int pid)
@@ -315,21 +315,6 @@ internal sealed class FrameRates : IDisposable
         return best;
     }
 
-    // Each process's parent and executable file name, from one snapshot of the processes.
-    private static Dictionary<int, (int Parent, string File)> Processes()
-    {
-        var processes = new Dictionary<int, (int, string)>();
-        IntPtr snapshot = CreateToolhelp32Snapshot(2 /* TH32CS_SNAPPROCESS */, 0);
-        if (snapshot == new IntPtr(-1)) return processes;
-        try
-        {
-            var entry = new PROCESSENTRY32W { dwSize = Marshal.SizeOf<PROCESSENTRY32W>() };
-            for (bool more = Process32FirstW(snapshot, ref entry); more; more = Process32NextW(snapshot, ref entry))
-                processes[entry.th32ProcessID] = (entry.th32ParentProcessID, entry.szExeFile);
-        }
-        finally { CloseHandle(snapshot); }
-        return processes;
-    }
     private static bool Descends(int process, int ancestor, Dictionary<int, (int Parent, string File)> processes)
     {
         for (int depth = 0; depth < 8 && processes.TryGetValue(process, out var entry) && entry.Parent != 0 && entry.Parent != process; depth++)
@@ -494,10 +479,12 @@ internal sealed class FrameRates : IDisposable
         lock (_lock) if (_events.Count < MostEvents) _events.Add((time, pid, chain));
     }
 
+    // As large as the largest block asked for (StopLeftSessions).
+    private static readonly byte[] Zeros = new byte[120 + 2048];
     private static IntPtr Zeroed(int size)
     {
         IntPtr p = Marshal.AllocHGlobal(size);
-        for (int i = 0; i < size; i++) Marshal.WriteByte(p, i, 0);
+        Marshal.Copy(Zeros, 0, p, size);
         return p;
     }
 
@@ -511,12 +498,6 @@ internal sealed class FrameRates : IDisposable
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void EventRecordCallback(IntPtr record);
     private delegate bool WindowProc(IntPtr window, IntPtr data);
     [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct PROCESSENTRY32W
-    {
-        public int dwSize, cntUsage, th32ProcessID; public IntPtr th32DefaultHeapID; public int th32ModuleID, cntThreads, th32ParentProcessID, pcPriClassBase, dwFlags;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string szExeFile;
-    }
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode)] private static extern uint StartTraceW(out ulong handle, string name, IntPtr properties);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode)] private static extern uint ControlTraceW(ulong handle, string? name, IntPtr properties, uint code);
     [DllImport("advapi32.dll")] private static extern uint EnableTraceEx2(ulong handle, in Guid provider, uint code, byte level, ulong any, ulong all, uint timeout, IntPtr parameters);
@@ -536,7 +517,4 @@ internal sealed class FrameRates : IDisposable
     [DllImport("kernel32.dll")] private static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern bool QueryFullProcessImageNameW(IntPtr process, int flags, char[] name, ref int size);
     [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
-    [DllImport("kernel32.dll")] private static extern IntPtr CreateToolhelp32Snapshot(uint flags, int pid);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern bool Process32FirstW(IntPtr snapshot, ref PROCESSENTRY32W entry);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern bool Process32NextW(IntPtr snapshot, ref PROCESSENTRY32W entry);
 }

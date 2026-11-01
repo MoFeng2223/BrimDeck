@@ -27,7 +27,7 @@ internal sealed class SystemSampler : IDisposable
     private Thread? _thread;
     // Raised when a thread is replaced: only the thread of the current generation reads.
     private int _generation;
-    private volatile bool _wanted, _disposed, _listProcesses, _primeProcesses, _primePower;
+    private volatile bool _wanted, _disposed, _listProcesses, _primeProcesses, _primeCounters;
     private volatile int _intervalMilliseconds = 1000;
     // The providers belong to the sampling thread, which creates them: adding the performance counters can take tens of
     // milliseconds, which the panel must not wait for. Only HoldProcesses reaches them from the UI thread. The thermal zones and the
@@ -38,15 +38,19 @@ internal sealed class SystemSampler : IDisposable
     private GpuDrivers? _drivers;
     private SensorClient? _sensors;
     private readonly MonitorBridgeReader _bridges = new();
-    // The processor's temperature has come from its own sensors or a hardware monitor (CpuTemperatureSource).
-    private volatile bool _processorHeat;
+    // Until when (Now) the processor's temperature counts as coming from its own sensors or a hardware monitor (CpuTemperatureSource),
+    // and whether the last reading did: while one does, the zones are not read. The time bridges a reading or two that fails.
+    private const double HeatHold = 30;
+    private double _processorHeatUntil = double.NegativeInfinity, _driverHeatUntil = double.NegativeInfinity;
+    private bool _processorHeat;
     private ThermalZones? _zones;
     private GpuTemperatures? _gpuTemperatures;
     private readonly StorageReader _storage = new();
     // Whether the processor's and the graphics adapter's temperatures are read, the drives, and the drives' temperatures (SetExtras).
     // _powerWanted: the whole machine's power (the Energy Meter counters, NVIDIA's board power); _batteryWanted: the battery alone, which
     // the machine's charge reading needs without any of the rest.
-    private volatile bool _temperatures, _storageWanted, _driveTemperatures, _powerWanted, _batteryWanted;
+    // _gpuWanted: the graphics adapters' counters, for the page, the row's GPU reading and the power.
+    private volatile bool _temperatures, _storageWanted, _driveTemperatures, _powerWanted, _batteryWanted, _gpuWanted;
     // The whole machine's power and the machine's battery (PowerProvider, BatteryProvider), made on the sampling thread.
     private PowerProvider? _power;
     private BatteryProvider? _battery;
@@ -132,23 +136,24 @@ internal sealed class SystemSampler : IDisposable
     // Called on the UI thread with what the panels show: temperatures, the processor's and the graphics adapter's (the expanded page
     // with temperatures on, or the collapsed row's temperature); storage, the drives (the page with storage on, or the collapsed
     // row's drive); driveTemperatures, the drives' temperatures (the page with both on). The drives are first read at once, so the
-    // page knows early how many lines it needs for them. frames: a collapsed row or an open page shows the frame rate.
-    public void SetExtras(bool temperatures, bool storage, bool driveTemperatures, bool power = false, bool battery = false, bool frames = false)
+    // page knows early how many lines it needs for them. frames: a collapsed row or an open page shows the frame rate. gpu: the graphics
+    // adapters (the page, the row's GPU reading, the power).
+    public void SetExtras(bool temperatures, bool storage, bool driveTemperatures, bool power = false, bool battery = false, bool frames = false, bool gpu = false)
     {
         if (!_disposed) _frames.Want(frames);
-        bool newly = power && !_powerWanted;
+        bool newly = power && !_powerWanted || gpu && !_gpuWanted;
         _temperatures = temperatures; _storageWanted = storage; _driveTemperatures = storage && driveTemperatures; _powerWanted = power; _batteryWanted = power || battery;
-        // Power asked for while the sampler already runs (the collapsed row's readings kept it going): the counters are read at once and again
-        // after the short priming window, so the first figure comes with the next snapshot and not a second reading later.
-        if (newly && _wanted && _thread is not null) { _primePower = true; _wake.Set(); }
+        _gpuWanted = gpu || power;
+        // Power or the adapters asked for while the sampler already runs (the collapsed row's readings kept it going): the counters are read
+        // at once and again after the short priming window, so the first figure comes with the next snapshot and not a second reading later.
+        if (newly && _wanted && _thread is not null) { _primeCounters = true; _wake.Set(); }
         if (storage && (_storage.Drives == SensorState.Unknown || _driveTemperatures && _storage.Temperatures == SensorState.Unknown)) _storage.Start(_driveTemperatures);
     }
     // Whether the processor's zones, the graphics adapters and the drives have given temperatures, and whether drives were found and
     // how many (-1 until read); the page keeps room for what has turned up or has not been asked yet.
-    public SensorState CpuSensor => _processorHeat ? SensorState.Found : _zones?.State ?? SensorState.Unknown;
-    public SensorState GpuSensor => _driverHeat ? SensorState.Found : _gpuTemperatures?.State ?? SensorState.Unknown;
-    // An adapter's driver gave a temperature where the graphics kernel gave none (GpuSample.DriverTemperature).
-    private volatile bool _driverHeat;
+    public SensorState CpuSensor => Now() < Volatile.Read(ref _processorHeatUntil) ? SensorState.Found : _zones?.State ?? SensorState.Unknown;
+    // Found while an adapter's driver gives a temperature where the graphics kernel gives none (GpuSample.DriverTemperature).
+    public SensorState GpuSensor => Now() < Volatile.Read(ref _driverHeatUntil) ? SensorState.Found : _gpuTemperatures?.State ?? SensorState.Unknown;
     public SensorState DriveSensor => _storage.Temperatures;
     public SensorState StorageState => _storage.Drives;
     public int StorageCount => _storage.Count;
@@ -183,19 +188,19 @@ internal sealed class SystemSampler : IDisposable
         {
             try
             {
-                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _powerHistory.Clear(); _powerStats.Reset(); _powerSource = null; _cpuPower.Clear(); _gpuPower.Clear(); _power!.Sample(false, false, 0, [], default, false); _storage.Rest(); _wake.WaitOne(); continue; }
-                bool primePower = _primePower;
-                _primePower = false;
-                if (!primed || _primeProcesses || primePower)
+                if (!_wanted) { primed = false; Rest(); _wake.WaitOne(); continue; }
+                bool primeCounters = _primeCounters;
+                _primeCounters = false;
+                if (!primed || _primeProcesses || primeCounters)
                 {
                     // The counters are read once to start the deltas; the processes again on the first reading, so their
-                    // figures cover the short window and not the whole pause. Power asked for while the sampler runs is primed the same way:
+                    // figures cover the short window and not the whole pause. Power or adapters asked for while the sampler runs are primed the same way:
                     // one collection now, and the next (the first snapshot) has the two samples a rate needs.
                     bool primeProcesses = _primeProcesses;
                     _primeProcesses = false;
                     // Readings starting (the monitor opened or came back): a hardware monitor started meanwhile is looked for again.
                     if (!primed) { _bridges.Rescan(); Collect(listProcesses: true); }
-                    else if (primePower) Collect(listProcesses: primeProcesses && _listProcesses);
+                    else if (primeCounters) Collect(listProcesses: primeProcesses && _listProcesses);
                     else if (_listProcesses) _processes.Sample(Now());
                     primed = true; first = true;
                     _wake.WaitOne(PrimeMilliseconds);
@@ -227,10 +232,20 @@ internal sealed class SystemSampler : IDisposable
 
     private static double Now() => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
 
+    // Paused: the histories start over, and what only the readings need is let go until they start again: the process table's buffer
+    // (a megabyte or more), the last list and the programs' icons, read again with the first list.
+    private void Rest()
+    {
+        _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _powerHistory.Clear(); _powerStats.Reset(); _powerSource = null; _cpuPower.Clear(); _gpuPower.Clear();
+        _power!.Sample(false, false, 0, [], default, false); _storage.Rest();
+        _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting); _processes.Dispose(); ProcessIcons.Clear();
+    }
+
     private MonitorSnapshot Collect(bool listProcesses)
     {
         double now = Now();
         bool meter = _power!.Prepare(_powerWanted);
+        _gpu!.Want(_gpuWanted);
         bool pdh = _pdh?.Collect() == true;
         if (!_listProcesses) { _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting); _processesAt = double.NegativeInfinity; }
         else if (listProcesses || !_lastProcesses.HasValue || now - _processesAt >= ProcessSeconds)
@@ -244,14 +259,13 @@ internal sealed class SystemSampler : IDisposable
             _history.Enqueue((rates.DownBytesPerSecond, rates.UpBytesPerSecond));
         }
         bool temperatures = _temperatures;
-        var cpu = _cpu!.Sample(pdh); var gpus = _gpu!.Sample(pdh);
-        // Asked on every tick, so the zones' counters leave the query once temperatures are no longer wanted.
-        if (_zones!.Sample(temperatures, now) is { } zone) cpu = cpu.Map(sample => sample with { Temperature = zone.Celsius, TemperatureZone = zone.Zone });
+        var cpu = _cpu!.Sample(pdh); var gpus = _gpu.Sample(pdh);
+        // Asked on every tick, so the zones' counters leave the query once temperatures are no longer wanted or a better source gives them.
+        if (_zones!.Sample(temperatures && !_processorHeat, now) is { } zone) cpu = cpu.Map(sample => sample with { Temperature = zone.Celsius, TemperatureZone = zone.Zone });
         // The processor's own sensors through the sensor service where enhanced sensors are set up, else a hardware monitor the user
-        // runs; either stands in front of the zones. Neither is asked while nothing shows a temperature or power.
-        bool processorWanted = temperatures || _powerWanted;
-        var report = _sensors!.Read(processorWanted, now) is { Status: SensorStatus.Ok } ok ? ok : null;
-        var bridge = processorWanted && (report?.Package is null || report.PackageWatts is null) ? _bridges.Read(now) : default;
+        // runs; either stands in front of the zones. A hardware monitor is asked only for what the service did not give.
+        var report = _sensors!.Read(temperatures || _powerWanted, now) is { Status: SensorStatus.Ok } ok ? ok : null;
+        var bridge = temperatures && report?.Package is null || _powerWanted && report?.PackageWatts is null ? _bridges.Read(now) : default;
         if (temperatures && report?.Package is { } package)
             cpu = cpu.Map(sample => sample with
             {
@@ -260,11 +274,13 @@ internal sealed class SystemSampler : IDisposable
             });
         else if (temperatures && bridge.Celsius is { } bridged)
             cpu = cpu.Map(sample => sample with { Temperature = bridged, TemperatureZone = null, TemperatureSource = bridge.Source });
-        if (cpu.OrDefault?.TemperatureSource is not null and not CpuTemperatureSource.Zone) _processorHeat = true;
+        _processorHeat = temperatures && cpu.OrDefault?.TemperatureSource is not null and not CpuTemperatureSource.Zone;
+        if (_processorHeat) Volatile.Write(ref _processorHeatUntil, now + HeatHold);
         IReadOnlyList<StorageDrive> storage = _storageWanted ? _storage.Sample(now, _driveTemperatures) : [];
         Remember(_cpuHistory, cpu.OrDefault?.Usage);
         // The usage each adapter's driver gives, where it gives one (GpuDrivers); the curves follow the figure shown.
-        var adapters = gpus.TryGet(out var read) ? Remember(_drivers!.Read(read, now)) : [];
+        var adapters = gpus.TryGet(out var read) ? Remember(_drivers!.Read(read, now, temperatures)) : [];
+        if (!_gpuWanted) _gpuHistories.Clear();
         // The machine's power and battery: read only while something shows them; the history and the peak start over once none does.
         var power = Reading<PowerSample>.Unavailable(Why.Waiting);
         var battery = Reading<BatterySample>.Unavailable(Why.Waiting);
@@ -336,7 +352,7 @@ internal sealed class SystemSampler : IDisposable
         {
             // The graphics kernel gives none: the temperature the adapter's own driver gave with its usage (GpuDrivers).
             if (gpu.DriverTemperature is not { } own) return snapshot;
-            _driverHeat = true;
+            Volatile.Write(ref _driverHeatUntil, now + HeatHold);
             return snapshot with { Gpu = gpu with { Temperature = own } };
         }
         var from = heat.Adapter == GpuReadings.LuidText(gpu.Luid) ? null : snapshot.Gpus.FirstOrDefault(adapter => GpuReadings.LuidText(adapter.Luid) == heat.Adapter);
