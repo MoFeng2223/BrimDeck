@@ -1248,10 +1248,11 @@ public partial class MainWindow
         bool levels = playerVisible || systemVisible;
         float peak = levels ? _media?.Peak() ?? 0 : 0;
         // Captured audio drives the bars, as many values as the equalizer on show has bars (at whatever length it is set to), flowing
-        // along them or one frequency band for each bar, as the setting chooses; the session peak is the fallback.
+        // along them or one frequency band for each bar, as that equalizer's setting chooses; the session peak is the fallback.
         var shown = _expanded ? IsMusicPage ? _musicEqualizer : null : _alert is null ? _compactEqualizer : null;
         var bandLevels = shown is null ? default : _flowLevels.AsSpan(0, Math.Clamp(shown.Bars, 1, _flowLevels.Length));
-        bool flowing = levels && shown is not null && _media?.FlowLevels(bandLevels, Settings.EqualizerMode) == true;
+        var mode = _expanded ? Settings.MusicEqualizerMode : Settings.EqualizerMode;
+        bool flowing = levels && shown is not null && _media?.FlowLevels(bandLevels, mode) == true;
         if (_expanded && IsMusicPage) { if (flowing) _musicEqualizer?.Show(bandLevels, playing); else _musicEqualizer?.Tick(peak, playing, seconds); }
         if (!_expanded && _alert is null) { if (flowing) _compactEqualizer?.Show(bandLevels, compactPlaying); else _compactEqualizer?.Tick(peak, compactPlaying, seconds); }
         if (_trackNoticeUntil != default && now >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }
