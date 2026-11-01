@@ -126,6 +126,16 @@ internal static partial class Program
             Check("cleanup failures retain owning generation", host.Faults.Single() is { Operation: "dispose" } fault && fault.Generation == generation);
             context!.Report("retired cleanup", new Exception("late")); Check("completed teardown rejects later diagnostics", host.Faults.Count == 1);
         }
+        using (var host = LifecycleHost())
+        {
+            await host.ReconcileAsync([Def("save-failed", c => { c.OnDispose(() => throw new IOException("fixture save denied")); return ValueTask.CompletedTask; })]);
+            bool refused = false;
+            try { await host.StopForMaintenanceAsync("save-failed"); } catch (IOException) { refused = true; }
+            Check("failed final save blocks destructive maintenance", refused && host.Faults.Any(f => f.ModuleId == "save-failed"));
+            refused = false;
+            try { await host.StopForMaintenanceAsync("save-failed"); } catch (IOException) { refused = true; }
+            Check("retry cannot forget a failed cleanup barrier", refused);
+        }
         Check("existing status enum numbers preserved", (int)ModuleStatus.Disabled == 0 && (int)ModuleStatus.DependencyFailed == 4 && (int)ModuleStatus.Waiting == 5);
     }
 }

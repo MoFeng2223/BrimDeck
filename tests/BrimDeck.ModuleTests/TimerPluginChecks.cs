@@ -13,7 +13,7 @@ internal static partial class Program
 {
     private static void TimerPluginChecks(string sampleBuild)
     {
-        string packaged = Path.GetFullPath(Path.Combine(sampleBuild, "..", "..", "BrimDeck", "release", "mods", "timers"));
+        string packaged = _artifacts.Timers;
         string root = Path.Combine(_root, "external-timers"), installed = Path.Combine(root, "mods"), data = Path.Combine(root, "data");
         var receipts = new Dictionary<string, string>();
         ModuleBundleInstaller.Install(Path.GetDirectoryName(packaged)!, installed, receipts);

@@ -219,6 +219,9 @@ internal sealed class ModuleFiles
     private ModuleFileResult CleanCache(string id, IReadOnlyList<string> inUse)
     {
         string root = Child("modules-cache", id); bool pending = false; string? problem = null;
+        // Leases and directory enumeration can use different separators or a trailing slash.
+        // Compare directory identities, including ancestor leases, before deleting any cache entry.
+        var protectedPaths = inUse.Select(p => Path.TrimEndingDirectorySeparator(Path.GetFullPath(p))).ToArray();
         try
         {
             if (File.Exists(root)) DeleteTree(root);
@@ -226,7 +229,10 @@ internal sealed class ModuleFiles
             {
                 foreach (string child in Directory.GetFileSystemEntries(root))
                 {
-                    if (inUse.Any(p => string.Equals(p, child, StringComparison.OrdinalIgnoreCase) || p.StartsWith(child + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))) { pending = true; continue; }
+                    string candidate = Path.TrimEndingDirectorySeparator(Path.GetFullPath(child));
+                    if (protectedPaths.Any(p => string.Equals(p, candidate, StringComparison.OrdinalIgnoreCase)
+                        || p.StartsWith(candidate + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                        || candidate.StartsWith(p + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))) { pending = true; continue; }
                     try { DeleteTree(child); }
                     catch (Exception error) when (FileError(error)) { pending = true; problem = error.Message; }
                 }

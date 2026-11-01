@@ -33,7 +33,7 @@ internal static partial class Program
         Check("case-insensitive duplicate manifest fields are rejected", ModulePackageInspector.Inspect(duplicate).Issues.Any(i => i.Code == "duplicate-manifest-field"));
         string warnings = Copy("warnings"); Edit(warnings, json => json["unrecognizedField"] = true);
         Check("unknown manifest fields warn without inventing a runtime rejection", ModulePackageInspector.Inspect(warnings).Passed && ModulePackageInspector.Inspect(warnings).Issues.Any(i => i.Code == "unknown-manifest-field"));
-        string fixture = Path.GetFullPath(Path.Combine(sample, "..", "..", "BrimDeck.InspectionFixture", "release", "BrimDeck.InspectionFixture.dll"));
+        string fixture = _artifacts.InspectionFixture;
         string probe = Copy("no-execution"); File.Copy(fixture, Path.Combine(probe, Path.GetFileName(fixture)));
         string sentinel = Path.Combine(root, "must-not-execute.txt"), oldSentinel = Environment.GetEnvironmentVariable("BRIMDECK_CHECK_SENTINEL") ?? "";
         Environment.SetEnvironmentVariable("BRIMDECK_CHECK_SENTINEL", sentinel);
@@ -56,10 +56,11 @@ internal static partial class Program
                 if (fixtureBytes.AsSpan(offset, desktopName.Length).SequenceEqual(desktopName)) lowerName.CopyTo(fixtureBytes, offset);
             File.WriteAllBytes(Path.Combine(probe, Path.GetFileName(fixture)), fixtureBytes);
             Check("desktop assembly reference ban is case insensitive", ModulePackageInspector.Inspect(probe).Issues.Any(i => i.Code == "desktop-reference-denied"));
-            string checker = Path.GetFullPath(Path.Combine(sample, "..", "..", "BrimDeck.ModuleCheck", "release", "BrimDeck.ModuleCheck.exe"));
+            string checker = _artifacts.ModuleCheck;
             (int Code, string Output) Run(params string[] arguments)
             {
-                var start = new ProcessStartInfo(checker) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = root };
+                var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = root };
+                start.ArgumentList.Add(checker);
                 foreach (string argument in arguments) start.ArgumentList.Add(argument);
                 using var process = Process.Start(start)!;
                 var output = process.StandardOutput.ReadToEndAsync(); var error = process.StandardError.ReadToEndAsync();

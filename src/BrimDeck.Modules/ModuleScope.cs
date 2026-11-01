@@ -12,13 +12,16 @@ internal sealed class ModuleScope(Action<string, Exception> fault) : IDisposable
     private volatile bool _released;
     public bool Released => _released;
     private volatile bool _ready;
+    private int _finalizingThread;
+    internal List<Exception> CleanupErrors { get; } = [];
     public bool Ready => _ready && !_ended && !Token.IsCancellationRequested;
     internal void Activate() => _ready = true;
     internal T UseStorage<T>(Func<T> operation)
     {
         lock (_gate)
         {
-            ObjectDisposedException.ThrowIf(_released, this);
+            // Only the synchronous finalizer may save after cancellation; unrelated late work is revoked.
+            ObjectDisposedException.ThrowIf(_released || _ended && _finalizingThread != Environment.CurrentManagedThreadId, this);
             return operation();
         }
     }
@@ -46,7 +49,7 @@ internal sealed class ModuleScope(Action<string, Exception> fault) : IDisposable
         SafeDispose(resource);
     }
     private void SafeDispose(IDisposable resource)
-    { try { resource.Dispose(); } catch (Exception ex) { fault("dispose", ex); } }
+    { try { resource.Dispose(); } catch (Exception ex) { lock (_gate) CleanupErrors.Add(ex); fault("dispose", ex); } }
     public void CancelActivation()
     { try { _lifetime.Cancel(); } catch (Exception ex) { fault("cancel", ex); } }
     public void Dispose()
@@ -60,8 +63,9 @@ internal sealed class ModuleScope(Action<string, Exception> fault) : IDisposable
             _resources.Clear();
         }
         CancelActivation();
-        foreach (var resource in resources) SafeDispose(resource);
-        lock (_gate) _released = true;
+        _finalizingThread = Environment.CurrentManagedThreadId;
+        try { foreach (var resource in resources) SafeDispose(resource); }
+        finally { lock (_gate) { _finalizingThread = 0; _released = true; } }
         // Keep the cancelled token readable by a late activation continuation.
     }
 }

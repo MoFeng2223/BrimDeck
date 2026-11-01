@@ -2,11 +2,12 @@ namespace BrimDeck.Core;
 
 public sealed class ModuleSettings
 {
+    public int SchemaVersion { get; set; } = 1;
     public bool Enabled { get; set; } = true;
     public List<string> EnabledModules { get; set; } = [];
     public Dictionary<string, string> Approvals { get; set; } = [];
     public Dictionary<string, string> BundledPackages { get; set; } = [];
-    public ModuleSettings Copy() => new() { Enabled = Enabled, EnabledModules = [.. EnabledModules ?? []], Approvals = new(Approvals ?? []), BundledPackages = new(BundledPackages ?? []) };
+    public ModuleSettings Copy() => new() { SchemaVersion = SchemaVersion, Enabled = Enabled, EnabledModules = [.. EnabledModules ?? []], Approvals = new(Approvals ?? []), BundledPackages = new(BundledPackages ?? []) };
     public void Normalize()
     {
         EnabledModules = (EnabledModules ?? []).Where(ValidId).Distinct(StringComparer.Ordinal).ToList();

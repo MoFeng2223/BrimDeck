@@ -27,6 +27,8 @@ internal static partial class Program
             Check("unknown module sizes are explicitly zero", files.Measure("missing") is { DataBytes: 0, CacheBytes: 0, Error: null });
             Check("cache clear defers a protected active generation", files.ClearCache("sample", [current]).Pending && Directory.Exists(current) && !Directory.Exists(old));
             Check("cache clear preserves business data", files.Measure("sample") is { DataBytes: 709, CacheBytes: 5, CachePending: true });
+            Check("cache leases normalize separators case and trailing separators", files.ClearCache("sample", [current.Replace('\\', '/').ToUpperInvariant() + "/"]).Pending && Directory.Exists(current));
+            Check("ancestor cache lease protects all its generations", files.ClearCache("sample", [Path.Combine(root, "modules-cache", "sample")]).Pending && Directory.Exists(current));
             files = new(root); Check("cache cleanup request survives restart", files.HasPending && files.Problem is null);
             Check("startup clears released cache without changing data", !files.ProcessPending([]).Pending && files.Measure("sample") is { CacheBytes: 0, DataBytes: 709, CachePending: false });
             Throws("cache clear rejects path traversal", () => files.ClearCache("../../outside", []));

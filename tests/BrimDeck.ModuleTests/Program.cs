@@ -16,6 +16,7 @@ internal static partial class Program
     private static readonly List<string> Failures = [];
     private static int _checks;
     private static string _root = "";
+    private static TestArtifacts _artifacts = null!;
     private static void Check(string name, bool condition) { _checks++; if (!condition) Failures.Add(name); }
     private static void Throws(string name, Action action) { try { action(); Check(name, false); } catch { Check(name, true); } }
     private sealed class Scheduler : IModuleScheduler
@@ -40,22 +41,60 @@ internal static partial class Program
     {
         if (args.Length == 2 && args[0] == "--fingerprint") { Console.WriteLine(ModuleCatalog.Fingerprint(args[1])); return 0; }
         if (args.Length == 2 && args[0] == "--authoring-packages") return AuthoringPackageChecks(args[1]);
-        if (args.Length != 3 || !Path.GetFullPath(args[0]).StartsWith("E:\\", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("Pass E: test directory, source repository, and sample build directory.");
-        _root = Path.Combine(args[0], Guid.NewGuid().ToString("N")); Directory.CreateDirectory(_root); Console.WriteLine("Results: " + _root);
+        string testRoot, repository, manifest = Path.Combine(AppContext.BaseDirectory, "module-test-artifacts.txt");
+        string? notes = null; var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            RuntimeChecks().GetAwaiter().GetResult();
-            LifecycleChecks().GetAwaiter().GetResult();
-            HostApiChecks().GetAwaiter().GetResult();
-            CapabilityChecks().GetAwaiter().GetResult();
-            PerformanceChecks().GetAwaiter().GetResult();
-            LoaderChecks(args[2]).GetAwaiter().GetResult();
-            ModuleFileChecks(args[2]).GetAwaiter().GetResult();
-            ModuleBoundaryAuditChecks(); ModuleContinuationAuditChecks(args[2]); ModuleOrphanChecks();
-            UiChecks(args[1]); AsyncViewChecks(); ViewVisibilityChecks(); SettingsNavigationChecks(); SettingsSchemaChecks(); ModuleDeprecationChecks(); StartupGuardChecks(); PackageInspectorChecks(args[2]); ModuleHostRangeChecks(args[2]); ModuleSignatureChecks(); PlatformChecks().GetAwaiter().GetResult(); TimerPluginChecks(args[2]); BoundaryChecks(args[1]);
+            if (args.Length == 3 && !args[0].StartsWith("--", StringComparison.Ordinal))
+                (testRoot, repository, notes) = (args[0], args[1], args[2]);
+            else
+            {
+                var options = new Dictionary<string, string>(StringComparer.Ordinal);
+                for (int i = 0; i < args.Length; i += 2)
+                {
+                    if (i + 1 >= args.Length || args[i] is not ("--test-root" or "--repository" or "--artifacts" or "--group") || args[i + 1].StartsWith("--", StringComparison.Ordinal)
+                        || !options.TryAdd(args[i], args[i + 1])) throw new ArgumentException("Use --test-root <directory> --repository <repository> [--artifacts <manifest>] [--group <names>].");
+                }
+                testRoot = options.GetValueOrDefault("--test-root") ?? Path.Combine(Path.GetTempPath(), "BrimDeck.ModuleTests");
+                repository = options.GetValueOrDefault("--repository") ?? Directory.GetCurrentDirectory();
+                manifest = options.GetValueOrDefault("--artifacts") ?? manifest;
+                selected.UnionWith((options.GetValueOrDefault("--group") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            }
+            repository = Path.GetFullPath(repository);
+            if (!File.Exists(Path.Combine(repository, "BrimDeck.sln"))) throw new DirectoryNotFoundException("--repository must name the BrimDeck repository: " + repository);
+            _artifacts = TestArtifacts.Load(manifest, notes);
+            _root = Path.Combine(Path.GetFullPath(testRoot), Guid.NewGuid().ToString("N")); Directory.CreateDirectory(_root); Console.WriteLine("Results: " + _root);
         }
-        catch (Exception ex) { Failures.Add(ex.ToString()); }
-        File.WriteAllText(Path.Combine(_root, "results.json"), JsonSerializer.Serialize(new { checks = _checks, passed = _checks - Failures.Count, failures = Failures }, new JsonSerializerOptions { WriteIndented = true }));
+        catch (Exception error) { Console.Error.WriteLine(error.Message); return 2; }
+        var groups = new (string Name, Action Run)[]
+        {
+            ("runtime", () => RuntimeChecks().GetAwaiter().GetResult()), ("lifecycle", () => LifecycleChecks().GetAwaiter().GetResult()),
+            ("host-api", () => HostApiChecks().GetAwaiter().GetResult()), ("capabilities", () => CapabilityChecks().GetAwaiter().GetResult()),
+            ("performance", () => PerformanceChecks().GetAwaiter().GetResult()), ("loader", () => LoaderChecks(_artifacts.Notes).GetAwaiter().GetResult()),
+            ("files", () => ModuleFileChecks(_artifacts.Notes).GetAwaiter().GetResult()), ("boundaries", ModuleBoundaryAuditChecks),
+            ("continuations", () => ModuleContinuationAuditChecks(_artifacts.Notes)), ("orphans", ModuleOrphanChecks),
+            ("ui", () => UiChecks(repository)), ("async-views", AsyncViewChecks), ("visibility", ViewVisibilityChecks),
+            ("settings-navigation", SettingsNavigationChecks), ("settings-schema", SettingsSchemaChecks), ("deprecations", ModuleDeprecationChecks),
+            ("startup", StartupGuardChecks), ("inspector", () => PackageInspectorChecks(_artifacts.Notes)), ("host-range", () => ModuleHostRangeChecks(_artifacts.Notes)),
+            ("signatures", ModuleSignatureChecks), ("platform", () => PlatformChecks().GetAwaiter().GetResult()),
+            ("timers", () => TimerPluginChecks(_artifacts.Notes)), ("sdk-boundary", () => BoundaryChecks(repository))
+        };
+        if (selected.Except(groups.Select(g => g.Name), StringComparer.OrdinalIgnoreCase).Any()) { Console.Error.WriteLine("Unknown group. Available: " + string.Join(", ", groups.Select(g => g.Name))); return 2; }
+        var results = new List<object>();
+        bool uiReady = false;
+        foreach (var group in groups)
+        {
+            if (selected.Count > 0 && !selected.Contains(group.Name) && !(group.Name == "ui" && selected.Overlaps(["async-views", "visibility", "settings-navigation", "settings-schema", "timers"])))
+            { results.Add(new { name = group.Name, status = "not-selected", checks = 0, failures = 0 }); continue; }
+            if (group.Name is "async-views" or "visibility" or "settings-navigation" or "settings-schema" or "timers" && !uiReady)
+            { results.Add(new { name = group.Name, status = "blocked-by-ui", checks = 0, failures = 0 }); Failures.Add(group.Name + ": UI initialization failed; group not executed."); continue; }
+            int before = _checks, failed = Failures.Count;
+            try { group.Run(); if (group.Name == "ui") uiReady = true; }
+            catch (Exception error) { Failures.Add(group.Name + ": " + error); }
+            results.Add(new { name = group.Name, status = Failures.Count == failed ? "passed" : "failed", checks = _checks - before, failures = Failures.Count - failed });
+            Console.WriteLine($"Group {group.Name}: checks {_checks - before}, failures {Failures.Count - failed}");
+        }
+        File.WriteAllText(Path.Combine(_root, "results.json"), JsonSerializer.Serialize(new { checks = _checks, failures = Failures, groups = results }, new JsonSerializerOptions { WriteIndented = true }));
         foreach (string failure in Failures) Console.WriteLine("FAIL: " + failure);
         Console.WriteLine($"Module checks: {_checks}, failures: {Failures.Count}"); return Failures.Count == 0 ? 0 : 1;
     }

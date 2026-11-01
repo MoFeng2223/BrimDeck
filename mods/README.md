@@ -4,7 +4,7 @@
 
 本文与[开发指南](../docs/zh-CN/modules/contributing.md)、[API 参考](../docs/zh-CN/modules/api.md)组成三篇作者主文档；必要界面、生命周期、数据与错误规则均在其中。独立 SDK 含编译引用、检查器和由文档生成的完整模板，开发者不需要阅读宿主源码。UI、宿主规则和配方文章为可选深入材料。
 
-文档入口：[开发与贡献指南](../docs/zh-CN/modules/contributing.md)、[API 参考](../docs/zh-CN/modules/api.md)、[用户使用说明](../docs/zh-CN/modules.md)。
+文档入口：[开发与贡献指南](../docs/zh-CN/modules/contributing.md)、[API 参考](../docs/zh-CN/modules/api.md)、[用户使用说明](../docs/zh-CN/modules.md)、[升级记录与 C01–C34 验收映射](../docs/zh-CN/modules/platform-upgrade.md)。
 
 目标是让独立作者通过公开接口完成制作、安装、启停、页面、活动、组件、设置、诊断和版本升级。普通业务页面的内部修改不得成为其他模组的直接依赖；公共 SDK 的变化必须经过兼容性审查。
 

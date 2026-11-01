@@ -17,6 +17,7 @@ public sealed partial class ModuleHost
     }
     private readonly HashSet<Guid> _retiring = [];
     private readonly HashSet<string> _maintenance = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _stopFailures = new(StringComparer.Ordinal);
     internal void ResumeAfterMaintenance(string id) { lock (_gate) _maintenance.Remove(id); }
     internal async Task StopForMaintenanceAsync(string id)
     {
@@ -35,6 +36,11 @@ public sealed partial class ModuleHost
             } while (grew);
             foreach (string module in DependencyOrder(current.ToDictionary(p => p.Key, p => p.Value.Definition)).Reverse())
                 if (stopping.Contains(module)) { Retire(current[module]); State(current[module].Definition, ModuleStatus.Disabled); }
+            lock (_gate)
+            {
+                var failures = stopping.Where(_stopFailures.ContainsKey).Select(module => module + ": " + _stopFailures[module]).ToArray();
+                if (failures.Length > 0) throw new IOException("Plugin cleanup failed; files and data were retained. Restart before retrying maintenance. " + string.Join("; ", failures));
+            }
         }
         finally { _serial.Release(); }
     }
@@ -87,6 +93,8 @@ public sealed partial class ModuleHost
         try
         {
             active.Scope.Dispose();
+            if (active.Scope.CleanupErrors.Count > 0)
+                lock (_gate) _stopFailures[id] = string.Join("; ", active.Scope.CleanupErrors.Select(Describe));
             try { active.Definition.Release?.Invoke(); } catch (Exception error) { ReportOwned(active, "unload", error); }
         }
         finally { lock (_gate) _retiring.Remove(active.Generation); }
