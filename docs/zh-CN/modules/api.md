@@ -43,6 +43,36 @@
 
 此区块由 `tools/BrimDeck.ModuleDocs` 从指定契约类型生成；不要手工编辑。基础类型为模组作者使用，末尾的状态与统计 DTO 为宿主诊断使用。
 
+### `ModuleAppearance`
+
+程序集：`BrimDeck.UI`；命名空间：`BrimDeck`。
+
+| 成员签名 |
+| --- |
+| `ModuleAppearance(long Revision, bool Dark, bool HighContrast, string Language, double DeviceScale, double ContentScale, bool ReducedMotion, bool Preview)` |
+| `double ContentScale { get; init; }` |
+| `bool Dark { get; init; }` |
+| `double DeviceScale { get; init; }` |
+| `bool HighContrast { get; init; }` |
+| `string Language { get; init; }` |
+| `bool Preview { get; init; }` |
+| `bool ReducedMotion { get; init; }` |
+| `long Revision { get; init; }` |
+
+### `ModulePageSize`
+
+程序集：`BrimDeck.UI`；命名空间：`BrimDeck`。
+
+| 成员签名 |
+| --- |
+| `ModulePageSize(double Width = 480, double Height = 266, double MinWidth = 440, double MaxWidth = 1200, double MinHeight = 140, double MaxHeight = 400)` |
+| `double Height { get; init; }` |
+| `double MaxHeight { get; init; }` |
+| `double MaxWidth { get; init; }` |
+| `double MinHeight { get; init; }` |
+| `double MinWidth { get; init; }` |
+| `double Width { get; init; }` |
+
 ### `ModuleSettingsStore`
 
 程序集：`BrimDeck.UI`；命名空间：`BrimDeck`。
@@ -513,7 +543,10 @@
 | `ModulePage(string Title, string TitleEn, Func<ModuleViewContext, IModuleView> CreateView, int Order = 500)` |
 | `Func<ModuleViewContext, IModuleView> CreateView { get; init; }` |
 | `Func<ModuleViewContext, ValueTask<IModuleView>>? CreateViewAsync { get; init; }` |
+| `string? IconPath { get; init; }` |
 | `int Order { get; init; }` |
+| `ModulePageSize? Size { get; init; }` |
+| `bool SupportsLocalTheme { get; init; }` |
 | `string Title { get; init; }` |
 | `string TitleEn { get; init; }` |
 | `static ModulePage Async(string title, string titleEn, Func<ModuleViewContext, ValueTask<IModuleView>> create, int order = 500)` |
@@ -539,6 +572,7 @@
 | 成员签名 |
 | --- |
 | `ModuleViewContext(FrameworkElement owner, Action<string> openPage, Action<string> openSettings, Action<string> showActivity)` |
+| `ModuleAppearance Appearance { get; }` |
 | `bool IsVisible { get; }` |
 | `CancellationToken Lifetime { get; }` |
 | `Action<string> OpenPage { get; }` |
@@ -548,9 +582,11 @@
 | `void Dispose()` |
 | `IDisposable Every(TimeSpan interval, Action callback)` |
 | `IDisposable EveryVisible(TimeSpan interval, Action callback)` |
+| `IDisposable OnAppearanceChanged(Action<ModuleAppearance> changed)` |
 | `IDisposable OnDispose(Action cleanup)` |
 | `IDisposable OnVisibilityChanged(Action<bool> listener)` |
 | `IDisposable Own(IDisposable resource)` |
+| `string Translate(string chinese, string english)` |
 
 ### `IModuleActivity`
 
@@ -680,8 +716,13 @@
 | `static string Tertiary { get; }` |
 | `static void Appear(UIElement element)` |
 | `static Brush Brush(string color)` |
+| `static Button Button(ModuleViewContext context, string label, Action clicked)` |
 | `static TextBlock Centered(string text, double size, string color)` |
+| `static ProgressBar Progress(double percent)` |
+| `static Grid Ring(double percent, double size = 24, double thickness = 2)` |
+| `static Border Row(string title, string value)` |
 | `static TextBlock Text(string text, double size = 13)` |
+| `static Border ValueCard(string title, string value)` |
 
 ### `ModuleControlButton`
 
@@ -776,7 +817,7 @@
 | 成员签名 |
 | --- |
 | `const int Major = 1` |
-| `const int Minor = 7` |
+| `const int Minor = 8` |
 | `const string HostInfo = "host.info"` |
 | `const string UsageRead = "usage.read"` |
 | `const string MediaRead = "media.read"` |
