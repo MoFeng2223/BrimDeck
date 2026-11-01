@@ -676,10 +676,23 @@ internal sealed class QuotaCarousel : GlideCarousel
     private readonly Canvas _strip;
     // For screen readers: its name, every ring's tooltip line, rotating or not.
     protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => AutomationProperties.GetName(this).Replace("\n", Loc.T("；", "; ")));
+    // One ring with its application's letter inside, at the size the system readings' dials carry theirs for this height, in the secondary text color.
+    internal static Grid Ring((double Used, string Color, string Tip, string Letter) item, double size, double thickness, double scale)
+    {
+        var ring = UI.Ring(item.Used, item.Color, size, thickness);
+        // Empty without the setting (DeckSettings.QuotaRingLetters): the ring is then as it was without letters.
+        if (item.Letter.Length > 0
+            && RingLetter.Create(item.Letter, Math.Max(1, BrimDeck.Core.CompactMusicLayout.Half(7 * scale)), size, Math.Max(1, size - 2 * thickness),
+                Application.Current?.MainWindow is { } window ? VisualTreeHelper.GetDpi(window).PixelsPerDip : 1, UI.PanelFont, UI.Brush(UI.Secondary)) is { } letter)
+            ring.Children.Add(letter);
+        return ring;
+    }
+
+    // rowScale: the row's scale, which sizes the letter inside each ring (as the system readings' dials size theirs).
     // count: the whole rings the window holds (CompactSpacing.Window); gap: the row's gap, which the rings keep between them too.
     // flowing: the window as wide as the room gives it, not whole rings (the surface is being dragged; CompactSpacing.ShareFlowing),
     // with the ring it cuts faded over cut DIPs; nothing glides then.
-    public QuotaCarousel(IReadOnlyList<(double Used, string Color, string Tip)> items, double size, double thickness, double gap, int count, double edge,
+    public QuotaCarousel(IReadOnlyList<(double Used, string Color, string Tip, string Letter)> items, double size, double thickness, double rowScale, double gap, int count, double edge,
         TimeSpan elapsed = default, bool animate = true, double? flowing = null, double cut = 0)
     {
         // Ring positions, the window and the travel all use whole device pixels. Layout rounding would otherwise widen each gap
@@ -697,7 +710,7 @@ internal sealed class QuotaCarousel : GlideCarousel
         _strip = new Canvas { Width = items.Count * step, Height = size, RenderTransform = new TranslateTransform() };
         for (int i = 0; i < items.Count; i++)
         {
-            var ring = UI.Ring(items[i].Used, items[i].Color, size, thickness);
+            var ring = Ring(items[i], size, thickness, rowScale);
             Canvas.SetLeft(ring, edge + i * step); _strip.Children.Add(ring);
         }
         // A Canvas measures the strip at its full width. Inside the Grid the strip would be

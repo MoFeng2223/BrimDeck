@@ -1030,7 +1030,9 @@ public partial class MainWindow
                 if (text.Length == 0) text = _mediaTrack!.Caption;
             }
         }
-        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
+        // A quota ring with nothing read yet would be an empty grey circle that says nothing: it is left out until its quota has
+        // a reading (QuotaRings).
+        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? [.. Settings.EnabledApps.Where(HasQuotaReading)] : new List<AppEntry>();
         // The clock keeps its own width; shown alone, it is centred.
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
         double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
@@ -1042,7 +1044,7 @@ public partial class MainWindow
         var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, equalizer, Settings.EqualizerBars, showCover); CurrentCompactLayout = layout;
         // An auto-width surface takes the width of what the row shows; the new shape builds the row again. The track notice
         // and the lyric's changing length are left out, so the width changes only when the content itself does.
-        int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count : 0;
+        int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count(HasQuotaReading) : 0;
         bool steadyText = media && Settings.MusicText != CompactMusicText.None;
         double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, dpi, equalizer, Settings.EqualizerBars, showCover);
         // The surface is never narrower than what the row must show (CompactMusicLayout.RequiredWidth); like the width it asks
@@ -1122,7 +1124,7 @@ public partial class MainWindow
                 case CompactPart.Clock:
                     element = CompactRegion(clock!, room, clock!.ReservedWidth, clock.Height, row, RegionAnchor.Left, dpi); _compactClock = clock; break;
                 case CompactPart.Rings:
-                    element = _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout.RingSize, layout.RingThickness, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), _quotaElapsed, animate,
+                    element = _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout.RingSize, layout.RingThickness, layout.Scale, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), _quotaElapsed, animate,
                         flow > 0 ? rings.Window : null, ringCut); break;
                 case CompactPart.Music:
                     element = _compactMarquee = CompactTitle(text, room, layout); break;
@@ -1145,15 +1147,19 @@ public partial class MainWindow
         // The readings were built with the row; they start or stop the sampler and take the newest reading.
         _stripShowing = false; UpdateMonitorDemand();
     }
-    // One ring per application: the highest used share among its quotas, with every quota in the tooltip.
-    private (double Used, string Color, string Tip)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>
+    // Whether an application's quota has anything read, which its collapsed ring needs.
+    private bool HasQuotaReading(AppEntry entry) => DashboardUsage.Quota(entry, Snapshots).Metrics.Count > 0;
+    // One ring per application: the highest used share among its quotas, with every quota in the tooltip, and the application's
+    // letter inside when the setting asks for it, so the rings are told apart by more than their color.
+    private (double Used, string Color, string Tip, string Letter)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>
     {
         var snapshot = DashboardUsage.Quota(entry, Snapshots);
         var percentages = snapshot.Metrics.Where(m => m.UsedPercent is not null).Select(m => Math.Clamp(m.UsedPercent!.Value, 0, 100)).ToArray();
         double used = percentages.Length > 0 ? percentages.Max() : snapshot.Metrics.Count > 0 ? 100 : 0;
         string tip = entry.Name + " · " + (percentages.Length > 0 ? Loc.T($"已用 {used:0.#}%", $"{used:0.#}% used")
             : snapshot.Metrics.Count > 0 ? string.Join(Loc.T("；", "; "), snapshot.Metrics.Select(m => m.ValueText.Length > 0 ? m.ValueText + " " + m.ValueSuffix : Loc.Label(m.Label))) : snapshot.StatusLabel);
-        return (used, PanelTheme.QuotaTheme(entry), tip);
+        // The display name (AppEntry.Name: the name the user gave the application, else the source's own), so a renamed application's letter follows.
+        return (used, PanelTheme.QuotaTheme(entry), tip, CompactMusicLayout.RingLetterFor(Settings.QuotaRingLetters, entry.Name));
     }).ToArray();
     private Brush CompactEqualizerColor => MusicColor(Settings.EqualizerColor, Settings.EqualizerCustomColor, "equalizer");
     private Brush PageEqualizerColor => MusicColor(Settings.MusicPageEqualizerColor, Settings.MusicPageEqualizerCustomColor, "equalizer");
