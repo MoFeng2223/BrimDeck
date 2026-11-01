@@ -207,7 +207,7 @@ public sealed partial class SettingsWindow
         input.LostKeyboardFocus+=(_,_)=>Commit();
         input.KeyDown+=(_,e)=>{if(e.Key==Key.Enter){Commit();e.Handled=true;}if(e.Key==Key.Escape){input.Text=slider.Value.ToString("0",CultureInfo.InvariantCulture);e.Handled=true;}};
         // The whole box is the number's click target, not only the 16 DIP line of text in it (SW-08); the steppers take their own clicks.
-        chip.MouseLeftButtonDown+=(_,e)=>{input.Focus();input.CaretIndex=input.Text.Length;e.Handled=true;};
+        FieldBox.Attach(chip, input);
         return(slider,chip);
     }
     private FrameworkElement Dimension(string title, double value, double min, double max, Action<double> changed)

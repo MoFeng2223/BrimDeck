@@ -30,6 +30,8 @@
     <Compile Include="..\..\src\BrimDeck\PageHandover.cs" Link="PageHandover.cs" />
     <Compile Include="..\..\src\BrimDeck\RadioGroups.cs" Link="RadioGroups.cs" />
     <Compile Include="..\..\src\BrimDeck\RowFocus.cs" Link="RowFocus.cs" />
+    <Compile Include="..\..\src\BrimDeck\FieldBox.cs" Link="FieldBox.cs" />
+    <Compile Include="..\..\src\BrimDeck\EmptyClickFocus.cs" Link="EmptyClickFocus.cs" />
     <Compile Include="..\..\src\BrimDeck\DrawnAutomation.cs" Link="DrawnAutomation.cs" />
     <Compile Include="..\..\src\BrimDeck\Soft.cs" Link="Soft.cs" />
     <!-- The island itself: the shadow observes its properties, and the settled clip is checked on its drawing. -->

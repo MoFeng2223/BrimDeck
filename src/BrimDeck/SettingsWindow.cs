@@ -188,22 +188,8 @@ public sealed partial class SettingsWindow : Window
         Content = frame; RootVisual = frame; UpdateCaption(); Native.SettingsChrome.SetTheme(this, _palette.Dark); ShowPage(_page);
         _status.SetResourceReference(TextBlock.ForegroundProperty, "SettingsError"); PaletteChanged?.Invoke();
     }
-    // Clicking anything that is not a control takes focus off a text field, as elsewhere in Windows. WPF leaves the
-    // field focused otherwise, since panels and scroll areas do not take focus. The holder is a focusable frame that
-    // draws no outline and is skipped by Tab.
-    private static void ReleaseFocusOnEmptyClick(Window window, Func<UIElement> holder)
-    {
-        window.AddHandler(MouseDownEvent, new MouseButtonEventHandler((_, e) =>
-        {
-            // Any focused control counts: the script editor, for one, keeps focus in its own text area rather than a TextBox.
-            if (Keyboard.FocusedElement is not Visual focused || ReferenceEquals(focused, holder()) || !window.IsAncestorOf(focused)) return;
-            for (var node = e.OriginalSource as DependencyObject; node is not null && !ReferenceEquals(node, window);
-                 node = node is Visual ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node))
-                if (node is Control { Focusable: true, IsEnabled: true }) return;
-            // The window itself would hand focus straight back to the field, so the frame takes it.
-            Keyboard.Focus(holder());
-        }), true);
-    }
+    // Clicking anything that is not a control takes focus off a text field, as elsewhere in Windows (EmptyClickFocus).
+    private static void ReleaseFocusOnEmptyClick(Window window, Func<UIElement> holder) => EmptyClickFocus.Attach(window, holder);
     private StackPanel Brand(double size, Thickness margin)
     {
         var brand = new StackPanel { Margin = margin, VerticalAlignment = VerticalAlignment.Center };
@@ -399,7 +385,6 @@ public sealed partial class SettingsWindow : Window
         {
             string name=theme switch { SettingsTheme.System=>Loc.T("跟随系统", "System"),SettingsTheme.Light=>Loc.T("浅色", "Light"),_=>Loc.T("深色", "Dark") };
             var choice=new RadioButton { Style=(Style)FindResource("SettingsSegment"),Content=name,IsChecked=S.Theme==theme,GroupName="Theme" };
-            if(theme==new DeckSettings().Theme)MarkDefault(choice);
             AutomationProperties.SetName(choice,name); choice.Checked+=(_,_)=> { Change(s=>s.Theme=theme); RebuildTheme(); }; themes.Children.Add(choice);
         }
         // Each language is named in itself. Choosing one rebuilds the window in it, as a theme change does.
@@ -431,7 +416,6 @@ public sealed partial class SettingsWindow : Window
         foreach (var (placement, name) in new[] { (DisplayPlacement.Primary, Loc.T("跟随主显示器", "Primary display")), (DisplayPlacement.Chosen, Loc.T("自选显示器", "Choose displays")) })
         {
             var option = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = name, IsChecked = S.Display == placement, GroupName = "Display" };
-            if (placement == new DeckSettings().Display) MarkDefault(option);
             AutomationProperties.SetName(option, Loc.T("显示在 · ", "Show on · ") + name);
             option.Checked += (_, _) =>
             {
@@ -698,10 +682,9 @@ public sealed partial class SettingsWindow : Window
     private void WindowRules()
     {
         SectionTitle(Loc.T("窗口行为", "Window behavior"));
-        var defaults = new DeckSettings();
-        Group(BehaviorRow(Loc.T("有窗口最大化时", "When a window is maximized"), S.Maximized, value => Change(s => s.Maximized = value), defaults.Maximized),
-            BehaviorRow(Loc.T("有应用处于无边框全屏时", "When an app is in borderless full screen"), S.Borderless, value => Change(s => s.Borderless = value), defaults.Borderless),
-            BehaviorRow(Loc.T("有应用处于独占全屏时", "When an app is in exclusive full screen"), S.Exclusive, value => Change(s => s.Exclusive = value), defaults.Exclusive),
+        Group(BehaviorRow(Loc.T("有窗口最大化时", "When a window is maximized"), S.Maximized, value => Change(s => s.Maximized = value)),
+            BehaviorRow(Loc.T("有应用处于无边框全屏时", "When an app is in borderless full screen"), S.Borderless, value => Change(s => s.Borderless = value)),
+            BehaviorRow(Loc.T("有应用处于独占全屏时", "When an app is in exclusive full screen"), S.Exclusive, value => Change(s => s.Exclusive = value)),
             Toggle(Loc.T("同时检测后方窗口", "Also check windows behind"), S.BackgroundWindows, value => Change(s => s.BackgroundWindows = value),
                 help: Loc.T("开启后，正在使用的窗口后方有窗口最大化或无边框全屏时，也按上面对应的规则处理。关闭后只检测正在使用的窗口。",
                     "When on, a maximized or borderless full-screen window behind the window you are using also follows the matching rule above. When off, only the window you are using is checked.")),
@@ -1198,7 +1181,6 @@ public sealed partial class SettingsWindow : Window
         {
             var option = new RadioButton { Content = label, Style = (Style)FindResource("SettingsSegment"), GroupName = "MouseWheel", IsChecked = S.MouseWheel == action };
             AutomationProperties.SetName(option, title + " · " + label); option.Checked += (_, _) => Change(s => s.MouseWheel = action); options.Children.Add(option);
-            if (action == new DeckSettings().MouseWheel) MarkDefault(option);
         }
         return Row(title, SegmentBorder(options), help: () => Loc.T("仅在展开的面板区域内滚动时生效；歌词、明细等会滚动的区域不受影响。",
             "Works only when the wheel is rolled over the expanded panel; areas that scroll, such as the lyrics and the details, are not affected."));
@@ -1212,32 +1194,18 @@ public sealed partial class SettingsWindow : Window
         {
             var option = new RadioButton { Content = label, Style = (Style)FindResource("SettingsSegment"), GroupName = "ExpandPlace", IsChecked = S.ExpandAtPointer == atPointer };
             AutomationProperties.SetName(option, title + " · " + label); option.Checked += (_, _) => Change(s => s.ExpandAtPointer = atPointer); options.Children.Add(option);
-            if (atPointer == new DeckSettings().ExpandAtPointer) MarkDefault(option);
         }
         return Row(title, SegmentBorder(options), help: () => Loc.T("刘海或胶囊比展开面板更宽时，悬停展开的面板所在的位置。",
             "Where the panel opens when hovered, if the notch or capsule is wider than the expanded panel."));
     }
 
-    // An option that is the setting's default carries a faint "默认" after its name, and says so to screen readers (SW-14, S-05).
-    private void MarkDefault(RadioButton option)
+    private FrameworkElement BehaviorRow(string title, WindowBehavior selected, Action<WindowBehavior> changed)
     {
-        if (option.Content is not string label) return;
-        var mark = TextLine(Loc.T("默认", "default"), 10, TextTertiary); mark.Margin = new Thickness(4, 1, 0, 0); mark.VerticalAlignment = VerticalAlignment.Center;
-        var content = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
-        content.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center }); content.Children.Add(mark);
-        option.Content = content;
-        AutomationProperties.SetHelpText(option, Loc.T("默认选项", "Default option"));
-    }
-
-    private FrameworkElement BehaviorRow(string title, WindowBehavior selected, Action<WindowBehavior> changed, WindowBehavior fallback)
-    {
-        // Wide enough for the longest option with its "默认" mark.
-        var options = new UniformGrid { Columns = 3, Width = Loc.IsEnglish ? 384 : 354 };
+        var options = new UniformGrid { Columns = 3, Width = 324 };
         foreach (var behavior in Enum.GetValues<WindowBehavior>())
         {
             var option = new RadioButton { Content = BehaviorName(behavior), Style = (Style)FindResource("SettingsSegment"), GroupName = "Behavior" + title, IsChecked = selected == behavior };
             AutomationProperties.SetName(option, title + " · " + BehaviorName(behavior)); option.Checked += (_, _) => changed(behavior); options.Children.Add(option);
-            if (behavior == fallback) MarkDefault(option);
         }
         return Row(title, SegmentBorder(options));
     }
