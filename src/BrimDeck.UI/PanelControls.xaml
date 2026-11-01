@@ -82,6 +82,23 @@
       </Border>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
+  <Style x:Key="ModulePageMenuItem" TargetType="MenuItem">
+    <Setter Property="OverridesDefaultStyle" Value="True"/><Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Height" Value="30"/><Setter Property="Padding" Value="9,0"/>
+    <Setter Property="Foreground" Value="{DynamicResource PanelPrimary}"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="MenuItem">
+      <Border x:Name="Chrome" Background="Transparent" CornerRadius="5" Padding="{TemplateBinding Padding}" Height="{TemplateBinding Height}">
+        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <TextBlock x:Name="Check" Text="✓" Visibility="Hidden" VerticalAlignment="Center"/>
+          <ContentPresenter Grid.Column="1" ContentSource="Header" VerticalAlignment="Center"/>
+        </Grid>
+      </Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsChecked" Value="True"><Setter TargetName="Check" Property="Visibility" Value="Visible"/></Trigger>
+        <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource PanelHover}"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
   <Style x:Key="MediaSourceMenuItem" TargetType="MenuItem">
     <Setter Property="OverridesDefaultStyle" Value="True"/><Setter Property="Cursor" Value="Hand"/>
     <Setter Property="Height" Value="28"/><Setter Property="Padding" Value="8,0,10,0"/>

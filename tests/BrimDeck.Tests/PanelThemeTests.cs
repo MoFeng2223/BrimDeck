@@ -439,7 +439,7 @@ internal static class PanelThemeTests
         }
 
         // XAML: App.xaml carries the dark theme's colors as the first values of the brushes PanelTheme replaces.
-        var source = new DirectoryInfo(AppContext.BaseDirectory);
+        var source = new DirectoryInfo(File.Exists(Path.Combine(Environment.CurrentDirectory, "BrimDeck.sln")) ? Environment.CurrentDirectory : AppContext.BaseDirectory);
         while (source is not null && !File.Exists(Path.Combine(source.FullName, "BrimDeck.sln"))) source = source.Parent;
         check("The source tree is found for the XAML checks", source is not null);
         if (source is null) return;
@@ -457,7 +457,7 @@ internal static class PanelThemeTests
         // A brush outside the merged dictionary would win over the one PanelTheme publishes and never change.
         int mergedEnd = xaml.IndexOf("</ResourceDictionary.MergedDictionaries>", StringComparison.Ordinal);
         check("The panel brushes sit in the merged dictionary PanelTheme replaces", mergedEnd > 0 && brushes.All(match => match.Index < mergedEnd));
-        var published = File.ReadAllText(Path.Combine(app, "PanelTheme.cs"));
+        var published = File.ReadAllText(Path.Combine(source.FullName, "src", "BrimDeck.UI", "PanelTheme.cs"));
         check("Every XAML panel brush is published by PanelTheme", brushes.All(match => Regex.IsMatch(published,
             $@"\(\s*""Panel{match.Groups[1].Value}""\s*,\s*""{Token(match.Groups[1].Value)}""\s*\)")));
         check("No XAML refers to a panel brush with StaticResource, which would keep the first theme",

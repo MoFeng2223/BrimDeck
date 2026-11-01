@@ -35,6 +35,9 @@ try
     EdgeFrameTests.Run(Check);
     CollapsedMoveTests.Run(Check);
     HotkeyTests.Run(Check);
+    InputMethodTests.Run(Check);
+    TimerTests.Run(root, Check);
+    RollingNumbersTests.Run(Check);
     KeyboardResizeTests.Run(Check);
     CollapsedGeometryTests.Run(root, Check);
     PanelHeaderTests.Run(Check);

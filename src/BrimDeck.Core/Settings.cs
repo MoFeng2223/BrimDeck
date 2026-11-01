@@ -40,8 +40,8 @@ public sealed record FullscreenRule(string Name = "", string Path = "")
 public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, OpenCode = 17, OpenCodeGo = 18, OpenRouter = 19, Pi = 20 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckSettings.PageOrder.
-public enum DeckPage { Usage, Music, Monitor }
-public enum DefaultDeckPage { Last, Usage, Music, Monitor }
+public enum DeckPage { Usage, Music, Monitor, MiniApps }
+public enum DefaultDeckPage { Last, Usage, Music, Monitor, MiniApps }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
 // What a double click on an end of the collapsed notch or capsule does: turn its auto width on or off, or start moving it
@@ -336,6 +336,9 @@ public sealed class DeckSettings
     public double LineOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
     public string HideHotkey { get; set; } = "";
     public string ExpandHotkey { get; set; } = "";
+    public InputMethodSettings InputMethods { get; set; } = new();
+    public MiniAppsSettings MiniApps { get; set; } = new();
+    public ModuleSettings Modules { get; set; } = new();
     // The resize shortcut: modifiers with the arrow keys ("Ctrl+Alt+Arrows", HotkeyText.Arrows); unset by default.
     public string ResizeHotkey { get; set; } = "";
     public bool MusicPage { get; set; } = true;
@@ -600,6 +603,10 @@ public sealed class DeckSettings
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
         copy.FullscreenRules = FullscreenRules.Select(rule => rule with { }).ToList();
+        copy.MiniApps = MiniApps?.Copy() ?? new();
+        copy.Modules = Modules?.Copy() ?? new();
+        copy.InputMethods = new() { Enabled = InputMethods?.Enabled == true, Mode = InputMethods?.Mode ?? InputMethodMode.Control, Shortcut = InputMethods?.Shortcut ?? "Win+Space",
+            Profiles = (InputMethods?.Profiles ?? []).Select(p => new InputMethodChoice { Id = p.Id, Name = p.Name, Enabled = p.Enabled }).ToList() };
         return copy;
     }
     public void Normalize()
@@ -660,6 +667,10 @@ public sealed class DeckSettings
         OpenDelay = Math.Clamp(OpenDelay, 0, 2000);
         CloseDelay = Math.Clamp(CloseDelay, 0, 2000);
         AnimationDuration = Math.Clamp(AnimationDuration, 100, 1000);
+        InputMethods ??= new();
+        InputMethods.Normalize();
+        MiniApps ??= new(); MiniApps.Normalize();
+        Modules ??= new(); Modules.Normalize();
         if (!Enum.IsDefined(Theme)) Theme = SettingsTheme.System;
         PanelTheme = PanelThemes.NormalizeId(PanelTheme) is { Length: > 0 } panelTheme ? panelTheme : PanelThemes.Dark;
         // Two valid, different times or none: anything else keeps the theme's own hours.

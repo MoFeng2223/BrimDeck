@@ -1,0 +1,15 @@
+<Project>
+  <!-- Every module uses the same allowlisted packaging rule; shared SDK binaries are supplied by the host. -->
+  <Target Name="GetModulePackage" DependsOnTargets="Build" Returns="@(_ModulePackageFile)">
+    <Error Condition="'$(ModuleId)' == ''" Text="A module project must declare ModuleId." />
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(ModuleId)', '^[a-z0-9][a-z0-9-]{0,79}$'))" Text="ModuleId must be a valid local module id." />
+    <ItemGroup>
+      <_ModulePackageSource Include="$(TargetDir)*.dll;$(TargetDir)*.deps.json;$(TargetDir)module.json"
+        Exclude="$(TargetDir)BrimDeck.UI.dll;$(TargetDir)BrimDeck.Core.dll;$(TargetDir)BrimDeck.Modules.Abstractions.dll;$(TargetDir)BrimDeck.Modules.dll;$(TargetDir)BrimDeck.dll" />
+    </ItemGroup>
+    <!-- The id is validated above; this path is a single child of this project's output package directory. -->
+    <RemoveDir Directories="$(TargetDir)package/$(ModuleId)" />
+    <Copy SourceFiles="@(_ModulePackageSource)" DestinationFolder="$(TargetDir)package/$(ModuleId)" SkipUnchangedFiles="true" />
+    <ItemGroup><_ModulePackageFile Include="$(TargetDir)package/$(ModuleId)/*"><ModuleFolder>$(ModuleId)</ModuleFolder></_ModulePackageFile></ItemGroup>
+  </Target>
+</Project>

@@ -177,11 +177,12 @@ public sealed partial class SettingsWindow
         return new Border { Child = host, Background = UI.Brush(Inset), CornerRadius = new CornerRadius(7), Padding = new Thickness(3), Margin = new Thickness(0, 4, 0, 4) };
     }
 
-    private (Slider Slider, Border Number) NumericControls(string title, double value, double min, double max, double tick, string unit, Action<double> changed)
+    private (Slider Slider, Border Number) NumericControls(string title, double value, double min, double max, double tick, string unit, Action<double> changed, bool fractional = false)
     {
+        string Text(double number) => number.ToString(fractional ? "G15" : "0", CultureInfo.InvariantCulture);
         var slider = new Slider { Style=(Style)FindResource("SettingsSlider"),Minimum=min,Maximum=max,Value=Math.Clamp(value,min,max),
             SmallChange=tick,LargeChange=tick*2,TickFrequency=tick,IsSnapToTickEnabled=true,IsMoveToPointEnabled=true,VerticalAlignment=VerticalAlignment.Center };
-        var input = new TextBox { Style=(Style)FindResource("SettingsNumber"),Width=40,Text=slider.Value.ToString("0",CultureInfo.InvariantCulture),VerticalAlignment=VerticalAlignment.Center };
+        var input = new TextBox { Style=(Style)FindResource("SettingsNumber"),Width=fractional ? 56 : 40,Text=Text(slider.Value),VerticalAlignment=VerticalAlignment.Center };
         AutomationProperties.SetName(slider,title); AutomationProperties.SetName(input,Loc.T(title+"数值", title+" value"));
         var units=TextLine(unit,10,TextTertiary);units.Margin=new Thickness(4,0,6,0);units.VerticalAlignment=VerticalAlignment.Center;
         var minus=new RepeatButton { Style=(Style)FindResource("SettingsStepper"),Content="−" };
@@ -192,19 +193,22 @@ public sealed partial class SettingsWindow
         FieldFocus(chip, input, () => UI.Brush(_palette.InputBorder));
         void Set(double number)
         {
-            var next=Math.Clamp(Math.Round(number),min,max);
-            if(Math.Abs(slider.Value-next)<.01) { input.Text=next.ToString("0",CultureInfo.InvariantCulture);return; }
+            double steps = (number - min) / tick;
+            double next = fractional ? number : Math.Round(number);
+            if (fractional && double.IsFinite(steps)) next = min + Math.Round(steps) * tick;
+            next = Math.Clamp(next, min, max);
+            if(fractional ? slider.Value == next : Math.Abs(slider.Value-next)<.01) { input.Text=Text(next);return; }
             slider.Value=next;
         }
-        slider.ValueChanged+=(_,_)=>{input.Text=slider.Value.ToString("0",CultureInfo.InvariantCulture);changed(slider.Value);};
+        slider.ValueChanged+=(_,_)=>{input.Text=Text(slider.Value);changed(slider.Value);};
         void Commit()
         {
             if(double.TryParse(input.Text,NumberStyles.Float,CultureInfo.InvariantCulture,out var number)&&double.IsFinite(number))Set(number);
-            input.Text=slider.Value.ToString("0",CultureInfo.InvariantCulture);
+            input.Text=Text(slider.Value);
         }
         minus.Click+=(_,_)=>Set(slider.Value-tick);plus.Click+=(_,_)=>Set(slider.Value+tick);
         input.LostKeyboardFocus+=(_,_)=>Commit();
-        input.KeyDown+=(_,e)=>{if(e.Key==Key.Enter){Commit();e.Handled=true;}if(e.Key==Key.Escape){input.Text=slider.Value.ToString("0",CultureInfo.InvariantCulture);e.Handled=true;}};
+        input.KeyDown+=(_,e)=>{if(e.Key==Key.Enter){Commit();e.Handled=true;}if(e.Key==Key.Escape){input.Text=Text(slider.Value);e.Handled=true;}};
         return(slider,chip);
     }
     private FrameworkElement Dimension(string title, double value, double min, double max, Action<double> changed)

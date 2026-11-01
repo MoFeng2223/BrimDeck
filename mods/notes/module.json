@@ -1,0 +1,11 @@
+{
+  "apiVersion": 1,
+  "apiMinor": 6,
+  "capabilities": ["ui.pages", "ui.widgets", "ui.settings"],
+  "id": "sample-notes",
+  "name": "便笺示例 / Notes sample",
+  "version": "1.0.0",
+  "assembly": "BrimDeck.Sample.dll",
+  "entryType": "BrimDeck.Sample.NotesModule",
+  "dependencies": []
+}

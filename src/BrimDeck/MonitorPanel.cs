@@ -40,7 +40,7 @@ public partial class MainWindow
         bool shown = _expanded && IsMonitorPage && IsVisible && !IsSuppressed;
         bool page = shown && !DisplayPower.Off;
         // A row whose chosen readings all wait for their first figures has no width, yet must be read for them (StripAwaits).
-        bool strip = !_expanded && (_compactStrip is not null || StripAwaits()) && IsVisible && !IsSuppressed && !DisplayPower.Off && _alert is null && EffectiveStyle != CompactStyle.Line;
+        bool strip = !ModuleActivityPresented && !_expanded && (_compactStrip is not null || StripAwaits()) && IsVisible && !IsSuppressed && !DisplayPower.Off && _alert is null && EffectiveStyle != CompactStyle.Line;
         if (!shown)
         {
             // A list that is not on screen cannot be under the pointer, and a closed page keeps no card open.

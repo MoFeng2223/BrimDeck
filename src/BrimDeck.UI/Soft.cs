@@ -36,7 +36,8 @@ internal static class Soft
     public const double Shrunk = .94;
 
     // Whether anything moves: the setting in BrimDeck and Windows' own "animation effects".
-    public static bool Enabled => SystemParameters.ClientAreaAnimation && (Application.Current as App)?.Settings.Animations != false;
+    public static bool AnimationsEnabled { get; set; } = true;
+    public static bool Enabled => SystemParameters.ClientAreaAnimation && AnimationsEnabled;
 
     public static DoubleAnimation Fade(double from, double to, int milliseconds, IEasingFunction? easing = null) =>
         new(from, to, TimeSpan.FromMilliseconds(milliseconds)) { EasingFunction = easing ?? Out };

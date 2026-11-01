@@ -87,6 +87,7 @@ public partial class App : Application
         // Before anything is read: a reading left unanswered when the last run ended stops now (SensorGuard).
         SensorGuard.Start(folder);
         UseLanguage();
+        Soft.AnimationsEnabled = Settings.Animations;
         PanelTheme.Use(Settings);
         ScheduleDaylight();
         // "跟随系统" follows the Windows app theme while BrimDeck runs.
@@ -107,10 +108,14 @@ public partial class App : Application
         Usage = new UsageService(new DesktopSources(), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
             kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName));
         WindowDrags = new WindowDrags();
+        InitializeModules();
         Deck = new MainWindow(this); MainWindow = Deck;
+        InitializeModuleStartup();
         Displays = Native.Displays.Current(); AssignDisplays();
         Deck.Show();
+        StartMedia(); UpdateSystemDemand();
         InitializeHotkeys();
+        InitializeInputMethods();
         StartBackgroundUpdates();
         // Only for a user who has the monitor page with its power line: the rest never open it.
         if (Settings.MonitorPage && Settings.MonitorPower) PowerWarm.Start(Dispatcher);
@@ -123,6 +128,7 @@ public partial class App : Application
         if (e.Args.Contains("--settings")) OpenSettings();
         // A portable update that kept this version says why on the About page.
         else if (Updates.RestartFailed) OpenUpdateSettings();
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { _ = ConfigureModulesAsync(refresh: true); });
     }
     // A resident app must not vanish without a trace. Unhandled errors are appended to crash.log in the data folder;
     // errors on the UI thread are logged and the app keeps running, and unobserved task errors are only logged.
@@ -152,6 +158,7 @@ public partial class App : Application
         Resources["UnpinSourceName"] = Loc.T("取消固定", "Unpin");
     }
     public void OpenSettings() => ShowSettings(false);
+    internal void OpenMiniAppsSettings() { ShowSettings(false); _settingsWindow?.ShowPage(SettingsWindow.MiniAppsPage); }
     // Starting BrimDeck while it runs shows the hidden panels as well as the settings, so the panels come back even without
     // the tray icon.
     private void ShowFromRelaunch()
@@ -208,6 +215,7 @@ public partial class App : Application
         // A new collapsed style morphs every panel's surface into its form (MainWindow.MorphShape).
         bool styleChanged = settings.Style != Settings.Style;
         settings.Normalize(); Settings = settings;
+        Soft.AnimationsEnabled = settings.Animations;
         ApplyHotkeys();
         ApplyTray();
         // A panel whose collapsed row changes asks again as it is built (PresentMonitor).
@@ -219,6 +227,11 @@ public partial class App : Application
         ScheduleDaylight();
         AssignDisplays();
         foreach (var deck in Decks.ToList()) { if (styleChanged) deck.MorphShape(); else deck.ApplySettings(); }
+        if (InputMethods is not null) ConfigureInputMethods();
+        Modules.Publish(new BrimDeck.Modules.ModulePreferencesChanged());
+        Modules.Publish(new BrimDeck.Modules.ModuleUiChanged());
+        _ = ConfigureModulesAsync();
+        if (!settings.InputMethods.Enabled) foreach (var deck in Decks.ToList()) deck.ClearInputMethodPresentation();
         QueueSave();
         CollapsedChanged();
         if (dataChanged || syncEnabled || languageChanged) _ = Deck.RefreshAutomaticallyAsync(queueIfBusy: true);
@@ -250,6 +263,7 @@ public partial class App : Application
         // Into or out of high contrast the theme itself has not changed, so the clock's gradient stays as the user left it.
         if (systemChanged && !wasHigh && !PanelTheme.HighContrast && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
         foreach (var deck in Decks.ToList()) deck.ApplySettings();
+        Modules?.Publish(new BrimDeck.Modules.ModuleUiChanged());
         if (!reload) _settingsWindow?.PanelThemeChanged();
     }
     // A theme with a night look changes look at its hours (PanelThemes.IsNight): the timer is set for the next change, and at
@@ -303,14 +317,14 @@ public partial class App : Application
     }
     internal void StartMedia()
     {
-        bool wanted = Settings.MediaWanted;
+        bool wanted = Settings.MediaWanted || ModuleMediaSource.SubscriberCount > 0;
         if (wanted && Media is null) { Media = new MediaSessions(Dispatcher); Media.Changed += RaiseMediaChanged; Media.SetPresentationActive(_presentingMedia.Count > 0, _presentingSystemAudio.Count > 0); _ = Media.StartAsync(); }
         else if (!wanted && Media is not null) { Media.Changed -= RaiseMediaChanged; Media.Dispose(); Media = null; RaiseMediaChanged(); }
         // Switching the setting off leaves full control on until BrimDeck restarts.
         if (Settings.AppleMusicFullControl && Media is { AppleMusicFullControl: false } media) media.EnableAppleMusicFullControl();
         if (Media is not null) { Media.NeteaseAutoFullControl = Settings.NeteaseAutoFullControl; Media.NeteaseFileControlWanted = Settings.NeteaseFullControl; Media.KugouFullControlWanted = Settings.KugouFullControl; }
     }
-    private void RaiseMediaChanged() => MediaChanged?.Invoke();
+    private void RaiseMediaChanged() { PublishModuleMedia(); MediaChanged?.Invoke(); }
     // Audio levels are read while any panel shows music: the player's while it shows a song's bars, the whole system's while
     // it shows collapsed bars at all times and no song plays.
     internal void PresentMedia(MainWindow deck, bool active, bool system)
@@ -326,13 +340,17 @@ public partial class App : Application
         if (page) _presentingMonitor.Add(deck); else _presentingMonitor.Remove(deck);
         if (power) _presentingPower.Add(deck); else _presentingPower.Remove(deck);
         if (strip) _stripMonitor.Add(deck); else _stripMonitor.Remove(deck);
-        bool wanted = _presentingMonitor.Count + _stripMonitor.Count > 0;
+        UpdateSystemDemand();
+    }
+    private void UpdateSystemDemand()
+    {
+        bool wanted = _presentingMonitor.Count + _stripMonitor.Count + ModuleSystemSource.SubscriberCount > 0;
         if (Exiting || Monitor is null && !wanted) return;
         // The sampler reads the choice of graphics adapter on its own thread, where each part is read whole.
         if (Monitor is null)
         {
             Monitor = new SystemSampler(Dispatcher, () => (Settings.MonitorGpu, Settings.MonitorGpuName));
-            Monitor.Updated += snapshot => MonitorUpdated?.Invoke(snapshot);
+            Monitor.Updated += snapshot => { PublishModuleSystem(snapshot); MonitorUpdated?.Invoke(snapshot); };
             // A choice saved under an older key is kept under the adapter's key from now on (GpuChoice.Resolve).
             Monitor.GpuKeyUpgraded += (old, key) => { if (Settings.MonitorGpu == old) { Settings.MonitorGpu = key; QueueSave(); } };
         }
@@ -405,7 +423,10 @@ public partial class App : Application
     public void ExitApplication()
     {
         if (Exiting) return;
+        PauseModulesForExit();
         Exiting = true; Lifetime.Cancel(); _settingsWindow?.RememberSize(); FlushSettings();
+        DisposeInputMethods();
+        foreach (var deck in Decks.ToList()) deck.ClearInputMethodPresentation();
         _settingsWindow?.Hide();
         var decks = Decks.ToList();
         int waiting = decks.Count;
@@ -423,8 +444,9 @@ public partial class App : Application
     }
     protected override void OnExit(ExitEventArgs e)
     {
-        Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
-        Media?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
+        PauseModulesForExit(); DisposeModules();
+        Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); DisposeInputMethods(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        Media?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Lyrics?.Dispose(); Prices?.Dispose(); CompleteModuleStartupOnExit(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
 }

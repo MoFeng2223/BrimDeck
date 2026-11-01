@@ -9,7 +9,7 @@ using System.Windows.Threading;
 namespace BrimDeck;
 
 // How a rebuilt page takes over from the one it replaces.
-internal enum Handover
+public enum Handover
 {
     // At once, as when nothing about the page's form changed (a reading, the clock).
     None,
@@ -33,7 +33,7 @@ internal enum Handover
 // Each hand-over leaves on its own layer (a batch in the leaving layer), so a switch to another page while the last one is
 // still leaving lets that one finish leaving instead of cutting it off (motion-review F17); the page that was still arriving
 // leaves from where it was.
-internal sealed class PageHandover
+public sealed class PageHandover
 {
     private const double Travel = 16, Faint = .3;
     private readonly Grid _layer;
@@ -68,7 +68,18 @@ internal sealed class PageHandover
 
     public void Release(FrameworkElement content, Handover motion)
     {
-        if (_held.Count == 0 || motion == Handover.None || !Soft.Enabled) { _held.Clear(); return; }
+        if (!Soft.Enabled)
+        {
+            _held.Clear(); Drop();
+            content.BeginAnimation(UIElement.OpacityProperty, null);
+            if (content.RenderTransform is TranslateTransform shift)
+            {
+                shift.BeginAnimation(TranslateTransform.XProperty, null); shift.BeginAnimation(TranslateTransform.YProperty, null);
+                shift.X = shift.Y = 0;
+            }
+            return;
+        }
+        if (_held.Count == 0 || motion == Handover.None) { _held.Clear(); return; }
         var leaving = _held.ToList();
         _held.Clear();
         // A rebuild while the page was still arriving (the usage page's own panel is what arrives): its elements leave from the
@@ -209,6 +220,9 @@ internal sealed class PageHandover
 
     // Brings one rebuilt part up from faint (a column whose quota page flipped), once the page has been laid out.
     public static void Brighten(UIElement element) => HoldThenArrive(element, Faint, Soft.Short);
+
+    // Temporary compact feedback arrives with the same curve as page content, from invisible.
+    public static void Appear(UIElement element) => HoldThenArrive(element, 0, Soft.Short);
 
     private static void HoldThenArrive(UIElement element, double from, int milliseconds)
     {

@@ -66,6 +66,12 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
 
 - By default it turns into the Indicator when a window is maximized, and hides during full-screen games or video so it never opens by accident.
 
+### Input-method switching
+
+Enable the module under **Settings → Input methods** and choose **Notify only** or **Control switching**. Notify only keeps Windows shortcuts and briefly reports verified changes. Control mode supports a recorded shortcut, participants and order; by default, hold **Win**, tap **Space** to preview and release to apply. The original content returns after feedback. Excluded input methods remain installed in Windows.
+
+The module is off by default. This first version supports standard 64-bit applications; Windows handles unsupported windows. See the [input-method guide](docs/en-US/input-methods.md).
+
 ### AI usage
 
 <img src="docs/en-US/images/usage.png" width="100%" alt="AI usage page: quotas of Claude, Codex, Cursor and Antigravity in four columns">
@@ -146,6 +152,8 @@ Make sure the tool is signed in on this PC; for example, Antigravity needs its d
 No. Costs come from the amounts reported by each service or from public model prices, and are meant to show how much you use. Your actual subscription charges are on each provider's bill.
 
 ## Contributing
+
+Building the native input-method adapter also requires Visual Studio 2022's **Desktop development with C++** workload and a Windows SDK. The regular .NET build compiles and copies the adapter automatically.
 
 You are welcome to report problems, suggest features or ask for more tools and players in [Issues](https://github.com/MoFeng2223/BrimDeck/issues), and to contribute through pull requests.
 

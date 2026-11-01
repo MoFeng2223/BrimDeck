@@ -1,7 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\BrimDeck.Core\BrimDeck.Core.csproj" />
+    <ProjectReference Include="..\BrimDeck.UI\BrimDeck.UI.csproj" />
+    <ProjectReference Include="..\BrimDeck.Modules\BrimDeck.Modules.csproj" />
+    <ProjectReference Include="..\..\mods\timers\BrimDeck.Timers.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -38,6 +41,22 @@
   </ItemGroup>
 
   <Import Project="ReleaseVersion.targets" />
+  <ItemGroup><InternalsVisibleTo Include="BrimDeck.ModuleTests" /></ItemGroup>
+  <Import Project="InputMethods.Native.targets" />
+
+  <ItemGroup><BundledModuleProject Include="../../mods/timers/BrimDeck.Timers.csproj" /></ItemGroup>
+  <Target Name="CopyBundledModules" AfterTargets="Build">
+    <MSBuild Projects="@(BundledModuleProject)" Targets="GetModulePackage" Properties="Configuration=$(Configuration);Platform=AnyCPU">
+      <Output TaskParameter="TargetOutputs" ItemName="_BundledFiles" />
+    </MSBuild>
+    <Copy SourceFiles="@(_BundledFiles)" DestinationFiles="@(_BundledFiles->'$(TargetDir)mods/%(ModuleFolder)/%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="PublishBundledModules" AfterTargets="ComputeFilesToPublish">
+    <MSBuild Projects="@(BundledModuleProject)" Targets="GetModulePackage" Properties="Configuration=$(Configuration);Platform=AnyCPU">
+      <Output TaskParameter="TargetOutputs" ItemName="_PublishBundledFiles" />
+    </MSBuild>
+    <ItemGroup><ResolvedFileToPublish Include="@(_PublishBundledFiles)"><RelativePath>mods/%(_PublishBundledFiles.ModuleFolder)/%(_PublishBundledFiles.Filename)%(_PublishBundledFiles.Extension)</RelativePath><CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory></ResolvedFileToPublish></ItemGroup>
+  </Target>
 
   <!-- The release build publishes the sensor service first and passes its SHA-256 here: the copy downloaded when the user turns
        enhanced sensors on must match it (Native.SensorSetup). A build without it uses BrimDeck.Sensors.exe beside BrimDeck.exe. -->

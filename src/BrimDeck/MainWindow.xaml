@@ -1,9 +1,9 @@
 <Window x:Class="BrimDeck.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:BrimDeck" Title="BrimDeck" WindowStyle="None"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:BrimDeck" xmlns:ui="clr-namespace:BrimDeck;assembly=BrimDeck.UI" Title="BrimDeck" WindowStyle="None"
         AllowsTransparency="True" Background="Transparent" ResizeMode="NoResize" Topmost="True"
         ShowActivated="False" ShowInTaskbar="False" Width="760" Height="256" Style="{StaticResource {x:Type Window}}">
   <Window.Resources>
-    <ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="ModelDetailsResources.xaml"/><ResourceDictionary Source="ToolbarResources.xaml"/><ResourceDictionary Source="MusicResources.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary>
+    <ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="ModelDetailsResources.xaml"/><ResourceDictionary Source="/BrimDeck.UI;component/PanelControls.xaml"/><ResourceDictionary Source="MusicResources.xaml"/><ResourceDictionary Source="/BrimDeck.UI;component/TimerResources.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary>
   </Window.Resources>
   <Grid x:Name="Stage" Background="{x:Null}">
     <!-- Hover state belongs to the zone, so moving between the panel and the strip above it never counts as leaving.
@@ -25,7 +25,7 @@
           <Grid.Effect>
             <DropShadowEffect Color="Black" BlurRadius="14" ShadowDepth="4" Direction="270" Opacity="0.28"/>
           </Grid.Effect>
-          <local:IslandBorder Background="{Binding Background, ElementName=Island}" CornerRadius="{Binding CornerRadius, ElementName=Island}"
+          <ui:IslandBorder Background="{Binding Background, ElementName=Island}" CornerRadius="{Binding CornerRadius, ElementName=Island}"
                               ShoulderRadius="{Binding ShoulderRadius, ElementName=Island}" Inset="1"/>
         </Grid>
       </Grid>
@@ -33,7 +33,7 @@
            the rounded corners and the gap above the capsule. It sits below the island so compact content keeps its own hit testing.
            Collapsed, SetExpanded places it at the box HoverExtensionBox gives; open, it stretches across the island again. -->
       <Border x:Name="HoverExtension" Background="#01000000" Height="0" VerticalAlignment="Top" HorizontalAlignment="Stretch"/>
-      <local:IslandBorder x:Name="Island" HorizontalAlignment="Left" VerticalAlignment="Top" Width="238" Height="32"
+      <ui:IslandBorder x:Name="Island" HorizontalAlignment="Left" VerticalAlignment="Top" Width="238" Height="32"
               Background="Black" BorderThickness="0" CornerRadius="0,0,12,12" ShoulderRadius="16" MaterialOpacity="1" ClipToBounds="True">
         <!-- The layered window and the island's rounded clip would leave text in grayscale; the surface beneath is always opaque,
              so ClearType is safe here. Text under a fade, a mask or another clip falls back to grayscale until that ends. -->
@@ -45,6 +45,10 @@
             <Grid.RenderTransform><ScaleTransform x:Name="CompactScale"/></Grid.RenderTransform>
             <StackPanel x:Name="CompactRings" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             <StackPanel x:Name="CompactAlert" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+            <TextBlock x:Name="TransientFeedback" FontSize="12" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" Foreground="{DynamicResource PanelPrimary}" TextAlignment="Center" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" HorizontalAlignment="Stretch" Visibility="Collapsed" IsHitTestVisible="False"/>
+            <Grid x:Name="ModuleNoticeContent" Margin="0,4" Visibility="Collapsed" IsHitTestVisible="False"/>
+            <Grid x:Name="ModuleCompact" Visibility="Collapsed" IsHitTestVisible="False"/>
+            <Grid x:Name="TransientLeavingContent" IsHitTestVisible="False"/>
           </Grid>
           <!-- Pinned to the top. Its width follows the island's, before the panel's scale (MainWindow.Scale.cs). It only fades: it has no
                render transform, because text under a transform that is not exactly the identity is drawn unhinted and off the pixel
@@ -56,6 +60,7 @@
               <Grid Grid.Row="1" x:Name="UsageContent" Margin="6,0,6,10"/>
               <Grid Grid.Row="1" x:Name="MonitorContent" Visibility="Collapsed"/>
               <Grid Grid.Row="1" x:Name="MusicContent" Visibility="Collapsed"/>
+              <Grid Grid.Row="1" x:Name="MiniAppsContent" Visibility="Collapsed"/>
               <!-- What a rebuilt usage or media page replaced, while it leaves (PageHandover). It spans the header row too and is
                    placed where the old content was: the next page's header row may be taller or shorter. -->
               <Grid Grid.Row="0" Grid.RowSpan="2" x:Name="LeavingContent"/>
@@ -84,6 +89,9 @@
                 </Button>
                 <Button x:Name="MonitorPageButton" Style="{StaticResource PanelIconButton}" Width="28" Height="24" Margin="1,0,0,0" Click="MonitorPage_Click">
                   <Viewbox Width="16" Height="16"><Canvas Width="24" Height="24"><Path Data="M 2,12.5 H 6.5 L 9.5,5 L 14.5,19 L 17.5,12.5 H 22" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.65" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox>
+                </Button>
+                <Button x:Name="MiniAppsPageButton" Style="{StaticResource PanelIconButton}" Width="28" Height="24" Margin="1,0,0,0" Click="MiniAppsPage_Click" ToolTip="小程序 / Mini apps">
+                  <Viewbox Width="16" Height="16"><Canvas Width="24" Height="24"><Path Data="M 3,3 H 10 V 10 H 3 Z M 14,3 H 21 V 10 H 14 Z M 3,14 H 10 V 21 H 3 Z M 14,14 H 21 V 21 H 14 Z" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.65" StrokeLineJoin="Round"/></Canvas></Viewbox>
                 </Button>
                  </StackPanel>
                  </Grid>
@@ -131,9 +139,11 @@
                   <Button x:Name="SettingsButton" Style="{StaticResource PanelSettingsButton}" Content="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="16" Click="Settings_Click"/>
                 </StackPanel>
               </Grid>
+            <Grid x:Name="ModuleControlHost" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Top" Width="320" Height="76"/>
+            <Grid x:Name="TransientContent" Visibility="Collapsed" Focusable="False" HorizontalAlignment="Center" VerticalAlignment="Top"/>
           </Grid>
         </Grid>
-      </local:IslandBorder>
+      </ui:IslandBorder>
     </Grid>
   </Grid>
 </Window>

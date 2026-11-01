@@ -37,7 +37,8 @@ internal static class ExpandStillTests
             }
             return found;
         }
-        foreach (Match m in Regex.Matches(text, @"ExpandedContent\s*\.\s*(RenderTransform|LayoutTransform)\s*=[^=]|\bContentScale\b|Animate\(\s*ExpandedContent[^;]*ScaleTransform"))
+        // A module viewport's ContentScale is a layout parameter, not the old ContentScale animation target.
+        foreach (Match m in Regex.Matches(text, @"ExpandedContent\s*\.\s*(RenderTransform|LayoutTransform)\s*=[^=]|\bAnimate\(\s*ContentScale\b|\bContentScale\s*\.\s*(ScaleX|ScaleY|BeginAnimation)\b|Animate\(\s*ExpandedContent[^;]*ScaleTransform"))
             found.Add(fileName + ": " + m.Value.Trim());
         return found;
     }
@@ -52,6 +53,10 @@ internal static class ExpandStillTests
         check("Expand still: a page that only fades, and a transform on something else, are not found",
             Transforms("new.xaml", """<Grid x:Name="ExpandedContent" Visibility="Hidden" Opacity="0"><Grid x:Name="ContentCanvas"><Grid.RenderTransform><ScaleTransform/></Grid.RenderTransform></Grid></Grid>""").Count == 0
             && Transforms("new.cs", "Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut);").Count == 0);
+
+        check("Expand still: a module viewport scale is not an animation of the open panel",
+            Transforms("viewport.cs", "new ModuleViewport(width, height) { ContentScale = scale }; view.SetViewport(viewport.Width, viewport.Height, viewport.ContentScale);").Count == 0
+            && Transforms("animated.cs", "ContentScale.BeginAnimation(ScaleTransform.ScaleXProperty, animation); ContentScale.ScaleY = .96;").Count == 2);
 
         // The XAML finder looks at the element's direct children in whatever order they come, and only those.
         check("Expand still: a transform after Grid.Resources, a transform as an attribute, and one after nested elements are found",
