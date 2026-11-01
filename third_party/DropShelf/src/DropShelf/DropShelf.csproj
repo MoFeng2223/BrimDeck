@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>DropShelf</AssemblyName>
+    <RootNamespace>DropShelf</RootNamespace>
+    <Version>2.6.7</Version>
+    <AssemblyVersion>2.6.7.0</AssemblyVersion>
+    <FileVersion>2.6.7.0</FileVersion>
+    <Product>DropShelf for Windows</Product>
+    <Company>DropShelf</Company>
+    <Authors>DropShelf Project</Authors>
+    <Description>通过鼠标手势呼出的 Windows 临时文件置物架</Description>
+    <ApplicationIcon>Assets\DropShelf.ico</ApplicationIcon>
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+    <!-- 托盘程序的内存堆很小，不需要后台并发回收；少一个常驻的后台回收线程和它的内存。 -->
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+  </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="Assets\DropShelf.ico" />
+    <Resource Include="Assets\DropShelf-256.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="DropShelf.Tests" />
+    <!-- BrimDeck host adapters are shared so this retained standalone project remains buildable. -->
+    <Compile Include="..\..\..\..\src\BrimDeck.Shelves\EmbeddedHostOptions.cs" Link="Hosting\EmbeddedHostOptions.cs" />
+    <Compile Include="..\..\..\..\src\BrimDeck.Shelves\HostedResources.cs" Link="Hosting\HostedResources.cs" />
+    <Compile Include="..\..\..\..\src\BrimDeck.Shelves\ShelfItem.Hosting.cs" Link="Hosting\ShelfItem.Hosting.cs" />
+  </ItemGroup>
+</Project>

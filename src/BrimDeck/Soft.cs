@@ -37,6 +37,37 @@ internal static class Soft
     // Whether anything moves: the setting in BrimDeck and Windows' own "animation effects".
     public static bool Enabled => SystemParameters.ClientAreaAnimation && (Application.Current as App)?.Settings.Animations != false;
 
+    public static readonly DependencyProperty ReducedProperty = DependencyProperty.RegisterAttached("Reduced", typeof(bool), typeof(Soft), new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.Inherits));
+    public static bool GetReduced(DependencyObject element) => (bool)element.GetValue(ReducedProperty);
+    public static void SetReduced(DependencyObject element, bool value) => element.SetValue(ReducedProperty, value);
+    public static bool For(DependencyObject? element)
+    {
+        if (!Enabled) return false;
+        if (element is System.Windows.Controls.Primitives.Popup popup) element = popup.PlacementTarget ?? element;
+        if (element is System.Windows.Controls.ContextMenu menu) element = menu.PlacementTarget ?? element;
+        return element is null || !GetReduced(element);
+    }
+    public static void StopTree(DependencyObject element)
+    {
+        if (element is UIElement animated) animated.BeginAnimation(UIElement.OpacityProperty, null);
+        if (element is FrameworkElement sized) { sized.BeginAnimation(FrameworkElement.WidthProperty, null); sized.BeginAnimation(FrameworkElement.HeightProperty, null); }
+        if (element is UIElement visual)
+        {
+            if (visual.RenderTransform is Transform transform) StopTransforms(transform);
+            visual.CacheMode = null;
+        }
+        if (element is Visual)
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(element); i++) StopTree(VisualTreeHelper.GetChild(element, i));
+    }
+    private static void StopTransforms(Transform transform)
+    {
+        if (transform.IsFrozen) return;
+        if (transform is TransformGroup group) { foreach (var child in group.Children) StopTransforms(child); return; }
+        if (transform is TranslateTransform shift) { shift.BeginAnimation(TranslateTransform.XProperty, null); shift.BeginAnimation(TranslateTransform.YProperty, null); }
+        if (transform is ScaleTransform scale) { scale.BeginAnimation(ScaleTransform.ScaleXProperty, null); scale.BeginAnimation(ScaleTransform.ScaleYProperty, null); }
+        if (transform is RotateTransform turn) turn.BeginAnimation(RotateTransform.AngleProperty, null);
+    }
+
     public static DoubleAnimation Fade(double from, double to, int milliseconds, IEasingFunction? easing = null) =>
         new(from, to, TimeSpan.FromMilliseconds(milliseconds)) { EasingFunction = easing ?? Out };
 
@@ -44,7 +75,14 @@ internal static class Soft
     // The element's own transform is replaced only when it has none.
     public static void Enter(UIElement? element, double drop = 6)
     {
-        if (element is null || !Enabled) return;
+        if (element is null) return;
+        if (!For(element))
+        {
+            // Reopening can reuse a surface whose previous entrance is still running when motion was turned off.
+            element.BeginAnimation(UIElement.OpacityProperty, null);
+            if (element.RenderTransform is TranslateTransform { IsFrozen: false } previous) previous.BeginAnimation(TranslateTransform.YProperty, null);
+            return;
+        }
         var start = Fade(0, 1, Short); start.FillBehavior = FillBehavior.Stop;
         element.BeginAnimation(UIElement.OpacityProperty, start);
         if (element.RenderTransform is not (null or MatrixTransform { Matrix.IsIdentity: true } or TranslateTransform { IsFrozen: false })) return;
@@ -57,6 +95,7 @@ internal static class Soft
     // it has gone. It leaves at full speed and slows, as what arrives does (motion-review F13).
     public static void Leave(UIElement element, Action done, double rise = 4)
     {
+        if (!For(element)) { done(); return; }
         var fade = Fade(element.Opacity, 0, Quick);
         fade.Completed += (_, _) => done();
         element.BeginAnimation(UIElement.OpacityProperty, fade);

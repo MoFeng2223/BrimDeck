@@ -57,7 +57,7 @@ public partial class MainWindow
 
     private void ShadowChanging()
     {
-        if (_shadowSettle is null) return;
+        if (_shadowSettle is null || !Soft.For(ShadowHost)) return;
         ShadowHost.CacheMode = null; _shadowSettle.Stop(); _shadowSettle.Start();
     }
 

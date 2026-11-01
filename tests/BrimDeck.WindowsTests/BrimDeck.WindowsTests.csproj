@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\BrimDeck.Core\BrimDeck.Core.csproj" />
+    <ProjectReference Include="..\..\src\BrimDeck.Shelves\BrimDeck.Shelves.csproj" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
     <Compile Include="..\..\src\BrimDeck\Native\PdhQuery.cs" Link="PdhQuery.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\TemperatureSensors.cs" Link="TemperatureSensors.cs" />
@@ -18,6 +19,9 @@
     <Compile Include="..\..\src\BrimDeck\Native\SettingsChrome.cs" Link="SettingsChrome.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\ProcessLoopbackCapture.cs" Link="ProcessLoopbackCapture.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\WindowsHost.cs" Link="WindowsHost.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\WindowContextEvents.cs" Link="WindowContextEvents.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\FileShareService.cs" Link="FileShareService.cs" />
+    <Compile Include="..\..\src\BrimDeck\FileShareDropTarget.cs" Link="FileShareDropTarget.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\GpuProvider.cs" Link="GpuProvider.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\Why.cs" Link="Why.cs" />
     <Compile Include="..\..\src\BrimDeck\MainWindow.Shadow.cs" Link="MainWindow.Shadow.cs" />
@@ -25,9 +29,53 @@
     <Compile Include="..\..\src\BrimDeck\MainWindow.PageSwitch.cs" Link="MainWindow.PageSwitch.cs" />
     <Compile Include="..\..\src\BrimDeck\PageHandover.cs" Link="PageHandover.cs" />
     <Compile Include="..\..\src\BrimDeck\Soft.cs" Link="Soft.cs" />
+    <Compile Include="..\..\src\BrimDeck\PopupMotion.cs" Link="PopupMotion.cs" />
     <!-- The island itself: the shadow observes its properties, and the settled clip is checked on its drawing. -->
     <Compile Include="..\..\src\BrimDeck\IslandBorder.cs" Link="IslandBorder.cs" />
     <Compile Include="..\..\src\BrimDeck\IslandDecor.cs" Link="IslandDecor.cs" />
     <Compile Include="..\..\src\BrimDeck\PageToolTips.cs" Link="PageToolTips.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardView.cs" Link="ClipboardView.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardApplicationMenu.cs" Link="ClipboardApplicationMenu.cs" />
+    <Compile Include="..\..\src\BrimDeck\ApplicationLabelMotion.cs" Link="ApplicationLabelMotion.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardView.Dock.cs" Link="ClipboardView.Dock.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardView.Actions.cs" Link="ClipboardView.Actions.cs" />
+    <Compile Include="..\BrimDeck.Tests\ClipboardHistoryTests.cs" Link="ClipboardHistoryTests.cs" />
+    <Compile Include="..\BrimDeck.Tests\ClipboardLibraryTests.cs" Link="ClipboardLibraryTests.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardView.Sort.cs" Link="ClipboardView.Sort.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardView.Emoji.cs" Link="ClipboardView.Emoji.cs" />
+    <Compile Include="..\..\src\BrimDeck\EdgeDropGlyph.cs" Link="EdgeDropGlyph.cs" />
+    <Compile Include="..\..\src\BrimDeck\EdgeDropWakeSlider.cs" Link="EdgeDropWakeSlider.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardPreviewSensitivityControl.cs" Link="ClipboardPreviewSensitivityControl.cs" />
+    <EmbeddedResource Include="..\..\third_party\EdgeDrop\src\components\phosphorPaths.ts" LogicalName="BrimDeck.EdgeDrop.Phosphor" />
+    <EmbeddedResource Include="..\..\third_party\EdgeDropEmoji\emoji.json" LogicalName="BrimDeck.EdgeDrop.Emoji" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardDragDrop.cs" Link="ClipboardDragDrop.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardCollectionAppearance.cs" Link="ClipboardCollectionAppearance.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardCollectionColorRibbon.cs" Link="ClipboardCollectionColorRibbon.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardView.Library.cs" Link="ClipboardView.Library.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardView.Preview.cs" Link="ClipboardView.Preview.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardPreviewWindow.cs" Link="ClipboardPreviewWindow.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardPreviewWindows.cs" Link="ClipboardPreviewWindows.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardView.Notice.cs" Link="ClipboardView.Notice.cs" />
+    <Compile Include="..\..\src\BrimDeck\IslandCardPanel.cs" Link="IslandCardPanel.cs" />
+    <Compile Include="..\..\src\BrimDeck\IslandSegmentedControl.cs" Link="IslandSegmentedControl.cs" />
+    <Compile Include="..\..\src\BrimDeck\ShelfIslandCard.cs" Link="ShelfIslandCard.cs" />
+    <Compile Include="..\..\src\BrimDeck\Feedback.cs" Link="Feedback.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardCard.cs" Link="ClipboardCard.cs" />
+    <Compile Include="..\..\src\BrimDeck\IslandContentCard.cs" Link="IslandContentCard.cs" />
+    <Compile Include="..\..\src\BrimDeck\IslandFilePreview.cs" Link="IslandFilePreview.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardPreview.cs" Link="ClipboardPreview.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardLibraryItem.cs" Link="ClipboardLibraryItem.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardEntryEditor.cs" Link="ClipboardEntryEditor.cs" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardLibraryWindow.cs" Link="ClipboardLibraryWindow.cs" />
+    <Page Include="..\..\src\BrimDeck\ClipboardLibraryResources.xaml" Link="ClipboardLibraryResources.xaml" />
+    <Compile Include="..\..\src\BrimDeck\ClipboardService.cs" Link="ClipboardService.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\ClipboardListener.cs" Link="ClipboardListener.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\ClipboardHistoryStore.cs" Link="ClipboardHistoryStore.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\ClipboardPaste.cs" Link="ClipboardPaste.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\GlobalHotkeys.cs" Link="GlobalHotkeys.cs" />
+    <Compile Include="..\..\src\BrimDeck\HotkeyGesture.cs" Link="HotkeyGesture.cs" />
+    <Page Include="..\..\src\BrimDeck\ClipboardResources.xaml" Link="ClipboardResources.xaml" />
+    <Page Include="..\..\src\BrimDeck\ToolbarResources.xaml" Link="ToolbarResources.xaml" />
+    <Page Include="..\..\src\BrimDeck\FileTrayResources.xaml" Link="FileTrayResources.xaml" />
   </ItemGroup>
 </Project>

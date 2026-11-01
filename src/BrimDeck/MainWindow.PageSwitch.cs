@@ -20,7 +20,7 @@ public partial class MainWindow
             return;
         }
         double x = button.TranslatePoint(new Point(), (UIElement)PageCapsule.Parent).X, width = button.ActualWidth, height = button.ActualHeight;
-        bool glide = _expanded && !_preview && PageSwitch.IsVisible && Soft.Enabled && PageCapsule.Width > 0 && Math.Abs(PageCapsuleShift.X - x) > .5;
+        bool glide = _expanded && !_preview && PageSwitch.IsVisible && Soft.For(PageSwitch) && PageCapsule.Width > 0 && Math.Abs(PageCapsuleShift.X - x) > .5;
         PageCapsule.Height = height;
         PageHandover.Glide(PageCapsule, WidthProperty, width, glide, Soft.Choose);
         double from = PageCapsuleShift.X;
@@ -44,6 +44,6 @@ public partial class MainWindow
     }
     private Button PageButton(DeckPage page) => page switch
     {
-        DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, DeckPage.FileTray => TrayPageButton, _ => AIUsageButton
+        DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, DeckPage.FileTray => TrayPageButton, DeckPage.Clipboard => ClipboardPageButton, _ => AIUsageButton
     };
 }

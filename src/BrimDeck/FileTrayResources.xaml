@@ -19,12 +19,19 @@
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="MenuItem">
       <Border x:Name="Chrome" Background="Transparent" CornerRadius="{DynamicResource PanelR5}" Height="{TemplateBinding Height}" Padding="6,0,8,0">
         <Grid>
-          <Grid.ColumnDefinitions><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <ContentPresenter Grid.Column="0" Content="{TemplateBinding Icon}" VerticalAlignment="Center"/>
           <TextBlock Grid.Column="1" Text="{TemplateBinding Header}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+          <TextBlock x:Name="SubmenuArrow" Grid.Column="2" Text="&#xE76C;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="9" Margin="10,0,0,0" VerticalAlignment="Center" Visibility="Collapsed"/>
+          <Popup x:Name="PART_Popup" Placement="Right" PlacementTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}" HorizontalOffset="2" AllowsTransparency="True" Focusable="False" IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}">
+            <Border Background="{DynamicResource PanelPopup}" BorderBrush="{DynamicResource PanelPopupBorder}" BorderThickness="1" CornerRadius="{DynamicResource PanelR8}" Padding="4" MinWidth="200">
+              <ScrollViewer MaxHeight="400" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="True"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle"/></ScrollViewer>
+            </Border>
+          </Popup>
         </Grid>
       </Border>
       <ControlTemplate.Triggers>
+        <Trigger Property="HasItems" Value="True"><Setter TargetName="SubmenuArrow" Property="Visibility" Value="Visible"/></Trigger>
         <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource PanelHover}"/></Trigger>
         <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value=".45"/></Trigger>
       </ControlTemplate.Triggers>

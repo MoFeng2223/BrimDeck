@@ -34,8 +34,8 @@ public sealed record FullscreenRule(string Name = "", string Path = "")
 public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, OpenCode = 17, OpenCodeGo = 18, OpenRouter = 19 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckSettings.PageOrder.
-public enum DeckPage { Usage, Music, Monitor, FileTray }
-public enum DefaultDeckPage { Last, Usage, Music, Monitor, FileTray }
+public enum DeckPage { Usage, Music, Monitor, FileTray, Clipboard }
+public enum DefaultDeckPage { Last, Usage, Music, Monitor, FileTray, Clipboard }
 // Where the file tray appears: as a page of the open panel, as a window beside the cursor, or both.
 public enum FileTrayPlacement { Notch, Floating, Both }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
@@ -257,11 +257,11 @@ public static class MonitorSizes
 // the rest only matters for the place that is on.
 public sealed class TraySettings
 {
-    // The switch in the page's toolbar: off hides the tray page and the floating tray both. Off at first: the tray is a
-    // page of the panel, and a panel that gains one by itself would change what everybody already has.
+    public ModuleMode Mode { get; set; } = ModuleMode.Full;
+    // Legacy compatibility only: placement now owns visibility; this value no longer disables the feature.
     public bool Enabled { get; set; }
     public FileTrayPlacement Placement { get; set; } = FileTrayPlacement.Both;
-    // Opens the tray page after a drop, so what was just added is on screen.
+    // Legacy compatibility only; the hosted shelf reader owns drop behavior.
     public bool OpenAfterDrop { get; set; } = true;
     // Minutes an unpinned item waits before the clean-up takes it; 0 keeps everything.
     public int RetentionMinutes { get; set; }
@@ -275,18 +275,23 @@ public sealed class TraySettings
     // Leaving: take the item off the tray once it is dragged out, and always copy rather than move the original.
     public bool AutoRemoveAfterDragOut { get; set; } = true;
     public bool ProtectOriginals { get; set; } = true;
+    // Island-only presentation; floating shelves keep their original view and interaction settings.
+    public bool GridView { get; set; }
+    public ClipboardHeaderMode HeaderMode { get; set; }
 
     public TraySettings Copy() => new()
     {
-        Enabled = Enabled, Placement = Placement, OpenAfterDrop = OpenAfterDrop, RetentionMinutes = RetentionMinutes,
+        Mode = Mode, Enabled = Enabled, Placement = Placement, OpenAfterDrop = OpenAfterDrop, RetentionMinutes = RetentionMinutes,
         FloatingInstant = FloatingInstant, FloatingDelayMs = FloatingDelayMs, AutoHideDelayMs = AutoHideDelayMs,
         MultipleFloatingTrays = MultipleFloatingTrays, SyncTrays = SyncTrays,
-        AutoRemoveAfterDragOut = AutoRemoveAfterDragOut, ProtectOriginals = ProtectOriginals,
+        AutoRemoveAfterDragOut = AutoRemoveAfterDragOut, ProtectOriginals = ProtectOriginals, GridView = GridView, HeaderMode = HeaderMode,
     };
 
     public void Normalize()
     {
+        if (!Enum.IsDefined(Mode)) Mode = ModuleMode.Full;
         if (!Enum.IsDefined(Placement)) Placement = FileTrayPlacement.Both;
+        if (!Enum.IsDefined(HeaderMode)) HeaderMode = ClipboardHeaderMode.Edge;
         RetentionMinutes = Math.Clamp(RetentionMinutes, 0, 1440);
         FloatingDelayMs = Math.Clamp(FloatingDelayMs, 0, 3000);
         AutoHideDelayMs = Math.Clamp(AutoHideDelayMs, 300, 20000);
@@ -416,10 +421,21 @@ public sealed class DeckSettings
     public bool MonitorPage { get; set; } = true;
     public double MonitorWidth { get; set; } = MonitorSizes.Default.Width;
     public double MonitorHeight { get; set; } = MonitorSizes.Default.Height;
-    public double TrayWidth { get; set; } = 520;
-    public double TrayHeight { get; set; } = 260;
+    public double TrayWidth { get; set; } = ClipboardDockLayout.Width;
+    public double TrayHeight { get; set; } = ClipboardDockLayout.Height;
+    public int TrayLayoutVersion { get; set; }
+    public bool TrayReferenceSize { get; set; } = true;
+    public ShelfLayoutBackup? TrayPreviousLayout { get; set; }
+    // The history page stays available while recording is off; visibility never opts into capture.
+    public bool ClipboardPage { get; set; } = true;
+    public double ClipboardWidth { get; set; } = ClipboardDockLayout.Width;
+    public double ClipboardHeight { get; set; } = ClipboardDockLayout.Height;
+    public int ClipboardLayoutVersion { get; set; }
+    public bool ClipboardReferenceSize { get; set; } = true;
+    public ClipboardLayoutBackup? ClipboardPreviousLayout { get; set; }
     // The file tray's own settings: where it appears, how long items wait, and what leaving does to them.
     public TraySettings Tray { get; set; } = new();
+    public ClipboardSettings Clipboard { get; set; } = new();
     public MonitorPalette MonitorPalette { get; set; } = MonitorPalette.Theme;
     // The Custom scheme's colors; kept while another scheme is chosen.
     public MonitorCustomColors MonitorCustomColors { get; set; } = new();
@@ -569,6 +585,9 @@ public sealed class DeckSettings
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
         copy.Tray = (Tray ?? new()).Copy();
+        copy.TrayPreviousLayout = TrayPreviousLayout is { } trayOld ? new ShelfLayoutBackup { Width = trayOld.Width, Height = trayOld.Height, GridView = trayOld.GridView } : null;
+        copy.Clipboard = (Clipboard ?? new()).Copy();
+        copy.ClipboardPreviousLayout = ClipboardPreviousLayout is { } old ? new ClipboardLayoutBackup { Width = old.Width, Height = old.Height, GridView = old.GridView } : null;
         copy.FullscreenRules = FullscreenRules.Select(rule => rule with { }).ToList();
         return copy;
     }
@@ -599,9 +618,16 @@ public sealed class DeckSettings
         MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
         MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : MonitorSizes.Default.Width;
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
-        TrayWidth = double.IsFinite(TrayWidth) ? Math.Clamp(TrayWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : 520;
-        TrayHeight = double.IsFinite(TrayHeight) ? Math.Clamp(TrayHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 260;
+        TrayWidth = double.IsFinite(TrayWidth) ? Math.Clamp(TrayWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : ClipboardDockLayout.Width;
+        TrayHeight = double.IsFinite(TrayHeight) ? Math.Clamp(TrayHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ClipboardDockLayout.Height;
+        ClipboardWidth = double.IsFinite(ClipboardWidth) ? Math.Clamp(ClipboardWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : ClipboardDockLayout.Width;
+        ClipboardHeight = double.IsFinite(ClipboardHeight) ? Math.Clamp(ClipboardHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ClipboardDockLayout.Height;
         Tray = Tray?.Copy() ?? new(); Tray.Normalize();
+        Clipboard = Clipboard?.Copy() ?? new(); Clipboard.Normalize();
+        ShelfDockLayout.Migrate(this);
+        TrayHeight = Math.Max(ClipboardDockLayout.Height, TrayHeight);
+        ClipboardDockLayout.Migrate(this);
+        ClipboardHeight = Math.Max(ClipboardDockLayout.Height, ClipboardHeight);
         PanelScale = PanelScales.Fit(PanelScale);
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
         MonitorCustomColors ??= new();

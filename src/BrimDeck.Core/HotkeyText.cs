@@ -1,7 +1,7 @@
 namespace BrimDeck.Core;
 
 // Resize is one setting for four registrations: its modifiers with each arrow key (see Arrows).
-public enum HotkeyKind { Hide, Expand, Resize }
+public enum HotkeyKind { Hide, Expand, Resize, Clipboard }
 
 // Unset: no combination saved. Active: registered. InUse: another program holds the combination. Invalid: the text is not
 // an allowed combination. Duplicate: a combination another hotkey has, which keeps it (see Plan and PlanArrows).
@@ -76,6 +76,17 @@ public static class HotkeyText
         if (kind == HotkeyKind.Expand && Normalize(hide) is { Length: > 0 } other && string.Equals(other, text, StringComparison.OrdinalIgnoreCase)
             && TryParse(hide, out _, out var otherKey) && isKey(otherKey))
             return (HotkeyStatus.Duplicate, text);
+        return (null, text);
+    }
+
+    // A later single shortcut yields to earlier ones. The resize group yields to all single shortcuts at registration.
+    public static (HotkeyStatus? Status, string Text) PlanAdditional(string? own, Func<string, bool> isKey, params string?[] others)
+    {
+        if (IsUnset(own)) return (HotkeyStatus.Unset, "");
+        if (!TryParse(own, out var modifiers, out var key) || !isKey(key)) return (HotkeyStatus.Invalid, "");
+        string text = Format(modifiers, key);
+        foreach (var other in others)
+            if (TryParse(other, out _, out var otherKey) && isKey(otherKey) && Overlap(text, other)) return (HotkeyStatus.Duplicate, text);
         return (null, text);
     }
 

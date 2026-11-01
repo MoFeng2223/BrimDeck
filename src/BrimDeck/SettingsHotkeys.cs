@@ -8,7 +8,7 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// The global shortcuts: hide/show (on the Collapsed view page), expand and resize (on the Expanded view page). Each is recorded
+// The global shortcuts: hide/show (Collapsed view), expand/resize (Expanded view), and clipboard (Clipboard). Each is recorded
 // by clicking its box and pressing the combination; leaving the box cancels, and only the cross inside the box clears it. The
 // resize row reads "Alt + [box] + arrow keys": Alt and the arrows are fixed, so its box records only the other modifiers. While
 // a box records, the app's registered shortcuts are suspended so pressing the current combination records it instead of
@@ -36,24 +36,26 @@ public sealed partial class SettingsWindow
     private static string HotkeyName(HotkeyKind kind) => kind switch
     {
         HotkeyKind.Hide => Loc.T("“隐藏/显示快捷键”", "the hide/show shortcut"), HotkeyKind.Expand => Loc.T("“展开快捷键”", "the expand shortcut"),
+        HotkeyKind.Clipboard => Loc.T("“剪贴板快捷键”", "the clipboard shortcut"),
         _ => Loc.T("“调整大小快捷键”", "the resize shortcut")
     };
     private static string SavedHotkey(DeckSettings settings, HotkeyKind kind) => (kind switch
     {
-        HotkeyKind.Hide => settings.HideHotkey, HotkeyKind.Expand => settings.ExpandHotkey, _ => settings.ResizeHotkey
+        HotkeyKind.Hide => settings.HideHotkey, HotkeyKind.Expand => settings.ExpandHotkey, HotkeyKind.Clipboard => settings.Clipboard.Hotkey, _ => settings.ResizeHotkey
     }) ?? "";
     private static void SetHotkey(DeckSettings settings, HotkeyKind kind, string value)
     {
-        switch (kind) { case HotkeyKind.Hide: settings.HideHotkey = value; break; case HotkeyKind.Expand: settings.ExpandHotkey = value; break; default: settings.ResizeHotkey = value; break; }
+        switch (kind) { case HotkeyKind.Hide: settings.HideHotkey = value; break; case HotkeyKind.Expand: settings.ExpandHotkey = value; break; case HotkeyKind.Clipboard: settings.Clipboard.Hotkey = value; break; default: settings.ResizeHotkey = value; break; }
     }
 
     private FrameworkElement HotkeyRow(HotkeyKind kind)
     {
-        string title = kind switch { HotkeyKind.Hide => Loc.T("隐藏/显示快捷键", "Hide/show shortcut"), HotkeyKind.Expand => Loc.T("展开快捷键", "Expand shortcut"), _ => Loc.T("调整大小快捷键", "Resize shortcut") };
+        string title = kind switch { HotkeyKind.Hide => Loc.T("隐藏/显示快捷键", "Hide/show shortcut"), HotkeyKind.Expand => Loc.T("展开快捷键", "Expand shortcut"), HotkeyKind.Clipboard => Loc.T("剪贴板快捷键", "Clipboard shortcut"), _ => Loc.T("调整大小快捷键", "Resize shortcut") };
         string help = kind switch
         {
             HotkeyKind.Hide => Loc.T("按下快捷键即可隐藏刘海、胶囊或指示条，再按一次恢复显示。", "Press the shortcut to hide the notch, capsule or indicator bar; press it again to show it."),
             HotkeyKind.Expand => Loc.T("按下快捷键即可展开面板，再按一次收起。", "Press the shortcut to expand the panel; press it again to collapse it."),
+            HotkeyKind.Clipboard => Loc.T("按下快捷键呼出剪贴板窗口，再按一次隐藏。默认 Ctrl+Alt+V，不占用 Windows 的 Win+V。", "Press to show clipboard history; press again to hide. Defaults to Ctrl+Alt+V, leaving Windows Win+V unchanged."),
             _ => Loc.T("按住 Alt 和框里的修饰键，再按方向键调整大小：←/→ 改宽度，↑/↓ 改展开面板的高度，按住可连续调整。方向键对应调整的方向；Alt 加另一个修饰键是为了不占用系统自带的方向键操作（选择文字、排列窗口、浏览器后退等）。",
                 "Hold Alt and the modifiers in the box, then press an arrow key to resize: ← and → change the width, ↑ and ↓ the expanded panel's height; hold to keep going. The arrows point the way the size changes; Alt with one more modifier leaves the system's own arrow shortcuts (selecting text, arranging windows, going back in a browser) alone.")
         };

@@ -1,0 +1,11 @@
+{
+  "source": "https://github.com/iamcal/emoji-data",
+  "version": "16.0.0",
+  "tag": "v16.0.0",
+  "upstreamDependency": "Edge-Drop 767b6d63 package-lock.json: emoji-datasource-twitter 16.0.0",
+  "catalog": "EdgeDropEmoji/emoji.json",
+  "catalogSha256": "1D602E65BE88772BF8CC368CE16B855D719EEDDBAFE128D471B80203F494D29F",
+  "license": "MIT",
+  "artwork": "No Twemoji artwork is distributed; Windows renders Unicode with Segoe UI Emoji.",
+  "adaptation": "catalog.ts category order, availability and obsolete filters, skin variants, sort order, 77 recents and 36x32 horizontal row virtualization translated into WPF. Recents are session-only; no history collection is created."
+}

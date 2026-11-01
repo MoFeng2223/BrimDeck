@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\BrimDeck.Core\BrimDeck.Core.csproj" />
+    <ProjectReference Include="..\BrimDeck.Shelves\BrimDeck.Shelves.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -9,7 +10,13 @@
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
     <PackageReference Include="System.Management" Version="10.0.0" />
     <Resource Include="Assets\Fonts\*.ttf" />
+    <EmbeddedResource Include="..\..\third_party\EdgeDrop\src\components\phosphorPaths.ts" LogicalName="BrimDeck.EdgeDrop.Phosphor" />
+    <EmbeddedResource Include="..\..\third_party\EdgeDropEmoji\emoji.json" LogicalName="BrimDeck.EdgeDrop.Emoji" />
+    <Content Include="..\..\third_party\EdgeDropEmoji\LICENSE" Link="EdgeDrop.EmojiData.LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\third_party\EdgeDrop\src\components\phosphorPaths.ts" Link="EdgeDrop.Phosphor.LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="ThirdPartyNotices.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\third_party\EdgeDrop\LICENSE" Link="EdgeDrop.LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\third_party\EdgeDrop.port.json" Link="EdgeDrop.port.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 

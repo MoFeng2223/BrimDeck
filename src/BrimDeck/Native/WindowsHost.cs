@@ -13,6 +13,18 @@ public sealed class WindowsHost : IDisposable
 {
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(400) };
     private readonly Func<IntPtr> _monitor;
+    private IDisposable? _events;
+    private bool _disposed;
+    public bool EventDriven
+    {
+        get => _events is not null;
+        set
+        {
+            if (_disposed || value == EventDriven) return;
+            if (value) { _timer.Stop(); _events = WindowContextEvents.Subscribe(_timer.Dispatcher, Poll); Poll(); }
+            else { _events?.Dispose(); _events = null; _timer.Start(); }
+        }
+    }
     // The app the context was last detected for: the empty pair on the desktop. The app rules resolve by it.
     private string _appName = "", _appPath = "";
     public (string Name, string Path) App => (_appName, _appPath);
@@ -40,6 +52,7 @@ public sealed class WindowsHost : IDisposable
     private string _raisedName = "", _raisedPath = "";
     private void Poll()
     {
+        if (_disposed) return;
         var context = DetectNow();
         var change = ScreenPolicy.WhatChanged(context, _appName, _appPath, Current, _raisedName, _raisedPath);
         if (change == ScreenPolicy.ForegroundChange.None) { WatchOrder(_window()); return; }
@@ -211,13 +224,16 @@ public sealed class WindowsHost : IDisposable
         }
         processName = _identityName; imagePath = _identityPath;
     }
-    public static void ConfigureOverlay(Window window)
+    public static void ConfigureOverlay(Window window) => SetOverlayInput(window, false);
+    // Hover never takes focus. Only an explicit text-input request temporarily lets the same island accept the keyboard.
+    public static void SetOverlayInput(Window window, bool enabled)
     {
         var handle = new WindowInteropHelper(window).Handle;
         var style = GetWindowLongPtr(handle, -20).ToInt64();
-        SetWindowLongPtr(handle, -20, new IntPtr(style | 0x08000000)); // WS_EX_NOACTIVATE: hover must not steal focus.
+        const long noActivate = 0x08000000; // WS_EX_NOACTIVATE
+        SetWindowLongPtr(handle, -20, new IntPtr(enabled ? style & ~noActivate : style | noActivate));
     }
-    public void Dispose() => _timer.Stop();
+    public void Dispose() { _disposed = true; _timer.Stop(); _events?.Dispose(); _events = null; }
     [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] private struct RECT
     { public int Left, Top, Right, Bottom; public readonly Rect ToRect() => new(Left, Top, Right - Left, Bottom - Top); }

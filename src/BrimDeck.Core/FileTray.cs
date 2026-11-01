@@ -185,7 +185,8 @@ public sealed class FileTrayStore(string directory)
         return tray;
     }
 
-    public void Save(FileTray tray)
+    public void Save(FileTray tray) => TrySave(tray);
+    public bool TrySave(FileTray tray)
     {
         try
         {
@@ -193,10 +194,10 @@ public sealed class FileTrayStore(string directory)
             string temp = FilePath + ".tmp";
             File.WriteAllText(temp, JsonSerializer.Serialize(new Stored { Items = [.. tray.Items] }, Json));
             File.Move(temp, FilePath, overwrite: true);
+            return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
-        {
-        }
+        { return false; }
     }
 
     private sealed class Stored { public List<TrayItem>? Items { get; set; } }

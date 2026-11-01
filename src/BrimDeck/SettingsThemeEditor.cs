@@ -326,7 +326,7 @@ public sealed partial class SettingsWindow
     private void ChooseOwnTheme(string path)
     {
         // The folder as just read, including this new file, so the watcher's report of the write reloads nothing.
-        _themeStamp = ThemeFolderStamp();
+        _app.AcknowledgeThemeFiles();
         var id = PanelTheme.UserThemes.FirstOrDefault(t => t.Usable && string.Equals(t.Path, path, StringComparison.OrdinalIgnoreCase))?.Id;
         if (id is not null) Change(s => { var kept = ThemeChoices.From(s); ChooseTheme(s, id); kept.ApplyTo(s); });
     }

@@ -76,7 +76,7 @@ public partial class MainWindow
         return double.IsFinite(grow) && double.IsFinite(rise) && left - grow / 2 >= 0 && left + width + grow / 2 <= Width && gap + height + rise <= Height;
     }
 
-    private bool CanAnimateLifecycle => IsVisible && Soft.Enabled && Settings.AnimationDuration > 0 && !_preview;
+    private bool CanAnimateLifecycle => IsVisible && Soft.For(Island) && Settings.AnimationDuration > 0 && !_preview;
 
     // Starts the boot. The panel stays out of sight until the dispatcher is idle: on BrimDeck's start the first frames come
     // late while the panel is built and the data read, which ate the dot and the first half of the swell. A panel that is busy
@@ -267,7 +267,7 @@ public partial class MainWindow
     internal void MorphShape()
     {
         // A preview from the settings window morphs too: the style chips sit on the page that previews the collapsed size.
-        _morphingShape = !_expanded && !_poweringOff && IsVisible && Soft.Enabled && Settings.AnimationDuration > 0 && !_bootWaiting;
+        _morphingShape = !_expanded && !_poweringOff && IsVisible && Soft.For(Island) && Settings.AnimationDuration > 0 && !_bootWaiting;
         ApplySettings(true);
         _morphingShape = false;
     }

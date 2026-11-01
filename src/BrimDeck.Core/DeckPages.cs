@@ -5,14 +5,15 @@ namespace BrimDeck.Core;
 public static class DeckPages
 {
     // The page switch, left to right, until the order is changed in the settings (DeckSettings.PageOrder).
-    public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.FileTray];
+    public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.FileTray, DeckPage.Clipboard];
     // Each known page once, in the saved order; a page missing from the file takes its default place after the others.
     public static List<DeckPage> Normalize(IEnumerable<DeckPage>? order) => [.. (order ?? []).Where(page => Enum.IsDefined(page)).Concat(Order).Distinct()];
 
     public static bool Shown(DeckSettings settings, DeckPage page) => page switch
     {
         DeckPage.Usage => settings.UsagePage, DeckPage.Music => settings.MusicPage, DeckPage.Monitor => settings.MonitorPage,
-        DeckPage.FileTray => settings.Tray.Enabled, _ => false
+        DeckPage.FileTray => settings.Tray.Mode != ModuleMode.Off && settings.Tray.Placement is FileTrayPlacement.Notch or FileTrayPlacement.Both,
+        DeckPage.Clipboard => settings.Clipboard.Mode != ModuleMode.Off && settings.ClipboardPage, _ => false
     };
 
     public static IReadOnlyList<DeckPage> Visible(DeckSettings settings) => settings.PageOrder.Where(page => Shown(settings, page)).ToList();
@@ -26,7 +27,7 @@ public static class DeckPages
     public static DeckPage? Opening(DefaultDeckPage choice) => choice switch
     {
         DefaultDeckPage.Usage => DeckPage.Usage, DefaultDeckPage.Music => DeckPage.Music, DefaultDeckPage.Monitor => DeckPage.Monitor,
-        DefaultDeckPage.FileTray => DeckPage.FileTray, _ => null
+        DefaultDeckPage.FileTray => DeckPage.FileTray, DefaultDeckPage.Clipboard => DeckPage.Clipboard, _ => null
     };
 
     // Every page's size lies within these; the usage page is also at least as wide as its columns need (MinimumWidth).
@@ -36,7 +37,7 @@ public static class DeckPages
     public static double MaxWidthOn(double workWidth, double scale = 1) => Math.Max(MinWidth, Math.Min(MaxWidth, Math.Floor((workWidth - 24) / scale)));
 
     public static (double MinWidth, double MaxWidth, double MinHeight, double MaxHeight) Limits(DeckSettings settings, DeckPage page)
-        => (page == DeckPage.Usage ? Math.Max(MinWidth, settings.MinimumWidth) : MinWidth, MaxWidth, MinHeight, MaxHeight);
+        => (page == DeckPage.Usage ? Math.Max(MinWidth, settings.MinimumWidth) : MinWidth, MaxWidth, page is DeckPage.Clipboard or DeckPage.FileTray ? ClipboardDockLayout.Height : MinHeight, MaxHeight);
 
     // Sets a page's size, as dragging an edge of the open panel does; the values are kept within the page's limits.
     public static void SetSize(DeckSettings settings, DeckPage page, double width, double height)
@@ -47,7 +48,8 @@ public static class DeckPages
         {
             case DeckPage.Music: settings.MusicWidth = width; settings.MusicHeight = height; break;
             case DeckPage.Monitor: settings.MonitorWidth = width; settings.MonitorHeight = height; break;
-            case DeckPage.FileTray: settings.TrayWidth = width; settings.TrayHeight = height; break;
+            case DeckPage.FileTray: settings.TrayWidth = width; settings.TrayHeight = height; settings.TrayReferenceSize = false; break;
+            case DeckPage.Clipboard: settings.ClipboardWidth = width; settings.ClipboardHeight = height; settings.ClipboardReferenceSize = false; break;
             default: settings.Width = width; settings.Height = height; break;
         }
     }
@@ -57,6 +59,7 @@ public static class DeckPages
         DeckPage.Music => (settings.MusicWidth, settings.MusicHeight),
         DeckPage.Monitor => (settings.MonitorWidth, settings.MonitorHeight),
         DeckPage.FileTray => (settings.TrayWidth, settings.TrayHeight),
+        DeckPage.Clipboard => (settings.ClipboardWidth, settings.ClipboardHeight),
         _ => (Math.Max(settings.Width, settings.MinimumWidth), settings.Height)
     };
 

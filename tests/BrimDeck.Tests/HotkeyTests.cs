@@ -22,6 +22,13 @@ internal static class HotkeyTests
             && HotkeyText.Plan(HotkeyKind.Hide, "", "", Key).Status == HotkeyStatus.Unset
             && HotkeyText.Plan(HotkeyKind.Hide, "Ctrl+", "", Key).Status == HotkeyStatus.Invalid
             && HotkeyText.Plan(HotkeyKind.Hide, "Ctrl+5", "", Key).Status == HotkeyStatus.Invalid);
+        check("Clipboard shortcut: unset, invalid, active and conflicting combinations are distinct",
+            HotkeyText.PlanAdditional("", Key).Status == HotkeyStatus.Unset
+            && HotkeyText.PlanAdditional("Ctrl+", Key).Status == HotkeyStatus.Invalid
+            && HotkeyText.PlanAdditional("Ctrl+Alt+V", Key, "Alt+K", "Ctrl+Q") == (null, "Ctrl+Alt+V")
+            && HotkeyText.PlanAdditional("Ctrl+Alt+V", Key, "alt+ctrl+v").Status == HotkeyStatus.Duplicate);
+        check("Clipboard shortcut: the resize arrow group yields to a conflicting clipboard combination",
+            HotkeyText.PlanArrows("Ctrl+Alt+Arrows", Key, "Ctrl+Alt+Left").Status == HotkeyStatus.Duplicate);
         check("The same combination in any spelling is a duplicate; the expand hotkey yields",
             HotkeyText.Same("Ctrl+Alt+K", "alt+ctrl+k") && !HotkeyText.Same("", "") && !HotkeyText.Same("Ctrl+K", "Ctrl+Shift+K")
             && HotkeyText.Plan(HotkeyKind.Hide, "Ctrl+Alt+K", "alt+ctrl+K", Key) == (null, "Ctrl+Alt+K")

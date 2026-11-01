@@ -1,0 +1,105 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:BrimDeck">
+  <ResourceDictionary.MergedDictionaries>
+    <ResourceDictionary Source="ToolbarResources.xaml"/>
+    <ResourceDictionary Source="FileTrayResources.xaml"/>
+  </ResourceDictionary.MergedDictionaries>
+  <!-- The same button chrome, feedback, palette and corners as the other island pages. -->
+  <Style x:Key="ClipboardRoundButton" TargetType="Button" BasedOn="{StaticResource PanelIconButton}">
+    <Setter Property="Width" Value="26"/><Setter Property="Height" Value="26"/>
+    <Style.Triggers>
+      <Trigger Property="Tag" Value="Selected"><Setter Property="Background" Value="{DynamicResource PanelFillSelected}"/><Setter Property="Foreground" Value="{DynamicResource PanelPrimary}"/></Trigger>
+      <Trigger Property="local:ClipboardDragDrop.Hint" Value="Into"><Setter Property="Background" Value="{DynamicResource PanelFillSelected}"/><Setter Property="Foreground" Value="{DynamicResource PanelAccent}"/><Setter Property="BorderBrush" Value="{DynamicResource PanelAccent}"/></Trigger>
+      <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value=".4"/></Trigger>
+    </Style.Triggers>
+  </Style>
+  <!-- A focused row exposes its actions before the user tabs into the card itself. -->
+  <Style x:Key="ClipboardFavoriteButton" TargetType="Button" BasedOn="{StaticResource ClipboardRoundButton}">
+    <Setter Property="Opacity" Value="0"/>
+    <Style.Triggers>
+      <DataTrigger Binding="{Binding Favorite}" Value="True"><Setter Property="Opacity" Value="1"/></DataTrigger>
+      <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType={x:Type local:ClipboardCard}}}" Value="True"><Setter Property="Opacity" Value="1"/></DataTrigger>
+      <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType={x:Type local:ClipboardCard}}}" Value="True"><Setter Property="Opacity" Value="1"/></DataTrigger>
+      <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="True"><Setter Property="Opacity" Value="1"/></DataTrigger>
+    </Style.Triggers>
+  </Style>
+  <Style x:Key="ClipboardTab" TargetType="Button" BasedOn="{StaticResource ClipboardRoundButton}">
+    <Setter Property="Width" Value="Auto"/><Setter Property="Height" Value="24"/><Setter Property="Padding" Value="8,0"/>
+    <Setter Property="Background" Value="{DynamicResource PanelSwitchFill}"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+      <Grid>
+        <Border x:Name="CustomFill" Background="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(local:ClipboardCollectionVisuals.Fill)}" CornerRadius="{DynamicResource PanelR5}" IsHitTestVisible="False" Visibility="Collapsed"/>
+        <Border x:Name="HoverLayer" Background="{DynamicResource PanelHover}" CornerRadius="{DynamicResource PanelR5}" Opacity="0"/>
+        <Border x:Name="PressLayer" Background="{DynamicResource PanelPressed}" CornerRadius="{DynamicResource PanelR5}" Opacity="0"/>
+        <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="{DynamicResource PanelR5}" Padding="{TemplateBinding Padding}">
+          <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <Border x:Name="ColorSelection" BorderBrush="{DynamicResource PanelAccent}" BorderThickness="2" CornerRadius="{DynamicResource PanelR5}" IsHitTestVisible="False" Visibility="Collapsed"/>
+        <Border x:Name="DropBefore" Background="{DynamicResource PanelAccent}" Width="2" HorizontalAlignment="Left" IsHitTestVisible="False" Visibility="Collapsed"/>
+        <Border x:Name="DropAfter" Background="{DynamicResource PanelAccent}" Width="2" HorizontalAlignment="Right" IsHitTestVisible="False" Visibility="Collapsed"/>
+      </Grid>
+      <ControlTemplate.Triggers>
+        <Trigger Property="local:ClipboardCollectionVisuals.HasColor" Value="True"><Setter TargetName="CustomFill" Property="Visibility" Value="Visible"/><Setter TargetName="Chrome" Property="Background" Value="Transparent"/></Trigger>
+        <MultiTrigger><MultiTrigger.Conditions><Condition Property="local:ClipboardCollectionVisuals.HasColor" Value="True"/><Condition Property="Tag" Value="Selected"/></MultiTrigger.Conditions><Setter TargetName="ColorSelection" Property="Visibility" Value="Visible"/></MultiTrigger>
+        <MultiTrigger><MultiTrigger.Conditions><Condition Property="local:ClipboardCollectionVisuals.HasColor" Value="True"/><Condition Property="IsKeyboardFocused" Value="True"/></MultiTrigger.Conditions><Setter TargetName="ColorSelection" Property="Visibility" Value="Visible"/></MultiTrigger>
+        <Trigger Property="local:ClipboardDragDrop.Hint" Value="Before"><Setter TargetName="DropBefore" Property="Visibility" Value="Visible"/></Trigger>
+        <Trigger Property="local:ClipboardDragDrop.Hint" Value="After"><Setter TargetName="DropAfter" Property="Visibility" Value="Visible"/></Trigger>
+        <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsPressed" Value="True"/><Condition Property="local:ClipboardCollectionVisuals.HasColor" Value="False"/></MultiTrigger.Conditions><Setter Property="Foreground" Value="{DynamicResource PanelPrimary}"/></MultiTrigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+    <Style.Triggers>
+      <Trigger Property="local:ClipboardCollectionVisuals.HasColor" Value="True">
+        <Setter Property="Background" Value="{Binding RelativeSource={RelativeSource Self}, Path=(local:ClipboardCollectionVisuals.Fill)}"/><Setter Property="Foreground" Value="{Binding RelativeSource={RelativeSource Self}, Path=(local:ClipboardCollectionVisuals.Ink)}"/>
+      </Trigger>
+      <Trigger Property="local:ClipboardDragDrop.Hint" Value="Into"><Setter Property="BorderBrush" Value="{DynamicResource PanelAccent}"/></Trigger>
+      <MultiTrigger><MultiTrigger.Conditions><Condition Property="local:ClipboardDragDrop.Hint" Value="Into"/><Condition Property="local:ClipboardCollectionVisuals.HasColor" Value="False"/></MultiTrigger.Conditions><Setter Property="Background" Value="{DynamicResource PanelFillSelected}"/></MultiTrigger>
+      <Trigger Property="local:ClipboardDragDrop.Hint" Value="Before"><Setter Property="BorderBrush" Value="{DynamicResource PanelAccent}"/></Trigger>
+      <Trigger Property="local:ClipboardDragDrop.Hint" Value="After"><Setter Property="BorderBrush" Value="{DynamicResource PanelAccent}"/></Trigger>
+      <MultiTrigger><MultiTrigger.Conditions><Condition Property="local:ClipboardDragDrop.Hint" Value="Before"/><Condition Property="local:ClipboardCollectionVisuals.HasColor" Value="False"/></MultiTrigger.Conditions><Setter Property="Foreground" Value="{DynamicResource PanelAccent}"/></MultiTrigger>
+      <MultiTrigger><MultiTrigger.Conditions><Condition Property="local:ClipboardDragDrop.Hint" Value="After"/><Condition Property="local:ClipboardCollectionVisuals.HasColor" Value="False"/></MultiTrigger.Conditions><Setter Property="Foreground" Value="{DynamicResource PanelAccent}"/></MultiTrigger>
+    </Style.Triggers>
+  </Style>
+  <Style x:Key="ClipboardList" TargetType="ListBox">
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBox">
+      <ScrollViewer x:Name="PART_ScrollViewer" Focusable="False" CanContentScroll="True" Padding="0"
+                    HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                    VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}">
+        <ItemsPresenter/>
+      </ScrollViewer>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="ClipboardItem" TargetType="ListBoxItem">
+    <Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,4,4"/>
+    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+    <Setter Property="VerticalAlignment" Value="Top"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
+      <Border x:Name="Selection" CornerRadius="{DynamicResource PanelR12}" BorderBrush="Transparent" BorderThickness="1" Padding="1">
+        <ContentPresenter/>
+      </Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Selection" Property="BorderBrush" Value="{DynamicResource PanelSecondary}"/></Trigger>
+        <Trigger Property="IsSelected" Value="True"><Setter TargetName="Selection" Property="BorderBrush" Value="{DynamicResource PanelAccent}"/></Trigger>
+        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Selection" Property="BorderBrush" Value="{DynamicResource PanelAccent}"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="ClipboardDockItem" TargetType="ListBoxItem" BasedOn="{StaticResource ClipboardItem}">
+    <Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,10,10"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
+      <Grid>
+        <ContentPresenter/>
+        <Border x:Name="Selection" CornerRadius="{DynamicResource ClipboardDockCardRadius}" BorderBrush="Transparent" BorderThickness="1" IsHitTestVisible="False"/>
+      </Grid>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Selection" Property="BorderBrush" Value="{DynamicResource PanelSecondary}"/></Trigger>
+        <Trigger Property="IsSelected" Value="True"><Setter TargetName="Selection" Property="BorderBrush" Value="{DynamicResource PanelAccent}"/></Trigger>
+        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Selection" Property="BorderBrush" Value="{DynamicResource PanelAccent}"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="ClipboardField" TargetType="TextBox">
+    <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource PanelPrimary}"/><Setter Property="CaretBrush" Value="{DynamicResource PanelPrimary}"/>
+    <Setter Property="BorderThickness" Value="0"/><Setter Property="SelectionBrush" Value="{DynamicResource PanelAccent}"/><Setter Property="FontSize" Value="12"/>
+    <Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="Padding" Value="0"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox"><ScrollViewer x:Name="PART_ContentHost" Focusable="False"/></ControlTemplate></Setter.Value></Setter>
+  </Style>
+</ResourceDictionary>
