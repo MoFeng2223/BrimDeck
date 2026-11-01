@@ -16,7 +16,7 @@ int first = current.IndexOf(begin, StringComparison.Ordinal), last = current.Ind
 if (first < 0 || last < first || current.IndexOf(begin, first + begin.Length, StringComparison.Ordinal) >= 0 || current.IndexOf(end, last + end.Length, StringComparison.Ordinal) >= 0)
     throw new InvalidDataException("API document needs exactly one generated section.");
 
-Type[] types = [typeof(IModuleSettingsNavigation), typeof(ModuleSettingsPlacement), typeof(ModuleDiagnostic), typeof(ModuleDiagnosticSeverity),
+Type[] types = [typeof(ModuleSettingsStore), typeof(IModuleVersionedSettings), typeof(IModuleCustomSettings), typeof(ModuleSettingsSnapshot), typeof(ModuleSettingsPatch), typeof(ModuleSettingsWriteStatus), typeof(ModuleSettingsWriteResult), typeof(IModuleSettingsNavigation), typeof(ModuleSettingsPlacement), typeof(ModuleDiagnostic), typeof(ModuleDiagnosticSeverity),
     typeof(IModulePlatform), typeof(IModuleRegistries), typeof(IModuleRegistration), typeof(IModuleEvents), typeof(IModuleServices),
     typeof(ModuleContextExtensions), typeof(ModuleEventPriority), typeof(ModuleOpeningEvent), typeof(ModulePageOpening), typeof(ModuleActivityOpening), typeof(IModulePresentation),
     typeof(ModuleSettingOption), typeof(ModuleTheme), typeof(ModuleLocalization), typeof(ModuleMotion), typeof(Handover), typeof(PageHandover), typeof(RollingDigitsView), typeof(RollingStepper), typeof(RollingStepper.EditDraft),

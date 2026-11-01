@@ -37,7 +37,7 @@ internal static partial class Program
         {
             string root = Root(); var files = new ModuleFiles(root); var module = Package(root, folder: "custom-folder"); files.Remember([module]);
             Write(Path.Combine(root, "modules-data", "sample", "state.json"), "user data"); Write(Path.Combine(root, "modules-cache", "sample", "digest", "a.dll"), "cache");
-            files.RequestRemoval("sample", module);
+            files.RequestRemoval("sample", module, deleteData: true);
             Check("uninstall records its intent before deleting files", Directory.Exists(module.Directory) && files.PendingRemovals.Contains("sample"));
             files = new(root); Check("uninstall intent is restored without losing the actual folder name", files.PendingRemovals.Contains("sample"));
             Check("uninstall removes package data and cache", !files.ProcessPending([]).Pending && !Directory.Exists(module.Directory)
@@ -51,7 +51,7 @@ internal static partial class Program
             string root = Root(); var files = new ModuleFiles(root); var module = Package(root); files.Remember([module]);
             string locked = Path.Combine(root, "modules-cache", "sample", "digest", "locked.dll"); Write(locked, "old cache");
             Write(Path.Combine(root, "modules-data", "sample", "old.json"), "old data");
-            files.RequestRemoval("sample", module);
+            files.RequestRemoval("sample", module, deleteData: true);
             using (var held = new FileStream(locked, FileMode.Open, FileAccess.Read, FileShare.Read))
             {
                 Check("locked uninstall files remain pending instead of reporting success", files.ProcessPending([]).Pending && files.PendingRemovals.Contains("sample"));
@@ -65,9 +65,9 @@ internal static partial class Program
         }
         {
             string root = Root(); var files = new ModuleFiles(root); var module = Package(root); files.Remember([module]);
-            files.RequestRemoval("sample", module); Write(Path.Combine(module.Directory, "Example.dll"), "updated between confirmation and cleanup");
+            files.RequestRemoval("sample", module, deleteData: true); Write(Path.Combine(module.Directory, "Example.dll"), "updated between confirmation and cleanup");
             Check("uninstall never removes changed unconfirmed package files", files.ProcessPending([]).Pending && Directory.Exists(module.Directory));
-            files.RequestRemoval("sample", new(module.Manifest, module.Directory, ModuleCatalog.Fingerprint(module.Directory)));
+            files.RequestRemoval("sample", new(module.Manifest, module.Directory, ModuleCatalog.Fingerprint(module.Directory)), deleteData: true);
             Check("explicit renewed uninstall confirmation can finish a changed package", !files.ProcessPending([]).Pending && !Directory.Exists(module.Directory));
         }
         {
@@ -78,7 +78,7 @@ internal static partial class Program
             Directory.Move(moved, module.Directory);
             File.Delete(Path.Combine(module.Directory, "Example.dll")); File.Delete(Path.Combine(module.Directory, "module.json")); Directory.Delete(module.Directory);
             Check("actual removed package is identified for automatic cleanup", files.Missing([]).SequenceEqual(["sample"]));
-            files.RequestRemoval("sample"); Check("manual removal cleanup is idempotent", !files.ProcessPending([]).Pending && !files.HasPending);
+            files.RequestRemoval("sample", deleteData: true); Check("manual removal cleanup is idempotent", !files.ProcessPending([]).Pending && !files.HasPending);
         }
         {
             string root = Root(); Write(Path.Combine(root, "module-files.json"), "broken journal");
@@ -101,9 +101,32 @@ internal static partial class Program
             Check("removing the unsafe entry allows queued cleanup", !files.ProcessPending([]).Pending);
         }
         {
+            string root = Root(); var files = new ModuleFiles(root); var module = Package(root);
+            string saved = Path.Combine(root, "modules-data", "sample", "keep.json"); Write(saved, "kept");
+            files.RequestRemoval("sample", module);
+            files = new(root);
+            files.RequestRemoval("sample");
+            Throws("pending preserve removal cannot be escalated to delete", () => files.RequestRemoval("sample", module, true));
+            Check("default uninstall preserves business data across restart", !files.ProcessPending([]).Pending && File.ReadAllText(saved) == "kept" && !Directory.Exists(module.Directory));
+            module = Package(root); files.Remember([module]);
+            Check("reinstallation adopts preserved data without overwriting it", File.ReadAllText(saved) == "kept" && files.Orphans().Count == 0);
+            Directory.Delete(module.Directory, true); files.RequestRemoval("sample"); files.ProcessPending([]);
+            Check("manual package removal preserves unassociated data", File.ReadAllText(saved) == "kept" && files.Orphans().Contains("sample"));
+        }
+        {
+            string root = Root(); var files = new ModuleFiles(root); var module = Package(root);
+            string saved = Path.Combine(root, "modules-data", "sample", "keep.json"); Write(saved, "legacy");
+            files.RequestRemoval("sample", module, true);
+            string journal = Path.Combine(root, "module-files.json");
+            var state = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(journal))!; state["Version"] = 1;
+            state["Removing"]![0]!.AsObject().Remove("DeleteData"); File.WriteAllText(journal, state.ToJsonString());
+            var migrated = new ModuleFiles(root); migrated.ProcessPending([]);
+            Check("legacy removal record grants no new data deletion authorization", File.ReadAllText(saved) == "legacy" && migrated.Problem is null);
+        }
+        {
             string source = Root(), root = Root(); Package(source, "bundled"); var receipts = new Dictionary<string, string>();
             ModuleBundleInstaller.Install(Path.Combine(source, "mods"), Path.Combine(root, "mods"), receipts);
-            var installed = new ModuleCatalog(Path.Combine(root, "mods"), "", []).Discover().Single(); var files = new ModuleFiles(root); files.RequestRemoval("bundled", installed); files.ProcessPending([]); receipts.Remove("bundled");
+            var installed = new ModuleCatalog(Path.Combine(root, "mods"), "", []).Discover().Single(); var files = new ModuleFiles(root); files.RequestRemoval("bundled", installed, deleteData: true); files.ProcessPending([]); receipts.Remove("bundled");
             Check("refresh does not silently reinstall removed bundles", ModuleBundleInstaller.Install(Path.Combine(source, "mods"), Path.Combine(root, "mods"), receipts, files.SuppressedBundles).Count == 0 && !Directory.Exists(installed.Directory));
             files.RestoreBundles();
             Check("explicit bundle restore can reinstall normally", ModuleBundleInstaller.Install(Path.Combine(source, "mods"), Path.Combine(root, "mods"), receipts, files.SuppressedBundles).Count == 1);

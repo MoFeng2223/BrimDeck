@@ -7,9 +7,11 @@ public sealed class ModuleSettings
     public List<string> EnabledModules { get; set; } = [];
     public Dictionary<string, string> Approvals { get; set; } = [];
     public Dictionary<string, string> BundledPackages { get; set; } = [];
-    public ModuleSettings Copy() => new() { SchemaVersion = SchemaVersion, Enabled = Enabled, EnabledModules = [.. EnabledModules ?? []], Approvals = new(Approvals ?? []), BundledPackages = new(BundledPackages ?? []) };
+    public Dictionary<string, string> PermissionGrants { get; set; } = [];
+    public ModuleSettings Copy() => new() { SchemaVersion = SchemaVersion, Enabled = Enabled, EnabledModules = [.. EnabledModules ?? []], Approvals = new(Approvals ?? []), BundledPackages = new(BundledPackages ?? []), PermissionGrants = new(PermissionGrants ?? []) };
     public void Normalize()
     {
+        PermissionGrants = (PermissionGrants ?? []).Where(pair => pair.Key is { Length: > 0 and <= 256 } && !pair.Key.Any(char.IsControl) && pair.Value is { Length: 64 } && pair.Value.All(Uri.IsHexDigit)).ToDictionary(pair => pair.Key, pair => pair.Value);
         EnabledModules = (EnabledModules ?? []).Where(ValidId).Distinct(StringComparer.Ordinal).ToList();
         Approvals = (Approvals ?? []).Where(pair => ValidId(pair.Key) && pair.Value is { Length: 64 } && pair.Value.All(Uri.IsHexDigit)).ToDictionary(pair => pair.Key, pair => pair.Value);
         BundledPackages = (BundledPackages ?? []).Where(pair => ValidId(pair.Key) && pair.Value is { Length: 64 } && pair.Value.All(Uri.IsHexDigit)).ToDictionary(pair => pair.Key, pair => pair.Value);

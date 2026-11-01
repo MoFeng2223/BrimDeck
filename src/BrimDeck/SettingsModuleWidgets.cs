@@ -24,9 +24,7 @@ public sealed partial class SettingsWindow
         {
             yield return page;
             if (page == ModulesPage) foreach (int extra in ExternalSettingsPages()) yield return extra;
-            if (page == MiniAppsPage)
-                foreach (var entry in ModuleSettingsEntries().Where(e => e.Placement == ModuleSettingsPlacement.MiniApps && e.Visible))
-                    yield return SettingsPageFor(entry.Contribution);
+            // Legacy widget deep links resolve to their owning plugin's detail page.
         }
     }
     private void RefreshMiniAppsNavigation()

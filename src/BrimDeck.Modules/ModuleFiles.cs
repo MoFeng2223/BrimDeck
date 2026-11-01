@@ -19,12 +19,13 @@ internal sealed class ModuleFiles
         public string Token { get; set; } = "";
         public string? PackageIdentity { get; set; } public string? DataIdentity { get; set; } public string? CacheIdentity { get; set; }
         public bool ReplacementPreserved { get; set; }
+        public bool? DeleteData { get; set; }
         public bool PackageMoved { get; set; } public bool DataMoved { get; set; } public bool CacheMoved { get; set; }
     }
     private sealed class FileState
     {
         public FileState() { }
-        public int Version { get; set; } = 1;
+        public int Version { get; set; } = 2;
         public List<Installed> Installed { get; set; } = [];
         public List<Removal> Removing { get; set; } = [];
         public List<string> CacheRequests { get; set; } = [];
@@ -47,12 +48,12 @@ internal sealed class ModuleFiles
                 using var input = new FileStream(_journal, FileMode.Open, FileAccess.Read, FileShare.Read);
                 if (input.Length > 1024 * 1024) throw new InvalidDataException("Module maintenance journal is too large.");
                 using var document = JsonDocument.Parse(input);
-                if (document.RootElement.ValueKind != JsonValueKind.Object || !document.RootElement.TryGetProperty("Version", out var version) || version.ValueKind != JsonValueKind.Number || !version.TryGetInt32(out int number) || number != 1
+                if (document.RootElement.ValueKind != JsonValueKind.Object || !document.RootElement.TryGetProperty("Version", out var version) || version.ValueKind != JsonValueKind.Number || !version.TryGetInt32(out int number) || number is not (1 or 2)
                     || new[] { "Installed", "Removing", "CacheRequests", "SuppressedBundles" }.Any(name => !document.RootElement.TryGetProperty(name, out var array) || array.ValueKind != JsonValueKind.Array))
                     throw new InvalidDataException("Incomplete module maintenance journal.");
                 _state = document.RootElement.Deserialize<FileState>(new JsonSerializerOptions { UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow })
                     ?? throw new InvalidDataException("Invalid module maintenance journal.");
-                if (_state.Version != 1 || _state.Installed is null || _state.Removing is null || _state.CacheRequests is null || _state.SuppressedBundles is null
+                if (_state.Version is not (1 or 2) || _state.Installed is null || _state.Removing is null || _state.CacheRequests is null || _state.SuppressedBundles is null
                     || _state.Installed.Count > 4096 || _state.Removing.Count > 4096 || _state.CacheRequests.Count > 4096 || _state.SuppressedBundles.Count > 4096
                     || _state.Installed.Any(e => e is null || !ModuleIds.Valid(e.Id) || !Folder(e.Folder) || !Digest(e.Digest))
                     || _state.Removing.Any(e => e is null || !ModuleIds.Valid(e.Id) || !Folder(e.Folder) || !Digest(e.Digest) || !Guid.TryParseExact(e.Token, "N", out _)
@@ -61,6 +62,9 @@ internal sealed class ModuleFiles
                     || _state.Installed.Select(e => e.Id).Distinct().Count() != _state.Installed.Count || _state.Removing.Select(e => e.Id).Distinct().Count() != _state.Removing.Count
                     || _state.Removing.Select(e => e.Token).Distinct(StringComparer.OrdinalIgnoreCase).Count() != _state.Removing.Count)
                     throw new InvalidDataException("Invalid module maintenance journal entries.");
+                // A legacy record never becomes a new authorization to delete business data.
+                if (_state.Version == 1) foreach (var removal in _state.Removing) removal.DeleteData = null;
+                _state.Version = 2;
             }
         }
         catch (Exception error) when (FileError(error) || error is JsonException)
@@ -152,7 +156,7 @@ internal sealed class ModuleFiles
                 .Order(StringComparer.Ordinal).ToArray();
         }
     }
-    internal void RequestRemoval(string id, DiscoveredModule? module = null)
+    internal void RequestRemoval(string id, DiscoveredModule? module = null, bool? deleteData = null)
     {
         ModuleIds.Require(id);
         lock (_gate)
@@ -166,11 +170,12 @@ internal sealed class ModuleFiles
             }
             if (_state.Removing.Find(r => r.Id == id) is { } pending)
             {
+                if (deleteData is { } choice && pending.DeleteData != choice) throw new IOException("A pending removal keeps its original data choice. Resolve it before requesting a different operation.");
                 if (module is not null && !pending.PackageMoved)
                 {
                     var previous = (pending.Digest, pending.Folder, pending.PackageIdentity, pending.DataIdentity, pending.CacheIdentity);
                     var identities = (Package: ModuleDirectoryIdentity.Read(module.Directory),
-                        Data: !pending.DataMoved ? ModuleDirectoryIdentity.Read(Child("modules-data", id)) : pending.DataIdentity,
+                        Data: pending.DataIdentity,
                         Cache: !pending.CacheMoved ? ModuleDirectoryIdentity.Read(Child("modules-cache", id)) : pending.CacheIdentity);
                     pending.Digest = module.Digest; pending.Folder = Path.GetFileName(module.Directory);
                     pending.PackageIdentity = identities.Package; pending.DataIdentity = identities.Data; pending.CacheIdentity = identities.Cache;
@@ -187,9 +192,9 @@ internal sealed class ModuleFiles
             var removal = new Removal
             {
                 Id = id, Folder = installed?.Folder ?? "orphan", Digest = installed?.Digest ?? new string('0', 64),
-                Token = Guid.NewGuid().ToString("N"),
+                Token = Guid.NewGuid().ToString("N"), DeleteData = deleteData ?? false,
                 PackageIdentity = installed is null ? null : ModuleDirectoryIdentity.Read(Child("mods", installed.Folder)),
-                DataIdentity = ModuleDirectoryIdentity.Read(Child("modules-data", id)), CacheIdentity = ModuleDirectoryIdentity.Read(Child("modules-cache", id)) };
+                DataIdentity = deleteData == true ? ModuleDirectoryIdentity.Read(Child("modules-data", id)) : null, CacheIdentity = ModuleDirectoryIdentity.Read(Child("modules-cache", id)) };
             removal.PackageMoved = removal.PackageIdentity is null; removal.DataMoved = removal.DataIdentity is null; removal.CacheMoved = removal.CacheIdentity is null;
             var previousSuppressed = _state.SuppressedBundles.ToList(); var previousCache = _state.CacheRequests.ToList();
             _state.Removing.Add(removal);
@@ -296,7 +301,10 @@ internal sealed class ModuleFiles
                         catch (Exception failure) when (FileError(failure)) { problems.Add(failure.Message); }
                     }
                     Area(package, "package", removal.PackageIdentity, removal.PackageMoved, value => removal.PackageMoved = value);
-                    Area(Child("modules-data", removal.Id), "data", removal.DataIdentity, removal.DataMoved, value => removal.DataMoved = value);
+                    if (removal.DeleteData == true)
+                        Area(Child("modules-data", removal.Id), "data", removal.DataIdentity, removal.DataMoved, value => removal.DataMoved = value);
+                    else if (Directory.Exists(Path.Combine(trash, "data")))
+                        problems.Add("Legacy removal contains quarantined business data retained for manual recovery.");
                     Area(Child("modules-cache", removal.Id), "cache", removal.CacheIdentity, removal.CacheMoved, value => removal.CacheMoved = value);
                     if (problems.Count > 0) throw new IOException(string.Join("; ", problems.Distinct()));
                     DeleteTree(trash);

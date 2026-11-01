@@ -141,6 +141,7 @@ public sealed record ModuleSettingOption(int Value, string Label, string LabelEn
 public sealed record ModuleSetting(string Key, string Label, string LabelEn, ModuleSettingKind Kind, double Minimum = 0, double Maximum = 1, string Unit = "", string UnitEn = "")
 {
     public IReadOnlyList<ModuleSettingOption> Options { get; init; } = [];
+    public object? DefaultValue { get; init; }
     public double Step { get; init; } = 1;
     public int MaximumLength { get; init; } = 256;
     public string Group { get; init; } = "";

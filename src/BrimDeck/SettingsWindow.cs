@@ -29,10 +29,10 @@ public sealed partial class SettingsWindow : Window
     private readonly TextBlock _status = new() { Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
     private ScrollViewer _scroll = null!;
     private static string[] _pages => [Loc.T("常规", "General"), Loc.T("收起外观", "Collapsed view"), Loc.T("展开外观", "Expanded view"),
-        Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck"), Loc.T("面板主题", "Panel theme"), Loc.T("显示与读数", "Display and readings"), Loc.T("输入法", "Input methods"), Loc.T("小程序", "Mini apps"), "", "", "", Loc.T("模组", "Modules"), Loc.T("增强传感器", "Enhanced sensors")];
+        Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck"), Loc.T("面板主题", "Panel theme"), Loc.T("显示与读数", "Display and readings"), Loc.T("输入法", "Input methods"), Loc.T("小程序", "Mini apps"), "", "", "", Loc.T("插件管理", "Plugin management"), Loc.T("增强传感器", "Enhanced sensors")];
     // The order of the pages in the navigation; the theme page (ThemePage) is listed with the appearance pages, and the system
     // monitor's page (MonitorSettingsPage) has its own group after music, before About.
-    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, 3, 4, 5, 6, MonitorSettingsPage, SensorsPage, InputMethodsPage, ModulesPage, MiniAppsPage, 7];
+    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, 3, 4, 5, 6, MonitorSettingsPage, SensorsPage, InputMethodsPage, MiniAppsPage, ModulesPage, 7];
     private int _page;
     private bool _preview;
     private StackPanel? _appRows;
@@ -62,9 +62,10 @@ public sealed partial class SettingsWindow : Window
         if (S.SettingsWindowWidth == size.Width && S.SettingsWindowHeight == size.Height && S.SettingsWindowMaximized == maximized) return;
         Change(s => { s.SettingsWindowWidth = size.Width; s.SettingsWindowHeight = size.Height; s.SettingsWindowMaximized = maximized; });
     }
-    public SettingsWindow(App app)
+    public SettingsWindow(App app) : this(app, 0) { }
+    internal SettingsWindow(App app, int initialPage)
     {
-        _app = app;
+        _app = app; _page = initialPage;
         Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/BrimDeck;component/SettingsResources.xaml", UriKind.Relative) });
         Style = (Style)FindResource(typeof(Window));
         // Sizes are DIPs, so the window looks the same at any scale factor. The default fits the page layout (the content
@@ -307,7 +308,8 @@ public sealed partial class SettingsWindow : Window
     public void ShowPage(int page)
     {
         if (page < 0 || page >= _pages.Length && !_moduleSettingsPages.ContainsValue(page)) return;
-        if (page >= _pages.Length && (ModuleSettingEntry(ModuleSettingsId(page)) is not { } extra || !ModuleSettingVisible(extra))) page = ModulesPage;
+        if (page >= _pages.Length && ModuleDetailId(page) is not null && !S.Modules.Enabled) page = ModulesPage;
+        else if (page >= _pages.Length && ModuleDetailId(page) is null && (ModuleSettingEntry(ModuleSettingsId(page)) is not { } extra || !ModuleSettingVisible(extra))) page = ModulesPage;
         if (page is 12 or 13 or 14) page = MiniAppsPage; // Reserved legacy page numbers. New module entries use namespaced ids.
         StopModuleMonitoring();
         RememberFocus();
@@ -350,7 +352,7 @@ public sealed partial class SettingsWindow : Window
         {
             if (i is 0 or 3 or 5 or 7 or MonitorSettingsPage or InputMethodsPage or ModulesPage)
             {
-                var group = TextLine(i switch { 0 => Loc.T("基础设置", "Basics"), 3 => Loc.T("AI 用量", "AI usage"), MonitorSettingsPage => Loc.T("系统监控", "System monitor"), InputMethodsPage => Loc.T("输入", "Input"), ModulesPage => Loc.T("工具", "Tools"), 5 => Loc.T("音乐", "Music"), _ => Loc.T("关于", "About") },10.5,TextTertiary);
+                var group = TextLine(i switch { 0 => Loc.T("基础设置", "Basics"), 3 => Loc.T("AI 用量", "AI usage"), MonitorSettingsPage => Loc.T("系统监控", "System monitor"), InputMethodsPage => Loc.T("输入", "Input"), ModulesPage => Loc.T("插件", "Plugins"), 5 => Loc.T("音乐", "Music"), _ => Loc.T("关于", "About") },10.5,TextTertiary);
                 group.Margin = new Thickness(12, i == 0 ? 0 : 24, 0, 8); _navigation.Children.Add(group);
             }
             int target=i; bool selected=page==i;
@@ -646,7 +648,7 @@ public sealed partial class SettingsWindow : Window
     }
     // What the "restore defaults" confirmation says. The quota page also puts the application list back (ResetPage, case 3), which removes the applications
     // the user added and their quota sources, the largest loss of any page, so it says so.
-    private string ResetConfirmText(int page) => Loc.T($"将把“{_pages[page]}”页的全部设置恢复为默认值。", $"This puts every setting on the {_pages[page]} page back to its default.")
+    private string ResetConfirmText(int page) => Loc.T($"将把“{SettingsPageTitle(page)}”页的全部设置恢复为默认值。", $"This puts every setting on the {SettingsPageTitle(page)} page back to its default.")
         + (page == 3 ? Loc.T("\n\n应用列表也会换回默认：你添加的应用、各应用的额度来源与自定义设置都会消失。", "\n\nThe application list also goes back to the default: the applications you added, and each one's quota source and custom settings, are removed.") : "");
     private void ResetPage()
     {

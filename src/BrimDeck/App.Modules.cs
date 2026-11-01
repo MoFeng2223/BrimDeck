@@ -44,7 +44,7 @@ public partial class App
         if (!DecideModuleRecovery()) return;
         if (!ModulesSkippedForSession) await (_initialModuleFileCleanup ??= InitializeModuleFileCleanupAsync());
         if (Exiting) return;
-        if (Settings.Modules.Enabled && (refresh || !_moduleCatalogScanned))
+        if (refresh || Settings.Modules.Enabled && !_moduleCatalogScanned)
         {
             var discovery = _moduleDiscovery ??= DiscoverModulesAsync();
             try { ExternalModules = await discovery; _moduleCatalogScanned = true; }
@@ -90,6 +90,7 @@ public partial class App
     {
         if (!ModulesSkippedForSession && ModuleFiles.Problem is null)
         {
+            await RecoverModuleInstallationsAsync();
             var before = await Task.Run(ModuleCatalog.Discover, Lifetime.Token);
             try { await ProcessModuleFilesAsync(ModuleCatalog.Failures.Count == 0 ? before : null); }
             catch (Exception cleanupError) { Modules.Report("host", "clean module files", cleanupError); ModuleFileProblem = cleanupError.Message; }
@@ -99,7 +100,7 @@ public partial class App
         {
             IReadOnlyList<ModuleBundleChange> changes = [];
             Exception? bundleError = null;
-            try { if (!ModulesSkippedForSession && ModuleFiles.Problem is null) changes = ModuleBundleInstaller.Install(Path.Combine(AppContext.BaseDirectory, "mods"), ModuleDirectory, receipts, ModuleFiles.SuppressedBundles); }
+            try { if (Settings.Modules.Enabled && !ModulesSkippedForSession && ModuleFiles.Problem is null) changes = ModuleBundleInstaller.Install(Path.Combine(AppContext.BaseDirectory, "mods"), ModuleDirectory, receipts, ModuleFiles.SuppressedBundles); }
             catch (Exception error) { bundleError = error; }
             return (Changes: changes, Modules: ModuleCatalog.Discover(), BundleError: bundleError);
         }, Lifetime.Token);

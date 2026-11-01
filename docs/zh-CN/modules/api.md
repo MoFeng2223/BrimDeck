@@ -1,6 +1,6 @@
 # BrimDeck 模组 API 参考
 
-本页记录当前代码可用的实验 API，当前契约版本为 `1.6`。本轮增加独立设置导航、真实呈现可见性、可见时定时器、文本／颜色字段、字段元数据与非致命诊断。基础数据服务要求 minor 1，能力描述要求 minor 2，异步挂载要求 minor 4，平台入口要求 minor 5；使用本轮新 API 时声明 minor 6。旧清单省略 minor 按 0 兼容，既有构造函数与枚举数值保持不变。
+本页记录当前代码可用的实验 API，当前契约版本为 `1.7`。1.6 增加独立设置导航、真实呈现可见性、可见时定时器、文本／颜色字段、字段元数据与非致命诊断；1.7 增加可选的修订设置、统一校验存储和局部设置视图，不修改旧接口的必需成员。基础数据服务要求 minor 1，能力描述要求 minor 2，异步挂载要求 minor 4，平台入口要求 minor 5；使用设置新契约时声明 minor 7。旧清单省略 minor 按 0 兼容，既有构造函数与枚举数值保持不变。
 
 与[开发指南](contributing.md)、[平台规范](../../../mods/README.md)组成三篇主文档。本文包含独立开发必须了解的规则，第 12 节提供完整速查；其他主题文章为可选补充。公开类型的来源是 `BrimDeck.Modules.Abstractions` 与 `BrimDeck.UI`；界面类型当前使用 `BrimDeck` 命名空间。
 
@@ -42,6 +42,86 @@
 <!-- BEGIN GENERATED MODULE API -->
 
 此区块由 `tools/BrimDeck.ModuleDocs` 从指定契约类型生成；不要手工编辑。基础类型为模组作者使用，末尾的状态与统计 DTO 为宿主诊断使用。
+
+### `ModuleSettingsStore`
+
+程序集：`BrimDeck.UI`；命名空间：`BrimDeck`。
+
+| 成员签名 |
+| --- |
+| `ModuleSettingsStore(string name, string nameEn, IReadOnlyList<ModuleSetting> fields, IModuleStorage storage, string key = "settings")` |
+| `IReadOnlyList<ModuleSetting> Fields { get; }` |
+| `string Name { get; }` |
+| `string NameEn { get; }` |
+| `bool Visible { get; }` |
+| `ModuleSettingsWriteResult Apply(ModuleSettingsPatch patch)` |
+| `ModuleSettingsSnapshot GetSnapshot()` |
+| `object Read(string key)` |
+| `void Reset()` |
+| `static object Validate(ModuleSetting field, object value)` |
+| `void Write(string key, object value)` |
+
+### `IModuleVersionedSettings`
+
+程序集：`BrimDeck.UI`；命名空间：`BrimDeck`。
+
+继承：`IModuleSettings`。
+
+| 成员签名 |
+| --- |
+| `ModuleSettingsWriteResult Apply(ModuleSettingsPatch patch)` |
+| `ModuleSettingsSnapshot GetSnapshot()` |
+
+### `IModuleCustomSettings`
+
+程序集：`BrimDeck.UI`；命名空间：`BrimDeck`。
+
+继承：`IModuleSettings`。
+
+| 成员签名 |
+| --- |
+| `IModuleView CreateSettingsView(ModuleViewContext context)` |
+
+### `ModuleSettingsSnapshot`
+
+程序集：`BrimDeck.UI`；命名空间：`BrimDeck`。
+
+| 成员签名 |
+| --- |
+| `ModuleSettingsSnapshot(long Revision, IReadOnlyDictionary<string, object> Values)` |
+| `long Revision { get; init; }` |
+| `IReadOnlyDictionary<string, object> Values { get; init; }` |
+
+### `ModuleSettingsPatch`
+
+程序集：`BrimDeck.UI`；命名空间：`BrimDeck`。
+
+| 成员签名 |
+| --- |
+| `ModuleSettingsPatch(long ExpectedRevision, IReadOnlyDictionary<string, object> Values)` |
+| `long ExpectedRevision { get; init; }` |
+| `IReadOnlyDictionary<string, object> Values { get; init; }` |
+
+### `ModuleSettingsWriteStatus`
+
+程序集：`BrimDeck.UI`；命名空间：`BrimDeck`。
+
+| 成员签名 |
+| --- |
+| `Saved = 0` |
+| `Conflict = 1` |
+| `Invalid = 2` |
+
+### `ModuleSettingsWriteResult`
+
+程序集：`BrimDeck.UI`；命名空间：`BrimDeck`。
+
+| 成员签名 |
+| --- |
+| `ModuleSettingsWriteResult(ModuleSettingsWriteStatus Status, long Revision, string? Error = null)` |
+| `string? Error { get; init; }` |
+| `long Revision { get; init; }` |
+| `ModuleSettingsWriteStatus Status { get; init; }` |
 
 ### `IModuleSettingsNavigation`
 
@@ -256,6 +336,7 @@
 | `static Thickness Place(FrameworkElement content)` |
 | `void Release(FrameworkElement content, Handover motion)` |
 | `void Send(UIElement? picture, Thickness place, FrameworkElement content, Handover motion)` |
+| `static BitmapSource Snapshot(Visual element, double width, double height, DpiScale dpi)` |
 
 ### `RollingDigitsView`
 
@@ -551,6 +632,7 @@
 | 成员签名 |
 | --- |
 | `ModuleSetting(string Key, string Label, string LabelEn, ModuleSettingKind Kind, double Minimum = 0, double Maximum = 1, string Unit = "", string UnitEn = "")` |
+| `object? DefaultValue { get; init; }` |
 | `string Description { get; init; }` |
 | `string DescriptionEn { get; init; }` |
 | `string Group { get; init; }` |
@@ -694,7 +776,7 @@
 | 成员签名 |
 | --- |
 | `const int Major = 1` |
-| `const int Minor = 6` |
+| `const int Minor = 7` |
 | `const string HostInfo = "host.info"` |
 | `const string UsageRead = "usage.read"` |
 | `const string MediaRead = "media.read"` |

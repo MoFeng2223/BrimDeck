@@ -13,7 +13,7 @@ internal static partial class Program
             string root = Root(); var files = new ModuleFiles(root);
             string data = Path.Combine(root, "modules-data", "ghost"); Write(Path.Combine(data, "keep.json"), "data");
             Check("orphan data directories are listed", files.Orphans().SequenceEqual(["ghost"]));
-            files.RequestRemoval("ghost");
+            files.RequestRemoval("ghost", deleteData: true);
             var result = files.ProcessPending([]);
             Check("clearing an orphan removes only its data", !result.Pending && !Directory.Exists(data) && !files.HasPending);
         }
@@ -23,11 +23,11 @@ internal static partial class Program
             var manifest = new ModuleManifest { Id = "sample", Name = "sample", Assembly = "Example.dll", EntryType = "Example.Entry" };
             File.WriteAllText(Path.Combine(dir, "module.json"), JsonSerializer.Serialize(manifest)); File.WriteAllText(Path.Combine(dir, "Example.dll"), "fixture");
             var module = new DiscoveredModule(manifest, dir, ModuleCatalog.Fingerprint(dir));
-            files.Remember([module]); files.RequestRemoval("sample", module); files.ProcessPending([]);
+            files.Remember([module]); files.RequestRemoval("sample", module, deleteData: true); files.ProcessPending([]);
             // Data written after the removal finished is never adopted by the older journal, but it is still visible.
             Write(Path.Combine(root, "modules-data", "sample", "late.json"), "late");
             Check("data created after removal is listed as an orphan", files.Orphans().SequenceEqual(["sample"]));
-            files.RequestRemoval("sample"); files.ProcessPending([]);
+            files.RequestRemoval("sample", deleteData: true); files.ProcessPending([]);
             Check("an orphan left by a completed removal can be cleared", !Directory.Exists(Path.Combine(root, "modules-data", "sample")));
         }
     }

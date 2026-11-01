@@ -130,6 +130,8 @@ public static partial class ModulePackageInspector
                     Warning("sdk-permission-not-declared", location, "SDK type references a service requiring " + permission + ". Type references alone do not prove a call.");
             }
             int minor = capability?.IntroducedMinor ?? 0;
+            if (type.Name is "BrimDeck.ModuleSettingsStore" or "BrimDeck.IModuleVersionedSettings" or "BrimDeck.IModuleCustomSettings" or "BrimDeck.ModuleSettingsSnapshot" or "BrimDeck.ModuleSettingsPatch" or "BrimDeck.ModuleSettingsWriteStatus" or "BrimDeck.ModuleSettingsWriteResult") minor = 7;
+            if (type.Name == "BrimDeck.ModuleSetting" && member is "set_DefaultValue" or "get_DefaultValue") minor = 7;
             if (type.Name is "BrimDeck.IModuleSettingsNavigation" or "BrimDeck.ModuleSettingsPlacement" or "BrimDeck.Modules.ModuleDiagnostic" or "BrimDeck.Modules.ModuleDiagnosticSeverity") minor = 6;
             if (type.Name is "BrimDeck.Modules.IModulePlatform" or "BrimDeck.Modules.IModuleRegistries" or "BrimDeck.Modules.IModuleServices" or "BrimDeck.Modules.IModuleEvents") minor = 5;
             if (type.Name == "BrimDeck.IModuleAsyncActivity") minor = 4;

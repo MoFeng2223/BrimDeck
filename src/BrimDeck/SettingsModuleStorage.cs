@@ -65,14 +65,17 @@ public sealed partial class SettingsWindow
             var uninstall = ActionButton(Loc.T("卸载模组", "Uninstall module"), async () =>
             {
                 if (_app.ModuleFilesBusy) return;
-                if (MessageBox.Show(this, Loc.T($"卸载“{module.Name}”并删除它的全部数据与缓存？\n\n依赖此模组的其他模组会停止。此操作无法撤销。", $"Uninstall {module.Name} and delete all its data and caches?\n\nDependent modules will stop. This cannot be undone."),
-                    Loc.T("卸载模组", "Uninstall module"), MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+                if (!Confirm(Loc.T("卸载插件", "Uninstall plugin"), Loc.T($"卸载“{module.Name}”？默认保留业务数据，重新安装后可以继续使用。\n依赖此插件的其他插件会停止。", $"Uninstall {module.Name}? Business data is kept by default for reinstallation.\nDependent plugins will stop."), Loc.T("卸载", "Uninstall"))) return;
+                var choice = MessageBox.Show(this, Loc.T("是否同时删除插件业务数据？\n选择“否”保留数据（推荐）；选择“是”将无法撤销。", "Also delete this plugin's business data?\nChoose No to keep it (recommended). Choosing Yes cannot be undone."),
+                    Loc.T("同时删除插件数据", "Delete plugin data too"), MessageBoxButton.YesNoCancel, MessageBoxImage.Warning, MessageBoxResult.No);
+                if (choice == MessageBoxResult.Cancel) return;
+                bool deleteData = choice == MessageBoxResult.Yes;
                 try
                 {
-                    var result = await _app.UninstallModuleAsync(module.Id); _expandedModules.Remove(module.Id);
+                    var result = await _app.UninstallModuleAsync(module.Id, deleteData); _expandedModules.Remove(module.Id);
                     _moduleActionMessage = result.ReplacementPreserved
                         ? Loc.T("为保护数据，部分目录已保留。请刷新查看，必要时重新确认卸载。", "Some directories were preserved to protect data. Refresh and confirm uninstall again if needed.")
-                        : result.Pending ? Loc.T("模组已停止，仍有文件待清理；解除占用后刷新或重新启动。", "Module stopped. Release remaining files, then refresh or restart to finish cleanup.") : Loc.T("模组已卸载，数据与缓存已删除。", "Module uninstalled. Data and caches deleted.");
+                        : result.Pending ? Loc.T("模组已停止，仍有文件待清理；解除占用后刷新或重新启动。", "Module stopped. Release remaining files, then refresh or restart to finish cleanup.") : deleteData ? Loc.T("插件已卸载，已确认的业务数据与缓存已删除。", "Plugin uninstalled. Confirmed business data and caches deleted.") : Loc.T("插件已卸载，业务数据已保留。", "Plugin uninstalled. Business data kept.");
                     if (IsLoaded) ShowPage(ModulesPage);
                 }
                 catch (Exception error) { SaveStatus(error.Message, true); }

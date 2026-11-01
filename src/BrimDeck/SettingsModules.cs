@@ -16,9 +16,10 @@ public sealed partial class SettingsWindow
     private int _nextModuleSettingsPage = _pages.Length;
     private int _moduleTab;
     private string? _moduleActionMessage;
+    private string _moduleSearch = "";
     private readonly HashSet<string> _expandedModules = [];
     private string? _moduleStructure;
-    private string ModuleStructure() => string.Join("|", _app.Modules.Modules.Select(m => $"{m.Id}:{m.Name}:{m.Version}:{m.Revision}:{m.Generation}"))
+    private string ModuleStructure() => S.Modules.Enabled + "/" + string.Join("|", _app.Modules.Modules.Select(m => $"{m.Id}:{m.Name}:{m.Version}:{m.Revision}:{m.Generation}:{m.Status}"))
         + "/pages/" + string.Join('|', _app.Modules.Registry.List<ModulePage>().Select(e => e.Id))
         + "/activities/" + string.Join('|', _app.Modules.Registry.List<IModuleActivity>().Select(e => e.Id))
         + "/widgets/" + string.Join('|', ModuleWidgetEntries().Select(e => e.Id + ":" + WidgetEnabled(e) + ":" + WidgetOrder(e)))
@@ -26,7 +27,15 @@ public sealed partial class SettingsWindow
         + "/discovery/" + string.Join('|', _app.ModuleCatalog.Failures.Select(f => f.Path + ":" + f.Error))
         + $"/files/{_app.ModuleFilesBusy}/{_app.PendingModuleCleanup}/{_app.HasRemovedBundles}/{_app.ModuleFileProblem}";
     private string SettingsPageTitle(int page) => page < _pages.Length ? _pages[page]
-        : ModuleSettingEntry(ModuleSettingsId(page)) is { } entry ? _app.Modules.Invoke(entry.ModuleId, "settings title", () => Loc.T(entry.Value.Name, entry.Value.NameEn)) ?? entry.Id : Loc.T("模组设置", "Module settings");
+        : ModuleDetailId(page) is { } owner ? _app.ExternalModules.FirstOrDefault(m => m.Manifest.Id == owner)?.Manifest.Name ?? owner
+        : ModuleSettingEntry(ModuleSettingsId(page)) is { } entry ? _app.Modules.Invoke(entry.ModuleId, "settings title", () => Loc.T(entry.Value.Name, entry.Value.NameEn)) ?? entry.Id : Loc.T("插件设置", "Plugin settings");
+    private string? ModuleDetailId(int page) => ModuleSettingsId(page) is var id && id.StartsWith("plugin/", StringComparison.Ordinal) ? id[7..] : null;
+    private int ModuleDetailPage(string id)
+    {
+        string key = "plugin/" + id;
+        if (!_moduleSettingsPages.TryGetValue(key, out int page)) _moduleSettingsPages[key] = page = _nextModuleSettingsPage++;
+        return page;
+    }
     private Contribution<IModuleSettings>? ModuleSettingEntry(string id) => _app.Modules.Registry.List<IModuleSettings>().FirstOrDefault(e => e.Id == id);
     private IReadOnlyList<ModuleSettingsEntry> ModuleSettingsEntries() => ModuleSettingsIndex.Create(_app.Modules, S.Modules.Enabled && S.MiniApps.Enabled);
     private bool ModuleSettingVisible(Contribution<IModuleSettings> entry) => ModuleSettingsEntries().Any(e => ReferenceEquals(e.Contribution, entry) && e.Visible);
@@ -38,28 +47,41 @@ public sealed partial class SettingsWindow
     }
     private IEnumerable<int> ExternalSettingsPages()
     {
-        foreach (var entry in ModuleSettingsEntries().Where(e => e.Placement == ModuleSettingsPlacement.Modules && e.Visible))
-            yield return SettingsPageFor(entry.Contribution);
+        if (!S.Modules.Enabled) yield break;
+        foreach (var module in _app.Modules.Modules.Where(m => m.Status == ModuleStatus.Ready).OrderBy(m => S.Modules.EnabledModules.IndexOf(m.Id)).ThenBy(m => m.Id, StringComparer.Ordinal))
+            yield return ModuleDetailPage(module.Id);
     }
     internal void ShowModuleSettings(string id)
     {
-        if (ModuleSettingEntry(id) is { } entry) { ShowPage(SettingsPageFor(entry)); return; }
+        string owner = ModuleSettingEntry(id)?.ModuleId ?? id.Split(':')[0];
+        if (_app.Modules.Modules.Any(m => m.Id == owner)) { ShowPage(ModuleDetailPage(owner)); return; }
         ShowPage(ModulesPage);
     }
     internal void RefreshModules()
     {
         if (_scroll is null) return;
         string structure = ModuleStructure();
-        if (_moduleStructure == structure) { if (_page == ModulesPage) RefreshModuleMetrics(); return; }
+        if (_moduleStructure == structure) { if (_page == ModulesPage || ModuleDetailId(_page) is not null) RefreshModuleMetrics(); return; }
         _moduleStructure = structure;
         if (_page >= ModulesPage || _page == MiniAppsPage) ShowPage(_page);
         else BuildSettingsNavigation(_page);
     }
     private void RenderModuleSettings(string id)
     {
+        if (id.StartsWith("plugin/", StringComparison.Ordinal)) { RenderPluginDetails(id[7..]); return; }
         var entry = ModuleSettingEntry(id);
         if (entry is null) { Group(TextLine(Loc.T("此组件当前未启用。", "This component is disabled."), 12, TextSecondary)); return; }
+        if (entry.Value is IModuleCustomSettings custom)
+        {
+            var view = new ModuleViewHost(_app.Modules, entry.ModuleId, new ModuleViewContext(_content, target => _app.Deck.OpenModulePageFromSettings(target), _app.OpenModuleSettings, _ => { }), custom.CreateSettingsView);
+            view.Height = 300; view.ClipToBounds = true; view.SetViewport(560, 300); view.SetPresented(true);
+            view.SizeChanged += (_, _) => view.SetViewport(Math.Max(1, view.ActualWidth), 300);
+            view.Unloaded += (_, _) => view.Dispose(); _content.Children.Add(view); return;
+        }
         var fields = ModuleSettingsSchema.Read(_app.Modules, entry);
+        long? revision = entry.Value is IModuleVersionedSettings versioned
+            ? _app.Modules.Invoke(entry.ModuleId, "settings revision", () => versioned.GetSnapshot())?.Revision : null;
+        if (entry.Value is IModuleVersionedSettings && revision is null) return;
         foreach (var group in fields.GroupBy(item => (item.Definition.Group, item.Definition.GroupEn)))
         {
             if (group.Key.Group.Length > 0) SectionTitle(Loc.T(group.Key.Group, group.Key.GroupEn));
@@ -70,7 +92,16 @@ public sealed partial class SettingsWindow
                 bool Write(object next)
                 {
                     bool current = _app.Modules.Registry.List<IModuleSettings>().Any(e => ReferenceEquals(e, entry));
-                    bool saved = current && _app.Modules.Invoke(entry.ModuleId, "write setting", () => { entry.Value.Write(field.Key, next); return true; });
+                    bool saved = current && _app.Modules.Invoke(entry.ModuleId, "write setting", () =>
+                    {
+                        if (entry.Value is IModuleVersionedSettings schema)
+                        {
+                            var result = schema.Apply(new(revision!.Value, new Dictionary<string, object> { [field.Key] = next }));
+                            if (result.Status != ModuleSettingsWriteStatus.Saved) return false;
+                            revision = result.Revision; return true;
+                        }
+                        entry.Value.Write(field.Key, ModuleSettingsStore.Validate(field, next)); return true;
+                    });
                     if (!saved) SaveStatus(Loc.T("模组设置未能保存，请查看模组详情。", "Module settings could not be saved. See module details."), true);
                     else SaveStatus("", false);
                     return saved;
@@ -102,12 +133,12 @@ public sealed partial class SettingsWindow
         var tabs = new UniformGrid { Columns = 2, Width = 248 };
         foreach (int tab in new[] { 0, 1 })
         {
-            var button = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = tab == 0 ? Loc.T("模组管理", "Manage modules") : Loc.T("性能监控", "Performance"), IsChecked = _moduleTab == tab, GroupName = "ModuleTab" };
+            var button = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = tab == 0 ? Loc.T("插件管理", "Manage plugins") : Loc.T("性能监控", "Performance"), IsChecked = _moduleTab == tab, GroupName = "ModuleTab" };
             AutomationProperties.SetName(button, (string)button.Content); AutomationProperties.SetAutomationId(button, "module-tab-" + tab);
             button.Checked += (_, _) => { if (_moduleTab != tab) { _moduleTab = tab; _keptOffset = 0; _scroll.ScrollToTop(); ShowPage(ModulesPage); } }; tabs.Children.Add(button);
         }
         var segments = SegmentBorder(tabs); segments.HorizontalAlignment = HorizontalAlignment.Left; segments.Margin = new Thickness(0, 0, 0, 20); _content.Children.Add(segments);
-        if (_moduleTab == 0) ModuleManagementPage(); else ModulePerformancePage();
+        if (_moduleTab == 0 || !S.Modules.Enabled) ModuleManagementPage(); else ModulePerformancePage();
         UpdateModuleMonitoring();
     }
     private Border ModuleCard(FrameworkElement content, Thickness? padding = null)
@@ -140,7 +171,9 @@ public sealed partial class SettingsWindow
                 var name = TextLine(orphan, 12, TextPrimary); DockPanel.SetDock(name, Dock.Left); line.Children.Add(name);
                 line.Children.Add(ModuleLink(Loc.T("清理", "Clear"), async () =>
                 {
-                    await _app.ClearOrphanDataAsync(orphan);
+                    if (!Confirm(Loc.T("删除未关联数据", "Delete unassociated data"), Loc.T($"永久删除 {orphan} 的插件数据与缓存？这不会删除源文件，但无法撤销。", $"Permanently delete plugin data and cache for {orphan}? Original source files are not deleted. This cannot be undone."), Loc.T("删除数据", "Delete data"))) return;
+                    try { await _app.ClearOrphanDataAsync(orphan); }
+                    catch (Exception error) { SaveStatus(error.Message, true); return; }
                     _moduleActionMessage = Loc.T($"已清理 {orphan} 的数据", $"Cleared data for {orphan}");
                     if (IsLoaded && _page == ModulesPage) ShowPage(ModulesPage);
                 }));
@@ -149,13 +182,14 @@ public sealed partial class SettingsWindow
             _content.Children.Add(ModuleCard(orphanBody));
         }
         var subtitle = TextLine(Loc.T("统一管理内置与外部模组，关闭后保留设置和进度。", "Manage built-in and external modules; keep settings and progress when off."), 11.5, TextSecondary); subtitle.TextWrapping = TextWrapping.Wrap; subtitle.Margin = new Thickness(0, 5, 0, 0);
-        var toggle = ModuleToggle(Loc.T("启用模组系统", "Enable modules"), S.Modules.Enabled, value => Change(s => s.Modules.Enabled = value));
+        var toggle = ModuleToggle(Loc.T("启用插件系统", "Enable plugins"), S.Modules.Enabled, value => Change(s => s.Modules.Enabled = value));
         toggle.IsEnabled = !_app.ModuleFilesBusy;
         AutomationProperties.SetAutomationId(toggle, "module-system-enabled");
-        _content.Children.Add(ModuleCard(Row(Loc.T("模组系统", "Module system"), toggle, subtitle), new Thickness(18, 8, 18, 8)));
+        _content.Children.Add(ModuleCard(Row(Loc.T("插件系统", "Plugin system"), toggle, subtitle), new Thickness(18, 8, 18, 8)));
         var toolbar = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 8, 0, 12) };
         var actions = new StackPanel { Orientation = Orientation.Horizontal };
-        actions.Children.Add(ModuleLink(Loc.T("打开目录", "Open folder"), () =>
+        actions.Children.Add(ModuleLink(Loc.T("安装插件", "Install plugin"), InstallPluginFolder));
+        actions.Children.Add(ModuleLink(Loc.T("打开插件文件夹", "Open plugin folder"), () =>
         {
             try { Directory.CreateDirectory(_app.ModuleDirectory); Process.Start(new ProcessStartInfo(_app.ModuleDirectory) { UseShellExecute = true }); _moduleActionMessage = Loc.T("已打开模组目录", "Module folder opened"); ShowPage(ModulesPage); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception) { SaveStatus(ex.Message, true); }
@@ -176,7 +210,35 @@ public sealed partial class SettingsWindow
         AddModuleMetricRefresh(_ => { var current = _app.Modules.Modules; SetMetricText(count, Loc.T($"{current.Count} 个模组 · {current.Count(m => m.Status == ModuleStatus.Ready)} 个运行中", $"{current.Count} modules · {current.Count(m => m.Status == ModuleStatus.Ready)} running")); });
         _content.Children.Add(toolbar);
         if (_moduleActionMessage is not null) { var note = TextLine(_moduleActionMessage, 11.5, TextSecondary); note.Margin = new Thickness(0, 0, 0, 12); _content.Children.Add(note); }
-        foreach (var module in modules) _content.Children.Add(ModuleEntryCard(module, false));
+        var search = new TextBox { Style = (Style)FindResource("SettingsField"), Text = _moduleSearch, Height = 30, Padding = new Thickness(8, 3, 8, 3), Margin = new Thickness(0, 0, 0, 12) };
+        AutomationProperties.SetName(search, Loc.T("搜索插件", "Search plugins")); _content.Children.Add(search);
+        var list = new StackPanel(); _content.Children.Add(list);
+        if (!S.Modules.Enabled)
+        {
+            search.Visibility = Visibility.Collapsed;
+            list.Children.Add(ModuleNotice(Loc.T("插件系统已关闭。刷新与文件维护不执行插件代码。", "Plugin system is off. Refresh and file maintenance do not execute plugin code.")));
+            var maintenance = new StackPanel();
+            foreach (var module in modules)
+            {
+                var external = _app.ExternalModules.FirstOrDefault(m => m.Manifest.Id == module.Id);
+                maintenance.Children.Add(TextLine(module.Name + " · v" + module.Version, 13, TextPrimary));
+                maintenance.Children.Add(ModuleStorageDetails(module, external));
+            }
+            list.Children.Add(new Expander { Header = Loc.T("文件与数据维护", "Files and data maintenance"), Foreground = UI.Brush(TextPrimary), Content = maintenance });
+            return;
+        }
+        var cards = modules.Select(module => (module, card: ModuleEntryCard(module, false))).ToArray();
+        foreach (var (_, card) in cards) list.Children.Add(card);
+        void Filter()
+        {
+            _moduleSearch = search.Text.Trim();
+            foreach (var (module, card) in cards)
+            {
+                string author = _app.ExternalModules.FirstOrDefault(m => m.Manifest.Id == module.Id)?.Manifest.Author ?? "";
+                card.Visibility = _moduleSearch.Length == 0 || (module.Name + " " + module.Id + " " + author).Contains(_moduleSearch, StringComparison.CurrentCultureIgnoreCase) ? Visibility.Visible : Visibility.Collapsed;
+            }
+        }
+        search.TextChanged += (_, _) => Filter(); Filter();
         foreach (var failure in _app.ModuleCatalog.Failures)
             _content.Children.Add(ModuleCard(UI.Text(Path.GetFileName(failure.Path) + ": " + failure.Error, 11.5, TextSecondary)));
     }

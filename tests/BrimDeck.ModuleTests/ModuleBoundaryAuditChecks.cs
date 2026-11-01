@@ -26,7 +26,7 @@ internal static partial class Program
         }
         {
             string root = Root(); var files = new ModuleFiles(root); var module = Package(root);
-            string data = Path.Combine(root, "modules-data", "sample", "old.json"); Write(data, "old"); files.RequestRemoval("sample", module);
+            string data = Path.Combine(root, "modules-data", "sample", "old.json"); Write(data, "old"); files.RequestRemoval("sample", module, deleteData: true);
             using (var held = new FileStream(Path.Combine(root, "module-files.json"), FileMode.Open, FileAccess.Read, FileShare.Read))
             {
                 files.ProcessPending([]); files.ProcessPending([]);
@@ -38,13 +38,13 @@ internal static partial class Program
             Check("audit: restart after journal failure preserves replacement business data", File.Exists(Path.Combine(root, "modules-data", "sample", "new.json")));
         }
         {
-            string root = Root(); var files = new ModuleFiles(root); var module = Package(root); files.RequestRemoval("sample", module);
+            string root = Root(); var files = new ModuleFiles(root); var module = Package(root); files.RequestRemoval("sample", module, deleteData: true);
             Write(Path.Combine(root, "modules-data", "sample", "new.json"), "new after request"); files.ProcessPending([]);
             Check("audit: an initially absent data directory is never adopted by an older removal", File.Exists(Path.Combine(root, "modules-data", "sample", "new.json")));
         }
         {
             string root = Root(); var files = new ModuleFiles(root); var module = Package(root);
-            string data = Path.Combine(root, "modules-data", "sample"); Write(Path.Combine(data, "old.json"), "old"); files.RequestRemoval("sample", module);
+            string data = Path.Combine(root, "modules-data", "sample"); Write(Path.Combine(data, "old.json"), "old"); files.RequestRemoval("sample", module, deleteData: true);
             Directory.Move(data, Path.Combine(root, "saved-original")); Write(Path.Combine(data, "new.json"), "replacement");
             var result = files.ProcessPending([]);
             Check("audit: replacement directory identity blocks stale cleanup", result.ReplacementPreserved && File.Exists(Path.Combine(data, "new.json")));
@@ -89,7 +89,7 @@ internal static partial class Program
             Write(Path.Combine(root, "modules-cache", "sample", "generation", "x"), "retained");
             using (var held = new FileStream(Path.Combine(root, "module-files.json"), FileMode.Open, FileAccess.Read, FileShare.Read))
             {
-                Throws("audit: failed removal intent commits are reported", () => files.RequestRemoval("sample", module));
+                Throws("audit: failed removal intent commits are reported", () => files.RequestRemoval("sample", module, deleteData: true));
                 Check("audit: failed intent commits restore in-memory removal and bundle state", !files.HasPending && !files.SuppressedBundles.Contains("sample"));
                 Throws("audit: failed cache intent commits are reported", () => files.ClearCache("sample", []));
                 Check("audit: failed cache intent never starts filesystem cleanup", !files.HasPending && File.Exists(Path.Combine(root, "modules-cache", "sample", "generation", "x")));
@@ -104,7 +104,7 @@ internal static partial class Program
         }
         {
             string root = Root(); var module = Package(root); string file = Path.Combine(root, "modules-data", "sample", "keep.json"); Write(file, "legacy data");
-            var files = new ModuleFiles(root); files.RequestRemoval("sample", module);
+            var files = new ModuleFiles(root); files.RequestRemoval("sample", module, deleteData: true);
             string journal = Path.Combine(root, "module-files.json"); var state = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(journal))!;
             var job = state["Removing"]![0]!.AsObject(); job.Remove("PackageIdentity"); job.Remove("DataIdentity"); job.Remove("CacheIdentity"); File.WriteAllText(journal, state.ToJsonString());
             var result = new ModuleFiles(root).ProcessPending([]);

@@ -39,6 +39,7 @@ internal static partial class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Length == 3 && args[0] == "--management-window") return ManagementWindowChecks(args[1], args[2]);
         if (args.Length == 2 && args[0] == "--fingerprint") { Console.WriteLine(ModuleCatalog.Fingerprint(args[1])); return 0; }
         if (args.Length == 2 && args[0] == "--authoring-packages") return AuthoringPackageChecks(args[1]);
         string testRoot, repository, manifest = Path.Combine(AppContext.BaseDirectory, "module-test-artifacts.txt");
@@ -71,7 +72,7 @@ internal static partial class Program
             ("runtime", () => RuntimeChecks().GetAwaiter().GetResult()), ("lifecycle", () => LifecycleChecks().GetAwaiter().GetResult()),
             ("host-api", () => HostApiChecks().GetAwaiter().GetResult()), ("capabilities", () => CapabilityChecks().GetAwaiter().GetResult()),
             ("performance", () => PerformanceChecks().GetAwaiter().GetResult()), ("loader", () => LoaderChecks(_artifacts.Notes).GetAwaiter().GetResult()),
-            ("files", () => ModuleFileChecks(_artifacts.Notes).GetAwaiter().GetResult()), ("boundaries", ModuleBoundaryAuditChecks),
+            ("files", () => ModuleFileChecks(_artifacts.Notes).GetAwaiter().GetResult()), ("management", () => ManagementChecks().GetAwaiter().GetResult()), ("management-window", () => ManagementWindowProcess(repository)), ("boundaries", ModuleBoundaryAuditChecks),
             ("continuations", () => ModuleContinuationAuditChecks(_artifacts.Notes)), ("orphans", ModuleOrphanChecks),
             ("ui", () => UiChecks(repository)), ("async-views", AsyncViewChecks), ("visibility", ViewVisibilityChecks),
             ("settings-navigation", SettingsNavigationChecks), ("settings-schema", SettingsSchemaChecks), ("deprecations", ModuleDeprecationChecks),

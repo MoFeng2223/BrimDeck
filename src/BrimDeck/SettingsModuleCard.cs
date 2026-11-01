@@ -12,7 +12,9 @@ namespace BrimDeck;
 public sealed partial class SettingsWindow
 {
     private string ModuleName(ModuleInfo module) => module.Name;
-    private string ModuleStateLabel(ModuleInfo module) => _app.ModulesSkippedForSession && S.Modules.EnabledModules.Contains(module.Id)
+    private string ModuleStateLabel(ModuleInfo module) => S.Modules.EnabledModules.Contains(module.Id)
+        && _app.ExternalModules.FirstOrDefault(e => e.Manifest.Id == module.Id) is { } package && S.Modules.Approvals.GetValueOrDefault(module.Id) != package.Digest
+        ? Loc.T("需重新批准", "Approval required") : _app.ModulesSkippedForSession && S.Modules.EnabledModules.Contains(module.Id)
         ? Loc.T("本次未启动", "Skipped this run") : module.Status switch
     {
         ModuleStatus.Ready => Loc.T("运行中", "Running"), ModuleStatus.Starting => module.Slow ? Loc.T("启动较慢", "Slow start") : Loc.T("启动中", "Starting"),
@@ -37,20 +39,25 @@ public sealed partial class SettingsWindow
         label.Children.Add(Stroke(module.Status == ModuleStatus.Ready ? "M 8,1 A 7,7 0 1 1 7.99,1 M 4.5,8 L 7,10.5 L 11.5,5.5" : module.Status is ModuleStatus.Starting or ModuleStatus.Waiting ? "M 8,1 A 7,7 0 1 1 7.99,1 M 8,4 L 8,8 L 11,10" : "M 8,1 A 7,7 0 1 1 7.99,1 M 4,4 L 12,12", 17, 17, stateColor));
         var names = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         names.Children.Add(TextLine(title, 13.5, TextPrimary, FontWeights.SemiBold));
-        var metadata = TextLine(module.Id + " · v" + module.Version + " · " + (module.BuiltIn ? Loc.T("内置", "Built-in") : Loc.T("外部", "External")) + (module.Slow ? Loc.T(" · 慢启动", " · Slow startup") : ""), 10.5, TextTertiary); metadata.Margin = new Thickness(0, 5, 0, 0); names.Children.Add(metadata);
+        var metadata = TextLine(module.Id + " · v" + module.Version + (external?.Manifest.Author is { Length: > 0 } author ? " · " + author : "") + " · " + (module.BuiltIn ? Loc.T("内置", "Built-in") : Loc.T("外部", "External")) + (module.Slow ? Loc.T(" · 慢启动", " · Slow startup") : ""), 10.5, TextTertiary); metadata.Margin = new Thickness(0, 5, 0, 0); names.Children.Add(metadata);
         Grid.SetColumn(names, 1); label.Children.Add(names);
-        var nameButton = ActionButton("", () => { }); nameButton.Content = label; nameButton.HorizontalContentAlignment = HorizontalAlignment.Stretch; nameButton.Padding = new Thickness(7, 10, 8, 10); nameButton.Margin = new Thickness(0, 0, 6, 0); header.Children.Add(nameButton);
+        var nameButton = ActionButton("", () => { if (!performance) ShowPage(ModuleDetailPage(module.Id)); }); nameButton.Content = label; nameButton.HorizontalContentAlignment = HorizontalAlignment.Stretch; nameButton.Padding = new Thickness(7, 10, 8, 10); nameButton.Margin = new Thickness(0, 0, 6, 0); header.Children.Add(nameButton);
         var status = TextLine(ModuleStateLabel(module), 10.5, stateColor); status.TextAlignment = TextAlignment.Center; status.VerticalAlignment = VerticalAlignment.Center;
         var statusHolder = new Border { Child = status, Padding = new Thickness(6, 4, 6, 4), CornerRadius = new CornerRadius(6), Background = UI.Brush(Inset), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) }; Grid.SetColumn(statusHolder, 1); header.Children.Add(statusHolder);
         if (ModuleSignatureChip(module) is { } chip) header.Children.Add(chip);
-        var toggle = ModuleToggle(Loc.T("启用：", "Enable: ") + title, enabled, value => Change(s =>
+        var toggle = ModuleToggle(Loc.T("启用：", "Enable: ") + title, enabled, value =>
         {
-            if (external is not null)
+            if (value && !approved && !Confirm(Loc.T("信任并启用插件", "Trust and enable plugin"), Loc.T($"“{title}”将在 BrimDeck 进程内执行 DLL 代码。\n它能够以当前用户权限访问文件和进程；权限声明和内容摘要不是安全沙箱。\n\n仅在信任作者和当前文件来源时启用。批准仅绑定本次包内容。", $"{title} will execute DLL code inside BrimDeck.\nIt can access files and processes with your user permissions; declarations and content hashes are not a sandbox.\n\nEnable only if you trust the author and these files. Approval binds only this package content."), Loc.T("信任并启用", "Trust and enable")))
+            { ShowPage(_page); return; }
+            Change(s =>
             {
-                s.Modules.EnabledModules.Remove(module.Id);
-                if (value) { s.Modules.EnabledModules.Add(module.Id); s.Modules.Approvals[module.Id] = external.Digest; }
-            }
-        }));
+                if (external is not null)
+                {
+                    s.Modules.EnabledModules.Remove(module.Id);
+                    if (value) { s.Modules.EnabledModules.Add(module.Id); s.Modules.Approvals[module.Id] = external.Digest; }
+                }
+            });
+        });
         toggle.IsEnabled = !_app.ModuleFilesBusy && (!_app.ModulesSkippedForSession || enabled);
         if (_app.ModulesSkippedForSession) toggle.ToolTip = Loc.T("关闭后下次启动也不加载；重新启用需重启应用。", "Disable to also skip it next time. Restart the app to enable modules again.");
         AutomationProperties.SetAutomationId(toggle, "module-enable-" + module.Id); toggle.Margin = new Thickness(4, 0, 14, 0); Grid.SetColumn(toggle, 2); header.Children.Add(toggle);
@@ -87,8 +94,8 @@ public sealed partial class SettingsWindow
             UpdateModuleMonitoring();
         }
         arrow = ChevronButton(Loc.T("展开：", "Expand: ") + title, SetOpen); arrow.Width = 24; Grid.SetColumn(arrow, 3); header.Children.Add(arrow); PointArrow(arrow, open);
-        AutomationProperties.SetAutomationId(arrow, "module-expand-" + module.Id); AutomationProperties.SetName(nameButton, Loc.T("展开：", "Expand: ") + title);
-        AutomationProperties.SetItemStatus(nameButton, open ? Loc.T("已展开", "Expanded") : Loc.T("已收起", "Collapsed")); nameButton.Click += (_, _) => SetOpen();
+        AutomationProperties.SetAutomationId(arrow, "module-expand-" + module.Id); AutomationProperties.SetName(nameButton, (performance ? Loc.T("展开：", "Expand: ") : Loc.T("插件详情：", "Plugin details: ")) + title);
+        AutomationProperties.SetItemStatus(nameButton, open ? Loc.T("已展开", "Expanded") : Loc.T("已收起", "Collapsed")); if (performance) nameButton.Click += (_, _) => SetOpen();
         root.Children.Add(header); root.Children.Add(detail);
         ModuleStatus iconState = module.Status;
         AddModuleMetricRefresh(values =>

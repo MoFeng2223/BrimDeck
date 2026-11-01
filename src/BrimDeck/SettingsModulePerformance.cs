@@ -23,14 +23,14 @@ public sealed partial class SettingsWindow
     { _modulePerformanceTimer?.Stop(); _moduleMetricRefresh.Clear(); _moduleInitialMetrics = null; }
     private void UpdateModuleMonitoring()
     {
-        bool run = _page == ModulesPage && IsVisible && WindowState != WindowState.Minimized && _moduleMetricRefresh.Count > 0;
+        bool run = (_page == ModulesPage || ModuleDetailId(_page) is not null) && IsVisible && WindowState != WindowState.Minimized && _moduleMetricRefresh.Count > 0;
         if (!run) { _modulePerformanceTimer?.Stop(); return; }
         _modulePerformanceTimer ??= new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) => RefreshModuleMetrics(), Dispatcher);
         if (!_modulePerformanceTimer.IsEnabled) _modulePerformanceTimer.Start();
     }
     private void RefreshModuleMetrics()
     {
-        if (_page != ModulesPage || !IsVisible || WindowState == WindowState.Minimized) { _modulePerformanceTimer?.Stop(); return; }
+        if ((_page != ModulesPage && ModuleDetailId(_page) is null) || !IsVisible || WindowState == WindowState.Minimized) { _modulePerformanceTimer?.Stop(); return; }
         var values = _app.Modules.Performance.ToDictionary(p => p.ModuleId);
         foreach (var update in _moduleMetricRefresh.ToArray()) update(values);
     }
