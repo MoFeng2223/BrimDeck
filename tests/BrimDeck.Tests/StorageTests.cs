@@ -176,8 +176,12 @@ static class StorageTests
         check("Compact drive: hidden by default, not part of Full", defaults.CompactReadings.Single(r => r.Item == Storage_) is { Visible: false }
             && (CompactMonitorItems.All & Storage_) == 0 && defaults.MonitorStorage && CompactMonitor.Channels(Storage_) == 1 && !CompactMonitor.HasValueChoice(Storage_));
         var readings = CompactMonitor.Normalize(defaults.CompactReadings);
-        readings.Single(r => r.Item == Storage_).Visible = true;
-        check("Compact drive: chosen, it shows and Full still matches", (CompactMonitor.Shown(readings) & Storage_) != 0 && CompactMonitor.Preset(readings) == CompactMonitorMode.Full);
+        readings.Single(r => r.Item == Storage_).Sources = ["D:"];
+        CompactMonitor.Apply(readings, CompactMonitorMode.Full);
+        check("Compact drive: Full shows it with both figures and keeps its letters", (CompactMonitor.Shown(readings) & Storage_) != 0 && CompactMonitor.Preset(readings) == CompactMonitorMode.Full
+            && readings.Single(r => r.Item == Storage_) is { Figures: [CompactFigures.Usage, CompactFigures.Temperature], Sources: ["D:"] });
+        readings.Single(r => r.Item == Storage_).Figures = [CompactFigures.Usage];
+        check("Compact drive: without its temperature, Full no longer matches", CompactMonitor.Preset(readings) is null);
         CompactMonitor.Apply(readings, CompactMonitorMode.Brief);
         check("Compact drive: Brief hides it", !readings.Single(r => r.Item == Storage_).Visible);
         var width = CompactMonitor.Widths(CompactMonitor.Rings, 12, _ => 30, 14, 20, 50, 40);

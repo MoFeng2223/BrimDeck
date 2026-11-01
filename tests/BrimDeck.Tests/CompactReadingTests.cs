@@ -28,9 +28,10 @@ internal static class CompactReadingTests
     private static void Migration(Action<string, bool> check)
     {
         var full = Read("""{"AppVersion":"0.1.0","CompactMonitor":0,"CompactMonitorItems":3}""");
+        // The old Full mode had no drives, power, battery or frame rate, so it matches the Full preset no longer.
         check("Compact readings: old Full shows every usage reading with figures in the default order",
             Same(full.CompactReadings, [.. CompactMonitor.Order]) && full.CompactReadings.All(r => r.Visible == ((All & r.Item) != 0) && r.ShowValue && r.Color is null)
-            && full.CompactMonitor == CompactMonitorMode.Full && full.CompactMonitorItems == All);
+            && full.CompactMonitor == CompactMonitorMode.Custom && full.CompactMonitorItems == All);
         var brief = Read("""{"AppVersion":"0.1.0","CompactMonitor":1,"CompactMonitorItems":63}""");
         check("Compact readings: old Brief shows the three rings without figures",
             CompactMonitor.Visible(brief.CompactReadings) == CompactMonitor.Rings && CompactMonitor.Values(brief.CompactReadings) == CompactMonitorItems.None
@@ -42,9 +43,9 @@ internal static class CompactReadingTests
         var empty = Read("""{"AppVersion":"0.1.0","CompactMonitor":2,"CompactMonitorItems":0}""");
         check("Compact readings: old Custom with nothing chosen shows CPU", CompactMonitor.Visible(empty.CompactReadings) == Cpu && empty.CompactMonitorItems == Cpu);
         var unknownMode = Read("""{"AppVersion":"0.1.0","CompactMonitor":9}""");
-        check("Compact readings: an unknown old mode reads as Full", CompactMonitor.Preset(unknownMode.CompactReadings) == CompactMonitorMode.Full);
+        check("Compact readings: an unknown old mode reads as the old Full", CompactMonitor.Visible(unknownMode.CompactReadings) == All);
         var defaults = new DeckSettings(); defaults.Normalize();
-        check("Compact readings: defaults are Full", defaults.CompactMonitor == CompactMonitorMode.Full && CompactMonitor.Preset(defaults.CompactReadings) == CompactMonitorMode.Full
+        check("Compact readings: defaults show every usage reading", CompactMonitor.Visible(defaults.CompactReadings) == All && CompactMonitor.Values(defaults.CompactReadings) == CompactMonitor.Rings
             && Same(defaults.CompactReadings, [.. CompactMonitor.Order]));
 
         var odd = Read("""{"AppVersion":"0.1.0","CompactMonitor":0,"CompactReadings":[{"Item":256,"Visible":true},null,{"Item":16,"Visible":true,"ShowValue":false,"Color":"#12ab3c"},{"Item":2,"Visible":false,"Color":"red"},{"Item":16,"Visible":false}]}""");
@@ -73,7 +74,8 @@ internal static class CompactReadingTests
             && CompactMonitor.Visible(readings) == CompactMonitor.Rings && CompactMonitor.Values(readings) == CompactMonitorItems.None);
         CompactMonitor.Apply(readings, CompactMonitorMode.Full);
         check("Compact readings: Full keeps the order and the colors", readings.Select(r => r.Item).SequenceEqual(order) && readings[0].Color == "#112233");
-        check("Compact readings: Full shows everything with figures", CompactMonitor.Preset(readings) == CompactMonitorMode.Full && CompactMonitor.Visible(readings) == All);
+        check("Compact readings: Full shows everything with figures", CompactMonitor.Preset(readings) == CompactMonitorMode.Full && CompactMonitor.Visible(readings) == CompactMonitor.Every
+            && CompactMonitor.Values(readings) == CompactMonitor.Rings && readings.Where(r => CompactFigures.Has(r.Item)).All(r => CompactFigures.Of(r).SequenceEqual([CompactFigures.Usage, CompactFigures.Temperature])));
         var before = readings.Select(r => (r.Item, r.Visible, r.ShowValue, r.Color)).ToArray();
         CompactMonitor.Apply(readings, CompactMonitorMode.Custom);
         check("Compact readings: no preset (Custom) changes nothing", readings.Select(r => (r.Item, r.Visible, r.ShowValue, r.Color)).SequenceEqual(before));
@@ -241,7 +243,9 @@ internal static class CompactReadingTests
     private static void Highlight(Action<string, bool> check)
     {
         var readings = CompactMonitor.Readings(CompactMonitorMode.Full, CompactMonitorItems.None);
-        check("Compact readings: the defaults light Full", CompactMonitor.Preset(readings) == CompactMonitorMode.Full);
+        check("Compact readings: the defaults, without the drives, light no preset", CompactMonitor.Preset(readings) is null);
+        CompactMonitor.Apply(readings, CompactMonitorMode.Full);
+        check("Compact readings: Full lights Full", CompactMonitor.Preset(readings) == CompactMonitorMode.Full);
         readings.First(r => r.Item == Columns).Visible = false;
         check("Compact readings: one reading off lights no preset", CompactMonitor.Preset(readings) is null);
         CompactMonitor.Apply(readings, CompactMonitorMode.Brief);
@@ -253,7 +257,7 @@ internal static class CompactReadingTests
         var settings = new DeckSettings { CompactReadings = readings }; settings.Normalize();
         check("Compact readings: no preset is saved as Custom in the old key", settings.CompactMonitor == CompactMonitorMode.Custom);
         CompactMonitor.Apply(settings.CompactReadings, CompactMonitorMode.Full); settings.Normalize();
-        check("Compact readings: Full is saved as Full in the old key", settings.CompactMonitor == CompactMonitorMode.Full && settings.CompactMonitorItems == All);
+        check("Compact readings: Full is saved as Full in the old key", settings.CompactMonitor == CompactMonitorMode.Full && settings.CompactMonitorItems == CompactMonitor.Every);
     }
 
     private static void Copies(Action<string, bool> check)

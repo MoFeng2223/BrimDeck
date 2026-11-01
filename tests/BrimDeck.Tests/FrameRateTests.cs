@@ -48,12 +48,12 @@ static class FrameRateTests
         check("Frame rate: one color, the frame rate's", CompactMonitor.Channels(Frames) == 1 && CompactMonitor.Role(Frames) == MonitorRole.Frames);
 
         var full = CompactMonitor.Normalize(null);
+        full.First(reading => reading.Item == Frames).Figures = [];
         CompactMonitor.Apply(full, CompactMonitorMode.Full);
-        check("Frame rate: Full does not turn it on", !full.First(reading => reading.Item == Frames).Visible);
-        full.First(reading => reading.Item == Frames).Visible = true;
-        check("Frame rate: shown, Full still matches", CompactMonitor.Preset(full) == CompactMonitorMode.Full);
-        CompactMonitor.Apply(full, CompactMonitorMode.Full);
-        check("Frame rate: Full leaves it as it is", full.First(reading => reading.Item == Frames).Visible);
+        check("Frame rate: Full shows it with the program's icon", full.First(reading => reading.Item == Frames) is { Visible: true } shownFrames
+            && CompactFrames.Shows(shownFrames, CompactFrames.Icon) && CompactMonitor.Preset(full) == CompactMonitorMode.Full);
+        full.First(reading => reading.Item == Frames).Figures = [];
+        check("Frame rate: without its icon, Full no longer matches", CompactMonitor.Preset(full) is null);
         CompactMonitor.Apply(full, CompactMonitorMode.Brief);
         check("Frame rate: Brief hides it", !full.First(reading => reading.Item == Frames).Visible);
 

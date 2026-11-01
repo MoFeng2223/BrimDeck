@@ -271,11 +271,10 @@ static class PowerTests
             && (CompactMonitor.Every & CompactMonitorItems.Power) != 0 && (CompactMonitor.Every & CompactMonitorItems.Charge) != 0);
         check("Readings: they leave a short row early, after the frame rate, the machine's battery after the drives", CompactMonitor.LeaveOrder.Take(4).SequenceEqual([CompactMonitorItems.Frames, CompactMonitorItems.Power, CompactMonitorItems.Storage, CompactMonitorItems.Charge]) && CompactMonitor.LeaveOrder.Count == CompactMonitor.Order.Count);
 
-        // The presets keep to the readings they had: Full does not turn the new ones on, Brief turns them off.
+        // Full turns the new readings on, Brief turns them off.
         var full = CompactMonitor.Normalize(null);
-        full.First(reading => reading.Item == CompactMonitorItems.Power).Visible = true;
         CompactMonitor.Apply(full, CompactMonitorMode.Full);
-        check("Readings: Full leaves Power as it is", full.First(reading => reading.Item == CompactMonitorItems.Power).Visible);
+        check("Readings: Full shows Power and Charge", full.Where(reading => reading.Item is CompactMonitorItems.Power or CompactMonitorItems.Charge).All(reading => reading.Visible));
         CompactMonitor.Apply(full, CompactMonitorMode.Brief);
         check("Readings: Brief hides Power and Charge", full.Where(reading => reading.Item is CompactMonitorItems.Power or CompactMonitorItems.Charge).All(reading => !reading.Visible));
         full.First(reading => reading.Item == CompactMonitorItems.Charge).Visible = true;
