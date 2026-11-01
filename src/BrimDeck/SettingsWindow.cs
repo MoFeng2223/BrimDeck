@@ -710,8 +710,8 @@ public sealed partial class SettingsWindow : Window
         raise.Background = UI.Brush(_palette.Input);
         Group(Toggle(Loc.T("持续置顶", "Keep on top"), S.ForceTopmost,
             value => Change(s => s.ForceTopmost = value), help:
-            Loc.T("开启后，面板被其他置顶窗口遮挡时会自动恢复到上方。仍遵循上面的显示与隐藏规则。若其他应用也持续置顶，可能出现闪烁。",
-                "Restores the panel above other always-on-top windows when covered. Display and hide rules above still apply. Apps that repeatedly raise themselves may cause flickering.")),
+            Loc.T("开启后，面板被其他置顶窗口遮挡时会立即恢复到上方，其他应用打开的菜单除外。仍遵循上面的显示与隐藏规则。若其他应用反复置顶自己，面板会暂停恢复几秒。",
+                "Restores the panel above other always-on-top windows as soon as it is covered, except for menus other apps open. Display and hide rules above still apply. If an app keeps raising itself, the panel pauses for a few seconds.")),
             Row(Loc.T("单次置顶", "Raise once"), raise, help: () => Loc.T("每次点击仅置顶一次。若面板再次被其他窗口遮挡，需要重新点击。",
                 "Each click raises the panel once. If another window covers it again, click again.")));
     }
