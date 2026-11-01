@@ -270,6 +270,8 @@ public sealed class DeckSettings
     public Dictionary<string, ThemeChoices> ThemeChoices { get; set; } = [];
     // When a theme with a night look shows its day look, "HH:mm-HH:mm" local time; empty keeps the theme's own hours.
     public string ThemeDaylight { get; set; } = "";
+    // How opaque the panel background is, 0-100 in 10% steps (100 is the plain look). Text and controls keep their own opacity.
+    public int PanelOpacity { get; set; } = 100;
     // A first start replaces the default with the Windows display language (SettingsStore.Load); files saved before
     // English existed are Chinese (SettingsMigrations).
     public string Language { get; set; } = Loc.English;
@@ -585,6 +587,7 @@ public sealed class DeckSettings
         // Two valid, different times or none: anything else keeps the theme's own hours.
         ThemeDaylight = (ThemeDaylight ?? "").Split('-', 2) is [var day, var night] && PanelThemes.ParseTimeOfDay(day) is { } d && PanelThemes.ParseTimeOfDay(night) is { } n && d != n
             ? PanelThemes.FormatDaylight(d, n) : "";
+        PanelOpacity = Math.Clamp(PanelOpacity, 0, 100);
         Language = Loc.Normalize(Language);
         if (!Enum.IsDefined(Style)) Style = CompactStyle.Notch;
         static double Fit(double value, double min, double max, double fallback) => double.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;

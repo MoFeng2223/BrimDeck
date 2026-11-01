@@ -42,6 +42,14 @@ internal static class SettingsMigrationTests
         var edited = colors.Copy(); edited.ClockGradient[0] = "#000000";
         check("a settings copy has its own gradient", colors.ClockGradient[0] == ClockColors.Sunset[0]);
 
+        // The panel background's opacity: fully opaque unless set, and kept within 0-100 whatever a file holds.
+        var opaque = new DeckSettings { PanelOpacity = 150 }; opaque.Normalize();
+        var clear = new DeckSettings { PanelOpacity = -5 }; clear.Normalize();
+        var normal = new DeckSettings(); normal.Normalize();
+        check("the panel background starts fully opaque and its opacity stays between 0 and 100",
+            normal.PanelOpacity == 100 && opaque.PanelOpacity == 100 && clear.PanelOpacity == 0
+            && SettingsMigrations.Read("""{"AppVersion":"0.1.0"}""", v010, out _).PanelOpacity == 100);
+
         // Upgrade 0.1.0 -> 0.2.0, change a setting, return to 0.1.0, then go back to 0.2.0.
         var path = Path.Combine(root, "version-switch");
         Directory.CreateDirectory(path);
