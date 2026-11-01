@@ -293,6 +293,8 @@ public sealed class DeckSettings
     // The panel's color theme (see PanelThemes): "system", "dark", "light", a built-in theme or a theme file's id.
     // The dark default is the original look. An id whose file is missing is kept and shown as the dark theme meanwhile.
     public string PanelTheme { get; set; } = PanelThemes.Dark;
+    // The panel's background opacity, 0-100; text and icons stay as they are.
+    public int PanelOpacity { get; set; } = 100;
     // What the user changed under each panel theme, by theme id (see ThemeChoices); the theme in use keeps its choices in the
     // ordinary settings, and they are saved here when another theme is chosen.
     public Dictionary<string, ThemeChoices> ThemeChoices { get; set; } = [];
@@ -673,6 +675,7 @@ public sealed class DeckSettings
         AnimationDuration = Math.Clamp(AnimationDuration, 100, 1000);
         if (!Enum.IsDefined(Theme)) Theme = SettingsTheme.System;
         PanelTheme = PanelThemes.NormalizeId(PanelTheme) is { Length: > 0 } panelTheme ? panelTheme : PanelThemes.Dark;
+        PanelOpacity = Math.Clamp(PanelOpacity, 0, 100);
         // Two valid, different times or none: anything else keeps the theme's own hours.
         ThemeDaylight = (ThemeDaylight ?? "").Split('-', 2) is [var day, var night] && PanelThemes.ParseTimeOfDay(day) is { } d && PanelThemes.ParseTimeOfDay(night) is { } n && d != n
             ? PanelThemes.FormatDaylight(d, n) : "";

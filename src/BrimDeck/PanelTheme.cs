@@ -21,6 +21,10 @@ internal static class PanelTheme
     // Whether Windows' high contrast is shown: the system's colors on the whole panel, whatever theme is chosen
     // (PanelThemes.HighContrast).
     public static bool HighContrast { get; private set; }
+    // Whether the island's background opacity (the theme page's slider) is below 100%: the surface then lets the desktop
+    // through, so surface-colored marquee bands would float over the see-through panel and the text fades itself instead
+    // (MusicMarquee.InkFade).
+    public static bool IslandTransparent { get; internal set; }
     // When the theme on screen changes between its day and night looks next, or null for a theme without a night look.
     public static DateTime? NextDaylightChange(DeckSettings settings) => PanelThemes.NextDaylightChange(ShownTheme.File, DateTime.Now, settings.ThemeDaylight);
     public static int Generation { get; private set; }
@@ -326,5 +330,5 @@ internal static class PanelTheme
         => new(new GradientStopCollection(stops.Select((stop, i) => new GradientStop(ToColor(stop), (double)i / (stops.Count - 1)))), new Point(0, 0), end);
     // The text marquees draw their edge fades in the surface color; over a gradient or scan lines that color would show as a band,
     // so there they fade the text itself instead (MusicMarquee.InkFade).
-    public static Color? MarqueeBackdrop => Current.HasOverlay ? null : ColorOf("surface");
+    public static Color? MarqueeBackdrop => Current.HasOverlay || IslandTransparent ? null : ColorOf("surface");
 }
