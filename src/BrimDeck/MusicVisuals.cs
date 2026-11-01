@@ -197,7 +197,8 @@ internal sealed class MusicEqualizer : FrameworkElement
 
 internal sealed class MusicMarquee : FrameworkElement
 {
-    private static readonly Typeface Typeface = new(UI.PanelFont, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+    private static readonly Typeface Plain = new(UI.PanelFont, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+    private Typeface _typeface = Plain;
     // Width of the edge fade, and the scroll speed in DIP per second.
     internal const double Edge = 6, Speed = 24;
     private readonly TranslateTransform _shift = new();
@@ -206,6 +207,8 @@ internal sealed class MusicMarquee : FrameworkElement
     // An edge fades only while text is hidden beyond it: none on the left before the text moves,
     // none on the right once its end is in view. The first and last characters rest unfaded.
     private readonly GradientStop _left = new(Colors.White, 0), _right = new(Colors.White, 1);
+    // The same fade for the tail's own color (InkFade): its stops follow the text's clocks and offsets.
+    private readonly GradientStop _tailLeft = new(Colors.White, 0), _tailRight = new(Colors.White, 1);
     private string _text = "";
     private double _fontSize = 11.5, _overflow, _fadeWidth = -1;
     private FormattedText? _formatted;
@@ -241,13 +244,26 @@ internal sealed class MusicMarquee : FrameworkElement
         get => _text;
         set { if (_text == value) return; _text = value; ResetText(); AutomationProperties.SetName(this, value); }
     }
-    // For screen readers: the whole line as text, however much of it shows.
-    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => _text);
+    // For screen readers: the whole line as text, however much of it shows. The open page's title reads with its own name
+    // ("Title ..." and the artist merged into the line); every other line reads as it is drawn.
+    public string AccessibleName { get; init; } = "";
+    internal string Reading => AccessibleName.Length > 0 ? AccessibleName : _text + Tail;
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => Reading);
     public double FontSize
     {
         get => _fontSize;
         set { if (_fontSize == value) return; _fontSize = value; ResetText(); }
     }
+    // The open page's title is semibold; the collapsed row and the lyrics are regular.
+    public FontWeight FontWeight { init => _typeface = new Typeface(UI.PanelFont, FontStyles.Normal, value, FontStretches.Normal); }
+    // A second run after the text in its own size and color: the merged title of a short page ("title · artist"). It scrolls with
+    // the text as one line. Over a gradient or scan lines (InkFade) it fades at its ends like the text, in its own color, so it
+    // is the same color whether the line fits or scrolls.
+    public string Tail { get; init; } = "";
+    public double TailFontSize { get; init; }
+    public Brush? TailForeground { get; init; }
+    // Whether the text overhangs the room it was last drawn in: the window shows the whole title in a tooltip then.
+    public bool Overflows => _overflow > 0;
     public bool CenterWhenFits { get; init; } = true;
     // The edge fade's width; the collapsed row scales it with its height. The scroll speed does not change.
     public double EdgeWidth { get; init; } = Edge;
@@ -296,8 +312,21 @@ internal sealed class MusicMarquee : FrameworkElement
     protected override Visual GetVisualChild(int index) => _glyphs ?? throw new ArgumentOutOfRangeException(nameof(index));
     protected override Size MeasureOverride(Size availableSize) { _glyphs?.Measure(availableSize); return default; }
     protected override Size ArrangeOverride(Size finalSize) { _glyphs?.Arrange(new Rect(finalSize)); return finalSize; }
-    private FormattedText Formatted => _formatted ??= new(Text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
-        Typeface, FontSize, _ink ?? Foreground, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+    private Brush? _tailInk;
+    private FormattedText Formatted => _formatted ??= Format();
+    private FormattedText Format()
+    {
+        var text = new FormattedText(Text + Tail, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+            _typeface, FontSize, _ink ?? Foreground, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        if (Tail.Length > 0)
+        {
+            text.SetFontWeight(FontWeights.Normal, Text.Length, Tail.Length);
+            if (TailFontSize > 0) text.SetFontSize(TailFontSize, Text.Length, Tail.Length);
+            if (_ink is not null && _tailInk is not null) text.SetForegroundBrush(_tailInk, Text.Length, Tail.Length);
+            else if (_ink is null && TailForeground is not null) text.SetForegroundBrush(TailForeground, Text.Length, Tail.Length);
+        }
+        return text;
+    }
     public void SetScrolling(bool enabled) { _scrolling = enabled; UpdateAnimation(); }
     private void ResetText() { _formatted = null; _rested = false; ResetAnimation(); Painter.InvalidateVisual(); }
     // Scrolls the laps again from the start (the panel closed and the row shows again).
@@ -313,7 +342,7 @@ internal sealed class MusicMarquee : FrameworkElement
     {
         _turn?.Stop(); ReleaseGlide(); ShowGliding();
         _scroll = null; _running = false; _since = double.NaN; _elapsed = 0;
-        _shift.X = 0; _unshift.X = 0; _left.Offset = 0; _right.Offset = 1 - EdgeStop;
+        _shift.X = 0; _unshift.X = 0; _left.Offset = _tailLeft.Offset = 0; _right.Offset = _tailRight.Offset = 1 - EdgeStop;
     }
     private void UpdateAnimation()
     {
@@ -366,7 +395,7 @@ internal sealed class MusicMarquee : FrameworkElement
         // Its laps done, the text rests at its start with no clock or timer left.
         bool done = Laps && _running && cycle.Done(played);
         if (done) at = cycle.Played(played);
-        _shift.X = cycle.Shift(at); _unshift.X = cycle.Unshift(at); _left.Offset = cycle.Left(at); _right.Offset = cycle.Right(at);
+        _shift.X = cycle.Shift(at); _unshift.X = cycle.Unshift(at); _left.Offset = _tailLeft.Offset = cycle.Left(at); _right.Offset = _tailRight.Offset = cycle.Right(at);
         if (done)
         {
             _rested = true; _running = false; _since = double.NaN; _elapsed = 0; _turn.Stop();
@@ -402,6 +431,9 @@ internal sealed class MusicMarquee : FrameworkElement
         _shift.ApplyAnimationClock(TranslateTransform.XProperty, (AnimationClock)_glide.Children[0]);
         _left.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_glide.Children[1]);
         _right.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_glide.Children[2]);
+        // The tail's fade shares the clocks (a clock may drive several stops).
+        _tailLeft.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_glide.Children[1]);
+        _tailRight.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_glide.Children[2]);
         _unshift.ApplyAnimationClock(TranslateTransform.XProperty, (AnimationClock)_glide.Children[3]);
     }
     private void ReleaseGlide()
@@ -412,6 +444,8 @@ internal sealed class MusicMarquee : FrameworkElement
         _unshift.ApplyAnimationClock(TranslateTransform.XProperty, null);
         _left.ApplyAnimationClock(GradientStop.OffsetProperty, null);
         _right.ApplyAnimationClock(GradientStop.OffsetProperty, null);
+        _tailLeft.ApplyAnimationClock(GradientStop.OffsetProperty, null);
+        _tailRight.ApplyAnimationClock(GradientStop.OffsetProperty, null);
     }
     // Gliding is raised once a turn has settled, and only when whether a clock glides has changed: a turn that lets one clock go
     // and starts the next (a new room for the text) raised it twice, and the bars' timer was stopped and started again for it.
@@ -433,7 +467,7 @@ internal sealed class MusicMarquee : FrameworkElement
         double Snap(double value) => Math.Round(value * scale) / scale;
         // Whole device pixels for the scroll distance, the centred start and the baseline, so resting glyphs are not split across
         // pixels at 150 %. The small allowance keeps rounding noise from starting a one-pixel scroll.
-        double overflow = Math.Max(0, Math.Ceiling((text.Width - size.Width) * scale - .01) / scale);
+        double overflow = MusicTitleFit.Overflow(text.Width, size.Width, scale);
         double fadeWidth = overflow > 0 ? size.Width : 0;
         if (_fadeWidth != fadeWidth)
         {
@@ -445,6 +479,12 @@ internal sealed class MusicMarquee : FrameworkElement
                 _left.Color = _right.Color = ink;
                 var clear = Color.FromArgb(0, ink.R, ink.G, ink.B);
                 _ink = fadeWidth > 0 ? new LinearGradientBrush(new GradientStopCollection { new(clear, 0), _left, _right, new(clear, 1) },
+                    new Point(0, 0), new Point(fadeWidth, 0)) { MappingMode = BrushMappingMode.Absolute, Transform = _unshift } : null;
+                // The tail fades in its own color (TailForeground, as it is drawn when the line fits); its stops take the same offsets.
+                var tailColor = (TailForeground as SolidColorBrush)?.Color ?? ink;
+                _tailLeft.Color = _tailRight.Color = tailColor;
+                var tailClear = Color.FromArgb(0, tailColor.R, tailColor.G, tailColor.B);
+                _tailInk = fadeWidth > 0 && Tail.Length > 0 ? new LinearGradientBrush(new GradientStopCollection { new(tailClear, 0), _tailLeft, _tailRight, new(tailClear, 1) },
                     new Point(0, 0), new Point(fadeWidth, 0)) { MappingMode = BrushMappingMode.Absolute, Transform = _unshift } : null;
                 _formatted = null; text = Formatted;
             }
