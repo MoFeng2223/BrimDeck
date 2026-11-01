@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -26,13 +26,13 @@ public partial class MainWindow
         _shadowSettle = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(250) };
         _shadowSettle.Tick += (_, _) => { _shadowSettle.Stop(); if (ShadowHost.Opacity > 0) ShadowHost.CacheMode = _shadowCache; };
         // The host's size follows the island's margin as well (the island sinks into place as the panel closes).
-        IslandShadow.SizeChanged += (_, _) => ShadowChanging(); ShadowHost.SizeChanged += (_, _) => ShadowChanging();
+        IslandShadow.SizeChanged += (_, _) => { UpdateShadowMask(); ShadowChanging(); }; ShadowHost.SizeChanged += (_, _) => ShadowChanging();
         // The color, corners and shoulders the shadow takes from the island; Changed is raised on each frame of a color animation.
         _surface.Changed += (_, _) => ShadowChanging();
         var corners = DependencyPropertyDescriptor.FromProperty(Border.CornerRadiusProperty, typeof(IslandBorder));
         var shoulders = DependencyPropertyDescriptor.FromProperty(IslandBorder.ShoulderRadiusProperty, typeof(IslandBorder));
         var opacity = DependencyPropertyDescriptor.FromProperty(OpacityProperty, typeof(Grid));
-        void ShapeChanged(object? sender, EventArgs e) => ShadowChanging();
+        void ShapeChanged(object? sender, EventArgs e) { UpdateShadowMask(); ShadowChanging(); }
         corners.AddValueChanged(Island, ShapeChanged);
         shoulders.AddValueChanged(Island, ShapeChanged);
         // Hidden (the open panel, the line), the picture is let go; shown again, it is kept at once unless a change is under way.
@@ -59,6 +59,23 @@ public partial class MainWindow
     {
         if (_shadowSettle is null) return;
         ShadowHost.CacheMode = null; _shadowSettle.Stop(); _shadowSettle.Start();
+    }
+
+    // The shadow caster is the island's copy lying under it, and it draws the same translucent surface: with PanelOpacity below
+    // 100 it would shine through the island and double it up, so collapsed the panel looked far more opaque than open. The mask
+    // keeps the caster for the effect — the shadow's shape and strength are unchanged — and hides everything inside the
+    // island's own outline: WPF applies an OpacityMask after the element's effect, so only the blurred shadow outside the
+    // island survives. With a fully opaque island the island hid the caster anyway and nothing visible changes.
+    private void UpdateShadowMask()
+    {
+        double w = Island.ActualWidth, h = Island.ActualHeight;
+        if (!(w > 0) || !(h > 0)) { IslandShadow.OpacityMask = null; return; }
+        var mask = Geometry.Combine(new RectangleGeometry(new Rect(0, 0, w, h)), Island.Outline(), GeometryCombineMode.Exclude, null);
+        IslandShadow.OpacityMask = new DrawingBrush
+        {
+            Viewbox = new Rect(0, 0, w, h), Viewport = new Rect(0, 0, w, h), Stretch = Stretch.None,
+            Drawing = new GeometryDrawing { Geometry = mask, Brush = Brushes.White }
+        };
     }
 
     // The picture is drawn at the display's scale and reaches past the blur by whole device pixels (ShadowBounds): a picture

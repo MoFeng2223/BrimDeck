@@ -25,7 +25,7 @@
           <Grid.Effect>
             <DropShadowEffect Color="Black" BlurRadius="14" ShadowDepth="4" Direction="270" Opacity="0.28"/>
           </Grid.Effect>
-          <local:IslandBorder Background="{Binding Background, ElementName=Island}" CornerRadius="{Binding CornerRadius, ElementName=Island}"
+          <local:IslandBorder x:Name="ShadowIsland" Background="{Binding Background, ElementName=Island}" CornerRadius="{Binding CornerRadius, ElementName=Island}"
                               ShoulderRadius="{Binding ShoulderRadius, ElementName=Island}" Inset="1"/>
         </Grid>
       </Grid>
