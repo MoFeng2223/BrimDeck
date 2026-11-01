@@ -749,9 +749,9 @@ public partial class MainWindow
     private MusicMarquee PageTitle(MediaTrack track, MusicMetrics c, bool center, bool merge)
     {
         string tail = merge && track.Artist.Length > 0 ? " · " + track.Artist : "";
-        var title = new MusicMarquee { Text = track.Title, Tail = tail, TailFontSize = c.Artist, TailForeground = UI.Brush(UI.Secondary), FontSize = c.Title,
+        var title = new MusicMarquee { Text = track.Title, Tail = tail, AccessibleName = MusicTitleFit.ReadAs(track.Title, tail), TailFontSize = c.Artist, TailForeground = UI.Brush(UI.Secondary), FontSize = c.Title,
             FontWeight = FontWeights.SemiBold, Height = c.TitleLine, CenterWhenFits = center, EdgeWidth = Math.Max(MusicMarquee.Edge, Math.Round(c.Title * .6)), Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
-        AutomationProperties.SetName(title, Loc.T("歌名 ", "Title ") + track.Title);
+        AutomationProperties.SetName(title, MusicTitleFit.ReadAs(track.Title, tail));
         ShowCutText(title, track.Title + tail);
         _musicTitle = title; UpdateLyricScrolling();
         return title;
