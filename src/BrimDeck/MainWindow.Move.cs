@@ -64,6 +64,7 @@ public partial class MainWindow
         _grips.Cursor = Cursors.SizeAll;
         _movePresses ??= new PointerPressObserver(Dispatcher, MovePressed);
         _escapeDismissal?.SetEnabled(true);
+        UpdatePointerTracking();
         UpdateGrips();
     }
 
@@ -76,6 +77,7 @@ public partial class MainWindow
         if (_grips.IsMouseCaptured) _grips.ReleaseMouseCapture();
         _grips.Cursor = null;
         _dragHold = true; _cursorInCompact = false;
+        UpdatePointerTracking();
         UpdateGrips();
     }
 

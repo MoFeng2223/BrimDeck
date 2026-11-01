@@ -20,6 +20,12 @@ internal static class CaptureChecks
             long style = GetWindowLongPtrW(handle, -20).ToInt64();
             check("overlay has no WGC-incompatible no-activate style", (style & 0x08000000) == 0);
             check("transparent overlay supports WGC", CreateItem(handle) == 0);
+            WindowsHost.SetOverlayInput(window, true);
+            check("explicit input removes the hover-only activation block", SendMessage(handle, 0x21, IntPtr.Zero, new IntPtr(0x02010001)) != new IntPtr(3));
+            WindowsHost.SetOverlayInput(window, false);
+            WindowsHost.SetOverlayInput(window, false);
+            check("ending explicit input restores non-activating clicks without duplicate hooks", SendMessage(handle, 0x21, IntPtr.Zero, new IntPtr(0x02010001)) == new IntPtr(3));
+            check("input mode changes preserve WGC compatibility", (GetWindowLongPtrW(handle, -20).ToInt64() & 0x08000000) == 0 && CreateItem(handle) == 0);
         }
         finally { window.Close(); }
     }

@@ -1,0 +1,26 @@
+using System.Windows;
+using DropShelf.Interop;
+using DropShelf.Services;
+using DropShelf.ViewModels;
+
+namespace DropShelf.Views;
+
+/// <summary>点击主窗口右下角的版本号打开：程序和数据的位置、退出与卸载。</summary>
+public partial class AboutWindow : Window
+{
+    public AboutWindow(SettingsViewModel viewModel)
+    {
+        HostedResources.Attach(this);
+        InitializeComponent();
+        DataContext = viewModel;
+        SourceInitialized += (_, _) =>
+        {
+            if (WindowEffects.ApplyTheme(this, SystemBackdrop.Mica, ThemeService.IsDark))
+                Background = System.Windows.Media.Brushes.Transparent;
+            else
+                WindowEffects.ShowOwnCaptionButtons(this, CaptionButtons);
+        };
+    }
+
+    private void OnCaptionCloseClick(object sender, RoutedEventArgs e) => SystemCommands.CloseWindow(this);
+}

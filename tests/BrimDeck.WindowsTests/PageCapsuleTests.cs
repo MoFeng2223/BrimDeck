@@ -20,6 +20,8 @@ public partial class MainWindow
     private readonly Button AIUsageButton = new() { Content = "Usage", Width = 60, Height = 24 };
     private readonly Button MusicPageButton = new() { Content = "Music", Width = 60, Height = 24 };
     private readonly Button MonitorPageButton = new() { Content = "Monitor", Width = 60, Height = 24 };
+    private readonly Button TrayPageButton = new() { Content = "Tray", Width = 60, Height = 24 };
+    private readonly Button ClipboardPageButton = new() { Content = "Clipboard", Width = 60, Height = 24 };
     private readonly Grid PageSwitch = new();
     private readonly Border PageCapsule = new() { Width = 60, Height = 24 };
     private readonly TranslateTransform PageCapsuleShift = new();
@@ -57,6 +59,12 @@ public partial class MainWindow
             var at = window.MonitorPageButton.TranslatePoint(new Point(), window.PageSwitch).X;
             check("pending production placement uses the current page after reorder", !window._capsulePending &&
                 (double)window.PageCapsule.GetAnimationBaseValue(WidthProperty) == window.MonitorPageButton.ActualWidth && Math.Abs((double)window.PageCapsuleShift.GetAnimationBaseValue(TranslateTransform.XProperty) - at) < .5);
+
+            window.CurrentPage = DeckPage.Clipboard;
+            PumpCapsule(() => window.PlacePageCapsule(), check);
+            var clipboardAt = window.ClipboardPageButton.TranslatePoint(new Point(), window.PageSwitch).X;
+            check("native clipboard page uses its own capsule and saved switch order", window.PageButton(DeckPage.Clipboard) == window.ClipboardPageButton &&
+                Math.Abs((double)window.PageCapsuleShift.GetAnimationBaseValue(TranslateTransform.XProperty) - clipboardAt) < .5);
 
             // An invisible/retired panel must yield too, even though its controls keep their previous size.
             window.Hide(); window.MonitorPageButton.Width = 95;

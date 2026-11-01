@@ -19,6 +19,7 @@ public partial class App : Application
     private readonly DispatcherTimer _save = new() { Interval = TimeSpan.FromMilliseconds(400) };
     public DeckSettings Settings { get; private set; } = new();
     public SettingsStore Store { get; private set; } = null!;
+    private FileTrayStore? _trayStore;
     public UsageService Usage { get; private set; } = null!;
     public ProviderSecrets Secrets { get; private set; } = null!;
     public Pricing Prices { get; private set; } = null!;
@@ -77,13 +78,15 @@ public partial class App : Application
         _mutex = new Mutex(true, "Local\\BrimDeck.Instance." + suffix, out var first);
         if (!first)
         {
-            try { using var existing = EventWaitHandle.OpenExisting(eventName); existing.Set(); } catch (WaitHandleCannotBeOpenedException) { }
+            if (!DropShelf.AppController.IsShelfRequest(e.Args) || !DropShelf.Services.MessageWindow.SendArguments(ShelfMessageWindow, e.Args))
+                try { using var existing = EventWaitHandle.OpenExisting(eventName); existing.Set(); } catch (WaitHandleCannotBeOpenedException) { }
             Shutdown(); return;
         }
         SetCurrentProcessExplicitAppUserModelID("BrimDeck.Desktop");
         RecordCrashes();
         var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck");
         Store = new SettingsStore(folder); Settings = Store.Load();
+        _trayStore = new FileTrayStore(folder);
         // Before anything is read: a reading left unanswered when the last run ended stops now (SensorGuard).
         SensorGuard.Start(folder);
         UseLanguage();
@@ -107,9 +110,12 @@ public partial class App : Application
         Usage = new UsageService(new DesktopSources(), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
             kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName));
         WindowDrags = new WindowDrags();
+        InitializeSharedModules(folder);
+        InitializeShelves(folder);
         Deck = new MainWindow(this); MainWindow = Deck;
         Displays = Native.Displays.Current(); AssignDisplays();
         Deck.Show();
+        InitializeClipboard(folder);
         InitializeHotkeys();
         StartBackgroundUpdates();
         // Only for a user who has the monitor page with its power line: the rest never open it.
@@ -120,7 +126,8 @@ public partial class App : Application
         ApplyTray();
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
         _listener = ThreadPool.RegisterWaitForSingleObject(_settingsEvent, (_, _) => Dispatcher.BeginInvoke(ShowFromRelaunch), null, Timeout.Infinite, false);
-        if (e.Args.Contains("--settings")) OpenSettings();
+        if (DropShelf.AppController.IsShelfRequest(e.Args)) { if (Shelves is not null) Shelves.HandleArguments(e.Args); else OpenShelfSettings(); }
+        else if (e.Args.Contains("--settings")) OpenSettings();
         // A portable update that kept this version says why on the About page.
         else if (Updates.RestartFailed) OpenUpdateSettings();
     }
@@ -150,6 +157,7 @@ public partial class App : Application
         Loc.Use(Settings.Language);
         Resources["PinSourceName"] = Loc.T("固定显示", "Pin");
         Resources["UnpinSourceName"] = Loc.T("取消固定", "Unpin");
+        _clipboardPreviews?.RefreshText();
     }
     public void OpenSettings() => ShowSettings(false);
     // Starting BrimDeck while it runs shows the hidden panels as well as the settings, so the panels come back even without
@@ -162,7 +170,7 @@ public partial class App : Application
     // Adds or removes the tray icon to match the settings.
     private void ApplyTray()
     {
-        if (Settings.ShowTrayIcon && _tray is null) _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden);
+        if (Settings.ShowTrayIcon && _tray is null) _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden, ToggleClipboard, OpenClipboardLibrary, OpenShelf, OpenShelfSettings);
         else if (!Settings.ShowTrayIcon && _tray is not null) { _tray.Dispose(); _tray = null; }
     }
     // The panel ends a collapsed preview when the pointer reaches it. The settings window clears its own preview state; the
@@ -209,6 +217,8 @@ public partial class App : Application
         bool styleChanged = settings.Style != Settings.Style;
         settings.Normalize(); Settings = settings;
         ApplyHotkeys();
+        ApplyClipboardSettings();
+        ApplyShelfSettings();
         ApplyTray();
         // A panel whose collapsed row changes asks again as it is built (PresentMonitor).
         UpdateMonitorExtras();
@@ -402,11 +412,22 @@ public partial class App : Application
     // Every panel powers off first (MainWindow.Lifecycle.cs): the islands draw back into dots that sink down through the floor, then the process ends. The
     // settings window goes at once, so the exit answers immediately. A panel that never reports back cannot hold the exit up:
     // the process ends anyway once the longest power-off would have finished.
-    public void ExitApplication()
+    private bool _exitPreparing;
+    public async void ExitApplication()
     {
-        if (Exiting) return;
+        if (Exiting || _exitPreparing || ModulesChanging) return;
+        _exitPreparing = true;
+        try
+        {
+            if (!await PrepareModuleExitAsync()) return;
+        }
+        finally { _exitPreparing = false; }
         Exiting = true; Lifetime.Cancel(); _settingsWindow?.RememberSize(); FlushSettings();
         _settingsWindow?.Hide();
+        // WPF closes windows before OnExit. Detach the active-shelf adapter first, or each closed shelf creates a replacement.
+        _settingsWindow?.ReleaseShelfSettings();
+        foreach (var deck in Decks) deck.ReleaseShelfView();
+        DisposeShelves(); _shelfImages?.Dispose(); _shelfImages = null;
         var decks = Decks.ToList();
         int waiting = decks.Count;
         var fallback = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(BrimDeck.MainWindow.PowerOffLength(Settings.AnimationDuration) + 500) };
@@ -424,6 +445,9 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        DisposeClipboard();
+        DisposeShelves();
+        _clipboardImages?.Dispose(); _shelfImages?.Dispose(); DisposeShelfTheme();
         Media?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);

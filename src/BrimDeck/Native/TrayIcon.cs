@@ -16,11 +16,12 @@ public sealed class TrayIcon : IDisposable
     private readonly Action _exit;
     private readonly Action? _toggleHidden;
     private readonly Func<bool>? _hidden;
+    private readonly Action? _clipboard, _clipboardLibrary, _shelf, _shelfSettings;
     private NOTIFYICONDATA _data;
     private readonly uint _taskbarCreated = RegisterWindowMessage("TaskbarCreated");
-    public TrayIcon(Window owner, Action settings, Action exit, Action? toggleHidden = null, Func<bool>? hidden = null)
+    public TrayIcon(Window owner, Action settings, Action exit, Action? toggleHidden = null, Func<bool>? hidden = null, Action? clipboard = null, Action? clipboardLibrary = null, Action? shelf = null, Action? shelfSettings = null)
     {
-        _settings = settings; _exit = exit; _toggleHidden = toggleHidden; _hidden = hidden;
+        _settings = settings; _exit = exit; _toggleHidden = toggleHidden; _hidden = hidden; _clipboard = clipboard; _clipboardLibrary = clipboardLibrary; _shelf = shelf; _shelfSettings = shelfSettings;
         var hwnd = new WindowInteropHelper(owner).Handle;
         _source = HwndSource.FromHwnd(hwnd); _source.AddHook(Hook);
         _data = new NOTIFYICONDATA { Size = Marshal.SizeOf<NOTIFYICONDATA>(), Window = hwnd, Id = 1, Flags = 1 | 2 | 4, CallbackMessage = Callback,
@@ -62,14 +63,14 @@ public sealed class TrayIcon : IDisposable
         if (mouseMessage == 0x205)
         {
             SetForegroundWindow(hwnd);
-            var menu = CreateMenu(_settings, _exit, _toggleHidden, _hidden?.Invoke() ?? false);
+            var menu = CreateMenu(_settings, _exit, _toggleHidden, _hidden?.Invoke() ?? false, _clipboard, _clipboardLibrary, _shelf, _shelfSettings);
             menu.Placement = PlacementMode.MousePoint;
             menu.IsOpen = true;
         }
         return IntPtr.Zero;
     }
     // Shared with the UI smoke run, which renders the menu without a tray.
-    internal static ContextMenu CreateMenu(Action settings, Action exit, Action? toggleHidden = null, bool hidden = false)
+    internal static ContextMenu CreateMenu(Action settings, Action exit, Action? toggleHidden = null, bool hidden = false, Action? clipboard = null, Action? clipboardLibrary = null, Action? shelf = null, Action? shelfSettings = null)
     {
         var menu = new ContextMenu();
         // Tray menus belong to the shell, so they follow the system's app theme rather than the settings window's palette.
@@ -92,6 +93,10 @@ public sealed class TrayIcon : IDisposable
             menu.Resources["MenuRule"] = new SolidColorBrush(Color.FromRgb(0xE1, 0xE1, 0xE1));
         }
         if (toggleHidden is not null) { var show = new MenuItem { Header = hidden ? Loc.T("显示面板", "Show panel") : Loc.T("隐藏面板", "Hide panel") }; show.Click += (_, _) => toggleHidden(); menu.Items.Add(show); }
+        if (clipboard is not null) { var history = new MenuItem { Header = Loc.T("剪贴板", "Clipboard") }; history.Click += (_, _) => clipboard(); menu.Items.Add(history); }
+        if (clipboardLibrary is not null) { var library = new MenuItem { Header = Loc.T("剪贴板库…", "Clipboard Library…") }; library.Click += (_, _) => clipboardLibrary(); menu.Items.Add(library); }
+        if (shelf is not null) { var item = new MenuItem { Header = Loc.T("打开置物架", "Open shelf") }; item.Click += (_, _) => shelf(); menu.Items.Add(item); }
+        if (shelfSettings is not null) { var item = new MenuItem { Header = Loc.T("置物架设置与最近关闭…", "Shelf settings and recent shelves…") }; item.Click += (_, _) => shelfSettings(); menu.Items.Add(item); }
         var open = new MenuItem { Header = Loc.T("设置", "Settings") }; open.Click += (_, _) => settings(); menu.Items.Add(open);
         menu.Items.Add(new Separator());
         var quit = new MenuItem { Header = Loc.T("退出", "Exit") }; quit.Click += (_, _) => exit(); menu.Items.Add(quit);

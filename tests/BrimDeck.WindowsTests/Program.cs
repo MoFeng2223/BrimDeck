@@ -15,6 +15,20 @@ internal static class Program
         try
         {
             // "--only power": just the power and battery checks, for a quick look at what this machine reports.
+            if (args is ["--only", "module-resources"]) { ModuleResourceChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "edgedrop"]) { EdgeDropPortChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "edgedrop", "--render", var edgeDirectory]) { EdgeDropPortChecks.Run(Check, edgeDirectory); return Finish(); }
+            if (args is ["--only", "clipboard-collections"]) { ClipboardChecks.RunCollections(Check); return Finish(); }
+            if (args is ["--only", "clipboard-collections", "--render", var collectionsDirectory]) { ClipboardChecks.RunCollections(Check, collectionsDirectory); return Finish(); }
+            if (args is ["--only", "clipboard-preview"]) { ClipboardChecks.RunPreview(Check); return Finish(); }
+            if (args is ["--only", "clipboard-toolbar"]) { ClipboardChecks.RunToolbar(Check); return Finish(); }
+            if (args is ["--only", "clipboard-applications"]) { ClipboardChecks.RunApplicationActions(Check); return Finish(); }
+            if (args is ["--only", "clipboard-images"]) { ClipboardChecks.RunImages(Check); return Finish(); }
+            if (args is ["--only", "clipboard-storage"]) { ClipboardChecks.RunStorage(Check); return Finish(); }
+            if (args is ["--only", "clipboard"]) { ClipboardChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "clipboard", "--render", var directory]) { ClipboardChecks.Run(Check, directory); return Finish(); }
+            if (args is ["--only", "file-share"]) { FileShareTests.Run(Check); return Finish(); }
+            if (args is ["--only", "shelves"]) { ShelfHostingChecks.Run(Check); return Finish(); }
             if (args is ["--only", "power"]) { PowerChecks.Run(Check); return Finish(); }
             if (args is ["--only", "gpu"]) { CheckGpus(); return Finish(); }
             if (args is ["--only", "capture"]) { CaptureChecks.Run(Check); return Finish(); }

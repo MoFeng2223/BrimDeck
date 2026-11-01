@@ -1,0 +1,365 @@
+/**
+ * Electron main process entry point.
+ *
+ * Lifecycle:
+ *   1. Single-instance lock (only one Edge-Drop may run).
+ *   2. App 'ready' -> ensure dirs, create the edge window + tray, register the
+ *      image protocol + IPC handlers, start the clipboard watcher.
+ *   3. On 'window-all-closed' we DON'T quit (the panel is hidden, not closed).
+ *   4. Quit from the tray menu tears everything down cleanly.
+ */
+import { app, BrowserWindow, protocol, session } from 'electron'
+import { APP_CONFIG, runtime } from './config'
+import { ensureDirs, PATHS } from '../store/paths'
+import { createWindow, getMainWindow, setInteractive, setVisible, startCursorPoll, stopCursorPoll, stopHeartbeat, setHotZoneWidth, registerTaskbarCreatedListener, isInteractive } from './window'
+import { createTray, registerIncognitoApplier, refreshTray } from './tray'
+import { registerIpc, registerSendListeners } from './ipc'
+import { reconcileLaunchAtLoginOnStartup } from './loginItems'
+import { isStoreBuild, shouldStartHidden } from './config'
+import { prewarmDragIcons, setFileNameWords } from './drag'
+import { mainT } from './i18n'
+import { initState, getWatcher, loadSettings, pushState, stopStateTimers, getStore } from './state'
+import { initAutoUpdater } from './updater'
+import { createOnboardingWindow } from './onboardingWindow'
+import { onboardingDue } from '../../shared/onboarding'
+import { startFullscreenMonitor, stopFullscreenMonitor, triggerFullscreenCheck } from './fullscreen'
+import { flushStagedTempRegistry } from './stagedTemp'
+import { extname, join, normalize } from 'node:path'
+import { existsSync, createReadStream } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { resolveStoredImage, resolveEmojiAsset, resolveIconAsset, emojiAssetDir } from './imageProtocol'
+import { getThumbnailPayloadScheduled, thumbnailCacheControl } from './thumbnailCache'
+
+// Edge-Drop renders a small, mostly static transparent panel. Chromium's GPU
+// process costs substantially more memory (~150–250 MB) than the iGPU compositing
+// savings are worth for such a simple UI. Software compositing keeps the process
+// count and RAM footprint minimal without meaningfully affecting visual quality.
+// Electron requires this call before the ready event.
+app.disableHardwareAcceleration()
+
+// Restrict the renderer to a single webContents and forbid remote module usage.
+app.enableSandbox()
+
+// Keep V8's old-space heap bounded without starving a renderer that is loading
+// an existing clipboard history. This deliberately does not restore
+// --optimize-for-size: that flag made collections more aggressive and caused
+// visible animation hitches. Chromium image/compositor memory is handled by
+// the thumbnail path below rather than by this JavaScript heap limit.
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512 --expose-gc')
+
+// ---- single instance -------------------------------------------------------
+/** After an update, a silent start at login shows the new tour this long after launch (see onboardingDue). */
+const UPDATE_TOUR_DELAY_AT_LOGIN_MS = 15_000
+
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    // If a second copy launches, just reveal the existing panel.
+    setVisible(true)
+    getMainWindow()?.focus()
+  })
+  app.on('browser-window-blur', () => {
+    triggerFullscreenCheck()
+  })
+}
+
+// ---- before ready: register privileged protocol ----------------------------
+// Must happen before app is ready so we can declare it as privileged (bypass
+// CSP for image loads).
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: APP_CONFIG.imageProtocol,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+  }
+])
+
+// ---- app lifecycle ---------------------------------------------------------
+app.on('before-quit', () => {
+  runtime.quitting = true
+  stopCursorPoll()
+  stopHeartbeat()
+  stopStateTimers()
+  stopFullscreenMonitor()
+  getWatcher().stop()
+  try {
+    getStore().persistSync()
+  } catch { /* ignore */ }
+  try {
+    flushStagedTempRegistry()
+  } catch { /* ignore */ }
+  try {
+    const { globalShortcut } = require('electron')
+    globalShortcut.unregisterAll()
+  } catch { /* ignore */ }
+})
+
+app.whenReady().then(() => {
+  // GitHub NSIS needs an explicit AUMID. Store packages already have one from
+  // the AppX identity; overriding it breaks toasts and taskbar grouping.
+  if (!isStoreBuild()) {
+    app.setAppUserModelId('com.edgedrop.app')
+  }
+
+  ensureDirs()
+  // NOTE: temp cleanup is intentionally NOT a blind wipe anymore. Staged drag
+  // and paste artifacts are lifecycle-managed (see stagedTemp.ts) and are
+  // reconciled against living history inside initState().
+
+  // Lock the renderer session down: block all permission requests by default.
+  const ses = session.defaultSession
+  ses.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
+
+  // Register the image protocol: edgelocal://<imageId> -> the staged image file.
+  registerImageProtocol()
+
+  createWindow()
+  startCursorPoll()
+  startFullscreenMonitor()
+  createTray()
+  registerTaskbarCreatedListener(refreshTray)
+
+  // Register global shortcut to toggle panel
+  registerGlobalHotkey()
+  registerIpc()
+  registerSendListeners()
+  initState()
+  prewarmDragIcons(isInteractive)
+
+  // Reflect settings immediately.
+  const settings = loadSettings()
+  const hiddenLaunch = shouldStartHidden()
+  if (hiddenLaunch) {
+    console.log('[Main] Login launch detected (--hidden / wasOpenedAtLogin) — starting silently in tray')
+  }
+  const tour = onboardingDue(settings)
+  // The tour plays in the device's own language (Onboarding.tsx); the saved language is left as it is.
+  if (tour === 'first-run' && !hiddenLaunch) {
+    setTimeout(() => {
+      createOnboardingWindow()
+    }, 2000)
+  } else if (tour === 'update') {
+    // Someone who finished an older tour sees this one once. Also on a silent start at login (many
+    // only ever start Edge-Drop that way), later, once Windows has settled.
+    setTimeout(() => {
+      createOnboardingWindow()
+    }, hiddenLaunch ? UPDATE_TOUR_DELAY_AT_LOGIN_MS : 2000)
+  }
+  setHotZoneWidth(settings.hotZoneWidth || 3)
+  // files the app writes (drag-out, paste into Explorer, Save to Downloads) are named in the user's language
+  setFileNameWords(() => ({
+    screenshotName: mainT('files.screenshotName'),
+    imageName: mainT('files.imageName'),
+    image: mainT('files.image'),
+    snippet: mainT('files.snippet')
+  }))
+
+  void reconcileLaunchAtLoginOnStartup().then((reconciled) => {
+    pushState.settings(reconciled)
+  }).catch((err) => {
+    console.error('[Main] Failed to reconcile launch-at-login with Windows:', err)
+  })
+  registerIncognitoApplier((v) => getWatcher().setPaused(v))
+  getWatcher().setPaused(settings.incognito)
+  pushState.settings(settings)
+  initAutoUpdater()
+
+  // Keep the tray checkmarks in sync after settings change from the UI.
+  // (Tray menu is rebuilt on each open, so no extra wiring is needed here.)
+})
+
+app.on('window-all-closed', () => {
+  // Never quit automatically when panel hides/closes; lifecycle is managed by tray.
+})
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow()
+})
+
+// ---- image protocol handler ------------------------------------------------
+function registerImageProtocol(): void {
+  protocol.handle(APP_CONFIG.imageProtocol, async (request) => {
+    try {
+      if (request.url.startsWith(`${APP_CONFIG.imageProtocol}://emoji/`)) {
+        const fileName = decodeURIComponent(request.url.slice(`${APP_CONFIG.imageProtocol}://emoji/`.length).split('?')[0] ?? '')
+        const dir = emojiAssetDir({
+          packaged: app.isPackaged,
+          resourcesPath: process.resourcesPath,
+          appPath: app.getAppPath(),
+          cwd: process.cwd()
+        })
+        const filePath = resolveEmojiAsset(dir, fileName)
+        if (!filePath) return new Response('Not found', { status: 404 })
+        const stream = createReadStream(filePath)
+        const body = new Response(stream as unknown as ReadableStream<Uint8Array>).body
+        return new Response(body, {
+          status: 200,
+          headers: new Headers({
+            'Content-Type': 'image/png',
+            'Cache-Control': 'public, max-age=31536000, immutable'
+          })
+        })
+      }
+
+      // File-kind folder icons (static SVG set, same immutable-cache shape
+      // as emoji). Must sit before the generic imageId fallback below.
+      if (request.url.startsWith(`${APP_CONFIG.imageProtocol}://icon/`)) {
+        const fileName = decodeURIComponent(request.url.slice(`${APP_CONFIG.imageProtocol}://icon/`.length).split('?')[0] ?? '')
+        // Same location pattern as PATHS.icon: works in dev (project root)
+        // and packaged (inside asar, readable via fs).
+        const filePath = resolveIconAsset(join(app.getAppPath(), 'resources', 'file-icons'), fileName)
+        if (!filePath) return new Response('Not found', { status: 404 })
+        const stream = createReadStream(filePath)
+        const body = new Response(stream as unknown as ReadableStream<Uint8Array>).body
+        return new Response(body, {
+          status: 200,
+          headers: new Headers({
+            'Content-Type': 'image/svg+xml',
+            'Cache-Control': 'public, max-age=31536000, immutable'
+          })
+        })
+      }
+
+      // List cards request bounded raster thumbnails.  Do not hand an original
+      // multi-megapixel file to Chromium merely to paint a 50–240px card.
+      if (request.url.startsWith(`${APP_CONFIG.imageProtocol}://thumb/`)) {
+        const rawTarget = request.url.slice(`${APP_CONFIG.imageProtocol}://thumb/`.length)
+        const isFileThumb = rawTarget.startsWith('file/')
+        const filePath = isFileThumb
+          ? normalize(decodeURIComponent(rawTarget.slice('file/'.length)))
+          : resolveStoredImage(PATHS.imagesDir(), rawTarget)?.filePath
+
+        if (!filePath || !existsSync(filePath)) return new Response('Not found', { status: 404 })
+        return await createThumbnailResponse(filePath, !isFileThumb, request)
+      }
+
+      // Support streaming full-resolution local image files: edgelocal://file/<encodedPath>
+      if (request.url.startsWith(`${APP_CONFIG.imageProtocol}://file/`)) {
+        const rawPath = request.url.slice(`${APP_CONFIG.imageProtocol}://file/`.length)
+        const filePath = normalize(decodeURIComponent(rawPath))
+        if (existsSync(filePath)) {
+          const ext = extname(filePath).toLowerCase()
+          let contentType = 'image/png'
+          if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg'
+          else if (ext === '.gif') contentType = 'image/gif'
+          else if (ext === '.webp') contentType = 'image/webp'
+          else if (ext === '.svg') contentType = 'image/svg+xml'
+          else if (ext === '.bmp') contentType = 'image/bmp'
+          else if (ext === '.avif') contentType = 'image/avif'
+
+          const stream = createReadStream(filePath)
+          const body = new Response(stream as unknown as ReadableStream<Uint8Array>).body
+          return new Response(body, {
+            status: 200,
+            headers: new Headers({
+              'Content-Type': contentType,
+              'Cache-Control': 'max-age=3600'
+            })
+          })
+        }
+        return new Response('Not found', { status: 404 })
+      }
+
+      const imageId = new URL(request.url).hostname
+      if (!/^[a-z0-9-]+$/i.test(imageId)) {
+        return new Response('Forbidden', { status: 403 })
+      }
+
+      const storedImage = resolveStoredImage(PATHS.imagesDir(), imageId)
+      if (!storedImage) {
+        return new Response('Not found', { status: 404 })
+      }
+
+      const stream = createReadStream(storedImage.filePath)
+      const body = new Response(stream as unknown as ReadableStream<Uint8Array>).body
+      const headers = new Headers({
+        'Content-Type': storedImage.contentType,
+        'Cache-Control': 'no-cache',
+        'ETag': `"${createHash('sha256').update(storedImage.filePath).digest('hex')}"`
+      })
+      return new Response(body, { status: 200, headers })
+    } catch {
+      return new Response('Error', { status: 500 })
+    }
+  })
+}
+
+/**
+ * Serve a bounded thumbnail with proper HTTP caching: long immutable freshness
+ * for content-addressed captures, short freshness + ETag/304 for external
+ * files. Payloads come from the LRU thumbnail engine so repeated requests do
+ * zero decode work in the main process; misses decode via its motion-aware
+ * queue so they never land inside a panel transition.
+ */
+async function createThumbnailResponse(filePath: string, isStoredCapture: boolean, request?: Request): Promise<Response> {
+  const ext = extname(filePath).toLowerCase()
+  // SVG files are vector XML documents; stream them directly with correct MIME type
+  // rather than failing inside nativeImage.createFromPath (which only supports raster bitmaps).
+  if (ext === '.svg') {
+    const stream = createReadStream(filePath)
+    const body = new Response(stream as unknown as ReadableStream<Uint8Array>).body
+    return new Response(body, {
+      status: 200,
+      headers: new Headers({
+        'Content-Type': 'image/svg+xml',
+        'Cache-Control': 'no-cache'
+      })
+    })
+  }
+
+  const payload = await getThumbnailPayloadScheduled(filePath)
+  if (!payload) return new Response('Unsupported image', { status: 415 })
+
+  const headers = new Headers({
+    'Content-Type': payload.contentType,
+    'Cache-Control': thumbnailCacheControl(isStoredCapture),
+    'ETag': payload.etag
+  })
+
+  const inm = request?.headers.get('if-none-match')
+  if (inm && inm === payload.etag) {
+    return new Response(null, { status: 304, headers })
+  }
+
+  return new Response(new Uint8Array(payload.body), { status: 200, headers })
+}
+
+// Silence unused import in environments where setVisible isn't referenced
+// after the refactor (kept for second-instance wiring above).
+void setInteractive
+
+let _lastHotkeyToggleTime = 0
+
+export function registerGlobalHotkey(targetHotkey?: string): boolean {
+  try {
+    const { globalShortcut } = require('electron')
+    globalShortcut.unregisterAll()
+    const settings = loadSettings()
+    const hotkey = targetHotkey || settings.toggleHotkey || 'Alt+C'
+
+    const success = globalShortcut.register(hotkey, () => {
+      if (runtime.quitting) return
+      const now = Date.now()
+      if (now - _lastHotkeyToggleTime < 500) return
+      _lastHotkeyToggleTime = now
+      pushState.togglePanel()
+    })
+
+    if (!success && hotkey !== 'Alt+C') {
+      console.warn(`[Main] Failed to register global shortcut ${hotkey}, falling back to Alt+C`)
+      globalShortcut.register('Alt+C', () => {
+        if (runtime.quitting) return
+        const now = Date.now()
+        if (now - _lastHotkeyToggleTime < 500) return
+        _lastHotkeyToggleTime = now
+        pushState.togglePanel()
+      })
+      return false
+    }
+    return success
+  } catch (err) {
+    console.error('[Main] Failed to register global shortcut:', err)
+    return false
+  }
+}

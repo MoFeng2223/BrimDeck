@@ -68,7 +68,7 @@ internal sealed class PageHandover
 
     public void Release(FrameworkElement content, Handover motion)
     {
-        if (_held.Count == 0 || motion == Handover.None || !Soft.Enabled) { _held.Clear(); return; }
+        if (_held.Count == 0 || motion == Handover.None || !Soft.For(content)) { _held.Clear(); return; }
         var leaving = _held.ToList();
         _held.Clear();
         // A rebuild while the page was still arriving (the usage page's own panel is what arrives): its elements leave from the
@@ -80,7 +80,7 @@ internal sealed class PageHandover
     public static Image? Capture(FrameworkElement page)
     {
         double width = page.ActualWidth, height = page.ActualHeight;
-        if (!page.IsVisible || width < 1 || height < 1 || PresentationSource.FromVisual(page) is null) return null;
+        if (!Soft.For(page) || !page.IsVisible || width < 1 || height < 1 || PresentationSource.FromVisual(page) is null) return null;
         // A page still arriving is pictured as it is drawn now: the brush takes the page's own opacity and shift with it
         // (checked: a page at half opacity and moved 10 DIP comes out so), so the picture leaves from where the page was.
         return new Image { Source = Snapshot(page, width, height, VisualTreeHelper.GetDpi(page)), Width = width, Height = height, Stretch = Stretch.None,
@@ -114,7 +114,7 @@ internal sealed class PageHandover
     // switch) and is centred as the page was.
     public void Send(UIElement? picture, Thickness place, FrameworkElement content, Handover motion)
     {
-        if (picture is null || motion == Handover.None || !Soft.Enabled) return;
+        if (picture is null || motion == Handover.None || !Soft.For(content)) return;
         Begin([picture], new Thickness(0, place.Top, 0, 0), content, motion);
     }
 
@@ -212,7 +212,7 @@ internal sealed class PageHandover
 
     private static void HoldThenArrive(UIElement element, double from, int milliseconds)
     {
-        if (!Soft.Enabled) return;
+        if (!Soft.For(element)) return;
         element.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(from, from, TimeSpan.Zero));
         element.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => element.BeginAnimation(UIElement.OpacityProperty, Arrival(from, 1, milliseconds)));
     }

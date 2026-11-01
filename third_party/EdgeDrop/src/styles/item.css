@@ -1,0 +1,3370 @@
+/**
+ * Premium Clipboard Item Card Styles
+ * Deep black, completely colorless, modern, and fluid.
+ */
+
+.item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+  background: var(--bg-card);
+  border: none;
+  border-radius: var(--radius-card);
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 0.14s ease;
+  overflow: hidden;
+}
+
+/* Specular light-reflection 1px border.
+   Zero-mask hardware-accelerated: 1px specular top highlight centered at 50%
+   that dissolves before reaching corners, paired with a subtle 1px bottom rim. */
+.item::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 2;
+  transition: opacity 0.14s ease;
+  background: 
+    radial-gradient(
+      ellipse 70% 1px at 50% 0%,
+      rgba(255, 255, 255, 0.22) 0%,
+      rgba(255, 255, 255, 0.08) 45%,
+      transparent 80%
+    ) top / 100% 1px no-repeat,
+    linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.035) 20%,
+      rgba(255, 255, 255, 0.035) 80%,
+      transparent 100%
+    ) bottom / 100% 1px no-repeat;
+}
+
+.item:hover::before {
+  opacity: 1.2;
+}
+
+/* Performance culling — invisible to users.
+   Cards outside the scroll viewport skip style/layout/paint of their whole
+   subtree; scrolling near them renders them normally. The `auto` keyword
+   remembers each card's real measured height after first paint, so scrollbar
+   geometry stays exact while `96px` is only the first-guess fallback for
+   never-rendered cards. Scoped to the scroll list so flyouts/overlays are
+   untouched. */
+.list-stack .item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 96px;
+}
+/* Cards in or near the list's view (ItemList marks them, measured against
+   the list, not the window) are always drawn, so opening the shelf never
+   shows them empty while its clip is still growing. */
+.list-stack .item[data-near] {
+  content-visibility: visible;
+}
+
+.list-stack .item.is-expanded {
+  content-visibility: visible !important;
+  contain-intrinsic-size: none !important;
+}
+
+.item:hover {
+  background: var(--bg-card-hover);
+}
+
+.item:hover .preview {
+  color: #ffffff;
+}
+
+.item.pinned {
+  background: #181818;
+}
+
+.item.pinned:hover {
+  background: var(--bg-card-hover);
+}
+
+/* Compact UI Density Mode */
+.list.compact .item {
+  margin-bottom: 6px;
+  border-radius: 14px;
+}
+.list.compact .item-content {
+  padding: 9px 12px 3px 12px;
+}
+.list.compact .item-footer {
+  padding: 3px 12px 6px 12px;
+}
+.list.compact .preview {
+  font-size: calc(12px * var(--font-scale, 1));
+  line-height: 1.35;
+}
+
+/* The main row within an item card. Carries the flex layout, padding,
+   and cursor. Separate from the outer .item motion.div so that the
+   collapsed + expanded sections can animate independently. */
+.item-main {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.item:not(.is-expanded) .item-main:active {
+  transform: scale(0.985);
+  transition: transform 0.08s ease;
+}
+
+.item.is-expanded .item-main:active,
+.item.is-expanded .item-main,
+.item.is-expanded {
+  transform: none !important;
+  cursor: default;
+}
+
+.body {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.item-content {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 13px 16px 5px 16px;
+}
+
+.item-footer {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 3px 16px 8px 16px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.28) 100%);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.preview {
+  font-family: var(--font-ui);
+  font-size: calc(13px * var(--font-scale, 1));
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.92);
+  font-weight: 400;
+  word-break: break-word;
+  white-space: pre-wrap;
+  transition: color 0.16s ease;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.preview.single {
+  -webkit-line-clamp: 1;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-ui);
+  font-size: calc(11px * var(--font-scale, 1));
+  color: rgba(255, 255, 255, 0.48);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.meta .meta-detail {
+  white-space: nowrap;
+  /* In a tight footer the detail text (domain, size, name) shortens first,
+     so badges after it (×N, tags) are never cut in half. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta .kind-badge,
+.meta .meta-hit-count {
+  flex-shrink: 0;
+}
+
+.meta-hit-count {
+  white-space: nowrap;
+  font-size: calc(10.5px * var(--font-scale, 1));
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.5px 4.5px;
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+}
+
+.meta-copied {
+  white-space: nowrap;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.meta-time {
+  margin-left: auto;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-family: var(--font-ui);
+  font-size: calc(11px * var(--font-scale, 1));
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-align: right;
+  padding-left: 6px;
+}
+
+/* Scroll to top / start button */
+.scroll-top-btn {
+  position: fixed;
+  bottom: 64px;
+  right: 24px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  /* Same surface as the action pills, just bigger: it is a page-level control. */
+  background: var(--act-surface);
+  border: none;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  z-index: 100;
+  transition: background-color 0.12s ease, transform 0.1s ease;
+}
+
+.scroll-top-btn:hover {
+  background: var(--act-surface-hover);
+}
+
+.scroll-top-btn:active {
+  transform: scale(0.94);
+}
+
+/* Horizontal Dock Scroll-to-Start Button */
+.scroll-top-btn.horizontal {
+  bottom: 16px;
+  right: 44px;
+  left: auto;
+  top: auto;
+  width: 38px;
+  height: 38px;
+}
+
+.scroll-top-btn.horizontal:active {
+  transform: scale(0.96);
+}
+
+/* "Back to where you were": the scroll-to-top button itself (same class, same
+   corner, which is free while the list is at the top), pointing the other way.
+   A white ring around its edge shrinks while it is offered and holds while
+   the pointer is on it. */
+.back-btn-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+
+.back-btn-ring circle {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-width: 2px;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 0;
+  animation: back-btn-ring var(--back-btn-ms, 6000ms) linear forwards;
+}
+
+.back-btn.is-held .back-btn-ring circle {
+  animation-play-state: paused;
+}
+
+/* Reduced motion shortens every animation to nothing: keep the button, drop the ring. */
+:root[data-motion='reduce'] .back-btn-ring {
+  display: none;
+}
+
+@keyframes back-btn-ring {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: 100; }
+}
+
+.bundle-stack {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.bundle-stack-large {
+  height: 132px;
+  position: relative;
+  width: 100%;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bundle-stack-icon-item {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  margin-top: -66px;
+  margin-left: -66px;
+  width: 132px;
+  height: 132px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  transform-origin: center center;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.42));
+}
+
+.kind-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: rgba(255, 255, 255, 0.65);
+}
+.kind-badge.url {
+  color: rgba(255, 255, 255, 0.9);
+}
+.kind-badge.code {
+  color: #38bdf8;
+  font-family: var(--font-mono);
+  font-size: calc(10.5px * var(--font-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* Minimal Code Block Preview for Item Card */
+.code-card-preview {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.code-card-preview .code-block-container {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.code-card-preview pre {
+  font-family: var(--font-mono) !important;
+}
+
+.list.horizontal .code-card-preview {
+  height: 86px;
+  max-height: 86px;
+}
+
+/* Clean Professional Link Card */
+.link-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  user-select: none;
+}
+
+.link-card-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-ui);
+  font-size: calc(11.5px * var(--font-scale, 1));
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.48);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.link-card-icon {
+  color: rgba(255, 255, 255, 0.55);
+  flex-shrink: 0;
+  transition: color 0.15s ease;
+}
+
+.link-card-domain {
+  color: rgba(255, 255, 255, 0.52);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.15s ease;
+}
+
+.link-card-body {
+  font-family: var(--font-ui);
+  font-size: calc(13.5px * var(--font-scale, 1));
+  font-weight: 500;
+  color: #ffffff;
+  line-height: 1.4;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  letter-spacing: 0;
+}
+
+.link-card-url {
+  font-family: var(--font-ui);
+  font-size: calc(11.5px * var(--font-scale, 1));
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.42);
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.01em;
+  min-width: 0;
+  transition: color 0.15s ease;
+}
+
+.link-card.compact {
+  gap: 3px;
+}
+
+.link-card.compact .link-card-body {
+  font-size: calc(12.5px * var(--font-scale, 1));
+  -webkit-line-clamp: 1;
+}
+
+.link-card.compact .link-card-url {
+  font-size: calc(10.5px * var(--font-scale, 1));
+}
+
+.item:hover .link-card-icon,
+.item-main:hover .link-card-icon {
+  color: rgba(255, 255, 255, 0.8);
+}
+.item:hover .link-card-domain,
+.item-main:hover .link-card-domain {
+  color: rgba(255, 255, 255, 0.72);
+}
+.item:hover .link-card-url,
+.item-main:hover .link-card-url {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+/* Image thumbnails */
+.item:has(.thumb-wrap) .item-content {
+  overflow: visible;
+  padding: 10px 12px 4px 12px;
+}
+
+.thumb {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 180px;
+  object-fit: contain;
+  border-radius: 10px;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  pointer-events: none;
+  transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.16s ease;
+}
+
+.thumb-wrap {
+  position: relative;
+  border-radius: 10px;
+  overflow: visible;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+}
+
+.item:not(.is-expanded):hover .thumb,
+.item:not(.is-expanded) .item-main:hover .thumb {
+  transform: scale(1.01);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+
+.file-name-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  font-size: calc(11.5px * var(--font-scale, 1));
+  color: rgba(255, 255, 255, 0.85);
+  min-width: 0;
+  flex: 1;
+}
+
+.single-file-hero {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  margin-top: -6px;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* The file art keeps one soft shadow; hover lifts it 4px. It is its own
+   pre-rastered layer (will-change), so it must stay 1:1 to stay sharp: no
+   scaling, and moves only in multiples of 4px (whole device pixels at
+   100-200% display scaling). Growing it 4% on hover measured 72% of the
+   sharpness of a direct render on a 1x screen; the 4px lift stays sharp.
+   No animated shadow either: changing a filter repaints the SVG every frame. */
+.single-file-hero svg,
+.single-file-hero img.file-kind-img {
+  display: block;
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.45));
+  transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.item.is-image-folder-card:not(.is-expanded):hover .single-file-hero svg,
+.item:not(.is-expanded) .item-main:hover .single-file-hero svg,
+.item.is-image-folder-card:not(.is-expanded):hover .single-file-hero img.file-kind-img,
+.item:not(.is-expanded) .item-main:hover .single-file-hero img.file-kind-img {
+  transform: translateY(-4px);
+}
+
+html[data-motion='reduce'] .single-file-hero svg,
+html[data-motion='reduce'] .single-file-hero img.file-kind-img {
+  transition: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Folder icons that open on hover (CustomFileIcon layered)           */
+/* ------------------------------------------------------------------ */
+/* At rest the plain icon shows (.fko-plain). Next to it sit its five
+   layers (back panel, three papers, front pocket) as bitmaps drawn once at
+   this exact device size (lib/iconLayers.ts), hidden: not painted, not even
+   decoded. Hovering the card swaps them in (same pixels as the plain icon)
+   and opens the folder: the pocket drops a step and tips forward on its
+   bottom edge, the papers rise a little and fan out. Leaving closes it, and
+   only then (after the motion) the plain icon takes over again. The opening
+   rules wait for .is-armed (set once the layers have their closed style),
+   so layers that arrive mid-hover still animate open instead of jumping.
+   Cost: moving bitmaps is a plain copy, no filter or SVG is redrawn; the
+   wrapper never gets a filter or transform (that would redraw everything
+   each frame). The papers move in multiples of --open-u (4px on large
+   icons, 2px on small ones), whole device pixels at 100-200% scaling, so
+   they stay sharp while open. */
+.file-kind-opening {
+  --open-u: 4px;
+  --open-time: 0.46s;
+  position: relative;
+  display: block;
+  filter: none !important;
+  transform: none !important;
+  will-change: auto !important;
+  transition: none !important;
+}
+/* Plain icon and every layer are pre-rastered layers (will-change): showing,
+   hiding and moving them is then compositor work, not a repaint of the card
+   under them (measured: ~3ms of raster per hover instead of ~12ms; memory
+   at rest unchanged, hidden layers hold no raster). */
+.file-kind-opening > .fko-plain,
+.fko-layers > .fil {
+  will-change: transform;
+}
+/* plain icon and pocket share the icon's one shadow */
+.file-kind-opening > .fko-plain,
+.fko-layers > .fil-front {
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.45));
+}
+.file-kind-opening > .fko-plain {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* back to visible only once the closing motion has finished */
+  transition: visibility 0s linear var(--open-time);
+}
+.fko-layers {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  transition: visibility 0s linear var(--open-time);
+}
+.fko-layers > .fil {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  transition: translate var(--open-time) cubic-bezier(0.22, 1, 0.36, 1), transform var(--open-time) cubic-bezier(0.22, 1, 0.36, 1);
+}
+.fko-layers > .fil-front {
+  transform-origin: 50% 83%; /* the pocket's bottom edge */
+}
+/* papers leave one after another: the front one first */
+.fko-layers > .fil-paper2 {
+  transition-delay: 0.035s;
+}
+.fko-layers > .fil-paper1 {
+  transition-delay: 0.07s;
+}
+/* small icons move half as far */
+.flyout-subitem:not(.single-hero-card) .file-kind-opening {
+  --open-u: 2px;
+}
+
+/* open */
+.item:not(.is-expanded) .item-main:hover .file-kind-opening.is-armed > .fko-plain,
+.item.is-image-folder-card:not(.is-expanded):hover .file-kind-opening.is-armed > .fko-plain {
+  visibility: hidden;
+  transition-delay: 0s;
+}
+.item:not(.is-expanded) .item-main:hover .file-kind-opening.is-armed > .fko-layers,
+.item.is-image-folder-card:not(.is-expanded):hover .file-kind-opening.is-armed > .fko-layers {
+  visibility: visible;
+  transition-delay: 0s;
+}
+.item:not(.is-expanded) .item-main:hover .file-kind-opening.is-armed .fil-paper1,
+.item.is-image-folder-card:not(.is-expanded):hover .file-kind-opening.is-armed .fil-paper1 {
+  translate: var(--open-u) calc(var(--open-u) * -1);
+}
+.item:not(.is-expanded) .item-main:hover .file-kind-opening.is-armed .fil-paper2,
+.item.is-image-folder-card:not(.is-expanded):hover .file-kind-opening.is-armed .fil-paper2 {
+  translate: 0 calc(var(--open-u) * -2);
+}
+.item:not(.is-expanded) .item-main:hover .file-kind-opening.is-armed .fil-paper3,
+.item.is-image-folder-card:not(.is-expanded):hover .file-kind-opening.is-armed .fil-paper3 {
+  translate: calc(var(--open-u) * -1) calc(var(--open-u) * -1);
+}
+.item:not(.is-expanded) .item-main:hover .file-kind-opening.is-armed .fil-front,
+.item.is-image-folder-card:not(.is-expanded):hover .file-kind-opening.is-armed .fil-front {
+  transform: translateY(var(--open-u)) perspective(calc(var(--open-u) * 90)) rotateX(-26deg);
+}
+
+html[data-motion='reduce'] .fko-layers > .fil {
+  transition: none;
+}
+
+/* Folder-style cards (files, folders, photos, stacks) keep the same
+   horizontal hover pill, but dock it on the label flap's shoulder (right of
+   the raised tab, between the art and the name) instead of the top corner:
+   the art sits above it, clear of it (see the file / photo art rules below),
+   so the pill is in one place on every one of these cards.
+   (`top: auto` sits in each dock's own rule: those outrank the top dock's
+   `.list.horizontal` pill offsets.) */
+.item.is-image-folder-card .item-main > .actions {
+  transform-origin: bottom right;
+}
+.item.is-image-folder-card .item-main > .actions {
+  top: auto;
+  bottom: 37px;
+}
+.list.horizontal .item.is-image-folder-card .item-main > .actions {
+  top: auto;
+  bottom: 28px;
+}
+
+/* Text, link, code and color cards dock the same pill at the bottom right,
+   in the room their content leaves at the bottom:
+   - top dock (fixed-height tiles): in the free band just above the bottom
+     row, >= 3px clear of a full 5-line preview and of the row; color values
+     sit above that band (see the color card rules).
+   - side dock (cards as tall as their content): in the bottom row, over the
+     time. These cards keep 6px more room at the bottom for it, and while the
+     pill shows the row's extras (tags, link domain, x-count, time) step aside
+     but keep their size, so the card never changes height; the type and
+     "copied" stay. They come back once the pill has faded out. */
+.list-stack .item:not(.is-image-folder-card) .item-main > .actions {
+  top: auto;
+  bottom: 6px;
+  transform-origin: bottom right;
+}
+.list.horizontal .list-stack .item:not(.is-image-folder-card) .item-main > .actions {
+  bottom: 27px;
+}
+.list:not(.horizontal) .list-stack .item:not(.is-image-folder-card) .item-footer {
+  padding-bottom: 14px;
+}
+.list:not(.horizontal) .list-stack .item:not(.is-image-folder-card) .item-footer :is(.meta > :not(.kind-badge, .meta-copied), .meta-time) {
+  transition: visibility 0s linear 0.12s, order 0s linear 0.12s;
+}
+.list:not(.horizontal) .list-stack .item:not(.is-image-folder-card) .item-main:is(:hover, :focus-within, .force-actions) .item-footer :is(.meta > :not(.kind-badge, .meta-copied), .meta-time) {
+  visibility: hidden;
+  transition-delay: 0s;
+}
+.list:not(.horizontal) .list-stack .item:not(.is-image-folder-card) .item-main:is(:hover, :focus-within, .force-actions) .item-footer .meta > :not(.kind-badge, .meta-copied) {
+  order: 1;
+}
+
+/* The preview's cards have no flap: their pill stays in the top corner and
+   the folder sits a little lower so the open papers clear it. */
+.flyout-subitem:not(.single-hero-card) .item-content:has(.file-kind-opening) {
+  padding-top: 28px;
+}
+/* Grid cards: the pill centred on the select box's row (box 10-30px). */
+.flyout-subitem:has(.subitem-select-badge) .actions {
+  top: 5px;
+}
+
+/* File cards: the art sits in the part of the viewport the label flap
+   (.image-folder-flap-wrap, pulled up 26px / 24px) leaves visible, high
+   enough that the open folder clears the hover pill on the flap's shoulder
+   (top dock: 94px icon, measured >= 6px gaps to folder and name). */
+.image-folder-viewport > .single-file-hero {
+  margin-top: 0;
+  padding-bottom: 26px;
+  box-sizing: border-box;
+}
+.list.horizontal .image-folder-viewport > .single-file-hero {
+  padding-bottom: 34px;
+}
+
+/* Photos and photo stacks sit the same way: the frame keeps a strip at the
+   bottom for the pill, so the photo (shown whole, any shape) rests above it.
+   Measured on hover with landscape, portrait, square, panorama and tiny
+   images: >= 6px from the pill and >= 5px from the frame's top in both docks
+   (top-dock 4-photo stacks overhang the top edge as they always have). */
+.image-folder-viewport:has(> .image-folder-thumb) {
+  padding-bottom: 36px;
+  box-sizing: border-box;
+}
+.list.horizontal .image-folder-viewport:has(> .image-folder-thumb) {
+  padding-bottom: 34px;
+}
+.list.horizontal .image-folder-viewport > .image-folder-thumb {
+  max-height: calc(100% - 14px);
+}
+.image-folder-viewport .image-folder-stack-deck:not(.is-file-deck) {
+  margin-top: 0;
+  padding-bottom: 32px;
+  box-sizing: border-box;
+}
+.list.horizontal .image-folder-viewport .image-folder-stack-deck:not(.is-file-deck) {
+  margin-top: 0;
+  padding-bottom: 30px;
+}
+.image-folder-stack-deck:not(.is-file-deck) .image-folder-stack-item {
+  width: 128px;
+  height: 86px;
+}
+.list.horizontal .image-folder-stack-deck:not(.is-file-deck) .image-folder-stack-item {
+  width: 86px;
+  height: 56px;
+}
+
+/* Single Image Folder Card (Framed image in folder card + borderless folder flap) */
+/* The hover background switches in one step (no fade): the textured viewport
+   paints with the card, so a fade redrew its grain and glow on every frame. */
+.item.is-image-folder-card {
+  height: 205px;
+  background: var(--bg-card, #141414);
+  border-radius: var(--radius-card, 18px);
+  overflow: hidden;
+  padding: 5px;
+  box-sizing: border-box;
+}
+
+.item.is-image-folder-card:not(.is-expanded):hover {
+  background: var(--bg-card-hover, #1c1c1c);
+}
+
+.item.is-image-folder-card .item-main {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+}
+
+.image-folder-card-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border-radius: calc(var(--radius-card, 18px) - 5px);
+  overflow: hidden;
+  background: var(--bg-card, #141414);
+}
+
+.item.is-image-folder-card:not(.is-expanded):hover .image-folder-card-inner,
+.item:not(.is-expanded) .item-main:hover .image-folder-card-inner {
+  background: var(--bg-card-hover, #1c1c1c);
+}
+
+/* Lift the viewport with the flap on hover so the folder tab keeps its contrast.
+   background-color only: the shorthand would also drop the glow and grain. */
+.item.is-image-folder-card:not(.is-expanded):hover .image-folder-viewport,
+.item:not(.is-expanded) .item-main:hover .image-folder-viewport {
+  background-color: #222222;
+}
+
+.image-folder-viewport {
+  position: relative;
+  width: 100%;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  background: #1b1b1b;
+  transition: background-color 0.16s ease;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: calc(var(--radius-card, 18px) - 5px) calc(var(--radius-card, 18px) - 5px) 0 0;
+}
+
+.image-folder-thumb {
+  position: relative;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 24px);
+  object-fit: contain;
+  border-radius: 6px;
+  z-index: 2;
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.55));
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), filter 0.22s ease;
+  pointer-events: none;
+}
+
+.item.is-image-folder-card:not(.is-expanded):hover .image-folder-thumb,
+.item:not(.is-expanded) .item-main:hover .image-folder-thumb {
+  transform: scale(1.03) translateY(-1px);
+  filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.65));
+}
+
+/* Image Stack Deck within Image Folder Card */
+.image-folder-stack-deck {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  margin-top: -10px; /* Shifts stack up into the visible sky above the flap */
+}
+
+.image-folder-stack-item {
+  position: absolute;
+  width: 146px;
+  height: 98px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: #18181b;
+  border: none;
+  box-shadow: 
+    0 12px 28px rgba(0, 0, 0, 0.55),
+    0 4px 10px rgba(0, 0, 0, 0.35);
+  transform-origin: 50% 90%;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.28s ease, opacity 0.28s ease;
+  will-change: transform;
+}
+
+.image-folder-stack-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* 2-Card Stack */
+.image-folder-stack-deck[data-count="2"] .image-folder-stack-item.pos-0 {
+  z-index: 2;
+  transform: translate(-6px, 2px) rotate(-4.5deg) scale(1);
+}
+.image-folder-stack-deck[data-count="2"] .image-folder-stack-item.pos-1 {
+  z-index: 1;
+  transform: translate(12px, -4px) rotate(8.5deg) scale(0.96);
+  opacity: 0.94;
+}
+.item.is-image-folder-card:hover .image-folder-stack-deck[data-count="2"] .image-folder-stack-item.pos-0,
+.item-main:hover .image-folder-stack-deck[data-count="2"] .image-folder-stack-item.pos-0 {
+  transform: translate(-10px, 0px) rotate(-7deg) scale(1.03);
+}
+.item.is-image-folder-card:hover .image-folder-stack-deck[data-count="2"] .image-folder-stack-item.pos-1,
+.item-main:hover .image-folder-stack-deck[data-count="2"] .image-folder-stack-item.pos-1 {
+  transform: translate(18px, -8px) rotate(13deg) scale(0.98);
+  opacity: 1;
+}
+
+/* 3-Card Stack */
+.image-folder-stack-deck[data-count="3"] .image-folder-stack-item.pos-0 {
+  z-index: 3;
+  transform: translate(-1px, 3px) rotate(-1.5deg) scale(1);
+}
+.image-folder-stack-deck[data-count="3"] .image-folder-stack-item.pos-1 {
+  z-index: 2;
+  transform: translate(14px, -3px) rotate(8deg) scale(0.96);
+  opacity: 0.94;
+}
+.image-folder-stack-deck[data-count="3"] .image-folder-stack-item.pos-2 {
+  z-index: 1;
+  transform: translate(-15px, -6px) rotate(-9.5deg) scale(0.92);
+  opacity: 0.88;
+}
+.item.is-image-folder-card:hover .image-folder-stack-deck[data-count="3"] .image-folder-stack-item.pos-0,
+.item-main:hover .image-folder-stack-deck[data-count="3"] .image-folder-stack-item.pos-0 {
+  transform: translate(-1px, 0px) rotate(-2deg) scale(1.03);
+}
+.item.is-image-folder-card:hover .image-folder-stack-deck[data-count="3"] .image-folder-stack-item.pos-1,
+.item-main:hover .image-folder-stack-deck[data-count="3"] .image-folder-stack-item.pos-1 {
+  transform: translate(22px, -6px) rotate(14deg) scale(0.98);
+  opacity: 1;
+}
+.item.is-image-folder-card:hover .image-folder-stack-deck[data-count="3"] .image-folder-stack-item.pos-2,
+.item-main:hover .image-folder-stack-deck[data-count="3"] .image-folder-stack-item.pos-2 {
+  transform: translate(-24px, -10px) rotate(-15deg) scale(0.94);
+  opacity: 0.95;
+}
+
+/* 4-Card Stack */
+.image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-0 {
+  z-index: 4;
+  transform: translate(2px, 3px) rotate(2deg) scale(1);
+}
+.image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-1 {
+  z-index: 3;
+  transform: translate(-10px, -2px) rotate(-6deg) scale(0.96);
+  opacity: 0.95;
+}
+.image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-2 {
+  z-index: 2;
+  transform: translate(18px, -5px) rotate(11deg) scale(0.92);
+  opacity: 0.90;
+}
+.image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-3 {
+  z-index: 1;
+  transform: translate(-22px, -9px) rotate(-14deg) scale(0.88);
+  opacity: 0.82;
+}
+.item.is-image-folder-card:hover .image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-0,
+.item-main:hover .image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-0 {
+  transform: translate(4px, 1px) rotate(3deg) scale(1.03);
+}
+.item.is-image-folder-card:hover .image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-1,
+.item-main:hover .image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-1 {
+  transform: translate(-16px, -4px) rotate(-9deg) scale(0.98);
+  opacity: 1;
+}
+.item.is-image-folder-card:hover .image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-2,
+.item-main:hover .image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-2 {
+  transform: translate(26px, -9px) rotate(17deg) scale(0.95);
+  opacity: 0.98;
+}
+.item.is-image-folder-card:hover .image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-3,
+.item-main:hover .image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-3 {
+  transform: translate(-30px, -14px) rotate(-21deg) scale(0.91);
+  opacity: 0.92;
+}
+
+/* ------------------------------------------------------------------ */
+/* Expanded Image Stack / Pinned Collection Styles                    */
+/* ------------------------------------------------------------------ */
+
+.item.is-image-folder-card.is-expanded {
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  padding: 5px;
+}
+
+.item.is-image-folder-card.is-expanded .image-folder-card-inner {
+  height: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.list.horizontal .item.is-image-folder-card.is-expanded {
+  height: 146px !important;
+  min-height: 146px !important;
+  max-height: 146px !important;
+  padding: 4px;
+  box-sizing: border-box;
+  overflow: hidden !important;
+}
+
+.list.horizontal .item.is-image-folder-card.is-expanded .item-main {
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  overflow: hidden !important;
+}
+
+.list.horizontal .item.is-image-folder-card.is-expanded .image-folder-card-inner {
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  position: relative;
+  overflow: hidden !important;
+}
+
+.image-folder-viewport.is-expanded-viewport {
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+  padding: 8px 8px 8px 8px;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+.list.horizontal .image-folder-viewport.is-expanded-viewport {
+  flex: 1;
+  width: 100%;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  padding: 4px 6px 4px 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+  box-sizing: border-box;
+  overflow: hidden !important;
+  border-radius: calc(var(--radius-card, 18px) - 5px);
+}
+
+.image-folder-expanded-content {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+.list.horizontal .image-folder-expanded-content {
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+/* Header bar inside the expanded charcoal viewport */
+.image-folder-expanded-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 28px;
+  padding: 0 0 0 4px; /* the actions sit flush right: room for the title */
+  margin-bottom: 10px;
+  flex-shrink: 0;
+  cursor: pointer;
+  user-select: none;
+  z-index: 10;
+}
+
+.list.horizontal .image-folder-expanded-top-bar {
+  justify-content: flex-start;
+  gap: 12px;
+  height: 22px;
+  margin-bottom: 8px;
+  padding: 0 4px;
+}
+
+.image-folder-collapse-btn {
+  width: var(--act-size);
+  height: var(--act-size);
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--act-surface);
+  border: none;
+  box-shadow: var(--act-shadow);
+  color: var(--act-ink);
+  cursor: pointer;
+  padding: 0;
+  transition: background-color 0.12s ease, color 0.12s ease, transform 0.1s ease;
+}
+
+.image-folder-collapse-btn:hover {
+  background: var(--act-surface-hover);
+  color: #ffffff;
+}
+
+.image-folder-collapse-btn:active {
+  transform: scale(0.9);
+}
+
+.image-folder-expanded-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  letter-spacing: 0.02em;
+}
+
+.list.horizontal .image-folder-expanded-title {
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.image-folder-expanded-top-bar .actions-pill {
+  display: flex;
+  align-items: center;
+}
+/* The header sits in the card's flow, not over content: no drop shadows
+   (in the top dock they fell onto the first row). */
+.image-folder-expanded-top-bar .actions-pill,
+.image-folder-expanded-top-bar .image-folder-collapse-btn {
+  box-shadow: none;
+}
+
+
+/* Textured card backgrounds (file and image cards):
+   a neutral, Apple-style dark surface, no color.
+   - Light: a faint white glow centered behind the art, a barely-there sheen
+     at the top and a soft darkening toward the bottom, like macOS's dark
+     widget materials.
+   - Grain: one static 128px seamless tile (assets/grain.png, soft Gaussian
+     luminance noise as light/dark specks with alpha; the light specks at half
+     strength so the grain darkens rather than greys the card).
+   All of it is background layers of one pseudo-element behind the content,
+   kept on its own layer (will-change): rastered once, so the card's hover
+   color change never redraws it (painted with the card it doubled the hover
+   raster work). No filter, blur or animation.
+   --glow-lift centers the glow on the art, which sits in the part the label
+   flap leaves visible (half the flap: 26/24px). */
+.image-folder-viewport.is-textured {
+  --glow-lift: 13px;
+  isolation: isolate;
+}
+.is-textured::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  will-change: transform;
+  background-image:
+    url('../assets/grain.png'),
+    radial-gradient(
+      60% 66% at 50% calc(50% - var(--glow-lift)),
+      rgba(255, 255, 255, 0.045) 0%,
+      rgba(255, 255, 255, 0.016) 50%,
+      transparent 80%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.022) 0%,
+      transparent 38%,
+      rgba(0, 0, 0, 0.2) 100%
+    );
+  background-size: 128px 128px, 100% 100%, 100% 100%;
+  background-repeat: repeat, no-repeat, no-repeat;
+}
+.list.horizontal .image-folder-viewport.is-textured {
+  --glow-lift: 12px;
+}
+/* Textured cards keep their base on hover: the lift to #222 would sit under
+   the texture for nothing, and the texture already sets the flap apart. */
+.item.is-image-folder-card:not(.is-expanded):hover .image-folder-viewport.is-textured,
+.item:not(.is-expanded) .item-main:hover .image-folder-viewport.is-textured {
+  background-color: #1b1b1b;
+}
+/* An open stack shows its list of entries; keep its frame plain. */
+.image-folder-viewport.is-textured.is-expanded-viewport::before {
+  content: none;
+}
+
+/* Folder Flap Sleeve - completely borderless */
+.image-folder-flap-wrap {
+  position: relative;
+  width: 100%;
+  flex-shrink: 0;
+  margin-top: -26px; /* overlaps bottom of image frame */
+  z-index: 5;
+}
+
+.image-folder-flap-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.image-folder-flap-svg path {
+  fill: var(--bg-card, #141414);
+  stroke: none;
+  border: none;
+}
+
+.item.is-image-folder-card:not(.is-expanded):hover .image-folder-flap-svg path,
+.item:not(.is-expanded) .item-main:hover .image-folder-flap-svg path {
+  fill: var(--bg-card-hover, #1c1c1c);
+}
+
+.image-folder-flap-content {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.image-folder-flap-header {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  padding-left: 9px;
+  padding-top: 1px;
+  box-sizing: border-box;
+  max-width: 125px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-elevated-badge {
+  font-size: calc(10.5px * var(--font-scale, 1));
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  padding: 0 4px;
+  text-transform: lowercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.list.horizontal .image-folder-flap-header {
+  height: 24px;
+  padding-left: 7px;
+  max-width: 105px;
+}
+
+.list.horizontal .file-elevated-badge {
+  font-size: 8.5px;
+  padding: 0 2px;
+}
+
+/* ------------------------------------------------------------------ */
+/* File stacks — a cascade of the glass folder icons                  */
+/* ------------------------------------------------------------------ */
+/* The folders have see-through fronts, so a tight fan of four (each with
+   its own heavy shadow) read as a smear. The front folder sits in full
+   color with the only shadow; the others peek out to the sides and behind,
+   smaller and dimmed, so the glass reads as depth. Hover spreads them and
+   lifts the front one. Photo cards in a mixed stack keep the
+   .image-folder-stack-item rules above.
+
+   Pixel-sharp on every screen: each folder is its own pre-rastered layer
+   (will-change), and a layer stays sharp only while it is shown 1:1. So
+   - its size never changes (each position has one fixed scale, the same at
+     rest and on hover) and nothing is tilted;
+   - it only ever moves by multiples of 4px, a whole number of device pixels
+     at 100/125/150/175/200% display scaling.
+   Measured on a 1x screen this took the front folder from 62% to ~100% of
+   the sharpness of a direct render, with no extra raster work on hover. */
+
+.image-folder-stack-deck.is-file-deck {
+  --spread: 36px;      /* side folders, at rest */
+  --spread-h: 44px;    /* ... on hover */
+  --pair: 24px;        /* second folder of a 2-stack */
+  --pair-h: 32px;
+  --pair-front: -12px; /* front folder of a 2-stack */
+  --back: -24px;       /* fourth folder, behind */
+  --back-h: -32px;
+}
+.list.horizontal .image-folder-stack-deck.is-file-deck {
+  --spread: 24px;
+  --spread-h: 28px;
+  --pair: 16px;
+  --pair-h: 24px;
+  --pair-front: -8px;
+  --back: -16px;
+  --back-h: -20px;
+}
+
+.file-stack-folder {
+  position: absolute;
+  display: block;
+  line-height: 0;
+  transform-origin: 50% 70%;
+  transition: translate 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.file-stack-folder img.file-kind-img,
+.file-stack-folder svg {
+  display: block;
+}
+
+.file-stack-folder.pos-0 {
+  z-index: 4;
+}
+.file-stack-folder.pos-0 img.file-kind-img {
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.45));
+}
+.file-stack-folder.pos-1 {
+  z-index: 3;
+}
+.file-stack-folder.pos-2 {
+  z-index: 2;
+}
+.file-stack-folder.pos-3 {
+  z-index: 1;
+}
+.file-stack-folder.pos-1 img.file-kind-img,
+.file-stack-folder.pos-2 img.file-kind-img {
+  filter: brightness(0.74);
+}
+.file-stack-folder.pos-3 img.file-kind-img {
+  filter: brightness(0.6);
+}
+
+/* 2 files: front a little left, the second behind on the right. */
+.image-folder-stack-deck[data-count="2"] .file-stack-folder.pos-0 {
+  translate: var(--pair-front) 4px;
+}
+.image-folder-stack-deck[data-count="2"] .file-stack-folder.pos-1 {
+  translate: var(--pair) -4px;
+  scale: 0.88;
+}
+.item.is-image-folder-card:not(.is-expanded):hover .image-folder-stack-deck[data-count="2"] .file-stack-folder.pos-0,
+.item-main:hover .image-folder-stack-deck[data-count="2"] .file-stack-folder.pos-0 {
+  translate: var(--pair-front) 0;
+}
+.item.is-image-folder-card:not(.is-expanded):hover .image-folder-stack-deck[data-count="2"] .file-stack-folder.pos-1,
+.item-main:hover .image-folder-stack-deck[data-count="2"] .file-stack-folder.pos-1 {
+  translate: var(--pair-h) -8px;
+}
+
+/* 3 files: front centered, one each side behind (right first, as the photo cards). */
+.image-folder-stack-deck[data-count="3"] .file-stack-folder.pos-0 {
+  translate: 0 4px;
+}
+.image-folder-stack-deck[data-count="3"] .file-stack-folder.pos-1 {
+  translate: var(--spread) -4px;
+  scale: 0.84;
+}
+.image-folder-stack-deck[data-count="3"] .file-stack-folder.pos-2 {
+  translate: calc(-1 * var(--spread)) -4px;
+  scale: 0.84;
+}
+.item.is-image-folder-card:not(.is-expanded):hover .image-folder-stack-deck[data-count="3"] .file-stack-folder.pos-0,
+.item-main:hover .image-folder-stack-deck[data-count="3"] .file-stack-folder.pos-0 {
+  translate: 0 0;
+}
+.item.is-image-folder-card:not(.is-expanded):hover .image-folder-stack-deck[data-count="3"] .file-stack-folder.pos-1,
+.item-main:hover .image-folder-stack-deck[data-count="3"] .file-stack-folder.pos-1 {
+  translate: var(--spread-h) -8px;
+}
+.item.is-image-folder-card:not(.is-expanded):hover .image-folder-stack-deck[data-count="3"] .file-stack-folder.pos-2,
+.item-main:hover .image-folder-stack-deck[data-count="3"] .file-stack-folder.pos-2 {
+  translate: calc(-1 * var(--spread-h)) -8px;
+}
+
+/* 4+ files: front centered, left and right behind, a fourth further back. */
+.image-folder-stack-deck[data-count="4"] .file-stack-folder.pos-0 {
+  translate: 0 4px;
+}
+.image-folder-stack-deck[data-count="4"] .file-stack-folder.pos-1 {
+  translate: calc(-1 * var(--spread)) -4px;
+  scale: 0.84;
+}
+.image-folder-stack-deck[data-count="4"] .file-stack-folder.pos-2 {
+  translate: var(--spread) -4px;
+  scale: 0.84;
+}
+.image-folder-stack-deck[data-count="4"] .file-stack-folder.pos-3 {
+  translate: 0 var(--back);
+  scale: 0.74;
+}
+.item.is-image-folder-card:not(.is-expanded):hover .image-folder-stack-deck[data-count="4"] .file-stack-folder.pos-0,
+.item-main:hover .image-folder-stack-deck[data-count="4"] .file-stack-folder.pos-0 {
+  translate: 0 0;
+}
+.item.is-image-folder-card:not(.is-expanded):hover .image-folder-stack-deck[data-count="4"] .file-stack-folder.pos-1,
+.item-main:hover .image-folder-stack-deck[data-count="4"] .file-stack-folder.pos-1 {
+  translate: calc(-1 * var(--spread-h)) -8px;
+}
+.item.is-image-folder-card:not(.is-expanded):hover .image-folder-stack-deck[data-count="4"] .file-stack-folder.pos-2,
+.item-main:hover .image-folder-stack-deck[data-count="4"] .file-stack-folder.pos-2 {
+  translate: var(--spread-h) -8px;
+}
+.item.is-image-folder-card:not(.is-expanded):hover .image-folder-stack-deck[data-count="4"] .file-stack-folder.pos-3,
+.item-main:hover .image-folder-stack-deck[data-count="4"] .file-stack-folder.pos-3 {
+  translate: 0 var(--back-h);
+}
+
+html[data-motion='reduce'] .file-stack-folder {
+  transition: none;
+}
+
+/* The cascade sits above the label flap, raised so the open front folder
+   clears the hover pill on the flap's shoulder (the back folders rise above
+   the front one, so the group still keeps a top margin). */
+.image-folder-viewport .image-folder-stack-deck.is-file-deck {
+  margin-top: 0;
+  padding: 0 0 36px;
+  box-sizing: border-box;
+}
+.list.horizontal .image-folder-viewport .image-folder-stack-deck.is-file-deck {
+  margin-top: 0;
+  padding: 0 0 34px;
+}
+/* A photo in a top-dock file stack scales with the folders (icon 94px), so
+   the group keeps its top margin. */
+/* ...and in any file stack its hover swing lifts 4px less, so its corner
+   stays clear of the card's top edge. */
+/* A photo in a file stack takes its place in the stack's order like the folders do: the photo cards'
+   own z-indexes (2 and 1 in a pair) sat below the folders' (4 down to 1), so a dimmed back folder was
+   drawn over the front photo. */
+.image-folder-stack-deck.is-file-deck .image-folder-stack-item.pos-0 {
+  z-index: 4;
+}
+.image-folder-stack-deck.is-file-deck .image-folder-stack-item.pos-1 {
+  z-index: 3;
+}
+.image-folder-stack-deck.is-file-deck .image-folder-stack-item.pos-2 {
+  z-index: 2;
+}
+.image-folder-stack-deck.is-file-deck .image-folder-stack-item.pos-3 {
+  z-index: 1;
+}
+.image-folder-stack-deck.is-file-deck .image-folder-stack-item {
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), translate 0.28s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.28s ease, opacity 0.28s ease;
+}
+.item-main:hover .image-folder-stack-deck.is-file-deck .image-folder-stack-item {
+  translate: 0 4px;
+}
+.list.horizontal .image-folder-stack-deck.is-file-deck .image-folder-stack-item {
+  width: 92px;
+  height: 60px;
+}
+
+.file-stack-expanded-track {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  height: 84px;
+  max-height: 84px;
+  align-items: center;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  padding: 2px 0;
+  box-sizing: border-box;
+}
+
+.file-stack-expanded-track::-webkit-scrollbar {
+  display: none;
+}
+
+.mini-file-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 68px;
+  min-width: 68px;
+  height: 76px;
+  padding: 4px;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  cursor: grab;
+  transition: transform 0.18s ease, background 0.16s ease;
+  user-select: none;
+}
+
+.mini-file-card:active {
+  cursor: grabbing;
+}
+
+.mini-file-card:hover {
+  background: rgba(0, 0, 0, 0.65);
+  transform: translateY(-2px);
+}
+
+.mini-file-card-name {
+  font-size: 8.5px;
+  color: rgba(255, 255, 255, 0.85);
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 3px;
+  text-align: center;
+}
+
+.file-stack-expanded-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 0 8px 0;
+  box-sizing: border-box;
+}
+
+.image-folder-flap-footer {
+  padding: 2px 12px 6px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  min-width: 0;
+}
+
+.list.horizontal .image-folder-flap-footer {
+  padding: 1px 8px 4px 8px;
+  gap: 4px;
+}
+
+.image-folder-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.image-folder-source-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+  max-width: none;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: calc(11.5px * var(--font-scale, 1));
+}
+
+.file-name-meta {
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 500;
+}
+
+.image-folder-meta .meta-hit-count,
+.image-folder-meta .meta-copied {
+  flex-shrink: 0;
+}
+
+/* Floating Actions Pill */
+.actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.item-main:hover .actions,
+.item-main:focus-within .actions,
+.item-main.force-actions .actions {
+  opacity: 1;
+  pointer-events: auto;
+  scale: 1;
+}
+
+.act {
+  position: relative;
+  flex: 0 0 auto;
+  width: var(--act-size);
+  height: var(--act-size);
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 6px; /* Square hit box: the whole button area stays clickable */
+  background: transparent;
+  color: var(--act-ink);
+  cursor: pointer;
+  outline: none;
+  transition: color 0.12s ease, transform 0.1s ease;
+}
+
+.act::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: 50%; /* The visible highlight is a circle */
+  background: transparent;
+  transition: background-color 0.12s ease;
+  pointer-events: none;
+}
+
+.act > svg {
+  position: relative;
+  z-index: 1;
+  width: var(--act-icon);
+  height: var(--act-icon);
+}
+
+.act:hover {
+  color: #ffffff;
+}
+.act:hover::before {
+  background: var(--act-hover);
+}
+.act:active {
+  transform: scale(0.90);
+}
+.act.danger:hover {
+  color: var(--act-danger);
+}
+.act.danger:hover::before {
+  background: var(--act-danger-bg);
+}
+.act.active {
+  color: var(--act-on-ink);
+}
+.act.active::before {
+  background: var(--act-on);
+}
+
+.act:focus-visible::before {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.45);
+}
+
+.act-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.14);
+  margin: 0 3px;
+  align-self: center;
+  flex-shrink: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Preview expand / contract button states                             */
+/* ------------------------------------------------------------------ */
+
+/* Card is actively being previewed — dim body so flyout takes focus */
+.item-main.previewing {
+  cursor: pointer;
+}
+
+.item-main.previewing .body {
+  opacity: 0.45;
+  pointer-events: auto;
+  user-select: none;
+  /* Use calc with --dpr to ensure consistent *visual* blur while saving GPU on 4K */
+  filter: blur(calc(3px / var(--dpr, 1)));
+  transition: opacity 0.3s ease, filter 0.3s ease;
+}
+
+/* In preview mode: keep the pill anchored in top-right corner without spatial jumping or obscuring center content */
+.item-main.previewing .actions {
+  opacity: 1;
+  pointer-events: auto;
+  scale: 1;
+}
+
+/* Brief pointer-events freeze on the pill right after preview opens,
+   so a rapid second click on the repositioned pill doesn't misfire. */
+.item-main.previewing .actions {
+  animation: preview-pill-appear 0.35s ease forwards;
+}
+
+@keyframes preview-pill-appear {
+  0%, 80% { pointer-events: none; }
+  100%     { pointer-events: auto; }
+}
+
+/* Contract (close preview) button — accented with a pulsing glow ring */
+/* ------------------------------------------------------------------ */
+/* Bundle-specific styles                                              */
+/* ------------------------------------------------------------------ */
+
+/* Bundle items use click for expand/collapse instead of double-click copy */
+.item.bundle .item-main {
+  cursor: pointer; /* click = expand/collapse */
+}
+
+/* Collapsed bundle preview stack graphic */
+.bundle-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fluid-bundle {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.bundle-slot {
+  display: grid;
+  transition: grid-template-rows 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.bundle-slot-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+.bundle-slot-stack {
+  grid-template-rows: 1fr;
+}
+.bundle-slot-list {
+  grid-template-rows: 0fr;
+  pointer-events: none;
+}
+.fluid-bundle.is-expanded .bundle-slot-stack {
+  grid-template-rows: 0fr;
+  pointer-events: none;
+}
+.fluid-bundle.is-expanded .bundle-slot-list {
+  grid-template-rows: 1fr;
+  pointer-events: auto;
+}
+
+.fluid-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 0;
+  width: 100%;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.fluid-grid-img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  cursor: grab;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.fluid-grid-img:active {
+  cursor: grabbing;
+}
+
+.fluid-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding-top: 8px;
+}
+
+.fluid-card-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  cursor: grab;
+  width: 100%;
+  transition: background 0.18s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+.fluid-card-row:hover {
+  background: rgba(255, 255, 255, 0.075);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.fluid-card-row::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0.5;
+  transition: opacity 0.14s ease;
+  background: 
+    radial-gradient(
+      ellipse 70% 1px at 50% 0%,
+      rgba(255, 255, 255, 0.2) 0%,
+      rgba(255, 255, 255, 0.04) 45%,
+      transparent 80%
+    ) top / 100% 1px no-repeat;
+}
+
+.fluid-card-row:hover::before {
+  opacity: 1;
+}
+
+.fluid-card-row:active {
+  cursor: grabbing;
+}
+
+.fluid-row-icon {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25));
+}
+
+.fluid-row-img {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.fluid-row-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  justify-content: center;
+  text-align: left;
+}
+
+.fluid-row-name {
+  font-size: calc(12.5px * var(--font-scale, 1));
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.92);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.fluid-row-sub {
+  font-size: calc(11px * var(--font-scale, 1));
+  color: rgba(255, 255, 255, 0.45);
+  font-family: var(--font-mono);
+}
+
+.fluid-row-actions {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  transform-origin: right center;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.fluid-card-row:hover .fluid-row-actions,
+.fluid-card-row:focus-within .fluid-row-actions {
+  opacity: 1;
+  pointer-events: auto;
+  scale: 1;
+}
+
+/* "N / 10" capacity readout next to the bundle actions pill */
+.bundle-capacity {
+  font-size: calc(11px * var(--font-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.45);
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+/* Single File card base preview */
+.single-file-preview {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+}
+
+.single-file-meta {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  padding: 0 4px;
+}
+
+.single-file-name {
+  font-size: calc(13.5px * var(--font-scale, 1));
+  font-weight: 550;
+  color: var(--text-primary, #ffffff);
+  line-height: 1.35;
+  text-align: center;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-all;
+}
+
+/* Flyout Sub-item Cards (feels identical to clipboard items) */
+.item.flyout-subitem {
+  margin-bottom: 0;
+  cursor: grab;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-card, #141414);
+  border: none;
+  border-radius: var(--radius-card, 18px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), background 0.14s ease, box-shadow 0.18s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.item.flyout-subitem:hover {
+  background: var(--bg-card-hover, #1c1c1c);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+
+.item.flyout-subitem:active {
+  cursor: grabbing;
+  transform: scale(0.98);
+}
+
+.item.flyout-subitem.is-selected {
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 0 1.5px #ffffff, 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+
+.item.flyout-subitem.is-selected::before {
+  opacity: 0;
+}
+
+.flyout-subitem .item-content {
+  padding: 16px 12px 6px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.flyout-subitem .single-file-hero {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.flyout-subitem .single-file-hero svg,
+.flyout-subitem .single-file-hero .file-kind-img {
+  width: 88px;
+  height: 88px;
+  display: block;
+  filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.45));
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.flyout-subitem:hover .single-file-hero svg,
+.flyout-subitem:hover .single-file-hero img.file-kind-img {
+  transform: translateY(-4px);
+}
+
+.flyout-subitem .single-file-meta {
+  width: 100%;
+  padding: 0 6px;
+  box-sizing: border-box;
+}
+
+.flyout-subitem .single-file-name {
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.35;
+  color: #ffffff;
+  text-align: center;
+  width: 100%;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+.flyout-subitem .item-footer {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 14px 10px 14px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.35) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.flyout-subitem .meta-size {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  font-family: var(--font-ui);
+  letter-spacing: 0.01em;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.flyout-subitem .actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.flyout-subitem:hover .actions {
+  opacity: 1;
+  scale: 1;
+  pointer-events: auto;
+}
+
+.flyout-subitem .subitem-select-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1.5px solid rgba(255, 255, 255, 0.32);
+  background: rgba(22, 22, 22, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 15;
+  opacity: 0.85;
+  transform: scale(1);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: opacity 0.14s ease, transform 0.14s ease, background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.flyout-subitem:hover .subitem-select-badge {
+  opacity: 1;
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
+.flyout-subitem .subitem-select-badge:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.85);
+  transform: scale(1.08);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.6);
+}
+
+.flyout-subitem .subitem-select-badge:active {
+  transform: scale(0.92);
+}
+
+.flyout-subitem .subitem-select-badge.selected {
+  opacity: 1;
+  background: #ffffff;
+  border-color: #ffffff;
+  color: #000000;
+  box-shadow: 0 2px 10px rgba(255, 255, 255, 0.3), 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+
+.flyout-subitem .subitem-select-badge.selected:hover {
+  background: #ffffff;
+  border-color: #ffffff;
+  transform: scale(1.08);
+  box-shadow: 0 3px 12px rgba(255, 255, 255, 0.4), 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+
+/* Single Hero Preview in Flyout */
+.single-hero-card {
+  width: 100%;
+}
+.single-hero-card .single-file-hero svg,
+.single-hero-card .single-file-hero .file-kind-img {
+  width: 120px;
+  height: 120px;
+}
+.single-hero-card .item-content {
+  padding: 28px 20px 14px 20px;
+}
+.single-hero-card .single-file-name {
+  font-size: 15px;
+  font-weight: 600;
+  -webkit-line-clamp: 3;
+}
+.single-hero-card .item-footer {
+  padding: 8px 20px 14px 20px;
+}
+
+.bundle-more-label {
+  color: var(--text-tertiary);
+  font-size: calc(12px * var(--font-scale, 1));
+  padding-left: 4px;
+  margin-top: 8px;
+}
+
+/* Bundle actions (Collapse / Copy all / Delete) placed at the top when
+   expanded. The WHOLE bar collapses the stack on click — pills inside call
+   stopPropagation, so they keep their own actions. No hover fill: the cursor
+   + tooltip already communicate the target. */
+.bundle-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0 10px;
+  width: 100%;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
+.bundle-collapse-hit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-right: auto;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.bundle-collapse-hit:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.bundle-actions-label {
+  font-weight: 500;
+}
+
+.actions-pill {
+  display: flex;
+}
+
+/* Interactive Onboarding Tutorial Banner styling */
+.tutorial-banner {
+  margin: 16px 16px 8px 16px;
+  padding: 14px 16px;
+  background: var(--bg-card);
+  border: none;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.tutorial-title {
+  font-size: calc(10px * var(--font-scale, 1));
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.tutorial-instruction {
+  font-size: calc(13px * var(--font-scale, 1));
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 500;
+}
+
+.tutorial-highlight {
+  animation: pulse-glow 1.5s infinite alternate;
+  border-color: rgba(255, 255, 255, 0.6) !important;
+  background: rgba(255, 255, 255, 0.12) !important;
+}
+
+@keyframes pulse-glow {
+  from {
+    box-shadow: 0 0 4px rgba(255, 255, 255, 0.1);
+  }
+  to {
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.4);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Horizontal Dock Mode Card Styles                                   */
+/* ------------------------------------------------------------------ */
+
+.list.horizontal .list-stack .item {
+  contain-intrinsic-size: 210px 146px;
+}
+
+.list.horizontal .item {
+  width: 210px;
+  min-width: 210px;
+  max-width: 210px;
+  height: 146px;
+  margin-bottom: 0;
+  flex-shrink: 0;
+  border-radius: var(--radius-card);
+}
+
+.list.horizontal .item-main {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.list.horizontal .body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.list.horizontal .item-content {
+  flex: 1;
+  min-height: 0;
+  padding: 10px 14px 2px 14px;
+  overflow: hidden;
+}
+
+.list.horizontal .preview {
+  font-family: var(--font-ui);
+  font-size: calc(12px * var(--font-scale, 1));
+  line-height: 1.34;
+  color: rgba(255, 255, 255, 0.92);
+  -webkit-line-clamp: 5;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.list.horizontal .item-footer {
+  padding: 2px 14px 8px 14px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.28) 100%);
+}
+
+.list.horizontal .meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list.horizontal .meta-time {
+  margin-left: auto;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-family: var(--font-ui);
+  font-size: calc(10.5px * var(--font-scale, 1));
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-align: right;
+  padding-left: 6px;
+}
+
+/* Horizontal Mode Compact Floating Actions Micro-Pill */
+.list.horizontal .actions {
+  top: 6px;
+  right: 6px;
+}
+
+.list.horizontal .item-main:hover .actions,
+.list.horizontal .item-main:focus-within .actions,
+.list.horizontal .item-main.force-actions .actions {
+  opacity: 1;
+  pointer-events: auto;
+  scale: 1;
+}
+
+.list.horizontal .act-divider {
+  height: 12px;
+  margin: 0 2px;
+}
+
+.list.horizontal .link-card-top {
+  gap: 6px;
+  font-size: calc(11px * var(--font-scale, 1));
+}
+
+.list.horizontal .link-card-body {
+  font-size: calc(12px * var(--font-scale, 1));
+  line-height: 1.34;
+  -webkit-line-clamp: 3;
+}
+
+.list.horizontal .link-card-url {
+  font-size: calc(10.5px * var(--font-scale, 1));
+}
+
+.list.horizontal .single-file-name {
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 550;
+  line-height: 1.3;
+  text-align: center;
+  width: 100%;
+  max-width: 100%;
+  padding: 0 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-all;
+}
+
+.list.horizontal .bundle-stack-large {
+  height: 90px;
+}
+
+.list.horizontal .bundle-stack-icon-item {
+  width: 88px;
+  height: 88px;
+  margin-top: -44px;
+  margin-left: -44px;
+}
+
+.list.horizontal .item.is-image .item-content,
+.list.horizontal .item:has(.thumb-wrap) .item-content {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 8px 12px 4px 12px;
+  overflow: visible;
+}
+
+.list.horizontal .thumb-wrap {
+  width: 100%;
+  height: auto;
+  max-height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border-radius: 8px;
+  overflow: visible;
+  padding: 2px;
+}
+
+.list.horizontal .thumb {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 100px;
+  object-fit: contain;
+  border-radius: 8px;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.16s ease;
+}
+
+.list.horizontal .item:not(.is-expanded):hover .thumb {
+  transform: scale(1.015);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.list.horizontal .item-content:has(.preview.single) .thumb {
+  max-height: 84px;
+}
+
+.list.horizontal .preview.single {
+  font-size: calc(10.5px * var(--font-scale, 1));
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Horizontal Dock Single Image Folder Card */
+.list.horizontal .item.is-image-folder-card {
+  width: 210px;
+  min-width: 210px;
+  max-width: 210px;
+  height: 146px;
+  padding: 5px;
+  box-sizing: border-box;
+}
+
+.list.horizontal .item.is-image-folder-card .item-main {
+  height: 100%;
+}
+
+.list.horizontal .image-folder-card-inner {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border-radius: calc(var(--radius-card, 18px) - 5px);
+  overflow: hidden;
+  background: var(--bg-card, #141414);
+}
+
+.list.horizontal .item.is-image-folder-card:not(.is-expanded):hover .image-folder-card-inner,
+.list.horizontal .item:not(.is-expanded) .item-main:hover .image-folder-card-inner {
+  background: var(--bg-card-hover, #1c1c1c);
+}
+
+.list.horizontal .image-folder-viewport {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  border-radius: calc(var(--radius-card, 18px) - 5px) calc(var(--radius-card, 18px) - 5px) 0 0;
+}
+
+.list.horizontal .image-folder-thumb {
+  max-width: calc(100% - 16px);
+  max-height: calc(100% - 20px);
+}
+
+.list.horizontal .image-folder-flap-wrap {
+  margin-top: -24px;
+  flex-shrink: 0;
+  width: 100%;
+}
+
+.list.horizontal .image-folder-flap-header {
+  height: 24px;
+}
+
+.list.horizontal .image-folder-flap-footer {
+  padding: 1px 10px 5px 10px;
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.list.horizontal .image-folder-meta {
+  font-size: calc(10.5px * var(--font-scale, 1));
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.list.horizontal .image-folder-source-name {
+  max-width: none;
+  flex: 1;
+  min-width: 0;
+}
+
+.list.horizontal .image-folder-stack-deck {
+  margin-top: -6px;
+}
+
+.list.horizontal .image-folder-stack-item {
+  width: 108px;
+  height: 70px;
+  border-radius: 6px;
+  border: none;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.55);
+}
+
+.list.horizontal .image-folder-stack-deck[data-count="2"] .image-folder-stack-item.pos-0 {
+  transform: translate(-4px, 1px) rotate(-4.5deg) scale(1);
+}
+.list.horizontal .image-folder-stack-deck[data-count="2"] .image-folder-stack-item.pos-1 {
+  transform: translate(8px, -2px) rotate(8.5deg) scale(0.96);
+}
+.list.horizontal .item.is-image-folder-card:hover .image-folder-stack-deck[data-count="2"] .image-folder-stack-item.pos-0,
+.list.horizontal .item-main:hover .image-folder-stack-deck[data-count="2"] .image-folder-stack-item.pos-0 {
+  transform: translate(-7px, 0px) rotate(-7deg) scale(1.03);
+}
+.list.horizontal .item.is-image-folder-card:hover .image-folder-stack-deck[data-count="2"] .image-folder-stack-item.pos-1,
+.list.horizontal .item-main:hover .image-folder-stack-deck[data-count="2"] .image-folder-stack-item.pos-1 {
+  transform: translate(12px, -4px) rotate(13deg) scale(0.98);
+}
+
+.list.horizontal .image-folder-stack-deck[data-count="3"] .image-folder-stack-item.pos-0 {
+  transform: translate(-1px, 2px) rotate(-1.5deg) scale(1);
+}
+.list.horizontal .image-folder-stack-deck[data-count="3"] .image-folder-stack-item.pos-1 {
+  transform: translate(9px, -2px) rotate(8deg) scale(0.96);
+}
+.list.horizontal .image-folder-stack-deck[data-count="3"] .image-folder-stack-item.pos-2 {
+  transform: translate(-10px, -4px) rotate(-9.5deg) scale(0.92);
+}
+.list.horizontal .item.is-image-folder-card:hover .image-folder-stack-deck[data-count="3"] .image-folder-stack-item.pos-0,
+.list.horizontal .item-main:hover .image-folder-stack-deck[data-count="3"] .image-folder-stack-item.pos-0 {
+  transform: translate(-1px, 0px) rotate(-2deg) scale(1.03);
+}
+.list.horizontal .item.is-image-folder-card:hover .image-folder-stack-deck[data-count="3"] .image-folder-stack-item.pos-1,
+.list.horizontal .item-main:hover .image-folder-stack-deck[data-count="3"] .image-folder-stack-item.pos-1 {
+  transform: translate(14px, -4px) rotate(14deg) scale(0.98);
+}
+.list.horizontal .item.is-image-folder-card:hover .image-folder-stack-deck[data-count="3"] .image-folder-stack-item.pos-2,
+.list.horizontal .item-main:hover .image-folder-stack-deck[data-count="3"] .image-folder-stack-item.pos-2 {
+  transform: translate(-15px, -6px) rotate(-15deg) scale(0.94);
+}
+
+.list.horizontal .image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-0 {
+  transform: translate(1px, 2px) rotate(2deg) scale(1);
+}
+.list.horizontal .image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-1 {
+  transform: translate(-7px, -1px) rotate(-6deg) scale(0.96);
+}
+.list.horizontal .image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-2 {
+  transform: translate(12px, -3px) rotate(11deg) scale(0.92);
+}
+.list.horizontal .image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-3 {
+  transform: translate(-14px, -6px) rotate(-14deg) scale(0.88);
+}
+.list.horizontal .item.is-image-folder-card:hover .image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-0,
+.list.horizontal .item-main:hover .image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-0 {
+  transform: translate(3px, 0px) rotate(3deg) scale(1.03);
+}
+.list.horizontal .item.is-image-folder-card:hover .image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-1,
+.list.horizontal .item-main:hover .image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-1 {
+  transform: translate(-10px, -2px) rotate(-9deg) scale(0.98);
+}
+.list.horizontal .item.is-image-folder-card:hover .image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-2,
+.list.horizontal .item-main:hover .image-folder-stack-deck[data-count="4"] .image-folder-stack-item.pos-2 {
+  transform: translate(17px, -6px) rotate(17deg) scale(0.95);
+}
+.list.horizontal .item.is-image-folder-card.is-expanded .image-folder-flap-wrap {
+  margin-top: -18px;
+  flex-shrink: 0;
+  width: 100%;
+}
+
+.list.horizontal .item.is-image-folder-card.is-expanded .image-folder-flap-header {
+  height: 18px;
+}
+
+.list.horizontal .item.is-image-folder-card.is-expanded .image-folder-flap-footer {
+  padding: 0 8px 3px 8px;
+  margin-top: auto;
+}
+
+.list.horizontal .item.is-image-folder-card.is-expanded .image-folder-meta {
+  font-size: 9.5px;
+  gap: 3px;
+}
+
+.list.horizontal .item.is-image-folder-card.is-expanded .meta-time {
+  font-size: 9.5px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Horizontal Expanded Stack & Sub-Item Tile Styling                  */
+/* ------------------------------------------------------------------ */
+
+.list.horizontal .item.is-expanded {
+  max-width: none;
+  overflow: visible;
+  z-index: 10;
+}
+
+.list.horizontal .item.is-expanded .item-main {
+  width: 100%;
+}
+
+.list.horizontal .item.is-expanded .item-content {
+  padding: 6px 10px 6px 10px;
+  overflow: visible;
+}
+
+.horizontal-bundle-expanded {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  gap: 4px;
+}
+
+.horizontal-bundle-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px 2px 2px;
+  width: 100%;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.horizontal-bundle-header .bundle-collapse-hit {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.horizontal-bundle-header .bundle-collapse-hit:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.horizontal-bundle-header .actions-pill {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.horizontal-subitem-track {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 8px;
+  overflow: visible;
+  height: 96px;
+  padding: 3px 4px 5px 4px;
+}
+
+.horizontal-subitem-track::-webkit-scrollbar {
+  display: none;
+}
+
+.horizontal-subitem-tile {
+  flex-shrink: 0;
+  width: 104px;
+  height: 88px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 6px 5px 6px;
+  overflow: hidden;
+  cursor: grab;
+  position: relative;
+  transition: background 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Edge-Drop signature specular top highlight reflection */
+.horizontal-subitem-tile::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0.5;
+  transition: opacity 0.14s ease;
+  background: radial-gradient(
+    ellipse 70% 1px at 50% 0%,
+    rgba(255, 255, 255, 0.2) 0%,
+    rgba(255, 255, 255, 0.04) 50%,
+    transparent 80%
+  ) top / 100% 1px no-repeat;
+}
+
+.horizontal-subitem-tile:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+.horizontal-subitem-tile:hover::before {
+  opacity: 1;
+}
+.horizontal-subitem-tile:active {
+  cursor: grabbing;
+}
+
+/* Hover Action Floating Micro-Pill */
+.horizontal-subitem-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.horizontal-subitem-tile:hover .horizontal-subitem-actions,
+.horizontal-subitem-tile:focus-within .horizontal-subitem-actions {
+  opacity: 1;
+  pointer-events: auto;
+  scale: 1;
+}
+
+/* Icon / Thumbnail Wrap */
+.horizontal-subitem-icon-wrap {
+  width: 100%;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.horizontal-subitem-img {
+  width: 42px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: block;
+  user-select: none;
+  pointer-events: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.horizontal-subitem-icon-wrap svg {
+  width: 36px;
+  height: 36px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25));
+}
+
+.horizontal-subitem-meta {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 0 2px;
+  gap: 1px;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.horizontal-subitem-name {
+  width: 100%;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.horizontal-subitem-sub {
+  width: 100%;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.45);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  line-height: 1.2;
+}
+
+/* ==========================================================================
+   Color Swatch Cards (Dynamic Color Background & Intelligent Contrast)
+   ========================================================================== */
+
+.item.is-color-card {
+  background-color: var(--card-color) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  transition: transform 0.14s ease, box-shadow 0.14s ease, background-color 0.14s ease;
+}
+
+.item.is-color-card:hover {
+  background-color: var(--card-color) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+
+.item.is-color-card.pinned {
+  background-color: var(--card-color) !important;
+}
+
+.item.is-color-card.pinned:hover {
+  background-color: var(--card-color) !important;
+}
+
+.item.is-color-card .item-main {
+  background: transparent !important;
+}
+
+.item.is-color-card .item-main:hover {
+  background: transparent !important;
+}
+
+.item.is-color-card .item-footer {
+  background: transparent !important;
+}
+
+/* Zero-border policy for color cards: pure flat swatch surface without specular reflections or outlines */
+.item.is-color-card::before {
+  display: none !important;
+  content: none !important;
+}
+
+/* Light color card contrast (black text, dark buttons, dark footer) */
+.item.is-color-card.is-light-color .color-swatch-code {
+  color: #000000;
+}
+
+.item.is-color-card.is-light-color .item-footer,
+.item.is-color-card.is-light-color .meta,
+.item.is-color-card.is-light-color .meta-time,
+.item.is-color-card.is-light-color .meta-detail,
+.item.is-color-card.is-light-color .meta-hit-count {
+  color: rgba(0, 0, 0, 0.62) !important;
+}
+
+.item.is-color-card.is-light-color .kind-badge {
+  color: rgba(0, 0, 0, 0.62) !important;
+  background: transparent !important;
+}
+
+.item.is-color-card.is-light-color .meta-hit-count {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.item.is-color-card.is-light-color .meta-copied {
+  color: #059669 !important;
+}
+
+/* Dark color card contrast (white text, light footer) */
+.item.is-color-card.is-dark-color .color-swatch-code {
+  color: #ffffff;
+}
+
+.item.is-color-card.is-dark-color .item-footer,
+.item.is-color-card.is-dark-color .meta,
+.item.is-color-card.is-dark-color .meta-time,
+.item.is-color-card.is-dark-color .meta-detail,
+.item.is-color-card.is-dark-color .meta-hit-count {
+  color: rgba(255, 255, 255, 0.68) !important;
+}
+
+.item.is-color-card.is-dark-color .kind-badge {
+  color: rgba(255, 255, 255, 0.68) !important;
+  background: transparent !important;
+}
+
+.item.is-color-card.is-dark-color .meta-hit-count {
+  background: rgba(255, 255, 255, 0.10);
+}
+
+.item.is-color-card.is-dark-color .meta-copied {
+  color: #34d399 !important;
+}
+
+/* Swatch Layout */
+.color-swatch-content {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  box-sizing: border-box;
+}
+
+.color-swatch-code {
+  font-family: var(--font-mono, 'Consolas', 'SF Mono', monospace);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.025em;
+  line-height: 1.2;
+  margin-bottom: 2px;
+}
+
+/* In horizontal mode: give breathing room above the code, and keep it above
+   the band the hover pill uses (bottom right, just above the bottom row) */
+.list.horizontal .item.is-color-card .item-content {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding-bottom: 28px;
+}
+
+.list.horizontal .item.is-color-card .color-swatch-code {
+  font-size: 17px;
+  margin-bottom: 4px;
+}
+
+/* ==========================================================================
+   Split Drop Zone (Detach/Ungroup sub-items from expanded stacks on drag)
+   ========================================================================== */
+
+.split-dropzone {
+  position: absolute;
+  z-index: 300;
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+
+/* Each dock: along the edge the card is dragged out to. The hit area is the
+   whole strip; Panel's internal-drop fallback uses the same reach (80px from
+   the top, 100px from a side). */
+.split-dropzone.pos-top {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+}
+.split-dropzone.pos-left,
+.split-dropzone.pos-right {
+  top: 0;
+  bottom: 0;
+  width: 88px;
+}
+.split-dropzone.pos-left {
+  left: 0;
+}
+.split-dropzone.pos-right {
+  right: 0;
+}
+
+/* The light: a lit strip on the screen edge in the edge bar's place (inline
+   insets, see SplitDropZone). A near-white core right on the edge, a tight
+   system-blue glow around it and a wide soft bloom into the shelf, its ends
+   fading out along the edge. Drawn once at full reach; while dragging it is
+   dimmer and reaches less, over the strip it comes up to full (transform and
+   opacity only). */
+.split-bar {
+  position: absolute;
+  pointer-events: none;
+}
+.split-dropzone.pos-top .split-bar {
+  top: 0;
+  height: 0;
+}
+.split-dropzone.pos-left .split-bar {
+  left: 0;
+  width: 0;
+}
+.split-dropzone.pos-right .split-bar {
+  right: 0;
+  width: 0;
+}
+.split-glow {
+  position: absolute;
+  opacity: 0.6;
+  will-change: transform, opacity;
+  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: split-glow-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.split-glow.side-left,
+.split-glow.side-right {
+  top: 0;
+  bottom: 0;
+  width: 48px;
+  transform: scaleX(0.7);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 24%, #000 76%, transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 24%, #000 76%, transparent);
+}
+.split-glow.side-left {
+  left: 0;
+  transform-origin: left center;
+  background: linear-gradient(
+    to right,
+    rgba(222, 240, 255, 1) 0,
+    rgba(222, 240, 255, 0.95) 1.5px,
+    rgba(10, 132, 255, 0.85) 3px,
+    rgba(10, 132, 255, 0.55) 6px,
+    rgba(10, 132, 255, 0.32) 11px,
+    rgba(10, 132, 255, 0.17) 18px,
+    rgba(10, 132, 255, 0.08) 27px,
+    rgba(10, 132, 255, 0.03) 37px,
+    rgba(10, 132, 255, 0) 48px
+  );
+}
+.split-glow.side-right {
+  right: 0;
+  transform-origin: right center;
+  background: linear-gradient(
+    to left,
+    rgba(222, 240, 255, 1) 0,
+    rgba(222, 240, 255, 0.95) 1.5px,
+    rgba(10, 132, 255, 0.85) 3px,
+    rgba(10, 132, 255, 0.55) 6px,
+    rgba(10, 132, 255, 0.32) 11px,
+    rgba(10, 132, 255, 0.17) 18px,
+    rgba(10, 132, 255, 0.08) 27px,
+    rgba(10, 132, 255, 0.03) 37px,
+    rgba(10, 132, 255, 0) 48px
+  );
+}
+.split-glow.side-top {
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 48px;
+  transform: scaleY(0.7);
+  transform-origin: center top;
+  background: linear-gradient(
+    to bottom,
+    rgba(222, 240, 255, 1) 0,
+    rgba(222, 240, 255, 0.95) 1.5px,
+    rgba(10, 132, 255, 0.85) 3px,
+    rgba(10, 132, 255, 0.55) 6px,
+    rgba(10, 132, 255, 0.32) 11px,
+    rgba(10, 132, 255, 0.17) 18px,
+    rgba(10, 132, 255, 0.08) 27px,
+    rgba(10, 132, 255, 0.03) 37px,
+    rgba(10, 132, 255, 0) 48px
+  );
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 24%, #000 76%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 24%, #000 76%, transparent);
+}
+.split-dropzone.active .split-glow {
+  opacity: 1;
+  transform: none;
+}
+@keyframes split-glow-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* In-app drag onto another card: the card a drop would stack into gets the
+   drop zone's dashed ring over its dimmed content; the card being dragged
+   dims. Both sit over every layer of the card's own content (its pill is 20).
+   The dim is ::after because the card's framer motion keeps an inline
+   opacity on .item. */
+.drop-target-ring {
+  position: absolute;
+  inset: 4px;
+  z-index: 25;
+  pointer-events: none;
+  border-radius: calc(var(--radius-card) - 4px);
+  background-color: rgba(0, 0, 0, 0.45);
+  --dash-color: rgba(255, 255, 255, 0.75);
+  animation: drop-target-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes drop-target-in {
+  from {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+}
+/* the drop zone's blue light, rising from the bottom of the card it would stack into */
+.drop-target-ring::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 80% 45% at 50% 100%,
+    rgba(10, 132, 255, 0.36) 0%,
+    rgba(10, 132, 255, 0.24) 28%,
+    rgba(10, 132, 255, 0.12) 52%,
+    rgba(10, 132, 255, 0.05) 72%,
+    rgba(10, 132, 255, 0.014) 88%,
+    rgba(10, 132, 255, 0) 100%
+  );
+}
+.item.is-drag-source::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  pointer-events: none;
+  border-radius: inherit;
+  background-color: rgba(0, 0, 0, 0.6);
+  animation: drag-source-in 150ms ease;
+}
+@keyframes drag-source-in {
+  from {
+    opacity: 0;
+  }
+}
+/* its hover buttons stay out of the way while it is the target */
+.item.is-drop-target .item-main > .actions {
+  visibility: hidden;
+}
+html[data-motion='reduce'] .drop-target-ring,
+html[data-motion='reduce'] .item.is-drag-source::after {
+  animation: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Action pills: one look for every hover / quick-action group        */
+/* (cards, bundles, image tiles, file rows, preview flyout). Each      */
+/* container above only sets where it sits and when it shows.          */
+/* ------------------------------------------------------------------ */
+.actions,
+.actions-pill,
+.act-pill,
+.fluid-row-actions,
+.horizontal-subitem-actions,
+.stack-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: var(--act-pad);
+  background: var(--act-surface);
+  border: none;
+  border-radius: 999px;
+  box-shadow: var(--act-shadow);
+}
+
+/* Hover pills grow in from their corner, then shrink back on leave. */
+.actions,
+.fluid-row-actions,
+.horizontal-subitem-actions,
+.stack-row-actions {
+  scale: 0.94;
+  transform-origin: top right;
+  transition:
+    opacity 0.12s ease,
+    scale 0.18s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.fluid-row-actions,
+.stack-row .stack-row-actions {
+  transform-origin: right center;
+}
+
+.list.horizontal {
+  --act-size: 22px;
+  --act-icon: 12px;
+}
+
+/* Preview flyout batch bar: capsule buttons on the action surface. */
+.flyout-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.flyout-text-btn {
+  height: 26px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: rgba(255, 255, 255, 0.65);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+.flyout-text-btn:hover {
+  color: #ffffff;
+}
+
+.flyout-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease, transform 0.1s ease;
+}
+.flyout-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+.flyout-btn:active {
+  transform: scale(0.96);
+}
+.flyout-btn > svg {
+  width: 13px;
+  height: 13px;
+}
+.flyout-btn.primary {
+  background: #ffffff;
+  color: #000000;
+  font-weight: 600;
+}
+.flyout-btn.primary:hover {
+  background: #e6e6e6;
+}
+.flyout-btn:focus-visible,
+.flyout-text-btn:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.45);
+  outline-offset: 2px;
+}
+
+/* Clickable URL in the link preview: same borderless surface as the batch buttons. */
+.flyout-url {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.8);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-all;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.flyout-url:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+/* ------------------------------------------------------------------ */
+/* Note (user metadata)                                                */
+/* ------------------------------------------------------------------ */
+
+/* Text, link, code and color cards: the note is one line above the
+   content. Side-dock cards are content-height, so this simply adds a line;
+   fixed-height top-dock cards give it a line of their content (below). */
+.item-note {
+  padding: 11px 16px 0 16px;
+  font-family: var(--font-ui);
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 600;
+  line-height: 1.3;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.item-note + .item-content {
+  padding-top: 4px;
+}
+
+/* Top dock: the note line plus one line less of content keeps the content
+   clear of the hover pill's band above the bottom row. */
+.list.horizontal .item-note {
+  padding: 8px 14px 0 14px;
+}
+.list.horizontal .item-note + .item-content {
+  padding-top: 2px;
+}
+.list.horizontal .item-note + .item-content .preview {
+  -webkit-line-clamp: 4;
+}
+.list.horizontal .item-note + .item-content .link-card-body {
+  -webkit-line-clamp: 2;
+}
+/* code: 4 of its 16.1px lines instead of 5 */
+.list.horizontal .item-note + .item-content .code-card-preview {
+  height: 65px;
+  max-height: 65px;
+}
+
+/* Image and file cards: the note takes the place of the file or source name
+   in the bottom line, so nothing grows. */
+.meta-label {
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.item.is-color-card.is-light-color .item-note {
+  color: rgba(0, 0, 0, 0.86);
+}
+.item.is-color-card.is-light-color .meta-label {
+  color: rgba(0, 0, 0, 0.7) !important;
+}
+.item.is-color-card.is-dark-color .meta-label {
+  color: rgba(255, 255, 255, 0.82) !important;
+}
+
+/* The card whose right-click menu is open keeps its hover look. */
+.item.menu-target:not(.is-color-card) {
+  background: var(--bg-card-hover);
+}
+
+/* Preview flyout: the whole note above the content. */
+.flyout-meta-head {
+  margin-bottom: 14px;
+}
+.flyout-meta-label {
+  font-family: var(--font-ui);
+  font-size: calc(15px * var(--font-scale, 1));
+  font-weight: 700;
+  line-height: 1.3;
+  color: #ffffff;
+  word-break: break-word;
+}

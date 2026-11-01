@@ -14,6 +14,18 @@ public sealed class WindowsHost : IDisposable
 {
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(400) };
     private readonly Func<IntPtr> _monitor;
+    private IDisposable? _events;
+    private bool _disposed;
+    public bool EventDriven
+    {
+        get => _events is not null;
+        set
+        {
+            if (_disposed || value == EventDriven) return;
+            if (value) { _timer.Stop(); _events = WindowContextEvents.Subscribe(_timer.Dispatcher, Poll); Poll(); }
+            else { _events?.Dispose(); _events = null; _timer.Start(); }
+        }
+    }
     // The foreground window's app, as the detection reads it: the empty pair on the desktop.
     private string _appName = "", _appPath = "";
     // The app the answer resolves for: the window whose context was detected. On a background full screen that is the
@@ -69,9 +81,9 @@ public sealed class WindowsHost : IDisposable
         // Reorders of the desktop's children only, which are the top-level windows; other events for windows only, not
         // for carets or cursors.
         if (winEvent == 0x8004 ? window != DesktopWindow : idObject != 0 || idChild != 0) return;
-        if (_orderCheckPending) return;
+        if (_disposed || _orderCheckPending) return;
         _orderCheckPending = true;
-        _timer.Dispatcher.BeginInvoke(() => { _orderCheckPending = false; WatchOrder(_window()); });
+        _timer.Dispatcher.BeginInvoke(() => { _orderCheckPending = false; if (!_disposed) WatchOrder(_window()); });
     }
     private readonly Func<IntPtr> _window;
     private readonly Func<bool>? _forceTopmost;
@@ -82,6 +94,7 @@ public sealed class WindowsHost : IDisposable
     private ScreenContext _raisedKind = ScreenContext.Desktop;
     private void Poll()
     {
+        if (_disposed) return;
         var context = DetectNow();
         var change = ScreenPolicy.WhatChanged(context, _resolvedName, _resolvedPath, Current, _raisedName, _raisedPath);
         if (change == ScreenPolicy.ForegroundChange.None) { WatchOrder(_window()); return; }
@@ -394,13 +407,16 @@ public sealed class WindowsHost : IDisposable
         }
         processName = cachedName; imagePath = cachedPath;
     }
-    public static void ConfigureOverlay(Window window)
+    public static void ConfigureOverlay(Window window) => SetOverlayInput(window, false);
+    // Hover never takes focus. Only an explicit text-input request temporarily lets the same island accept the keyboard.
+    public static void SetOverlayInput(Window window, bool enabled)
     {
         var handle = new WindowInteropHelper(window).Handle;
-        // WS_EX_NOACTIVATE makes WGC CreateForWindow fail with E_INVALIDARG. Keep the
-        // window capturable and reject mouse activation without swallowing the click.
-        // ShowActivated=False separately prevents activation when the window is shown.
-        HwndSource.FromHwnd(handle)?.AddHook(OverlayMessages);
+        // WS_EX_NOACTIVATE breaks WGC capture. Suppress mouse activation with a hook instead,
+        // removing that hook only while explicit clipboard or shelf input borrows keyboard focus.
+        var source = HwndSource.FromHwnd(handle);
+        source?.RemoveHook(OverlayMessages);
+        if (!enabled) source?.AddHook(OverlayMessages);
     }
     private static IntPtr OverlayMessages(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
@@ -410,8 +426,14 @@ public sealed class WindowsHost : IDisposable
     }
     public void Dispose()
     {
+        if (_disposed) return;
+        // Make queued callbacks inert before releasing either owner's native event hooks.
+        _disposed = true;
         _timer.Stop();
+        _events?.Dispose();
+        _events = null;
         foreach (var hook in _hooks) if (hook != IntPtr.Zero) UnhookWinEvent(hook);
+        Array.Clear(_hooks);
     }
     [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] private struct RECT

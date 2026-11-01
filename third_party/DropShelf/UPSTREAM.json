@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/wangmingkun148/DropShelf",
+  "commit": "077afb1420a44ca52d4bb0aa2b48193ec1a571c5",
+  "version": "2.6.7",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2026 Wang Mingkun",
+  "integration": "Original sources and resources are compiled by src/BrimDeck.Shelves/BrimDeck.Shelves.csproj. Host adaptations isolate resources and storage, delegate process lifecycle to BrimDeck, and expose the original shelf models to the island. The standalone entry point and installer are retained as upstream source, not launched by BrimDeck."
+}

@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/Deepender25/Edge-Drop",
+  "version": "0.4.0",
+  "commit": "767b6d63d7841d7746189fe97ba67d27dd378d34",
+  "archive": "https://github.com/Deepender25/Edge-Drop/archive/767b6d63d7841d7746189fe97ba67d27dd378d34.zip",
+  "archiveSha256": "6CEFA536B21A0DC8AA738DEB8F251A0B5631B6F1CEC734E334A7052CC81B104B",
+  "license": "Apache-2.0",
+  "licenseSha256": "415BFA7302CBA9F37A0D21BB7BDF46468950DD7C1188B82334A0D8169354B1F8",
+  "snapshotDirectory": "EdgeDrop",
+  "portIndex": "EdgeDrop.PORTING.md",
+  "integration": "Source translation into the existing WPF host; no Electron runtime or upstream installation scripts."
+}

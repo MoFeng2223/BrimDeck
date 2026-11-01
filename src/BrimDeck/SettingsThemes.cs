@@ -17,13 +17,9 @@ namespace BrimDeck;
 // saving a file in the themes folder reloads it, so a theme can be edited with the panel beside it.
 public sealed partial class SettingsWindow
 {
-    internal const int ThemePage = 8, MonitorSettingsPage = 9;
-    private FileSystemWatcher? _themeWatcher;
-    private DispatcherTimer? _themeReload;
+    internal const int ThemePage = 8, MonitorSettingsPage = 9, TrayPage = 10;
     // The themes folder as last read (file names, sizes and times), so a watcher event that changed nothing reloads nothing.
-    private string _themeStamp = "";
     // A stamp no folder has, so the next watcher tick reloads.
-    private const string UnknownStamp = "?";
     // Set when the folder needs no new read for this rebuild: the theme changed without the page, or the page just read it.
     // Saved files are covered by the watcher, and the Reload button reads it again.
     private bool _themesFresh;
@@ -34,9 +30,8 @@ public sealed partial class SettingsWindow
 
     private void ThemesPage()
     {
-        WatchThemeFolder(true);
         // The stamp is taken just before the read, so a write during the read still differs from it.
-        if (!_themesFresh) { _themeStamp = ThemeFolderStamp(); _app.ApplyPanelTheme(reload: true); }
+        if (!_themesFresh) _app.ApplyPanelTheme(reload: true);
         _themesFresh = false;
         var chosen = PanelThemes.NormalizeId(S.PanelTheme);
         var users = PanelTheme.UserThemes;
@@ -407,55 +402,7 @@ public sealed partial class SettingsWindow
     }
 
     // Names, sizes and times of the files LoadFolder reads: a file's content cannot change without one of them changing.
-    private static string ThemeFolderStamp()
-    {
-        try
-        {
-            var folder = new DirectoryInfo(PanelTheme.Folder);
-            if (!folder.Exists) return "";
-            return string.Join("|", folder.EnumerateFiles("*.json").Concat(folder.EnumerateDirectories().Select(dir => new FileInfo(Path.Combine(dir.FullName, "theme.json"))).Where(file => file.Exists))
-                .OrderBy(file => file.FullName, StringComparer.OrdinalIgnoreCase).Select(file => $"{file.FullName}:{file.Length}:{file.LastWriteTimeUtc.Ticks}"));
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return Guid.NewGuid().ToString(); }
-    }
 
     // Saving a theme file while the page is shown reloads the themes; editors write a file in several steps, so changes are
     // gathered for a moment first.
-    private void WatchThemeFolder(bool on)
-    {
-        if (!on) { _themeWatcher?.Dispose(); _themeWatcher = null; _themeReload?.Stop(); return; }
-        if (_themeWatcher is not null) return;
-        try
-        {
-            Directory.CreateDirectory(PanelTheme.Folder);
-            if (_themeReload is null)
-            {
-                _themeReload = new DispatcherTimer(DispatcherPriority.Background, Dispatcher) { Interval = TimeSpan.FromMilliseconds(400) };
-                _themeReload.Tick += (_, _) =>
-                {
-                    _themeReload.Stop();
-                    if (IsLoaded && _page == ThemePage && ThemeFolderStamp() != _themeStamp) ShowPage(ThemePage);
-                };
-            }
-            void Restart() { _themeReload.Stop(); _themeReload.Start(); }
-            var watcher = new FileSystemWatcher(PanelTheme.Folder) { IncludeSubdirectories = true, NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size };
-            void Changed(object? _, FileSystemEventArgs e)
-            {
-                if (!e.FullPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase) && e.ChangeType != WatcherChangeTypes.Deleted && e.ChangeType != WatcherChangeTypes.Renamed) return;
-                Dispatcher.BeginInvoke(Restart);
-            }
-            watcher.Changed += Changed; watcher.Created += Changed; watcher.Deleted += Changed; watcher.Renamed += Changed;
-            // A burst of changes can overflow the watcher's buffer, and a removed folder stops it; the rebuild that follows makes a
-            // new one and reads whatever was missed.
-            watcher.Error += (_, _) => Dispatcher.BeginInvoke(() =>
-            {
-                if (!ReferenceEquals(_themeWatcher, watcher)) return;
-                _themeWatcher = null; watcher.Dispose(); _themeStamp = UnknownStamp;
-                Restart();
-            });
-            watcher.EnableRaisingEvents = true;
-            _themeWatcher = watcher;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { _themeWatcher = null; }
-    }
 }

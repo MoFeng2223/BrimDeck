@@ -1,0 +1,1326 @@
+<Window x:Class="DropShelf.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:DropShelf.Views.Controls"
+        xmlns:l="clr-namespace:DropShelf.Localization"
+        xmlns:models="clr-namespace:DropShelf.Models"
+        Title="DropShelf" Style="{StaticResource AppWindowStyle}" TextOptions.TextRenderingMode="Grayscale"
+        Width="860" Height="640" MinWidth="640" MinHeight="520" WindowStartupLocation="CenterScreen">
+    <!-- 文字用灰度抗锯齿：翻牌时缓存成位图的页面和静止时看起来一样，落定时不会突然变锐 -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="48" GlassFrameThickness="-1" ResizeBorderThickness="6" CornerRadius="0"
+                      UseAeroCaptionButtons="True" />
+    </WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <!-- 每页各自的滚动区；滚动条叠在内容上，出现或消失都不改变页面宽度 -->
+        <Style x:Key="PageScrollStyle" TargetType="ScrollViewer" BasedOn="{StaticResource {x:Type ScrollViewer}}">
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+            <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="Focusable" Value="False" />
+        </Style>
+
+        <!-- 设置页平时收起；翻牌时它就是卡片的背面 -->
+        <Style x:Key="PageHostStyle" TargetType="Grid">
+            <Setter Property="Visibility" Value="Collapsed" />
+        </Style>
+
+        <!-- 页面内容的宽度和页边距；状态栏出现时左边距由代码加宽 -->
+        <Style x:Key="PageContentStyle" TargetType="FrameworkElement">
+            <Setter Property="MaxWidth" Value="860" />
+            <Setter Property="Margin" Value="{Binding PageInset, RelativeSource={RelativeSource AncestorType=Window}}" />
+        </Style>
+
+        <!-- 设置页是翻过来的卡片背面：一张圆角的牌，内容在牌里滚动，牌底下露出其余几张牌的边 -->
+        <Style x:Key="PageSheetStyle" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource SheetBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SheetBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+            <!-- 上下留一点空，滚动条不会伸进圆角 -->
+            <Setter Property="Padding" Value="0,6" />
+            <Setter Property="MaxWidth" Value="908" />
+            <Setter Property="Margin" Value="{Binding SheetInset, RelativeSource={RelativeSource AncestorType=Window}}" />
+        </Style>
+        <!-- 牌里的留白：两侧 23 加上 1 的边框，正好等于代码里的 SheetPadding，内容和概览页对齐 -->
+        <Style x:Key="SheetContentStyle" TargetType="FrameworkElement">
+            <Setter Property="Margin" Value="23,12,23,24" />
+        </Style>
+
+        <Style x:Key="StackEdgeButtonStyle" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <ContentPresenter />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ThemeTileStyle" TargetType="ListBoxItem">
+            <Setter Property="Margin" Value="0,0,12,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd" CornerRadius="10" BorderThickness="2" BorderBrush="Transparent" Padding="6"
+                                Background="Transparent">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 强调色色块：选中时外圈和对勾 -->
+        <Style x:Key="AccentSwatchStyle" TargetType="ListBoxItem">
+            <Setter Property="Margin" Value="0,0,4,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Grid Width="32" Height="32" Background="Transparent">
+                            <Ellipse x:Name="Ring" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="2" Opacity="0" />
+                            <Ellipse x:Name="Swatch" Margin="5" Fill="{Binding Brush}" />
+                            <TextBlock x:Name="Check" Text="{StaticResource Glyph.Check}" FontFamily="{StaticResource IconFont}" FontSize="11"
+                                       Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Hidden" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Ring" Property="Opacity" Value="0.35" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Ring" Property="Opacity" Value="1" />
+                                <Setter TargetName="Check" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <!-- 跟随 Windows：显示系统当前的强调色，并与固定颜色之间留出间隔 -->
+                            <DataTrigger Binding="{Binding Value}" Value="">
+                                <Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource SystemAccentBrush}" />
+                                <Setter Property="ToolTip" Value="{l:Loc AccentFollowSystem}" />
+                                <Setter Property="Margin" Value="0,0,16,0" />
+                            </DataTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="TipCardStyle" TargetType="Border" BasedOn="{StaticResource CardBorderStyle}">
+            <Setter Property="Padding" Value="16,16,16,18" />
+        </Style>
+
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+
+        <!-- 子页面标题左侧的返回按钮 -->
+        <Style x:Key="BackButtonStyle" TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
+            <Setter Property="Content" Value="{StaticResource Glyph.Back}" />
+            <Setter Property="Width" Value="36" />
+            <Setter Property="Height" Value="36" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Margin" Value="-6,3,8,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="ToolTip" Value="{l:Loc BackTooltip}" />
+        </Style>
+
+        <controls:RampConverter x:Key="Ramp" />
+
+        <!-- 左侧状态栏中的按钮，以及只作提示、不可点击的呼出方式（不加背景，免得像按钮） -->
+        <Style x:Key="SoftAccentButtonStyle" TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid MinHeight="38" Background="Transparent">
+                            <Border x:Name="Bd" CornerRadius="6" Background="{DynamicResource AccentBrush}">
+                                <Border.OpacityMask>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                        <GradientStop Color="Black" Offset="0" />
+                                        <GradientStop Color="Black" Offset="0.62" />
+                                        <GradientStop Color="#00000000" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.OpacityMask>
+                            </Border>
+                            <ContentPresenter Margin="14,0" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentPressedBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="WayRowStyle" TargetType="StackPanel">
+            <Setter Property="Orientation" Value="Horizontal" />
+            <Setter Property="Margin" Value="2,0,0,12" />
+        </Style>
+        <Style x:Key="WayGlyphStyle" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Width" Value="26" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+        </Style>
+
+        <!-- 概览页的设置卡片：高度随窗口变化，矮时一行，够高时交叉淡入成大卡片，背景图案随高度渐显 -->
+        <Style TargetType="controls:PageTile">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="Margin" Value="0,0,6,6" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}" />
+            <Setter Property="Height" Value="{Binding SettingsCardHeight, RelativeSource={RelativeSource AncestorType=Window}}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="controls:PageTile">
+                        <Border x:Name="Bd" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource CardBorderBrush}"
+                                BorderThickness="1" CornerRadius="8">
+                            <Grid ClipToBounds="True">
+                                <Grid Opacity="{Binding ActualHeight, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource Ramp}, ConverterParameter='140,230'}">
+                                    <TextBlock Text="{TemplateBinding Icon}" FontFamily="{StaticResource IconFont}" FontSize="150" Opacity="0.07"
+                                               Foreground="{DynamicResource AccentTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                               Margin="0,0,-16,-24" />
+                                </Grid>
+                                <Grid x:Name="Compact" Margin="18,0,16,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{TemplateBinding Icon}" FontFamily="{StaticResource IconFont}" FontSize="22" Margin="0,0,16,0"
+                                               VerticalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}" />
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{TemplateBinding Header}" Style="{StaticResource BodyStrongTextStyle}" />
+                                        <TextBlock Text="{TemplateBinding Summary}" Style="{StaticResource CaptionTextStyle}" Margin="0,3,0,0"
+                                                   TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                </Grid>
+                                <Grid x:Name="Tall" Margin="22,22,18,20" Opacity="0">
+                                    <Border Width="44" Height="44" CornerRadius="10" Background="{DynamicResource AccentFaintBrush}"
+                                            HorizontalAlignment="Left" VerticalAlignment="Top">
+                                        <TextBlock Text="{TemplateBinding Icon}" FontFamily="{StaticResource IconFont}" FontSize="22"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}" />
+                                    </Border>
+                                    <StackPanel VerticalAlignment="Bottom">
+                                        <TextBlock Text="{TemplateBinding Header}" FontSize="16" FontWeight="SemiBold" />
+                                        <ItemsControl ItemsSource="{TemplateBinding Items}" Focusable="False" Margin="0,10,0,0">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Margin="0,0,6,0" Padding="9,3,9,4" CornerRadius="11" Background="{DynamicResource SubtleSelectedBrush}">
+                                                        <TextBlock Text="{Binding}" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsTall" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="Compact" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.2" />
+                                            <DoubleAnimation Storyboard.TargetName="Tall" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.2" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="Compact" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.2" />
+                                            <DoubleAnimation Storyboard.TargetName="Tall" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.2" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource CardHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.8" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 窗口右下角的版本号等文字链接 -->
+        <Style x:Key="TextLinkStyle" TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="Transparent" Padding="6,3">
+                            <ContentPresenter />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!--
+            对话框的预制阴影：放在对话框下面单独缓存为位图，对话框里输入文字、光标闪烁和弹出缩放时都不用重新计算模糊。
+            对话框底色不透明，正好盖住阴影层自身的底色。
+        -->
+        <Style x:Key="DialogShadowStyle" TargetType="Control">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Control">
+                        <Border>
+                            <Border.CacheMode>
+                                <BitmapCache />
+                            </Border.CacheMode>
+                            <Border CornerRadius="8" Background="{DynamicResource FlyoutBrush}">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="32" ShadowDepth="8" Direction="270" Opacity="0.22" Color="Black" />
+                                </Border.Effect>
+                            </Border>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 最近关闭的置物架：缩略图堆叠中的一张 -->
+        <Style x:Key="MiniStackCardStyle" TargetType="Border">
+            <Setter Property="Width" Value="60" />
+            <Setter Property="Height" Value="60" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Background" Value="{DynamicResource ShelfTileBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ShelfTileBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding}" Value="{x:Null}">
+                    <Setter Property="Visibility" Value="Hidden" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <DataTemplate x:Key="MiniThumbnailTemplate">
+            <Grid Margin="6">
+                <Image Source="{Binding Image}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
+                <TextBlock Text="{Binding Glyph}" FontFamily="{StaticResource IconFont}" FontSize="24" HorizontalAlignment="Center"
+                           VerticalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasImage}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </Grid>
+        </DataTemplate>
+
+        <!-- 牌堆中的一张牌：被选出时显示强调色边框、“点击恢复”和删除按钮 -->
+        <Style x:Key="FanCardStyle" TargetType="Button">
+            <Setter Property="Width" Value="150" />
+            <Setter Property="Height" Value="200" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{DynamicResource FlyoutBrush}" BorderBrush="{DynamicResource FlyoutBorderBrush}"
+                                BorderThickness="1" CornerRadius="12">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="controls:FanPanel.IsHot" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.85" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="HotOnlyStyle" TargetType="FrameworkElement">
+            <Setter Property="Opacity" Value="0" />
+            <Style.Triggers>
+                <Trigger Property="controls:FanPanel.IsHot" Value="True">
+                    <Trigger.EnterActions>
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.2" />
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </Trigger.EnterActions>
+                    <Trigger.ExitActions>
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.15" />
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </Trigger.ExitActions>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <DataTemplate x:Key="HistoryCardTemplate">
+            <Button Style="{StaticResource FanCardStyle}" Command="{Binding RestoreCommand}" ToolTip="{l:Loc RestoreShelf}">
+                <Grid>
+                    <StackPanel Margin="12,16,12,0">
+                        <Viewbox Height="60" Stretch="Uniform">
+                            <Canvas Width="120" Height="84">
+                                <Border Style="{StaticResource MiniStackCardStyle}" Canvas.Left="30" Canvas.Top="14" DataContext="{Binding Stack2}">
+                                    <Border.RenderTransform>
+                                        <TransformGroup>
+                                            <RotateTransform Angle="-10" />
+                                            <TranslateTransform X="-10" Y="2" />
+                                        </TransformGroup>
+                                    </Border.RenderTransform>
+                                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource MiniThumbnailTemplate}" />
+                                </Border>
+                                <Border Style="{StaticResource MiniStackCardStyle}" Canvas.Left="30" Canvas.Top="13" DataContext="{Binding Stack1}">
+                                    <Border.RenderTransform>
+                                        <TransformGroup>
+                                            <RotateTransform Angle="7" />
+                                            <TranslateTransform X="9" Y="1" />
+                                        </TransformGroup>
+                                    </Border.RenderTransform>
+                                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource MiniThumbnailTemplate}" />
+                                </Border>
+                                <Border Style="{StaticResource MiniStackCardStyle}" Canvas.Left="30" Canvas.Top="12" DataContext="{Binding Stack0}">
+                                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource MiniThumbnailTemplate}" />
+                                </Border>
+                            </Canvas>
+                        </Viewbox>
+                        <TextBlock Text="{Binding Title}" FontSize="13" Margin="0,10,0,0" TextAlignment="Center" TextWrapping="Wrap"
+                                   TextTrimming="CharacterEllipsis" MaxHeight="36" LineHeight="18" />
+                        <TextBlock Text="{Binding Detail}" FontSize="11" Margin="0,4,0,0" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                        <Border x:Name="RestoreHint" Style="{StaticResource HotOnlyStyle}" Margin="0,10,0,0" Padding="10,2,10,3" CornerRadius="10" HorizontalAlignment="Center"
+                                Background="{DynamicResource AccentBrush}">
+                            <TextBlock Text="{l:Loc ClickToRestore}" FontSize="11" Foreground="{DynamicResource TextOnAccentBrush}" />
+                        </Border>
+                    </StackPanel>
+                    <Button Content="{StaticResource Glyph.Close}" FontSize="9" Width="24" Height="24" Margin="0,4,4,0"
+                            HorizontalAlignment="Right" VerticalAlignment="Top" ToolTip="{l:Loc RemoveHistoryTooltip}" Command="{Binding RemoveCommand}">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
+                                <Setter Property="Visibility" Value="Hidden" />
+                                <Style.Triggers>
+                                    <Trigger Property="controls:FanPanel.IsHot" Value="True">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </Grid>
+            </Button>
+        </DataTemplate>
+
+        <!-- 删除光效和提示用的大红，与强调色中的红色（偏粉）区分开 -->
+        <SolidColorBrush x:Key="DeleteBrush" Color="#E5000F" />
+        <!-- 拖动内置操作时底部亮起的中性灰：表示这里删不了 -->
+        <SolidColorBrush x:Key="LockedBrush" Color="#808080" />
+
+        <!-- 对话框中字段上方的标题 -->
+        <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Margin" Value="0,16,0,6" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+        </Style>
+
+        <!-- 自定义操作的编辑、删除按钮，悬停在卡片上时显示 -->
+        <DataTemplate x:Key="CustomActionButtons">
+            <StackPanel Orientation="Horizontal">
+                <Button Style="{StaticResource IconButtonStyle}" Content="{StaticResource Glyph.Edit}" FontSize="14"
+                        ToolTip="{l:Loc EditTooltip}" Command="{Binding EditCommand}" />
+                <Button Style="{StaticResource IconButtonStyle}" Content="{StaticResource Glyph.Delete}" FontSize="14"
+                        Margin="4,0,0,0" ToolTip="{l:Loc DeleteTooltip}" Command="{Binding DeleteCommand}" />
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- 可拖动的操作卡片：拖动中的卡片变淡，悬停的目标位置显示“替换”或“交换” -->
+        <Style x:Key="ActionCardStyle" TargetType="Border">
+            <Setter Property="MinHeight" Value="62" />
+            <Setter Property="Padding" Value="16,10,12,10" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Background" Value="{DynamicResource CardBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource CardBorderBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="ToolTip" Value="{Binding Description}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsDragSource}" Value="True">
+                    <Setter Property="Opacity" Value="0.4" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsDropTarget}" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentFaintBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="HoverButtonsStyle" TargetType="ContentPresenter">
+            <Setter Property="ContentTemplate" Value="{StaticResource CustomActionButtons}" />
+            <Setter Property="Visibility" Value="Collapsed" />
+            <Style.Triggers>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsCustom}" Value="True" />
+                        <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Border}}" Value="True" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="Visibility" Value="Visible" />
+                </MultiDataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- 与置物架底部按钮一样排成一行：图标在上，名称和位置在下；拖到上面时位置换成“替换/交换” -->
+        <DataTemplate x:Key="ActionSlotTemplate">
+            <Border Style="{StaticResource ActionCardStyle}" Margin="0,0,4,4" Padding="10,14,10,12">
+                <Grid>
+                    <StackPanel HorizontalAlignment="Center">
+                        <TextBlock Text="{Binding Glyph}" FontFamily="{StaticResource IconFont}" FontSize="20" HorizontalAlignment="Center" />
+                        <TextBlock Text="{Binding Title}" FontSize="14" Margin="0,10,0,0" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        <Grid Height="20" Margin="0,3,0,0">
+                            <TextBlock Text="{Binding Position}" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextSecondaryBrush}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsDropTarget}" Value="True">
+                                                <Setter Property="Visibility" Value="Hidden" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <Border CornerRadius="10" Padding="8,2,10,3" HorizontalAlignment="Center" Background="{DynamicResource AccentBrush}"
+                                    Visibility="{Binding IsDropTarget, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{StaticResource Glyph.Swap}" FontFamily="{StaticResource IconFont}" FontSize="11" Margin="0,1,5,0"
+                                               VerticalAlignment="Center" Foreground="{DynamicResource TextOnAccentBrush}" />
+                                    <TextBlock Text="{Binding DropHint}" FontSize="12" VerticalAlignment="Center" Foreground="{DynamicResource TextOnAccentBrush}" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </StackPanel>
+                    <ContentPresenter Content="{Binding}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-8,-4,0"
+                                      Style="{StaticResource HoverButtonsStyle}" />
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="MoreActionTemplate">
+            <Border Style="{StaticResource ActionCardStyle}" Margin="0,0,0,4">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding Glyph}" FontFamily="{StaticResource IconFont}" FontSize="20" Margin="0,0,16,0"
+                               VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0">
+                        <TextBlock Text="{Binding Title}" FontSize="14" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding Description}" FontSize="12" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"
+                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                    </StackPanel>
+                    <ContentPresenter Grid.Column="2" Content="{Binding}" VerticalAlignment="Center" Style="{StaticResource HoverButtonsStyle}" />
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid x:Name="RootGrid">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- 标题栏：程序名和运行状态 -->
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="18,0,0,0">
+            <Image Source="/DropShelf;component/Assets/DropShelf-256.png" Width="16" Height="16"
+                   RenderOptions.BitmapScalingMode="HighQuality" />
+            <TextBlock Text="DropShelf" Margin="12,0,0,1" FontSize="12" VerticalAlignment="Center" />
+            <StackPanel x:Name="StatusIndicator" Orientation="Horizontal" Margin="16,0,0,0" Background="Transparent"
+                        WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="{Binding StatusDetail}">
+                <Ellipse Width="7" Height="7" Margin="0,1,6,0" VerticalAlignment="Center">
+                    <Ellipse.Style>
+                        <Style TargetType="Ellipse">
+                            <Setter Property="Fill" Value="{DynamicResource CautionBrush}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsHealthy}" Value="True">
+                                    <Setter Property="Fill" Value="{DynamicResource SuccessBrush}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Ellipse.Style>
+                </Ellipse>
+                <TextBlock x:Name="StatusTitleText" Text="{Binding StatusTitle}" FontSize="12" VerticalAlignment="Center" Margin="0,0,0,1"
+                           Foreground="{DynamicResource TextSecondaryBrush}" />
+            </StackPanel>
+        </StackPanel>
+
+        <!-- 没有系统材质（Windows 10 等）时才显示的窗口按钮 -->
+        <StackPanel x:Name="CaptionButtons" Orientation="Horizontal" HorizontalAlignment="Right" Visibility="Collapsed">
+            <Button Style="{StaticResource CaptionButtonStyle}" Content="&#xE921;" Click="OnMinimizeClick"
+                    ToolTip="{l:Loc CaptionMinimize}" AutomationProperties.Name="{l:Loc CaptionMinimize}" />
+            <Button Click="OnMaximizeClick" AutomationProperties.Name="{l:Loc CaptionMaximize}">
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource CaptionButtonStyle}">
+                        <Setter Property="Content" Value="&#xE922;" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding WindowState, RelativeSource={RelativeSource AncestorType=Window}}" Value="Maximized">
+                                <Setter Property="Content" Value="&#xE923;" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+            </Button>
+            <Button Style="{StaticResource CloseCaptionButtonStyle}" Click="OnCaptionCloseClick"
+                    ToolTip="{l:Loc CaptionClose}" AutomationProperties.Name="{l:Loc CaptionClose}" />
+        </StackPanel>
+
+        <!-- 页面内容：概览页列出各项设置，点进去后可返回 -->
+        <Border x:Name="ContentLayer" Grid.Row="1" Background="{DynamicResource LayerBrush}"
+                BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="0,1,0,0" SizeChanged="OnContentLayerSizeChanged">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <!-- 概览页和各设置页叠放在同一块区域，各自滚动，准备或显示一页时不会改变另一页的滚动范围 -->
+                <Grid x:Name="PageStage" Grid.RowSpan="2">
+                    <!-- 翻牌时在这一层挖出卡片的形状，里面的概览页照常下沉淡出 -->
+                    <Grid x:Name="OverviewHost">
+                        <ScrollViewer x:Name="OverviewScroll" Style="{StaticResource PageScrollStyle}">
+                            <Grid x:Name="PageContent" Style="{StaticResource PageContentStyle}">
+                                <Grid.RenderTransform>
+                                    <TranslateTransform x:Name="PageContentShift" />
+                                </Grid.RenderTransform>
+                                <!-- 概览 -->
+                                <!-- 撑满可视区域：内容不够高时中间一行留空，牌堆总是贴着窗口底边 -->
+                                <Grid x:Name="OverviewPage" Visibility="Visible">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <!-- 窗口宽到显示左侧状态栏时，标题移到状态栏图标右侧，这一行收起 -->
+                                    <Grid x:Name="OverviewHeader">
+                                        <TextBlock x:Name="OverviewTitle" Text="{l:Loc Overview}" Style="{StaticResource TitleTextStyle}" HorizontalAlignment="Left">
+                                            <TextBlock.RenderTransform>
+                                                <TranslateTransform x:Name="OverviewTitleShift" />
+                                            </TextBlock.RenderTransform>
+                                        </TextBlock>
+                                        <Button x:Name="OverviewOpenButton" Style="{StaticResource AccentButtonStyle}" Command="{Binding OpenShelfCommand}" HorizontalAlignment="Right"
+                                                VerticalAlignment="Center" Padding="16,6,16,7">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{StaticResource Glyph.Add}" FontFamily="{StaticResource IconFont}" FontSize="13"
+                                                           Margin="0,1,8,0" VerticalAlignment="Center" />
+                                                <TextBlock Text="{l:Loc OpenShelf}" />
+                                            </StackPanel>
+                                        </Button>
+                                    </Grid>
+
+                                    <StackPanel x:Name="OverviewBody" Grid.Row="1" VerticalAlignment="Top">
+                                        <StackPanel.RenderTransform>
+                                            <TranslateTransform x:Name="OverviewBodyShift" />
+                                        </StackPanel.RenderTransform>
+                                        <StackPanel x:Name="GettingStartedSection" Visibility="{Binding ShowGettingStarted, Converter={StaticResource BoolToVisibility}}">
+                                            <Grid>
+                                                <TextBlock Text="{l:Loc GettingStarted}" Style="{StaticResource SectionHeaderTextStyle}" />
+                                                <Button x:Name="DismissGettingStartedButton" Style="{StaticResource IconButtonStyle}" Content="{StaticResource Glyph.Close}"
+                                                        FontSize="10" Width="28" Height="28" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,0,4"
+                                                        ToolTip="{l:Loc DismissTooltip}" Command="{Binding DismissGettingStartedCommand}" />
+                                            </Grid>
+                                            <UniformGrid Columns="3">
+                                                <Border Style="{StaticResource TipCardStyle}" Margin="0,0,6,0">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{StaticResource Glyph.Mouse}" FontFamily="{StaticResource IconFont}" FontSize="22"
+                                                                   Foreground="{DynamicResource AccentTextBrush}" />
+                                                        <TextBlock Text="{l:Loc TipShakeTitle}" Style="{StaticResource BodyStrongTextStyle}" Margin="0,12,0,4" />
+                                                        <TextBlock Text="{l:Loc TipShakeBody}" Style="{StaticResource CaptionTextStyle}" />
+                                                    </StackPanel>
+                                                </Border>
+                                                <Border Style="{StaticResource TipCardStyle}" Margin="3,0,3,0">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{StaticResource Glyph.Library}" FontFamily="{StaticResource IconFont}" FontSize="22"
+                                                                   Foreground="{DynamicResource AccentTextBrush}" />
+                                                        <TextBlock Text="{l:Loc TipStackTitle}" Style="{StaticResource BodyStrongTextStyle}" Margin="0,12,0,4" />
+                                                        <TextBlock Text="{l:Loc TipStackBody}" Style="{StaticResource CaptionTextStyle}" />
+                                                    </StackPanel>
+                                                </Border>
+                                                <Border Style="{StaticResource TipCardStyle}" Margin="6,0,0,0">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{StaticResource Glyph.Lightning}" FontFamily="{StaticResource IconFont}" FontSize="22"
+                                                                   Foreground="{DynamicResource AccentTextBrush}" />
+                                                        <TextBlock Text="{l:Loc QuickActionsTitle}" Style="{StaticResource BodyStrongTextStyle}" Margin="0,12,0,4" />
+                                                        <TextBlock Text="{l:Loc TipActionsBody}" Style="{StaticResource CaptionTextStyle}" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </UniformGrid>
+                                        </StackPanel>
+
+
+                                        <TextBlock Text="{l:Loc SettingsSection}" Style="{StaticResource SectionHeaderTextStyle}" />
+                                        <UniformGrid x:Name="PageCards" Columns="2" Margin="0,0,-6,0">
+                                            <controls:PageTile Tag="General" Click="OnPageCardClick" Icon="{StaticResource Glyph.Settings}" Header="{l:Loc General}"
+                                                               Summary="{Binding GeneralSummary}" />
+                                            <controls:PageTile Tag="Shelf" Click="OnPageCardClick" Icon="{StaticResource Glyph.Mouse}" Header="{l:Loc GesturesAndShelf}"
+                                                               Summary="{Binding ShelfSummary}" />
+                                            <controls:PageTile Tag="Actions" Click="OnPageCardClick" Icon="{StaticResource Glyph.Lightning}" Header="{l:Loc QuickActionsTitle}"
+                                                               Summary="{Binding ActionsSummary}" />
+                                            <controls:PageTile Tag="Appearance" Click="OnPageCardClick" Icon="{StaticResource Glyph.Color}" Header="{l:Loc Appearance}"
+                                                               Summary="{Binding AppearanceSummary}" />
+                                        </UniformGrid>
+                                    </StackPanel>
+
+                                    <!-- 最近关闭的置物架排成一手牌，贴着窗口底边，下半截被裁掉；没有记录时整块隐藏 -->
+                                    <StackPanel x:Name="HistorySection" Grid.Row="2" Visibility="{Binding HasHistory, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBlock Text="{l:Loc RecentShelves}" Style="{StaticResource SectionHeaderTextStyle}" />
+                                        <ItemsControl x:Name="HistoryList" ItemsSource="{Binding HistoryEntries}" ItemTemplate="{StaticResource HistoryCardTemplate}"
+                                                      Focusable="False" Height="165" Margin="0,4,0,-36"
+                                                      PreviewMouseLeftButtonDown="OnHistoryMouseDown" PreviewMouseMove="OnHistoryMouseMove"
+                                                      PreviewMouseLeftButtonUp="OnHistoryMouseUp" LostMouseCapture="OnHistoryLostCapture">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <controls:FanPanel />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Grid>
+                            </Grid>
+                        </ScrollViewer>
+                    </Grid>
+
+                    <!-- 抽牌时旧页面退到牌堆后面，新页面从牌堆前面抽出。 -->
+                    <Canvas x:Name="StackBackLayer" Visibility="Collapsed" IsHitTestVisible="False" />
+                    <!-- 其余几张卡片露在设置页底下的边，翻牌时由概览页的卡片收拢而来；画在概览页之上、设置页之下 -->
+                    <Canvas x:Name="StackLayer" Visibility="Collapsed" />
+
+                    <!-- 常规 -->
+                    <Grid x:Name="GeneralHost" Style="{StaticResource PageHostStyle}">
+                        <Border x:Name="GeneralSheet" Style="{StaticResource PageSheetStyle}">
+                            <ScrollViewer x:Name="GeneralScroll" Style="{StaticResource PageScrollStyle}">
+                                <StackPanel x:Name="GeneralPage" Style="{StaticResource SheetContentStyle}">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
+                                        <Button Style="{StaticResource BackButtonStyle}" Click="OnBackClick" />
+                                        <TextBlock Text="{l:Loc General}" Style="{StaticResource TitleTextStyle}" />
+                                    </StackPanel>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Language}" Header="{l:Loc Language}" Description="{l:Loc LanguageDescription}">
+                                        <ListBox x:Name="LanguageSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
+                                                 SelectedValue="{Binding Language}">
+                                            <ListBoxItem Content="{l:Loc FollowSystem}" Tag="{x:Static models:AppLanguage.System}" />
+                                            <!-- 语言名称始终用该语言本身书写，切换错了也能认出来 -->
+                                            <ListBoxItem Content="中文" Tag="{x:Static models:AppLanguage.Chinese}" />
+                                            <ListBoxItem Content="English" Tag="{x:Static models:AppLanguage.English}" />
+                                        </ListBox>
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Power}" Header="{l:Loc StartWithWindows}" Description="{Binding StartupDescription}">
+                                        <CheckBox x:Name="StartupEnabledBox" Style="{StaticResource ToggleSwitchStyle}" IsChecked="{Binding StartWithWindows}" />
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Keyboard}" Header="{l:Loc GlobalHotkey}" Description="{Binding HotkeyDescription}">
+                                        <controls:HotkeyBox x:Name="HotkeyEditor" Gesture="{Binding Hotkey}" />
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Help}" Header="{l:Loc Tutorial}" Description="{l:Loc TutorialDescription}">
+                                        <Button Content="{l:Loc ViewTutorial}" Command="{Binding ShowTutorialCommand}" MinWidth="96" />
+                                    </controls:SettingsCard>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+                    </Grid>
+
+                    <!-- 手势与置物架 -->
+                    <Grid x:Name="ShelfHost" Style="{StaticResource PageHostStyle}">
+                        <Border x:Name="ShelfSheet" Style="{StaticResource PageSheetStyle}">
+                            <ScrollViewer x:Name="ShelfScroll" Style="{StaticResource PageScrollStyle}">
+                                <StackPanel x:Name="ShelfPage" Style="{StaticResource SheetContentStyle}">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
+                                        <Button Style="{StaticResource BackButtonStyle}" Click="OnBackClick" />
+                                        <TextBlock Text="{l:Loc GesturesAndShelf}" Style="{StaticResource TitleTextStyle}" />
+                                    </StackPanel>
+                                    <TextBlock Text="{l:Loc AutoOpen}" Style="{StaticResource SectionHeaderTextStyle}" Margin="2,0,0,8" />
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Expand}" Header="{l:Loc TriggerHeader}" Description="{l:Loc TriggerDescription}">
+                                        <ListBox x:Name="TriggerSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
+                                                 SelectedValue="{Binding Trigger}">
+                                            <ListBoxItem Content="{l:Loc TriggerShake}" Tag="{x:Static models:AutoOpenTrigger.Shake}" />
+                                            <ListBoxItem Content="{l:Loc TriggerEdge}" Tag="{x:Static models:AutoOpenTrigger.Edge}" />
+                                            <ListBoxItem Content="{l:Loc TriggerBoth}" Tag="{x:Static models:AutoOpenTrigger.Both}" />
+                                        </ListBox>
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Lightning}" Header="{l:Loc ShakeSensitivity}"
+                                                           Description="{Binding SensitivityDescription}"
+                                                           Visibility="{Binding UsesShake, Converter={StaticResource BoolToVisibility}}">
+                                        <!-- 三个字对准 0、50、100：越靠近滑钮越大越清楚，像 macOS 程序坞；两端的字从外侧放大，不会超出滑块 -->
+                                        <StackPanel Width="200">
+                                            <Slider x:Name="SensitivitySlider" Minimum="0" Maximum="100" SmallChange="5" LargeChange="10"
+                                                    IsSnapToTickEnabled="True" TickFrequency="1" Value="{Binding Sensitivity}"
+                                                    AutomationProperties.Name="{l:Loc ShakeSensitivity}" />
+                                            <Grid Height="20" Margin="0,-3,0,0" IsHitTestVisible="False">
+                                                <Grid.Resources>
+                                                    <Style TargetType="TextBlock" BasedOn="{StaticResource CaptionTextStyle}">
+                                                        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                                                    </Style>
+                                                </Grid.Resources>
+                                                <TextBlock x:Name="SteadyLabel" Text="{l:Loc SensitivitySteady}" HorizontalAlignment="Left" RenderTransformOrigin="0,0" />
+                                                <TextBlock x:Name="BalancedLabel" Text="{l:Loc SensitivityBalanced}" HorizontalAlignment="Center" RenderTransformOrigin="0.5,0" />
+                                                <TextBlock x:Name="ResponsiveLabel" Text="{l:Loc SensitivityResponsive}" HorizontalAlignment="Right" RenderTransformOrigin="1,0" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Timer}" Header="{l:Loc EdgeDwellHeader}"
+                                                           Description="{l:Loc EdgeDwellDescription}"
+                                                           Visibility="{Binding UsesEdge, Converter={StaticResource BoolToVisibility}}">
+                                        <ListBox x:Name="EdgeDwellSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
+                                                 SelectedValue="{Binding EdgeDwell}">
+                                            <ListBoxItem Content="{l:Loc DwellShort}" Tag="{x:Static models:EdgeDwellTime.Short}" />
+                                            <ListBoxItem Content="{l:Loc DwellMedium}" Tag="{x:Static models:EdgeDwellTime.Medium}" />
+                                            <ListBoxItem Content="{l:Loc DwellLong}" Tag="{x:Static models:EdgeDwellTime.Long}" />
+                                        </ListBox>
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Shield}" Header="{l:Loc BlockedAppsHeader}"
+                                                           Description="{l:Loc BlockedAppsDescription}">
+                                        <Button x:Name="AddBlockedAppButton" Content="{l:Loc AddApp}" MinWidth="96" Click="OnAddBlockedAppClick" />
+                                    </controls:SettingsCard>
+                                    <ItemsControl x:Name="BlockedAppList" ItemsSource="{Binding BlockedApps}" Focusable="False">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <controls:SettingsCard Header="{Binding}" MinHeight="44" Padding="60,4,10,4">
+                                                    <Button Style="{StaticResource IconButtonStyle}" FontSize="14" Content="{StaticResource Glyph.Delete}"
+                                                            ToolTip="{l:Loc RemoveBlockedApp}" CommandParameter="{Binding}"
+                                                            Command="{Binding DataContext.RemoveBlockedAppCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" />
+                                                </controls:SettingsCard>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+
+                                    <TextBlock Text="{l:Loc Shelf}" Style="{StaticResource SectionHeaderTextStyle}" />
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.ViewAll}" Header="{l:Loc Size}" Description="{l:Loc SizeDescription}">
+                                        <ListBox x:Name="ShelfSizeSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
+                                                 SelectedValue="{Binding ShelfSize}">
+                                            <ListBoxItem Content="{l:Loc SizeSmall}" Tag="{x:Static models:QuickShelfSize.Small}" />
+                                            <ListBoxItem Content="{l:Loc SizeMedium}" Tag="{x:Static models:QuickShelfSize.Medium}" />
+                                            <ListBoxItem Content="{l:Loc SizeLarge}" Tag="{x:Static models:QuickShelfSize.Large}" />
+                                        </ListBox>
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Move}" Header="{l:Loc DragOutModeHeader}"
+                                                           Description="{l:Loc DragOutModeDescription}">
+                                        <ListBox x:Name="DragOutModeSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
+                                                 SelectedValue="{Binding DragOutMode}">
+                                            <ListBoxItem Content="{l:Loc TransferMove}" Tag="{x:Static models:TransferMode.Move}" />
+                                            <ListBoxItem Content="{l:Loc TransferCopy}" Tag="{x:Static models:TransferMode.Copy}" />
+                                        </ListBox>
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Clear}" Header="{l:Loc CloseWhenEmpty}"
+                                                           Description="{l:Loc CloseWhenEmptyDescription}">
+                                        <CheckBox x:Name="CloseWhenEmptyBox" Style="{StaticResource ToggleSwitchStyle}" IsChecked="{Binding CloseWhenEmpty}" />
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.History}" Header="{l:Loc ClearShelfHistory}"
+                                                           Description="{Binding HistoryDescription}">
+                                        <Button x:Name="ClearHistoryButton" Content="{l:Loc Clear}" Command="{Binding ClearHistoryCommand}" MinWidth="96" />
+                                    </controls:SettingsCard>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+                    </Grid>
+
+                    <!-- 快速操作 -->
+                    <Grid x:Name="ActionsHost" Style="{StaticResource PageHostStyle}">
+                        <Border x:Name="ActionsSheet" Style="{StaticResource PageSheetStyle}">
+                            <ScrollViewer x:Name="ActionsScroll" Style="{StaticResource PageScrollStyle}">
+                                <StackPanel x:Name="ActionsPage" Style="{StaticResource SheetContentStyle}"
+                                            PreviewMouseLeftButtonDown="OnActionCardMouseDown" PreviewMouseMove="OnActionCardMouseMove"
+                                            PreviewMouseLeftButtonUp="OnActionCardMouseUp" LostMouseCapture="OnActionCardLostCapture">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                        <Button Style="{StaticResource BackButtonStyle}" Click="OnBackClick" />
+                                        <TextBlock Text="{l:Loc QuickActionsTitle}" Style="{StaticResource TitleTextStyle}" />
+                                    </StackPanel>
+                                    <TextBlock Style="{StaticResource CaptionTextStyle}" FontSize="13" Margin="0,0,0,20"
+                                               Text="{l:Loc ActionsPageDescription}" />
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.ViewAll}" Header="{l:Loc ActionLayoutHeader}">
+                                        <controls:SettingsCard.Style>
+                                            <Style TargetType="controls:SettingsCard" BasedOn="{StaticResource {x:Type controls:SettingsCard}}">
+                                                <Setter Property="Description" Value="{l:Loc ActionLayoutDescription}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasActionSlots}" Value="False">
+                                                        <Setter Property="Description" Value="{l:Loc ActionLayoutOffDescription}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </controls:SettingsCard.Style>
+                                        <ListBox x:Name="ActionLayoutSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
+                                                 SelectedValue="{Binding ActionLayout}">
+                                            <ListBoxItem Content="{l:Loc LayoutOff}" Tag="{x:Static models:QuickActionLayout.Off}" />
+                                            <ListBoxItem Content="{l:Loc LayoutTwo}" Tag="{x:Static models:QuickActionLayout.Two}" />
+                                            <ListBoxItem Content="{l:Loc LayoutFour}" Tag="{x:Static models:QuickActionLayout.Four}" />
+                                        </ListBox>
+                                    </controls:SettingsCard>
+
+                                    <StackPanel Visibility="{Binding HasActionSlots, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBlock Text="{l:Loc CurrentActions}" Style="{StaticResource SectionHeaderTextStyle}" Margin="2,24,0,2" />
+                                        <TextBlock Text="{l:Loc DragToSwapHint}" Style="{StaticResource CaptionTextStyle}" Margin="2,0,0,10" />
+                                        <!-- 与置物架底部按钮的排列一致，排成一行 -->
+                                        <ItemsControl x:Name="ActionSlotsList" ItemsSource="{Binding VisibleSlots}" Focusable="False"
+                                                      ItemTemplate="{StaticResource ActionSlotTemplate}" Margin="0,0,-4,0">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <UniformGrid Rows="1" />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                        </ItemsControl>
+                                    </StackPanel>
+
+                                    <TextBlock Text="{l:Loc MoreActions}" Style="{StaticResource SectionHeaderTextStyle}" />
+                                    <ItemsControl x:Name="MoreActionsList" ItemsSource="{Binding MoreActions}" Focusable="False"
+                                                  ItemTemplate="{StaticResource MoreActionTemplate}" />
+                                    <Button x:Name="AddCustomActionButton" HorizontalAlignment="Left" Margin="0,6,0,0" Padding="12,5,14,6"
+                                            Command="{Binding AddCustomActionCommand}" IsEnabled="{Binding CanAddCustomAction}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{StaticResource Glyph.Add}" FontFamily="{StaticResource IconFont}" FontSize="12"
+                                                       Margin="0,1,8,0" VerticalAlignment="Center" />
+                                            <TextBlock Text="{l:Loc AddCustomAction}" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+                    </Grid>
+
+                    <!-- 外观 -->
+                    <Grid x:Name="AppearanceHost" Style="{StaticResource PageHostStyle}">
+                        <Border x:Name="AppearanceSheet" Style="{StaticResource PageSheetStyle}">
+                            <ScrollViewer x:Name="AppearanceScroll" Style="{StaticResource PageScrollStyle}">
+                                <StackPanel x:Name="AppearancePage" Style="{StaticResource SheetContentStyle}">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
+                                        <Button Style="{StaticResource BackButtonStyle}" Click="OnBackClick" />
+                                        <TextBlock Text="{l:Loc Appearance}" Style="{StaticResource TitleTextStyle}" />
+                                    </StackPanel>
+                                    <TextBlock Text="{l:Loc Theme}" Style="{StaticResource SectionHeaderTextStyle}" Margin="2,0,0,10" />
+                                    <ListBox x:Name="ThemeSelector" SelectedValuePath="Tag" SelectedValue="{Binding Theme}" Background="Transparent"
+                                             BorderThickness="0" ItemContainerStyle="{StaticResource ThemeTileStyle}"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                        <ListBox.Template>
+                                            <ControlTemplate TargetType="ListBox">
+                                                <ItemsPresenter />
+                                            </ControlTemplate>
+                                        </ListBox.Template>
+                                        <ListBox.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel />
+                                            </ItemsPanelTemplate>
+                                        </ListBox.ItemsPanel>
+                                        <ListBoxItem Tag="{x:Static models:AppTheme.System}">
+                                            <StackPanel>
+                                                <Grid Width="140" Height="92">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border CornerRadius="7,0,0,7" Background="#F9F7F1" />
+                                                    <Border Grid.Column="1" CornerRadius="0,7,7,0" Background="#202020" />
+                                                    <Border Grid.ColumnSpan="2" Width="64" Height="64" CornerRadius="8" Background="#80808080">
+                                                        <Border Width="30" Height="30" CornerRadius="5" Background="#FFFFFF" BorderBrush="#33000000" BorderThickness="1" />
+                                                    </Border>
+                                                </Grid>
+                                                <TextBlock Text="{l:Loc FollowSystem}" Margin="2,8,0,2" FontSize="13" />
+                                            </StackPanel>
+                                        </ListBoxItem>
+                                        <ListBoxItem Tag="{x:Static models:AppTheme.Light}">
+                                            <StackPanel>
+                                                <Border Width="140" Height="92" CornerRadius="7" Background="#F9F7F1" BorderBrush="#14000000" BorderThickness="1">
+                                                    <Border Width="64" Height="64" CornerRadius="8" Background="#FFFFFF" BorderBrush="#1A000000" BorderThickness="1">
+                                                        <Border Width="30" Height="30" CornerRadius="5" Background="#F9F7F1" BorderBrush="#26000000" BorderThickness="1" />
+                                                    </Border>
+                                                </Border>
+                                                <TextBlock Text="{l:Loc ThemeLight}" Margin="2,8,0,2" FontSize="13" />
+                                            </StackPanel>
+                                        </ListBoxItem>
+                                        <ListBoxItem Tag="{x:Static models:AppTheme.Dark}">
+                                            <StackPanel>
+                                                <Border Width="140" Height="92" CornerRadius="7" Background="#202020" BorderBrush="#33FFFFFF" BorderThickness="1">
+                                                    <Border Width="64" Height="64" CornerRadius="8" Background="#2B2B2B" BorderBrush="#26FFFFFF" BorderThickness="1">
+                                                        <Border Width="30" Height="30" CornerRadius="5" Background="#3B3B3B" BorderBrush="#33FFFFFF" BorderThickness="1" />
+                                                    </Border>
+                                                </Border>
+                                                <TextBlock Text="{l:Loc ThemeDark}" Margin="2,8,0,2" FontSize="13" />
+                                            </StackPanel>
+                                        </ListBoxItem>
+                                    </ListBox>
+
+                                    <Border Style="{StaticResource CardBorderStyle}" Margin="0,20,0,0" Padding="20,14,16,14">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <TextBlock Text="{StaticResource Glyph.Brush}" FontFamily="{StaticResource IconFont}" FontSize="20" Margin="0,0,20,0"
+                                                       VerticalAlignment="Center" />
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock Text="{l:Loc AccentColor}" FontSize="14" />
+                                                <TextBlock Text="{l:Loc AccentDescription}" FontSize="12" Margin="0,2,0,0" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                            </StackPanel>
+                                            <ListBox x:Name="AccentSelector" Grid.Row="1" Grid.Column="1" Margin="-5,10,0,0" ItemsSource="{Binding AccentOptions}"
+                                                     SelectedValuePath="Value" SelectedValue="{Binding Accent}" Background="Transparent" BorderThickness="0"
+                                                     ItemContainerStyle="{StaticResource AccentSwatchStyle}" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                                <ListBox.Template>
+                                                    <ControlTemplate TargetType="ListBox">
+                                                        <ItemsPresenter />
+                                                    </ControlTemplate>
+                                                </ListBox.Template>
+                                                <ListBox.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <WrapPanel />
+                                                    </ItemsPanelTemplate>
+                                                </ListBox.ItemsPanel>
+                                            </ListBox>
+                                        </Grid>
+                                    </Border>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+                    </Grid>
+                    <Canvas x:Name="StackFrontLayer" Visibility="Collapsed" IsHitTestVisible="False" />
+                </Grid>
+                <Button x:Name="VersionButton" Grid.Row="1" Style="{StaticResource TextLinkStyle}" Content="{Binding Version}"
+                        HorizontalAlignment="Right" Margin="0,0,10,6" ToolTip="{l:Loc AboutTooltip}" Click="OnVersionClick" />
+
+                <!-- 窗口足够宽时在左侧显示状态栏：没有边框，背景向右渐隐，与内容区融为一体 -->
+                <Grid x:Name="SidePanel" Grid.RowSpan="2" Width="300" HorizontalAlignment="Left" Visibility="Collapsed">
+                    <Grid.RenderTransform>
+                        <TranslateTransform x:Name="SidePanelShift" />
+                    </Grid.RenderTransform>
+                    <!-- 椭圆渐隐：上半部分几乎是竖直的边，往下沿弧线收窄到左下角 -->
+                    <Border Background="{DynamicResource CardBrush}">
+                        <Border.OpacityMask>
+                            <RadialGradientBrush Center="0,0.2" GradientOrigin="0,0.2" RadiusX="1" RadiusY="0.8">
+                                <GradientStop Color="Black" Offset="0" />
+                                <GradientStop Color="#B0000000" Offset="0.6" />
+                                <GradientStop Color="Transparent" Offset="1" />
+                            </RadialGradientBrush>
+                        </Border.OpacityMask>
+                    </Border>
+                    <!-- 左上角的强调色光晕 -->
+                    <Border Background="{DynamicResource AccentBrush}" Opacity="0.2">
+                        <Border.OpacityMask>
+                            <RadialGradientBrush Center="0,0" GradientOrigin="0,0" RadiusX="1" RadiusY="0.5">
+                                <GradientStop Color="Black" Offset="0" />
+                                <GradientStop Color="Transparent" Offset="1" />
+                            </RadialGradientBrush>
+                        </Border.OpacityMask>
+                    </Border>
+
+                    <StackPanel Margin="30,30,30,0">
+                        <!-- 线框版应用图标，跟随文字颜色，不与强调色冲突。 -->
+                        <Viewbox x:Name="SidePanelIcon" Width="52" Height="52" HorizontalAlignment="Left" RenderTransformOrigin="0.5,0.5">
+                            <Viewbox.RenderTransform>
+                                <ScaleTransform x:Name="SidePanelIconScale" />
+                            </Viewbox.RenderTransform>
+                            <Canvas Width="256" Height="256">
+                                <Rectangle Canvas.Left="22" Canvas.Top="22" Width="212" Height="212" RadiusX="44" RadiusY="44"
+                                           Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="12" />
+                                <Path Data="M128,64 V156 M90,120 L128,158 L166,120 M68,170 V190 H188 V170" Stroke="{DynamicResource TextPrimaryBrush}"
+                                      StrokeThickness="12" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+                            </Canvas>
+                        </Viewbox>
+                        <TextBlock x:Name="SidePanelTitle" Text="{Binding PanelTitle}" Style="{StaticResource SubtitleTextStyle}" Margin="0,20,0,0"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding PanelBody}" Style="{StaticResource CaptionTextStyle}" Margin="0,6,0,0" LineHeight="19" />
+                        <Button Style="{StaticResource SoftAccentButtonStyle}" Command="{Binding OpenShelfCommand}" Margin="0,20,0,0">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{StaticResource Glyph.Add}" FontFamily="{StaticResource IconFont}" FontSize="13" Width="26"
+                                           Margin="0,1,0,0" VerticalAlignment="Center" />
+                                <TextBlock Text="{l:Loc OpenShelf}" FontSize="13" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+
+                        <TextBlock Text="{l:Loc PanelWays}" FontSize="12" Margin="2,26,0,8" Foreground="{DynamicResource TextTertiaryBrush}" />
+                        <StackPanel Style="{StaticResource WayRowStyle}" Visibility="{Binding ShowShakeWay, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="{StaticResource Glyph.Move}" Style="{StaticResource WayGlyphStyle}" />
+                            <TextBlock Text="{l:Loc WayShake}" FontSize="13" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <StackPanel Style="{StaticResource WayRowStyle}" Visibility="{Binding ShowEdgeWay, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="{StaticResource Glyph.Expand}" Style="{StaticResource WayGlyphStyle}" />
+                            <TextBlock Text="{l:Loc WayEdge}" FontSize="13" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <StackPanel Style="{StaticResource WayRowStyle}" Visibility="{Binding ShowHotkeyWay, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="{StaticResource Glyph.Keyboard}" Style="{StaticResource WayGlyphStyle}" />
+                                <ItemsControl ItemsSource="{Binding HotkeyKeys}" Focusable="False" VerticalAlignment="Center">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Margin="0,0,4,0" Padding="6,1,6,2" CornerRadius="4" BorderThickness="1,1,1,2"
+                                                    Background="{DynamicResource ControlBrush}" BorderBrush="{DynamicResource ControlBorderBrush}">
+                                                <TextBlock Text="{Binding}" FontSize="11" />
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- 打开设置页后图标收起，概览标题缩成返回链接，页面名称从上方滚出 -->
+                    <StackPanel Margin="30,20,30,0" VerticalAlignment="Top">
+                        <!-- 胶囊形的返回按钮，文字与下面的页面名称左对齐 -->
+                        <Button x:Name="PanelBackButton" Click="OnBackClick" Opacity="0" IsHitTestVisible="False" HorizontalAlignment="Left"
+                                Margin="-10,0,0,0" Cursor="Hand" Foreground="{DynamicResource TextSecondaryBrush}" ToolTip="{l:Loc BackTooltip}">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="Pill" Background="Transparent" CornerRadius="6" Padding="10,5,14,6">
+                                        <ContentPresenter />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                                            <Setter TargetName="Pill" Property="Background" Value="{DynamicResource SubtleHoverBrush}" />
+                                        </Trigger>
+                                        <Trigger Property="IsPressed" Value="True">
+                                            <Setter TargetName="Pill" Property="Background" Value="{DynamicResource SubtlePressedBrush}" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{StaticResource Glyph.Back}" FontFamily="{StaticResource IconFont}" FontSize="13"
+                                           VerticalAlignment="Center" Margin="0,1,8,0" />
+                                <TextBlock x:Name="PanelCrumbText" Text="{l:Loc Overview}" FontSize="15" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Border ClipToBounds="True" Margin="0,2,0,0" IsHitTestVisible="False">
+                            <TextBlock x:Name="PanelPageName" Style="{StaticResource TitleTextStyle}" Opacity="0" TextTrimming="CharacterEllipsis">
+                                <TextBlock.RenderTransform>
+                                    <TranslateTransform x:Name="PanelPageNameShift" />
+                                </TextBlock.RenderTransform>
+                            </TextBlock>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+
+                <!-- 概览页的标题：状态栏出现时从页面左上角飞到状态栏图标右侧，打开设置页时缩进返回链接 -->
+                <Grid Grid.RowSpan="2" Height="52" Margin="98,30,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False">
+                    <TextBlock x:Name="PanelPageTitle" Text="{l:Loc Overview}" Style="{StaticResource TitleTextStyle}" VerticalAlignment="Center"
+                               Visibility="Collapsed">
+                        <TextBlock.RenderTransform>
+                            <TransformGroup>
+                                <ScaleTransform x:Name="PanelTitleScale" />
+                                <TranslateTransform x:Name="PanelTitleShift" />
+                            </TransformGroup>
+                        </TextBlock.RenderTransform>
+                    </TextBlock>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- 添加或编辑自定义操作（Windows 11 对话框样式） -->
+        <Grid x:Name="EditorOverlay" Grid.RowSpan="2" Background="{DynamicResource SmokeBrush}"
+              Visibility="{Binding IsEditorOpen, Converter={StaticResource BoolToVisibility}}">
+            <Grid Width="480" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24">
+                <Control Style="{StaticResource DialogShadowStyle}" />
+                <Border x:Name="EditorDialog" DataContext="{Binding Editor}" Background="{DynamicResource FlyoutBrush}"
+                        BorderBrush="{DynamicResource FlyoutBorderBrush}" BorderThickness="1" CornerRadius="8">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Margin="24,22,24,24">
+                            <TextBlock Text="{Binding Title}" Style="{StaticResource SubtitleTextStyle}" />
+
+                            <TextBlock Text="{l:Loc ActionKind}" Style="{StaticResource FieldLabelStyle}" Margin="0,18,0,6" />
+                            <ListBox x:Name="EditorKindSelector" Style="{StaticResource SegmentedStyle}" HorizontalAlignment="Left"
+                                     SelectedValuePath="Tag" SelectedValue="{Binding Kind}">
+                                <ListBoxItem Content="{l:Loc KindFolder}" Tag="{x:Static models:CustomActionKind.Folder}" />
+                                <ListBoxItem Content="{l:Loc KindCompressImage}" Tag="{x:Static models:CustomActionKind.CompressImage}" />
+                                <ListBoxItem Content="{l:Loc KindOpenWith}" Tag="{x:Static models:CustomActionKind.OpenWith}" />
+                            </ListBox>
+
+                            <!-- 文件夹 -->
+                            <StackPanel Visibility="{Binding IsFolder, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="{l:Loc FolderLabel}" Style="{StaticResource FieldLabelStyle}" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="EditorFolderBox" Text="{Binding Folder, UpdateSourceTrigger=PropertyChanged}" />
+                                    <Button Grid.Column="1" Content="{l:Loc Browse}" Margin="8,0,0,0" Click="OnBrowseFolderClick" />
+                                </Grid>
+                                <TextBlock Text="{l:Loc FolderModeLabel}" Style="{StaticResource FieldLabelStyle}" />
+                                <ListBox Style="{StaticResource SegmentedStyle}" HorizontalAlignment="Left" SelectedValuePath="Tag"
+                                         SelectedValue="{Binding FolderMode}">
+                                    <ListBoxItem Content="{l:Loc TransferMove}" Tag="{x:Static models:TransferMode.Move}" />
+                                    <ListBoxItem Content="{l:Loc TransferCopy}" Tag="{x:Static models:TransferMode.Copy}" />
+                                </ListBox>
+                            </StackPanel>
+
+                            <!-- 压缩图片 -->
+                            <StackPanel Visibility="{Binding IsCompressImage, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="{l:Loc ImageSizeLabel}" Style="{StaticResource FieldLabelStyle}" />
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBox x:Name="EditorSizeBox" Width="120" Text="{Binding SizeText, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBlock Text="KB" Margin="10,0,0,1" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <TextBlock Text="{l:Loc ImageSizeHint}" Style="{StaticResource CaptionTextStyle}" Margin="0,6,0,0" />
+                            </StackPanel>
+
+                            <!-- 用程序打开 -->
+                            <StackPanel Visibility="{Binding IsOpenWith, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="{l:Loc ProgramLabel}" Style="{StaticResource FieldLabelStyle}" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="EditorProgramBox" Text="{Binding ProgramPath, UpdateSourceTrigger=PropertyChanged}" />
+                                    <Button Grid.Column="1" Content="{l:Loc Browse}" Margin="8,0,0,0" Click="OnBrowseProgramClick" />
+                                </Grid>
+                                <TextBlock Text="{l:Loc ArgumentsLabel}" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding Arguments, UpdateSourceTrigger=PropertyChanged}" Tag="{}{files}" />
+                                <TextBlock Text="{l:Loc ArgumentsHint}" Style="{StaticResource CaptionTextStyle}" Margin="0,6,0,0" />
+                            </StackPanel>
+
+                            <TextBlock Text="{l:Loc NameLabel}" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBox x:Name="EditorNameBox" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Tag="{Binding NamePlaceholder}"
+                                     MaxLength="40" />
+
+                            <StackPanel Orientation="Horizontal" Margin="0,14,0,0"
+                                        Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="{StaticResource Glyph.Error}" FontFamily="{StaticResource IconFont}" FontSize="13"
+                                           Foreground="{DynamicResource CriticalBrush}" Margin="0,2,8,0" />
+                                <TextBlock x:Name="EditorErrorText" Text="{Binding Error}" FontSize="13" Foreground="{DynamicResource CriticalBrush}"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <Border Grid.Row="1" Background="{DynamicResource WindowBackgroundBrush}" BorderBrush="{DynamicResource DividerBrush}"
+                                BorderThickness="0,1,0,0" CornerRadius="0,0,8,8" Padding="24,20">
+                            <UniformGrid Columns="2" HorizontalAlignment="Right" Width="260">
+                                <Button x:Name="EditorSaveButton" Style="{StaticResource AccentButtonStyle}" Content="{l:Loc Save}"
+                                        Command="{Binding SaveCommand}" Margin="0,0,4,0" IsDefault="True" />
+                                <Button x:Name="EditorCancelButton" Content="{l:Loc Cancel}" Command="{Binding CancelCommand}" Margin="4,0,0,0"
+                                        IsCancel="True" />
+                            </UniformGrid>
+                        </Border>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <!-- 确认删除自定义操作（与编辑对话框相同的 Windows 11 对话框样式） -->
+        <Grid x:Name="ConfirmOverlay" Grid.RowSpan="2" Background="{DynamicResource SmokeBrush}" Visibility="Collapsed">
+            <Grid Width="400" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24" RenderTransformOrigin="0.5,0.5">
+                <Grid.RenderTransform>
+                    <ScaleTransform x:Name="ConfirmDialogScale" />
+                </Grid.RenderTransform>
+                <Control Style="{StaticResource DialogShadowStyle}" />
+                <Border Background="{DynamicResource FlyoutBrush}" BorderBrush="{DynamicResource FlyoutBorderBrush}" BorderThickness="1"
+                        CornerRadius="8">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Margin="24,22,24,24">
+                            <TextBlock Text="{l:Loc ConfirmDeleteTitle}" Style="{StaticResource SubtitleTextStyle}" />
+                            <TextBlock x:Name="ConfirmMessage" FontSize="14" Margin="0,12,0,0" TextWrapping="Wrap" LineHeight="20" />
+                        </StackPanel>
+                        <Border Grid.Row="1" Background="{DynamicResource WindowBackgroundBrush}" BorderBrush="{DynamicResource DividerBrush}"
+                                BorderThickness="0,1,0,0" CornerRadius="0,0,8,8" Padding="24,20">
+                            <UniformGrid Columns="2" HorizontalAlignment="Right" Width="260">
+                                <Button Style="{StaticResource AccentButtonStyle}" Content="{l:Loc DeleteTooltip}" Click="OnConfirmDeleteClick" Margin="0,0,4,0" />
+                                <Button x:Name="ConfirmCancelButton" Content="{l:Loc Cancel}" Click="OnConfirmCancelClick" Margin="4,0,0,0" />
+                            </UniformGrid>
+                        </Border>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <!-- 拖动快速操作时窗口底部发光：自定义操作为红色，拖进去后提示松开删除；内置操作为灰色，提示不能删除 -->
+        <Grid x:Name="DeleteZone" Grid.RowSpan="2" Height="120" VerticalAlignment="Bottom" IsHitTestVisible="False" Opacity="0">
+            <Rectangle x:Name="DeleteGlow" Fill="{StaticResource DeleteBrush}" Opacity="0.35">
+                <Rectangle.OpacityMask>
+                    <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
+                        <GradientStop Color="Black" Offset="0" />
+                        <GradientStop Color="#80000000" Offset="0.4" />
+                        <GradientStop Color="Transparent" Offset="1" />
+                    </LinearGradientBrush>
+                </Rectangle.OpacityMask>
+            </Rectangle>
+            <Border x:Name="DeleteHint" CornerRadius="14" Padding="12,5,14,6" Margin="0,0,0,28" HorizontalAlignment="Center"
+                    VerticalAlignment="Bottom" Background="{StaticResource DeleteBrush}" Opacity="0">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="DeleteHintGlyph" FontFamily="{StaticResource IconFont}" FontSize="14" Margin="0,1,8,0"
+                               VerticalAlignment="Center" Foreground="White" />
+                    <TextBlock x:Name="DeleteHintText" FontSize="13" VerticalAlignment="Center" Foreground="White" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- 拖动快速操作时跟随光标的卡片 -->
+        <Canvas x:Name="DragLayer" Grid.RowSpan="2" IsHitTestVisible="False">
+            <Border x:Name="DragGhost" Visibility="Collapsed" CornerRadius="8" Padding="12,8,16,9" Background="{DynamicResource FlyoutBrush}"
+                    BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1">
+                <!-- 跟随光标和弹回都改这个平移，不改 Canvas.Left/Top，拖动时窗口不必每帧重新排版 -->
+                <Border.RenderTransform>
+                    <TranslateTransform x:Name="DragGhostShift" />
+                </Border.RenderTransform>
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="18" ShadowDepth="4" Direction="270" Opacity="0.22" Color="Black" />
+                </Border.Effect>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="DragGhostGlyph" FontFamily="{StaticResource IconFont}" FontSize="16" Margin="0,1,10,0"
+                               VerticalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}" />
+                    <TextBlock x:Name="DragGhostText" FontSize="13" VerticalAlignment="Center" />
+                </StackPanel>
+            </Border>
+        </Canvas>
+    </Grid>
+</Window>

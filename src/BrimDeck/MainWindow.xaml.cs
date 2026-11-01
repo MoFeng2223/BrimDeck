@@ -88,6 +88,7 @@ public partial class MainWindow : Window
     public MainWindow(App app, MainWindow? lead = null)
     {
         _app = app; _lead = lead;
+        _fileShare = new FileShareService(() => new WindowInteropHelper(this).Handle);
         _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle, IslandStrip,
             () => Settings.ForceTopmost, () => Settings.BackgroundWindows);
         Rect? IslandStrip()
@@ -103,7 +104,7 @@ public partial class MainWindow : Window
         _hover = new(Dispatcher, () =>
         {
             _hover!.Stop();
-            if (IsSuppressed || !_pointerInside) return;
+            if (ReducedModule || IsSuppressed || !_pointerInside) return;
             // Opened by hovering: the panel may centre on the pointer (see SetExpanded).
             if (Settings.ExpandAtPointer && PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
             SetExpanded(true);
@@ -118,6 +119,8 @@ public partial class MainWindow : Window
             if (_expanded && !_preview) PointerChanged(_pointerInside);
         }) { Interval = TimeSpan.FromSeconds(1) };
         InitializeComponent();
+        InitializeClipboardHeader();
+        InitializeFileSharing();
         // Out of sight until the boot (or, without animations, until it has its place): the window shows before it is placed.
         HoverZone.Opacity = 0;
         _handover = new PageHandover(LeavingContent);
@@ -137,9 +140,10 @@ public partial class MainWindow : Window
         _host.ContextChanged += context =>
         {
             _context = context;
-            if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true)
+            if (!_preview && !ClipboardHoldsOpen && !FileShareHoldsOpen && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true)
             {
                 if (_expanded) ReplayCompactTitle();
+                if (IsClipboardPage) EndClipboardInput();
                 _expanded = false;
             }
             ApplySettings(true);
@@ -158,8 +162,7 @@ public partial class MainWindow : Window
             _context = context;
             ApplySettings(!_expanded);
         };
-        // Esc also leaves move mode (MainWindow.Move.cs).
-        SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escapeDismissal = new EscapeDismissal(this, () => { if (_moveArmed) CancelMove(); else SetExpanded(false, keyboard: true); }); };
+        SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escapeDismissal = new EscapeDismissal(this, DismissPanelFromKeyboard); };
         Loaded += async (_, _) =>
         {
             _virtualDesktops ??= new VirtualDesktopPresence(this);
@@ -172,12 +175,14 @@ public partial class MainWindow : Window
             if (_lead is null) { _app.AssignDisplays(); await RefreshAutomaticallyAsync(); }
         };
         Closing += (_, e) => { if (!_app.Exiting && !_retiring) { e.Cancel = true; SetExpanded(false); } };
-        Closed += (_, _) => { CancelMove(); _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _seconds.Stop(); _refresh.Stop(); _alertTimer.Stop(); _clipSettle?.Stop(); };
+        Closed += (_, _) => { CancelMove(); _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _fileShareDrop?.Dispose(); _fileShare.Dispose(); _trayMenu?.SetCurrentValue(ContextMenu.IsOpenProperty, false); _host.Dispose(); _trayDropHover.Stop(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _seconds.Stop(); _refresh.Stop(); _alertTimer.Stop(); _clipSettle?.Stop(); };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
         // The collapsed island opens on hover, so a right click there does nothing, except leave move mode.
         MouseWheel += PanelWheel;
         MouseRightButtonUp += (_, e) => { if (_moveArmed) { CancelMove(); e.Handled = true; return; } if (!_expanded || !Settings.RightClickSettings) return; _app.OpenSettings(); e.Handled = true; };
-        PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { SetExpanded(false, keyboard: true); e.Handled = true; } };
+        PreviewKeyDown += PanelKeyPressed;
+        Deactivated += (_, _) => ClipboardInteractionChanged();
+        Closed += (_, _) => _clipboardView?.Dispose();
         // A scale change moves the window to a rectangle Windows suggests; the island is centred again.
         // DpiChanged is a bubbling event: every Image raises it when its own DPI changes. Once the window has moved to a
         // monitor with another scale, each image the panel rebuilds while it is laid out reports a change, and laying out
@@ -227,7 +232,8 @@ public partial class MainWindow : Window
     // second. A collapsed preview keeps them running: hovering the island ends the preview (see TrackPointer).
     private void UpdatePointerTracking()
     {
-        bool run = _trackPointer && !IsSuppressed && !(_preview && _previewExpanded);
+        // Explicit move mode needs pointer updates only until the user completes or cancels it.
+        bool run = _trackPointer && (!ReducedModule || _moveArmed) && !IsSuppressed && !(_preview && _previewExpanded);
         if (run && !_pointerTrack.IsEnabled) { _pointerTrack.Interval = TimeSpan.FromMilliseconds(TrackNear); _pointerTrack.Start(); }
         else if (!run && _pointerTrack.IsEnabled) _pointerTrack.Stop();
     }
@@ -256,6 +262,8 @@ public partial class MainWindow : Window
         if (!Settings.QuotaAlerts && _alert is not null) ClearAlert();
         ApplySyncSchedule();
         ApplyMusicSettings();
+        ApplyModulePresentation();
+        if (_clipboardInput && (!IsDockPage || _preview)) EndClipboardInput();
         ApplySecondClock();
         ApplyScale();
         var (bounds, work, scale) = WindowsHost.MonitorScreen(MonitorHandle) ?? WindowsHost.PrimaryScreen();
@@ -266,7 +274,9 @@ public partial class MainWindow : Window
         NoteCollapsedWidth(shapeBefore, dipBefore);
         // Page widths are unscaled; drawn at the panel's scale they fit the work area less 12 DIP each side.
         double Fit(double width) => Math.Max(240, Math.Min(width, (work.Width / scale - 24) / _scale));
-        _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width); _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width);
+        _pageWidth = IsClipboardPage && Settings.ClipboardReferenceSize
+            ? ClipboardDockLayout.ReferenceWidth(work.Width / scale, _scale) : Fit(DeckPages.Size(Settings, CurrentPage).Width);
+        _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width);
         // The widest shown page as it fits this monitor, measured as _pageWidth is (SetExpanded centres on it). A drag resizes
         // only the page that shows, which SetExpanded takes from _pageWidth; this is set again when the size is saved (ApplySettings).
         _widestPage = Fit(DeckPages.Largest(Settings).Width);
@@ -277,7 +287,7 @@ public partial class MainWindow : Window
         // monitor, with room on either side for the resize grips just outside them (ResizeGrips). The notch and the capsule may be
         // as wide as the monitor, so the window is as wide as the monitor too. Only Island animates.
         var largest = DeckPages.Largest(Settings);
-        largest = (Math.Max(largest.Width, PageMaxWidth), Math.Max(largest.Height, DeckPages.MaxHeight));
+        largest = (Math.Max(largest.Width, PageMaxWidth), Math.Max(largest.Height, DeckPages.MaxHeight) + (DeckPages.Visible(Settings).Any(page => page is DeckPage.Clipboard or DeckPage.FileTray) ? ClipboardHeaderHeight : 0));
         double widestSurface = Enum.GetValues<CompactStyle>().Max(style => CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip, _scale).Max);
         // In the edge's frame: on a side edge a page's height runs along the edge and its width away from it.
         // The window starts at the monitor top (the frame's edge). A capsule's panel can start lower (at the top of a top taskbar's work area, or
@@ -480,7 +490,7 @@ public partial class MainWindow : Window
     // While open, the pointer is inside over the panel or over the collapsed surface's hover area, which can be wider than the
     // panel (a wide notch or capsule) or reach the screen edge above it.
     // The open monitor page's grips reach a little outside it (ResizeGrips.PanelArea); they count as the panel.
-    private bool InsideOpenPanel(Point screenPoint) => ScreenBounds(Island).Contains(screenPoint) || CompactHoverScreenRect().Contains(screenPoint)
+    private bool InsideOpenPanel(Point screenPoint) => ScreenBounds(Island).Contains(screenPoint) || CompactHoverScreenRect().Contains(screenPoint) || ClipboardHeaderBridge(screenPoint)
         || PanelResizable && PresentationSource.FromVisual(Stage) is not null && Contains(ResizeGrips.PanelArea(IslandBox()), Stage.PointFromScreen(screenPoint));
     private static bool Contains(DipRect r, Point p) => p.X >= r.X && p.X <= r.Right && p.Y >= r.Y && p.Y <= r.Bottom;
     // Implemented by the compact layout in its own file, if present. Both run on every shape change and every alert change,
@@ -530,6 +540,8 @@ public partial class MainWindow : Window
         System.Windows.Automation.AutomationProperties.SetName(AIUsageButton, Loc.T("AI 用量", "AI usage"));
         System.Windows.Automation.AutomationProperties.SetName(MonitorPageButton, Loc.T("系统监控", "System monitor"));
         System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("音乐", "Music"));
+        System.Windows.Automation.AutomationProperties.SetName(TrayPageButton, Loc.T("文件中转", "File tray"));
+        System.Windows.Automation.AutomationProperties.SetName(ClipboardPageButton, Loc.T("剪贴板", "Clipboard"));
         System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));
     }
     public void Preview(bool enabled, bool expanded = true)
@@ -642,19 +654,21 @@ public partial class MainWindow : Window
         // Only the panel under the pointer is open; the others close at once and give up the Escape key.
         if (expanded && !_preview)
             foreach (var other in _app.Decks.Where(deck => deck != this && deck._expanded && !deck._preview).ToList()) other.SetExpanded(false);
-        if (expanded && !_expanded && !_preview) ApplyDefaultMusicPage();
+        if (expanded && !_expanded && !_preview && !_openingClipboard) ApplyDefaultMusicPage();
         // A hand-over cut short by closing the panel leaves nothing behind for the next opening.
         if (expanded && !_expanded) _handover.Drop();
         bool wasExpanded = _expanded;
         _expanded = expanded;
-        _escapeDismissal?.SetEnabled(expanded && !_preview || _moveArmed);
-        if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
+        PrepareClipboardHeader(instant: instant || !wasExpanded || !expanded);
+        if (!expanded && (_clipboardInput || _clipboardView?.PopupOpen == true)) EndClipboardInput();
+        _escapeDismissal?.SetEnabled(expanded && !_preview && !_clipboardInput || _moveArmed);
+        if (!expanded) { HideTrayNotice(); CloseTrayPopups(); CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
         if (wasExpanded && !expanded) { HotkeyPanelCollapsed(); ReplayCompactTitle(); _app.RequestTrim(); }
         Collapsed = ShapeFor(EffectiveStyle);
         var shape = Collapsed;
         var style = shape.Style;
         bool line = style == CompactStyle.Line, indicator = !expanded && line;
-        double wantedHeight = DeckPages.Size(Settings, CurrentPage).Height;
+        double wantedHeight = DeckPages.ExpandedSize(Settings, CurrentPage).Height + (IsDockPage ? _clipboardHeaderTarget : 0);
         var panel = PanelFor(wantedHeight);
         double panelTop = panel.Top, headerExtra = panel.HeaderExtra;
         double pageHeight = PageHeight(wantedHeight, panel);
@@ -699,7 +713,7 @@ public partial class MainWindow : Window
         // motion-review C1, C4: closing takes three quarters of the set time; a move the keyboard asked for takes 0.6 of it. The
         // open panel changing size in place (a page switch) keeps its own length whatever the setting (PanelMotion.Reshape).
         bool turning = wasExpanded != expanded;
-        int duration = !instant && Settings.Animations && SystemParameters.ClientAreaAnimation
+        int duration = !instant && !ReducedModule && Settings.Animations && SystemParameters.ClientAreaAnimation
             ? expanded && !turning ? PanelMotion.Reshape : PanelMotion.Length(Settings.AnimationDuration, closing: turning && !expanded, keyboard: keyboard && turning) : 0;
         // motion-review F1, F2: turned back while the last opening or closing is still under way (the pointer left an opening
         // panel, or came back to a closing one), the surface starts back from where it is at once, in the share of the move it
@@ -827,7 +841,8 @@ public partial class MainWindow : Window
         // indicator's color.
         if (duration == 0 || expanded && line && !wasExpanded) SetImmediate(_surface, SolidColorBrush.ColorProperty, tone);
         else _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = tone, EasingFunction = easeInOut }, duration, tint), HandoffBehavior.SnapshotAndReplace);
-        // The panel is rebuilt when data or settings change, never here: a rebuild on the first frame reads as a stall.
+        if (expanded && IsClipboardPage && _clipboardView is null) RenderClipboard();
+        // An already built page is reused; the first explicit open alone materializes clipboard history.
         if (expanded) { RefreshStatus(); UpdateMusicPosition(); }
         else RenderSyncButton();
         UpdateMusicTimer();
@@ -860,7 +875,7 @@ public partial class MainWindow : Window
     internal void TrackPointer()
     {
         CheckMoveOvertaken();
-        if (_preview && _previewExpanded || IsSuppressed || !IsVisible || PresentationSource.FromVisual(Stage) is null || Resizing || BootHoldsPointer) return;
+        if (ReducedModule && !_moveArmed || _preview && _previewExpanded || IsSuppressed || !IsVisible || PresentationSource.FromVisual(Stage) is null || Resizing || BootHoldsPointer) return;
         var cursor = WindowsHost.Cursor();
         // Move mode: the panel does not open (MainWindow.Move.cs).
         if (_moveArmed) { TrackMove(cursor); return; }
@@ -885,6 +900,7 @@ public partial class MainWindow : Window
         {
             // Kept current so that collapsing with the cursor still on the surface does not count as a new entry.
             _cursorInCompact = inCompact;
+            TrackClipboardHeader(cursor);
             // A jump straight out of the panel can leave without any mouse message reaching the window.
             // Inside means over the panel itself or the collapsed hover area (InsideOpenPanel); HoverZone's bounds would also
             // count its top margin above a lowered panel.
@@ -922,12 +938,12 @@ public partial class MainWindow : Window
         if (inside)
         {
             _popupReturnArea = null;
-            _leave.Stop(); if (_expanded || IsSuppressed) return;
+            _leave.Stop(); if (_expanded || ReducedModule || IsSuppressed) return;
             _hover.Stop(); _hover.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay)); _hover.Start();
         }
         else
         {
-            _hover.Stop(); if (!_expanded || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) return;
+            _hover.Stop(); if (!_expanded || _preview || _pageSwitchHold.IsEnabled || ClipboardHoldsOpen || FileShareHoldsOpen || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) return;
             int delay = Math.Max(_popupReturnArea is null ? 1 : 50, Settings.CloseDelay);
             _leftAt = Environment.TickCount64;
             _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(delay); _leave.Start();
@@ -936,10 +952,10 @@ public partial class MainWindow : Window
     internal void CheckPointerExit(Point screenPoint)
     {
         if (IsHotkeyPinned || Resizing) { _leave.Stop(); return; }
-        if (_pointerInside || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) { _leave.Stop(); return; }
+        if (_pointerInside || _preview || _pageSwitchHold.IsEnabled || ClipboardHoldsOpen || FileShareHoldsOpen || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) { _leave.Stop(); return; }
         // Closing a calendar with either button must leave a path back to the results.
         // Keep checking until the cursor leaves that area; entering the island restores normal hover behavior.
-        if (_popupReturnArea is { } area && area.Contains(screenPoint)) return;
+        if (_popupReturnArea is { } area && area.Contains(screenPoint)) { if (ReducedModule) _leave.Stop(); return; }
         // A mouse leave from the panel into the part of the hover area beside or above it is not an exit.
         if (_expanded && InsideOpenPanel(screenPoint)) { PointerChanged(true); return; }
         // Still just past a resize grip: the pointer is most likely coming back to it. The panel waits, but not for long.

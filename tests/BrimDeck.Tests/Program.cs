@@ -13,6 +13,13 @@ var root = Path.Combine(Path.GetTempPath(), "BrimDeck-Tests-" + Guid.NewGuid().T
 Directory.CreateDirectory(root);
 try
 {
+    if (args is ["--only", "modules"])
+    {
+        ModulePolicyTests.Run(Check);
+        ClipboardHistoryTests.Run(Check);
+        Console.WriteLine($"MODULE CORE RESULT: {passed} checks passed.");
+        return;
+    }
     await PiUsageTests.Run(root, Check);
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
@@ -38,11 +45,14 @@ try
     KeyboardResizeTests.Run(Check);
     CollapsedGeometryTests.Run(root, Check);
     PanelHeaderTests.Run(Check);
+    ModulePolicyTests.Run(Check);
     SystemMonitorTests.Run(Check);
     MonitorSpeechTests.Run(Check);
     CompactReadingTests.Run(Check);
     TemperatureTests.Run(Check);
     StorageTests.Run(Check);
+    FileTrayTests.Run(Check);
+    ClipboardHistoryTests.Run(Check);
     SensorStopTests.Run(Check);
     StripAdmissionTests.Run(Check);
     PowerTests.Run(Check);

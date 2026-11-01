@@ -28,7 +28,7 @@ internal static class PopupMotion
     // The waiting picture's pop-up for the opening under way, null between openings.
     private sealed class Placed { public Popup? Ghost; public Image? Picture; public Window? Window; public DispatcherTimer? Refresh; public Action? Unhook; }
 
-    public static void Attach(Popup popup)
+    public static void Attach(Popup popup, bool exitSnapshot = true)
     {
         if (Places.TryGetValue(popup, out _)) return;
         var placed = new Placed();
@@ -36,9 +36,9 @@ internal static class PopupMotion
         popup.Opened += (_, _) =>
         {
             Soft.Enter(popup.Child);
-            Prepare(placed, () => popup.IsOpen ? popup.Child : null, () => Anchor(popup));
+            if (exitSnapshot) Prepare(placed, () => popup.IsOpen ? popup.Child : null, () => Anchor(popup));
         };
-        popup.Closed += (_, _) => Leave(popup.Child as FrameworkElement, placed);
+        popup.Closed += (_, _) => { if (exitSnapshot) Leave(popup.Child as FrameworkElement, placed); };
     }
 
     // What a pop-up is placed against: its target, or, as a template's pop-up has none (a combo box's list), the element it lies in.
@@ -65,7 +65,7 @@ internal static class PopupMotion
         Close(placed);
         Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
         {
-            if (!Soft.Enabled || placed.Ghost is not null || content() is not FrameworkElement element || anchor() is not { } source || Window.GetWindow(source) is not { } window) return;
+            if (!Soft.For(anchor()) || placed.Ghost is not null || content() is not FrameworkElement element || anchor() is not { } source || Window.GetWindow(source) is not { } window) return;
             var root = VisualTreeHelper.GetParent(element) as Visual ?? element;
             if (PresentationSource.FromVisual(root) is not HwndSource real || PresentationSource.FromVisual(window) is null) return;
             var offset = root == element ? new Vector() : VisualTreeHelper.GetOffset(element);
@@ -150,7 +150,7 @@ internal static class PopupMotion
         placed.Ghost = null; placed.Picture = null; placed.Window = null; placed.Refresh = null; placed.Unhook = null;
         if (ghost is null || image is null) return;
         // A pop-up closed with its window (the settings window closed or hidden) goes with it, without a picture left behind.
-        if (!Soft.Enabled || content is null || window is not { IsVisible: true } || PresentationSource.FromVisual(image) is null) { ghost.IsOpen = false; return; }
+        if (!Soft.For(content) || content is null || window is not { IsVisible: true } || PresentationSource.FromVisual(image) is null) { ghost.IsOpen = false; return; }
         // The picture taken while it was open is the one beneath it already: taken now, the hovered option has lost its mark.
         // Closed before it had entered, it has none yet and is taken now.
         if (image.Source is null) Take(content, image);

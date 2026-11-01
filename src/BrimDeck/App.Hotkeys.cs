@@ -3,14 +3,14 @@ using BrimDeck.Native;
 
 namespace BrimDeck;
 
-// The global hotkeys and the hidden state the hide hotkey toggles. All are unset by default and are taken from the settings
-// (HideHotkey, ExpandHotkey, ResizeHotkey). The registrations live on a message-only window of the app (GlobalHotkeys), so
+// The global hotkeys and the hidden state the hide hotkey toggles. The clipboard shortcut defaults to Ctrl+Alt+V; panel
+// shortcuts start unset. The registrations live on a message-only window of the app (GlobalHotkeys), so
 // panels closed and opened again for display changes do not lose them.
 public partial class App
 {
     private GlobalHotkeys? _hotkeys;
-    private readonly Dictionary<HotkeyKind, HotkeyStatus> _hotkeyStatus = new() { [HotkeyKind.Hide] = HotkeyStatus.Unset, [HotkeyKind.Expand] = HotkeyStatus.Unset, [HotkeyKind.Resize] = HotkeyStatus.Unset };
-    private string _hideHotkey = "", _expandHotkey = "", _resizeHotkey = "";
+    private readonly Dictionary<HotkeyKind, HotkeyStatus> _hotkeyStatus = Enum.GetValues<HotkeyKind>().ToDictionary(kind => kind, _ => HotkeyStatus.Unset);
+    private string _hideHotkey = "", _expandHotkey = "", _resizeHotkey = "", _clipboardHotkey = "";
     private int _hotkeySuspensions;
 
     // Raised on the UI thread after the hotkeys are registered again, with any status change.
@@ -36,13 +36,13 @@ public partial class App
 
     // Registers the hotkeys saved in the settings. Unchanged texts that are already active are left alone; any other one is
     // tried again, so a combination another program has since released becomes active on the next save.
-    public void ApplyHotkeys() => ApplyHotkeys(Settings.HideHotkey, Settings.ExpandHotkey, Settings.ResizeHotkey);
-    internal void ApplyHotkeys(string? hide, string? expand, string? resize)
+    public void ApplyHotkeys() => ApplyHotkeys(Settings.HideHotkey, Settings.ExpandHotkey, Settings.ResizeHotkey, Settings.Clipboard.Mode == ModuleMode.Off ? "" : Settings.Clipboard.Hotkey);
+    internal void ApplyHotkeys(string? hide, string? expand, string? resize, string? clipboard = "")
     {
-        hide ??= ""; expand ??= ""; resize ??= "";
-        bool unchanged = hide == _hideHotkey && expand == _expandHotkey && resize == _resizeHotkey
+        hide ??= ""; expand ??= ""; resize ??= ""; clipboard ??= "";
+        bool unchanged = hide == _hideHotkey && expand == _expandHotkey && resize == _resizeHotkey && clipboard == _clipboardHotkey
             && _hotkeyStatus.Values.All(status => status is HotkeyStatus.Active or HotkeyStatus.Unset);
-        _hideHotkey = hide; _expandHotkey = expand; _resizeHotkey = resize;
+        _hideHotkey = hide; _expandHotkey = expand; _resizeHotkey = resize; _clipboardHotkey = clipboard;
         if (unchanged && _hotkeySuspensions == 0 && _hotkeys is not null) return;
         RegisterHotkeys();
     }
@@ -51,14 +51,16 @@ public partial class App
     // matched by ResumeHotkeys, and the hotkeys come back with the last one.
     public void SuspendHotkeys()
     {
-        if (_hotkeySuspensions++ > 0 || _hotkeys is null) return;
+        if (_hotkeySuspensions++ > 0) return;
+        Shelves?.SetHotkeysPaused(true);
+        if (_hotkeys is null) return;
         foreach (var kind in Enum.GetValues<HotkeyKind>()) _hotkeys.Unregister(kind);
     }
 
     public void ResumeHotkeys()
     {
         if (_hotkeySuspensions == 0) return;
-        if (--_hotkeySuspensions == 0) RegisterHotkeys();
+        if (--_hotkeySuspensions == 0) { RegisterHotkeys(); Shelves?.SetHotkeysPaused(false); }
     }
 
     internal void DisposeHotkeys()
@@ -96,6 +98,8 @@ public partial class App
 
     private void RegisterHotkeys()
     {
+        bool shelfPaused = Shelves?.AreHotkeysPaused == true;
+        Shelves?.SetHotkeysPaused(true);
         // Everything is released first, so a combination one hotkey gives up is free for another this time round.
         foreach (var kind in Enum.GetValues<HotkeyKind>()) _hotkeys?.Unregister(kind);
         foreach (var kind in new[] { HotkeyKind.Hide, HotkeyKind.Expand })
@@ -109,7 +113,9 @@ public partial class App
             }
             _hotkeyStatus[kind] = status.Value;
         }
+        RegisterClipboardHotkey();
         RegisterResizeHotkey();
+        Shelves?.SetHotkeysPaused(shelfPaused || _hotkeySuspensions > 0);
         HotkeysChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -118,7 +124,7 @@ public partial class App
     private void RegisterResizeHotkey()
     {
         const HotkeyKind kind = HotkeyKind.Resize;
-        var (status, text) = HotkeyText.PlanArrows(_resizeHotkey, HotkeyGesture.IsKeyName, _hideHotkey, _expandHotkey);
+        var (status, text) = HotkeyText.PlanArrows(_resizeHotkey, HotkeyGesture.IsKeyName, _hideHotkey, _expandHotkey, _clipboardHotkey);
         if (status is null && HotkeyText.TryParseArrows(text, out var modifiers))
         {
             status = HotkeyStatus.Active;
@@ -133,11 +139,24 @@ public partial class App
         _hotkeyStatus[kind] = status ?? HotkeyStatus.Invalid;
     }
 
+    private void RegisterClipboardHotkey()
+    {
+        var (status, text) = HotkeyText.PlanAdditional(_clipboardHotkey, HotkeyGesture.IsKeyName, _hideHotkey, _expandHotkey);
+        if (status is null)
+        {
+            HotkeyGesture.TryParse(text, out var modifiers, out var key);
+            status = !HotkeyGesture.ToNative(modifiers, key, out uint fs, out uint vk) ? HotkeyStatus.Invalid
+                : _hotkeys is null || _hotkeySuspensions > 0 ? HotkeyStatus.Active : _hotkeys.Register(HotkeyKind.Clipboard, fs, vk);
+        }
+        _hotkeyStatus[HotkeyKind.Clipboard] = status.Value;
+    }
+
     private void HotkeyPressed(HotkeyKind kind, int slot)
     {
         if (Exiting) return;
         if (kind == HotkeyKind.Hide) ToggleHidden();
         else if (kind == HotkeyKind.Resize) ResizeFromHotkey(slot);
+        else if (kind == HotkeyKind.Clipboard) ToggleClipboard();
         else ToggleExpandFromHotkey();
     }
 }

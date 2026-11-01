@@ -21,37 +21,40 @@ internal static class Feedback
     private static readonly MouseEventHandler PointerHandler = (sender, _) => Update(sender);
     private static readonly MouseEventHandler MoveHandler = (sender, _) => { if (sender is UIElement { IsMouseCaptured: true }) Update(sender); };
     private static readonly DependencyPropertyChangedEventHandler EnabledHandler = (sender, _) => Update(sender);
+    private static readonly RoutedEventHandler LoadedHandler = (sender, _) => Update(sender, initialize: true);
 
     private static void FadeChanged(DependencyObject element, DependencyPropertyChangedEventArgs e)
     {
         if (element is not ButtonBase button) return;
         button.MouseEnter -= PointerHandler; button.MouseLeave -= PointerHandler; button.MouseMove -= MoveHandler;
-        button.LostMouseCapture -= PointerHandler; button.IsEnabledChanged -= EnabledHandler;
+        button.LostMouseCapture -= PointerHandler; button.IsEnabledChanged -= EnabledHandler; button.Loaded -= LoadedHandler;
         button.RemoveHandler(UIElement.MouseLeftButtonDownEvent, ButtonHandler); button.RemoveHandler(UIElement.MouseLeftButtonUpEvent, ButtonHandler);
         if (!(bool)e.NewValue) return;
         button.MouseEnter += PointerHandler; button.MouseLeave += PointerHandler; button.MouseMove += MoveHandler;
-        button.LostMouseCapture += PointerHandler; button.IsEnabledChanged += EnabledHandler;
+        button.LostMouseCapture += PointerHandler; button.IsEnabledChanged += EnabledHandler; button.Loaded += LoadedHandler;
+        if (button.IsLoaded) Update(button, initialize: true);
         // The button handles its own presses; handledEventsToo lets the feedback see them after it has.
         button.AddHandler(UIElement.MouseLeftButtonDownEvent, ButtonHandler, true); button.AddHandler(UIElement.MouseLeftButtonUpEvent, ButtonHandler, true);
     }
 
-    private static void Update(object sender)
+    private static void Update(object sender, bool initialize = false)
     {
         if (sender is not ButtonBase { Template: { } template } button) return;
-        bool enabled = button.IsEnabled, animate = Soft.Enabled && button.IsVisible;
+        bool enabled = button.IsEnabled, animate = !initialize && Soft.For(button) && button.IsVisible;
         bool over = enabled && button.IsMouseOver, pressed = enabled && button.IsPressed;
-        Show(template.FindName("HoverLayer", button) as UIElement, over ? 1 : 0, animate, over);
-        Show(template.FindName("PressLayer", button) as UIElement, pressed ? 1 : 0, animate, pressed);
-        Show(template.FindName("Glyph", button) as UIElement, pressed ? GlyphPressed : over ? 1 : GlyphRest, animate, over);
+        Show(template.FindName("HoverLayer", button) as UIElement, over ? 1 : 0, animate, over, initialize);
+        Show(template.FindName("PressLayer", button) as UIElement, pressed ? 1 : 0, animate, pressed, initialize);
+        Show(template.FindName("Glyph", button) as UIElement, pressed ? GlyphPressed : over ? 1 : GlyphRest, animate, over, initialize);
     }
     private const double GlyphRest = .78, GlyphPressed = .6;
 
     // arriving: the feedback comes (Soft.Hover); otherwise it leaves, a little quicker (Soft.HoverOut).
-    private static void Show(UIElement? layer, double target, bool animate, bool arriving)
+    private static void Show(UIElement? layer, double target, bool animate, bool arriving, bool initialize)
     {
         if (layer is null) return;
         double from = layer.Opacity;
-        if (Math.Abs(from - target) < .01 && !layer.HasAnimatedProperties) return;
+        // Local values let the host own fading even when an imported template has instant opacity triggers.
+        if (!initialize && Math.Abs(from - target) < .01 && !layer.HasAnimatedProperties) return;
         layer.BeginAnimation(UIElement.OpacityProperty, null);
         layer.Opacity = target;
         if (animate) layer.BeginAnimation(UIElement.OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(from, target,

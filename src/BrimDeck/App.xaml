@@ -36,6 +36,7 @@
         <CornerRadius x:Key="PanelR10">10</CornerRadius><CornerRadius x:Key="PanelR11">11</CornerRadius><CornerRadius x:Key="PanelR12">12</CornerRadius>
         <CornerRadius x:Key="PanelR13">13</CornerRadius><CornerRadius x:Key="PanelR14">14</CornerRadius><CornerRadius x:Key="PanelR15">15</CornerRadius>
         <CornerRadius x:Key="PanelR16">16</CornerRadius>
+        <CornerRadius x:Key="ClipboardDockCardRadius">18</CornerRadius>
       </ResourceDictionary>
     </ResourceDictionary.MergedDictionaries>
     <FontFamily x:Key="AppTextFont">Microsoft YaHei</FontFamily>

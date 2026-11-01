@@ -1,0 +1,1573 @@
+/**
+ * Panel + layout styles — the blade and its chrome.
+ *
+ * The blade is anchored to the left edge of the transparent window. When open
+ * it slides/grows from x=0; when closed it retracts fully off-screen. The
+ * layered background + inner light edge gives the "extending from the screen"
+ * depth. Actual motion is driven by Framer Motion; these rules define the look.
+ */
+
+.root {
+  position: fixed;
+  inset: 0;
+  pointer-events: none; /* Let clicks pass through empty space */
+}
+
+/* pointer-events on individual children is set inline via React (open ? auto : none) */
+
+/* The blade itself — a tall rounded-right panel. */
+.blade {
+  position: relative; /* Inside motion wrapper */
+  flex-shrink: 0;
+  width: var(--panel-width);
+  display: flex;
+  flex-direction: column;
+  border-top-right-radius: 24px;
+  border-bottom-right-radius: 24px;
+  /* Completely deep black */
+  background: #000000;
+  
+  /* No back shadow and no edges */
+  box-shadow: none;
+  overflow: hidden;
+  border: none;
+  -webkit-background-clip: padding-box;
+  background-clip: padding-box;
+}
+.blade-container.blade-right .blade {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-top-left-radius: 24px;
+  border-bottom-left-radius: 24px;
+}
+
+/* Top-position blade: centered at top, bottom-rounded corners */
+.blade-container.blade-top {
+  top: 0;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+}
+.blade-container.blade-top .blade {
+  margin: 0 auto;
+  width: min(calc(100vw - 60px), 1080px);
+  border-radius: 0 0 24px 24px;
+}
+
+/* Reverse curves (flares) connecting blade to screen edge */
+.flare-top, .flare-bottom {
+  position: absolute;
+  left: -30px;
+  width: 60px;
+  height: 30px;
+  pointer-events: none;
+  z-index: -1;
+  display: flex;
+  background: linear-gradient(to right, #000000 30px, transparent 30px);
+  justify-content: flex-end;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.flare-top.flare-right, .flare-bottom.flare-right {
+  left: auto;
+  right: -30px;
+  background: linear-gradient(to left, #000000 30px, transparent 30px);
+  justify-content: flex-start;
+}
+.flare-top {
+  top: -30px;
+}
+.flare-bottom {
+  bottom: -30px;
+}
+.flare-top svg, .flare-bottom svg {
+  width: 30px;
+  height: 30px;
+  display: block;
+}
+
+/* Horizontal reverse curves (flares) connecting horizontal blade to screen edge */
+.flare-horizontal {
+  position: absolute;
+  width: 32px;
+  height: 30px;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.flare-horizontal svg {
+  width: 32px;
+  height: 30px;
+  display: block;
+}
+.flare-top-left {
+  left: -30px;
+  top: 0;
+}
+.flare-top-right {
+  right: -30px;
+  top: 0;
+}
+
+.blade-container.is-open .flare-top,
+.blade-container.is-open .flare-bottom,
+.blade-container.is-open .flare-horizontal,
+.blade-container.is-transitioning .flare-top,
+.blade-container.is-transitioning .flare-bottom,
+.blade-container.is-transitioning .flare-horizontal {
+  opacity: 1;
+}
+
+/* Parent container solid block extension to prevent screen edge blur transparency */
+.blade-container::before {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.blade-container.is-open::before,
+.blade-container.is-transitioning::before {
+  opacity: 1;
+}
+
+.blade-container.blade-left::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -30px;
+  width: 31px;
+  background: #000000;
+  pointer-events: none;
+  z-index: -2;
+}
+.blade-container.blade-right::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: auto;
+  right: -30px;
+  width: 31px;
+  background: #000000;
+  pointer-events: none;
+  z-index: -2;
+}
+.blade-container.blade-top::before {
+  content: '';
+  position: absolute;
+  top: -30px;
+  bottom: auto;
+  left: 0;
+  right: 0;
+  width: auto;
+  height: 30px;
+  background: #000000;
+  pointer-events: none;
+  z-index: -2;
+  display: block;
+}
+
+/* Content veil. The blade is pure black, so fading a black layer away over
+   the content looks exactly like fading the content in, without lifting the
+   whole content tree into its own layer. Open: the shape leads and the
+   content follows 50ms behind it. Close: the content dims first, then the
+   shape draws back into the edge bar. background-color (not opacity) was
+   measured to keep CPU and memory at or below the old reveal. Once the close
+   has finished (300ms) the veil is hidden, so the resting edge bar is drawn
+   exactly as before; on open it is visible again from the first frame. */
+.blade::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 400; /* above every layer inside the blade (ClearMenu menu is 350) */
+  pointer-events: none;
+  background-color: rgba(0, 0, 0, 1);
+  visibility: hidden;
+  transition: background-color 120ms cubic-bezier(0.4, 0, 1, 1), visibility 0s linear 300ms;
+}
+.blade-container.is-open .blade::after {
+  background-color: rgba(0, 0, 0, 0);
+  visibility: visible;
+  transition: background-color 240ms cubic-bezier(0.2, 0, 0, 1) 50ms, visibility 0s linear 0s;
+}
+.blade-container.reduce-motion .blade::after {
+  transition-duration: 0.01s;
+  transition-delay: 0s;
+}
+
+
+
+/* Edge bar getting ready for a drag from another app (EdgeDragCue): the bar
+   itself, solid black like it, swelling a little wider and longer. It starts
+   just wider than the bar and grows in three eased steps as the drag comes
+   closer: --pull is 0, 1/3, 2/3 or 1 (set from the cursor poll, see
+   lib/edgeDrag.ts), so it only animates when it changes step. The pill is
+   laid out at its largest (bar + 10px thick, 114% long) and scaled down to
+   the step, so a step is a transform on its own layer: no layout or repaint
+   per frame. --barn is the bar's thickness as a plain number. */
+.edge-drag-cue {
+  --pull: 0;
+  --bar: 3px;
+  --barn: 3;
+  --cue-thick: calc((var(--barn) + 3 + 7 * var(--pull)) / (var(--barn) + 10));
+  --cue-long: calc((1.04 + 0.1 * var(--pull)) / 1.14);
+  position: absolute;
+  background-color: #000000;
+  will-change: transform;
+  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+.edge-drag-cue.side-left,
+.edge-drag-cue.side-right {
+  top: 50%;
+  width: calc(var(--bar) + 10px);
+  height: 114%;
+  transform: translateY(-50%) scale(var(--cue-thick), var(--cue-long));
+}
+.edge-drag-cue.side-left {
+  left: 0;
+  transform-origin: left center;
+  border-radius: 0 100% 100% 0 / 0 24px 24px 0;
+}
+.edge-drag-cue.side-right {
+  right: 0;
+  transform-origin: right center;
+  border-radius: 100% 0 0 100% / 24px 0 0 24px;
+}
+.edge-drag-cue.side-top {
+  top: 0;
+  left: 50%;
+  height: calc(var(--bar) + 10px);
+  width: 114%;
+  transform-origin: center top;
+  transform: translateX(-50%) scale(var(--cue-long), var(--cue-thick));
+  border-radius: 0 0 24px 24px / 0 0 100% 100%;
+}
+/* Grows out of the bar itself */
+.edge-drag-cue.side-left,
+.edge-drag-cue.side-right {
+  animation-name: edge-drag-cue-in-side;
+}
+.edge-drag-cue.side-top {
+  animation-name: edge-drag-cue-in-top;
+}
+@keyframes edge-drag-cue-in-side {
+  from {
+    transform: translateY(-50%) scale(calc(var(--barn) / (var(--barn) + 10)), calc(1 / 1.14));
+  }
+}
+@keyframes edge-drag-cue-in-top {
+  from {
+    transform: translateX(-50%) scale(calc(1 / 1.14), calc(var(--barn) / (var(--barn) + 10)));
+  }
+}
+[data-motion='reduce'] .edge-drag-cue {
+  transition: none;
+  animation: none;
+}
+
+/* The drag targets' dashed line (DashedOutline): a 2px stroke,
+   10px dashes with round ends and 8px clear between them, the same for the
+   drop zone, the stacking ring and the detach edge. --dash-color sets how lit
+   it is. The rect is inset by half the stroke so it is never clipped. */
+.dashed-outline {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.dashed-outline-shape {
+  fill: none;
+  stroke: var(--dash-color, rgba(255, 255, 255, 0.38));
+  stroke-width: 2px;
+  stroke-linecap: round;
+  stroke-dasharray: 8 10;
+  transition: stroke 180ms ease;
+}
+rect.dashed-outline-shape {
+  x: 1px;
+  y: 1px;
+  width: calc(100% - 2px);
+  height: calc(100% - 2px);
+}
+
+/* Drop zone for drags from other apps (DropOverlay): solid black over the
+   whole shelf (nothing shows through), a dashed well, and the tray icon on its
+   own. The well comes in at its size as the shelf opens; once the drag is over
+   the shelf its dashes brighten softly (no change of size: a step from the edge
+   into the shelf, where the zone turns over, read as a pop), and it tightens as
+   it takes the drop. */
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 320; /* above the header and the split zone, below the content veil (400) */
+  display: flex;
+  padding: 12px;
+  pointer-events: none;
+  background: #000000;
+}
+.drop-overlay.is-horizontal {
+  padding: 10px 12px 12px;
+}
+/* A soft blue light rising from the bottom of the drop zone, in the edge light's blue, gone before 30% of
+   the zone's height; the shelf is otherwise unchanged. An ellipse wider than the shelf, so its sides fall
+   off softly too, with an eased falloff (no visible gradient band). It comes up with the zone and grows a
+   little brighter once the drag is over the shelf. Behind the well (painted first). */
+.drop-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 75% 30% at 50% 100%,
+    rgba(10, 132, 255, 0.34) 0%,
+    rgba(10, 132, 255, 0.24) 28%,
+    rgba(10, 132, 255, 0.13) 52%,
+    rgba(10, 132, 255, 0.06) 72%,
+    rgba(10, 132, 255, 0.016) 88%,
+    rgba(10, 132, 255, 0) 100%
+  );
+  opacity: 0.7;
+  transition: opacity 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.drop-overlay.is-over::before {
+  opacity: 1;
+}
+.drop-well {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px;
+  position: relative;
+  border-radius: 16px;
+  --dash-color: rgba(255, 255, 255, 0.55);
+  text-align: center;
+  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: drop-well-in 300ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* the well's dashes brighten over a longer, even ease than other dashed outlines */
+.drop-well .dashed-outline-shape {
+  transition: stroke 360ms cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+.drop-overlay.is-horizontal .drop-well {
+  flex-direction: row;
+  gap: 14px;
+  text-align: left;
+}
+@keyframes drop-well-in {
+  from {
+    transform: scale(0.94);
+  }
+}
+.drop-overlay.is-over .drop-well {
+  --dash-color: rgba(255, 255, 255, 0.78);
+}
+.drop-overlay.is-accepted .drop-well {
+  --dash-color: rgba(255, 255, 255, 0.9);
+  transform: scale(0.97);
+  transition-duration: 200ms;
+}
+/* Taken in: the zone fades as the new card comes up under it (Panel unmounts it once faded,
+   ACCEPT_FADE_MS). A CSS transition over framer-motion's inline opacity (hence !important): framer's
+   own fade showed the zone at full opacity for a frame as it finished, a flash after the drop. */
+.drop-overlay.is-accepted {
+  opacity: 0 !important;
+  transition: opacity 280ms cubic-bezier(0.45, 0, 0.25, 1);
+}
+.drop-icon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.92);
+}
+.drop-icon .drop-arrow {
+  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms ease;
+}
+.drop-overlay.is-over .drop-icon .drop-arrow {
+  transform: translateY(1.5px);
+  transition-duration: 360ms;
+}
+.drop-overlay.is-accepted .drop-icon .drop-arrow {
+  transform: translateY(4px);
+  opacity: 0;
+}
+.drop-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.drop-title {
+  font-size: calc(14px * var(--font-scale, 1));
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  letter-spacing: 0.01em;
+}
+.drop-sub {
+  font-size: calc(12px * var(--font-scale, 1));
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.5);
+}
+[data-motion='reduce'] .dashed-outline-shape,
+/* Pin / unpin (PinGlow): the shelf's edge light (the split zone's: a bright hairline with a short blue
+   falloff, faded at its ends) along the inside edge the card went to. It switches on from the middle out
+   and fades, once, and keeps off the cards. */
+.pin-glow {
+  position: absolute;
+  z-index: 310;
+  pointer-events: none;
+  opacity: 0;
+}
+.pin-glow.from-top,
+.pin-glow.from-bottom {
+  left: 0;
+  right: 0;
+  height: 48px;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 24%, #000 76%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 24%, #000 76%, transparent);
+  animation: pin-glow-across 820ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.pin-glow.from-left,
+.pin-glow.from-right {
+  top: 0;
+  bottom: 0;
+  width: 48px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 24%, #000 76%, transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 24%, #000 76%, transparent);
+  animation: pin-glow-along 820ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.pin-glow.from-top {
+  top: 0;
+  transform-origin: center top;
+  background: linear-gradient(
+    to bottom,
+    rgba(222, 240, 255, 1) 0,
+    rgba(222, 240, 255, 0.95) 1.5px,
+    rgba(10, 132, 255, 0.85) 3px,
+    rgba(10, 132, 255, 0.55) 6px,
+    rgba(10, 132, 255, 0.32) 11px,
+    rgba(10, 132, 255, 0.17) 18px,
+    rgba(10, 132, 255, 0.08) 27px,
+    rgba(10, 132, 255, 0.03) 37px,
+    rgba(10, 132, 255, 0) 48px
+  );
+}
+.pin-glow.from-bottom {
+  bottom: 0;
+  transform-origin: center bottom;
+  background: linear-gradient(
+    to top,
+    rgba(222, 240, 255, 1) 0,
+    rgba(222, 240, 255, 0.95) 1.5px,
+    rgba(10, 132, 255, 0.85) 3px,
+    rgba(10, 132, 255, 0.55) 6px,
+    rgba(10, 132, 255, 0.32) 11px,
+    rgba(10, 132, 255, 0.17) 18px,
+    rgba(10, 132, 255, 0.08) 27px,
+    rgba(10, 132, 255, 0.03) 37px,
+    rgba(10, 132, 255, 0) 48px
+  );
+}
+.pin-glow.from-left {
+  left: 0;
+  transform-origin: left center;
+  background: linear-gradient(
+    to right,
+    rgba(222, 240, 255, 1) 0,
+    rgba(222, 240, 255, 0.95) 1.5px,
+    rgba(10, 132, 255, 0.85) 3px,
+    rgba(10, 132, 255, 0.55) 6px,
+    rgba(10, 132, 255, 0.32) 11px,
+    rgba(10, 132, 255, 0.17) 18px,
+    rgba(10, 132, 255, 0.08) 27px,
+    rgba(10, 132, 255, 0.03) 37px,
+    rgba(10, 132, 255, 0) 48px
+  );
+}
+.pin-glow.from-right {
+  right: 0;
+  transform-origin: right center;
+  background: linear-gradient(
+    to left,
+    rgba(222, 240, 255, 1) 0,
+    rgba(222, 240, 255, 0.95) 1.5px,
+    rgba(10, 132, 255, 0.85) 3px,
+    rgba(10, 132, 255, 0.55) 6px,
+    rgba(10, 132, 255, 0.32) 11px,
+    rgba(10, 132, 255, 0.17) 18px,
+    rgba(10, 132, 255, 0.08) 27px,
+    rgba(10, 132, 255, 0.03) 37px,
+    rgba(10, 132, 255, 0) 48px
+  );
+}
+/* from the middle out, then the falloff draws in as it fades */
+@keyframes pin-glow-across {
+  0% {
+    opacity: 0;
+    transform: scale(0.35, 0.7);
+  }
+  30% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1, 0.75);
+  }
+}
+@keyframes pin-glow-along {
+  0% {
+    opacity: 0;
+    transform: scale(0.7, 0.35);
+  }
+  30% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.75, 1);
+  }
+}
+@keyframes pin-glow-plain {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+[data-motion='reduce'] .pin-glow {
+  animation-name: pin-glow-plain;
+}
+
+[data-motion='reduce'] .drop-overlay.is-accepted,
+[data-motion='reduce'] .drop-overlay::before,
+[data-motion='reduce'] .drop-well,
+[data-motion='reduce'] .drop-icon,
+[data-motion='reduce'] .drop-icon .drop-arrow {
+  transition: none;
+  animation: none;
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px var(--pad) 8px;
+  position: relative;
+  z-index: 100;
+}
+
+.header.header-horizontal {
+  z-index: 250;
+}
+
+.header .title {
+  font-size: calc(13px * var(--font-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+
+.header .spacer {
+  flex: 1;
+}
+
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.icon-btn:hover {
+  background: var(--bg-chip);
+  color: var(--text-primary);
+}
+
+/* Search: borderless pill on the card surface. Focus lifts the fill a step
+   further than hover and brightens the icon (no ring: the UI is borderless);
+   a macOS-style clear button appears once there is text. */
+.search {
+  --search-h: 34px;
+  --search-font: 13px;
+  --search-inset: 12px; /* icon / clear distance from the ends */
+  margin: 4px var(--pad) 6px;
+  position: relative;
+  z-index: 1;
+}
+.search input {
+  width: 100%;
+  height: var(--search-h);
+  padding: 0 calc(var(--search-inset) + 22px) 0 calc(var(--search-inset) + 22px);
+  background: var(--bg-card);
+  border: none;
+  border-radius: var(--radius-pill);
+  outline: none;
+  color: var(--text-primary);
+  caret-color: #ffffff;
+  font-family: var(--font-ui);
+  font-size: calc(var(--search-font) * var(--font-scale, 1));
+  font-weight: 500;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.search input::placeholder {
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+.search input::selection {
+  background: rgba(255, 255, 255, 0.28);
+}
+.search input:hover {
+  background: var(--bg-card-hover);
+}
+.search input:focus {
+  background: #222222;
+}
+.search .search-icon {
+  position: absolute;
+  left: var(--search-inset);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-tertiary);
+  pointer-events: none;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.search:focus-within .search-icon,
+.search.has-query .search-icon {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* Clear: grey disc with a dark cross, like a macOS search field. */
+.search-clear {
+  position: absolute;
+  right: calc(var(--search-inset) - 2px);
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  color: #141414;
+  cursor: pointer;
+  outline: none;
+  opacity: 0;
+  scale: 0.6;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 0.12s ease,
+    scale 0.16s cubic-bezier(0.2, 0.9, 0.3, 1),
+    background-color 0.12s ease,
+    visibility 0s linear 0.16s;
+}
+.search.has-query .search-clear {
+  opacity: 1;
+  scale: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    opacity 0.12s ease,
+    scale 0.16s cubic-bezier(0.2, 0.9, 0.3, 1),
+    background-color 0.12s ease,
+    visibility 0s;
+}
+.search-clear:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+.search-clear:active {
+  scale: 0.9;
+}
+.search-clear:focus-visible {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.45);
+}
+
+/* Header-embedded search (horizontal dock): centered overlay, long field.
+   Absolutely centered to the header so side widths can't offset it; fixed
+   width so focusing never shifts any neighboring buttons. Same field, just
+   the 30px control height and 12px text of that dock. */
+.header-search-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+}
+.header-search-center .search {
+  --search-h: 30px;
+  --search-font: 12px;
+  --search-inset: 10px;
+  margin: 0;
+}
+.header-search-center .search input {
+  width: 300px;
+  max-width: 100%;
+}
+.header-search-center .search-clear {
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+}
+
+/* Scroll area */
+.list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 2px var(--pad) 4px;
+  position: relative;
+  z-index: 1;
+  scrollbar-width: none; /* Firefox */
+  scroll-behavior: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+.list::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+
+/* Horizontal dock list styles */
+.list.horizontal {
+  flex-direction: row;
+  overflow-y: hidden;
+  overflow-x: auto;
+  padding: 6px 14px 8px;
+}
+.list.horizontal .list-stack {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  height: 146px;
+}
+.list.horizontal .pinned-section {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0;
+  margin: 0;
+  height: 146px;
+}
+.list.horizontal .recent-section {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  height: 146px;
+}
+
+/* Horizontal Pinned Accordion Drawer — Smooth width transition */
+.pinned-accordion.horizontal {
+  display: block;
+  width: 0;
+  min-width: 0;
+  max-width: 0;
+  height: 146px;
+  overflow: hidden;
+  margin-right: 0;
+  flex-shrink: 0;
+  transition: width 0.24s cubic-bezier(0.16, 1, 0.3, 1), max-width 0.24s cubic-bezier(0.16, 1, 0.3, 1), margin-right 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: width, max-width;
+}
+
+.pinned-accordion.horizontal.is-expanded {
+  width: var(--pinned-target-width, max-content);
+  max-width: var(--pinned-target-width, 3000px);
+  margin-right: 10px;
+}
+
+.pinned-accordion.horizontal .pinned-accordion-inner {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  height: 146px;
+  width: var(--pinned-target-width, max-content);
+  min-width: var(--pinned-target-width, max-content);
+  overflow: hidden;
+  opacity: 0;
+  transform: translateX(-8px);
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.24s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.24s ease;
+}
+
+.pinned-accordion.horizontal.is-expanded .pinned-accordion-inner {
+  opacity: 1;
+  transform: translateX(0);
+  visibility: visible;
+  pointer-events: auto;
+}
+
+/* Horizontal Floating Pinned Pill */
+.pinned-floating-pill.horizontal {
+  align-self: center;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 26px;
+  min-width: 26px;
+  max-width: 26px;
+  height: auto;
+  padding: 8px 0;
+  margin: 0;
+  background: #141414;
+  border: none;
+  border-radius: 999px;
+  color: #ffffff;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  transition: background 0.14s ease, transform 0.12s ease;
+  flex-shrink: 0;
+}
+
+.pinned-floating-pill.horizontal:hover {
+  background: #1c1c1c;
+}
+
+.pinned-floating-pill.horizontal:active {
+  transform: scale(0.96);
+  background: #222222;
+}
+
+.pinned-floating-pill.horizontal .pinned-pill-icon {
+  display: block;
+  color: #ffffff;
+  opacity: 0.92;
+  flex-shrink: 0;
+}
+
+.pinned-floating-pill.horizontal .pinned-pill-count {
+  font-size: calc(11px * var(--font-scale, 1));
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  line-height: 1;
+  height: 11px;
+  letter-spacing: 0.01em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pinned-floating-pill.horizontal .pinned-pill-arrow {
+  display: block;
+  color: rgba(255, 255, 255, 0.6);
+  flex-shrink: 0;
+  transition: color 0.14s ease, transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pinned-floating-pill.horizontal:hover .pinned-pill-arrow {
+  color: #ffffff;
+}
+
+[data-motion="reduce"] .pinned-accordion.horizontal,
+[data-motion="reduce"] .pinned-accordion.horizontal .pinned-accordion-inner,
+[data-motion="reduce"] .pinned-floating-pill.horizontal .pinned-pill-arrow {
+  transition: none !important;
+}
+
+
+
+.list.horizontal .recent-section .section-label.recent-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  min-width: 20px;
+  height: 146px;
+  margin: 0 2px 0 0;
+  padding: 0;
+  background: transparent;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  box-sizing: border-box;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.list.horizontal .recent-section .recent-label-text {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: calc(9.5px * var(--font-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.35);
+  max-height: 125px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section-label {
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #a1a1aa;
+  margin: 8px 6px 6px;
+}
+.section-label:first-child {
+  margin-top: 4px;
+}
+
+.list-stack,
+.recent-section,
+.pinned-section {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Clean Pinned Section */
+.pinned-section {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  margin: 0 0 4px;
+}
+
+/* Pinned Accordion Drawer — Hardware-accelerated 0fr/1fr grid transition */
+.pinned-accordion {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: grid-template-rows;
+}
+
+.pinned-accordion.is-expanded {
+  grid-template-rows: 1fr;
+}
+
+.pinned-accordion-inner {
+  overflow: hidden;
+  min-height: 0;
+  opacity: 0;
+  transform: translateY(-8px);
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.24s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.24s ease;
+}
+
+.pinned-accordion.is-expanded .pinned-accordion-inner {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+  pointer-events: auto;
+}
+
+/* Ensure pinned cards are pre-rendered and never culled during accordion reveal */
+.pinned-section .item {
+  content-visibility: visible !important;
+  contain-intrinsic-size: none !important;
+}
+
+/* Floating Pinned Pill */
+.pinned-floating-pill {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px 0 7px;
+  margin: 2px 0 6px 1px;
+  background: #141414;
+  border: none;
+  border-radius: 999px;
+  color: #ffffff;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  transition: background 0.14s ease, transform 0.12s ease;
+}
+
+.pinned-floating-pill:hover {
+  background: #1c1c1c;
+}
+
+.pinned-floating-pill:active {
+  transform: scale(0.96);
+  background: #222222;
+}
+
+.pinned-floating-pill .pinned-pill-icon {
+  color: #ffffff;
+  opacity: 0.92;
+  flex-shrink: 0;
+}
+
+.pinned-floating-pill .pinned-pill-count {
+  font-size: calc(11px * var(--font-scale, 1));
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  line-height: 1;
+  letter-spacing: 0.01em;
+}
+
+.pinned-floating-pill .pinned-pill-arrow {
+  color: rgba(255, 255, 255, 0.6);
+  flex-shrink: 0;
+  transition: color 0.14s ease, transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pinned-floating-pill:hover .pinned-pill-arrow {
+  color: #ffffff;
+}
+
+[data-motion="reduce"] .pinned-accordion,
+[data-motion="reduce"] .pinned-accordion-inner,
+[data-motion="reduce"] .pinned-floating-pill .pinned-pill-arrow {
+  transition: none !important;
+}
+
+/* Interactive Pinned Section Header */
+.pinned-header-interactive {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: 4px 6px;
+  margin: 0 0 2px 0;
+  border-radius: 8px;
+  background: transparent;
+  transition: background 0.15s ease;
+  user-select: none;
+}
+.pinned-header-interactive:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.pinned-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: calc(11.5px * var(--font-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.85);
+}
+.pinned-count-badge {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: calc(11.5px * var(--font-scale, 1));
+  font-weight: 600;
+  padding: 0;
+  border-radius: 0;
+  letter-spacing: 0;
+  border: none;
+}
+.pinned-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pinned-toggle-hint {
+  font-size: calc(10.5px * var(--font-scale, 1));
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.6);
+  text-transform: none;
+  letter-spacing: 0;
+  transition: color 0.2s ease;
+}
+.pinned-header-interactive:hover .pinned-toggle-hint {
+  color: #ffffff;
+}
+.pinned-header-interactive .bundle-collapse-btn {
+  background: transparent;
+  padding: 0;
+  height: 18px;
+  width: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  color: rgba(255, 255, 255, 0.7);
+}
+.pinned-header-interactive:hover .bundle-collapse-btn {
+  color: #ffffff;
+}
+
+/* Empty state */
+.empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 24px;
+  user-select: none;
+}
+.empty-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 220px;
+}
+.empty .title {
+  font-size: calc(15px * var(--font-scale, 1));
+  font-weight: 600;
+  color: #ffffff;
+  letter-spacing: 0.01em;
+}
+.empty .hint {
+  font-size: calc(13px * var(--font-scale, 1));
+  line-height: 1.45;
+  color: #a1a1aa;
+}
+
+/* Footer */
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px var(--pad) 12px;
+  position: relative;
+  z-index: 100;
+  background: transparent;
+}
+.footer .count {
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 500;
+  color: #e4e4e7;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.footer .spacer {
+  flex: 1;
+}
+
+/* Glass capsule: item count + emoji button */
+.footer-capsule {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  background: var(--bg-chip);
+  border: none;
+  border-radius: 999px;
+  padding: 0 10px;
+  box-shadow: none;
+  transition: background 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.footer-capsule:hover {
+  background: #1c1c1c;
+}
+.footer-capsule-count {
+  font-size: calc(11.5px * var(--font-scale, 1));
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  padding-right: 0;
+  user-select: none;
+}
+.footer-capsule-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.12);
+  margin-right: 3px;
+}
+.footer-capsule-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+.footer-capsule-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  transform: scale(1.08);
+}
+.footer-capsule-btn:active {
+  transform: scale(0.94);
+}
+
+/* Return to clipboard pill */
+.footer-back-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  background: var(--bg-chip);
+  border: none;
+  border-radius: 999px;
+  padding: 0 12px 0 8px;
+  color: #f4f4f5;
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: none;
+  transition: background 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.footer-back-pill:hover {
+  background: #1c1c1c;
+  color: #ffffff;
+}
+.footer-back-pill:active {
+  transform: scale(0.96);
+}
+
+/* Clear button */
+.text-btn {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.75);
+  background: var(--bg-chip);
+  border: none;
+  padding: 0 10px 0 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  box-shadow: none;
+  transition: background 0.18s cubic-bezier(0.22, 1, 0.36, 1), color 0.18s ease;
+}
+.text-btn .clear-btn-icon {
+  color: rgba(255, 255, 255, 0.75);
+  transition: color 0.18s ease;
+}
+.text-btn:hover:not(:disabled) {
+  background: #1c1c1c;
+  color: #ffffff;
+}
+.text-btn:hover:not(:disabled) .clear-btn-icon {
+  color: #ff6b6b;
+}
+.text-btn.active:not(:disabled) {
+  background: #1c1c1c;
+  color: #ffffff;
+}
+.text-btn.active:not(:disabled) .clear-btn-icon {
+  color: #ff6b6b;
+}
+.text-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.text-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: #141414;
+}
+.text-btn.danger {
+  color: rgba(255, 255, 255, 0.75);
+}
+.text-btn.danger:hover:not(:disabled) {
+  background: #1c1c1c;
+  color: #ffffff;
+}
+.text-btn.danger:hover:not(:disabled) .clear-btn-icon {
+  color: #ff6b6b;
+}
+
+/* ----------------------------------------------------------------- */
+/* Toasts                                                            */
+/* ----------------------------------------------------------------- */
+
+/* Bottom-anchored stack, sitting just above the footer. pointer-events are
+   enabled per-toast so empty areas stay click-through. */
+.toast-stack {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 52px;
+  display: flex;
+  flex-direction: column-reverse; /* newest (last in DOM) appears lowest */
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  z-index: 200;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 9px 16px;
+  font-size: calc(12.5px * var(--font-scale, 1));
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  background: #141414;
+  border: none;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+  text-align: left;
+}
+
+.toast-info {
+  border: none;
+}
+
+.toast-error {
+  color: #fff;
+  background: #3a1c1c;
+  border: none;
+}
+
+.toast:hover {
+  filter: brightness(1.1);
+}
+
+/* Quick Type Segmented Control (Jelly Radio Physics) */
+.filter-segmented-track {
+  background: transparent;
+  display: flex;
+  align-items: center;
+  overflow: visible;
+}
+
+.jelly-filters {
+  --jf-chip: #27272a;
+  --jf-active: #ffffff;
+  --jf-text: rgba(255, 255, 255, 0.72);
+  --jf-active-text: #18181b;
+  --jf-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+
+  display: inline-flex;
+  align-items: center;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  overflow: visible;
+}
+
+.filter-chip {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  border: 0 !important;
+  background: none !important;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  outline: none;
+  transform-origin: 50% 50%;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  will-change: transform;
+  /* Transform is driven strictly per-frame by Jelly MotionValues (inline) - no CSS transform transition */
+}
+
+.filter-chip[data-on='true'],
+.filter-chip.active {
+  cursor: default;
+}
+
+.filter-chip__skin {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  overflow: hidden;
+  background: #27272a;
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1;
+  white-space: nowrap;
+  border: none;
+  box-shadow: none;
+  transition:
+    transform 160ms cubic-bezier(0.23, 1, 0.32, 1),
+    background-color 200ms ease,
+    color 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.filter-chip__skin::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: #ffffff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .filter-chip[data-on='false']:not(:disabled):hover .filter-chip__skin::before,
+  .filter-chip:not(.active):not(:disabled):hover .filter-chip__skin::before {
+    opacity: 0.12;
+  }
+  .filter-chip[data-on='false']:not(:disabled):hover .filter-chip__skin,
+  .filter-chip:not(.active):not(:disabled):hover .filter-chip__skin {
+    color: #ffffff;
+  }
+}
+
+.filter-chip:active .filter-chip__skin {
+  transform: scale(0.95);
+}
+
+.filter-chip[data-on='true'] .filter-chip__skin,
+.filter-chip.active .filter-chip__skin {
+  background: #ffffff;
+  color: #18181b;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .filter-chip:active .filter-chip__skin {
+    transform: none;
+  }
+}
+
+/* Copy indicator: a liquid tab that grows out of the edge bar.
+   .copy-ind is a zero-size anchor on the screen edge at the middle of the
+   bar. The shape is drawn for a left dock; .copy-ind__orient mirrors it for
+   the right dock and turns it for the top. Everything animates with
+   transform/opacity, so the compositor runs it (no per-frame JS). */
+.copy-ind {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.copy-ind__orient {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.copy-ind--right .copy-ind__orient {
+  transform: scaleX(-1);
+}
+.copy-ind--top .copy-ind__orient {
+  transform: rotate(90deg);
+}
+
+/* Rest: squashed into the bar (bar thickness / tab depth) and hidden once
+   the exit has finished. Exit: critically damped spring, no bounce, starts
+   60ms after the icon leaves. */
+.copy-ind__shape {
+  position: absolute;
+  display: block;
+  overflow: visible;
+  transform: scale(var(--copy-tab-start), 0.62);
+  visibility: hidden;
+  transition:
+    transform 289ms linear(0, 0.021 1.8%, 0.058 3.8%, 0.116 6.3%, 0.23 10.5%, 0.402 16.8%, 0.503 20.8%, 0.586 24.5%, 0.659 28.2%, 0.725 32.3%, 0.782 36.5%, 0.832 41%, 0.874 46%, 0.911 51.7%, 0.941 58.5%, 0.965 66.8%, 0.982 77.5%, 0.994 93.8%, 1) 60ms,
+    visibility 0s linear 360ms;
+}
+/* Enter: spring with response 0.40s and damping 0.72, a 3.8% overshoot. */
+.copy-ind.is-on .copy-ind__shape {
+  transform: scale(1, 1);
+  visibility: visible;
+  transition:
+    transform 444ms linear(0, 0.007 1.8%, 0.03 3.8%, 0.071 6%, 0.138 8.8%, 0.246 12.5%, 0.524 21.5%, 0.649 26%, 0.745 30%, 0.826 34%, 0.891 38%, 0.944 42.3%, 0.985 46.8%, 1.014 51.7%, 1.032 57.8%, 1.038 65.5%, 1.026 80%, 1.006 99.8%, 1),
+    visibility 0s;
+}
+
+/* Icon: centred on the tab's flat cap, upright in every dock. */
+.copy-ind__icon {
+  position: absolute;
+  left: 25px;
+  top: 0;
+  transform: translate(-50%, -50%) scale(0.5);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 110ms cubic-bezier(0.4, 0, 1, 1),
+    transform 160ms cubic-bezier(0.4, 0, 1, 1),
+    visibility 0s linear 160ms;
+}
+.copy-ind--right .copy-ind__icon {
+  left: -25px;
+}
+.copy-ind--top .copy-ind__icon {
+  left: 0;
+  top: 25px;
+}
+/* Pops in once the tab is big enough to hold it (110ms): spring with
+   response 0.34s, damping 0.62. */
+.copy-ind.is-on .copy-ind__icon {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 160ms cubic-bezier(0.2, 0, 0, 1) 110ms,
+    transform 348ms linear(0, 0.008 2%, 0.033 4.3%, 0.078 6.8%, 0.149 9.8%, 0.255 13.5%, 0.58 24%, 0.705 28.5%, 0.802 32.5%, 0.884 36.5%, 0.95 40.5%, 1.001 44.5%, 1.039 48.8%, 1.067 53.5%, 1.081 59%, 1.082 65.8%, 1.061 76.3%, 1.016 95.3%, 1.008 99.8%, 1) 110ms,
+    visibility 0s;
+}
+
+/* Check style: the tick draws itself in once the icon has appeared. */
+.copy-ind .tick-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 0s linear 200ms;
+}
+.copy-ind.is-on .tick-draw {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 280ms cubic-bezier(0.22, 1, 0.36, 1) 170ms;
+}
+
+/* Reduce motion: full-size shape and icon simply fade. */
+.copy-ind.is-reduced .copy-ind__shape {
+  transform: none;
+  opacity: 0;
+  transition: opacity 120ms linear, visibility 0s linear 120ms;
+}
+.copy-ind.is-reduced.is-on .copy-ind__shape {
+  opacity: 1;
+  transition: opacity 120ms linear, visibility 0s;
+}
+.copy-ind.is-reduced .copy-ind__icon {
+  transform: translate(-50%, -50%);
+  transition: opacity 120ms linear, visibility 0s linear 120ms;
+}
+.copy-ind.is-reduced.is-on .copy-ind__icon {
+  transform: translate(-50%, -50%);
+  transition: opacity 120ms linear, visibility 0s;
+}
+.copy-ind.is-reduced .tick-draw {
+  stroke-dashoffset: 0;
+  transition: none;
+}

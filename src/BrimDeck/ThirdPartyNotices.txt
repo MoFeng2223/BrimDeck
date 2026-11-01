@@ -1,3 +1,32 @@
+DropShelf 2.6.7 (commit 077afb1420a44ca52d4bb0aa2b48193ec1a571c5)
+https://github.com/wangmingkun148/DropShelf
+
+Original WPF shelves, gestures, Shell drag-and-drop, virtual attachments, quick actions, history and resources are hosted in BrimDeck.
+Adaptations isolate resources and storage and connect BrimDeck's lifecycle and island. The original implementation is by Wang Mingkun.
+
+MIT License
+
+Copyright (c) 2026 Wang Mingkun
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
 Jint 4.16.3
 https://github.com/sebastienros/jint
 
@@ -681,6 +710,24 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Phosphor Icons Core 2.1.1 (unmodified Bold icon paths)
+https://phosphoricons.com
+MIT License; Copyright (c) 2023 Phosphor Icons.
+The complete notice is distributed in EdgeDrop.Phosphor.LICENSE.txt alongside the original path data.
+
+emoji-data 16.0.0 (local Unicode catalog, not Twemoji artwork)
+https://github.com/iamcal/emoji-data
+MIT License; Copyright (c) 2013 Cal Henderson.
+The complete notice is distributed in EdgeDrop.EmojiData.LICENSE.txt.
+Emoji glyphs are rendered by Windows fonts; no Twemoji image assets are distributed.
+
+Edge-Drop 0.4.0 (translated top Dock header, horizontal cards, stacks and offline preview algorithms)
+https://github.com/Deepender25/Edge-Drop
+Source commit: 767b6d63d7841d7746189fe97ba67d27dd378d34
+Licensed under the Apache License, Version 2.0.
+The complete original license and bundled notices are distributed in EdgeDrop.LICENSE.txt.
+Modified files are identified in third_party/EdgeDrop.PORTING.md; React/Electron presentation is translated into WPF and uses BrimDeck's existing data, theme, motion and native drag owners.
 
 Night Owl for Visual Studio Code (panel theme colors)
 https://github.com/sdras/night-owl-vscode-theme

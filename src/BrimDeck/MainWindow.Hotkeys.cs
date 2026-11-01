@@ -23,6 +23,7 @@ public partial class MainWindow
     internal void OpenFromHotkey()
     {
         if (_expanded) return;
+        if (_host.EventDriven) { _context = _host.DetectNow(); ApplySettings(); }
         // A collapsed preview of the settings ends as hovering would end it; a preview of the open panel is left alone.
         if (_preview) { if (_previewExpanded) return; _app.EndPreviewFromDeck(); }
         // The full-screen rule hides the panel; the hotkey does not override it.

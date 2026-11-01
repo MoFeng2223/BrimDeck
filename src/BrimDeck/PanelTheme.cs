@@ -26,6 +26,8 @@ internal static class PanelTheme
     public static int Generation { get; private set; }
     // Raised just before another palette becomes current; true when a theme trades its day and night looks.
     public static event Action<bool>? Changing;
+    // Published after the complete palette is current, including file reloads and day/night changes.
+    public static event Action? Changed;
     // The themes found in the folder at the last reload.
     public static IReadOnlyList<PanelThemeInfo> UserThemes { get; private set; } = [];
 
@@ -90,6 +92,7 @@ internal static class PanelTheme
         _hex = Hexes(palette); _appColors.Clear(); _warningColor = _criticalColor = null;
         _readable.Clear(); _readableColors.Clear();
         Publish(Application.Current?.Resources);
+        Changed?.Invoke();
         return true;
     }
 
@@ -162,6 +165,7 @@ internal static class PanelTheme
         next["PanelScrollThumbRest"] = Current.ThumbRestOpacity;
         // Corners in the panel's XAML (App.xaml has the defaults): square in a pixel theme.
         for (int r = 1; r <= 16; r++) next["PanelR" + r] = new CornerRadius(Corner(r));
+        next["ClipboardDockCardRadius"] = new CornerRadius(Corner(Core.ClipboardDockLayout.CardRadius));
         next["SegmentCorner"] = new CornerRadius(Corner(5));
         var merged = resources.MergedDictionaries;
         int at = _published is not null ? merged.IndexOf(_published) : -1;
