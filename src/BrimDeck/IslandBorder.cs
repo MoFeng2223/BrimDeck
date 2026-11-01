@@ -147,7 +147,7 @@ public sealed class IslandBorder : Border
         return brush;
     }
 
-    private Geometry Outline()
+    internal Geometry Outline()
     {
         double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip, step = PixelStairs.Step(Pixel, dpi);
         var key = (RenderSize, ShoulderRadius, CornerRadius, Inset, step, RimWidth);
