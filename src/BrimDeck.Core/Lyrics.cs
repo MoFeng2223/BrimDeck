@@ -70,7 +70,8 @@ public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string 
         {
             var stamps = Regex.Matches(row, @"\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]");
             if (stamps.Count == 0) continue;
-            string text = row[(stamps[^1].Index + stamps[^1].Length)..].Trim();
+            // Word-timed LRC puts a <mm:ss.xx> tag before each word; the panel shows whole lines, so the tags are dropped.
+            string text = Regex.Replace(row[(stamps[^1].Index + stamps[^1].Length)..], @"<\d{1,3}:\d{2}(?:[.:]\d{1,3})?>", "").Trim();
             foreach (Match stamp in stamps)
             {
                 double time = int.Parse(stamp.Groups[1].Value) * 60 + int.Parse(stamp.Groups[2].Value);

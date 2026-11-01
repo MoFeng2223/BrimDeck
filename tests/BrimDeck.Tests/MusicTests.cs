@@ -38,6 +38,8 @@ internal static class MusicTests
         check("LRC multiple timestamps and offsets are parsed", lrc.Synced && lrc.Lines.Count == 3 && lrc.Lines[0].Seconds == 1.5 && lrc.Lines[1].Seconds == 5.75);
         check("Lyrics show an instrumental introduction before the first timestamp", lrc.At(0).Current == "♪");
         check("Long lyric lines stay visible until the next timestamp", lrc.At(10.75).Current == "同一行" && lrc.At(12).Current == "同一行" && lrc.At(19.499).Current == "同一行" && lrc.At(19.5).Current == "后一行");
+        var words = Lyrics.Parse("[03:17.552]<03:17.552>我<03:17.855>也<03:18.143>可<03:18.479>以 <03:19.000>", null, 252, "test");
+        check("Word timing tags are removed from LRC lines", words.Lines.Count == 1 && words.Lines[0].Text == "我也可以" && Math.Abs(words.Lines[0].Seconds - 197.552) < 0.001);
         var gap = Lyrics.Parse("[00:02]长句\n[00:14]\n[00:20]下一句", null, 40, "网易云音乐");
         check("Only timestamped blank lines start an instrumental gap", gap.At(13.999).Current == "长句" && gap.At(14).Current == "♪" && gap.At(19.999).Current == "♪" && gap.At(20).Current == "下一句");
         check("Seeking backwards from an explicit gap restores the lyric", gap.At(16).Current == "♪" && gap.At(8).Current == "长句");
