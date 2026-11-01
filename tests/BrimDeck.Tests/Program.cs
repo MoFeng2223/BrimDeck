@@ -49,6 +49,7 @@ try
     CurvesTests.Run(Check);
     ExpandBounceTests.Run(Check);
     ExpandStillTests.Run(Check);
+    ResetConfirmTests.Run(Check);
     ExpandSnapTests.Run(Check);
     MotionReviewTests.Run(Check);
     IdleCostTests.Run(Check);

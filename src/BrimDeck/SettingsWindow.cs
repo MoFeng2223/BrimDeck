@@ -351,7 +351,7 @@ public sealed partial class SettingsWindow : Window
         if (page is < 4 or 5 or 6 or ThemePage or MonitorSettingsPage)
         {
             // Resets every setting on the page, so it is an outlined button and asks first (SW-09, S-03).
-            var reset=ActionButton(Loc.T("恢复默认", "Restore defaults"),()=>{ if(Confirm(Loc.T("恢复默认", "Restore defaults"),Loc.T($"将把“{_pages[page]}”页的全部设置恢复为默认值。",$"This puts every setting on the {_pages[page]} page back to its default."),Loc.T("恢复默认", "Restore defaults")))ResetPage(); });
+            var reset=ActionButton(Loc.T("恢复默认", "Restore defaults"),()=>{ if(Confirm(Loc.T("恢复默认", "Restore defaults"),ResetConfirmText(page),Loc.T("恢复默认", "Restore defaults")))ResetPage(); });
             reset.Style=(Style)FindResource("SettingsOutlineButton"); reset.FontSize=12; reset.Padding=new Thickness(12,4,12,4); reset.VerticalAlignment=VerticalAlignment.Center; DockPanel.SetDock(reset,Dock.Right); head.Children.Add(reset);
         }
         head.Children.Add(page == 7 ? Wordmark(28) : TextLine(_pages[page],24,TextPrimary,FontWeights.SemiBold)); _content.Children.Add(head);
@@ -621,6 +621,10 @@ public sealed partial class SettingsWindow : Window
         }
         QuickSizeRow(sizes);
     }
+    // What the "restore defaults" confirmation says. The quota page also puts the application list back (ResetPage, case 3), which removes the applications
+    // the user added and their quota sources, the largest loss of any page, so it says so.
+    private string ResetConfirmText(int page) => Loc.T($"将把“{_pages[page]}”页的全部设置恢复为默认值。", $"This puts every setting on the {_pages[page]} page back to its default.")
+        + (page == 3 ? Loc.T("\n\n应用列表也会换回默认：你添加的应用、各应用的额度来源与自定义设置都会消失。", "\n\nThe application list also goes back to the default: the applications you added, and each one's quota source and custom settings, are removed.") : "");
     private void ResetPage()
     {
         var defaults=new DeckSettings();
