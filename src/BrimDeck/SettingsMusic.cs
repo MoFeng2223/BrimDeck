@@ -157,9 +157,7 @@ public sealed partial class SettingsWindow
         bool notch = style == CompactStyle.Notch;
         string letters = Loc.T("环内显示首字母", "Letter in the rings");
         var options = new StackPanel();
-        options.Children.Add(Lighter(Toggle(letters, S.QuotaRingLetters, v => Change(s => s.QuotaRingLetters = v),
-            help: Loc.T("在每个配额环中间写出应用显示名称的首个字母或数字，改名后随之变化。刘海、胶囊和侧边列都适用。",
-                "Writes the first letter or digit of each application's display name inside its ring; renaming an application changes it. Applies to the notch, the capsule and the side column.")), letters));
+        options.Children.Add(Lighter(Toggle(letters, S.QuotaRingLetters, v => Change(s => s.QuotaRingLetters = v)), letters));
         return OptionsPartRow(style, CompactPart.Rings, rows, Loc.T("配额环", "Quota rings"), Loc.T("配额环设置", "Quota ring settings"), S.ShowsSummary(style),
             on => Change(s => { if (notch) s.NotchSummary = on; else s.CapsuleSummary = on; }), options);
     }
