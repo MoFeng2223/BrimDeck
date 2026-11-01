@@ -1203,13 +1203,14 @@ public partial class MainWindow
         else _musicTick.Stop();
         if (_expanded || EffectiveStyle != CompactStyle.Line || !Settings.MusicIndicatorProgress || _mediaTrack is not { HasTimeline: true, State: not MediaState.Stopped }) MusicIndicator.Visibility = Visibility.Collapsed;
     }
-    // The open page's current lyric and title scroll together: only while a song plays, the panel is open on this page and
-    // animation is on. Paused, they rest at their start (a title that overhangs shows whole in its tooltip).
+    // The open page: the current lyric scrolls only while a song plays, the panel is open on this page and animation is on. The title
+    // is the song's name, not its audio, so it scrolls whenever the page is open and the title does not fit; paused, it would otherwise
+    // rest cut at its start with no way to read the rest.
     private void UpdateLyricScrolling()
     {
-        bool scrolling = Settings.Animations && SystemParameters.ClientAreaAnimation
-            && MusicAudioActive && IsVisible && !IsSuppressed && !DisplayPower.Off && _expanded && IsMusicPage;
-        _lyricCurrent?.SetScrolling(scrolling); _musicTitle?.SetScrolling(scrolling);
+        bool open = Settings.Animations && SystemParameters.ClientAreaAnimation
+            && IsVisible && !IsSuppressed && !DisplayPower.Off && _expanded && IsMusicPage;
+        _lyricCurrent?.SetScrolling(open && MusicAudioActive); _musicTitle?.SetScrolling(open);
     }
     // The carousel runs its own timer and WPF animation; it only needs to know when it may move.
     private void UpdateQuotaCarousel()
