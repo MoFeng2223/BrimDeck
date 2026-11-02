@@ -1,0 +1,24 @@
+src/BrimDeck/MainWindow.CompactColumn.cs
+  h_dc4d9c798f1bc1 113
+src/BrimDeck/SettingsMusic.cs
+  h_dc4d9c798f1bc1 61,67,77,88,167,209,212-228,248,250
+src/BrimDeck.Core/Settings.cs
+  h_dc4d9c798f1bc1 284,363-364,389,391
+tests/BrimDeck.Tests/EqualizerModeTests.cs
+  h_dc4d9c798f1bc1 5-6,14-15,18-25,29
+src/BrimDeck/SettingsWindow.cs
+  h_dc4d9c798f1bc1 636,646-648
+src/BrimDeck/MainWindow.Music.cs
+  h_dc4d9c798f1bc1 458,535,784,1125,1165-1166,1270,1273
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7ee8a08aba614b6c1fd08b6e7d77bc8ecc32bfea",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
