@@ -31,17 +31,17 @@ public partial class MainWindow
         double scale = CompactMusicLayout.SafeScale(shape.Scale), dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
         double column = SnapDown(ColumnWidth(shape), dpi), room = SnapDown(CompactContentWidth(shape), dpi);
         bool media = Settings.ShowsMusic(EffectiveStyle) && _mediaTrack is { State: not MediaState.Stopped };
+        bool cover = media && !PausedHides(PausedMusicHide.Cover), hideText = PausedHides(PausedMusicHide.Text);
         bool equalizer = CompactEqualizerShown;
-        bool notice = media && _trackNoticeUntil > DateTimeOffset.UtcNow;
+        bool notice = media && !hideText && _trackNoticeUntil > DateTimeOffset.UtcNow;
         string text = "";
-        if (media)
+        if (media && !hideText)
         {
             if (notice || Settings.MusicText == CompactMusicText.Title) text = _mediaTrack!.Caption;
             else if (Settings.MusicText == CompactMusicText.Lyrics)
             {
-                text = CurrentLyrics(_mediaTrack!).Current;
-                _compactLyric = text;
-                if (text.Length == 0) text = _mediaTrack!.Caption;
+                _compactLyric = CurrentLyrics(_mediaTrack!).Current;
+                text = CompactLyricText(_mediaTrack!, _compactLyric);
             }
         }
         var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
@@ -82,11 +82,11 @@ public partial class MainWindow
             line.Children.Add(element);
             lines.Add((line, height));
         }
-        if (media)
+        if (cover)
         {
-            var cover = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius);
-            System.Windows.Automation.AutomationProperties.SetName(cover, _mediaTrack!.Caption);
-            Add(cover, layout.CoverSize);
+            var image = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius);
+            System.Windows.Automation.AutomationProperties.SetName(image, _mediaTrack!.Caption);
+            Add(image, layout.CoverSize);
         }
         foreach (var part in Settings.CompactOrder(EffectiveStyle))
         {
@@ -122,7 +122,7 @@ public partial class MainWindow
         // The column's width and length for the shape (CollapsedGeometry.Resolve): the widest fixed part, the readings up to the cap,
         // and every line with the gaps; the surface never shortens below its tallest line. Like the row, the track notice is left out.
         var stack = CompactColumn.Stack([.. lines.Select(line => line.Height)], gap);
-        double wantedColumn = CompactColumn.Width(scale, [layout.CoverSize * (media ? 1 : 0), equalizer ? layout.EqualizerSize : 0, clock?.ReservedWidth ?? 0, apps.Count > 0 ? layout.RingSize : 0],
+        double wantedColumn = CompactColumn.Width(scale, [layout.CoverSize * (cover ? 1 : 0), equalizer ? layout.EqualizerSize : 0, clock?.ReservedWidth ?? 0, apps.Count > 0 ? layout.RingSize : 0],
             strips.Select(strip => strip.PreferredWidth));
         double wanted = notice ? (double.IsNaN(_compactWanted) ? stack.Length : _compactWanted) : DevicePixels.Up(stack.Length, dpi);
         double required = lines.Count == 0 ? 0 : Math.Ceiling(lines.Max(line => line.Height));
@@ -156,7 +156,7 @@ public partial class MainWindow
         {
             int line = i / perLine, inLine = Math.Min(perLine, rings.Length - line * perLine);
             double start = (column - (inLine * layout.RingSize + (inLine - 1) * gap)) / 2;
-            var ring = UI.Ring(rings[i].Used, rings[i].Color, layout.RingSize, layout.RingThickness);
+            var ring = QuotaCarousel.Ring(rings[i], layout.RingSize, layout.RingThickness, layout.Scale);
             Canvas.SetLeft(ring, Math.Round(start + (i % perLine) * (layout.RingSize + gap)));
             Canvas.SetTop(ring, line * (layout.RingSize + gap));
             canvas.Children.Add(ring);

@@ -21,56 +21,6 @@ public sealed partial class SettingsWindow
         return new HelpHeading(label, HelpIcon(title, help, 14)) { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
     }
 
-    // A label followed by its info icon. The label is centered in the height the panel is given, and the icon's center goes on
-    // the middle of the label's glyphs. The settings window draws text in Display mode, which snaps the baseline to device
-    // pixels, so the glyphs sit at a different height in the label's box at each display scale and a fixed offset cannot
-    // follow them: at 150% a 1 DIP nudge measured at another scale left the icon 1.5 pixels low.
-    private sealed class HelpHeading : Panel
-    {
-        // The middle of a capital letter and of an ideograph above the baseline, the same for Segoe UI Variable and
-        // Microsoft YaHei UI; measured from rendered glyphs at 11 to 13 DIP and 100% to 200% scale.
-        private const double GlyphMiddle = 0.36;
-        private readonly TextBlock _label;
-        private readonly FrameworkElement _icon;
-        private readonly TranslateTransform _shift = new();
-
-        public HelpHeading(TextBlock label, FrameworkElement icon)
-        {
-            _label = label; _icon = icon;
-            label.VerticalAlignment = VerticalAlignment.Top; icon.VerticalAlignment = VerticalAlignment.Top; icon.RenderTransform = _shift;
-            Children.Add(label); Children.Add(icon);
-        }
-
-        protected override Size MeasureOverride(Size available)
-        {
-            var free = new Size(double.PositiveInfinity, available.Height);
-            _label.Measure(free); _icon.Measure(free);
-            return new Size(_label.DesiredSize.Width + _icon.DesiredSize.Width, Math.Max(_label.DesiredSize.Height, _icon.DesiredSize.Height));
-        }
-
-        protected override Size ArrangeOverride(Size final)
-        {
-            double scale = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-            // Rounded as layout rounding would round it, so the baseline below is measured from where the label really is.
-            double top = Math.Round((final.Height - _label.DesiredSize.Height) / 2 * scale) / scale;
-            _label.Arrange(new Rect(0, top, _label.DesiredSize.Width, _label.DesiredSize.Height));
-            var text = new FormattedText(_label.Text, CultureInfo.CurrentUICulture, _label.FlowDirection,
-                new Typeface(_label.FontFamily, _label.FontStyle, _label.FontWeight, _label.FontStretch), _label.FontSize, Brushes.Black, null,
-                TextOptions.GetTextFormattingMode(_label), scale);
-            double middle = top + _label.Margin.Top + _label.Padding.Top + text.Baseline - GlyphMiddle * _label.FontSize;
-            _icon.Arrange(new Rect(_label.DesiredSize.Width, middle - _icon.DesiredSize.Height / 2, _icon.DesiredSize.Width, _icon.DesiredSize.Height));
-            // Layout rounding moves the icon's box, and again the mark inside it, to whole device pixels; at 150% the two
-            // together left the mark half a pixel low. The shift takes the remainder back.
-            var mark = (_icon as Decorator)?.Child as FrameworkElement ?? _icon;
-            double center = VisualTreeHelper.GetOffset(_icon).Y + mark.TranslatePoint(new Point(0, mark.RenderSize.Height / 2), _icon).Y;
-            _shift.Y = middle - center;
-            return final;
-        }
-
-        // The baseline moves with the display scale even when the label's size in DIPs stays the same.
-        protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi) => InvalidateArrange();
-    }
-
     // The info icon that shows a setting's or a section's description on hover or focus.
     private FrameworkElement HelpIcon(string title, Func<string> help, double size)
     {
@@ -140,6 +90,8 @@ public sealed partial class SettingsWindow
         var highlight = new Border { CornerRadius = new CornerRadius(6), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
             IsHitTestVisible = false, RenderTransform = move, Visibility = Visibility.Hidden };
         highlight.SetResourceReference(Border.BackgroundProperty, "SettingsFillSelected");
+        // The chosen option is outlined as well: its fill alone stands too close to the control's own (SW-07).
+        highlight.BorderThickness = new Thickness(1); highlight.SetResourceReference(Border.BorderBrushProperty, "SettingsInputBorder");
         var host = new Grid(); host.Children.Add(highlight); host.Children.Add(content);
         void Slide(double from, double to)
         {
@@ -181,14 +133,13 @@ public sealed partial class SettingsWindow
             SmallChange=tick,LargeChange=tick*2,TickFrequency=tick,IsSnapToTickEnabled=true,IsMoveToPointEnabled=true,VerticalAlignment=VerticalAlignment.Center };
         var input = new TextBox { Style=(Style)FindResource("SettingsNumber"),Width=40,Text=slider.Value.ToString("0",CultureInfo.InvariantCulture),VerticalAlignment=VerticalAlignment.Center };
         AutomationProperties.SetName(slider,title); AutomationProperties.SetName(input,Loc.T(title+"数值", title+" value"));
-        var line=new StackPanel {Orientation=Orientation.Horizontal};line.Children.Add(input);
-        var units=TextLine(unit,10,TextTertiary);units.Margin=new Thickness(4,0,6,0);units.VerticalAlignment=VerticalAlignment.Center;line.Children.Add(units);
+        var units=TextLine(unit,10,TextTertiary);units.Margin=new Thickness(4,0,6,0);units.VerticalAlignment=VerticalAlignment.Center;
         var minus=new RepeatButton { Style=(Style)FindResource("SettingsStepper"),Content="−" };
         var plus=new RepeatButton { Style=(Style)FindResource("SettingsStepper"),Content="+" };
         AutomationProperties.SetName(minus,Loc.T("减少"+title, "Decrease "+title));AutomationProperties.SetName(plus,Loc.T("增加"+title, "Increase "+title));
-        line.Children.Add(new Border {Width=1,Background=UI.Brush(Divider),Margin=new Thickness(2,5,3,5)});line.Children.Add(minus);line.Children.Add(plus);
-        var chip=new Border {Child=line,Height=30,CornerRadius=new CornerRadius(6),Background=UI.Brush(_palette.Input),BorderBrush=UI.Brush(_palette.Border),BorderThickness=new Thickness(1),Padding=new Thickness(7,0,2,0)};
-        FieldFocus(chip, input, () => UI.Brush(_palette.Border));
+        // The framed box: the number, its unit, a divider and the steppers (NumberBox).
+        var chip=NumberBox.Create(input,units,minus,plus,UI.Brush(Divider),UI.Brush(_palette.Input),UI.Brush(_palette.InputBorder));
+        FieldFocus(chip, input, () => UI.Brush(_palette.InputBorder));
         void Set(double number)
         {
             var next=Math.Clamp(Math.Round(number),min,max);

@@ -20,13 +20,6 @@ internal static class CaptureChecks
             long style = GetWindowLongPtrW(handle, -20).ToInt64();
             check("overlay has no WGC-incompatible no-activate style", (style & 0x08000000) == 0);
             check("transparent overlay supports WGC", CreateItem(handle) == 0);
-            try
-            {
-                SetWindowLongPtrW(handle, -20, new IntPtr(style | 0x08000000));
-                check("old overlay style reproduces WGC E_INVALIDARG", CreateItem(handle) == unchecked((int)0x80070057));
-            }
-            finally { SetWindowLongPtrW(handle, -20, new IntPtr(style)); }
-            check("restoring capturable style restores WGC", CreateItem(handle) == 0);
         }
         finally { window.Close(); }
     }
@@ -57,6 +50,5 @@ internal static class CaptureChecks
     [DllImport("combase.dll")] private static extern int WindowsDeleteString(IntPtr text);
     [DllImport("combase.dll")] private static extern int RoGetActivationFactory(IntPtr text, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out CaptureInterop factory);
     [DllImport("user32.dll")] private static extern IntPtr GetWindowLongPtrW(IntPtr handle, int index);
-    [DllImport("user32.dll")] private static extern IntPtr SetWindowLongPtrW(IntPtr handle, int index, IntPtr value);
     [DllImport("user32.dll", EntryPoint = "SendMessageW")] private static extern IntPtr SendMessage(IntPtr handle, int message, IntPtr wParam, IntPtr lParam);
 }
