@@ -25,8 +25,9 @@ internal sealed class ThermActivity(ThermWorkspace workspace) : IModuleActivity
     public IModuleView CreateView(ModuleViewContext context, ActivityViewKind kind) => new ThermActivityView(workspace, context, kind);
 }
 
-// The compact row holds the three readings at the row's scale; the expanded strip (the module's control bar, 320×76)
-// holds the same three readings larger with the bridge's mode beneath. Both redraw from the workspace's latest sample.
+// The compact row holds the three readings at the row's scale; the expanded strip (the module's control bar, shown
+// only when a view calls ShowActivity) holds the same three readings larger with the bridge's mode beneath. Both
+// redraw from the workspace's latest sample.
 internal sealed class ThermActivityView : Grid, IModuleView, IModuleLayoutView
 {
     private readonly ThermWorkspace _workspace;
@@ -45,19 +46,10 @@ internal sealed class ThermActivityView : Grid, IModuleView, IModuleLayoutView
         if (kind == ActivityViewKind.Expanded)
         {
             _state.SetResourceReference(TextBlock.ForegroundProperty, "PanelTertiary");
-            var readings = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            readings.Children.Add(_row);
-            readings.Children.Add(_state);
-            // The way into the full page: the control bar is what hover-expansion shows while the readings are on.
-            var open = ModuleUi.Button(context, Loc.T("打开面板", "Open panel"), () => context.OpenPage(ThermModule.PageId));
-            open.Height = 46; open.Padding = new Thickness(12, 0, 12, 0); open.VerticalAlignment = VerticalAlignment.Center;
-            var row = new Grid();
-            row.ColumnDefinitions.Add(new ColumnDefinition());
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            readings.HorizontalAlignment = HorizontalAlignment.Center;
-            row.Children.Add(readings);
-            SetColumn(open, 1); row.Children.Add(open);
-            Children.Add(row);
+            var column = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            column.Children.Add(_row);
+            column.Children.Add(_state);
+            Children.Add(column);
         }
         else Children.Add(_row);
         workspace.Changed += Refresh;

@@ -3,23 +3,19 @@ using BrimDeck.Modules;
 using Loc = BrimDeck.ModuleLocalization;
 
 namespace BrimDeck.Thrm;
-// The cooler module: one page (three gauge cards), one persistent activity (the collapsed row's three readings),
-// and the settings both follow. The only host entry point is the public SDK context.
+// The cooler module: one persistent activity (the collapsed row's three readings) and its settings. The readings
+// are presence, not a task, so the module registers no page — the collapsed row is the whole surface until the
+// platform grows a way to fold richer readings into it. The only host entry point is the public SDK context.
 public sealed class ThermModule : IModule
 {
     public const string Id = "thrm";
-    public const string PageId = Id + ":cooler";
     public ValueTask ActivateAsync(IModuleContext context, CancellationToken cancellationToken)
     {
         var workspace = new ThermWorkspace(context);
         context.Own(workspace);
-        context.Register("cooler", new ModulePage("散热器", "Cooler", view => new ThermPageView(workspace, view), 150)
-        {
-            IconPath = ThermVisuals.FanGlyph, Size = new ModulePageSize(620, 250)
-        });
         context.Register<IModuleActivity>("readings", new ThermActivity(workspace));
         context.Register<IModuleSettings>("general", new ThermSettings(workspace));
-        // The readings' switch: off, the collapsed row returns to the built-in system readings.
+        // The readings' switch, shown with the module's details; off, the collapsed row returns to the built-in readings.
         context.Register("readings", new ModuleWidget("散热器读数", "Cooler readings", Id + ":general",
             () => workspace.Options.ShowReadings, workspace.SetShowReadings) { IconPath = ThermVisuals.FanGlyph });
         return ValueTask.CompletedTask;
@@ -160,12 +156,10 @@ internal sealed class ThermSettings(ThermWorkspace workspace) : IModuleSettings
     public bool Visible => true;
     public IReadOnlyList<ModuleSetting> Fields =>
     [
-        new("show", "在收起行显示读数", "Show readings in the collapsed row", ModuleSettingKind.Toggle),
         new("poll", "轮询间隔", "Poll interval", ModuleSettingKind.Number, 1, 10, "秒", "s")
     ];
     public object Read(string key) => key switch
     {
-        "show" => workspace.Options.ShowReadings,
         "poll" => workspace.Options.PollSeconds,
         _ => throw new ArgumentException(key)
     };
@@ -173,7 +167,6 @@ internal sealed class ThermSettings(ThermWorkspace workspace) : IModuleSettings
     {
         switch (key)
         {
-            case "show" when value is bool enabled: workspace.SetShowReadings(enabled); break;
             case "poll": workspace.SetPollSeconds((int)Math.Round(Convert.ToDouble(value))); break;
             default: throw new ArgumentException(key);
         }
