@@ -3,21 +3,24 @@ using BrimDeck.Modules;
 using Loc = BrimDeck.ModuleLocalization;
 
 namespace BrimDeck.Thrm;
-// The cooler module: one persistent activity (the collapsed row's three readings) and its settings. The readings
-// are presence, not a task, so the module registers no page — the collapsed row is the whole surface until the
-// platform grows a way to fold richer readings into it. The only host entry point is the public SDK context.
+// The cooler module: a page (three gauge cards), a persistent activity (the collapsed row's three readings) and the
+// settings. The readings are presence, not a task, so the activity is Passive — expanding the panel opens the normal
+// pages, and the page is reached through the page tabs (or as the default page). No widget switch: the module has one
+// surface and one concern, and enabling the module itself is the switch. The only host entry point is the public SDK.
 public sealed class ThermModule : IModule
 {
     public const string Id = "thrm";
+    public const string PageId = Id + ":cooler";
     public ValueTask ActivateAsync(IModuleContext context, CancellationToken cancellationToken)
     {
         var workspace = new ThermWorkspace(context);
         context.Own(workspace);
+        context.Register("cooler", new ModulePage("散热器", "Cooler", view => new ThermPageView(workspace, view), 150)
+        {
+            IconPath = ThermVisuals.FanGlyph, Size = new ModulePageSize(620, 250)
+        });
         context.Register<IModuleActivity>("readings", new ThermActivity(workspace));
         context.Register<IModuleSettings>("general", new ThermSettings(workspace));
-        // The readings' switch, shown with the module's details; off, the collapsed row returns to the built-in readings.
-        context.Register("readings", new ModuleWidget("散热器读数", "Cooler readings", Id + ":general",
-            () => workspace.Options.ShowReadings, workspace.SetShowReadings) { IconPath = ThermVisuals.FanGlyph });
         return ValueTask.CompletedTask;
     }
 }
@@ -25,7 +28,6 @@ public sealed class ThermModule : IModule
 public sealed class ThermOptions
 {
     public int PollSeconds { get; set; } = 2;
-    public bool ShowReadings { get; set; } = true;
     public void Normalize() => PollSeconds = double.IsFinite(PollSeconds) ? Math.Clamp(PollSeconds, 1, 10) : 2;
 }
 
@@ -101,13 +103,6 @@ internal sealed class ThermWorkspace : IDisposable
         Options.PollSeconds = double.IsFinite(seconds) ? Math.Clamp(seconds, 1, 10) : 2;
         Save();
         RestartPulse();
-        Raise();
-    }
-
-    internal void SetShowReadings(bool enabled)
-    {
-        Options.ShowReadings = enabled;
-        Save();
         Raise();
     }
 
