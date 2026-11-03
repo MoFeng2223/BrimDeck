@@ -676,7 +676,9 @@ public partial class MainWindow : Window
             foreach (var other in _app.Decks.Where(deck => deck != this && deck._expanded && !deck._preview).ToList()) other.SetExpanded(false);
         if (expanded && !_expanded && !_preview && _transient is null)
         {
-            if (ModuleActivityPresented) _moduleControls = true;
+            // A presence-only activity keeps the pages on expand: its place is the collapsed row, and its control bar
+            // waits for a view's ShowActivity instead of taking every opening of the panel.
+            if (ModuleActivityPresented && !ActivityState.Passive) _moduleControls = true;
             else
             {
                 ApplyDefaultMusicPage();
