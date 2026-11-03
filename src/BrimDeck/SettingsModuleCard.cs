@@ -180,8 +180,8 @@ public sealed partial class SettingsWindow
                 SyncLink(enabled);
                 controls.Children.Add(ModuleToggle(Loc.T(widget.Value.Name, widget.Value.NameEn), enabled, value =>
                 {
-                    _app.Modules.Invoke(widget.ModuleId, "toggle widget", () => { widget.Value.SetEnabled(value); return true; });
-                    SyncLink(value);
+                    // The link follows the widget's real state: a failed toggle (module busy, host rejected it) leaves it as it was.
+                    if (_app.Modules.Invoke(widget.ModuleId, "toggle widget", () => { widget.Value.SetEnabled(value); return true; })) SyncLink(value);
                 }));
                 body.Children.Add(Row(Loc.T(widget.Value.Name, widget.Value.NameEn), controls));
             }

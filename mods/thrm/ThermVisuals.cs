@@ -80,7 +80,7 @@ internal sealed class ThermReading(string letter, string figurePreview)
         _ring = Math.Max(1.2, ThermVisuals.Half(2 * scale));
         double letterSize = Math.Max(1, 7 * scale), font = Math.Max(1, ThermVisuals.Half(11.5 * scale));
 
-        _track = new Path { StrokeThickness = _ring, Stretch = Stretch.None };
+        _track = new Path { StrokeThickness = _ring, Stretch = Stretch.None, Data = ThermVisuals.DialArc(_size, _ring, 1) };
         _track.SetResourceReference(Shape.StrokeProperty, "PanelRingTrack");
         _fill = new Path { StrokeThickness = _ring, Stretch = Stretch.None, Data = ThermVisuals.DialArc(_size, _ring, 0) };
         var mark = new TextBlock
@@ -109,10 +109,16 @@ internal sealed class ThermReading(string letter, string figurePreview)
         _figure.Width = Math.Ceiling(_figure.DesiredSize.Width) + 2;
         _figure.Text = "";
 
-        var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        // A rescale while the row is already mounted refreshes it in place: the caller holds the old root, so a fresh
+        // one would leave the mounted instance showing numbers no Show ever reaches again. One container owns the
+        // controls — pick it before attaching, or WPF refuses the second parent.
+        var row = _root as StackPanel;
+        bool fresh = row is null;
+        if (fresh) _root = row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        else row.Children.Clear();
         row.Children.Add(_dial);
         row.Children.Add(_figure);
-        return _root = row;
+        return row;
     }
 
     // Rebuild for a new row scale; the elements are cheap and the reading owns no timers.
