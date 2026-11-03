@@ -29,7 +29,8 @@ internal sealed record SettingsPalette(bool Dark)
     public void Apply(ResourceDictionary resources)
     {
         void Brush(string key, string color) => resources[key] = UI.Brush(color);
-        Brush("SettingsTextPrimary", Primary); Brush("SettingsTextSecondary", Secondary);
+        Brush("SettingsTextPrimary", Primary); Brush("SettingsTextSecondary", Secondary); Brush("SettingsTextTertiary", Tertiary);
+        Brush("SettingsDivider", Divider);
         Brush("SettingsFillHover", Dark ? "#25252B" : "#E8E9EF");
         Brush("SettingsFillPressed", Dark ? "#363640" : "#DDDFE8");
         Brush("SettingsFillSelected", Dark ? "#41414A" : "#FFFFFF");

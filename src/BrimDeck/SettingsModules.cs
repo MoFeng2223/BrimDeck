@@ -37,7 +37,7 @@ public sealed partial class SettingsWindow
         return page;
     }
     private Contribution<IModuleSettings>? ModuleSettingEntry(string id) => _app.Modules.Registry.List<IModuleSettings>().FirstOrDefault(e => e.Id == id);
-    private IReadOnlyList<ModuleSettingsEntry> ModuleSettingsEntries() => ModuleSettingsIndex.Create(_app.Modules, S.Modules.Enabled && S.MiniApps.Enabled);
+    private IReadOnlyList<ModuleSettingsEntry> ModuleSettingsEntries() => ModuleSettingsIndex.Create(_app.Modules, S.MiniApps.Enabled);
     private bool ModuleSettingVisible(Contribution<IModuleSettings> entry) => ModuleSettingsEntries().Any(e => ReferenceEquals(e.Contribution, entry) && e.Visible);
     private string ModuleSettingsId(int page) => _moduleSettingsPages.FirstOrDefault(pair => pair.Value == page).Key ?? "";
     private int SettingsPageFor(Contribution<IModuleSettings> entry)
@@ -53,7 +53,9 @@ public sealed partial class SettingsWindow
     }
     internal void ShowModuleSettings(string id)
     {
-        string owner = ModuleSettingEntry(id)?.ModuleId ?? id.Split(':')[0];
+        // A component's settings link opens its fields page; only an unknown or stopped module falls back to a list page.
+        if (ModuleSettingEntry(id) is { } entry && _app.Modules.Modules.Any(m => m.Id == entry.ModuleId)) { ShowPage(SettingsPageFor(entry)); return; }
+        string owner = id.Split(':')[0];
         if (_app.Modules.Modules.Any(m => m.Id == owner)) { ShowPage(ModuleDetailPage(owner)); return; }
         ShowPage(ModulesPage);
     }
@@ -109,19 +111,15 @@ public sealed partial class SettingsWindow
                 string title = Loc.T(field.Label, field.LabelEn), description = Loc.T(field.Description, field.DescriptionEn);
                 FrameworkElement row = field.Kind switch
                 {
-                    ModuleSettingKind.Toggle => Toggle(title, (bool)value, v => Write(v)),
-                    ModuleSettingKind.Number => SliderRow(title, (double)value, field.Minimum, field.Maximum, field.Step, Loc.T(field.Unit, field.UnitEn), v => Write(v), fractional: true),
-                    ModuleSettingKind.Choice => ChoiceRow(title, (int)value, field.Options.Select(o => (o.Value, Loc.T(o.Label, o.LabelEn))).ToArray(), v => Write(v)),
-                    ModuleSettingKind.Text => ModuleTextField(field, (string)value, Write),
+                    ModuleSettingKind.Toggle => ModuleUi.ToggleRow(this, title, (bool)value, v => Write(v), description),
+                    ModuleSettingKind.Number => ModuleUi.SliderRow(this, title, (double)value, field.Minimum, field.Maximum, field.Step, Loc.T(field.Unit, field.UnitEn), v => Write(v), description, fractional: true),
+                    ModuleSettingKind.Choice => ModuleUi.ChoiceRow(this, title, (int)value, field.Options.Select(o => (o.Value, Loc.T(o.Label, o.LabelEn))).ToArray(), v => Write(v), description),
+                    ModuleSettingKind.Text => ModuleUi.TextRow(this, title, (string)value, v => Write(v), Loc.T(field.Placeholder, field.PlaceholderEn), field.MaximumLength, description),
                     ModuleSettingKind.Color => ModuleColorField(field, (string)value, Write),
                     _ => throw new InvalidOperationException("The settings projection contained an unsupported field.")
                 };
                 AutomationProperties.SetAutomationId(row, "module-setting-" + entry.Id + ":" + field.Key);
                 AutomationProperties.SetHelpText(row, description); rows.Add(row);
-                if (description.Length > 0)
-                {
-                    var note = TextLine(description, 11.5, TextSecondary); note.TextWrapping = TextWrapping.Wrap; note.Margin = new Thickness(0, -2, 0, 10); rows.Add(note);
-                }
             }
             Group(rows.ToArray());
         }
