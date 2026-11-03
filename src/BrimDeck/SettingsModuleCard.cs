@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -45,22 +47,25 @@ public sealed partial class SettingsWindow
         var status = TextLine(ModuleStateLabel(module), 10.5, stateColor); status.TextAlignment = TextAlignment.Center; status.VerticalAlignment = VerticalAlignment.Center;
         var statusHolder = new Border { Child = status, Padding = new Thickness(6, 4, 6, 4), CornerRadius = new CornerRadius(6), Background = UI.Brush(Inset), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) }; Grid.SetColumn(statusHolder, 1); header.Children.Add(statusHolder);
         if (ModuleSignatureChip(module) is { } chip) header.Children.Add(chip);
-        var toggle = ModuleToggle(Loc.T("启用：", "Enable: ") + title, enabled, value =>
+        // The performance tab watches a running plugin, so it carries no switch: enabling or disabling stays on the
+        // management tab, and a click here never stops a running session.
+        if (!performance)
         {
-            if (value && !approved && !Confirm(Loc.T("信任并启用插件", "Trust and enable plugin"), Loc.T($"“{title}”将在 BrimDeck 进程内执行 DLL 代码。\n它能够以当前用户权限访问文件和进程；权限声明和内容摘要不是安全沙箱。\n\n仅在信任作者和当前文件来源时启用。批准仅绑定本次包内容。", $"{title} will execute DLL code inside BrimDeck.\nIt can access files and processes with your user permissions; declarations and content hashes are not a sandbox.\n\nEnable only if you trust the author and these files. Approval binds only this package content."), Loc.T("信任并启用", "Trust and enable")))
-            { ShowPage(_page); return; }
-            Change(s =>
+            var toggle = ModuleToggle(Loc.T("启用：", "Enable: ") + title, enabled, value =>
             {
-                if (external is not null)
+                if (value && !approved && !Confirm(Loc.T("信任并启用插件", "Trust and enable plugin"), Loc.T($"“{title}”将在 BrimDeck 进程内执行 DLL 代码。\n它能够以当前用户权限访问文件和进程；权限声明和内容摘要不是安全沙箱。\n\n仅在信任作者和当前文件来源时启用。批准仅绑定本次包内容。", $"{title} will execute DLL code inside BrimDeck.\nIt can access files and processes with your user permissions; declarations and content hashes are not a sandbox.\n\nEnable only if you trust the author and these files. Approval binds only this package content."), Loc.T("信任并启用", "Trust and enable")))
+                { ShowPage(_page); return; }
+                Change(s =>
                 {
-                    s.Modules.EnabledModules.Remove(module.Id);
-                    if (value) { s.Modules.EnabledModules.Add(module.Id); s.Modules.Approvals[module.Id] = external.Digest; }
-                }
+                    if (external is null) return;
+                    SetModuleEnabled(s, module.Id, value);
+                    if (value) s.Modules.Approvals[module.Id] = external.Digest;
+                });
             });
-        });
-        toggle.IsEnabled = !_app.ModuleFilesBusy && (!_app.ModulesSkippedForSession || enabled);
-        if (_app.ModulesSkippedForSession) toggle.ToolTip = Loc.T("关闭后下次启动也不加载；重新启用需重启应用。", "Disable to also skip it next time. Restart the app to enable modules again.");
-        AutomationProperties.SetAutomationId(toggle, "module-enable-" + module.Id); toggle.Margin = new Thickness(4, 0, 14, 0); Grid.SetColumn(toggle, 2); header.Children.Add(toggle);
+            toggle.IsEnabled = !_app.ModuleFilesBusy && (!_app.ModulesSkippedForSession || enabled);
+            if (_app.ModulesSkippedForSession) toggle.ToolTip = Loc.T("关闭后下次启动也不加载；重新启用需重启应用。", "Disable to also skip it next time. Restart the app to enable modules again.");
+            AutomationProperties.SetAutomationId(toggle, "module-enable-" + module.Id); toggle.Margin = new Thickness(4, 0, 14, 0); Grid.SetColumn(toggle, 2); header.Children.Add(toggle);
+        }
         var detail = new Border { BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0, 1, 0, 0), ClipToBounds = true };
         StackPanel? body = null;
         void EnsureBody()
@@ -117,6 +122,19 @@ public sealed partial class SettingsWindow
         });
         return ModuleCard(root, new Thickness(0));
     }
+    // Enabling re-inserts a module where it sat among the enabled ones, so a toggle never shuffles the sidebar order;
+    // the discovery order breaks ties for modules that were never enabled before.
+    private void SetModuleEnabled(DeckSettings settings, string id, bool enabled)
+    {
+        if (!enabled) { settings.Modules.EnabledModules.Remove(id); return; }
+        if (settings.Modules.EnabledModules.Contains(id)) return;
+        var discovered = _app.ExternalModules.Select(m => m.Manifest.Id).ToList();
+        int target = discovered.IndexOf(id), slot = settings.Modules.EnabledModules.Count;
+        if (target >= 0)
+            for (int i = 0; i < settings.Modules.EnabledModules.Count; i++)
+                if (discovered.IndexOf(settings.Modules.EnabledModules[i]) > target) { slot = i; break; }
+        settings.Modules.EnabledModules.Insert(slot, id);
+    }
     private void ModuleManagementDetails(ModuleInfo module, DiscoveredModule? external, StackPanel body)
     {
         string description = external is null ? "" : Loc.T(external.Manifest.Description, string.IsNullOrWhiteSpace(external.Manifest.DescriptionEn) ? external.Manifest.Description : external.Manifest.DescriptionEn);
@@ -131,6 +149,12 @@ public sealed partial class SettingsWindow
         if (external is not null && S.Modules.Approvals.TryGetValue(module.Id, out string? digest) && digest != external.Digest)
             body.Children.Add(ModuleNotice(Loc.T("文件已更新，重新开启此模组后生效。", "Files changed. Enable the module again to load them.")));
         var links = new WrapPanel { Margin = new Thickness(-8, 0, 0, 10) };
+        if (external is not null)
+            links.Children.Add(ModuleLink(Loc.T("打开插件文件夹", "Open plugin folder"), () =>
+            {
+                try { Process.Start(new ProcessStartInfo(Path.Combine(_app.ModuleDirectory, module.Id)) { UseShellExecute = true }); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception) { SaveStatus(error.Message, true); }
+            }));
         foreach (var page in _app.Modules.Registry.List<ModulePage>().Where(p => p.ModuleId == module.Id))
             links.Children.Add(ModuleLink(Loc.T("打开：", "Open: ") + Loc.T(page.Value.Title, page.Value.TitleEn), () => _app.Deck.OpenModulePageFromSettings(page.Id)));
         foreach (var settings in _app.Modules.Registry.List<IModuleSettings>().Where(s => s.ModuleId == module.Id))
@@ -145,10 +169,19 @@ public sealed partial class SettingsWindow
             {
                 bool enabled = _app.Modules.Invoke(widget.ModuleId, "widget state", widget.Value.Enabled);
                 var controls = new StackPanel { Orientation = Orientation.Horizontal };
-                if (enabled) controls.Children.Add(ModuleLink(Loc.T("设置", "Settings"), () => ShowModuleSettings(widget.Value.SettingsId)));
+                // The "Settings" link exists only while the widget is on, and the switch stays where the reader is:
+                // throwing them to the management list made every switch look like it did nothing.
+                Button? link = null;
+                void SyncLink(bool on)
+                {
+                    if (on && link is null) { link = ModuleLink(Loc.T("设置", "Settings"), () => ShowModuleSettings(widget.Value.SettingsId)); controls.Children.Insert(0, link); }
+                    else if (!on && link is not null) { controls.Children.Remove(link); link = null; }
+                }
+                SyncLink(enabled);
                 controls.Children.Add(ModuleToggle(Loc.T(widget.Value.Name, widget.Value.NameEn), enabled, value =>
                 {
-                    _app.Modules.Invoke(widget.ModuleId, "toggle widget", () => { widget.Value.SetEnabled(value); return true; }); ShowPage(ModulesPage);
+                    _app.Modules.Invoke(widget.ModuleId, "toggle widget", () => { widget.Value.SetEnabled(value); return true; });
+                    SyncLink(value);
                 }));
                 body.Children.Add(Row(Loc.T(widget.Value.Name, widget.Value.NameEn), controls));
             }
