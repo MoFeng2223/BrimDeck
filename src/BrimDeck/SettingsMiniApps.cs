@@ -34,27 +34,18 @@ public sealed partial class SettingsWindow
         dimensions.Children.Add(width); System.Windows.Controls.Grid.SetColumn(height, 1); dimensions.Children.Add(height); Target.Children.Add(dimensions);
     }
 
-    // The global size is the starting point for module pages, not a setting they follow: a page whose module declared a
-    // Size keeps it, and the rest take the new size through their own preference (their clamps still apply). The size
-    // write goes through the same Change callback that applies the edit, on the settings object that callback installs —
-    // writing through a directory built before Change would land on a discarded copy. The preview lands on the first
-    // page that moves; without such pages the legacy mini-app page is sized as before.
+    // The global size feeds every module page that declares none: the page directory rebuilds from the current settings
+    // on each change, so an undeclared page simply takes the new value — no per-page preference is written, and a
+    // module author's declared Size always wins. The preview lands on the first such page, so the slider visibly does
+    // something; a declared Size still means the slider cannot move that page, which is the author's call.
     private void ResizeMiniAppsSize(Action<DeckSettings> edit)
     {
-        // A page the user sized on its own keeps its size: only pages with neither a declared Size nor a saved
-        // preference take the global value, so dragging this slider never erases per-page adjustments.
-        var movable = _app.PageDirectory(S).All.Where(p => p.BuiltIn is null
-            && !(S.Pages.Entries.TryGetValue(p.Id, out var preference) && (preference.Width is not null || preference.Height is not null))
-            && _app.Modules.Registry.List<ModulePage>().Any(e => e.Id == p.Id && e.Value.Size is null)).ToArray();
-        if (movable.Length == 0) { Resize(edit, DeckPage.MiniApps); return; }
-        Change(s =>
-        {
-            edit(s);
-            var directory = _app.PageDirectory(s);
-            foreach (var page in movable) directory.SetSize(page.Id, s.MiniApps.Width, s.MiniApps.Height);
-        });
+        Change(edit);
         if (!S.Modules.Enabled || _preview) return;
+        var directory = _app.PageDirectory(S);
+        var declared = _app.Modules.Registry.List<ModulePage>().Where(e => e.Value.Size is not null).Select(e => e.Id).ToHashSet();
+        if (directory.Visible.FirstOrDefault(p => p.BuiltIn is null && !declared.Contains(p.Id)) is not { } target) return;
         _preview = true; _previewPage = DeckPage.MiniApps; _app.Deck.Preview(true);
-        _app.Deck.SelectPage(movable[0].Id, remember: false);
+        _app.Deck.SelectPage(target.Id, remember: false);
     }
 }
