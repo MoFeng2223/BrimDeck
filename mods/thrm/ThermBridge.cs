@@ -27,7 +27,9 @@ internal static class ThermBridge
                 Number(root, "cpuFanRpm"), Number(root, "gpuFanRpm"), Number(root, "targetRpm"),
                 root.TryGetProperty("workMode", out var mode) && mode.ValueKind == JsonValueKind.String ? mode.GetString() ?? "" : "");
         }
-        catch (OperationCanceledException) { throw; }
+        // Only our own cancellation propagates; HttpClient's timeout also arrives as a cancellation, and swallowing the
+        // sample here would leave stale temperatures on the page instead of the dashes the bridge-down state deserves.
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { throw; }
         catch (Exception) { return null; }
     }
 

@@ -51,6 +51,7 @@ internal sealed class ThermPageView : Grid, IModuleView
             _gpu.Show(0, "—", "—", ThermLevels.Green);
             _fan.Show(0, "—", "—", ThermLevels.Green);
             _state.Text = Loc.T("THRM 桥未运行", "THRM bridge unreachable");
+            _state.Visibility = Visibility.Visible;
             return;
         }
         // The arc carries the level's color; the figures stay in the palette's primary, as the panel's own numbers do.
