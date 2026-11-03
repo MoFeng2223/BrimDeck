@@ -22,14 +22,14 @@ public partial class MainWindow
     internal bool IsHotkeyPinned => _hotkeyPinned;
 
     // page: the page to open on (a page hotkey), in place of the page chosen for opening (ApplyDefaultMusicPage).
-    internal void OpenFromHotkey(DeckPage? page = null)
+    internal void OpenFromHotkey(string? page = null)
     {
         if (_expanded) return;
         _hotkeyPage = page;
         try { Open(); } finally { _hotkeyPage = null; }
     }
 
-    private DeckPage? _hotkeyPage;
+    private string? _hotkeyPage;
 
     private void Open()
     {

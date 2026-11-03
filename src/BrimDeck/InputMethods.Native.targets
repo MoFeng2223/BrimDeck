@@ -1,0 +1,21 @@
+<Project>
+  <PropertyGroup>
+    <InputMethodNativeDirectory>$(MSBuildProjectDirectory)\obj\ime-native\$(Configuration)</InputMethodNativeDirectory>
+    <InputMethodNativeDll>$(InputMethodNativeDirectory)\BrimDeck.InputMethods.Native.dll</InputMethodNativeDll>
+    <!-- The C++ adapter needs the VS C++ workload and the Windows SDK, which are looked up by vcvars (through reg.exe). A machine
+         or a build agent without them can build and test everything else with -p:SkipInputMethodNative=true; the app then runs
+         without input-method takeover. -->
+    <SkipInputMethodNative Condition="'$(SkipInputMethodNative)' == ''">false</SkipInputMethodNative>
+  </PropertyGroup>
+  <Target Name="BuildInputMethodNative" BeforeTargets="CoreCompile" Condition="'$(OS)' == 'Windows_NT' and '$(SkipInputMethodNative)' != 'true'"
+          Inputs="$(MSBuildThisFileDirectory)..\BrimDeck.InputMethods.Native\InputMethods.cpp;$(MSBuildThisFileDirectory)..\..\build\BuildInputMethodNative.ps1"
+          Outputs="$(InputMethodNativeDll)">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\..\build\BuildInputMethodNative.ps1&quot; -OutputDirectory &quot;$(InputMethodNativeDirectory)&quot;" />
+  </Target>
+  <Target Name="CopyInputMethodNative" AfterTargets="Build" DependsOnTargets="BuildInputMethodNative" Condition="'$(OS)' == 'Windows_NT' and '$(SkipInputMethodNative)' != 'true'">
+    <Copy SourceFiles="$(InputMethodNativeDll)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="PublishInputMethodNative" AfterTargets="Publish" DependsOnTargets="BuildInputMethodNative" Condition="'$(OS)' == 'Windows_NT' and '$(SkipInputMethodNative)' != 'true'">
+    <Copy SourceFiles="$(InputMethodNativeDll)" DestinationFolder="$(PublishDir)" />
+  </Target>
+</Project>

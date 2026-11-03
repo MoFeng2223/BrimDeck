@@ -72,6 +72,7 @@ public partial class App
     {
         if (UserHidden == hidden) return;
         UserHidden = hidden;
+        if (hidden) InputMethods?.Suspend();
         foreach (var deck in Decks.ToList()) deck.UserHiddenChanged();
         UserHiddenChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -110,12 +111,12 @@ public partial class App
     // shows it; otherwise the panel under the pointer opens on it.
     public void OpenPageFromHotkey(int place)
     {
-        var pages = DeckPages.Visible(Settings);
+        var pages = PageDirectory(Settings).Visible;
         if (place < 0 || place >= pages.Count) return;
-        var page = pages[place];
+        var page = pages[place].Id;
         if (Decks.FirstOrDefault(deck => deck.IsOpenForHotkey) is { } open)
         {
-            if (open.CurrentPage == page) open.CollapseFromHotkey(); else open.SelectPage(page);
+            if (open.CurrentPageId == page) open.CollapseFromHotkey(); else open.SelectPage(page);
             return;
         }
         DeckUnderPointer().OpenFromHotkey(page);

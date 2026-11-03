@@ -43,7 +43,7 @@ public partial class MainWindow
         // only hidden for now (the panel open, or a notice in its place, which leaves no row built: RenderCompact) keeps its
         // temperatures read while the sampler runs (App.UpdateMonitorExtras).
         bool heldStrip = (_compactStrip is not null || StripAwaits() || _alert is not null && Settings.ShowsMonitor(EffectiveStyle)) && IsVisible && !IsSuppressed && !DisplayPower.Off && EffectiveStyle != CompactStyle.Line;
-        bool strip = heldStrip && !_expanded && _alert is null;
+        bool strip = heldStrip && !ModuleActivityPresented && !_expanded && _alert is null;
         if (!shown)
         {
             // A list that is not on screen cannot be under the pointer, and a closed page keeps no card open.

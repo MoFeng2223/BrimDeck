@@ -142,7 +142,7 @@ public sealed partial class SettingsWindow
         {
             popup.IsOpen = false;
             PopupMotion.AfterClose(() => choose(value.Length == 0 ? null : ThemeColor.Parse(value)));
-        }, Loc.T("撤销", "Undo"));
+        }, resetLabel: Loc.T("撤销", "Undo"));
         TogglePopup(chip, popup);
         return chip;
     }

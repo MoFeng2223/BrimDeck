@@ -57,6 +57,10 @@ jobs:
         run: |
           dotnet run --project tests/BrimDeck.WindowsTests -c Release --no-build -- --hosted
           if ($LASTEXITCODE -ne 0) { throw 'Windows tests failed.' }
+      - name: Plugin tests
+        run: |
+          dotnet run --project tests/BrimDeck.ModuleTests -c Release --no-build -- --test-root "$env:RUNNER_TEMP/module-tests" --repository "$env:GITHUB_WORKSPACE"
+          if ($LASTEXITCODE -ne 0) { throw 'Plugin tests failed.' }
       # Started by hand from the Actions tab: every Windows check, to see which of the left-out ones this runner can answer.
       # It never fails the run; the log is the result.
       - name: Windows tests (everything, for information)

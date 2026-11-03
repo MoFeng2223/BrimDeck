@@ -1,0 +1,13 @@
+{
+  "apiVersion": 1,
+  "apiMinor": 1,
+  "id": "sample-usage-alerts",
+  "name": "用量提醒示例",
+  "version": "1.0.0",
+  "description": "使用公开 API 读取 Codex 用量、正在播放与系统监控；达到自定义阈值后显示岛内提醒。",
+  "descriptionEn": "A public SDK example for Codex usage alerts, now playing and system metrics.",
+  "assembly": "BrimDeck.UsageAlerts.dll",
+  "entryType": "BrimDeck.UsageAlerts.UsageAlertsModule",
+  "capabilities": ["usage.read", "media.read", "system.read", "notifications.show", "ui.pages", "ui.settings"],
+  "permissions": ["usage.read", "media.read", "system.read", "notifications.show"]
+}

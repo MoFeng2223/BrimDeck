@@ -185,6 +185,7 @@ public sealed partial class SettingsWindow
     // A notch or line moved to another edge or anchor on the panel builds the page again, for its choices and the names of its rows.
     internal void CollapsedChanged()
     {
+        RefreshMiniAppsNavigation();
         if (!IsLoaded || _page != 1) return;
         if (_builtDock is { } built && (built.Edge != S.CompactEdge(built.Style) || built.Anchor != (built.Style == CompactStyle.Line ? S.LineAnchor : S.NotchAnchor))) ShowPage(1);
         else _refreshCollapsedRanges?.Invoke();

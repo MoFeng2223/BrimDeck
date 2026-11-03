@@ -25,16 +25,16 @@ public sealed partial class SettingsWindow
     private static readonly ControlTemplate HotkeyBoxTemplate = (ControlTemplate)System.Windows.Markup.XamlReader.Parse(
         "<ControlTemplate TargetType='Button' xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'>" +
         "<Border Background='Transparent'><ContentPresenter VerticalAlignment='Center'/></Border></ControlTemplate>");
-    internal const int HotkeysPage = 11;
+    internal const int HotkeysPage = 12;
 
     private void HotkeysSettings()
     {
         SectionTitle(Loc.T("展开与显示", "Expand and show"));
-        Group([.. new[] { HotkeyKind.Hide, HotkeyKind.Expand, HotkeyKind.Page1, HotkeyKind.Page2, HotkeyKind.Page3 }.Select(HotkeyRow)]);
+        Group([.. new[] { HotkeyKind.Hide, HotkeyKind.Expand, HotkeyKind.Page1, HotkeyKind.Page2, HotkeyKind.Page3 }.Select(kind => HotkeyRow(kind))]);
         SectionTitle(Loc.T("位置与大小", "Position and size"));
-        Group([.. new[] { HotkeyKind.Move, HotkeyKind.Resize }.Select(HotkeyRow)]);
+        Group([.. new[] { HotkeyKind.Move, HotkeyKind.Resize }.Select(kind => HotkeyRow(kind))]);
         SectionTitle(Loc.T("其他", "Other"));
-        Group([.. new[] { HotkeyKind.ClickThrough, HotkeyKind.OpenSettings, HotkeyKind.Refresh }.Select(HotkeyRow)]);
+        Group([.. new[] { HotkeyKind.ClickThrough, HotkeyKind.OpenSettings, HotkeyKind.Refresh }.Select(kind => HotkeyRow(kind))]);
     }
 
     private static string HotkeyTitle(HotkeyKind kind) => kind switch
@@ -66,14 +66,16 @@ public sealed partial class SettingsWindow
     // How a clash message names another shortcut.
     private static string HotkeyName(HotkeyKind kind) => "“" + HotkeyTitle(kind) + "”";
 
-    private FrameworkElement HotkeyRow(HotkeyKind kind)
+    private FrameworkElement HotkeyRow(HotkeyKind kind, bool inputMethod = false)
     {
-        string title = HotkeyTitle(kind);
-        Func<string>? help = HotkeyHelp(kind) is { } helpText ? () => helpText : null;
+        string title = inputMethod ? Loc.T("切换快捷键", "Switching shortcut") : HotkeyTitle(kind);
+        Func<string>? help = inputMethod
+            ? () => Loc.T("点击录制，然后按下并松开组合键。支持 Win + 空格、Ctrl + 空格、Ctrl + Shift 等；Esc 取消。", "Click to record, then press and release a combination. Win + Space, Ctrl + Space and Ctrl + Shift are supported. Esc cancels.")
+            : HotkeyHelp(kind) is { } helpText ? () => helpText : null;
         // An arrow box records only the modifiers that go with Alt; Alt and the arrow keys are written beside it.
-        bool arrows = HotkeyText.IsArrows(kind);
+        bool arrows = !inputMethod && HotkeyText.IsArrows(kind);
         string waiting = arrows ? Loc.T("请按 Ctrl、Shift 或 Win…", "Press Ctrl, Shift or Win…") : Loc.T("请按下组合键…", "Press a combination…");
-        string Saved() => S.Hotkey(kind);
+        string Saved() => inputMethod ? S.InputMethods.Shortcut ?? "" : S.Hotkey(kind);
         // The other shortcuts, with the names a clash message gives them. The arrow shortcuts yield to the single combinations
         // (HotkeyText.Priority), so only an arrow row speaks of a clash with those.
         IEnumerable<(string Text, string Name)> Others() => Enum.GetValues<HotkeyKind>()
@@ -131,10 +133,33 @@ public sealed partial class SettingsWindow
             box.ToolTip = !recording && saved.Length > 0 ? HotkeyDisplay(saved) : null;
             chrome.BorderBrush = UI.Brush(recording ? _palette.Accent : _palette.InputBorder);
             clear.IsEnabled = saved.Length > 0; clear.Opacity = clear.IsEnabled ? 1 : .35;
-            if (!recording) Note(HotkeyProblem(kind, saved, Others()));
+            if (!recording) Note(inputMethod ? InputMethodShortcutProblem(saved) : HotkeyProblem(kind, saved, Others()));
             AutomationProperties.SetHelpText(box, (saved.Length == 0 ? Loc.T("未设置。", "Not set. ") : HotkeyDisplay(saved) + Loc.T("。", ". ")) + help?.Invoke());
         }
         Action stop = null!;
+        BrimDeck.Native.InputMethodShortcut? recorder = null;
+        var recordTimeout = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+        void BeginInputRecording()
+        {
+            recorder = _app.InputMethods.RecordShortcut(decision =>
+            {
+                if (!recording || !box.IsLoaded) return;
+                string candidate = InputMethodGesture.Recorded(decision);
+                if (!decision.Complete)
+                { text.Text = candidate.Length == 0 ? Loc.T("请按下组合键…", "Press a combination…") : InputMethodGesture.Display(candidate) + "…"; return; }
+                if (decision.Cancel) { stop(); return; }
+                string problem = InputMethodShortcutProblem(candidate);
+                if (!InputMethodGesture.TryParse(candidate, out _, out string canonical))
+                    problem = Loc.T("请使用 Ctrl、Alt 或 Win 搭配按键，或 Ctrl + Shift 等组合。", "Use Ctrl, Alt or Win with a key, or a modifier chord such as Ctrl + Shift.");
+                if (problem.Length > 0)
+                {
+                    recorder?.Dispose(); recorder = null; _app.InputMethods.EndRecording();
+                    BeginInputRecording(); Show(); Note(problem); return;
+                }
+                Save(canonical); stop(); ShowPage(InputMethodsPage);
+            });
+            if (!recorder.Running) { stop(); Note(Loc.T("录制未启动，请重试。", "Recording could not start. Try again.")); }
+        }
         void Start()
         {
             if (recording) return;
@@ -142,20 +167,32 @@ public sealed partial class SettingsWindow
             recording = true; _stopHotkeyRecording = stop; held = HotkeyModifiers.None;
             SuspendAppHotkeys();
             box.Focus(); Note(""); Show();
+            recordTimeout.Start();
+            if (inputMethod) BeginInputRecording();
         }
         stop = () =>
         {
             if (!recording) return;
             recording = false;
+            recordTimeout.Stop();
+            if (recorder is not null) { recorder.Dispose(); recorder = null; _app.InputMethods.EndRecording(); }
             if (_stopHotkeyRecording == stop) _stopHotkeyRecording = null;
             // Resuming registers the shortcuts again from the settings, including one just recorded.
             ResumeAppHotkeys();
             Show();
         };
+        recordTimeout.Tick += (_, _) => stop();
+        EventHandler deactivated = (_, _) => stop();
         box.Click += (_, _) => { if (!recording) Start(); };
         // Saves a recorded combination unless another shortcut has it; returns whether it was saved.
         bool Save(string gesture)
         {
+            if (inputMethod) { Change(s => s.InputMethods.Shortcut = gesture); return true; }
+            if (S.InputMethods.Mode == InputMethodMode.Control && SameHotkey(gesture, S.InputMethods.Shortcut))
+            {
+                Note(Loc.T("与输入法切换快捷键重复，请换一个组合键。", "This conflicts with the input-method shortcut. Choose another combination."));
+                return false;
+            }
             if (Others().FirstOrDefault(other => SameHotkey(gesture, other.Text)) is { Name: { } clash })
             {
                 Note(Loc.T("与" + clash + "重复，请换一个组合键。", "This is already " + clash + ". Choose another combination."));
@@ -175,6 +212,7 @@ public sealed partial class SettingsWindow
         box.PreviewKeyDown += (_, e) =>
         {
             if (!recording) return;
+            if (inputMethod) { e.Handled = true; return; }
             var key = HotkeyGesture.KeyOf(e);
             if (key is Key.None or Key.ImeProcessed or Key.DeadCharProcessed) return;
             // Every key goes to the recorder, so Alt opens no menu and Enter or Space does not press the box again.
@@ -217,6 +255,7 @@ public sealed partial class SettingsWindow
         box.PreviewKeyUp += (_, e) =>
         {
             if (!recording && !swallowKeyUp) return;
+            if (inputMethod) { e.Handled = true; return; }
             e.Handled = true;
             var key = HotkeyGesture.KeyOf(e);
             if (!recording && !IsModifierKey(key)) swallowKeyUp = false;
@@ -238,7 +277,11 @@ public sealed partial class SettingsWindow
         };
         // Leaving the box, the page or the window ends recording, so suspensions and resumptions stay paired.
         box.LostKeyboardFocus += (_, _) => { swallowKeyUp = false; stop(); };
-        clear.Click += (_, _) => { stop(); Change(s => s.SetHotkey(kind, "")); Note(""); Show(); };
+        clear.Click += (_, _) =>
+        {
+            stop(); Change(s => { if (inputMethod) s.InputMethods.Shortcut = ""; else s.SetHotkey(kind, ""); }); Note(""); Show();
+            if (inputMethod) ShowPage(InputMethodsPage);
+        };
 
         // An arrow box stands between its fixed parts, written in the secondary text at the box's size.
         FrameworkElement control = chrome;
@@ -257,8 +300,8 @@ public sealed partial class SettingsWindow
         Grid.SetColumn(note, 1); row.Children.Add(note);
         Grid.SetColumn(control, 2); row.Children.Add(control);
         Action refresh = () => { if (!recording) Show(); };
-        row.Loaded += (_, _) => { if (_hotkeyRows.Add(refresh) && _hotkeyRows.Count == 1) WatchAppHotkeys(true); Show(); };
-        row.Unloaded += (_, _) => { stop(); if (_hotkeyRows.Remove(refresh) && _hotkeyRows.Count == 0) WatchAppHotkeys(false); };
+        row.Loaded += (_, _) => { Deactivated += deactivated; if (_hotkeyRows.Add(refresh) && _hotkeyRows.Count == 1) WatchAppHotkeys(true); Show(); };
+        row.Unloaded += (_, _) => { Deactivated -= deactivated; stop(); if (_hotkeyRows.Remove(refresh) && _hotkeyRows.Count == 0) WatchAppHotkeys(false); };
         Show();
         return row;
     }

@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0-windows10.0.19041.0</TargetFramework><UseWPF>true</UseWPF><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><ModuleId>sample-notes</ModuleId></PropertyGroup>
+  <ItemGroup><ProjectReference Include="..\..\src\BrimDeck.Modules.Abstractions\BrimDeck.Modules.Abstractions.csproj" /><ProjectReference Include="..\..\src\BrimDeck.UI\BrimDeck.UI.csproj" /><ProjectReference Include="Helper\BrimDeck.Sample.Helper.csproj" /></ItemGroup>
+  <ItemGroup><Compile Remove="Helper/**/*.cs" /></ItemGroup>
+  <ItemGroup><Content Include="module.json" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
+<Import Project="../../build/ModulePackage.targets" />
+</Project>

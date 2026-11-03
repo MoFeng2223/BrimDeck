@@ -72,7 +72,7 @@ internal static class ThemeCoverageTests
         var source = new DirectoryInfo(AppContext.BaseDirectory);
         while (source is not null && !File.Exists(Path.Combine(source.FullName, "BrimDeck.sln"))) source = source.Parent;
         if (source is null) { check("The source tree is found for the settings palette", false); return; }
-        var text = File.ReadAllText(Path.Combine(source.FullName, "src", "BrimDeck", "SettingsPalette.cs"));
+        var text = File.ReadAllText(Path.Combine(source.FullName, "src", "BrimDeck.UI", "SettingsPalette.cs"));
         var colors = new Dictionary<(string, bool), ThemeColor>();
         foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(text,
             @"(?:public string (\w+) => |Brush\(""(\w+)"", )(?:Dark \? ""(#\w+)"" : ""(#\w+)""|""(#\w+)"")"))

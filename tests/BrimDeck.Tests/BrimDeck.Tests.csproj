@@ -1,7 +1,8 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\BrimDeck.Core\BrimDeck.Core.csproj" />
+    <ProjectReference Include="../../mods/timers/Core/BrimDeck.Timers.Core.csproj" />
     <Content Include="Fixtures\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

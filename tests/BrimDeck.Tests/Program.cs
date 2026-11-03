@@ -36,10 +36,14 @@ try
     EdgeFrameTests.Run(Check);
     CollapsedMoveTests.Run(Check);
     HotkeyTests.Run(Check);
+    InputMethodTests.Run(Check);
+    TimerTests.Run(root, Check);
+    RollingNumbersTests.Run(Check);
     KeyboardResizeTests.Run(Check);
     CollapsedGeometryTests.Run(root, Check);
     PanelHeaderTests.Run(Check);
     SystemMonitorTests.Run(Check);
+    DeckPageDirectoryTests.Run(Check);
     MonitorSpeechTests.Run(Check);
     CompactReadingTests.Run(Check);
     TemperatureTests.Run(Check);

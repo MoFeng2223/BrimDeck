@@ -20,6 +20,7 @@ public partial class MainWindow
     private readonly Button AIUsageButton = new() { Content = "Usage", Width = 60, Height = 24 };
     private readonly Button MusicPageButton = new() { Content = "Music", Width = 60, Height = 24 };
     private readonly Button MonitorPageButton = new() { Content = "Monitor", Width = 60, Height = 24 };
+    private readonly Button MiniAppsPageButton = new() { Content = "Mini apps", Width = 60, Height = 24 };
     private readonly Grid PageSwitch = new();
     private readonly Border PageCapsule = new() { Width = 60, Height = 24 };
     private readonly TranslateTransform PageCapsuleShift = new();
@@ -31,7 +32,7 @@ public partial class MainWindow
         var window = new MainWindow { Width = 260, Height = 100, Left = -20000, Top = -20000,
             ShowActivated = false, WindowStyle = WindowStyle.None };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
-        buttons.Children.Add(window.AIUsageButton); buttons.Children.Add(window.MonitorPageButton); buttons.Children.Add(window.MusicPageButton);
+        buttons.Children.Add(window.AIUsageButton); buttons.Children.Add(window.MonitorPageButton); buttons.Children.Add(window.MusicPageButton); buttons.Children.Add(window.MiniAppsPageButton);
         window.PageCapsule.RenderTransform = window.PageCapsuleShift;
         window.PageSwitch.Children.Add(window.PageCapsule); window.PageSwitch.Children.Add(buttons);
         window.Content = window.PageSwitch;
@@ -58,6 +59,23 @@ public partial class MainWindow
             check("pending production placement uses the current page after reorder", !window._capsulePending &&
                 (double)window.PageCapsule.GetAnimationBaseValue(WidthProperty) == window.MonitorPageButton.ActualWidth && Math.Abs((double)window.PageCapsuleShift.GetAnimationBaseValue(TranslateTransform.XProperty) - at) < .5);
 
+            window.CurrentPage = DeckPage.MiniApps;
+            window.Settings.PageOrder = [DeckPage.MiniApps, DeckPage.Monitor, DeckPage.Usage, DeckPage.Music];
+            window.OrderPageButtons();
+            PumpCapsule(() => window.PlacePageCapsule(), check);
+            var miniAt = window.MiniAppsPageButton.TranslatePoint(new Point(), window.PageSwitch).X;
+            check("mini apps use their own page capsule and reorder without duplicate buttons", buttons.Children.Count == 4 && ReferenceEquals(buttons.Children[0], window.MiniAppsPageButton)
+                && Math.Abs((double)window.PageCapsuleShift.GetAnimationBaseValue(TranslateTransform.XProperty) - miniAt) < .5);
+            var pluginButton = new Button { Content = "Plugin", Width = 45, Height = 24 };
+            var moreButton = new Button { Content = "More", Width = 36, Height = 24 };
+            window._navigationButtons = [pluginButton, window.AIUsageButton, moreButton]; window._navigationSelection = moreButton;
+            window.OrderPageButtons(); PumpCapsule(() => window.PlacePageCapsule(), check);
+            double moreAt = moreButton.TranslatePoint(new Point(), window.PageSwitch).X;
+            check("an overflow page anchors its capsule to the more button", Math.Abs((double)window.PageCapsuleShift.GetAnimationBaseValue(TranslateTransform.XProperty) - moreAt) < .5 && buttons.Children.Count == 3);
+            window._navigationButtons = null; window._navigationSelection = null;
+            buttons.Children.Clear(); buttons.Children.Add(window.AIUsageButton); window.OrderPageButtons();
+            window.CurrentPage = DeckPage.Monitor;
+
             // An invisible/retired panel must yield too, even though its controls keep their previous size.
             window.Hide(); window.MonitorPageButton.Width = 95;
             PumpCapsule(() => window.PlacePageCapsule(), check);
@@ -71,7 +89,7 @@ public partial class MainWindow
     {
         var window = new MainWindow { Width = 260, Height = 100, Left = -20000, Top = -20000, ShowActivated = false, WindowStyle = WindowStyle.None };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
-        buttons.Children.Add(window.AIUsageButton); buttons.Children.Add(window.MonitorPageButton); buttons.Children.Add(window.MusicPageButton);
+        buttons.Children.Add(window.AIUsageButton); buttons.Children.Add(window.MonitorPageButton); buttons.Children.Add(window.MusicPageButton); buttons.Children.Add(window.MiniAppsPageButton);
         window.PageCapsule.RenderTransform = window.PageCapsuleShift;
         window.PageSwitch.Children.Add(window.PageCapsule); window.PageSwitch.Children.Add(buttons);
         window.Content = window.PageSwitch;
@@ -86,6 +104,7 @@ public partial class MainWindow
             // pass (RefreshStatus runs PlacePageCapsule before ApplyHeader) keeps it there, though ActualHeight is still the old tier's.
             window.FitPageButtons(short_);
             check("the capsule takes the new tier's height as the buttons change", window.PageCapsule.Height == short_.ButtonHeight && short_.ButtonHeight != tall.ButtonHeight);
+            check("mini apps follow the same header height as built-in pages", window.MiniAppsPageButton.Height == short_.ButtonHeight);
             check("a button's ActualHeight before the next layout pass is still the old tier's", window.AIUsageButton.ActualHeight == tall.ButtonHeight);
             window.PlacePageCapsule();
             check("a placement before the next layout pass keeps the new tier's height", window.PageCapsule.Height == short_.ButtonHeight);
