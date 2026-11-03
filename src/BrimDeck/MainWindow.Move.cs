@@ -92,7 +92,7 @@ public partial class MainWindow
     }
 
     // The panel opened, hid, turned into another form or became a preview: move mode gives way.
-    private bool MoveOvertaken => _expanded || _preview || ClickThrough || IsSuppressed || !IsVisible || _poweringOff || EffectiveStyle != _moveStyle || _alert is not null && _moveOverlay is null;
+    private bool MoveOvertaken => _expanded || _preview || ClickThrough || IsSuppressed || !IsVisible || _poweringOff || EffectiveStyle != _moveStyle || CompactNoticeUp && _moveOverlay is null;
     private void CheckMoveOvertaken() { if (_moveArmed && MoveOvertaken) CancelMove(); }
 
     // The outline the highlight follows: the island's own at rest.

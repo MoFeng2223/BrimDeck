@@ -76,7 +76,8 @@ public partial class MainWindow
         if (_app.UserHidden)
         {
             _hover.Stop(); _leave.Stop(); _pointerInside = false; _cursorInCompact = false;
-            if (_alert is not null) ClearAlert();
+            if (_otp is not null) ClearMailOtp();
+            else if (_alert is not null) ClearAlert();
         }
         // Hiding and showing again are immediate (MainWindow.ApplySettings).
         ApplySettings(true);

@@ -21,6 +21,7 @@ public partial class App : Application
     public SettingsStore Store { get; private set; } = null!;
     public UsageService Usage { get; private set; } = null!;
     public ProviderSecrets Secrets { get; private set; } = null!;
+    private MailOtpWatcher? _mailOtp;
     public Pricing Prices { get; private set; } = null!;
     public AppUpdates Updates { get; internal set; } = null!;
     // The main panel. It owns the tray icon, reads the usage data and takes the settings preview; every other chosen
@@ -115,6 +116,8 @@ public partial class App : Application
         Deck.Show();
         InitializeHotkeys();
         StartBackgroundUpdates();
+        _mailOtp = new MailOtpWatcher(this);
+        _mailOtp.Apply(Settings);
         // Only for a user who has the monitor page with its power line: the rest never open it.
         if (Settings.MonitorPage && Settings.MonitorPower) PowerWarm.Start(Dispatcher);
         WarmSettingsWriter();
@@ -222,6 +225,7 @@ public partial class App : Application
         ScheduleDaylight();
         AssignDisplays();
         foreach (var deck in Decks.ToList()) { if (styleChanged) deck.MorphShape(); else deck.ApplySettings(); }
+        _mailOtp?.Apply(Settings);
         QueueSave();
         CollapsedChanged();
         if (dataChanged || syncEnabled || languageChanged) _ = Deck.RefreshAutomaticallyAsync(queueIfBusy: true);
@@ -411,7 +415,7 @@ public partial class App : Application
     public void ExitApplication()
     {
         if (Exiting) return;
-        Exiting = true; Lifetime.Cancel(); _settingsWindow?.RememberSize(); FlushSettings();
+        Exiting = true; Lifetime.Cancel(); _mailOtp?.Stop(); _settingsWindow?.RememberSize(); FlushSettings();
         _settingsWindow?.Hide();
         var decks = Decks.ToList();
         int waiting = decks.Count;

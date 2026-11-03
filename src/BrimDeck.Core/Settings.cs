@@ -550,6 +550,12 @@ public sealed class DeckSettings
     public bool SettingsWindowMaximized { get; set; }
     // Shows the compact notice when a quota rises into the warning or critical level.
     public bool QuotaAlerts { get; set; } = true;
+    // QQ mailbox verification codes on the collapsed island (MailOtp). Authorization codes are not stored here (IProviderSecrets).
+    public bool MailOtpEnabled { get; set; }
+    public bool MailOtpAutoCopy { get; set; }
+    public int MailOtpSeconds { get; set; } = MailOtp.DefaultSeconds;
+    // Account address only (e.g. name@qq.com). Never the authorization code.
+    public string MailOtpAddress { get; set; } = "";
     // Also reads the Claude Code and Codex CLI session records inside WSL distributions. Off by default: it starts stopped distributions.
     public bool IncludeWsl { get; set; }
     // The ordered application list; the order is the column order of the expanded panel. Claude and Codex are shown
@@ -709,6 +715,9 @@ public sealed class DeckSettings
         ThemeDaylight = (ThemeDaylight ?? "").Split('-', 2) is [var day, var night] && PanelThemes.ParseTimeOfDay(day) is { } d && PanelThemes.ParseTimeOfDay(night) is { } n && d != n
             ? PanelThemes.FormatDaylight(d, n) : "";
         Language = Loc.Normalize(Language);
+        MailOtpSeconds = MailOtp.FitSeconds(MailOtpSeconds);
+        MailOtpAddress = (MailOtpAddress ?? "").Trim();
+        if (MailOtpAddress.Length > 128) MailOtpAddress = MailOtpAddress[..128];
         if (!Enum.IsDefined(Style)) Style = CompactStyle.Notch;
         static double Fit(double value, double min, double max, double fallback) => double.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;
         static double Offset(double value) => Fit(value, -CollapsedLimits.OffsetLimit, CollapsedLimits.OffsetLimit, CollapsedLimits.OffsetDefault);

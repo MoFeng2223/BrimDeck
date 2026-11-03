@@ -1185,7 +1185,7 @@ public partial class MainWindow
     }
     // The collapsed bars: while a song plays or is paused, or at all times when chosen (EqualizerAlways).
     private bool CompactEqualizerShown => Settings.ShowsEqualizer(EffectiveStyle) && (Settings.EqualizerAlways || _mediaTrack is { State: not MediaState.Stopped });
-    private bool TitleGliding => !_expanded && _alert is null && _compactEqualizer is not null && _compactMarquee?.IsGliding == true;
+    private bool TitleGliding => !_expanded && !CompactNoticeUp && _compactEqualizer is not null && _compactMarquee?.IsGliding == true;
     private void MusicGliding(bool gliding) => UpdateMusicTimer();
     // A display frame while the collapsed title glides (Motion): the bars move once at least a timer's interval has passed,
     // and the timer takes over again once the glide has let go.
@@ -1208,7 +1208,7 @@ public partial class MainWindow
         bool animations = Settings.Animations && SystemParameters.ClientAreaAnimation;
         // A paused song rests at the start of its line; an endless scroll would keep the window composing for hours. So does a
         // display that is off: the line rests until it is back.
-        _compactMarquee?.SetScrolling(animations && MusicAudioActive && IsVisible && !IsSuppressed && !DisplayPower.Off && !_expanded && _alert is null && EffectiveStyle != CompactStyle.Line);
+        _compactMarquee?.SetScrolling(animations && MusicAudioActive && IsVisible && !IsSuppressed && !DisplayPower.Off && !_expanded && !CompactNoticeUp && EffectiveStyle != CompactStyle.Line);
         UpdateLyricScrolling();
         UpdateQuotaCarousel();
         bool needed = IsVisible && !IsSuppressed && !DisplayPower.Off && (MusicAudioActive && (musicVisible || progressVisible) || animations && systemVisible || _trackNoticeUntil > DateTimeOffset.UtcNow);
@@ -1235,7 +1235,7 @@ public partial class MainWindow
     // The carousel runs its own timer and WPF animation; it only needs to know when it may move.
     private void UpdateQuotaCarousel()
     {
-        bool running = IsVisible && !IsSuppressed && !DisplayPower.Off && !_expanded && _alert is null;
+        bool running = IsVisible && !IsSuppressed && !DisplayPower.Off && !_expanded && !CompactNoticeUp;
         _quotaCarousel?.SetRunning(running, _pointerInside);
         _stripCarousel?.SetRunning(running, _pointerInside);
         _columnCarousel?.SetRunning(running, _pointerInside);
@@ -1243,11 +1243,11 @@ public partial class MainWindow
     }
     // With the display off (and the session unlocked), nothing of the music is seen: the bars stop and the audio levels are not read.
     private bool MusicPresentationVisible => IsVisible && !IsSuppressed && !DisplayPower.Off && _mediaTrack is { State: not MediaState.Stopped }
-        && (_expanded ? IsMusicPage : (Settings.ShowsMusic(EffectiveStyle) || _compactEqualizer is not null) && _alert is null);
+        && (_expanded ? IsMusicPage : (Settings.ShowsMusic(EffectiveStyle) || _compactEqualizer is not null) && !CompactNoticeUp);
     // The bars seen with a song: the music page's, or the collapsed row's.
     private bool PlayerLevelsVisible => MusicPresentationVisible && (_expanded || _compactEqualizer is not null);
     // The collapsed bars shown at all times read the whole system's sound while no song plays.
-    private bool SystemLevelsVisible => IsVisible && !IsSuppressed && !DisplayPower.Off && !_expanded && _alert is null
+    private bool SystemLevelsVisible => IsVisible && !IsSuppressed && !DisplayPower.Off && !_expanded && !CompactNoticeUp
         && Settings.EqualizerAlways && _compactEqualizer is not null && !MusicAudioActive;
     // The display went off or came back on (DisplayPower): what runs only to be seen stops or starts again.
     // A track notice that ran out while the display was off (the music tick that ends it was stopped) is cleared first, so the
@@ -1269,11 +1269,11 @@ public partial class MainWindow
         float peak = levels ? _media?.Peak() ?? 0 : 0;
         // Captured audio drives the bars, as many values as the equalizer on show has bars (at whatever length it is set to), flowing
         // along them or one frequency band for each bar, as the equalizer setting chooses; the session peak is the fallback.
-        var shown = _expanded ? IsMusicPage ? _musicEqualizer : null : _alert is null ? _compactEqualizer : null;
+        var shown = _expanded ? IsMusicPage ? _musicEqualizer : null : !CompactNoticeUp ? _compactEqualizer : null;
         var bandLevels = shown is null ? default : _flowLevels.AsSpan(0, Math.Clamp(shown.Bars, 1, _flowLevels.Length));
         bool flowing = levels && shown is not null && _media?.FlowLevels(bandLevels, Settings.EqualizerMode) == true;
         if (_expanded && IsMusicPage) { if (flowing) _musicEqualizer?.Show(bandLevels, playing); else _musicEqualizer?.Tick(peak, playing, seconds); }
-        if (!_expanded && _alert is null) { if (flowing) _compactEqualizer?.Show(bandLevels, compactPlaying); else _compactEqualizer?.Tick(peak, compactPlaying, seconds); }
+        if (!_expanded && !CompactNoticeUp) { if (flowing) _compactEqualizer?.Show(bandLevels, compactPlaying); else _compactEqualizer?.Tick(peak, compactPlaying, seconds); }
         if (_trackNoticeUntil != default && now >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }
         if ((now - _positionTick).TotalMilliseconds >= 250) { _positionTick = now; UpdateMusicPosition(); }
     }

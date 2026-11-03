@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -70,10 +71,19 @@ public partial class MainWindow
     // longer than the row scrolls through it once while it is shown (CompactAlertLayout.Scroll).
     partial void LayoutCompactAlert(CollapsedShape shape, bool alertVisible)
     {
-        if (!alertVisible || _alert is not { } alert)
+        if (!alertVisible)
         {
-            // A cleared notice leaves none of this file's regions behind.
             if (CompactAlert.Children.Count > 0 && CompactAlert.Children[0] is FrameworkElement { Tag: var own } && ReferenceEquals(own, AlertRegionTag)) CompactAlert.Children.Clear();
+            _alertRendered = null; _alertSince = null; return;
+        }
+        if (_otp is { } otp)
+        {
+            LayoutMailOtp(shape, otp);
+            return;
+        }
+        if (_alert is not { } alert)
+        {
+            if (CompactAlert.Children.Count > 0 && CompactAlert.Children[0] is FrameworkElement { Tag: var cleared } && ReferenceEquals(cleared, AlertRegionTag)) CompactAlert.Children.Clear();
             _alertRendered = null; _alertSince = null; return;
         }
         // The scroll follows the time since the notice appeared, so a rebuild (a new shape or theme) carries on where it was.
@@ -153,6 +163,56 @@ public partial class MainWindow
         shift.ApplyAnimationClock(TranslateTransform.XProperty, clock);
         double elapsed = Math.Clamp((Environment.TickCount64 - _alertSince!.Value.Since) / 1000d, 0, shown);
         if (elapsed > 0) clock.Controller!.Seek(TimeSpan.FromSeconds(elapsed), TimeSeekOrigin.BeginTime);
+    }
+
+    // Mail verification code: replaces the collapsed row ([ ✉  code  ·  来自 short ]). Whole strip copies via Island click.
+    private void LayoutMailOtp(CollapsedShape shape, MailOtpHit otp)
+    {
+        object key = otp;
+        if (_otpCopied) key = (otp, "copied");
+        if (_alertRendered is { } done && Equals(done.Shape, shape) && Equals(done.Alert, key)
+            && CompactAlert.Children.Count > 0 && CompactAlert.Children[0] is FrameworkElement { Tag: var keep } && ReferenceEquals(keep, AlertRegionTag))
+            return;
+        CompactAlert.Children.Clear();
+        _alertRendered = (shape, key); _compactRendered = shape;
+        _alertSince = (key, Environment.TickCount64);
+        double scale = CompactMusicLayout.SafeScale(shape.Scale);
+        double codeSize = Math.Max(1, CompactMusicLayout.Half(15.5 * scale));
+        double metaSize = Math.Max(1, CompactMusicLayout.Half(11 * scale));
+        double line = Math.Max(1, CompactMusicLayout.Whole(20 * scale));
+        var icon = UI.Fixed("\uE715", metaSize, line, UI.Secondary, font: new FontFamily("Segoe MDL2 Assets"));
+        FrameworkElement body;
+        if (_otpCopied)
+        {
+            body = UI.Fixed(Loc.T("\u2713 已复制", "\u2713 Copied"), codeSize, line, UI.Primary, FontWeights.SemiBold);
+        }
+        else
+        {
+            var code = UI.Fixed(otp.Code, codeSize, line, UI.Primary, FontWeights.Bold);
+            var sep = UI.Fixed(" · ", metaSize, line, UI.Tertiary);
+            var from = UI.Fixed(Loc.T("来自 ", "from ") + otp.FromShort, metaSize, line, UI.Secondary);
+            from.ToolTip = otp.FromShort;
+            var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            row.Children.Add(icon);
+            row.Children.Add(new Border { Width = Math.Max(4, CompactMusicLayout.Whole(6 * scale)) });
+            row.Children.Add(code);
+            row.Children.Add(sep);
+            row.Children.Add(from);
+            body = row;
+        }
+        body.HorizontalAlignment = HorizontalAlignment.Center;
+        body.VerticalAlignment = VerticalAlignment.Center;
+        var host = new Border
+        {
+            Child = body,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Tag = AlertRegionTag,
+            Cursor = System.Windows.Input.Cursors.Hand,
+            ToolTip = Loc.T("点击复制验证码", "Click to copy the code")
+        };
+        AutomationProperties.SetName(host, Loc.T($"验证码 {otp.Code}，来自 {otp.FromShort}", $"Code {otp.Code}, from {otp.FromShort}"));
+        CompactAlert.Children.Add(host);
     }
 
     private enum RegionAnchor { Left, Center, Right }
