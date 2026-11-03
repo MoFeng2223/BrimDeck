@@ -49,6 +49,7 @@ try
     DevicesTests.Run(Check);
     DeviceProtocolTests.Run(Check);
     PowerTests.Run(Check);
+    DevicesPageTests.Run(Check);
     FrameRateTests.Run(Check);
     ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);
