@@ -309,7 +309,10 @@ public sealed partial class SettingsWindow : Window
     {
         if (page < 0 || page >= _pages.Length && !_moduleSettingsPages.ContainsValue(page)) return;
         if (page >= _pages.Length && ModuleDetailId(page) is not null && !S.Modules.Enabled) page = ModulesPage;
-        else if (page >= _pages.Length && ModuleDetailId(page) is null && (ModuleSettingEntry(ModuleSettingsId(page)) is not { } extra || !ModuleSettingVisible(extra))) page = ModulesPage;
+        // A vanished entry (module stopped or removed) falls back to the list. An entry that merely turned invisible —
+        // a widget switch flipped on the very page it configures — keeps its page: throwing the reader to the list
+        // would make every switch look like the setting did nothing.
+        else if (page >= _pages.Length && ModuleDetailId(page) is null && ModuleSettingEntry(ModuleSettingsId(page)) is not { } extra) page = ModulesPage;
         if (page is 12 or 13 or 14) page = MiniAppsPage; // Reserved legacy page numbers. New module entries use namespaced ids.
         StopModuleMonitoring();
         RememberFocus();
