@@ -28,9 +28,26 @@ public sealed partial class SettingsWindow
     {
         var dimensions = new System.Windows.Controls.Grid { Margin = new System.Windows.Thickness(0, 8, 0, 0) };
         dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
-        var width = Dimension(Loc.T("宽度", "Width"), S.MiniApps.Width, 440, 1200, value => Resize(s => s.MiniApps.Width = value, DeckPage.MiniApps));
-        var height = Dimension(Loc.T("高度", "Height"), S.MiniApps.Height, 140, 400, value => Resize(s => s.MiniApps.Height = value, DeckPage.MiniApps));
+        var width = Dimension(Loc.T("宽度", "Width"), S.MiniApps.Width, 440, 1200, value => ResizeMiniAppsSize(s => s.MiniApps.Width = value));
+        var height = Dimension(Loc.T("高度", "Height"), S.MiniApps.Height, 140, 400, value => ResizeMiniAppsSize(s => s.MiniApps.Height = value));
         width.Margin = new System.Windows.Thickness(0, 0, 20, 0); height.Margin = new System.Windows.Thickness(20, 0, 0, 0);
         dimensions.Children.Add(width); System.Windows.Controls.Grid.SetColumn(height, 1); dimensions.Children.Add(height); Target.Children.Add(dimensions);
+    }
+
+    // The global size is the starting point for module pages, not a setting they follow: a page whose module declared a
+    // Size keeps it, and the rest take the new size through their own preference (their clamps still apply). The preview
+    // lands on the first page that moves, so the slider visibly does something; without such pages it sizes the legacy
+    // mini-app page as before.
+    private void ResizeMiniAppsSize(Action<DeckSettings> edit)
+    {
+        var directory = _app.PageDirectory(S);
+        var movable = directory.All.Where(p => p.BuiltIn is null
+            && _app.Modules.Registry.List<ModulePage>().Any(e => e.Id == p.Id && e.Value.Size is null)).ToArray();
+        Change(edit);
+        if (movable.Length == 0) { Resize(edit, DeckPage.MiniApps); return; }
+        foreach (var page in movable) directory.SetSize(page.Id, S.MiniApps.Width, S.MiniApps.Height);
+        if (!S.Modules.Enabled || _preview) return;
+        _preview = true; _previewPage = DeckPage.MiniApps; _app.Deck.Preview(true);
+        _app.Deck.SelectPage(movable[0].Id, remember: false);
     }
 }
