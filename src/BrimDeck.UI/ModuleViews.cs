@@ -122,7 +122,10 @@ public sealed record ModulePage(string Title, string TitleEn, Func<ModuleViewCon
     }
 }
 public enum ActivityViewKind { Compact, Expanded }
-public sealed record ActivityState(bool Active, double Progress, bool Indeterminate, string Accent, int Completion = 0);
+// Passive marks a presence-only activity (a reading, a status): it takes the collapsed row, but expanding the panel
+// opens the normal pages instead of the activity's control bar, which only a view's ShowActivity can bring up.
+public sealed record ActivityState(bool Active, double Progress, bool Indeterminate, string Accent, int Completion = 0)
+{ public bool Passive { get; init; } }
 public interface IModuleActivity
 {
     ActivityState State { get; }

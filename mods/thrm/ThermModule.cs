@@ -44,7 +44,6 @@ internal sealed class ThermWorkspace : IDisposable
     private IDisposable? _pulse;
     private int _polling;
     private bool _disposed, _storageWritable;
-    private bool? _bridgeUp;
     internal ThermOptions Options { get; private set; } = new();
     internal ThrmSample? Latest { get; private set; }
     internal bool BridgeUp => Latest is not null;
@@ -94,15 +93,10 @@ internal sealed class ThermWorkspace : IDisposable
 
     private void Apply(ThrmSample? sample)
     {
+        // Bridge up-and-down is the norm (the cooler software starts and stops, the machine sleeps): the readings
+        // show dashes and the page says so, and none of it goes into the module's diagnostics, which would only pile
+        // up one entry per flip.
         Latest = sample;
-        if (_bridgeUp != (sample is not null))
-        {
-            _bridgeUp = sample is not null;
-            // Once per transition, so a stopped bridge is findable in the module's diagnostics without flooding them.
-            _context.Report("poll bridge", _bridgeUp.Value
-                ? new InvalidOperationException("THRM 桥已恢复。/ The THRM bridge answered again.")
-                : new InvalidOperationException("THRM 桥不可达（127.0.0.1:27391），读数显示横线。/ The THRM bridge is unreachable; the readings show dashes."));
-        }
         Raise();
     }
 

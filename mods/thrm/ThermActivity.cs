@@ -7,7 +7,9 @@ using Loc = BrimDeck.ModuleLocalization;
 namespace BrimDeck.Thrm;
 
 // The collapsed row's persistent reading: the three cooler figures where the built-in readings would sit. The
-// state reports the CPU temperature as the row indicator's share and color, for the line style's progress bar.
+// readings are presence, not a running task, so the state is Passive — expanding the panel opens the pages instead
+// of this module's control bar. The state still reports the CPU temperature as the row indicator's share and color,
+// for the line style's progress bar.
 internal sealed class ThermActivity(ThermWorkspace workspace) : IModuleActivity
 {
     public ActivityState State
@@ -16,7 +18,7 @@ internal sealed class ThermActivity(ThermWorkspace workspace) : IModuleActivity
         {
             var sample = workspace.Latest;
             double share = sample is null ? 0 : Math.Clamp(sample.CpuTemp / 100, 0, 1);
-            return new(workspace.Options.ShowReadings, share, false, ThermLevels.Temperature(sample?.CpuTemp ?? 0));
+            return new(workspace.Options.ShowReadings, share, false, ThermLevels.Temperature(sample?.CpuTemp ?? 0)) { Passive = true };
         }
     }
     public event Action? Changed { add => workspace.Changed += value; remove => workspace.Changed -= value; }
