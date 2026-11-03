@@ -51,15 +51,16 @@ public sealed partial class SettingsWindow
         // management tab, and a click here never stops a running session.
         if (!performance)
         {
+            // The trust prompt and digest approval only mean anything for an external DLL package; a built-in module
+            // just flips its enabled state.
             var toggle = ModuleToggle(Loc.T("启用：", "Enable: ") + title, enabled, value =>
             {
-                if (value && !approved && !Confirm(Loc.T("信任并启用插件", "Trust and enable plugin"), Loc.T($"“{title}”将在 BrimDeck 进程内执行 DLL 代码。\n它能够以当前用户权限访问文件和进程；权限声明和内容摘要不是安全沙箱。\n\n仅在信任作者和当前文件来源时启用。批准仅绑定本次包内容。", $"{title} will execute DLL code inside BrimDeck.\nIt can access files and processes with your user permissions; declarations and content hashes are not a sandbox.\n\nEnable only if you trust the author and these files. Approval binds only this package content."), Loc.T("信任并启用", "Trust and enable")))
+                if (value && external is not null && !approved && !Confirm(Loc.T("信任并启用插件", "Trust and enable plugin"), Loc.T($"“{title}”将在 BrimDeck 进程内执行 DLL 代码。\n它能够以当前用户权限访问文件和进程；权限声明和内容摘要不是安全沙箱。\n\n仅在信任作者和当前文件来源时启用。批准仅绑定本次包内容。", $"{title} will execute DLL code inside BrimDeck.\nIt can access files and processes with your user permissions; declarations and content hashes are not a sandbox.\n\nEnable only if you trust the author and these files. Approval binds only this package content."), Loc.T("信任并启用", "Trust and enable")))
                 { ShowPage(_page); return; }
                 Change(s =>
                 {
-                    if (external is null) return;
                     SetModuleEnabled(s, module.Id, value);
-                    if (value) s.Modules.Approvals[module.Id] = external.Digest;
+                    if (value && external is not null) s.Modules.Approvals[module.Id] = external.Digest;
                 });
             });
             toggle.IsEnabled = !_app.ModuleFilesBusy && (!_app.ModulesSkippedForSession || enabled);
