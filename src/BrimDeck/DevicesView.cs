@@ -306,6 +306,7 @@ internal sealed class DevicesView : FrameworkElement
     {
         var parts = new List<string>();
         if (device.Parts.Count > 0) parts.Add(string.Join("  ", device.Parts.Select(part => Devices.PartName(part.Part) + " " + Devices.Figure(part.Percent))));
+        if (device.Asleep) parts.Add(Loc.T("休眠", "Sleeping"));
         if (device.Charging) parts.Add(Loc.T("充电中", "Charging"));
         else if (device.Lowest is null) parts.Add(Loc.T("未报告电量", "No battery reported"));
         else if (level == MemoryLevel.Critical) parts.Add(Loc.T("电量低", "Battery low"));
