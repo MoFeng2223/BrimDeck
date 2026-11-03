@@ -41,7 +41,10 @@ public sealed partial class SettingsWindow
     // page that moves; without such pages the legacy mini-app page is sized as before.
     private void ResizeMiniAppsSize(Action<DeckSettings> edit)
     {
+        // A page the user sized on its own keeps its size: only pages with neither a declared Size nor a saved
+        // preference take the global value, so dragging this slider never erases per-page adjustments.
         var movable = _app.PageDirectory(S).All.Where(p => p.BuiltIn is null
+            && !(S.Pages.Entries.TryGetValue(p.Id, out var preference) && (preference.Width is not null || preference.Height is not null))
             && _app.Modules.Registry.List<ModulePage>().Any(e => e.Id == p.Id && e.Value.Size is null)).ToArray();
         if (movable.Length == 0) { Resize(edit, DeckPage.MiniApps); return; }
         Change(s =>

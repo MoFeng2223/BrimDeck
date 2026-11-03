@@ -47,7 +47,7 @@ public static partial class ModuleUi
         var strip = new UniformGrid { Columns = Math.Max(1, options.Length), Width = 292 };
         foreach (var option in options)
         {
-            var choice = new RadioButton { Style = Style(scope, "SettingsSegment"), Content = option.Label, GroupName = title, IsChecked = option.Value == selected };
+            var choice = new RadioButton { Style = Style(scope, "SettingsSegment"), Content = option.Label, IsChecked = option.Value == selected };
             AutomationProperties.SetName(choice, title + " " + option.Label);
             choice.Checked += (_, _) => changed(option.Value);
             strip.Children.Add(choice);
@@ -139,7 +139,7 @@ public static partial class ModuleUi
             var chosen = options.FirstOrDefault(option => option.IsChecked == true);
             if (chosen is null || chosen.ActualWidth <= 0 || !host.IsAncestorOf(chosen)) { highlight.Visibility = Visibility.Hidden; return; }
             var at = chosen.TranslatePoint(new Point(), host);
-            highlight.Width = chosen.ActualWidth; highlight.Height = chosen.ActualHeight; highlight.Margin = new Thickness(0, at.Y, 0, 0);
+            highlight.Width = chosen.ActualWidth; highlight.Height = chosen.ActualHeight; highlight.Margin = new Thickness(at.X, at.Y, 0, 0);
             highlight.Visibility = Visibility.Visible;
         }
         foreach (var option in options) option.Checked += (_, _) => Place();
