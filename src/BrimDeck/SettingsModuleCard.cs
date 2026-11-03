@@ -151,9 +151,10 @@ public sealed partial class SettingsWindow
             body.Children.Add(ModuleNotice(Loc.T("文件已更新，重新开启此模组后生效。", "Files changed. Enable the module again to load them.")));
         var links = new WrapPanel { Margin = new Thickness(-8, 0, 0, 10) };
         if (external is not null)
+            // The discovered folder, not an id-derived path: a renamed folder is still found by the manifest id.
             links.Children.Add(ModuleLink(Loc.T("打开插件文件夹", "Open plugin folder"), () =>
             {
-                try { Process.Start(new ProcessStartInfo(Path.Combine(_app.ModuleDirectory, module.Id)) { UseShellExecute = true }); }
+                try { Process.Start(new ProcessStartInfo(external.Directory) { UseShellExecute = true }); }
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception) { SaveStatus(error.Message, true); }
             }));
         foreach (var page in _app.Modules.Registry.List<ModulePage>().Where(p => p.ModuleId == module.Id))
