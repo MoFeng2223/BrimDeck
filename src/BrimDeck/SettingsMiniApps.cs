@@ -35,17 +35,21 @@ public sealed partial class SettingsWindow
     }
 
     // The global size is the starting point for module pages, not a setting they follow: a page whose module declared a
-    // Size keeps it, and the rest take the new size through their own preference (their clamps still apply). The preview
-    // lands on the first page that moves, so the slider visibly does something; without such pages it sizes the legacy
-    // mini-app page as before.
+    // Size keeps it, and the rest take the new size through their own preference (their clamps still apply). The size
+    // write goes through the same Change callback that applies the edit, on the settings object that callback installs —
+    // writing through a directory built before Change would land on a discarded copy. The preview lands on the first
+    // page that moves; without such pages the legacy mini-app page is sized as before.
     private void ResizeMiniAppsSize(Action<DeckSettings> edit)
     {
-        var directory = _app.PageDirectory(S);
-        var movable = directory.All.Where(p => p.BuiltIn is null
+        var movable = _app.PageDirectory(S).All.Where(p => p.BuiltIn is null
             && _app.Modules.Registry.List<ModulePage>().Any(e => e.Id == p.Id && e.Value.Size is null)).ToArray();
-        Change(edit);
         if (movable.Length == 0) { Resize(edit, DeckPage.MiniApps); return; }
-        foreach (var page in movable) directory.SetSize(page.Id, S.MiniApps.Width, S.MiniApps.Height);
+        Change(s =>
+        {
+            edit(s);
+            var directory = _app.PageDirectory(s);
+            foreach (var page in movable) directory.SetSize(page.Id, s.MiniApps.Width, s.MiniApps.Height);
+        });
         if (!S.Modules.Enabled || _preview) return;
         _preview = true; _previewPage = DeckPage.MiniApps; _app.Deck.Preview(true);
         _app.Deck.SelectPage(movable[0].Id, remember: false);
