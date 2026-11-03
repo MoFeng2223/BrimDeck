@@ -69,11 +69,16 @@ public partial class MainWindow
     // Whether this surface's collapsed row chooses the battery reading (the system readings are on and the table shows it).
     private bool StripChoosesBattery => Settings.ShowsMonitor(EffectiveStyle) && (CompactMonitor.Shown(Settings.CompactReadings) & CompactMonitorItems.Battery) != 0;
 
-    // The collapsed reading: the device with the lowest charge among those shown, null while none reports one.
+    // The collapsed reading: the device with the lowest charge among those shown (asleep keeps its last %, never a false 0 %),
+    // null while none reports one. MoreCount is how many other shown devices also report a charge (a tiny affordance on the strip).
     internal BatteryReading? LowestBattery()
     {
-        var lowest = ShownDevices.Where(device => device.Lowest is not null).OrderBy(device => device.Lowest).FirstOrDefault();
-        return lowest is null ? null : new BatteryReading(lowest.Lowest!.Value, lowest.Charging, Devices.Level(lowest.Lowest, lowest.Charging, Settings.DeviceLowPercent), lowest.Name);
+        var withCharge = ShownDevices.Where(device => device.Lowest is not null).OrderBy(device => device.Lowest).ThenBy(device => device.Asleep ? 1 : 0).ToList();
+        var lowest = withCharge.FirstOrDefault();
+        if (lowest is null) return null;
+        // Asleep: grey the last %, never paint it as critical from a cached figure.
+        var level = lowest.Asleep ? MemoryLevel.Normal : Devices.Level(lowest.Lowest, lowest.Charging, Settings.DeviceLowPercent);
+        return new BatteryReading(lowest.Lowest!.Value, lowest.Charging, level, lowest.Name, lowest.Kind, lowest.Asleep, false, Math.Max(0, withCharge.Count - 1), Devices.ShortLabel(lowest.Name));
     }
     // What the collapsed row shows: the lowest battery, kept while the devices are being listed again (the display came back
     // on, a suppression ended), so the reading does not drop to a dash for the moment the sources take to report.
@@ -119,5 +124,6 @@ public partial class MainWindow
     }
 }
 
-// The collapsed row's battery reading: the lowest charge among the devices shown, and the device it is.
-internal readonly record struct BatteryReading(int Percent, bool Charging, MemoryLevel Level, string Name);
+// The collapsed row's battery reading: the lowest charge among the devices shown, its kind for the icon, whether it is asleep
+// (last % kept, never a false 0 %), and how many other devices also report a charge (MoreCount).
+internal readonly record struct BatteryReading(int Percent, bool Charging, MemoryLevel Level, string Name, DeviceKind Kind = DeviceKind.Other, bool Asleep = false, bool Unknown = false, int MoreCount = 0, string ShortLabel = "");

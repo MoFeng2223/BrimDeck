@@ -89,5 +89,12 @@ static class DevicesTests
             && Devices.Level(25, false, 15) == MemoryLevel.Elevated && Devices.Level(26, false, 15) == MemoryLevel.Normal);
         check("Devices: a charging or unreported battery is never low", Devices.Level(3, true, 15) == MemoryLevel.Normal && Devices.Level(null, false, 15) == MemoryLevel.Normal);
         check("Devices: figures", Devices.Figure(42) == "42%" && Devices.Figure(null) == "—" && Devices.Figure(130) == "100%");
+        check("Devices: short labels take the first token", Devices.ShortLabel("M041 AJ179") == "M041" && Devices.ShortLabel("AJ179") == "AJ179"
+            && Devices.ShortLabel("  ") == "" && Devices.ShortLabel(null) == "");
+        check("Devices: compact figures never fake 0% while asleep", Devices.CompactFigure(92, false) == "92%"
+            && Devices.CompactFigure(92, true) == "92%" && Devices.CompactFigure(0, true) == Loc.T("休眠", "Sleep")
+            && Devices.CompactFigure(null, true) == Loc.T("休眠", "Sleep") && Devices.CompactFigure(null, false, unknown: true) == "··"
+            && Devices.CompactFigure(null, false) == "··");
+        check("Devices: layout gap is eight for the stacked cards", DevicesLayout.Gap == 8);
     }
 }

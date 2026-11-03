@@ -231,10 +231,12 @@ internal sealed class DevicesView : FrameworkElement
             return;
         }
 
-        var level = Devices.Level(device.Lowest, device.Charging, _low);
+        // Asleep keeps the last %, never painted as low/critical from a cached figure (product: grey +「休眠」).
+        var level = device.Asleep ? MemoryLevel.Normal : Devices.Level(device.Lowest, device.Charging, _low);
         // As text the level's color is moved to read at 4.5:1 on the theme (the warning amber is too light on light themes); in high
         // contrast the system's text color.
         string accent = high ? SystemColors.WindowTextColor.ToString() : TextColor(_colors.Level(level, UI.Secondary));
+        if (device.Asleep) drawing.PushOpacity(0.55);
         DeviceGlyphs.Draw(drawing, device.Kind, new Rect(r.X + pad, Math.Round(middle - icon / 2), icon, icon), UI.Secondary);
 
         // The figure at the right, in a column as wide as "100%" so names line up from card to card, the battery before it.
@@ -275,6 +277,7 @@ internal sealed class DevicesView : FrameworkElement
             var (name, _) = Texts(card, device.Name, null, textWidth, UI.Primary, detailColor, ppd);
             drawing.DrawText(name, new Point(textX, Math.Round(middle - name.Height / 2)));
         }
+        if (device.Asleep) drawing.Pop();
     }
 
     // By theme (a color readable on a light theme is not on a dark one). The target is above 4.5:1 because it is measured on the
@@ -307,6 +310,7 @@ internal sealed class DevicesView : FrameworkElement
         var parts = new List<string>();
         if (device.Parts.Count > 0) parts.Add(string.Join("  ", device.Parts.Select(part => Devices.PartName(part.Part) + " " + Devices.Figure(part.Percent))));
         if (device.Asleep) parts.Add(Loc.T("休眠", "Sleeping"));
+        else parts.Add(Loc.T("在线", "Online"));
         if (device.Charging) parts.Add(Loc.T("充电中", "Charging"));
         else if (device.Lowest is null) parts.Add(Loc.T("未报告电量", "No battery reported"));
         else if (level == MemoryLevel.Critical) parts.Add(Loc.T("电量低", "Battery low"));

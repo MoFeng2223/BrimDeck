@@ -132,6 +132,30 @@ public static class Devices
     // The figure as shown: "85%", or "—" for a device that reports no battery.
     public static string Figure(int? percent) => percent is { } p ? Clamp(p).ToString(System.Globalization.CultureInfo.InvariantCulture) + "%" : "—";
 
+    // A short model / id for the collapsed strip (e.g. "M041", "AJ179"): the first token, at most eight characters.
+    public static string ShortLabel(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "";
+        var token = name.Split([' ', '-', '_', '/', '·'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? "";
+        return token.Length <= 8 ? token : token[..8];
+    }
+
+    // The collapsed strip's battery figure: never a false 0 % while asleep; unknown is "··", not critical.
+    // Asleep with a known last charge keeps that percent (the row greys it and adds "休眠"); asleep with none shows "休眠".
+    public static string CompactFigure(int? percent, bool asleep, bool unknown = false)
+    {
+        if (unknown) return "··";
+        if (asleep)
+        {
+            if (percent is { } p && p > 0) return Clamp(p).ToString(System.Globalization.CultureInfo.InvariantCulture) + "%";
+            return Loc.T("休眠", "Sleep");
+        }
+        return percent is { } value ? Clamp(value).ToString(System.Globalization.CultureInfo.InvariantCulture) + "%" : "··";
+    }
+
+    // The asleep tag drawn after a known last charge on the collapsed strip.
+    public static string CompactAsleepTag => Loc.T("休眠", "Sleep");
+
     // A line for the tooltip and the settings: "左 80% · 右 75% · 盒 60% · 充电中 · 蓝牙".
     public static string Describe(DeviceBattery device)
     {
@@ -247,7 +271,7 @@ public sealed class DeviceRoster
 // with more devices the last card counts the rest.
 public sealed record DevicesLayout(int Columns, int Rows, double Body, double Caption, double Figure, bool Roomy, bool Dense)
 {
-    public const double MinimumCard = 180, MaximumCard = 440, Gap = 10, DenseRow = 34, ComfortableRow = 52, MaximumRow = 72, Hysteresis = 12;
+    public const double MinimumCard = 180, MaximumCard = 440, Gap = 8, DenseRow = 34, ComfortableRow = 52, MaximumRow = 72, Hysteresis = 12;
     public int Room => Columns * Rows;
 
     public static DevicesLayout For(double width, double height, int devices, DevicesLayout? previous)
