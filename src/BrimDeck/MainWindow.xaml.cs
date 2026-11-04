@@ -73,6 +73,13 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, int> _levels = new();
     private bool _levelsSeeded;
     private CompactAlertInfo? _alert;
+    // Mail verification code notice (MailOtp): takes the CompactAlert row; separate from quota alerts.
+    private MailOtpHit? _otp;
+    private bool _otpCopied;
+    private DispatcherTimer? _otpCopiedTimer;
+    // Quota alert or mail OTP occupies the collapsed CompactAlert row.
+    private bool CompactNoticeUp => _alert is not null || _otp is not null;
+
     private DeckSettings Settings => _app.Settings;
     public bool IsExpanded => _expanded;
     public bool IsSuppressed => !_preview && (Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Hide || HiddenByUser);
@@ -103,7 +110,8 @@ public partial class MainWindow : Window
         _hover = new(Dispatcher, () =>
         {
             _hover!.Stop();
-            if (IsSuppressed || !_pointerInside) return;
+            // OTP owns the collapsed strip: hover must not expand over the code.
+            if (IsSuppressed || !_pointerInside || _otp is not null) return;
             OpenAtPointer();
         });
         _leave = new(Dispatcher, () => CheckPointerExit(WindowsHost.Cursor()));
@@ -129,7 +137,11 @@ public partial class MainWindow : Window
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); else if (OffPeakChanged()) RenderCompact(); if (_lead is null) _app.CheckUpdatesIfDue(); };
         _seconds.Tick += (_, _) => { if (_compactClock is not null) _compactClock.Time = DateTime.Now; _seconds.Interval = SecondDelay(DateTime.Now); };
-        _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false); };
+        _alertTimer.Tick += (_, _) => {
+            _alertTimer.Stop();
+            if (_otp is not null) { ClearMailOtp(); if (!_expanded) SetExpanded(false); return; }
+            _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false);
+        };
         // A new foreground context closes the panel directly (ApplySettings lays it out collapsed), so SetExpanded never sees the
         // panel turn from open to closed: the collapsed title is set to scroll its laps again here, as SetExpanded does.
         _host.ContextChanged += context =>
@@ -252,6 +264,8 @@ public partial class MainWindow : Window
         ApplyLanguage();
         ApplyTheme();
         if (!Settings.QuotaAlerts && _alert is not null) ClearAlert();
+        if (!Settings.MailOtpEnabled && _otp is not null) ClearMailOtp();
+        if (IsSuppressed && _otp is not null) ClearMailOtp();
         ApplySyncSchedule();
         ApplyMusicSettings();
         ApplySecondClock();
@@ -488,12 +502,13 @@ public partial class MainWindow : Window
     private void ApplyCollapsedLayout()
     {
         // While the content fades out into the indicator it keeps the size it had, instead of being squeezed by the new shape.
-        if (Collapsed.Style == CompactStyle.Line && Compact.Visibility == Visibility.Visible && Compact.Opacity > 0 && !_expanded && IsVisible) return;
+        // A live quota/OTP notice must still rebuild: RenderCompact clears CompactAlert first, and an early return would leave a blank capsule.
+        if (!CompactNoticeUp && Collapsed.Style == CompactStyle.Line && Compact.Visibility == Visibility.Visible && Compact.Opacity > 0 && !_expanded && IsVisible) return;
         // Compact content keeps its final width while the surface moves, so nothing drifts with the shrinking edges.
         Compact.Width = Collapsed.ContentWidth;
         Compact.Height = Math.Max(0, 26 * Collapsed.Scale);
         ApplyCompactGeometry(Collapsed);
-        LayoutCompactAlert(Collapsed, _alert is not null);
+        LayoutCompactAlert(Collapsed, CompactNoticeUp);
     }
     // Brings the surface, its layers, the shadow and every cached piece of content up to the current panel theme. XAML styles
     // follow the theme by themselves (DynamicResource); what code built with the old colors is built again by the renders that
@@ -559,10 +574,10 @@ public partial class MainWindow : Window
         foreach (var reading in _columnReadings) reading.SetRunning(false, false);
         _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _stripCarousel = null; _compactClock = null; _compactStrip = null;
         _columnCarousel = null; _columnReadings.Clear(); _columnStrips.Clear();
-        if (_alert is not null)
+        if (CompactNoticeUp)
         {
             CompactAlert.Visibility = Visibility.Visible; CompactRings.Visibility = Visibility.Collapsed;
-            // LayoutCompactAlert (MainWindow.CompactLayout.cs) builds the alert row from _alert and sizes it for the shape.
+            // LayoutCompactAlert builds the quota or mail-OTP row and sizes it for the shape.
             ApplyCollapsedLayout();
             // The notice hides the system readings, which then need none.
             UpdateMonitorDemand();
@@ -600,18 +615,106 @@ public partial class MainWindow : Window
 
     internal void ShowAlert(AppEntry entry, string label, double used, DateTimeOffset? resetAt)
         => ShowAlert(new CompactAlertInfo(entry, entry.Name, label + " ", used, resetAt));
-    internal void ClearAlert() { _alertTimer.Stop(); _alert = null; RenderCompact(); }
+    internal void ClearAlert()
+    {
+        _alert = null;
+        // OTP reuses the notice timer; clearing a quota alert must not cancel a live code.
+        if (_otp is not null) return;
+        _alertTimer.Stop();
+        RenderCompact();
+    }
     // No alert while the panel is suppressed (full-screen rule or hidden by the user): it would not be seen, and it must not
     // appear later when the panel shows again.
     private void ShowAlert(CompactAlertInfo alert)
     {
         if (IsSuppressed) return;
+        // A live verification code keeps the row; quota waits.
+        if (_otp is not null) return;
         _alert = alert; _alertTimer.Stop(); _alertTimer.Start();
         RenderCompact();
         if (!_expanded && !IsSuppressed) SetExpanded(false);
     }
 
-    private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
+    // Island row for a mailbox verification code. Hidden while the island is suppressed (fullscreen / lock hide).
+    internal void ShowMailOtp(MailOtpHit hit)
+    {
+        if (!Settings.MailOtpEnabled || IsSuppressed) return;
+        if (string.IsNullOrWhiteSpace(hit.Code)) return;
+        _alertTimer.Stop(); _alert = null;
+        _otp = hit; _otpCopied = false; _otpCopiedTimer?.Stop();
+        _alertTimer.Interval = TimeSpan.FromSeconds(MailOtp.FitSeconds(Settings.MailOtpSeconds));
+        _alertTimer.Stop(); _alertTimer.Start();
+        if (Settings.MailOtpAutoCopy) CopyMailOtp(hit.Code, flash: false);
+        // Indicator→Capsule remorph: update Collapsed before RenderCompact so CompactAlert is built for the showable shape.
+        // Also reveal Compact immediately — the indicator leaves Opacity at 0, and SetExpanded's delayed compact track
+        // would otherwise show a blank stretched capsule until ~62% of the morph.
+        // Do not set _morphingShape: MorphShape zeros Compact opacity mid-morph, which is exactly the blank-capsule bug.
+        _alertRendered = null;
+        Collapsed = ShapeFor(EffectiveStyle);
+        RevealMailOtpCompact();
+        RenderCompact();
+        if (!_expanded && !IsSuppressed) SetExpanded(false);
+        else RevealMailOtpCompact();
+    }
+
+    // Compact stays Hidden/Opacity 0 in Line (indicator). OTP content lives in CompactAlert — force the slot visible now.
+    private void RevealMailOtpCompact()
+    {
+        if (_otp is null || _expanded) return;
+        if (Collapsed.Style == CompactStyle.Line) return;
+        Compact.Visibility = Visibility.Visible;
+        SetImmediate(Compact, OpacityProperty, 1d);
+        SetImmediate(CompactScale, ScaleTransform.ScaleXProperty, 1d);
+        SetImmediate(CompactScale, ScaleTransform.ScaleYProperty, 1d);
+    }
+
+    private void ClearMailOtp()
+    {
+        _otpCopiedTimer?.Stop();
+        _otp = null; _otpCopied = false;
+        _alertTimer.Interval = TimeSpan.FromSeconds(5);
+        // Dropping OTP may return EffectiveStyle to Line; rebuild so the indicator comes back.
+        if (!_expanded && !IsSuppressed) SetExpanded(false);
+        else RenderCompact();
+    }
+
+    private void CopyMailOtp(string code, bool flash = true)
+    {
+        try { System.Windows.Clipboard.SetText(code); }
+        catch (System.Runtime.InteropServices.COMException) { return; }
+        catch (System.Security.SecurityException) { return; }
+        if (!flash) return;
+        _otpCopied = true;
+        _otpCopiedTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) };
+        _otpCopiedTimer.Tick -= OtpCopiedTick;
+        _otpCopiedTimer.Tick += OtpCopiedTick;
+        _otpCopiedTimer.Stop(); _otpCopiedTimer.Start();
+        RenderCompact();
+    }
+
+    private void OtpCopiedTick(object? sender, EventArgs e)
+    {
+        _otpCopiedTimer?.Stop();
+        _otpCopied = false;
+        RenderCompact();
+    }
+
+    // Maximized→indicator hides Compact (no content slot). A live mail OTP temporarily uses the user's normal
+    // collapsed style so the code row can appear; if the user chose Indicator as the style, fall back to Capsule.
+    private CompactStyle EffectiveStyle
+    {
+        get
+        {
+            if (_otp is not null)
+            {
+                var style = Settings.Style;
+                return style == CompactStyle.Line ? CompactStyle.Capsule : style;
+            }
+            return !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Line
+                ? CompactStyle.Line
+                : Settings.Style;
+        }
+    }
     // One animated track: where it starts and ends, as fractions of the configured duration.
     private readonly record struct Track(double Start, double End);
     // The collapsed island at rest clips its content to a rectangle (IslandBorder.SettledClip): the content keeps clear of its
@@ -811,9 +914,17 @@ public partial class MainWindow : Window
             Island.BeginAnimation(Border.CornerRadiusProperty, Timed(new CornerRadiusAnimation { To = radius, EasingFunction = morphing ? Soft.Out : corners }, duration, cornerTrack), HandoffBehavior.SnapshotAndReplace);
         }
         bool compactGone = expanded || line;
-        Animate(Compact, OpacityProperty, compactGone ? 0 : 1, duration, compact, easeOut, () => { if (_expanded || ShapeFor(EffectiveStyle).Style == CompactStyle.Line) Compact.Visibility = Visibility.Hidden; });
-        Animate(CompactScale, ScaleTransform.ScaleXProperty, compactGone ? Soft.Shrunk : 1, duration, compact, easeOut);
-        Animate(CompactScale, ScaleTransform.ScaleYProperty, compactGone ? Soft.Shrunk : 1, duration, compact, easeOut);
+        // Live OTP: never delay Compact fade-in after indicator remorph — blank capsule until the late compact track.
+        if (!compactGone && _otp is not null)
+        {
+            RevealMailOtpCompact();
+        }
+        else
+        {
+            Animate(Compact, OpacityProperty, compactGone ? 0 : 1, duration, compact, easeOut, () => { if (_expanded || ShapeFor(EffectiveStyle).Style == CompactStyle.Line) Compact.Visibility = Visibility.Hidden; });
+            Animate(CompactScale, ScaleTransform.ScaleXProperty, compactGone ? Soft.Shrunk : 1, duration, compact, easeOut);
+            Animate(CompactScale, ScaleTransform.ScaleYProperty, compactGone ? Soft.Shrunk : 1, duration, compact, easeOut);
+        }
         // The line's playback progress, hidden while the surface was the boot's dot, comes back with the compact content.
         Animate(MusicIndicator, OpacityProperty, 1, duration, compact, easeOut);
         Animate(ShadowHost, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);
@@ -823,7 +934,12 @@ public partial class MainWindow : Window
         // Opening from the indicator, the surface takes its own color while it is still the thin line: the opening spring is
         // half way open within a few frames, and a tint still under way showed for those frames as a large block in the
         // indicator's color.
-        if (duration == 0 || expanded && line && !wasExpanded) SetImmediate(_surface, SolidColorBrush.ColorProperty, tone);
+        // OTP remorph from indicator: take surface color and material at once so the code row is not a blank tinted capsule.
+        if (duration == 0 || expanded && line && !wasExpanded || !indicator && _otp is not null)
+        {
+            SetImmediate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0d : 1d);
+            SetImmediate(_surface, SolidColorBrush.ColorProperty, tone);
+        }
         else _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = tone, EasingFunction = easeInOut }, duration, tint), HandoffBehavior.SnapshotAndReplace);
         // The panel is rebuilt when data or settings change, never here: a rebuild on the first frame reads as a stall.
         if (expanded) { RefreshStatus(); UpdateMusicPosition(); }
@@ -854,6 +970,7 @@ public partial class MainWindow : Window
     // Opened by hovering or by a click: the panel may centre on the pointer (see SetExpanded).
     private void OpenAtPointer()
     {
+        if (_otp is not null) return;
         if (Settings.ExpandAtPointer && PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
         SetExpanded(true);
     }
@@ -864,7 +981,15 @@ public partial class MainWindow : Window
     private void Island_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         bool pressed = _islandPressed; _islandPressed = false;
-        if (!pressed || _expanded || _preview || _moveArmed || IsSuppressed || !Settings.ClickToExpand) return;
+        if (!pressed || _expanded || _preview || _moveArmed || IsSuppressed) return;
+        // A mail verification code owns the collapsed row: the whole strip copies, and does not open the panel.
+        if (_otp is { } otp)
+        {
+            e.Handled = true;
+            CopyMailOtp(otp.Code);
+            return;
+        }
+        if (!Settings.ClickToExpand) return;
         e.Handled = true;
         _hover.Stop(); _leave.Stop();
         OpenAtPointer();
@@ -942,7 +1067,9 @@ public partial class MainWindow : Window
         {
             _popupReturnArea = null;
             _leave.Stop(); if (_expanded || IsSuppressed) return;
-            _hover.Stop(); if (Settings.ClickToExpand) return;
+            _hover.Stop();
+            // While a verification code is showing, only click/copy acts — do not expand on hover.
+            if (_otp is not null || Settings.ClickToExpand) return;
             _hover.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay)); _hover.Start();
         }
         else
