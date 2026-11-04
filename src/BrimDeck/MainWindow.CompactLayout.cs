@@ -170,6 +170,8 @@ public partial class MainWindow
     // Whole strip still copies; a dedicated copy control makes the action obvious. Hover does not expand (PointerChanged).
     private void LayoutMailOtp(CollapsedShape shape, MailOtpHit otp)
     {
+        // Never leave CompactAlert visible with zero children (blank white capsule).
+        CompactAlert.Visibility = Visibility.Visible;
         object key = otp;
         if (_otpCopied) key = (otp, "copied");
         if (_alertRendered is { } done && Equals(done.Shape, shape) && Equals(done.Alert, key)
@@ -178,6 +180,14 @@ public partial class MainWindow
         CompactAlert.Children.Clear();
         _alertRendered = (shape, key); _compactRendered = shape;
         _alertSince = (key, Environment.TickCount64);
+        // Guard: empty code must not allocate an empty host row.
+        if (string.IsNullOrWhiteSpace(otp.Code))
+        {
+            var missing = UI.Fixed(Loc.T("验证码", "Code"), Math.Max(1, CompactMusicLayout.Half(13 * CompactMusicLayout.SafeScale(shape.Scale))), Math.Max(1, CompactMusicLayout.Whole(20 * CompactMusicLayout.SafeScale(shape.Scale))), UI.Secondary);
+            missing.Tag = AlertRegionTag;
+            CompactAlert.Children.Add(missing);
+            return;
+        }
         double scale = CompactMusicLayout.SafeScale(shape.Scale);
         double codeSize = Math.Max(1, CompactMusicLayout.Half(15.5 * scale));
         double metaSize = Math.Max(1, CompactMusicLayout.Half(11 * scale));

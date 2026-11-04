@@ -502,7 +502,8 @@ public partial class MainWindow : Window
     private void ApplyCollapsedLayout()
     {
         // While the content fades out into the indicator it keeps the size it had, instead of being squeezed by the new shape.
-        if (Collapsed.Style == CompactStyle.Line && Compact.Visibility == Visibility.Visible && Compact.Opacity > 0 && !_expanded && IsVisible) return;
+        // A live quota/OTP notice must still rebuild: RenderCompact clears CompactAlert first, and an early return would leave a blank capsule.
+        if (!CompactNoticeUp && Collapsed.Style == CompactStyle.Line && Compact.Visibility == Visibility.Visible && Compact.Opacity > 0 && !_expanded && IsVisible) return;
         // Compact content keeps its final width while the surface moves, so nothing drifts with the shrinking edges.
         Compact.Width = Collapsed.ContentWidth;
         Compact.Height = Math.Max(0, 26 * Collapsed.Scale);
@@ -638,13 +639,33 @@ public partial class MainWindow : Window
     internal void ShowMailOtp(MailOtpHit hit)
     {
         if (!Settings.MailOtpEnabled || IsSuppressed) return;
+        if (string.IsNullOrWhiteSpace(hit.Code)) return;
         _alertTimer.Stop(); _alert = null;
         _otp = hit; _otpCopied = false; _otpCopiedTimer?.Stop();
         _alertTimer.Interval = TimeSpan.FromSeconds(MailOtp.FitSeconds(Settings.MailOtpSeconds));
         _alertTimer.Stop(); _alertTimer.Start();
         if (Settings.MailOtpAutoCopy) CopyMailOtp(hit.Code, flash: false);
+        // Indicator→Capsule remorph: update Collapsed before RenderCompact so CompactAlert is built for the showable shape.
+        // Also reveal Compact immediately — the indicator leaves Opacity at 0, and SetExpanded's delayed compact track
+        // would otherwise show a blank stretched capsule until ~62% of the morph.
+        // Do not set _morphingShape: MorphShape zeros Compact opacity mid-morph, which is exactly the blank-capsule bug.
+        _alertRendered = null;
+        Collapsed = ShapeFor(EffectiveStyle);
+        RevealMailOtpCompact();
         RenderCompact();
         if (!_expanded && !IsSuppressed) SetExpanded(false);
+        else RevealMailOtpCompact();
+    }
+
+    // Compact stays Hidden/Opacity 0 in Line (indicator). OTP content lives in CompactAlert — force the slot visible now.
+    private void RevealMailOtpCompact()
+    {
+        if (_otp is null || _expanded) return;
+        if (Collapsed.Style == CompactStyle.Line) return;
+        Compact.Visibility = Visibility.Visible;
+        SetImmediate(Compact, OpacityProperty, 1d);
+        SetImmediate(CompactScale, ScaleTransform.ScaleXProperty, 1d);
+        SetImmediate(CompactScale, ScaleTransform.ScaleYProperty, 1d);
     }
 
     private void ClearMailOtp()
@@ -893,9 +914,17 @@ public partial class MainWindow : Window
             Island.BeginAnimation(Border.CornerRadiusProperty, Timed(new CornerRadiusAnimation { To = radius, EasingFunction = morphing ? Soft.Out : corners }, duration, cornerTrack), HandoffBehavior.SnapshotAndReplace);
         }
         bool compactGone = expanded || line;
-        Animate(Compact, OpacityProperty, compactGone ? 0 : 1, duration, compact, easeOut, () => { if (_expanded || ShapeFor(EffectiveStyle).Style == CompactStyle.Line) Compact.Visibility = Visibility.Hidden; });
-        Animate(CompactScale, ScaleTransform.ScaleXProperty, compactGone ? Soft.Shrunk : 1, duration, compact, easeOut);
-        Animate(CompactScale, ScaleTransform.ScaleYProperty, compactGone ? Soft.Shrunk : 1, duration, compact, easeOut);
+        // Live OTP: never delay Compact fade-in after indicator remorph — blank capsule until the late compact track.
+        if (!compactGone && _otp is not null)
+        {
+            RevealMailOtpCompact();
+        }
+        else
+        {
+            Animate(Compact, OpacityProperty, compactGone ? 0 : 1, duration, compact, easeOut, () => { if (_expanded || ShapeFor(EffectiveStyle).Style == CompactStyle.Line) Compact.Visibility = Visibility.Hidden; });
+            Animate(CompactScale, ScaleTransform.ScaleXProperty, compactGone ? Soft.Shrunk : 1, duration, compact, easeOut);
+            Animate(CompactScale, ScaleTransform.ScaleYProperty, compactGone ? Soft.Shrunk : 1, duration, compact, easeOut);
+        }
         // The line's playback progress, hidden while the surface was the boot's dot, comes back with the compact content.
         Animate(MusicIndicator, OpacityProperty, 1, duration, compact, easeOut);
         Animate(ShadowHost, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);
@@ -905,7 +934,12 @@ public partial class MainWindow : Window
         // Opening from the indicator, the surface takes its own color while it is still the thin line: the opening spring is
         // half way open within a few frames, and a tint still under way showed for those frames as a large block in the
         // indicator's color.
-        if (duration == 0 || expanded && line && !wasExpanded) SetImmediate(_surface, SolidColorBrush.ColorProperty, tone);
+        // OTP remorph from indicator: take surface color and material at once so the code row is not a blank tinted capsule.
+        if (duration == 0 || expanded && line && !wasExpanded || !indicator && _otp is not null)
+        {
+            SetImmediate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0d : 1d);
+            SetImmediate(_surface, SolidColorBrush.ColorProperty, tone);
+        }
         else _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = tone, EasingFunction = easeInOut }, duration, tint), HandoffBehavior.SnapshotAndReplace);
         // The panel is rebuilt when data or settings change, never here: a rebuild on the first frame reads as a stall.
         if (expanded) { RefreshStatus(); UpdateMusicPosition(); }
