@@ -1,0 +1,16 @@
+tests/BrimDeck.Tests/PanelThemeEditorTests.cs
+  h_dc4d9c798f1bc1 94-97
+src/BrimDeck.Core/PanelThemes.Derive.cs
+  h_dc4d9c798f1bc1 16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "60a50c3e933a7bae4b0598e3d792c512e6647a00",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
