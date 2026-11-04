@@ -129,6 +129,8 @@ internal sealed class ModuleViewHost : Grid, IDisposable
         try { return _host.Measure(_owner, operation, run); } catch (Exception error) { _lease!.Report(operation, error); return default; }
     }
     internal bool IsAdjusting => Query("view input", () => _view!.IsAdjusting);
+    // The mounted view, for the host's own width and layout questions (never handed to module code).
+    internal IModuleView? View => _view;
     internal void SetPresented(bool presented)
     { _presented = presented; UpdatePresentation(); }
     private void UpdatePresentation()

@@ -3,10 +3,10 @@ using BrimDeck.Modules;
 using Loc = BrimDeck.ModuleLocalization;
 
 namespace BrimDeck.Thrm;
-// The cooler module: a page (three gauge cards) and its settings — that is all until the platform grows a way to
-// fold readings into the collapsed row beside the built-in ones (the readings' controls are kept in ThermVisuals for
-// that day). Until then the module takes no place in the collapsed row: covering it, hiding the built-in readings,
-// is not a trade the cooler should make. The only host entry point is the public SDK context.
+// The cooler module: a page (three gauge cards), its settings, and a passive activity whose readings fold into the
+// collapsed row beside the built-in ones (the platform's row-part stream). The activity is always on — enabling the
+// module is the switch — and Passive, so expanding the panel opens the pages rather than a control bar. The only host
+// entry point is the public SDK context.
 public sealed class ThermModule : IModule
 {
     public const string Id = "thrm";
@@ -19,6 +19,7 @@ public sealed class ThermModule : IModule
         {
             IconPath = ThermVisuals.FanGlyph, Size = new ModulePageSize(620, 250)
         });
+        context.Register<IModuleActivity>("readings", new ThermActivity(workspace));
         context.Register<IModuleSettings>("general", new ThermSettings(workspace));
         return ValueTask.CompletedTask;
     }

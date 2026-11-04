@@ -124,8 +124,13 @@ public sealed record ModulePage(string Title, string TitleEn, Func<ModuleViewCon
 public enum ActivityViewKind { Compact, Expanded }
 // Passive marks a presence-only activity (a reading, a status): it takes the collapsed row, but expanding the panel
 // opens the normal pages instead of the activity's control bar, which only a view's ShowActivity can bring up.
+// A passive activity's view may also declare PreferredWidth, the room its readings ask for in the collapsed row
+// beside the built-in ones; it is dropped whole when the row has no room (the settings say so).
 public sealed record ActivityState(bool Active, double Progress, bool Indeterminate, string Accent, int Completion = 0)
 { public bool Passive { get; init; } }
+// The width a compact view asks for, in DIPs at scale 1 (the row scales it like the built-in readings). Null means the
+// view does not offer itself as a row part and takes the whole row when its activity is presented.
+public interface IModuleCompactWidth { double? PreferredWidth { get; } }
 public interface IModuleActivity
 {
     ActivityState State { get; }

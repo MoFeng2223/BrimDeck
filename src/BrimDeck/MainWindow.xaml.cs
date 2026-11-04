@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -579,8 +579,14 @@ public partial class MainWindow : Window
             CompactRings.Visibility = Visibility.Hidden; CompactAlert.Visibility = Visibility.Hidden;
             ApplyCollapsedLayout(); return;
         }
-        if (ModuleActivityPresented && _alert is null) { RenderModuleCompact(); ApplyCollapsedLayout(); return; }
+        // A passive activity whose view offers a width is one part of the normal row (RenderCompactMusic); only an
+        // activity that takes the whole row — a running task's readings — replaces it.
+        bool modulePart = ModuleActivityPresented && ActivityState.Passive;
+        if (ModuleActivityPresented && _alert is null && !modulePart) { RenderModuleCompact(); ApplyCollapsedLayout(); return; }
         var fade = RowFadeStart();
+        // The module readings' host belongs to the row about to be discarded; it is released with it, and the new row
+        // mounts its own (a host cannot be moved between parents, and an unloaded one does not come back on show).
+        ClearModulePartForRow();
         CompactRings.Children.Clear(); CompactAlert.Children.Clear();
         CompactRings.HorizontalAlignment = HorizontalAlignment.Center;
         if (_quotaCarousel is not null) { _quotaElapsed = _quotaCarousel.Elapsed; _quotaCarousel.SetRunning(false, false); }

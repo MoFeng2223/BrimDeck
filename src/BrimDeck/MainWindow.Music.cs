@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -1062,18 +1062,24 @@ public partial class MainWindow
         var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings), scale,
             !(media && showCover) && !equalizer && apps.Count == 0 && text.Length == 0 && clock is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden, _stripAdmission) : null;
         _stripLayout = _stripAdmission.Layout;
+        // The module readings' part, asked for before any width is worked out: an auto-width surface must count it, or the
+        // row would never be wide enough for it and it would be dropped for good.
+        var modulePart = ModuleCompactPart(scale);
+        // One source of truth for "is there a module part": its view and its place in the saved order. Everything below
+        // keys off this width, so a view that failed to mount can never leave the row believing in it.
+        double moduleFace = modulePart.View is not null && Settings.CompactOrder(EffectiveStyle).Contains(CompactPart.Modules) ? modulePart.Width : 0;
         // Readings that do not fit scroll through a window of whole readings, as the rings do (CompactSpacing.Window).
         var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, equalizer, Settings.EqualizerBars, showCover); CurrentCompactLayout = layout;
         // An auto-width surface takes the width of what the row shows; the new shape builds the row again. The track notice
         // and the lyric's changing length are left out, so the width changes only when the content itself does.
         int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count : 0;
         bool steadyText = media && !hideText && Settings.MusicText != CompactMusicText.None;
-        double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, dpi, equalizer, Settings.EqualizerBars, showCover);
+        double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, dpi, equalizer, Settings.EqualizerBars, showCover, moduleFace);
         // The surface is never narrower than what the row must show (CompactMusicLayout.RequiredWidth); like the width it asks
         // for, this leaves out the track notice, so the surface does not move for it.
         var readingWidths = strip?.ItemWidths() ?? [];
         double required = CompactMusicLayout.RequiredWidth(scale, media, steadyText, clock?.ReservedWidth ?? 0,
-            steadyRings > 0 ? Math.Max(1, CompactMusicLayout.Whole(12 * scale)) : 0, CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0), equalizer, Settings.EqualizerBars, showCover);
+            steadyRings > 0 ? Math.Max(1, CompactMusicLayout.Whole(12 * scale)) : 0, CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0), equalizer, Settings.EqualizerBars, showCover, moduleFace);
         if (double.IsNaN(_compactWanted) || Math.Abs(wanted - _compactWanted) > .5 || Math.Abs(required - _compactRequired) > .5)
         { _compactWanted = wanted; _compactRequired = required; Dispatcher.BeginInvoke(DispatcherPriority.Background, FitCompactToContent); }
         double row = layout.RowHeight, unit = CompactMusicLayout.Gap(scale);
@@ -1119,11 +1125,23 @@ public partial class MainWindow
         }
         var shown = new List<(object Part, CompactSpacing.Part Size)>();
         if (hasCover) shown.Add(("cover", new(layout.CoverSize)));
+        // A passive activity's readings stand as one part, whole or not at all: its declared width takes part in the
+        // arrangement like the built-in readings'. It is left out of the row altogether when what the scrolling parts
+        // need leaves no room for it — a part cut at the edge would be worse than absent — and the settings say so.
+        bool wantsModule = moduleFace > 0;
+        // The room the scrolling parts must keep whatever happens (their narrowest windows), then the module part's own.
+        double scrollingFloor = CompactSpacing.Minimum(ringWidths, layout.RingGap) + CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0);
+        bool moduleFits = wantsModule && pool - scrollingFloor >= modulePart.Width - .5;
+        _compactModuleShown = moduleFits;
+        double moduleWidth = moduleFits ? modulePart.Width : 0;
+        // The module part is not one of the scrolling parts: its room comes off the pool before they share what is left.
+        if (moduleWidth > 0) { pool = Math.Max(0, pool - moduleWidth - unit); (rings, readings) = CompactSpacing.Share(ringWidths, layout.RingGap, readingWidths, strip?.Gap ?? 0, pool); }
         foreach (var part in Settings.CompactOrder(EffectiveStyle))
         {
             if (part == CompactPart.Rings && rings.Window > 0) shown.Add((part, new(rings.Window)));
             else if (part == CompactPart.Music && hasText) shown.Add((part, new(0)));
             else if (part == CompactPart.Monitor && readings.Window > 0) shown.Add((part, new(readings.Window)));
+            else if (part == CompactPart.Modules && moduleWidth > 0) shown.Add((part, new(moduleWidth)));
             else if (part == CompactPart.Equalizer && hasEqualizer) shown.Add((part, new(layout.EqualizerSize)));
             else if (part == CompactPart.Clock && hasClock) shown.Add((part, new(clock!.ReservedWidth)));
         }
@@ -1148,6 +1166,14 @@ public partial class MainWindow
                 case CompactPart.Rings:
                     element = _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout.RingSize, layout.RingThickness, layout.Scale, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), _quotaElapsed, animate,
                         flow > 0 ? rings.Window : null, ringCut); break;
+                case CompactPart.Modules:
+                    // The readings stand at their declared width, centred in the room the arrangement gave them. The view
+                    // is kept across row rebuilds, so detach it from the last row's grid before this one adopts it.
+                    if (modulePart.View is not { } moduleView) { element = new Grid(); break; }
+                    if (VisualTreeHelper.GetParent(moduleView) is Panel previous) previous.Children.Remove(moduleView);
+                    moduleView.Width = modulePart.Width; moduleView.HorizontalAlignment = HorizontalAlignment.Center;
+                    element = moduleView;
+                    break;
                 case CompactPart.Music:
                     element = _compactMarquee = CompactTitle(text, room, layout); break;
                 default:
@@ -1166,6 +1192,12 @@ public partial class MainWindow
             grid.Children.Add(element);
         }
         CompactRings.Children.Add(grid); UpdateMusicTimer();
+        // The module readings' host was unloaded with the last row; once the new row is in the tree, tell it it is on show
+        // again. Its Loaded event does the same, but a clear-and-add can reuse the same element without one.
+        if (moduleWidth > 0 && modulePart.View is ModuleViewHost partHost)
+        {
+            partHost.SetPresented(true);
+        }
         // The readings were built with the row; they start or stop the sampler and take the newest reading.
         _stripShowing = false; UpdateMonitorDemand();
     }

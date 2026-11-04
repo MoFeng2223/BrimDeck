@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Automation;
@@ -99,7 +99,39 @@ public partial class MainWindow
     {
         _moduleExpandedView?.Dispose(); _moduleCompactView?.Dispose(); _moduleExpandedView = _moduleCompactView = null;
         ModuleControlHost.Children.Clear(); ModuleCompact.Children.Clear();
+        ReleaseModulePart();
     }
+    // The passive activities' readings as one part of the collapsed row: a compact view that declares a width
+    // (IModuleCompactWidth) offers itself beside the built-in readings, and takes its place in the saved part order.
+    // The mine host cannot simply be reused across row rebuilds: the row is rebuilt by clearing its children, and WPF
+    // will not take an element that still has a logical parent — nor does a host that was unloaded report itself on
+    // show again. So the part is built fresh for each row it takes part in, and the previous one is disposed here.
+    private (FrameworkElement? View, double Width) ModuleCompactPart(double scale)
+    {
+        if (!ModuleActivityPresented || !ActivityState.Passive || _moduleActivity is not { } entry) { ReleaseModulePart(); return (null, 0); }
+        if (!ReferenceEquals(_modulePartOwner, entry) || _modulePartView is null)
+        {
+            ReleaseModulePart();
+            _modulePartOwner = entry;
+            _modulePartView = new ModuleViewHost(_app.Modules, entry.ModuleId, ModuleContext, context => entry.Value.CreateView(context, ActivityViewKind.Compact));
+        }
+        // A module's compact view keeps the whole row when it does not declare a width; those take the other path.
+        if (_modulePartView.View is not IModuleCompactWidth declared || declared.PreferredWidth is not { } wanted) { ReleaseModulePart(); return (null, 0); }
+        _modulePartView.SetViewport(wanted, 24, Math.Clamp(scale, .75, 2));
+        _modulePartView.SetPresented(true);
+        return (_modulePartView, wanted);
+    }
+    // Called by the row before it clears its children: the part's host goes with the old row and a fresh one mounts into
+    // the new, so no element is ever asked to change parent.
+    private void ClearModulePartForRow() => ReleaseModulePart();
+    private ModuleViewHost? _modulePartView;
+    private Contribution<IModuleActivity>? _modulePartOwner;
+    // Whether the row had room for the module readings at its last build: the settings page says which readings are
+    // not shown for want of room (the #78 plan's rule for the collapsed row).
+    internal bool ModulePartShown => _compactModuleShown;
+    internal bool ModulePartWanted => ModuleActivityPresented && ActivityState.Passive && _modulePartView is not null;
+    private bool _compactModuleShown;
+    private void ReleaseModulePart() { _modulePartView?.Dispose(); _modulePartView = null; _modulePartOwner = null; }
     private void ReleaseModulePage()
     { if (_modulePageMenu is not null) _modulePageMenu.IsOpen = false; _modulePageMenu = null; _modulePage?.Dispose(); _modulePage = null; _modulePageEntry = null; MiniAppsContent.Children.Clear(); }
     private void DismissExpandedFromEscape()
@@ -193,6 +225,10 @@ public partial class MainWindow
             UpdateCollapsedGeometry(); RenderCompact(); if (!_expanded && !_moduleClosing) SetExpanded(false);
         }
         if (active && _moduleExpandedView is null) BuildModuleControls();
+        // A row part's first mount lands after the row was built without it: the module's next Changed (which is what
+        // brought us here) rebuilds the row so the readings join it. Once mounted, later updates go through the view's own
+        // redraw, so no rebuild is needed for every reading.
+        if (active && ActivityState.Passive && _modulePartView is { View: null } && !_expanded) RenderCompact();
         var state = ActivityState;
         if (_moduleCompletion != state.Completion)
         {

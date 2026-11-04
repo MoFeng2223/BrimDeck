@@ -64,7 +64,19 @@ public sealed partial class SettingsWindow
     }
 
     private const double PartRowHeight = 44, PartHandleWidth = 40;
-    // The parts whose options are open (the clock, the quota rings), kept while the page is rebuilt or the collapsed style changes.
+    // The note beside the module readings' row: which readings the module offers, and whether the row had room for them
+    // at its last build — the plan's rule that the settings say what the collapsed row left out for want of room.
+    private string ModulePartHelp
+    {
+        get
+        {
+            var deck = _app.Decks.FirstOrDefault(d => d.IsVisible) ?? _app.Deck;
+            if (deck is null || !deck.ModulePartWanted) return Loc.T("当前没有提供收起行读数的模组。", "No module offers collapsed-row readings right now.");
+            return deck.ModulePartShown
+                ? Loc.T("模组读数与内置读数并排显示，可拖动调整位置；空间不足时整块隐藏。", "Module readings stand beside the built-in ones; drag to move them. The row hides them whole when there is no room.")
+                : Loc.T("空间不足，模组读数当前未显示。加宽收起面板或减少其他读数后可显示。", "No room right now, so the module readings are hidden. Widen the collapsed panel or choose fewer readings.");
+        }
+    }    // The parts whose options are open (the clock, the quota rings), kept while the page is rebuilt or the collapsed style changes.
     private readonly HashSet<CompactPart> _openParts = [];
     private readonly List<(Border Row, Border Options, Button Arrow)> _partOptions = [];
     // One draggable row of the collapsed content: the handle, the name and the switch.
@@ -77,6 +89,9 @@ public sealed partial class SettingsWindow
             CompactPart.Equalizer => (Loc.T("律动条", "Equalizer"), S.ShowsEqualizer(style), null),
             CompactPart.Music => (Loc.T("正在播放的音乐", "Music now playing"), S.ShowsMusic(style),
                 Loc.T("拖动只改变歌名或歌词的位置。封面始终在最左侧。", "Dragging moves only the title or lyric. The cover stays at the left.")),
+            // Module readings take no switch of their own: which readings exist is each module's business (enabling the
+            // module is its switch), and the row drops them whole, with a note, when it has no room. The note is the help.
+            CompactPart.Modules => (Loc.T("模组读数", "Module readings"), true, ModulePartHelp),
             _ => (Loc.T("系统监控", "System monitor"), S.ShowsMonitor(style), null)
         };
         void Show(bool on) => Change(s =>
@@ -95,6 +110,8 @@ public sealed partial class SettingsWindow
         row.Children.Add(handle);
         var label = SettingLabel(title, help is null ? null : () => help); Grid.SetColumn(label, 1); row.Children.Add(label);
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = shown, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
+        // Module readings have no switch (see above); hiding the control leaves the row draggable and the note in place.
+        if (part == CompactPart.Modules) toggle.Visibility = Visibility.Collapsed;
         AutomationProperties.SetName(toggle, title); toggle.Checked += (_, _) => Show(true); toggle.Unchecked += (_, _) => Show(false);
         Grid.SetColumn(toggle, 2); row.Children.Add(toggle);
         AttachPartDrag(handle, title, style, rows);

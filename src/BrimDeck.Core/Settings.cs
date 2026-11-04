@@ -56,12 +56,14 @@ public enum PausedMusicHide { None, Text, Cover, Both }
 // on the right. Saved as numbers, so new members go at the end; a file without it, or with a number not listed, is Flow.
 public enum EqualizerMode { Flow = 0, Spectrum = 1 }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left; Music places
-// only the title or lyric. Saved as numbers, so new members go at the end.
-public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock }
+// only the title or lyric. Saved as numbers, so new members go at the end. Modules stands for passive module readings (a
+// hardware read-out and the like): one part in the row's arrangement, dropped whole with a settings note when there is no room.
+public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Modules }
 public static class CompactParts
 {
     // A file saved before the equalizer and the clock were put in order adds them after its parts, the clock last, where they stood.
-    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock];
+    // Modules follows the system readings, the readings it belongs beside.
+    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Modules, CompactPart.Equalizer, CompactPart.Clock];
     // Each known part once, in the saved order; a part missing from the file takes its default place after the others.
     public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Default).Distinct()];
 }

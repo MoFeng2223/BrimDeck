@@ -25,10 +25,10 @@ internal sealed class ThermActivity(ThermWorkspace workspace) : IModuleActivity
     public IModuleView CreateView(ModuleViewContext context, ActivityViewKind kind) => new ThermActivityView(workspace, context, kind);
 }
 
-// The compact row holds the three readings at the row's scale; the expanded strip (the module's control bar, shown
-// only when a view calls ShowActivity) holds the same three readings larger with the bridge's mode beneath. Both
-// redraw from the workspace's latest sample.
-internal sealed class ThermActivityView : Grid, IModuleView, IModuleLayoutView
+// The compact row holds the three readings at the row's scale, as one part of the collapsed row beside the built-in
+// readings; the expanded strip (the module's control bar, shown only when a view calls ShowActivity) holds the same
+// three readings larger with the bridge's mode beneath. Both redraw from the workspace's latest sample.
+internal sealed class ThermActivityView : Grid, IModuleView, IModuleLayoutView, IModuleCompactWidth
 {
     private readonly ThermWorkspace _workspace;
     private readonly ActivityViewKind _kind;
@@ -38,6 +38,11 @@ internal sealed class ThermActivityView : Grid, IModuleView, IModuleLayoutView
     private double _scale = -1;
 
     public FrameworkElement Element => this;
+
+    // The room the three readings ask for at scale 1, from the fixed columns ThermReading holds (their dials, gaps and
+    // measured figure columns), so the row's arrangement never waits for a layout pass. The host scales it like the
+    // built-in readings. Only the compact view offers itself as a row part.
+    public double? PreferredWidth => _kind == ActivityViewKind.Expanded ? null : Math.Ceiling(_cpu.Width + _gpu.Width + _fan.Width + 3 * 6);
 
     internal ThermActivityView(ThermWorkspace workspace, ModuleViewContext context, ActivityViewKind kind)
     {

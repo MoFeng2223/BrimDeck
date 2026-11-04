@@ -73,6 +73,10 @@ internal sealed class ThermReading(string letter, string figurePreview)
 
     public FrameworkElement Root => _root ??= Build(1);
 
+    // The room this reading takes at the scale it was built for, from the fixed parts: the dial, the gap and the held
+    // column whose width was measured at build time.
+    public double Width => _dial.Width + _figure.Margin.Left + (_figure.Width is { } held && double.IsFinite(held) ? held : 0);
+
     private FrameworkElement Build(double scale)
     {
         _scale = scale;
