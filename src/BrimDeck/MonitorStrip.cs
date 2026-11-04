@@ -33,6 +33,8 @@ internal sealed class MonitorStrip : FrameworkElement
     private MonitorSnapshot? _snapshot;
     // The look of the power and charge readings on the theme in use.
     private readonly PowerStyle _powerStyle;
+    // The lowest battery among the devices shown (MainWindow.LowestBattery), for the battery reading.
+    private BatteryReading? _battery;
     // Made once, as the strip measures and draws on every reading: the readings in order, each once, the delegates it hands to
     // CompactMonitor (a method group or a lambda passed each time would be allocated each time), and the list they are
     // arranged into.
@@ -104,6 +106,7 @@ internal sealed class MonitorStrip : FrameworkElement
         _width = CompactMonitor.Widths(_values, _dial, _ringFigure, _dial, ColumnsWidth(Environment.ProcessorCount),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))), DrivesWidth(),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("999W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
+            DeviceBatteryWidth(),
             FramesSlot + Math.Round(3 * _scale) + FigureWidth(WidestFrames) + Math.Round(2 * _scale) + SmallWidth(FramesUnit));
     }
 
@@ -190,6 +193,17 @@ internal sealed class MonitorStrip : FrameworkElement
         return widths;
     }
 
+    // A new lowest battery, drawn at once in the room kept for its widest figure ("100%"), as a new snapshot's figures are.
+    public void SetBattery(BatteryReading? battery)
+    {
+        if (_battery == battery) return;
+        _battery = battery;
+        InvalidateVisual();
+    }
+    private static string BatteryFigure(BatteryReading? battery) => battery is { } b
+        ? Devices.CompactFigure(b.Unknown ? null : b.Percent, b.Asleep, b.Unknown)
+        : "··";
+
     // frames: the frames a second the dials and the core columns are drawn at while they ease (CompactSmoothing).
     public void Update(MonitorSnapshot? snapshot, bool motion, int frames)
     {
@@ -265,7 +279,8 @@ internal sealed class MonitorStrip : FrameworkElement
             }
             double left = Math.Round(x);
             // Each reading in the color of its level (ReadingLevels); the core columns take theirs core by core.
-            var level = item == CompactMonitorItems.Charge ? BatteryModel.Level(s?.Battery.OrDefault, BatteryModel.LowPercent) : ReadingLevels.Of(item, s);
+            var level = item == CompactMonitorItems.Battery ? _battery?.Level ?? MemoryLevel.Normal
+                : item == CompactMonitorItems.Charge ? BatteryModel.Level(s?.Battery.OrDefault, BatteryModel.LowPercent) : ReadingLevels.Of(item, s);
             string color = _colors.At(item, level);
             switch (item)
             {
@@ -280,6 +295,7 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Storage: Drives(drawing, left, center, s, ppd); break;
                 case CompactMonitorItems.Power: Power(drawing, left, center, s?.Power.OrDefault, ppd); break;
                 case CompactMonitorItems.Charge: Charge(drawing, left, center, s?.Battery.OrDefault, level, ppd); break;
+                case CompactMonitorItems.Battery: Battery(drawing, left, center, _battery, color, level, ppd); break;
                 case CompactMonitorItems.Frames: Frames(drawing, left, center, FrameOf(s), color, ppd); break;
             }
             if (partial) { drawing.Pop(); drawing.Pop(); drawing.Pop(); }
@@ -398,6 +414,66 @@ internal sealed class MonitorStrip : FrameworkElement
         }
     }
 
+    // Peripheral battery on the collapsed strip (product: icon 14 + SemiBold %; short model when the reserved width allows;
+    // asleep greys the last % at ~0.55 opacity and never paints a false 0 %; unknown is "··"). LeaveOrder keeps it after Charge
+    // and before Frames in the default order.
+    private void Battery(DrawingContext drawing, double x, double center, BatteryReading? battery, string color, MemoryLevel level, double ppd)
+    {
+        double Snap(double value) => Math.Round(value * ppd) / ppd;
+        bool asleep = battery is { Asleep: true }, unknown = battery is null || battery.Value.Unknown;
+        double icon = DeviceIconSize;
+        var kind = battery?.Kind ?? DeviceKind.Other;
+        string ink = unknown ? UI.Tertiary : asleep ? UI.Secondary : color;
+        string figureColor = unknown || asleep ? UI.Secondary : FigureColor(level, color);
+        if (asleep) drawing.PushOpacity(0.55);
+        DeviceGlyphs.Draw(drawing, kind, new Rect(Snap(x), Snap(center - icon / 2), icon, icon), ink);
+        double at = x + icon + Math.Round(3 * _scale);
+        double baseline = Math.Round(center + _font * .36);
+        string figure = BatteryFigure(battery);
+        var figureText = MonitorDraw.Text(figure, _font, figureColor, ppd, strong: true);
+        MonitorDraw.Baseline(drawing, figureText, at, baseline);
+        at += Math.Ceiling(figureText.WidthIncludingTrailingWhitespace);
+        // Asleep with a known last charge: keep the % and tag it "休眠" in secondary type.
+        if (asleep && battery is { Percent: > 0, Unknown: false })
+        {
+            at += Math.Round(3 * _scale);
+            var tag = MonitorDraw.Text(Devices.CompactAsleepTag, _small, UI.Secondary, ppd);
+            MonitorDraw.Baseline(drawing, tag, at, baseline);
+            at += Math.Ceiling(tag.WidthIncludingTrailingWhitespace);
+        }
+        // Short model when the reserved with-model width still fits (min ~52 without, ~88 with).
+        if (battery is { ShortLabel.Length: > 0 } labeled && !unknown)
+        {
+            at += Math.Round(4 * _scale);
+            var model = MonitorDraw.Text(labeled.ShortLabel, _small, UI.Tertiary, ppd);
+            MonitorDraw.Baseline(drawing, model, at, baseline);
+            at += Math.Ceiling(model.WidthIncludingTrailingWhitespace);
+        }
+        // More than one reporting device: a tiny affordance that the strip shows only the lowest.
+        if (battery is { MoreCount: > 0 })
+        {
+            at += Math.Round(3 * _scale);
+            double dot = Math.Max(1.5, 2.2 * _scale);
+            drawing.DrawEllipse(UI.Brush(UI.Tertiary), null, new Point(Snap(at + dot / 2), Snap(center)), Snap(dot / 2), Snap(dot / 2));
+        }
+        if (asleep) drawing.Pop();
+    }
+
+    // Reserved width: icon 14 + gap + SemiBold "100%" (+ asleep tag room) + gap + short model, floored at ~52 / ~88.
+    private double DeviceIconSize => Math.Round(14 * _scale);
+    private double DeviceBatteryMinBare => Math.Round(52 * _scale);
+    private double DeviceBatteryMinWithModel => Math.Round(88 * _scale);
+    private double DeviceBatteryWidth()
+    {
+        double icon = DeviceIconSize, gap = Math.Round(3 * _scale);
+        double figure = Math.Ceiling(MonitorDraw.Text(WidestPercent, _font, UI.Primary, 1, strong: true).WidthIncludingTrailingWhitespace);
+        double tag = Math.Ceiling(MonitorDraw.Text(Devices.CompactAsleepTag, _small, UI.Secondary, 1).WidthIncludingTrailingWhitespace);
+        double model = Math.Ceiling(MonitorDraw.Text("WWWWWWWW", _small, UI.Tertiary, 1).WidthIncludingTrailingWhitespace);
+        double bare = icon + gap + Math.Max(figure, tag);
+        double withModel = bare + Math.Round(4 * _scale) + model + Math.Round(3 * _scale) + Math.Round(2.2 * _scale);
+        return Math.Max(DeviceBatteryMinWithModel, Math.Max(DeviceBatteryMinBare, withModel));
+    }
+
     // The figure of a reading that is a share: "83%", one size, weight and baseline for every reading that has one (the dials' figures,
     // the drives', the battery's).
     private void Figure(DrawingContext drawing, double x, double center, double? share, string color, double ppd)
@@ -469,6 +545,8 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Frames when FrameOf(s) is { } frames: parts.Add(Loc.T("帧率 ", "Frame rate ") + FramesFigure(frames.PerSecond) + " FPS" + Loc.T("，", ", ") + frames.Program); break;
                 case CompactMonitorItems.Charge when s?.Battery.OrDefault is { } own:
                     parts.Add(Loc.T("本机电池 ", "This PC's battery ") + PowerText.Percent(own.Percent) + Loc.T("，", ", ") + PowerText.State(own) + LevelWords(BatteryModel.Level(own, BatteryModel.LowPercent))); break;
+                case CompactMonitorItems.Battery when _battery is { } device:
+                    parts.Add(device.Name + " " + BatteryFigure(device) + (device.Asleep ? Loc.T("，休眠", ", sleeping") : "") + LevelWords(device.Level)); break;
             }
         }
         return string.Join(Loc.T("；", "; "), parts);
