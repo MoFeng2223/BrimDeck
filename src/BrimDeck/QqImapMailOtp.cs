@@ -41,7 +41,7 @@ internal sealed class QqImapMailOtp : IMailOtpMailbox
             while (!cancellation.IsCancellationRequested)
             {
                 if (!client.IsConnected || !inbox.IsOpen)
-                    throw new IOException("QQ IMAP connection closed.");
+                    throw new System.IO.IOException("QQ IMAP connection closed.");
 
                 using var done = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
                 done.CancelAfter(TimeSpan.FromMinutes(MailOtp.IdleHeartbeatMinutes));
