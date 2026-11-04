@@ -28,6 +28,8 @@ internal static class MailOtpTests
         check("Mail OTP: display seconds snap to 8/10/12",
             MailOtp.FitSeconds(10) == 10 && MailOtp.FitSeconds(9) == MailOtp.DefaultSeconds
             && MailOtp.SecondChoices.SequenceEqual([8, 10, 12]));
+        check("Mail OTP: poll fallback and IDLE heartbeat are bounded",
+            MailOtp.PollSeconds == 8 && MailOtp.IdleHeartbeatMinutes == 4 && MailOtp.PollSeconds < 45);
 
         var settings = new DeckSettings { MailOtpEnabled = true, MailOtpAutoCopy = true, MailOtpSeconds = 99, MailOtpAddress = "  name@qq.com  " };
         settings.Normalize();

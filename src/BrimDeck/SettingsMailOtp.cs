@@ -20,7 +20,7 @@ public partial class SettingsWindow
             Change(s => s.MailOtpEnabled = v);
             // Rebuild so fields enable/disable with the switch.
             ShowPage(0);
-        }, help: Loc.T("关闭后立即停止轮询，岛上也不再弹出验证码。", "Off: polling stops and the island no longer shows codes.")));
+        }, help: Loc.T("关闭后立即停止监听，岛上也不再弹出验证码。", "Off: listening stops and the island no longer shows codes.")));
 
         bool on = S.MailOtpEnabled;
         var address = new TextBox
@@ -45,12 +45,14 @@ public partial class SettingsWindow
             if (value is "********" or "") return;
             _app.Secrets.Write(MailOtp.SecretId, value.Trim());
             secret.Password = "********";
+            _app.RefreshMailOtp();
             SaveStatus(Loc.T("授权码已保存到本机。", "Authorization code saved on this PC."));
         };
         var clear = ActionButton(Loc.T("清除", "Clear"), () =>
         {
             _app.Secrets.Delete(MailOtp.SecretId);
             secret.Password = "";
+            _app.RefreshMailOtp();
             SaveStatus(Loc.T("已清除授权码。", "Authorization code cleared."));
         });
         clear.IsEnabled = on;
@@ -84,7 +86,7 @@ public partial class SettingsWindow
                     "Off by default. On: the code is copied as soon as it arrives; the island still shows it briefly.")),
             Row(Loc.T("展示时长", "Display duration"), seconds));
 
-        Note(Loc.T("锁屏或全屏隐藏岛时不会弹出明文验证码。不会保存邮件正文，也不会上传到云端。",
-            "Codes are not shown while the island is hidden for the lock screen or fullscreen. Message bodies are not saved or uploaded."), 11.5, TextSecondary, new Thickness(0, -8, 0, 20));
+        Note(Loc.T("锁屏或全屏隐藏岛时不会弹出明文验证码；窗口最大化变为指示条时仍会弹出。不会保存邮件正文，也不会上传到云端。",
+            "Codes are not shown while the island is hidden for the lock screen or fullscreen; they still appear when a maximized window collapses the island to the indicator. Message bodies are not saved or uploaded."), 11.5, TextSecondary, new Thickness(0, -8, 0, 20));
     }
 }

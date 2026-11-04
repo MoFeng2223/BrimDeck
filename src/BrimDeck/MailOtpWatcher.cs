@@ -1,11 +1,10 @@
 using System.Windows;
 using System.Windows.Threading;
 using BrimDeck.Core;
-using BrimDeck.Native;
 
 namespace BrimDeck;
 
-// Polls the configured QQ mailbox for verification codes and hands hits to the active deck. Never writes mail bodies to disk.
+// Listens to the configured QQ mailbox for verification codes and hands hits to the active deck. Never writes mail bodies to disk.
 internal sealed class MailOtpWatcher
 {
     private readonly App _app;
@@ -26,15 +25,22 @@ internal sealed class MailOtpWatcher
     {
         bool on = settings.MailOtpEnabled && settings.MailOtpAddress.Length > 0;
         if (!on) { Stop(); return; }
+        // Restart so address/secret changes reconnect immediately instead of waiting out a prior IDLE/poll.
+        Stop(clearSeen: false);
         Start();
     }
 
-    public void Stop()
+    public void Stop() => Stop(clearSeen: true);
+
+    private void Stop(bool clearSeen)
     {
         var cts = Interlocked.Exchange(ref _loop, null);
         cts?.Cancel();
         cts?.Dispose();
-        lock (_gate) { _seen.Clear(); _seeded = false; }
+        if (clearSeen)
+        {
+            lock (_gate) { _seen.Clear(); _seeded = false; }
+        }
     }
 
     private void Start()
@@ -47,36 +53,44 @@ internal sealed class MailOtpWatcher
 
     private async Task LoopAsync(CancellationToken cancellation)
     {
-        // Stagger the first poll slightly so startup is not blocked.
-        try { await Task.Delay(2500, cancellation).ConfigureAwait(false); }
-        catch (OperationCanceledException) { return; }
         while (!cancellation.IsCancellationRequested)
-        {
-            try { await PollOnce(cancellation).ConfigureAwait(false); }
-            catch (OperationCanceledException) { return; }
-            catch { /* next round */ }
-            try { await Task.Delay(TimeSpan.FromSeconds(45), cancellation).ConfigureAwait(false); }
-            catch (OperationCanceledException) { return; }
-        }
-    }
-
-    private async Task PollOnce(CancellationToken cancellation)
-    {
-        if (Interlocked.Exchange(ref _running, 1) == 1) return;
-        try
         {
             var settings = _app.Settings;
             if (!settings.MailOtpEnabled || settings.MailOtpAddress.Length == 0) return;
             var secret = _app.Secrets.Read(MailOtp.SecretId);
-            if (secret.Length == 0) return;
-            IReadOnlyList<MailOtpHit> hits;
-            try { hits = await _mailbox.RecentAsync(settings.MailOtpAddress, secret, cancellation).ConfigureAwait(false); }
-            finally { /* secret string is ephemeral; GC will reclaim */ }
-            if (hits.Count == 0) return;
+            if (secret.Length == 0)
+            {
+                try { await Task.Delay(TimeSpan.FromSeconds(MailOtp.PollSeconds), cancellation).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
+                continue;
+            }
+
+            try
+            {
+                await _mailbox.ListenAsync(settings.MailOtpAddress, secret, HandleHitsAsync, cancellation).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { return; }
+            catch
+            {
+                // Reconnect after a short gap (IDLE drop, network blip, auth hiccup).
+            }
+
+            try { await Task.Delay(TimeSpan.FromSeconds(MailOtp.PollSeconds), cancellation).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
+        }
+    }
+
+    private async Task HandleHitsAsync(IReadOnlyList<MailOtpHit> hits, CancellationToken cancellation)
+    {
+        if (hits.Count == 0) return;
+        // Serialize UI hand-off so overlapping IDLE wakeups do not race the seen set.
+        if (Interlocked.Exchange(ref _running, 1) == 1) return;
+        try
+        {
             MailOtpHit? newest = null;
             lock (_gate)
             {
-                // First successful poll only remembers ids so an old inbox code is not flashed on enable.
+                // First successful batch only remembers ids so an old inbox code is not flashed on enable.
                 if (!_seeded)
                 {
                     foreach (var hit in hits) _seen.Add(hit.MessageId);
@@ -89,7 +103,6 @@ internal sealed class MailOtpWatcher
                     newest = hit;
                     break;
                 }
-                // Cap remembered ids.
                 if (_seen.Count > 200)
                 {
                     _seen.Clear();
@@ -101,7 +114,7 @@ internal sealed class MailOtpWatcher
             await Application.Current.Dispatcher.InvokeAsync(() =>
             {
                 foreach (var deck in _app.Decks) deck.ShowMailOtp(toast);
-            }, DispatcherPriority.Background);
+            }, DispatcherPriority.Normal);
         }
         finally { Interlocked.Exchange(ref _running, 0); }
     }

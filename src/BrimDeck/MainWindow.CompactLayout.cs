@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Input;
 using System.Windows.Media.Animation;
 using BrimDeck.Core;
 
@@ -165,7 +166,8 @@ public partial class MainWindow
         if (elapsed > 0) clock.Controller!.Seek(TimeSpan.FromSeconds(elapsed), TimeSeekOrigin.BeginTime);
     }
 
-    // Mail verification code: replaces the collapsed row ([ ✉  code  ·  来自 short ]). Whole strip copies via Island click.
+    // Mail verification code: replaces the collapsed row ([ ✉  code  ·  来自 short ] [复制]).
+    // Whole strip still copies; a dedicated copy control makes the action obvious. Hover does not expand (PointerChanged).
     private void LayoutMailOtp(CollapsedShape shape, MailOtpHit otp)
     {
         object key = otp;
@@ -180,7 +182,8 @@ public partial class MainWindow
         double codeSize = Math.Max(1, CompactMusicLayout.Half(15.5 * scale));
         double metaSize = Math.Max(1, CompactMusicLayout.Half(11 * scale));
         double line = Math.Max(1, CompactMusicLayout.Whole(20 * scale));
-        var icon = UI.Fixed("\uE715", metaSize, line, UI.Secondary, font: new FontFamily("Segoe MDL2 Assets"));
+        var mdl2 = new FontFamily("Segoe MDL2 Assets");
+        var icon = UI.Fixed("\uE715", metaSize, line, UI.Secondary, font: mdl2);
         FrameworkElement body;
         if (_otpCopied)
         {
@@ -192,12 +195,32 @@ public partial class MainWindow
             var sep = UI.Fixed(" · ", metaSize, line, UI.Tertiary);
             var from = UI.Fixed(Loc.T("来自 ", "from ") + otp.FromShort, metaSize, line, UI.Secondary);
             from.ToolTip = otp.FromShort;
+            // Visible copy affordance (MDL2 Copy). Button handles its own click so the island press does not also fire.
+            var copyGlyph = UI.Fixed("\uE8C8", metaSize, line, UI.Secondary, font: mdl2);
+            var copyBtn = new Border
+            {
+                Child = copyGlyph,
+                Cursor = Cursors.Hand,
+                Margin = new Thickness(Math.Max(4, CompactMusicLayout.Whole(8 * scale)), 0, 0, 0),
+                Padding = new Thickness(Math.Max(2, CompactMusicLayout.Whole(4 * scale)), 0, Math.Max(2, CompactMusicLayout.Whole(4 * scale)), 0),
+                Background = Brushes.Transparent,
+                ToolTip = Loc.T("复制验证码", "Copy code"),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            AutomationProperties.SetName(copyBtn, Loc.T("复制验证码", "Copy code"));
+            copyBtn.MouseLeftButtonDown += (_, e) => e.Handled = true;
+            copyBtn.MouseLeftButtonUp += (_, e) =>
+            {
+                e.Handled = true;
+                CopyMailOtp(otp.Code);
+            };
             var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
             row.Children.Add(icon);
             row.Children.Add(new Border { Width = Math.Max(4, CompactMusicLayout.Whole(6 * scale)) });
             row.Children.Add(code);
             row.Children.Add(sep);
             row.Children.Add(from);
+            row.Children.Add(copyBtn);
             body = row;
         }
         body.HorizontalAlignment = HorizontalAlignment.Center;
@@ -208,7 +231,7 @@ public partial class MainWindow
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             Tag = AlertRegionTag,
-            Cursor = System.Windows.Input.Cursors.Hand,
+            Cursor = Cursors.Hand,
             ToolTip = Loc.T("点击复制验证码", "Click to copy the code")
         };
         AutomationProperties.SetName(host, Loc.T($"验证码 {otp.Code}，来自 {otp.FromShort}", $"Code {otp.Code}, from {otp.FromShort}"));

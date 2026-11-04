@@ -232,6 +232,8 @@ public partial class App : Application
     }
     // The settings window's size group follows changes made on the panel (a drag, or content that changed the auto width).
     internal void CollapsedChanged() => _settingsWindow?.CollapsedChanged();
+    // Reconnect the QQ mailbox listener after credentials or the switch change.
+    internal void RefreshMailOtp() => _mailOtp?.Apply(Settings);
     private void SystemThemeChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
     {
         if (Dispatcher.HasShutdownStarted) return;

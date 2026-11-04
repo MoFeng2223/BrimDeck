@@ -13,6 +13,10 @@ public static class MailOtp
     public const int DefaultPort = 993;
     public const int DefaultSeconds = 10;
     public static readonly int[] SecondChoices = [8, 10, 12];
+    // How often to fall back to a full poll when IMAP IDLE is unavailable or drops; also the gap after a failed listen.
+    public const int PollSeconds = 8;
+    // Cancel IDLE periodically so QQ (and intermediaries) do not silently drop a stale connection.
+    public const int IdleHeartbeatMinutes = 4;
 
     // 4–8 digits, not glued to more digits; prefers codes near 验证码/code/otp wording.
     private static readonly System.Text.RegularExpressions.Regex NearCode = new(
@@ -72,8 +76,11 @@ public static class MailOtp
     public static int FitSeconds(int seconds) => SecondChoices.Contains(seconds) ? seconds : DefaultSeconds;
 }
 
-// Read-only mailbox poll for recent verification codes. Implementations must not persist message bodies.
+// Read-only mailbox access for recent verification codes. Implementations must not persist message bodies.
 public interface IMailOtpMailbox
 {
     Task<IReadOnlyList<MailOtpHit>> RecentAsync(string address, string authorizationCode, CancellationToken cancellation);
+
+    // Long-lived listen: call onHits whenever a fresh batch is available (IDLE push or a timed poll). Returns only when cancelled.
+    Task ListenAsync(string address, string authorizationCode, Func<IReadOnlyList<MailOtpHit>, CancellationToken, Task> onHits, CancellationToken cancellation);
 }

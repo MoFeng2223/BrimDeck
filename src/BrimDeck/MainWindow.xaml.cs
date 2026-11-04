@@ -110,7 +110,8 @@ public partial class MainWindow : Window
         _hover = new(Dispatcher, () =>
         {
             _hover!.Stop();
-            if (IsSuppressed || !_pointerInside) return;
+            // OTP owns the collapsed strip: hover must not expand over the code.
+            if (IsSuppressed || !_pointerInside || _otp is not null) return;
             OpenAtPointer();
         });
         _leave = new(Dispatcher, () => CheckPointerExit(WindowsHost.Cursor()));
@@ -651,7 +652,9 @@ public partial class MainWindow : Window
         _otpCopiedTimer?.Stop();
         _otp = null; _otpCopied = false;
         _alertTimer.Interval = TimeSpan.FromSeconds(5);
-        RenderCompact();
+        // Dropping OTP may return EffectiveStyle to Line; rebuild so the indicator comes back.
+        if (!_expanded && !IsSuppressed) SetExpanded(false);
+        else RenderCompact();
     }
 
     private void CopyMailOtp(string code, bool flash = true)
@@ -675,7 +678,22 @@ public partial class MainWindow : Window
         RenderCompact();
     }
 
-    private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
+    // Maximized→indicator hides Compact (no content slot). A live mail OTP temporarily uses the user's normal
+    // collapsed style so the code row can appear; if the user chose Indicator as the style, fall back to Capsule.
+    private CompactStyle EffectiveStyle
+    {
+        get
+        {
+            if (_otp is not null)
+            {
+                var style = Settings.Style;
+                return style == CompactStyle.Line ? CompactStyle.Capsule : style;
+            }
+            return !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Line
+                ? CompactStyle.Line
+                : Settings.Style;
+        }
+    }
     // One animated track: where it starts and ends, as fractions of the configured duration.
     private readonly record struct Track(double Start, double End);
     // The collapsed island at rest clips its content to a rectangle (IslandBorder.SettledClip): the content keeps clear of its
@@ -918,6 +936,7 @@ public partial class MainWindow : Window
     // Opened by hovering or by a click: the panel may centre on the pointer (see SetExpanded).
     private void OpenAtPointer()
     {
+        if (_otp is not null) return;
         if (Settings.ExpandAtPointer && PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
         SetExpanded(true);
     }
@@ -1014,7 +1033,9 @@ public partial class MainWindow : Window
         {
             _popupReturnArea = null;
             _leave.Stop(); if (_expanded || IsSuppressed) return;
-            _hover.Stop(); if (Settings.ClickToExpand) return;
+            _hover.Stop();
+            // While a verification code is showing, only click/copy acts — do not expand on hover.
+            if (_otp is not null || Settings.ClickToExpand) return;
             _hover.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay)); _hover.Start();
         }
         else
