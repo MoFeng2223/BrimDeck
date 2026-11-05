@@ -579,7 +579,8 @@ public partial class MainWindow : Window
         if (_transientNotice is not null)
         {
             TransientFeedback.Text = Collapsed.ContentWidth < 116 && _transientNotice.Success ? "✓" : (_transientNotice.Success ? "✓  " : "!  ") + _transientNotice.Text;
-            CompactRings.Visibility = Visibility.Hidden; CompactAlert.Visibility = Visibility.Hidden;
+            CompactRings.Visibility = CompactAlert.Visibility = Visibility.Hidden;
+            HideModuleParts();
             TransientFeedback.Visibility = _transientNotice.Module is null ? Visibility.Visible : Visibility.Collapsed;
             ModuleNoticeContent.Visibility = _transientNotice.Module is not null ? Visibility.Visible : Visibility.Collapsed;
             ApplyCollapsedLayout(); return;
@@ -587,7 +588,8 @@ public partial class MainWindow : Window
         TransientFeedback.Visibility = Visibility.Collapsed;
         if (_transient is not null)
         {
-            CompactRings.Visibility = Visibility.Hidden; CompactAlert.Visibility = Visibility.Hidden;
+            CompactRings.Visibility = CompactAlert.Visibility = Visibility.Hidden;
+            HideModuleParts();
             ApplyCollapsedLayout(); return;
         }
         // A passive activity whose view offers a width is one part of the normal row (RenderCompactMusic); only an
