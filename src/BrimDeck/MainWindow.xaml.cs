@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -561,7 +561,18 @@ public partial class MainWindow : Window
     }
 
     // The compact island shows one ring per enabled application: the highest used share among its quotas.
+    // A row rebuild tells the module parts they are off show, and a view may answer that by redrawing and raising Changed —
+    // which comes back here. The guard makes the rebuild re-entrant-safe: the inner call returns at once rather than
+    // recursing (dragging the surface was enough to trigger it and the panel locked up).
+    private bool _renderingCompact;
     internal void RenderCompact()
+    {
+        if (_renderingCompact) return;
+        _renderingCompact = true;
+        try { RenderCompactCore(); }
+        finally { _renderingCompact = false; }
+    }
+    private void RenderCompactCore()
     {
         ModuleCompact.Visibility = Visibility.Collapsed;
         ModuleNoticeContent.Visibility = Visibility.Collapsed;
