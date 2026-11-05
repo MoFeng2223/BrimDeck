@@ -126,14 +126,20 @@ public sealed partial class SettingsWindow
     {
         string name = deck.ModulePartName(moduleId);
         bool enabled = S.ShowsModulePart(style, moduleId);
-        bool room = deck.ModulePartShown(moduleId);
+        // The row's accounting of what it left out, and why: the user's switch, a rule hiding the row, the module not
+        // running, or no room — the plan asks for the reason, not just "hidden".
+        string help = deck.ModulePartStateOf(moduleId) switch
+        {
+            ModulePartState.UserOff => Loc.T("已在收起行关闭此模组的读数（展开页不受影响）。", "This module's readings are turned off in the collapsed row (its pages are unaffected)."),
+            ModulePartState.RuleHidden => Loc.T("收起行当前被规则隐藏（全屏或指示条样式），读数暂不显示。", "A rule hides the collapsed row right now (full screen, or the indicator style), so the readings are not shown."),
+            ModulePartState.Unavailable => Loc.T("此模组当前未运行，读数暂不显示。", "This module is not running right now, so its readings are not shown."),
+            ModulePartState.NoRoom => Loc.T("空间不足，此模组的读数当前未显示。加宽收起面板或减少其他读数后可显示。", "No room right now, so this module's readings are hidden. Widen the collapsed panel or choose fewer readings."),
+            _ => Loc.T("读数正与内置读数并排显示，可拖动调整位置。", "The readings stand beside the built-in ones; drag to move them.")
+        };
         var row = new Grid { Background = Brushes.Transparent };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(PartHandleWidth) }); row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var handle = new GripHandle { Width = 22, Background = Brushes.Transparent, Cursor = Cursors.SizeAll, HorizontalAlignment = HorizontalAlignment.Left, Child = Grip(TextTertiary) };
         row.Children.Add(handle);
-        string help = !enabled ? Loc.T("已在收起行关闭此模组的读数（展开页不受影响）。", "This module's readings are turned off in the collapsed row (its pages are unaffected).")
-            : room ? Loc.T("读数正与内置读数并排显示，可拖动调整位置。", "The readings stand beside the built-in ones; drag to move them.")
-            : Loc.T("空间不足，此模组的读数当前未显示。加宽收起面板或减少其他读数后可显示。", "No room right now, so this module's readings are hidden. Widen the collapsed panel or choose fewer readings.");
         var label = SettingLabel(name, () => help); Grid.SetColumn(label, 1); row.Children.Add(label);
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = enabled, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, name);
@@ -196,7 +202,7 @@ public sealed partial class SettingsWindow
         // options, as the size rows do.
         row.MouseLeftButtonDown += (_, e) => { if (e.GetPosition(row).Y >= PartRowHeight) return; Show(!_openParts.Contains(part)); e.Handled = true; };
         AttachPartDrag(handle, title, style, rows);
-        item = new Border { Child = row, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0), Tag = part, RenderTransform = new TranslateTransform() };
+        item = new Border { Child = row, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0), Tag = CompactRowPart.Of(part), RenderTransform = new TranslateTransform() };
         _partOptions.Add((item, options, arrow));
         Show(_openParts.Contains(part));
         return item;

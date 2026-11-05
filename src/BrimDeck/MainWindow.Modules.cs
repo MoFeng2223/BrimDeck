@@ -95,8 +95,15 @@ public partial class MainWindow
     private void SelectModuleActivity()
     {
         var entries = _app.Modules.Registry.List<IModuleActivity>();
-        bool Active(Contribution<IModuleActivity> entry) => _app.Modules.Invoke(entry.ModuleId, "activity state", () => entry.Value.State.Active);
-        var selected = entries.FirstOrDefault(e => e.Id == _preferredModuleActivityId && Active(e)) ?? entries.FirstOrDefault(Active) ?? entries.FirstOrDefault();
+        ActivityState? StateOf(Contribution<IModuleActivity> entry) => _app.Modules.Invoke(entry.ModuleId, "activity state", () => NormalizeActivity(entry.Value.State));
+        var active = entries.Select(entry => (Entry: entry, State: StateOf(entry))).Where(item => item.State is { Active: true }).ToList();
+        // A determined choice, not incidental registration order (the platform plan asks for it): the user's own pick
+        // first; then a running task (an activity that is not Passive — a timer, say) before a presence-only reading,
+        // since a control bar is what a task asks for; ties break on the contribution id, so the same set of modules
+        // always picks the same one whatever order they loaded in.
+        var selected = entries.FirstOrDefault(e => e.Id == _preferredModuleActivityId && active.Any(item => ReferenceEquals(item.Entry, e)))
+            ?? active.OrderBy(item => item.State!.Passive ? 1 : 0).ThenBy(item => item.Entry.Id, StringComparer.Ordinal).Select(item => item.Entry).FirstOrDefault()
+            ?? entries.OrderBy(e => e.Id, StringComparer.Ordinal).FirstOrDefault();
         if (ReferenceEquals(selected, _moduleActivity)) return;
         ReleaseModuleActivityViews(); _moduleActivity = selected; _moduleCompletion = ActivityState.Completion;
     }
@@ -203,8 +210,20 @@ public partial class MainWindow
     internal bool ModulePartWanted => _moduleParts.Count > 0;
     internal double ModulePartFace => _modulePartFace;
     internal IReadOnlyList<string> ModulePartIds => [.. _moduleParts.Select(part => part.Owner.ModuleId)];
-    internal bool ModulePartShown(string moduleId) => _moduleParts.FirstOrDefault(part => part.Owner.ModuleId == moduleId) is { Placed: true };
+    internal bool ModulePartShown(string moduleId) => ModulePartStateOf(moduleId) == ModulePartState.Shown;
     internal string ModulePartName(string moduleId) => _app.Modules.Modules.FirstOrDefault(m => m.Id == moduleId)?.Name ?? moduleId;
+    // Why a module's readings are not in the collapsed row, in the order the reasons take precedence: the user's own
+    // switch first (their choice outranks everything), then a rule that hides the row (full-screen, an app rule, the
+    // indicator style that has no room for parts), then the module not running, and last the row having no room.
+    internal ModulePartState ModulePartStateOf(string moduleId)
+    {
+        var part = _moduleParts.FirstOrDefault(item => item.Owner.ModuleId == moduleId);
+        if (part is null) return ModulePartState.Unavailable;
+        if (!Settings.ShowsModulePart(EffectiveStyle, moduleId)) return ModulePartState.UserOff;
+        if (IsSuppressed || EffectiveStyle == CompactStyle.Line) return ModulePartState.RuleHidden;
+        if (_app.Modules.Modules.FirstOrDefault(m => m.Id == moduleId)?.Status is not ModuleStatus.Ready) return ModulePartState.Unavailable;
+        return part.Placed ? ModulePartState.Shown : ModulePartState.NoRoom;
+    }
     private void ReleaseModuleParts()
     {
         foreach (var part in _moduleParts) { CompactModuleLayer.Children.Remove(part.Host); part.Host.Dispose(); }
@@ -373,3 +392,7 @@ public partial class MainWindow
         Animate(_moduleScale, ScaleTransform.ScaleYProperty, expanded ? 1 : .92, duration, content, Soft.Out);
     }
 }
+
+// Why a module's readings are, or are not, in the collapsed row. The settings page names the reason rather than only
+// saying "hidden" (the plugin platform plan's rule for the collapsed row).
+internal enum ModulePartState { Shown, UserOff, NoRoom, RuleHidden, Unavailable }
