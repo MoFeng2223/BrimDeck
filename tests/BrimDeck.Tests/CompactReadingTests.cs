@@ -283,19 +283,26 @@ internal static class CompactReadingTests
         check("Compact readings: Copy keeps a table not yet built", CompactMonitor.Preset(untouched.CompactReadings) == CompactMonitorMode.Brief);
     }
 
-    // The order of the collapsed parts: one per style, each part once, kept by copies and by saving.
+    // The order of the collapsed parts: one per style, each part once, kept by copies and by saving. A module's readings
+    // are a part of their own, joined to the order from the modules that offer them.
     private static void PartOrder(Action<string, bool> check)
     {
-        CompactPart[] standard = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Modules, CompactPart.Equalizer, CompactPart.Clock];
+        CompactRowPart[] standard = [CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Clock)];
         var odd = Read("""{"AppVersion":"0.1.0","NotchOrder":[2,9,2,0]}""");
-        check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactPart.Monitor, CompactPart.Rings, CompactPart.Music, CompactPart.Modules, CompactPart.Equalizer, CompactPart.Clock])
+        check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Clock)])
             && odd.CapsuleOrder.SequenceEqual(standard));
         var older = Read("""{"AppVersion":"1.2.2","NotchOrder":[1,2,0]}""");
         check("Compact order: an order saved before the equalizer and the clock had a place puts the equalizer before the clock, at the end",
-            older.NotchOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Modules, CompactPart.Equalizer, CompactPart.Clock]));
+            older.NotchOrder.SequenceEqual([CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Clock)]));
         var moved = Read("""{"AppVersion":"1.2.3","NotchOrder":[4,0,3,1,2]}""");
         check("Compact order: the equalizer and the clock keep a place chosen for them",
-            moved.NotchOrder.SequenceEqual([CompactPart.Clock, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Music, CompactPart.Monitor, CompactPart.Modules]));
+            moved.NotchOrder.SequenceEqual([CompactRowPart.Of(CompactPart.Clock), CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor)]));
+        // A module's part joins right after the system readings, in the caller's order; uninstalling it keeps its place.
+        var withModule = Read("""{"AppVersion":"0.1.0"}""");
+        var joined = CompactParts.Normalize(withModule.NotchOrder, ["thrm", "net"]);
+        check($"Compact order: a module's part joins after the system readings, in the caller's order [{string.Join(",", joined)}]",
+            joined.IndexOf(CompactRowPart.Module("thrm")) == joined.IndexOf(CompactRowPart.Of(CompactPart.Monitor)) + 1
+            && joined.IndexOf(CompactRowPart.Module("net")) == joined.IndexOf(CompactRowPart.Module("thrm")) + 1);
         var musicOff = Upgraded("""{"AppVersion":"1.2.2","NotchMusic":false}""");
         check("Compact equalizer: a file from before its own switch shows it as the music was shown",
             !musicOff.NotchEqualizer && musicOff.CapsuleEqualizer && !musicOff.EqualizerAlways && Upgraded("""{"AppVersion":"1.2.2"}""").NotchEqualizer);
@@ -313,11 +320,18 @@ internal static class CompactReadingTests
             && !new DeckSettings { MusicPage = false, NotchMusic = false, NotchEqualizer = false, MusicIndicatorProgress = false }.MediaWanted
             && !new DeckSettings().ShowsEqualizer(CompactStyle.Line));
         var settings = new DeckSettings();
-        settings.SetCompactOrder(CompactStyle.Capsule, [CompactPart.Music, CompactPart.Monitor, CompactPart.Rings]);
+        settings.SetCompactOrder(CompactStyle.Capsule, [CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Rings)]);
         var copy = settings.Copy(); copy.SetCompactOrder(CompactStyle.Capsule, standard);
-        check("Compact order: each style keeps its own and Copy is deep", settings.CompactOrder(CompactStyle.Capsule)[0] == CompactPart.Music
+        check("Compact order: each style keeps its own and Copy is deep", settings.CompactOrder(CompactStyle.Capsule)[0] == CompactRowPart.Of(CompactPart.Music)
             && settings.CompactOrder(CompactStyle.Notch).SequenceEqual(standard));
         var read = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
-        check("Compact order: survives saving and reading", read.CapsuleOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Modules, CompactPart.Equalizer, CompactPart.Clock]));
+        check("Compact order: survives saving and reading", read.CapsuleOrder.SequenceEqual([CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Clock)]));
+        // A saved module part survives saving and reading, and its switch is kept separately.
+        settings.SetCompactOrder(CompactStyle.Notch, [CompactRowPart.Module("thrm"), .. standard]);
+        settings.SetModulePartEnabled(CompactStyle.Notch, "thrm", false);
+        var roundTrip = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
+        check("Compact order: a module's part and its switch survive saving and reading",
+            roundTrip.NotchOrder[0] == CompactRowPart.Module("thrm") && !roundTrip.ShowsModulePart(CompactStyle.Notch, "thrm")
+            && roundTrip.ShowsModulePart(CompactStyle.Notch, "other"));
     }
 }

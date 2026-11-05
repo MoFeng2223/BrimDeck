@@ -90,7 +90,10 @@ public partial class MainWindow
         }
         foreach (var part in Settings.CompactOrder(EffectiveStyle))
         {
-            switch (part)
+            // A module's readings take no place in the side column yet: the column stacks whole lines, and a module part
+            // is a horizontal strip of its own. Side placement is the plan's own follow-up (方向/DPI in phase four).
+            if (part.IsModule) continue;
+            switch (part.BuiltIn)
             {
                 case CompactPart.Rings when apps.Count > 0:
                     Add(ColumnRings(apps, layout, ringGap, column, out double ringsHeight), ringsHeight); break;

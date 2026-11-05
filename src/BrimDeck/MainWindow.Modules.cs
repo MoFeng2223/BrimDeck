@@ -168,32 +168,32 @@ public partial class MainWindow
         return (parts, face);
     }
     // The row is about to be rebuilt: the parts are not taken out of the tree with it (they live in CompactModuleLayer),
-    // so nothing to detach — the new row places and sizes them again through PlaceModulePart.
-    private void ClearModulePartForRow() => CompactModuleLayer.Visibility = Visibility.Collapsed;
-    // Places the parts that fitted, left to right from the offset the arrangement gave them, with the row's gap between
-    // them; a part that did not fit is hidden for this build and says so in the settings.
-    private void PlaceModuleParts(double left, double gap, double height)
+    // so nothing to detach — the new row places and sizes them again through PlaceModulePart. The layer's own size goes
+    // back to nothing so this build's parts start their own span.
+    private void ClearModulePartForRow()
     {
-        bool any = false;
-        foreach (var part in _moduleParts)
-        {
-            if (!part.Placed || part.Width <= 0)
-            {
-                part.Host.Visibility = Visibility.Collapsed;
-                part.Host.SetPresented(false);
-                continue;
-            }
-            part.Host.Visibility = Visibility.Visible;
-            part.Host.Width = part.Width; part.Host.Height = height;
-            part.Host.HorizontalAlignment = HorizontalAlignment.Left; part.Host.VerticalAlignment = VerticalAlignment.Top;
-            Canvas.SetLeft(part.Host, Math.Max(0, left)); Canvas.SetTop(part.Host, 0);
-            part.Host.SetViewport(part.Width, 24, Math.Clamp(_modulePartScale, .75, 2));
-            part.Host.SetPresented(true);
-            left += part.Width + gap;
-            any = true;
-        }
-        CompactModuleLayer.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
-        CompactModuleLayer.Width = any ? Math.Max(0, left) : 0; CompactModuleLayer.Height = height;
+        CompactModuleLayer.Visibility = Visibility.Collapsed;
+        CompactModuleLayer.Width = 0; CompactModuleLayer.Height = 0;
+        foreach (var part in _moduleParts) { part.Placed = false; part.Host.Visibility = Visibility.Collapsed; part.Host.SetPresented(false); }
+    }
+    // Places one module's part at the room the arrangement gave it. A part the row had no room for stays hidden and says
+    // so in the settings.
+    private void PlaceModulePart(string moduleId, double left, double width, double height)
+    {
+        var part = _moduleParts.FirstOrDefault(item => item.Owner.ModuleId == moduleId);
+        if (part is null || width <= 0) return;
+        // The layer is hidden before each rebuild (ClearModulePartForRow); the first part placed shows it again.
+        CompactModuleLayer.Visibility = Visibility.Visible;
+        double layerWidth = double.IsFinite(CompactModuleLayer.Width) ? CompactModuleLayer.Width : 0;
+        double layerHeight = double.IsFinite(CompactModuleLayer.Height) ? CompactModuleLayer.Height : 0;
+        CompactModuleLayer.Width = Math.Max(layerWidth, left + width);
+        CompactModuleLayer.Height = Math.Max(layerHeight, height);
+        part.Host.Visibility = Visibility.Visible;
+        part.Host.Width = width; part.Host.Height = height;
+        part.Host.HorizontalAlignment = HorizontalAlignment.Left; part.Host.VerticalAlignment = VerticalAlignment.Top;
+        Canvas.SetLeft(part.Host, Math.Max(0, left)); Canvas.SetTop(part.Host, 0);
+        part.Host.SetViewport(width, 24, Math.Clamp(_modulePartScale, .75, 2));
+        part.Host.SetPresented(true);
     }
     private double _modulePartScale = 1, _modulePartFace;
     // Whether any module reading stood in the row at its last build (the settings page says which ones did not, and why).
