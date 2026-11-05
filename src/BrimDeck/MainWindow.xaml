@@ -45,6 +45,10 @@
           <Grid x:Name="Compact" HorizontalAlignment="Center" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
             <Grid.RenderTransform><ScaleTransform x:Name="CompactScale"/></Grid.RenderTransform>
             <StackPanel x:Name="CompactRings" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <!-- A passive module's row part lives here for the whole session: the row rebuilds itself by clearing
+                 CompactRings, and a view host that left the tree with it would report itself hidden and stop drawing.
+                 The row only moves and sizes this layer. -->
+            <Canvas x:Name="CompactModuleLayer" HorizontalAlignment="Left" VerticalAlignment="Center" Visibility="Collapsed" IsHitTestVisible="False"/>
             <StackPanel x:Name="CompactAlert" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
             <TextBlock x:Name="TransientFeedback" FontSize="12" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" Foreground="{DynamicResource PanelPrimary}" TextAlignment="Center" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" HorizontalAlignment="Stretch" Visibility="Collapsed" IsHitTestVisible="False"/>
             <Grid x:Name="ModuleNoticeContent" Margin="0,4" Visibility="Collapsed" IsHitTestVisible="False"/>

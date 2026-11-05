@@ -32,6 +32,7 @@
 | `ui.presentation` | Service | 刷新模组界面 / Refresh module presentation | 5 | 无 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModulePresentation` |
 | `ui.pages` | Contribution | 小程序页面 / Mini-app pages | 0 | 无 | `windows-desktop` | `activation` | `BrimDeck.UI`: `BrimDeck.ModulePage` |
 | `ui.activities` | Contribution | 持续活动 / Persistent activities | 0 | 无 | `windows-desktop` | `activation` | `BrimDeck.UI`: `BrimDeck.IModuleActivity` |
+| `ui.compact-parts` | Contribution | 收起行部件 / Compact-row parts | 0 | 无 | `windows-desktop` | `activation` | `BrimDeck.UI`: `BrimDeck.IModuleCompactPart` |
 | `ui.widgets` | Contribution | 组件 / Widgets | 0 | 无 | `windows-desktop` | `activation` | `BrimDeck.UI`: `BrimDeck.ModuleWidget` |
 | `ui.settings` | Contribution | 设置 / Settings | 0 | 无 | `windows-desktop` | `activation` | `BrimDeck.UI`: `BrimDeck.IModuleSettings` |
 | `storage.data` | Intrinsic | 模组数据 / Module data | 0 | 无 | `any` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleStorage` |
@@ -826,6 +827,7 @@
 | `const string UiPresentation = "ui.presentation"` |
 | `const string UiPages = "ui.pages"` |
 | `const string UiActivities = "ui.activities"` |
+| `const string UiCompactParts = "ui.compact-parts"` |
 | `const string UiWidgets = "ui.widgets"` |
 | `const string UiSettings = "ui.settings"` |
 | `const string StorageData = "storage.data"` |

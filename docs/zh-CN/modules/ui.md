@@ -58,6 +58,16 @@ caption.SetResourceReference(TextBlock.ForegroundProperty, "PanelSecondary");
 
 动效遵守 `ModuleMotion.Enabled`／`ModuleUi.AnimationsEnabled`。关闭动画时直接到达最终状态。连续操作从当前呈现继续，释放视图时结束自有动画和订阅。`PageHandover` 使用完调用 `Drop`，并放入视图清理。
 
+## 收起行部件（`ui.compact-parts`）
+
+只想在收起行显示读数、没有"进行中的任务"要表达时，用 `IModuleCompactPart`，不要为此写一个 `IModuleActivity`：
+
+- 一个部件只有一个视图（`CreateView(context)`），没有 `Active` 状态、没有展开形态；详情属于插件自己的页面。
+- 它占多少地方由视图声明（`IModuleCompactWidth.PreferredWidth` 横排 / `PreferredHeight` 竖排 / `CompactWidth` 窄形态）。
+  宿主按用户在「收起外观」里的顺序排布，放不下时先用窄形态，仍放不下就整块隐藏并在设置中说明原因。
+- 用户可单独开关某个插件在收起行的读数；插件停用即撤下。
+- 旧的 `ActivityState.Passive = true` 写法仍然有效（宿主把它们当作部件），但新插件不必再碰 `Passive`。
+
 页面可能在收起后仍挂载。显示用定时器使用 `EveryVisible`；计时进度、提醒阈值等业务继续归模组级管理。进入前后不能暂停业务或重新初始化会话。详细可见性规则见[宿主规则](host-rules.md)，实现方式见[开发配方](recipes.md)。
 
 ## 交付前检查

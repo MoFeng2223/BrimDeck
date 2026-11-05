@@ -48,6 +48,9 @@ internal sealed class ModuleViewHost : Grid, IDisposable
         context.Fault = error => { if (!_disposed || _cleaning) _lease.Report("view resource", error); };
         foreach (var dictionary in context.Owner.Resources.MergedDictionaries) Resources.MergedDictionaries.Add(dictionary);
         foreach (var key in context.Owner.Resources.Keys) Resources[key] = context.Owner.Resources[key];
+        // A row part is given a fixed room by the host; content that overruns it is cut at the part's own edge rather than
+        // growing the island or covering what stands beside it (the plan's rule for over-budget content).
+        ClipToBounds = true;
         SetResourceReference(BackgroundProperty, "PanelSurface");
         TextElement.SetFontFamily(this, UI.PanelFont);
         context.Attach(this, owner); context.BindLifetime(_lease.Lifetime);
@@ -116,7 +119,11 @@ internal sealed class ModuleViewHost : Grid, IDisposable
         UpdatePresentation();
         AutomationProperties.SetName(_content, "");
         if (animate) { if (leaving is not null) _handover.Send(leaving, new Thickness(0), element, Handover.Morph); else PageHandover.Appear(element); }
+        Mounted?.Invoke();
     }
+    // Raised once the view is in place. The collapsed row asks for the view's declared width before the row is laid
+    // out, and a host mounts its view after it was added, so the row rebuilds itself when this arrives.
+    internal event Action? Mounted;
     private void MountFailed(Exception error)
     {
         if (!Live) return;
@@ -129,6 +136,8 @@ internal sealed class ModuleViewHost : Grid, IDisposable
         try { return _host.Measure(_owner, operation, run); } catch (Exception error) { _lease!.Report(operation, error); return default; }
     }
     internal bool IsAdjusting => Query("view input", () => _view!.IsAdjusting);
+    // The mounted view, for the host's own width and layout questions (never handed to module code).
+    internal IModuleView? View => _view;
     internal void SetPresented(bool presented)
     { _presented = presented; UpdatePresentation(); }
     private void UpdatePresentation()

@@ -24,6 +24,7 @@ internal static class ModuleCapabilities
         Ui(ModuleApi.UiPages, "小程序页面", "Mini-app pages", "BrimDeck.ModulePage"),
         Ui(ModuleApi.UiActivities, "持续活动", "Persistent activities", "BrimDeck.IModuleActivity"),
         Ui(ModuleApi.UiWidgets, "组件", "Widgets", "BrimDeck.ModuleWidget"),
+        Ui(ModuleApi.UiCompactParts, "收起行部件", "Compact-row parts", "BrimDeck.IModuleCompactPart"),
         Ui(ModuleApi.UiSettings, "设置", "Settings", "BrimDeck.IModuleSettings"),
         Core<IModuleStorage>(ModuleApi.StorageData, ModuleCapabilityKind.Intrinsic, "模组数据", "Module data", 0, null) with { Environment = "any" }
     });
