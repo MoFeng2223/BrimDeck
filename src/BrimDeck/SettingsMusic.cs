@@ -89,9 +89,10 @@ public sealed partial class SettingsWindow
             CompactPart.Equalizer => (Loc.T("律动条", "Equalizer"), S.ShowsEqualizer(style), null),
             CompactPart.Music => (Loc.T("正在播放的音乐", "Music now playing"), S.ShowsMusic(style),
                 Loc.T("拖动只改变歌名或歌词的位置。封面始终在最左侧。", "Dragging moves only the title or lyric. The cover stays at the left.")),
-            // Module readings take no switch of their own: which readings exist is each module's business (enabling the
-            // module is its switch), and the row drops them whole, with a note, when it has no room. The note is the help.
-            CompactPart.Modules => (Loc.T("模组读数", "Module readings"), true, ModulePartHelp),
+            // Module readings carry their own switch, like every other part: a module may offer a page without the user
+            // wanting its readings in the collapsed row (enabling the module is not the same choice). The note adds
+            // whether the row had room at its last build.
+            CompactPart.Modules => (Loc.T("模组读数", "Module readings"), S.ShowsModuleReadings(style), ModulePartHelp),
             _ => (Loc.T("系统监控", "System monitor"), S.ShowsMonitor(style), null)
         };
         void Show(bool on) => Change(s =>
@@ -101,6 +102,7 @@ public sealed partial class SettingsWindow
                 case CompactPart.Rings: if (notch) s.NotchSummary = on; else s.CapsuleSummary = on; break;
                 case CompactPart.Music: if (notch) s.NotchMusic = on; else s.CapsuleMusic = on; break;
                 case CompactPart.Equalizer: if (notch) s.NotchEqualizer = on; else s.CapsuleEqualizer = on; break;
+                case CompactPart.Modules: if (notch) s.NotchModuleReadings = on; else s.CapsuleModuleReadings = on; break;
                 default: if (notch) s.NotchMonitor = on; else s.CapsuleMonitor = on; break;
             }
         });
@@ -110,8 +112,6 @@ public sealed partial class SettingsWindow
         row.Children.Add(handle);
         var label = SettingLabel(title, help is null ? null : () => help); Grid.SetColumn(label, 1); row.Children.Add(label);
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = shown, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
-        // Module readings have no switch (see above); hiding the control leaves the row draggable and the note in place.
-        if (part == CompactPart.Modules) toggle.Visibility = Visibility.Collapsed;
         AutomationProperties.SetName(toggle, title); toggle.Checked += (_, _) => Show(true); toggle.Unchecked += (_, _) => Show(false);
         Grid.SetColumn(toggle, 2); row.Children.Add(toggle);
         AttachPartDrag(handle, title, style, rows);

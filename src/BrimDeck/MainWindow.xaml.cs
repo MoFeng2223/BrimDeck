@@ -399,7 +399,7 @@ public partial class MainWindow : Window
     private CollapsedShape ShapeFor(CompactStyle style)
     {
         if (_transientCompactShape is { } transient && transient.Style == style) return transient;
-        double? wanted = ModuleActivityPresented
+        double? wanted = ModuleActivityTakesRow
             ? Settings.CompactAutoWidth(style) ? 140 * Math.Clamp((style == CompactStyle.Notch ? Settings.NotchHeight : Settings.CapsuleHeight) / 32, .75, 2) : null
             : Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null;
         // The capsule keeps its place on the screen; docked with the bottom (MainWindow.Edge.cs) it is only seen from there.
@@ -581,8 +581,7 @@ public partial class MainWindow : Window
         }
         // A passive activity whose view offers a width is one part of the normal row (RenderCompactMusic); only an
         // activity that takes the whole row — a running task's readings — replaces it.
-        bool modulePart = ModuleActivityPresented && ActivityState.Passive;
-        if (ModuleActivityPresented && _alert is null && !modulePart) { RenderModuleCompact(); ApplyCollapsedLayout(); return; }
+        if (_alert is null && ModuleActivityTakesRow) { RenderModuleCompact(); ApplyCollapsedLayout(); return; }
         var fade = RowFadeStart();
         // The module readings' host belongs to the row about to be discarded; it is released with it, and the new row
         // mounts its own (a host cannot be moved between parents, and an unloaded one does not come back on show).

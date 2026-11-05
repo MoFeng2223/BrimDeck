@@ -116,7 +116,11 @@ internal sealed class ModuleViewHost : Grid, IDisposable
         UpdatePresentation();
         AutomationProperties.SetName(_content, "");
         if (animate) { if (leaving is not null) _handover.Send(leaving, new Thickness(0), element, Handover.Morph); else PageHandover.Appear(element); }
+        Mounted?.Invoke();
     }
+    // Raised once the view is in place. The collapsed row asks for the view's declared width before the row is laid
+    // out, and a host mounts its view after it was added, so the row rebuilds itself when this arrives.
+    internal event Action? Mounted;
     private void MountFailed(Exception error)
     {
         if (!Live) return;
