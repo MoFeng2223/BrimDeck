@@ -43,6 +43,10 @@ internal sealed class ThermActivityView : Grid, IModuleView, IModuleLayoutView, 
     // measured figure columns), so the row's arrangement never waits for a layout pass. The host scales it like the
     // built-in readings. Only the compact view offers itself as a row part.
     public double? PreferredWidth => _kind == ActivityViewKind.Expanded ? null : Math.Ceiling(_cpu.Width + _gpu.Width + _fan.Width + 3 * 6);
+    // Down a side column the three readings stack, one per line: the column is narrow, so the part takes three lines and
+    // the widest reading's width rather than the sum of them.
+    public double? PreferredHeight => _kind == ActivityViewKind.Expanded ? null : Math.Ceiling(3 * 24.0 + 2 * 2);
+
 
     internal ThermActivityView(ThermWorkspace workspace, ModuleViewContext context, ActivityViewKind kind)
     {
@@ -56,7 +60,12 @@ internal sealed class ThermActivityView : Grid, IModuleView, IModuleLayoutView, 
             column.Children.Add(_state);
             Children.Add(column);
         }
-        else Children.Add(_row);
+        else
+        {
+            // The compact view serves both directions: a wide viewport keeps the row, a narrow one stacks the readings.
+            Children.Add(_row);
+            SizeChanged += (_, _) => _row.Orientation = ActualWidth >= ActualHeight ? Orientation.Horizontal : Orientation.Vertical;
+        }
         workspace.Changed += Refresh;
         Refresh();
     }

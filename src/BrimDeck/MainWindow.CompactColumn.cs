@@ -88,11 +88,28 @@ public partial class MainWindow
             System.Windows.Automation.AutomationProperties.SetName(image, _mediaTrack!.Caption);
             Add(image, layout.CoverSize);
         }
-        foreach (var part in Settings.CompactOrder(EffectiveStyle))
+        // The module readings in a side column: a part that declares a height takes that many lines, at the column's
+        // width; its view lays itself down the column (the module is told the viewport's shape). Parts that declare no
+        // height stand in a horizontal row alone, so they are skipped here.
+        _modulePartScale = scale;
+        var columnModules = ModuleCompactParts(scale);
+        // Where the parts' lines start: everything added before them, in the column's own length (gaps included).
+        double partTop = lines.Sum(line => line.Height) + Math.Max(0, lines.Count - 1) * gap;
+        foreach (var part in Settings.CompactOrder(EffectiveStyle, columnModules.Parts.Select(item => item.Owner.ModuleId)))
         {
-            // A module's readings take no place in the side column yet: the column stacks whole lines, and a module part
-            // is a horizontal strip of its own. Side placement is the plan's own follow-up (方向/DPI in phase four).
-            if (part.IsModule) continue;
+            if (part.IsModule)
+            {
+                var placed = columnModules.Parts.FirstOrDefault(item => item.Owner.ModuleId == part.ModuleId);
+                if (placed?.Host.View is not IModuleCompactWidth declared || declared.PreferredHeight is not { } height) continue;
+                if (!Settings.ShowsModulePart(EffectiveStyle, part.ModuleId!)) continue;
+                // The column grows to what it shows, so a part that declares a height always fits: it takes those lines at
+                // the column's width, and its view lays itself down the shape it is given.
+                placed.Placed = true;
+                PlaceModuleColumnPart(part.ModuleId!, column, height, partTop);
+                partTop += height + gap;
+                Add(new Grid { Width = column, Height = height }, height);
+                continue;
+            }
             switch (part.BuiltIn)
             {
                 case CompactPart.Rings when apps.Count > 0:

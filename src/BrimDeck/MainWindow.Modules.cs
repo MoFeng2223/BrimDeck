@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Automation;
@@ -182,6 +182,23 @@ public partial class MainWindow
         CompactModuleLayer.Visibility = Visibility.Collapsed;
         CompactModuleLayer.Width = 0; CompactModuleLayer.Height = 0;
         foreach (var part in _moduleParts) { part.Placed = false; part.Host.Visibility = Visibility.Collapsed; part.Host.SetPresented(false); }
+    }
+    // Places one module's part in a side column: the column's width, the length the view declared, at the offset the
+    // column's stack gives it. The layer spans the whole column so a part anywhere down it shows.
+    private void PlaceModuleColumnPart(string moduleId, double width, double height, double top = 0)
+    {
+        var part = _moduleParts.FirstOrDefault(item => item.Owner.ModuleId == moduleId);
+        if (part is null || width <= 0 || height <= 0) return;
+        CompactModuleLayer.Visibility = Visibility.Visible;
+        CompactModuleLayer.Width = Math.Max(CompactModuleLayer.Width, width);
+        CompactModuleLayer.Height = Math.Max(CompactModuleLayer.Height, top + height);
+        part.Host.Visibility = Visibility.Visible;
+        part.Host.Width = width; part.Host.Height = height;
+        part.Host.HorizontalAlignment = HorizontalAlignment.Left; part.Host.VerticalAlignment = VerticalAlignment.Top;
+        Canvas.SetLeft(part.Host, 0); Canvas.SetTop(part.Host, Math.Max(0, top));
+        // A narrow viewport: the view lays its readings down the column (IModuleCompactWidth's height contract).
+        part.Host.SetViewport(width, height, Math.Clamp(_modulePartScale, .75, 2));
+        part.Host.SetPresented(true);
     }
     // Places one module's part at the room the arrangement gave it. A part the row had no room for stays hidden and says
     // so in the settings.

@@ -128,9 +128,16 @@ public enum ActivityViewKind { Compact, Expanded }
 // beside the built-in ones; it is dropped whole when the row has no room (the settings say so).
 public sealed record ActivityState(bool Active, double Progress, bool Indeterminate, string Accent, int Completion = 0)
 { public bool Passive { get; init; } }
-// The width a compact view asks for, in DIPs at scale 1 (the row scales it like the built-in readings). Null means the
-// view does not offer itself as a row part and takes the whole row when its activity is presented.
-public interface IModuleCompactWidth { double? PreferredWidth { get; } }
+// The room a compact view asks for in the collapsed row, in DIPs at scale 1 (the row scales it like the built-in
+// readings). PreferredWidth is its share of a horizontal row; PreferredHeight is the length it takes down a side column
+// (a notch on a screen edge), where the row's width is the column's and the part adds a line of that height. Null means
+// the view does not offer itself in that direction: a view that declares only a width stands in a horizontal row alone,
+// and one that declares neither takes the whole row when its activity is presented.
+public interface IModuleCompactWidth
+{
+    double? PreferredWidth { get; }
+    double? PreferredHeight => null;
+}
 public interface IModuleActivity
 {
     ActivityState State { get; }
