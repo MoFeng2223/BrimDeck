@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -1143,10 +1143,14 @@ public partial class MainWindow
         var placedModules = new Dictionary<string, ModulePart>(StringComparer.Ordinal);
         foreach (var part in wantedParts)
         {
-            bool fits = moduleFace > 0 && available >= part.Width - .5;
+            // The full width first; when it does not fit, the narrower form the view offers (it lays itself out for the
+            // narrower room), so a part gives up detail rather than disappearing while its compact form would fit.
+            double width = part.Width;
+            bool fits = moduleFace > 0 && available >= width - .5;
+            if (!fits && part.CompactWidth is { } compact && compact > 0 && available >= compact - .5) { width = compact; part.Width = compact; fits = true; }
             part.Placed = fits;
             part.Dropped = !fits;
-            if (fits) { moduleWidth += part.Width + unit; available -= part.Width + unit; placedModules[part.Owner.ModuleId] = part; }
+            if (fits) { moduleWidth += width + unit; available -= width + unit; placedModules[part.Owner.ModuleId] = part; }
         }
         _compactModulesShown = moduleWidth > 0;
         // The module parts are not scrolling parts: their room comes off the pool before the rings and readings share.

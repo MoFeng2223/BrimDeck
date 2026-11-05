@@ -46,6 +46,11 @@ internal sealed class ThermActivityView : Grid, IModuleView, IModuleLayoutView, 
     // Down a side column the three readings stack, one per line: the column is narrow, so the part takes three lines and
     // the widest reading's width rather than the sum of them.
     public double? PreferredHeight => _kind == ActivityViewKind.Expanded ? null : Math.Ceiling(3 * 24.0 + 2 * 2);
+    // A narrower form when the row is short of room: the temperatures only, the fan speed gives way (it is the reading a
+    // glance cares about least, and its figures are the widest).
+    public double? CompactWidth => _kind == ActivityViewKind.Expanded ? null : Math.Ceiling(_cpu.Width + _gpu.Width + 2 * 6);
+    /// <summary>Whether the fan reading is shown at the current width: the view drops it when the room is the compact one.</summary>
+    private bool _compactFan = true;
 
 
     internal ThermActivityView(ThermWorkspace workspace, ModuleViewContext context, ActivityViewKind kind)
@@ -64,7 +69,13 @@ internal sealed class ThermActivityView : Grid, IModuleView, IModuleLayoutView, 
         {
             // The compact view serves both directions: a wide viewport keeps the row, a narrow one stacks the readings.
             Children.Add(_row);
-            SizeChanged += (_, _) => _row.Orientation = ActualWidth >= ActualHeight ? Orientation.Horizontal : Orientation.Vertical;
+            SizeChanged += (_, _) =>
+            {
+                _row.Orientation = ActualWidth >= ActualHeight ? Orientation.Horizontal : Orientation.Vertical;
+                // The host may give the compact room (CompactWidth); the fan reading is what goes.
+                bool fan = ActualWidth >= PreferredWidth - .5 || _row.Orientation == Orientation.Vertical;
+                if (fan != _compactFan) { _compactFan = fan; _fan.Root.Visibility = fan ? Visibility.Visible : Visibility.Collapsed; }
+            };
         }
         workspace.Changed += Refresh;
         Refresh();

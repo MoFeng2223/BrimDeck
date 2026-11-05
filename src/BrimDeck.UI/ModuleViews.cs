@@ -137,6 +137,10 @@ public interface IModuleCompactWidth
 {
     double? PreferredWidth { get; }
     double? PreferredHeight => null;
+    // An optional narrower form the host may use when the full width does not fit: room for fewer readings, a compact
+    // figure. The view is told the narrower viewport and lays itself out for it (it decides what to drop), so the row
+    // keeps showing something rather than dropping the part whole. Null means there is no narrower form.
+    double? CompactWidth => null;
 }
 public interface IModuleActivity
 {

@@ -123,6 +123,7 @@ public partial class MainWindow
         internal Contribution<IModuleActivity> Owner { get; } = owner;
         internal ModuleViewHost Host { get; } = host;
         internal double Width { get; set; }
+        internal double? CompactWidth { get; set; }
         internal bool Placed { get; set; }
         internal bool Dropped { get; set; }
     }
@@ -166,6 +167,7 @@ public partial class MainWindow
             // next rebuild rather than being thrown away.
             if (part.Host.View is not IModuleCompactWidth declared || declared.PreferredWidth is not { } wanted) continue;
             part.Width = wanted;
+            part.CompactWidth = declared.CompactWidth;
             face += wanted;
             parts.Add(part);
         }

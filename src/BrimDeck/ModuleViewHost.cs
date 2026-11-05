@@ -48,6 +48,9 @@ internal sealed class ModuleViewHost : Grid, IDisposable
         context.Fault = error => { if (!_disposed || _cleaning) _lease.Report("view resource", error); };
         foreach (var dictionary in context.Owner.Resources.MergedDictionaries) Resources.MergedDictionaries.Add(dictionary);
         foreach (var key in context.Owner.Resources.Keys) Resources[key] = context.Owner.Resources[key];
+        // A row part is given a fixed room by the host; content that overruns it is cut at the part's own edge rather than
+        // growing the island or covering what stands beside it (the plan's rule for over-budget content).
+        ClipToBounds = true;
         SetResourceReference(BackgroundProperty, "PanelSurface");
         TextElement.SetFontFamily(this, UI.PanelFont);
         context.Attach(this, owner); context.BindLifetime(_lease.Lifetime);
