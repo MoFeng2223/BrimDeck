@@ -417,7 +417,10 @@ public partial class MainWindow
     }
     private void RenderModuleCompact()
     {
+        // This activity takes the whole row, so the built-in readings go — and so do the module readings' parts, which
+        // live in a layer of their own above them. A cover page shows the activity alone.
         CompactRings.Visibility = CompactAlert.Visibility = Visibility.Hidden;
+        CompactModuleLayer.Visibility = Visibility.Collapsed;
         _quotaCarousel?.SetRunning(false, false); _stripCarousel?.SetRunning(false, false); _compactClock = null; _compactStrip = null;
         ModuleCompact.Visibility = Visibility.Visible;
         if (_moduleCompactView is null && _moduleActivity is { } entry)
