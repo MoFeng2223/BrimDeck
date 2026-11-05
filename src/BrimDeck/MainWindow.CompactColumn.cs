@@ -95,11 +95,11 @@ public partial class MainWindow
         var columnModules = ModuleCompactParts(scale);
         // Where the parts' lines start: everything added before them, in the column's own length (gaps included).
         double partTop = lines.Sum(line => line.Height) + Math.Max(0, lines.Count - 1) * gap;
-        foreach (var part in Settings.CompactOrder(EffectiveStyle, columnModules.Parts.Select(item => item.Owner.ModuleId)))
+        foreach (var part in Settings.CompactOrder(EffectiveStyle, columnModules.Parts.Select(item => item.ModuleId)))
         {
             if (part.IsModule)
             {
-                var placed = columnModules.Parts.FirstOrDefault(item => item.Owner.ModuleId == part.ModuleId);
+                var placed = columnModules.Parts.FirstOrDefault(item => item.ModuleId == part.ModuleId);
                 if (placed?.Host.View is not IModuleCompactWidth declared || declared.PreferredHeight is not { } height) continue;
                 if (!Settings.ShowsModulePart(EffectiveStyle, part.ModuleId!)) continue;
                 // The column grows to what it shows, so a part that declares a height always fits: it takes those lines at

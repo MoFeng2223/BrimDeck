@@ -126,6 +126,9 @@ public enum ActivityViewKind { Compact, Expanded }
 // opens the normal pages instead of the activity's control bar, which only a view's ShowActivity can bring up.
 // A passive activity's view may also declare PreferredWidth, the room its readings ask for in the collapsed row
 // beside the built-in ones; it is dropped whole when the row has no room (the settings say so).
+// Passive is kept for modules built before IModuleCompactPart existed. New presence-only content should register an
+// IModuleCompactPart instead: it has no activity state to maintain. Passive activity views that declare a width still
+// work — the host treats them as row parts.
 public sealed record ActivityState(bool Active, double Progress, bool Indeterminate, string Accent, int Completion = 0)
 { public bool Passive { get; init; } }
 // The room a compact view asks for in the collapsed row, in DIPs at scale 1 (the row scales it like the built-in
@@ -141,6 +144,24 @@ public interface IModuleCompactWidth
     // figure. The view is told the narrower viewport and lays itself out for it (it decides what to drop), so the row
     // keeps showing something rather than dropping the part whole. Null means there is no narrower form.
     double? CompactWidth => null;
+}
+// Presence-only content in the collapsed row — a hardware read-out, a status: a contribution of its own beside the
+// built-in readings, in the user's order and under the user's switch. No Active state and no Expanded view: this is the
+// part itself, and the module's own page is where its detail belongs.
+//
+// Widths are in DIPs at scale 1, exactly as IModuleCompactWidth describes. A part must declare at least one of
+// PreferredWidth / PreferredHeight, or it is rejected at registration. Views follow the view lifecycle: the host creates
+// one per mount, disposes it with the row, and never recreates it on every reading.
+public interface IModuleCompactPart
+{
+    IModuleView CreateView(ModuleViewContext context);
+}
+// A part whose view is built asynchronously, mirroring IModuleAsyncActivity.
+public interface IModuleAsyncCompactPart : IModuleCompactPart
+{
+    ValueTask<IModuleView> CreateViewAsync(ModuleViewContext context);
+    IModuleView IModuleCompactPart.CreateView(ModuleViewContext context)
+        => throw new ModuleApiException("async-view-required", "This compact part requires asynchronous mounting.");
 }
 public interface IModuleActivity
 {

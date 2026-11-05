@@ -6,25 +6,6 @@ using Loc = BrimDeck.ModuleLocalization;
 
 namespace BrimDeck.Thrm;
 
-// The collapsed row's persistent reading: the three cooler figures where the built-in readings would sit. The
-// readings are presence, not a running task, so the activity is always on (enabling the module is the switch) and
-// Passive — expanding the panel opens the pages instead of a control bar. The state still reports the CPU
-// temperature as the row indicator's share and color, for the line style's progress bar.
-internal sealed class ThermActivity(ThermWorkspace workspace) : IModuleActivity
-{
-    public ActivityState State
-    {
-        get
-        {
-            var sample = workspace.Latest;
-            double share = sample is null ? 0 : Math.Clamp(sample.CpuTemp / 100, 0, 1);
-            return new(true, share, false, ThermLevels.Temperature(sample?.CpuTemp ?? 0)) { Passive = true };
-        }
-    }
-    public event Action? Changed { add => workspace.Changed += value; remove => workspace.Changed -= value; }
-    public IModuleView CreateView(ModuleViewContext context, ActivityViewKind kind) => new ThermActivityView(workspace, context, kind);
-}
-
 // The compact row holds the three readings at the row's scale, as one part of the collapsed row beside the built-in
 // readings; the expanded strip (the module's control bar, shown only when a view calls ShowActivity) holds the same
 // three readings larger with the bridge's mode beneath. Both redraw from the workspace's latest sample.

@@ -780,6 +780,12 @@ public sealed class DeckSettings
         copy.Modules = Modules?.Copy() ?? new();
         copy.InputMethods = new() { Enabled = InputMethods?.Enabled == true, Mode = InputMethods?.Mode ?? InputMethodMode.Control, Shortcut = InputMethods?.Shortcut ?? "Win+Space",
             Profiles = (InputMethods?.Profiles ?? []).Select(p => new InputMethodChoice { Id = p.Id, Name = p.Name, Enabled = p.Enabled }).ToList() };
+        // The module part preferences hold mutable objects, so the copy owns its own instances: a write through the copy (the
+        // settings window edits a copy) must not reach the settings in use.
+        copy._notchOrder = [.. _notchOrder];
+        copy._capsuleOrder = [.. _capsuleOrder];
+        copy._notchModuleParts = [.. _notchModuleParts.Select(item => new ModuleCompactPreference { ModuleId = item.ModuleId, Enabled = item.Enabled })];
+        copy._capsuleModuleParts = [.. _capsuleModuleParts.Select(item => new ModuleCompactPreference { ModuleId = item.ModuleId, Enabled = item.Enabled })];
         return copy;
     }
     public void Normalize()

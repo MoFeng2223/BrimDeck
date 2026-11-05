@@ -3,9 +3,8 @@ using BrimDeck.Modules;
 using Loc = BrimDeck.ModuleLocalization;
 
 namespace BrimDeck.Thrm;
-// The cooler module: a page (three gauge cards), its settings, and a passive activity whose readings fold into the
-// collapsed row beside the built-in ones (the platform's row-part stream). The activity is always on — enabling the
-// module is the switch — and Passive, so expanding the panel opens the pages rather than a control bar. The only host
+// The cooler module: a page (three gauge cards), its settings, and a compact part whose readings stand in the collapsed
+// row beside the built-in ones (the platform's compact-part channel). Enabling the module is the switch. The only host
 // entry point is the public SDK context.
 public sealed class ThermModule : IModule
 {
@@ -19,7 +18,7 @@ public sealed class ThermModule : IModule
         {
             IconPath = ThermVisuals.FanGlyph, Size = new ModulePageSize(620, 250)
         });
-        context.Register<IModuleActivity>("readings", new ThermActivity(workspace));
+        context.Register<IModuleCompactPart>("readings", new ThermCompactPart(workspace));
         context.Register<IModuleSettings>("general", new ThermSettings(workspace));
         return ValueTask.CompletedTask;
     }

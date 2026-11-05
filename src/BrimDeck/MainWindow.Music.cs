@@ -1068,11 +1068,13 @@ public partial class MainWindow
         var moduleParts = ModuleCompactParts(scale);
         // The row's order, with each module as a part of its own: the saved order first, then any module that offers
         // readings the file has never seen (so installing one is enough for it to appear beside the system readings).
-        var rowOrder = Settings.CompactOrder(EffectiveStyle, moduleParts.Parts.Select(part => part.Owner.ModuleId));
+        var rowOrder = Settings.CompactOrder(EffectiveStyle, moduleParts.Parts.Select(part => part.ModuleId));
         // The parts whose switch is on take room below. A module the user turned off keeps its host mounted (the switch
         // brings it straight back) but takes no room.
-        var wantedParts = moduleParts.Parts.Where(part => Settings.ShowsModulePart(EffectiveStyle, part.Owner.ModuleId)).ToList();
-        double moduleFace = moduleParts.Face;
+        var wantedParts = moduleParts.Parts.Where(part => Settings.ShowsModulePart(EffectiveStyle, part.ModuleId)).ToList();
+        // Only the parts the switches leave on take room, and each narrows by a gap: the row's width must match what the
+        // placement loop below actually needs, or the last part is dropped for a width the row did not have to find.
+        double moduleFace = wantedParts.Sum(part => part.Width) + Math.Max(0, wantedParts.Count - 1) * CompactMusicLayout.Gap(scale);
         // Readings that do not fit scroll through a window of whole readings, as the rings do (CompactSpacing.Window).
         var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, equalizer, Settings.EqualizerBars, showCover); CurrentCompactLayout = layout;
         // An auto-width surface takes the width of what the row shows; the new shape builds the row again. The track notice
@@ -1150,7 +1152,7 @@ public partial class MainWindow
             if (!fits && part.CompactWidth is { } compact && compact > 0 && available >= compact - .5) { width = compact; part.Width = compact; fits = true; }
             part.Placed = fits;
             part.Dropped = !fits;
-            if (fits) { moduleWidth += width + unit; available -= width + unit; placedModules[part.Owner.ModuleId] = part; }
+            if (fits) { moduleWidth += width + unit; available -= width + unit; placedModules[part.ModuleId] = part; }
         }
         _compactModulesShown = moduleWidth > 0;
         // The module parts are not scrolling parts: their room comes off the pool before the rings and readings share.
