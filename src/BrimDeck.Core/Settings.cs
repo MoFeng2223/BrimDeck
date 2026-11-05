@@ -59,6 +59,23 @@ public enum EqualizerMode { Flow = 0, Spectrum = 1 }
 // only the title or lyric. Saved as numbers, so new members go at the end. Modules stands for passive module readings (a
 // hardware read-out and the like): one part in the row's arrangement, dropped whole with a settings note when there is no room.
 public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Modules }
+// Each module that offers collapsed-row readings keeps its own place and switch there, in the order the user gave:
+// the parts are grouped by module, and the module's own arrangement inside its group is its business. A module
+// missing here is shown, in the order its activity was registered — so a new module appears without being saved.
+public sealed class ModuleCompactPreference
+{
+    public string ModuleId { get; set; } = "";
+    public bool Enabled { get; set; } = true;
+}
+public static class ModuleCompactPreferences
+{
+    // Known ids once each, in the saved order; ids from uninstalled modules are dropped, and an id the file has never
+    // seen is appended by the caller when it meets the module (see ShowsModulePart).
+    public static List<ModuleCompactPreference> Normalize(IEnumerable<ModuleCompactPreference>? saved) => [.. (saved ?? [])
+        .Where(item => item is not null && !string.IsNullOrWhiteSpace(item.ModuleId))
+        .GroupBy(item => item.ModuleId, StringComparer.Ordinal).Select(group => new ModuleCompactPreference { ModuleId = group.Key, Enabled = group.First().Enabled })
+        .Take(64)];
+}
 public static class CompactParts
 {
     // A file saved before the equalizer and the clock were put in order adds them after its parts, the clock last, where they stood.
@@ -281,6 +298,7 @@ public sealed class DeckSettings
     private List<AppEntry>? _apps;
     private List<CompactReading>? _readings;
     private List<CompactPart> _notchOrder = [.. CompactParts.Default], _capsuleOrder = [.. CompactParts.Default];
+    private List<ModuleCompactPreference> _notchModuleParts = [], _capsuleModuleParts = [];
     private List<DeckPage> _pageOrder = [.. DeckPages.Order];
     private int _equalizerBars = CompactMusicLayout.DefaultBars, _musicEqualizerBars = 5;
     private EqualizerMode _equalizerMode = EqualizerMode.Flow;
@@ -529,6 +547,11 @@ public sealed class DeckSettings
     // collapsed row carries its readings.
     public bool NotchModuleReadings { get; set; } = true;
     public bool CapsuleModuleReadings { get; set; } = true;
+    // Each module that offers collapsed-row readings keeps its own place and switch there, in the order the user gave:
+    // the parts are grouped by module, and the module's own arrangement inside its group is its business. A module
+    // missing here is shown, in the order its activity was registered — so a new module appears without being saved.
+    public List<ModuleCompactPreference> NotchModuleParts { get => _notchModuleParts; set => _notchModuleParts = ModuleCompactPreferences.Normalize(value); }
+    public List<ModuleCompactPreference> CapsuleModuleParts { get => _capsuleModuleParts; set => _capsuleModuleParts = ModuleCompactPreferences.Normalize(value); }
     // The order of the quota rings, the title or lyric, the system readings, the equalizer and the clock, for the notch and the capsule each.
     public List<CompactPart> NotchOrder { get => _notchOrder; set => _notchOrder = CompactParts.Normalize(value); }
     public List<CompactPart> CapsuleOrder { get => _capsuleOrder; set => _capsuleOrder = CompactParts.Normalize(value); }
@@ -580,6 +603,32 @@ public sealed class DeckSettings
     // The indicator is too thin for readings, as for the clock.
     public bool ShowsMonitor(CompactStyle style) => style switch { CompactStyle.Notch => NotchMonitor, CompactStyle.Capsule => CapsuleMonitor, _ => false };
     public bool ShowsModuleReadings(CompactStyle style) => style switch { CompactStyle.Notch => NotchModuleReadings, CompactStyle.Capsule => CapsuleModuleReadings, _ => false };
+    // Whether this module's readings stand in the collapsed row: the global switch first, then the module's own, and a
+    // module the file has never seen stands on (so installing a module is enough for it to appear).
+    public bool ShowsModulePart(CompactStyle style, string moduleId)
+        => ShowsModuleReadings(style) && ModuleParts(style).FirstOrDefault(item => item.ModuleId == moduleId)?.Enabled != false;
+    public IReadOnlyList<ModuleCompactPreference> ModuleParts(CompactStyle style) => style == CompactStyle.Capsule ? CapsuleModuleParts : NotchModuleParts;
+    public void SetModulePartEnabled(CompactStyle style, string moduleId, bool enabled)
+    {
+        var parts = (style == CompactStyle.Capsule ? CapsuleModuleParts : NotchModuleParts).ToList();
+        if (parts.FirstOrDefault(item => item.ModuleId == moduleId) is { } existing) existing.Enabled = enabled;
+        else parts.Add(new ModuleCompactPreference { ModuleId = moduleId, Enabled = enabled });
+        if (style == CompactStyle.Capsule) CapsuleModuleParts = parts; else NotchModuleParts = parts;
+    }
+    // The saved order first (only ids still present), then the modules the caller knows about that the file never saw,
+    // so a new module joins at the end rather than at an arbitrary place.
+    public IReadOnlyList<string> ModulePartOrder(CompactStyle style, IEnumerable<string> present)
+    {
+        var known = present.ToHashSet(StringComparer.Ordinal);
+        var saved = ModuleParts(style).Select(item => item.ModuleId).Where(known.Contains).ToList();
+        saved.AddRange(known.Where(id => !saved.Contains(id, StringComparer.Ordinal)));
+        return saved;
+    }
+    public void SetModulePartOrder(CompactStyle style, IEnumerable<string> order)
+    {
+        var parts = order.Select(id => ModuleParts(style).FirstOrDefault(item => item.ModuleId == id) ?? new ModuleCompactPreference { ModuleId = id }).ToList();
+        if (style == CompactStyle.Capsule) CapsuleModuleParts = parts; else NotchModuleParts = parts;
+    }
     public IReadOnlyList<CompactPart> CompactOrder(CompactStyle style) => style == CompactStyle.Capsule ? CapsuleOrder : NotchOrder;
     public void SetCompactOrder(CompactStyle style, IEnumerable<CompactPart> order) { if (style == CompactStyle.Notch) NotchOrder = [.. order]; else if (style == CompactStyle.Capsule) CapsuleOrder = [.. order]; }
     public bool CompactAutoWidth(CompactStyle style) => style switch { CompactStyle.Notch => NotchAutoWidth, CompactStyle.Capsule => CapsuleAutoWidth, _ => false };

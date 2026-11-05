@@ -104,76 +104,113 @@ public partial class MainWindow
     {
         _moduleExpandedView?.Dispose(); _moduleCompactView?.Dispose(); _moduleExpandedView = _moduleCompactView = null;
         ModuleControlHost.Children.Clear(); ModuleCompact.Children.Clear();
-        ReleaseModulePart();
+        ReleaseModuleParts();
     }
-    // The passive activities' readings as one part of the collapsed row: a compact view that declares a width
-    // (IModuleCompactWidth) offers itself beside the built-in readings, and takes its place in the saved part order.
-    // The host is kept across row rebuilds — built once per activity generation — and the row only detaches it from the
-    // old row's grid before adopting it (see ClearModulePartForRow): releasing it here would dispose and re-mount the
-    // view on every rebuild, which showed as the readings blinking out while the surface was dragged or resized.
-    private (FrameworkElement? View, double Width) ModuleCompactPart(double scale)
+    // The passive activities' readings as parts of the collapsed row: every passive activity whose compact view
+    // declares a width (IModuleCompactWidth) stands beside the built-in readings, in the user's module order and under
+    // the module's own switch. The hosts are kept for the session — built once per activity generation — and the row
+    // only detaches them from the old row's grid before adopting them: releasing on every rebuild would dispose and
+    // re-mount the views, which showed as the readings blinking out while the surface was dragged or resized.
+    private sealed class ModulePart(Contribution<IModuleActivity> owner, ModuleViewHost host)
+    {
+        internal Contribution<IModuleActivity> Owner { get; } = owner;
+        internal ModuleViewHost Host { get; } = host;
+        internal double Width { get; set; }
+        internal bool Placed { get; set; }
+        internal bool Dropped { get; set; }
+    }
+    private readonly List<ModulePart> _moduleParts = [];
+    private (IReadOnlyList<ModulePart> Parts, double Face) ModuleCompactParts(double scale)
     {
         // A row part is not "the selected activity": every passive activity that offers a width stands in the row,
         // whether or not it is the one the control bar would show. Selecting one activity for the bar is a separate
         // question (SelectModuleActivity), and picking a running task there must not hide the readings beside it.
-        var source = _app.Modules.Registry.List<IModuleActivity>().FirstOrDefault(e =>
-            _app.Modules.Invoke(e.ModuleId, "activity state", () => e.Value.State is { Active: true, Passive: true }));
-        if (source is null) { ReleaseModulePart(); return (null, 0); }
-        if (!ReferenceEquals(_modulePartOwner, source) || _modulePartView is null)
+        var sources = _app.Modules.Registry.List<IModuleActivity>()
+            .Where(e => _app.Modules.Invoke(e.ModuleId, "activity state", () => e.Value.State is { Active: true, Passive: true }))
+            .ToList();
+        if (sources.Count == 0) { ReleaseModuleParts(); return ([], 0); }
+        // The modules that can offer a part, in the user's saved order then registration order: a module the file has
+        // never seen joins at the end, so installing one is enough for it to appear.
+        var order = Settings.ModulePartOrder(EffectiveStyle, sources.Select(e => e.ModuleId)).ToList();
+        sources = [.. sources.OrderBy(e => order.IndexOf(e.ModuleId))];
+        // Generations that went away (a module disabled, its activity stopped) lose their host with their state.
+        foreach (var stale in _moduleParts.Where(part => !sources.Any(e => ReferenceEquals(e, part.Owner))).ToList())
+        { CompactModuleLayer.Children.Remove(stale.Host); stale.Host.Dispose(); _moduleParts.Remove(stale); }
+        double face = 0;
+        var parts = new List<ModulePart>(sources.Count);
+        foreach (var source in sources)
         {
-            ReleaseModulePart();
-            _modulePartOwner = source;
-            var module = source.Value;
-            _modulePartView = new ModuleViewHost(_app.Modules, source.ModuleId, ModuleContext, context => module.CreateView(context, ActivityViewKind.Compact));
-            // The host lives in CompactModuleLayer, which never leaves the tree, so its view keeps reporting itself on
-            // show across row rebuilds; the row only moves and sizes it.
-            CompactModuleLayer.Children.Add(_modulePartView);
-            // The view arrives after the host is built, and the row is laid out before that: rebuild the collapsed row
-            // once it does, so its declared width takes part. Without this the part would stay out of the row for good.
-            _modulePartView.Mounted += () => { if (!_expanded && IsLoaded) RenderCompact(); };
+            var part = _moduleParts.FirstOrDefault(item => ReferenceEquals(item.Owner, source));
+            if (part is null)
+            {
+                var module = source.Value;
+                var host = new ModuleViewHost(_app.Modules, source.ModuleId, ModuleContext, context => module.CreateView(context, ActivityViewKind.Compact));
+                // The host lives in CompactModuleLayer, which never leaves the tree, so its view keeps reporting itself
+                // on show across row rebuilds; the row only moves and sizes it.
+                CompactModuleLayer.Children.Add(host);
+                // The view arrives after the host is built, and the row is laid out before that: rebuild the collapsed
+                // row once it does, so its declared width takes part.
+                host.Mounted += () => { if (!_expanded && IsLoaded) RenderCompact(); };
+                part = new ModulePart(source, host);
+                _moduleParts.Add(part);
+            }
+            part.Width = 0; part.Placed = false; part.Dropped = false;
+            // A view that has not mounted yet (or that does not offer a width) takes no part; the host stays for the
+            // next rebuild rather than being thrown away.
+            if (part.Host.View is not IModuleCompactWidth declared || declared.PreferredWidth is not { } wanted) continue;
+            part.Width = wanted;
+            face += wanted;
+            parts.Add(part);
         }
-        // A fresh host mounts its view asynchronously: there is no view to ask yet, so the host is kept (not released)
-        // and the row is built again once the view arrives — releasing here would throw away the very host that is
-        // about to mount, and the part would never appear.
-        if (_modulePartView.View is not { } view) { CompactModuleLayer.Visibility = Visibility.Collapsed; return (null, 0); }
-        // A module's compact view keeps the whole row when it does not declare a width; those take the other path.
-        if (view is not IModuleCompactWidth declared || declared.PreferredWidth is not { } wanted)
-        {
-            CompactModuleLayer.Visibility = Visibility.Collapsed;
-            ReleaseModulePart();
-            return (null, 0);
-        }
-        _modulePartView.SetViewport(wanted, 24, Math.Clamp(scale, .75, 2));
-        _modulePartView.SetPresented(true);
-        return (_modulePartView, wanted);
+        // A part the module's own switch turns off is not placed and takes no room, but its host stays mounted so the
+        // switch brings it straight back.
+        _modulePartFace = face;
+        return (parts, face);
     }
-    // The row is about to be rebuilt: the part is not taken out of the tree with it (it lives in CompactModuleLayer),
-    // so nothing to detach — the new row places and sizes it again through PlaceModulePart.
+    // The row is about to be rebuilt: the parts are not taken out of the tree with it (they live in CompactModuleLayer),
+    // so nothing to detach — the new row places and sizes them again through PlaceModulePart.
     private void ClearModulePartForRow() => CompactModuleLayer.Visibility = Visibility.Collapsed;
-    // Puts the part at its place in the rebuilt row: the layer spans the row, the host sits at the left offset the
-    // arrangement gave it. Non-placements leave the layer hidden (no room, no part, or another part's turn).
-    private void PlaceModulePart(double left, double width, double height)
+    // Places the parts that fitted, left to right from the offset the arrangement gave them, with the row's gap between
+    // them; a part that did not fit is hidden for this build and says so in the settings.
+    private void PlaceModuleParts(double left, double gap, double height)
     {
-        if (_modulePartView is null || width <= 0) { CompactModuleLayer.Visibility = Visibility.Collapsed; return; }
-        CompactModuleLayer.Width = Math.Max(0, left + width);
-        CompactModuleLayer.Height = height;
-        CompactModuleLayer.Visibility = Visibility.Visible;
-        _modulePartView.Width = width; _modulePartView.Height = height;
-        _modulePartView.HorizontalAlignment = HorizontalAlignment.Left; _modulePartView.VerticalAlignment = VerticalAlignment.Top;
-        Canvas.SetLeft(_modulePartView, Math.Max(0, left)); Canvas.SetTop(_modulePartView, 0);
+        bool any = false;
+        foreach (var part in _moduleParts)
+        {
+            if (!part.Placed || part.Width <= 0)
+            {
+                part.Host.Visibility = Visibility.Collapsed;
+                part.Host.SetPresented(false);
+                continue;
+            }
+            part.Host.Visibility = Visibility.Visible;
+            part.Host.Width = part.Width; part.Host.Height = height;
+            part.Host.HorizontalAlignment = HorizontalAlignment.Left; part.Host.VerticalAlignment = VerticalAlignment.Top;
+            Canvas.SetLeft(part.Host, Math.Max(0, left)); Canvas.SetTop(part.Host, 0);
+            part.Host.SetViewport(part.Width, 24, Math.Clamp(_modulePartScale, .75, 2));
+            part.Host.SetPresented(true);
+            left += part.Width + gap;
+            any = true;
+        }
+        CompactModuleLayer.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
+        CompactModuleLayer.Width = any ? Math.Max(0, left) : 0; CompactModuleLayer.Height = height;
     }
-    private ModuleViewHost? _modulePartView;
-    private Contribution<IModuleActivity>? _modulePartOwner;
-    // Whether the row had room for the module readings at its last build: the settings page says which readings are
-    // not shown for want of room (the #78 plan's rule for the collapsed row).
-    internal bool ModulePartShown => _compactModuleShown;
-    internal bool ModulePartWanted => _modulePartView is not null;
-    private bool _compactModuleShown;
-    private void ReleaseModulePart()
+    private double _modulePartScale = 1, _modulePartFace;
+    // Whether any module reading stood in the row at its last build (the settings page says which ones did not, and why).
+    private bool _compactModulesShown;
+    // Which modules offer a part, and whether the row had room: the settings page lists them, with the reason when one
+    // is not shown (the #78 plan's rule for the collapsed row).
+    internal bool ModulePartWanted => _moduleParts.Count > 0;
+    internal double ModulePartFace => _modulePartFace;
+    internal IReadOnlyList<string> ModulePartIds => [.. _moduleParts.Select(part => part.Owner.ModuleId)];
+    internal bool ModulePartShown(string moduleId) => _moduleParts.FirstOrDefault(part => part.Owner.ModuleId == moduleId) is { Placed: true };
+    internal string ModulePartName(string moduleId) => _app.Modules.Modules.FirstOrDefault(m => m.Id == moduleId)?.Name ?? moduleId;
+    private void ReleaseModuleParts()
     {
-        if (_modulePartView is not null) CompactModuleLayer.Children.Remove(_modulePartView);
+        foreach (var part in _moduleParts) { CompactModuleLayer.Children.Remove(part.Host); part.Host.Dispose(); }
+        _moduleParts.Clear();
         CompactModuleLayer.Visibility = Visibility.Collapsed;
-        _modulePartView?.Dispose(); _modulePartView = null; _modulePartOwner = null;
+        _modulePartFace = 0;
     }
     private void ReleaseModulePage()
     { if (_modulePageMenu is not null) _modulePageMenu.IsOpen = false; _modulePageMenu = null; _modulePage?.Dispose(); _modulePage = null; _modulePageEntry = null; MiniAppsContent.Children.Clear(); }
@@ -268,10 +305,10 @@ public partial class MainWindow
             UpdateCollapsedGeometry(); RenderCompact(); if (!_expanded && !_moduleClosing) SetExpanded(false);
         }
         if (active && _moduleExpandedView is null) BuildModuleControls();
-        // A row part's first mount lands after the row was built without it: the module's next Changed (which is what
-        // brought us here) rebuilds the row so the readings join it. Once mounted, later updates go through the view's own
-        // redraw, so no rebuild is needed for every reading.
-        if (active && ActivityState.Passive && _modulePartView is { View: null } && !_expanded) RenderCompact();
+        // A part's first mount lands after the row was built without it: the module's next Changed (which is what
+        // brought us here) rebuilds the row so the readings join it. Once mounted, later updates go through the view's
+        // own redraw, so no rebuild is needed for every reading.
+        if (active && !_expanded && _moduleParts.Any(part => part.Host.View is null)) RenderCompact();
         var state = ActivityState;
         if (_moduleCompletion != state.Completion)
         {

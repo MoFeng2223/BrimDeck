@@ -1062,13 +1062,14 @@ public partial class MainWindow
         var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings), scale,
             !(media && showCover) && !equalizer && apps.Count == 0 && text.Length == 0 && clock is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden, _stripAdmission) : null;
         _stripLayout = _stripAdmission.Layout;
-        // The module readings' part, asked for before any width is worked out: an auto-width surface must count it, or the
-        // row would never be wide enough for it and it would be dropped for good.
-        var modulePart = ModuleCompactPart(scale);
-        // One source of truth for "is there a module part": its view, the user's switch for this style, and its place in
-        // the saved order. Everything below keys off this width, so a view that failed to mount never leaves the row
-        // believing in it.
-        double moduleFace = modulePart.View is not null && Settings.ShowsModuleReadings(EffectiveStyle) && Settings.CompactOrder(EffectiveStyle).Contains(CompactPart.Modules) ? modulePart.Width : 0;
+        // The module readings' parts, asked for before any width is worked out: an auto-width surface must count them,
+        // or the row would never be wide enough and they would be dropped for good.
+        _modulePartScale = scale;
+        var moduleParts = ModuleCompactParts(scale);
+        // The modules whose own switch is on: their widths take part below. A module the user turned off keeps its host
+        // mounted (the switch brings it straight back) but takes no room.
+        var wantedParts = moduleParts.Parts.Where(part => Settings.ShowsModulePart(EffectiveStyle, part.Owner.ModuleId)).ToList();
+        double moduleFace = Settings.CompactOrder(EffectiveStyle).Contains(CompactPart.Modules) ? moduleParts.Face : 0;
         // Readings that do not fit scroll through a window of whole readings, as the rings do (CompactSpacing.Window).
         var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, equalizer, Settings.EqualizerBars, showCover); CurrentCompactLayout = layout;
         // An auto-width surface takes the width of what the row shows; the new shape builds the row again. The track notice
@@ -1130,19 +1131,28 @@ public partial class MainWindow
         // arrangement like the built-in readings'. It is left out of the row altogether when what the scrolling parts
         // need leaves no room for it — a part cut at the edge would be worse than absent — and the settings say so.
         bool wantsModule = moduleFace > 0;
-        // The room the scrolling parts must keep whatever happens (their narrowest windows), then the module part's own.
+        // The room the scrolling parts must keep whatever happens (their narrowest windows), then the module parts' own.
         double scrollingFloor = CompactSpacing.Minimum(ringWidths, layout.RingGap) + CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0);
-        bool moduleFits = wantsModule && pool - scrollingFloor >= modulePart.Width - .5;
-        _compactModuleShown = moduleFits;
-        double moduleWidth = moduleFits ? modulePart.Width : 0;
-        // The module part is not one of the scrolling parts: its room comes off the pool before they share what is left.
-        if (moduleWidth > 0) { pool = Math.Max(0, pool - moduleWidth - unit); (rings, readings) = CompactSpacing.Share(ringWidths, layout.RingGap, readingWidths, strip?.Gap ?? 0, pool); }
+        // The parts are grouped by module and placed in the user's order: each takes its room from what is left after the
+        // scrolling parts' floor, and one that does not fit is dropped on its own (the settings say which, and why) —
+        // the parts after it still try, so a wide module never starves a narrow one behind it.
+        double moduleWidth = 0, available = pool - scrollingFloor;
+        foreach (var part in wantedParts)
+        {
+            bool fits = moduleFace > 0 && available >= part.Width - .5;
+            part.Placed = fits;
+            part.Dropped = !fits;
+            if (fits) { moduleWidth += part.Width + unit; available -= part.Width + unit; }
+        }
+        _compactModulesShown = moduleWidth > 0;
+        // The module parts are not scrolling parts: their room comes off the pool before the rings and readings share.
+        if (moduleWidth > 0) { pool = Math.Max(0, pool - moduleWidth); (rings, readings) = CompactSpacing.Share(ringWidths, layout.RingGap, readingWidths, strip?.Gap ?? 0, pool); }
         foreach (var part in Settings.CompactOrder(EffectiveStyle))
         {
             if (part == CompactPart.Rings && rings.Window > 0) shown.Add((part, new(rings.Window)));
             else if (part == CompactPart.Music && hasText) shown.Add((part, new(0)));
             else if (part == CompactPart.Monitor && readings.Window > 0) shown.Add((part, new(readings.Window)));
-            else if (part == CompactPart.Modules && moduleWidth > 0) shown.Add((part, new(moduleWidth)));
+            else if (part == CompactPart.Modules && moduleWidth > 0) shown.Add((part, new(moduleWidth - unit)));
             else if (part == CompactPart.Equalizer && hasEqualizer) shown.Add((part, new(layout.EqualizerSize)));
             else if (part == CompactPart.Clock && hasClock) shown.Add((part, new(clock!.ReservedWidth)));
         }
@@ -1168,9 +1178,9 @@ public partial class MainWindow
                     element = _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout.RingSize, layout.RingThickness, layout.Scale, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), _quotaElapsed, animate,
                         flow > 0 ? rings.Window : null, ringCut); break;
                 case CompactPart.Modules:
-                    // The readings live in their own layer over the row and are placed there: the host never leaves the
-                    // tree, so its view keeps reporting itself on show while rows are rebuilt.
-                    PlaceModulePart(left, modulePart.Width, row);
+                    // The readings live in their own layer over the row and are placed there: the hosts never leave the
+                    // tree, so their views keep reporting themselves on show while rows are rebuilt.
+                    PlaceModuleParts(left, unit, row);
                     element = new Grid();
                     break;
                 case CompactPart.Music:

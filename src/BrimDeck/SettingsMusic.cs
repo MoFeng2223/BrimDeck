@@ -64,17 +64,16 @@ public sealed partial class SettingsWindow
     }
 
     private const double PartRowHeight = 44, PartHandleWidth = 40;
-    // The note beside the module readings' row: which readings the module offers, and whether the row had room for them
-    // at its last build — the plan's rule that the settings say what the collapsed row left out for want of room.
+    // The note beside the module readings' line: what this switch covers, and where each module's own switch is. The
+    // per-module lines under it carry the room accounting (the plan's rule that the settings say what the row left out).
     private string ModulePartHelp
     {
         get
         {
             var deck = _app.Decks.FirstOrDefault(d => d.IsVisible) ?? _app.Deck;
             if (deck is null || !deck.ModulePartWanted) return Loc.T("当前没有提供收起行读数的模组。", "No module offers collapsed-row readings right now.");
-            return deck.ModulePartShown
-                ? Loc.T("模组读数与内置读数并排显示，可拖动调整位置；空间不足时整块隐藏。", "Module readings stand beside the built-in ones; drag to move them. The row hides them whole when there is no room.")
-                : Loc.T("空间不足，模组读数当前未显示。加宽收起面板或减少其他读数后可显示。", "No room right now, so the module readings are hidden. Widen the collapsed panel or choose fewer readings.");
+            return Loc.T("总开关：关闭后所有模组的读数都不在收起行显示（展开页不受影响）。各模组可单独开关并拖动排序。",
+                "Master switch: off hides every module's readings from the collapsed row (their pages are unaffected). Each module has its own switch and can be dragged to reorder.");
         }
     }    // The parts whose options are open (the clock, the quota rings), kept while the page is rebuilt or the collapsed style changes.
     private readonly HashSet<CompactPart> _openParts = [];
@@ -115,7 +114,60 @@ public sealed partial class SettingsWindow
         AutomationProperties.SetName(toggle, title); toggle.Checked += (_, _) => Show(true); toggle.Unchecked += (_, _) => Show(false);
         Grid.SetColumn(toggle, 2); row.Children.Add(toggle);
         AttachPartDrag(handle, title, style, rows);
-        return new Border { Child = row, Height = PartRowHeight, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0), Tag = part, RenderTransform = new TranslateTransform() };
+        var item = new Border { Child = row, Height = PartRowHeight, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0), Tag = part, RenderTransform = new TranslateTransform() };
+        // The module readings are grouped by module: one line per module under the part's own line, each with its switch
+        // and its place (dragged among the modules). A module with no room at the last build says so here.
+        if (part != CompactPart.Modules) return item;
+        var host = new StackPanel();
+        host.Children.Add(item);
+        host.Children.Add(ModulePartRows(style));
+        return new Border { Child = host, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0), Tag = part };
+    }
+    // One line per module that offers collapsed-row readings: its name, its switch, and the reason when the row had no
+    // room for it at its last build. Dragging reorders the modules among themselves; their place in the row as a whole
+    // is the "模组读数" line's own drag.
+    private FrameworkElement ModulePartRows(CompactStyle style)
+    {
+        var deck = _app.Decks.FirstOrDefault(d => d.IsVisible) ?? _app.Deck;
+        var ids = deck?.ModulePartIds ?? [];
+        var panel = new StackPanel { Margin = new Thickness(PartHandleWidth + 8, 0, 0, 6) };
+        if (ids.Count == 0)
+        {
+            var empty = TextLine(Loc.T("当前没有提供收起行读数的模组。", "No module offers collapsed-row readings right now."), 11, TextSecondary);
+            empty.TextWrapping = TextWrapping.Wrap; panel.Children.Add(empty);
+            return panel;
+        }
+        var order = S.ModulePartOrder(style, ids).ToList();
+        foreach (string id in order)
+        {
+            string name = deck!.ModulePartName(id);
+            bool enabled = S.ShowsModulePart(style, id);
+            bool room = deck.ModulePartShown(id);
+            var line = new Grid { Background = Brushes.Transparent, Margin = new Thickness(0, 2, 0, 2) };
+            line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) }); line.ColumnDefinitions.Add(new ColumnDefinition()); line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var handle = new GripHandle { Width = 18, Background = Brushes.Transparent, Cursor = Cursors.SizeAll, HorizontalAlignment = HorizontalAlignment.Left, Child = Grip(TextTertiary) };
+            line.Children.Add(handle);
+            var label = TextLine(name, 12, enabled ? TextPrimary : TextSecondary);
+            // The note is the settings' accounting of what the row left out, as the plan asks: user off, or no room.
+            label.ToolTip = !enabled ? Loc.T("已在收起行关闭此模组的读数。", "This module's readings are turned off in the collapsed row.")
+                : room ? Loc.T("读数正与内置读数并排显示。", "The readings stand beside the built-in ones.")
+                : Loc.T("空间不足，此模组的读数当前未显示。加宽收起面板或减少其他读数后可显示。", "No room right now, so this module's readings are hidden. Widen the collapsed panel or choose fewer readings.");
+            Grid.SetColumn(label, 1); line.Children.Add(label);
+            var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = enabled, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
+            AutomationProperties.SetName(toggle, name);
+            string moduleId = id;
+            toggle.Checked += (_, _) => Change(s => s.SetModulePartEnabled(style, moduleId, true));
+            toggle.Unchecked += (_, _) => Change(s => s.SetModulePartEnabled(style, moduleId, false));
+            Grid.SetColumn(toggle, 2); line.Children.Add(toggle);
+            var row = new Border { Child = line, Height = 32, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0), Tag = moduleId, RenderTransform = new TranslateTransform() };
+            AttachDrag(handle, name, () => panel, 32, list =>
+            {
+                var order = list.Children.OfType<Border>().Where(b => b.Tag is string).Select(b => (string)b.Tag).ToArray();
+                Change(s => s.SetModulePartOrder(style, order));
+            });
+            panel.Children.Add(row);
+        }
+        return panel;
     }
     // Dropped in a new place, the collapsed row takes the new order at once. The open options close when a drag begins, so every
     // row is one line high while they move.
