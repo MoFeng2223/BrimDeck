@@ -211,7 +211,7 @@ public partial class MainWindow
         if (!ReferenceEquals(_moveOverlay, overlay) || _moveStart is not { } start) { overlay.Close(); return; }
         _moveOverlay = null; _dockOverride = null;
         var moved = Settings.Copy();
-        if (start.Style == CompactStyle.Capsule) (moved.CapsuleOffsetX, moved.CapsuleTop) = CollapsedMove.CapsulePlace(place.X, place.Y, start.Surface.Width, start.Work);
+        if (start.Style == CompactStyle.Capsule) (moved.CapsuleOffsetX, moved.CapsuleTop) = CollapsedMove.CapsulePlace(place.X, place.Y, start.Surface.Width, start.ScreenWidth);
         else if (start.Style == CompactStyle.Line)
         {
             moved.LineEdge = place.Edge; moved.LineOffsetX = place.Offset;

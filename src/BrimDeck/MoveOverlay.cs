@@ -74,8 +74,7 @@ internal sealed class MoveOverlay : Window
 // The notch and the line move along the edge nearest the pointer. When that edge changes, the surface sinks back into the edge it
 // leaves and rises out of the new one under the pointer. The panel lays itself out for the new edge meanwhile (DockChanged) and
 // reports the size it takes there (Shape): a notch on a side edge stands its content in a column, so its length and depth change,
-// and the surface eases to that size. On an edge with a taskbar it hangs from the screen's edge while the pointer is over the
-// taskbar and from the taskbar's inner edge otherwise (CollapsedMove.AnchorAt), sliding between the two.
+// and the surface eases to that size. It hangs from the physical screen edge, including over a taskbar.
 internal sealed class MoveGhost : FrameworkElement
 {
     private sealed class Docked
@@ -195,7 +194,7 @@ internal sealed class MoveGhost : FrameworkElement
         {
             if (!_dropping)
             {
-                var (x, y, guideX, guideY) = CollapsedMove.Capsule(_pointer.X + _grabX, _pointer.Y + _grabY, _start.Surface.Width, _start.Surface.Height, _start.ScreenHeight, _start.Work);
+                var (x, y, guideX, guideY) = CollapsedMove.Capsule(_pointer.X + _grabX, _pointer.Y + _grabY, _start.Surface.Width, _start.Surface.Height, _start.ScreenWidth, _start.ScreenHeight, _start.Work);
                 _tx = x; _ty = y;
                 Guide(ref _guideA, ref _guideAAt, guideX, now);
                 Guide(ref _guideB, ref _guideBAt, guideY, now);
@@ -231,8 +230,7 @@ internal sealed class MoveGhost : FrameworkElement
         {
             var edge = CollapsedMove.NearestEdge(_pointer.X, _pointer.Y, _start.ScreenWidth, _start.ScreenHeight, _pointerEdge);
             _pointerEdge = edge;
-            // Over the taskbar it hangs from the screen's edge, elsewhere from the taskbar's; an edge without one keeps what it had.
-            var anchor = CollapsedMove.AnchorAt(edge, _pointer.X, _pointer.Y, _start.ScreenWidth, _start.ScreenHeight, _start.Work);
+            var anchor = CollapsedMove.AnchorAt(edge, _start.ScreenWidth, _start.ScreenHeight, _start.Work);
             bool over = DeckSettings.Anchor(_start.Style, edge, anchor ?? _start.SavedAnchor) == EdgeAnchor.Screen;
             if (anchor is not null) _anchor = anchor;
             if (edge != Home.Edge) MoveTo(edge, over, now);
@@ -310,7 +308,7 @@ internal sealed class MoveGhost : FrameworkElement
         MoveLook.Surface(drawing, outline, 1, veil: false);
         MoveLook.Outline(drawing, outline, 1, hangs: false);
         MoveLook.Icon(drawing, new Point(cx, cy), MoveLook.IconSize(height), 1);
-        // The guides cross the capsule and reach a little past it: the vertical one where its centre is held on the work area's
+        // The guides cross the capsule and reach a little past it: the vertical one where its centre is held on the screen's
         // middle, the horizontal one where its middle or one of its edges is held.
         double a = Lit(_guideA, now), b = Lit(_guideB, now);
         if (a > .01) MoveLook.Guide(drawing, new Rect(_guideAAt - .75, _y - GuideReach, 1.5, height + 2 * GuideReach), a);

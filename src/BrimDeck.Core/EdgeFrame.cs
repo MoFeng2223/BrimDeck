@@ -9,8 +9,8 @@ namespace BrimDeck.Core;
 // - Left: x runs down the edge, y right from it; the frame is the monitor mirrored about its diagonal.
 // - Right: x runs down the edge, y left from it; the frame is the monitor turned a quarter clockwise.
 // The frame starts at the screen's edge (overTaskbar), covering a taskbar there, or at the work area's edge, so the notch hangs
-// from the taskbar instead; without a taskbar on that edge the two are the same. Left unsaid, the top starts at the screen's edge
-// and the other edges at the work area's, as before the choice existed. The frame's along span is the monitor's (the notch may be
+// from the taskbar instead; without a taskbar on that edge the two are the same. Left unsaid, every edge starts at the screen's edge.
+// The frame's along span is the monitor's (the notch may be
 // as long as the edge); its depth reaches from that edge to the opposite side of the monitor.
 // Rectangles are in DIPs relative to the monitor's top-left corner (screen) or to the frame's origin (frame).
 public readonly record struct EdgeFrame(ScreenEdge Edge, double ScreenWidth, double ScreenHeight, double Line)
@@ -20,7 +20,7 @@ public readonly record struct EdgeFrame(ScreenEdge Edge, double ScreenWidth, dou
     {
         double w = Finite(screenWidth), h = Finite(screenHeight);
         bool valid = double.IsFinite(work.X) && double.IsFinite(work.Y) && double.IsFinite(work.Width) && double.IsFinite(work.Height) && work.Width > 0 && work.Height > 0;
-        bool over = overTaskbar ?? edge == ScreenEdge.Top;
+        bool over = overTaskbar ?? true;
         double line = edge switch
         {
             ScreenEdge.Bottom => over || !valid ? h : Math.Clamp(work.Bottom, 0, h),

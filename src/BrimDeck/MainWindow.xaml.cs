@@ -434,7 +434,8 @@ public partial class MainWindow : Window
     public (double OffsetMin, double OffsetMax, double TopMin, double TopMax, double WidthMin, double WidthMax) CurrentCollapsedRanges(CompactStyle style, double width, double height)
     {
         // The capsule's settings are places on the screen, whichever edge it is docked with.
-        var (monitor, work) = style == CompactStyle.Capsule ? (_screenMonitor, _screenWork) : (MonitorBoundsDip, WorkDip);
+        var (monitor, work) = style == CompactStyle.Capsule ? (_screenMonitor, _screenWork)
+            : (MonitorBoundsDip, style == CompactStyle.Line && Dock(style).OverTaskbar ? _frame.Monitor : WorkDip);
         var (widthMin, widthMax) = CollapsedGeometry.WidthRange(style, monitor, work, _scale);
         // At the height the surface takes, which a short screen or work area can lower below the saved one (as Resolve does).
         double surfaceHeight = CollapsedGeometry.SurfaceHeight(style, height, monitor, work, _scale);

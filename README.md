@@ -62,7 +62,7 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
 
   <img src="docs/en-US/images/compact-monitor.png" width="474" alt="System readings in the notch: core columns, CPU, memory, GPU and network speed beside the quota rings">
 
-- The size and position of the Notch, Capsule and Indicator can be adjusted in settings.
+- The size and position of the Notch, Capsule and Indicator can be adjusted in settings. Movement and default docking use the full screen, including the taskbar area, so the capsule can be placed directly over the taskbar.
 
 - By default it turns into the Indicator when a window is maximized, and hides during full-screen games or video so it never opens by accident.
 

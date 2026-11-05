@@ -11,9 +11,9 @@ internal static class EdgeFrameTests
         var left = EdgeFrame.For(ScreenEdge.Left, 1920, 1080, work);
         var right = EdgeFrame.For(ScreenEdge.Right, 1920, 1080, work);
         check("Top: the frame is the monitor, unchanged", top.Monitor == new DipRect(0, 0, 1920, 1080) && top.FromScreen(work) == work && !top.Across);
-        check("Bottom: the frame starts at the taskbar's top and runs up from it",
-            bottom.Line == 1032 && bottom.Monitor == new DipRect(0, 0, 1920, 1032) && bottom.FromScreen(work) == new DipRect(0, 0, 1920, 1032)
-            && bottom.ToScreen(new DipRect(841, 0, 238, 32)) == new DipRect(841, 1000, 238, 32));
+        check("Bottom: the frame starts at the physical screen edge, over the taskbar, and runs up from it",
+            bottom.Line == 1080 && bottom.Monitor == new DipRect(0, 0, 1920, 1080) && bottom.FromScreen(work) == new DipRect(0, 48, 1920, 1032)
+            && bottom.ToScreen(new DipRect(841, 0, 238, 32)) == new DipRect(841, 1048, 238, 32));
         check("Left and right: the frame runs down the edge, as long as the screen is high",
             left.Across && right.Across && left.Monitor == new DipRect(0, 0, 1080, 1920) && right.Monitor == new DipRect(0, 0, 1080, 1920)
             && left.FromScreen(work) == new DipRect(0, 0, 1032, 1920) && right.FromScreen(work) == new DipRect(0, 0, 1032, 1920));
@@ -31,10 +31,15 @@ internal static class EdgeFrameTests
         check("The matrix turns frame directions into screen directions, and Upright turns them back",
             new[] { top, bottom, left, right }.All(frame => Apply(frame.Matrix, 2, 3) == frame.ToScreen(2, 3)
                 && Apply(frame.Upright, Apply(frame.Matrix, 2, 3).X, Apply(frame.Matrix, 2, 3).Y) == (2, 3)));
-        // A taskbar at the left: the left frame starts at its right edge.
-        var leftBar = EdgeFrame.For(ScreenEdge.Left, 1920, 1080, new DipRect(60, 0, 1860, 1080));
-        check("A side taskbar moves the frame's edge to the work area", leftBar.Line == 60 && leftBar.Monitor == new DipRect(0, 0, 1080, 1860)
+        // An explicit taskbar-edge choice is still honored.
+        var leftBar = EdgeFrame.For(ScreenEdge.Left, 1920, 1080, new DipRect(60, 0, 1860, 1080), overTaskbar: false);
+        check("An explicitly chosen taskbar anchor moves the frame's edge to the work area", leftBar.Line == 60 && leftBar.Monitor == new DipRect(0, 0, 1080, 1860)
             && leftBar.ToScreen(new DipRect(0, 0, 10, 20)) == new DipRect(60, 0, 20, 10));
+        foreach (var edge in Enum.GetValues<ScreenEdge>())
+            check($"{edge}: notch and indicator default to the screen edge without another setting",
+                DeckSettings.Anchor(CompactStyle.Notch, edge, null) == EdgeAnchor.Screen
+                && DeckSettings.Anchor(CompactStyle.Line, edge, null) == EdgeAnchor.Screen
+                && DeckSettings.Anchor(CompactStyle.Line, edge, EdgeAnchor.Taskbar) == EdgeAnchor.Taskbar);
         check("A missing work area uses the monitor's edge; an unknown edge is the top",
             EdgeFrame.For(ScreenEdge.Bottom, 1920, 1080, new DipRect(double.NaN, 0, 0, 0)).Line == 1080
             && EdgeFrame.For((ScreenEdge)9, 1920, 1080, work).Edge == ScreenEdge.Top);

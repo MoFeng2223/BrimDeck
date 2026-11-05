@@ -145,9 +145,9 @@ internal static class CompactSpacingTests
             && CollapsedGeometry.Resolve(new DeckSettings { NotchHeight = 24 }, CompactStyle.Notch, screen, area, 1, null, 300).Surface.Width == 356
             && CollapsedGeometry.Resolve(capsule, CompactStyle.Line, screen, area, 1, null, 300).Surface.Width == CollapsedLimits.LineLengthDefault
             && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area).Surface.Width == 140);
-        check("Compact required: the height the surface takes, within its range and the screen or work area",
+        check("Compact required: the height the surface takes, within its range and the physical screen",
             CollapsedGeometry.SurfaceHeight(CompactStyle.Notch, 64, new DipRect(0, 0, 800, 40), new DipRect(0, 0, 800, 30)) == 40
-            && CollapsedGeometry.SurfaceHeight(CompactStyle.Capsule, 64, new DipRect(0, 0, 800, 40), new DipRect(0, 0, 800, 30)) == 30
+            && CollapsedGeometry.SurfaceHeight(CompactStyle.Capsule, 64, new DipRect(0, 0, 800, 40), new DipRect(0, 0, 800, 30)) == 40
             && CollapsedGeometry.SurfaceHeight(CompactStyle.Notch, 10, screen, area) == CollapsedLimits.NotchHeightMin
             && CollapsedGeometry.SurfaceHeight(CompactStyle.Capsule, 40, screen, area) == 40);
         check("Compact required: surface width for a content width", CollapsedGeometry.SurfaceWidth(CompactStyle.Capsule, 32, 100) == 132

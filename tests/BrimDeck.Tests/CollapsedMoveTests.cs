@@ -10,7 +10,7 @@ internal static class CollapsedMoveTests
         var work = new DipRect(0, 0, 1920, 1032);
         const double W = 1920, H = 1080;
 
-        check("The notch hangs from the edge nearest the pointer, the bottom one at the taskbar's top",
+        check("The notch hangs from the screen edge nearest the pointer",
             CollapsedMove.NearestEdge(900, 10, W, H, ScreenEdge.Top) == ScreenEdge.Top
             && CollapsedMove.NearestEdge(900, 1040, W, H, ScreenEdge.Top) == ScreenEdge.Bottom
             && CollapsedMove.NearestEdge(5, 500, W, H, ScreenEdge.Top) == ScreenEdge.Left
@@ -36,10 +36,10 @@ internal static class CollapsedMoveTests
         check("The saved offset puts the notch's centre where it was dropped, on a side edge too",
             Math.Abs(shape.Surface.X + shape.Surface.Width / 2 - 400) < 1e-9 && frame.ToScreen(shape.Surface).X == 0);
 
-        check("Over a taskbar the surface hangs from the screen's edge, elsewhere from the taskbar's; an edge without one keeps the choice",
-            CollapsedMove.AnchorAt(ScreenEdge.Bottom, 500, 1050, W, H, work) == EdgeAnchor.Screen
-            && CollapsedMove.AnchorAt(ScreenEdge.Bottom, 500, 1020, W, H, work) == EdgeAnchor.Taskbar
-            && CollapsedMove.AnchorAt(ScreenEdge.Top, 500, 5, W, H, work) is null
+        check("Dragging to an edge uses the physical screen edge; an edge without a taskbar keeps the choice",
+            CollapsedMove.AnchorAt(ScreenEdge.Bottom, W, H, work) == EdgeAnchor.Screen
+            && CollapsedMove.AnchorAt(ScreenEdge.Top, W, H, new DipRect(0, 48, W, H - 48)) == EdgeAnchor.Screen
+            && CollapsedMove.AnchorAt(ScreenEdge.Top, W, H, work) is null
             && CollapsedMove.Line(ScreenEdge.Bottom, true, W, H, work) == H && CollapsedMove.Line(ScreenEdge.Bottom, false, W, H, work) == 1032);
         var topBarWork = new DipRect(0, 48, 1920, 1032);
         var under = EdgeFrame.For(ScreenEdge.Top, W, H, topBarWork, overTaskbar: false);
@@ -58,31 +58,39 @@ internal static class CollapsedMoveTests
         var over = CollapsedGeometry.Resolve(new DeckSettings { LineTop = 4 }, CompactStyle.Line, new DipRect(0, 0, W, H), topBarWork, lineOverTaskbar: true);
         check("A line over the taskbar is measured from the screen's edge", over.Surface.Y == 4);
 
-        var capsule = CollapsedMove.Capsule(865, 300, 196, 32, H, work);
-        check("The capsule is held on the work area's middle, with a vertical guide there", capsule.X == 862 && capsule.GuideX == 960 && capsule.GuideY is null);
-        capsule = CollapsedMove.Capsule(700, 9, 196, 32, H, work);
+        var capsule = CollapsedMove.Capsule(865, 300, 196, 32, W, H, work);
+        check("The capsule is held on the screen's middle, with a vertical guide there", capsule.X == 862 && capsule.GuideX == 960 && capsule.GuideY is null);
+        capsule = CollapsedMove.Capsule(700, 9, 196, 32, W, H, work);
         check("It is held at its usual distance from the top", capsule.Y == CollapsedMove.Gap && capsule.GuideY == 0 && capsule.GuideX is null);
-        capsule = CollapsedMove.Capsule(700, 1032 - 32 - 8, 196, 32, H, work);
+        capsule = CollapsedMove.Capsule(700, 1032 - 32 - 8, 196, 32, W, H, work);
         check("Above the taskbar it is held just clear of its top", capsule.Y == 1032 - 32 - CollapsedMove.Gap && capsule.GuideY == 1032);
-        capsule = CollapsedMove.Capsule(700, 2000, 196, 32, H, work);
+        capsule = CollapsedMove.Capsule(700, 2000, 196, 32, W, H, work);
         check("Over the taskbar it goes down to the monitor's bottom and is held clear of it", capsule.Y == H - 32 - CollapsedMove.Gap && capsule.GuideY == H);
-        capsule = CollapsedMove.Capsule(-40, 400, 196, 32, H, work);
-        var right = CollapsedMove.Capsule(5000, 400, 196, 32, H, work);
-        check("At the work area's sides it keeps the same gap, with no guide", capsule.X == CollapsedMove.Gap && right.X == 1920 - 196 - CollapsedMove.Gap && capsule.GuideX is null);
-        capsule = CollapsedMove.Capsule(500, 506, 196, 32, H, work);
-        check("It is held on the work area's middle down the screen, with a horizontal guide there", capsule.Y == 500 && capsule.GuideY == 516);
-        capsule = CollapsedMove.Capsule(500, 600, 196, 32, H, work);
+        capsule = CollapsedMove.Capsule(-40, 400, 196, 32, W, H, work);
+        var right = CollapsedMove.Capsule(5000, 400, 196, 32, W, H, work);
+        check("At the screen's sides it keeps the same gap, with no guide", capsule.X == CollapsedMove.Gap && right.X == 1920 - 196 - CollapsedMove.Gap && capsule.GuideX is null);
+        capsule = CollapsedMove.Capsule(500, 518, 196, 32, W, H, work);
+        check("It is held on the screen's middle down the screen, with a horizontal guide there", capsule.Y == 524 && capsule.GuideY == 540);
+        capsule = CollapsedMove.Capsule(500, 600, 196, 32, W, H, work);
         check("Elsewhere it follows the pointer", capsule.X == 500 && capsule.Y == 600 && capsule.GuideX is null && capsule.GuideY is null);
         var topBar = new DipRect(0, 48, 1920, 1032);
-        check("Below a top taskbar it cannot go above the work area",
-            CollapsedMove.Capsule(500, 0, 196, 32, H, topBar).Y == 48 + CollapsedMove.Gap && CollapsedMove.Capsule(500, 300, 196, 32, H, topBar).Y == 300);
+        check("The capsule can move over a top taskbar, using the screen's top as its boundary",
+            CollapsedMove.Capsule(500, 0, 196, 32, W, H, topBar).Y == CollapsedMove.Gap && CollapsedMove.Capsule(500, 300, 196, 32, W, H, topBar).Y == 300);
 
-        var (offsetX, top) = CollapsedMove.CapsulePlace(500, 600, 196, work);
+        var (offsetX, top) = CollapsedMove.CapsulePlace(500, 600, 196, W);
         var placed = CollapsedGeometry.Resolve(new DeckSettings { CapsuleOffsetX = offsetX, CapsuleTop = top, CapsuleWidth = 196, CapsuleAutoWidth = false }, CompactStyle.Capsule, new DipRect(0, 0, W, H), work);
         check("The saved offset and top put the capsule where it was dropped", placed.Surface.X == 500 && placed.Surface.Y == 600);
-        var low = CollapsedMove.Capsule(700, 2000, 196, 32, H, work);
-        (offsetX, top) = CollapsedMove.CapsulePlace(low.X, low.Y, 196, work);
+        var low = CollapsedMove.Capsule(700, 2000, 196, 32, W, H, work);
+        (offsetX, top) = CollapsedMove.CapsulePlace(low.X, low.Y, 196, W);
         placed = CollapsedGeometry.Resolve(new DeckSettings { CapsuleOffsetX = offsetX, CapsuleTop = top, CapsuleWidth = 196, CapsuleAutoWidth = false }, CompactStyle.Capsule, new DipRect(0, 0, W, H), work);
         check("A capsule dropped over the taskbar stays there", placed.Surface.Y == low.Y);
+        foreach (var area in new[] { topBar, new DipRect(60, 0, W - 60, H), new DipRect(0, 0, W - 60, H) })
+        {
+            var corner = CollapsedMove.Capsule(-100, -100, 196, 32, W, H, area);
+            (offsetX, top) = CollapsedMove.CapsulePlace(corner.X, corner.Y, 196, W);
+            placed = CollapsedGeometry.Resolve(new DeckSettings { CapsuleOffsetX = offsetX, CapsuleTop = top, CapsuleWidth = 196 }, CompactStyle.Capsule, new DipRect(0, 0, W, H), area);
+            check("Dragging and saving use the same screen coordinates with a top or side taskbar",
+                corner.X == CollapsedMove.Gap && corner.Y == CollapsedMove.Gap && placed.Surface.X == corner.X && placed.Surface.Y == corner.Y);
+        }
     }
 }

@@ -6,7 +6,7 @@ public static class CollapsedLimits
 {
     // The height at which compact content is drawn at its designed size; Scale is the surface height divided by this.
     public const double BaseHeight = 32;
-    // The notch and the capsule may be as wide as the monitor (the work area for the capsule). NotchWidthMax and CapsuleWidthMax
+    // The notch and the capsule may be as wide as the monitor. NotchWidthMax and CapsuleWidthMax
     // are only the limits for saved values; each monitor narrows them when the shape is resolved (WidthRange).
     // The smallest widths are only what the shape itself needs; the content keeps the surface wide enough for what it shows
     // (CompactMusicLayout.RequiredWidth, CollapsedGeometry.Resolve).
@@ -63,9 +63,8 @@ public readonly record struct PanelPlacement(double Top, double HeaderExtra);
 // is too small for them only narrows what is drawn on it.
 // monitor: the monitor's bounds in DIPs; only its width and height are used.
 // work: the monitor's work area in DIPs, relative to the monitor's top-left corner.
-// The notch is placed against the top of the monitor, over a top taskbar as before. The line stays within the work area; so
-// does the capsule, except that it may go down past the work area's bottom, over a bottom taskbar. Every result lies on the
-// monitor, with a width and height of at least 0, for any input.
+// The notch and capsule use the entire monitor, including taskbars. The line uses the chosen edge's frame (lineOverTaskbar).
+// Every result lies on the monitor, with a width and height of at least 0, for any input.
 public static class CollapsedGeometry
 {
     // contentWanted: with auto width, the width the notch's or capsule's content asks for (0 for none); null keeps the saved
@@ -95,14 +94,14 @@ public static class CollapsedGeometry
         {
             case CompactStyle.Capsule:
             {
-                double height = Math.Min(Value(settings.CapsuleHeight, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, CollapsedLimits.CapsuleHeightDefault) * s, area.Height);
+                double height = Math.Min(Value(settings.CapsuleHeight, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, CollapsedLimits.CapsuleHeightDefault) * s, screen.Height);
                 double saved = Value(settings.CapsuleWidth, CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax, CollapsedLimits.CapsuleWidthDefault) * s;
                 double fit = Math.Max(CollapsedLimits.CapsuleWidthMin * s, SurfaceWidth(style, height, wanted));
-                double width = Math.Min(Math.Max(auto ? fit : saved, SurfaceWidth(style, height, required)), area.Width);
-                var (topMin, topMax) = TopRange(height, screen.Height - area.Y, double.PositiveInfinity);
+                double width = Math.Min(Math.Max(auto ? fit : saved, SurfaceWidth(style, height, required)), screen.Width);
+                var (topMin, topMax) = TopRange(height, screen.Height, double.PositiveInfinity);
                 double top = Math.Clamp(Value(settings.CapsuleTop, CollapsedLimits.CapsuleTopMin, CollapsedLimits.CapsuleTopMax, CollapsedLimits.CapsuleTopDefault), topMin, topMax);
                 double scale = height / CollapsedLimits.BaseHeight, inset = CollapsedLimits.CapsuleInset * scale;
-                var surface = new DipRect(area.X + Place(area.Width, width, settings.CapsuleOffsetX), area.Y + top, width, height);
+                var surface = new DipRect(Place(screen.Width, width, settings.CapsuleOffsetX), top, width, height);
                 return new(style, surface, scale, inset, Math.Max(0, width - 2 * inset), height / 2, height / 2, 0);
             }
             case CompactStyle.Line:
@@ -130,15 +129,15 @@ public static class CollapsedGeometry
     }
 
     // The height a notch or capsule takes on this monitor for a saved height, as Resolve takes it: within the style's range and
-    // no taller than the screen (notch) or the work area (capsule), at the scale. The line's thickness is returned as it is.
+    // no taller than the screen, at the scale. The line's thickness is returned as it is.
     public static double SurfaceHeight(CompactStyle style, double height, DipRect monitor, DipRect work, double scale = 1)
     {
-        var (screen, area) = Sanitize(monitor, work);
+        var (screen, _) = Sanitize(monitor, work);
         double s = ValidScale(scale);
         return style switch
         {
             CompactStyle.Notch => Math.Min(Value(height, CollapsedLimits.NotchHeightMin, CollapsedLimits.NotchHeightMax, CollapsedLimits.NotchHeightDefault) * s, screen.Height),
-            CompactStyle.Capsule => Math.Min(Value(height, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, CollapsedLimits.CapsuleHeightDefault) * s, area.Height),
+            CompactStyle.Capsule => Math.Min(Value(height, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, CollapsedLimits.CapsuleHeightDefault) * s, screen.Height),
             _ => height
         };
     }
@@ -182,12 +181,11 @@ public static class CollapsedGeometry
 
     private static double ValidScale(double scale) => scale > 0 && double.IsFinite(scale) ? scale : 1;
 
-    // The distances from the top of the work area at which a capsule of this height stays on the monitor: 0 to
-    // monitorH - workY - H, so it may cover a bottom taskbar.
+    // Distances from the screen's top that keep the capsule on the monitor, including any taskbar.
     public static (double Min, double Max) CapsuleTopRange(double height, DipRect monitor, DipRect work)
     {
-        var (screen, area) = Sanitize(monitor, work);
-        return TopRange(Finite(height), screen.Height - area.Y, double.PositiveInfinity);
+        var (screen, _) = Sanitize(monitor, work);
+        return TopRange(Finite(height), screen.Height, double.PositiveInfinity);
     }
 
     // Where the open panel starts, in DIPs from the top of the monitor (work is relative to the monitor), and how much taller
@@ -250,7 +248,7 @@ public static class CollapsedGeometry
     private static double Span(CompactStyle style, DipRect monitor, DipRect work)
     {
         var (screen, area) = Sanitize(monitor, work);
-        return style == CompactStyle.Notch ? screen.Width : area.Width;
+        return style == CompactStyle.Line ? area.Width : screen.Width;
     }
 
     private static double Value(double value, double min, double max, double fallback) => double.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;

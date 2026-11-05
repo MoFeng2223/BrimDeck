@@ -310,10 +310,9 @@ public sealed class DeckSettings
     // The edge the notch hangs from. On the other edges it keeps its width (along the edge), height and offset (along the edge
     // too); see EdgeFrame. The capsule always sits below the top edge.
     public ScreenEdge NotchEdge { get; set; } = ScreenEdge.Top;
-    // What the notch hangs from on that edge; null until chosen, which is the screen's edge at the top and the taskbar's elsewhere,
-    // as before the choice existed.
+    // What the notch hangs from on that edge; the screen's edge unless explicitly chosen otherwise.
     public EdgeAnchor? NotchAnchor { get; set; }
-    // The edge and the anchor of the line, as the notch's; the line keeps to the taskbar's side by default. A window rule that turns
+    // The edge and the anchor of the line, as the notch's; both use the screen edge by default. A window rule that turns
     // the notch or the capsule into the line shows it where the line's own settings put it.
     public ScreenEdge LineEdge { get; set; } = ScreenEdge.Top;
     public EdgeAnchor? LineAnchor { get; set; }
@@ -326,12 +325,12 @@ public sealed class DeckSettings
         _ => (ScreenEdge.Top, true)
     };
     public static EdgeAnchor Anchor(CompactStyle style, ScreenEdge edge, EdgeAnchor? chosen)
-        => chosen ?? (style == CompactStyle.Notch && edge == ScreenEdge.Top ? EdgeAnchor.Screen : EdgeAnchor.Taskbar);
+        => chosen ?? EdgeAnchor.Screen;
     public ScreenEdge CompactEdge(CompactStyle style) => style == CompactStyle.Line ? LineEdge : style == CompactStyle.Notch ? NotchEdge : ScreenEdge.Top;
     public double CapsuleWidth { get; set; } = CollapsedLimits.CapsuleWidthDefault;
     public double CapsuleHeight { get; set; } = CollapsedLimits.CapsuleHeightDefault;
     public double CapsuleOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
-    // Distance from the top of the work area. Saved up to 4000; each monitor stops the capsule at the bottom of its work area.
+    // Distance from the screen's top. Saved up to 4000; each monitor stops the capsule at its physical bottom edge.
     public double CapsuleTop { get; set; } = CollapsedLimits.CapsuleTopDefault;
     public double LineLength { get; set; } = CollapsedLimits.LineLengthDefault;
     // In half-DIP steps.

@@ -19,7 +19,7 @@ namespace ReadmeMedia;
 // replaced by a handler that always fails, and media detection is never started. The panel window stays transparent
 // and off screen; each image is taken from its visual tree with RenderTargetBitmap.
 //
-// Usage: ReadmeMedia <output folder> [zh-CN|en-US] [stills,themes,monitor,hero,settings]  (settings only when named)
+// Usage: ReadmeMedia <output folder> [zh-CN|en-US] [stills,themes,monitor,hero,settings,screen-edges]  (last two only when named)
 internal static class Program
 {
     internal const BindingFlags Any = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
@@ -141,7 +141,54 @@ internal sealed class Renderer(App app, string output, string language, string[]
         if (scenes.Contains("settings")) await SettingsPage("settings", 3);
         // The music page at its presets and at the ends of its size range; for checking layout changes, not for the README.
         if (scenes.Contains("music-sizes")) await MusicSizes();
+        // Exercises the real panel's placement with synthetic data; no account or media session is read.
+        if (scenes.Contains("screen-edges")) await ScreenEdges();
         Directory.Delete(folder, true);
+    }
+
+    private async Task ScreenEdges()
+    {
+        var (bounds, work, dpi) = WindowsHost.PrimaryScreen();
+        double width = bounds.Width / dpi, height = bounds.Height / dpi;
+        _settings.Animations = false;
+        _settings.CapsuleAutoWidth = false;
+        _settings.CapsuleWidth = 640;
+        _settings.CapsuleHeight = 32;
+        _settings.NotchAnchor = _settings.LineAnchor = null;
+        foreach (int scale in PanelScales.Choices)
+        foreach (var edge in new[] { ScreenEdge.Top, ScreenEdge.Bottom })
+        {
+            _settings.PanelScale = scale;
+            _settings.NotchEdge = _settings.LineEdge = edge;
+            _settings.CapsuleTop = edge == ScreenEdge.Top ? 0 : Math.Min(CollapsedLimits.CapsuleTopMax, height - 32 * scale / 100d - CollapsedMove.Gap);
+            foreach (var style in Enum.GetValues<CompactStyle>())
+            {
+                _settings.Style = style;
+                Refresh();
+                await Settle();
+                _deck.SetExpanded(false, true);
+                await Settle();
+                var frame = (EdgeFrame)Program.Field(_deck, "_frame")!;
+                var shape = (CollapsedShape)_deck.GetType().GetProperty("Collapsed", Program.Any)!.GetValue(_deck)!;
+                var surface = frame.ToScreen(shape.Surface);
+                if (frame.Edge != edge || frame.Line != (edge == ScreenEdge.Top ? 0 : height) || surface.X < 0 || surface.Right > width
+                    || surface.Y < 0 || surface.Bottom > height)
+                    throw new InvalidOperationException($"{style} at {scale}% did not use the physical screen edge: {surface}, {frame}");
+                if (edge == ScreenEdge.Bottom && work.Bottom < bounds.Bottom && surface.Bottom <= (work.Bottom - bounds.Top) / dpi)
+                    throw new InvalidOperationException($"{style} at {scale}% stopped above the taskbar: {surface}");
+                if (edge == ScreenEdge.Top && work.Top > bounds.Top && surface.Y >= (work.Top - bounds.Top) / dpi)
+                    throw new InvalidOperationException($"{style} at {scale}% stopped below the taskbar: {surface}");
+                if (style == CompactStyle.Capsule && scale == 100) await Save($"taskbar-capsule-{edge}", 1);
+                _deck.SetExpanded(true, true);
+                await Settle();
+                var island = (FrameworkElement)_deck.FindName("Island")!;
+                if (island.ActualHeight <= shape.Surface.Height || island.ActualWidth <= 0)
+                    throw new InvalidOperationException($"{style} at {scale}% did not expand from the screen edge.");
+                if (style == CompactStyle.Capsule && scale == 100) await Save($"taskbar-expanded-{edge}", 1);
+                _deck.SetExpanded(false, true);
+                Console.WriteLine($"PASS: {style} at {scale}% uses the physical {edge} edge and expands.");
+            }
+        }
     }
 
     private DeckSettings BuildSettings()

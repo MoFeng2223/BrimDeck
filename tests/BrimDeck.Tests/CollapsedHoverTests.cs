@@ -20,15 +20,15 @@ internal static class CollapsedHoverTests
         // With default settings the resolved shapes sense the same boxes as the fixed sizes did, centred on a 1920-wide monitor.
         var monitor = new DipRect(0, 0, 1920, 1080);
         var bottomTaskbar = new DipRect(0, 0, 1920, 1032);
-        DipRect Default(CompactStyle style, DipRect work) { var shape = CollapsedGeometry.Resolve(new DeckSettings(), style, monitor, work); return CollapsedHover.Zone(shape.Style, shape.Surface, work.Y); }
+        DipRect Default(CompactStyle style, DipRect work) { var shape = CollapsedGeometry.Resolve(new DeckSettings(), style, monitor, work); return CollapsedHover.Zone(shape.Style, shape.Surface, style == CompactStyle.Capsule ? 0 : work.Y); }
         check("Default shapes sense today's notch, capsule and indicator boxes",
             Default(CompactStyle.Notch, bottomTaskbar) == new DipRect(841, 0, 238, 32)
             && Default(CompactStyle.Capsule, bottomTaskbar) == new DipRect(862, 0, 196, 37)
             && Default(CompactStyle.Line, bottomTaskbar) == new DipRect(924, 0, 72, 10));
-        // A taskbar at the top moves the capsule below it, so the strip would cover the taskbar; the notch stays at the edge.
+        // Both shapes can sit over a top taskbar and bridge to the physical screen edge.
         var topTaskbar = new DipRect(0, 48, 1920, 1032);
-        check("Below a top taskbar the capsule bridges to the work area, not over the taskbar",
-            Default(CompactStyle.Capsule, topTaskbar) == new DipRect(862, 48, 196, 37) && Default(CompactStyle.Notch, topTaskbar).Y == 0);
+        check("Over a top taskbar the capsule's hover strip reaches the physical screen edge",
+            Default(CompactStyle.Capsule, topTaskbar) == new DipRect(862, 0, 196, 37) && Default(CompactStyle.Notch, topTaskbar).Y == 0);
         check("The capsule's threshold is measured from the work area's top",
             CollapsedHover.HasBridge(CompactStyle.Capsule, new DipRect(0, 68, 196, 32), 48)
             && CollapsedHover.Zone(CompactStyle.Capsule, new DipRect(10, 68, 196, 32), 48) == new DipRect(10, 48, 196, 52)
