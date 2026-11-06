@@ -313,7 +313,9 @@ public sealed partial class SettingsWindow : Window
         // a widget switch flipped on the very page it configures — keeps its page: throwing the reader to the list
         // would make every switch look like the setting did nothing.
         else if (page >= _pages.Length && ModuleDetailId(page) is null && ModuleSettingEntry(ModuleSettingsId(page)) is not { } extra) page = ModulesPage;
-        if (page is 12 or 13 or 14) page = MiniAppsPage; // Reserved legacy page numbers. New module entries use namespaced ids.
+        // 12 is the hotkeys page (issue #204: it took the number the mini-apps page once held, so the two no longer clash);
+        // 13 and 14 remain reserved legacy numbers with no page of their own.
+        if (page is 13 or 14) page = MiniAppsPage;
         StopModuleMonitoring();
         RememberFocus();
         if (page != _page) { _expandedSource = null; _openSizes.Clear(); }
