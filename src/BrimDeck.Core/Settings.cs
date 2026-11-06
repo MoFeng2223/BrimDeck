@@ -386,6 +386,12 @@ public sealed class DeckSettings
     // Writes each application's first letter (or digit) of its name inside its collapsed quota ring, in the notch, the capsule and
     // the side column. Off by default; a file without it reads as off.
     public bool QuotaRingLetters { get; set; }
+    // A collapsed ring fills with what is left of the allowance rather than with what has been used, and its tooltip says so. On
+    // by default, as the tightest reading is the one worth seeing; a file without it reads as on.
+    public bool QuotaRingsRemaining { get; set; } = true;
+    // Labels each quota ring with its time window in the lower-right opening (5h, 7D, 30D ...), for every window the source
+    // reports, not just the two Codex ones. Language-independent and needs no legend. On by default; a file without it reads as on.
+    public bool QuotaRingWindowMarks { get; set; } = true;
     public bool CapsuleMusic { get; set; } = true;
     // The notch and the capsule each switch the equalizer on. It shows while a song plays (or is paused), or, with EqualizerAlways,
     // at all times: then it reads the whole system's sound while no song plays.

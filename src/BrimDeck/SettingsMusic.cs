@@ -153,13 +153,18 @@ public sealed partial class SettingsWindow
         Show(_openParts.Contains(part));
         return item;
     }
-    // The quota rings: the switch turns them on or off; the option under the title writes each application's letter inside its ring.
+    // The quota rings: the switch turns them on or off; the options under the title write each application's letter inside its
+    // ring, show what is left rather than what was used, and label each ring with its quota window.
     private Border RingsRow(CompactStyle style, StackPanel rows)
     {
         bool notch = style == CompactStyle.Notch;
         string letters = Loc.T("环内显示首字母", "Letter in the rings");
         var options = new StackPanel();
         options.Children.Add(Lighter(Toggle(letters, S.QuotaRingLetters, v => Change(s => s.QuotaRingLetters = v)), letters));
+        string remains = Loc.T("显示剩余额度", "Show what is left");
+        options.Children.Add(Lighter(Toggle(remains, S.QuotaRingsRemaining, v => Change(s => s.QuotaRingsRemaining = v)), remains));
+        string marks = Loc.T("标注限额时间", "Label quota windows");
+        options.Children.Add(Lighter(Toggle(marks, S.QuotaRingWindowMarks, v => Change(s => s.QuotaRingWindowMarks = v)), marks));
         return OptionsPartRow(style, CompactPart.Rings, rows, Loc.T("配额环", "Quota rings"), Loc.T("配额环设置", "Quota ring settings"), S.ShowsSummary(style),
             on => Change(s => { if (notch) s.NotchSummary = on; else s.CapsuleSummary = on; }), options);
     }

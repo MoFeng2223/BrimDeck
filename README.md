@@ -46,7 +46,7 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
   </tr>
 </table>
 
-- Notch and Capsule show the highest quota usage of each tool as a ring; an option under "Quota rings" in the collapsed settings writes the first letter or digit of each tool's display name inside its ring (off by default). They also preview the music that is playing with its cover, an equalizer, and the title or the current lyric line.
+- Notch and Capsule draw one ring per reported quota, side by side, each filled with **what is left** and switchable to what has been used under "Quota rings". The same place writes the first letter or digit of each tool's display name inside its ring (off by default) and turns on "Label quota windows" (on by default): the label sits in a wide opening at the lower right of each ring and names that quota's time window, for example `5h` (five hours), `7D` (seven days), `30D` or `12h`. A tool with only a weekly quota, no 5-hour limit, or an extra plan window gets a ring for every allowance it reports, so nothing is dropped; when a source gives no window, its full name stays in the tooltip. Labelled rings grow to 18 DIP, with a small time label at the far lower right and the application's letter still centred, so both switches work together. They also preview the music that is playing with its cover, an equalizer, and the title or the current lyric line.
 
   <img src="docs/en-US/images/compact-notch-lyrics.png" width="279" alt="Notch showing a lyric line">
 

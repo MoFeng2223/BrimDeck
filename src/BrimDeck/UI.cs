@@ -120,6 +120,30 @@ internal static class UI
         }
         return ring;
     }
+    // A quota ring with an opening at the lower right for its time-window label (QuotaCarousel.Ring). The label now sits just
+    // outside the ring's box, so the arc can stay nearly whole: it runs counterclockwise from 25 degrees past three o'clock,
+    // through twelve and nine, to 250 degrees, leaving a 135-degree opening. The colored share keeps that lower-left end and
+    // grows back from it toward the top right, so the reading is anchored at the ring's end rather than at its start.
+    // Unlabelled rings keep UI.Ring's full circle.
+    public static Grid OpenRing(double percent, string color, double size, double thickness, string? track = null)
+    {
+        const double Start = 25, Sweep = 225;
+        var ring = new Grid { Width = size, Height = size };
+        ring.Children.Add(Arc(size, thickness, Start, Start + Sweep, SweepDirection.Counterclockwise, Brush(track ?? PanelTheme.Hex("ringTrack"))));
+        double fraction = Math.Clamp(percent, 0, 100) / 100;
+        if (fraction > 0) ring.Children.Add(Arc(size, thickness, Start + Sweep * (1 - fraction), Start + Sweep, SweepDirection.Counterclockwise, Brush(color)));
+        return ring;
+    }
+    // One arc of a ring between two compass angles, with the round ends UI.Ring draws.
+    private static Path Arc(double size, double thickness, double from, double to, SweepDirection sweep, Brush brush)
+    {
+        double radius = size / 2 - thickness / 2, center = size / 2;
+        Point At(double degrees) { double radians = degrees * Math.PI / 180; return new Point(center + radius * Math.Cos(radians), center - radius * Math.Sin(radians)); }
+        var figure = new PathFigure { StartPoint = At(from), IsClosed = false };
+        figure.Segments.Add(new ArcSegment(At(to), new Size(radius, radius), 0, Math.Abs(to - from) > 180, sweep, true));
+        var geometry = new PathGeometry(); geometry.Figures.Add(figure);
+        return new Path { Data = geometry, Stroke = brush, StrokeThickness = thickness, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
+    }
     public static string Number(long number) => number switch
     { >= 1_000_000_000 => (number / 1_000_000_000d).ToString("0.##", CultureInfo.InvariantCulture) + "B", >= 1_000_000 => (number / 1_000_000d).ToString("0.##", CultureInfo.InvariantCulture) + "M", >= 1000 => (number / 1000d).ToString("0.#", CultureInfo.InvariantCulture) + "K", _ => number.ToString("N0") };
     public static string Cost(IEnumerable<TokenEntry> entries, Pricing pricing) => Cost(pricing.Summarize(entries));

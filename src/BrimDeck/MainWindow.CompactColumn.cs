@@ -46,7 +46,12 @@ public partial class MainWindow
         }
         var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
-        var layout = CompactMusicLayout.Calculate(10000, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, 0, equalizer, Settings.EqualizerBars); CurrentCompactLayout = layout;
+        // One ring per reported quota, not one per application: an extra plan window is another ring, and a source without a
+        // 5-hour limit simply has fewer rings. Labelled rings grow to hold their time label.
+        var ringItems = apps.Count > 0 ? QuotaRings(apps) : [];
+        bool labelled = Settings.QuotaRingWindowMarks && ringItems.Any(ring => ring.Mark.Length > 0);
+        var layout = CompactMusicLayout.Calculate(10000, scale, media, ringItems.Length, text.Length > 0, clock?.ReservedWidth ?? 0, 0, equalizer, Settings.EqualizerBars,
+            ringSize: labelled ? 18 * scale : null); CurrentCompactLayout = layout;
         // One strip per reading, each alone on its line and centred in it. The drives show no glyph here: each drive has a line with its
         // letter and its figures, stacked or side by side as chosen in the settings, so any number of drives stand one below the other.
         var strips = new List<MonitorStrip>();

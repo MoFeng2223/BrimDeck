@@ -670,19 +670,42 @@ internal abstract class GlideCarousel : Grid
     }
 }
 
+// One ring as the collapsed row draws it: the application's color, the share it fills, its tooltip, the application's letter
+// when that setting is on, and the time-window label in the lower-right opening when labelling is on. The letter and the mark
+// are independent: turning one on never disables the other.
+internal readonly record struct QuotaRingView(double Used, string Color, string Tip, string Letter, string Mark);
+
 // Rings that do not all fit scroll through a window of whole rings, a ring step at a time.
 internal sealed class QuotaCarousel : GlideCarousel
 {
     private readonly Canvas _strip;
     // For screen readers: its name, every ring's tooltip line, rotating or not.
     protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => AutomationProperties.GetName(this).Replace("\n", Loc.T("；", "; ")));
-    // One ring with its application's letter inside, at the size the system readings' dials carry theirs for this height, in the secondary text color.
-    internal static Grid Ring((double Used, string Color, string Tip, string Letter) item, double size, double thickness, double scale)
+    // One ring: the application's letter inside it when that setting asks for one, and the time label in the lower-right
+    // opening when labelling asks for one. The letter stays centred; the label is small and sits at the far right of the
+    // opening, so the two keep their own corners of the ring.
+    internal static Grid Ring(QuotaRingView item, double size, double thickness, double scale)
     {
-        var ring = UI.Ring(item.Used, item.Color, size, thickness);
-        // Empty without the setting (DeckSettings.QuotaRingLetters): the ring is then as it was without letters.
-        if (item.Letter.Length > 0
-            && RingLetter.Create(item.Letter, Math.Max(1, BrimDeck.Core.CompactMusicLayout.Half(7 * scale)), size, Math.Max(1, size - 2 * thickness),
+        bool marked = item.Mark.Length > 0;
+        var ring = marked ? UI.OpenRing(item.Used, item.Color, size, thickness)
+            : UI.Ring(item.Used, item.Color, size, thickness);
+        if (marked)
+        {
+            // Two characters draw at 7.5 DIP; a longer window (30D, 120m) scales down so every plan fits the same ring. The
+            // label sits at the far lower right, reaching into the gap between rings: the centred letter keeps the middle.
+            double markFont = Math.Max(5.5, BrimDeck.Core.CompactMusicLayout.Half(7.5 * scale * Math.Min(1, 2.5 / item.Mark.Length)));
+            var label = new TextBlock { Text = item.Mark, FontFamily = UI.PanelFont,
+                FontSize = markFont, FontWeight = FontWeights.Bold,
+                Foreground = UI.Brush(UI.Primary), Opacity = .85, IsHitTestVisible = false };
+            var place = new Canvas { Width = size, Height = size, IsHitTestVisible = false };
+            Canvas.SetRight(label, -2.5); Canvas.SetBottom(label, -1);
+            place.Children.Add(label); ring.Children.Add(place);
+        }
+        double letterCell = Math.Max(1, size - 2 * thickness);
+        double letterFont = Math.Max(1, BrimDeck.Core.CompactMusicLayout.Half(7 * scale));
+        // The glyph is skipped only when the ring's centre is too small to hold a letter at all (CompactMusicLayout.RingLetterBox).
+        if (item.Letter.Length > 0 && letterCell >= 6
+            && RingLetter.Create(item.Letter, letterFont, size, letterCell,
                 Application.Current?.MainWindow is { } window ? VisualTreeHelper.GetDpi(window).PixelsPerDip : 1, UI.PanelFont, UI.Brush(UI.Secondary)) is { } letter)
             ring.Children.Add(letter);
         return ring;
@@ -692,7 +715,7 @@ internal sealed class QuotaCarousel : GlideCarousel
     // count: the whole rings the window holds (CompactSpacing.Window); gap: the row's gap, which the rings keep between them too.
     // flowing: the window as wide as the room gives it, not whole rings (the surface is being dragged; CompactSpacing.ShareFlowing),
     // with the ring it cuts faded over cut DIPs; nothing glides then.
-    public QuotaCarousel(IReadOnlyList<(double Used, string Color, string Tip, string Letter)> items, double size, double thickness, double rowScale, double gap, int count, double edge,
+    public QuotaCarousel(IReadOnlyList<QuotaRingView> items, double size, double thickness, double rowScale, double gap, int count, double edge,
         TimeSpan elapsed = default, bool animate = true, double? flowing = null, double cut = 0)
     {
         // Ring positions, the window and the travel all use whole device pixels. Layout rounding would otherwise widen each gap
@@ -706,7 +729,12 @@ internal sealed class QuotaCarousel : GlideCarousel
         bool cutting = flowing is not null && cut > 0;
         // The fades lie outside the window, over the gaps beside it, so every ring in the window is whole at rest.
         edge = Rotates || cutting ? Math.Min(Snap(edge), Snap(gap)) : 0;
-        Width = edge + window + edge; Height = size; ClipToBounds = true;
+        // A labelled ring lets its time label reach a few DIP past the right edge into the gap. At rest the clipping box ends
+        // exactly at the last ring's edge, which would cut the right half of the last label, so leave that much room in the box
+        // and give it back with a negative right margin: the layout slot and everything after it keep their old width.
+        double bleed = !Rotates && !cutting && items.Any(item => item.Mark.Length > 0) ? Snap(4) : 0;
+        Width = edge + window + edge + bleed; Height = size; ClipToBounds = true;
+        if (bleed > 0) Margin = new Thickness(0, 0, -bleed, 0);
         _strip = new Canvas { Width = items.Count * step, Height = size, RenderTransform = new TranslateTransform() };
         for (int i = 0; i < items.Count; i++)
         {
