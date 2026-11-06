@@ -64,6 +64,13 @@ internal static class QuotaRingsTests
         var clamped = CompactQuotaRings.Build("Codex", Snapshot(Five(140), Week(-5)), remaining: true);
         check("Shares stay within 0 to 100", clamped[0].Used == 0 && clamped[1].Used == 100);
 
+        var nan = new UsageMetric(MetricKind.Percent, "无效读数") { Percent = double.NaN, Window = 300 };
+        var withNaN = CompactQuotaRings.Build("Codex", Snapshot(nan, Week(16)), remaining: true);
+        var allNaN = CompactQuotaRings.Build("Codex", Snapshot(nan), remaining: true);
+        check("A NaN share is not a reading: valid windows keep their rings and a source with only NaN falls back to a state ring",
+            withNaN.Count == 1 && withNaN[0] is { Used: 84, Mark: "7D" }
+            && allNaN.Count == 1 && !double.IsNaN(allNaN[0].Used) && allNaN[0].Tip.Contains("Codex", StringComparison.Ordinal));
+
         var unlimited = CompactQuotaRings.Build("Codex", Snapshot(
             new UsageMetric(MetricKind.Percent, "无限额度") { Percent = 10, Window = 300, Unlimited = true }), remaining: true);
         check("An unlimited quota is named in its tooltip", unlimited.Count == 1 && unlimited[0].Tip.Contains("无上限", StringComparison.Ordinal));
@@ -81,6 +88,15 @@ internal static class QuotaRingsTests
             plainPair.RingSize == 12 && labelledPair.RingSize == 18 && labelledPair.VisibleRings == 2
             && CompactMusicLayout.NaturalWidth(1, false, 2, false, 0, 0, ringSize: 18)
                 - CompactMusicLayout.NaturalWidth(1, false, 2, false, 0, 0) == 12);
+
+        // Beside the system readings the middle is tight: the readings must give way to the rings' real diameter, not the
+        // old 12 DIP estimate, or a labelled ring is cut. Unlabelled rows keep their old numbers exactly.
+        var crowded = CompactMusicLayout.Calculate(100, 1, false, 2, false, 0, 400, ringSize: 18);
+        var oldCrowded = CompactMusicLayout.Calculate(100, 1, false, 2, false, 0, 400);
+        var scaledCrowded = CompactMusicLayout.Calculate(150, 1.5, false, 2, false, 0, 600, ringSize: 27);
+        check("Readings yield to the rings' real diameter, at any scale",
+            crowded is { MonitorWidth: 56, RingWidth: 44, VisibleRings: 2, ScrollRings: false }
+            && oldCrowded.MonitorWidth == 68 && scaledCrowded is { RingSize: 27, MonitorWidth: 84, RingWidth: 66, VisibleRings: 2 });
     }
 
     private static ProviderSnapshot Snapshot(params UsageMetric[] metrics) => new(ProviderId.Codex) { Metrics = [.. metrics], StatusLabel = "未连接" };

@@ -244,14 +244,17 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
         // functions of the width, with slopes from 0 to 1, as above.
         bool monitorAlone = monitorWanted > 0 && !media && !bars && rings == 0 && !text && face == 0;
         double monitorNeed = monitorWanted + Whole(8 * s);
+        // ringSize arrives already scaled (18 * scale for labelled rings), while RingsAndText takes the unscaled diameter.
+        // The readings must give way to the rings' real size, not the old 12 DIP estimate.
+        double size = Math.Max(1, Whole(ringSize ?? 12 * s)), ringDip = ringSize is null ? 12 : size / s;
         double monitorRegion = monitorWanted == 0 ? 0 : monitorAlone ? Math.Min(monitorWanted, middle)
-            : Math.Min(Math.Min(monitorNeed, Math.Max(middle - RingsAndText(s, rings, text), middle / 2)),
-                Math.Max(0, middle - (rings > 0 ? Math.Max(1, Whole(12 * s)) : 0) - (text ? Whole(MinimumText * s) : 0)));
+            : Math.Min(Math.Min(monitorNeed, Math.Max(middle - RingsAndText(s, rings, text, ringDip), middle / 2)),
+                Math.Max(0, middle - (rings > 0 ? size : 0) - (text ? Whole(MinimumText * s) : 0)));
         middle = Math.Max(0, middle - monitorRegion);
 
         // Rings have one size for a given height: the width never shrinks them. The ring region is cut at its edge, through a
         // ring if need be, and rotates while it is narrower than all the rings.
-        double size = Math.Max(1, Whole(ringSize ?? 12 * s)), gap = Whole(8 * s);
+        double gap = Whole(8 * s);
         double between = Whole(8 * s), desired = Whole(56 * s), minimum = Whole(MinimumText * s);
         static double Span(int count, double size, double gap) => count == 0 ? 0 : count * size + (count - 1) * gap;
         double all = Span(rings, size, gap);

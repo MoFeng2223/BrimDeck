@@ -15,7 +15,7 @@ public static class CompactQuotaRings
     // tooltip. remaining fills the ring with what is left instead of what has been used.
     public static IReadOnlyList<QuotaRingData> Build(string name, ProviderSnapshot snapshot, bool remaining = false, bool marks = true)
     {
-        var readings = snapshot.Metrics.Where(metric => metric.UsedPercent is not null)
+        var readings = snapshot.Metrics.Where(metric => metric.UsedPercent is { } used && !double.IsNaN(used))
             .OrderBy(metric => metric.Window ?? int.MaxValue)
             .ThenBy(metric => metric.Label, StringComparer.Ordinal)
             .ToArray();
