@@ -309,7 +309,10 @@ public sealed partial class SettingsWindow : Window
     {
         if (page < 0 || page >= _pages.Length && !_moduleSettingsPages.ContainsValue(page)) return;
         if (page >= _pages.Length && ModuleDetailId(page) is not null && !S.Modules.Enabled) page = ModulesPage;
-        else if (page >= _pages.Length && ModuleDetailId(page) is null && (ModuleSettingEntry(ModuleSettingsId(page)) is not { } extra || !ModuleSettingVisible(extra))) page = ModulesPage;
+        // A vanished entry (module stopped or removed) falls back to the list. An entry that merely turned invisible —
+        // a widget switch flipped on the very page it configures — keeps its page: throwing the reader to the list
+        // would make every switch look like the setting did nothing.
+        else if (page >= _pages.Length && ModuleDetailId(page) is null && ModuleSettingEntry(ModuleSettingsId(page)) is not { } extra) page = ModulesPage;
         if (page is 12 or 13 or 14) page = MiniAppsPage; // Reserved legacy page numbers. New module entries use namespaced ids.
         StopModuleMonitoring();
         RememberFocus();
@@ -350,9 +353,10 @@ public sealed partial class SettingsWindow : Window
         _navigation.Children.Clear();
         foreach (int i in VisibleSettingsPages())
         {
-            if (i is 0 or 3 or 5 or 7 or MonitorSettingsPage or InputMethodsPage or ModulesPage)
+            if (i is 0 or 3 or 5 or 7 or MonitorSettingsPage or InputMethodsPage or MiniAppsPage or ModulesPage)
             {
-                var group = TextLine(i switch { 0 => Loc.T("基础设置", "Basics"), 3 => Loc.T("AI 用量", "AI usage"), MonitorSettingsPage => Loc.T("系统监控", "System monitor"), InputMethodsPage => Loc.T("输入", "Input"), ModulesPage => Loc.T("插件", "Plugins"), 5 => Loc.T("音乐", "Music"), _ => Loc.T("关于", "About") },10.5,TextTertiary);
+                // The mini-apps page gets its own "Tools" group: implicit inheritance put it under "Input", where it never belonged.
+                var group = TextLine(i switch { 0 => Loc.T("基础设置", "Basics"), 3 => Loc.T("AI 用量", "AI usage"), MonitorSettingsPage => Loc.T("系统监控", "System monitor"), InputMethodsPage => Loc.T("输入", "Input"), MiniAppsPage => Loc.T("工具", "Tools"), ModulesPage => Loc.T("插件", "Plugins"), 5 => Loc.T("音乐", "Music"), _ => Loc.T("关于", "About") },10.5,TextTertiary);
                 group.Margin = new Thickness(12, i == 0 ? 0 : 24, 0, 8); _navigation.Children.Add(group);
             }
             int target=i; bool selected=page==i;

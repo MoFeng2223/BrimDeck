@@ -303,7 +303,11 @@ public sealed class WindowsHost : IDisposable
         }
         if (foreground == IntPtr.Zero || !IsWindowVisible(foreground) || IsIconic(foreground)) { _appName = ""; _appPath = ""; return Desktop(); }
         GetWindowThreadProcessId(foreground, out var pid);
-        if (pid == Environment.ProcessId) { _appName = ""; _appPath = ""; return Desktop(); }
+        // Our own window in front — the user clicked the island, which activated it. Nothing about the environment the
+        // user works in changed, so the whole last answer stands, app identity included: reporting Desktop here would
+        // fold the open panel whenever a maximised app was in front, and blanking the identity would read as an app
+        // switch and re-apply the default panel behaviour while the user is mid-click.
+        if (pid == Environment.ProcessId) return Current;
         if (MonitorFromWindow(foreground, 2) != monitor) { _appName = ""; _appPath = ""; return Desktop(); }
         if (IsShell(foreground)) { _appName = ""; _appPath = ""; return Desktop(); }
         // The window's app travels with its context, so the app rules can answer for it; the read is cached per window.

@@ -28,9 +28,24 @@ public sealed partial class SettingsWindow
     {
         var dimensions = new System.Windows.Controls.Grid { Margin = new System.Windows.Thickness(0, 8, 0, 0) };
         dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
-        var width = Dimension(Loc.T("宽度", "Width"), S.MiniApps.Width, 440, 1200, value => Resize(s => s.MiniApps.Width = value, DeckPage.MiniApps));
-        var height = Dimension(Loc.T("高度", "Height"), S.MiniApps.Height, 140, 400, value => Resize(s => s.MiniApps.Height = value, DeckPage.MiniApps));
+        var width = Dimension(Loc.T("宽度", "Width"), S.MiniApps.Width, 440, 1200, value => ResizeMiniAppsSize(s => s.MiniApps.Width = value));
+        var height = Dimension(Loc.T("高度", "Height"), S.MiniApps.Height, 140, 400, value => ResizeMiniAppsSize(s => s.MiniApps.Height = value));
         width.Margin = new System.Windows.Thickness(0, 0, 20, 0); height.Margin = new System.Windows.Thickness(20, 0, 0, 0);
         dimensions.Children.Add(width); System.Windows.Controls.Grid.SetColumn(height, 1); dimensions.Children.Add(height); Target.Children.Add(dimensions);
+    }
+
+    // The global size feeds every module page that declares none: the page directory rebuilds from the current settings
+    // on each change, so an undeclared page simply takes the new value — no per-page preference is written, and a
+    // module author's declared Size always wins. The preview lands on the first such page, so the slider visibly does
+    // something; a declared Size still means the slider cannot move that page, which is the author's call.
+    private void ResizeMiniAppsSize(Action<DeckSettings> edit)
+    {
+        Change(edit);
+        if (!S.Modules.Enabled || _preview) return;
+        var directory = _app.PageDirectory(S);
+        var declared = _app.Modules.Registry.List<ModulePage>().Where(e => e.Value.Size is not null).Select(e => e.Id).ToHashSet();
+        if (directory.Visible.FirstOrDefault(p => p.BuiltIn is null && !declared.Contains(p.Id)) is not { } target) return;
+        _preview = true; _previewPage = DeckPage.MiniApps; _app.Deck.Preview(true);
+        _app.Deck.SelectPage(target.Id, remember: false);
     }
 }

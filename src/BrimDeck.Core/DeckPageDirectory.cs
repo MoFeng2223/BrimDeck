@@ -78,7 +78,8 @@ public sealed class DeckPageDirectory
     }
     public DeckPageDefinition? Find(string? id) => All.FirstOrDefault(p => p.Id == id);
     public bool Shown(DeckPageDefinition page) => page.Available && (page.BuiltIn is { } builtIn ? DeckPages.Shown(_settings, builtIn)
-        : _settings.Modules.Enabled && _settings.MiniApps.Enabled && (!_settings.Pages.Entries.TryGetValue(page.Id, out var preference) || preference.Visible));
+        // A module page follows the plugin system and its own visible preference; the mini-app entry toggle does not hide it.
+        : _settings.Modules.Enabled && (!_settings.Pages.Entries.TryGetValue(page.Id, out var preference) || preference.Visible));
     public DeckPageDefinition Resolve(string? wanted) => Find(wanted) is { } page && Shown(page) ? page : Visible.FirstOrDefault() ?? All[0];
     public string Opening(string? requested) => _settings.Pages.DefaultId ?? requested ?? _settings.Pages.LastId ?? DeckPageIds.Usage;
     public (double MinWidth, double MaxWidth, double MinHeight, double MaxHeight) Limits(DeckPageDefinition page)
