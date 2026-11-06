@@ -399,7 +399,7 @@ public partial class MainWindow : Window
     private CollapsedShape ShapeFor(CompactStyle style)
     {
         if (_transientCompactShape is { } transient && transient.Style == style) return transient;
-        double? wanted = ModuleActivityPresented
+        double? wanted = ModuleActivityTakesRow
             ? Settings.CompactAutoWidth(style) ? 140 * Math.Clamp((style == CompactStyle.Notch ? Settings.NotchHeight : Settings.CapsuleHeight) / 32, .75, 2) : null
             : Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null;
         // The capsule keeps its place on the screen; docked with the bottom (MainWindow.Edge.cs) it is only seen from there.
@@ -561,14 +561,26 @@ public partial class MainWindow : Window
     }
 
     // The compact island shows one ring per enabled application: the highest used share among its quotas.
+    // A row rebuild tells the module parts they are off show, and a view may answer that by redrawing and raising Changed —
+    // which comes back here. The guard makes the rebuild re-entrant-safe: the inner call returns at once rather than
+    // recursing (dragging the surface was enough to trigger it and the panel locked up).
+    private bool _renderingCompact;
     internal void RenderCompact()
+    {
+        if (_renderingCompact) return;
+        _renderingCompact = true;
+        try { RenderCompactCore(); }
+        finally { _renderingCompact = false; }
+    }
+    private void RenderCompactCore()
     {
         ModuleCompact.Visibility = Visibility.Collapsed;
         ModuleNoticeContent.Visibility = Visibility.Collapsed;
         if (_transientNotice is not null)
         {
             TransientFeedback.Text = Collapsed.ContentWidth < 116 && _transientNotice.Success ? "✓" : (_transientNotice.Success ? "✓  " : "!  ") + _transientNotice.Text;
-            CompactRings.Visibility = Visibility.Hidden; CompactAlert.Visibility = Visibility.Hidden;
+            CompactRings.Visibility = CompactAlert.Visibility = Visibility.Hidden;
+            HideModuleParts();
             TransientFeedback.Visibility = _transientNotice.Module is null ? Visibility.Visible : Visibility.Collapsed;
             ModuleNoticeContent.Visibility = _transientNotice.Module is not null ? Visibility.Visible : Visibility.Collapsed;
             ApplyCollapsedLayout(); return;
@@ -576,11 +588,17 @@ public partial class MainWindow : Window
         TransientFeedback.Visibility = Visibility.Collapsed;
         if (_transient is not null)
         {
-            CompactRings.Visibility = Visibility.Hidden; CompactAlert.Visibility = Visibility.Hidden;
+            CompactRings.Visibility = CompactAlert.Visibility = Visibility.Hidden;
+            HideModuleParts();
             ApplyCollapsedLayout(); return;
         }
-        if (ModuleActivityPresented && _alert is null) { RenderModuleCompact(); ApplyCollapsedLayout(); return; }
+        // A passive activity whose view offers a width is one part of the normal row (RenderCompactMusic); only an
+        // activity that takes the whole row — a running task's readings — replaces it.
+        if (_alert is null && ModuleActivityTakesRow) { RenderModuleCompact(); ApplyCollapsedLayout(); return; }
         var fade = RowFadeStart();
+        // The module readings' host belongs to the row about to be discarded; it is released with it, and the new row
+        // mounts its own (a host cannot be moved between parents, and an unloaded one does not come back on show).
+        ClearModulePartForRow();
         CompactRings.Children.Clear(); CompactAlert.Children.Clear();
         CompactRings.HorizontalAlignment = HorizontalAlignment.Center;
         if (_quotaCarousel is not null) { _quotaElapsed = _quotaCarousel.Elapsed; _quotaCarousel.SetRunning(false, false); }
@@ -676,7 +694,9 @@ public partial class MainWindow : Window
             foreach (var other in _app.Decks.Where(deck => deck != this && deck._expanded && !deck._preview).ToList()) other.SetExpanded(false);
         if (expanded && !_expanded && !_preview && _transient is null)
         {
-            if (ModuleActivityPresented) _moduleControls = true;
+            // A presence-only activity keeps the pages on expand: its place is the collapsed row, and its control bar
+            // waits for a view's ShowActivity instead of taking every opening of the panel.
+            if (ModuleActivityPresented && !ActivityState.Passive) _moduleControls = true;
             else
             {
                 ApplyDefaultMusicPage();

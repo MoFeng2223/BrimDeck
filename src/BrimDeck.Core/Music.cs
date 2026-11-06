@@ -158,7 +158,7 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     // the rings show (ring: its size, 0 without rings) and the narrowest window of the system readings when they show
     // (reading: CompactSpacing.Minimum, 0 without readings), which their carousels then show in turn; all with the gaps between
     // them. A clock alone, or rings alone, so make a short surface. In whole DIPs, rounded up, so rounding never takes a part away.
-    public static double RequiredWidth(double scale, bool media, bool text, double clockFace, double ring = 0, double reading = 0, bool? equalizer = null, int bars = DefaultBars, bool cover = true)
+    public static double RequiredWidth(double scale, bool media, bool text, double clockFace, double ring = 0, double reading = 0, bool? equalizer = null, int bars = DefaultBars, bool cover = true, double moduleFace = 0)
     {
         double s = SafeScale(scale), gap = Gap(s), width = 0;
         int parts = 0;
@@ -166,7 +166,7 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
         if (media && cover) Add(Math.Max(1, Whole(20 * s)));
         if (equalizer ?? media) Add(BarsWidth(bars, s));
         if (media && text) Add(Whole(MinimumText * s));
-        Add(Safe(ring)); Add(Safe(reading)); Add(Safe(clockFace));
+        Add(Safe(ring)); Add(Safe(reading)); Add(Safe(clockFace)); Add(Safe(moduleFace));
         return parts == 0 ? 0 : Math.Ceiling(width + (parts - 1) * gap - 1e-9);
     }
 
@@ -179,10 +179,10 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     // (CollapsedGeometry.Resolve). dpi (device pixels per DIP, 0 for none): the width is rounded up to whole device pixels. The row
     // is laid out in whole device pixels, rounded down (DevicePixels.Down), so a width with a fraction left in it (a clock face
     // that is not a whole number of DIPs) would leave the readings a fraction short of the room they asked for, and they would scroll.
-    public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, double dpi = 0, bool? equalizer = null, int bars = DefaultBars, bool cover = true)
-        => dpi > 0 ? DevicePixels.Up(Natural(scale, media, rings, text, clockFace, monitorFace, equalizer ?? media, bars, cover), dpi) : Natural(scale, media, rings, text, clockFace, monitorFace, equalizer ?? media, bars, cover);
+    public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, double dpi = 0, bool? equalizer = null, int bars = DefaultBars, bool cover = true, double moduleFace = 0)
+        => dpi > 0 ? DevicePixels.Up(Natural(scale, media, rings, text, clockFace, monitorFace, equalizer ?? media, bars, cover, moduleFace), dpi) : Natural(scale, media, rings, text, clockFace, monitorFace, equalizer ?? media, bars, cover, moduleFace);
 
-    private static double Natural(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, bool equalizer, int count, bool cover)
+    private static double Natural(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, bool equalizer, int count, bool cover, double moduleFace = 0)
     {
         double s = SafeScale(scale), face = Safe(clockFace), monitor = Safe(monitorFace), bars = BarsWidth(count, s);
         rings = Math.Max(0, rings);
@@ -195,6 +195,9 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
         // The bars hold the gap toward the middle, the clock the gap toward whatever is before it.
         width += !equalizer ? 0 : media || rings > 0 || text || monitor > 0 ? bars + Whole(8 * s) : bars;
         width += face == 0 ? 0 : !media && !equalizer && rings == 0 && !text && monitor == 0 ? face : face + Whole(8 * s);
+        // A module readings part is one part more: it takes the gap after whatever stands before it.
+        double module = Safe(moduleFace);
+        width += module == 0 ? 0 : width > 0 ? module + Whole(8 * s) : module;
         return width;
     }
 

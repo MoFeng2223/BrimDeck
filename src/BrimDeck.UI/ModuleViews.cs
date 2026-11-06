@@ -122,7 +122,48 @@ public sealed record ModulePage(string Title, string TitleEn, Func<ModuleViewCon
     }
 }
 public enum ActivityViewKind { Compact, Expanded }
-public sealed record ActivityState(bool Active, double Progress, bool Indeterminate, string Accent, int Completion = 0);
+// Passive marks a presence-only activity (a reading, a status): it takes the collapsed row, but expanding the panel
+// opens the normal pages instead of the activity's control bar, which only a view's ShowActivity can bring up.
+// A passive activity's view may also declare PreferredWidth, the room its readings ask for in the collapsed row
+// beside the built-in ones; it is dropped whole when the row has no room (the settings say so).
+// Passive is kept for modules built before IModuleCompactPart existed. New presence-only content should register an
+// IModuleCompactPart instead: it has no activity state to maintain. Passive activity views that declare a width still
+// work — the host treats them as row parts.
+public sealed record ActivityState(bool Active, double Progress, bool Indeterminate, string Accent, int Completion = 0)
+{ public bool Passive { get; init; } }
+// The room a compact view asks for in the collapsed row, in DIPs at scale 1 (the row scales it like the built-in
+// readings). PreferredWidth is its share of a horizontal row; PreferredHeight is the length it takes down a side column
+// (a notch on a screen edge), where the row's width is the column's and the part adds a line of that height. Null means
+// the view does not offer itself in that direction: a view that declares only a width stands in a horizontal row alone,
+// and one that declares neither takes the whole row when its activity is presented.
+public interface IModuleCompactWidth
+{
+    double? PreferredWidth { get; }
+    double? PreferredHeight => null;
+    // An optional narrower form the host may use when the full width does not fit: room for fewer readings, a compact
+    // figure. The view is told the narrower viewport and lays itself out for it (it decides what to drop), so the row
+    // keeps showing something rather than dropping the part whole. Null means there is no narrower form.
+    double? CompactWidth => null;
+}
+// Presence-only content in the collapsed row — a hardware read-out, a status: a contribution of its own beside the
+// built-in readings, in the user's order and under the user's switch. No Active state and no Expanded view: this is the
+// part itself, and the module's own page is where its detail belongs.
+//
+// Widths are in DIPs at scale 1, exactly as IModuleCompactWidth describes. A view that declares neither PreferredWidth
+// nor PreferredHeight cannot be placed: the host keeps it out of the row and records the reason in the module's
+// diagnostics (registration cannot check this — the view does not exist yet). Views follow the view lifecycle: the host
+// creates one per mount, disposes it with the row, and never recreates it on every reading.
+public interface IModuleCompactPart
+{
+    IModuleView CreateView(ModuleViewContext context);
+}
+// A part whose view is built asynchronously, mirroring IModuleAsyncActivity.
+public interface IModuleAsyncCompactPart : IModuleCompactPart
+{
+    ValueTask<IModuleView> CreateViewAsync(ModuleViewContext context);
+    IModuleView IModuleCompactPart.CreateView(ModuleViewContext context)
+        => throw new ModuleApiException("async-view-required", "This compact part requires asynchronous mounting.");
+}
 public interface IModuleActivity
 {
     ActivityState State { get; }

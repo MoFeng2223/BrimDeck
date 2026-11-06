@@ -153,7 +153,7 @@ public partial class MainWindow
         _transientHandover.Drop();
         _pendingTransientNotice = _transientNotice = null;
         ResetTransientFeedback(); RenderCompact();
-        var arriving = _alert is not null ? CompactAlert : ModuleActivityPresented ? (FrameworkElement)ModuleCompact : CompactRings;
+        var arriving = _alert is not null ? CompactAlert : ModuleActivityTakesRow ? (FrameworkElement)ModuleCompact : CompactRings;
         if (leaving is not null && Soft.Enabled) _transientHandover.Send(leaving, new Thickness(0), arriving, Handover.Morph);
         else if (animate) PageHandover.Appear(arriving);
         void ReleaseFrame()

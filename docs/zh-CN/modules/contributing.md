@@ -171,7 +171,7 @@ dotnet "$sdk/tools/checker/BrimDeck.ModuleCheck.dll" $package --json --warnings-
   "apiVersion": 1, "apiMinor": 6,
   "id": "counter-demo", "name": "计数交互示例", "version": "1.0.0",
   "assembly": "BrimDeck.CounterDemo.dll", "entryType": "BrimDeck.CounterDemo.CounterModule",
-  "capabilities": ["ui.pages", "ui.activities", "ui.widgets", "ui.settings", "ui.presentation", "storage.data"],
+  "capabilities": ["ui.pages", "ui.activities", "ui.compact-parts", "ui.widgets", "ui.settings", "ui.presentation", "storage.data"],
   "permissions": [], "dependencies": []
 }
 ```
