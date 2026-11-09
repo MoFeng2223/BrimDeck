@@ -502,6 +502,11 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     // Monitors were connected, removed or rearranged; the list of displays is built again.
     // A taskbar that appeared, moved or went away also shows or hides the collapsed group's anchor row.
     internal void DisplaysChanged() { if (!IsLoaded) return; if (_page is 0 or 1) ShowPage(_page); }
+    // The style hotkey changed the collapsed style; the page's cards and options follow it.
+    internal void CompactStyleChanged()
+    {
+        if (IsLoaded && _page == 1 && _styleCards.TryGetValue(S.Style, out var card)) card.IsChecked = true;
+    }
     private void Compact()
     {
         SectionTitle(Loc.T("快捷操作", "Shortcuts"));
@@ -514,7 +519,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         foreach(var style in Enum.GetValues<CompactStyle>())
         {
             var button=new RadioButton { Style=(Style)FindResource("SettingsChoice"),Content=CompactStylePreview.Create(style,_palette.Dark,S.ShowsClock(style)),Margin=new Thickness(6,3,6,0),Tag=StyleName(style),GroupName="CompactStyle",IsChecked=S.Style==style };
-            button.Checked+=(_,_)=>{ var previous=S.Style; Change(s=>s.Style=style); ShowStyleOptions(style,previous); }; AutomationProperties.SetName(button,StyleName(style)); styles.Children.Add(button);
+            button.Checked+=(_,_)=>{ var previous=S.Style; if(previous!=style) Change(s=>s.Style=style); ShowStyleOptions(style,previous); }; AutomationProperties.SetName(button,StyleName(style)); styles.Children.Add(button);
             _styleCards[style]=button;
         }
         _styleOptions=new Grid();
