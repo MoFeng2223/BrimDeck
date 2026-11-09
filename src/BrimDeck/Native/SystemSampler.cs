@@ -116,8 +116,9 @@ internal sealed class SystemSampler : IDisposable
     public void Warm() { if (!_disposed && _thread is null) StartThread(0); }
 
     // Called on the UI thread whenever a panel opens or closes the page or shows or hides the readings in its collapsed row.
-    // processes: the expanded page is open, so the process list is read too.
-    public void SetDemand(bool wanted, int intervalSeconds, bool processes)
+    // processes: the expanded page is open, so the process list is read too. immediate: a sampler no longer wanted stops at once, as it
+    // has already lingered (App.LingerPageExtras).
+    public void SetDemand(bool wanted, int intervalSeconds, bool processes, bool immediate = false)
     {
         if (_disposed) return;
         _intervalMilliseconds = Math.Clamp(intervalSeconds, 1, 2) * 1000;
@@ -126,6 +127,7 @@ internal sealed class SystemSampler : IDisposable
         // The page opened while the collapsed row kept the sampler running: the processes are read at once and again shortly,
         // instead of waiting up to two readings for a list.
         if (_listProcesses && !listing && _wanted) { _primeProcesses = true; _wake.Set(); }
+        if (!wanted && immediate) { _linger.Stop(); _wanted = false; Latest = null; _wake.Set(); return; }
         if (!wanted) { if (_wanted && !_linger.IsEnabled) _linger.Start(); return; }
         _linger.Stop();
         if (_wanted) return;

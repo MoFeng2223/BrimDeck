@@ -3,18 +3,18 @@ namespace BrimDeck.Core;
 // How much BrimDeck keeps in memory between uses (DeckSettings.MemoryMode). Saver gives back as much as it can soon after use and
 // does less work while the panel is collapsed, saving processor time as well, without slowing what is on screen while it is used;
 // Balanced gives back what it no longer uses without trimming what it still needs; Smooth keeps readings, captures and caches longer
-// and prepares the pages' code at start, so the panel and its pages open without waiting, and still lets go of what has not been used
-// for a long while.
+// and prepares the pages' code at start, so the panel and its pages open without waiting; it does not give memory back while the
+// panel is collapsed, and still stops the readings and captures that have not been used for a while.
 public enum MemoryMode { Saver, Balanced, Smooth }
 
 // What a mode does. App.Memory.cs, the samplers, the media sessions and the panels read it.
 public sealed record MemoryPlan
 {
-    // The clean-up runs once every panel has been collapsed this long, and at most this often.
+    // Whether memory is given back while the panel sits collapsed: the heap is compacted and the room it no longer uses handed back to
+    // Windows. The smooth mode keeps it. The clean-up runs once every panel has been collapsed TrimAfter, and at most every TrimEvery.
+    public bool TrimWhenIdle { get; init; }
     public TimeSpan TrimAfter { get; init; }
     public TimeSpan TrimEvery { get; init; }
-    // The clean-up hands the room the heap no longer uses back to Windows (an aggressive collection) rather than only compacting it.
-    public bool ReturnMemory { get; init; }
     // The clean-up also takes the process's pages out of its working set. What is taken out comes back on the next use, page by
     // page, which can make the next opening stutter.
     public bool TrimWorkingSet { get; init; }
@@ -48,19 +48,19 @@ public sealed record MemoryPlan
 
     public static readonly MemoryPlan Saver = new()
     {
-        TrimAfter = TimeSpan.FromSeconds(45), TrimEvery = TimeSpan.FromMinutes(5), ReturnMemory = true, TrimWorkingSet = true,
+        TrimWhenIdle = true, TrimAfter = TimeSpan.FromSeconds(45), TrimEvery = TimeSpan.FromMinutes(5), TrimWorkingSet = true,
         ReadingsLinger = TimeSpan.FromSeconds(3), LingerExtras = false, KeepCaches = false, MediaLinger = TimeSpan.Zero, RecentCovers = 4,
         PointerFarMilliseconds = 320, QuietWhileOpen = false, WarmAtStart = false, CollapsedSeconds = 2
     };
     public static readonly MemoryPlan Balanced = new()
     {
-        TrimAfter = TimeSpan.FromMinutes(3), TrimEvery = TimeSpan.FromMinutes(15), ReturnMemory = true, TrimWorkingSet = false,
+        TrimWhenIdle = true, TrimAfter = TimeSpan.FromMinutes(3), TrimEvery = TimeSpan.FromMinutes(15), TrimWorkingSet = false,
         ReadingsLinger = TimeSpan.FromSeconds(10), LingerExtras = true, KeepCaches = false, MediaLinger = TimeSpan.FromSeconds(5), RecentCovers = 16,
         PointerFarMilliseconds = 160, QuietWhileOpen = false, WarmAtStart = false
     };
     public static readonly MemoryPlan Smooth = new()
     {
-        TrimAfter = TimeSpan.FromMinutes(10), TrimEvery = TimeSpan.FromMinutes(30), ReturnMemory = false, TrimWorkingSet = false,
+        TrimWhenIdle = false, TrimWorkingSet = false,
         ReadingsLinger = TimeSpan.FromMinutes(1), LingerExtras = true, KeepCaches = true, MediaLinger = TimeSpan.FromSeconds(30), RecentCovers = 32,
         PointerFarMilliseconds = 160, QuietWhileOpen = true, WarmAtStart = true
     };

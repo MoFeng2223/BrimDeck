@@ -26,13 +26,13 @@ internal static class MemoryModeTests
             && JsonSerializer.Serialize(new DeckSettings { MemoryMode = MemoryMode.Saver }).Contains("\"TrimMemoryWhenIdle\":true"));
 
         var (saver, balanced, fluent) = (MemoryPlan.For(MemoryMode.Saver), MemoryPlan.For(MemoryMode.Balanced), MemoryPlan.For(MemoryMode.Smooth));
-        check("Memory modes: only the saver mode trims the working set, and the smooth mode keeps the room the heap grew into",
-            saver.TrimWorkingSet && !balanced.TrimWorkingSet && !fluent.TrimWorkingSet && saver.ReturnMemory && balanced.ReturnMemory && !fluent.ReturnMemory);
-        check("Memory modes: the more a mode keeps, the later it cleans up and the longer readings linger",
-            saver.TrimAfter < balanced.TrimAfter && balanced.TrimAfter < fluent.TrimAfter && saver.TrimEvery < balanced.TrimEvery && balanced.TrimEvery < fluent.TrimEvery
+        check("Memory modes: only the saver mode trims the working set, and the smooth mode gives no memory back while collapsed",
+            saver.TrimWorkingSet && !balanced.TrimWorkingSet && !fluent.TrimWorkingSet && saver.TrimWhenIdle && balanced.TrimWhenIdle && !fluent.TrimWhenIdle);
+        check("Memory modes: the saver mode cleans up sooner than the balanced one, and the more a mode keeps, the longer readings linger",
+            saver.TrimAfter < balanced.TrimAfter && saver.TrimEvery < balanced.TrimEvery
             && saver.ReadingsLinger < balanced.ReadingsLinger && balanced.ReadingsLinger < fluent.ReadingsLinger);
-        check("Memory modes: the smooth mode still cleans up and stops the readings after a while",
-            fluent.TrimAfter < TimeSpan.FromHours(1) && fluent.ReadingsLinger <= TimeSpan.FromMinutes(1));
+        check("Memory modes: the smooth mode still stops the readings after a while",
+            fluent.ReadingsLinger <= TimeSpan.FromMinutes(1));
         check("Memory modes: the saver mode reads the collapsed row every 2 seconds, an open page at the chosen interval",
             saver.ReadingSeconds(1, pageOpen: false) == 2 && saver.ReadingSeconds(2, pageOpen: false) == 2 && saver.ReadingSeconds(1, pageOpen: true) == 1
             && balanced.ReadingSeconds(1, pageOpen: false) == 1 && fluent.ReadingSeconds(1, pageOpen: false) == 1);

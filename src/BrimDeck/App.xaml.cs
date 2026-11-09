@@ -351,14 +351,22 @@ public partial class App : Application
         if (power) _presentingPower.Add(deck); else _presentingPower.Remove(deck);
         if (strip) _stripMonitor.Add(deck); else _stripMonitor.Remove(deck);
         if (strip || heldStrip) _heldStrip.Add(deck); else _heldStrip.Remove(deck);
-        bool wanted = _presentingMonitor.Count + _stripMonitor.Count > 0;
         LingerPageExtras();
+        ApplyMonitorDemand(lingered: false);
+    }
+    // lingered: the page's linger just ran out (LingerPageExtras), so a sampler no longer wanted stops at once instead of lingering again.
+    private void ApplyMonitorDemand(bool lingered)
+    {
+        // A page that closed a moment ago is still read for, processes included, while its extras linger: opened again, it shows
+        // the current list at once instead of "Reading processes…" until the first list comes.
+        bool listing = _presentingMonitor.Count > 0 || _pageExtras;
+        bool wanted = listing || _stripMonitor.Count > 0;
         if (Exiting || Monitor is null && !wanted) return;
         // The sampler reads the choice of graphics adapter on its own thread, where each part is read whole.
         Monitor ??= CreateMonitor();
         // What is read besides the usage is set before the sampler starts, so its first collection already holds it.
         UpdateMonitorExtras();
-        Monitor.SetDemand(wanted, MemoryPlan.ReadingSeconds(Settings.MonitorInterval, _presentingMonitor.Count > 0), _presentingMonitor.Count > 0);
+        Monitor.SetDemand(wanted, MemoryPlan.ReadingSeconds(Settings.MonitorInterval, listing), listing, immediate: lingered);
     }
     private SystemSampler CreateMonitor()
     {
@@ -393,9 +401,9 @@ public partial class App : Application
     // the graphics adapter's temperatures for a ring showing its own, the drives for the drive reading, and their temperatures when
     // it shows those. The processor's and the adapter's temperatures also while the row is only hidden for now, as long as the sampler
     // runs for something else (the page, or the pause after it): the row shown again then takes readings that have them.
-    // What an open monitor page asks for besides the usage (temperatures, drives, power, frame rate, adapters) stays asked for while the
-    // sampler keeps reading after the page closes (MemoryPlan.LingerExtras, ReadingsLinger), so a page opened again within it has them
-    // at once instead of priming them again. The saver mode lets them go when the page closes.
+    // What an open monitor page asks for (the process list, temperatures, drives, power, frame rate, adapters) stays asked for for a while
+    // after the page closes (MemoryPlan.LingerExtras, ReadingsLinger), so a page opened again within it has them at once instead of
+    // priming them again. The saver mode lets them go when the page closes.
     private DispatcherTimer? _pageLinger;
     private bool _pageExtras, _pagePower, _pageFrames;
     private void LingerPageExtras()
@@ -412,7 +420,7 @@ public partial class App : Application
         if (_pageLinger is null)
         {
             _pageLinger = new DispatcherTimer(DispatcherPriority.Background, Dispatcher);
-            _pageLinger.Tick += (_, _) => { _pageLinger.Stop(); _pageExtras = false; UpdateMonitorExtras(); };
+            _pageLinger.Tick += (_, _) => { _pageLinger.Stop(); _pageExtras = false; ApplyMonitorDemand(lingered: true); };
         }
         if (!_pageLinger.IsEnabled) { _pageLinger.Interval = plan.ReadingsLinger; _pageLinger.Start(); }
     }
