@@ -138,6 +138,7 @@ public partial class MainWindow
         _shelfStale = false;
         RefreshStatus();
         UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed;
+        MiniAppsContent.Visibility = Visibility.Collapsed;
         ShelfContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed;
         double width = ContentCanvas.Width, height = ContentCanvas.Height;

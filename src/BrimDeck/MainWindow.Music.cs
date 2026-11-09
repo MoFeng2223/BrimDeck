@@ -455,7 +455,7 @@ public partial class MainWindow
         // Only a page that was on screen hands over; one that arrives by the page switch or with the panel opening comes in whole.
         bool shown = MusicContent.IsVisible && _expanded && !_preview;
         RefreshStatus();
-        UsageContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Visible;
+        UsageContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; MiniAppsContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         double h = ContentCanvas.Height, w = ContentCanvas.Width;
         var track = _mediaTrack;

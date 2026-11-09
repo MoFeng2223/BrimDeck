@@ -323,7 +323,10 @@ public partial class MainWindow
     internal void RefreshMiniAppsPreferences() => _modulePage?.Refresh();
     private void RenderMiniApps()
     {
+        // Every other page's container goes, the ones dev added (the clipboard and the devices) included: a page left
+        // visible underneath is what the hand-over's picture then captures.
         UsageContent.Visibility = MusicContent.Visibility = MonitorContent.Visibility = Visibility.Collapsed;
+        ShelfContent.Visibility = DevicesContent.Visibility = Visibility.Collapsed;
         MiniAppsContent.Visibility = Visibility.Visible; ModelToolbar.Visibility = ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         ApplyHeader(PanelHeader.For(ToolbarFor(ContentCanvas.Height), 20));
         double bottom = ContentCanvas.Height < 180 ? 8 : 10;
