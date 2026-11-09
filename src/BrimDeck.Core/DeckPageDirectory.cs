@@ -3,9 +3,13 @@ namespace BrimDeck.Core;
 // Stable ids are independent of display language and of the lifetime of a plugin package.
 public static class DeckPageIds
 {
-    public const string Usage = "@builtin/usage", Music = "@builtin/music", Monitor = "@builtin/monitor", LegacyMiniApps = "@builtin/miniapps";
-    public static string Of(DeckPage page) => page switch { DeckPage.Music => Music, DeckPage.Monitor => Monitor, DeckPage.MiniApps => LegacyMiniApps, _ => Usage };
-    public static bool Valid(string? id) => id is Usage or Music or Monitor or LegacyMiniApps || id is { Length: > 2 and <= 256 } && id[0] != '@'
+    public const string Usage = "@builtin/usage", Music = "@builtin/music", Monitor = "@builtin/monitor", Clipboard = "@builtin/clipboard", Devices = "@builtin/devices", LegacyMiniApps = "@builtin/miniapps";
+    public static string Of(DeckPage page) => page switch
+    {
+        DeckPage.Music => Music, DeckPage.Monitor => Monitor, DeckPage.Clipboard => Clipboard, DeckPage.Devices => Devices,
+        DeckPage.MiniApps => LegacyMiniApps, _ => Usage
+    };
+    public static bool Valid(string? id) => id is Usage or Music or Monitor or Clipboard or Devices or LegacyMiniApps || id is { Length: > 2 and <= 256 } && id[0] != '@'
         && id.IndexOf(':') is > 0 && !id.Any(char.IsWhiteSpace) && !id.Any(char.IsControl);
 }
 
@@ -71,7 +75,8 @@ public sealed class DeckPageDirectory
     {
         _settings = settings;
         if (settings.Pages.Version == 0) settings.Pages.Normalize(settings);
-        DeckPageDefinition[] builtIns = [new(DeckPageIds.Usage, "AI 用量", "AI usage", DeckPage.Usage), new(DeckPageIds.Music, "音乐", "Music", DeckPage.Music), new(DeckPageIds.Monitor, "系统监控", "System monitor", DeckPage.Monitor)];
+        DeckPageDefinition[] builtIns = [new(DeckPageIds.Usage, "AI 用量", "AI usage", DeckPage.Usage), new(DeckPageIds.Music, "音乐", "Music", DeckPage.Music), new(DeckPageIds.Monitor, "系统监控", "System monitor", DeckPage.Monitor),
+            new(DeckPageIds.Clipboard, "剪贴板与文件中转", "Clipboard and file transfer", DeckPage.Clipboard), new(DeckPageIds.Devices, "设备电量", "Device batteries", DeckPage.Devices)];
         var entries = builtIns.Concat(plugins.Where(p => p.BuiltIn is null && DeckPageIds.Valid(p.Id) && !p.Id.StartsWith('@'))).DistinctBy(p => p.Id, StringComparer.Ordinal).ToArray();
         var saved = settings.Pages.Order.Select((id, index) => (id, index)).ToDictionary(p => p.id, p => p.index, StringComparer.Ordinal);
         All = entries.OrderBy(p => saved.GetValueOrDefault(p.Id, int.MaxValue)).ThenBy(p => Array.IndexOf(entries, p)).ToArray();
@@ -114,6 +119,8 @@ public sealed class DeckPageDirectory
             case DeckPage.Usage: _settings.UsagePage = visible; break;
             case DeckPage.Music: _settings.MusicPage = visible; break;
             case DeckPage.Monitor: _settings.MonitorPage = visible; break;
+            case DeckPage.Clipboard: _settings.ClipboardPage = visible; break;
+            case DeckPage.Devices: _settings.DevicesPage = visible; break;
             default: if (DeckPageIds.Valid(id)) Preference(id).Visible = visible; break;
         }
     }

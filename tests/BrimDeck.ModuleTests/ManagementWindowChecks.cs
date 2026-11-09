@@ -84,6 +84,8 @@ internal static partial class Program
         using var prices = new Pricing(root); Set("Prices", prices); Set("Updates", new AppUpdates(new OfflineUpdates(), root));
         using var inputs = new InputMethodController(action => action(), _ => false); Set("InputMethods", inputs);
         using var lyrics = new LyricsService(appleCacheRoots: () => []); Set("Lyrics", lyrics);
+        // The window builds the clipboard page in its constructor (InitializeShelf), so the service has to be there first.
+        var shelf = new ShelfService(root, System.Windows.Threading.Dispatcher.CurrentDispatcher); Set("Shelf", shelf);
         var options = app.Settings; options.Language = Loc.Chinese; options.Theme = SettingsTheme.Dark; Loc.Use(options.Language);
         options.Modules.EnabledModules.AddRange(["window-test", "no-settings"]);
         var settings = new ModuleSettingsStore("Synthetic settings", "Synthetic settings", [new("text", "Text", "Text", ModuleSettingKind.Text) { DefaultValue = "synthetic" }], new ModuleStorage(Path.Combine(root, "modules-data", "window-test")));

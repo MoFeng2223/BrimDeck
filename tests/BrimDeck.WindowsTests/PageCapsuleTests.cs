@@ -20,6 +20,8 @@ public partial class MainWindow
     private readonly Button AIUsageButton = new() { Content = "Usage", Width = 60, Height = 24 };
     private readonly Button MusicPageButton = new() { Content = "Music", Width = 60, Height = 24 };
     private readonly Button MonitorPageButton = new() { Content = "Monitor", Width = 60, Height = 24 };
+    private readonly Button ShelfPageButton = new() { Content = "Clipboard", Width = 60, Height = 24 };
+    private readonly Button DevicesPageButton = new() { Content = "Devices", Width = 60, Height = 24 };
     private readonly Button MiniAppsPageButton = new() { Content = "Mini apps", Width = 60, Height = 24 };
     private readonly Grid PageSwitch = new();
     private readonly Border PageCapsule = new() { Width = 60, Height = 24 };
@@ -32,7 +34,7 @@ public partial class MainWindow
         var window = new MainWindow { Width = 260, Height = 100, Left = -20000, Top = -20000,
             ShowActivated = false, WindowStyle = WindowStyle.None };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
-        buttons.Children.Add(window.AIUsageButton); buttons.Children.Add(window.MonitorPageButton); buttons.Children.Add(window.MusicPageButton); buttons.Children.Add(window.MiniAppsPageButton);
+        buttons.Children.Add(window.AIUsageButton); buttons.Children.Add(window.MonitorPageButton); buttons.Children.Add(window.MusicPageButton); buttons.Children.Add(window.ShelfPageButton); buttons.Children.Add(window.MiniAppsPageButton);
         window.PageCapsule.RenderTransform = window.PageCapsuleShift;
         window.PageSwitch.Children.Add(window.PageCapsule); window.PageSwitch.Children.Add(buttons);
         window.Content = window.PageSwitch;
@@ -64,7 +66,9 @@ public partial class MainWindow
             window.OrderPageButtons();
             PumpCapsule(() => window.PlacePageCapsule(), check);
             var miniAt = window.MiniAppsPageButton.TranslatePoint(new Point(), window.PageSwitch).X;
-            check("mini apps use their own page capsule and reorder without duplicate buttons", buttons.Children.Count == 4 && ReferenceEquals(buttons.Children[0], window.MiniAppsPageButton)
+            // OrderPageButtons rebuilds the row from Settings.PageOrder, which Normalize fills out with every page the file
+            // does not name: the four set above plus the clipboard, the devices and the plugin branch's mini apps page.
+            check("mini apps use their own page capsule and reorder without duplicate buttons", buttons.Children.Count == 6 && ReferenceEquals(buttons.Children[0], window.MiniAppsPageButton)
                 && Math.Abs((double)window.PageCapsuleShift.GetAnimationBaseValue(TranslateTransform.XProperty) - miniAt) < .5);
             var pluginButton = new Button { Content = "Plugin", Width = 45, Height = 24 };
             var moreButton = new Button { Content = "More", Width = 36, Height = 24 };
@@ -89,7 +93,7 @@ public partial class MainWindow
     {
         var window = new MainWindow { Width = 260, Height = 100, Left = -20000, Top = -20000, ShowActivated = false, WindowStyle = WindowStyle.None };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
-        buttons.Children.Add(window.AIUsageButton); buttons.Children.Add(window.MonitorPageButton); buttons.Children.Add(window.MusicPageButton); buttons.Children.Add(window.MiniAppsPageButton);
+        buttons.Children.Add(window.AIUsageButton); buttons.Children.Add(window.MonitorPageButton); buttons.Children.Add(window.MusicPageButton); buttons.Children.Add(window.ShelfPageButton); buttons.Children.Add(window.MiniAppsPageButton);
         window.PageCapsule.RenderTransform = window.PageCapsuleShift;
         window.PageSwitch.Children.Add(window.PageCapsule); window.PageSwitch.Children.Add(buttons);
         window.Content = window.PageSwitch;

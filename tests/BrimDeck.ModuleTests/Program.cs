@@ -183,7 +183,7 @@ internal static partial class Program
         var options = new DeckSettings(); options.Modules.EnabledModules.Add("sample"); options.Modules.Approvals["sample"] = new string('A', 64);
         var copy = options.Copy(); copy.Modules.EnabledModules.Clear(); copy.Modules.Approvals.Clear();
         Check("module preferences deep copied", options.Modules.EnabledModules.Count == 1 && options.Modules.Approvals.Count == 1);
-        var legacy = JsonSerializer.Deserialize<DeckSettings>("{}")!; legacy.Normalize(); Check("old settings enable built-ins without external plugins", legacy.Modules.Enabled && legacy.Modules.EnabledModules.Count == 0 && (int)DeckPage.MiniApps == 3);
+        var legacy = JsonSerializer.Deserialize<DeckSettings>("{}")!; legacy.Normalize(); Check("old settings enable built-ins without external plugins", legacy.Modules.Enabled && legacy.Modules.EnabledModules.Count == 0 && (int)DeckPage.MiniApps == 5);
     }
 
     private static async Task LoaderChecks(string binaries)

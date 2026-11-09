@@ -87,7 +87,9 @@ internal static class TimerTests
         var legacy = JsonSerializer.Deserialize<DeckSettings>("{\"MiniApps\":{\"FocusMinutes\":35,\"Order\":[2,0,1]}}")!;
         var legacyCopy = legacy.Copy(); legacyCopy.MiniApps.LegacyValues!.Clear();
         check("Mini-apps: legacy timer settings round-trip independently", JsonSerializer.Serialize(legacy).Contains("FocusMinutes") && legacy.MiniApps.LegacyValues!.Count == 2);
-        check("Timer: page enum appended", (int)DeckPage.MiniApps == 3 && (int)DefaultDeckPage.MiniApps == 4 && (int)DeckPage.Monitor == 2);
+        // dev gave Usage/Music/Monitor the numbers they had and put Clipboard and Devices after them; the plugin branch's
+        // MiniApps page stays last so those numbers keep their saved meaning.
+        check("Timer: page enum appended", (int)DeckPage.MiniApps == 5 && (int)DefaultDeckPage.MiniApps == 6 && (int)DeckPage.Monitor == 2);
         check("Timer: mini-app page opening supported", DeckPages.Opening(DefaultDeckPage.MiniApps) == DeckPage.MiniApps);
         DeckPages.SetSize(settings, DeckPage.MiniApps, 560, 350);
         check("Timer: page owns its size", DeckPages.Size(settings, DeckPage.MiniApps) == (560, 350) && settings.MusicWidth == 440);

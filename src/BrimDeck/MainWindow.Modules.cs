@@ -308,6 +308,7 @@ public partial class MainWindow
     private void DismissExpandedFromEscape()
     {
         if (_moveArmed) { CancelMove(); return; }
+        if (ShelfEscape()) return;
         if (IsMiniAppsPage && !ModuleControlsVisible && _modulePage?.CancelAdjustment() == true) return;
         SetExpanded(false, keyboard: true);
     }
