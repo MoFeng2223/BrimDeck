@@ -87,7 +87,8 @@ public partial class MainWindow
     }
 
     // ---- The collapsed count ----
-    // The width the count keeps: the tray and "9+", so the surface does not change width as files come and go (CompactMusicLayout).
+    // The width of the fixed marks of the row: the clock, the count and the devices (CompactMusicLayout).
+    // The count shows the whole number, and its width follows the number's digits.
     private static double FixedFace(double scale, params double[] widths)
     {
         var shown = widths.Where(width => width > 0).ToArray();
@@ -99,8 +100,15 @@ public partial class MainWindow
         int count = Settings.ShowsTransfer(EffectiveStyle) ? ShelfData.Files.Count : 0;
         _transferShown = count; _compactTransfer = null;
         if (count == 0) return null;
-        double s = CompactMusicLayout.SafeScale(scale), icon = CompactMusicLayout.Whole(14 * s);
-        var badge = new Grid { Width = CompactMusicLayout.Whole(32 * s), Height = CompactMusicLayout.Whole(16 * s), Background = Brushes.Transparent };
+        double s = CompactMusicLayout.SafeScale(scale), icon = CompactMusicLayout.Whole(14 * s), gap = CompactMusicLayout.Whole(3 * s);
+        var number = new TextBlock
+        {
+            Text = count.ToString(CultureInfo.InvariantCulture), FontFamily = UI.PanelFont, FontSize = CompactMusicLayout.Half(11.5 * s), FontWeight = FontWeights.SemiBold,
+            Foreground = UI.Brush(UI.Primary), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(icon + gap, 0, 0, 0)
+        };
+        Typography.SetNumeralAlignment(number, FontNumeralAlignment.Tabular);
+        number.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        var badge = new Grid { Width = Math.Ceiling(number.DesiredSize.Width), Height = CompactMusicLayout.Whole(16 * s), Background = Brushes.Transparent };
         // The tray on the 16 unit grid of the row's other marks (PowerIcons), scaled to the icon's size with the same 1.35 DIP line,
         // rather than a larger drawing stretched to fit, which thickened and blurred it.
         double grid = icon / 16;
@@ -110,12 +118,6 @@ public partial class MainWindow
             Stroke = UI.Brush(UI.Secondary), StrokeThickness = 1.35 / grid, StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
             Width = 16, Height = 16, LayoutTransform = new ScaleTransform(grid, grid), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center
         };
-        var number = new TextBlock
-        {
-            Text = count > 9 ? "9+" : count.ToString(CultureInfo.InvariantCulture), FontFamily = UI.PanelFont, FontSize = CompactMusicLayout.Half(11.5 * s), FontWeight = FontWeights.SemiBold,
-            Foreground = UI.Brush(UI.Primary), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(icon + CompactMusicLayout.Whole(3 * s), 0, 0, 0)
-        };
-        Typography.SetNumeralAlignment(number, FontNumeralAlignment.Tabular);
         badge.Children.Add(tray); badge.Children.Add(number);
         string tip = Loc.T($"文件中转：{count} 个文件", count == 1 ? "File transfer: 1 file" : $"File transfer: {count} files");
         badge.ToolTip = tip; AutomationProperties.SetName(badge, tip);
