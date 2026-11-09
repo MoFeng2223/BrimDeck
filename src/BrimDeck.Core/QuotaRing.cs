@@ -4,11 +4,9 @@ namespace BrimDeck.Core;
 // inside it. Detail is what the tooltip says after the application's name.
 public sealed record QuotaRing(double Outer, double? Inner, string Detail)
 {
-    // Ring diameters at scale 1: one ring keeps 12 DIP; two rings, one inside the other, take 20, so the inner one keeps the
-    // single ring's stroke and an 8 DIP middle for the letter. Every ring in the row has one size, so the row grows only while
-    // some application has two rings.
-    public const double Single = 12, Pair = 20;
-    public static double Diameter(bool pairs) => pairs ? Pair : Single;
+    // Every ring's diameter at scale 1, one ring or two: one ring is as large as the outer ring of a pair, and the inner ring of a
+    // pair keeps the same stroke and an 8 DIP middle for the letter.
+    public const double Diameter = 20;
 
     // The outer ring holds the quotas of the shortest window the source states (five hours for Claude, Codex and Antigravity),
     // the inner ring every other quota (the weekly ones, a monthly one beside a daily one); each shows its highest share. A source

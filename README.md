@@ -66,7 +66,7 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
 
 - By default it turns into the Indicator when a window is maximized, and hides during full-screen games or video so it never opens by accident.
 
-- It stays above other windows by default. It can instead be covered by other windows like any window, and comes to the front when it expands (Settings › General › Window behavior).
+- It stays above other windows by default. It can instead be covered by other windows like any window, and comes to the front when it expands; the maximized and full-screen rules above still apply, so the indicator can show above a full-screen window (Settings › General › Window behavior).
 
 ### AI usage
 

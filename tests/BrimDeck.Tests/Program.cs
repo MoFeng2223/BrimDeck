@@ -59,6 +59,7 @@ try
     ExpandBounceTests.Run(Check);
     ExpandStillTests.Run(Check);
     FontTests.Run(root, Check);
+    SurfaceTransparencyTests.Run(Check);
     ExpandSnapTests.Run(Check);
     MotionReviewTests.Run(Check);
     IdleCostTests.Run(Check);
@@ -78,6 +79,7 @@ try
     await InstallerUpdateTests.Run(root, Check);
     await PortableUpdateTests.Run(root, Check);
     SettingsMigrationTests.Run(root, Check);
+    MemoryModeTests.Run(Check);
     OffPeakTests.Run(root, Check);
     FullscreenRuleTests.Run(Check);
     LanguageTests.Run(root, Check);

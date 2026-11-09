@@ -55,7 +55,7 @@ public partial class MainWindow
         Action changed = ShelfChanged;
         _app.Shelf.Changed += changed;
         ShelfFiles.Changed += changed;
-        Closed += (_, _) => { _app.Shelf.Changed -= changed; ShelfFiles.Changed -= changed; };
+        Closed += (_, _) => { _app.Shelf.Changed -= changed; ShelfFiles.Changed -= changed; _movingTimer?.Stop(); };
         HoverZone.AllowDrop = true;
         HoverZone.PreviewDragEnter += ShelfDragEnter;
         HoverZone.PreviewDragOver += ShelfDragOver;
@@ -87,7 +87,8 @@ public partial class MainWindow
     }
 
     // ---- The collapsed count ----
-    // The width the count keeps: the tray and "9+", so the surface does not change width as files come and go (CompactMusicLayout).
+    // The width of the fixed marks of the row: the clock, the count and the devices (CompactMusicLayout).
+    // The count shows the whole number, and its width follows the number's digits.
     private static double FixedFace(double scale, params double[] widths)
     {
         var shown = widths.Where(width => width > 0).ToArray();
@@ -99,8 +100,15 @@ public partial class MainWindow
         int count = Settings.ShowsTransfer(EffectiveStyle) ? ShelfData.Files.Count : 0;
         _transferShown = count; _compactTransfer = null;
         if (count == 0) return null;
-        double s = CompactMusicLayout.SafeScale(scale), icon = CompactMusicLayout.Whole(14 * s);
-        var badge = new Grid { Width = CompactMusicLayout.Whole(32 * s), Height = CompactMusicLayout.Whole(16 * s), Background = Brushes.Transparent };
+        double s = CompactMusicLayout.SafeScale(scale), icon = CompactMusicLayout.Whole(14 * s), gap = CompactMusicLayout.Whole(3 * s);
+        var number = new TextBlock
+        {
+            Text = count.ToString(CultureInfo.InvariantCulture), FontFamily = UI.PanelFont, FontSize = CompactMusicLayout.Half(11.5 * s), FontWeight = FontWeights.SemiBold,
+            Foreground = UI.Brush(UI.Primary), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(icon + gap, 0, 0, 0)
+        };
+        Typography.SetNumeralAlignment(number, FontNumeralAlignment.Tabular);
+        number.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        var badge = new Grid { Width = Math.Ceiling(number.DesiredSize.Width), Height = CompactMusicLayout.Whole(16 * s), Background = Brushes.Transparent };
         // The tray on the 16 unit grid of the row's other marks (PowerIcons), scaled to the icon's size with the same 1.35 DIP line,
         // rather than a larger drawing stretched to fit, which thickened and blurred it.
         double grid = icon / 16;
@@ -110,12 +118,6 @@ public partial class MainWindow
             Stroke = UI.Brush(UI.Secondary), StrokeThickness = 1.35 / grid, StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
             Width = 16, Height = 16, LayoutTransform = new ScaleTransform(grid, grid), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center
         };
-        var number = new TextBlock
-        {
-            Text = count > 9 ? "9+" : count.ToString(CultureInfo.InvariantCulture), FontFamily = UI.PanelFont, FontSize = CompactMusicLayout.Half(11.5 * s), FontWeight = FontWeights.SemiBold,
-            Foreground = UI.Brush(UI.Primary), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(icon + CompactMusicLayout.Whole(3 * s), 0, 0, 0)
-        };
-        Typography.SetNumeralAlignment(number, FontNumeralAlignment.Tabular);
         badge.Children.Add(tray); badge.Children.Add(number);
         string tip = Loc.T($"文件中转：{count} 个文件", count == 1 ? "File transfer: 1 file" : $"File transfer: {count} files");
         badge.ToolTip = tip; AutomationProperties.SetName(badge, tip);
@@ -168,6 +170,19 @@ public partial class MainWindow
         ShelfContent.Children.Add(grid);
         RefocusTyping();
     }
+    // During a resize the page is built again only where its sizes step (row height, type size, what the file rows show); in between
+    // the file column takes the width the new size gives it and the clipboard column the rest. The details keep the width they were
+    // built for until the drag ends.
+    private void StretchShelf()
+    {
+        if (_shelfDetail is not null) return;
+        double width = ContentCanvas.Width, height = ContentCanvas.Height;
+        if (!double.IsFinite(width) || !double.IsFinite(height)) return;
+        var layout = ShelfLayout.For(width, height);
+        if (layout with { FileColumn = 0, ClipColumn = 0 } != _shelfLayout with { FileColumn = 0, ClipColumn = 0 }) { RenderShelf(); return; }
+        if (ShelfContent.Children.Count == 1 && ShelfContent.Children[0] is Grid { ColumnDefinitions.Count: 3 } grid)
+            grid.ColumnDefinitions[2].Width = new GridLength(layout.FileColumn);
+    }
     private void RememberShelfScroll()
     {
         foreach (var viewer in ShelfContent.Children.OfType<Grid>().SelectMany(grid => FindScrolls(grid)))
@@ -190,10 +205,10 @@ public partial class MainWindow
     private bool Searching => _shelfSearching && _shelfQuery.Trim().Length > 0;
     private List<ClipEntry> VisibleClips() => Searching
         ? ShelfData.Clips.Where(clip => clip.Kind != ClipKind.Image && Shelf.Matches(clip.Text, _shelfQuery)).ToList()
-        : ShelfData.Clips.Where(clip => _clipTab is null || clip.Category == _clipTab).ToList();
+        : ShelfData.Clips.Where(clip => _clipTab is not { } id || clip.Categories.Contains(id)).ToList();
     private List<TransferFile> VisibleFiles() => Searching
         ? ShelfData.Files.Where(file => Shelf.Matches(file.Name, _shelfQuery)).ToList()
-        : ShelfData.Files.Where(file => _fileTab is null || file.Category == _fileTab).ToList();
+        : ShelfData.Files.Where(file => _fileTab is not { } id || file.Categories.Contains(id)).ToList();
 
     // ---- Columns ----
     // The space between a column's header (its filters' underline) and its list.
@@ -212,9 +227,13 @@ public partial class MainWindow
             if (clips.Count == 0) body = ClipEmpty(layout);
             else
             {
-                var rows = new StackPanel();
-                foreach (var clip in clips) rows.Children.Add(ClipRow(clip, layout));
-                body = Scroll(rows, ShelfSide.Clipboard, _clipOffset);
+                // Only the rows in view are built (ShelfRowList); a row reaches from the list's left edge, its text 8 DIP in.
+                var list = new ShelfRowList(
+                    item => { var row = ClipRow((ClipEntry)item, layout); row.Margin = new Thickness(0); return row; },
+                    (item, row) => { if (_shelfRows.TryGetValue(((ClipEntry)item).Id, out var kept) && kept.Row == row) _shelfRows.Remove(((ClipEntry)item).Id); })
+                { ItemsSource = clips, Margin = new Thickness(-8, 0, 0, 0) };
+                Fade(PassWheel(list.Viewer), ShelfSide.Clipboard, _clipOffset);
+                body = list;
             }
         }
         Grid.SetRow(body, 1); column.Children.Add(body);
@@ -225,10 +244,12 @@ public partial class MainWindow
         var column = new Grid();
         column.RowDefinitions.Add(new RowDefinition { Height = new GridLength(layout.Header + ListGap) });
         column.RowDefinitions.Add(new RowDefinition());
-        // The drop highlight: over the list only, below the header, a little in from the column's edges: a faint fill and a thin
-        // dashed outline in the theme's accent, corner 8. The list stays visible.
-        double corner = PanelTheme.Corner(8);
-        var frame = new Rectangle { RadiusX = corner, RadiusY = corner, StrokeThickness = 1, StrokeDashArray = [4, 3], Margin = new Thickness(-6, 0, -6, 2), IsHitTestVisible = false };
+        // The drop highlight: over the list, below the header: a faint fill and a thin dashed outline in the theme's accent, corner 8.
+        // The list stays visible. It stands clear of the rows: up into the gap under the filters, and out to the left past a row's
+        // background (8 DIP left of the text) to 12 DIP from the icons, stopping 4 DIP short of the divider in the gap between the
+        // columns; on the right, the same distance from the text, whose row ends 4 DIP past it.
+        double corner = PanelTheme.Corner(8), left = Math.Min(12, layout.Gap / 2 - 4);
+        var frame = new Rectangle { RadiusX = corner, RadiusY = corner, StrokeThickness = 1, StrokeDashArray = [4, 3], Margin = new Thickness(-left, -ListGap, -(left - 4), -4), IsHitTestVisible = false };
         Grid.SetRow(frame, 1); column.Children.Add(frame); _fileFrame = frame; ShowDropFrame();
         column.Children.Add(ColumnHeader(ShelfSide.Files, layout.FileColumn, layout));
         var files = VisibleFiles();
@@ -236,9 +257,14 @@ public partial class MainWindow
         if (files.Count == 0) body = FileEmpty(layout);
         else
         {
-            var rows = new StackPanel();
-            foreach (var file in files) rows.Children.Add(FileRow(file, layout));
-            body = Scroll(rows, ShelfSide.Files, _fileOffset);
+            // As the clipboard's list: only the rows in view are built (ShelfRowList). What is picked is kept by the page (_picked),
+            // so a row built as it scrolls into view shows it.
+            var list = new ShelfRowList(
+                item => { var row = FileRow((TransferFile)item, layout); row.Margin = new Thickness(0); return row; },
+                (item, row) => { if (_shelfRows.TryGetValue(((TransferFile)item).Id, out var kept) && kept.Row == row) _shelfRows.Remove(((TransferFile)item).Id); })
+            { ItemsSource = files, Margin = new Thickness(-8, 0, 0, 0) };
+            Fade(PassWheel(list.Viewer), ShelfSide.Files, _fileOffset);
+            body = list;
         }
         Grid.SetRow(body, 1); column.Children.Add(body);
         return column;
@@ -257,13 +283,12 @@ public partial class MainWindow
         viewer.AddHandler(MouseWheelEvent, new MouseWheelEventHandler((_, e) => { if (viewer.ScrollableHeight < 1) e.Handled = false; }), true);
         return viewer;
     }
-    // The list scrolls inside its column and fades out at the bottom; the scroll bar is only a thin handle (App.xaml).
-    private static ScrollViewer Scroll(FrameworkElement rows, ShelfSide side, double offset)
+    // A list scrolls inside its column (ShelfRowList, which starts 8 DIP left of the column so a row's background reaches past its
+    // text); the scroll bar is only a thin handle (App.xaml). This marks the list's side (RememberShelfScroll), goes back to its
+    // scroll position, and fades the list out at the bottom while more of it lies below.
+    private static ScrollViewer Fade(ScrollViewer viewer, ShelfSide side, double offset)
     {
-        // A row's background reaches 8 DIP left of its text (RowFrame); the list starts that much further left, so the scroll area does
-        // not cut the background off at the text.
-        rows.Margin = new Thickness(8, 0, 0, 0);
-        var viewer = PassWheel(new ScrollViewer { Content = rows, Tag = side, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Focusable = false, Margin = new Thickness(-8, 0, 0, 0) });
+        viewer.Tag = side;
         var fade = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
         fade.GradientStops.Add(new GradientStop(Colors.Black, 0)); fade.GradientStops.Add(new GradientStop(Colors.Black, .9)); fade.GradientStops.Add(new GradientStop(Colors.Transparent, 1));
         void Mask() => viewer.OpacityMask = viewer.ScrollableHeight > 1 && viewer.VerticalOffset < viewer.ScrollableHeight - 1 ? fade : null;
@@ -301,7 +326,6 @@ public partial class MainWindow
         var panel = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, layout.Header / 2) };
         if (Searching) { panel.Children.Add(Label(Loc.T("没有匹配的文件", "No files match"), layout.Body, UI.Secondary, HorizontalAlignment.Center)); return panel; }
         panel.Children.Add(Label(_fileTab is null ? Loc.T("把文件拖到这里", "Drag files here") : Loc.T("这个分类还没有文件", "This category is empty"), layout.Body, UI.Secondary, HorizontalAlignment.Center));
-        panel.Children.Add(Label(Loc.T("只记录位置，不复制文件", "Only their places are kept"), layout.Aux, UI.Tertiary, HorizontalAlignment.Center, top: 4));
         return panel;
     }
 
@@ -331,13 +355,20 @@ public partial class MainWindow
         double buttonsWidth = 0;
         if (side == ShelfSide.Clipboard)
         {
-            // "清除" takes away at once what the filter shown holds (Shelf.Clearable): in "全部" all but "常用", in a category of the
-            // user's that category's entries. "常用" has none.
-            if (Shelf.Clearable(ShelfData, _clipTab).Count > 0)
+            // "清除" takes away at once what the filter shown holds (Shelf.Clear): in "全部" all that is not kept; in a category of the
+            // user's, its entries, those also in another category only leaving this one. "常用" has none. The button stays while the
+            // list shows anything, even when all of it is kept and a press takes nothing away.
+            if (VisibleClips().Count > 0)
             {
-                string tip = _clipTab is { } id && ShelfData.ClipCategories.FirstOrDefault(c => c.Id == id) is { } category
-                    ? Loc.T($"清除“{category.Name}”中的全部内容", $"Clear everything in {category.Name}") : Loc.T("清除全部内容，“常用”保留", "Clear everything but Favorites");
-                buttons.Children.Add(ClearButton(tip, () => DeleteClips(Shelf.Clearable(ShelfData, _clipTab))));
+                string tip = _clipTab == ShelfData.Favorites ? Loc.T("“常用”中的内容不会被清除", "What is in Favorites is not cleared")
+                    : _clipTab is { } id && ShelfData.ClipCategories.FirstOrDefault(c => c.Id == id) is { } category
+                    ? Loc.T($"清除“{category.Name}”中的全部内容", $"Clear everything in {category.Name}") : Loc.T("清除全部内容，“常用”和一直保留的分类不受影响", "Clear everything but Favorites and the categories kept");
+                buttons.Children.Add(ClearButton(tip, () =>
+                {
+                    if (Shelf.Clearable(ShelfData, _clipTab).Count == 0) return;
+                    var gone = Shelf.Clear(ShelfData, _clipTab);
+                    if (gone.Count > 0) DeleteClips(gone); else _app.Shelf.Edited();
+                }));
                 buttonsWidth += ClearWidth;
             }
         }
@@ -352,7 +383,8 @@ public partial class MainWindow
         double ownWidth = own.Sum(category => TabWidth(category.Name, layout, true));
         if (side == ShelfSide.Files)
         {
-            // "清除" as on the clipboard: every file in "全部", a category's files in it; the files themselves stay where they are.
+            // "清除" as on the clipboard: every file in "全部", a category's files in it (those also in another category only leave
+            // it); the files themselves stay where they are.
             bool clearable = Shelf.ClearableFiles(ShelfData, _fileTab).Count > 0;
             double clear = clearable ? ClearWidth : 0;
             buttonsWidth = clear;
@@ -368,7 +400,11 @@ public partial class MainWindow
             {
                 string tip = _fileTab is { } id && ShelfData.FileCategories.FirstOrDefault(c => c.Id == id) is { } category
                     ? Loc.T($"清除“{category.Name}”中的文件记录", $"Clear the files listed in {category.Name}") : Loc.T("清除全部文件记录", "Clear every file listed");
-                buttons.Children.Add(ClearButton(tip, () => RemoveFiles(Shelf.ClearableFiles(ShelfData, _fileTab))));
+                buttons.Children.Add(ClearButton(tip, () =>
+                {
+                    var gone = Shelf.ClearFiles(ShelfData, _fileTab);
+                    if (gone.Count > 0) RemoveFiles(gone); else _app.Shelf.Edited();
+                }));
             }
         }
         double room = width - buttonsWidth - ButtonsMargin - 4;
@@ -511,7 +547,8 @@ public partial class MainWindow
             RenderShelf();
         };
         tab.MouseRightButtonUp += (_, e) => e.Handled = true;
-        // Entries dragged from the list, and files dragged in from the computer onto a file category, go into that category.
+        // Entries dragged from the list onto a category, and files dragged in from the computer onto a file category, go into that
+        // category, staying in the others they are in. "全部" takes only files from the computer.
         tab.DragOver += (_, e) => { e.Effects = TabAccepts(side, id, e.Data) ? DragDropEffects.Copy : DragDropEffects.None; HighlightTab(tab, e.Effects != DragDropEffects.None); e.Handled = true; };
         tab.DragLeave += (_, _) => HighlightTab(tab, false);
         tab.Drop += (_, e) => { e.Handled = true; HighlightTab(tab, false); DropOnTab(side, id, e.Data); };
@@ -528,7 +565,7 @@ public partial class MainWindow
     private const string ShelfFormat = "BrimDeck.ShelfItems";
     private static bool TabAccepts(ShelfSide side, Guid? id, IDataObject data)
     {
-        if (data.GetDataPresent(ShelfFormat)) return data.GetData(ShelfFormat) is string text && text.StartsWith(side + "|", StringComparison.Ordinal);
+        if (data.GetDataPresent(ShelfFormat)) return id is not null && data.GetData(ShelfFormat) is string text && text.StartsWith(side + "|", StringComparison.Ordinal);
         return side == ShelfSide.Files && data.GetDataPresent(DataFormats.FileDrop);
     }
     private void DropOnTab(ShelfSide side, Guid? id, IDataObject data)
@@ -536,18 +573,23 @@ public partial class MainWindow
         if (data.GetDataPresent(ShelfFormat) && data.GetData(ShelfFormat) is string text && text.StartsWith(side + "|", StringComparison.Ordinal))
         {
             var ids = text[(side.ToString().Length + 1)..].Split(',').Select(part => Guid.TryParse(part, out var g) ? g : Guid.Empty).ToHashSet();
-            Assign(side, ids, id);
+            if (id is { } category) SetCategory(side, ids, category, add: true);
             return;
         }
         if (side == ShelfSide.Files && data.GetData(DataFormats.FileDrop) is string[] paths) { EndDrop(dropped: true); AddDropped(paths, id); }
     }
-    private void Assign(ShelfSide side, IEnumerable<Guid> ids, Guid? category)
+    // Puts entries in a category or takes them out of it; their other categories stay.
+    private void SetCategory(ShelfSide side, IEnumerable<Guid> ids, Guid category, bool add)
     {
         var set = ids.ToHashSet();
-        if (side == ShelfSide.Clipboard) foreach (var clip in ShelfData.Clips.Where(clip => set.Contains(clip.Id))) clip.Category = category;
-        else foreach (var file in ShelfData.Files.Where(file => set.Contains(file.Id))) file.Category = category;
+        Shelf.SetCategory(side == ShelfSide.Clipboard ? ShelfData.Clips.Where(clip => set.Contains(clip.Id)).Select(clip => clip.Categories)
+            : ShelfData.Files.Where(file => set.Contains(file.Id)).Select(file => file.Categories), category, add);
         _app.Shelf.Edited();
     }
+    // The categories of the entries given, one list each.
+    private List<List<Guid>> CategoriesOf(ShelfSide side, IReadOnlyList<Guid> ids) => side == ShelfSide.Clipboard
+        ? [.. ShelfData.Clips.Where(clip => ids.Contains(clip.Id)).Select(clip => clip.Categories)]
+        : [.. ShelfData.Files.Where(file => ids.Contains(file.Id)).Select(file => file.Categories)];
 
     // ---- Rows ----
     private Border RowFrame(ShelfLayout layout, double height, bool picked)
@@ -570,13 +612,22 @@ public partial class MainWindow
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var content = ClipContent(clip, layout, two);
         grid.Children.Add(content);
-        // In "全部", the category an entry is in: a dot in its color, or a star for "常用". Under the pointer it gives way, as the time
-        // does (ShowMore).
+        // In "全部", the categories an entry is in, in their order: a dot in each one's color, a star for "常用", at most three (the
+        // tip names them all). Under the pointer they give way, as the time does (ShowMore).
         FrameworkElement? mark = null;
-        if (clip.Category is { } id && _clipTab is null && ShelfData.ClipCategories.FirstOrDefault(c => c.Id == id) is { } category)
+        var marked = _clipTab is null ? ShelfData.ClipCategories.Where(c => clip.Categories.Contains(c.Id)).ToList() : [];
+        if (marked.Count > 0)
         {
-            mark = id == ShelfData.Favorites ? StarGlyph(9, UI.Tertiary, filled: true) : new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(category.Color) };
-            mark.Margin = new Thickness(8, 0, 0, 0); mark.VerticalAlignment = VerticalAlignment.Center; mark.ToolTip = Shelf.CategoryName(category);
+            var marks = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
+                Background = Brushes.Transparent, ToolTip = string.Join(Loc.T("、", ", "), marked.Select(Shelf.CategoryName)) };
+            foreach (var category in marked.Take(3))
+            {
+                FrameworkElement glyph = category.Id == ShelfData.Favorites ? StarGlyph(9, UI.Tertiary, filled: true) : new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(category.Color) };
+                glyph.VerticalAlignment = VerticalAlignment.Center;
+                if (marks.Children.Count > 0) glyph.Margin = new Thickness(3, 0, 0, 0);
+                marks.Children.Add(glyph);
+            }
+            mark = marks;
             Grid.SetColumn(mark, 1); grid.Children.Add(mark);
         }
         var aux = AuxSlot(clip.Manual ? Loc.T("常用语", "Phrase") : Shelf.When(clip.Copied, DateTimeOffset.Now), layout, () => OpenDetail(ShelfSide.Clipboard, clip.Id),
@@ -833,24 +884,58 @@ public partial class MainWindow
             start = null;
             var list = files();
             if (list.Count == 0) return;
-            var data = ShelfService.FileData(list.Select(file => file.Path));
+            bool move = Settings.TransferDragOut == TransferDragOut.Move;
+            var data = ShelfService.FileData(list.Select(file => file.Path), move);
             data.SetData(ShelfFormat, ShelfSide.Files + "|" + string.Join(",", list.Select(file => file.Id)));
             if (source is Border row) row.Background = _picked.Count > 0 && list.Count > 1 ? UI.Brush(UI.FillSelected) : Brushes.Transparent;
-            DragOut(source, data);
+            DragOut(source, data, move ? DragDropEffects.Copy | DragDropEffects.Move : DragDropEffects.Copy);
+            if (move) WatchMoved(list);
             e.Handled = true;
         };
     }
-    // Dragged out of the panel, entries and files are only copied: the originals stay where they are.
-    private void DragOut(DependencyObject source, DataObject data)
+    // Dragged out of the panel, clipboard entries are copied; files are copied, or, when the drag is set to move, moved where the
+    // target takes moves (a chat window or a browser takes only copies).
+    private void DragOut(DependencyObject source, DataObject data, DragDropEffects allowed = DragDropEffects.Copy)
     {
         _draggingOut = true;
-        try { DragDrop.DoDragDrop(source, data, DragDropEffects.Copy); }
+        try { DragDrop.DoDragDrop(source, data, allowed); }
         catch (Exception error) when (error is System.Runtime.InteropServices.COMException or InvalidOperationException) { }
         finally
         {
             _draggingOut = false;
             if (_expanded && !_pointerInside) PointerChanged(false);
         }
+    }
+    // Files dragged out to be moved leave the list once they are gone from where they were. The drag's result does not tell: the
+    // Explorer moves files itself and reports no move, and it may still be moving them after the drag ends (a large file to another
+    // drive takes a while). So they are looked for every second for five minutes; a file still there was copied, or not dropped.
+    private readonly Dictionary<Guid, long> _movingOut = [];
+    private DispatcherTimer? _movingTimer;
+    private void WatchMoved(IReadOnlyList<TransferFile> files)
+    {
+        long until = Environment.TickCount64 + 5 * 60_000;
+        foreach (var file in files) _movingOut[file.Id] = until;
+        CheckMoved(null, EventArgs.Empty);
+        if (_movingOut.Count == 0) return;
+        _movingTimer ??= new DispatcherTimer(DispatcherPriority.Background, Dispatcher) { Interval = TimeSpan.FromSeconds(1) };
+        _movingTimer.Tick -= CheckMoved; _movingTimer.Tick += CheckMoved;
+        _movingTimer.Start();
+    }
+    private void CheckMoved(object? sender, EventArgs e)
+    {
+        long now = Environment.TickCount64;
+        var gone = new List<TransferFile>();
+        foreach (var (id, until) in _movingOut.ToList())
+        {
+            var file = ShelfData.Files.FirstOrDefault(f => f.Id == id);
+            if (file is null || now > until) { _movingOut.Remove(id); continue; }
+            if (ShelfFiles.Exists(file.Path)) continue;
+            _movingOut.Remove(id);
+            ShelfFiles.Forget(file.Path);
+            gone.Add(file);
+        }
+        if (gone.Count > 0) RemoveFiles(gone);
+        if (_movingOut.Count == 0) _movingTimer?.Stop();
     }
     // A picture is dragged as a file as well (ShelfService.PictureFile), which is how browsers and Electron applications take one.
     private DataObject ClipDrag(ClipEntry clip)

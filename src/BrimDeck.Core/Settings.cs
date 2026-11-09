@@ -28,6 +28,9 @@ public sealed record FullscreenRule(string Name = "", string Path = "")
     public WindowBehavior? Borderless { get; init; }
     public WindowBehavior? Exclusive { get; init; }
 }
+// An application whose playback the panel leaves out: AppId is the id its media session reports (MediaAppTarget.Ignores),
+// Name the name the panel gave it when it was added, and Path its executable when one was found, for the list's icon.
+public sealed record IgnoredMediaApp(string AppId = "", string Name = "", string Path = "");
 // ZCode reads the ZCode desktop application's local request records and its signed-in Coding Plan quota.
 // Dsh reads the DeepSeek account or API key that DeepSeek Harness (desktop app or local web app) signed in with; DeepSeek uses a key entered by hand.
 // GrokBot reads the weekly allowance of the Grok Bot desktop app; it is a quota source only.
@@ -213,6 +216,7 @@ public static class AppPresets
     public const int MaximumApps = 7;
     // A long list would be hard to review, and the exceptions are meant for a few shell-level apps.
     public const int MaximumFullscreenExceptions = 32;
+    public const int MaximumIgnoredMediaApps = 32;
     public const string WarningColor = "#E5C890", CriticalColor = "#E78284";
     public const int MaximumOffPeakPeriods = 6;
     public const decimal MaximumBalanceTarget = 1_000_000_000;
@@ -292,6 +296,8 @@ public sealed class DeckSettings
     private int _equalizerBars = CompactMusicLayout.DefaultBars, _musicEqualizerBars = 5;
     private EqualizerMode _equalizerMode = EqualizerMode.Flow;
     private PausedMusicHide _musicPausedHide;
+    private MusicGestureAction _musicDragLeft = MusicGestureAction.PreviousTrack, _musicDragRight = MusicGestureAction.NextTrack, _musicDragUp, _musicDragDown,
+        _musicSwipeLeft = MusicGestureAction.PreviousTrack, _musicSwipeRight = MusicGestureAction.NextTrack;
     // Version of the BrimDeck that last saved settings.json; see SettingsMigrations. Empty in files saved before 0.1.0.
     public string AppVersion { get; set; } = "";
     public bool LaunchAtStartup { get; set; }
@@ -314,6 +320,9 @@ public sealed class DeckSettings
     // the setting existed. Icons, figures in code and the clock styles' own faces are not affected. A file without it reads as empty.
     public string UiFont { get; set; } = "";
     public CompactStyle Style { get; set; } = CompactStyle.Notch;
+    // The notch or the capsule last chosen, which the line style hotkey (HotkeyKind.LineStyle) returns to from the line. Normalize
+    // keeps it up to date.
+    public CompactStyle ShapeStyle { get; set; } = CompactStyle.Notch;
     // Size and position of each collapsed style in DIPs; limits and defaults are in CollapsedLimits. OffsetX moves the surface
     // from the centre; each monitor narrows the offset to what fits (CollapsedGeometry) without changing the saved value.
     public double NotchWidth { get; set; } = CollapsedLimits.NotchWidthDefault;
@@ -369,13 +378,16 @@ public sealed class DeckSettings
     public string Page9Hotkey { get; set; } = "";
     public string Page10Hotkey { get; set; } = "";
     public string RefreshHotkey { get; set; } = "";
+    public string CycleStyleHotkey { get; set; } = "";
+    public string LineStyleHotkey { get; set; } = "";
     public string Hotkey(HotkeyKind kind) => (kind switch
     {
         HotkeyKind.Hide => HideHotkey, HotkeyKind.Expand => ExpandHotkey, HotkeyKind.Resize => ResizeHotkey, HotkeyKind.Move => MoveHotkey,
         HotkeyKind.ClickThrough => ClickThroughHotkey, HotkeyKind.OpenSettings => SettingsHotkey, HotkeyKind.Page1 => Page1Hotkey,
         HotkeyKind.Page2 => Page2Hotkey, HotkeyKind.Page3 => Page3Hotkey, HotkeyKind.Page4 => Page4Hotkey,
         HotkeyKind.Page5 => Page5Hotkey, HotkeyKind.Page6 => Page6Hotkey, HotkeyKind.Page7 => Page7Hotkey, HotkeyKind.Page8 => Page8Hotkey,
-        HotkeyKind.Page9 => Page9Hotkey, HotkeyKind.Page10 => Page10Hotkey, HotkeyKind.Refresh => RefreshHotkey, _ => ""
+        HotkeyKind.Page9 => Page9Hotkey, HotkeyKind.Page10 => Page10Hotkey, HotkeyKind.Refresh => RefreshHotkey,
+        HotkeyKind.CycleStyle => CycleStyleHotkey, HotkeyKind.LineStyle => LineStyleHotkey, _ => ""
     }) ?? "";
     public void SetHotkey(HotkeyKind kind, string value)
     {
@@ -398,6 +410,8 @@ public sealed class DeckSettings
             case HotkeyKind.Page9: Page9Hotkey = value; break;
             case HotkeyKind.Page10: Page10Hotkey = value; break;
             case HotkeyKind.Refresh: RefreshHotkey = value; break;
+            case HotkeyKind.CycleStyle: CycleStyleHotkey = value; break;
+            case HotkeyKind.LineStyle: LineStyleHotkey = value; break;
         }
     }
     // Mouse pass-through: hovering does not open the panel and every click goes to the window beneath; only the shortcuts open
@@ -449,6 +463,15 @@ public sealed class DeckSettings
     public bool MusicPageCover { get; set; } = true;
     public bool MusicIndicatorProgress { get; set; } = true;
     public bool LyricsEnabled { get; set; } = true;
+    // What dragging with the left button over the expanded music page does in each direction, and a two-finger touchpad swipe
+    // to either side (MusicGestures). A number not listed does nothing.
+    public MusicGestureAction MusicDragLeft { get => _musicDragLeft; set => _musicDragLeft = Gesture(value); }
+    public MusicGestureAction MusicDragRight { get => _musicDragRight; set => _musicDragRight = Gesture(value); }
+    public MusicGestureAction MusicDragUp { get => _musicDragUp; set => _musicDragUp = Gesture(value); }
+    public MusicGestureAction MusicDragDown { get => _musicDragDown; set => _musicDragDown = Gesture(value); }
+    public MusicGestureAction MusicSwipeLeft { get => _musicSwipeLeft; set => _musicSwipeLeft = Gesture(value); }
+    public MusicGestureAction MusicSwipeRight { get => _musicSwipeRight; set => _musicSwipeRight = Gesture(value); }
+    private static MusicGestureAction Gesture(MusicGestureAction value) => Enum.IsDefined(value) ? value : MusicGestureAction.None;
     // How many bars the music page's equalizer has, beside the title; its bars keep their spacing, so more bars make it longer.
     public int MusicEqualizerBars { get => _musicEqualizerBars; set => _musicEqualizerBars = CompactMusicLayout.SafeBars(value); }
     // How the collapsed equalizer and the music page's equalizer show the sound; one choice for both, while each has its own length.
@@ -468,6 +491,8 @@ public sealed class DeckSettings
     public bool KugouFullControl { get; set; }
     // Enables Apple Music's full control when BrimDeck starts, without the entry and its explanation.
     public bool AppleMusicFullControl { get; set; }
+    // Applications whose playback is not shown: their songs stay off the panel and out of the source menu.
+    public List<IgnoredMediaApp> IgnoredMediaApps { get; set; } = [];
     public DefaultDeckPage DefaultPage { get; set; }
     // A right click on the expanded panel opens the settings window.
     public bool RightClickSettings { get; set; } = true;
@@ -487,6 +512,10 @@ public sealed class DeckSettings
     // BrimDeck drawn larger, in percent (PanelScales): the collapsed surface and the expanded panel, its pages, header and menus
     // grow together, as Windows' display scaling would for BrimDeck alone. Sizes stay saved before the scale.
     public int PanelScale { get; set; } = PanelScales.Default;
+    // How much of what lies behind shows through the panel's surface, collapsed and expanded, in percent: 0 is opaque. Only the
+    // surface and its theme layers are see-through; text, icons and the rim are drawn as before.
+    public int SurfaceTransparency { get; set; }
+    public const int MaxSurfaceTransparency = 90;
     public int OpenDelay { get; set; } = 0;
     // The collapsed panel opens on a click instead of on hover; OpenDelay then does not apply.
     public bool ClickToExpand { get; set; }
@@ -494,7 +523,8 @@ public sealed class DeckSettings
     public int AnimationDuration { get; set; } = 360;
     public bool Animations { get; set; } = true;
     // The panel stays above other windows. Off, it is an ordinary window that others cover: it comes to the front when it
-    // opens, and over the desktop while the desktop is shown; the window rules and ForceTopmost then do not apply.
+    // opens, and over the desktop while the desktop is shown; ForceTopmost then does not apply. The window rules still do:
+    // Normal leaves it covered, Line puts the indicator above the window that fills the screen, Hide hides it.
     public bool AlwaysOnTop { get; set; } = true;
     public bool ForceTopmost { get; set; }
     // The panel window can be captured on its own by recording apps (OBS window capture). Off, the window keeps the no-activate
@@ -525,9 +555,9 @@ public sealed class DeckSettings
     public double ClipboardWidth { get; set; } = ShelfSizes.Default.Width;
     public double ClipboardHeight { get; set; } = ShelfSizes.Default.Height;
     public bool ClipboardRecord { get; set; } = true;
-    public ClipRetention ClipboardRetention { get; set; } = ClipRetention.Month;
-    // Applications whose copies are not recorded, by process name without ".exe".
+    // Applications whose copies are not recorded: the executable's path, or a process name (ClipboardExclusions).
     public List<string> ClipboardExcluded { get; set; } = [];
+    public TransferDragOut TransferDragOut { get; set; } = TransferDragOut.Copy;
     public double MonitorHeight { get; set; } = MonitorSizes.Default.Height;
     public MonitorPalette MonitorPalette { get; set; } = MonitorPalette.Theme;
     // The Custom scheme's colors; kept while another scheme is chosen.
@@ -547,6 +577,8 @@ public sealed class DeckSettings
     // name it while it is not connected; null for 自动 (GpuChoice.Auto). Files saved before there was a choice read as 自动.
     public string? MonitorGpu { get; set; }
     public string? MonitorGpuName { get; set; }
+    // Where the graphics adapters' usage comes from, on the page and the collapsed row alike (GpuUsageSource).
+    public GpuUsageSource MonitorGpuUsage { get; set; }
     public MonitorProcessView MonitorProcessView { get; set; }
     // The expanded page shows the temperatures the system reports (Temperatures); off, none are read for it. Off by default: asking
     // a driver for a temperature froze one laptop (SensorStops), so a new user turns them on knowingly.
@@ -586,9 +618,11 @@ public sealed class DeckSettings
     // Whether the notch and the capsule widen to their content (CollapsedGeometry.Resolve). Resizing one by dragging an end turns
     // its own off, so the width set by hand stays.
     public bool NotchAutoWidth { get; set; } = true;
-    // Compacts the heap and trims the working set after the panel has been collapsed and idle for a while (App.Memory.cs). On by
-    // default; the memory is read back in when the panel next opens, which can stutter, so it can be turned off.
-    public bool TrimMemoryWhenIdle { get; set; } = true;
+    // How much is kept in memory between uses (MemoryPlan, App.Memory.cs).
+    private MemoryMode _memoryMode = MemoryMode.Balanced;
+    public MemoryMode MemoryMode { get => _memoryMode; set => _memoryMode = Enum.IsDefined(value) ? value : MemoryMode.Balanced; }
+    // The on/off switch MemoryMode replaced (SettingsMigrations.MemoryModeFromSwitch). Written to match the mode, for older versions.
+    public bool TrimMemoryWhenIdle => MemoryMode == MemoryMode.Saver;
     public bool CapsuleAutoWidth { get; set; } = true;
     public GripDoubleClick GripDoubleClick { get; set; } = GripDoubleClick.Move;
     // What the collapsed readings showed before their table (CompactReadings). Kept to read older files and, written to match the
@@ -676,8 +710,6 @@ public sealed class DeckSettings
     public WindowBehavior Behavior(ScreenContext context, string? processName = null, string? imagePath = null,
         ScreenContext? backgroundKind = null)
     {
-        // An ordinary window is covered by the full-screen window anyway, so no rule applies.
-        if (!AlwaysOnTop) return WindowBehavior.Normal;
         var kind = context == ScreenContext.BackgroundFullscreen ? backgroundKind ?? ScreenContext.Desktop : context;
         if (processName is not null || imagePath is not null)
             foreach (var rule in FullscreenRules)
@@ -708,6 +740,7 @@ public sealed class DeckSettings
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
         copy.FullscreenRules = FullscreenRules.Select(rule => rule with { }).ToList();
+        copy.IgnoredMediaApps = [.. IgnoredMediaApps ?? []];
         copy.DeviceChoices = [.. (DeviceChoices ?? []).Select(device => device.Copy())];
         return copy;
     }
@@ -756,10 +789,10 @@ public sealed class DeckSettings
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
         ClipboardWidth = double.IsFinite(ClipboardWidth) ? Math.Clamp(ClipboardWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : ShelfSizes.Default.Width;
         ClipboardHeight = double.IsFinite(ClipboardHeight) ? Math.Clamp(ClipboardHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ShelfSizes.Default.Height;
-        if (!Enum.IsDefined(ClipboardRetention)) ClipboardRetention = ClipRetention.Month;
-        ClipboardExcluded = [.. (ClipboardExcluded ?? []).Select(name => (name ?? "").Trim()).Select(name => name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name)
-            .Where(name => name.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)];
+        if (!Enum.IsDefined(TransferDragOut)) TransferDragOut = TransferDragOut.Copy;
+        ClipboardExcluded = ClipboardExclusions.Normalize(ClipboardExcluded);
         PanelScale = PanelScales.Fit(PanelScale);
+        SurfaceTransparency = Math.Clamp(SurfaceTransparency, 0, MaxSurfaceTransparency);
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
         MonitorCustomColors ??= new();
         MonitorCustomColors.Normalize();
@@ -768,6 +801,7 @@ public sealed class DeckSettings
         MonitorInterval = Math.Clamp(MonitorInterval, 1, 2);
         if (!Enum.IsDefined(MonitorSort)) MonitorSort = ProcessSort.Cpu;
         if (!Enum.IsDefined(MonitorMain)) MonitorMain = MonitorMain.Cpu;
+        if (!Enum.IsDefined(MonitorGpuUsage)) MonitorGpuUsage = GpuUsageSource.Driver;
         MonitorGpu = string.IsNullOrWhiteSpace(MonitorGpu) ? null : MonitorGpu.Trim();
         MonitorGpuName = MonitorGpu is null || string.IsNullOrWhiteSpace(MonitorGpuName) ? null : MonitorGpuName.Trim();
         if (!Enum.IsDefined(MonitorProcessView)) MonitorProcessView = MonitorProcessView.Auto;
@@ -798,6 +832,8 @@ public sealed class DeckSettings
         Language = Loc.Normalize(Language);
         UiFont = UiFonts.Normalize(UiFont);
         if (!Enum.IsDefined(Style)) Style = CompactStyle.Notch;
+        if (Style != CompactStyle.Line) ShapeStyle = Style;
+        else if (ShapeStyle is not (CompactStyle.Notch or CompactStyle.Capsule)) ShapeStyle = CompactStyle.Notch;
         static double Fit(double value, double min, double max, double fallback) => double.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;
         static double Offset(double value) => Fit(value, -CollapsedLimits.OffsetLimit, CollapsedLimits.OffsetLimit, CollapsedLimits.OffsetDefault);
         NotchWidth = Fit(NotchWidth, CollapsedLimits.NotchWidthMin, CollapsedLimits.NotchWidthMax, CollapsedLimits.NotchWidthDefault);
@@ -845,6 +881,9 @@ public sealed class DeckSettings
             .DistinctBy(ScreenPolicy.Key, StringComparer.OrdinalIgnoreCase)
             .Take(AppPresets.MaximumFullscreenExceptions).ToList();
         static WindowBehavior? Valid(WindowBehavior? choice) => choice is null || Enum.IsDefined(choice.Value) ? choice : null;
+        IgnoredMediaApps = (IgnoredMediaApps ?? []).OfType<IgnoredMediaApp>().Where(app => !string.IsNullOrWhiteSpace(app.AppId))
+            .Select(app => new IgnoredMediaApp(app.AppId.Trim(), (app.Name ?? "").Trim(), (app.Path ?? "").Trim()))
+            .DistinctBy(app => app.AppId, StringComparer.OrdinalIgnoreCase).Take(AppPresets.MaximumIgnoredMediaApps).ToList();
         DisplayMonitors = (DisplayMonitors ?? []).OfType<ChosenDisplay>().Where(d => !string.IsNullOrWhiteSpace(d.Id))
             .Select(d => new ChosenDisplay(d.Id.Trim(), (d.Name ?? "").Trim())).DistinctBy(d => d.Id).ToList();
         if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;

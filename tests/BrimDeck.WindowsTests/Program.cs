@@ -108,12 +108,12 @@ internal static class Program
             Check("GPU auto shows a discrete adapter", GpuChoice.Auto(gpus, 0)?.Kind == GpuKind.Discrete);
         // The drivers' own usage: asked twice, as Intel's counters need two readings; an adapter Windows saw idle is not asked.
         var drivers = new GpuDrivers(() => { });
-        drivers.Read(gpus, 0, true);
+        drivers.Read(gpus, 0, true, GpuUsageSource.Driver);
         Thread.Sleep(1000);
-        foreach (var gpu in drivers.Read(gpus, 1, true))
+        foreach (var gpu in drivers.Read(gpus, 1, true, GpuUsageSource.Driver))
             Console.WriteLine($"GPU driver: {gpu.Name ?? "(unnamed)"} usage {gpu.Usage:P0} from {gpu.UsageSource ?? "Windows engines"}, engines {gpu.EngineUsage:P0}"
                 + (gpu.DriverWatts is { } watts ? $", {watts:0.0} W" : "") + (gpu.DriverTemperature is { } heat ? $", {heat:0} °C" : ""));
-        Check("GPU driver usage is a share, and only for an adapter Windows saw working", drivers.Read(gpus, 2, true).All(gpu => gpu.Usage is >= 0 and <= 1
+        Check("GPU driver usage is a share, and only for an adapter Windows saw working", drivers.Read(gpus, 2, true, GpuUsageSource.Driver).All(gpu => gpu.Usage is >= 0 and <= 1
             && (gpu.UsageSource is null || gpu.EngineUsage > 0)));
     }
     private static string Gigabytes(Reading<ulong> bytes) => bytes.TryGet(out var value) ? $"{value / 1e9:0.00} GB" : "?";

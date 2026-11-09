@@ -40,6 +40,42 @@ internal static class AppIdentity
         return new(pid, name ?? "", family, appId ?? Resolve(pid));
     }
 
+    // The executable's full path, "" when the process cannot be opened.
+    public static string ImagePath(int pid)
+    {
+        var handle = OpenProcess(ProcessQueryLimitedInformation, false, (uint)pid);
+        if (handle == 0) return "";
+        try
+        {
+            var path = new StringBuilder(1024); int length = path.Capacity;
+            return QueryFullProcessImageName(handle, 0, path, ref length) ? path.ToString() : "";
+        }
+        finally { CloseHandle(handle); }
+    }
+
+    // The executable of a running process of the application: the package's for a packaged id, otherwise one named by the
+    // id. "" when none runs or the id names no process (an id of the application's own choosing).
+    public static string FindImage(MediaAppOwner owner)
+    {
+        if (owner.ProcessId is { } pid && ImagePath(pid) is { Length: > 0 } own) return own;
+        if (owner.PackageFamily is { } family)
+            foreach (var process in Process.GetProcesses())
+                using (process)
+                {
+                    var handle = OpenProcess(ProcessQueryLimitedInformation, false, (uint)process.Id);
+                    if (handle == 0) continue;
+                    string? packaged;
+                    try { packaged = Read(handle, GetPackageFamilyName); }
+                    finally { CloseHandle(handle); }
+                    if (string.Equals(packaged, family, StringComparison.OrdinalIgnoreCase) && ImagePath(process.Id) is { Length: > 0 } path) return path;
+                }
+        if (owner.ProcessName.Length > 0)
+            foreach (var process in Process.GetProcessesByName(owner.ProcessName))
+                using (process)
+                    if (ImagePath(process.Id) is { Length: > 0 } path) return path;
+        return "";
+    }
+
     // The name Windows lists an application under: the display name it registered with its id, or its Start menu entry's.
     // Null when it has neither; cached, since the Start menu lookup reads the shell's application list.
     public static string? RegisteredName(string appId) => Names.GetOrAdd(appId, Lookup);

@@ -16,7 +16,7 @@ internal sealed class ShelfService : IDisposable
 {
     private readonly string _folder, _file, _pictures;
     private readonly Dispatcher _dispatcher;
-    private readonly DispatcherTimer _save, _prune;
+    private readonly DispatcherTimer _save;
     private ClipboardWatch? _watch;
     private bool _unreadable;
     public ShelfData Data { get; private set; } = new();
@@ -30,24 +30,22 @@ internal sealed class ShelfService : IDisposable
         _dispatcher = dispatcher;
         _save = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = TimeSpan.FromMilliseconds(600) };
         _save.Tick += (_, _) => { _save.Stop(); Save(); };
-        _prune = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = TimeSpan.FromHours(1) };
-        _prune.Tick += (_, _) => Prune();
         Load();
+        // The history goes when BrimDeck exits; after an exit that did not clear it (a crash, a forced end) it goes now.
+        if (!_unreadable && Shelf.History(Data) is { Count: > 0 } left) Remove(left, raise: false);
     }
 
-    // Starts or stops recording as the settings ask, and applies the history rules.
+    // Starts or stops recording as the settings ask.
     public void Apply(DeckSettings settings)
     {
         _settings = () => settings;
         bool record = settings.ClipboardPage && settings.ClipboardRecord;
         if (record && _watch is null)
         {
-            try { _watch = new ClipboardWatch(Copied, name => _settings().ClipboardExcluded.Contains(name, StringComparer.OrdinalIgnoreCase)); }
+            try { _watch = new ClipboardWatch(Copied, name => ClipboardExclusions.Excludes(_settings().ClipboardExcluded, name)); }
             catch (System.ComponentModel.Win32Exception) { _watch = null; }
         }
         else if (!record && _watch is not null) { _watch.Dispose(); _watch = null; }
-        if (_watch is not null) _prune.Start(); else _prune.Stop();
-        Prune();
     }
 
     private void Copied(ClipCopy copy)
@@ -61,16 +59,9 @@ internal sealed class ShelfService : IDisposable
             Data.Clips.Insert(0, entry);
         }
         else entry = Shelf.Add(Data, new ClipEntry { Kind = Shelf.Classify(copy.Text), Text = copy.Text, Html = copy.Html, Rtf = copy.Rtf, Copied = now, Source = copy.Source });
-        Prune(raise: false);
+        // The categories whose rules it meets take it, the same text copied again too.
+        ShelfRules.Apply(Data, entry);
         Changed?.Invoke(); QueueSave();
-    }
-
-    // Clears what the rules say is too old or past the most recent 500.
-    private void Prune(bool raise = true)
-    {
-        var expired = Shelf.Expired(Data, _settings().ClipboardRetention, DateTimeOffset.Now);
-        if (expired.Count == 0) return;
-        Remove(expired, raise);
     }
 
     public void Raise() => Changed?.Invoke();
@@ -89,7 +80,8 @@ internal sealed class ShelfService : IDisposable
 
     public void AddFiles(IEnumerable<string> paths, Guid? category)
     {
-        Shelf.AddFiles(Data, paths, category, DateTimeOffset.Now);
+        var added = Shelf.AddFiles(Data, paths, category, DateTimeOffset.Now);
+        foreach (var file in added) ShelfRules.Apply(Data, file);
         Edited();
     }
     public void RemoveFiles(IEnumerable<TransferFile> files)
@@ -167,11 +159,10 @@ internal sealed class ShelfService : IDisposable
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or CryptographicException) { }
     }
-    // Leaving BrimDeck: the history goes when the rules keep it only until then; what is kept stays. The pictures written for
-    // dragging go too.
+    // Leaving BrimDeck: the history goes; what is kept (ShelfData.Kept) stays. The pictures written for dragging go too.
     public void Exit()
     {
-        if (_settings().ClipboardRetention == ClipRetention.UntilExit) Remove(Shelf.History(Data), raise: false);
+        Remove(Shelf.History(Data), raise: false);
         Save();
         try { if (Directory.Exists(DragFolder)) Directory.Delete(DragFolder, true); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
@@ -219,12 +210,13 @@ internal sealed class ShelfService : IDisposable
         return data;
     }
     public static DataObject TextData(string text) { var data = new DataObject(); data.SetText(text, TextDataFormat.UnicodeText); return data; }
-    // Files to paste or drop: the Explorer copies them (Preferred DropEffect: copy), it never moves the originals.
-    public static DataObject FileData(IEnumerable<string> paths)
+    // Files to paste or drop. Preferred DropEffect tells the Explorer to copy them (1), or, for a drag set to move, to move them (2)
+    // even to another drive.
+    public static DataObject FileData(IEnumerable<string> paths, bool move = false)
     {
         var list = new StringCollection(); list.AddRange(paths.ToArray());
         var data = new DataObject(); data.SetFileDropList(list);
-        data.SetData("Preferred DropEffect", new MemoryStream(BitConverter.GetBytes(1)));
+        data.SetData("Preferred DropEffect", new MemoryStream(BitConverter.GetBytes(move ? 2 : 1)));
         return data;
     }
 
@@ -273,5 +265,5 @@ internal sealed class ShelfService : IDisposable
         wait.Start();
     }
 
-    public void Dispose() { _watch?.Dispose(); _watch = null; _prune.Stop(); }
+    public void Dispose() { _watch?.Dispose(); _watch = null; }
 }

@@ -33,13 +33,9 @@ internal static class QuotaRingTests
         check("Quota ring: a balance without a share fills one ring, a source with nothing leaves it empty",
             balance is { Outer: 100, Inner: null } && balance.Detail.Contains("5.00") && nothing is { Outer: 0, Inner: null, Detail: "未登录" });
 
-        check("Quota ring: 12 DIP alone, 20 with a pair", QuotaRing.Diameter(false) == 12 && QuotaRing.Diameter(true) == 20);
-
-        // The row takes the larger rings at its scale, and keeps 12 DIP without a pair.
-        var single = CompactMusicLayout.Calculate(1000, 1, false, 3, false, 0);
-        var pair = CompactMusicLayout.Calculate(1000, 2, false, 3, false, 0, ring: QuotaRing.Pair);
-        check("Quota ring: the row's rings follow the diameter and the scale", single.RingSize == 12 && pair.RingSize == 40 && pair.RingWidth == 3 * 40 + 2 * 16);
-        check("Quota ring: an auto-width row grows by the larger rings",
-            CompactMusicLayout.NaturalWidth(1, false, 3, false, 0, 0, ring: QuotaRing.Pair) - CompactMusicLayout.NaturalWidth(1, false, 3, false, 0, 0) == 24);
+        // One ring is as large as the outer ring of a pair: 20 DIP at scale 1, whatever the rings hold.
+        var one = CompactMusicLayout.Calculate(1000, 1, false, 3, false, 0);
+        var two = CompactMusicLayout.Calculate(1000, 2, false, 3, false, 0);
+        check("Quota ring: every ring is 20 DIP at scale 1 and follows the scale", one.RingSize == 20 && two.RingSize == 40 && two.RingWidth == 3 * 40 + 2 * 16);
     }
 }

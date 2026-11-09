@@ -258,6 +258,8 @@ public sealed partial class SettingsWindow
     // Operations only one player supports, grouped under that player's name.
     private void Players()
     {
+        SectionTitle(Loc.T("播放来源", "Playback sources"));
+        Group(IgnoredAppsRow());
         SectionTitle(Loc.T("网易云音乐", "NetEase Cloud Music"));
         // Without full control NetEase is controlled through its system media session, an option in its own settings.
         PlayerNote(Loc.T("在网易云音乐“设置 › 系统”中打开“开启 SMTC”，即可控制播放。",
@@ -281,6 +283,59 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("QQ 音乐", "QQ Music"));
         PlayerNote(Loc.T("无需任何设置。", "Needs no setup."), last: true);
     }
+    // Whether the ignored apps are shown under their row, kept while the row is rebuilt after an app is added or removed.
+    private bool _ignoredOpen;
+    // Holds the row, so that adding or removing an app rebuilds the row alone, as the app rules row does.
+    private Border? _ignoredHost;
+
+    // The applications whose playback the panel leaves out. The menu offers the apps that report playback now, and any
+    // executable. An executable is added under its file name, the id most players report; a player that reports an id of
+    // its own choosing is matched only while it plays and can be added from the menu then.
+    private FrameworkElement IgnoredAppsRow() => _ignoredHost = new Border { Child = IgnoredAppsContent() };
+    private void RefreshIgnoredApps() { if (_ignoredHost is not null) _ignoredHost.Child = IgnoredAppsContent(); }
+
+    private FrameworkElement IgnoredAppsContent() => AppListRow(Loc.T("忽略的应用", "Ignored apps"),
+        () => Loc.T("被忽略的应用播放时，面板不显示它的歌曲，来源菜单中也不列出它。“添加应用”列出正在播放或已暂停的应用，也可以浏览可执行文件。忽略浏览器会忽略其中所有网页的播放。",
+            "While an ignored app plays, the panel does not show its songs and the source menu leaves it out. \"Add app\" lists the apps that are playing or paused, or browse for an executable. Ignoring a browser ignores playback in all its pages."),
+        Loc.T("展开忽略的应用", "Show ignored apps"), Loc.T("添加要忽略的应用", "Add an app to ignore"),
+        [.. S.IgnoredMediaApps.Select(IgnoredAppLine)], IgnoredAppMenu, _ignoredOpen, open => _ignoredOpen = open);
+
+    private FrameworkElement IgnoredAppLine(IgnoredMediaApp app)
+    {
+        string name = app.Name.Length > 0 ? app.Name : app.AppId;
+        return AppLine(name, IgnoredAppDetail(app), app.Path, app.Path.Length > 0 ? app.Path : app.AppId, () =>
+        {
+            Change(s => s.IgnoredMediaApps.RemoveAll(entry => string.Equals(entry.AppId, app.AppId, StringComparison.OrdinalIgnoreCase)));
+            RefreshIgnoredApps();
+        });
+    }
+
+    // The executable's file name when it is known, otherwise the id the app's media session reports.
+    private static string IgnoredAppDetail(IgnoredMediaApp app) => app.Path.Length > 0 ? System.IO.Path.GetFileName(app.Path) : app.AppId;
+
+    private void IgnoredAppMenu(Button anchor)
+    {
+        var menu = AppMenu(anchor);
+        var apps = (((App)Application.Current).Media?.DetectedApps() ?? [])
+            .Where(app => !S.IgnoredMediaApps.Any(entry => string.Equals(entry.AppId, app.AppId, StringComparison.OrdinalIgnoreCase)))
+            .OrderBy(app => app.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        foreach (var app in apps)
+            menu.Items.Add(AppMenuItem(app.Name, IgnoredAppDetail(app), app.Path, () =>
+            {
+                Change(s => s.IgnoredMediaApps.Add(app));
+                RefreshIgnoredApps();
+            }));
+        if (apps.Count == 0) menu.Items.Add(new MenuItem { Header = Loc.T("没有正在播放的应用", "No app is playing"), IsEnabled = false });
+        AddBrowseItem(menu, Loc.T("选择要忽略的应用", "Choose an app to ignore"), path =>
+        {
+            var app = new IgnoredMediaApp(System.IO.Path.GetFileName(path), AppName(System.IO.Path.GetFileNameWithoutExtension(path), path), path);
+            if (S.IgnoredMediaApps.Any(entry => string.Equals(entry.AppId, app.AppId, StringComparison.OrdinalIgnoreCase))) return;
+            Change(s => s.IgnoredMediaApps.Add(app));
+            RefreshIgnoredApps();
+        });
+        menu.IsOpen = true;
+    }
+
     // A line of small text between a player's title and its settings; last: the player has no settings, so the line ends the
     // section with a group's spacing.
     private void PlayerNote(string text, bool last = false)

@@ -59,8 +59,9 @@ internal sealed class MediaSessions : IDisposable
     private readonly Dictionary<Session, SystemSource> _sessions = new();
     private readonly Dictionary<string, CoverCache> _covers = new();
     // Downloaded artwork of recent songs, so switching back to one shows its cover at once.
-    // Players that publish only a URL (QQ's pipe, Netease) would otherwise download it on every switch.
-    private const int RecentCoverCount = 16;
+    // Players that publish only a URL (QQ's pipe, Netease) would otherwise download it on every switch. How many follows the memory
+    // mode (MemoryPlan.RecentCovers).
+    public int RecentCoverCount { get; set; } = 16;
     private readonly LinkedList<(string Url, byte[] Bytes)> _recentCovers = new();
     private readonly Dictionary<string, Route> _routes = new();
     private readonly MediaSessionHandover _handover = new();
@@ -148,19 +149,15 @@ internal sealed class MediaSessions : IDisposable
         {
             var processes = KugouInstall.Processes();
             bool read = now || processes.Key.Length > 0;
-            return (Read: read, State: read ? KugouInstall.State() : null, Processes: processes);
+            return (Read: read, Install: read ? KugouInstall.Inspect() : default, Processes: processes);
         }).ContinueWith(check => _dispatcher.BeginInvoke(() =>
         {
             _kugouChecking = false;
             if (_disposed || !check.IsCompletedSuccessfully || !check.Result.Read) return;
-            var (_, state, (processes, started)) = check.Result;
+            var (_, (state, written), (processes, started)) = check.Result;
             _kugouRead = true;
             if (state != KugouState) { KugouState = state; Changed?.Invoke(); }
-            // An unchanged file is changed again at once; a KuGou with the debugging port is connected within a few seconds of its
-            // start, so one that runs longer without it started before the change and restarts.
-            bool unchanged = state is LibcefPatchState.Original or LibcefPatchState.Partial;
-            bool stale = state is LibcefPatchState.Patched && !KugouFullControl && started is { } at && DateTime.UtcNow - at > TimeSpan.FromSeconds(8);
-            if (_kugouAuto && !RestartingKugou && (unchanged || stale) && _kugouAttempted != processes)
+            if (_kugouAuto && !RestartingKugou && KugouPatch.RestartDue(state, KugouFullControl, started, written) && _kugouAttempted != processes)
             {
                 _kugouAttempted = processes;
                 _ = EnableKugouFullControlAsync(start: false);
@@ -358,6 +355,8 @@ internal sealed class MediaSessions : IDisposable
                 foreach (var source in _sessions.Values.Where(s => s.Dirty).ToArray()) _ = ReadSystemAsync(source);
                 if (_disposed) return;
                 var routes = BuildRoutes();
+                // An ignored application's routes are dropped whole, so its sessions do not come back as routes of their own.
+                routes.RemoveAll(route => MediaAppTarget.Ignores(_ignored, route.System?.App ?? "", route.ProcessName));
                 var tracks = new List<MediaTrack>();
                 var covers = new Dictionary<string, BitmapSource?>();
                 DateTimeOffset? swapDue = null;
@@ -465,6 +464,23 @@ internal sealed class MediaSessions : IDisposable
     }
     private static bool AppMatches(SystemSource source, string executable) =>
         string.Equals(Path.GetFileName(source.Session.SourceAppUserModelId), executable, StringComparison.OrdinalIgnoreCase);
+    // Applications whose playback is left out (DeckSettings.IgnoredMediaApps).
+    private IReadOnlyList<IgnoredMediaApp> _ignored = [];
+    public IReadOnlyList<IgnoredMediaApp> Ignored
+    {
+        set { if (_ignored.SequenceEqual(value)) return; _ignored = [.. value]; Schedule(); }
+    }
+    // The applications that report playback now, playing or paused, other than ignored ones: what the settings can add to the
+    // ignored list. A player read through its own connection is named by the id its session would report.
+    public IReadOnlyList<IgnoredMediaApp> DetectedApps() => BuildRoutes()
+        .Where(route => !route.Departed && !MediaAppTarget.Ignores(_ignored, route.System?.App ?? "", route.ProcessName))
+        .Select(route =>
+        {
+            string appId = route.System?.App ?? (route.ProcessName == "kugou" ? "kugou" : route.ProcessName + ".exe");
+            var owner = new MediaAppOwner(route.Connection?.ProcessId, MediaAppTarget.ProcessName(appId), appId);
+            return new IgnoredMediaApp(appId, SourceName(appId), AppIdentity.FindImage(owner));
+        })
+        .DistinctBy(app => app.AppId, StringComparer.OrdinalIgnoreCase).ToList();
     private List<Route> BuildRoutes()
     {
         var routes = new List<Route>();
@@ -773,6 +789,8 @@ internal sealed class MediaSessions : IDisposable
     private static MediaDispatchResult DispatchResult(DesktopCommandResult result) => result switch
     { DesktopCommandResult.Unavailable => MediaDispatchResult.Unavailable, DesktopCommandResult.Sent => MediaDispatchResult.Sent, _ => MediaDispatchResult.Uncertain };
     public float Peak() => _meter.Peak;
+    // How long the bars' capture keeps running after nothing shows them (MemoryPlan.MediaLinger).
+    public TimeSpan MeterLinger { set => _meter.Linger = value; }
     // The bars' levels from the player's captured audio, flowing along the bars or as the spectrum, one band for each of the levels.Length bars; false when only the peak meter is available.
     public bool FlowLevels(Span<double> levels, EqualizerMode mode) => _meter.TryFill(levels, mode);
     // The playing player's sound while its bars are seen; otherwise the whole system's, while bars shown at all times ask for it.
