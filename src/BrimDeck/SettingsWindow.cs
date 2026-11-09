@@ -321,6 +321,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         double keep = page == _page ? Math.Max(_scroll.VerticalOffset, _keptOffset) : 0; _keptOffset = 0;
         // The exception list's reserved height only lasts for this visit of the page.
         _exceptionsReservedHeight = 0; _exceptionsOpen = false; _exceptionsHost = null;
+        _ignoredOpen = false; _ignoredHost = null;
         _scroll.ScrollChanged -= ExceptionsScrollChanged;
         _refreshSensors = null;
         _page = page; _navigation.Children.Clear(); _content.Children.Clear(); _aboutUpdateView = null; _scroll.ScrollToTop();

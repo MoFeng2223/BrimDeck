@@ -358,6 +358,8 @@ internal sealed class MediaSessions : IDisposable
                 foreach (var source in _sessions.Values.Where(s => s.Dirty).ToArray()) _ = ReadSystemAsync(source);
                 if (_disposed) return;
                 var routes = BuildRoutes();
+                // An ignored application's routes are dropped whole, so its sessions do not come back as routes of their own.
+                routes.RemoveAll(route => MediaAppTarget.Ignores(_ignored, route.System?.App ?? "", route.ProcessName));
                 var tracks = new List<MediaTrack>();
                 var covers = new Dictionary<string, BitmapSource?>();
                 DateTimeOffset? swapDue = null;
@@ -465,6 +467,23 @@ internal sealed class MediaSessions : IDisposable
     }
     private static bool AppMatches(SystemSource source, string executable) =>
         string.Equals(Path.GetFileName(source.Session.SourceAppUserModelId), executable, StringComparison.OrdinalIgnoreCase);
+    // Applications whose playback is left out (DeckSettings.IgnoredMediaApps).
+    private IReadOnlyList<IgnoredMediaApp> _ignored = [];
+    public IReadOnlyList<IgnoredMediaApp> Ignored
+    {
+        set { if (_ignored.SequenceEqual(value)) return; _ignored = [.. value]; Schedule(); }
+    }
+    // The applications that report playback now, playing or paused, other than ignored ones: what the settings can add to the
+    // ignored list. A player read through its own connection is named by the id its session would report.
+    public IReadOnlyList<IgnoredMediaApp> DetectedApps() => BuildRoutes()
+        .Where(route => !route.Departed && !MediaAppTarget.Ignores(_ignored, route.System?.App ?? "", route.ProcessName))
+        .Select(route =>
+        {
+            string appId = route.System?.App ?? (route.ProcessName == "kugou" ? "kugou" : route.ProcessName + ".exe");
+            var owner = new MediaAppOwner(route.Connection?.ProcessId, MediaAppTarget.ProcessName(appId), appId);
+            return new IgnoredMediaApp(appId, SourceName(appId), AppIdentity.FindImage(owner));
+        })
+        .DistinctBy(app => app.AppId, StringComparer.OrdinalIgnoreCase).ToList();
     private List<Route> BuildRoutes()
     {
         var routes = new List<Route>();
