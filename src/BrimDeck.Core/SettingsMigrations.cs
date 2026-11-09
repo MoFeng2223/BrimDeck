@@ -27,6 +27,7 @@ public static class SettingsMigrations
         saved = VersionOf(root);
         foreach (var (version, apply) in Steps)
             if (version > saved && version <= running) apply(root);
+        MemoryModeFromSwitch(root);
         var settings = root.Deserialize<DeckSettings>() ?? new();
         settings.Normalize();
         return settings;
@@ -108,6 +109,16 @@ public static class SettingsMigrations
     {
         if (root["AlwaysOnTop"] is not NodeValue above || !above.TryGetValue(out bool on) || on) return;
         foreach (var name in new[] { "Maximized", "Borderless", "Exclusive" }) root[name] = (int)WindowBehavior.Normal;
+    }
+
+    // 1.3.0: "free memory when idle" (TrimMemoryWhenIdle) became one of three modes (MemoryMode). Switched on, it did what the
+    // saver mode does; switched off, the file takes the balanced mode. Not a step: the switch changed during the 1.3.0 prereleases,
+    // whose files count as 1.3.0 and would skip a 1.3.0 step. It runs on any file that has the switch and no mode, which only a
+    // version before the change writes (later versions write both).
+    private static void MemoryModeFromSwitch(JsonObject root)
+    {
+        if (root.ContainsKey("MemoryMode") || root["TrimMemoryWhenIdle"] is not NodeValue trim || !trim.TryGetValue(out bool on)) return;
+        root["MemoryMode"] = (int)(on ? MemoryMode.Saver : MemoryMode.Balanced);
     }
 
     private static bool Flag(JsonObject root, string name) => root[name] is not NodeValue value || !value.TryGetValue(out bool flag) || flag;

@@ -6,8 +6,8 @@ using BrimDeck.Core;
 
 namespace BrimDeck.Native;
 
-// Reads the system for the monitor page on a thread of its own, only while a panel shows the page and for a short while
-// after, so the page costs nothing while it is not looked at. The structure follows ftop's SystemSampler by Nongfsq
+// Reads the system for the monitor page on a thread of its own, only while a panel shows the page and for a while after (the
+// memory mode's ReadingsLinger), so the page costs nothing while it is not looked at. The structure follows ftop's SystemSampler by Nongfsq
 // (https://github.com/Nongfsq/ftop, MIT License; see ThirdPartyNotices.txt): one provider per module keeps the counters
 // it needs for deltas and returns a Reading; nothing here throws; listing processes, the costliest reading, runs every
 // other tick. The readings themselves are the Windows ones Task Manager shows.
@@ -15,8 +15,6 @@ namespace BrimDeck.Native;
 // thread with providers of its own, and the old one ends should the driver ever answer (ReadingAbandoned).
 internal sealed class SystemSampler : IDisposable
 {
-    // Reopening the page within this time finds the sampler still running and the readings current.
-    private static readonly TimeSpan Linger = TimeSpan.FromSeconds(10);
     // After a pause the counters are read once and again after this short window, so the page has figures almost at once.
     private const int PrimeMilliseconds = 300;
     // The network readings the sparklines draw, oldest first: a minute at one reading a second.
@@ -28,6 +26,8 @@ internal sealed class SystemSampler : IDisposable
     // Raised when a thread is replaced: only the thread of the current generation reads.
     private int _generation;
     private volatile bool _wanted, _disposed, _listProcesses, _primeProcesses, _primeCounters;
+    // The memory mode keeps the process list's buffer and the programs' icons while the readings pause (MemoryPlan.KeepCaches).
+    private volatile bool _keepCaches;
     private volatile int _intervalMilliseconds = 1000;
     // The providers belong to the sampling thread, which creates them: adding the performance counters can take tens of
     // milliseconds, which the panel must not wait for. Only HoldProcesses reaches them from the UI thread. Each kind of counter has a
@@ -92,7 +92,7 @@ internal sealed class SystemSampler : IDisposable
     public SystemSampler(Dispatcher dispatcher, Func<(string? Key, string? Name)> gpuChoice)
     {
         _dispatcher = dispatcher; _gpuChoice = gpuChoice;
-        _linger = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = Linger };
+        _linger = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = MemoryPlan.For(MemoryMode.Balanced).ReadingsLinger };
         // Once paused the readings grow old, so they are dropped: a page opened later shows dashes until new ones arrive
         // instead of old figures as if they were current.
         _linger.Tick += (_, _) => { _linger.Stop(); _wanted = false; Latest = null; };
@@ -106,6 +106,14 @@ internal sealed class SystemSampler : IDisposable
     public event Action<string, string>? GpuKeyUpgraded;
     // While set, rows already in the process lists keep their rank (the pointer is over a list).
     public bool HoldProcesses { get => _processes.Hold; set => _processes.Hold = value; }
+
+    // The memory mode's rules (MemoryPlan): reopening the page within ReadingsLinger finds the sampler still running and the readings
+    // current. Called on the UI thread.
+    public void UsePlan(MemoryPlan plan) { _linger.Interval = plan.ReadingsLinger; _keepCaches = plan.KeepCaches; }
+
+    // Starts the sampling thread without reading, so the counters and the adapters' descriptions are set up before the page first
+    // opens (the smooth memory mode). Called on the UI thread.
+    public void Warm() { if (!_disposed && _thread is null) StartThread(0); }
 
     // Called on the UI thread whenever a panel opens or closes the page or shows or hides the readings in its collapsed row.
     // processes: the expanded page is open, so the process list is read too.
@@ -257,12 +265,14 @@ internal sealed class SystemSampler : IDisposable
     }
 
     // Paused: the histories start over, and what only the readings need is let go until they start again: the process table's buffer
-    // (a megabyte or more), the last list and the programs' icons, read again with the first list.
+    // (a megabyte or more), the last list and the programs' icons, read again with the first list. The smooth memory mode keeps the
+    // buffer and the icons (MemoryPlan.KeepCaches).
     private void Rest()
     {
         _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _powerHistory.Clear(); _powerStats.Reset(); _powerSource = null; _cpuPower.Clear(); _gpuPower.Clear();
         _power!.Sample(false, false, 0, [], default, false); _storage.Rest(); _bridges.Rest();
-        _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting); _processes.Dispose(); ProcessIcons.Clear();
+        _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting);
+        if (!_keepCaches) { _processes.Dispose(); ProcessIcons.Clear(); }
         _cpu!.Forget();
     }
 

@@ -30,7 +30,9 @@ public partial class MainWindow : Window
     private bool _dragHold;
     // Checks run every 40 ms near the surface. Farther away the interval grows with the distance, assuming the cursor
     // approaches at no more than 10 physical pixels per millisecond, so it still arrives within one short interval.
-    private const double TrackNear = 40, TrackFar = 160, ApproachSpeed = 10;
+    // TrackFar: the longest pause while the pointer is far away, which the memory mode sets (MemoryPlan.PointerFarMilliseconds).
+    private const double TrackNear = 40, ApproachSpeed = 10;
+    private double TrackFar => _app.MemoryPlan.PointerFarMilliseconds;
     private readonly WindowsHost _host;
     // Null for the main panel. The panels of other monitors take their usage data from it instead of reading their own.
     private readonly MainWindow? _lead;
@@ -247,8 +249,9 @@ public partial class MainWindow : Window
     }
     public void ApplySettings() => ApplySettings(false);
     // animatePage also animates the collapsed shape, which is how a screen-context change (maximized window, full screen)
-    // moves between the notch, the capsule and the indicator.
-    private void ApplySettings(bool animatePage)
+    // moves between the notch, the capsule and the indicator. pageOnly: only the page changed (ShowPage); the collapsed row does not
+    // depend on the page, so it is not built again.
+    private void ApplySettings(bool animatePage, bool pageOnly = false)
     {
         // Powering off (exit) holds the panel as it is.
         if (_poweringOff) return;
@@ -305,7 +308,7 @@ public partial class MainWindow : Window
         FrameHeight = Math.Max(1, Math.Min(MonitorBoundsDip.Height, Math.Max(Math.Max(140, panelSpace), Collapsed.Surface.Bottom + 24)));
         Place(bounds, scale);
         UpdateClock();
-        RenderCompact();
+        if (!pageOnly || newEdge) RenderCompact();
         // Hiding and showing again (the tray, a full-screen rule) are immediate. The boot plays only when the panel first
         // appears (Loaded); the power-off only when BrimDeck exits (App.ExitApplication).
         // The window's own opacity is no longer animated; a build that faded it may have left it lowered.
@@ -681,6 +684,8 @@ public partial class MainWindow : Window
         // host's own state, as a new screen context closes the panel without passing here.
         if (expanded != _host.Open) _host.Front(expanded);
         _expanded = expanded;
+        // The smooth memory mode holds off full collections while a panel is open (App.UpdateCollectionLatency).
+        if (expanded != wasExpanded) _app.UpdateCollectionLatency();
         _escapeDismissal?.SetEnabled(expanded && !_preview || _moveArmed);
         if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); if (wasExpanded) ResetShelf(); }
         if (wasExpanded && !expanded) { HotkeyPanelCollapsed(); ReplayCompactTitle(); _app.RequestTrim(); }
