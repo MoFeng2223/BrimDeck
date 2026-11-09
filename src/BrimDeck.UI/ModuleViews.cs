@@ -149,9 +149,10 @@ public interface IModuleCompactWidth
 // built-in readings, in the user's order and under the user's switch. No Active state and no Expanded view: this is the
 // part itself, and the module's own page is where its detail belongs.
 //
-// Widths are in DIPs at scale 1, exactly as IModuleCompactWidth describes. A part must declare at least one of
-// PreferredWidth / PreferredHeight, or it is rejected at registration. Views follow the view lifecycle: the host creates
-// one per mount, disposes it with the row, and never recreates it on every reading.
+// Widths are in DIPs at scale 1, exactly as IModuleCompactWidth describes. A view that declares neither PreferredWidth
+// nor PreferredHeight cannot be placed: the host keeps it out of the row and records the reason in the module's
+// diagnostics (registration cannot check this — the view does not exist yet). Views follow the view lifecycle: the host
+// creates one per mount, disposes it with the row, and never recreates it on every reading.
 public interface IModuleCompactPart
 {
     IModuleView CreateView(ModuleViewContext context);

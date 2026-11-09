@@ -1113,6 +1113,24 @@ public partial class MainWindow
         // Too short for both narrowest windows, the title gives way down to its shortest.
         double needed = CompactSpacing.Minimum(ringWidths, layout.RingGap) + CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0);
         if (pool < needed) pool += Math.Min(needed - pool, Math.Max(0, titleShare - titleFloor));
+        // The module parts take their room first: the built-in readings are what scrolls (their windows are computed from
+        // what is left), and a part that does not fit gives way on its own. Doing this before Share also keeps the drag's
+        // flowing windows authoritative — a later Share would overwrite the blend and make the rings jump by whole items.
+        double scrollingFloor = CompactSpacing.Minimum(ringWidths, layout.RingGap) + CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0);
+        double moduleWidth = 0, available = pool - scrollingFloor;
+        var placedModules = new Dictionary<string, ModulePart>(StringComparer.Ordinal);
+        foreach (var part in wantedParts)
+        {
+            // The full width first; when it does not fit, the narrower form the view offers (it lays itself out for it).
+            double width = part.Width;
+            bool fits = moduleFace > 0 && available >= width - .5;
+            if (!fits && part.CompactWidth is { } compact && compact > 0 && available >= compact - .5) { width = compact; part.Width = compact; fits = true; }
+            part.Placed = fits;
+            part.Dropped = !fits;
+            if (fits) { moduleWidth += width + unit; available -= width + unit; placedModules[part.ModuleId] = part; }
+        }
+        _compactModulesShown = moduleWidth > 0;
+        if (moduleWidth > 0) pool = Math.Max(0, pool - moduleWidth);
         var (rings, readings) = CompactSpacing.Share(ringWidths, layout.RingGap, readingWidths, strip?.Gap ?? 0, pool);
         // While the surface is dragged the windows take the room as it comes, an item cut at the edge, and ease back to whole items
         // when it settles (MainWindow.CompactFlow.cs): the row follows the pointer as 1.2.1's did, with no jump per item.
@@ -1138,27 +1156,6 @@ public partial class MainWindow
         // arrangement like the built-in readings'. It is left out of the row altogether when what the scrolling parts
         // need leaves no room for it — a part cut at the edge would be worse than absent — and the settings say so.
         bool wantsModule = moduleFace > 0;
-        // The room the scrolling parts must keep whatever happens (their narrowest windows), then the module parts' own.
-        double scrollingFloor = CompactSpacing.Minimum(ringWidths, layout.RingGap) + CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0);
-        // The parts are grouped by module and placed in the user's order: each takes its room from what is left after the
-        // scrolling parts' floor, and one that does not fit is dropped on its own (the settings say which, and why) —
-        // the parts after it still try, so a wide module never starves a narrow one behind it.
-        double moduleWidth = 0, available = pool - scrollingFloor;
-        var placedModules = new Dictionary<string, ModulePart>(StringComparer.Ordinal);
-        foreach (var part in wantedParts)
-        {
-            // The full width first; when it does not fit, the narrower form the view offers (it lays itself out for the
-            // narrower room), so a part gives up detail rather than disappearing while its compact form would fit.
-            double width = part.Width;
-            bool fits = moduleFace > 0 && available >= width - .5;
-            if (!fits && part.CompactWidth is { } compact && compact > 0 && available >= compact - .5) { width = compact; part.Width = compact; fits = true; }
-            part.Placed = fits;
-            part.Dropped = !fits;
-            if (fits) { moduleWidth += width + unit; available -= width + unit; placedModules[part.ModuleId] = part; }
-        }
-        _compactModulesShown = moduleWidth > 0;
-        // The module parts are not scrolling parts: their room comes off the pool before the rings and readings share.
-        if (moduleWidth > 0) { pool = Math.Max(0, pool - moduleWidth); (rings, readings) = CompactSpacing.Share(ringWidths, layout.RingGap, readingWidths, strip?.Gap ?? 0, pool); }
         // Each module is a part of its own, in the row's saved order among the built-in parts.
         foreach (var part in rowOrder)
         {

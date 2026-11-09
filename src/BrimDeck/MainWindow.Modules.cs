@@ -128,6 +128,8 @@ public partial class MainWindow
         internal double Width { get; set; }
         internal double? CompactWidth { get; set; }
         internal bool Placed { get; set; }
+        // The missing-width diagnostic is written once per part, not on every rebuild.
+        internal bool ReportedNoWidth { get; set; }
         internal bool Dropped { get; set; }
     }
     private readonly List<ModulePart> _moduleParts = [];
@@ -188,9 +190,18 @@ public partial class MainWindow
                 _moduleParts.Add(part);
             }
             part.Width = 0; part.Placed = false; part.Dropped = false;
-            // A view that has not mounted yet (or that does not offer a width) takes no part; the host stays for the
-            // next rebuild rather than being thrown away.
-            if (part.Host.View is not IModuleCompactWidth declared || declared.PreferredWidth is not { } wanted) continue;
+            // A view that has not mounted yet takes no part; the host stays for the next rebuild rather than being thrown
+            // away. One that mounted without declaring a width can never be placed, and says why in the diagnostics.
+            if (part.Host.View is not IModuleCompactWidth declared || declared.PreferredWidth is not { } wanted)
+            {
+                if (part.Host.View is not null && !part.ReportedNoWidth)
+                {
+                    part.ReportedNoWidth = true;
+                    _app.Modules.Report(source.ModuleId, "compact part",
+                        new ModuleApiException("compact-part-no-width", "A compact part's view must declare PreferredWidth or PreferredHeight (IModuleCompactWidth) to stand in the collapsed row."));
+                }
+                continue;
+            }
             part.Width = wanted;
             part.CompactWidth = declared.CompactWidth;
             face += wanted;
@@ -204,6 +215,13 @@ public partial class MainWindow
     // The row is about to be rebuilt: the parts are not taken out of the tree with it (they live in CompactModuleLayer),
     // so nothing to detach — the new row places and sizes them again through PlaceModulePart. The layer's own size goes
     // back to nothing so this build's parts start their own span.
+    // A notice or a temporary page takes the row in place of everything else: the parts leave the screen with the built-in
+    // readings, and stop refreshing while they are off it.
+    private void HideModuleParts()
+    {
+        CompactModuleLayer.Visibility = Visibility.Collapsed;
+        foreach (var part in _moduleParts) part.Host.SetPresented(false);
+    }
     private void ClearModulePartForRow()
     {
         CompactModuleLayer.Visibility = Visibility.Collapsed;
