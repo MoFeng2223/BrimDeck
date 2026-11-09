@@ -1,0 +1,29 @@
+src/BrimDeck/MainWindow.Shelf.cs
+  s_a4895f55ecb8d0::t_4c988d317180b4 282-284
+  s_a4895f55ecb8d0::t_298269d098ac1d 256-263
+  s_a4895f55ecb8d0::t_1dc8f03a7fe52e 174-178,181,183
+  s_a4895f55ecb8d0::t_807969c26c6f38 171-173,179-180,182
+  s_a4895f55ecb8d0::t_c960d75a460e10 285,287
+  s_a4895f55ecb8d0::t_c73fffaf732e77 228-234
+src/BrimDeck/ShelfRowList.cs
+  s_a4895f55ecb8d0::t_21a4a76e04f0b9 1-50
+src/BrimDeck/MainWindow.Resize.cs
+  s_a4895f55ecb8d0::t_c968d67f2578d8 324
+  s_a4895f55ecb8d0::t_99c8d513816cf6 322-323
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "29cdf3aef19494a45dd4feaaf4ca89415f38606f",
+  "prompts": {},
+  "sessions": {
+    "s_a4895f55ecb8d0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3746e0e0-70cd-44f7-91ce-faccc6646c76",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
