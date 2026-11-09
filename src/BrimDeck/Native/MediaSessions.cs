@@ -148,19 +148,15 @@ internal sealed class MediaSessions : IDisposable
         {
             var processes = KugouInstall.Processes();
             bool read = now || processes.Key.Length > 0;
-            return (Read: read, State: read ? KugouInstall.State() : null, Processes: processes);
+            return (Read: read, Install: read ? KugouInstall.Inspect() : default, Processes: processes);
         }).ContinueWith(check => _dispatcher.BeginInvoke(() =>
         {
             _kugouChecking = false;
             if (_disposed || !check.IsCompletedSuccessfully || !check.Result.Read) return;
-            var (_, state, (processes, started)) = check.Result;
+            var (_, (state, written), (processes, started)) = check.Result;
             _kugouRead = true;
             if (state != KugouState) { KugouState = state; Changed?.Invoke(); }
-            // An unchanged file is changed again at once; a KuGou with the debugging port is connected within a few seconds of its
-            // start, so one that runs longer without it started before the change and restarts.
-            bool unchanged = state is LibcefPatchState.Original or LibcefPatchState.Partial;
-            bool stale = state is LibcefPatchState.Patched && !KugouFullControl && started is { } at && DateTime.UtcNow - at > TimeSpan.FromSeconds(8);
-            if (_kugouAuto && !RestartingKugou && (unchanged || stale) && _kugouAttempted != processes)
+            if (_kugouAuto && !RestartingKugou && KugouPatch.RestartDue(state, KugouFullControl, started, written) && _kugouAttempted != processes)
             {
                 _kugouAttempted = processes;
                 _ = EnableKugouFullControlAsync(start: false);
