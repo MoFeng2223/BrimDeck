@@ -8,6 +8,7 @@ internal static class MusicTests
         await MediaRoutingTests.Run(check);
         MediaSeekPreviewTests.Run(check);
         MediaPlaybackStackTests.Run(check);
+        HorizontalSwipeTests.Run(check);
         var modes = new MediaTrack { CanRepeat = true, CanShuffle = true, Repeat = MediaRepeat.List };
         check("Modes cycle list, single, shuffle, order, list", MusicPlaybackModes.Next(modes) == MusicPlaybackMode.Track
             && MusicPlaybackModes.Next(modes with { Repeat = MediaRepeat.Track }) == MusicPlaybackMode.Shuffle
