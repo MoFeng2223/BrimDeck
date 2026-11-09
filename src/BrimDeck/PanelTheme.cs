@@ -24,6 +24,9 @@ internal static class PanelTheme
     // When the theme on screen changes between its day and night looks next, or null for a theme without a night look.
     public static DateTime? NextDaylightChange(DeckSettings settings) => PanelThemes.NextDaylightChange(ShownTheme.File, DateTime.Now, settings.ThemeDaylight);
     public static int Generation { get; private set; }
+    // Another interface font (Fonts.Use) makes everything built from the old one out of date, as another palette does: every page and
+    // cache that compares Generation is built again, with no fade, since no color changes.
+    public static void Outdate() => Generation++;
     // Raised just before another palette becomes current; true when a theme trades its day and night looks.
     public static event Action<bool>? Changing;
     // The themes found in the folder at the last reload.
