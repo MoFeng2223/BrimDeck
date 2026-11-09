@@ -95,7 +95,7 @@ public partial class App : Application
         Store = new SettingsStore(folder); Settings = Store.Load();
         // Before anything is read: a reading left unanswered when the last run ended stops now (SensorGuard).
         SensorGuard.Start(folder);
-        UseLanguage();
+        UseLanguage(); UseFont();
         PanelTheme.Use(Settings);
         ScheduleDaylight();
         // "跟随系统" follows the Windows app theme while BrimDeck runs.
@@ -155,6 +155,10 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += (_, args) => Write(args.ExceptionObject);
         TaskScheduler.UnobservedTaskException += (_, args) => { Write(args.Exception); args.SetObserved(); };
     }
+    // The user's own font goes in front of the interface's families (Fonts); false when it is the one already in use.
+    // The families are published at the start whatever is chosen, so the XAML defaults are never what the text is drawn in by accident.
+    private bool UseFont() { bool changed = Fonts.Use(Settings.UiFont); if (!_fontsPublished) { _fontsPublished = true; Fonts.Publish(Resources); } return changed; }
+    private bool _fontsPublished;
     // Names used by XAML templates follow the language through these resources.
     private void UseLanguage()
     {
@@ -221,6 +225,8 @@ public partial class App : Application
         // A new collapsed style morphs every panel's surface into its form (MainWindow.MorphShape).
         bool styleChanged = settings.Style != Settings.Style;
         settings.Normalize(); Settings = settings;
+        // A different interface font is published at once and reaches every window already made (Fonts.Use); the panels below lay out again with it.
+        UseFont();
         Shelf.Apply(settings);
         ApplyHotkeys();
         ApplyTray();
