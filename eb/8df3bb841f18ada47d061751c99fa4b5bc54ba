@@ -1,0 +1,21 @@
+src/BrimDeck/PanelTheme.cs
+  s_dace215e85b470::t_e0688607577d68 27-29
+src/BrimDeck/App.xaml.cs
+  s_dace215e85b470::t_e0688607577d68 160-161
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "eb8df3bb841f18ada47d061751c99fa4b5bc54ba",
+  "prompts": {},
+  "sessions": {
+    "s_dace215e85b470": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf8154fc-5cdc-4f14-adf7-6fcafc843c35",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
