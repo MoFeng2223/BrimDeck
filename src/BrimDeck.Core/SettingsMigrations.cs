@@ -99,6 +99,15 @@ public static class SettingsMigrations
                 ["Key"] = device["Key"]?.DeepClone(), ["Name"] = device["Name"]?.DeepClone(), ["Collapsed"] = false, ["Expanded"] = false
             })]);
         root.Remove("HiddenDevices");
+        OrdinaryPanelRules(root);
+    }
+
+    // 1.3.0: the window rules apply to a panel that is not kept above other windows too; before, it was always left covered.
+    // Such a panel keeps that: its three global rules are set to keep the style, which leaves it covered.
+    private static void OrdinaryPanelRules(JsonObject root)
+    {
+        if (root["AlwaysOnTop"] is not NodeValue above || !above.TryGetValue(out bool on) || on) return;
+        foreach (var name in new[] { "Maximized", "Borderless", "Exclusive" }) root[name] = (int)WindowBehavior.Normal;
     }
 
     private static bool Flag(JsonObject root, string name) => root[name] is not NodeValue value || !value.TryGetValue(out bool flag) || flag;

@@ -748,8 +748,9 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     private void WindowRules()
     {
         SectionTitle(Loc.T("窗口行为", "Window behavior"));
-        // The window rules and Keep on top only concern a panel above other windows, so they leave with the switch.
-        var rules = new StackPanel { Visibility = S.AlwaysOnTop ? Visibility.Visible : Visibility.Collapsed };
+        // The window rules apply whether or not the panel is kept above other windows; Keep on top only concerns a panel above
+        // them, so it leaves with the switch.
+        var rules = new StackPanel();
         foreach (var row in new[]
         {
             BehaviorRow(Loc.T("有窗口最大化时", "When a window is maximized"), S.Maximized, value => Change(s => s.Maximized = value)),
@@ -764,13 +765,13 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
             rules.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
             rules.Children.Add(row);
         }
-        var keep = new StackPanel { Visibility = rules.Visibility };
+        var keep = new StackPanel { Visibility = S.AlwaysOnTop ? Visibility.Visible : Visibility.Collapsed };
         var onTop = Toggle(Loc.T("显示在其他窗口上方", "Keep above other windows"), S.AlwaysOnTop, value =>
         {
             if (S.AlwaysOnTop != value) Change(s => s.AlwaysOnTop = value);
-            rules.Visibility = keep.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
-        }, help: Loc.T("关闭后，面板像普通窗口一样会被其他窗口遮挡，展开时显示在最前面，显示桌面时仍然可见。",
-            "When off, other windows can cover the panel like any window. It comes to the front when it expands and stays visible when you show the desktop."));
+            keep.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+        }, help: Loc.T("关闭后，面板像普通窗口一样会被其他窗口遮挡，展开时显示在最前面，显示桌面时仍然可见。下面的规则仍然生效：选择“保持原有样式”时面板被遮挡，选择“显示为指示条”时指示条显示在该窗口上方。",
+            "When off, other windows can cover the panel like any window. It comes to the front when it expands and stays visible when you show the desktop. The rules below still apply: with Keep style the panel is covered, with As indicator the indicator shows above that window."));
         var behavior = new StackPanel();
         behavior.Children.Add(onTop); behavior.Children.Add(rules);
         Group(behavior);

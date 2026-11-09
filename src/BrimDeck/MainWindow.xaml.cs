@@ -76,6 +76,10 @@ public partial class MainWindow : Window
     private DeckSettings Settings => _app.Settings;
     public bool IsExpanded => _expanded;
     public bool IsSuppressed => !_preview && (Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Hide || HiddenByUser);
+    // The panel is a topmost overlay: kept above other windows, or an ordinary panel a window rule turns into the indicator,
+    // which shows above the window that fills the screen.
+    private bool KeepsAbove => Settings.AlwaysOnTop
+        || !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Line;
     public IReadOnlyList<ProviderSnapshot> Snapshots { get; private set; } = [];
     // Set when the first read has ended, with data or without (RefreshAsync); until then the usage page shows its skeleton.
     private bool _firstReadEnded;
@@ -89,7 +93,7 @@ public partial class MainWindow : Window
     {
         _app = app; _lead = lead;
         _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle, IslandStrip,
-            () => Settings.ForceTopmost, () => Settings.BackgroundWindows, () => Settings.AlwaysOnTop);
+            () => Settings.ForceTopmost, () => Settings.BackgroundWindows, () => KeepsAbove);
         Rect? IslandStrip()
         {
             // The island border is what is drawn, in every style and whether the panel is collapsed or open — its size
@@ -259,8 +263,9 @@ public partial class MainWindow : Window
         ApplyTheme();
         ApplySurface();
         WindowsHost.SetCapturable(this, Settings.WindowCapture);
-        // Made ordinary, at startup too, the panel goes beneath the window in use like a closed one.
-        if (Topmost != Settings.AlwaysOnTop) { Topmost = Settings.AlwaysOnTop; if (!Topmost && !_expanded) _host.Front(false); }
+        // Made ordinary, at startup too, the panel goes beneath the window in use like a closed one; so does an ordinary panel
+        // whose indicator is no longer called for.
+        if (Topmost != KeepsAbove) { Topmost = KeepsAbove; if (!Topmost && !_expanded) _host.Front(false); }
         if (!Settings.QuotaAlerts && _alert is not null) ClearAlert();
         ApplySyncSchedule();
         ApplyMusicSettings();
@@ -920,7 +925,7 @@ public partial class MainWindow : Window
         var grip = TrackGrips(cursor);
         // An ordinary panel under another window is out of the pointer's reach (DeckSettings.AlwaysOnTop); asked only where
         // the pointer would otherwise count as inside.
-        bool Covered() => !Settings.AlwaysOnTop && WindowsHost.CoveredAt(this, cursor);
+        bool Covered() => !KeepsAbove && WindowsHost.CoveredAt(this, cursor);
         bool inCompact = area.Contains(cursor) && grip == ResizeEdges.None && !Covered();
         double dx = Math.Max(0, Math.Max(area.Left - cursor.X, cursor.X - area.Right)), dy = Math.Max(0, Math.Max(area.Top - cursor.Y, cursor.Y - area.Bottom));
         // Whole 20 ms steps, so small movements far away do not reschedule the timer on every check.
