@@ -21,6 +21,8 @@ internal static class ModuleCapabilities
         Core<IModuleSystem>(ModuleApi.SystemRead, ModuleCapabilityKind.Service, "读取系统监控", "Read system metrics", 1, ModuleApi.SystemRead),
         Core<IModuleNotifications>(ModuleApi.NotificationsShow, ModuleCapabilityKind.Service, "显示岛内提醒", "Show island notices", 1, ModuleApi.NotificationsShow),
         Core<IModulePresentation>(ModuleApi.UiPresentation, ModuleCapabilityKind.Service, "刷新模组界面", "Refresh module presentation", 5, null),
+        Core<IModuleCommands>(ModuleApi.CommandsInvoke, ModuleCapabilityKind.Service, "调用自己的命令", "Invoke own commands", 9, null),
+        Core<IModuleCommand>(ModuleApi.UiCommands, ModuleCapabilityKind.Contribution, "插件命令", "Commands", 9, null),
         Ui(ModuleApi.UiPages, "小程序页面", "Mini-app pages", "BrimDeck.ModulePage"),
         Ui(ModuleApi.UiActivities, "持续活动", "Persistent activities", "BrimDeck.IModuleActivity"),
         Ui(ModuleApi.UiWidgets, "组件", "Widgets", "BrimDeck.ModuleWidget"),

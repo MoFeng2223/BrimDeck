@@ -23,4 +23,12 @@ public sealed partial class ModuleHost
             (operation, callback) => InvokeOwned(active, operation, () => { callback(); return true; }),
             (operation, error) => ReportOwned(active, operation, error));
     }
+
+    // The lifetime of the running activation of a module, or a token that is already cancelled when it is not running. A
+    // command's work ends when its module stops, so a command still in flight cannot outlive the activation that owns it.
+    internal CancellationToken CommandLifetime(string id)
+    {
+        Active? active; lock (_gate) active = _active.GetValueOrDefault(id);
+        return active is not null && active.Scope.Ready ? active.Scope.Token : new CancellationToken(canceled: true);
+    }
 }

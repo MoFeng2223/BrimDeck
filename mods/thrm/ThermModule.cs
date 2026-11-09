@@ -19,6 +19,7 @@ public sealed class ThermModule : IModule
             IconPath = ThermVisuals.FanGlyph, Size = new ModulePageSize(620, 250)
         });
         context.Register<IModuleCompactPart>("readings", new ThermCompactPart(workspace));
+        context.Register<IModuleCommand>("open-page", new ThermCommands(context));
         context.Register<IModuleSettings>("general", new ThermSettings(workspace));
         return ValueTask.CompletedTask;
     }

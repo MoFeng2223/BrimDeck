@@ -2,10 +2,12 @@ namespace BrimDeck.Modules;
 
 public static class ModuleApi
 {
-    public const int Major = 1, Minor = 8;
+    public const int Major = 1, Minor = 9;
     public const string HostInfo = "host.info", UsageRead = "usage.read", MediaRead = "media.read", SystemRead = "system.read", NotificationsShow = "notifications.show";
     public const string UiPresentation = "ui.presentation";
     public const string UiCompactParts = "ui.compact-parts";
+    public const string CommandsInvoke = "commands.invoke";
+    public const string UiCommands = "ui.commands";
     public const string UiPages = "ui.pages", UiActivities = "ui.activities", UiWidgets = "ui.widgets", UiSettings = "ui.settings", StorageData = "storage.data";
     public static IReadOnlyList<ModuleCapability> Catalog { get; } = ModuleCapabilities.Create();
     public static IReadOnlyList<string> Capabilities { get; } = Array.AsReadOnly(Catalog.Select(c => c.Id).ToArray());

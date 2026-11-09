@@ -5,6 +5,7 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Shapes;
 using BrimDeck.Core;
+using BrimDeck.Modules;
 
 namespace BrimDeck;
 
@@ -38,6 +39,35 @@ public sealed partial class SettingsWindow
         Group([.. new[] { HotkeyKind.Move, HotkeyKind.Resize }.Select(kind => HotkeyRow(kind))]);
         SectionTitle(Loc.T("其他", "Other"));
         Group([.. new[] { HotkeyKind.ClickThrough, HotkeyKind.OpenSettings, HotkeyKind.Refresh }.Select(kind => HotkeyRow(kind))]);
+        CommandHotkeys();
+    }
+
+    // The plugin commands, one row each: the box binds a global shortcut and the switch puts the command in the tray menu.
+    // A command of a stopped module keeps its binding but has no row, since the module offers nothing to bind while it is off.
+    private void CommandHotkeys()
+    {
+        var commands = _app.ModuleCommands();
+        if (commands.Count == 0) return;
+        SectionTitle(Loc.T("插件命令", "Plugin commands"),
+            help: () => Loc.T("快捷键默认未绑定；打开右侧开关会把命令放进托盘菜单。停用插件后绑定与开关都会保留。",
+                "Shortcuts are unbound by default; the switch on the right puts the command in the tray menu. Both are kept when the plugin is disabled."));
+        Group([.. commands.Select(entry => CommandHotkeyRow(entry))]);
+    }
+
+    private FrameworkElement CommandHotkeyRow(Contribution<BrimDeck.Modules.IModuleCommand> entry)
+    {
+        string title = App.CommandName(entry);
+        var descriptor = entry.Value.Descriptor;
+        string? help = (descriptor.Description, descriptor.DescriptionEn) switch
+        {
+            ({ Length: > 0 } zh, { Length: > 0 } en) => Loc.T(zh, en),
+            ({ Length: > 0 } zh, _) => zh,
+            (_, { Length: > 0 } en) => en,
+            _ => null
+        };
+        // The row decides both entry points of one command: the shortcut on the left, the tray switch beside it.
+        var tray = Toggle(Loc.T("放进托盘菜单", "Show in tray menu"), S.ModuleTrayCommand(entry.Id), value => Change(s => s.SetModuleTrayCommand(entry.Id, value)));
+        return CommandBox(entry.Id, title, help, tray);
     }
 
     private static string HotkeyTitle(HotkeyKind kind) => kind switch
@@ -311,6 +341,175 @@ public sealed partial class SettingsWindow
 
     // The app raises HotkeysChanged on the UI thread after registering again.
     private void AppHotkeysChanged() { foreach (var refresh in _hotkeyRows.ToList()) refresh(); }
+
+    // A command's shortcut box. It records exactly as a built-in one does (same template, suspension, clash check and status
+    // messages) but reads and writes the command's binding, and it may stand beside the command's tray switch.
+    private FrameworkElement CommandBox(string commandId, string title, string? help, FrameworkElement? trailing)
+    {
+        string waiting = Loc.T("请按下组合键…", "Press a combination…");
+        var text = TextLine("", 12, TextPrimary);
+        text.VerticalAlignment = VerticalAlignment.Center; text.TextTrimming = TextTrimming.CharacterEllipsis; text.Margin = new Thickness(10, 0, 32, 0);
+        var box = new Button
+        {
+            Template = HotkeyBoxTemplate, Content = text, HorizontalContentAlignment = HorizontalAlignment.Stretch, Cursor = Cursors.Hand,
+            FocusVisualStyle = (Style)FindResource("SettingsFocus")
+        };
+        Grid.SetColumnSpan(box, 2);
+        AutomationProperties.SetName(box, title);
+        var cross = new Path { Data = System.Windows.Media.Geometry.Parse("M 1,1 L 9,9 M 9,1 L 1,9"), StrokeThickness = 1.3, Width = 10, Height = 10 };
+        cross.SetBinding(Shape.StrokeProperty, new Binding(nameof(Control.Foreground)) { RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(Button), 1) });
+        var clear = new Button { Style = (Style)FindResource("SettingsGlyphButton"), Content = cross, Width = 24, Height = 24, Margin = new Thickness(0, 0, 3, 0), VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(clear, 1);
+        AutomationProperties.SetName(clear, Loc.T("清除" + title, "Clear " + title));
+        clear.ToolTip = Loc.T("清除", "Clear");
+        ToolTipService.SetShowOnDisabled(clear, false);
+        var inner = new Grid();
+        inner.ColumnDefinitions.Add(new ColumnDefinition()); inner.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var slot = new Border { Background = System.Windows.Media.Brushes.Transparent, Width = 27 }; Grid.SetColumn(slot, 1);
+        inner.Children.Add(box); inner.Children.Add(slot); inner.Children.Add(clear);
+        var chrome = new Border
+        {
+            Child = inner, Width = HotkeyBoxWidth, Height = 30, CornerRadius = new CornerRadius(6), Background = UI.Brush(_palette.Input),
+            BorderBrush = UI.Brush(_palette.InputBorder), BorderThickness = new Thickness(1), VerticalAlignment = VerticalAlignment.Center
+        };
+        var note = TextLine("", 11.5, _palette.Dark ? "#F0A6AA" : "#B12E3A");
+        note.TextWrapping = TextWrapping.Wrap; note.TextTrimming = TextTrimming.CharacterEllipsis; note.MaxWidth = 300; note.MaxHeight = 34; note.HorizontalAlignment = HorizontalAlignment.Right;
+        note.TextAlignment = TextAlignment.Right; note.Margin = new Thickness(0, 0, 12, 0);
+        note.VerticalAlignment = VerticalAlignment.Center; note.Visibility = Visibility.Hidden;
+        AutomationProperties.SetLiveSetting(note, AutomationLiveSetting.Assertive);
+
+        bool recording = false, swallowKeyUp = false;
+        void Note(string message) { note.Text = message; note.ToolTip = message.Length > 0 ? message : null; note.Visibility = message.Length > 0 ? Visibility.Visible : Visibility.Hidden; }
+        void Show()
+        {
+            string saved = S.ModuleHotkey(commandId);
+            text.Text = recording ? waiting : saved.Length == 0 ? Loc.T("未设置", "Not set") : HotkeyDisplay(saved);
+            text.Foreground = UI.Brush(recording ? TextSecondary : saved.Length == 0 ? TextTertiary : TextPrimary);
+            box.ToolTip = !recording && saved.Length > 0 ? HotkeyDisplay(saved) : null;
+            chrome.BorderBrush = UI.Brush(recording ? _palette.Accent : _palette.InputBorder);
+            clear.IsEnabled = saved.Length > 0; clear.Opacity = clear.IsEnabled ? 1 : .35;
+            if (!recording) Note(CommandProblem(commandId, saved));
+            AutomationProperties.SetHelpText(box, (saved.Length == 0 ? Loc.T("未设置。", "Not set. ") : HotkeyDisplay(saved) + Loc.T("。", ". ")) + help ?? "");
+        }
+        Action stop = null!;
+        var recordTimeout = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+        void Start()
+        {
+            if (recording) return;
+            _stopHotkeyRecording?.Invoke();
+            recording = true; _stopHotkeyRecording = stop;
+            SuspendAppHotkeys();
+            box.Focus(); Note(""); Show();
+            recordTimeout.Start();
+        }
+        stop = () =>
+        {
+            if (!recording) return;
+            recording = false;
+            recordTimeout.Stop();
+            if (_stopHotkeyRecording == stop) _stopHotkeyRecording = null;
+            // Resuming registers again from the settings, including a command just recorded.
+            ResumeAppHotkeys();
+            Show();
+        };
+        recordTimeout.Tick += (_, _) => stop();
+        EventHandler deactivated = (_, _) => stop();
+        box.Click += (_, _) => { if (!recording) Start(); };
+        // Saves a recorded combination unless a built-in shortcut or another command has it; returns whether it was saved.
+        bool Save(string gesture)
+        {
+            if (CommandClash(commandId, gesture) is { Length: > 0 } clash)
+            {
+                Note(clash);
+                text.Text = waiting; text.Foreground = UI.Brush(TextSecondary);
+                return false;
+            }
+            Change(s => s.SetModuleHotkey(commandId, gesture));
+            return true;
+        }
+        box.PreviewKeyDown += (_, e) =>
+        {
+            if (!recording) return;
+            var key = HotkeyGesture.KeyOf(e);
+            if (key is Key.None or Key.ImeProcessed or Key.DeadCharProcessed) return;
+            e.Handled = true;
+            var modifiers = CurrentModifiers();
+            if (IsModifierKey(key)) { text.Text = ModifierDisplay(modifiers) + "+…"; text.Foreground = UI.Brush(TextPrimary); return; }
+            if (IsCharacterKey(key) && (modifiers & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Windows)) == 0)
+            {
+                Note(Loc.T("字母、数字等按键需要搭配 Ctrl、Alt 或 Win。", "Letter, digit and other character keys need Ctrl, Alt or Win."));
+                text.Text = waiting; text.Foreground = UI.Brush(TextSecondary);
+                return;
+            }
+            string gesture = FormatHotkey(modifiers, key);
+            if (gesture.Length == 0)
+            {
+                Note(Loc.T("请同时按住 Ctrl、Alt、Shift 或 Win；F1–F24 可以单独使用。", "Hold Ctrl, Alt, Shift or Win as well; F1–F24 can be used alone."));
+                text.Text = waiting; text.Foreground = UI.Brush(TextSecondary);
+                return;
+            }
+            if (Save(gesture)) { swallowKeyUp = true; stop(); }
+        };
+        box.PreviewKeyUp += (_, e) =>
+        {
+            if (!recording && !swallowKeyUp) return;
+            e.Handled = true;
+            var key = HotkeyGesture.KeyOf(e);
+            if (!recording && !IsModifierKey(key)) swallowKeyUp = false;
+            if (recording && IsModifierKey(key))
+            {
+                var modifiers = CurrentModifiers();
+                text.Text = modifiers == ModifierKeys.None ? waiting : ModifierDisplay(modifiers) + "+…";
+            }
+        };
+        box.LostKeyboardFocus += (_, _) => { swallowKeyUp = false; stop(); };
+        clear.Click += (_, _) => { stop(); Change(s => s.SetModuleHotkey(commandId, "")); Note(""); Show(); };
+
+        var row = new Grid { MinHeight = 44 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var label = SettingLabel(title, help is null ? null : () => help); label.Margin = new Thickness(0, 0, 12, 0); row.Children.Add(label);
+        Grid.SetColumn(note, 1); row.Children.Add(note);
+        // With a tray switch the box and the switch share the right-hand column, the switch after the box.
+        FrameworkElement control = chrome;
+        if (trailing is not null)
+        {
+            var parts = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            parts.Children.Add(chrome); trailing.Margin = new Thickness(16, 0, 0, 0); parts.Children.Add(trailing);
+            control = parts;
+        }
+        Grid.SetColumn(control, 2); row.Children.Add(control);
+        Action refresh = () => { if (!recording) Show(); };
+        row.Loaded += (_, _) => { Deactivated += deactivated; if (_hotkeyRows.Add(refresh) && _hotkeyRows.Count == 1) WatchAppHotkeys(true); Show(); };
+        row.Unloaded += (_, _) => { Deactivated -= deactivated; stop(); if (_hotkeyRows.Remove(refresh) && _hotkeyRows.Count == 0) WatchAppHotkeys(false); };
+        Show();
+        return row;
+    }
+
+    // What stands in the way of binding this combination to this command, or "" when nothing does. A built-in shortcut always
+    // wins: taking its combination would make one of the two stop working with no way to say which.
+    private string CommandClash(string commandId, string gesture)
+    {
+        foreach (var kind in Enum.GetValues<HotkeyKind>())
+            if (HotkeyText.Normalize(S.Hotkey(kind)) is { Length: > 0 } builtInText && HotkeyText.Overlap(gesture, builtInText))
+                return Loc.T("与" + HotkeyName(kind) + "重复，请换一个组合键。", "This is already " + HotkeyName(kind) + ". Choose another combination.");
+        if (_app.ModuleCommands().FirstOrDefault(entry => entry.Id != commandId && HotkeyText.Overlap(gesture, S.ModuleHotkey(entry.Id))) is { } other)
+            return Loc.T("与「" + App.CommandName(other) + "」重复，请换一个组合键。", "This is already “" + App.CommandName(other) + "”. Choose another combination.");
+        return "";
+    }
+
+    // Why a saved command shortcut is not active, or "" when nothing is wrong with it.
+    private string CommandProblem(string commandId, string saved)
+    {
+        if (saved.Length == 0) return "";
+        if (CommandClash(commandId, saved) is { Length: > 0 } clash) return clash;
+        return _app.CommandHotkeyStatus(commandId) switch
+        {
+            HotkeyStatus.InUse => Loc.T("这个组合键已被其他程序占用，未能生效。", "Another program already uses this combination, so it is not active."),
+            HotkeyStatus.Invalid => Loc.T("无法识别这个组合键，请重新录制。", "This combination is not recognized. Record it again."),
+            HotkeyStatus.Duplicate => Loc.T("被前面的命令占用，未能生效。", "An earlier command took this combination, so it is not active."),
+            _ => ""
+        };
+    }
 
     // What is wrong with a saved shortcut, or "" when nothing is: a combination another shortcut has, or a registration the app
     // could not complete.

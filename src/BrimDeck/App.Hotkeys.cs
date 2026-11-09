@@ -1,3 +1,4 @@
+using System.Windows.Threading;
 using BrimDeck.Core;
 using BrimDeck.Native;
 
@@ -31,6 +32,7 @@ public partial class App
         if (_hotkeys is not null) return;
         _hotkeys = new GlobalHotkeys();
         _hotkeys.Pressed += HotkeyPressed;
+        _hotkeys.CommandPressed += CommandHotkeyPressed;
         ApplyHotkeys();
     }
 
@@ -39,12 +41,21 @@ public partial class App
     public void ApplyHotkeys()
     {
         var texts = Enum.GetValues<HotkeyKind>().ToDictionary(kind => kind, Settings.Hotkey);
+        // Command bindings take part in the comparison: changing only a plugin command's combination must register again,
+        // otherwise its new combination would never be taken.
+        var commands = ModuleCommands().ToDictionary(entry => entry.Id, entry => Settings.ModuleHotkey(entry.Id));
         bool unchanged = texts.All(pair => _hotkeyTexts.TryGetValue(pair.Key, out var text) && text == pair.Value)
-            && _hotkeyStatus.Values.All(status => status is HotkeyStatus.Active or HotkeyStatus.Unset);
+            && commands.Count == _commandTexts.Count && commands.All(pair => _commandTexts.TryGetValue(pair.Key, out var text) && text == pair.Value)
+            && _hotkeyStatus.Values.All(status => status is HotkeyStatus.Active or HotkeyStatus.Unset)
+            && _commandHotkeyStatus.Values.All(status => status is HotkeyStatus.Active or HotkeyStatus.Unset);
         _hotkeyTexts = texts;
+        _commandTexts = commands;
         if (unchanged && _hotkeySuspensions == 0 && _hotkeys is not null) return;
         RegisterHotkeys();
     }
+
+    // The command binding each command had at the last registration, to notice a change that only touches a command.
+    private Dictionary<string, string> _commandTexts = [];
 
     // Releases the hotkeys, for example while the settings window records a new combination. Calls nest; each must be
     // matched by ResumeHotkeys, and the hotkeys come back with the last one.
@@ -52,6 +63,7 @@ public partial class App
     {
         if (_hotkeySuspensions++ > 0 || _hotkeys is null) return;
         foreach (var kind in Enum.GetValues<HotkeyKind>()) _hotkeys.Unregister(kind);
+        _hotkeys.UnregisterCommands();
     }
 
     public void ResumeHotkeys()
@@ -63,7 +75,7 @@ public partial class App
     internal void DisposeHotkeys()
     {
         if (_hotkeys is null) return;
-        _hotkeys.Pressed -= HotkeyPressed; _hotkeys.Dispose(); _hotkeys = null;
+        _hotkeys.Pressed -= HotkeyPressed; _hotkeys.CommandPressed -= CommandHotkeyPressed; _hotkeys.Dispose(); _hotkeys = null;
     }
 
     // Hides every panel, or shows them again. An open panel closes first.
@@ -133,14 +145,67 @@ public partial class App
     {
         // Everything is released first, so a combination one hotkey gives up is free for another this time round.
         foreach (var kind in Enum.GetValues<HotkeyKind>()) _hotkeys?.Unregister(kind);
+        _hotkeys?.UnregisterCommands();
         var plans = HotkeyText.Plan(kind => _hotkeyTexts.GetValueOrDefault(kind), HotkeyGesture.IsKeyName);
         foreach (var kind in HotkeyText.Priority)
         {
             var (status, text) = plans[kind];
             _hotkeyStatus[kind] = status ?? (HotkeyText.IsArrows(kind) ? RegisterArrows(kind, text) : Register(kind, text, 0, repeat: false));
         }
+        RegisterCommandHotkeys(plans.Values.Where(pair => pair.Status is null).Select(pair => pair.Text).ToHashSet(StringComparer.OrdinalIgnoreCase));
         HotkeysChanged?.Invoke(this, EventArgs.Empty);
     }
+
+    // Plugin command combinations, after every built-in one: a command never takes a combination from a built-in hotkey, which
+    // is what makes a clash explainable ("yields to the panel's own shortcut" rather than a silent failure). Commands claimed
+    // in list order, so two commands bound to one combination keep the first and the settings page names the clash.
+    private void RegisterCommandHotkeys(IReadOnlySet<string> builtIn)
+    {
+        _commandHotkeyStatus = [];
+        if (_hotkeys is null) return;
+        var claimed = new HashSet<string>(builtIn, StringComparer.OrdinalIgnoreCase);
+        int index = 0;
+        foreach (var entry in ModuleCommands())
+        {
+            string saved = Settings.ModuleHotkey(entry.Id);
+            if (HotkeyText.IsUnset(saved)) continue;
+            // The same parsing, normal form and key check the built-in hotkeys use, so both sides of a clash compare alike.
+            if (!HotkeyGesture.TryParse(saved, out var modifiers, out var key))
+            { _commandHotkeyStatus[entry.Id] = HotkeyStatus.Invalid; continue; }
+            string text = HotkeyGesture.Format(modifiers, key);
+            if (!claimed.Add(text)) { _commandHotkeyStatus[entry.Id] = HotkeyStatus.Duplicate; continue; }
+            if (!HotkeyGesture.ToNative(modifiers, key, out uint fs, out uint vk, repeat: false))
+            { _commandHotkeyStatus[entry.Id] = HotkeyStatus.Invalid; continue; }
+            _commandHotkeyStatus[entry.Id] = _hotkeySuspensions > 0 ? HotkeyStatus.Active : _hotkeys.RegisterCommand(index++, entry.Id, fs, vk);
+        }
+    }
+
+    // The last registration result of each command binding. Read by the shortcut page, which shows why a binding is not active.
+    private Dictionary<string, HotkeyStatus> _commandHotkeyStatus = [];
+    internal HotkeyStatus CommandHotkeyStatus(string commandId) => _commandHotkeyStatus.GetValueOrDefault(commandId, HotkeyStatus.Unset);
+
+    // A command's combination was pressed. Invoked from the hotkey window's message hook, so the command runs as the user.
+    private void CommandHotkeyPressed(string commandId)
+    {
+        if (Exiting) return;
+        if (ModuleCommands().FirstOrDefault(entry => entry.Id == commandId) is { } entry) RunModuleCommand(entry);
+    }
+
+    // Called when a module is retired or its commands change: its combinations must stop working at once, while the saved
+    // bindings stay in the settings for when the module returns. Registration is coalesced: a module registers several
+    // contributions during activation, and each change must not re-register every hotkey.
+    private void ModuleCommandsChanged()
+    {
+        if (Exiting || Dispatcher.HasShutdownStarted || _commandsRefreshPending) return;
+        _commandsRefreshPending = true;
+        void Apply()
+        {
+            _commandsRefreshPending = false;
+            if (!Exiting) ApplyHotkeys();
+        }
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, Apply);
+    }
+    private bool _commandsRefreshPending;
 
     private HotkeyStatus Register(HotkeyKind kind, string text, int slot, bool repeat)
     {

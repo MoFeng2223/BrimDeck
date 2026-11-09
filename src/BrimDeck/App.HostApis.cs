@@ -17,6 +17,7 @@ public partial class App
         yield return ModuleService.Of<IModuleSystem>(ModuleApi.SystemRead, scope => new SystemReader(scope, ModuleSystemSource));
         yield return ModuleService.Of<IModuleNotifications>(ModuleApi.NotificationsShow, scope =>
         { scope.OnDispose(() => DropModuleNotices(scope.ModuleId, scope.Lifetime)); return new NoticeWriter(this, scope); });
+        yield return ModuleService.Of<IModuleCommands>(ModuleApi.CommandsInvoke, scope => new CommandsService(this, scope));
     }
     private void InitializeHostApiDemand()
     {

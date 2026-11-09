@@ -1,7 +1,7 @@
 {
   "apiVersion": 1,
-  "apiMinor": 5,
-  "capabilities": ["ui.pages", "ui.compact-parts", "ui.settings", "storage.data"],
+  "apiMinor": 9,
+  "capabilities": ["ui.pages", "ui.compact-parts", "ui.commands", "commands.invoke", "ui.settings", "storage.data"],
   "id": "thrm",
   "name": "散热器 / Cooler",
   "version": "1.0.0",

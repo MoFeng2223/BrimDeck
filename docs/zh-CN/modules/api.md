@@ -30,6 +30,8 @@
 | `system.read` | Service | 读取系统监控 / Read system metrics | 1 | `system.read` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleSystem` |
 | `notifications.show` | Service | 显示岛内提醒 / Show island notices | 1 | `notifications.show` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleNotifications` |
 | `ui.presentation` | Service | 刷新模组界面 / Refresh module presentation | 5 | 无 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModulePresentation` |
+| `commands.invoke` | Service | 调用自己的命令 / Invoke own commands | 9 | 无 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleCommands` |
+| `ui.commands` | Contribution | 插件命令 / Commands | 9 | 无 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleCommand` |
 | `ui.pages` | Contribution | 小程序页面 / Mini-app pages | 0 | 无 | `windows-desktop` | `activation` | `BrimDeck.UI`: `BrimDeck.ModulePage` |
 | `ui.activities` | Contribution | 持续活动 / Persistent activities | 0 | 无 | `windows-desktop` | `activation` | `BrimDeck.UI`: `BrimDeck.IModuleActivity` |
 | `ui.compact-parts` | Contribution | 收起行部件 / Compact-row parts | 0 | 无 | `windows-desktop` | `activation` | `BrimDeck.UI`: `BrimDeck.IModuleCompactPart` |
@@ -297,6 +299,41 @@
 | 成员签名 |
 | --- |
 | `void Invalidate()` |
+
+### 命令（`ui.commands` / `commands.invoke`）
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+一个命令是一个稳定的、用户可见的动作。注册名即命令 id（贡献 id 形如 `thrm:open-page`），所以命令不能寻址别的模组的贡献，id 跨重启保持不变——全局快捷键、托盘菜单和页面按钮绑定的正是这个 id。三者调用同一份 `ExecuteAsync`，宿主不维护第二套回调。
+
+| 成员签名 |
+| --- |
+| `ModuleCommand(string Name, string NameEn)` |
+| `string? Description { get; init; }` |
+| `string? DescriptionEn { get; init; }` |
+| `string[]? Parameters { get; init; }` |
+| `string[]? Requires { get; init; }` |
+| `enum ModuleCommandResultKind { Completed, Busy, Rejected, Cancelled, CapabilityMissing, Failed }` |
+| `ModuleCommandResult(ModuleCommandResultKind Kind, string? Message, string? MessageEn)` |
+| `static ModuleCommandResult Completed { get; }` |
+| `static ModuleCommandResult Busy { get; }` |
+| `static ModuleCommandResult Cancelled { get; }` |
+| `static ModuleCommandResult Rejected(string message, string? messageEn = null)` |
+| `static ModuleCommandResult Missing(string message, string? messageEn = null)` |
+| `static ModuleCommandResult Failed(string message, string? messageEn = null)` |
+| `IModuleCommand.Descriptor { get; }` |
+| `IModuleCommand.CanExecute { get; }` |
+| `IModuleCommand.ExecuteAsync(IReadOnlyDictionary<string, string>? parameters, CancellationToken cancellation)` |
+| `enum ModuleCommandOrigin { User, Host }` |
+| `IModuleCommands.List()` |
+| `IModuleCommands.InvokeAsync(string commandId, IReadOnlyDictionary<string, string>? parameters = null, ModuleCommandOrigin origin = ModuleCommandOrigin.User, CancellationToken cancellation = default)` |
+| `IModuleCommands.ShowOwnPage(string pageId, bool userInitiated = true)` |
+
+结果分开是有意的：同一命令在飞时再次调用返回 `Busy`（快捷键按两下不会执行两次），`CanExecute == false` 返回 `Rejected`，模组抛出 `ModuleApiException` 或任何异常返回 `Failed`，取消返回 `Cancelled`。`Requires` 列出命令运行时需要的能力：当前宿主不提供其中任意一项时返回 `CapabilityMissing`，而不是让它以失败的形式出现——为更新宿主写的命令因此在旧版上仍有明确结论。
+
+`IModuleCommands` 绑定在本次激活上：`List()` 只列出调用者自己的命令，`InvokeAsync` 只接受自己的命令 id（别的 id 抛 `unknown-command`）。`ShowOwnPage` 打开调用者注册的页面，且只对用户发起的调用生效（`origin` 为 `User`），后台定时器不能把面板抢出来。其余宿主动作（展开、媒体、强调色）随 `host.control` 能力在 5c 开放。
+
+快捷键默认未绑定，由用户在"设置 → 快捷键 → 插件命令"里录制；托盘只显示用户在那一行打开的"放进托盘菜单"开关。停用或移除模组时命令连同其注册一起释放、快捷键立即解绑、托盘项撤下，但**绑定偏好保留**在设置里——重新启用后自动恢复。命令不能占用内置快捷键的组合：录制时与内置项冲突会被拒绝并说明与哪一条冲突。
 
 ### `ModuleSettingOption`
 
@@ -818,13 +855,15 @@
 | 成员签名 |
 | --- |
 | `const int Major = 1` |
-| `const int Minor = 8` |
+| `const int Minor = 9` |
 | `const string HostInfo = "host.info"` |
 | `const string UsageRead = "usage.read"` |
 | `const string MediaRead = "media.read"` |
 | `const string SystemRead = "system.read"` |
 | `const string NotificationsShow = "notifications.show"` |
 | `const string UiPresentation = "ui.presentation"` |
+| `const string CommandsInvoke = "commands.invoke"` |
+| `const string UiCommands = "ui.commands"` |
 | `const string UiPages = "ui.pages"` |
 | `const string UiActivities = "ui.activities"` |
 | `const string UiCompactParts = "ui.compact-parts"` |
