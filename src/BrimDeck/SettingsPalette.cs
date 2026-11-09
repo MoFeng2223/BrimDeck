@@ -26,6 +26,10 @@ internal sealed record SettingsPalette(bool Dark)
     public string Accent => Dark ? "#88B0EE" : "#347BDF";
     // Text that says something failed or is unavailable.
     public string Negative => Dark ? "#F0A6AA" : "#B12E3A";
+    // A status dot for something set up and working: at least 3:1 against the surface (WCAG 1.4.11).
+    public string Positive => Dark ? "#5DC98C" : "#2F9E5E";
+    // A link inside running text: at least 4.5:1 against the surface, so it reads as text and stands apart from it.
+    public string Link => Dark ? "#88B0EE" : "#2374DE";
     public void Apply(ResourceDictionary resources)
     {
         void Brush(string key, string color) => resources[key] = UI.Brush(color);
