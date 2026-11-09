@@ -242,10 +242,12 @@ public partial class MainWindow
         var column = new Grid();
         column.RowDefinitions.Add(new RowDefinition { Height = new GridLength(layout.Header + ListGap) });
         column.RowDefinitions.Add(new RowDefinition());
-        // The drop highlight: over the list only, below the header, a little in from the column's edges: a faint fill and a thin
-        // dashed outline in the theme's accent, corner 8. The list stays visible.
-        double corner = PanelTheme.Corner(8);
-        var frame = new Rectangle { RadiusX = corner, RadiusY = corner, StrokeThickness = 1, StrokeDashArray = [4, 3], Margin = new Thickness(-6, 0, -6, 2), IsHitTestVisible = false };
+        // The drop highlight: over the list, below the header: a faint fill and a thin dashed outline in the theme's accent, corner 8.
+        // The list stays visible. It stands clear of the rows: up into the gap under the filters, and out to the left past a row's
+        // background (8 DIP left of the text) to 12 DIP from the icons, stopping 4 DIP short of the divider in the gap between the
+        // columns; on the right, the same distance from the text, whose row ends 4 DIP past it.
+        double corner = PanelTheme.Corner(8), left = Math.Min(12, layout.Gap / 2 - 4);
+        var frame = new Rectangle { RadiusX = corner, RadiusY = corner, StrokeThickness = 1, StrokeDashArray = [4, 3], Margin = new Thickness(-left, -ListGap, -(left - 4), -4), IsHitTestVisible = false };
         Grid.SetRow(frame, 1); column.Children.Add(frame); _fileFrame = frame; ShowDropFrame();
         column.Children.Add(ColumnHeader(ShelfSide.Files, layout.FileColumn, layout));
         var files = VisibleFiles();
@@ -322,7 +324,6 @@ public partial class MainWindow
         var panel = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, layout.Header / 2) };
         if (Searching) { panel.Children.Add(Label(Loc.T("没有匹配的文件", "No files match"), layout.Body, UI.Secondary, HorizontalAlignment.Center)); return panel; }
         panel.Children.Add(Label(_fileTab is null ? Loc.T("把文件拖到这里", "Drag files here") : Loc.T("这个分类还没有文件", "This category is empty"), layout.Body, UI.Secondary, HorizontalAlignment.Center));
-        panel.Children.Add(Label(Loc.T("只记录位置，不复制文件", "Only their places are kept"), layout.Aux, UI.Tertiary, HorizontalAlignment.Center, top: 4));
         return panel;
     }
 
