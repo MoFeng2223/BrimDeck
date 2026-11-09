@@ -148,6 +148,14 @@ public partial class MainWindow
         _moduleControls = false;
         bool changed = CurrentPageId != resolved.Id;
         string beforeId = CurrentPageId;
+        bool animate = changed && _expanded && !_preview && Soft.Enabled;
+        var before = CurrentPage;
+        var from = PageContent(before);
+        // The picture is taken before anything is released: ReleaseModulePage empties MiniAppsContent, so capturing after
+        // it left two module pages handing over a blank page, which read as an instant switch (the built-in pages keep
+        // their content, which is why only module pages looked wrong).
+        var picture = animate ? PageHandover.Capture(from) : null;
+        var place = PageHandover.Place(from);
         if (changed) ReleaseModulePage();
         if (changed) { CloseSourceMenu(); PageToolTips.CloseWithin(PageContent(CurrentPage)); }
         if (changed && _expanded && !_preview)
@@ -156,11 +164,6 @@ public partial class MainWindow
             _hover.Stop(); _leave.Stop(); _pageSwitchHold.Stop(); _pageSwitchHold.Start();
         }
         if (remember) { Settings.LastPage = page; Settings.Pages.LastId = id; _app.QueueSave(); }
-        bool animate = changed && _expanded && !_preview && Soft.Enabled;
-        var before = CurrentPage;
-        var from = PageContent(before);
-        var picture = animate ? PageHandover.Capture(from) : null;
-        var place = PageHandover.Place(from);
         _requestedPageId = id;
         ShowPage(page, animatePage: changed && _expanded && !_preview);
         bool back = directory.All.ToList().FindIndex(p => p.Id == resolved.Id) < directory.All.ToList().FindIndex(p => p.Id == beforeId);

@@ -35,9 +35,10 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         Loc.T("输入法", "Input methods"), Loc.T("小程序", "Mini apps"), Loc.T("快捷键", "Shortcuts"), "", "", Loc.T("插件管理", "Plugin management"), Loc.T("增强传感器", "Enhanced sensors"),
         Loc.T("设备电量", "Device batteries"), Loc.T("剪贴板", "Clipboard"), Loc.T("文件中转", "File transfer")];
     // The order of the pages in the navigation; the theme page (ThemePage) and the shortcuts (HotkeysPage) are listed with the
-    // basic pages, and the system monitor's page (MonitorSettingsPage) has its own group after music; then the plugin branch's
-    // pages (Input methods, Mini apps, Plugins, Sensors), then the devices and clipboard pages dev added, before About.
-    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, HotkeysPage, 3, 4, 5, 6, MonitorSettingsPage, InputMethodsPage, MiniAppsPage, ModulesPage, SensorsPage, DevicesSettingsPage, ClipboardSettingsPage, TransferSettingsPage, 7];
+    // basic pages, and the system monitor's page (MonitorSettingsPage) has its own group after music, with the sensors page
+    // following it; then the plugin branch's pages (Input methods, Mini apps, Plugins), then the devices and clipboard pages
+    // dev added, before About. A page opens a group where it stands, so SensorsPage has to stay right after the monitor's.
+    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, HotkeysPage, 3, 4, 5, 6, MonitorSettingsPage, SensorsPage, InputMethodsPage, MiniAppsPage, ModulesPage, DevicesSettingsPage, ClipboardSettingsPage, TransferSettingsPage, 7];
     private int _page;
     private bool _preview;
     private StackPanel? _appRows;
