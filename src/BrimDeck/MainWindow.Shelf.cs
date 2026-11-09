@@ -168,6 +168,19 @@ public partial class MainWindow
         ShelfContent.Children.Add(grid);
         RefocusTyping();
     }
+    // During a resize the page is built again only where its sizes step (row height, type size, what the file rows show); in between
+    // the file column takes the width the new size gives it and the clipboard column the rest. The details keep the width they were
+    // built for until the drag ends.
+    private void StretchShelf()
+    {
+        if (_shelfDetail is not null) return;
+        double width = ContentCanvas.Width, height = ContentCanvas.Height;
+        if (!double.IsFinite(width) || !double.IsFinite(height)) return;
+        var layout = ShelfLayout.For(width, height);
+        if (layout with { FileColumn = 0, ClipColumn = 0 } != _shelfLayout with { FileColumn = 0, ClipColumn = 0 }) { RenderShelf(); return; }
+        if (ShelfContent.Children.Count == 1 && ShelfContent.Children[0] is Grid { ColumnDefinitions.Count: 3 } grid)
+            grid.ColumnDefinitions[2].Width = new GridLength(layout.FileColumn);
+    }
     private void RememberShelfScroll()
     {
         foreach (var viewer in ShelfContent.Children.OfType<Grid>().SelectMany(grid => FindScrolls(grid)))
@@ -212,9 +225,13 @@ public partial class MainWindow
             if (clips.Count == 0) body = ClipEmpty(layout);
             else
             {
-                var rows = new StackPanel();
-                foreach (var clip in clips) rows.Children.Add(ClipRow(clip, layout));
-                body = Scroll(rows, ShelfSide.Clipboard, _clipOffset);
+                // Only the rows in view are built (ShelfRowList); a row reaches from the list's left edge, its text 8 DIP in.
+                var list = new ShelfRowList(
+                    item => { var row = ClipRow((ClipEntry)item, layout); row.Margin = new Thickness(0); return row; },
+                    (item, row) => { if (_shelfRows.TryGetValue(((ClipEntry)item).Id, out var kept) && kept.Row == row) _shelfRows.Remove(((ClipEntry)item).Id); })
+                { ItemsSource = clips, Margin = new Thickness(-8, 0, 0, 0) };
+                Fade(PassWheel(list.Viewer), ShelfSide.Clipboard, _clipOffset);
+                body = list;
             }
         }
         Grid.SetRow(body, 1); column.Children.Add(body);
@@ -236,9 +253,14 @@ public partial class MainWindow
         if (files.Count == 0) body = FileEmpty(layout);
         else
         {
-            var rows = new StackPanel();
-            foreach (var file in files) rows.Children.Add(FileRow(file, layout));
-            body = Scroll(rows, ShelfSide.Files, _fileOffset);
+            // As the clipboard's list: only the rows in view are built (ShelfRowList). What is picked is kept by the page (_picked),
+            // so a row built as it scrolls into view shows it.
+            var list = new ShelfRowList(
+                item => { var row = FileRow((TransferFile)item, layout); row.Margin = new Thickness(0); return row; },
+                (item, row) => { if (_shelfRows.TryGetValue(((TransferFile)item).Id, out var kept) && kept.Row == row) _shelfRows.Remove(((TransferFile)item).Id); })
+            { ItemsSource = files, Margin = new Thickness(-8, 0, 0, 0) };
+            Fade(PassWheel(list.Viewer), ShelfSide.Files, _fileOffset);
+            body = list;
         }
         Grid.SetRow(body, 1); column.Children.Add(body);
         return column;
@@ -257,13 +279,12 @@ public partial class MainWindow
         viewer.AddHandler(MouseWheelEvent, new MouseWheelEventHandler((_, e) => { if (viewer.ScrollableHeight < 1) e.Handled = false; }), true);
         return viewer;
     }
-    // The list scrolls inside its column and fades out at the bottom; the scroll bar is only a thin handle (App.xaml).
-    private static ScrollViewer Scroll(FrameworkElement rows, ShelfSide side, double offset)
+    // A list scrolls inside its column (ShelfRowList, which starts 8 DIP left of the column so a row's background reaches past its
+    // text); the scroll bar is only a thin handle (App.xaml). This marks the list's side (RememberShelfScroll), goes back to its
+    // scroll position, and fades the list out at the bottom while more of it lies below.
+    private static ScrollViewer Fade(ScrollViewer viewer, ShelfSide side, double offset)
     {
-        // A row's background reaches 8 DIP left of its text (RowFrame); the list starts that much further left, so the scroll area does
-        // not cut the background off at the text.
-        rows.Margin = new Thickness(8, 0, 0, 0);
-        var viewer = PassWheel(new ScrollViewer { Content = rows, Tag = side, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Focusable = false, Margin = new Thickness(-8, 0, 0, 0) });
+        viewer.Tag = side;
         var fade = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
         fade.GradientStops.Add(new GradientStop(Colors.Black, 0)); fade.GradientStops.Add(new GradientStop(Colors.Black, .9)); fade.GradientStops.Add(new GradientStop(Colors.Transparent, 1));
         void Mask() => viewer.OpacityMask = viewer.ScrollableHeight > 1 && viewer.VerticalOffset < viewer.ScrollableHeight - 1 ? fade : null;
