@@ -1,0 +1,21 @@
+src/BrimDeck/Native/MediaSessions.cs
+  s_dace215e85b470::t_cd885c4f6eb340 163-167,169-173
+  s_dace215e85b470::t_38e12cca365bfd 147
+  s_dace215e85b470::t_4d2d2260b04655 136-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c8e42241ea639599bfb6e2bd8a69eacd7777d8b1",
+  "prompts": {},
+  "sessions": {
+    "s_dace215e85b470": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf8154fc-5cdc-4f14-adf7-6fcafc843c35",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
