@@ -6,6 +6,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using BrimDeck.Core;
+using BrimDeck.Native;
 
 namespace BrimDeck;
 
@@ -52,21 +53,60 @@ public partial class SettingsWindow
         AutomationProperties.SetName(retention, Loc.T("保留历史记录", "Keep history"));
         PopupMotion.Attach(retention);
         retention.SelectionChanged += (_, _) => { if (retention.SelectedIndex >= 0) Change(s => s.ClipboardRetention = choices[retention.SelectedIndex].Item1); };
-        var excluded = new TextBox { Style = (Style)FindResource("SettingsField"), Width = 220, Text = string.Join(", ", S.ClipboardExcluded), IsEnabled = S.ClipboardRecord };
-        AutomationProperties.SetName(excluded, Loc.T("不记录的应用", "Apps not recorded"));
-        excluded.LostKeyboardFocus += (_, _) =>
-        {
-            var names = excluded.Text.Split([',', '，', ';', '；'], StringSplitOptions.RemoveEmptyEntries).Select(name => name.Trim()).ToList();
-            if (!names.SequenceEqual(S.ClipboardExcluded)) Change(s => s.ClipboardExcluded = names);
-        };
         Group(record,
             Row(Loc.T("保留历史记录", "Keep history"), retention, help: () => Loc.T("放进分类的内容和常用语一直保留，只在删除时移除。", "Entries in a category and phrases are kept until you delete them.")),
-            Row(Loc.T("不记录的应用", "Apps not recorded"), excluded, help: () => Loc.T("填写进程名，用逗号分隔，例如 KeePass, 1Password。", "Process names separated by commas, for example KeePass, 1Password.")));
+            _excludedHost = new Border { Child = ExcludedAppsContent() });
         SectionTitle(Loc.T("分类", "Categories"), help: () => Loc.T("放进分类的内容一直保留，不按保留规则清理。拖动调整顺序，面板中按这个顺序显示。“常用”是内置分类，排在最前。",
             "Entries in a category are kept, whatever the history rule. Drag to reorder; the panel shows them in this order. Favorites is built in and comes first."));
         CategoryList(ShelfSide.Clipboard);
         SectionTitle(Loc.T("常用语", "Phrases"), help: () => Loc.T("手写的文字，放在“常用”中，在面板中单击即可粘贴。", "Text you write here goes to Favorites; click it on the panel to paste it."));
         PhraseList();
+    }
+
+    // Whether the apps not recorded are shown under their row, and the row itself, rebuilt alone when an app is added or removed.
+    private bool _excludedOpen;
+    private Border? _excludedHost;
+    private void RefreshExcludedApps() { if (_excludedHost is not null) _excludedHost.Child = ExcludedAppsContent(); }
+
+    // An app picked from the menu or a file is kept by its path, for its icon and name; one typed in earlier versions by its
+    // process name. Either way every process of that executable is left out.
+    private FrameworkElement ExcludedAppsContent() => AppListRow(Loc.T("不记录的应用", "Apps not recorded"),
+        () => Loc.T("从这些应用复制的内容不会记录。“添加应用”列出有窗口的应用，也可以浏览可执行文件。",
+            "What you copy from these apps is not recorded. \"Add app\" lists apps with windows, or browse for an executable."),
+        Loc.T("展开不记录的应用", "Show apps not recorded"), Loc.T("添加不记录的应用", "Add an app not to record"),
+        [.. S.ClipboardExcluded.Select(ExcludedAppLine)], ExcludedAppMenu, _excludedOpen, open => _excludedOpen = open, S.ClipboardRecord);
+
+    private FrameworkElement ExcludedAppLine(string entry)
+    {
+        string process = ClipboardExclusions.ProcessName(entry), path = ClipboardExclusions.IsPath(entry) ? entry : "";
+        string name = AppName(process, path);
+        return AppLine(name, FileName(process, path), path, path, () =>
+        {
+            Change(s => s.ClipboardExcluded.RemoveAll(other => string.Equals(ClipboardExclusions.ProcessName(other), process, StringComparison.OrdinalIgnoreCase)));
+            RefreshExcludedApps();
+        });
+    }
+
+    private void ExcludedAppMenu(Button anchor)
+    {
+        var menu = AppMenu(anchor);
+        var apps = RunningApps.WithWindows()
+            .Where(app => !ClipboardExclusions.Excludes(S.ClipboardExcluded, app.Name))
+            .Select(app => (App: app, Name: AppName(app.Name, app.Path)))
+            .OrderBy(entry => entry.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        foreach (var (app, name) in apps)
+            menu.Items.Add(AppMenuItem(name, FileName(app.Name, app.Path), app.Path, () => AddExcludedApp(app.Path.Length > 0 ? app.Path : app.Name)));
+        if (apps.Count == 0) menu.Items.Add(new MenuItem { Header = Loc.T("没有可添加的应用", "No apps to add"), IsEnabled = false });
+        AddBrowseItem(menu, Loc.T("选择不记录的应用", "Choose an app not to record"), AddExcludedApp);
+        menu.IsOpen = true;
+    }
+
+    private void AddExcludedApp(string entry)
+    {
+        if (ClipboardExclusions.Excludes(S.ClipboardExcluded, ClipboardExclusions.ProcessName(entry))) return;
+        Change(s => s.ClipboardExcluded.Add(entry));
+        RefreshExcludedApps();
     }
 
     // ---- 文件中转 ----

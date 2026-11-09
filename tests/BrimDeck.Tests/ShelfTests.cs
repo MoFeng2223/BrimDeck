@@ -127,10 +127,13 @@ internal static class ShelfTests
         settings.ClipboardPage = false;
         check("Shelf settings: the file transfer's count needs the page", !settings.ShowsTransfer(CompactStyle.Notch) && new DeckSettings().ShowsTransfer(CompactStyle.Capsule)
             && !new DeckSettings().ShowsTransfer(CompactStyle.Line));
-        var normalized = new DeckSettings { ClipboardExcluded = ["KeePass.exe", " keepass ", "", "1Password"], ClipboardWidth = double.NaN };
+        var normalized = new DeckSettings { ClipboardExcluded = ["KeePass.exe", " keepass ", "", "1Password", @" C:\Apps\Bitwarden.exe ", "bitwarden", @"D:\.exe"], ClipboardWidth = double.NaN };
         normalized.Normalize();
-        check("Shelf settings: excluded applications lose .exe and repeats, and a bad size returns to the default",
-            normalized.ClipboardExcluded.SequenceEqual(["KeePass", "1Password"]) && normalized.ClipboardWidth == ShelfSizes.Default.Width);
+        check("Shelf settings: excluded names lose .exe, paths stay whole, repeats of a process go, and a bad size returns to the default",
+            normalized.ClipboardExcluded.SequenceEqual(["KeePass", "1Password", @"C:\Apps\Bitwarden.exe"]) && normalized.ClipboardWidth == ShelfSizes.Default.Width);
+        check("Shelf settings: an excluded name or path matches its process, in any case",
+            ClipboardExclusions.Excludes(normalized.ClipboardExcluded, "bitwarden") && ClipboardExclusions.Excludes(normalized.ClipboardExcluded, "KEEPASS")
+            && !ClipboardExclusions.Excludes(normalized.ClipboardExcluded, "Bitwarden.exe") && !ClipboardExclusions.Excludes(normalized.ClipboardExcluded, ""));
         check("Shelf settings: the page order of an older file gains the page at the end",
             DeckPages.Normalize([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music]).SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Clipboard, DeckPage.Devices]));
     }

@@ -8,7 +8,6 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using BrimDeck.Core;
 using BrimDeck.Native;
-using Microsoft.Win32;
 
 namespace BrimDeck;
 
@@ -232,10 +231,8 @@ public sealed partial class SettingsWindow
             menu.Items.Add(AppMenuItem(name, FileName(app.Name, app.Path), app.Path, () => AddException(new FullscreenRule(app.Name, app.Path)
                 { Maximized = WindowBehavior.Normal, Borderless = WindowBehavior.Normal, Exclusive = WindowBehavior.Normal })));
         if (apps.Count == 0) menu.Items.Add(new MenuItem { Header = Loc.T("没有可添加的应用", "No apps to add"), IsEnabled = false });
-        menu.Items.Add(new Separator());
-        var browse = new MenuItem { Header = Loc.T("浏览可执行文件…", "Browse for an executable…") };
-        browse.Click += (_, _) => BrowseException();
-        menu.Items.Add(browse);
+        AddBrowseItem(menu, Loc.T("选择要豁免的应用", "Choose an app to exempt"), path => AddException(new FullscreenRule(System.IO.Path.GetFileNameWithoutExtension(path), path)
+            { Maximized = WindowBehavior.Normal, Borderless = WindowBehavior.Normal, Exclusive = WindowBehavior.Normal }));
         menu.IsOpen = true;
     }
 
@@ -264,19 +261,6 @@ public sealed partial class SettingsWindow
         AutomationProperties.SetName(item, name);
         item.Click += (_, _) => add();
         return item;
-    }
-
-    private void BrowseException()
-    {
-        var dialog = new OpenFileDialog
-        {
-            Title = Loc.T("选择要豁免的应用", "Choose an app to exempt"),
-            Filter = Loc.T("应用程序 (*.exe)|*.exe", "Applications (*.exe)|*.exe"),
-            CheckFileExists = true
-        };
-        if (dialog.ShowDialog(this) != true) return;
-        AddException(new FullscreenRule(System.IO.Path.GetFileNameWithoutExtension(dialog.FileName), dialog.FileName)
-            { Maximized = WindowBehavior.Normal, Borderless = WindowBehavior.Normal, Exclusive = WindowBehavior.Normal });
     }
 
     // The list stays open or closed as it was; the count beside the button shows the app was added.

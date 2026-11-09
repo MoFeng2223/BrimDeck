@@ -42,7 +42,7 @@ internal sealed class ShelfService : IDisposable
         bool record = settings.ClipboardPage && settings.ClipboardRecord;
         if (record && _watch is null)
         {
-            try { _watch = new ClipboardWatch(Copied, name => _settings().ClipboardExcluded.Contains(name, StringComparer.OrdinalIgnoreCase)); }
+            try { _watch = new ClipboardWatch(Copied, name => ClipboardExclusions.Excludes(_settings().ClipboardExcluded, name)); }
             catch (System.ComponentModel.Win32Exception) { _watch = null; }
         }
         else if (!record && _watch is not null) { _watch.Dispose(); _watch = null; }

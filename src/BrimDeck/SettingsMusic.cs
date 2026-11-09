@@ -288,84 +288,26 @@ public sealed partial class SettingsWindow
     // Holds the row, so that adding or removing an app rebuilds the row alone, as the app rules row does.
     private Border? _ignoredHost;
 
-    // The applications whose playback the panel leaves out. The row opens like the app rules row: a click on the row or its
-    // arrow shows the apps under the title. The menu offers the apps that report playback now, since an app's media session
-    // id cannot be told from its executable.
+    // The applications whose playback the panel leaves out. The menu offers the apps that report playback now, and any
+    // executable. An executable is added under its file name, the id most players report; a player that reports an id of
+    // its own choosing is matched only while it plays and can be added from the menu then.
     private FrameworkElement IgnoredAppsRow() => _ignoredHost = new Border { Child = IgnoredAppsContent() };
     private void RefreshIgnoredApps() { if (_ignoredHost is not null) _ignoredHost.Child = IgnoredAppsContent(); }
 
-    private FrameworkElement IgnoredAppsContent()
-    {
-        string title = Loc.T("忽略的应用", "Ignored apps");
-        var apps = S.IgnoredMediaApps;
-        if (apps.Count == 0) _ignoredOpen = false;
-        var list = new StackPanel { Margin = new Thickness(20, 0, 0, 6) };
-        foreach (var app in apps)
-        {
-            list.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
-            list.Children.Add(IgnoredAppLine(app));
-        }
-        var label = TextLine(title, 13, TextPrimary, FontWeights.SemiBold); label.VerticalAlignment = VerticalAlignment.Center;
-        var info = HelpIcon(title, () => Loc.T("被忽略的应用播放时，面板不显示它的歌曲，来源菜单中也不列出它。“添加应用”列出正在播放或已暂停的应用。忽略浏览器会忽略其中所有网页的播放。",
-            "While an ignored app plays, the panel does not show its songs and the source menu leaves it out. \"Add app\" lists the apps that are playing or paused. Ignoring a browser ignores playback in all its pages."), 14);
-        info.MouseLeftButtonDown += (_, e) => e.Handled = true;
-        var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        heading.Children.Add(new HelpHeading(label, info));
-        Button? arrow = null;
-        void Show(bool open)
-        {
-            list.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
-            if (arrow is not null) PointArrow(arrow, open);
-        }
-        void Flip() { _ignoredOpen = !_ignoredOpen; Show(_ignoredOpen); }
-        if (apps.Count > 0)
-        {
-            arrow = ChevronButton(Loc.T("展开忽略的应用", "Show ignored apps"), Flip);
-            arrow.Margin = new Thickness(2, 0, 0, 0);
-            heading.Children.Add(arrow);
-        }
-        int n = apps.Count;
-        var count = TextLine(n == 0 ? Loc.T("未添加", "None") : Loc.T($"{n} 个应用", n == 1 ? "1 app" : $"{n} apps"), 12, TextTertiary);
-        count.VerticalAlignment = VerticalAlignment.Center; count.Margin = new Thickness(0, 0, 12, 0);
-        var add = AddAppButton(Loc.T("添加要忽略的应用", "Add an app to ignore"), IgnoredAppMenu);
-        var controls = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        controls.Children.Add(count); controls.Children.Add(add);
-        var header = new Grid { MinHeight = 44, Background = Brushes.Transparent };
-        header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.Children.Add(heading); Grid.SetColumn(controls, 1); header.Children.Add(controls);
-        header.MouseLeftButtonDown += (_, e) => { if (arrow is not null) Flip(); e.Handled = true; };
-        Show(_ignoredOpen && n > 0);
-        var row = new StackPanel(); row.Children.Add(header); row.Children.Add(list); return row;
-    }
+    private FrameworkElement IgnoredAppsContent() => AppListRow(Loc.T("忽略的应用", "Ignored apps"),
+        () => Loc.T("被忽略的应用播放时，面板不显示它的歌曲，来源菜单中也不列出它。“添加应用”列出正在播放或已暂停的应用，也可以浏览可执行文件。忽略浏览器会忽略其中所有网页的播放。",
+            "While an ignored app plays, the panel does not show its songs and the source menu leaves it out. \"Add app\" lists the apps that are playing or paused, or browse for an executable. Ignoring a browser ignores playback in all its pages."),
+        Loc.T("展开忽略的应用", "Show ignored apps"), Loc.T("添加要忽略的应用", "Add an app to ignore"),
+        [.. S.IgnoredMediaApps.Select(IgnoredAppLine)], IgnoredAppMenu, _ignoredOpen, open => _ignoredOpen = open);
 
-    // One ignored app: its icon, its name, its file or id, and the cross that takes it off the list.
     private FrameworkElement IgnoredAppLine(IgnoredMediaApp app)
     {
         string name = app.Name.Length > 0 ? app.Name : app.AppId;
-        var row = new Grid { MinHeight = 40, Background = Brushes.Transparent, ToolTip = app.Path.Length > 0 ? app.Path : app.AppId };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        row.ColumnDefinitions.Add(new ColumnDefinition());
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        row.Children.Add(AppIcon(app.Path));
-        var labels = new Grid { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
-        labels.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); labels.ColumnDefinitions.Add(new ColumnDefinition());
-        var title = TextLine(name, 13, TextPrimary); title.VerticalAlignment = VerticalAlignment.Center; title.TextTrimming = TextTrimming.CharacterEllipsis;
-        labels.Children.Add(title);
-        string detail = IgnoredAppDetail(app);
-        if (detail.Length > 0 && !string.Equals(detail, name, StringComparison.OrdinalIgnoreCase))
-        {
-            var file = TextLine(detail, 11.5, TextTertiary);
-            file.VerticalAlignment = VerticalAlignment.Center; file.Margin = new Thickness(8, 1, 0, 0); file.TextTrimming = TextTrimming.CharacterEllipsis;
-            Grid.SetColumn(file, 1); labels.Children.Add(file);
-        }
-        Grid.SetColumn(labels, 1); row.Children.Add(labels);
-        var remove = RemoveButton(name, () =>
+        return AppLine(name, IgnoredAppDetail(app), app.Path, app.Path.Length > 0 ? app.Path : app.AppId, () =>
         {
             Change(s => s.IgnoredMediaApps.RemoveAll(entry => string.Equals(entry.AppId, app.AppId, StringComparison.OrdinalIgnoreCase)));
             RefreshIgnoredApps();
         });
-        Grid.SetColumn(remove, 2); row.Children.Add(remove);
-        return row;
     }
 
     // The executable's file name when it is known, otherwise the id the app's media session reports.
@@ -384,6 +326,13 @@ public sealed partial class SettingsWindow
                 RefreshIgnoredApps();
             }));
         if (apps.Count == 0) menu.Items.Add(new MenuItem { Header = Loc.T("没有正在播放的应用", "No app is playing"), IsEnabled = false });
+        AddBrowseItem(menu, Loc.T("选择要忽略的应用", "Choose an app to ignore"), path =>
+        {
+            var app = new IgnoredMediaApp(System.IO.Path.GetFileName(path), AppName(System.IO.Path.GetFileNameWithoutExtension(path), path), path);
+            if (S.IgnoredMediaApps.Any(entry => string.Equals(entry.AppId, app.AppId, StringComparison.OrdinalIgnoreCase))) return;
+            Change(s => s.IgnoredMediaApps.Add(app));
+            RefreshIgnoredApps();
+        });
         menu.IsOpen = true;
     }
 
