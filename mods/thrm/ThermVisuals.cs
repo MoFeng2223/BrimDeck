@@ -116,9 +116,11 @@ internal sealed class ThermReading(string letter, string figurePreview)
         // A rescale while the row is already mounted refreshes it in place: the caller holds the old root, so a fresh
         // one would leave the mounted instance showing numbers no Show ever reaches again. One container owns the
         // controls — pick it before attaching, or WPF refuses the second parent.
-        var row = _root as StackPanel;
-        bool fresh = row is null;
-        if (fresh) _root = row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        if (_root is not StackPanel row)
+        {
+            row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            _root = row;
+        }
         else row.Children.Clear();
         row.Children.Add(_dial);
         row.Children.Add(_figure);
