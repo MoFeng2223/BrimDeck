@@ -52,6 +52,9 @@ internal sealed class SystemSampler : IDisposable
     // the machine's charge reading needs without any of the rest.
     // _gpuWanted: the graphics adapters' counters, for the page, the row's GPU reading and the power.
     private volatile bool _temperatures, _storageWanted, _driveTemperatures, _powerWanted, _batteryWanted, _gpuWanted;
+    // Where the adapters' usage comes from (DeckSettings.MonitorGpuUsage), set on the UI thread and read on the sampling thread.
+    private volatile GpuUsageSource _gpuUsage;
+    public GpuUsageSource GpuUsage { set => _gpuUsage = value; }
     // The whole machine's power and the machine's battery (PowerProvider, BatteryProvider), made on the sampling thread.
     private PowerProvider? _power;
     private BatteryProvider? _battery;
@@ -314,7 +317,7 @@ internal sealed class SystemSampler : IDisposable
         IReadOnlyList<StorageDrive> storage = _storageWanted ? _storage.Sample(now, _driveTemperatures) : [];
         Remember(_cpuHistory, cpu.OrDefault?.Usage);
         // The usage each adapter's driver gives, where it gives one (GpuDrivers); the curves follow the figure shown.
-        var adapters = gpus.TryGet(out var read) ? Remember(_drivers!.Read(read, now, temperatures)) : [];
+        var adapters = gpus.TryGet(out var read) ? Remember(_drivers!.Read(read, now, temperatures, _gpuUsage)) : [];
         if (!_gpuWanted) _gpuHistories.Clear();
         // The machine's power and battery: read only while something shows them; the history and the peak start over once none does.
         var power = Reading<PowerSample>.Unavailable(Why.Waiting);
