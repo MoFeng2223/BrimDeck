@@ -205,10 +205,10 @@ public partial class MainWindow
     private bool Searching => _shelfSearching && _shelfQuery.Trim().Length > 0;
     private List<ClipEntry> VisibleClips() => Searching
         ? ShelfData.Clips.Where(clip => clip.Kind != ClipKind.Image && Shelf.Matches(clip.Text, _shelfQuery)).ToList()
-        : ShelfData.Clips.Where(clip => _clipTab is null || clip.Category == _clipTab).ToList();
+        : ShelfData.Clips.Where(clip => _clipTab is not { } id || clip.Categories.Contains(id)).ToList();
     private List<TransferFile> VisibleFiles() => Searching
         ? ShelfData.Files.Where(file => Shelf.Matches(file.Name, _shelfQuery)).ToList()
-        : ShelfData.Files.Where(file => _fileTab is null || file.Category == _fileTab).ToList();
+        : ShelfData.Files.Where(file => _fileTab is not { } id || file.Categories.Contains(id)).ToList();
 
     // ---- Columns ----
     // The space between a column's header (its filters' underline) and its list.
@@ -355,13 +355,20 @@ public partial class MainWindow
         double buttonsWidth = 0;
         if (side == ShelfSide.Clipboard)
         {
-            // "清除" takes away at once what the filter shown holds (Shelf.Clearable): in "全部" all but "常用", in a category of the
-            // user's that category's entries. "常用" has none.
-            if (Shelf.Clearable(ShelfData, _clipTab).Count > 0)
+            // "清除" takes away at once what the filter shown holds (Shelf.Clear): in "全部" all that is not kept; in a category of the
+            // user's, its entries, those also in another category only leaving this one. "常用" has none. The button stays while the
+            // list shows anything, even when all of it is kept and a press takes nothing away.
+            if (VisibleClips().Count > 0)
             {
-                string tip = _clipTab is { } id && ShelfData.ClipCategories.FirstOrDefault(c => c.Id == id) is { } category
-                    ? Loc.T($"清除“{category.Name}”中的全部内容", $"Clear everything in {category.Name}") : Loc.T("清除全部内容，“常用”保留", "Clear everything but Favorites");
-                buttons.Children.Add(ClearButton(tip, () => DeleteClips(Shelf.Clearable(ShelfData, _clipTab))));
+                string tip = _clipTab == ShelfData.Favorites ? Loc.T("“常用”中的内容不会被清除", "What is in Favorites is not cleared")
+                    : _clipTab is { } id && ShelfData.ClipCategories.FirstOrDefault(c => c.Id == id) is { } category
+                    ? Loc.T($"清除“{category.Name}”中的全部内容", $"Clear everything in {category.Name}") : Loc.T("清除全部内容，“常用”和一直保留的分类不受影响", "Clear everything but Favorites and the categories kept");
+                buttons.Children.Add(ClearButton(tip, () =>
+                {
+                    if (Shelf.Clearable(ShelfData, _clipTab).Count == 0) return;
+                    var gone = Shelf.Clear(ShelfData, _clipTab);
+                    if (gone.Count > 0) DeleteClips(gone); else _app.Shelf.Edited();
+                }));
                 buttonsWidth += ClearWidth;
             }
         }
@@ -376,7 +383,8 @@ public partial class MainWindow
         double ownWidth = own.Sum(category => TabWidth(category.Name, layout, true));
         if (side == ShelfSide.Files)
         {
-            // "清除" as on the clipboard: every file in "全部", a category's files in it; the files themselves stay where they are.
+            // "清除" as on the clipboard: every file in "全部", a category's files in it (those also in another category only leave
+            // it); the files themselves stay where they are.
             bool clearable = Shelf.ClearableFiles(ShelfData, _fileTab).Count > 0;
             double clear = clearable ? ClearWidth : 0;
             buttonsWidth = clear;
@@ -392,7 +400,11 @@ public partial class MainWindow
             {
                 string tip = _fileTab is { } id && ShelfData.FileCategories.FirstOrDefault(c => c.Id == id) is { } category
                     ? Loc.T($"清除“{category.Name}”中的文件记录", $"Clear the files listed in {category.Name}") : Loc.T("清除全部文件记录", "Clear every file listed");
-                buttons.Children.Add(ClearButton(tip, () => RemoveFiles(Shelf.ClearableFiles(ShelfData, _fileTab))));
+                buttons.Children.Add(ClearButton(tip, () =>
+                {
+                    var gone = Shelf.ClearFiles(ShelfData, _fileTab);
+                    if (gone.Count > 0) RemoveFiles(gone); else _app.Shelf.Edited();
+                }));
             }
         }
         double room = width - buttonsWidth - ButtonsMargin - 4;
@@ -535,7 +547,8 @@ public partial class MainWindow
             RenderShelf();
         };
         tab.MouseRightButtonUp += (_, e) => e.Handled = true;
-        // Entries dragged from the list, and files dragged in from the computer onto a file category, go into that category.
+        // Entries dragged from the list onto a category, and files dragged in from the computer onto a file category, go into that
+        // category, staying in the others they are in. "全部" takes only files from the computer.
         tab.DragOver += (_, e) => { e.Effects = TabAccepts(side, id, e.Data) ? DragDropEffects.Copy : DragDropEffects.None; HighlightTab(tab, e.Effects != DragDropEffects.None); e.Handled = true; };
         tab.DragLeave += (_, _) => HighlightTab(tab, false);
         tab.Drop += (_, e) => { e.Handled = true; HighlightTab(tab, false); DropOnTab(side, id, e.Data); };
@@ -552,7 +565,7 @@ public partial class MainWindow
     private const string ShelfFormat = "BrimDeck.ShelfItems";
     private static bool TabAccepts(ShelfSide side, Guid? id, IDataObject data)
     {
-        if (data.GetDataPresent(ShelfFormat)) return data.GetData(ShelfFormat) is string text && text.StartsWith(side + "|", StringComparison.Ordinal);
+        if (data.GetDataPresent(ShelfFormat)) return id is not null && data.GetData(ShelfFormat) is string text && text.StartsWith(side + "|", StringComparison.Ordinal);
         return side == ShelfSide.Files && data.GetDataPresent(DataFormats.FileDrop);
     }
     private void DropOnTab(ShelfSide side, Guid? id, IDataObject data)
@@ -560,18 +573,23 @@ public partial class MainWindow
         if (data.GetDataPresent(ShelfFormat) && data.GetData(ShelfFormat) is string text && text.StartsWith(side + "|", StringComparison.Ordinal))
         {
             var ids = text[(side.ToString().Length + 1)..].Split(',').Select(part => Guid.TryParse(part, out var g) ? g : Guid.Empty).ToHashSet();
-            Assign(side, ids, id);
+            if (id is { } category) SetCategory(side, ids, category, add: true);
             return;
         }
         if (side == ShelfSide.Files && data.GetData(DataFormats.FileDrop) is string[] paths) { EndDrop(dropped: true); AddDropped(paths, id); }
     }
-    private void Assign(ShelfSide side, IEnumerable<Guid> ids, Guid? category)
+    // Puts entries in a category or takes them out of it; their other categories stay.
+    private void SetCategory(ShelfSide side, IEnumerable<Guid> ids, Guid category, bool add)
     {
         var set = ids.ToHashSet();
-        if (side == ShelfSide.Clipboard) foreach (var clip in ShelfData.Clips.Where(clip => set.Contains(clip.Id))) clip.Category = category;
-        else foreach (var file in ShelfData.Files.Where(file => set.Contains(file.Id))) file.Category = category;
+        Shelf.SetCategory(side == ShelfSide.Clipboard ? ShelfData.Clips.Where(clip => set.Contains(clip.Id)).Select(clip => clip.Categories)
+            : ShelfData.Files.Where(file => set.Contains(file.Id)).Select(file => file.Categories), category, add);
         _app.Shelf.Edited();
     }
+    // The categories of the entries given, one list each.
+    private List<List<Guid>> CategoriesOf(ShelfSide side, IReadOnlyList<Guid> ids) => side == ShelfSide.Clipboard
+        ? [.. ShelfData.Clips.Where(clip => ids.Contains(clip.Id)).Select(clip => clip.Categories)]
+        : [.. ShelfData.Files.Where(file => ids.Contains(file.Id)).Select(file => file.Categories)];
 
     // ---- Rows ----
     private Border RowFrame(ShelfLayout layout, double height, bool picked)
@@ -594,13 +612,22 @@ public partial class MainWindow
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var content = ClipContent(clip, layout, two);
         grid.Children.Add(content);
-        // In "全部", the category an entry is in: a dot in its color, or a star for "常用". Under the pointer it gives way, as the time
-        // does (ShowMore).
+        // In "全部", the categories an entry is in, in their order: a dot in each one's color, a star for "常用", at most three (the
+        // tip names them all). Under the pointer they give way, as the time does (ShowMore).
         FrameworkElement? mark = null;
-        if (clip.Category is { } id && _clipTab is null && ShelfData.ClipCategories.FirstOrDefault(c => c.Id == id) is { } category)
+        var marked = _clipTab is null ? ShelfData.ClipCategories.Where(c => clip.Categories.Contains(c.Id)).ToList() : [];
+        if (marked.Count > 0)
         {
-            mark = id == ShelfData.Favorites ? StarGlyph(9, UI.Tertiary, filled: true) : new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(category.Color) };
-            mark.Margin = new Thickness(8, 0, 0, 0); mark.VerticalAlignment = VerticalAlignment.Center; mark.ToolTip = Shelf.CategoryName(category);
+            var marks = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
+                Background = Brushes.Transparent, ToolTip = string.Join(Loc.T("、", ", "), marked.Select(Shelf.CategoryName)) };
+            foreach (var category in marked.Take(3))
+            {
+                FrameworkElement glyph = category.Id == ShelfData.Favorites ? StarGlyph(9, UI.Tertiary, filled: true) : new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(category.Color) };
+                glyph.VerticalAlignment = VerticalAlignment.Center;
+                if (marks.Children.Count > 0) glyph.Margin = new Thickness(3, 0, 0, 0);
+                marks.Children.Add(glyph);
+            }
+            mark = marks;
             Grid.SetColumn(mark, 1); grid.Children.Add(mark);
         }
         var aux = AuxSlot(clip.Manual ? Loc.T("常用语", "Phrase") : Shelf.When(clip.Copied, DateTimeOffset.Now), layout, () => OpenDetail(ShelfSide.Clipboard, clip.Id),

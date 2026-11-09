@@ -555,7 +555,6 @@ public sealed class DeckSettings
     public double ClipboardWidth { get; set; } = ShelfSizes.Default.Width;
     public double ClipboardHeight { get; set; } = ShelfSizes.Default.Height;
     public bool ClipboardRecord { get; set; } = true;
-    public ClipRetention ClipboardRetention { get; set; } = ClipRetention.Month;
     // Applications whose copies are not recorded: the executable's path, or a process name (ClipboardExclusions).
     public List<string> ClipboardExcluded { get; set; } = [];
     public TransferDragOut TransferDragOut { get; set; } = TransferDragOut.Copy;
@@ -790,7 +789,6 @@ public sealed class DeckSettings
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
         ClipboardWidth = double.IsFinite(ClipboardWidth) ? Math.Clamp(ClipboardWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : ShelfSizes.Default.Width;
         ClipboardHeight = double.IsFinite(ClipboardHeight) ? Math.Clamp(ClipboardHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ShelfSizes.Default.Height;
-        if (!Enum.IsDefined(ClipboardRetention)) ClipboardRetention = ClipRetention.Month;
         if (!Enum.IsDefined(TransferDragOut)) TransferDragOut = TransferDragOut.Copy;
         ClipboardExcluded = ClipboardExclusions.Normalize(ClipboardExcluded);
         PanelScale = PanelScales.Fit(PanelScale);

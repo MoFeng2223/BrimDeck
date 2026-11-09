@@ -700,7 +700,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                 // The devices' order, names and switches stay; the page and its size are Expanded view's (case 2).
                 case DevicesSettingsPage:s.DeviceLowPercent=defaults.DeviceLowPercent;s.DeviceWarningPercent=defaults.DeviceWarningPercent;s.DeviceFigures=defaults.DeviceFigures;break;
                 // The categories and phrases are the user's own data, not settings; the other page has nothing to restore.
-                case ClipboardSettingsPage:s.ClipboardRecord=defaults.ClipboardRecord;s.ClipboardRetention=defaults.ClipboardRetention;s.ClipboardExcluded=[];break;
+                case ClipboardSettingsPage:s.ClipboardRecord=defaults.ClipboardRecord;s.ClipboardExcluded=[];break;
                 // The current theme's application colors go back to its own; the other themes keep what was saved for them.
                 case 3:{var previous=s.Apps;s.QuotaAlerts=defaults.QuotaAlerts;s.IncludeWsl=defaults.IncludeWsl;s.Apps=defaults.Apps;PanelThemes.CarryAppChoices(s,previous);break;}
                 case 5:s.EqualizerAlways=defaults.EqualizerAlways;s.EqualizerBars=defaults.EqualizerBars;s.EqualizerMode=defaults.EqualizerMode;s.EqualizerColor=defaults.EqualizerColor;s.EqualizerCustomColor=defaults.EqualizerCustomColor;

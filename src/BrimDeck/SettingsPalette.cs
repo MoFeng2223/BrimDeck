@@ -42,6 +42,8 @@ internal sealed record SettingsPalette(bool Dark)
         // The fill of buttons with white text on the accent: at least 4.5:1 for that text, at rest and under the pointer, in both
         // modes (the dark mode's own accent is too light for it).
         Brush("SettingsAccentFill", "#2374DE");
+        // A small label that is on (a category kept): the accent's text on a pale wash of it.
+        Brush("SettingsAccentText", Accent); Brush("SettingsAccentTint", Dark ? "#24324A" : "#E4EEFC");
         Brush("SettingsAccentHover", "#1964C7");
         Brush("SettingsSliderAccent", Accent); Brush("SettingsTrackBrush", Dark ? "#42424A" : "#D3D6DF");
         Brush("SettingsBorder", Border); Brush("SettingsInput", Input); Brush("SettingsPopup", Popup);
