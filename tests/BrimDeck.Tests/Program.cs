@@ -59,6 +59,7 @@ try
     ExpandBounceTests.Run(Check);
     ExpandStillTests.Run(Check);
     FontTests.Run(root, Check);
+    SurfaceTransparencyTests.Run(Check);
     ExpandSnapTests.Run(Check);
     MotionReviewTests.Run(Check);
     IdleCostTests.Run(Check);

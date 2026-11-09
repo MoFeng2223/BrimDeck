@@ -501,6 +501,10 @@ public sealed class DeckSettings
     // BrimDeck drawn larger, in percent (PanelScales): the collapsed surface and the expanded panel, its pages, header and menus
     // grow together, as Windows' display scaling would for BrimDeck alone. Sizes stay saved before the scale.
     public int PanelScale { get; set; } = PanelScales.Default;
+    // How much of what lies behind shows through the panel's surface, collapsed and expanded, in percent: 0 is opaque. Only the
+    // surface and its theme layers are see-through; text, icons and the rim are drawn as before.
+    public int SurfaceTransparency { get; set; }
+    public const int MaxSurfaceTransparency = 90;
     public int OpenDelay { get; set; } = 0;
     // The collapsed panel opens on a click instead of on hover; OpenDelay then does not apply.
     public bool ClickToExpand { get; set; }
@@ -779,6 +783,7 @@ public sealed class DeckSettings
         ClipboardExcluded = [.. (ClipboardExcluded ?? []).Select(name => (name ?? "").Trim()).Select(name => name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name)
             .Where(name => name.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)];
         PanelScale = PanelScales.Fit(PanelScale);
+        SurfaceTransparency = Math.Clamp(SurfaceTransparency, 0, MaxSurfaceTransparency);
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
         MonitorCustomColors ??= new();
         MonitorCustomColors.Normalize();

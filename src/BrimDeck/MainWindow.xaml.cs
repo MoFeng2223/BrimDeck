@@ -253,6 +253,7 @@ public partial class MainWindow : Window
         var shapeBefore = Collapsed; double dipBefore = _pixelsPerDip;
         ApplyLanguage();
         ApplyTheme();
+        ApplySurface();
         WindowsHost.SetCapturable(this, Settings.WindowCapture);
         // Made ordinary, at startup too, the panel goes beneath the window in use like a closed one.
         if (Topmost != Settings.AlwaysOnTop) { Topmost = Settings.AlwaysOnTop; if (!Topmost && !_expanded) _host.Front(false); }
@@ -526,6 +527,21 @@ public partial class MainWindow : Window
         _musicRenderKey = ""; _compactRendered = null; _alertRendered = null;
         if (_detailPopup is { } popup) Dispatcher.BeginInvoke(() => { if (ReferenceEquals(_detailPopup, popup)) popup.Close(); });
         if (MediaSourceButton.ContextMenu?.IsOpen == true) Dispatcher.BeginInvoke(CloseSourceMenu);
+    }
+    // The surface's transparency (DeckSettings.SurfaceTransparency). ClearType needs an opaque color under the text, so over a
+    // see-through surface the island's text is smoothed in grayscale (a pixel theme's stays unsmoothed, PanelTheme.Text). The
+    // shadow is cast by an opaque copy of the surface that would show through it, so a see-through surface casts none.
+    private void ApplySurface()
+    {
+        double opacity = 1 - Settings.SurfaceTransparency / 100d;
+        bool clear = opacity < 1;
+        Island.SurfaceOpacity = opacity;
+        if (PanelTheme.Current.Effects.Pixel <= 0)
+        {
+            if (clear) TextOptions.SetTextRenderingMode(Island, TextRenderingMode.Grayscale);
+            else Island.ClearValue(TextOptions.TextRenderingModeProperty);
+        }
+        IslandShadow.Visibility = clear ? Visibility.Hidden : Visibility.Visible;
     }
     // The toolbar's fixed buttons are declared in XAML; their names follow the interface language.
     private void ApplyLanguage()
