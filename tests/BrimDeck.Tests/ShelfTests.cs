@@ -117,6 +117,11 @@ internal static class ShelfTests
             settings.ClipboardPage && settings.ClipboardRecord && settings.ClipboardRetention == ClipRetention.Month && DeckPages.Order.Contains(DeckPage.Clipboard));
         check("Shelf settings: a settings file that turned recording off keeps it off",
             !System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{\"ClipboardRecord\":false}")!.ClipboardRecord);
+        var dragOut = new DeckSettings { TransferDragOut = (TransferDragOut)7 };
+        dragOut.Normalize();
+        check("Shelf settings: files dragged out are copied unless moving is chosen; an older file copies; an unknown choice copies",
+            settings.TransferDragOut == TransferDragOut.Copy && System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{}")!.TransferDragOut == TransferDragOut.Copy
+            && System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{\"TransferDragOut\":1}")!.TransferDragOut == TransferDragOut.Move && dragOut.TransferDragOut == TransferDragOut.Copy);
         DeckPages.SetSize(settings, DeckPage.Clipboard, 2000, 100);
         check("Shelf settings: the page's size is its own and kept within the limits", DeckPages.Size(settings, DeckPage.Clipboard) == (1200, 140) && settings.MonitorWidth == MonitorSizes.Default.Width);
         settings.ClipboardPage = false;

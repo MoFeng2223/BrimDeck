@@ -90,6 +90,10 @@ public sealed class ShelfData
 // How long the clipboard history is kept (DeckSettings.ClipboardRetention). Entries in a category and phrases are always kept.
 public enum ClipRetention { Week, Month, Recent500, UntilExit }
 
+// What dragging files out of the file transfer does (DeckSettings.TransferDragOut). Move lets the target move the originals; a
+// target that only takes copies (a chat window, a browser) still copies them. Files moved away leave the list.
+public enum TransferDragOut { Copy, Move }
+
 public static class Shelf
 {
     // The most text one entry keeps; longer copies are not recorded.

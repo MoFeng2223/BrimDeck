@@ -219,12 +219,13 @@ internal sealed class ShelfService : IDisposable
         return data;
     }
     public static DataObject TextData(string text) { var data = new DataObject(); data.SetText(text, TextDataFormat.UnicodeText); return data; }
-    // Files to paste or drop: the Explorer copies them (Preferred DropEffect: copy), it never moves the originals.
-    public static DataObject FileData(IEnumerable<string> paths)
+    // Files to paste or drop. Preferred DropEffect tells the Explorer to copy them (1), or, for a drag set to move, to move them (2)
+    // even to another drive.
+    public static DataObject FileData(IEnumerable<string> paths, bool move = false)
     {
         var list = new StringCollection(); list.AddRange(paths.ToArray());
         var data = new DataObject(); data.SetFileDropList(list);
-        data.SetData("Preferred DropEffect", new MemoryStream(BitConverter.GetBytes(1)));
+        data.SetData("Preferred DropEffect", new MemoryStream(BitConverter.GetBytes(move ? 2 : 1)));
         return data;
     }
 

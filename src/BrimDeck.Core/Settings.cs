@@ -534,6 +534,7 @@ public sealed class DeckSettings
     public ClipRetention ClipboardRetention { get; set; } = ClipRetention.Month;
     // Applications whose copies are not recorded, by process name without ".exe".
     public List<string> ClipboardExcluded { get; set; } = [];
+    public TransferDragOut TransferDragOut { get; set; } = TransferDragOut.Copy;
     public double MonitorHeight { get; set; } = MonitorSizes.Default.Height;
     public MonitorPalette MonitorPalette { get; set; } = MonitorPalette.Theme;
     // The Custom scheme's colors; kept while another scheme is chosen.
@@ -764,6 +765,7 @@ public sealed class DeckSettings
         ClipboardWidth = double.IsFinite(ClipboardWidth) ? Math.Clamp(ClipboardWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : ShelfSizes.Default.Width;
         ClipboardHeight = double.IsFinite(ClipboardHeight) ? Math.Clamp(ClipboardHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ShelfSizes.Default.Height;
         if (!Enum.IsDefined(ClipboardRetention)) ClipboardRetention = ClipRetention.Month;
+        if (!Enum.IsDefined(TransferDragOut)) TransferDragOut = TransferDragOut.Copy;
         ClipboardExcluded = [.. (ClipboardExcluded ?? []).Select(name => (name ?? "").Trim()).Select(name => name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name)
             .Where(name => name.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)];
         PanelScale = PanelScales.Fit(PanelScale);

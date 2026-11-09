@@ -55,7 +55,7 @@ public partial class MainWindow
         Action changed = ShelfChanged;
         _app.Shelf.Changed += changed;
         ShelfFiles.Changed += changed;
-        Closed += (_, _) => { _app.Shelf.Changed -= changed; ShelfFiles.Changed -= changed; };
+        Closed += (_, _) => { _app.Shelf.Changed -= changed; ShelfFiles.Changed -= changed; _movingTimer?.Stop(); };
         HoverZone.AllowDrop = true;
         HoverZone.PreviewDragEnter += ShelfDragEnter;
         HoverZone.PreviewDragOver += ShelfDragOver;
@@ -855,24 +855,58 @@ public partial class MainWindow
             start = null;
             var list = files();
             if (list.Count == 0) return;
-            var data = ShelfService.FileData(list.Select(file => file.Path));
+            bool move = Settings.TransferDragOut == TransferDragOut.Move;
+            var data = ShelfService.FileData(list.Select(file => file.Path), move);
             data.SetData(ShelfFormat, ShelfSide.Files + "|" + string.Join(",", list.Select(file => file.Id)));
             if (source is Border row) row.Background = _picked.Count > 0 && list.Count > 1 ? UI.Brush(UI.FillSelected) : Brushes.Transparent;
-            DragOut(source, data);
+            DragOut(source, data, move ? DragDropEffects.Copy | DragDropEffects.Move : DragDropEffects.Copy);
+            if (move) WatchMoved(list);
             e.Handled = true;
         };
     }
-    // Dragged out of the panel, entries and files are only copied: the originals stay where they are.
-    private void DragOut(DependencyObject source, DataObject data)
+    // Dragged out of the panel, clipboard entries are copied; files are copied, or, when the drag is set to move, moved where the
+    // target takes moves (a chat window or a browser takes only copies).
+    private void DragOut(DependencyObject source, DataObject data, DragDropEffects allowed = DragDropEffects.Copy)
     {
         _draggingOut = true;
-        try { DragDrop.DoDragDrop(source, data, DragDropEffects.Copy); }
+        try { DragDrop.DoDragDrop(source, data, allowed); }
         catch (Exception error) when (error is System.Runtime.InteropServices.COMException or InvalidOperationException) { }
         finally
         {
             _draggingOut = false;
             if (_expanded && !_pointerInside) PointerChanged(false);
         }
+    }
+    // Files dragged out to be moved leave the list once they are gone from where they were. The drag's result does not tell: the
+    // Explorer moves files itself and reports no move, and it may still be moving them after the drag ends (a large file to another
+    // drive takes a while). So they are looked for every second for five minutes; a file still there was copied, or not dropped.
+    private readonly Dictionary<Guid, long> _movingOut = [];
+    private DispatcherTimer? _movingTimer;
+    private void WatchMoved(IReadOnlyList<TransferFile> files)
+    {
+        long until = Environment.TickCount64 + 5 * 60_000;
+        foreach (var file in files) _movingOut[file.Id] = until;
+        CheckMoved(null, EventArgs.Empty);
+        if (_movingOut.Count == 0) return;
+        _movingTimer ??= new DispatcherTimer(DispatcherPriority.Background, Dispatcher) { Interval = TimeSpan.FromSeconds(1) };
+        _movingTimer.Tick -= CheckMoved; _movingTimer.Tick += CheckMoved;
+        _movingTimer.Start();
+    }
+    private void CheckMoved(object? sender, EventArgs e)
+    {
+        long now = Environment.TickCount64;
+        var gone = new List<TransferFile>();
+        foreach (var (id, until) in _movingOut.ToList())
+        {
+            var file = ShelfData.Files.FirstOrDefault(f => f.Id == id);
+            if (file is null || now > until) { _movingOut.Remove(id); continue; }
+            if (ShelfFiles.Exists(file.Path)) continue;
+            _movingOut.Remove(id);
+            ShelfFiles.Forget(file.Path);
+            gone.Add(file);
+        }
+        if (gone.Count > 0) RemoveFiles(gone);
+        if (_movingOut.Count == 0) _movingTimer?.Stop();
     }
     // A picture is dragged as a file as well (ShelfService.PictureFile), which is how browsers and Electron applications take one.
     private DataObject ClipDrag(ClipEntry clip)

@@ -12,7 +12,8 @@ namespace BrimDeck;
 // The clipboard and file transfer's settings, in their own group ("中转站"). The page's size is set with the other pages under
 // "展开外观". "剪贴板": whether and for how long the clipboard is recorded (the history stays on this computer, encrypted for the
 // current Windows user), its categories and the phrases; "文件中转": its categories. The panel only uses the categories and
-// phrases; they are made and changed here. Entries in a category and phrases are kept whatever the history rule.
+// phrases; they are made and changed here. Entries in a category and phrases are kept whatever the history rule. "文件中转" also
+// sets whether files dragged out are copied or moved.
 public partial class SettingsWindow
 {
     internal const int ClipboardSettingsPage = 13, TransferSettingsPage = 14;
@@ -72,6 +73,11 @@ public partial class SettingsWindow
     private void TransferSettings()
     {
         WatchShelf();
+        Group(MusicChoice(Loc.T("拖出文件", "Drag files out"), S.TransferDragOut,
+            [(TransferDragOut.Copy, Loc.T("复制", "Copy")), (TransferDragOut.Move, Loc.T("移动", "Move"))],
+            value => Change(s => s.TransferDragOut = value), width: 216,
+            help: Loc.T("选择“移动”时，文件移到新位置后从列表中移除。聊天软件、浏览器等只接受复制的地方仍会复制。",
+                "With Move, files moved to a new place leave the list. Chat apps, browsers and other places that only take copies still get copies.")));
         SectionTitle(Loc.T("分类", "Categories"), help: () => Loc.T("拖动调整顺序。删除分类时，其中的文件回到“全部”，原文件不受影响。",
             "Drag to reorder. Deleting a category puts its files back in All; the original files are not touched."));
         CategoryList(ShelfSide.Files);
