@@ -1,0 +1,86 @@
+src/BrimDeck/ShelfService.cs
+  s_bb20e42b86868a::t_17da601a1493a7 136-144
+src/BrimDeck/MainWindow.Shelf.cs
+  s_bb20e42b86868a::t_8be016f074379a 80-81,85
+  s_bb20e42b86868a::t_af48d12d23c8c0 138-148,161-172,174,177
+src/BrimDeck/ShelfFiles.cs
+  s_bb20e42b86868a::t_8d4c9b6d2c3311 78
+  s_bb20e42b86868a::t_a31c4bfc8105d8 67-74,76
+  s_bb20e42b86868a::t_7498ce1b3b9042 94
+src/BrimDeck/UsagePanel.cs
+  s_bb20e42b86868a::t_e59e6c6838c1f6 161
+src/BrimDeck/SettingsThemes.cs
+  s_bb20e42b86868a::t_ef378bcb3fbce8 87
+src/BrimDeck/App.Memory.cs
+  s_bb20e42b86868a::t_026a02bb08f2b0 6
+  s_bb20e42b86868a::t_ea29546446b64e 84
+  s_bb20e42b86868a::t_caa7afc4b5e179 3,11-21,24-27,30-35,37-45,49,51-61,86-87,95-135
+src/BrimDeck/SettingsThemeEditor.cs
+  s_bb20e42b86868a::t_a663e1ad95d3ac 322
+src/BrimDeck.Core/MemoryModes.cs
+  s_bb20e42b86868a::t_730b67d8bb08e4 55-64,66-69
+  s_bb20e42b86868a::t_2acc90a9e9f485 80
+  s_bb20e42b86868a::t_d4e74c2fb409e7 3-8,14-19,21,24-26,65,70-71,74,86
+tests/BrimDeck.Tests/MemoryModeTests.cs
+  s_bb20e42b86868a::t_a27d002b70d9bb 29-30,34-50
+src/BrimDeck/ModelDatePicker.cs
+  s_bb20e42b86868a::t_004622dc925fad 119
+src/BrimDeck/MainWindow.Release.cs
+  s_bb20e42b86868a::t_fbc054ef2a4208 1-54
+src/BrimDeck/App.xaml.cs
+  s_bb20e42b86868a::t_9cc4979f7f8ebd 454-455
+  s_bb20e42b86868a::t_4d1c36c02c9b30 35-36
+  s_bb20e42b86868a::t_712644d31c00e1 337-347
+  s_bb20e42b86868a::t_13b21425cf3910 532
+  s_bb20e42b86868a::t_e3f8e816eb4598 534
+  s_bb20e42b86868a::t_3f84645b03e84a 233-236
+  s_bb20e42b86868a::t_cc5a9e89674f2d 348-354
+src/BrimDeck/SettingsWindow.cs
+  s_bb20e42b86868a::t_38d881028651f5 392-393
+  s_bb20e42b86868a::t_740d33e152cff5 724
+src/BrimDeck/MainWindow.Music.cs
+  s_bb20e42b86868a::t_c5e81bae4a1f58 118-120
+  s_bb20e42b86868a::t_2937fb3fe43e44 460-462
+  s_bb20e42b86868a::t_626d2cf447c58b 1062
+src/BrimDeck/MainWindow.CompactColumn.cs
+  s_bb20e42b86868a::t_92e672ba1feeff 51
+src/BrimDeck/Native/MediaSessions.cs
+  s_bb20e42b86868a::t_6b3e949c317d13 490
+  s_bb20e42b86868a::t_6f1e9fc60058d7 83
+  s_bb20e42b86868a::t_431f042c3f8f91 57
+  s_bb20e42b86868a::t_64442c05218281 123
+  s_bb20e42b86868a::t_c1cbbee6244ac2 198,201-202
+  s_bb20e42b86868a::t_434f1e5555b813 208-209,211
+src/BrimDeck.Core/Music.cs
+  s_bb20e42b86868a::t_cfd50635e030cf 281
+src/BrimDeck/MainWindow.ShelfDetail.cs
+  s_bb20e42b86868a::t_c54b468666baf8 141-142,145,150
+  s_bb20e42b86868a::t_b9029307b64447 390
+src/BrimDeck/MonitorPanel.cs
+  s_bb20e42b86868a::t_95f486449618f9 204-207
+src/BrimDeck/MainWindow.xaml.cs
+  s_bb20e42b86868a::t_c5ca0c1550495f 141,145,148
+  s_bb20e42b86868a::t_a0f73147831520 668-679
+  s_bb20e42b86868a::t_5c5146273e296f 1059
+  s_bb20e42b86868a::t_7df4e915406c06 1054-1055
+  s_bb20e42b86868a::t_01a6c350e5f004 699,701-702
+  s_bb20e42b86868a::t_4ddfc052cf626d 1045
+src/BrimDeck/Native/SystemSampler.cs
+  s_bb20e42b86868a::t_3dfbe59d0a74f2 103-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6689f43c904547ebfd9b4bb1147257ef9e2a7e4e",
+  "prompts": {},
+  "sessions": {
+    "s_bb20e42b86868a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "304a9dd6-e0a7-4ffa-9035-450a6f2ae497",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
