@@ -456,24 +456,15 @@ public sealed class DeckSettings
     public string Page10Hotkey { get; set; } = "";
     public string RefreshHotkey { get; set; } = "";
     // Plugin command bindings, by command id ("thrm:open-page"). Kept when the command's module is stopped or removed, so
-    // re-enabling the module brings the binding back; the id is stable precisely so this survives a restart.
+    // re-enabling the module brings the binding back; the id is stable precisely so this survives a restart. Commands have
+    // exactly one entry point, the global shortcut, so this map is all the preference there is.
     public Dictionary<string, string> ModuleHotkeys { get; set; } = new(StringComparer.Ordinal);
-    // The commands the user put in the tray menu, by command id. Also kept while the module is absent.
-    public List<string> ModuleTrayCommands { get; set; } = [];
     public string ModuleHotkey(string commandId) => (ModuleHotkeys ?? new(StringComparer.Ordinal)).GetValueOrDefault(commandId) ?? "";
     public void SetModuleHotkey(string commandId, string value)
     {
         if (string.IsNullOrWhiteSpace(commandId)) return;
         ModuleHotkeys ??= new(StringComparer.Ordinal);
         if (string.IsNullOrWhiteSpace(value)) ModuleHotkeys.Remove(commandId); else ModuleHotkeys[commandId] = value;
-    }
-    public bool ModuleTrayCommand(string commandId) => (ModuleTrayCommands ?? []).Contains(commandId);
-    public void SetModuleTrayCommand(string commandId, bool shown)
-    {
-        if (string.IsNullOrWhiteSpace(commandId)) return;
-        ModuleTrayCommands ??= [];
-        ModuleTrayCommands.Remove(commandId);
-        if (shown) ModuleTrayCommands.Add(commandId);
     }
     public string Hotkey(HotkeyKind kind) => (kind switch
     {
@@ -866,9 +857,8 @@ public sealed class DeckSettings
         copy.MiniApps = MiniApps?.Copy() ?? new();
         copy.Pages = Pages?.Copy() ?? new();
         copy.Modules = Modules?.Copy() ?? new();
-        // Command bindings are plain strings, but the dictionaries must not be shared: the settings window edits a copy.
+        // Command bindings are plain strings, but the dictionary must not be shared: the settings window edits a copy.
         copy.ModuleHotkeys = new(ModuleHotkeys ?? [], StringComparer.Ordinal);
-        copy.ModuleTrayCommands = [.. ModuleTrayCommands ?? []];
         copy.InputMethods = new() { Enabled = InputMethods?.Enabled == true, Mode = InputMethods?.Mode ?? InputMethodMode.Control, Shortcut = InputMethods?.Shortcut ?? "Win+Space",
             Profiles = (InputMethods?.Profiles ?? []).Select(p => new InputMethodChoice { Id = p.Id, Name = p.Name, Enabled = p.Enabled }).ToList() };
         copy.DeviceChoices = [.. (DeviceChoices ?? []).Select(device => device.Copy())];
@@ -968,7 +958,6 @@ public sealed class DeckSettings
         // never be a contribution id, or a text that is not a hotkey, is dropped.
         ModuleHotkeys = (ModuleHotkeys ?? []).Where(pair => ContributionId(pair.Key) && HotkeyText.Normalize(pair.Value) is { Length: > 0 })
             .ToDictionary(pair => pair.Key, pair => HotkeyText.Normalize(pair.Value), StringComparer.Ordinal);
-        ModuleTrayCommands = (ModuleTrayCommands ?? []).Where(ContributionId).Distinct(StringComparer.Ordinal).Take(256).ToList();
         if (!Enum.IsDefined(Theme)) Theme = SettingsTheme.System;
         PanelTheme = PanelThemes.NormalizeId(PanelTheme) is { Length: > 0 } panelTheme ? panelTheme : PanelThemes.Dark;
         // Two valid, different times or none: anything else keeps the theme's own hours.

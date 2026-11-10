@@ -105,7 +105,7 @@ public partial class App
         => (entry.Value.Descriptor.Name, entry.Value.Descriptor.NameEn) is ({ Length: > 0 } zh, { Length: > 0 } en) ? Loc.T(zh, en)
             : entry.Value.Descriptor.Name is { Length: > 0 } name ? name : entry.Id;
 
-    // Runs a command from a shortcut or the tray menu: reports the result and never throws.
+    // Runs a command from its global shortcut: reports the result and never throws.
     internal async void RunModuleCommand(Contribution<IModuleCommand> entry)
     {
         try
@@ -114,23 +114,6 @@ public partial class App
             ReportCommandResult(entry, result);
         }
         catch (Exception error) { Modules.Report(entry.ModuleId, "command " + entry.Id, error); }
-    }
-
-    // The commands the user put in the tray menu, in list order. Only commands that are on offer appear: a stopped module's
-    // entries disappear with its contributions, and come back when it is enabled again, because the setting is kept.
-    private IReadOnlyList<(string Id, string Label)> TrayModuleCommands()
-    {
-        if (Settings.ModuleTrayCommands is not { Count: > 0 }) return [];
-        var offered = ModuleCommands();
-        return [.. Settings.ModuleTrayCommands
-            .Select(id => offered.FirstOrDefault(entry => entry.Id == id))
-            .OfType<Contribution<IModuleCommand>>()
-            .Select(entry => (entry.Id, CommandName(entry)))];
-    }
-
-    private void RunTrayModuleCommand(string commandId)
-    {
-        if (ModuleCommands().FirstOrDefault(entry => entry.Id == commandId) is { } entry) RunModuleCommand(entry);
     }
 
     // Opens a page the module owns, and nothing else: the id must be one of that module's registered pages. This is the one

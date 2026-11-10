@@ -93,30 +93,36 @@ internal static partial class Program
         // A recorded combination is saved in the canonical modifier order with the key's own spelling, which is what a
         // recording produces (the modifiers come from flags, the key from the WPF Key enum name).
         settings.SetModuleHotkey("thrm:open-page", "alt+ctrl+T");
-        settings.SetModuleTrayCommand("thrm:open-page", true);
         settings.Normalize();
-        Check("a command binding and tray choice survive normalizing while the module is absent",
-            settings.ModuleHotkey("thrm:open-page") == "Ctrl+Alt+T" && settings.ModuleTrayCommand("thrm:open-page"));
+        Check("a command binding survives normalizing while the module is absent",
+            settings.ModuleHotkey("thrm:open-page") == "Ctrl+Alt+T");
         var copy = settings.Copy();
         copy.SetModuleHotkey("thrm:open-page", "");
-        copy.SetModuleTrayCommand("thrm:open-page", false);
-        Check("the settings copy owns its binding maps, so editing the copy leaves the original alone",
-            settings.ModuleHotkey("thrm:open-page") == "Ctrl+Alt+T" && settings.ModuleTrayCommand("thrm:open-page")
-            && copy.ModuleHotkey("thrm:open-page") == "" && !copy.ModuleTrayCommand("thrm:open-page"));
+        Check("the settings copy owns its binding map, so editing the copy leaves the original alone",
+            settings.ModuleHotkey("thrm:open-page") == "Ctrl+Alt+T" && copy.ModuleHotkey("thrm:open-page") == "");
         var dirty = new DeckSettings();
         dirty.ModuleHotkeys["not a command id"] = "Ctrl+K";
         dirty.ModuleHotkeys["ok:cmd"] = "Ctrl+";     // not a hotkey, so it has no combination to register
         dirty.ModuleHotkeys["ok:other"] = "F9";
-        dirty.ModuleTrayCommands.AddRange(["ok:cmd", "ok:cmd", "bad id", "ok:other"]);
         dirty.Normalize();
-        Check("normalizing drops impossible command ids, invalid key texts and repeated tray entries",
-            dirty.ModuleHotkeys.Count == 1 && dirty.ModuleHotkey("ok:other") == "F9" && dirty.ModuleTrayCommands.Count == 2);
-        Check("a binding for a command that is unset reads back empty",
-            new DeckSettings().ModuleHotkey("x:y") == "" && !new DeckSettings().ModuleTrayCommand("x:y"));
+        Check("normalizing drops impossible command ids and invalid key texts",
+            dirty.ModuleHotkeys.Count == 1 && dirty.ModuleHotkey("ok:other") == "F9");
+        Check("a binding for a command that is unset reads back empty", new DeckSettings().ModuleHotkey("x:y") == "");
 
-        // ---- commands never take a built-in combination (the settings check the row uses) ----
+        // ---- a command and a built-in shortcut never share a combination, in either direction ----
+        // Both directions are checked through the same primitive the settings rows use, so the two sides cannot drift apart:
+        // a row compares the combination being recorded against the other side's saved text, and Overlap is symmetric.
         Check("a command binding to a built-in combination is detected as a clash",
             HotkeyText.Overlap("ctrl+alt+t", HotkeyText.Normalize("Ctrl+Alt+T")));
+        Check("an arrow shortcut covers its four arrow keys, so a command on one of them clashes",
+            HotkeyText.Overlap("Ctrl+Alt+Left", HotkeyText.Normalize("Ctrl+Alt+Arrows"))
+            && HotkeyText.Overlap("Ctrl+Alt+Arrows", HotkeyText.Normalize("Ctrl+Alt+Left")));
+        // The clash a built-in row must report does not depend on what that row held before: changing a row from F10 to the
+        // combination a command already has is a clash, even though F10 itself clashes with nothing.
+        Check("a new recording clashes with a command even when the row's previous text did not",
+            !HotkeyText.Overlap("Ctrl+Alt+F10", "Ctrl+Alt+F9") && HotkeyText.Overlap("Ctrl+Alt+F9", "Ctrl+Alt+F9"));
+        Check("an unbound command never clashes with anything",
+            !HotkeyText.Overlap("Ctrl+Alt+F9", "") && !HotkeyText.Overlap("", "Ctrl+Alt+F9") && !HotkeyText.Same("", ""));
     }
 
     private static bool ThrowsAsync(Func<Task> action)

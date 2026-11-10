@@ -42,15 +42,16 @@ public sealed partial class SettingsWindow
         CommandHotkeys();
     }
 
-    // The plugin commands, one row each: the box binds a global shortcut and the switch puts the command in the tray menu.
-    // A command of a stopped module keeps its binding but has no row, since the module offers nothing to bind while it is off.
+    // The plugin commands, one row each. A command has exactly one entry point — its global shortcut — so the row is just a
+    // shortcut box, like the built-in rows. A command of a stopped module keeps its binding but has no row, since the module
+    // offers nothing to bind while it is off.
     private void CommandHotkeys()
     {
         var commands = _app.ModuleCommands();
         if (commands.Count == 0) return;
         SectionTitle(Loc.T("插件命令", "Plugin commands"),
-            help: () => Loc.T("快捷键默认未绑定；打开右侧开关会把命令放进托盘菜单。停用插件后绑定与开关都会保留。",
-                "Shortcuts are unbound by default; the switch on the right puts the command in the tray menu. Both are kept when the plugin is disabled."));
+            help: () => Loc.T("快捷键默认未绑定；与内置快捷键或其他命令重复时不会生效。停用插件后绑定会保留。",
+                "Shortcuts are unbound by default and do not take a combination another shortcut or command has. Bindings are kept when the plugin is disabled."));
         Group([.. commands.Select(entry => CommandHotkeyRow(entry))]);
     }
 
@@ -65,9 +66,7 @@ public sealed partial class SettingsWindow
             (_, { Length: > 0 } en) => en,
             _ => null
         };
-        // The row decides both entry points of one command: the shortcut on the left, the tray switch beside it.
-        var tray = Toggle(Loc.T("放进托盘菜单", "Show in tray menu"), S.ModuleTrayCommand(entry.Id), value => Change(s => s.SetModuleTrayCommand(entry.Id, value)));
-        return CommandBox(entry.Id, title, help, tray);
+        return CommandBox(entry.Id, title, help);
     }
 
     private static string HotkeyTitle(HotkeyKind kind) => kind switch
@@ -111,9 +110,18 @@ public sealed partial class SettingsWindow
         string Saved() => inputMethod ? S.InputMethods.Shortcut ?? "" : S.Hotkey(kind);
         // The other shortcuts, with the names a clash message gives them. The arrow shortcuts yield to the single combinations
         // (HotkeyText.Priority), so only an arrow row speaks of a clash with those.
-        IEnumerable<(string Text, string Name)> Others() => Enum.GetValues<HotkeyKind>()
-            .Where(other => other != kind && (arrows || !HotkeyText.IsArrows(other)))
-            .Select(other => (S.Hotkey(other), HotkeyName(other)));
+        // Plugin commands are included: a command's combination is registered after the built-in ones and would silently yield,
+        // so binding a built-in row to a command's combination has to be refused here, where the user can see why. Every
+        // command binding is listed regardless of the row's own current text: the caller compares against the combination
+        // being recorded, and a command the row does not clash with today is exactly what a new recording may collide with.
+        IEnumerable<(string Text, string Name)> Others()
+        {
+            var others = Enum.GetValues<HotkeyKind>()
+                .Where(other => other != kind && (arrows || !HotkeyText.IsArrows(other)))
+                .Select(other => (Text: S.Hotkey(other), Name: HotkeyName(other)));
+            var commands = _app.ModuleCommands().Select(entry => (Text: S.ModuleHotkey(entry.Id), Name: CommandHotkeyName(entry)));
+            return others.Concat(commands);
+        }
 
         // The box keeps one size and place in every state: the text on the left, trimmed before the clear button, which
         // always holds its slot on the right and is only dimmed while nothing is set. The record button spans the whole
@@ -343,8 +351,8 @@ public sealed partial class SettingsWindow
     private void AppHotkeysChanged() { foreach (var refresh in _hotkeyRows.ToList()) refresh(); }
 
     // A command's shortcut box. It records exactly as a built-in one does (same template, suspension, clash check and status
-    // messages) but reads and writes the command's binding, and it may stand beside the command's tray switch.
-    private FrameworkElement CommandBox(string commandId, string title, string? help, FrameworkElement? trailing)
+    // messages) but reads and writes the command's binding.
+    private FrameworkElement CommandBox(string commandId, string title, string? help)
     {
         string waiting = Loc.T("请按下组合键…", "Press a combination…");
         var text = TextLine("", 12, TextPrimary);
@@ -469,21 +477,16 @@ public sealed partial class SettingsWindow
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var label = SettingLabel(title, help is null ? null : () => help); label.Margin = new Thickness(0, 0, 12, 0); row.Children.Add(label);
         Grid.SetColumn(note, 1); row.Children.Add(note);
-        // With a tray switch the box and the switch share the right-hand column, the switch after the box.
-        FrameworkElement control = chrome;
-        if (trailing is not null)
-        {
-            var parts = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-            parts.Children.Add(chrome); trailing.Margin = new Thickness(16, 0, 0, 0); parts.Children.Add(trailing);
-            control = parts;
-        }
-        Grid.SetColumn(control, 2); row.Children.Add(control);
+        Grid.SetColumn(chrome, 2); row.Children.Add(chrome);
         Action refresh = () => { if (!recording) Show(); };
         row.Loaded += (_, _) => { Deactivated += deactivated; if (_hotkeyRows.Add(refresh) && _hotkeyRows.Count == 1) WatchAppHotkeys(true); Show(); };
         row.Unloaded += (_, _) => { Deactivated -= deactivated; stop(); if (_hotkeyRows.Remove(refresh) && _hotkeyRows.Count == 0) WatchAppHotkeys(false); };
         Show();
         return row;
     }
+
+    // How a clash message names a command.
+    private static string CommandHotkeyName(Contribution<BrimDeck.Modules.IModuleCommand> entry) => "“" + App.CommandName(entry) + "”";
 
     // What stands in the way of binding this combination to this command, or "" when nothing does. A built-in shortcut always
     // wins: taking its combination would make one of the two stop working with no way to say which.
@@ -493,7 +496,7 @@ public sealed partial class SettingsWindow
             if (HotkeyText.Normalize(S.Hotkey(kind)) is { Length: > 0 } builtInText && HotkeyText.Overlap(gesture, builtInText))
                 return Loc.T("与" + HotkeyName(kind) + "重复，请换一个组合键。", "This is already " + HotkeyName(kind) + ". Choose another combination.");
         if (_app.ModuleCommands().FirstOrDefault(entry => entry.Id != commandId && HotkeyText.Overlap(gesture, S.ModuleHotkey(entry.Id))) is { } other)
-            return Loc.T("与「" + App.CommandName(other) + "」重复，请换一个组合键。", "This is already “" + App.CommandName(other) + "”. Choose another combination.");
+            return Loc.T("与" + CommandHotkeyName(other) + "重复，请换一个组合键。", "This is already " + CommandHotkeyName(other) + ". Choose another combination.");
         return "";
     }
 
