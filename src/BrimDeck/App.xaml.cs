@@ -285,6 +285,8 @@ public partial class App : Application
         if (systemChanged && !wasHigh && !PanelTheme.HighContrast && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
         foreach (var deck in Decks.ToList()) deck.ApplySettings();
         Modules?.Publish(new BrimDeck.Modules.ModuleUiChanged());
+        // The panel's theme is part of what modules read; ApplySettings above has already taken the new palette.
+        DeckStateChanged();
         if (!reload) _settingsWindow?.PanelThemeChanged();
     }
     // A theme with a night look changes look at its hours (PanelThemes.IsNight): the timer is set for the next change, and at
@@ -316,6 +318,8 @@ public partial class App : Application
             Displays = Native.Displays.Current(); AssignDisplays();
             foreach (var deck in Decks.ToList()) deck.ApplySettings();
             _settingsWindow?.DisplaysChanged();
+            // Every panel has its monitor now: the new layout is one change as modules see it.
+            DisplaysSettled();
         });
     }
     // Gives the main panel its monitor and opens or closes the panels of the other monitors. A panel that keeps its
@@ -413,17 +417,23 @@ public partial class App : Application
         bool Heat(CompactMonitorItems item, CompactMonitorItems among) => (among & item) != 0 && Settings.CompactReadings.FirstOrDefault(reading => reading.Item == item) is { } reading
             && (item == CompactMonitorItems.Storage || reading.ShowValue) && CompactFigures.Shows(reading, CompactFigures.Temperature);
         bool stripDrives = (shown & CompactMonitorItems.Storage) != 0;
-        Monitor?.SetExtras(page && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Cpu, held) || Heat(CompactMonitorItems.Gpu, held),
-            page && Settings.MonitorStorage || stripDrives,
-            page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage, shown),
+        // A module subscribed to the system readings keeps the sampler running, but reads only what the user allows: the
+        // same switches the page obeys, never a sensor the user turned off and never past SensorGuard.
+        bool modules = ModuleSystemSource.SubscriberCount > 0;
+        Monitor?.SetExtras(
+            page && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Cpu, held) || Heat(CompactMonitorItems.Gpu, held) || modules && Settings.MonitorTemperatures,
+            page && Settings.MonitorStorage || stripDrives || modules && Settings.MonitorStorage,
+            page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage, shown) || modules && Settings.MonitorStorage && Settings.MonitorTemperatures,
             // The watts (the counters, NVIDIA's helper) only for a page that shows the power line or a row that chose the reading; the battery
             // alone also for the row's charge reading.
-            _presentingPower.Count > 0 && Settings.MonitorPower && PowerKnownToExist || (shown & CompactMonitorItems.Power) != 0,
+            _presentingPower.Count > 0 && Settings.MonitorPower && PowerKnownToExist || (shown & CompactMonitorItems.Power) != 0 || modules && Settings.MonitorPower && PowerKnownToExist,
             (shown & CompactMonitorItems.Charge) != 0,
             // The frame rate for a row that shows it, or an open page with room for its line.
             (shown & CompactMonitorItems.Frames) != 0 || Settings.MonitorFrames && _presentingMonitor.Any(deck => deck.PageShowsFrames),
             // The graphics adapters for the page and the row's GPU reading (the power asks for them itself).
-            page || (shown & CompactMonitorItems.Gpu) != 0);
+            page || (shown & CompactMonitorItems.Gpu) != 0 || modules,
+            // The disks' read and write rates have no place in the panel: only a module asks for them.
+            modules);
     }
     // The page reads the machine's power only where there may be something to read: not once the sampler knows there is neither a power
     // source nor a battery (a desktop with nothing), so such a page does not keep asking.

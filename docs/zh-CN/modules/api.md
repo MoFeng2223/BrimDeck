@@ -28,6 +28,7 @@
 | `usage.read` | Service | 读取用量 / Read usage | 1 | `usage.read` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleUsage` |
 | `media.read` | Service | 读取正在播放 / Read now playing | 1 | `media.read` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleMedia` |
 | `system.read` | Service | 读取系统监控 / Read system metrics | 1 | `system.read` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleSystem` |
+| `host.state` | Service | 读取面板状态 / Read panel state | 10 | `host.state` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleHostState` |
 | `notifications.show` | Service | 显示岛内提醒 / Show island notices | 1 | `notifications.show` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleNotifications` |
 | `ui.presentation` | Service | 刷新模组界面 / Refresh module presentation | 5 | 无 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModulePresentation` |
 | `commands.invoke` | Service | 调用自己的命令 / Invoke own commands | 9 | 无 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleCommands` |
@@ -855,8 +856,9 @@
 | 成员签名 |
 | --- |
 | `const int Major = 1` |
-| `const int Minor = 9` |
+| `const int Minor = 10` |
 | `const string HostInfo = "host.info"` |
+| `const string HostState = "host.state"` |
 | `const string UsageRead = "usage.read"` |
 | `const string MediaRead = "media.read"` |
 | `const string SystemRead = "system.read"` |
@@ -1206,6 +1208,86 @@
 | `long Revision { get; init; }` |
 | `ModuleDataStatus Status { get; init; }` |
 | `double? UploadBytesPerSecond { get; init; }` |
+| `ModuleReading<double> CpuUsage { get; init; }` |
+| `ModuleReading<double> MemoryUsage { get; init; }` |
+| `ModuleReading<UInt64> MemoryUsed { get; init; }` |
+| `ModuleReading<UInt64> MemoryTotal { get; init; }` |
+| `ModuleReading<double> GpuUsage { get; init; }` |
+| `ModuleReading<double> DownloadRate { get; init; }` |
+| `ModuleReading<double> UploadRate { get; init; }` |
+| `ModuleReading<double> CpuTemperature { get; init; }` |
+| `string? CpuTemperatureSource { get; init; }` |
+| `ModuleReading<double> GpuTemperature { get; init; }` |
+| `string? GpuTemperatureFrom { get; init; }` |
+| `string? GpuAdapterKey { get; init; }` |
+| `string? GpuAdapterName { get; init; }` |
+| `ModuleReading<UInt64> GpuDedicatedBytesUsed { get; init; }` |
+| `ModuleReading<UInt64> GpuDedicatedBytesTotal { get; init; }` |
+| `ModuleReading<double> DiskReadBytesPerSecond { get; init; }` |
+| `ModuleReading<double> DiskWriteBytesPerSecond { get; init; }` |
+| `ModuleReading<double> PowerWatts { get; init; }` |
+| `bool PowerEstimated { get; init; }` |
+| `string? PowerSource { get; init; }` |
+| `ModuleReading<double> CpuPowerWatts { get; init; }` |
+| `ModuleReading<double> GpuPowerWatts { get; init; }` |
+| `IReadOnlyList<ModuleStorageDrive> Storage { get; init; }` |
+| `bool StorageRead { get; init; }` |
+
+### `ModuleReading<T>`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`；`T` 为值类型。
+
+| 成员签名 |
+| --- |
+| `ModuleDataStatus Status { get; init; }` |
+| `T? Value { get; init; }` |
+| `string? Reason { get; init; }` |
+| `DateTimeOffset? ObservedAt { get; init; }` |
+| `static ModuleReading<T> Available(T value, DateTimeOffset? observed = null)` |
+| `static ModuleReading<T> Missing(string? reason = null, DateTimeOffset? observed = null)` |
+| `static ModuleReading<T> Disabled(string? reason = null)` |
+| `static ModuleReading<T> Stale(T? value, string? reason = null, DateTimeOffset? observed = null)` |
+
+### `ModuleStorageDrive` / `ModuleStorageVolume`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `ModuleStorageDrive(int Number, string? Model, bool SolidState, IReadOnlyList<ModuleStorageVolume> Volumes)` |
+| `ModuleReading<double> Temperature { get; init; }` |
+| `ModuleStorageVolume(string Letter, string Label, UInt64 TotalBytes, UInt64 FreeBytes)` |
+| `UInt64 UsedBytes { get; }` |
+
+### `IModuleHostState`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+继承：`IModuleSnapshotReader<ModuleHostStateSnapshot>`。
+
+| 成员签名 |
+| --- |
+
+### `ModuleHostStateSnapshot`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `ModuleHostStateSnapshot(long Revision, DateTimeOffset ObservedAt)` |
+| `bool Expanded { get; init; }` |
+| `string PageId { get; init; }` |
+| `bool PageIsOwn { get; init; }` |
+| `string ThemeId { get; init; }` |
+| `bool ThemeIsDark { get; init; }` |
+| `bool ThemeNightLook { get; init; }` |
+| `bool HighContrast { get; init; }` |
+| `int ThemeGeneration { get; init; }` |
+| `double DeviceScale { get; init; }` |
+| `double ContentScale { get; init; }` |
+| `string ScreenContext { get; init; }` |
+| `string? DisplayId { get; init; }` |
+| `int DisplayRevision { get; init; }` |
 
 ### `IModuleNotifications`
 
@@ -1405,14 +1487,19 @@
 | --- | --- | --- |
 | `IModuleUsage` | `usage.read` | 各服务的用量指标、重置／过期时间、余额／数量、token 汇总与完整性标记 |
 | `IModuleMedia` | `media.read` | 本体选中的播放器、曲名、作者、专辑、播放状态、进度和播放速率 |
-| `IModuleSystem` | `system.read` | CPU、内存、GPU、网络吞吐；没有进程路径或进程明细 |
+| `IModuleSystem` | `system.read` | CPU、内存、GPU、网络吞吐、磁盘读写、温度、显存、功耗与磁盘容量；没有进程路径或进程明细 |
+| `IModuleHostState` | `host.state` | 主面板的展开、当前页面、主题、缩放、全屏上下文与显示器标识 |
 | `IModuleNotifications` | `notifications.show` | 由宿主呈现的短时文字／进度提醒，复用岛内交接动效 |
 
 读取接口只返回独立不可变快照；不暴露凭据、账户详情字典、数据源路径或本体可变 store。权限是公开接口的访问控制，同进程 DLL 仍须来自可信作者。
 
-`GetSnapshot()` 获取最新缓存；`Subscribe()` 不重放旧值，激活提交后才接收变化，随激活代自动释放。订阅后再读最新快照可避免首次挂载漏读。回调在本体发布数据的 UI 线程执行，应快速返回；异常会归属到模组并隔离。快照包含 `Revision` 与 `ObservedAt`。`Available`、`Unavailable`、`Stale`、`Disabled` 表示数据状态，当前宿主主要使用前三者；缺失数字为 null，不能解释成 0。
+`GetSnapshot()` 获取最新缓存；`Subscribe()` 在激活提交后先交付当时最新的快照一次，之后接收变化，随激活代自动释放。因此模组不需要在订阅后立刻再读来实现首次同步；先订阅再读仍然可用，但读到的不会比已交付的更旧。回调在本体发布数据的 UI 线程执行，应快速返回；异常会归属到模组并隔离。快照包含 `Revision` 与 `ObservedAt`。顶层 `Status` 是整份快照的汇总；逐项读数使用 `ModuleReading<T>`：`Available` 可以合法为 0，`Unavailable`、`Disabled`、`Stale` 的 `Value` 不为有效读数，并带稳定原因代码。缺失数字为 null，不能解释成 0。
 
-用量跟随本体已有刷新来源，不新增网络请求；某服务未启用或尚未读取时可能没有条目。必须检查条目状态、`TokenUsageAvailable`、`TokenUsageComplete`，并按具体指标的 `ResetsAt`／`ExpiresAt` 判断有效期。百分比是已用比例，可能超过 100。系统监控订阅按需复用原采样器，不启动进程扫描；超过 6 秒的缓存读取标为 Stale。媒体读取根据时间和播放速率估计进度，订阅仅在本体媒体状态更新时触发。
+用量跟随本体已有刷新来源，不新增网络请求；某服务未启用或尚未读取时可能没有条目。必须检查条目状态、`TokenUsageAvailable`、`TokenUsageComplete`，并按具体指标的 `ResetsAt`／`ExpiresAt` 判断有效期。百分比是已用比例，可能超过 100。系统监控订阅按需复用原采样器，不启动进程扫描，也不为模组另起轮询；读数只在用户设置允许时才读取（关闭的温度、存储、功耗来源不会被模组重新打开，安全停止的传感器也不会绕过），没有来源的字段为 `Unavailable` 而合法零仍为 `Available`；超过 6 秒的缓存读取标为 Stale。磁盘读写只由模组订阅触发，面板本身不显示它。媒体读取根据时间和播放速率估计进度，`PositionObservedAt` 是播放器给出位置的时间，订阅仅在本体媒体状态更新时触发。
+
+面板状态（`IModuleHostState`）只代表主面板：副屏的展开或切页不会覆盖它。它会随面板真实的展开、切页、主题、缩放、全屏上下文和显示器变化发布，只有内容变化时才发布；`Revision` 严格递增，`DisplayRevision` 在显示器布局变化时增加。`PageId` 对内置页面是稳定 id；插件页面只对所属插件显示其完整 id，其他读者看到通用的 `mini-apps` 页，`PageIsOwn` 仅对所属插件为 true。主题与缩放在同一次设置应用后合并为一次发布，回调中再次切页或收起不会造成递归分发。
+
+宿主事件只能由宿主发布；插件页面与活动的打开事件只投递给所属插件，其他插件看不到。模组自己 `Publish` 的消息只在自身作用域内投递，不能与其他插件建立跨模组消息通道。
 
 提醒标题最多 60 字符、正文最多 160 字符，ID 使用局部模组 ID 规则；时长夹取到 900–8000 ms，进度夹取到 0–100，非有限值拒绝。Ready 前返回 `NotReady`。已展开、输入法正在切换、已有提示或全屏抑制时排队，最多等待 30 秒。每模组每分钟最多接收 4 条，队列总计 16 条，同一激活代同 ID 的待显示项合并。`Shown`／`Queued` 仅代表接收结果，不能当成已经被用户看见。关闭模组撤销其待显示与当前提示；通知结束恢复持续计时，不修改计时会话。当前投递到主岛，不向所有屏幕重复广播。
 
@@ -1513,8 +1600,10 @@
 | Amount / Used / Total | 按 Unit/Currency 解读；余额、花费、数量不可互换 |
 | InputTokens/OutputTokens/Cache*Tokens/TotalTokens | token 数，先看 Available/Complete；Total 已含缓存读写，不重复相加 |
 | ResetsAt/ExpiresAt/UpdatedAt/ObservedAt | DateTimeOffset 时间点；按重置时间标识周期；ObservedAt 不代表来源刚刷新，过期不告警 |
-| 媒体 PositionSeconds/DurationSeconds | 秒，null 表示无时间轴；PlaybackState 为小写状态，未知值显示未知 |
-| 系统 *UsedPercent / *Bytes | 百分比 0–100／字节；网络 Download/Upload 是字节每秒；可用快照的单字段仍可为 null |
+| 媒体 PositionSeconds/DurationSeconds | 秒，null 表示无时间轴；PlaybackState 为小写状态，未知值显示未知；PositionObservedAt 是播放器给出位置的时间 |
+| 系统 *UsedPercent / *Bytes | 百分比 0–100／字节；网络 Download/Upload 与磁盘 Read/Write 是字节每秒；逐项读数先看 `ModuleReading<T>.Status`，可用快照的单字段仍可为 null |
+| 系统温度／功耗 | 摄氏度／瓦；`CpuTemperatureSource`、`GpuTemperatureFrom`、`PowerSource` 说明来源；`PowerEstimated` 为真时整机功耗是部件估算而非实测 |
+| 面板状态 | `Expanded`、`PageId`、`ThemeId`、`DeviceScale`/`ContentScale`、`ScreenContext`；主面板语义，`DisplayRevision` 随显示器布局变化 |
 
 Revision 表示当前快照变更，不是永久 ID，不能跨服务比较或假定重启后仍单调递增。订阅不重放，先订阅再读取完成初始同步；告警归模组级，多屏不重复发。可选服务先检查 host.info 的实际 Capabilities，再 Get；能力可用也可能暂时无数据。
 

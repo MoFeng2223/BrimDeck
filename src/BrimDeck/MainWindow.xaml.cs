@@ -69,6 +69,9 @@ public partial class MainWindow : Window
     private readonly Dictionary<Guid, int> _quotaPages = new();
     private DateTimeOffset? _updatedAt;
     private ScreenContext _context;
+    // What modules read about this panel: the screen context as the panel resolved it, and the device scale of its monitor.
+    internal ScreenContext CurrentScreenContext => _context;
+    internal double DeviceScale => _pixelsPerDip;
     // Threshold levels seen per quota; a rise after the first reading briefly widens the compact island.
     private readonly Dictionary<string, int> _levels = new();
     private bool _levelsSeeded;
@@ -337,6 +340,8 @@ public partial class MainWindow : Window
         RenderUsage();
         CheckMoveOvertaken();
         ReportMoveShape();
+        // What modules can see of this panel has just been laid out: tell the host once, if it is the main panel and anything changed.
+        _app.DeckStateChanged();
     }
     // Windows keeps a layered window's last picture while it is hidden and puts it on screen the moment the window is shown,
     // before WPF draws again. Hidden straight away, the panel came back showing the frame it was hidden on: after the expand

@@ -106,7 +106,16 @@ public sealed partial class ModuleHost : IDisposable
     }
     private static string Describe(Exception error)
     { try { return error.Message; } catch { return "Module exception details could not be read."; } }
+    // A message from the host goes to every listener of its type, except an opening of a module's page or activity: that one
+    // is the owner's to see, so no other module learns which page another is opening.
     public void Publish<T>(T message)
+        => Publish(message, message is ModuleOpeningEvent opening ? OwnerOf(opening.ContributionId) : null);
+    private string? OwnerOf(string contributionId)
+    {
+        int colon = contributionId.IndexOf(':');
+        return colon > 0 ? contributionId[..colon] : null;
+    }
+    private void Publish<T>(T message, string? from)
     {
         ArgumentNullException.ThrowIfNull(message);
         EventListener[] list;
@@ -114,6 +123,7 @@ public sealed partial class ModuleHost : IDisposable
         foreach (var entry in list)
         {
             if (!entry.Live || !entry.Scope.Ready) continue;
+            if (from is not null && entry.Owner != from) continue;
             InvokeOwned(entry.Owner, entry.Scope, "event " + typeof(T).Name, () => { if (entry.Live) ((Action<T>)entry.Callback)(message); return true; });
         }
     }
@@ -173,7 +183,8 @@ public sealed partial class ModuleHost : IDisposable
                 {
                     if (!_boundServices.TryGetValue(typeof(T), out var service))
                     {
-                        var serviceScope = new ModuleServiceScope(id, scope.Token, RequireLive, () => scope.Ready, Stage, (operation, callback) => host.InvokeOwned(activation, operation, () => { callback(); return true; }));
+                        var serviceScope = new ModuleServiceScope(id, scope.Token, RequireLive, () => scope.Ready, Stage,
+                            (operation, callback) => host.InvokeOwned(activation, operation, () => { callback(); return true; }), scope.AfterActivate);
                         _boundServices[typeof(T)] = service = binding.Create(serviceScope);
                     }
                     return (T)service;
@@ -232,7 +243,7 @@ public sealed partial class ModuleHost : IDisposable
             RequireLive();
             if (message is IModuleHostEvent || typeof(IModuleHostEvent).IsAssignableFrom(typeof(T))) throw new ModuleApiException("host-event-publish-denied", "Host lifecycle events may only be published by the host.");
             if (!scope.Ready) throw new ModuleApiException("module-not-ready", "The module has not committed activation.");
-            host.Publish(message);
+            host.Publish(message, id);
         }
         public void Report(string operation, Exception error) => host.ReportOwned(activation, operation, error);
     }

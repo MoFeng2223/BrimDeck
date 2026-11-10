@@ -58,7 +58,26 @@ internal static partial class Program
             return ValueTask.CompletedTask;
         })]);
         Check("widgets cannot route settings into another module", host.Modules.Single().Status == ModuleStatus.Failed && host.Registry.List<ModuleWidget>().Count == 0);
+        await ScopeChecks();
         BundleChecks();
+    }
+    // Two modules on one bus: a module's own messages stay with it, and another module's page opening is not its business.
+    private static async Task ScopeChecks()
+    {
+        using var host = Host();
+        int alpha = 0, beta = 0, alphaOpen = 0, betaOpen = 0;
+        IModuleContext? betaContext = null;
+        await host.ReconcileAsync([
+            Def("alpha", c => { c.Subscribe<string>(_ => alpha++); c.Subscribe<ModulePageOpening>(_ => alphaOpen++); return ValueTask.CompletedTask; }),
+            Def("beta", c => { betaContext = c; c.Subscribe<string>(_ => beta++); c.Subscribe<ModulePageOpening>(_ => betaOpen++); return ValueTask.CompletedTask; })]);
+        betaContext!.Publish("beta-only");
+        Check("a module's message reaches its own listeners only", beta == 1 && alpha == 0);
+        host.Publish(new ModulePageOpening("alpha:page"));
+        Check("another module's page opening is not broadcast", alphaOpen == 1 && betaOpen == 0);
+        host.Publish("host-message");
+        Check("host messages still reach every module", alpha == 1 && beta == 2);
+        await host.ReconcileAsync([]);
+        Check("stopping modules ends their scoped subscriptions", alpha == 1 && beta == 2);
     }
     private static void BundleChecks()
     {

@@ -19,6 +19,7 @@ internal static class ModuleCapabilities
         Core<IModuleUsage>(ModuleApi.UsageRead, ModuleCapabilityKind.Service, "读取用量", "Read usage", 1, ModuleApi.UsageRead),
         Core<IModuleMedia>(ModuleApi.MediaRead, ModuleCapabilityKind.Service, "读取正在播放", "Read now playing", 1, ModuleApi.MediaRead),
         Core<IModuleSystem>(ModuleApi.SystemRead, ModuleCapabilityKind.Service, "读取系统监控", "Read system metrics", 1, ModuleApi.SystemRead),
+        Core<IModuleHostState>(ModuleApi.HostState, ModuleCapabilityKind.Service, "读取面板状态", "Read panel state", 10, ModuleApi.HostState),
         Core<IModuleNotifications>(ModuleApi.NotificationsShow, ModuleCapabilityKind.Service, "显示岛内提醒", "Show island notices", 1, ModuleApi.NotificationsShow),
         Core<IModulePresentation>(ModuleApi.UiPresentation, ModuleCapabilityKind.Service, "刷新模组界面", "Refresh module presentation", 5, null),
         Core<IModuleCommands>(ModuleApi.CommandsInvoke, ModuleCapabilityKind.Service, "调用自己的命令", "Invoke own commands", 9, null),

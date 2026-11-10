@@ -14,4 +14,5 @@ internal static class Why
     public static string NoGpu => Loc.T("显卡驱动未提供 GPU 计数器", "the graphics driver provides no GPU counters");
     public static string NoGpuMemory => Loc.T("显卡驱动未报告显存占用", "the graphics driver reports no memory in use");
     public static string NoProcesses => Loc.T("无法读取进程列表", "the process list could not be read");
+    public static string NoDisk => Loc.T("系统未提供磁盘计数器", "the system provides no disk counters");
 }

@@ -53,7 +53,30 @@ internal static partial class Program
         host.Publish(new ModuleSuspending()); source.Publish(empty); clock.Tick();
         Check("starting module receives no host callbacks", calls == 0 && ticks == 0 && lifecycle == 0);
         release.SetResult(); await starting; source.Publish(empty with { Revision = 1 }); clock.Tick(); host.Publish(new ModuleSuspending());
-        Check("ready scope receives snapshots timer and lifecycle", calls == 1 && ticks == 1 && lifecycle == 1 && source.SubscriberCount == 1);
+        // Two calls: the reading in hand once the module is ready, then the one published after it.
+        Check("ready scope receives snapshots timer and lifecycle", calls == 2 && ticks == 1 && lifecycle == 1 && source.SubscriberCount == 1);
+        // A subscription made while the module starts is handed the reading in hand once it is ready, and only once: the
+        // module never has to read the snapshot itself to learn where it begins.
+        var staged = new ModuleSnapshotSource<ModuleUsageSnapshot>(empty with { Revision = 7 });
+        int delivered = 0; ModuleUsageSnapshot? first = null;
+        var reload = new ManualResetEventSlim();
+        var stagedHost = new ModuleHost(Path.Combine(_root, "staged"), new Scheduler(), [], App.ModuleKinds(),
+            [ModuleService.Of<IModuleUsage>(ModuleApi.UsageRead, ModuleApi.UsageRead, scope => new UsageClient(scope, staged))]) { StartTimeout = TimeSpan.FromSeconds(2) };
+        try
+        {
+            var startingStaged = stagedHost.ReconcileAsync([Client(ApiManifest("staged"), async c =>
+            { c.GetService<IModuleUsage>().Subscribe(value => { delivered++; first ??= value; }); await Task.Run(reload.Wait); })]);
+            staged.Publish(empty with { Revision = 8 });
+            Check("starting module is handed nothing while it starts", delivered == 0);
+            reload.Set(); await startingStaged;
+            Check("subscription receives the latest reading once it is ready", delivered == 1 && first?.Revision == 8);
+            staged.Publish(empty with { Revision = 9 });
+            Check("later readings follow the first", delivered == 2);
+            await stagedHost.ReconcileAsync([]);
+            staged.Publish(empty with { Revision = 10 });
+            Check("a stopped module is handed no later readings", delivered == 2 && staged.SubscriberCount == 0);
+        }
+        finally { stagedHost.Dispose(); }
         Check("host information reports actual capabilities", context!.GetService<IModuleHostInfo>().GetInfo().Capabilities.Contains(ModuleApi.UsageRead));
         Throws("module cannot forge lifecycle with object payload", () => context!.Publish<object>(new ModuleSuspending()));
         context!.Publish("module-message");
@@ -61,9 +84,13 @@ internal static partial class Program
         Check("disable releases host subscriptions and timers", source.SubscriberCount == 0 && clock.Callbacks.Count == 0);
         Throws("retained host service revoked after disable", () => reader!.GetSnapshot());
         Throws("retained service cannot subscribe after disable", () => reader!.Subscribe(_ => { }));
+        int before = calls;
         await host.ReconcileAsync([Client(ApiManifest(), c => { c.GetService<IModuleUsage>().Subscribe(_ => throw new Exception("listener")); return ValueTask.CompletedTask; }),
             Client(ApiManifest("healthy"), c => { c.GetService<IModuleUsage>().Subscribe(_ => calls++); return ValueTask.CompletedTask; })]);
-        source.Publish(empty); Check("snapshot callback failure isolated and attributed", calls == 2 && host.Faults.Any(f => f.ModuleId == "client" && f.Operation == "host snapshot"));
+        source.Publish(empty);
+        // Both modules' first readings are handed over at activation, so the one publish adds one to each; the failing listener
+        // is attributed to its own module and the healthy one keeps receiving.
+        Check("snapshot callback failure isolated and attributed", calls == before + 2 && host.Faults.Any(f => f.ModuleId == "client" && f.Operation == "host snapshot"));
         var target = new ModuleDefinition(new() { Id = "dep", Name = "dep", Version = "2.0.0" }, "v1", true, () => new TestModule(Done));
         var child = new ModuleDefinition(new() { Id = "child", Name = "child", Dependencies = [new("dep") { MaximumVersionExclusive = "2.0.0" }] }, "v1", true, () => new TestModule(_ => { creates++; return ValueTask.CompletedTask; }));
         await host.ReconcileAsync([child, target]); Check("dependency exclusive maximum blocks incompatible installed version", creates == 0 && host.Modules.Single(m => m.Id == "child").Status == ModuleStatus.DependencyFailed);
@@ -113,6 +140,46 @@ internal static partial class Program
         Check("invalid system numbers never become fake zero", ModuleHostProjection.System(2, malformed).Status == ModuleDataStatus.Unavailable);
         Check("missing player is unavailable with no timeline", ModuleHostProjection.Media(1, now, null) is { Status: ModuleDataStatus.Unavailable, PositionSeconds: null, DurationSeconds: null });
         Check("playing metadata omits embedded content", !JsonSerializer.Serialize(ModuleHostProjection.Media(2, now, new() { Title = "Track", EmbeddedLyrics = "PRIVATE-LYRICS", State = MediaState.Playing })).Contains("PRIVATE"));
+        // A reading of zero is a reading, not a missing one: an idle machine reports no traffic, and the module must see it.
+        var idle = new MonitorSnapshot(DateTimeOffset.Now, 4, new CpuSample([new CoreSample(0, 0, CoreTier.Unknown, 1, 0, default, null)], default),
+            new MemorySample(16UL << 30, 0, 0, 0), new NetworkSample(0, 0), new GpuSample(0, Reading<ulong>.Of(0)) { DedicatedTotal = 8UL << 30 }, default);
+        var quiet = ModuleHostProjection.System(3, idle);
+        Check("a legitimate zero stays available", quiet is { DownloadRate.Status: ModuleDataStatus.Available, DownloadRate.Value: 0, GpuDedicatedBytesUsed.Status: ModuleDataStatus.Available }
+            && quiet.DownloadBytesPerSecond == 0 && quiet.GpuDedicatedBytesUsed.Value == 0);
+        Check("a sensor that was not read is missing, not zero", quiet.CpuTemperature.Status == ModuleDataStatus.Unavailable && quiet.CpuTemperature.Value is null
+            && quiet.DiskReadBytesPerSecond.Status == ModuleDataStatus.Unavailable && quiet.DiskReadBytesPerSecond.Value is null
+            && quiet.PowerWatts.Status == ModuleDataStatus.Unavailable);
+        Check("storage is frozen and carries its own readings", quiet is { StorageRead: false } && ((IList<ModuleStorageDrive>)quiet.Storage).IsReadOnly);
+        var heated = new MonitorSnapshot(DateTimeOffset.Now, 4, new CpuSample([new CoreSample(0, 0, CoreTier.Unknown, 1, .5, default, null)], default) { Temperature = 61, TemperatureSource = BrimDeck.Core.CpuTemperatureSource.Processor },
+            new MemorySample(16UL << 30, 8UL << 30, 0, 0), new NetworkSample(1200, 800),
+            new GpuSample(.3, Reading<ulong>.Of(1UL << 30)) { Temperature = 55, Name = "Card", Key = "gpu:1", DedicatedTotal = 8UL << 30 }, default)
+        {
+            Disk = new DiskRates(4096, 2048),
+            Power = new PowerSample(96, PowerOrigin.Estimated, PowerSource.Components, [new("cpu", "CPU", 96, "RAPL")]),
+            Storage = [new StorageDrive(0, "Disk", [new StorageVolume("C:", "System", 100UL << 30, 40UL << 30)]) { Temperature = new DiskTemperature("Disk", 41), SolidState = true }]
+        };
+        var busy = ModuleHostProjection.System(4, heated);
+        Check("temperatures, memory and disk carry values and their sources", busy is
+            { CpuTemperature.Value: 61, CpuTemperatureSource: "processor", GpuTemperature.Value: 55, GpuAdapterKey: "gpu:1", GpuAdapterName: "Card" }
+            && busy.MemoryUsed.Value == 8UL << 30 && busy.DiskReadBytesPerSecond.Value == 4096 && busy.DiskWriteBytesPerSecond.Value == 2048);
+        Check("power keeps its measurement and its source", busy is { PowerWatts.Value: 96, PowerEstimated: true, PowerSource: "components" });
+        Check("drives and volumes are projected with their state", busy.StorageRead && busy.Storage.Single() is { SolidState: true, Volumes.Count: 1 } drive
+            && drive.Volumes[0].UsedBytes == 60UL << 30 && drive.Temperature.Status == ModuleDataStatus.Available);
+        Check("readings serialize without host internals", !JsonSerializer.Serialize(busy).Contains("PRIVATE"));
+        // The panel's state is the main panel's, and a page that belongs to one module is named only to that module.
+        var state = new ModuleHostStateSnapshot(1, now) { Expanded = true, PageId = "thrm:main", ThemeId = "dark", ContentScale = 1.25, DisplayRevision = 3 };
+        Check("a module sees its own page", App.PageIdForModules(state.PageId, "thrm") == "thrm:main");
+        Check("another module's page is hidden behind the generic page", App.PageIdForModules(state.PageId, "other") == DeckPageIds.LegacyMiniApps);
+        Check("built-in pages stay visible to every module", App.PageIdForModules(DeckPageIds.Monitor, "other") == DeckPageIds.Monitor);
+        Check("a state snapshot is immutable data", state is { Expanded: true, ContentScale: 1.25, DisplayRevision: 3 } && state.Revision == 1);
+        // One publication per real change: a repaint that changed nothing costs no callback, and the revision never goes back.
+        var revisions = new HostStateRevisions();
+        var first = revisions.Apply(state, force: false)!;
+        Check("the first state is published with a revision", first.Revision == 1);
+        Check("an unchanged state is not published again", revisions.Apply(state, force: false) is null);
+        Check("a changed state is published with the next revision", revisions.Apply(state with { Expanded = false }, force: false) is { Revision: 2 });
+        Check("a forced publication moves the revision on", revisions.Apply(state with { Expanded = false }, force: true) is { Revision: 3 });
+        Check("the state in hand is the last published", revisions.Current is { Revision: 3, Expanded: false });
     }
     private static void ThresholdChecks()
     {

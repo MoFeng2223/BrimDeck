@@ -29,14 +29,25 @@ public sealed class ModuleServiceScope
     private readonly Func<bool> _ready;
     private readonly Func<Func<IDisposable>, IDisposable> _ownSubscription;
     private readonly Action<string, Action> _invoke;
-    internal ModuleServiceScope(string id, CancellationToken lifetime, Action requireLive, Func<bool> ready, Func<Func<IDisposable>, IDisposable> ownSubscription, Action<string, Action> invoke)
-    { ModuleId = id; Lifetime = lifetime; _requireLive = requireLive; _ready = ready; _ownSubscription = ownSubscription; _invoke = invoke; }
+    private readonly Action<Action> _afterActivate;
+    internal ModuleServiceScope(string id, CancellationToken lifetime, Action requireLive, Func<bool> ready, Func<Func<IDisposable>, IDisposable> ownSubscription,
+        Action<string, Action> invoke, Action<Action> afterActivate)
+    { ModuleId = id; Lifetime = lifetime; _requireLive = requireLive; _ready = ready; _ownSubscription = ownSubscription; _invoke = invoke; _afterActivate = afterActivate; }
     public string ModuleId { get; }
     public CancellationToken Lifetime { get; }
     public bool Ready => !Lifetime.IsCancellationRequested && _ready();
     public void RequireLive() => _requireLive();
     public T Read<T>(ModuleSnapshotSource<T> source) where T : class { RequireLive(); return source.Read(); }
     public IDisposable Subscribe<T>(ModuleSnapshotSource<T> source, Action<T> listener) where T : class
-    { RequireLive(); ArgumentNullException.ThrowIfNull(listener); return _ownSubscription(() => source.Subscribe(value => { if (Ready) _invoke("host snapshot", () => listener(value)); })); }
+    {
+        RequireLive(); ArgumentNullException.ThrowIfNull(listener);
+        void Deliver(T value) { if (Ready) _invoke("host snapshot", () => listener(value)); }
+        var lease = _ownSubscription(() => source.Subscribe(Deliver));
+        // The reading in hand is handed over once, after this activation commits. A module then begins from a known value
+        // instead of having to read it itself, and never gets the one the snapshot held while it was still starting.
+        try { _afterActivate(() => Deliver(source.Read())); }
+        catch { lease.Dispose(); throw; }
+        return lease;
+    }
     public IDisposable OnDispose(Action action) => _ownSubscription(() => new ModuleAction(action));
 }

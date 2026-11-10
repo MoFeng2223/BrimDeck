@@ -33,9 +33,10 @@ internal static partial class Program
             && new ModuleCommand("打开", "Open") { Requires = [ModuleApi.CommandsInvoke] } is { Requires.Length: 1 });
 
         // ---- both capabilities are in the catalog and bound ----
+        // Introduced in minor 9; the contract's current minor moves on with later additions.
         Check("the command capabilities are catalogued as a service and a contribution",
-            ModuleApi.Describe(ModuleApi.CommandsInvoke) is { Kind: ModuleCapabilityKind.Service, IntroducedMinor: ModuleApi.Minor }
-            && ModuleApi.Describe(ModuleApi.UiCommands) is { Kind: ModuleCapabilityKind.Contribution, IntroducedMinor: ModuleApi.Minor }
+            ModuleApi.Describe(ModuleApi.CommandsInvoke) is { Kind: ModuleCapabilityKind.Service, IntroducedMinor: 9 }
+            && ModuleApi.Describe(ModuleApi.UiCommands) is { Kind: ModuleCapabilityKind.Contribution, IntroducedMinor: 9 }
             && ModuleApi.Capabilities.Contains(ModuleApi.UiCommands) && ModuleApi.Capabilities.Contains(ModuleApi.CommandsInvoke));
         Check("the contribution kind accepts a registered command and rejects an unnamed one",
             App.ModuleKinds().Any(kind => kind.Contract == typeof(IModuleCommand) && kind.Id == ModuleApi.UiCommands));
