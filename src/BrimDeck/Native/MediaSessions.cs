@@ -54,14 +54,19 @@ internal sealed class MediaSessions : IDisposable
     private readonly MediaPlaybackStack _stack = new();
     private readonly AudioLevelMeter _meter = new();
     private readonly IMediaPlayerConnection[] _connections;
-    private readonly AppleMusicControls? _appleMusic;
+    private readonly AppleMusicControls _appleMusic;
     private readonly HttpClient _coverHttp = new() { Timeout = TimeSpan.FromSeconds(6) };
     private readonly Dictionary<Session, SystemSource> _sessions = new();
     private readonly Dictionary<string, CoverCache> _covers = new();
     // Downloaded artwork of recent songs, so switching back to one shows its cover at once.
     // Players that publish only a URL (QQ's pipe, Netease) would otherwise download it on every switch. How many follows the memory
-    // mode (MemoryPlan.RecentCovers).
-    public int RecentCoverCount { get; set; } = 16;
+    // mode (MemoryPlan.RecentCovers); a mode that keeps fewer lets the others go at once, not at the next download.
+    private int _recentCoverCount = 16;
+    public int RecentCoverCount
+    {
+        get => _recentCoverCount;
+        set { _recentCoverCount = value; while (_recentCovers.Count > Math.Max(0, value)) _recentCovers.RemoveLast(); }
+    }
     private readonly LinkedList<(string Url, byte[] Bytes)> _recentCovers = new();
     private readonly Dictionary<string, Route> _routes = new();
     private readonly MediaSessionHandover _handover = new();
@@ -80,7 +85,7 @@ internal sealed class MediaSessions : IDisposable
     public bool NeteaseInstalled => Netease?.Installed == true;
     public bool NeteaseRunning => Netease?.ProcessId is not null;
     public bool NeteaseFullControl => Netease is { ProcessId: not null, IsLogMode: false };
-    private NeteaseSource? Netease => _connections.OfType<NeteaseSource>().FirstOrDefault();
+    private NeteaseSource Netease { get; }
     public bool NeteaseAutoFullControl { set { if (Netease is { } source) source.AutoFullControl = value; } }
     public async Task<bool> EnableFullControlAsync(bool quiet = false)
     {
@@ -120,7 +125,7 @@ internal sealed class MediaSessions : IDisposable
     // lasting state: the setting KugouFullControl. The file's state is read off the UI thread when it is needed
     // (CheckKugouInstall); while the setting is on, a file found unchanged (as after a KuGou update) is changed again and a
     // running KuGou restarts, once for each start of KuGou.
-    private KugouCdpConnection? Kugou => _connections.OfType<KugouCdpConnection>().FirstOrDefault();
+    private KugouCdpConnection Kugou { get; }
     public bool RestartingKugou { get; private set; }
     public LibcefPatchState? KugouState { get; private set; }
     public bool KugouFullControl => Kugou?.Ready == true;
@@ -195,18 +200,20 @@ internal sealed class MediaSessions : IDisposable
     public string? Pinned => _pinned;
     public event Action? Changed;
 
-    public MediaSessions(Dispatcher dispatcher, bool connectPlayers = true)
+    public MediaSessions(Dispatcher dispatcher)
     {
         _dispatcher = dispatcher;
-        _connections = connectPlayers ? [new NeteaseSource(), new QqMediaConnection(), new KugouCdpConnection()] : [];
+        Netease = new NeteaseSource(); Kugou = new KugouCdpConnection();
+        _connections = [Netease, new QqMediaConnection(), Kugou];
         _debounce = new PromptTimer(dispatcher, async () => { _debounce!.Stop(); await RefreshAsync(); }) { Interval = TimeSpan.FromMilliseconds(100) };
         _poll = new DispatcherTimer(TimeSpan.FromSeconds(30), DispatcherPriority.Background,
             async (_, _) => await RefreshAsync(), dispatcher);
         // A briefly stopped source is held in place; no event arrives when that hold ends.
         _recheck = new PromptTimer(dispatcher, () => { _recheck!.Stop(); Schedule(); }) { Interval = TimeSpan.FromSeconds(1) };
-        _debounce.Stop(); _poll.Stop(); _recheck.Stop();
+        // The timer made with a handler starts itself; the other two start when first asked.
+        _poll.Stop();
         foreach (var connection in _connections) connection.Changed += Schedule;
-        if (connectPlayers) { _appleMusic = new AppleMusicControls(); _appleMusic.Changed += AppleMusicChanged; }
+        _appleMusic = new AppleMusicControls(); _appleMusic.Changed += AppleMusicChanged;
     }
     // Apple Music's shuffle, repeat and seeking through the controls of its window (AppleMusicControls), enabled from the
     // music page's "Enable full control" entry after its explanation. It lasts while BrimDeck runs and is not saved, so the
@@ -485,7 +492,7 @@ internal sealed class MediaSessions : IDisposable
     {
         var routes = new List<Route>();
         var consumed = new HashSet<SystemSource>();
-        var current = _connections.Length > 0 ? _manager?.GetCurrentSession() : null;
+        var current = _manager?.GetCurrentSession();
         foreach (var connection in _connections)
         {
             if (connection.ProcessId is not { } pid || connection.Snapshot is not { } snapshot) continue;

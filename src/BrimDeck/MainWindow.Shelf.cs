@@ -77,11 +77,12 @@ public partial class MainWindow
         };
     }
 
-    // A copy or a dropped file while the panel is closed is shown when it opens (ApplyDefaultMusicPage), not built at every copy.
+    // A copy or a dropped file while the panel is closed is shown when it opens (ApplyDefaultMusicPage), not built at every copy;
+    // one made while another page shows, when the page is next shown (RenderShelf).
     private bool _shelfStale;
     private void ShelfChanged()
     {
-        if (IsShelfPage && !_preview) { if (_expanded) RenderShelf(); else _shelfStale = true; }
+        if (IsShelfPage && _expanded && !_preview) RenderShelf(); else _shelfStale = true;
         int count = Settings.ShowsTransfer(EffectiveStyle) ? ShelfData.Files.Count : 0;
         if (count != _transferShown && !_expanded) RenderCompact();
     }
@@ -101,14 +102,20 @@ public partial class MainWindow
         _transferShown = count; _compactTransfer = null;
         if (count == 0) return null;
         double s = CompactMusicLayout.SafeScale(scale), icon = CompactMusicLayout.Whole(14 * s), gap = CompactMusicLayout.Whole(3 * s);
+        // The number starts on a whole device pixel and the badge ends on one. Layout rounding moves a margin that lies between two
+        // pixels onto the next (17 DIPs are 25.5 pixels at 150% and become 26), which took the room from the number: a count of two
+        // digits no longer fit and, wrapping as every TextBlock does by default (App.xaml), stood on two lines cut by the badge.
+        double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX, start = DevicePixels.Up(icon + gap, dpi);
         var number = new TextBlock
         {
             Text = count.ToString(CultureInfo.InvariantCulture), FontFamily = UI.PanelFont, FontSize = CompactMusicLayout.Half(11.5 * s), FontWeight = FontWeights.SemiBold,
-            Foreground = UI.Brush(UI.Primary), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(icon + gap, 0, 0, 0)
+            Foreground = UI.Brush(UI.Primary), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.NoWrap
         };
         Typography.SetNumeralAlignment(number, FontNumeralAlignment.Tabular);
         number.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        var badge = new Grid { Width = Math.Ceiling(number.DesiredSize.Width), Height = CompactMusicLayout.Whole(16 * s), Background = Brushes.Transparent };
+        double digits = number.DesiredSize.Width;
+        number.Margin = new Thickness(start, 0, 0, 0);
+        var badge = new Grid { Width = DevicePixels.Up(start + digits, dpi), Height = CompactMusicLayout.Whole(16 * s), Background = Brushes.Transparent };
         // The tray on the 16 unit grid of the row's other marks (PowerIcons), scaled to the icon's size with the same 1.35 DIP line,
         // rather than a larger drawing stretched to fit, which thickened and blurred it.
         double grid = icon / 16;
@@ -134,10 +141,18 @@ public partial class MainWindow
     }
 
     // ---- The page ----
-    private void RenderShelf()
+    // What the page's rows were last built for, besides the entries and what the page itself has chosen (the categories, the
+    // search, the details), each change of which builds it again (ShelfChanged, and the page's own actions). The minute is part of
+    // it, as the rows show how long ago each copy was made.
+    private sealed record ShelfBuild(double Width, double Height, object Settings, int Theme, string Language, long Minute, double Dpi, double Scale);
+    private ShelfBuild? _shelfBuilt;
+
+    // lazy: asked for with the data or the settings (RenderUsage) rather than by a change of the page itself. The usage is read every
+    // minute, and each read used to build this page again, twice, whether or not the panel was open. A lazy render keeps the rows
+    // while what they were built for is the same; while the panel is closed it builds nothing, and the page is built as the panel
+    // opens (ApplyDefaultMusicPage), as it is after a copy made meanwhile.
+    private void RenderShelf(bool lazy = false)
     {
-        // Built while the panel is closed as well: the panel opens on what was built last.
-        _shelfStale = false;
         RefreshStatus();
         UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed;
         ShelfContent.Visibility = Visibility.Visible;
@@ -149,13 +164,23 @@ public partial class MainWindow
         ApplyHeader(Settings.UsagePage ? header.WithControlsOf(CachedUsageHeader()) : header);
         // In the lowest panels the toolbar leaves 2 DIP under the page switch (PanelHeader); the page keeps 4 more below it.
         ShelfContent.Margin = new Thickness(layout.Side, height < 150 ? 4 : 0, layout.Side, layout.Tier == ShelfTier.Compact ? 8 : 12);
-        // The pointer may have left a row that is about to be replaced; its scroll positions are kept.
-        RememberShelfScroll();
-        ShelfContent.Children.Clear(); _shelfRows.Clear(); _shelfTabs.Clear(); _fileFrame = null;
+        var build = new ShelfBuild(width, height, Settings, PanelTheme.Generation, Loc.Language, DateTime.Now.Ticks / TimeSpan.TicksPerMinute, VisualTreeHelper.GetDpi(this).DpiScaleY, _scale);
+        bool keep = lazy && !_shelfStale && build == _shelfBuilt && ShelfContent.Children.Count > 0;
+        if (lazy && !keep && !_expanded && !_preview) { _shelfStale = true; return; }
+        if (!keep)
+        {
+            // Built while the panel is closed as well, when the page itself asks: the panel opens on what was built last.
+            _shelfStale = false; _shelfBuilt = build;
+            // The pointer may have left a row that is about to be replaced; its scroll positions are kept.
+            RememberShelfScroll();
+            ShelfContent.Children.Clear(); _shelfRows.Clear(); _shelfTabs.Clear(); _fileFrame = null;
+        }
+        // The header's own parts are set again either way: another page shown meanwhile has hidden them.
         RenderShelfToolbar(width);
-        if (_shelfDetail is { } detail && Find(detail.Side, detail.Id) is not null) { ShelfContent.Children.Add(DetailView(detail.Side, detail.Id, width - 2 * layout.Side, layout)); return; }
+        if (_shelfDetail is { } detail && Find(detail.Side, detail.Id) is not null) { if (!keep) ShelfContent.Children.Add(DetailView(detail.Side, detail.Id, width - 2 * layout.Side, layout)); return; }
         _shelfDetail = null;
         RenderPageSwitch();
+        if (keep) return;
 
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition());

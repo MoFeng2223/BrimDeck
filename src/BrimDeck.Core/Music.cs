@@ -88,7 +88,6 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     public double EqualizerBar { get; init; } = 3;
     // System readings region (CompactMonitor), with a gap toward its neighbour; alone in the row it is centred.
     public double MonitorWidth { get; init; }
-    public double MonitorFace { get; init; }
     public bool MonitorAlone { get; init; }
     // Clock region: the gap, then the face; a lone clock has no gap and is centred.
     public double ClockWidth { get; init; }
@@ -279,7 +278,7 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
             CoverWidth = coverRegion, CoverSize = cover, CoverRadius = Whole(4 * s),
             EqualizerWidth = eqRegion, EqualizerSize = eqW, EqualizerHeight = eqH, EqualizerBar = bar,
             ClockWidth = clockRegion, ClockFace = face, ClockAlone = clockAlone,
-            MonitorWidth = monitorRegion, MonitorFace = monitorWanted, MonitorAlone = monitorAlone,
+            MonitorWidth = monitorRegion, MonitorAlone = monitorAlone,
             Between = used, RingThickness = Math.Max(.5, Half(2 * s)), RingEdge = Whole(3 * s), TextEdge = Whole(6 * s),
             TextFont = Math.Max(1, Half(11.5 * s)), TextHeight = Math.Max(1, Whole(22 * s)), TextScrolls = text && textWidth >= minimum
         };
