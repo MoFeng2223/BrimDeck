@@ -73,6 +73,8 @@ public sealed class WindowsHost : IDisposable
         // Reorders of the desktop's children only, which are the top-level windows; other events for windows only, not
         // for carets or cursors.
         if (winEvent == 0x8004 ? window != DesktopWindow : idObject != 0 || idChild != 0) return;
+        // A window coming to the front may be a program just started: the players' shared process list is taken anew.
+        if (winEvent == 0x0003) ProcessSnapshot.Expire();
         if (_orderCheckPending) return;
         _orderCheckPending = true;
         _timer.Dispatcher.BeginInvoke(() => { _orderCheckPending = false; WatchOrder(_window()); });
