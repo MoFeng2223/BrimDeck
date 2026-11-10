@@ -133,6 +133,15 @@ internal sealed class ShelfService : IDisposable
         return image;
     }
 
+    // The page is switched off: the thumbnails and the files' icons it showed are let go (App.ReleaseUnused); the entries stay, as
+    // they are what is saved. False when there was nothing to let go.
+    public bool Rest()
+    {
+        bool held = _thumbs.Count > 0 | ShelfFiles.Rest();
+        _thumbs.Clear();
+        return held;
+    }
+
     // ---- Saving ----
     private void Load()
     {

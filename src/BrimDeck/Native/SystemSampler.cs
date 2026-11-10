@@ -100,6 +100,8 @@ internal sealed class SystemSampler : IDisposable
 
     // The newest readings while the sampler runs; null once it has paused. Raised on the UI thread.
     public MonitorSnapshot? Latest { get; private set; }
+    // Paused: nothing asks for readings and the linger has run out, so the thread, if started, waits.
+    public bool Resting => !_wanted;
     public event Action<MonitorSnapshot>? Updated;
     // The saved choice of graphics adapter was found under an older key (the first) and is to be saved under its key now (the
     // second). Raised on the UI thread.

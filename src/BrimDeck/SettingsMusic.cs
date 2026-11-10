@@ -11,7 +11,6 @@ namespace BrimDeck;
 
 public sealed partial class SettingsWindow
 {
-    private DeckPage _previewPage;
     // keepPreview marks the segments alone as preview controls, so a press on the rest of the row still ends the preview.
     private FrameworkElement MusicChoice<T>(string title, T selected, (T Value, string Label)[] options, Action<T> change, bool enabled = true, bool keepPreview = false, string? help = null, double width = 292) where T : notnull
     {
