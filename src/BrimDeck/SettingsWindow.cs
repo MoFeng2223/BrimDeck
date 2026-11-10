@@ -389,8 +389,8 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                 help: Loc.T("关闭后，再次打开 BrimDeck 即可显示隐藏的面板并打开设置。",
                     "When off, open BrimDeck again to show hidden panels and open the settings.")),
             Row(Loc.T("资源占用", "Resource use"), SegmentBorder(MemoryModes()), help: () => Loc.T(
-                "省资源：尽快回收暂时不用的系统资源，占用最少；再次使用时需要重新读取，部分操作可能稍有卡顿。\n平衡：适时回收不用的资源，兼顾占用与流畅。\n流畅：常用的数据保留更久，展开和切换页面更流畅，占用稍多。",
-                "Saver: frees resources not in use as soon as possible, using the least. They are read again when needed, so some actions may stutter slightly.\nBalanced: frees unused resources in time, balancing resource use and smoothness.\nSmooth: keeps frequently used data longer, so opening the panel and switching pages feel smoother, using a little more resources.")),
+                "省资源：收起后很快回收暂时不用的内存，并在空闲期间持续回收，占用最少；再次使用时需要重新读取，部分操作可能稍有卡顿。\n平衡：几分钟没有使用后回收不用的内存，兼顾占用与流畅。\n流畅：收起后不回收内存，常用的数据保留更久，展开和切换页面更流畅，占用较多。\n在设置中关闭的页面，其占用的资源会在一段时间后释放。",
+                "Saver: frees memory not in use soon after the panel closes and keeps freeing it while idle, using the least. It is read again when needed, so some actions may stutter slightly.\nBalanced: frees unused memory after a few minutes without use, balancing resource use and smoothness.\nSmooth: frees no memory after the panel closes and keeps frequently used data longer, so opening the panel and switching pages feel smoother, using more resources.\nThe resources of a page switched off in the settings are released a while later.")),
             Row(Loc.T("退出 BrimDeck", "Exit BrimDeck"), ActionButton(Loc.T("退出", "Exit"), _app.ExitApplication)));
         SectionTitle(Loc.T("外观与语言", "Appearance and language"));
         var themes = new UniformGrid { Columns=3,Width=292 };
@@ -721,7 +721,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
 
     // A page that is not shown cannot be previewed, so its sizes are only saved.
     private void Resize(Action<DeckSettings> edit, DeckPage page = DeckPage.Usage)
-    { bool shown = DeckPages.Shown(S, page); Change(edit); if (!shown) return; _preview = true; _previewPage = page; _app.Deck.Preview(true); _app.Deck.SelectPage(page, remember: false); }
+    { bool shown = DeckPages.Shown(S, page); Change(edit); if (!shown) return; _preview = true; _app.Deck.Preview(true); _app.Deck.SelectPage(page, remember: false); }
 
     private void Interaction()
     {
