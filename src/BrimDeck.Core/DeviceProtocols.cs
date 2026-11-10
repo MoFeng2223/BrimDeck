@@ -13,9 +13,9 @@ namespace BrimDeck.Core;
 // - AJAZZ / AJ179 (XCTECH 249A:5C2F receiver, documented wired 248A:5C2E/5D2E/5E2E): interrupt report framing after
 //   Rockeyxx/aj179-linux (MIT; see ThirdPartyNotices.txt) and a read-only PoC on a 249A:5C2F / M041 dongle — not the AJ 8K
 //   Feature 0xF7 path.
-// - SteelSeries, HyperX and MCHOSE headsets, MCHOSE mice, VGN keyboards, Endgame Gear, VAXEE, Nordic receivers and the
-//   PlayStation controllers: written from the documented bytes alone (HeadsetControl, the Linux drivers and the vendors' own
-//   web drivers are look-only).
+// - SteelSeries, HyperX and MCHOSE headsets, MCHOSE mice, VGN keyboards (and ATK's on the same frame, measured here),
+//   Endgame Gear, VAXEE, Nordic receivers and the PlayStation controllers: written from the documented bytes alone
+//   (HeadsetControl, the Linux drivers and the vendors' own web drivers are look-only).
 // - After HaloBattery (https://github.com/HeyOkay/HaloBattery, MIT; see ThirdPartyNotices.txt): the Compx 17-byte frame's
 //   reply rules (pulsar.py), the 0x83 feature exchange of WLmouse, G-Wolves, LAMZU and the MCHOSE A5 Pro Max with its model
 //   lists, the MCHOSE RealTek and G7 exchanges (mchose.py), the HyperX Cloud III, III S and Alpha 2 requests, the NZXT Lift
@@ -283,6 +283,16 @@ public static class Dongles
     public const int VgnVendor = 0x320F;
     public static byte[] VgnRequest() { var frame = new byte[64]; frame[0] = 0x04; frame[3] = 0x1A; frame[4] = 0x06; return frame; }
     public static BatteryRead? VgnBattery(byte[] reply) => reply.Length >= 10 && reply[0] == 0x04 && reply[3] == 0x1A && reply[8] <= 100 ? new(reply[8], reply[9] != 0) : null;
+
+    // ATK's keyboards answer that same frame on the same page: the Z87 Pro's dongle (373B:1012, "ATK Z87 Dongle", usage page
+    // 0xFF1C, usage 0x0092, 64-byte reports) answered 04 00 00 1A 06 00 00 00 5C ... to it on a keyboard at 92 %, which is what
+    // VgnBattery reads. Measured; the sibling keyboards of the family are not, so only this pair is sent to.
+    public static readonly (int Product, string Name)[] AtkKeyboards = [(0x1012, "ATK Z87 Pro")];
+    public static string? AtkKeyboard(int product)
+    {
+        foreach (var (id, name) in AtkKeyboards) if (id == product) return name;
+        return null;
+    }
 
     // Endgame Gear (VID 0x3367, usage page 0xFF01, feature 0xA1): A1 B4; byte 1 is 0x01 for a reading, the percentage at 16.
     public const int EndgameVendor = 0x3367;
@@ -713,6 +723,8 @@ public static class Dongles
         if (vendor == AtkVendor && usagePage == 0xFF05) return Protocol.BitMouse;
         if (CompxVerified.Contains((vendor, product, usagePage))) return Protocol.Compx;
         if (vendor == VgnVendor && usagePage == 0xFF1C && product == 0x5088) return Protocol.Vgn;
+        // ATK's keyboards on the same page, answered with VGN's frame (AtkKeyboards): only a pair measured here is sent to.
+        if (vendor == AtkVendor && usagePage == 0xFF1C && AtkKeyboard(product) is not null) return Protocol.Vgn;
         if (vendor == EndgameVendor && usagePage == 0xFF01) return Protocol.Endgame;
         if (vendor == VaxeeVendor && usagePage == 0xFF05) return Protocol.Vaxee;
         if (vendor == InphicVendor && product is 0x5B2E or 0x5B2F && featureLength >= 33) return Protocol.Inphic;
