@@ -55,6 +55,7 @@ public partial class App
     // Called by the main panel when what a module can see about it changed; the panel knows when its layout finished.
     internal void DeckStateChanged() => PublishModuleHostState(force: false);
 }
+
 // The revisions of the panel state as modules see it: a change publishes once, an unchanged layout publishes nothing, and a
 // forced publish (a display change, a theme reload) keeps the revision moving forward rather than repeating the last one.
 internal sealed class HostStateRevisions

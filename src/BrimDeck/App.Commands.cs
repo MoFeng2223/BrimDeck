@@ -129,6 +129,36 @@ public partial class App
         return true;
     }
 
+    // Opens the panel for a module that a user action asked to open (host.control.expand). A prompt notice still opens on its
+    // own; this is the same opening, without taking a page away from the user.
+    internal bool RequestModuleExpand(string moduleId)
+    {
+        if (string.IsNullOrEmpty(moduleId) || Deck is null || Exiting || Dispatcher.HasShutdownStarted) return false;
+        void Open() { if (!Exiting && Deck is not null) Deck.SetExpanded(true); }
+        if (Dispatcher.CheckAccess()) Open(); else Dispatcher.BeginInvoke(Open);
+        return true;
+    }
+
+    // Pauses or resumes the player the panel is showing (host.control.media). It goes through the same player the panel's
+    // own button uses, so the two never disagree; a player that offers no toggle is a refusal, not a failure.
+    internal async Task<ModuleHostResult> ToggleModuleMediaPlayPauseAsync(CancellationToken moduleLifetime, CancellationToken cancellation)
+    {
+        if (Media?.Current is not { } track) return ModuleHostResult.Rejected("no-player");
+        if (!track.CanToggle) return ModuleHostResult.Rejected("not-toggleable");
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(moduleLifetime, cancellation);
+        try
+        {
+            return await Media.CommandAsync(track.Id, MediaCommand.PlayPause).WaitAsync(linked.Token)
+                ? ModuleHostResult.Completed : ModuleHostResult.Rejected("player-refused");
+        }
+        catch (OperationCanceledException) when (linked.IsCancellationRequested) { return ModuleHostResult.Cancelled; }
+        catch (Exception error)
+        {
+            Modules.Report("host control", "media play/pause", error);
+            return ModuleHostResult.Failed("player-error");
+        }
+    }
+
     // The service a module receives: bound to one activation, so it lists and invokes only that module's commands.
     private sealed class CommandsService(App app, ModuleServiceScope scope) : IModuleCommands
     {

@@ -274,10 +274,17 @@ public partial class App : Application
     }
     // Makes the chosen panel theme current (reading the theme folder again when asked) and repaints every panel if it changed.
     // When Windows switches "system" between dark and light, a preset clock gradient carries over as it does when a theme is chosen.
-    internal void ApplyPanelTheme(bool reload = false, bool systemChanged = false)
+    internal void ApplyPanelTheme(bool reload = false, bool systemChanged = false, bool drawAccent = false)
     {
         var previous = PanelTheme.Current;
         bool wasHigh = PanelTheme.HighContrast;
+        // The user's own theme wins over any module's temporary accent: changing it ends those requests before the new
+        // palette is made, so what is drawn is exactly what was chosen. A module's own request or release keeps the stack.
+        if (!drawAccent)
+        {
+            ModuleAccents.Clear();
+            PanelTheme.AccentOverride = ModuleAccents.Current;
+        }
         bool changed = PanelTheme.Use(Settings, reload, systemChanged);
         ScheduleDaylight();
         if (!changed) return;

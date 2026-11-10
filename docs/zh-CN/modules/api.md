@@ -29,6 +29,11 @@
 | `media.read` | Service | 读取正在播放 / Read now playing | 1 | `media.read` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleMedia` |
 | `system.read` | Service | 读取系统监控 / Read system metrics | 1 | `system.read` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleSystem` |
 | `host.state` | Service | 读取面板状态 / Read panel state | 10 | `host.state` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleHostState` |
+| `host.control` | Service | 请求宿主操作 / Ask the host to act | 10 | `host.control` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleHostControl` |
+| `host.control.page` | Service | 打开自己的页面 / Open own page | 10 | 同名 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModulePageControl` |
+| `host.control.expand` | Service | 请求展开面板 / Request expanding | 10 | 同名 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModulePanelControl` |
+| `host.control.media` | Service | 播放或暂停媒体 / Play or pause media | 10 | 同名 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleMediaControl` |
+| `host.control.accent` | Service | 临时强调色 / Temporary accent | 10 | 同名 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleAccentControl` |
 | `notifications.show` | Service | 显示岛内提醒 / Show island notices | 1 | `notifications.show` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleNotifications` |
 | `ui.presentation` | Service | 刷新模组界面 / Refresh module presentation | 5 | 无 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModulePresentation` |
 | `commands.invoke` | Service | 调用自己的命令 / Invoke own commands | 9 | 无 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleCommands` |
@@ -1489,6 +1494,7 @@
 | `IModuleMedia` | `media.read` | 本体选中的播放器、曲名、作者、专辑、播放状态、进度和播放速率 |
 | `IModuleSystem` | `system.read` | CPU、内存、GPU、网络吞吐、磁盘读写、温度、显存、功耗与磁盘容量；没有进程路径或进程明细 |
 | `IModuleHostState` | `host.state` | 主面板的展开、当前页面、主题、缩放、全屏上下文与显示器标识 |
+| `IModuleHostControl` | `host.control` | 四个受控动作：打开自身页面、请求展开、媒体暂停、临时强调色；每个动作另需自己的子能力 |
 | `IModuleNotifications` | `notifications.show` | 由宿主呈现的短时文字／进度提醒，复用岛内交接动效 |
 
 读取接口只返回独立不可变快照；不暴露凭据、账户详情字典、数据源路径或本体可变 store。权限是公开接口的访问控制，同进程 DLL 仍须来自可信作者。
@@ -1500,6 +1506,12 @@
 面板状态（`IModuleHostState`）只代表主面板：副屏的展开或切页不会覆盖它。它会随面板真实的展开、切页、主题、缩放、全屏上下文和显示器变化发布，只有内容变化时才发布；`Revision` 严格递增，`DisplayRevision` 在显示器布局变化时增加。`PageId` 对内置页面是稳定 id；插件页面只对所属插件显示其完整 id，其他读者看到通用的 `mini-apps` 页，`PageIsOwn` 仅对所属插件为 true。主题与缩放在同一次设置应用后合并为一次发布，回调中再次切页或收起不会造成递归分发。
 
 宿主事件只能由宿主发布；插件页面与活动的打开事件只投递给所属插件，其他插件看不到。模组自己 `Publish` 的消息只在自身作用域内投递，不能与其他插件建立跨模组消息通道。
+
+宿主控制（`IModuleHostControl`）只做四件明确的事，每个动作要在清单里声明自己的子能力，否则调用会抛 `capability-not-declared`：
+`Pages.OpenOwnPageAsync` 只能打开本模组注册的页面（越权返回 `page-not-own`）；`Panel.RequestExpandAsync` 只接受
+`ModuleCommandOrigin.User`，定时器、状态回调与后台事件一律 `user-initiated-only`；`Media.ToggleMediaPlayPauseAsync` 走面板自己的播放器控制，
+没有可控制的播放器是 `no-player`；`Accent.RequestAccentOverride` 返回可释放的临时强调色，多次申请按后进先出，释放后回落到前一次，
+用户修改主题会清空全部临时强调色，模组停用也会自动释放。宿主不接受模组修改内置页面布局、全局悬停规则、贴靠策略或持久设置。
 
 提醒标题最多 60 字符、正文最多 160 字符，ID 使用局部模组 ID 规则；时长夹取到 900–8000 ms，进度夹取到 0–100，非有限值拒绝。Ready 前返回 `NotReady`。已展开、输入法正在切换、已有提示或全屏抑制时排队，最多等待 30 秒。每模组每分钟最多接收 4 条，队列总计 16 条，同一激活代同 ID 的待显示项合并。`Shown`／`Queued` 仅代表接收结果，不能当成已经被用户看见。关闭模组撤销其待显示与当前提示；通知结束恢复持续计时，不修改计时会话。当前投递到主岛，不向所有屏幕重复广播。
 

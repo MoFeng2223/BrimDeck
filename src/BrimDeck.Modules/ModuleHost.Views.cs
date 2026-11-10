@@ -31,4 +31,12 @@ public sealed partial class ModuleHost
         Active? active; lock (_gate) active = _active.GetValueOrDefault(id);
         return active is not null && active.Scope.Ready ? active.Scope.Token : new CancellationToken(canceled: true);
     }
+
+    // The manifest of a module's running activation: a host service bound to it answers from the capabilities it declared.
+    // Null once the activation has ended, so a retained service cannot act on a stale manifest.
+    internal ModuleManifest? ManifestOf(string id)
+    {
+        Active? active; lock (_gate) active = _active.GetValueOrDefault(id);
+        return active is not null && active.Scope.Ready ? active.Definition.Manifest : null;
+    }
 }

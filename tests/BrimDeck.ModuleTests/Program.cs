@@ -78,7 +78,7 @@ internal static partial class Program
             ("settings-navigation", SettingsNavigationChecks), ("page-theme", PageThemeChecks), ("settings-schema", SettingsSchemaChecks), ("deprecations", ModuleDeprecationChecks),
             ("startup", StartupGuardChecks), ("inspector", () => PackageInspectorChecks(_artifacts.Notes)), ("host-range", () => ModuleHostRangeChecks(_artifacts.Notes)),
             ("signatures", ModuleSignatureChecks), ("platform", () => PlatformChecks().GetAwaiter().GetResult()),
-            ("commands", () => CommandChecks().GetAwaiter().GetResult()),
+            ("commands", () => CommandChecks().GetAwaiter().GetResult()), ("host-control", HostControlChecks),
             ("timers", () => TimerPluginChecks(_artifacts.Notes)), ("sdk-boundary", () => BoundaryChecks(repository))
         };
         if (selected.Except(groups.Select(g => g.Name), StringComparer.OrdinalIgnoreCase).Any()) { Console.Error.WriteLine("Unknown group. Available: " + string.Join(", ", groups.Select(g => g.Name))); return 2; }

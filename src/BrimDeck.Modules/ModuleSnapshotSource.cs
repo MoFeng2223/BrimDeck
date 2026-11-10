@@ -31,9 +31,11 @@ public sealed class ModuleServiceScope
     private readonly Action<string, Action> _invoke;
     private readonly Action<Action> _afterActivate;
     internal ModuleServiceScope(string id, CancellationToken lifetime, Action requireLive, Func<bool> ready, Func<Func<IDisposable>, IDisposable> ownSubscription,
-        Action<string, Action> invoke, Action<Action> afterActivate)
-    { ModuleId = id; Lifetime = lifetime; _requireLive = requireLive; _ready = ready; _ownSubscription = ownSubscription; _invoke = invoke; _afterActivate = afterActivate; }
+        Action<string, Action> invoke, Action<Action> afterActivate, ModuleManifest manifest)
+    { ModuleId = id; Lifetime = lifetime; _requireLive = requireLive; _ready = ready; _ownSubscription = ownSubscription; _invoke = invoke; _afterActivate = afterActivate; Manifest = manifest; }
     public string ModuleId { get; }
+    // The manifest of the activation this service belongs to: what it declared, read by the service's own policy checks.
+    public ModuleManifest Manifest { get; }
     public CancellationToken Lifetime { get; }
     public bool Ready => !Lifetime.IsCancellationRequested && _ready();
     public void RequireLive() => _requireLive();

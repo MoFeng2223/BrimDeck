@@ -20,6 +20,12 @@ internal static class ModuleCapabilities
         Core<IModuleMedia>(ModuleApi.MediaRead, ModuleCapabilityKind.Service, "读取正在播放", "Read now playing", 1, ModuleApi.MediaRead),
         Core<IModuleSystem>(ModuleApi.SystemRead, ModuleCapabilityKind.Service, "读取系统监控", "Read system metrics", 1, ModuleApi.SystemRead),
         Core<IModuleHostState>(ModuleApi.HostState, ModuleCapabilityKind.Service, "读取面板状态", "Read panel state", 10, ModuleApi.HostState),
+        Core<IModuleHostControl>(ModuleApi.HostControl, ModuleCapabilityKind.Service, "请求宿主操作", "Ask the host to act", 10, ModuleApi.HostControl),
+        // Each action of IModuleHostControl is granted apart; a manifest lists only what it uses.
+        Core<IModulePageControl>(ModuleHostControlActions.Page, ModuleCapabilityKind.Service, "打开自己的页面", "Open own page", 10, ModuleHostControlActions.Page),
+        Core<IModulePanelControl>(ModuleHostControlActions.Expand, ModuleCapabilityKind.Service, "请求展开面板", "Request expanding", 10, ModuleHostControlActions.Expand),
+        Core<IModuleMediaControl>(ModuleHostControlActions.Media, ModuleCapabilityKind.Service, "播放或暂停媒体", "Play or pause media", 10, ModuleHostControlActions.Media),
+        Core<IModuleAccentControl>(ModuleHostControlActions.Accent, ModuleCapabilityKind.Service, "临时强调色", "Temporary accent", 10, ModuleHostControlActions.Accent),
         Core<IModuleNotifications>(ModuleApi.NotificationsShow, ModuleCapabilityKind.Service, "显示岛内提醒", "Show island notices", 1, ModuleApi.NotificationsShow),
         Core<IModulePresentation>(ModuleApi.UiPresentation, ModuleCapabilityKind.Service, "刷新模组界面", "Refresh module presentation", 5, null),
         Core<IModuleCommands>(ModuleApi.CommandsInvoke, ModuleCapabilityKind.Service, "调用自己的命令", "Invoke own commands", 9, null),

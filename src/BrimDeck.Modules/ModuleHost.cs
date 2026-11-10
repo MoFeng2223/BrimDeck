@@ -80,10 +80,18 @@ public sealed partial class ModuleHost : IDisposable
         _availableCapabilities = Array.AsReadOnly(_capabilityDetails.Select(c => c.Id).ToArray());
     }
     public IReadOnlyList<string> AvailableCapabilities => _availableCapabilities;
+    // Which of the desktop application's capabilities the host must actually be able to serve. A capability catalogued as a
+    // sub-action of another (host.control's page, expand, media, accent) is granted through the one service its parent binds
+    // and needs no binding of its own; requiring it here would make every start fail on an adapter nobody has to provide.
+    private static readonly HashSet<string> HostBound = new(ModuleApi.Catalog
+        .Where(capability => capability.Kind != ModuleCapabilityKind.Service || ParentAction(capability.Id) is null)
+        .Select(capability => capability.Id), StringComparer.Ordinal);
+    private static string? ParentAction(string id)
+        => id.StartsWith(ModuleApi.HostControl + ".", StringComparison.Ordinal) ? ModuleApi.HostControl : null;
     public void RequireCapabilities(IEnumerable<string> capabilities)
     {
         foreach (string id in capabilities)
-            if (!_availableCapabilities.Contains(id)) throw new ModuleApiException("capability-unavailable", "Host adapter is missing: " + id);
+            if (HostBound.Contains(id) && !_availableCapabilities.Contains(id)) throw new ModuleApiException("capability-unavailable", "Host adapter is missing: " + id);
     }
     public void Report(string id, string operation, Exception error) => Report(id, operation, error, Guid.Empty);
     private void Report(string id, string operation, Exception error, Guid generation)
@@ -184,7 +192,7 @@ public sealed partial class ModuleHost : IDisposable
                     if (!_boundServices.TryGetValue(typeof(T), out var service))
                     {
                         var serviceScope = new ModuleServiceScope(id, scope.Token, RequireLive, () => scope.Ready, Stage,
-                            (operation, callback) => host.InvokeOwned(activation, operation, () => { callback(); return true; }), scope.AfterActivate);
+                            (operation, callback) => host.InvokeOwned(activation, operation, () => { callback(); return true; }), scope.AfterActivate, manifest);
                         _boundServices[typeof(T)] = service = binding.Create(serviceScope);
                     }
                     return (T)service;

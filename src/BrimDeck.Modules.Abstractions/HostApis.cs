@@ -6,6 +6,8 @@ public static class ModuleApi
     public const string HostInfo = "host.info", UsageRead = "usage.read", MediaRead = "media.read", SystemRead = "system.read", NotificationsShow = "notifications.show";
     // The panel's own state: expanded, page, theme, scale, full screen and displays, as one dated snapshot.
     public const string HostState = "host.state";
+    // Asking the host to act (HostControl.cs); each action also needs its own sub-capability.
+    public const string HostControl = "host.control";
     public const string UiPresentation = "ui.presentation";
     public const string UiCompactParts = "ui.compact-parts";
     public const string CommandsInvoke = "commands.invoke";

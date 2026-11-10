@@ -17,6 +17,9 @@ public partial class App
         yield return ModuleService.Of<IModuleMedia>(ModuleApi.MediaRead, scope => new MediaReader(scope, ModuleMediaSource));
         yield return ModuleService.Of<IModuleSystem>(ModuleApi.SystemRead, scope => new SystemReader(scope, ModuleSystemSource));
         yield return ModuleService.Of<IModuleHostState>(ModuleApi.HostState, scope => new HostStateReader(this, scope, ModuleHostStateSource));
+        // The service is made while the module is still starting, before it is in the active table, so the activation's own
+        // manifest is handed in by the registry rather than looked up later.
+        yield return ModuleService.Of<IModuleHostControl>(ModuleApi.HostControl, ModuleApi.HostControl, scope => new HostControlService(this, scope, scope.Manifest));
         yield return ModuleService.Of<IModuleNotifications>(ModuleApi.NotificationsShow, scope =>
         { scope.OnDispose(() => DropModuleNotices(scope.ModuleId, scope.Lifetime)); return new NoticeWriter(this, scope); });
         yield return ModuleService.Of<IModuleCommands>(ModuleApi.CommandsInvoke, scope => new CommandsService(this, scope));
