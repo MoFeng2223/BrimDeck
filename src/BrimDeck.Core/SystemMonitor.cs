@@ -93,6 +93,9 @@ public sealed record MemorySample(ulong Total, ulong Used, ulong CommitUsed, ulo
 
 public sealed record NetworkSample(double DownBytesPerSecond, double UpBytesPerSecond);
 
+// The disks' read and write rates over the whole machine, in bytes per second.
+public sealed record DiskRates(double ReadBytesPerSecond, double WriteBytesPerSecond);
+
 // The level of each reading of the collapsed strip, by one rule per kind of reading: a share (CPU, GPU, each core column,
 // memory in use) against ElevatedShare and CriticalShare, memory also by its commit charge (MemorySample.Level), and a rate
 // against fixed rates. A rate has no share: Windows reports an adapter's link speed, but that is the nominal speed of the
@@ -283,6 +286,9 @@ public sealed record MonitorSnapshot(DateTimeOffset Time, int LogicalProcessors,
     public PowerTrack GpuPower { get; init; } = PowerTrack.None;
     // The frame rate of the program in front, read only while something shows it (SystemSampler.SetExtras).
     public Reading<FrameSample> Frames { get; init; } = Reading<FrameSample>.Unavailable(Loc.T("正在读取", "Reading"));
+    // The disks' read and write rates over the whole machine, in bytes per second, read only while something shows them
+    // (SystemSampler.SetExtras); one reading, as the counters give the two together.
+    public Reading<DiskRates> Disk { get; init; } = Reading<DiskRates>.Unavailable(Loc.T("正在读取", "Reading"));
     public static MonitorSnapshot Empty(int logicalProcessors, string reason) => new(DateTimeOffset.Now, logicalProcessors,
         Reading<CpuSample>.Unavailable(reason), Reading<MemorySample>.Unavailable(reason), Reading<NetworkSample>.Unavailable(reason),
         Reading<GpuSample>.Unavailable(reason), Reading<ProcessList>.Unavailable(reason));

@@ -23,4 +23,20 @@ public sealed partial class ModuleHost
             (operation, callback) => InvokeOwned(active, operation, () => { callback(); return true; }),
             (operation, error) => ReportOwned(active, operation, error));
     }
+
+    // The lifetime of the running activation of a module, or a token that is already cancelled when it is not running. A
+    // command's work ends when its module stops, so a command still in flight cannot outlive the activation that owns it.
+    internal CancellationToken CommandLifetime(string id)
+    {
+        Active? active; lock (_gate) active = _active.GetValueOrDefault(id);
+        return active is not null && active.Scope.Ready ? active.Scope.Token : new CancellationToken(canceled: true);
+    }
+
+    // The manifest of a module's running activation: a host service bound to it answers from the capabilities it declared.
+    // Null once the activation has ended, so a retained service cannot act on a stale manifest.
+    internal ModuleManifest? ManifestOf(string id)
+    {
+        Active? active; lock (_gate) active = _active.GetValueOrDefault(id);
+        return active is not null && active.Scope.Ready ? active.Definition.Manifest : null;
+    }
 }

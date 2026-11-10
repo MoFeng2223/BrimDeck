@@ -11,7 +11,7 @@ public partial class MainWindow
     // does; otherwise it is set in place. A switch whose buttons are not laid out yet places it once they are.
     private List<Button>? _navigationButtons;
     private Button? _navigationSelection;
-    private IReadOnlyList<Button> PageNavigationButtons => _navigationButtons ?? [AIUsageButton, MonitorPageButton, MusicPageButton, MiniAppsPageButton];
+    private IReadOnlyList<Button> PageNavigationButtons => _navigationButtons ?? [AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton, MiniAppsPageButton];
     private Button ActivePageButton => _navigationSelection ?? PageButton(CurrentPage);
     private void PlacePageCapsule()
     {
@@ -55,5 +55,5 @@ public partial class MainWindow
         }
         for (int i = 0; i < order.Count; i++) order[i].Margin = new Thickness(i == 0 ? 0 : 1, 0, 0, 0);
     }
-    private Button PageButton(DeckPage page) => page switch { DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, DeckPage.MiniApps => MiniAppsPageButton, _ => AIUsageButton };
+    private Button PageButton(DeckPage page) => page switch { DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, DeckPage.Clipboard => ShelfPageButton, DeckPage.Devices => DevicesPageButton, DeckPage.MiniApps => MiniAppsPageButton, _ => AIUsageButton };
 }

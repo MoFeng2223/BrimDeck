@@ -40,13 +40,15 @@ public sealed record FullscreenRule(string Name = "", string Path = "")
 public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, OpenCode = 17, OpenCodeGo = 18, OpenRouter = 19, Pi = 20 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckSettings.PageOrder.
-public enum DeckPage { Usage, Music, Monitor, MiniApps }
-public enum DefaultDeckPage { Last, Usage, Music, Monitor, MiniApps }
+// MiniApps is the plugin branch's fallback page for module pages (MainWindow.CurrentPage); it stays at the end so the
+// numbers dev gave its own pages keep their saved meaning.
+public enum DeckPage { Usage, Music, Monitor, Clipboard, Devices, MiniApps }
+public enum DefaultDeckPage { Last, Usage, Music, Monitor, Clipboard, Devices, MiniApps }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
 // What a double click on an end of the collapsed notch or capsule does: turn its auto width on or off, or start moving it
-// (MainWindow.Move.cs); moving is the default. Saved as numbers, so new members go at the end.
-public enum GripDoubleClick { AutoWidth, Move }
+// (MainWindow.Move.cs); moving is the default. Off shows no handle at its ends at all. Saved as numbers, so new members go at the end.
+public enum GripDoubleClick { AutoWidth, Move, Off }
 public enum CompactMusicText { None, Title, Lyrics }
 // What the collapsed music hides while the song is paused: the title or lyric, the cover, or both. Saved as numbers, so new
 // members go at the end.
@@ -76,7 +78,7 @@ public sealed class CompactRowPartConverter : System.Text.Json.Serialization.Jso
     }
 }
 
-public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Modules }
+public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer, Devices, Modules }
 // One part of the collapsed row: a built-in one, or one module's readings. A module's part is its own part in the
 // order — the user drags "散热器" beside the quota rings, not a group of modules — so the row's order holds saved module
 // ids directly. Saved as text ("m:thrm"), so a module that is gone keeps its place for when it comes back.
@@ -116,9 +118,10 @@ public static class CompactParts
     internal const string ModulePrefix = "m:";
     // A file saved before the equalizer and the clock were put in order adds them after its parts, the clock last, where they stood.
     // Module readings follow the system readings, the readings they belong beside. A module part is inserted by the
-    // caller when it meets the module (see Normalize with the known ids).
+    // caller when it meets the module (see Normalize with the known ids). The devices' batteries (1.3.0) join last.
     public static IReadOnlyList<CompactRowPart> Default { get; } =
-        [CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Clock)];
+        [CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Clock),
+         CompactRowPart.Of(CompactPart.Transfer), CompactRowPart.Of(CompactPart.Devices)];
     // Each known part once, in the saved order; a part missing from the file takes its default place after the others.
     // knownModules: the modules that offer a part now — their parts join right after the system readings, in the order
     // given (the user's module order), so a newly installed module appears beside the readings it belongs with.
@@ -346,6 +349,14 @@ public static class PanelSizes
 }
 
 // The system monitor page's quick sizes. Unlike the usage page's they do not depend on the applications.
+// The clipboard and file transfer page's sizes, the same as the system monitor's.
+public static class ShelfSizes
+{
+    public static readonly (double Width, double Height) Default = (620, 220);
+    public static (double Width, double Height) For(PanelSize size) => size switch
+    { PanelSize.Compact => (480, 160), PanelSize.Spacious => (860, 320), _ => Default };
+}
+
 public static class MonitorSizes
 {
     public static readonly (double Width, double Height) Default = (620, 220);
@@ -381,6 +392,9 @@ public sealed class DeckSettings
     // A first start replaces the default with the Windows display language (SettingsStore.Load); files saved before
     // English existed are Chinese (SettingsMigrations).
     public string Language { get; set; } = Loc.English;
+    // The family the interface's text is drawn in (UiFonts), in front of the app's own fonts; empty is those fonts alone, as before
+    // the setting existed. Icons, figures in code and the clock styles' own faces are not affected. A file without it reads as empty.
+    public string UiFont { get; set; } = "";
     public CompactStyle Style { get; set; } = CompactStyle.Notch;
     // Size and position of each collapsed style in DIPs; limits and defaults are in CollapsedLimits. OffsetX moves the surface
     // from the centre; each monitor narrows the offset to what fits (CollapsedGeometry) without changing the saved value.
@@ -433,12 +447,32 @@ public sealed class DeckSettings
     public string Page1Hotkey { get; set; } = "";
     public string Page2Hotkey { get; set; } = "";
     public string Page3Hotkey { get; set; } = "";
+    public string Page4Hotkey { get; set; } = "";
+    public string Page5Hotkey { get; set; } = "";
+    public string Page6Hotkey { get; set; } = "";
+    public string Page7Hotkey { get; set; } = "";
+    public string Page8Hotkey { get; set; } = "";
+    public string Page9Hotkey { get; set; } = "";
+    public string Page10Hotkey { get; set; } = "";
     public string RefreshHotkey { get; set; } = "";
+    // Plugin command bindings, by command id ("thrm:open-page"). Kept when the command's module is stopped or removed, so
+    // re-enabling the module brings the binding back; the id is stable precisely so this survives a restart. Commands have
+    // exactly one entry point, the global shortcut, so this map is all the preference there is.
+    public Dictionary<string, string> ModuleHotkeys { get; set; } = new(StringComparer.Ordinal);
+    public string ModuleHotkey(string commandId) => (ModuleHotkeys ?? new(StringComparer.Ordinal)).GetValueOrDefault(commandId) ?? "";
+    public void SetModuleHotkey(string commandId, string value)
+    {
+        if (string.IsNullOrWhiteSpace(commandId)) return;
+        ModuleHotkeys ??= new(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(value)) ModuleHotkeys.Remove(commandId); else ModuleHotkeys[commandId] = value;
+    }
     public string Hotkey(HotkeyKind kind) => (kind switch
     {
         HotkeyKind.Hide => HideHotkey, HotkeyKind.Expand => ExpandHotkey, HotkeyKind.Resize => ResizeHotkey, HotkeyKind.Move => MoveHotkey,
         HotkeyKind.ClickThrough => ClickThroughHotkey, HotkeyKind.OpenSettings => SettingsHotkey, HotkeyKind.Page1 => Page1Hotkey,
-        HotkeyKind.Page2 => Page2Hotkey, HotkeyKind.Page3 => Page3Hotkey, HotkeyKind.Refresh => RefreshHotkey, _ => ""
+        HotkeyKind.Page2 => Page2Hotkey, HotkeyKind.Page3 => Page3Hotkey, HotkeyKind.Page4 => Page4Hotkey,
+        HotkeyKind.Page5 => Page5Hotkey, HotkeyKind.Page6 => Page6Hotkey, HotkeyKind.Page7 => Page7Hotkey, HotkeyKind.Page8 => Page8Hotkey,
+        HotkeyKind.Page9 => Page9Hotkey, HotkeyKind.Page10 => Page10Hotkey, HotkeyKind.Refresh => RefreshHotkey, _ => ""
     }) ?? "";
     public void SetHotkey(HotkeyKind kind, string value)
     {
@@ -453,6 +487,13 @@ public sealed class DeckSettings
             case HotkeyKind.Page1: Page1Hotkey = value; break;
             case HotkeyKind.Page2: Page2Hotkey = value; break;
             case HotkeyKind.Page3: Page3Hotkey = value; break;
+            case HotkeyKind.Page4: Page4Hotkey = value; break;
+            case HotkeyKind.Page5: Page5Hotkey = value; break;
+            case HotkeyKind.Page6: Page6Hotkey = value; break;
+            case HotkeyKind.Page7: Page7Hotkey = value; break;
+            case HotkeyKind.Page8: Page8Hotkey = value; break;
+            case HotkeyKind.Page9: Page9Hotkey = value; break;
+            case HotkeyKind.Page10: Page10Hotkey = value; break;
             case HotkeyKind.Refresh: RefreshHotkey = value; break;
         }
     }
@@ -485,6 +526,9 @@ public sealed class DeckSettings
     // The notch and the capsule each switch the clock on; its style, color, hour format and seconds are shared.
     public bool NotchClock { get; set; }
     public bool CapsuleClock { get; set; }
+    // The file transfer's count on the notch and the capsule; shown only while the file transfer holds files.
+    public bool NotchTransfer { get; set; } = true;
+    public bool CapsuleTransfer { get; set; } = true;
     public ClockStyle ClockStyle { get; set; }
     public ClockColor ClockColor { get; set; }
     public string ClockCustomColor { get; set; } = ClockColors.DefaultCustom;
@@ -546,7 +590,13 @@ public sealed class DeckSettings
     public int CloseDelay { get; set; } = 0;
     public int AnimationDuration { get; set; } = 360;
     public bool Animations { get; set; } = true;
+    // The panel stays above other windows. Off, it is an ordinary window that others cover: it comes to the front when it
+    // opens, and over the desktop while the desktop is shown; the window rules and ForceTopmost then do not apply.
+    public bool AlwaysOnTop { get; set; } = true;
     public bool ForceTopmost { get; set; }
+    // The panel window can be captured on its own by recording apps (OBS window capture). Off, the window keeps the no-activate
+    // style that recording apps cannot capture, and that keeps it out of Alt+Tab.
+    public bool WindowCapture { get; set; }
     public WindowBehavior Maximized { get; set; } = WindowBehavior.Line;
     public WindowBehavior Borderless { get; set; } = WindowBehavior.Hide;
     public WindowBehavior Exclusive { get; set; } = WindowBehavior.Hide;
@@ -567,6 +617,14 @@ public sealed class DeckSettings
     // The system monitor page; it reads the system only while it is open on screen.
     public bool MonitorPage { get; set; } = true;
     public double MonitorWidth { get; set; } = MonitorSizes.Default.Width;
+    // The clipboard and file transfer page. The clipboard is recorded from the start; a settings file saved before keeps its choice.
+    public bool ClipboardPage { get; set; } = true;
+    public double ClipboardWidth { get; set; } = ShelfSizes.Default.Width;
+    public double ClipboardHeight { get; set; } = ShelfSizes.Default.Height;
+    public bool ClipboardRecord { get; set; } = true;
+    public ClipRetention ClipboardRetention { get; set; } = ClipRetention.Month;
+    // Applications whose copies are not recorded, by process name without ".exe".
+    public List<string> ClipboardExcluded { get; set; } = [];
     public double MonitorHeight { get; set; } = MonitorSizes.Default.Height;
     public MonitorPalette MonitorPalette { get; set; } = MonitorPalette.Theme;
     // The Custom scheme's colors; kept while another scheme is chosen.
@@ -595,6 +653,21 @@ public sealed class DeckSettings
     // The expanded page shows the whole machine's power draw with its curve, and the machine's own battery when it has one (PowerResolver,
     // BatteryModel); off, neither is read for it. The collapsed row's Power and Charge readings are chosen in its table.
     public bool MonitorPower { get; set; } = true;
+    // The devices page: the battery of the connected wireless devices (Devices); it reads them only while it shows.
+    public bool DevicesPage { get; set; } = true;
+    public double DevicesWidth { get; set; } = 460;
+    public double DevicesHeight { get; set; } = 200;
+    // The devices' order, names and where each shows (DeviceLists), by their key (DeviceBattery.Key). Empty until the user changes
+    // the list; a device not in it shows everywhere, after those that are.
+    public List<DeviceChoice> DeviceChoices { get; set; } = [];
+    // The collapsed row shows each device's figure after its ring.
+    public bool DeviceFigures { get; set; } = true;
+    // At or under these charges a battery shows as low and as getting low (Devices.Level).
+    public int DeviceLowPercent { get; set; } = Devices.DefaultLowPercent;
+    public int DeviceWarningPercent { get; set; } = Devices.DefaultWarningPercent;
+    // The notch and the capsule each show the devices' batteries (CompactPart.Devices).
+    public bool NotchDevices { get; set; }
+    public bool CapsuleDevices { get; set; }
     // The expanded page shows a line under memory and network with the frame rate of the program in front, its name and its display's
     // refresh rate (FrameRates). Off by default; read only while the page is open, and only where the user may read Windows' frame
     // events (the Performance Log Users group, or BrimDeck elevated).
@@ -663,6 +736,9 @@ public sealed class DeckSettings
     public bool ShowsClock(CompactStyle style) => style switch { CompactStyle.Notch => NotchClock, CompactStyle.Capsule => CapsuleClock, _ => false };
     // The indicator is too thin for readings, as for the clock.
     public bool ShowsMonitor(CompactStyle style) => style switch { CompactStyle.Notch => NotchMonitor, CompactStyle.Capsule => CapsuleMonitor, _ => false };
+    public bool ShowsDevices(CompactStyle style) => style switch { CompactStyle.Notch => NotchDevices, CompactStyle.Capsule => CapsuleDevices, _ => false };
+    // The file transfer's count needs the page: with the page off, nothing can be dropped there.
+    public bool ShowsTransfer(CompactStyle style) => ClipboardPage && style switch { CompactStyle.Notch => NotchTransfer, CompactStyle.Capsule => CapsuleTransfer, _ => false };
     public bool ShowsModuleReadings(CompactStyle style) => style switch { CompactStyle.Notch => NotchModuleReadings, CompactStyle.Capsule => CapsuleModuleReadings, _ => false };
     // Each module's part is one part of the row, with its own place and its own switch, beside the built-in parts.
     public IReadOnlyList<CompactRowPart> CompactOrder(CompactStyle style, IEnumerable<string>? knownModules = null)
@@ -674,7 +750,8 @@ public sealed class DeckSettings
         : part.BuiltIn switch
         {
             CompactPart.Rings => ShowsSummary(style), CompactPart.Music => ShowsMusic(style), CompactPart.Monitor => ShowsMonitor(style),
-            CompactPart.Equalizer => ShowsEqualizer(style), _ => ShowsClock(style)
+            CompactPart.Equalizer => ShowsEqualizer(style), CompactPart.Transfer => ShowsTransfer(style), CompactPart.Devices => ShowsDevices(style),
+            _ => ShowsClock(style)
         };
     // Whether this module's readings stand in the collapsed row: the global switch first, then the module's own; a module
     // the file has never seen stands on, so installing it is enough for it to appear.
@@ -745,6 +822,8 @@ public sealed class DeckSettings
     public WindowBehavior Behavior(ScreenContext context, string? processName = null, string? imagePath = null,
         ScreenContext? backgroundKind = null)
     {
+        // An ordinary window is covered by the full-screen window anyway, so no rule applies.
+        if (!AlwaysOnTop) return WindowBehavior.Normal;
         var kind = context == ScreenContext.BackgroundFullscreen ? backgroundKind ?? ScreenContext.Desktop : context;
         if (processName is not null || imagePath is not null)
             foreach (var rule in FullscreenRules)
@@ -778,8 +857,11 @@ public sealed class DeckSettings
         copy.MiniApps = MiniApps?.Copy() ?? new();
         copy.Pages = Pages?.Copy() ?? new();
         copy.Modules = Modules?.Copy() ?? new();
+        // Command bindings are plain strings, but the dictionary must not be shared: the settings window edits a copy.
+        copy.ModuleHotkeys = new(ModuleHotkeys ?? [], StringComparer.Ordinal);
         copy.InputMethods = new() { Enabled = InputMethods?.Enabled == true, Mode = InputMethods?.Mode ?? InputMethodMode.Control, Shortcut = InputMethods?.Shortcut ?? "Win+Space",
             Profiles = (InputMethods?.Profiles ?? []).Select(p => new InputMethodChoice { Id = p.Id, Name = p.Name, Enabled = p.Enabled }).ToList() };
+        copy.DeviceChoices = [.. (DeviceChoices ?? []).Select(device => device.Copy())];
         // The module part preferences hold mutable objects, so the copy owns its own instances: a write through the copy (the
         // settings window edits a copy) must not reach the settings in use.
         copy._notchOrder = [.. _notchOrder];
@@ -814,7 +896,28 @@ public sealed class DeckSettings
         MusicWidth = double.IsFinite(MusicWidth) ? Math.Clamp(MusicWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : 440;
         MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
         MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : MonitorSizes.Default.Width;
+        DevicesWidth = double.IsFinite(DevicesWidth) ? Math.Clamp(DevicesWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : 460;
+        DevicesHeight = double.IsFinite(DevicesHeight) ? Math.Clamp(DevicesHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
+        DeviceChoices = [.. (DeviceChoices ?? []).OfType<DeviceChoice>().Where(device => !string.IsNullOrWhiteSpace(device.Key)).DistinctBy(device => device.Key).Take(256)];
+        foreach (var device in DeviceChoices)
+        {
+            device.Name ??= "";
+            device.Kind = Enum.IsDefined(device.Kind) ? device.Kind : DeviceKind.Other;
+            var label = device.Label?.Trim();
+            device.Label = string.IsNullOrEmpty(label) ? null : label.Length > DeviceLists.MaximumLabel ? label[..DeviceLists.MaximumLabel] : label;
+            static string? Hex(string? color) => AppPresets.NormalizeColor(color) is { Length: > 0 } valid ? valid : null;
+            device.Color = Hex(device.Color); device.ChargeColor = Hex(device.ChargeColor); device.WarningColor = Hex(device.WarningColor); device.CriticalColor = Hex(device.CriticalColor);
+        }
+        DeviceLowPercent = Devices.LowChoices.Contains(DeviceLowPercent) ? DeviceLowPercent : Devices.DefaultLowPercent;
+        // Getting low starts above low: a warning at or under the low threshold takes the next choice above it.
+        DeviceWarningPercent = Devices.WarningChoices.Contains(DeviceWarningPercent) ? DeviceWarningPercent : Devices.DefaultWarningPercent;
+        if (DeviceWarningPercent <= DeviceLowPercent) DeviceWarningPercent = Devices.WarningChoices.First(percent => percent > DeviceLowPercent);
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
+        ClipboardWidth = double.IsFinite(ClipboardWidth) ? Math.Clamp(ClipboardWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : ShelfSizes.Default.Width;
+        ClipboardHeight = double.IsFinite(ClipboardHeight) ? Math.Clamp(ClipboardHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ShelfSizes.Default.Height;
+        if (!Enum.IsDefined(ClipboardRetention)) ClipboardRetention = ClipRetention.Month;
+        ClipboardExcluded = [.. (ClipboardExcluded ?? []).Select(name => (name ?? "").Trim()).Select(name => name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name)
+            .Where(name => name.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)];
         PanelScale = PanelScales.Fit(PanelScale);
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
         MonitorCustomColors ??= new();
@@ -851,14 +954,27 @@ public sealed class DeckSettings
         MiniApps ??= new(); MiniApps.Normalize();
         Pages ??= new(); Pages.Normalize(this);
         Modules ??= new(); Modules.Normalize();
+        // Command bindings are kept for modules that are not installed, so only the shape is checked here: an id that could
+        // never be a contribution id, or a text that is not a hotkey, is dropped.
+        ModuleHotkeys = (ModuleHotkeys ?? []).Where(pair => ContributionId(pair.Key) && HotkeyText.Normalize(pair.Value) is { Length: > 0 })
+            .ToDictionary(pair => pair.Key, pair => HotkeyText.Normalize(pair.Value), StringComparer.Ordinal);
         if (!Enum.IsDefined(Theme)) Theme = SettingsTheme.System;
         PanelTheme = PanelThemes.NormalizeId(PanelTheme) is { Length: > 0 } panelTheme ? panelTheme : PanelThemes.Dark;
         // Two valid, different times or none: anything else keeps the theme's own hours.
         ThemeDaylight = (ThemeDaylight ?? "").Split('-', 2) is [var day, var night] && PanelThemes.ParseTimeOfDay(day) is { } d && PanelThemes.ParseTimeOfDay(night) is { } n && d != n
             ? PanelThemes.FormatDaylight(d, n) : "";
         Language = Loc.Normalize(Language);
+        UiFont = UiFonts.Normalize(UiFont);
         if (!Enum.IsDefined(Style)) Style = CompactStyle.Notch;
         static double Fit(double value, double min, double max, double fallback) => double.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;
+        // A contribution id is "module:name" with both parts present, so a command id is valid the same way.
+        static bool ContributionId(string? id)
+        {
+            if (id is not { Length: > 2 and <= 256 }) return false;
+            int colon = id.IndexOf(':');
+            if (colon <= 0 || colon >= id.Length - 1) return false;
+            return !id.Any(char.IsWhiteSpace) && !id.Any(char.IsControl);
+        }
         static double Offset(double value) => Fit(value, -CollapsedLimits.OffsetLimit, CollapsedLimits.OffsetLimit, CollapsedLimits.OffsetDefault);
         NotchWidth = Fit(NotchWidth, CollapsedLimits.NotchWidthMin, CollapsedLimits.NotchWidthMax, CollapsedLimits.NotchWidthDefault);
         NotchHeight = Fit(NotchHeight, CollapsedLimits.NotchHeightMin, CollapsedLimits.NotchHeightMax, CollapsedLimits.NotchHeightDefault);

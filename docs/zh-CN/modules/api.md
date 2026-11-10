@@ -28,8 +28,16 @@
 | `usage.read` | Service | 读取用量 / Read usage | 1 | `usage.read` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleUsage` |
 | `media.read` | Service | 读取正在播放 / Read now playing | 1 | `media.read` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleMedia` |
 | `system.read` | Service | 读取系统监控 / Read system metrics | 1 | `system.read` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleSystem` |
+| `host.state` | Service | 读取面板状态 / Read panel state | 10 | `host.state` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleHostState` |
+| `host.control` | Service | 请求宿主操作 / Ask the host to act | 10 | `host.control` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleHostControl` |
+| `host.control.page` | Service | 打开自己的页面 / Open own page | 10 | 同名 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModulePageControl` |
+| `host.control.expand` | Service | 请求展开面板 / Request expanding | 10 | 同名 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModulePanelControl` |
+| `host.control.media` | Service | 播放或暂停媒体 / Play or pause media | 10 | 同名 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleMediaControl` |
+| `host.control.accent` | Service | 临时强调色 / Temporary accent | 10 | 同名 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleAccentControl` |
 | `notifications.show` | Service | 显示岛内提醒 / Show island notices | 1 | `notifications.show` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleNotifications` |
 | `ui.presentation` | Service | 刷新模组界面 / Refresh module presentation | 5 | 无 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModulePresentation` |
+| `commands.invoke` | Service | 调用自己的命令 / Invoke own commands | 9 | 无 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleCommands` |
+| `ui.commands` | Contribution | 插件命令 / Commands | 9 | 无 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleCommand` |
 | `ui.pages` | Contribution | 小程序页面 / Mini-app pages | 0 | 无 | `windows-desktop` | `activation` | `BrimDeck.UI`: `BrimDeck.ModulePage` |
 | `ui.activities` | Contribution | 持续活动 / Persistent activities | 0 | 无 | `windows-desktop` | `activation` | `BrimDeck.UI`: `BrimDeck.IModuleActivity` |
 | `ui.compact-parts` | Contribution | 收起行部件 / Compact-row parts | 0 | 无 | `windows-desktop` | `activation` | `BrimDeck.UI`: `BrimDeck.IModuleCompactPart` |
@@ -297,6 +305,41 @@
 | 成员签名 |
 | --- |
 | `void Invalidate()` |
+
+### 命令（`ui.commands` / `commands.invoke`）
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+一个命令是一个稳定的、用户可见的动作。注册名即命令 id（贡献 id 形如 `thrm:open-page`），所以命令不能寻址别的模组的贡献，id 跨重启保持不变——全局快捷键绑定的正是这个 id，命令的入口也只有这一个。命令与内置快捷键共用同一份录制、冲突与注册逻辑，宿主不维护第二套回调。
+
+| 成员签名 |
+| --- |
+| `ModuleCommand(string Name, string NameEn)` |
+| `string? Description { get; init; }` |
+| `string? DescriptionEn { get; init; }` |
+| `string[]? Parameters { get; init; }` |
+| `string[]? Requires { get; init; }` |
+| `enum ModuleCommandResultKind { Completed, Busy, Rejected, Cancelled, CapabilityMissing, Failed }` |
+| `ModuleCommandResult(ModuleCommandResultKind Kind, string? Message, string? MessageEn)` |
+| `static ModuleCommandResult Completed { get; }` |
+| `static ModuleCommandResult Busy { get; }` |
+| `static ModuleCommandResult Cancelled { get; }` |
+| `static ModuleCommandResult Rejected(string message, string? messageEn = null)` |
+| `static ModuleCommandResult Missing(string message, string? messageEn = null)` |
+| `static ModuleCommandResult Failed(string message, string? messageEn = null)` |
+| `IModuleCommand.Descriptor { get; }` |
+| `IModuleCommand.CanExecute { get; }` |
+| `IModuleCommand.ExecuteAsync(IReadOnlyDictionary<string, string>? parameters, CancellationToken cancellation)` |
+| `enum ModuleCommandOrigin { User, Host }` |
+| `IModuleCommands.List()` |
+| `IModuleCommands.InvokeAsync(string commandId, IReadOnlyDictionary<string, string>? parameters = null, ModuleCommandOrigin origin = ModuleCommandOrigin.User, CancellationToken cancellation = default)` |
+| `IModuleCommands.ShowOwnPage(string pageId, bool userInitiated = true)` |
+
+结果分开是有意的：同一命令在飞时再次调用返回 `Busy`（快捷键按两下不会执行两次），`CanExecute == false` 返回 `Rejected`，模组抛出 `ModuleApiException` 或任何异常返回 `Failed`，取消返回 `Cancelled`。`Requires` 列出命令运行时需要的能力：当前宿主不提供其中任意一项时返回 `CapabilityMissing`，而不是让它以失败的形式出现——为更新宿主写的命令因此在旧版上仍有明确结论。
+
+`IModuleCommands` 绑定在本次激活上：`List()` 只列出调用者自己的命令，`InvokeAsync` 只接受自己的命令 id（别的 id 抛 `unknown-command`）。`ShowOwnPage` 打开调用者注册的页面，且只对用户发起的调用生效（`origin` 为 `User`），后台定时器不能把面板抢出来。其余宿主动作（展开、媒体、强调色）随 `host.control` 能力在 5c 开放。
+
+快捷键默认未绑定，由用户在"设置 → 快捷键 → 插件命令"里录制。停用或移除模组时命令连同其注册一起释放、快捷键立即解绑，但**绑定偏好保留**在设置里——重新启用后自动恢复。命令与内置快捷键**互相**不占用对方的组合：在命令行录制一个内置项已用的组合会被拒绝，在内置行录制一个命令已用的组合同样会被拒绝，提示都说明与哪一条冲突。命令的组合永远在内置项之后注册，因此即使设置文件被手工改成冲突，内置项也总是先赢。
 
 ### `ModuleSettingOption`
 
@@ -818,13 +861,16 @@
 | 成员签名 |
 | --- |
 | `const int Major = 1` |
-| `const int Minor = 8` |
+| `const int Minor = 10` |
 | `const string HostInfo = "host.info"` |
+| `const string HostState = "host.state"` |
 | `const string UsageRead = "usage.read"` |
 | `const string MediaRead = "media.read"` |
 | `const string SystemRead = "system.read"` |
 | `const string NotificationsShow = "notifications.show"` |
 | `const string UiPresentation = "ui.presentation"` |
+| `const string CommandsInvoke = "commands.invoke"` |
+| `const string UiCommands = "ui.commands"` |
 | `const string UiPages = "ui.pages"` |
 | `const string UiActivities = "ui.activities"` |
 | `const string UiCompactParts = "ui.compact-parts"` |
@@ -1167,6 +1213,86 @@
 | `long Revision { get; init; }` |
 | `ModuleDataStatus Status { get; init; }` |
 | `double? UploadBytesPerSecond { get; init; }` |
+| `ModuleReading<double> CpuUsage { get; init; }` |
+| `ModuleReading<double> MemoryUsage { get; init; }` |
+| `ModuleReading<UInt64> MemoryUsed { get; init; }` |
+| `ModuleReading<UInt64> MemoryTotal { get; init; }` |
+| `ModuleReading<double> GpuUsage { get; init; }` |
+| `ModuleReading<double> DownloadRate { get; init; }` |
+| `ModuleReading<double> UploadRate { get; init; }` |
+| `ModuleReading<double> CpuTemperature { get; init; }` |
+| `string? CpuTemperatureSource { get; init; }` |
+| `ModuleReading<double> GpuTemperature { get; init; }` |
+| `string? GpuTemperatureFrom { get; init; }` |
+| `string? GpuAdapterKey { get; init; }` |
+| `string? GpuAdapterName { get; init; }` |
+| `ModuleReading<UInt64> GpuDedicatedBytesUsed { get; init; }` |
+| `ModuleReading<UInt64> GpuDedicatedBytesTotal { get; init; }` |
+| `ModuleReading<double> DiskReadBytesPerSecond { get; init; }` |
+| `ModuleReading<double> DiskWriteBytesPerSecond { get; init; }` |
+| `ModuleReading<double> PowerWatts { get; init; }` |
+| `bool PowerEstimated { get; init; }` |
+| `string? PowerSource { get; init; }` |
+| `ModuleReading<double> CpuPowerWatts { get; init; }` |
+| `ModuleReading<double> GpuPowerWatts { get; init; }` |
+| `IReadOnlyList<ModuleStorageDrive> Storage { get; init; }` |
+| `bool StorageRead { get; init; }` |
+
+### `ModuleReading<T>`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`；`T` 为值类型。
+
+| 成员签名 |
+| --- |
+| `ModuleDataStatus Status { get; init; }` |
+| `T? Value { get; init; }` |
+| `string? Reason { get; init; }` |
+| `DateTimeOffset? ObservedAt { get; init; }` |
+| `static ModuleReading<T> Available(T value, DateTimeOffset? observed = null)` |
+| `static ModuleReading<T> Missing(string? reason = null, DateTimeOffset? observed = null)` |
+| `static ModuleReading<T> Disabled(string? reason = null)` |
+| `static ModuleReading<T> Stale(T? value, string? reason = null, DateTimeOffset? observed = null)` |
+
+### `ModuleStorageDrive` / `ModuleStorageVolume`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `ModuleStorageDrive(int Number, string? Model, bool SolidState, IReadOnlyList<ModuleStorageVolume> Volumes)` |
+| `ModuleReading<double> Temperature { get; init; }` |
+| `ModuleStorageVolume(string Letter, string Label, UInt64 TotalBytes, UInt64 FreeBytes)` |
+| `UInt64 UsedBytes { get; }` |
+
+### `IModuleHostState`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+继承：`IModuleSnapshotReader<ModuleHostStateSnapshot>`。
+
+| 成员签名 |
+| --- |
+
+### `ModuleHostStateSnapshot`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `ModuleHostStateSnapshot(long Revision, DateTimeOffset ObservedAt)` |
+| `bool Expanded { get; init; }` |
+| `string PageId { get; init; }` |
+| `bool PageIsOwn { get; init; }` |
+| `string ThemeId { get; init; }` |
+| `bool ThemeIsDark { get; init; }` |
+| `bool ThemeNightLook { get; init; }` |
+| `bool HighContrast { get; init; }` |
+| `int ThemeGeneration { get; init; }` |
+| `double DeviceScale { get; init; }` |
+| `double ContentScale { get; init; }` |
+| `string ScreenContext { get; init; }` |
+| `string? DisplayId { get; init; }` |
+| `int DisplayRevision { get; init; }` |
 
 ### `IModuleNotifications`
 
@@ -1366,14 +1492,26 @@
 | --- | --- | --- |
 | `IModuleUsage` | `usage.read` | 各服务的用量指标、重置／过期时间、余额／数量、token 汇总与完整性标记 |
 | `IModuleMedia` | `media.read` | 本体选中的播放器、曲名、作者、专辑、播放状态、进度和播放速率 |
-| `IModuleSystem` | `system.read` | CPU、内存、GPU、网络吞吐；没有进程路径或进程明细 |
+| `IModuleSystem` | `system.read` | CPU、内存、GPU、网络吞吐、磁盘读写、温度、显存、功耗与磁盘容量；没有进程路径或进程明细 |
+| `IModuleHostState` | `host.state` | 主面板的展开、当前页面、主题、缩放、全屏上下文与显示器标识 |
+| `IModuleHostControl` | `host.control` | 四个受控动作：打开自身页面、请求展开、媒体暂停、临时强调色；每个动作另需自己的子能力 |
 | `IModuleNotifications` | `notifications.show` | 由宿主呈现的短时文字／进度提醒，复用岛内交接动效 |
 
 读取接口只返回独立不可变快照；不暴露凭据、账户详情字典、数据源路径或本体可变 store。权限是公开接口的访问控制，同进程 DLL 仍须来自可信作者。
 
-`GetSnapshot()` 获取最新缓存；`Subscribe()` 不重放旧值，激活提交后才接收变化，随激活代自动释放。订阅后再读最新快照可避免首次挂载漏读。回调在本体发布数据的 UI 线程执行，应快速返回；异常会归属到模组并隔离。快照包含 `Revision` 与 `ObservedAt`。`Available`、`Unavailable`、`Stale`、`Disabled` 表示数据状态，当前宿主主要使用前三者；缺失数字为 null，不能解释成 0。
+`GetSnapshot()` 获取最新缓存；`Subscribe()` 在激活提交后先交付当时最新的快照一次，之后接收变化，随激活代自动释放。因此模组不需要在订阅后立刻再读来实现首次同步；先订阅再读仍然可用，但读到的不会比已交付的更旧。回调在本体发布数据的 UI 线程执行，应快速返回；异常会归属到模组并隔离。快照包含 `Revision` 与 `ObservedAt`。顶层 `Status` 是整份快照的汇总；逐项读数使用 `ModuleReading<T>`：`Available` 可以合法为 0，`Unavailable`、`Disabled`、`Stale` 的 `Value` 不为有效读数，并带稳定原因代码。缺失数字为 null，不能解释成 0。
 
-用量跟随本体已有刷新来源，不新增网络请求；某服务未启用或尚未读取时可能没有条目。必须检查条目状态、`TokenUsageAvailable`、`TokenUsageComplete`，并按具体指标的 `ResetsAt`／`ExpiresAt` 判断有效期。百分比是已用比例，可能超过 100。系统监控订阅按需复用原采样器，不启动进程扫描；超过 6 秒的缓存读取标为 Stale。媒体读取根据时间和播放速率估计进度，订阅仅在本体媒体状态更新时触发。
+用量跟随本体已有刷新来源，不新增网络请求；某服务未启用或尚未读取时可能没有条目。必须检查条目状态、`TokenUsageAvailable`、`TokenUsageComplete`，并按具体指标的 `ResetsAt`／`ExpiresAt` 判断有效期。百分比是已用比例，可能超过 100。系统监控订阅按需复用原采样器，不启动进程扫描，也不为模组另起轮询；读数只在用户设置允许时才读取（关闭的温度、存储、功耗来源不会被模组重新打开，安全停止的传感器也不会绕过），没有来源的字段为 `Unavailable` 而合法零仍为 `Available`；超过 6 秒的缓存读取标为 Stale。磁盘读写只由模组订阅触发，面板本身不显示它。媒体读取根据时间和播放速率估计进度，`PositionObservedAt` 是播放器给出位置的时间，订阅仅在本体媒体状态更新时触发。
+
+面板状态（`IModuleHostState`）只代表主面板：副屏的展开或切页不会覆盖它。它会随面板真实的展开、切页、主题、缩放、全屏上下文和显示器变化发布，只有内容变化时才发布；`Revision` 严格递增，`DisplayRevision` 在显示器布局变化时增加。`PageId` 对内置页面是稳定 id；插件页面只对所属插件显示其完整 id，其他读者看到通用的 `mini-apps` 页，`PageIsOwn` 仅对所属插件为 true。主题与缩放在同一次设置应用后合并为一次发布，回调中再次切页或收起不会造成递归分发。
+
+宿主事件只能由宿主发布；插件页面与活动的打开事件只投递给所属插件，其他插件看不到。模组自己 `Publish` 的消息只在自身作用域内投递，不能与其他插件建立跨模组消息通道。
+
+宿主控制（`IModuleHostControl`）只做四件明确的事，每个动作要在清单里声明自己的子能力，否则调用会抛 `capability-not-declared`：
+`Pages.OpenOwnPageAsync` 只能打开本模组注册的页面（越权返回 `page-not-own`）；`Panel.RequestExpandAsync` 只接受
+`ModuleCommandOrigin.User`，定时器、状态回调与后台事件一律 `user-initiated-only`；`Media.ToggleMediaPlayPauseAsync` 走面板自己的播放器控制，
+没有可控制的播放器是 `no-player`；`Accent.RequestAccentOverride` 返回可释放的临时强调色，多次申请按后进先出，释放后回落到前一次，
+用户修改主题会清空全部临时强调色，模组停用也会自动释放。宿主不接受模组修改内置页面布局、全局悬停规则、贴靠策略或持久设置。
 
 提醒标题最多 60 字符、正文最多 160 字符，ID 使用局部模组 ID 规则；时长夹取到 900–8000 ms，进度夹取到 0–100，非有限值拒绝。Ready 前返回 `NotReady`。已展开、输入法正在切换、已有提示或全屏抑制时排队，最多等待 30 秒。每模组每分钟最多接收 4 条，队列总计 16 条，同一激活代同 ID 的待显示项合并。`Shown`／`Queued` 仅代表接收结果，不能当成已经被用户看见。关闭模组撤销其待显示与当前提示；通知结束恢复持续计时，不修改计时会话。当前投递到主岛，不向所有屏幕重复广播。
 
@@ -1474,8 +1612,10 @@
 | Amount / Used / Total | 按 Unit/Currency 解读；余额、花费、数量不可互换 |
 | InputTokens/OutputTokens/Cache*Tokens/TotalTokens | token 数，先看 Available/Complete；Total 已含缓存读写，不重复相加 |
 | ResetsAt/ExpiresAt/UpdatedAt/ObservedAt | DateTimeOffset 时间点；按重置时间标识周期；ObservedAt 不代表来源刚刷新，过期不告警 |
-| 媒体 PositionSeconds/DurationSeconds | 秒，null 表示无时间轴；PlaybackState 为小写状态，未知值显示未知 |
-| 系统 *UsedPercent / *Bytes | 百分比 0–100／字节；网络 Download/Upload 是字节每秒；可用快照的单字段仍可为 null |
+| 媒体 PositionSeconds/DurationSeconds | 秒，null 表示无时间轴；PlaybackState 为小写状态，未知值显示未知；PositionObservedAt 是播放器给出位置的时间 |
+| 系统 *UsedPercent / *Bytes | 百分比 0–100／字节；网络 Download/Upload 与磁盘 Read/Write 是字节每秒；逐项读数先看 `ModuleReading<T>.Status`，可用快照的单字段仍可为 null |
+| 系统温度／功耗 | 摄氏度／瓦；`CpuTemperatureSource`、`GpuTemperatureFrom`、`PowerSource` 说明来源；`PowerEstimated` 为真时整机功耗是部件估算而非实测 |
+| 面板状态 | `Expanded`、`PageId`、`ThemeId`、`DeviceScale`/`ContentScale`、`ScreenContext`；主面板语义，`DisplayRevision` 随显示器布局变化 |
 
 Revision 表示当前快照变更，不是永久 ID，不能跨服务比较或假定重启后仍单调递增。订阅不重放，先订阅再读取完成初始同步；告警归模组级，多屏不重复发。可选服务先检查 host.info 的实际 Capabilities，再 Get；能力可用也可能暂时无数据。
 

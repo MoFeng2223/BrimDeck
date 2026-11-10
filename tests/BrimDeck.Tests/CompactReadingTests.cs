@@ -48,7 +48,7 @@ internal static class CompactReadingTests
         check("Compact readings: defaults show every usage reading", CompactMonitor.Visible(defaults.CompactReadings) == All && CompactMonitor.Values(defaults.CompactReadings) == CompactMonitor.Rings
             && Same(defaults.CompactReadings, [.. CompactMonitor.Order]));
 
-        var odd = Read("""{"AppVersion":"0.1.0","CompactMonitor":0,"CompactReadings":[{"Item":256,"Visible":true},null,{"Item":16,"Visible":true,"ShowValue":false,"Color":"#12ab3c"},{"Item":2,"Visible":false,"Color":"red"},{"Item":16,"Visible":false}]}""");
+        var odd = Read("""{"AppVersion":"0.1.0","CompactMonitor":0,"CompactReadings":[{"Item":4096,"Visible":true},null,{"Item":16,"Visible":true,"ShowValue":false,"Color":"#12ab3c"},{"Item":2,"Visible":false,"Color":"red"},{"Item":16,"Visible":false}]}""");
         check("Compact readings: unknown and repeated readings are dropped, missing ones join hidden",
             Same(odd.CompactReadings, Download, Cpu, Columns, Memory, Gpu, Upload, CompactMonitorItems.Storage, CompactMonitorItems.Power, CompactMonitorItems.Charge, CompactMonitorItems.Frames) && odd.CompactReadings[0].Visible && !odd.CompactReadings[1].Visible
             && odd.CompactReadings.Skip(2).All(r => !r.Visible) && odd.CompactMonitorItems == Download && odd.CompactMonitor == CompactMonitorMode.Custom);
@@ -287,16 +287,16 @@ internal static class CompactReadingTests
     // are a part of their own, joined to the order from the modules that offer them.
     private static void PartOrder(Action<string, bool> check)
     {
-        CompactRowPart[] standard = [CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Clock)];
+        CompactRowPart[] standard = [CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Clock), CompactRowPart.Of(CompactPart.Transfer), CompactRowPart.Of(CompactPart.Devices)];
         var odd = Read("""{"AppVersion":"0.1.0","NotchOrder":[2,9,2,0]}""");
-        check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Clock)])
+        check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Clock), CompactRowPart.Of(CompactPart.Transfer), CompactRowPart.Of(CompactPart.Devices)])
             && odd.CapsuleOrder.SequenceEqual(standard));
         var older = Read("""{"AppVersion":"1.2.2","NotchOrder":[1,2,0]}""");
         check("Compact order: an order saved before the equalizer and the clock had a place puts the equalizer before the clock, at the end",
-            older.NotchOrder.SequenceEqual([CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Clock)]));
+            older.NotchOrder.SequenceEqual([CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Clock), CompactRowPart.Of(CompactPart.Transfer), CompactRowPart.Of(CompactPart.Devices)]));
         var moved = Read("""{"AppVersion":"1.2.3","NotchOrder":[4,0,3,1,2]}""");
         check("Compact order: the equalizer and the clock keep a place chosen for them",
-            moved.NotchOrder.SequenceEqual([CompactRowPart.Of(CompactPart.Clock), CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor)]));
+            moved.NotchOrder.SequenceEqual([CompactRowPart.Of(CompactPart.Clock), CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Transfer), CompactRowPart.Of(CompactPart.Devices)]));
         // A module's part joins right after the system readings, in the caller's order; uninstalling it keeps its place.
         var withModule = Read("""{"AppVersion":"0.1.0"}""");
         var joined = CompactParts.Normalize(withModule.NotchOrder, ["thrm", "net"]);
@@ -325,7 +325,7 @@ internal static class CompactReadingTests
         check("Compact order: each style keeps its own and Copy is deep", settings.CompactOrder(CompactStyle.Capsule)[0] == CompactRowPart.Of(CompactPart.Music)
             && settings.CompactOrder(CompactStyle.Notch).SequenceEqual(standard));
         var read = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
-        check("Compact order: survives saving and reading", read.CapsuleOrder.SequenceEqual([CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Clock)]));
+        check("Compact order: survives saving and reading", read.CapsuleOrder.SequenceEqual([CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Clock), CompactRowPart.Of(CompactPart.Transfer), CompactRowPart.Of(CompactPart.Devices)]));
         // A saved module part survives saving and reading, and its switch is kept separately.
         settings.SetCompactOrder(CompactStyle.Notch, [CompactRowPart.Module("thrm"), .. standard]);
         settings.SetModulePartEnabled(CompactStyle.Notch, "thrm", false);

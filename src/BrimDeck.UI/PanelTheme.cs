@@ -24,6 +24,9 @@ internal static class PanelTheme
     // When the theme on screen changes between its day and night looks next, or null for a theme without a night look.
     public static DateTime? NextDaylightChange(DeckSettings settings) => PanelThemes.NextDaylightChange(ShownTheme.File, DateTime.Now, settings.ThemeDaylight);
     public static int Generation { get; private set; }
+    // A module's temporary accent ("#RRGGBB"), drawn in place of the theme's accent until it is released, the module stops or
+    // the user changes the theme. Set by App from its own stack of requests; never written to the settings.
+    public static string? AccentOverride { get; set; }
     // Raised just before another palette becomes current; true when a theme trades its day and night looks.
     public static event Action<bool>? Changing;
     // The themes found in the folder at the last reload.
@@ -82,6 +85,9 @@ internal static class PanelTheme
         if (!reload && !high && !HighContrast && ReferenceEquals(theme, ShownTheme) && night == Night && _signature.Length > 0) return false;
         ShownTheme = theme; Night = night; HighContrast = high;
         var palette = high ? SystemPalette() : PanelThemes.Resolve(theme, night);
+        // A module's temporary accent (host.control.accent) is laid over the theme, never saved into it; the user's own theme
+        // change clears those requests in App before this runs, so a chosen theme always ends up as chosen.
+        if (AccentOverride is { } accent && ThemeColor.TryParse(accent, out var temporary)) palette = palette.WithColor("accent", temporary);
         var signature = Signature(theme, palette);
         if (signature == _signature) return false;
         // Panels on screen take a picture of their old look now, before any brush changes (MainWindow.ThemeFade).

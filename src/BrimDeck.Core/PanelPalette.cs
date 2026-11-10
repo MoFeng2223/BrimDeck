@@ -57,6 +57,14 @@ public sealed class PanelPalette
 
     public string Id { get; }
 
+    // A copy of this palette with one token replaced, used for a module's temporary accent: everything else, including the
+    // contrast rules already applied, stays as the theme made it. Only the accent is ever replaced this way.
+    public PanelPalette WithColor(string key, ThemeColor color)
+    {
+        var colors = new Dictionary<string, ThemeColor>(_colors, StringComparer.Ordinal) { [key] = color };
+        return new PanelPalette(Id, colors, _apps, Effects, Adjustments, Clock, _swatches, WrittenColors, WrittenApps) { IsNight = IsNight };
+    }
+
     public IReadOnlyDictionary<string, ThemeColor> Colors => _colors;
     public IReadOnlyDictionary<string, ThemeColor> Apps => _apps;
     // Every token and app color as the theme and its base themes write them, before any is made readable: what the theme

@@ -26,12 +26,15 @@ public partial class App
         InitializeHostApiDemand();
         ModuleCatalog = new(ModuleDirectory, Path.Combine(Store.DirectoryPath, "modules-cache"), [typeof(ModuleUi).Assembly, typeof(DeckSettings).Assembly], ApplicationVersion.Current.ToString());
         Modules.Registry.Changed += QueueModuleViewsRefresh;
+        Modules.Registry.Changed += ModuleCommandsChanged;
         Modules.Changed += QueueModuleStateRefresh;
         SystemEvents.PowerModeChanged += ModulesPowerChanged;
     }
     internal static IReadOnlyList<ModuleKind> ModuleKinds() => [
         ModuleKind.Of<ModulePage>(ModuleApi.UiPages, page => { if (string.IsNullOrWhiteSpace(page.Title) || page.CreateView is null) throw new ArgumentException("A page needs a title and view factory."); if (page.IconPath is { Length: > 0 } path) _ = System.Windows.Media.Geometry.Parse(path); if (page.Size is { } size && new[] { size.Width, size.Height, size.MinWidth, size.MaxWidth, size.MinHeight, size.MaxHeight }.Any(v => !double.IsFinite(v) || v <= 0)) throw new ArgumentException("Page sizes must be finite and positive."); }),
         ModuleKind.Of<IModuleActivity>(ModuleApi.UiActivities), ModuleKind.Of<IModuleCompactPart>(ModuleApi.UiCompactParts),
+        // A command's name is what the shortcut row and the tray entry show, so an unnamed command would be unreachable.
+        ModuleKind.Of<IModuleCommand>(ModuleApi.UiCommands, command => { if (string.IsNullOrWhiteSpace(command.Descriptor.Name) && string.IsNullOrWhiteSpace(command.Descriptor.NameEn)) throw new ArgumentException("A command needs a name."); }),
         ModuleKind.Of<ModuleWidget>(ModuleApi.UiWidgets, widget =>
         {
             if (widget.Enabled is null || widget.SetEnabled is null || string.IsNullOrWhiteSpace(widget.Name)) throw new ArgumentException("Invalid widget definition.");
@@ -150,7 +153,7 @@ public partial class App
     {
         SystemEvents.PowerModeChanged -= ModulesPowerChanged;
         if (Modules is null) return;
-        Modules.Registry.Changed -= QueueModuleViewsRefresh; Modules.Changed -= QueueModuleStateRefresh; Modules.Dispose();
+        Modules.Registry.Changed -= QueueModuleViewsRefresh; Modules.Registry.Changed -= ModuleCommandsChanged; Modules.Changed -= QueueModuleStateRefresh; Modules.Dispose();
     }
     internal void OpenModuleSettings(string id)
     {

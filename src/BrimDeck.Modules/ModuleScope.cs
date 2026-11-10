@@ -15,7 +15,37 @@ internal sealed class ModuleScope(Action<string, Exception> fault) : IDisposable
     private int _finalizingThread;
     internal List<Exception> CleanupErrors { get; } = [];
     public bool Ready => _ready && !_ended && !Token.IsCancellationRequested;
-    internal void Activate() => _ready = true;
+    private readonly List<Action> _afterActivate = [];
+    internal void Activate()
+    {
+        Action[] pending;
+        lock (_gate)
+        {
+            if (_ended) return;
+            _ready = true;
+            pending = [.. _afterActivate]; _afterActivate.Clear();
+        }
+        // Delivered work runs once the module is ready, outside the gate: it calls back into the module.
+        foreach (var action in pending) Run(action);
+    }
+    // Work a service owes the module once it becomes ready (the first value of a snapshot it subscribed to). A module that
+    // has ended before then is handed nothing.
+    internal void AfterActivate(Action action)
+    {
+        bool runNow;
+        lock (_gate)
+        {
+            if (_ended) return;
+            if (!_ready) { _afterActivate.Add(action); return; }
+            runNow = true;
+        }
+        if (runNow) Run(action);
+    }
+    private void Run(Action action)
+    {
+        try { if (!_ended && !Token.IsCancellationRequested) action(); }
+        catch (Exception ex) { fault("activate delivery", ex); }
+    }
     internal T UseStorage<T>(Func<T> operation)
     {
         lock (_gate)

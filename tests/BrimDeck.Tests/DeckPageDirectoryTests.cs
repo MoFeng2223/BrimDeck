@@ -11,13 +11,18 @@ internal static class DeckPageDirectoryTests
         var directory = new DeckPageDirectory(settings, plugins);
         check("Pages: numeric enum migration keeps an unresolved legacy mini-app target", settings.Pages.Version == 1 && settings.Pages.DefaultId == DeckPageIds.LegacyMiniApps && settings.Pages.LastId == DeckPageIds.LegacyMiniApps);
         check("Pages: unresolved legacy target falls back without inventing a plugin default", directory.Resolve(directory.Opening(null)).Id == DeckPageIds.Monitor && settings.Pages.DefaultId == DeckPageIds.LegacyMiniApps);
-        check("Pages: built-ins and plugin contributions share a bounded directory", directory.All.Select(p => p.Id).SequenceEqual([DeckPageIds.Monitor, DeckPageIds.Usage, DeckPageIds.Music, "sample:one", "sample:two"]));
+        // The built-in pages dev added (Clipboard, Devices) are in the directory too; the saved order places the ones it
+        // names first and leaves the rest in DeckPages.Order after them.
+        check("Pages: built-ins and plugin contributions share a bounded directory",
+            directory.All.Select(p => p.Id).SequenceEqual([DeckPageIds.Monitor, DeckPageIds.Usage, DeckPageIds.Music, DeckPageIds.Clipboard, DeckPageIds.Devices, "sample:one", "sample:two"]));
         check("Pages: legacy shared dimensions seed both pages", directory.Size(plugins[0]) == (620, 220) && directory.Size(plugins[1]) == (620, 220));
         directory.SetSize("sample:one", 950, 310);
         check("Pages: resizing one plugin page leaves other pages and legacy dimensions alone", directory.Size(plugins[0]) == (950, 310) && directory.Size(plugins[1]) == (620, 220) && settings.MiniApps.Width == 620);
         settings.Pages.Order = ["sample:two", DeckPageIds.Music, "sample:one", DeckPageIds.Usage, DeckPageIds.Monitor];
         directory = new(settings, plugins);
-        check("Pages: custom order is shared by mixed built-in and plugin navigation", directory.Visible.Select(p => p.Id).SequenceEqual(settings.Pages.Order));
+        // The saved order comes first; the built-in pages it does not name follow in DeckPages.Order (MiniApps is off here,
+        // since the module page set is not the legacy entry toggle).
+        check("Pages: custom order is shared by mixed built-in and plugin navigation", directory.Visible.Select(p => p.Id).Take(settings.Pages.Order.Count).SequenceEqual(settings.Pages.Order));
         settings.Pages.DefaultId = "sample:two"; settings.Pages.LastId = "sample:two";
         var absent = new DeckPageDirectory(settings, plugins.Take(1));
         check("Pages: missing default falls back only at runtime", absent.Resolve(absent.Opening(null)).Id == DeckPageIds.Music && settings.Pages.DefaultId == "sample:two" && settings.Pages.LastId == "sample:two");

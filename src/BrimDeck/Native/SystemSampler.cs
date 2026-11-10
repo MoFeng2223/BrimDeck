@@ -33,9 +33,10 @@ internal sealed class SystemSampler : IDisposable
     // milliseconds, which the panel must not wait for. Only HoldProcesses reaches them from the UI thread. Each kind of counter has a
     // query of its own: counters just asked for (the adapters', the power meter's) are primed without starting the processor's
     // deltas over, and a stuck collection (the thermal zones', the power meter's) is known to be theirs.
-    private PdhQuery? _cpuPdh, _gpuPdh, _zonesPdh, _meterPdh;
+    private PdhQuery? _cpuPdh, _gpuPdh, _zonesPdh, _meterPdh, _diskPdh;
     private CpuProvider? _cpu;
     private GpuProvider? _gpu;
+    private DiskProvider? _disk;
     private GpuDrivers? _drivers;
     private SensorClient? _sensors;
     private readonly MonitorBridgeReader _bridges = new();
@@ -51,7 +52,7 @@ internal sealed class SystemSampler : IDisposable
     // _powerWanted: the whole machine's power (the Energy Meter counters, NVIDIA's board power); _batteryWanted: the battery alone, which
     // the machine's charge reading needs without any of the rest.
     // _gpuWanted: the graphics adapters' counters, for the page, the row's GPU reading and the power.
-    private volatile bool _temperatures, _storageWanted, _driveTemperatures, _powerWanted, _batteryWanted, _gpuWanted;
+    private volatile bool _temperatures, _storageWanted, _driveTemperatures, _powerWanted, _batteryWanted, _gpuWanted, _diskWanted;
     // The whole machine's power and the machine's battery (PowerProvider, BatteryProvider), made on the sampling thread.
     private PowerProvider? _power;
     private BatteryProvider? _battery;
@@ -74,7 +75,7 @@ internal sealed class SystemSampler : IDisposable
     // Rate counters read over a few milliseconds are far off: "% Processor Time" read 60 % to 100 %, or nothing, over 0 to 20 ms on a
     // machine near idle (300 ms read true). Collections of a query closer together than this are not made (Collect).
     private const double ShortestCounterSeconds = .2;
-    private double _cpuAt = double.NegativeInfinity, _gpuAt = double.NegativeInfinity;
+    private double _cpuAt = double.NegativeInfinity, _gpuAt = double.NegativeInfinity, _diskAt = double.NegativeInfinity;
     private Reading<CpuSample> _lastCpu = Reading<CpuSample>.Unavailable(Why.Waiting);
     private Reading<IReadOnlyList<GpuSample>> _lastGpus = Reading<IReadOnlyList<GpuSample>>.Unavailable(Why.Waiting);
     private readonly Queue<(double Down, double Up)> _history = new(HistoryLength);
@@ -145,17 +146,20 @@ internal sealed class SystemSampler : IDisposable
     // row's drive); driveTemperatures, the drives' temperatures (the page with both on). The drives are first read at once, so the
     // page knows early how many lines it needs for them. frames: a collapsed row or an open page shows the frame rate. gpu: the graphics
     // adapters (the page, the row's GPU reading, the power).
-    public void SetExtras(bool temperatures, bool storage, bool driveTemperatures, bool power = false, bool battery = false, bool frames = false, bool gpu = false)
+    public void SetExtras(bool temperatures, bool storage, bool driveTemperatures, bool power = false, bool battery = false, bool frames = false, bool gpu = false, bool disk = false)
     {
         if (!_disposed) _frames.Want(frames);
-        bool newly = power && !_powerWanted || gpu && !_gpuWanted;
+        bool newlyPower = power && !_powerWanted, newlyGpu = gpu && !_gpuWanted, newlyDisk = disk && !_diskWanted;
+        bool newly = newlyPower || newlyGpu;
         _temperatures = temperatures; _storageWanted = storage; _driveTemperatures = storage && driveTemperatures; _powerWanted = power; _batteryWanted = power || battery;
-        _gpuWanted = gpu || power;
+        _gpuWanted = gpu || power; _diskWanted = disk;
         // Power or the adapters asked for while the sampler already runs (the collapsed row's readings kept it going): the counters are read
         // at once and again after the short priming window, so the first figure comes with the next snapshot and not a second reading later.
-        if (newly && _wanted && _thread is not null) { _primeCounters = true; _wake.Set(); }
+        if ((newly || newlyDisk) && _wanted && _thread is not null) { _primeCounters = true; _wake.Set(); }
         if (storage && (_storage.Drives == SensorState.Unknown || _driveTemperatures && _storage.Temperatures == SensorState.Unknown)) _storage.Start(_driveTemperatures);
     }
+    // Whether the disk counters gave readings; Unknown until they are asked for.
+    public SensorState DiskSensor => _disk?.State ?? SensorState.Unknown;
     // Whether the processor's zones, the graphics adapters and the drives have given temperatures, and whether drives were found and
     // how many (-1 until read); the page keeps room for what has turned up or has not been asked yet.
     public SensorState CpuSensor => Now() < Volatile.Read(ref _processorHeatUntil) ? SensorState.Found : _zones?.State ?? SensorState.Unknown;
@@ -181,9 +185,10 @@ internal sealed class SystemSampler : IDisposable
             catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException) { Debug.WriteLine(ex); return null; }
         }
         Action stuck = () => Replace(generation);
-        _cpuPdh = Query(); _gpuPdh = Query(); _zonesPdh = Query(); _meterPdh = Query();
+        _cpuPdh = Query(); _gpuPdh = Query(); _zonesPdh = Query(); _meterPdh = Query(); _diskPdh = Query();
         _cpu = new CpuProvider(_cpuPdh);
         _gpu = new GpuProvider(_gpuPdh);
+        _disk = new DiskProvider(_diskPdh);
         _drivers = new GpuDrivers(stuck);
         _sensors = new SensorClient();
         _zones = new ThermalZones(_zonesPdh, stuck);
@@ -268,6 +273,7 @@ internal sealed class SystemSampler : IDisposable
     {
         _power!.Prepare(_powerWanted);
         if (_gpu!.Want(_gpuWanted)) { _gpuPdh?.Collect(); _gpuAt = Now(); }
+        if (_disk!.Want(_diskWanted)) { _diskPdh?.Collect(); _diskAt = Now(); }
     }
 
     private MonitorSnapshot Collect(bool listProcesses)
@@ -277,10 +283,14 @@ internal sealed class SystemSampler : IDisposable
         _gpu!.Want(_gpuWanted);
         // A collection this soon after the last is skipped, and the processor and the adapters keep the readings they gave then.
         bool cpuSoon = now - _cpuAt < ShortestCounterSeconds, gpuSoon = now - _gpuAt < ShortestCounterSeconds;
+        bool diskSoon = now - _diskAt < ShortestCounterSeconds;
         bool cpuCollected = !cpuSoon && _cpuPdh?.Collect() == true;
         bool gpuCollected = !gpuSoon && _gpuWanted && _gpuPdh?.Collect() == true;
+        _disk!.Want(_diskWanted);
+        bool diskCollected = !diskSoon && _diskWanted && _diskPdh?.Collect() == true;
         if (!cpuSoon) _cpuAt = now;
         if (!gpuSoon) _gpuAt = now;
+        if (!diskSoon) _diskAt = now;
         if (!_listProcesses) { _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting); _processesAt = double.NegativeInfinity; }
         else if (listProcesses || !_lastProcesses.HasValue || now - _processesAt >= ProcessSeconds)
         {
@@ -295,6 +305,7 @@ internal sealed class SystemSampler : IDisposable
         bool temperatures = _temperatures;
         var cpu = cpuSoon ? _lastCpu : _cpu!.Sample(cpuCollected); var gpus = gpuSoon ? _lastGpus : _gpu.Sample(gpuCollected);
         _lastCpu = cpu; _lastGpus = gpus;
+        var disk = _disk!.Sample(diskCollected);
         // Asked on every tick, so the zones' counters leave the query once temperatures are no longer wanted or a better source gives them.
         if (_zones!.Sample(temperatures && !_processorHeat, now) is { } zone) cpu = cpu.Map(sample => sample with { Temperature = zone.Celsius, TemperatureZone = zone.Zone });
         // The processor's own sensors through the sensor service where enhanced sensors are set up, else a hardware monitor the user
@@ -369,7 +380,7 @@ internal sealed class SystemSampler : IDisposable
             Power = power, Battery = battery, PowerHistory = _powerHistory.ToArray(),
             PowerSummary = _powerStats.Summary(now),
             CpuPower = _cpuPower.Track(now), GpuPower = _gpuPower.Track(now),
-            Frames = frames
+            Frames = frames, Disk = disk
         };
         var shown = WithGpu(snapshot, _autoGpu, out bool automatic);
         if (automatic && shown.Gpu.TryGet(out var gpu)) Volatile.Write(ref _autoGpu, gpu.Luid);
@@ -449,7 +460,7 @@ internal sealed class SystemSampler : IDisposable
         _frames.Dispose();
         _wake.Set();
         // The thread may be inside a reading; it ends on its own as a background thread if it does not stop in time.
-        if (_thread?.Join(1000) != false) { _cpuPdh?.Dispose(); _gpuPdh?.Dispose(); _zonesPdh?.Dispose(); _meterPdh?.Dispose(); _power?.Dispose(); _processes.Dispose(); _network.Dispose(); _gpuTemperatures?.Dispose(); _wake.Dispose(); }
+        if (_thread?.Join(1000) != false) { _cpuPdh?.Dispose(); _gpuPdh?.Dispose(); _zonesPdh?.Dispose(); _meterPdh?.Dispose(); _diskPdh?.Dispose(); _power?.Dispose(); _processes.Dispose(); _network.Dispose(); _gpuTemperatures?.Dispose(); _wake.Dispose(); }
     }
 }
 
@@ -634,6 +645,41 @@ internal static class MemoryProvider
     }
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GlobalMemoryStatusEx(ref MemoryStatus buffer);
     [DllImport("kernel32.dll", EntryPoint = "K32GetPerformanceInfo", SetLastError = true)] private static extern bool GetPerformanceInfo(ref PerformanceInformation information, uint size);
+}
+
+// The disks' read and write rates over the whole machine (Task Manager's "Disk"), from the PhysicalDisk counters of _Total.
+// The counters are in the query only while something shows them, as the GPU's are; the first collection only starts the
+// deltas, so the first reading is unavailable rather than wrong.
+internal sealed class DiskProvider
+{
+    private const string ReadPath = @"\PhysicalDisk(_Total)\Disk Read Bytes/sec";
+    private const string WritePath = @"\PhysicalDisk(_Total)\Disk Write Bytes/sec";
+    private readonly PdhQuery? _pdh;
+    private bool _wanted, _read, _write;
+    public DiskProvider(PdhQuery? pdh) { _pdh = pdh; }
+    // Whether the counters have just joined the query (they need a first collection). Called before each collection.
+    public bool Want(bool wanted)
+    {
+        if (wanted == _wanted || _pdh is null) return false;
+        _wanted = wanted;
+        if (wanted) { _read = _pdh.Add(ReadPath); _write = _pdh.Add(WritePath); }
+        else { _pdh.Remove(ReadPath); _pdh.Remove(WritePath); }
+        return wanted;
+    }
+    // Found while the counters give readings; None where the machine has none.
+    public SensorState State => _pdh is null || !_wanted ? SensorState.Unknown : _read || _write ? SensorState.Found : SensorState.None;
+    public Reading<DiskRates> Sample(bool collected)
+    {
+        if (!_wanted || _pdh is null) return Reading<DiskRates>.Unavailable(Why.Waiting);
+        if (!_read && !_write) return Reading<DiskRates>.Unavailable(_pdh.IsOpen ? Why.NoDisk : Why.NoCounters);
+        if (!collected) return Reading<DiskRates>.Unavailable(Why.NoCounters);
+        if (Total(_pdh.Read(ReadPath)) is not { } read || Total(_pdh.Read(WritePath)) is not { } write)
+            return Reading<DiskRates>.Unavailable(Why.Waiting);
+        // A counter gone backwards (a drive added or removed, a reset) is skipped rather than read as a negative rate.
+        return read >= 0 && write >= 0 && double.IsFinite(read) && double.IsFinite(write) ? new DiskRates(read, write) : Reading<DiskRates>.Unavailable(Why.Waiting);
+    }
+    private static double? Total(IReadOnlyList<(string Instance, double Value)> values)
+        => values.FirstOrDefault(value => value.Instance.Equals("_Total", StringComparison.OrdinalIgnoreCase)) is { Instance.Length: > 0 } total ? total.Value : null;
 }
 
 // Download and upload over the physical adapters. Virtual adapters (Hyper-V, VPN, loopback) and filter drivers are left out:

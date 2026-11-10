@@ -78,6 +78,7 @@ internal static partial class Program
             ("settings-navigation", SettingsNavigationChecks), ("page-theme", PageThemeChecks), ("settings-schema", SettingsSchemaChecks), ("deprecations", ModuleDeprecationChecks),
             ("startup", StartupGuardChecks), ("inspector", () => PackageInspectorChecks(_artifacts.Notes)), ("host-range", () => ModuleHostRangeChecks(_artifacts.Notes)),
             ("signatures", ModuleSignatureChecks), ("platform", () => PlatformChecks().GetAwaiter().GetResult()),
+            ("commands", () => CommandChecks().GetAwaiter().GetResult()), ("host-control", HostControlChecks),
             ("timers", () => TimerPluginChecks(_artifacts.Notes)), ("sdk-boundary", () => BoundaryChecks(repository))
         };
         if (selected.Except(groups.Select(g => g.Name), StringComparer.OrdinalIgnoreCase).Any()) { Console.Error.WriteLine("Unknown group. Available: " + string.Join(", ", groups.Select(g => g.Name))); return 2; }
@@ -183,7 +184,7 @@ internal static partial class Program
         var options = new DeckSettings(); options.Modules.EnabledModules.Add("sample"); options.Modules.Approvals["sample"] = new string('A', 64);
         var copy = options.Copy(); copy.Modules.EnabledModules.Clear(); copy.Modules.Approvals.Clear();
         Check("module preferences deep copied", options.Modules.EnabledModules.Count == 1 && options.Modules.Approvals.Count == 1);
-        var legacy = JsonSerializer.Deserialize<DeckSettings>("{}")!; legacy.Normalize(); Check("old settings enable built-ins without external plugins", legacy.Modules.Enabled && legacy.Modules.EnabledModules.Count == 0 && (int)DeckPage.MiniApps == 3);
+        var legacy = JsonSerializer.Deserialize<DeckSettings>("{}")!; legacy.Normalize(); Check("old settings enable built-ins without external plugins", legacy.Modules.Enabled && legacy.Modules.EnabledModules.Count == 0 && (int)DeckPage.MiniApps == 5);
     }
 
     private static async Task LoaderChecks(string binaries)

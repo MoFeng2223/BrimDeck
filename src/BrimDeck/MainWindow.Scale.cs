@@ -31,8 +31,7 @@ public partial class MainWindow
         BindingOperations.GetBindingExpression(ExpandedContent, WidthProperty)?.UpdateTarget();
     }
 
-    internal double Scale => _scale;
-    // The open panel's corner radius as drawn.
+    internal double Scale => _scale;    // The open panel's corner radius as drawn.
     private double PanelRadius => PanelHeader.PanelRadius * _scale;
 
     private sealed class Unscaled : IValueConverter

@@ -9,14 +9,20 @@ public partial class App
     internal ModuleSnapshotSource<ModuleUsageSnapshot> ModuleUsageSource { get; } = new(new(0, DateTimeOffset.UtcNow, Array.AsReadOnly(Array.Empty<ModuleUsageEntry>())));
     internal ModuleSnapshotSource<ModuleMediaSnapshot> ModuleMediaSource { get; } = new(new(0, DateTimeOffset.UtcNow, ModuleDataStatus.Unavailable, "unknown", "", "", "", "", null, null));
     internal ModuleSnapshotSource<ModuleSystemSnapshot> ModuleSystemSource { get; } = new(new(0, DateTimeOffset.UtcNow, ModuleDataStatus.Unavailable, null, null, null, null, null, null, null));
+    internal ModuleSnapshotSource<ModuleHostStateSnapshot> ModuleHostStateSource { get; } = new(new(0, DateTimeOffset.UtcNow));
     private IEnumerable<ModuleService> HostApiBindings()
     {
         yield return ModuleService.Of<IModulePresentation>(ModuleApi.UiPresentation, scope => new PresentationWriter(this, scope));
         yield return ModuleService.Of<IModuleUsage>(ModuleApi.UsageRead, scope => new UsageReader(scope, ModuleUsageSource));
         yield return ModuleService.Of<IModuleMedia>(ModuleApi.MediaRead, scope => new MediaReader(scope, ModuleMediaSource));
         yield return ModuleService.Of<IModuleSystem>(ModuleApi.SystemRead, scope => new SystemReader(scope, ModuleSystemSource));
+        yield return ModuleService.Of<IModuleHostState>(ModuleApi.HostState, scope => new HostStateReader(this, scope, ModuleHostStateSource));
+        // The service is made while the module is still starting, before it is in the active table, so the activation's own
+        // manifest is handed in by the registry rather than looked up later.
+        yield return ModuleService.Of<IModuleHostControl>(ModuleApi.HostControl, ModuleApi.HostControl, scope => new HostControlService(this, scope, scope.Manifest));
         yield return ModuleService.Of<IModuleNotifications>(ModuleApi.NotificationsShow, scope =>
         { scope.OnDispose(() => DropModuleNotices(scope.ModuleId, scope.Lifetime)); return new NoticeWriter(this, scope); });
+        yield return ModuleService.Of<IModuleCommands>(ModuleApi.CommandsInvoke, scope => new CommandsService(this, scope));
     }
     private void InitializeHostApiDemand()
     {
@@ -27,7 +33,10 @@ public partial class App
             if (Dispatcher.CheckAccess()) Apply(); else Dispatcher.BeginInvoke(Apply);
         }
         ModuleMediaSource.DemandChanged += _ => OnUi(StartMedia);
-        ModuleSystemSource.DemandChanged += _ => OnUi(UpdateSystemDemand);
+        ModuleSystemSource.DemandChanged += _ => OnUi(() => { UpdateSystemDemand(); UpdateMonitorExtras(); });
+        // A module reading the panel's state keeps the state read while it is subscribed: the source is published from the
+        // panel's own changes, so nothing runs between them.
+        ModuleHostStateSource.DemandChanged += _ => OnUi(() => PublishModuleHostState(force: false));
     }
     internal void PublishModuleUsage(IReadOnlyList<ProviderSnapshot> snapshots)
     { if (!Exiting) ModuleUsageSource.Publish(ModuleHostProjection.Usage(++_usageRevision, DateTimeOffset.UtcNow, snapshots)); }
@@ -44,6 +53,17 @@ public partial class App
     {
         public override ModuleSystemSnapshot GetSnapshot()
         { var value = base.GetSnapshot(); return value.Status == ModuleDataStatus.Available && DateTimeOffset.UtcNow - value.ObservedAt > TimeSpan.FromSeconds(6) ? value with { Status = ModuleDataStatus.Stale } : value; }
+    }
+    private sealed class HostStateReader(App app, ModuleServiceScope scope, ModuleSnapshotSource<ModuleHostStateSnapshot> source) : IModuleHostState
+    {
+        private readonly SnapshotReader<ModuleHostStateSnapshot> _reader = new Reader(scope, source);
+        public ModuleHostStateSnapshot GetSnapshot() => app.RedactHostState(_reader.GetSnapshot(), scope.ModuleId);
+        public IDisposable Subscribe(Action<ModuleHostStateSnapshot> listener)
+        {
+            ArgumentNullException.ThrowIfNull(listener);
+            return _reader.Subscribe(value => listener(app.RedactHostState(value, scope.ModuleId)));
+        }
+        private sealed class Reader(ModuleServiceScope scope, ModuleSnapshotSource<ModuleHostStateSnapshot> source) : SnapshotReader<ModuleHostStateSnapshot>(scope, source);
     }
     private sealed class MediaReader(ModuleServiceScope scope, ModuleSnapshotSource<ModuleMediaSnapshot> source) : SnapshotReader<ModuleMediaSnapshot>(scope, source), IModuleMedia
     {

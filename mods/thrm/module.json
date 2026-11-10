@@ -1,0 +1,13 @@
+{
+  "apiVersion": 1,
+  "apiMinor": 9,
+  "capabilities": ["ui.pages", "ui.compact-parts", "ui.commands", "commands.invoke", "ui.settings", "storage.data"],
+  "id": "thrm",
+  "name": "散热器 / Cooler",
+  "version": "1.0.0",
+  "description": "散热器状态：CPU/GPU 温度与风扇转速，经本地 THRM 桥（127.0.0.1:27391）轮询，展开页为三张弧形仪表卡。",
+  "descriptionEn": "Cooler status: CPU/GPU temperatures and fan speed polled from the local THRM bridge (127.0.0.1:27391), with three gauge cards on the page.",
+  "author": "TakaraMiyuki",
+  "assembly": "BrimDeck.Thrm.dll",
+  "entryType": "BrimDeck.Thrm.ThermModule"
+}

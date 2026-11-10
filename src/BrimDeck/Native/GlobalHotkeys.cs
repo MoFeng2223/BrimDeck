@@ -8,13 +8,21 @@ namespace BrimDeck.Native;
 // again when monitors change, so their windows cannot hold the registrations; this window has no monitor, no position and
 // no DPI, and Explorer restarting does not affect it. A hotkey may hold several combinations, told apart by their slot (the
 // resize shortcut's four arrow keys).
+//
+// Plugin commands use the same window and take their registration ids from their slot in the caller's command list: the ids
+// only have to be told apart for the lifetime of one registration pass, which is all the atom RegisterHotKey sees.
 internal sealed class GlobalHotkeys : IDisposable
 {
     // Slots per hotkey in the registration ids: room for more combinations than the four arrow keys need.
     private const int WmHotkey = 0x0312, ErrorHotkeyAlreadyRegistered = 1409, Slots = 8;
+    // Command ids start here so they never collide with a HotkeyKind's ids.
+    private const int CommandBase = 0x4000;
     private readonly HwndSource _source;
     private readonly HashSet<(HotkeyKind Kind, int Slot)> _registered = [];
+    private readonly Dictionary<int, string> _commands = [];
     public event Action<HotkeyKind, int>? Pressed;
+    // Raised with the command id whose combination was pressed. Commands carry no slot: a command owns one combination.
+    public event Action<string>? CommandPressed;
 
     public GlobalHotkeys()
     {
@@ -28,6 +36,27 @@ internal sealed class GlobalHotkeys : IDisposable
         Unregister(kind, slot);
         if (RegisterHotKey(_source.Handle, Id(kind, slot), fsModifiers, vk)) { _registered.Add((kind, slot)); return HotkeyStatus.Active; }
         return Marshal.GetLastWin32Error() == ErrorHotkeyAlreadyRegistered ? HotkeyStatus.InUse : HotkeyStatus.Invalid;
+    }
+
+    // Registers a command's combination. The caller passes one index per registered command, which addresses it in the hook.
+    public HotkeyStatus RegisterCommand(int index, string commandId, uint fsModifiers, uint vk)
+    {
+        UnregisterCommand(index);
+        if (!RegisterHotKey(_source.Handle, CommandBase + index, fsModifiers, vk)) return Marshal.GetLastWin32Error() == ErrorHotkeyAlreadyRegistered ? HotkeyStatus.InUse : HotkeyStatus.Invalid;
+        _commands[CommandBase + index] = commandId;
+        return HotkeyStatus.Active;
+    }
+
+    public void UnregisterCommand(int index)
+    {
+        if (_commands.Remove(CommandBase + index)) UnregisterHotKey(_source.Handle, CommandBase + index);
+    }
+
+    // Every command registration goes at once, before a new pass registers its own.
+    public void UnregisterCommands()
+    {
+        foreach (int id in _commands.Keys.ToList()) UnregisterHotKey(_source.Handle, id);
+        _commands.Clear();
     }
 
     // Every combination of the hotkey.
@@ -47,6 +76,7 @@ internal sealed class GlobalHotkeys : IDisposable
     public void Dispose()
     {
         foreach (var (kind, slot) in _registered.ToList()) Unregister(kind, slot);
+        UnregisterCommands();
         _source.RemoveHook(Hook); _source.Dispose();
     }
 
@@ -55,8 +85,10 @@ internal sealed class GlobalHotkeys : IDisposable
     private IntPtr Hook(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if (message != WmHotkey) return IntPtr.Zero;
+        int id = wParam.ToInt32();
         foreach (var (kind, slot) in _registered)
-            if (wParam.ToInt32() == Id(kind, slot)) { handled = true; Pressed?.Invoke(kind, slot); break; }
+            if (id == Id(kind, slot)) { handled = true; Pressed?.Invoke(kind, slot); return IntPtr.Zero; }
+        if (_commands.TryGetValue(id, out var command)) { handled = true; CommandPressed?.Invoke(command); }
         return IntPtr.Zero;
     }
 
