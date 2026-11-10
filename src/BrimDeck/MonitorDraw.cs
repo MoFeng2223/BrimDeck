@@ -32,19 +32,21 @@ internal static class MonitorDraw
 
     // Text set once per string, size, weight and color: the same figures come back every second, so they are not laid out again.
     private static readonly Dictionary<(string, double, bool, bool, string, double), FormattedText> Texts = [];
+    // Those texts as drawings, each at the height it is drawn at (BaselineKept).
+    private static readonly Dictionary<(FormattedText Text, double Y), Drawing> Drawn = [];
     // Looked up per use: the user's font may change (Fonts.Version), and the texts and letters kept here were set in the old one.
     private static Typeface Regular => Fonts.Face(UiFontRole.Panel);
     private static Typeface Strong => Fonts.Face(UiFontRole.Panel, FontWeights.SemiBold);
     private static Typeface Display => Fonts.Face(UiFontRole.Display, FontWeights.SemiBold);
     private static int _fontSeen = -1;
-    private static void KeepFresh() { if (_fontSeen == Fonts.Version) return; _fontSeen = Fonts.Version; Texts.Clear(); Letters.Clear(); }
+    private static void KeepFresh() { if (_fontSeen == Fonts.Version) return; _fontSeen = Fonts.Version; Texts.Clear(); Drawn.Clear(); Letters.Clear(); }
 
     public static FormattedText Text(string text, double size, string color, double pixelsPerDip, bool strong = false, bool display = false)
     {
         KeepFresh();
         var key = (text, size, strong, display, color, pixelsPerDip);
         if (Texts.TryGetValue(key, out var known)) return known;
-        if (Texts.Count > 768) Texts.Clear();
+        if (Texts.Count > 768) { Texts.Clear(); Drawn.Clear(); }
         var formatted = new FormattedText(text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, display ? Display : strong ? Strong : Regular,
             size, UI.Brush(color), pixelsPerDip);
         return Texts[key] = formatted;
@@ -57,6 +59,28 @@ internal static class MonitorDraw
 
     // The text's baseline placed at y, so figures of different sizes on one line sit on one baseline.
     public static void Baseline(DrawingContext drawing, FormattedText text, double x, double baseline) => drawing.DrawText(text, new Point(x, baseline - text.Baseline));
+
+    // The same for a text drawn again and again at one height, as the collapsed row's figures are on every frame while its
+    // readings ease. DrawText lays a text's glyphs out again on every call, whether the text is kept (Text) or not, and laying
+    // out the row's twenty figures took most of the 2.6 ms a frame cost on the UI thread, seven frames a second (measured
+    // 2026-11-10). The text is drawn once into a drawing and that is placed along the row. Its height is drawn into the drawing
+    // rather than placed: a baseline that falls halfway between two device pixels is put on one of them, and moved there by a
+    // transform it fell on the other (seen at 125%), a pixel away from where DrawText puts it.
+    public static void BaselineKept(DrawingContext drawing, FormattedText text, double x, double baseline)
+    {
+        double y = baseline - text.Baseline;
+        if (!Drawn.TryGetValue((text, y), out var made))
+        {
+            var group = new DrawingGroup();
+            using (var context = group.Open()) context.DrawText(text, new Point(0, y));
+            group.Freeze();
+            if (Drawn.Count > 1024) Drawn.Clear();
+            Drawn[(text, y)] = made = group;
+        }
+        drawing.PushTransform(Placed(new Matrix(1, 0, 0, 1, x, 0)));
+        drawing.DrawDrawing(made);
+        drawing.Pop();
+    }
 
     // A dial: three quarters of a circle, from lower left over the top to lower right, on the quota rings' track, filled clockwise
     // by the share, with the reading's letter inside. The gap tells it from the full quota rings beside it in the collapsed row,
@@ -144,7 +168,8 @@ internal static class MonitorDraw
     {
         if (Places.TryGetValue(place, out var known)) return known;
         var transform = new MatrixTransform(place); transform.Freeze();
-        if (Places.Count > 64) Places.Clear();
+        // Room for the row's figures and a page's as well, each at its own place.
+        if (Places.Count > 512) Places.Clear();
         return Places[place] = transform;
     }
 

@@ -337,19 +337,19 @@ internal sealed class MonitorStrip : FrameworkElement
         if (shareText is not null && heatText is not null && (_inline & item) != 0)
         {
             var first = MonitorDraw.Text(shareText, _font, ShareColor(), ppd);
-            MonitorDraw.Baseline(drawing, first, x, baseline);
-            MonitorDraw.Baseline(drawing, MonitorDraw.Text(heatText, _font, HeatColor(), ppd), x + Math.Ceiling(first.WidthIncludingTrailingWhitespace) + InlineGap, baseline);
+            MonitorDraw.BaselineKept(drawing, first, x, baseline);
+            MonitorDraw.BaselineKept(drawing, MonitorDraw.Text(heatText, _font, HeatColor(), ppd), x + Math.Ceiling(first.WidthIncludingTrailingWhitespace) + InlineGap, baseline);
             return;
         }
         if (shareText is not null && heatText is not null)
         {
             // The baselines sit far enough apart for a gap of about four DIPs between the lines' digits, within the row's height.
-            MonitorDraw.Baseline(drawing, MonitorDraw.Text(shareText, _small, ShareColor(), ppd), x, Math.Round(center - 2.5 * _scale));
-            MonitorDraw.Baseline(drawing, MonitorDraw.Text(heatText, _small, HeatColor(), ppd), x, Math.Round(center + 8 * _scale));
+            MonitorDraw.BaselineKept(drawing, MonitorDraw.Text(shareText, _small, ShareColor(), ppd), x, Math.Round(center - 2.5 * _scale));
+            MonitorDraw.BaselineKept(drawing, MonitorDraw.Text(heatText, _small, HeatColor(), ppd), x, Math.Round(center + 8 * _scale));
             return;
         }
-        if (shareText is not null) MonitorDraw.Baseline(drawing, MonitorDraw.Text(shareText, _font, ShareColor(), ppd), x, baseline);
-        else if (heatText is not null) MonitorDraw.Baseline(drawing, MonitorDraw.Text(heatText, _font, HeatColor(), ppd), x, baseline);
+        if (shareText is not null) MonitorDraw.BaselineKept(drawing, MonitorDraw.Text(shareText, _font, ShareColor(), ppd), x, baseline);
+        else if (heatText is not null) MonitorDraw.BaselineKept(drawing, MonitorDraw.Text(heatText, _font, HeatColor(), ppd), x, baseline);
     }
 
     // A figure keeps the text color while its reading is normal and takes the level's color at the warning and critical
@@ -362,7 +362,7 @@ internal sealed class MonitorStrip : FrameworkElement
         double size = Math.Round(9 * _scale);
         MonitorDraw.Arrow(drawing, new Point(x, center - size / 2), size, Math.Max(1, 1.4 * _scale), glyph, color);
         var text = MonitorDraw.Text(RateFigure(rate), _font, FigureColor(level, color), ppd);
-        MonitorDraw.Baseline(drawing, text, x + size + Math.Round(3 * _scale), Math.Round(center + _font * .36));
+        MonitorDraw.BaselineKept(drawing, text, x + size + Math.Round(3 * _scale), Math.Round(center + _font * .36));
     }
 
     // A drive glyph in the color of the highest level among the figures shown, then each letter's tag, in the tertiary text
@@ -387,7 +387,7 @@ internal sealed class MonitorStrip : FrameworkElement
             if (i > 0) at += EntryGap;
             if (_tags[i].Length > 0)
             {
-                MonitorDraw.Baseline(drawing, MonitorDraw.Text(_tags[i], _font, UI.Tertiary, ppd), at, baseline);
+                MonitorDraw.BaselineKept(drawing, MonitorDraw.Text(_tags[i], _font, UI.Tertiary, ppd), at, baseline);
                 at += FigureWidth(_tags[i]) + TagGap;
             }
             var share = _letterUsage[i] ? CompactSources.Share(_letters[i], s) : null;
@@ -401,7 +401,7 @@ internal sealed class MonitorStrip : FrameworkElement
     // The figure of a reading that is a share: "83%", one size, weight and baseline for every reading that has one (the dials' figures,
     // the drives', the battery's).
     private void Figure(DrawingContext drawing, double x, double center, double? share, string color, double ppd)
-        => MonitorDraw.Baseline(drawing, MonitorDraw.Text(GaugeFigure(share), _font, color, ppd), x, Math.Round(center + _font * .36));
+        => MonitorDraw.BaselineKept(drawing, MonitorDraw.Text(GaugeFigure(share), _font, color, ppd), x, Math.Round(center + _font * .36));
 
     // The whole machine's power: a bolt in the theme's curve color, then the draw in watts, "38W"; a dash
     // while there is no reading. The room is kept for the widest figure ("999W"; the font's 1 is narrower than its other digits).
@@ -411,7 +411,7 @@ internal sealed class MonitorStrip : FrameworkElement
         double size = Math.Round(14 * _scale), slot = Math.Round(9 * _scale);
         PowerIcons.Draw(drawing, PowerIcon.Bolt, new Rect(x + Math.Round((slot - size) / 2), Math.Round(center - size / 2), size, size), power is null ? UI.Tertiary : _powerStyle.Draw, _powerStyle, ppd);
         string figure = power is { } p ? PowerFormat.Compact(p.Watts) + "W" : "—";
-        MonitorDraw.Baseline(drawing, MonitorDraw.Text(figure, _font, UI.Primary, ppd), x + slot + Math.Round(3 * _scale), Math.Round(center + _font * .36));
+        MonitorDraw.BaselineKept(drawing, MonitorDraw.Text(figure, _font, UI.Primary, ppd), x + slot + Math.Round(3 * _scale), Math.Round(center + _font * .36));
     }
 
     // The frame rate: the program's icon (when chosen and it has one) or a screen glyph in the reading's color, then the whole frames
@@ -428,8 +428,8 @@ internal sealed class MonitorStrip : FrameworkElement
         }
         double at = x + slot + Math.Round(3 * _scale);
         var figure = MonitorDraw.Text(FramesFigure(frames?.PerSecond), _font, UI.Primary, ppd);
-        MonitorDraw.Baseline(drawing, figure, at, baseline);
-        MonitorDraw.Baseline(drawing, MonitorDraw.Text(FramesUnit, _small, UI.Tertiary, ppd), at + Math.Ceiling(figure.WidthIncludingTrailingWhitespace) + Math.Round(2 * _scale), baseline);
+        MonitorDraw.BaselineKept(drawing, figure, at, baseline);
+        MonitorDraw.BaselineKept(drawing, MonitorDraw.Text(FramesUnit, _small, UI.Tertiary, ppd), at + Math.Ceiling(figure.WidthIncludingTrailingWhitespace) + Math.Round(2 * _scale), baseline);
     }
     private static FrameSample? FrameOf(MonitorSnapshot? s) => s?.Frames.OrDefault;
     private static readonly string[] FrameFigures = [.. Enumerable.Range(0, 1000).Select(count => count.ToString(System.Globalization.CultureInfo.InvariantCulture))];
