@@ -152,12 +152,6 @@ public partial class App
         ApplyModuleAccent();
         return lease;
     }
-    // A user choosing a theme (or the system switching one) ends every module's request: the user's own colors always win.
-    internal void ClearModuleAccents()
-    {
-        if (!ModuleAccents.Clear()) return;
-        ApplyPanelTheme(reload: false);
-    }
     // Draws the accent the stack currently asks for, or the theme's own when it is empty. Called after a request or a release.
     internal void ApplyModuleAccent()
     {
@@ -167,7 +161,7 @@ public partial class App
             if (Exiting) return;
             PanelTheme.AccentOverride = ModuleAccents.Current;
             // Use() resolves a fresh palette when the accent differs, and a repaint follows; with nothing to change it does nothing.
-            ApplyPanelTheme(drawAccent: true);
+            ApplyPanelTheme();
         }
         if (Dispatcher.CheckAccess()) Apply(); else Dispatcher.BeginInvoke(Apply);
     }

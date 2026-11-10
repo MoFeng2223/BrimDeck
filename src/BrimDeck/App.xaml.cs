@@ -228,6 +228,9 @@ public partial class App : Application
         }
         bool dataChanged = settings.IncludeWsl != Settings.IncludeWsl || !settings.RequiredProviders.SetEquals(Settings.RequiredProviders) ||
             !settings.EnabledApps.Select(e => e.ConfigurationKey).ToHashSet().SetEquals(Settings.EnabledApps.Select(e => e.ConfigurationKey));
+        // The user changed the theme: their choice ends every module's temporary accent before the new palette is made, so
+        // what they picked is what they see. A change of something else leaves the module's accent in place.
+        bool themeChanged = !string.Equals(PanelThemes.NormalizeId(settings.PanelTheme), PanelThemes.NormalizeId(Settings.PanelTheme), StringComparison.Ordinal);
         bool syncEnabled = settings.UsageAutoSync && !Settings.UsageAutoSync;
         // A new collapsed style morphs every panel's surface into its form (MainWindow.MorphShape).
         bool styleChanged = settings.Style != Settings.Style;
@@ -244,6 +247,7 @@ public partial class App : Application
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
         bool languageChanged = Loc.Normalize(settings.Language) != Loc.Language;
         if (languageChanged) UseLanguage();
+        if (themeChanged) { ModuleAccents.Clear(); PanelTheme.AccentOverride = ModuleAccents.Current; }
         PanelTheme.Use(settings);
         ScheduleDaylight();
         AssignDisplays();
@@ -274,13 +278,13 @@ public partial class App : Application
     }
     // Makes the chosen panel theme current (reading the theme folder again when asked) and repaints every panel if it changed.
     // When Windows switches "system" between dark and light, a preset clock gradient carries over as it does when a theme is chosen.
-    internal void ApplyPanelTheme(bool reload = false, bool systemChanged = false, bool drawAccent = false)
+    internal void ApplyPanelTheme(bool reload = false, bool systemChanged = false)
     {
         var previous = PanelTheme.Current;
         bool wasHigh = PanelTheme.HighContrast;
-        // The user's own theme wins over any module's temporary accent: changing it ends those requests before the new
-        // palette is made, so what is drawn is exactly what was chosen. A module's own request or release keeps the stack.
-        if (!drawAccent)
+        // The system's own light/dark switch counts as the user's theme: it ends every module's temporary accent. A module's
+        // own request or release goes through ApplyModuleAccent, which sets the accent and calls here.
+        if (systemChanged)
         {
             ModuleAccents.Clear();
             PanelTheme.AccentOverride = ModuleAccents.Current;

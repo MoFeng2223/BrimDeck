@@ -63,5 +63,11 @@ internal static partial class Program
         lease.Dispose();
         Check("releasing after the module stopped is harmless", owned.Count == 0);
         Check("an invalid color is refused before it reaches the stack", AccentOverrides.Normalize("chartreuse") is null);
+        // The user's choice ends every request, whether they pick a theme in settings or Windows switches light/dark.
+        var chosen = new AccentOverrides();
+        var one = chosen.Add("alpha", "#AA0000"); var two = chosen.Add("beta", "#00BB00");
+        Check("a user theme change clears a two-module stack", chosen.Clear() && chosen.Count == 0 && chosen.Current is null);
+        one.Dispose(); two.Dispose();
+        Check("released requests do not come back after a clear", chosen.Count == 0);
     }
 }
