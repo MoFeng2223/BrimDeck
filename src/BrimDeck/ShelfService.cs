@@ -61,7 +61,11 @@ internal sealed class ShelfService : IDisposable
         else entry = Shelf.Add(Data, new ClipEntry { Kind = Shelf.Classify(copy.Text), Text = copy.Text, Html = copy.Html, Rtf = copy.Rtf, Copied = now, Source = copy.Source });
         // The categories whose rules it meets take it, the same text copied again too.
         ShelfRules.Apply(Data, entry);
-        Changed?.Invoke(); QueueSave();
+        Changed?.Invoke();
+        // The history goes when BrimDeck exits and when it next starts, so a copy that is only history has nothing to keep on disk:
+        // saving it serialized and encrypted the whole list, on this thread, after every copy. A picture is saved all the same: its
+        // file is deleted with its entry, and a start after a forced end finds that entry only in the saved list.
+        if (entry.Kind == ClipKind.Image || Data.Kept(entry)) QueueSave();
     }
 
     public void Raise() => Changed?.Invoke();

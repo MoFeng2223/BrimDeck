@@ -53,6 +53,22 @@ internal static class AppIdentity
         finally { CloseHandle(handle); }
     }
 
+    // A process's name as Process.ProcessName gives it (the executable's file name, without ".exe" only), which the saved window
+    // rules and clipboard exclusions are compared with, and its executable's path, both read from the process handle. The path is
+    // "" for a process that cannot be opened (it ended, or is protected); its name is then asked of Process, which lists every
+    // process to find it.
+    public static (string Name, string Path) NameAndPath(int pid)
+    {
+        string path = ImagePath(pid);
+        if (path.Length > 0)
+        {
+            var file = System.IO.Path.GetFileName(path.AsSpan());
+            return ((file.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? file[..^4] : file).ToString(), path);
+        }
+        try { using var process = Process.GetProcessById(pid); return (process.ProcessName, ""); }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { return ("", ""); }
+    }
+
     // The executable of a running process of the application: the package's for a packaged id, otherwise one named by the
     // id. "" when none runs or the id names no process (an id of the application's own choosing).
     public static string FindImage(MediaAppOwner owner)

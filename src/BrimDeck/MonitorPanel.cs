@@ -105,10 +105,13 @@ public partial class MainWindow
             UpdateCompactStrips(snapshot, MonitorMotion && Settings.CompactSmoothing != CompactSmoothing.Off); return;
         }
         if (!IsMonitorPage || _monitorView is null) return;
-        if (MonitorKey() != _monitorKey)
+        // The sensors and the layout step are worked out once for each reading; the key and what the page was built for follow from them.
+        var sensors = MonitorSensors();
+        var layout = CurrentMonitorLayout(sensors);
+        if (MonitorKey(layout, sensors.Small) != _monitorKey)
         {
             // Rebuilt because a kind of sensor turned out to have none (or turned up), the page fades in rather than cuts.
-            if (BuiltSensors() != _monitorSensors) _monitorFade = true;
+            if (BuiltSensors(layout, sensors.Small) != _monitorSensors) _monitorFade = true;
             RenderMonitor(); return;
         }
         _monitorView.Update(snapshot, MonitorMotion);
@@ -133,11 +136,11 @@ public partial class MainWindow
     private static double MonitorBottom(double height) => height < 170 ? 10 : 16;
     // The step the page is built for, kept while a resize stays within MonitorLayout.Hysteresis of it.
     private MonitorLayout? _monitorLayout;
-    private MonitorLayout CurrentMonitorLayout()
+    private MonitorLayout CurrentMonitorLayout((int Drives, bool Small, int Power) sensors)
     {
         double height = ContentCanvas.Height;
-        return MonitorLayout.For(ContentCanvas.Width - 2 * _header.Side, height - _header.Row - MonitorBottom(height), Settings.MonitorProcesses, MonitorSensors().Drives,
-            _monitorView is not null ? _monitorLayout : null, MonitorSensors().Power, Settings.MonitorFrames);
+        return MonitorLayout.For(ContentCanvas.Width - 2 * _header.Side, height - _header.Row - MonitorBottom(height), Settings.MonitorProcesses, sensors.Drives,
+            _monitorView is not null ? _monitorLayout : null, sensors.Power, Settings.MonitorFrames);
     }
 
     // What the view is built from: its layout step, not its exact size, so a page resized within a step is not built again.
@@ -146,16 +149,13 @@ public partial class MainWindow
     // and room for a temperature beside the small gauge (MonitorSensors), so it is built again only when the places it shows or
     // that room change: when the volumes are first counted, a sensor turns out to have none or first shows, or a volume comes or
     // goes past the room.
-    private string MonitorKey() => string.Join("|", CurrentMonitorLayout(), Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "", Settings.MonitorProcesses,
-        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, PanelTheme.Generation, Settings.MonitorTemperatures, MonitorSensors().Small, Settings.MonitorPower, Native.BatteryProvider.SystemHasBattery,
+    private string MonitorKey(MonitorLayout layout, bool small) => string.Join("|", layout, Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "", Settings.MonitorProcesses,
+        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, PanelTheme.Generation, Settings.MonitorTemperatures, small, Settings.MonitorPower, Native.BatteryProvider.SystemHasBattery,
         Settings.MonitorFrames);
     // What the shown page was built for: its volumes' places, the small gauge's room and the lines for power and the battery.
     private (int Lines, int Columns, bool Small, int Power) _monitorSensors;
-    private (int Lines, int Columns, bool Small, int Power) BuiltSensors()
-    {
-        var layout = CurrentMonitorLayout();
-        return (layout.StorageLines, layout.StorageColumns, MonitorSensors().Small, layout.PowerLines);
-    }
+    private static (int Lines, int Columns, bool Small, int Power) BuiltSensors(MonitorLayout layout, bool small)
+        => (layout.StorageLines, layout.StorageColumns, small, layout.PowerLines);
     // Drives: the volumes to keep places for, 0 for none; while they are not counted yet, as many as the page can hold.
     private (int Drives, bool Small, int Power) MonitorSensors()
     {
@@ -188,11 +188,13 @@ public partial class MainWindow
         ApplyHeader(Settings.UsagePage ? header.WithControlsOf(CachedUsageHeader()) : header);
         MonitorContent.Margin = new Thickness(_header.Side, 0, _header.Side, MonitorBottom(height));
         Motion.Enabled = MonitorMotion;
-        var key = MonitorKey();
+        // Worked out once for each render: a drag renders the page many times a second.
+        var sensors = MonitorSensors();
+        var layout = CurrentMonitorLayout(sensors);
+        var key = MonitorKey(layout, sensors.Small);
         bool fade = _monitorFade; _monitorFade = false;
         if (_monitorView is not null && key == _monitorKey && MonitorContent.Children.Contains(_monitorView)) return;
-        var layout = CurrentMonitorLayout();
-        _monitorKey = key; _monitorLayout = layout; _monitorSensors = BuiltSensors();
+        _monitorKey = key; _monitorLayout = layout; _monitorSensors = BuiltSensors(layout, sensors.Small);
         // The list being replaced may have been under the pointer; its leave event never comes.
         if (_app.Monitor is { } monitor) monitor.HoldProcesses = false;
         var old = shown ? _monitorView : null;

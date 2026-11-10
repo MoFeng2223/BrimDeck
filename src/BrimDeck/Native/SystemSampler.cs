@@ -804,7 +804,7 @@ internal sealed class ProcessProvider : IDisposable
         string image = entry.AppKey ?? entry.Name;
         if (_apps.TryGetValue(image, out var known) && known.Path is not null) return known;
         string plain = entry.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? entry.Name[..^4] : entry.Name;
-        string? path = _unreadable.Contains(entry.Pid) ? null : ImagePath(entry.Pid);
+        string? path = _unreadable.Contains(entry.Pid) ? null : AppIdentity.ImagePath(entry.Pid) is { Length: > 0 } read ? read : null;
         if (path is null) { _unreadable.Add(entry.Pid); return _apps[image] = known.Name is { } kept ? (null, kept) : (null, plain); }
         string name = plain;
         try
@@ -814,18 +814,6 @@ internal sealed class ProcessProvider : IDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { }
         return _apps[image] = (path, name);
-    }
-
-    private static string? ImagePath(int pid)
-    {
-        var process = OpenProcess(0x1000, false, pid);
-        if (process == IntPtr.Zero) return null;
-        try
-        {
-            var text = new char[1024]; int size = text.Length;
-            return QueryFullProcessImageNameW(process, 0, text, ref size) ? new string(text, 0, size) : null;
-        }
-        finally { CloseHandle(process); }
     }
 
     private bool Read()
@@ -846,7 +834,4 @@ internal sealed class ProcessProvider : IDisposable
     public void Dispose() { if (_buffer != IntPtr.Zero) { Marshal.FreeHGlobal(_buffer); _buffer = IntPtr.Zero; } }
 
     [DllImport("ntdll.dll")] private static extern int NtQuerySystemInformation(int informationClass, IntPtr buffer, int length, out int returnLength);
-    [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] private static extern bool QueryFullProcessImageNameW(IntPtr process, int flags, char[] name, ref int size);
-    [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
 }
