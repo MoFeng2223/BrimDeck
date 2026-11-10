@@ -317,6 +317,12 @@ static class DeviceProtocolTests
             && Dongles.CompxBattery([0x08, 0x04, 0, 0, 0, 1, 63, 2]) == new BatteryRead(63) && Dongles.CompxBattery([0x08, 0x03, 0, 0, 0, 0, 63, 0]) is null);
         var vgn = new byte[64]; vgn[0] = 0x04; vgn[3] = 0x1A; vgn[8] = 41; vgn[9] = 0;
         check("VGN keyboards: the request and a reply", Dongles.VgnRequest().Take(5).SequenceEqual(new byte[] { 0x04, 0, 0, 0x1A, 0x06 }) && Dongles.VgnBattery(vgn) == new BatteryRead(41));
+        // The ATK Z87 Pro's dongle (373B:1012) answers that frame on its 0xFF1C collection; the reply below is the one it gave.
+        var atk = (byte[])vgn.Clone(); atk[8] = 92;
+        check("ATK keyboards: the Z87 Pro's dongle read with VGN's frame, its model name given over the dongle's",
+            Dongles.VgnBattery(atk) == new BatteryRead(92) && Dongles.Find(0x373B, 0x1012, 0xFF1C, "ATK Z87 Dongle", 0, 1, 0x0092, 64, 64) == Dongles.Protocol.Vgn
+            && Dongles.Find(0x373B, 0x1012, 0xFF1B, "ATK Z87 Dongle", 0, 1, 0x0092, 64, 64) is null
+            && Dongles.AtkKeyboard(0x1012) == "ATK Z87 Pro" && Dongles.AtkKeyboard(0x1013) is null);
         var endgame = new byte[32]; endgame[0] = 0xA1; endgame[1] = 0x01; endgame[16] = 77;
         check("Endgame Gear: the request and a reply; a busy one is none", Dongles.EndgameRequest(32)[..2].SequenceEqual(new byte[] { 0xA1, 0xB4 }) && Dongles.EndgameBattery(endgame) == new BatteryRead(77)
             && Dongles.EndgameBattery([0xA1, 0x03, .. new byte[30]]) is null);
