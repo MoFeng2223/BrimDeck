@@ -102,14 +102,20 @@ public partial class MainWindow
         _transferShown = count; _compactTransfer = null;
         if (count == 0) return null;
         double s = CompactMusicLayout.SafeScale(scale), icon = CompactMusicLayout.Whole(14 * s), gap = CompactMusicLayout.Whole(3 * s);
+        // The number starts on a whole device pixel and the badge ends on one. Layout rounding moves a margin that lies between two
+        // pixels onto the next (17 DIPs are 25.5 pixels at 150% and become 26), which took the room from the number: a count of two
+        // digits no longer fit and, wrapping as every TextBlock does by default (App.xaml), stood on two lines cut by the badge.
+        double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX, start = DevicePixels.Up(icon + gap, dpi);
         var number = new TextBlock
         {
             Text = count.ToString(CultureInfo.InvariantCulture), FontFamily = UI.PanelFont, FontSize = CompactMusicLayout.Half(11.5 * s), FontWeight = FontWeights.SemiBold,
-            Foreground = UI.Brush(UI.Primary), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(icon + gap, 0, 0, 0)
+            Foreground = UI.Brush(UI.Primary), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.NoWrap
         };
         Typography.SetNumeralAlignment(number, FontNumeralAlignment.Tabular);
         number.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        var badge = new Grid { Width = Math.Ceiling(number.DesiredSize.Width), Height = CompactMusicLayout.Whole(16 * s), Background = Brushes.Transparent };
+        double digits = number.DesiredSize.Width;
+        number.Margin = new Thickness(start, 0, 0, 0);
+        var badge = new Grid { Width = DevicePixels.Up(start + digits, dpi), Height = CompactMusicLayout.Whole(16 * s), Background = Brushes.Transparent };
         // The tray on the 16 unit grid of the row's other marks (PowerIcons), scaled to the icon's size with the same 1.35 DIP line,
         // rather than a larger drawing stretched to fit, which thickened and blurred it.
         double grid = icon / 16;
