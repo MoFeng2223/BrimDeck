@@ -138,14 +138,16 @@ public partial class MainWindow
         if (_shelfDetail is not null) { CloseDetail(); return true; }
         return false;
     }
-    // Closing the panel ends the search, the typing and the details; the chosen categories stay.
+    // Closing the panel ends the search, the typing and the details; the chosen categories stay. The page is built again at the next
+    // opening only when one of them was ended: a page closed as it was built opens as it is.
     private void ResetShelf()
     {
+        bool ended = _shelfEdit is not null || _shelfDetail is not null || _shelfSearching || _shelfQuery.Length > 0 || _picked.Count > 0;
         if (_shelfEdit is not null || _shelfSearching) EndTyping();
         _shelfEdit = null; _shelfDetail = null; _shelfSearching = false; _shelfQuery = ""; _picked.Clear();
         if (_searchBox is not null) _searchBox.Text = "";
         _shelfMenu?.SetCurrentValue(ContextMenu.IsOpenProperty, false);
-        if (IsShelfPage) _shelfStale = true;
+        if (ended && IsShelfPage) _shelfStale = true;
     }
 
     // ---- Typing ----
@@ -385,7 +387,7 @@ public partial class MainWindow
         var grid = new Grid { VerticalAlignment = VerticalAlignment.Top };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); grid.ColumnDefinitions.Add(new ColumnDefinition());
         double icon = layout.Tier == ShelfTier.Compact ? 32 : 48;
-        var image = new Image { Source = ShelfFiles.Icon(file.Path, large: true), Width = icon, Height = icon, VerticalAlignment = VerticalAlignment.Top, Opacity = exists ? 1 : .45, Margin = new Thickness(0, 2, 14, 0) };
+        var image = new Image { Source = ShelfFiles.Icon(file.Path), Width = icon, Height = icon, VerticalAlignment = VerticalAlignment.Top, Opacity = exists ? 1 : .45, Margin = new Thickness(0, 2, 14, 0) };
         RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
         grid.Children.Add(image);
         var text = new StackPanel();

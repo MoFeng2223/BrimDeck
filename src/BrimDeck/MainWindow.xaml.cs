@@ -87,7 +87,6 @@ public partial class MainWindow : Window
     private bool _firstReadEnded;
     // The page built while it waited is not reused (RenderUsage compares its build key, which a failed read does not change).
     internal void FirstReadEnded() { if (_firstReadEnded) return; _firstReadEnded = true; _usageBuilt = null; }
-    public string? LastRefreshError { get; private set; }
 
     private sealed record CompactAlertInfo(AppEntry Entry, string Name, string Label, double Used, DateTimeOffset? ResetAt);
 
@@ -139,14 +138,14 @@ public partial class MainWindow : Window
         _seconds.Tick += (_, _) => { if (_compactClock is not null) _compactClock.Time = DateTime.Now; _seconds.Interval = SecondDelay(DateTime.Now); };
         _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false); };
         // A new foreground context closes the panel directly (ApplySettings lays it out collapsed), so SetExpanded never sees the
-        // panel turn from open to closed: the collapsed title is set to scroll its laps again here, as SetExpanded does.
+        // panel turn from open to closed: what follows a closing is done here (PanelClosed), as SetExpanded does.
         _host.ContextChanged += context =>
         {
             _context = context;
-            if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true && !ShelfHolds)
+            if (_expanded && !_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true && !ShelfHolds)
             {
-                if (_expanded) ReplayCompactTitle();
                 _expanded = false;
+                PanelClosed();
             }
             ApplySettings(true);
         };
@@ -666,6 +665,18 @@ public partial class MainWindow : Window
         _clipSettle.Start();
     }
 
+    // The panel has just turned from open to closed (_expanded is already false), by SetExpanded or by a new foreground context:
+    // the collector and the clean-up take their rules for a closed panel (App.Memory.cs), the clipboard page ends its search and
+    // details, a panel the expand hotkey showed while the panels are hidden hides again, and the collapsed title scrolls its laps anew.
+    private void PanelClosed()
+    {
+        _app.UpdateCollectionLatency();
+        ResetShelf();
+        HotkeyPanelCollapsed();
+        ReplayCompactTitle();
+        _app.RequestTrim();
+    }
+
     // The panel's last opening or closing, so that one turned back part way can tell (motion-review F1, F2).
     private readonly MoveTurn _turn = new();
     // keyboard: a hotkey or Escape asked for it (motion-review C4), so the move is quicker and has no give.
@@ -685,10 +696,10 @@ public partial class MainWindow : Window
         if (expanded != _host.Open) _host.Front(expanded);
         _expanded = expanded;
         // The smooth memory mode holds off full collections while a panel is open (App.UpdateCollectionLatency).
-        if (expanded != wasExpanded) _app.UpdateCollectionLatency();
+        if (expanded && !wasExpanded) _app.UpdateCollectionLatency();
         _escapeDismissal?.SetEnabled(expanded && !_preview || _moveArmed);
-        if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); if (wasExpanded) ResetShelf(); }
-        if (wasExpanded && !expanded) { HotkeyPanelCollapsed(); ReplayCompactTitle(); _app.RequestTrim(); }
+        if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
+        if (wasExpanded && !expanded) PanelClosed();
         Collapsed = ShapeFor(EffectiveStyle);
         var shape = Collapsed;
         var style = shape.Style;
@@ -1031,7 +1042,7 @@ public partial class MainWindow : Window
         // Timer requests reuse the current read. Changed settings or a wider
         // date range still require one follow-up, and automatic requests must not clear it.
         if (_refreshing) { if (queueIfBusy) _refreshRequested = true; return; }
-        _refreshing = true; LastRefreshError = null;
+        _refreshing = true;
         var decks = _app.Decks.ToList();
         foreach (var deck in decks) deck.RenderSyncButton();
         try
@@ -1040,11 +1051,12 @@ public partial class MainWindow : Window
             foreach (var deck in _app.Decks) deck.SetSnapshots(result);
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { LastRefreshError = ex.GetType().Name + "\n" + ex.StackTrace; }
+        // A read that failed in a way the sources did not expect leaves the panels with what they showed; the next one tries again.
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
         finally
         {
             _refreshing = false; _syncAsked = false; foreach (var deck in _app.Decks) deck.FirstReadEnded();
-            RestartSyncCycle(); _app.RequestTrim();
+            RestartSyncCycle();
             foreach (var deck in _app.Decks) { deck.RenderUsage(); deck.RenderSyncButton(); }
             if (_refreshRequested)
             {

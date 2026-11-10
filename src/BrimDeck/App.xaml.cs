@@ -32,6 +32,8 @@ public partial class App : Application
     private bool _arrangePending;
     // Every panel shows the one set of players, and their lyrics are looked up once.
     internal MediaSessions? Media { get; private set; }
+    // The players as they were when the music was switched off, kept until the settings have rested a while (RequestRelease).
+    private MediaSessions? _restingMedia;
     internal event Action? MediaChanged;
     internal LyricsService Lyrics { get; private set; } = null!;
     // The clipboard history and the file transfer, shared by every panel (ShelfService).
@@ -228,6 +230,10 @@ public partial class App : Application
         bool styleChanged = settings.Style != Settings.Style, memoryChanged = settings.MemoryMode != Settings.MemoryMode;
         settings.Normalize(); Settings = settings;
         if (memoryChanged) ApplyMemoryMode();
+        // A monitor page switched on in the smooth mode has its counters set up ahead, as at start.
+        else if (MemoryPlan.WarmAtStart) WarmMonitor();
+        // What a page switched off leaves behind is let go once the settings have rested a while.
+        RequestRelease();
         // A different interface font is published at once and reaches every window already made (Fonts.Use); the panels below lay out again with it.
         UseFont();
         Shelf.Apply(settings);
@@ -328,8 +334,24 @@ public partial class App : Application
     internal void StartMedia()
     {
         bool wanted = Settings.MediaWanted;
-        if (wanted && Media is null) { Media = new MediaSessions(Dispatcher) { Ignored = Settings.IgnoredMediaApps }; UseMediaPlan(Media, MemoryPlan); Media.Changed += RaiseMediaChanged; Media.SetPresentationActive(_presentingMedia.Count > 0, _presentingSystemAudio.Count > 0); _ = Media.StartAsync(); }
-        else if (!wanted && Media is not null) { Media.Changed -= RaiseMediaChanged; Media.Dispose(); Media = null; RaiseMediaChanged(); }
+        if (wanted && Media is null)
+        {
+            // Switched off a moment ago and still kept: the players, the song and its cover are as they were, and the panels take
+            // them once the settings have been applied.
+            var kept = _restingMedia; _restingMedia = null;
+            Media = kept ?? new MediaSessions(Dispatcher) { Ignored = Settings.IgnoredMediaApps };
+            UseMediaPlan(Media, MemoryPlan); Media.Changed += RaiseMediaChanged; Media.SetPresentationActive(_presentingMedia.Count > 0, _presentingSystemAudio.Count > 0);
+            if (kept is null) _ = Media.StartAsync(); else Dispatcher.BeginInvoke(() => { if (ReferenceEquals(Media, kept)) RaiseMediaChanged(); });
+        }
+        // Switched off, the panels show no music at once; the players themselves are let go later (ReleaseUnused), so a switch
+        // tried off and on again does not look for them and their songs anew.
+        // Meanwhile they capture no sound and do nothing to a player on their own (its full control is not set up again).
+        else if (!wanted && Media is not null)
+        {
+            Media.Changed -= RaiseMediaChanged; Media.SetPresentationActive(false, false);
+            Media.NeteaseAutoFullControl = false; Media.NeteaseFileControlWanted = false; Media.KugouFullControlWanted = false;
+            _restingMedia = Media; Media = null; RaiseMediaChanged();
+        }
         // Switching the setting off leaves full control on until BrimDeck restarts.
         if (Settings.AppleMusicFullControl && Media is { AppleMusicFullControl: false } media) media.EnableAppleMusicFullControl();
         if (Media is not null) { Media.Ignored = Settings.IgnoredMediaApps; Media.NeteaseAutoFullControl = Settings.NeteaseAutoFullControl; Media.NeteaseFileControlWanted = Settings.NeteaseFullControl; Media.KugouFullControlWanted = Settings.KugouFullControl; }
@@ -428,8 +450,9 @@ public partial class App : Application
     {
         bool page = _presentingMonitor.Count > 0 || _pageExtras;
         bool strip = _stripMonitor.Count > 0;
-        var shown = strip ? Core.CompactMonitor.Shown(Settings.CompactReadings) : CompactMonitorItems.None;
         var held = _heldStrip.Count > 0 ? Core.CompactMonitor.Shown(Settings.CompactReadings) : CompactMonitorItems.None;
+        // A row that shows its readings is among the held ones (PresentMonitor).
+        var shown = strip ? held : CompactMonitorItems.None;
         bool Heat(CompactMonitorItems item, CompactMonitorItems among) => (among & item) != 0 && Settings.CompactReadings.FirstOrDefault(reading => reading.Item == item) is { } reading
             && (item == CompactMonitorItems.Storage || reading.ShowValue) && CompactFigures.Shows(reading, CompactFigures.Temperature);
         bool stripDrives = (shown & CompactMonitorItems.Storage) != 0;
@@ -506,9 +529,9 @@ public partial class App : Application
     }
     protected override void OnExit(ExitEventArgs e)
     {
-        Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        Exiting = true; Lifetime.Cancel(); _save.Stop(); _trim?.Stop(); _release?.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
         if (Shelf is not null) { Shelf.Exit(); Shelf.Dispose(); }
-        Media?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Devices?.Dispose(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
+        Media?.Dispose(); _restingMedia?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Devices?.Dispose(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
 }

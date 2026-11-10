@@ -26,11 +26,28 @@ internal static class MemoryModeTests
             && JsonSerializer.Serialize(new DeckSettings { MemoryMode = MemoryMode.Saver }).Contains("\"TrimMemoryWhenIdle\":true"));
 
         var (saver, balanced, fluent) = (MemoryPlan.For(MemoryMode.Saver), MemoryPlan.For(MemoryMode.Balanced), MemoryPlan.For(MemoryMode.Smooth));
-        check("Memory modes: only the saver mode trims the working set, and the smooth mode gives no memory back while collapsed",
-            saver.TrimWorkingSet && !balanced.TrimWorkingSet && !fluent.TrimWorkingSet && saver.TrimWhenIdle && balanced.TrimWhenIdle && !fluent.TrimWhenIdle);
+        check("Memory modes: the saver and balanced modes give memory back while collapsed, and the smooth mode does not",
+            saver.TrimWhenIdle && balanced.TrimWhenIdle && !fluent.TrimWhenIdle);
         check("Memory modes: the saver mode cleans up sooner than the balanced one, and the more a mode keeps, the longer readings linger",
             saver.TrimAfter < balanced.TrimAfter && saver.TrimEvery < balanced.TrimEvery
             && saver.ReadingsLinger < balanced.ReadingsLinger && balanced.ReadingsLinger < fluent.ReadingsLinger);
+        check("Memory modes: the more a mode keeps, the longer a switched-off page keeps what it built, and none lets it go at once",
+            saver.ReleaseAfter >= TimeSpan.FromSeconds(30) && saver.ReleaseAfter < balanced.ReleaseAfter && balanced.ReleaseAfter < fluent.ReleaseAfter);
+
+        // The clean-up's schedule (TrimDue): used is the last use, trimmed the last clean-up.
+        var used = new DateTime(2026, 11, 10, 9, 0, 0, DateTimeKind.Utc);
+        check("Memory modes: what starting leaves behind is given back once in every mode, a minute after the last use at most",
+            saver.TrimDue(used, null) == used + saver.TrimAfter && balanced.TrimDue(used, null) == used + MemoryPlan.OwedAfter
+            && fluent.TrimDue(used, null) == used + MemoryPlan.OwedAfter && saver.TrimAfter < MemoryPlan.OwedAfter && MemoryPlan.OwedAfter < balanced.TrimAfter);
+        check("Memory modes: after that the smooth mode gives nothing back",
+            fluent.TrimDue(used, used) is null && fluent.TrimDue(used.AddHours(1), used) is null);
+        check("Memory modes: a clean-up waits its quiet stretch after a use",
+            balanced.TrimDue(used, used.AddHours(-1)) == used + balanced.TrimAfter && saver.TrimDue(used, used.AddHours(-1)) == used + saver.TrimAfter);
+        check("Memory modes: with nothing used, the clean-up comes again every period, however often the usage is read meanwhile",
+            balanced.TrimDue(used, used.AddMinutes(4)) == used.AddMinutes(4) + balanced.TrimEvery
+            && saver.TrimDue(used, used.AddMinutes(4)) == used.AddMinutes(4) + saver.TrimEvery);
+        check("Memory modes: a use just before the period ends still waits its quiet stretch",
+            balanced.TrimDue(used.AddMinutes(13), used.AddMinutes(4)) == used.AddMinutes(13) + balanced.TrimAfter);
         check("Memory modes: the smooth mode still stops the readings after a while",
             fluent.ReadingsLinger <= TimeSpan.FromMinutes(1));
         check("Memory modes: the saver mode reads the collapsed row every 2 seconds, an open page at the chosen interval",

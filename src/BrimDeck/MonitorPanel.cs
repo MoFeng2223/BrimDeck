@@ -201,10 +201,10 @@ public partial class MainWindow
             Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; }, SwitchMonitorGpu,
             Settings.MonitorTemperatures, _monitorSensors.Small, PowerBlockFor(old is null && MonitorMotion && !Resizing), Settings.MonitorFrames);
         _monitorView.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
-        // The new page may show the power line where the old one did not, or the other way round: what is read follows.
-        if (_monitorShowing && _monitorView.ShowsPower != _powerPage) UpdateMonitorDemand();
-        // And the frame rate's line: the frame rate is read only while a page or a row shows it.
-        if (_monitorShowing) _app.UpdateMonitorExtras();
+        // The new page may show the power line where the old one did not, or the other way round: what is read follows
+        // (UpdateMonitorDemand, which asks for the extras as well). And the frame rate's line: the frame rate is read only while a
+        // page or a row shows it.
+        if (_monitorShowing) { if (_monitorView.ShowsPower != _powerPage) UpdateMonitorDemand(); else _app.UpdateMonitorExtras(); }
         if (old is not null) MonitorCrossfade.Swap(MonitorContent, _monitorView, old, MonitorMotion);
         else
         {
