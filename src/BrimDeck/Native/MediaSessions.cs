@@ -60,8 +60,13 @@ internal sealed class MediaSessions : IDisposable
     private readonly Dictionary<string, CoverCache> _covers = new();
     // Downloaded artwork of recent songs, so switching back to one shows its cover at once.
     // Players that publish only a URL (QQ's pipe, Netease) would otherwise download it on every switch. How many follows the memory
-    // mode (MemoryPlan.RecentCovers).
-    public int RecentCoverCount { get; set; } = 16;
+    // mode (MemoryPlan.RecentCovers); a mode that keeps fewer lets the others go at once, not at the next download.
+    private int _recentCoverCount = 16;
+    public int RecentCoverCount
+    {
+        get => _recentCoverCount;
+        set { _recentCoverCount = value; while (_recentCovers.Count > Math.Max(0, value)) _recentCovers.RemoveLast(); }
+    }
     private readonly LinkedList<(string Url, byte[] Bytes)> _recentCovers = new();
     private readonly Dictionary<string, Route> _routes = new();
     private readonly MediaSessionHandover _handover = new();
