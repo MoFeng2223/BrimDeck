@@ -58,6 +58,7 @@ internal sealed class MonitorStrip : FrameworkElement
         CompactMonitorItems unavailable = CompactMonitorItems.None, StripAdmission? admission = null, DriveParts parts = DriveParts.All)
     {
         _driveParts = parts;
+        AddVisualChild(_moving);
         _easing = new PromptTimer(Dispatcher, EaseStep);
         _presence = presence; _dpi = dpi; _colors = colors; _centered = centered; _powerStyle = PowerStyle.For(colors.Palette);
         _order = [.. readings.Select(reading => reading.Item)];
@@ -165,10 +166,26 @@ internal sealed class MonitorStrip : FrameworkElement
     private readonly PromptTimer _easing;
     private void EaseStep()
     {
-        InvalidateVisual();
-        if (!ValuesMoving(Eased.Now)) _easing.Stop();
+        double now = Eased.Now;
+        if (_layered) DrawMoving(now); else InvalidateVisual();
+        if (!ValuesMoving(now)) _easing.Stop();
     }
     private Smooth _cpu, _memory, _gpu;
+
+    // What a drawing holds of the row. While the values ease, a frame changes the core columns and the dials' arcs and nothing
+    // else, so those are drawn into a visual of their own (Moving) that lies over this element's drawing of the rest (Steady):
+    // an easing frame draws that visual again (EaseStep), a reading draws both (OnRender). Drawn whole, an easing frame took
+    // 1.9 ms of the UI thread, 1.2 ms of it for a battery on mains (PowerGlyphs.CornerPlug); the arcs and the columns alone
+    // take 0.5 ms (measured 2026-11-10). The two layers overlap only where an arc lies over its own track, so the row comes
+    // out the same, pixel for pixel, as drawn in one piece (All).
+    private enum Layer { All, Steady, Moving }
+    private readonly DrawingVisual _moving = new();
+    // Whether the row was last drawn in its two layers, and whether the upper one holds anything.
+    private bool _layered, _movingDrawn;
+    // Where the readings start in the row, as they were last arranged (OnRender).
+    private double _start;
+    protected override int VisualChildrenCount => 1;
+    protected override Visual GetVisualChild(int index) => index == 0 ? _moving : throw new ArgumentOutOfRangeException(nameof(index));
 
     // The gap between two readings.
     public double Gap => _gap;
@@ -243,16 +260,42 @@ internal sealed class MonitorStrip : FrameworkElement
 
     protected override void OnRender(DrawingContext drawing)
     {
-        double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), center = _row / 2, now = Eased.Now;
+        double w = ActualWidth, now = Eased.Now;
         // Each reading takes its width and the gap after it in proportion to how present it is, so the row closes up smoothly.
         _now = now;
         double total = CompactMonitor.Arrange(_orderOnce, Shown, _width, _gap, _presenceNow, _arranged);
-        if (total <= 0) return;
-        double start = _centered ? (w - total) / 2 : w - total;
+        _start = _centered ? (w - total) / 2 : w - total;
+        // A reading on its way in or out is faded and made smaller as a whole, its arc and its columns with it: the row is then
+        // drawn in one piece.
+        _layered = total > 0 && Settled();
+        if (_layered) { Draw(drawing, Layer.Steady, now); DrawMoving(now); return; }
+        if (_movingDrawn) { _moving.RenderOpen().Close(); _movingDrawn = false; }
+        if (total > 0) Draw(drawing, Layer.All, now);
+    }
+    private bool Settled()
+    {
+        foreach (var reading in _arranged) if (reading.Presence < .999) return false;
+        return true;
+    }
+    private void DrawMoving(double now)
+    {
+        using var drawing = _moving.RenderOpen();
+        Draw(drawing, Layer.Moving, now);
+        _movingDrawn = true;
+    }
+
+    // The readings as last arranged, or the part of them a layer holds: the core columns and the dials' arcs (Moving), or the
+    // rest (Steady).
+    private void Draw(DrawingContext drawing, Layer layer, double now)
+    {
+        double ppd = MonitorDraw.PixelsPerDip(this), center = _row / 2;
         var s = _snapshot;
+        var dial = layer switch { Layer.Steady => DialParts.Face, Layer.Moving => DialParts.Share, _ => DialParts.All };
         foreach (var (item, at, width, presence) in _arranged)
         {
-            double x = start + at;
+            bool moves = item is CompactMonitorItems.Columns or CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu;
+            if (layer == Layer.Moving ? !moves : layer == Layer.Steady && item == CompactMonitorItems.Columns) continue;
+            double x = _start + at;
             // A reading on its way in or out is drawn smaller and fainter, centred in the room it has.
             bool partial = presence < .999;
             double offset = (width * presence - width) / 2;
@@ -270,11 +313,11 @@ internal sealed class MonitorStrip : FrameworkElement
             switch (item)
             {
                 case CompactMonitorItems.Columns: Columns(drawing, left, width, center, s?.Cpu.OrDefault, now); break;
-                case CompactMonitorItems.Cpu: Gauge(drawing, left, center, item, _cpu.At(now), s?.Cpu.OrDefault?.Usage, color, level, "C", s, ppd); break;
+                case CompactMonitorItems.Cpu: Gauge(drawing, dial, left, center, item, _cpu.At(now), s?.Cpu.OrDefault?.Usage, color, level, "C", s, ppd); break;
                 case CompactMonitorItems.Memory:
                     var memory = s?.Memory.OrDefault;
-                    Gauge(drawing, left, center, item, _memory.At(now), memory?.UsedFraction, memory is null ? UI.Tertiary : color, level, "M", s, ppd); break;
-                case CompactMonitorItems.Gpu: Gauge(drawing, left, center, item, _gpu.At(now), s?.Gpu.OrDefault is { NoReadings: false } gpu ? gpu.Usage : null, color, level, "G", s, ppd); break;
+                    Gauge(drawing, dial, left, center, item, _memory.At(now), memory?.UsedFraction, memory is null ? UI.Tertiary : color, level, "M", s, ppd); break;
+                case CompactMonitorItems.Gpu: Gauge(drawing, dial, left, center, item, _gpu.At(now), s?.Gpu.OrDefault is { NoReadings: false } gpu ? gpu.Usage : null, color, level, "G", s, ppd); break;
                 case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, s?.Network.OrDefault?.DownBytesPerSecond, color, level, ppd); break;
                 case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, color, level, ppd); break;
                 case CompactMonitorItems.Storage: Drives(drawing, left, center, s, ppd); break;
@@ -313,12 +356,13 @@ internal sealed class MonitorStrip : FrameworkElement
 
     // A dial open at the bottom with the reading's letter inside, and its figures after it when it shows them: the gap tells it
     // from the full quota rings beside it, and a letter stays legible at this size where a glyph does not.
-    // dial: the share the dial shows as it eases; share: the reading's, which the figure shows.
-    private void Gauge(DrawingContext drawing, double x, double center, CompactMonitorItems item, double? dial, double? share, string color, MemoryLevel level, string letter, MonitorSnapshot? s, double ppd)
+    // dial: the share the dial shows as it eases; share: the reading's, which the figure shows. parts: what is drawn of the dial;
+    // its figures go with its track and letter.
+    private void Gauge(DrawingContext drawing, DialParts parts, double x, double center, CompactMonitorItems item, double? dial, double? share, string color, MemoryLevel level, string letter, MonitorSnapshot? s, double ppd)
     {
         // As thick as a quota ring and on the same track, so its whole outline shows even at a low share.
-        MonitorDraw.Dial(drawing, new Point(x + _dial / 2, center), _dial, Math.Max(1.2, CompactMusicLayout.Half(2 * _scale)), Math.Max(1, 7 * _scale), dial, color, letter, ppd);
-        if ((_values & item) == 0) return;
+        MonitorDraw.Dial(drawing, new Point(x + _dial / 2, center), _dial, Math.Max(1.2, CompactMusicLayout.Half(2 * _scale)), Math.Max(1, 7 * _scale), dial, color, letter, ppd, parts);
+        if ((_values & item) == 0 || (parts & DialParts.Face) == 0) return;
         var heat = (_heat & item) != 0 ? CompactFigures.Heat(item, s) : null;
         Figures(drawing, x + _dial + Math.Round(4 * _scale), center, item, (_usage & item) != 0 ? (share, level) : null, (_heat & item) != 0, heat, ppd);
     }
