@@ -14,6 +14,8 @@ namespace BrimDeck;
 // carrying the reading's letter (Dial), the rates with an arrow, the temperatures with a thermometer and the drives with a drive
 // (Arrow).
 internal enum MonitorGlyph { Down, Up, Thermometer, Drive, Screen }
+// What is drawn of a dial (MonitorDraw.Dial): its track and letter, the arc of its share, or both.
+[Flags] internal enum DialParts { Face = 1, Share = 2, All = Face | Share }
 
 internal static class MonitorDraw
 {
@@ -60,12 +62,12 @@ internal static class MonitorDraw
     // The text's baseline placed at y, so figures of different sizes on one line sit on one baseline.
     public static void Baseline(DrawingContext drawing, FormattedText text, double x, double baseline) => drawing.DrawText(text, new Point(x, baseline - text.Baseline));
 
-    // The same for a text drawn again and again at one height, as the collapsed row's figures are on every frame while its
-    // readings ease. DrawText lays a text's glyphs out again on every call, whether the text is kept (Text) or not, and laying
-    // out the row's twenty figures took most of the 2.6 ms a frame cost on the UI thread, seven frames a second (measured
-    // 2026-11-10). The text is drawn once into a drawing and that is placed along the row. Its height is drawn into the drawing
-    // rather than placed: a baseline that falls halfway between two device pixels is put on one of them, and moved there by a
-    // transform it fell on the other (seen at 125%), a pixel away from where DrawText puts it.
+    // The same for a text drawn again and again at one height, as most of the collapsed row's figures are from one reading to
+    // the next. DrawText lays a text's glyphs out again on every call, whether the text is kept (Text) or not: drawn this way,
+    // the row's twenty figures took 0.6 ms less of the UI thread each time the row was drawn (measured 2026-11-10). The text is
+    // drawn once into a drawing and that is placed along the row. Its height is drawn into the drawing rather than placed: a
+    // baseline that falls halfway between two device pixels is put on one of them, and moved there by a transform it fell on
+    // the other (seen at 125%), a pixel away from where DrawText puts it.
     public static void BaselineKept(DrawingContext drawing, FormattedText text, double x, double baseline)
     {
         double y = baseline - text.Baseline;
@@ -86,13 +88,17 @@ internal static class MonitorDraw
     // by the share, with the reading's letter inside. The gap tells it from the full quota rings beside it in the collapsed row,
     // and a letter stays legible at that size where a glyph does not. Its centre sits a thirty-second of its size below the
     // centre given, so the open circle looks centred; the letter is centred on its own outline, not on the font's box.
+    // parts: the track and the letter (Face), the share's arc (Share), or all of it; the collapsed row draws the two apart, as
+    // only the arc moves while a reading eases (MonitorStrip).
     private const double DialStart = Math.PI * 1.25, DialSweep = Math.PI * 1.5;
-    public static void Dial(DrawingContext drawing, Point center, double size, double ring, double letterSize, double? share, string color, string letter, double ppd)
+    public static void Dial(DrawingContext drawing, Point center, double size, double ring, double letterSize, double? share, string color, string letter, double ppd,
+        DialParts parts = DialParts.All)
     {
         double radius = size / 2 - ring / 2;
         var c = new Point(center.X, center.Y + size / 32);
-        DialArc(drawing, c, radius, ring, 1, PanelTheme.Hex("ringTrack"));
-        if (share is { } value && value > .002) DialArc(drawing, c, radius, ring, Math.Min(1, value), color);
+        if ((parts & DialParts.Face) != 0) DialArc(drawing, c, radius, ring, 1, PanelTheme.Hex("ringTrack"));
+        if ((parts & DialParts.Share) != 0 && share is { } value && value > .002) DialArc(drawing, c, radius, ring, Math.Min(1, value), color);
+        if ((parts & DialParts.Face) == 0) return;
         var text = Text(letter, letterSize, UI.Primary, ppd, strong: true);
         // Filled as its outline rather than drawn as text: WPF puts a glyph run's baseline on whole device pixels and hints the
         // glyph to them, which at a fractional scale left the letter up to a pixel above the ring's centre (0.7 px at 150 %). The
