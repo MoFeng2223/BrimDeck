@@ -645,6 +645,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             Dongles.Protocol.Asus => ReadAsus,
             Dongles.Protocol.SteelSeries => SteelSeriesMouse,
             Dongles.Protocol.RapooGen1 => RapooGen1,
+            Dongles.Protocol.Aula => Aula,
             _ => null
         };
 
@@ -696,6 +697,28 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         if (read is not BatteryRead battery) return [];
         claimed.Add(info.Path);
         return [Mouse("vgn", info, "VGN", battery, DeviceKind.Keyboard)];
+    }
+
+    // The AULA F87 PRO's 2.4 GHz receiver (Dongles.AulaRequest): command 0x05 on its 0xFF02 collection, answered by the 0x0A
+    // report that carries the charge. The keyboard is the only device behind the receiver, so no target goes in the frame.
+    // The AULA F87 PRO's 2.4 GHz receiver (Dongles.AulaRequest): command 0x05 on its 0xFF02 collection. The receiver answers
+    // the first request with echoes of it only; the 0x0A report that carries the charge comes with a second request, which it
+    // answers after a moment (the pause the keyboard's own software leaves between its frames). The keyboard is the only
+    // device behind the receiver, so no target goes in the frame.
+    private static IEnumerable<DeviceBattery> Aula(HidInfo info, HashSet<string> claimed)
+    {
+        using var device = new HidDevice(info);
+        device.Flush();
+        device.Write(Dongles.AulaRequest(0x05));
+        Thread.Sleep(500);
+        device.Write(Dongles.AulaRequest(0x05));
+        for (int i = 0; i < 6; i++)
+        {
+            if (device.Read(300) is not { } reply || Dongles.AulaBattery(reply) is not { } battery) continue;
+            claimed.Add(info.Path);
+            return [Mouse("aula", info, "AULA", battery, DeviceKind.Keyboard, "AULA F87 PRO")];
+        }
+        return [];
     }
 
     // The feature-report brands: set the request, wait, get the reply.
