@@ -742,8 +742,9 @@ public static class Dongles
         if (vendor == AtkVendor && usagePage == 0xFF05) return Protocol.BitMouse;
         if (CompxVerified.Contains((vendor, product, usagePage))) return Protocol.Compx;
         if (vendor == VgnVendor && usagePage == 0xFF1C && product == 0x5088) return Protocol.Vgn;
-        // ATK's keyboards on the same page, answered with VGN's frame (AtkKeyboards): only a pair measured here is sent to.
-        if (vendor == AtkVendor && usagePage == 0xFF1C && AtkKeyboard(product) is not null) return Protocol.Vgn;
+        // ATK's keyboards on the same page, answered with VGN's frame (AtkKeyboards): only a product measured here, and only its
+        // keyboard collection.
+        if (vendor == AtkVendor && AtkKeyboard(product) is not null) return usagePage == 0xFF1C && usage == 0x0092 && outputLength >= 64 ? Protocol.Vgn : null;
         if (vendor == EndgameVendor && usagePage == 0xFF01) return Protocol.Endgame;
         if (vendor == VaxeeVendor && usagePage == 0xFF05) return Protocol.Vaxee;
         if (vendor == InphicVendor && product is 0x5B2E or 0x5B2F && featureLength >= 33) return Protocol.Inphic;
