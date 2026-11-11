@@ -78,6 +78,17 @@ static class DeviceSafetyTests
         check("Requests: the Compx page 0xFF02 on ATK's vendor and the other pages of the A9 are not sent to",
             Dongles.Find(0x373B, 0x1119, 0xFF02, "", 0) is null && Dongles.Find(0x373B, 0x111A, 0xFF01, "", 0) is null && Dongles.Find(0x373B, 0x1120, 0xFF04, "", 0) is null);
 
+        // ATK's keyboards answer VGN's keyboard frame (AtkKeyboards): the Z87 Pro's dongle is the one product measured, so it is
+        // the only one sent to, on the keyboard page, while ATK's mice keep BitMouse on theirs.
+        var atkKeyboards = new List<(int Product, int Page)>();
+        for (int product = 0; product <= 0xFFFF; product++)
+            foreach (int page in pages)
+                if (Dongles.Find(0x373B, product, page, "ATK Z87 Dongle", 0, 1, 0x0092, 64, 64) == Dongles.Protocol.Vgn) atkKeyboards.Add((product, page));
+        check("Requests: VGN's keyboard frame goes to 373B:1012 on page 0xFF1C and nowhere else of ATK's",
+            atkKeyboards.SequenceEqual(new[] { (0x1012, 0xFF1C) })
+            && Dongles.Find(0x373B, 0x1012, 0xFF05, "ATK Z87 Dongle", 0, 1, 0x0001, 64, 64) == Dongles.Protocol.BitMouse
+            && Dongles.Find(0x373B, 0x1013, 0xFF1C, "ATK Z87 Pro", 0, 1, 0x0092, 64, 64) is null);
+
         // The vendors' own ids keep their readers.
         check("Requests: ATK's BitMouse page, VGN's keyboard, Endgame Gear and VAXEE are still read",
             Dongles.Find(0x373B, 0x1001, 0xFF05, "", 0) == Dongles.Protocol.BitMouse && Dongles.Find(0x320F, 0x5088, 0xFF1C, "", 0) == Dongles.Protocol.Vgn
