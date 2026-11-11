@@ -1027,7 +1027,7 @@ public partial class MainWindow
         {
             bool over = row.Row.IsMouseOver;
             row.Row.Background = _picked.Contains(flash.Id) ? UI.Brush(UI.FillSelected) : over ? UI.Brush(PanelTheme.Hex("hover")) : Brushes.Transparent;
-            if (row.Aux.Tag is RowEnd { Label: var label } && label.Tag is string original) { label.Text = original; label.Tag = null; label.Foreground = UI.Brush(UI.Tertiary); }
+            if (row.Aux.Tag is RowEnd { Label: var label } && label.Tag is string original) { label.Text = original; label.Tag = null; label.Foreground = UI.Brush(UI.Tertiary); label.Margin = new Thickness(0); }
             ShowMore(row.Aux, over);
         }
     }
@@ -1038,7 +1038,10 @@ public partial class MainWindow
         if (aux.Tag is RowEnd end)
         {
             end.Label.Tag ??= end.Label.Text;
-            end.Label.Text = text; end.Label.Foreground = UI.Brush(UI.Primary); end.Label.Visibility = Visibility.Visible; end.More.Visibility = Visibility.Hidden;
+            // On the tinted row the word keeps as far from the right edge as the entry does from the left (8 DIP: the row's right
+            // padding is 4).
+            end.Label.Text = text; end.Label.Foreground = UI.Brush(UI.Primary); end.Label.Margin = new Thickness(0, 0, 4, 0);
+            end.Label.Visibility = Visibility.Visible; end.More.Visibility = Visibility.Hidden;
         }
     }
 
