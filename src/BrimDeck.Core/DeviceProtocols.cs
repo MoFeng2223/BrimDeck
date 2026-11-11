@@ -238,6 +238,24 @@ public static class Razer
 // The 2.4 GHz mice of the Chinese brands, each a frame on a vendor collection.
 public static class Dongles
 {
+    // AULA (狼蛛) keyboards on their 2.4 GHz receiver (VID 0x3554, the F87 PRO's 0xFA09, usage page 0xFF02, usage 0x0002,
+    // report id 0x13, 20 bytes): [report id, command, 0x01, 0x00, zeros, checksum], the checksum the low byte of the sum of the
+    // nineteen bytes before it. These are the frames the AULA F87 PRO software writes, read from its HID sessions. Command 0x05
+    // asks for the receiver's state; the receiver answers with an 0x0A report: [0x13, 0x0A, 0x01, 0x00, length (4), source
+    // command (0x05), percent, ...]. Only that answer is a reading.
+    public const int AulaVendor = 0x3554;
+    public const int AulaF87Pro = 0xFA09;
+    public static byte[] AulaRequest(byte command)
+    {
+        var frame = new byte[20];
+        frame[0] = 0x13; frame[1] = command; frame[2] = 0x01;
+        int sum = 0; for (int i = 0; i < 19; i++) sum += frame[i];
+        frame[19] = (byte)sum;
+        return frame;
+    }
+    public static BatteryRead? AulaBattery(byte[] reply)
+        => reply.Length >= 7 && reply[0] == 0x13 && reply[1] == 0x0A && reply[5] == 0x05 && reply[6] <= 100 ? new(reply[6]) : null;
+
     // ATK, VXE and VGN on Nordic receivers (VID 0x373B, usage page 0xFF05, report 0x08, 64 bytes): [checksum, 0x72, parameter
     // length, sequence, target (1 the mouse behind a receiver), command, payload length, payload...], the checksum the low byte
     // of the sum of the bytes after it. Battery is command 0x07.
@@ -677,7 +695,7 @@ public static class Dongles
     public enum Protocol
     {
         BitMouse, Compx, Vgn, Endgame, Vaxee, Inphic, Mchose, Ajazz, CompxFramed, F83, Nordic, MchoseRealtek, Gmouse, Lingbao, Nzxt, Cherry, Hecate,
-        Asus, SteelSeries, RapooGen1
+        Asus, SteelSeries, RapooGen1, Aula
     }
 
     // The Compx receivers atkctl documents (the ATK A9 Ultra), by vendor, product and usage page.
@@ -698,6 +716,7 @@ public static class Dongles
         int inputLength = 0, int outputLength = 0, int collection = -1)
     {
         if (IsAjazz(vendor, product)) return AjazzCollection(iface, usagePage, usage, inputLength, outputLength) ? Protocol.Ajazz : null;
+        if (vendor == AulaVendor && product == AulaF87Pro) return usagePage == 0xFF02 && usage == 0x0002 && inputLength >= 20 && outputLength >= 20 ? Protocol.Aula : null;
         if (IsCompxFramed(vendor, product)) return CompxFramedCollection(usagePage, usage, inputLength, outputLength) ? Protocol.CompxFramed : null;
         if (F83Find(vendor, product) is { } f83) return F83Collection(f83, iface, usagePage, featureLength) ? Protocol.F83 : null;
         if (Gmouse.Contains((vendor, product))) return usagePage == 0xFF01 && usage == 0x0010 && outputLength >= 65 ? Protocol.Gmouse : null;

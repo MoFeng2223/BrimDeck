@@ -297,6 +297,14 @@ static class DeviceProtocolTests
 
     private static void DongleFrames(Action<string, bool> check)
     {
+        // AULA F87 PRO: report id 0x13, command 0x05, the checksum the low byte of the nineteen bytes before it; only the
+        // receiver's 0x0A answer is a reading.
+        var aula = Dongles.AulaRequest(0x05);
+        check("AULA F87 PRO: the state request, its checksum, and its collection", aula.Length == 20 && aula[0] == 0x13 && aula[1] == 0x05
+            && aula[19] == (byte)(aula.Take(19).Sum(b => b) & 0xFF) && Dongles.Find(0x3554, 0xFA09, 0xFF02, "", 0, 1, 0x0002, 20, 20) == Dongles.Protocol.Aula
+            && Dongles.Find(0x3554, 0xFA09, 0xFF04, "", 8) is null);
+        check("AULA F87 PRO: the 0x0A answer's level; the echo and other commands are none", Dongles.AulaBattery([0x13, 0x0A, 0x01, 0x00, 0x04, 0x05, 87, 0x01, 0, 0]) == new BatteryRead(87)
+            && Dongles.AulaBattery([0x13, 0x05, 0x01, 0x00, 0x0A, 0x03, 0, 0]) is null && Dongles.AulaBattery([0x13, 0x0A, 0x01, 0x00, 0x04, 0x07, 87]) is null);
         check("ATK/VXE: the battery request with its checksum", Dongles.BitMouseRequest(0x07).Take(8).SequenceEqual(new byte[] { 0x08, 0x7D, 0x72, 0x02, 0x00, 0x01, 0x07, 0x01 }));
         check("ATK/VXE: a reply's level; an asleep mouse or a cabled placeholder is none",
             Dongles.BitMouseBattery([0x08, 0x72, 0x00, 0x00, 0x01, 0x07, 0x01, 87, 0x10, 0x0F]) == new BatteryRead(87)
