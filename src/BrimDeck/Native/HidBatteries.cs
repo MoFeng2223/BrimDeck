@@ -699,29 +699,21 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         if (read is not BatteryRead battery) return [];
         claimed.Add(info.Path);
         bool atk = info.Vendor == Dongles.AtkVendor;
-        return [Mouse(atk ? "atk" : "vgn", info, atk ? "ATK" : "VGN", battery, DeviceKind.Keyboard, atk ? Dongles.AtkKeyboard(info.Product) : null)];
+        return [Mouse(atk ? "atkkb" : "vgn", info, atk ? "ATK" : "VGN", battery, DeviceKind.Keyboard, atk ? Dongles.AtkKeyboard(info.Product) : null)];
     }
 
-    // The AULA F87 PRO's 2.4 GHz receiver (Dongles.AulaRequest): command 0x05 on its 0xFF02 collection, answered by the 0x0A
-    // report that carries the charge. The keyboard is the only device behind the receiver, so no target goes in the frame.
-    // The AULA F87 PRO's 2.4 GHz receiver (Dongles.AulaRequest): command 0x05 on its 0xFF02 collection. The receiver answers
-    // the first request with echoes of it only; the 0x0A report that carries the charge comes with a second request, which it
-    // answers after a moment (the pause the keyboard's own software leaves between its frames). The keyboard is the only
-    // device behind the receiver, so no target goes in the frame.
+    // The AULA F87 PRO's 2.4 GHz receiver (Dongles.AulaRequest): command 0x05 on its 0xFF02 collection. The receiver answers a
+    // request with echoes of it, and the 0x0A report that carries the charge comes with the request after it. One request goes
+    // out each pass, in the same exchange as the other keyboards (no wait between two requests that would hold up the devices
+    // read after this one): the first pass after the receiver arrives finds only the echoes, and the passes after it the
+    // charge. The keyboard is the only device behind the receiver, so no target goes in the frame.
     private static IEnumerable<DeviceBattery> Aula(HidInfo info, HashSet<string> claimed)
     {
         using var device = new HidDevice(info);
-        device.Flush();
-        device.Write(Dongles.AulaRequest(0x05));
-        Thread.Sleep(500);
-        device.Write(Dongles.AulaRequest(0x05));
-        for (int i = 0; i < 6; i++)
-        {
-            if (device.Read(300) is not { } reply || Dongles.AulaBattery(reply) is not { } battery) continue;
-            claimed.Add(info.Path);
-            return [Mouse("aula", info, "AULA", battery, DeviceKind.Keyboard, "AULA F87 PRO")];
-        }
-        return [];
+        var read = Hid.Transact<object>([device], () => device.Write(Dongles.AulaRequest(0x05)), r => Dongles.AulaBattery(r) is { } b ? b : null, 500);
+        if (read is not BatteryRead battery) return [];
+        claimed.Add(info.Path);
+        return [Mouse("aula", info, "AULA", battery, DeviceKind.Keyboard, "AULA F87 PRO")];
     }
 
     // The feature-report brands: set the request, wait, get the reply.
