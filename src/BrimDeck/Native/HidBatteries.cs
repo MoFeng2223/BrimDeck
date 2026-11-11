@@ -689,13 +689,16 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         return [Mouse("compx", info, "VXE", battery)];
     }
 
+    // VGN's keyboards, and ATK's, which answer the same frame (Dongles.AtkKeyboards). The Z87 Pro's dongle calls itself
+    // "ATK Z87 Dongle", so the keyboard's own model name is given where the table has it rather than the dongle's.
     private static IEnumerable<DeviceBattery> Vgn(HidInfo info, HashSet<string> claimed)
     {
         using var device = new HidDevice(info);
         var read = Hid.Transact<object>([device], () => device.Write(Dongles.VgnRequest()), r => Dongles.VgnBattery(r) is { } b ? b : null, 500);
         if (read is not BatteryRead battery) return [];
         claimed.Add(info.Path);
-        return [Mouse("vgn", info, "VGN", battery, DeviceKind.Keyboard)];
+        bool atk = info.Vendor == Dongles.AtkVendor;
+        return [Mouse(atk ? "atk" : "vgn", info, atk ? "ATK" : "VGN", battery, DeviceKind.Keyboard, atk ? Dongles.AtkKeyboard(info.Product) : null)];
     }
 
     // The feature-report brands: set the request, wait, get the reply.
