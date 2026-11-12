@@ -1,0 +1,19 @@
+releases/1.3.0.md
+  s_9aec7dc30ec8fe::t_767a94ee6a8048 1-65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d031c5460f0d4356ade48672cfa767e1ffa96bec",
+  "prompts": {},
+  "sessions": {
+    "s_9aec7dc30ec8fe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a7c39d6-e1e4-4eb1-837e-78317164b086",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
