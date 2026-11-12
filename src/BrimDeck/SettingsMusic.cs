@@ -57,7 +57,7 @@ public sealed partial class SettingsWindow
         var rows = new StackPanel();
         _partOptions.Clear();
         foreach (var part in S.CompactOrder(style))
-            rows.Children.Add(part switch { CompactPart.Clock => ClockRow(style, rows), CompactPart.Rings => RingsRow(style, rows), _ => PartRow(style, part, rows) });
+            rows.Children.Add(part switch { CompactPart.Clock => ClockRow(style, rows), _ => PartRow(style, part, rows) });
         UpdateDividers(rows);
         Group(rows);
     }
@@ -158,15 +158,21 @@ public sealed partial class SettingsWindow
         Show(_openParts.Contains(part));
         return item;
     }
-    // The quota rings: the switch turns them on or off; the option under the title writes each application's letter inside its ring.
-    private Border RingsRow(CompactStyle style, StackPanel rows)
+    // The quota rings' look, on the quota page beside the applications: one ring or nested rings, whether the arcs show what is used
+    // or what is left, and whether each application's letter (its display name's) is written inside its ring. They are shared by the
+    // notch, the capsule and the side column; each application's quotas are set with the application (RingDetails), and the rings are
+    // switched on or off with the collapsed content (PartRow). A new style builds the application rows again, so their ring lines follow it.
+    private void QuotaRingSection()
     {
-        bool notch = style == CompactStyle.Notch;
-        string letters = Loc.T("环内显示首字母", "Letter in the rings");
-        var options = new StackPanel();
-        options.Children.Add(Lighter(Toggle(letters, S.QuotaRingLetters, v => Change(s => s.QuotaRingLetters = v)), letters));
-        return OptionsPartRow(style, CompactPart.Rings, rows, Loc.T("配额环", "Quota rings"), Loc.T("配额环设置", "Quota ring settings"), S.ShowsSummary(style),
-            on => Change(s => { if (notch) s.NotchSummary = on; else s.CapsuleSummary = on; }), options);
+        SectionTitle(Loc.T("配额显示", "Quota display"));
+        Group(MusicChoice(Loc.T("环的样式", "Ring style"), S.QuotaRingStyle, [(QuotaRingStyle.Single, Loc.T("单环", "Single")), (QuotaRingStyle.Nested, Loc.T("多环", "Nested"))],
+                v => { Change(s => s.QuotaRingStyle = v); foreach (var entry in S.Apps) RefreshAppRow(entry.InstanceId); }, help: Loc.T("单环：每个应用一个环，默认显示已用比例最高的一项额度。\n多环：每个应用最多三个环，分别显示不同的额度。\n各环显示哪项额度，在下方展开该应用后设置。",
+                    "Single: one ring per app, showing its most used quota by default.\nNested: up to three rings per app, each showing a different quota.\nWhich quota each ring shows is set by expanding the app below."), width: 200),
+            MusicChoice(Loc.T("显示已用或剩余", "Used or left"), S.QuotaRingRemaining, [(false, Loc.T("已用额度", "Used")), (true, Loc.T("剩余额度", "Left"))],
+                v => Change(s => s.QuotaRingRemaining = v), help: Loc.T("已用额度：显示已用的比例，用得越多，配额环和进度条越长。\n剩余额度：显示剩余的比例，用得越多，配额环和进度条越短。\n配额环、展开面板的进度条和百分比、配额提醒都按这里显示；余额、扣费等金额不受影响。",
+                    "Used: shows the share used; the more is used, the longer the rings and bars.\nLeft: shows the share left; the more is used, the shorter the rings and bars.\nThe quota rings, the panel's bars and percentages, and the quota notices all follow it; amounts such as balances and spending stay as they are."), width: 200),
+            Toggle(Loc.T("环内显示首字母", "Letter in the rings"), S.QuotaRingLetters, v => Change(s => s.QuotaRingLetters = v),
+                help: Loc.T("在配额环中间显示应用名称的首字母，名称以下方“显示名称”一栏为准。", "Shows the first letter of the app's name inside its quota ring, taken from the Display name column below.")));
     }
     // The clock's swatches but the gradient: the theme's color (theme), the presets, a custom color and the cover's. Used for the
     // equalizer and for the music page's current lyric; save gets the chosen color and the custom one.
@@ -202,14 +208,6 @@ public sealed partial class SettingsWindow
             ClockColor.White => theme,
             _ => ClockFace.Fill([PanelTheme.Readable(ClockFace.Preset(color))])
         };
-    }
-    // Labels inside an open row are set lighter than the row's own title, as "快捷尺寸" is (QuickRow).
-    private static FrameworkElement Lighter(FrameworkElement row, string title)
-    {
-        static IEnumerable<TextBlock> Texts(DependencyObject parent) => LogicalTreeHelper.GetChildren(parent).OfType<DependencyObject>()
-            .SelectMany(child => child is TextBlock text ? new[] { text } : Texts(child));
-        if (Texts(row).FirstOrDefault(text => text.Text == title) is { } label) label.FontWeight = FontWeights.Normal;
-        return row;
     }
     // Settings every player shares: the equalizer, colors, cover and text.
     private void MusicStyle()

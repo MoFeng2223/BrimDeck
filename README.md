@@ -48,7 +48,7 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
   </tr>
 </table>
 
-- Notch and Capsule show each tool's quota usage as a ring, and as two concentric rings for a tool with both a 5-hour and a weekly quota; the first letter of the tool's name can be shown inside its ring (off by default). They also preview the music that is playing with its cover, an equalizer, and the title or the current lyric line.
+- Notch and Capsule show each tool's quota usage as rings. Choose one ring per tool, or nested rings: up to three concentric rings per tool, each showing the quota you choose. The rings and the panel's bars can show what is used or what is left, and the first letter of the tool's display name can be shown inside its ring (off by default). They also preview the music that is playing with its cover, an equalizer, and the title or the current lyric line.
 
   <img src="docs/en-US/images/compact-notch-lyrics.png" width="412" alt="Notch showing a lyric line">
 
