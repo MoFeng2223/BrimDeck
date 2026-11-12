@@ -1,0 +1,107 @@
+src/BrimDeck/MainWindow.Music.cs
+  h_dc4d9c798f1bc1 1062-1063,1068,1073,1177-1179,1181,1183
+tests/BrimDeck.Tests/QuotaRingTests.cs
+  h_dc4d9c798f1bc1 3-5,8,10-12,15,18,21,24,26-39,42-44,49,51-114,117-140
+src/BrimDeck/MainWindow.CompactLayout.cs
+  h_dc4d9c798f1bc1 93-96,111,126
+docs/zh-CN/clipboard.md
+  h_dc4d9c798f1bc1 1-55
+scripts/readme-media/Program.cs
+  h_dc4d9c798f1bc1 22-25,83,113-125,152-154,158-159,166-167,178-181,309-384,386-390,394-398,402-403,448-450,457-458,487-489,501-502,504,507,513,517-518,528,532,539,558,561-578,582,659-663,669-670,686,688,722-724,728-746,751-764,768,799,806,839-847,850-863
+  h_dc4d9c798f1bc1 155-157,160-165,391-393,399-401,725-727,747-750,765-767
+tests/BrimDeck.Tests/DashboardUsageTests.cs
+  h_dc4d9c798f1bc1 76-83
+docs/zh-CN/enhanced-sensors.md
+  h_dc4d9c798f1bc1 5
+README.zh-CN.md
+  h_dc4d9c798f1bc1 10,21,29,31-32,45-46,51,53,57,65,67-71,75,91,94-96,98,102,104,106-107,110-111,114-127,129-134,138,140,142-150,162-164,170-171,175-178,184,197-202,205,216-217
+  h_dc4d9c798f1bc1 161
+docs/en-US/enhanced-sensors.md
+  h_dc4d9c798f1bc1 5
+README.md
+  h_dc4d9c798f1bc1 10,21,29,31-32,45-46,51,53,57,65,67-71,75,91,94-96,98,102,104,106-107,110-111,114-127,129-134,138,140,142-150,161-164,170-171,175-178,184,197-202,205,216-217
+releases/1.3.0-beta.2.md
+  h_dc4d9c798f1bc1 1-7
+releases/1.3.0.md
+  h_dc4d9c798f1bc1 1-65
+scripts/readme-media/compose.py
+  h_dc4d9c798f1bc1 132,134-135,137-146,152-160,182,250,253
+src/BrimDeck.Core/DashboardUsage.cs
+  h_dc4d9c798f1bc1 22-24,27-31,33
+docs/en-US/ai-tools.md
+  h_dc4d9c798f1bc1 39-46,93
+src/BrimDeck.Core/Settings.cs
+  h_dc4d9c798f1bc1 61-64,151-160,178-179,199-203,452-457
+docs/en-US/clipboard.md
+  h_dc4d9c798f1bc1 1-55
+src/BrimDeck/MonitorDraw.cs
+  h_dc4d9c798f1bc1 17-18,65-70,91-92,94-95,99-101
+src/BrimDeck.Core/UsageMetric.cs
+  h_dc4d9c798f1bc1 37-38,45
+src/BrimDeck/MainWindow.CompactColumn.cs
+  h_dc4d9c798f1bc1 51
+src/BrimDeck/PowerGlyphs.cs
+  h_dc4d9c798f1bc1 118-119,193-208
+src/BrimDeck/MainWindow.xaml.cs
+  h_dc4d9c798f1bc1 1052
+tests/BrimDeck.Tests/Program.cs
+  h_dc4d9c798f1bc1 30
+src/BrimDeck.Core/Music.cs
+  h_dc4d9c798f1bc1 181-183,185,192,201-203,221-222,248
+src/BrimDeck/ModelDetails.cs
+  h_dc4d9c798f1bc1 20-21,226
+docs/en-US/system-monitor.md
+  h_dc4d9c798f1bc1 1-81
+src/BrimDeck/SettingsMusic.cs
+  h_dc4d9c798f1bc1 60,161-165,167-175
+src/BrimDeck.Core/QuotaRing.cs
+  h_dc4d9c798f1bc1 3-7,9-117,119-124
+src/BrimDeck/App.xaml.cs
+  h_dc4d9c798f1bc1 258-259
+docs/zh-CN/music-players.md
+  h_dc4d9c798f1bc1 23,25,30,41-49
+src/BrimDeck/MusicVisuals.cs
+  h_dc4d9c798f1bc1 689-698,711
+docs/zh-CN/ai-tools.md
+  h_dc4d9c798f1bc1 39-46,93
+docs/zh-CN/devices.md
+  h_dc4d9c798f1bc1 1-51
+src/BrimDeck/SettingsProviders.cs
+  h_dc4d9c798f1bc1 22-43,96,419-491,495-496,502-503,510-512,517-525,533-597,601
+  h_dc4d9c798f1bc1 492-494,497-501,504-509,513-516,526-532,598-600
+src/BrimDeck/SettingsWindow.cs
+  h_dc4d9c798f1bc1 689,705,806,812,825-826
+docs/en-US/devices.md
+  h_dc4d9c798f1bc1 1-51
+docs/zh-CN/privacy.md
+  h_dc4d9c798f1bc1 3,36-39,51-53,63
+docs/zh-CN/system-monitor.md
+  h_dc4d9c798f1bc1 1-81
+src/BrimDeck/MonitorStrip.cs
+  h_dc4d9c798f1bc1 61,169-171,175-189,263,267-291,293,296-298,316,319-320,359-361,364-365
+src/BrimDeck/UsageSynchronization.cs
+  h_dc4d9c798f1bc1 112,123-124
+src/BrimDeck/DeviceStrip.cs
+  h_dc4d9c798f1bc1 26-27,44,53
+src/BrimDeck/UI.cs
+  h_dc4d9c798f1bc1 105-106,117-118,120,125-126,128-129,131,133,137,143-144
+src/BrimDeck/UsagePanel.cs
+  h_dc4d9c798f1bc1 19-26,353,567-570,573-575,590-591,598-599,607-608,640
+docs/en-US/music-players.md
+  h_dc4d9c798f1bc1 23,25,30,41-49
+docs/en-US/privacy.md
+  h_dc4d9c798f1bc1 3,36-39,51-53,63
+src/BrimDeck/MainWindow.Shelf.cs
+  h_dc4d9c798f1bc1 1030,1041-1044
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1ab7f89844ab12341393904c133620c233382f16",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
