@@ -1,0 +1,21 @@
+src/BrimDeck/DeviceStrip.cs
+  s_68720d86b08c2a::t_268a29e8690ba8 53
+  s_68720d86b08c2a::t_747974921a5b38 26-27
+  s_68720d86b08c2a::t_755a95c7e69a90 44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "abc8268c23dbdb8eebcf416c9efe830fc28917b8",
+  "prompts": {},
+  "sessions": {
+    "s_68720d86b08c2a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "87e7574d-c854-4ba4-882d-c8d037492f4a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
