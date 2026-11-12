@@ -42,19 +42,19 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 <table>
   <tr>
-    <td align="center"><img src="docs/zh-CN/images/compact-notch.png" width="261" alt="刘海"><br>刘海（默认）</td>
-    <td align="center"><img src="docs/zh-CN/images/compact-capsule.png" width="251" alt="胶囊"><br>胶囊</td>
+    <td align="center"><img src="docs/zh-CN/images/compact-notch.png" width="232" alt="刘海"><br>刘海（默认）</td>
+    <td align="center"><img src="docs/zh-CN/images/compact-capsule.png" width="222" alt="胶囊"><br>胶囊</td>
     <td align="center"><img src="docs/zh-CN/images/compact-line.png" width="128" alt="指示条"><br>指示条</td>
   </tr>
 </table>
 
-- 刘海与胶囊通过配额环显示各工具的配额使用率。配额环可以选择单环或多环：多环时每个工具最多显示三个同心环，每个环显示哪一项额度可以自行选择；配额环和展开面板的进度条可以显示已用额度或剩余额度；环内可以显示工具显示名称的首字母（默认关闭）。还支持音乐预览，可显示封面、律动条、歌名或当前歌词。
+- 刘海与胶囊通过配额环显示各工具的配额使用率。配额环可以选择单环（默认）或多环：多环时每个工具最多显示三个同心环，每个环显示哪一项额度可以自行选择；配额环和展开面板的进度条可以显示已用额度或剩余额度；环内可以显示工具显示名称的首字母（默认关闭）。还支持音乐预览，可显示封面、律动条、歌名或当前歌词。
 
-  <img src="docs/zh-CN/images/compact-notch-lyrics.png" width="412" alt="刘海中显示歌词">
+  <img src="docs/zh-CN/images/compact-notch-lyrics.png" width="383" alt="刘海中显示歌词">
 
 - 刘海与胶囊可以显示时间，与配额环或音乐一起显示时位于右侧，单独显示时居中；可以自定义配色。
 
-  <img src="docs/zh-CN/images/compact-clock.png" width="571" alt="刘海中的时间：简约、数码管、衬线样式位于配额环右侧，单独显示时居中">
+  <img src="docs/zh-CN/images/compact-clock.png" width="513" alt="刘海中的时间：简约、数码管、衬线样式位于配额环右侧，单独显示时居中">
 
 - 某个工具的配额使用率升到预警（70%）或告警（90%）时，收起形态会显示提醒 5 秒；可在设置中关闭。
 
@@ -62,11 +62,11 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 - 刘海与胶囊可以显示系统读数，与配额环、音乐并排显示。
 
-  <img src="docs/zh-CN/images/compact-monitor.png" width="527" alt="刘海中的系统读数：配额环旁显示核心柱、CPU、内存、GPU 与网速">
+  <img src="docs/zh-CN/images/compact-monitor.png" width="498" alt="刘海中的系统读数：配额环旁显示核心柱、CPU、内存、GPU 与网速">
 
 - 刘海与胶囊可以显示无线设备的电量，以及文件中转中的文件数量。
 
-  <img src="docs/zh-CN/images/compact-devices.png" width="530" alt="刘海中的设备电量与文件中转：配额环旁显示文件数量，以及鼠标、键盘、耳机、手柄的电量环">
+  <img src="docs/zh-CN/images/compact-devices.png" width="483" alt="刘海中的设备电量与文件中转：配额环旁显示文件数量，以及鼠标、键盘、耳机、手柄的电量环">
 
 - 刘海、胶囊和指示条的尺寸与位置可在设置中调整；刘海和指示条可以贴靠屏幕的顶部、底部、左侧或右侧，三种样式都可以放在任务栏内。
 
