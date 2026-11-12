@@ -120,22 +120,22 @@ internal static class QuotaRingTests
             small.RingSize == 12 && small.RingWidth == 3 * 12 + 2 * 8 && CompactMusicLayout.RingSizeFor(QuotaRing.Single, 2) == 24
             && CompactMusicLayout.NaturalWidth(1, false, 3, false, 0, 0, ring: QuotaRing.Single) == 3 * 12 + 2 * 8);
 
-        // The settings: the style and the arcs' meaning default to nested and used, are saved and read back, and a file without
+        // The settings: the style and the arcs' meaning default to single and used, are saved and read back, and a file without
         // them reads as the defaults; an application's choices are cleaned when read.
         var store = new SettingsStore(Path.Combine(root, "quota-rings"), "0.1.0");
         var fresh = store.Load();
-        bool defaults = fresh.QuotaRingStyle == QuotaRingStyle.Nested && !fresh.QuotaRingRemaining;
-        fresh.QuotaRingStyle = QuotaRingStyle.Single; fresh.QuotaRingRemaining = true;
+        bool defaults = fresh.QuotaRingStyle == QuotaRingStyle.Single && !fresh.QuotaRingRemaining;
+        fresh.QuotaRingStyle = QuotaRingStyle.Nested; fresh.QuotaRingRemaining = true;
         fresh.Apps[0].SingleRingQuota = " 每周额度 "; fresh.Apps[0].RingQuotas = ["", "b", "b", "c"]; fresh.Apps[0].QuotaTargets = new() { ["today"] = 12.345m, ["key"] = -1m };
         store.Save(fresh);
         var read = new SettingsStore(store.DirectoryPath, "0.1.0").Load();
         check("Quota ring settings: saved and read back, with each application's choices cleaned",
-            defaults && read.QuotaRingStyle == QuotaRingStyle.Single && read.QuotaRingRemaining
+            defaults && read.QuotaRingStyle == QuotaRingStyle.Nested && read.QuotaRingRemaining
             && read.Apps[0].SingleRingQuota == "每周额度" && read.Apps[0].RingQuotas.SequenceEqual(["", "b"])
             && read.Apps[0].QuotaTargets.Count == 1 && read.Apps[0].QuotaTargets["today"] == 12.35m);
         File.WriteAllText(store.FilePath, """{"AppVersion":"0.1.0","QuotaRingStyle":7}""");
         var odd = new SettingsStore(store.DirectoryPath, "0.1.0").Load();
-        check("Quota ring settings: an unknown style reads as nested", odd.QuotaRingStyle == QuotaRingStyle.Nested && !odd.QuotaRingRemaining);
+        check("Quota ring settings: an unknown style, or a file without one, reads as single", odd.QuotaRingStyle == QuotaRingStyle.Single && !odd.QuotaRingRemaining);
         var copy = read.Apps[0].Copy(); copy.RingQuotas.Add("z");
         check("Quota ring settings: a copied application keeps its own list", read.Apps[0].RingQuotas.Count == 2);
     }
