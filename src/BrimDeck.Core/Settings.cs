@@ -60,7 +60,7 @@ public enum PausedMusicHide { None, Text, Cover, Both }
 public enum EqualizerMode { Flow = 0, Spectrum = 1 }
 // How the collapsed quota rings are drawn (QuotaRing). Nested: up to three rings about one centre, 20 DIP across, each quota in
 // a ring of its own. Single: one 12 DIP ring per application with its highest share, as before there were nested rings. Saved
-// as numbers, so new members go at the end; a file without it, or with a number not listed, is Nested.
+// as numbers, so new members go at the end; a file without it, or with a number not listed, is Single.
 public enum QuotaRingStyle { Nested = 0, Single = 1 }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left; Music places
 // only the title or lyric. Saved as numbers, so new members go at the end.
@@ -451,8 +451,8 @@ public sealed class DeckSettings
     public bool QuotaRingLetters { get; set; }
     // The quota rings' style (QuotaRingStyle), in every style and in the side column; each application's choice of quotas for it is
     // its own (AppEntry.SingleRingQuota, AppEntry.RingQuotas).
-    public QuotaRingStyle QuotaRingStyle { get => _quotaRingStyle; set => _quotaRingStyle = Enum.IsDefined(value) ? value : QuotaRingStyle.Nested; }
-    private QuotaRingStyle _quotaRingStyle = QuotaRingStyle.Nested;
+    public QuotaRingStyle QuotaRingStyle { get => _quotaRingStyle; set => _quotaRingStyle = Enum.IsDefined(value) ? value : QuotaRingStyle.Single; }
+    private QuotaRingStyle _quotaRingStyle = QuotaRingStyle.Single;
     // The rings' arcs show what is left of each quota instead of what is used. Off by default; a file without it reads as off.
     public bool QuotaRingRemaining { get; set; }
     public bool CapsuleMusic { get; set; } = true;
