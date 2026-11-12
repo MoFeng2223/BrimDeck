@@ -232,6 +232,10 @@ public static class Razer
         new(0x02BA, "Razer BlackWidow V4 Mini HyperSpeed", 0x9F, 3, 31_000, true, DeviceKind.Keyboard), new(0x02B9, "Razer BlackWidow V4 Mini HyperSpeed", 0x1F, 3, 31_000, true, DeviceKind.Keyboard),
         new(0x02D5, "Razer BlackWidow V4 Tenkeyless HyperSpeed", 0x9F, 2, 31_000, true, DeviceKind.Keyboard), new(0x02D7, "Razer BlackWidow V4 Tenkeyless HyperSpeed", 0x1F, 3, 31_000, true, DeviceKind.Keyboard),
     ];
+    // Measured with Synapse 4 / RazerAppEngine running: this receiver still answers the battery and charging queries.
+    // Keep the software guard for models whose concurrent access has not been verified.
+    public static bool CanPollWithSynapse(int product) => product == 0x0088;
+
     public static Model? Find(int product) => Catalog.FirstOrDefault(model => model.Product == product);
 }
 
@@ -348,6 +352,8 @@ public static class Dongles
     // product pairs, on the 17-byte collection, are sent to.
     public static readonly (int Vendor, int Product)[] CompxFramed =
     [
+        // ATK Wireless Charging dongle: measured on its 17-byte 0xFF02 / usage 2 collection.
+        (AtkVendor, 0x12DA),
         // ATK receivers (F1 Pro Max 8K and 1K, F1 V3 Ultimate+, F1 Ultimate 2.0, A9 Air GEM) and mice on their cables.
         (AtkVendor, 0x101B), (AtkVendor, 0x101A), (AtkVendor, 0x1303), (AtkVendor, 0x11D9), (AtkVendor, 0x11E4), (AtkVendor, 0x1278),
         (AtkVendor, 0x1015), (AtkVendor, 0x12A9), (AtkVendor, 0x1293),

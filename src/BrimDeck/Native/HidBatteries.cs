@@ -373,7 +373,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         else foreach (var info in hidpp) claimed.Add(info.Path);
         if (ask)
             foreach (var group in infos.Where(info => info.Vendor == Razer.Vendor).GroupBy(info => info.Product))
-                if (Razer.Find(group.Key) is { } model && !Aside(Razer.Vendor)) Try(() => ReadRazer(model, [.. group], claimed));
+                if (Razer.Find(group.Key) is { } model && (Razer.CanPollWithSynapse(group.Key) || !Aside(Razer.Vendor))) Try(() => ReadRazer(model, [.. group], claimed));
         // The devices (GroupKey) a dongle protocol has read this pass.
         var answered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // The ROG Omni receivers, each read as a whole (its pairing table, then its paired devices).

@@ -16,13 +16,13 @@ static class DeviceSafetyTests
     // injected; the matching is the real one.
     private static void VendorPrograms(Action<string, bool> check)
     {
-        // Exactly Scan's decision for a device of this vendor, given the executable names that are running.
+        // The vendor-level guard; Scan additionally allows the specifically verified Razer receiver.
         bool Aside(int vendor, params string[] processes) => VendorSoftware.BrandOf(vendor) is { } brand && VendorSoftware.Running(processes).Contains(brand);
 
         string[] desktop = ["explorer.exe", "chrome.exe", "BrimDeck.exe", "steam.exe", "Discord.exe", "svchost.exe"];
         check("Vendor software: nothing of the four brands among ordinary processes, so every brand is read",
             !Aside(Razer.Vendor, desktop) && !Aside(Dongles.EndgameVendor, desktop) && !Aside(Dongles.VaxeeVendor, desktop) && !Aside(Dongles.InphicVendor, desktop) && !Aside(Dongles.InphicWireless, desktop));
-        check("Vendor software: Razer stands aside for Synapse 3 and 4 and their background parts",
+        check("Vendor software: Synapse 3 and 4 and their background parts are detected for Razer",
             Aside(Razer.Vendor, [.. desktop, "Razer Synapse.exe"]) && Aside(Razer.Vendor, [.. desktop, "Razer Synapse 4.exe"])
             && Aside(Razer.Vendor, [.. desktop, "RazerCentralService.exe"]) && Aside(Razer.Vendor, [.. desktop, "Razer Synapse Service.exe"]) && Aside(Razer.Vendor, [.. desktop, "RazerAppEngine.exe"])
             && Aside(Razer.Vendor, ["RAZERSYNAPSE.EXE"]));
