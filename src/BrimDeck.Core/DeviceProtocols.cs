@@ -348,6 +348,8 @@ public static class Dongles
     // product pairs, on the 17-byte collection, are sent to.
     public static readonly (int Vendor, int Product)[] CompxFramed =
     [
+        // ATK Wireless Charging dongle: measured on its 17-byte 0xFF02 / usage 2 collection.
+        (AtkVendor, 0x12DA),
         // ATK receivers (F1 Pro Max 8K and 1K, F1 V3 Ultimate+, F1 Ultimate 2.0, A9 Air GEM) and mice on their cables.
         (AtkVendor, 0x101B), (AtkVendor, 0x101A), (AtkVendor, 0x1303), (AtkVendor, 0x11D9), (AtkVendor, 0x11E4), (AtkVendor, 0x1278),
         (AtkVendor, 0x1015), (AtkVendor, 0x12A9), (AtkVendor, 0x1293),
