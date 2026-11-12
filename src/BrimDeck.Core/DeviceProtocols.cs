@@ -232,10 +232,6 @@ public static class Razer
         new(0x02BA, "Razer BlackWidow V4 Mini HyperSpeed", 0x9F, 3, 31_000, true, DeviceKind.Keyboard), new(0x02B9, "Razer BlackWidow V4 Mini HyperSpeed", 0x1F, 3, 31_000, true, DeviceKind.Keyboard),
         new(0x02D5, "Razer BlackWidow V4 Tenkeyless HyperSpeed", 0x9F, 2, 31_000, true, DeviceKind.Keyboard), new(0x02D7, "Razer BlackWidow V4 Tenkeyless HyperSpeed", 0x1F, 3, 31_000, true, DeviceKind.Keyboard),
     ];
-    // Measured with Synapse 4 / RazerAppEngine running: this receiver still answers the battery and charging queries.
-    // Keep the software guard for models whose concurrent access has not been verified.
-    public static bool CanPollWithSynapse(int product) => product == 0x0088;
-
     public static Model? Find(int product) => Catalog.FirstOrDefault(model => model.Product == product);
 }
 

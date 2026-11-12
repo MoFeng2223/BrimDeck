@@ -99,10 +99,6 @@ static class DeviceProtocolTests
             && Dongles.Find(0x373B, 0x12DA, 0xFF05, "", 0, 1, 0, 8, 0) is null
             && Dongles.Find(0x373B, 0x12DA, 0xFF02, "", 0, 1, 2, 49, 49) is null
             && Dongles.Find(0x373B, 0x12DA, 0xFF02, "", 0, 1, 1, 17, 17) is null);
-        check("Razer: Synapse polling exception is limited to the measured Basilisk Ultimate receiver",
-            Razer.CanPollWithSynapse(0x0088)
-            && Razer.Catalog.Where(model => model.Product != 0x0088).All(model => !Razer.CanPollWithSynapse(model.Product))
-            && !Razer.CanPollWithSynapse(0xFFFF));
         // Compx's 17-byte frame: vigil-watt's captures on an ATK 101B receiver.
         check("Compx frame: a reply on battery and one on the cable", Dongles.CompxFrame(Bytes("08 04 00 00 00 02 5F 00 10 01 00 00 00 00 00 00 D7")) == new BatteryRead(95)
             && Dongles.CompxFrame(Bytes("08 04 00 00 00 02 5F 01 10 61 00 00 00 00 00 00 76")) == new BatteryRead(95, true));
