@@ -7,8 +7,28 @@ internal static partial class Program
     // against a real activation below.
     private static void HostControlChecks()
     {
+        // Exercise the real palette cache, not just the override stack: a request/release must repaint even when the
+        // selected theme did not change, while repeating the same override must keep the existing generation.
+        string previousTheme = PanelTheme.ShownTheme.Id;
+        string? previousAccent = PanelTheme.AccentOverride;
+        var themeSettings = new BrimDeck.Core.DeckSettings { PanelTheme = "dark" };
+        try
+        {
+            PanelTheme.AccentOverride = null; PanelTheme.Use(themeSettings, reload: true);
+            string original = PanelTheme.Hex("accent");
+            PanelTheme.AccentOverride = "#13579B";
+            Check("a temporary accent invalidates an unchanged theme cache", PanelTheme.Use(themeSettings) && PanelTheme.Hex("accent") == "#13579B");
+            int generation = PanelTheme.Generation;
+            Check("the same temporary accent reuses the palette", !PanelTheme.Use(themeSettings) && PanelTheme.Generation == generation);
+            PanelTheme.AccentOverride = null;
+            Check("releasing an accent restores the unchanged user theme", PanelTheme.Use(themeSettings) && PanelTheme.Hex("accent") == original);
+        }
+        finally
+        { PanelTheme.AccentOverride = previousAccent; PanelTheme.Use(new BrimDeck.Core.DeckSettings { PanelTheme = previousTheme }, reload: true); }
         // ---- the accent stack ----
         var accents = new AccentOverrides();
+        int repaintRequests = 0;
+        accents.Changed += () => repaintRequests++;
         Check("no accent is drawn until a module asks", accents.Current is null && accents.Count == 0);
         var first = accents.Add("alpha", "#112233");
         Check("the newest request is drawn", accents.Current == "#112233" && accents.Count == 1);
@@ -18,6 +38,7 @@ internal static partial class Program
         Check("releasing the older request leaves the newer one", accents.Current == "#445566" && accents.Count == 1);
         second.Dispose();
         Check("releasing the last request gives the theme back", accents.Current is null && accents.Count == 0);
+        Check("accent requests and releases each notify the repaint subscriber", repaintRequests == 4);
         // The stack is the precedence: releasing the newest falls back to the one behind it.
         var a = accents.Add("alpha", "#111111"); var b = accents.Add("beta", "#222222");
         b.Dispose();

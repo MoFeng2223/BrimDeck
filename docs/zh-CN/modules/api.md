@@ -30,23 +30,59 @@
 | `system.read` | Service | 读取系统监控 / Read system metrics | 1 | `system.read` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleSystem` |
 | `host.state` | Service | 读取面板状态 / Read panel state | 10 | `host.state` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleHostState` |
 | `host.control` | Service | 请求宿主操作 / Ask the host to act | 10 | `host.control` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleHostControl` |
-| `host.control.page` | Service | 打开自己的页面 / Open own page | 10 | 同名 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModulePageControl` |
-| `host.control.expand` | Service | 请求展开面板 / Request expanding | 10 | 同名 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModulePanelControl` |
-| `host.control.media` | Service | 播放或暂停媒体 / Play or pause media | 10 | 同名 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleMediaControl` |
-| `host.control.accent` | Service | 临时强调色 / Temporary accent | 10 | 同名 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleAccentControl` |
+| `host.control.page` | Service | 打开自己的页面 / Open own page | 10 | `host.control.page` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModulePageControl` |
+| `host.control.expand` | Service | 请求展开面板 / Request expanding | 10 | `host.control.expand` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModulePanelControl` |
+| `host.control.media` | Service | 播放或暂停媒体 / Play or pause media | 10 | `host.control.media` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleMediaControl` |
+| `host.control.accent` | Service | 临时强调色 / Temporary accent | 10 | `host.control.accent` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleAccentControl` |
 | `notifications.show` | Service | 显示岛内提醒 / Show island notices | 1 | `notifications.show` | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleNotifications` |
 | `ui.presentation` | Service | 刷新模组界面 / Refresh module presentation | 5 | 无 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModulePresentation` |
 | `commands.invoke` | Service | 调用自己的命令 / Invoke own commands | 9 | 无 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleCommands` |
 | `ui.commands` | Contribution | 插件命令 / Commands | 9 | 无 | `windows-desktop` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleCommand` |
 | `ui.pages` | Contribution | 小程序页面 / Mini-app pages | 0 | 无 | `windows-desktop` | `activation` | `BrimDeck.UI`: `BrimDeck.ModulePage` |
 | `ui.activities` | Contribution | 持续活动 / Persistent activities | 0 | 无 | `windows-desktop` | `activation` | `BrimDeck.UI`: `BrimDeck.IModuleActivity` |
-| `ui.compact-parts` | Contribution | 收起行部件 / Compact-row parts | 0 | 无 | `windows-desktop` | `activation` | `BrimDeck.UI`: `BrimDeck.IModuleCompactPart` |
 | `ui.widgets` | Contribution | 组件 / Widgets | 0 | 无 | `windows-desktop` | `activation` | `BrimDeck.UI`: `BrimDeck.ModuleWidget` |
+| `ui.compact-parts` | Contribution | 收起行部件 / Compact-row parts | 0 | 无 | `windows-desktop` | `activation` | `BrimDeck.UI`: `BrimDeck.IModuleCompactPart` |
 | `ui.settings` | Contribution | 设置 / Settings | 0 | 无 | `windows-desktop` | `activation` | `BrimDeck.UI`: `BrimDeck.IModuleSettings` |
 | `storage.data` | Intrinsic | 模组数据 / Module data | 0 | 无 | `any` | `activation` | `BrimDeck.Modules.Abstractions`: `BrimDeck.Modules.IModuleStorage` |
 
 当前目录中的能力均为实验接口。`activation` 表示贡献或服务归属本次模组激活，具体视图另由视图上下文释放。
 <!-- END GENERATED MODULE CAPABILITIES -->
+
+### 命令（`ui.commands` / `commands.invoke`）
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+一个命令是一个稳定的、用户可见的动作。注册名即命令 id（贡献 id 形如 `sample-reading-progress:open-page`），所以命令不能寻址别的模组的贡献，id 跨重启保持不变——全局快捷键绑定的正是这个 id，命令的入口也只有这一个。命令与内置快捷键共用同一份录制、冲突与注册逻辑，宿主不维护第二套回调。
+
+| 成员签名 |
+| --- |
+| `ModuleCommand(string Name, string NameEn)` |
+| `string? Description { get; init; }` |
+| `string? DescriptionEn { get; init; }` |
+| `string[]? Parameters { get; init; }` |
+| `string[]? Requires { get; init; }` |
+| `enum ModuleCommandResultKind { Completed, Busy, Rejected, Cancelled, CapabilityMissing, Failed }` |
+| `ModuleCommandResult(ModuleCommandResultKind Kind, string? Message, string? MessageEn)` |
+| `static ModuleCommandResult Completed { get; }` |
+| `static ModuleCommandResult Busy { get; }` |
+| `static ModuleCommandResult Cancelled { get; }` |
+| `static ModuleCommandResult Rejected(string message, string? messageEn = null)` |
+| `static ModuleCommandResult Missing(string message, string? messageEn = null)` |
+| `static ModuleCommandResult Failed(string message, string? messageEn = null)` |
+| `IModuleCommand.Descriptor { get; }` |
+| `IModuleCommand.CanExecute { get; }` |
+| `IModuleCommand.ExecuteAsync(IReadOnlyDictionary<string, string>? parameters, CancellationToken cancellation)` |
+| `enum ModuleCommandOrigin { User, Host }` |
+| `IModuleCommands.List()` |
+| `IModuleCommands.InvokeAsync(string commandId, IReadOnlyDictionary<string, string>? parameters = null, ModuleCommandOrigin origin = ModuleCommandOrigin.User, CancellationToken cancellation = default)` |
+| `IModuleCommands.ShowOwnPage(string pageId, bool userInitiated = true)` |
+
+结果分开是有意的：同一命令在飞时再次调用返回 `Busy`（快捷键按两下不会执行两次），`CanExecute == false` 返回 `Rejected`，模组抛出 `ModuleApiException` 或任何异常返回 `Failed`，取消返回 `Cancelled`。`Requires` 列出命令运行时需要的能力：当前宿主不提供其中任意一项时返回 `CapabilityMissing`，而不是让它以失败的形式出现——为更新宿主写的命令因此在旧版上仍有明确结论。
+
+`IModuleCommands` 绑定在本次激活上：`List()` 只列出调用者自己的命令，`InvokeAsync` 只接受自己的命令 id（别的 id 抛 `unknown-command`）。`ShowOwnPage` 打开调用者注册的页面，且只对用户发起的调用生效（`origin` 为 `User`），后台定时器不能把面板抢出来。其余宿主动作（展开、媒体、强调色）随 `host.control` 能力在 5c 开放。
+
+快捷键默认未绑定，由用户在"设置 → 快捷键 → 插件命令"里录制。停用或移除模组时命令连同其注册一起释放、快捷键立即解绑，但**绑定偏好保留**在设置里——重新启用后自动恢复。命令与内置快捷键**互相**不占用对方的组合：在命令行录制一个内置项已用的组合会被拒绝，在内置行录制一个命令已用的组合同样会被拒绝，提示都说明与哪一条冲突。命令的组合永远在内置项之后注册，因此即使设置文件被手工改成冲突，内置项也总是先赢。
+
 
 <!-- BEGIN GENERATED MODULE API -->
 
@@ -306,41 +342,6 @@
 | --- |
 | `void Invalidate()` |
 
-### 命令（`ui.commands` / `commands.invoke`）
-
-程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
-
-一个命令是一个稳定的、用户可见的动作。注册名即命令 id（贡献 id 形如 `thrm:open-page`），所以命令不能寻址别的模组的贡献，id 跨重启保持不变——全局快捷键绑定的正是这个 id，命令的入口也只有这一个。命令与内置快捷键共用同一份录制、冲突与注册逻辑，宿主不维护第二套回调。
-
-| 成员签名 |
-| --- |
-| `ModuleCommand(string Name, string NameEn)` |
-| `string? Description { get; init; }` |
-| `string? DescriptionEn { get; init; }` |
-| `string[]? Parameters { get; init; }` |
-| `string[]? Requires { get; init; }` |
-| `enum ModuleCommandResultKind { Completed, Busy, Rejected, Cancelled, CapabilityMissing, Failed }` |
-| `ModuleCommandResult(ModuleCommandResultKind Kind, string? Message, string? MessageEn)` |
-| `static ModuleCommandResult Completed { get; }` |
-| `static ModuleCommandResult Busy { get; }` |
-| `static ModuleCommandResult Cancelled { get; }` |
-| `static ModuleCommandResult Rejected(string message, string? messageEn = null)` |
-| `static ModuleCommandResult Missing(string message, string? messageEn = null)` |
-| `static ModuleCommandResult Failed(string message, string? messageEn = null)` |
-| `IModuleCommand.Descriptor { get; }` |
-| `IModuleCommand.CanExecute { get; }` |
-| `IModuleCommand.ExecuteAsync(IReadOnlyDictionary<string, string>? parameters, CancellationToken cancellation)` |
-| `enum ModuleCommandOrigin { User, Host }` |
-| `IModuleCommands.List()` |
-| `IModuleCommands.InvokeAsync(string commandId, IReadOnlyDictionary<string, string>? parameters = null, ModuleCommandOrigin origin = ModuleCommandOrigin.User, CancellationToken cancellation = default)` |
-| `IModuleCommands.ShowOwnPage(string pageId, bool userInitiated = true)` |
-
-结果分开是有意的：同一命令在飞时再次调用返回 `Busy`（快捷键按两下不会执行两次），`CanExecute == false` 返回 `Rejected`，模组抛出 `ModuleApiException` 或任何异常返回 `Failed`，取消返回 `Cancelled`。`Requires` 列出命令运行时需要的能力：当前宿主不提供其中任意一项时返回 `CapabilityMissing`，而不是让它以失败的形式出现——为更新宿主写的命令因此在旧版上仍有明确结论。
-
-`IModuleCommands` 绑定在本次激活上：`List()` 只列出调用者自己的命令，`InvokeAsync` 只接受自己的命令 id（别的 id 抛 `unknown-command`）。`ShowOwnPage` 打开调用者注册的页面，且只对用户发起的调用生效（`origin` 为 `User`），后台定时器不能把面板抢出来。其余宿主动作（展开、媒体、强调色）随 `host.control` 能力在 5c 开放。
-
-快捷键默认未绑定，由用户在"设置 → 快捷键 → 插件命令"里录制。停用或移除模组时命令连同其注册一起释放、快捷键立即解绑，但**绑定偏好保留**在设置里——重新启用后自动恢复。命令与内置快捷键**互相**不占用对方的组合：在命令行录制一个内置项已用的组合会被拒绝，在内置行录制一个命令已用的组合同样会被拒绝，提示都说明与哪一条冲突。命令的组合永远在内置项之后注册，因此即使设置文件被手工改成冲突，内置项也总是先赢。
-
 ### `ModuleSettingOption`
 
 程序集：`BrimDeck.UI`；命名空间：`BrimDeck`。
@@ -409,7 +410,7 @@
 | `void Hold(Panel content, UIElement? keep = null)` |
 | `static Thickness Place(FrameworkElement content)` |
 | `void Release(FrameworkElement content, Handover motion)` |
-| `void Send(UIElement? picture, Thickness place, FrameworkElement content, Handover motion)` |
+| `void Send(FrameworkElement? picture, Thickness place, FrameworkElement content, Handover motion)` |
 | `static BitmapSource Snapshot(Visual element, double width, double height, DpiScale dpi)` |
 
 ### `RollingDigitsView`
@@ -663,6 +664,7 @@
 | `bool Active { get; init; }` |
 | `int Completion { get; init; }` |
 | `bool Indeterminate { get; init; }` |
+| `bool Passive { get; init; }` |
 | `double Progress { get; init; }` |
 
 ### `ActivityViewKind`
@@ -673,6 +675,284 @@
 | --- |
 | `Compact = 0` |
 | `Expanded = 1` |
+
+### `IModuleCompactPart`
+
+程序集：`BrimDeck.UI`；命名空间：`BrimDeck`。
+
+| 成员签名 |
+| --- |
+| `IModuleView CreateView(ModuleViewContext context)` |
+
+### `IModuleAsyncCompactPart`
+
+程序集：`BrimDeck.UI`；命名空间：`BrimDeck`。
+
+继承：`IModuleCompactPart`。
+
+| 成员签名 |
+| --- |
+| `ValueTask<IModuleView> CreateViewAsync(ModuleViewContext context)` |
+
+### `IModuleCompactWidth`
+
+程序集：`BrimDeck.UI`；命名空间：`BrimDeck`。
+
+| 成员签名 |
+| --- |
+| `double? CompactWidth { get; }` |
+| `double? PreferredHeight { get; }` |
+| `double? PreferredWidth { get; }` |
+
+### `ModuleCommand`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `ModuleCommand(string Name, string NameEn)` |
+| `string? Description { get; init; }` |
+| `string? DescriptionEn { get; init; }` |
+| `string Name { get; init; }` |
+| `string NameEn { get; init; }` |
+| `string[]? Parameters { get; init; }` |
+| `string[]? Requires { get; init; }` |
+
+### `ModuleCommandResultKind`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `Completed = 0` |
+| `Busy = 1` |
+| `Rejected = 2` |
+| `Cancelled = 3` |
+| `CapabilityMissing = 4` |
+| `Failed = 5` |
+
+### `ModuleCommandResult`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `ModuleCommandResult(ModuleCommandResultKind Kind, string? Message = null, string? MessageEn = null)` |
+| `static ModuleCommandResult Busy { get; }` |
+| `static ModuleCommandResult Cancelled { get; }` |
+| `static ModuleCommandResult Completed { get; }` |
+| `ModuleCommandResultKind Kind { get; init; }` |
+| `string? Message { get; init; }` |
+| `string? MessageEn { get; init; }` |
+| `static ModuleCommandResult Failed(string message, string? messageEn = null)` |
+| `static ModuleCommandResult Missing(string message, string? messageEn = null)` |
+| `static ModuleCommandResult Rejected(string message, string? messageEn = null)` |
+
+### `IModuleCommand`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `bool CanExecute { get; }` |
+| `ModuleCommand Descriptor { get; }` |
+| `Task<ModuleCommandResult> ExecuteAsync(IReadOnlyDictionary<string, string>? parameters, CancellationToken cancellation)` |
+
+### `ModuleCommandOrigin`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `User = 0` |
+| `Host = 1` |
+
+### `IModuleCommands`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `Task<ModuleCommandResult> InvokeAsync(string commandId, IReadOnlyDictionary<string, string>? parameters = null, ModuleCommandOrigin origin = User, CancellationToken cancellation = null)` |
+| `IReadOnlyList<ModuleCommand> List()` |
+| `bool ShowOwnPage(string pageId, bool userInitiated = true)` |
+
+### `ModuleReading<T>`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `ModuleReading<T>()` |
+| `DateTimeOffset? ObservedAt { get; init; }` |
+| `string? Reason { get; init; }` |
+| `ModuleDataStatus Status { get; init; }` |
+| `T? Value { get; init; }` |
+| `static ModuleReading<T> Available(T value, DateTimeOffset? observed = null)` |
+| `static ModuleReading<T> Disabled(string? reason = null)` |
+| `static ModuleReading<T> Missing(string? reason = null, DateTimeOffset? observed = null)` |
+| `static ModuleReading<T> Stale(T? value, string? reason = null, DateTimeOffset? observed = null)` |
+
+### `ModuleStorageDrive`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `ModuleStorageDrive(int Number, string? Model, bool SolidState, IReadOnlyList<ModuleStorageVolume> Volumes)` |
+| `string? Model { get; init; }` |
+| `int Number { get; init; }` |
+| `bool SolidState { get; init; }` |
+| `ModuleReading<double> Temperature { get; init; }` |
+| `IReadOnlyList<ModuleStorageVolume> Volumes { get; init; }` |
+
+### `ModuleStorageVolume`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `ModuleStorageVolume(string Letter, string Label, UInt64 TotalBytes, UInt64 FreeBytes)` |
+| `UInt64 FreeBytes { get; init; }` |
+| `string Label { get; init; }` |
+| `string Letter { get; init; }` |
+| `UInt64 TotalBytes { get; init; }` |
+| `UInt64 UsedBytes { get; }` |
+
+### `IModuleHostState`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+继承：`IModuleSnapshotReader<ModuleHostStateSnapshot>`。
+
+| 成员签名 |
+| --- |
+
+### `ModuleHostStateSnapshot`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `ModuleHostStateSnapshot(long Revision, DateTimeOffset ObservedAt)` |
+| `double ContentScale { get; init; }` |
+| `double DeviceScale { get; init; }` |
+| `string? DisplayId { get; init; }` |
+| `int DisplayRevision { get; init; }` |
+| `bool Expanded { get; init; }` |
+| `bool HighContrast { get; init; }` |
+| `DateTimeOffset ObservedAt { get; init; }` |
+| `string PageId { get; init; }` |
+| `bool PageIsOwn { get; init; }` |
+| `long Revision { get; init; }` |
+| `string ScreenContext { get; init; }` |
+| `int ThemeGeneration { get; init; }` |
+| `string ThemeId { get; init; }` |
+| `bool ThemeIsDark { get; init; }` |
+| `bool ThemeNightLook { get; init; }` |
+
+### `ModuleHostControlActions`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `const string Page = "host.control.page"` |
+| `const string Expand = "host.control.expand"` |
+| `const string Media = "host.control.media"` |
+| `const string Accent = "host.control.accent"` |
+
+### `ModuleHostResultKind`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `Completed = 0` |
+| `Rejected = 1` |
+| `CapabilityMissing = 2` |
+| `Cancelled = 3` |
+| `Failed = 4` |
+
+### `ModuleHostResult`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `ModuleHostResult(ModuleHostResultKind Kind, string? Reason = null)` |
+| `static ModuleHostResult Cancelled { get; }` |
+| `static ModuleHostResult Completed { get; }` |
+| `ModuleHostResultKind Kind { get; init; }` |
+| `bool Ok { get; }` |
+| `string? Reason { get; init; }` |
+| `static ModuleHostResult Failed(string reason)` |
+| `static ModuleHostResult Missing(string reason)` |
+| `static ModuleHostResult Rejected(string reason)` |
+
+### `IModuleHostControl`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `IModuleAccentControl Accent { get; }` |
+| `IModuleMediaControl Media { get; }` |
+| `IModulePageControl Pages { get; }` |
+| `IModulePanelControl Panel { get; }` |
+
+### `IModulePageControl`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `Task<ModuleHostResult> OpenOwnPageAsync(string pageId, CancellationToken cancellation = null)` |
+
+### `IModulePanelControl`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `Task<ModuleHostResult> RequestExpandAsync(ModuleCommandOrigin origin, CancellationToken cancellation = null)` |
+
+### `IModuleMediaControl`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `Task<ModuleHostResult> ToggleMediaPlayPauseAsync(CancellationToken cancellation = null)` |
+
+### `IModuleAccentControl`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `ModuleAccentResult RequestAccentOverride(string color)` |
+
+### `ModuleAccentOverride`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+继承：`IDisposable`。
+
+| 成员签名 |
+| --- |
+| `string Color { get; }` |
+
+### `ModuleAccentResult`
+
+程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
+
+| 成员签名 |
+| --- |
+| `ModuleAccentResult(ModuleHostResultKind Kind, ModuleAccentOverride? Override = null, string? Reason = null)` |
+| `ModuleHostResultKind Kind { get; init; }` |
+| `ModuleAccentOverride? Override { get; init; }` |
+| `string? Reason { get; init; }` |
 
 ### `ModuleWidget`
 
@@ -762,10 +1042,14 @@
 | `static Brush Brush(string color)` |
 | `static Button Button(ModuleViewContext context, string label, Action clicked)` |
 | `static TextBlock Centered(string text, double size, string color)` |
+| `static FrameworkElement ChoiceRow(FrameworkElement scope, string title, int selected, ValueTuple<int, string>[] options, Action<int> changed, string? description = null)` |
 | `static ProgressBar Progress(double percent)` |
 | `static Grid Ring(double percent, double size = 24, double thickness = 2)` |
 | `static Border Row(string title, string value)` |
+| `static FrameworkElement SliderRow(FrameworkElement scope, string title, double value, double min, double max, double step, string? unit, Action<double> changed, string? description = null, bool fractional = false)` |
 | `static TextBlock Text(string text, double size = 13)` |
+| `static FrameworkElement TextRow(FrameworkElement scope, string title, string value, Func<string, bool> commit, string? placeholder = null, int maxLength = 0, string? description = null)` |
+| `static FrameworkElement ToggleRow(FrameworkElement scope, string title, bool value, Action<bool> changed, string? description = null)` |
 | `static Border ValueCard(string title, string value)` |
 
 ### `ModuleControlButton`
@@ -863,17 +1147,18 @@
 | `const int Major = 1` |
 | `const int Minor = 10` |
 | `const string HostInfo = "host.info"` |
-| `const string HostState = "host.state"` |
 | `const string UsageRead = "usage.read"` |
 | `const string MediaRead = "media.read"` |
 | `const string SystemRead = "system.read"` |
 | `const string NotificationsShow = "notifications.show"` |
+| `const string HostState = "host.state"` |
+| `const string HostControl = "host.control"` |
 | `const string UiPresentation = "ui.presentation"` |
+| `const string UiCompactParts = "ui.compact-parts"` |
 | `const string CommandsInvoke = "commands.invoke"` |
 | `const string UiCommands = "ui.commands"` |
 | `const string UiPages = "ui.pages"` |
 | `const string UiActivities = "ui.activities"` |
-| `const string UiCompactParts = "ui.compact-parts"` |
 | `const string UiWidgets = "ui.widgets"` |
 | `const string UiSettings = "ui.settings"` |
 | `const string StorageData = "storage.data"` |
@@ -1181,6 +1466,7 @@
 | `DateTimeOffset ObservedAt { get; init; }` |
 | `double PlaybackRate { get; init; }` |
 | `string PlaybackState { get; init; }` |
+| `DateTimeOffset? PositionObservedAt { get; init; }` |
 | `double? PositionSeconds { get; init; }` |
 | `long Revision { get; init; }` |
 | `string Source { get; init; }` |
@@ -1203,96 +1489,40 @@
 | 成员签名 |
 | --- |
 | `ModuleSystemSnapshot(long Revision, DateTimeOffset ObservedAt, ModuleDataStatus Status, double? CpuUsedPercent, double? MemoryUsedPercent, UInt64? MemoryUsedBytes, UInt64? MemoryTotalBytes, double? GpuUsedPercent, double? DownloadBytesPerSecond, double? UploadBytesPerSecond)` |
+| `ModuleReading<double> CpuPowerWatts { get; init; }` |
+| `ModuleReading<double> CpuTemperature { get; init; }` |
+| `string? CpuTemperatureSource { get; init; }` |
+| `ModuleReading<double> CpuUsage { get; init; }` |
 | `double? CpuUsedPercent { get; init; }` |
+| `ModuleReading<double> DiskReadBytesPerSecond { get; init; }` |
+| `ModuleReading<double> DiskWriteBytesPerSecond { get; init; }` |
 | `double? DownloadBytesPerSecond { get; init; }` |
+| `ModuleReading<double> DownloadRate { get; init; }` |
+| `string? GpuAdapterKey { get; init; }` |
+| `string? GpuAdapterName { get; init; }` |
+| `ModuleReading<UInt64> GpuDedicatedBytesTotal { get; init; }` |
+| `ModuleReading<UInt64> GpuDedicatedBytesUsed { get; init; }` |
+| `ModuleReading<double> GpuPowerWatts { get; init; }` |
+| `ModuleReading<double> GpuTemperature { get; init; }` |
+| `string? GpuTemperatureFrom { get; init; }` |
+| `ModuleReading<double> GpuUsage { get; init; }` |
 | `double? GpuUsedPercent { get; init; }` |
+| `ModuleReading<UInt64> MemoryTotal { get; init; }` |
 | `UInt64? MemoryTotalBytes { get; init; }` |
+| `ModuleReading<double> MemoryUsage { get; init; }` |
+| `ModuleReading<UInt64> MemoryUsed { get; init; }` |
 | `UInt64? MemoryUsedBytes { get; init; }` |
 | `double? MemoryUsedPercent { get; init; }` |
 | `DateTimeOffset ObservedAt { get; init; }` |
-| `long Revision { get; init; }` |
-| `ModuleDataStatus Status { get; init; }` |
-| `double? UploadBytesPerSecond { get; init; }` |
-| `ModuleReading<double> CpuUsage { get; init; }` |
-| `ModuleReading<double> MemoryUsage { get; init; }` |
-| `ModuleReading<UInt64> MemoryUsed { get; init; }` |
-| `ModuleReading<UInt64> MemoryTotal { get; init; }` |
-| `ModuleReading<double> GpuUsage { get; init; }` |
-| `ModuleReading<double> DownloadRate { get; init; }` |
-| `ModuleReading<double> UploadRate { get; init; }` |
-| `ModuleReading<double> CpuTemperature { get; init; }` |
-| `string? CpuTemperatureSource { get; init; }` |
-| `ModuleReading<double> GpuTemperature { get; init; }` |
-| `string? GpuTemperatureFrom { get; init; }` |
-| `string? GpuAdapterKey { get; init; }` |
-| `string? GpuAdapterName { get; init; }` |
-| `ModuleReading<UInt64> GpuDedicatedBytesUsed { get; init; }` |
-| `ModuleReading<UInt64> GpuDedicatedBytesTotal { get; init; }` |
-| `ModuleReading<double> DiskReadBytesPerSecond { get; init; }` |
-| `ModuleReading<double> DiskWriteBytesPerSecond { get; init; }` |
-| `ModuleReading<double> PowerWatts { get; init; }` |
 | `bool PowerEstimated { get; init; }` |
 | `string? PowerSource { get; init; }` |
-| `ModuleReading<double> CpuPowerWatts { get; init; }` |
-| `ModuleReading<double> GpuPowerWatts { get; init; }` |
+| `ModuleReading<double> PowerWatts { get; init; }` |
+| `long Revision { get; init; }` |
+| `ModuleDataStatus Status { get; init; }` |
 | `IReadOnlyList<ModuleStorageDrive> Storage { get; init; }` |
 | `bool StorageRead { get; init; }` |
-
-### `ModuleReading<T>`
-
-程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`；`T` 为值类型。
-
-| 成员签名 |
-| --- |
-| `ModuleDataStatus Status { get; init; }` |
-| `T? Value { get; init; }` |
-| `string? Reason { get; init; }` |
-| `DateTimeOffset? ObservedAt { get; init; }` |
-| `static ModuleReading<T> Available(T value, DateTimeOffset? observed = null)` |
-| `static ModuleReading<T> Missing(string? reason = null, DateTimeOffset? observed = null)` |
-| `static ModuleReading<T> Disabled(string? reason = null)` |
-| `static ModuleReading<T> Stale(T? value, string? reason = null, DateTimeOffset? observed = null)` |
-
-### `ModuleStorageDrive` / `ModuleStorageVolume`
-
-程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
-
-| 成员签名 |
-| --- |
-| `ModuleStorageDrive(int Number, string? Model, bool SolidState, IReadOnlyList<ModuleStorageVolume> Volumes)` |
-| `ModuleReading<double> Temperature { get; init; }` |
-| `ModuleStorageVolume(string Letter, string Label, UInt64 TotalBytes, UInt64 FreeBytes)` |
-| `UInt64 UsedBytes { get; }` |
-
-### `IModuleHostState`
-
-程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
-
-继承：`IModuleSnapshotReader<ModuleHostStateSnapshot>`。
-
-| 成员签名 |
-| --- |
-
-### `ModuleHostStateSnapshot`
-
-程序集：`BrimDeck.Modules.Abstractions`；命名空间：`BrimDeck.Modules`。
-
-| 成员签名 |
-| --- |
-| `ModuleHostStateSnapshot(long Revision, DateTimeOffset ObservedAt)` |
-| `bool Expanded { get; init; }` |
-| `string PageId { get; init; }` |
-| `bool PageIsOwn { get; init; }` |
-| `string ThemeId { get; init; }` |
-| `bool ThemeIsDark { get; init; }` |
-| `bool ThemeNightLook { get; init; }` |
-| `bool HighContrast { get; init; }` |
-| `int ThemeGeneration { get; init; }` |
-| `double DeviceScale { get; init; }` |
-| `double ContentScale { get; init; }` |
-| `string ScreenContext { get; init; }` |
-| `string? DisplayId { get; init; }` |
-| `int DisplayRevision { get; init; }` |
+| `double? UploadBytesPerSecond { get; init; }` |
+| `ModuleReading<double> UploadRate { get; init; }` |
 
 ### `IModuleNotifications`
 

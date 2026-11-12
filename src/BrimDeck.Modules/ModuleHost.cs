@@ -76,6 +76,9 @@ public sealed partial class ModuleHost : IDisposable
         _kinds = contributions.ToDictionary(k => k.Contract);
         _serviceBindings = bindings.ToDictionary(s => s.Contract);
         var available = contributions.Select(k => k.Id).Concat(bindings.Select(b => b.Capability!)).Concat(ModuleApi.Catalog.Where(c => c.Kind == ModuleCapabilityKind.Intrinsic).Select(c => c.Id)).ToHashSet(StringComparer.Ordinal);
+        // Scoped sub-actions are implemented by their parent's binding. Advertise them too, so host.info and command
+        // Requires checks see what this host actually provides; the caller's own declarations still gate each action.
+        available.UnionWith(ModuleApi.Catalog.Where(c => ParentAction(c.Id) is { } parent && available.Contains(parent)).Select(c => c.Id).ToArray());
         _capabilityDetails = Array.AsReadOnly(ModuleApi.Catalog.Where(c => available.Contains(c.Id)).OrderBy(c => c.Id, StringComparer.Ordinal).ToArray());
         _availableCapabilities = Array.AsReadOnly(_capabilityDetails.Select(c => c.Id).ToArray());
     }

@@ -80,8 +80,8 @@ public sealed class CompactRowPartConverter : System.Text.Json.Serialization.Jso
 
 public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer, Devices, Modules }
 // One part of the collapsed row: a built-in one, or one module's readings. A module's part is its own part in the
-// order — the user drags "散热器" beside the quota rings, not a group of modules — so the row's order holds saved module
-// ids directly. Saved as text ("m:thrm"), so a module that is gone keeps its place for when it comes back.
+// order — the user drags "阅读进度" beside the quota rings, not a group of modules — so the row's order holds saved module
+// ids directly. Saved as text ("m:sample-reading-progress"), so a module that is gone keeps its place for when it comes back.
 [System.Text.Json.Serialization.JsonConverter(typeof(CompactRowPartConverter))]
 public readonly record struct CompactRowPart(CompactPart BuiltIn, string? ModuleId = null){
     public static CompactRowPart Of(CompactPart part) => new(part);
@@ -455,7 +455,7 @@ public sealed class DeckSettings
     public string Page9Hotkey { get; set; } = "";
     public string Page10Hotkey { get; set; } = "";
     public string RefreshHotkey { get; set; } = "";
-    // Plugin command bindings, by command id ("thrm:open-page"). Kept when the command's module is stopped or removed, so
+    // Plugin command bindings, by command id ("sample-reading-progress:open-page"). Kept when the command's module is stopped or removed, so
     // re-enabling the module brings the binding back; the id is stable precisely so this survives a restart. Commands have
     // exactly one entry point, the global shortcut, so this map is all the preference there is.
     public Dictionary<string, string> ModuleHotkeys { get; set; } = new(StringComparer.Ordinal);

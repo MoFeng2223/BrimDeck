@@ -37,7 +37,7 @@ public partial class App
         };
     }
     // A module's own page is named in full only to that module: any other reader gets the generic mini-apps page. The module
-    // id of a page is the part before its colon ("thrm:main" is thrm's).
+    // id of a page is the part before its colon ("sample-reading-progress:main" is sample-reading-progress's).
     internal static string PageIdForModules(string pageId, string? moduleId)
         => moduleId is { Length: > 0 } && IsOwnPage(pageId, moduleId) ? pageId : pageId.StartsWith('@') ? pageId : DeckPageIds.LegacyMiniApps;
     internal ModuleHostStateSnapshot RedactHostState(ModuleHostStateSnapshot state, string moduleId)

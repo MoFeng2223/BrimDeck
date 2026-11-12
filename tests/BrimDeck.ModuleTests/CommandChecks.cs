@@ -93,14 +93,14 @@ internal static partial class Program
         var settings = new DeckSettings();
         // A recorded combination is saved in the canonical modifier order with the key's own spelling, which is what a
         // recording produces (the modifiers come from flags, the key from the WPF Key enum name).
-        settings.SetModuleHotkey("thrm:open-page", "alt+ctrl+T");
+        settings.SetModuleHotkey("sample-reading-progress:open-page", "alt+ctrl+T");
         settings.Normalize();
         Check("a command binding survives normalizing while the module is absent",
-            settings.ModuleHotkey("thrm:open-page") == "Ctrl+Alt+T");
+            settings.ModuleHotkey("sample-reading-progress:open-page") == "Ctrl+Alt+T");
         var copy = settings.Copy();
-        copy.SetModuleHotkey("thrm:open-page", "");
+        copy.SetModuleHotkey("sample-reading-progress:open-page", "");
         Check("the settings copy owns its binding map, so editing the copy leaves the original alone",
-            settings.ModuleHotkey("thrm:open-page") == "Ctrl+Alt+T" && copy.ModuleHotkey("thrm:open-page") == "");
+            settings.ModuleHotkey("sample-reading-progress:open-page") == "Ctrl+Alt+T" && copy.ModuleHotkey("sample-reading-progress:open-page") == "");
         var dirty = new DeckSettings();
         dirty.ModuleHotkeys["not a command id"] = "Ctrl+K";
         dirty.ModuleHotkeys["ok:cmd"] = "Ctrl+";     // not a hotkey, so it has no combination to register

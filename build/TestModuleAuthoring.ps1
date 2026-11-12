@@ -15,6 +15,7 @@ if ($work.StartsWith($repository + [IO.Path]::DirectorySeparatorChar, [StringCom
 if (Test-Path -LiteralPath (Join-Path $sdk 'src')) { throw 'The developer SDK must not contain host sources.' }
 $metadata = Get-Content -LiteralPath (Join-Path $sdk 'sdk.json') -Raw | ConvertFrom-Json
 New-Item -ItemType Directory -Path $work | Out-Null
+[IO.File]::WriteAllText((Join-Path $work '.brimdeck-authoring-verification'), 'brimdeck-authoring-verification/v1')
 $packages = Join-Path $work 'packages'
 New-Item -ItemType Directory -Path $packages | Out-Null
 $reports = @()

@@ -55,7 +55,7 @@ foreach ($document in @('mods/README.md','docs/zh-CN/modules.md','docs/en-US/mod
     Copy-Item -LiteralPath (Join-Path $repository $document) -Destination $destination
 }
 Copy-Item -LiteralPath (Join-Path $repository 'docs/zh-CN/modules') -Destination (Join-Path $stage 'docs/zh-CN/modules') -Recurse
-foreach ($example in @('notes','timers','usage-alerts')) {
+foreach ($example in @('notes','timers','usage-alerts','reading-progress')) {
     $files = Get-ChildItem -LiteralPath (Join-Path $repository "mods/$example") -Recurse -File | Where-Object { $_.FullName -notmatch '[\\/](bin|obj)[\\/]' } | Select-Object -ExpandProperty FullName
     foreach ($file in $files) {
         $destination = Join-Path $stage ([IO.Path]::GetRelativePath($repository,$file))

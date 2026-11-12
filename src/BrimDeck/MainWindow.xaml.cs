@@ -727,6 +727,7 @@ public partial class MainWindow : Window
         // host's own state, as a new screen context closes the panel without passing here.
         if (expanded != _host.Open) _host.Front(expanded);
         _expanded = expanded;
+        _app.DeckStateChanged();
         RefreshModulePresentation();
         _escapeDismissal?.SetEnabled(expanded && !_preview && _transient is null || _moveArmed);
         if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); if (wasExpanded) ResetShelf(); }

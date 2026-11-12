@@ -167,8 +167,8 @@ internal static partial class Program
             && drive.Volumes[0].UsedBytes == 60UL << 30 && drive.Temperature.Status == ModuleDataStatus.Available);
         Check("readings serialize without host internals", !JsonSerializer.Serialize(busy).Contains("PRIVATE"));
         // The panel's state is the main panel's, and a page that belongs to one module is named only to that module.
-        var state = new ModuleHostStateSnapshot(1, now) { Expanded = true, PageId = "thrm:main", ThemeId = "dark", ContentScale = 1.25, DisplayRevision = 3 };
-        Check("a module sees its own page", App.PageIdForModules(state.PageId, "thrm") == "thrm:main");
+        var state = new ModuleHostStateSnapshot(1, now) { Expanded = true, PageId = "sample-reading-progress:main", ThemeId = "dark", ContentScale = 1.25, DisplayRevision = 3 };
+        Check("a module sees its own page", App.PageIdForModules(state.PageId, "sample-reading-progress") == "sample-reading-progress:main");
         Check("another module's page is hidden behind the generic page", App.PageIdForModules(state.PageId, "other") == DeckPageIds.LegacyMiniApps);
         Check("built-in pages stay visible to every module", App.PageIdForModules(DeckPageIds.Monitor, "other") == DeckPageIds.Monitor);
         Check("a state snapshot is immutable data", state is { Expanded: true, ContentScale: 1.25, DisplayRevision: 3 } && state.Revision == 1);

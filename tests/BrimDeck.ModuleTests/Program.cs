@@ -79,16 +79,16 @@ internal static partial class Program
             ("startup", StartupGuardChecks), ("inspector", () => PackageInspectorChecks(_artifacts.Notes)), ("host-range", () => ModuleHostRangeChecks(_artifacts.Notes)),
             ("signatures", ModuleSignatureChecks), ("platform", () => PlatformChecks().GetAwaiter().GetResult()),
             ("commands", () => CommandChecks().GetAwaiter().GetResult()), ("host-control", HostControlChecks),
-            ("timers", () => TimerPluginChecks(_artifacts.Notes)), ("sdk-boundary", () => BoundaryChecks(repository))
+            ("timers", () => TimerPluginChecks(_artifacts.Notes)), ("reading-progress", () => ReadingProgressChecks(repository)), ("sdk-boundary", () => BoundaryChecks(repository))
         };
         if (selected.Except(groups.Select(g => g.Name), StringComparer.OrdinalIgnoreCase).Any()) { Console.Error.WriteLine("Unknown group. Available: " + string.Join(", ", groups.Select(g => g.Name))); return 2; }
         var results = new List<object>();
         bool uiReady = false;
         foreach (var group in groups)
         {
-            if (selected.Count > 0 && !selected.Contains(group.Name) && !(group.Name == "ui" && selected.Overlaps(["async-views", "visibility", "settings-navigation", "page-theme", "settings-schema", "timers"])))
+            if (selected.Count > 0 && !selected.Contains(group.Name) && !(group.Name == "ui" && selected.Overlaps(["async-views", "visibility", "settings-navigation", "page-theme", "settings-schema", "timers", "reading-progress"])))
             { results.Add(new { name = group.Name, status = "not-selected", checks = 0, failures = 0 }); continue; }
-            if (group.Name is "async-views" or "visibility" or "settings-navigation" or "page-theme" or "settings-schema" or "timers" && !uiReady)
+            if (group.Name is "async-views" or "visibility" or "settings-navigation" or "page-theme" or "settings-schema" or "timers" or "reading-progress" && !uiReady)
             { results.Add(new { name = group.Name, status = "blocked-by-ui", checks = 0, failures = 0 }); Failures.Add(group.Name + ": UI initialization failed; group not executed."); continue; }
             int before = _checks, failed = Failures.Count;
             try { group.Run(); if (group.Name == "ui") uiReady = true; }
