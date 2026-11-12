@@ -1049,6 +1049,7 @@ public partial class MainWindow : Window
         {
             var result = await LoadSnapshotsAsync(decks.Min(deck => deck._historyStart));
             foreach (var deck in _app.Decks) deck.SetSnapshots(result);
+            _app.SnapshotsChanged();
         }
         catch (OperationCanceledException) { }
         // A read that failed in a way the sources did not expect leaves the panels with what they showed; the next one tries again.
