@@ -36,6 +36,13 @@ When a record carries its own amount (Cursor and OpenCode, for example), that am
 
 A price in that list usually comes from the cheapest provider and can differ from the model maker's list price. For example, GLM-5.3 is listed at 0.07 and 1.4 USD per million input and output tokens, while Z.AI charges 1.4 and 4.4. So for each model your records use, BrimDeck looks up the model maker's own endpoint on OpenRouter and uses its prices instead; a model whose maker has no endpoint there keeps the list price. Each model's endpoint prices are looked up once a day and saved on this PC; when a lookup fails, the prices saved before are used. Prices added by hand take precedence.
 
+## Target balance and off-peak time
+
+Expand an app's row under Settings › Quotas and usage › Apps to set:
+
+- **Target balance**: for sources billed per API call, which only have a balance, the target balance counts as 100% and usage is shown from what is left. For example, with a target of 100 and 20 left, 80% is shown as used. New rows start at 100; left empty, only the balance amount is shown. Once set, the quota ring, the progress bar, the warning colors and the notices follow it.
+- **Off-peak time**: add up to 6 off-peak periods, with colors of their own. During an off-peak period, the column's quota ring and progress bar use the off-peak colors.
+
 ## Usage in WSL
 
 When "Include usage from WSL" is turned on in Settings › Quotas and usage, BrimDeck reads the Claude Code and Codex CLI session records inside installed WSL distributions and counts them in the tokens and cost of Claude and Codex. Only Claude and Codex support WSL at present.
@@ -82,6 +89,7 @@ Reads local session usage and cost statistics from Pi Coding Agent (`~/.pi/agent
 - **Usage app**: select Pi under "Usage app" and pair it with an existing quota source. Pi is not offered under "Quota source". No Pi sign-in, third-party subscription quota or Pi account switching is read or provided.
 - **Tokens and cost**: reads session records from `~/.pi/agent/sessions` and counts token usage and Pi-recorded costs for Today and Week, not subscription charges.
 - **Session path**: `PI_CODING_AGENT_SESSION_DIR` takes precedence; otherwise reads `sessions` under `PI_CODING_AGENT_DIR`, or the default directory when neither is set. Pi-specific resolution supports `~`, `~/...`, relative paths and local `file://` URLs; Windows also supports `~\...` and Git Bash/MSYS/Cygwin/WSL drive paths. Relative paths use the BrimDeck process working directory, which may differ from Pi running in another terminal. Only the selected directory is read; other Pi profiles are not automatically scanned.
+
 ## OpenCode
 
 The OpenCode CLI and desktop app share one data folder (`%USERPROFILE%\.local\share\opencode`), and keep the sign-in and session records in `opencode.db` there, so signing in to either is enough. OpenCode 1.x and 2.x use this folder too.
