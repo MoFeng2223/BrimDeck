@@ -42,19 +42,19 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
 
 <table>
   <tr>
-    <td align="center"><img src="docs/en-US/images/compact-notch.png" width="261" alt="Notch"><br>Notch (default)</td>
-    <td align="center"><img src="docs/en-US/images/compact-capsule.png" width="251" alt="Capsule"><br>Capsule</td>
+    <td align="center"><img src="docs/en-US/images/compact-notch.png" width="232" alt="Notch"><br>Notch (default)</td>
+    <td align="center"><img src="docs/en-US/images/compact-capsule.png" width="222" alt="Capsule"><br>Capsule</td>
     <td align="center"><img src="docs/en-US/images/compact-line.png" width="128" alt="Indicator"><br>Indicator</td>
   </tr>
 </table>
 
-- Notch and Capsule show each tool's quota usage as rings. Choose one ring per tool, or nested rings: up to three concentric rings per tool, each showing the quota you choose. The rings and the panel's bars can show what is used or what is left, and the first letter of the tool's display name can be shown inside its ring (off by default). They also preview the music that is playing with its cover, an equalizer, and the title or the current lyric line.
+- Notch and Capsule show each tool's quota usage as rings. Choose one ring per tool (the default), or nested rings: up to three concentric rings per tool, each showing the quota you choose. The rings and the panel's bars can show what is used or what is left, and the first letter of the tool's display name can be shown inside its ring (off by default). They also preview the music that is playing with its cover, an equalizer, and the title or the current lyric line.
 
-  <img src="docs/en-US/images/compact-notch-lyrics.png" width="412" alt="Notch showing a lyric line">
+  <img src="docs/en-US/images/compact-notch-lyrics.png" width="383" alt="Notch showing a lyric line">
 
 - The notch and capsule can show the time. It sits on the right when shown with the quota rings or music, and is centered when shown alone; its colors can be customized.
 
-  <img src="docs/en-US/images/compact-clock.png" width="571" alt="Clock in the notch: Simple, Seven segment and Serif styles beside the quota rings, and the clock shown alone, centered">
+  <img src="docs/en-US/images/compact-clock.png" width="513" alt="Clock in the notch: Simple, Seven segment and Serif styles beside the quota rings, and the clock shown alone, centered">
 
 - When a tool's quota usage rises to the warning (70%) or critical (90%) level, the collapsed view shows a notice for 5 seconds. You can turn this off in settings.
 
@@ -62,11 +62,11 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
 
 - Notch and Capsule can show system readings next to the quota rings and the music.
 
-  <img src="docs/en-US/images/compact-monitor.png" width="527" alt="System readings in the notch: core columns, CPU, memory, GPU and network speed beside the quota rings">
+  <img src="docs/en-US/images/compact-monitor.png" width="498" alt="System readings in the notch: core columns, CPU, memory, GPU and network speed beside the quota rings">
 
 - Notch and Capsule can show the batteries of wireless devices and the number of files in the file transfer.
 
-  <img src="docs/en-US/images/compact-devices.png" width="530" alt="Device batteries and the file transfer in the notch: the file count beside the quota rings, then battery rings for a mouse, a keyboard, headsets and a controller">
+  <img src="docs/en-US/images/compact-devices.png" width="483" alt="Device batteries and the file transfer in the notch: the file count beside the quota rings, then battery rings for a mouse, a keyboard, headsets and a controller">
 
 - The size and position of the Notch, Capsule and Indicator can be adjusted in settings. The Notch and Indicator can hang from the top, bottom, left or right edge of the screen, and all three styles can sit inside the taskbar.
 
