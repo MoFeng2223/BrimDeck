@@ -4,9 +4,10 @@
 
 ## 构建与安装
 
-需要 .NET 10 SDK 和包含契约 1.10 的 `feat/plugins` 宿主；正式版 1.3.0 尚不包含该插件平台。
+需要 .NET 10 SDK 和从本分支构建的契约 1.10 宿主；正式版 1.3.0 尚不包含该插件平台。本分支同时修复了命令子能力目录、临时色重绘和面板状态事件，验收时请使用配套宿主，不能只把示例安装到修复前的 1.10 构建。
 
 ```powershell
+dotnet build BrimDeck.sln -c Release
 dotnet build mods/reading-progress/BrimDeck.ReadingProgress.csproj -c Release -t:GetModulePackage
 ```
 
@@ -55,6 +56,6 @@ dotnet build BrimDeck.ReadingProgress.csproj -c Release -t:GetModulePackage -p:B
 
 ---
 
-Track a book and page goal with a compact progress part, persistent page updates, undo, shortcut commands and a temporary completion accent. No network, account, local service or hardware access is required. This sample is installed explicitly and is not bundled by default. It requires the contract-1.10 `feat/plugins` host, not the current 1.3.0 release.
+Track a book and page goal with a compact progress part, persistent page updates, undo, shortcut commands and a temporary completion accent. No network, account, local service or hardware access is required. This sample is installed explicitly and is not bundled by default. Use a contract-1.10 host built from this branch, including its command capability, accent repaint and panel-state fixes; earlier 1.10 builds and the current 1.3.0 release are not the acceptance target.
 
 Build the package with the command above, copy its `sample-reading-progress` directory into the module folder opened by host settings, refresh and enable it. The optional `BrimDeckSdk` build mode works outside the repository without host project references. Buttons and shortcuts use the same commands; only the open-page command opens the panel. Acceptance details expose the initial panel snapshot and safe refusal probes; background expansion and foreign-page navigation must be rejected. Unreadable saved data is preserved. Theme changes, disabling the module or releasing the override end the temporary accent.
