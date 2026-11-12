@@ -1,0 +1,48 @@
+README.md
+  h_dc4d9c798f1bc1 10,21,29,31-32,45-46,51,53,57,65,67-71,75,91,94-96,98,102,104,106-107,110-111,114-127,129-134,138,140,142-150,161-164,170-171,175-178,184,197-202,205,216-217
+docs/en-US/devices.md
+  h_dc4d9c798f1bc1 1-51
+docs/zh-CN/music-players.md
+  h_dc4d9c798f1bc1 23,25,30,41-49
+docs/en-US/ai-tools.md
+  h_dc4d9c798f1bc1 39-45,92
+docs/zh-CN/ai-tools.md
+  h_dc4d9c798f1bc1 39-45,92
+docs/en-US/enhanced-sensors.md
+  h_dc4d9c798f1bc1 5
+docs/zh-CN/privacy.md
+  h_dc4d9c798f1bc1 3,36-39,51-53,63
+docs/zh-CN/devices.md
+  h_dc4d9c798f1bc1 1-51
+docs/zh-CN/clipboard.md
+  h_dc4d9c798f1bc1 1-55
+docs/en-US/music-players.md
+  h_dc4d9c798f1bc1 23,25,30,41-49
+docs/en-US/privacy.md
+  h_dc4d9c798f1bc1 3,36-39,51-53,63
+docs/en-US/clipboard.md
+  h_dc4d9c798f1bc1 1-55
+README.zh-CN.md
+  h_dc4d9c798f1bc1 10,21,29,31-32,45-46,51,53,57,65,67-71,75,91,94-96,98,102,104,106-107,110-111,114-127,129-134,138,140,142-150,162-164,170-171,175-178,184,197-202,205,216-217
+docs/zh-CN/system-monitor.md
+  h_dc4d9c798f1bc1 1-81
+scripts/readme-media/compose.py
+  h_dc4d9c798f1bc1 132,134-135,137-146,152-160,182,250,253
+scripts/readme-media/Program.cs
+  h_dc4d9c798f1bc1 22-25,83,113-125,152-154,158-159,166-167,178-181,309-384,386-390,394-398,402-403,448-450,457-458,487-489,501-502,504,507,513,517-518,528,532,539,558,561-578,582,659-663,669-670,686,688,722-724,728-746,751-764,768,799,806,839-847,850-863
+docs/zh-CN/enhanced-sensors.md
+  h_dc4d9c798f1bc1 5
+docs/en-US/system-monitor.md
+  h_dc4d9c798f1bc1 1-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "be2f1cf4f6b4202ea7d753e5ffb706ed0ee93e1c",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
