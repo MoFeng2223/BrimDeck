@@ -255,6 +255,8 @@ public partial class App : Application
     }
     // The settings window's size group follows changes made on the panel (a drag, or content that changed the auto width).
     internal void CollapsedChanged() => _settingsWindow?.CollapsedChanged();
+    // A new reading may bring quotas an application row's ring choices did not have yet (SettingsWindow.QuotasChanged).
+    internal void SnapshotsChanged() => _settingsWindow?.QuotasChanged();
     private void SystemThemeChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
     {
         if (Dispatcher.HasShutdownStarted) return;

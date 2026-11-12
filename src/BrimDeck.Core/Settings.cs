@@ -58,6 +58,10 @@ public enum PausedMusicHide { None, Text, Cover, Both }
 // drum beat or a voice is seen crossing them. Spectrum: the sound split by pitch, each bar one band, low on the left and high
 // on the right. Saved as numbers, so new members go at the end; a file without it, or with a number not listed, is Flow.
 public enum EqualizerMode { Flow = 0, Spectrum = 1 }
+// How the collapsed quota rings are drawn (QuotaRing). Nested: up to three rings about one centre, 20 DIP across, each quota in
+// a ring of its own. Single: one 12 DIP ring per application with its highest share, as before there were nested rings. Saved
+// as numbers, so new members go at the end; a file without it, or with a number not listed, is Single.
+public enum QuotaRingStyle { Nested = 0, Single = 1 }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left; Music places
 // only the title or lyric. Saved as numbers, so new members go at the end.
 public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer, Devices }
@@ -144,6 +148,16 @@ public sealed class AppEntry
     public string OffPeakColor { get; set; } = "";
     public string OffPeakWarningColor { get; set; } = "";
     public string OffPeakCriticalColor { get; set; } = "";
+    // This row's collapsed quota ring (QuotaRing.For). SingleRingQuota: the quota (UsageMetric.Id) the single ring shows; empty
+    // shows the default. RingQuotas: the quotas the nested rings show by place, outer, middle and inner, an empty string for a ring
+    // left out (QuotaRing.Slots); an empty list shows the default rings. The letter inside always comes from the display name
+    // (CompactMusicLayout.RingLetterFor).
+    // QuotaTargets: the amount that counts as 100% for each other balance or amount spent (UsageMetric.Id → amount), such as a gift
+    // balance, a key's balance or today's spending, as BalanceTarget is for the account balance; the rings, the panel's bars and the
+    // notices all follow it (DashboardUsage.Quota).
+    public string SingleRingQuota { get; set; } = "";
+    public List<string> RingQuotas { get; set; } = [];
+    public Dictionary<string, decimal> QuotaTargets { get; set; } = [];
     public bool IsOffPeak(DateTime local) => OffPeak?.Any(period => period.Contains(local)) == true;
     // The next minute at which this row enters or leaves its off-peak time; null without periods, or when they cover the
     // whole day. A boundary inside another period changes nothing, so the first boundary that flips the state is taken.
@@ -161,6 +175,8 @@ public sealed class AppEntry
         var copy = (AppEntry)MemberwiseClone();
         copy.UsageSource = UsageSource;
         copy.OffPeak = [.. (OffPeak ?? []).Select(period => period.Copy())];
+        copy.RingQuotas = [.. RingQuotas ?? []];
+        copy.QuotaTargets = new(QuotaTargets ?? []);
         return copy;
     }
     public void Normalize()
@@ -180,6 +196,11 @@ public sealed class AppEntry
         OffPeakColor = AppPresets.NormalizeColor(OffPeakColor);
         OffPeakWarningColor = AppPresets.NormalizeColor(OffPeakWarningColor);
         OffPeakCriticalColor = AppPresets.NormalizeColor(OffPeakCriticalColor);
+        SingleRingQuota = (SingleRingQuota ?? "").Trim();
+        if (SingleRingQuota.Length > 500) SingleRingQuota = "";
+        RingQuotas = QuotaRing.Slots(RingQuotas);
+        QuotaTargets = (QuotaTargets ?? []).Where(pair => pair.Key.Length is > 0 and <= 500 && pair.Value > 0 && pair.Value <= AppPresets.MaximumBalanceTarget).Take(32)
+            .ToDictionary(pair => pair.Key, pair => decimal.Round(pair.Value, 2, MidpointRounding.AwayFromZero));
     }
 }
 
@@ -428,6 +449,12 @@ public sealed class DeckSettings
     // Writes each application's first letter (or digit) of its name inside its collapsed quota ring, in the notch, the capsule and
     // the side column. Off by default; a file without it reads as off.
     public bool QuotaRingLetters { get; set; }
+    // The quota rings' style (QuotaRingStyle), in every style and in the side column; each application's choice of quotas for it is
+    // its own (AppEntry.SingleRingQuota, AppEntry.RingQuotas).
+    public QuotaRingStyle QuotaRingStyle { get => _quotaRingStyle; set => _quotaRingStyle = Enum.IsDefined(value) ? value : QuotaRingStyle.Single; }
+    private QuotaRingStyle _quotaRingStyle = QuotaRingStyle.Single;
+    // The rings' arcs show what is left of each quota instead of what is used. Off by default; a file without it reads as off.
+    public bool QuotaRingRemaining { get; set; }
     public bool CapsuleMusic { get; set; } = true;
     // The notch and the capsule each switch the equalizer on. It shows while a song plays (or is paused), or, with EqualizerAlways,
     // at all times: then it reads the whole system's sound while no song plays.
