@@ -16,7 +16,14 @@ public partial class MainWindow
         if (!IsUsagePage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false);
         bool wanted = details && Settings.UsagePage;
         if (wanted != _details) _usageHandover = wanted ? Handover.Forward : Handover.Back;
-        _details = wanted; RenderUsage();
+        _details = wanted;
+        // The panel takes clicks without taking focus, so an open date or app pop-up stays open when the back button is
+        // clicked, and RenderUsage leaves the page as it is while a pop-up is open. The pop-up goes at once, before the page
+        // moves: faded out, it would close (and hand activation back to the panel) in the middle of the page's move, and the
+        // page would be built twice, once by the pop-up's closing and once here. Closed now, its closing builds the page once,
+        // with the motion set above, and the call below finds it built.
+        if (_detailPopup is { } popup) { _popupAtOnce = true; try { popup.Close(); } finally { _popupAtOnce = false; } }
+        RenderUsage();
     }
 
     private const double ColumnTopInset = 2, EdgeInset = 6;
