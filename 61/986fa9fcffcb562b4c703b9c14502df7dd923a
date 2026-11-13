@@ -1,0 +1,33 @@
+src/BrimDeck/Native/SystemSampler.cs
+  s_a174260c7667ff::t_771d9995d4c2cb 230-233
+  s_a174260c7667ff::t_e726cb698acdfb 240-241
+  s_a174260c7667ff::t_1dca4117d555ab 288-290,293,295,300,304,307
+  s_a174260c7667ff::t_50bef59ca006f9 81-82
+  s_6e52e25f6c2d36::t_93bd26da7f5baa 210
+  s_a174260c7667ff::t_d49b35d9e2a3a6 227
+  s_a174260c7667ff::t_b7ce01fcbb35a6 294,298-299,305,308
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "61986fa9fcffcb562b4c703b9c14502df7dd923a",
+  "prompts": {},
+  "sessions": {
+    "s_6e52e25f6c2d36": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f8982054-f528-4d98-aae2-f953240e294b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_a174260c7667ff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c2981951-7635-44b3-a1a5-fe26b38e3ef5",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
