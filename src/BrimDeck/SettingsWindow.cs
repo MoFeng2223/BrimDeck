@@ -68,8 +68,8 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     {
         _app = app;
         Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/BrimDeck;component/SettingsResources.xaml", UriKind.Relative) });
-        using (Fonts.Plain()) Fonts.Publish(Resources);
-        Style = (Style)FindResource(typeof(Window));
+        using (OwnFonts()) Fonts.Publish(Resources);
+        Style =(Style)FindResource(typeof(Window));
         // Sizes are DIPs, so the window looks the same at any scale factor. The default fits the page layout (the content
         // column is at most 858 wide); the last closed size replaces it. Either is fitted to the work area of the screen
         // the window opens on, which CenterScreen takes as the one under the mouse pointer.
@@ -142,8 +142,13 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     }
     private void PricesChanged()
     { if (!Dispatcher.HasShutdownStarted) Dispatcher.BeginInvoke(() => { if (IsLoaded) RefreshPriceRows(); }); }
-    // The window keeps the app's own fonts whatever interface font the user chose (Fonts.Plain): it is where the font is chosen, and it stays readable.
-    internal void RebuildTheme() { using (Fonts.Plain()) RebuildThemeCore(); }
+    // The window keeps the app's own fonts whatever interface font the user chose (Fonts.Plain), unless the user asked for it to follow
+    // the chosen one (DeckSettings.SettingsFollowsFont). The font row keeps them either way (AppearanceSection), so a font that is
+    // hard to read can be changed back. Fonts.Use leaves this window alone (IKeepsAppFonts); a change of font or of the switch rebuilds it.
+    private IDisposable? OwnFonts() => S.SettingsFollowsFont ? null : Fonts.Plain();
+    // The family for what this window builds or draws outside a rebuild (a dialog, a popup, a tick label).
+    internal FontFamily SettingsFont(UiFontRole role) => S.SettingsFollowsFont && !Fonts.IsPlain ? Fonts.Of(role) : Fonts.PlainOf(role);
+    internal void RebuildTheme() { using (OwnFonts()) { Fonts.Publish(Resources); RebuildThemeCore(); } }
     private void RebuildThemeCore()
     {
         RememberFocus();
@@ -152,7 +157,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         // A language change rebuilds the window the same way.
         Title = Loc.T("BrimDeck 设置", "BrimDeck Settings");
         _palette = new(SettingsPalette.IsDark(S.Theme)); _palette.Apply(Resources);
-        Background = UI.Brush(Surface); Foreground = UI.Brush(TextPrimary); FontFamily = Fonts.PlainOf(UiFontRole.Panel);
+        Background = UI.Brush(Surface); Foreground = UI.Brush(TextPrimary); FontFamily = SettingsFont(UiFontRole.Panel);
         // Detach reused panels before rebuilding the window's theme-specific surfaces.
         _navigation.Children.Clear(); _content.Children.Clear();
         if (_navigation.Parent is ScrollViewer oldNavigation) oldNavigation.Content = null;
@@ -215,14 +220,14 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     // The product name on one line: a heavier "Brim" followed by a light "Deck".
     private TextBlock Wordmark(double size)
     {
-        var name = new TextBlock { FontFamily = Fonts.PlainOf(UiFontRole.Text), FontSize = size, Foreground = UI.Brush(TextPrimary) };
+        var name = new TextBlock { FontFamily = SettingsFont(UiFontRole.Text), FontSize = size, Foreground = UI.Brush(TextPrimary) };
         name.Inlines.Add(new Run("Brim") { FontWeight = FontWeights.SemiBold });
         name.Inlines.Add(new Run("Deck") { FontWeight = FontWeights.Light, Foreground = UI.Brush(_palette.Dark ? "#C5C5CB" : "#565661") });
         AutomationProperties.SetName(name, "BrimDeck"); return name;
     }
     private TextBlock TextLine(string text, double size = 13, string color = "#F1F1F4", FontWeight? weight = null)
     {
-        var block = UI.Line(text, size, color, weight); block.FontFamily = Fonts.PlainOf(UiFontRole.Panel);
+        var block = UI.Line(text, size, color, weight); block.FontFamily = SettingsFont(UiFontRole.Panel);
         string? resource = color == TextPrimary ? "SettingsTextPrimary" : color == TextSecondary ? "SettingsTextSecondary" :
             color is "#F0A6AA" or "#B12E3A" ? "SettingsError" : null;
         if (resource is not null) block.SetResourceReference(TextBlock.ForegroundProperty, resource);
@@ -304,7 +309,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         }, System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
-    public void ShowPage(int page) { using (Fonts.Plain()) ShowPageCore(page); }
+    public void ShowPage(int page) { using (OwnFonts()) ShowPageCore(page); }
     private void ShowPageCore(int page)
     {
         if (page < 0 || page >= _pages.Length) return;
@@ -420,12 +425,14 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         var transparency = SliderRow(Loc.T("背景透明度", "Background transparency"), S.SurfaceTransparency, 0, DeckSettings.MaxSurfaceTransparency, 5, "%",
             value => Change(s => s.SurfaceTransparency = (int)value));
         // The interface font (UiFonts, Fonts): "Default" keeps the app's own fonts. The installed families are listed when the list is
-        // opened and not before, and the choice reaches every window at once (Fonts.Use) without a restart; this window is built again
-        // with the app's own fonts (Fonts.Plain), and only the preview line below is set in the chosen one.
+        // opened and not before, and the choice reaches every window at once (Fonts.Use) without a restart; this window is built again,
+        // in the chosen font only when the switch below asks for it (DeckSettings.SettingsFollowsFont). The font row and the switch are
+        // always in the app's own fonts (Fonts.Plain), so a font that is hard to read can be changed back from here.
         var fontDefault = Loc.T("默认", "Default");
         List<string> fontNames = S.UiFont.Length > 0 ? [fontDefault, S.UiFont] : [fontDefault];
         bool fontListed = false, fontFilling = false;
-        var font = new ComboBox { Width=150,Style=(Style)FindResource("SettingsCombo"),ItemsSource=fontNames,SelectedIndex=S.UiFont.Length > 0 ? 1 : 0,MaxDropDownHeight=320,IsTextSearchEnabled=true };
+        var font = new ComboBox { Width=150,Style=(Style)FindResource("SettingsCombo"),ItemsSource=fontNames,SelectedIndex=S.UiFont.Length > 0 ? 1 : 0,MaxDropDownHeight=320,IsTextSearchEnabled=true,
+            FontFamily=Fonts.PlainOf(UiFontRole.Panel) };
         AutomationProperties.SetName(font,Loc.T("界面字体", "Interface font")); AutomationProperties.SetAutomationId(font,"interface-font"); PopupMotion.Attach(font);
         font.DropDownOpened+=(_,_)=>
         {
@@ -445,10 +452,16 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         };
         var fontSample = new TextBlock { Text=Loc.T("字体预览 Aa Bb 0123 中英文混排", "Font preview Aa Bb 0123 mixed text"),TextTrimming=TextTrimming.CharacterEllipsis,MaxWidth=260,
             FontFamily=Fonts.Sample(S.UiFont),FontSize=13,Foreground=UI.Brush(TextPrimary),VerticalAlignment=VerticalAlignment.Center };
+        FrameworkElement fontRow, followRow;
+        using (Fonts.Plain())
+        {
+            fontRow = Row(Loc.T("界面字体", "Interface font"),font,help: () => Loc.T("选择界面文字使用的字体，立即生效。图标、等宽的脚本编辑器和时钟的自带字体样式不受影响；字体缺失时会回到默认字体。",
+                "Choose the font the interface text is drawn in; it applies at once. Icons, the monospaced script editor and the clock styles that ship their own fonts are not affected; a missing font falls back to the default one."));
+            followRow = Toggle(Loc.T("字体应用到设置窗口", "Apply font to settings window"), S.SettingsFollowsFont,
+                on => { Change(s => s.SettingsFollowsFont = on); RebuildTheme(); });
+        }
         Group(Row(Loc.T("主题", "Theme"),SegmentBorder(themes)),Row(Loc.T("语言", "Language"),language),Row(Loc.T("缩放", "Scale"),scale),transparency,
-            Row(Loc.T("界面字体", "Interface font"),font,help: () => Loc.T("选择界面文字使用的字体，立即生效。图标、等宽的脚本编辑器和时钟的自带字体样式不受影响；字体缺失时会回到默认字体。",
-                "Choose the font the interface text is drawn in; it applies at once. Icons, the monospaced script editor and the clock styles that ship their own fonts are not affected; a missing font falls back to the default one.")),
-            Row(Loc.T("字体预览", "Font preview"),fontSample));
+            fontRow,followRow,Row(Loc.T("字体预览", "Font preview"),fontSample));
         DisplayChoice(); Interaction(); WindowRules();
     }
     // Either the primary display, or any set of displays, each with its own switch. A chosen display that is not
@@ -683,7 +696,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         {
             switch(_page)
             {
-                case 0:s.LaunchAtStartup=false;s.ShowTrayIcon=defaults.ShowTrayIcon;s.MemoryMode=defaults.MemoryMode;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.ClickToExpand=defaults.ClickToExpand;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.AlwaysOnTop=defaults.AlwaysOnTop;s.ForceTopmost=defaults.ForceTopmost;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.FullscreenRules=[];s.Display=defaults.Display;s.DisplayMonitors=[];s.PanelScale=defaults.PanelScale;s.SurfaceTransparency=defaults.SurfaceTransparency;s.UiFont=defaults.UiFont;
+                case 0:s.LaunchAtStartup=false;s.ShowTrayIcon=defaults.ShowTrayIcon;s.MemoryMode=defaults.MemoryMode;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.ClickToExpand=defaults.ClickToExpand;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.AlwaysOnTop=defaults.AlwaysOnTop;s.ForceTopmost=defaults.ForceTopmost;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.FullscreenRules=[];s.Display=defaults.Display;s.DisplayMonitors=[];s.PanelScale=defaults.PanelScale;s.SurfaceTransparency=defaults.SurfaceTransparency;s.UiFont=defaults.UiFont;s.SettingsFollowsFont=defaults.SettingsFollowsFont;
                     s.ClickThrough=defaults.ClickThrough;s.ClickThroughPanel=defaults.ClickThroughPanel;s.WindowCapture=defaults.WindowCapture;break;
                 case HotkeysPage:foreach(var kind in Enum.GetValues<HotkeyKind>())s.SetHotkey(kind,defaults.Hotkey(kind));break;
                 case 1:s.Style=defaults.Style;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;

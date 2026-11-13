@@ -340,6 +340,9 @@ public sealed class DeckSettings
     // The family the interface's text is drawn in (UiFonts), in front of the app's own fonts; empty is those fonts alone, as before
     // the setting existed. Icons, figures in code and the clock styles' own faces are not affected. A file without it reads as empty.
     public string UiFont { get; set; } = "";
+    // On, the settings window is drawn in the chosen font too; off (the default), it keeps the app's own fonts. Either way the
+    // font row itself keeps them, so a font that is hard to read can still be changed back.
+    public bool SettingsFollowsFont { get; set; }
     public CompactStyle Style { get; set; } = CompactStyle.Notch;
     // The notch or the capsule last chosen, which the line style hotkey (HotkeyKind.LineStyle) returns to from the line. Normalize
     // keeps it up to date.
