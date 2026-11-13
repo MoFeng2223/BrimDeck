@@ -52,6 +52,8 @@ public sealed partial class SettingsWindow
     private void EditExpanded(Action<List<ExpandedReading>> edit)
         => Resize(s => { var list = ExpandedMonitor.Normalize(s.ExpandedReadings); edit(list); s.ExpandedReadings = list; }, DeckPage.Monitor);
 
+    private Action? _refreshExpanded;
+
     private Grid ExpandedColumns()
     {
         var grid = new Grid { Background = Brushes.Transparent };
@@ -66,6 +68,7 @@ public sealed partial class SettingsWindow
         bool syncing = false;
         var refresh = new List<Action>();
         void Refresh() { syncing = true; try { foreach (var update in refresh) update(); } finally { syncing = false; } }
+        _refreshExpanded = Refresh;
         void Edit(Action<List<ExpandedReading>> edit) { if (syncing) return; EditExpanded(edit); Refresh(); }
         var rows = new StackPanel();
         foreach (var reading in ExpandedMonitor.Normalize(S.ExpandedReadings).Where(reading => reading.Item != ExpandedItem.Processes))
@@ -78,7 +81,7 @@ public sealed partial class SettingsWindow
         var table = new StackPanel();
         table.Children.Add(headings);
         table.Children.Add(new Border { Child = rows, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0, 1, 0, 0) });
-        var empty = TextLine(Loc.T("一个都不选时，展开页显示提示，并且不读取任何数据。", "With nothing chosen the expanded page says so and reads nothing."), 12, TextTertiary);
+        var empty = TextLine(Loc.T("一个都不选时，展开页显示提示，并且展开页不请求任何数据（进程列表开关打开时除外）。", "With nothing chosen the expanded page says so and asks for no data (unless the process list switch is on)."), 12, TextTertiary);
         empty.Margin = new Thickness(0, 6, 0, 6); empty.TextWrapping = TextWrapping.Wrap;
         table.Children.Add(empty);
 
@@ -88,7 +91,7 @@ public sealed partial class SettingsWindow
             (ExpandedPreset.All, Loc.T("全部", "All"), Loc.T("显示全部监控项；帧率需要授权，保持原状。不改变顺序和进程列表。", "Shows every reading; the frame rate needs permission and stays as it is. The order and the process list stay.")),
             (ExpandedPreset.Brief, Loc.T("简洁", "Brief"), Loc.T("只显示 CPU、内存、下载和上传。", "Shows only the CPU, memory, download and upload.")),
             (ExpandedPreset.CpuMemory, Loc.T("CPU 与内存", "CPU and memory"), Loc.T("只显示 CPU 和内存。", "Shows only the CPU and memory.")),
-            (ExpandedPreset.None, Loc.T("全部不选", "None"), Loc.T("不选任何监控项；展开页显示提示，并且不读取数据。进程列表有单独的开关。", "Chooses no reading; the expanded page says so and reads nothing. The process list has its own switch."))
+            (ExpandedPreset.None, Loc.T("全部不选", "None"), Loc.T("清空表格中的监控项，不影响进程列表。要显示空状态并停止展开页的采集，还需关闭“显示进程列表”开关。", "Clears the table items only; the process list is not affected. To get the empty state and stop the expanded page collecting, also turn off the process list switch."))
         })
         {
             var choice = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = label, GroupName = "ExpandedPreset" };

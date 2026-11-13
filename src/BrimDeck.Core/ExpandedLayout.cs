@@ -71,7 +71,7 @@ public sealed class ExpandedPlan
     public ExpandedDemand Demand(bool temperatures) => ExpandedMonitor.Demand(Shown, temperatures);
 
     // What makes two plans the same page, as far as building it goes.
-    public string Signature => string.Join("|", Kind, Steps, List, string.Join(",", Parts.Select(part => part.Item + ":" + part.Form)));
+    public string Signature => string.Join("|", Kind, Steps, List, Downloads, Uploads, string.Join(",", Parts.Select(part => part.Item + ":" + part.Form)));
 }
 
 // The expanded page's layout from the table of items: the page before the table (MonitorLayout) made general. The rules:

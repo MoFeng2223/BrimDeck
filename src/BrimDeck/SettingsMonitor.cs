@@ -21,9 +21,9 @@ public sealed partial class SettingsWindow
     {
         bool syncing = false;
         var refresh = new List<Action>();
-        _refreshReadings = null;
+        _refreshReadings = null; _refreshExpanded = null;
         // Shows what the settings hold in place: the colors, the preset they match, and the readings' colors in the table.
-        void Refresh() { syncing = true; try { foreach (var update in refresh) update(); } finally { syncing = false; } _refreshReadings?.Invoke(); }
+        void Refresh() { syncing = true; try { foreach (var update in refresh) update(); } finally { syncing = false; } _refreshReadings?.Invoke(); _refreshExpanded?.Invoke(); }
         // A color per reading, four to a row.
         var roles = KeepPreview(new UniformGrid { Columns = 4, Width = Loc.IsEnglish ? 600 : 440, Margin = new Thickness(0, 6, 0, 6) });
         foreach (var role in Enum.GetValues<MonitorRole>()) roles.Children.Add(SwatchCell(RoleName(role), RoleHelp(role), () => RoleSwatch(role, Refresh), refresh));

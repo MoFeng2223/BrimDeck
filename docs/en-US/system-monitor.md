@@ -25,7 +25,7 @@ The readings shown in the notch and capsule are chosen under "When collapsed".
 - The checks here only affect the expanded page, and the checks under "When collapsed" only affect the notch and capsule; neither changes the other.
 - Presets: All (the frame rate stays as it is), Brief (CPU, memory, download, upload), CPU and memory, and None.
 - The page lays itself out for what is chosen: a single reading fills the page; when room runs short, minor lines such as the frame rate and drives go first, then the network and memory are compressed, and nothing overlaps or leaves the page. Download and upload share one line and can be shown one at a time.
-- With nothing chosen, the expanded page shows a note and an "Open settings" button, and reads no data. A reading that is not chosen is not read and costs nothing.
+- With nothing chosen, the expanded page shows a note and an "Open settings" button, and asks for no data. A reading that is not chosen is not requested by the expanded page; collapsed rows and the delay-retention window still read what they need.
 - Until you change the table the expanded page is exactly as before the upgrade; the old switches for the process list, drives, power and battery, and frame rate are now part of it.
 
 ## CPU and GPU

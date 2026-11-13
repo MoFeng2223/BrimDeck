@@ -184,7 +184,7 @@ public partial class MainWindow
         if (plan.Kind is not (ExpandedKind.Empty or ExpandedKind.Unavailable)) return null;
         bool none = plan.Kind == ExpandedKind.Empty;
         string title = none ? Loc.T("还没有选择要显示的监控项", "No readings chosen") : Loc.T("选中的监控项在这台电脑上读不到", "The chosen readings are not available on this PC");
-        string note = none ? Loc.T("在设置中选择展开时显示的项目。选择之前不会读取任何数据。", "Choose what the expanded page shows in settings. Nothing is read until you do.")
+        string note = none ? Loc.T("在设置中选择展开时显示的项目。选择之前展开页不会读取任何数据。", "Choose what the expanded page shows in settings. The expanded page reads nothing until you do.")
             : Loc.T("可以在设置中换成其他监控项。", "You can choose other readings in settings.");
         var panel = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
         panel.Children.Add(Label(title, plan.Body + 1, UI.Secondary, HorizontalAlignment.Center));

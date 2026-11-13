@@ -318,6 +318,9 @@ internal sealed class SystemSampler : IDisposable
         {
             _lastProcesses = _processes.Sample(now); _processesAt = now;
         }
+        // While network is not read the provider forgets its baseline and the history goes, so the first rate after it turns on is not an
+        // average over the time off and old readings do not join new ones.
+        if (!_readNetwork) { _network.Forget(); _history.Clear(); }
         var network = _readNetwork ? _network.Sample(now) : Reading<NetworkSample>.Unavailable(Why.Waiting);
         if (network.TryGet(out var rates))
         {
@@ -681,6 +684,9 @@ internal sealed class NetworkProvider : IDisposable
     private int _sinceList = Relist;
     private double? _time;
     private readonly IntPtr _row = Marshal.AllocHGlobal(RowSize);
+
+    // Starts over: the next sample only sets the baseline, and the adapters are listed again.
+    public void Forget() { _previous = []; _time = null; _sinceList = Relist; }
 
     public Reading<NetworkSample> Sample(double now)
     {

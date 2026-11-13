@@ -216,7 +216,10 @@ internal static class ExpandedMonitorTests
         check("Expanded layout: nonsense sizes and fonts give a plan without parts out of the page", nan.Parts.All(part => part.Box.Inside(Page(nan), .5) && double.IsFinite(part.Box.Height)));
         var tiny = ExpandedLayout.For([ExpandedItem.Frames], 400, 12, content);
         check("Expanded layout: a page too short for a line still shows the one asked, squeezed and inside the page",
-            tiny.Part(ExpandedItem.Frames) is { } line && tiny.Squeezed && line.Box.Inside(Page(tiny), .5) == false || tiny.Parts.Count == 0 || tiny.Parts.All(part => part.Box.Bottom <= 12.01));
+            tiny.Part(ExpandedItem.Frames) is { } line && tiny.Squeezed && line.Box.Inside(Page(tiny), .5) && tiny.Parts.All(part => part.Box.Bottom <= 12.01));
+        var onlyDown = ExpandedLayout.For([ExpandedItem.Download], 620, 200, content);
+        var downUp = ExpandedLayout.For([ExpandedItem.Download, ExpandedItem.Upload], 620, 200, content);
+        check("Expanded layout: plans differing only in the upload switch have different signatures", onlyDown.Signature != downUp.Signature);
     }
 
     private static void Properties(Action<string, bool> check)
