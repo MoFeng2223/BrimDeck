@@ -14,6 +14,7 @@ Directory.CreateDirectory(root);
 try
 {
     await PiUsageTests.Run(root, Check);
+    await CodeAgentUsageTests.Run(root, Check);
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);

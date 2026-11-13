@@ -20,7 +20,7 @@ public sealed class LogReader
         public int Errors;
         public string Model = "unknown", LastTotal = "";
     }
-    // Claude and Codex read different folders; each keeps only the files its latest read visited.
+    // Claude, CodeAgent and Codex read different folders; each keeps only the files its latest read visited.
     private readonly Dictionary<ProviderId, Dictionary<string, CacheItem>> _caches = [];
     // The merged entries of the latest read, kept while no file changed and the start date stayed: most refreshes find nothing new.
     private readonly Dictionary<ProviderId, (DateTimeOffset Cutoff, List<TokenEntry> Entries)> _merged = [];
@@ -198,6 +198,21 @@ public sealed class LogReader
                 }
                 Add(item, new($"codex:{time:O}:{Convert.ToHexString(digest[..16])}", time.Value, item.Model, input - cached, cached, write, 0, output));
             }
+            else if (id == ProviderId.CodeAgent && type == "query-metrics")
+            {
+                // CodeAgent's observability/obs.jsonl records each model request with its usage. A session record can keep only the
+                // empty usage of a message whose request was cut short; the same message id here gives the real counts, and Read keeps
+                // the larger of the two. Requests outside the conversation (such as session titles) appear only here.
+                if (time is null || time < item.Cutoff) return;
+                var usage = obj.Get("usage");
+                if (usage.ValueKind != JsonValueKind.Object) return;
+                var key = obj.Get("message_id").Text();
+                if (key.Length == 0) key = $"{time:O}:{usage.GetRawText()}";
+                var creation = usage.Get("cache_creation_input_tokens").Count();
+                var hour = Math.Min(creation, usage.Get("cache_creation").Get("ephemeral_1h_input_tokens").Count());
+                Add(item, new("cac:" + key, time.Value, string.Intern(obj.Get("model").Text()), usage.Get("input_tokens").Count(),
+                    usage.Get("cache_read_input_tokens").Count(), creation - hour, hour, usage.Get("output_tokens").Count()));
+            }
             else
             {
                 if (type != "assistant" || time is null || time < item.Cutoff) return;
@@ -209,7 +224,7 @@ public sealed class LogReader
                 var key = message.Get("id").Text();
                 if (key.Length == 0) key = obj.Get("uuid").Text();
                 if (key.Length == 0) key = $"{time:O}:{usage.GetRawText()}";
-                Add(item, new("claude:" + key, time.Value, string.Intern(message.Get("model").Text()), usage.Get("input_tokens").Count(),
+                Add(item, new((id == ProviderId.CodeAgent ? "cac:" : "claude:") + key, time.Value, string.Intern(message.Get("model").Text()), usage.Get("input_tokens").Count(),
                     usage.Get("cache_read_input_tokens").Count(), creation - hour, hour, usage.Get("output_tokens").Count()));
             }
         }

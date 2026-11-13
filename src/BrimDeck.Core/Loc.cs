@@ -29,6 +29,7 @@ public static class Loc
     {
         ["5 小时额度"] = "5-hour limit", ["每周额度"] = "Weekly limit", ["每月额度"] = "Monthly limit", ["主要额度"] = "Primary limit", ["次要额度"] = "Secondary limit",
         ["账期额度"] = "Billing period limit", ["套餐额度"] = "Plan limit",
+        ["忙时每日额度"] = "Daily busy-hour limit", ["闲时每日额度"] = "Daily idle-hour limit", ["外部模型"] = "Outside models", ["内部模型"] = "Internal models",
         ["5 小时"] = "5-hour", ["每日"] = "Daily", ["每周"] = "Weekly", ["每月"] = "Monthly", ["主要"] = "Primary", ["次要"] = "Secondary",
         ["账期"] = "Billing period", ["套餐"] = "Plan", ["其他"] = "Other",
         ["Cursor 模型"] = "Cursor models", ["其他模型"] = "Other models", ["工具调用"] = "Tool calls",

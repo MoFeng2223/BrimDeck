@@ -14,6 +14,11 @@ public interface IDesktopSources
     Task<IReadOnlyList<LocalEndpoint>> FindAntigravityAsync(CancellationToken cancellation);
     // Runs a read-only query against a local SQLite database; null means the database could not be opened or queried.
     IReadOnlyList<string?[]>? QueryDatabase(string database, string sql) => null;
+    // Decrypts the base64 of a Windows DPAPI blob of the current user (CodeAgent's sign-in); null when it cannot.
+    string? UnprotectUserData(string base64) => null;
+    // Runs CodeAgent CLI's `auth status` to renew an expired CodeAgent sign-in kept in home (CodeAgentUsage); true when the file
+    // then holds a later expiry than before.
+    Task<bool> RenewCodeAgentAsync(string home, CancellationToken cancellation) => Task.FromResult(false);
 }
 
 // quotaCache is the file that keeps the last Claude quota read online across restarts (ClaudeQuotaCache); null keeps none.
@@ -48,6 +53,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private readonly KimiSessions _kimi = new();
     // The Kimi Code membership level, read from /me at most every few hours, for the hash of the token it was read with.
     private (string Account, string Plan, DateTimeOffset Time)? _kimiPlan;
+    // When a CodeAgent renewal last failed; null after one that worked.
+    private DateTimeOffset? _codeAgentRenewed;
+    private (CreditHours Hours, DateTimeOffset Time)? _codeAgentHours;
     // The last Kimi Code quota read online and the hash of its account; kimiQuotaCache keeps it across restarts.
     private KimiQuotaReading? _kimiRetained;
     private string _kimiAccount = "", _kimiSaved = "";
@@ -245,8 +253,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         var now = _clock();
         var start = new DateTimeOffset(usageStart?.Date ?? now.LocalDateTime.Date.AddDays(-29));
         // The reader owns a cache and is accessed serially before the first asynchronous request.
-        var snapshot = id is ProviderId.Claude or ProviderId.Codex or ProviderId.Pi
-            ? _logs.Read(id, id == ProviderId.Pi ? _locations.PiSessions : id == ProviderId.Codex ? _locations.CodexHome : _locations.ClaudeHome, now, start.LocalDateTime) : new ProviderSnapshot(id) { UsageStart = start.LocalDateTime.Date };
+        var snapshot = id is ProviderId.Claude or ProviderId.Codex or ProviderId.Pi or ProviderId.CodeAgent
+            ? _logs.Read(id, id switch { ProviderId.Pi => _locations.PiSessions, ProviderId.Codex => _locations.CodexHome, ProviderId.CodeAgent => _locations.CodeAgentHome, _ => _locations.ClaudeHome },
+                now, start.LocalDateTime) : new ProviderSnapshot(id) { UsageStart = start.LocalDateTime.Date };
         var claudeAccount = id == ProviderId.Claude ? ReadClaudeProfile(snapshot) : ("", "");
         var wslRead = _includeWsl && id is ProviderId.Claude or ProviderId.Codex ? StartWsl(snapshot, now, start.LocalDateTime) : null;
         if (id == ProviderId.ZCode) ZCodeUsage.Read(snapshot, desktop, _locations.ZCodeHome, start, now);
@@ -258,6 +267,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         {
             switch (id)
             {
+                case ProviderId.CodeAgent:
+                    await ReadCodeAgentAsync(snapshot, now, ct);
+                    break;
                 case ProviderId.Pi:
                     snapshot.UsageNote += Loc.T(" · 费用取自 Pi 记录，非订阅账单", " · Costs recorded by Pi, not subscription charges");
                     snapshot.StatusLabel = Loc.T("仅本地统计", "Local usage only");
@@ -1203,10 +1215,74 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (limited) snapshot.Status = Loc.T("已达到 OpenCode Go 的用量上限，重置前请求会被拒绝", "The OpenCode Go limit is reached; requests are refused until it resets.");
     }
 
+    // CodeAgent's credit allowance (CodeAgentUsage), read with the sign-in CodeAgent keeps. An expired or refused sign-in is renewed
+    // the way CodeAgent renews it (IDesktopSources.RenewCodeAgentAsync) and the reading tried once more; a renewal that fails is
+    // not tried again for ten minutes, so a sign-in that needs the user does not start the CLI on every refresh.
+    private async Task ReadCodeAgentAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
+        var home = _locations.CodeAgentHome;
+        var credential = CodeAgentUsage.ReadCredential(home, desktop.UnprotectUserData);
+        if (credential is null) { snapshot.StatusLabel = Loc.T("未连接", "Not connected"); snapshot.Status = Loc.T("请先登录 CodeAgent", "Sign in to CodeAgent first"); return; }
+        void Expired()
+        {
+            snapshot.StatusLabel = Loc.T("登录已过期", "Sign-in expired");
+            snapshot.Status = Loc.T("CodeAgent 登录已过期且未能自动续期，请在 CodeAgent 中重新登录", "The CodeAgent sign-in has expired and could not be renewed. Sign in to CodeAgent again.");
+        }
+        async Task<CodeAgentCredential?> Renew()
+        {
+            if (_codeAgentRenewed is { } last && now - last < TimeSpan.FromMinutes(10)) return null;
+            _codeAgentRenewed = now;
+            if (!await desktop.RenewCodeAgentAsync(home, ct)) return null;
+            _codeAgentRenewed = null;
+            return CodeAgentUsage.ReadCredential(home, desktop.UnprotectUserData) is { } renewed && !renewed.Expired(_clock()) ? renewed : null;
+        }
+        if (credential.Expired(now) && (credential = await Renew()) is null) { Expired(); return; }
+        async Task<JsonDocument?> Read(CodeAgentCredential signIn, string url)
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(TimeSpan.FromSeconds(15));
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.TryAddWithoutValidation("X-Auth-Token", signIn.Token);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            request.Headers.UserAgent.ParseAdd("BrimDeck/0.1");
+            try { return await SendAsync(_http, request, deadline.Token); }
+            catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden) { return null; }
+        }
+        var doc = await Read(credential, CodeAgentUsage.QuotaUrl);
+        if (doc is null && await Renew() is { } fresh) doc = await Read(credential = fresh, CodeAgentUsage.QuotaUrl);
+        if (doc is null) { Expired(); return; }
+        using (doc)
+        {
+            var metrics = CodeAgentUsage.Quotas(doc.RootElement, await ReadCodeAgentHours(credential.Token));
+            if (metrics.Count == 0) throw new InvalidDataException(Loc.T("CodeAgent 没有返回额度", "CodeAgent returned no quota"));
+            snapshot.Metrics = metrics;
+            snapshot.Scope = "account";
+            snapshot.PlanSource = Loc.T("CodeAgent 账户", "CodeAgent account");
+            Connected(snapshot, Loc.T("CodeAgent 账户", "CodeAgent account"), now);
+        }
+    }
+
     // Kimi Code's own sign-in reads the plan quota. The token is used as it is: an expired one is not sent and never renewed,
     // since renewing would replace the sign-in Kimi Code holds. Kimi Code renews it only while in use, so most refreshes find
     // it expired; the last reading (KimiQuotaCache) then stands in, marked as old, until Kimi Code is used again. A rejected
     // token is treated the same way, since Kimi Code renews it on its next use.
+    // The busy and idle hours change rarely: they are read again after six hours, and a failed read keeps the last ones.
+    private async Task<CreditHours?> ReadCodeAgentHours(string token)
+    {
+        var now = _clock();
+        if (_codeAgentHours is { } kept && now - kept.Time < TimeSpan.FromHours(6)) return kept.Hours;
+        try
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var request = new HttpRequestMessage(HttpMethod.Get, CodeAgentUsage.HoursUrl);
+            request.Headers.TryAddWithoutValidation("X-Auth-Token", token);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            using var doc = await SendAsync(_http, request, deadline.Token);
+            if (CreditHours.Parse(doc.RootElement) is { } hours) { _codeAgentHours = (hours, now); return hours; }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException or IOException or RateLimitedException) { }
+        return _codeAgentHours?.Hours;
+    }
+
     private async Task ReadKimiAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
     {
         var service = KimiUsage.Service(_locations.KimiHome, _locations.KimiEnvironment);

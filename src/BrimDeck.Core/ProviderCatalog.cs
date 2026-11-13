@@ -9,16 +9,17 @@ public static class ProviderCatalog
 {
     public static readonly ProviderId[] BuiltIns = [ProviderId.Claude, ProviderId.Codex, ProviderId.Antigravity, ProviderId.Cursor];
     // Sources read automatically from local applications; only the first four are added to new settings by default.
-    public static readonly ProviderId[] AutomaticSources = [.. BuiltIns, ProviderId.GrokBot, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.OpenCode];
+    public static readonly ProviderId[] AutomaticSources = [.. BuiltIns, ProviderId.GrokBot, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.OpenCode, ProviderId.CodeAgent];
     public static readonly ProviderId[] Sources = [.. AutomaticSources, ProviderId.GlmChina, ProviderId.GlmGlobal, ProviderId.DeepSeek, ProviderId.KimiApi, ProviderId.OpenCodeGo, ProviderId.OpenRouter, ProviderId.NewApi, ProviderId.Sub2Api, ProviderId.Custom];
     // Grok Bot is quota-only; Pi is usage-only and must never appear in the quota-source menu.
-    public static readonly ProviderId[] UsageSources = [.. BuiltIns, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.OpenCode, ProviderId.Pi];
+    public static readonly ProviderId[] UsageSources = [.. BuiltIns, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.OpenCode, ProviderId.Pi, ProviderId.CodeAgent];
     public static bool IsBuiltIn(ProviderId id) => AutomaticSources.Contains(id);
     public static bool IsUsageSource(ProviderId id) => UsageSources.Contains(id);
     // Which clients a statistics source covers; each reads the local records all of its clients share.
     public static string UsageTip(ProviderId id) => id switch
     {
         ProviderId.Pi => Loc.T("Pi 本机会话（所有提供商）", "Local Pi sessions (all providers)"),
+        ProviderId.CodeAgent => Loc.T("CodeAgent CLI 本机会话", "Local CodeAgent CLI sessions"),
         ProviderId.Claude => Loc.T("Claude Code + Claude 桌面版", "Claude Code + Claude desktop app"),
         ProviderId.Codex => Loc.T("Codex 桌面版 + Codex CLI", "Codex desktop app + Codex CLI"),
         ProviderId.Antigravity => Loc.T("Antigravity 桌面版 + Antigravity CLI", "Antigravity desktop app + Antigravity CLI"),
@@ -42,6 +43,8 @@ public static class ProviderCatalog
             "The membership plan quota of the account signed in to Kimi Code; the sign-in is never renewed"),
         ProviderId.OpenCode => Loc.T("OpenCode 登录 OpenCode Console 的工作区的 OpenCode Go 额度；不续期登录",
             "The OpenCode Go allowance of the workspace OpenCode signed in to OpenCode Console with; the sign-in is never renewed"),
+        ProviderId.CodeAgent => Loc.T("CodeAgent 登录账户的积分额度，所有模型共用；登录过期时用 CodeAgent CLI 自动续期",
+            "The credit allowance of the account signed in to CodeAgent, shared by every model; an expired sign-in is renewed with CodeAgent CLI"),
         ProviderId.OpenCodeGo => Loc.T("API 密钥所属工作区的 OpenCode Go 额度", "The OpenCode Go allowance of the workspace the API key belongs to"),
         ProviderId.OpenRouter => Loc.T("API 密钥所属账户的余额，以及这个密钥的限额与消费", "The balance of the account the API key belongs to, and the limit and spending of this key"),
         _ => ""

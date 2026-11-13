@@ -10,6 +10,9 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
     public string KimiHome { get; init; } = "";
     // Pi's session root.
     public string PiSessions { get; init; } = "";
+    // CodeAgent CLI resolves its data directory as CODEAGENT3_CONFIG_DIR, otherwise %USERPROFILE%\.cac; its session records
+    // use the Claude Code format under projects.
+    public string CodeAgentHome { get; init; } = "";
     // The environment variables that change which Kimi Code service is used (KIMI_CODE_BASE_URL, KIMI_CODE_OAUTH_HOST and
     // the others in KimiEnvironment); all null when unset.
     public KimiEnvironment KimiEnvironment { get; init; } = new();
@@ -26,7 +29,8 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR"), Environment.GetEnvironmentVariable("CODEX_HOME"),
         Environment.GetEnvironmentVariable("ZCODE_HOME"), Environment.GetEnvironmentVariable("DSH_HOME"), Environment.GetEnvironmentVariable("KIMI_CODE_HOME"),
-        Environment.GetEnvironmentVariable("PI_CODING_AGENT_DIR"), Environment.GetEnvironmentVariable("PI_CODING_AGENT_SESSION_DIR"))
+        Environment.GetEnvironmentVariable("PI_CODING_AGENT_DIR"), Environment.GetEnvironmentVariable("PI_CODING_AGENT_SESSION_DIR"),
+        Environment.GetEnvironmentVariable("CODEAGENT3_CONFIG_DIR"))
     with { KimiEnvironment = new(Environment.GetEnvironmentVariable("KIMI_CODE_BASE_URL"),
         Environment.GetEnvironmentVariable("KIMI_CODE_OAUTH_HOST") ?? Environment.GetEnvironmentVariable("KIMI_OAUTH_HOST"),
         Environment.GetEnvironmentVariable("KIMI_CODE_REGION_MARKER")) })
@@ -38,12 +42,12 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
         return this with { OpenCodeData = data, OpenCodeDatabase = OpenCodeUsage.Database(data, database) };
     }
 
-    public static DataLocations Resolve(string home, string roaming, string local, string? claudeOverride, string? codexOverride, string? zcodeOverride = null, string? dshOverride = null, string? kimiOverride = null, string? piOverride = null, string? piSessionOverride = null) => new(
+    public static DataLocations Resolve(string home, string roaming, string local, string? claudeOverride, string? codexOverride, string? zcodeOverride = null, string? dshOverride = null, string? kimiOverride = null, string? piOverride = null, string? piSessionOverride = null, string? codeAgentOverride = null) => new(
         ConfigDirectory(claudeOverride, Path.Combine(home, ".claude")),
         ConfigDirectory(codexOverride, Path.Combine(home, ".codex")),
         Path.Combine(roaming, "Cursor", "User", "globalStorage", "state.vscdb"), roaming, local)
     { ZCodeHome = ConfigDirectory(zcodeOverride, Path.Combine(home, ".zcode")), DshHome = ConfigDirectory(dshOverride, Path.Combine(home, ".dsh")), KimiHome = ConfigDirectory(kimiOverride, Path.Combine(home, ".kimi-code")), AntigravityConversations = AntigravityUsage.Folders(home),
-      PiSessions = PiSessionDirectory(home, piOverride, piSessionOverride), OpenCodeData = OpenCodeUsage.DataFolder(home, null), OpenCodeDatabase = OpenCodeUsage.Database(OpenCodeUsage.DataFolder(home, null), null) };
+      PiSessions = PiSessionDirectory(home, piOverride, piSessionOverride), CodeAgentHome = ConfigDirectory(codeAgentOverride, Path.Combine(home, ".cac")), OpenCodeData = OpenCodeUsage.DataFolder(home, null), OpenCodeDatabase = OpenCodeUsage.Database(OpenCodeUsage.DataFolder(home, null), null) };
 
     private static string ConfigDirectory(string? value, string fallback) =>
         !string.IsNullOrWhiteSpace(value) && Path.IsPathFullyQualified(value) ? Path.GetFullPath(value) : fallback;
