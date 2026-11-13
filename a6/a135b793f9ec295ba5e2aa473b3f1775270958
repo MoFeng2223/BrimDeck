@@ -1,0 +1,102 @@
+src/BrimDeck.Core/Themes/dracula.json
+  s_3b74c344a6c1b2::t_fb2a2a2fe1a54a 54
+docs/en-US/ai-tools.md
+  s_3b74c344a6c1b2::t_aece581dbacb86 23,28,37,106-113,116,140-143
+src/BrimDeck.Core/UsageService.cs
+  s_3b74c344a6c1b2::t_1f169b80fc92ae 256-258
+  s_3b74c344a6c1b2::t_1486a5f7d4117d 1185-1215
+  s_3b74c344a6c1b2::t_489d6b715daf4b 274-276
+tests/BrimDeck.Tests/Program.cs
+  s_3b74c344a6c1b2::t_7d8f11e6e27e0d 18
+src/BrimDeck.Core/Templates/theme-template.json
+  s_3b74c344a6c1b2::t_fb2a2a2fe1a54a 66
+tests/BrimDeck.Tests/ConfiguredProviderTests.cs
+  s_3b74c344a6c1b2::t_8669e4ffaef456 219-220
+docs/zh-CN/privacy.md
+  s_3b74c344a6c1b2::t_aece581dbacb86 18-19
+src/BrimDeck.Core/ScriptProvider.cs
+  s_3b74c344a6c1b2::t_aeac0ffe78879e 219-237
+  s_3b74c344a6c1b2::t_6f3e603c2d79fb 38
+  s_3b74c344a6c1b2::t_0547541483e6a9 238
+docs/zh-CN/ai-tools.md
+  s_3b74c344a6c1b2::t_aece581dbacb86 23,28,37,106-113,116,140-143
+src/BrimDeck.Core/Settings.cs
+  s_3b74c344a6c1b2::t_fb2a2a2fe1a54a 259
+  s_3b74c344a6c1b2::t_9d51b60c2a2547 41-42,45,260
+src/BrimDeck.Core/PanelThemes.cs
+  s_3b74c344a6c1b2::t_00ecd9378349e1 95,99-100
+docs/en-US/privacy.md
+  s_3b74c344a6c1b2::t_aece581dbacb86 18-19
+docs/en-US/themes.md
+  s_3b74c344a6c1b2::t_27a831d326caa9 77
+src/BrimDeck.Core/ProviderCatalog.cs
+  s_3b74c344a6c1b2::t_00ecd9378349e1 12-13,15,30,49-51,61,66
+src/BrimDeck.Core/CommandCodeUsage.cs
+  s_3b74c344a6c1b2::t_de65e4455841e5 1-127
+src/BrimDeck.Core/LogReader.cs
+  s_3b74c344a6c1b2::t_30805d44e91f41 190-192
+  s_3b74c344a6c1b2::t_f4e9aae12c4710 146-167
+  s_2dc55b86210800::t_3c8c85c2ca1128 193
+src/BrimDeck.Core/Themes/one-dark-pro.json
+  s_3b74c344a6c1b2::t_fb2a2a2fe1a54a 54
+src/BrimDeck.Core/Themes/night-owl.json
+  s_3b74c344a6c1b2::t_fb2a2a2fe1a54a 54
+src/BrimDeck.Core/Themes/light.json
+  s_3b74c344a6c1b2::t_fb2a2a2fe1a54a 54
+src/BrimDeck.Core/Themes/island-holiday.json
+  s_3b74c344a6c1b2::t_fb2a2a2fe1a54a 60,126
+src/BrimDeck/SettingsProviders.cs
+  s_3b74c344a6c1b2::t_00ecd9378349e1 304
+src/BrimDeck.Core/DataLocations.cs
+  s_3b74c344a6c1b2::t_00ecd9378349e1 16-18,53
+src/BrimDeck.Core/Themes/cyberpunk-edgerunners.json
+  s_3b74c344a6c1b2::t_fb2a2a2fe1a54a 60
+src/BrimDeck.Core/Themes/dark.json
+  s_3b74c344a6c1b2::t_fb2a2a2fe1a54a 55
+src/BrimDeck.Core/Loc.cs
+  s_3b74c344a6c1b2::t_3f657939088b04 37
+tests/BrimDeck.Tests/CommandCodeUsageTests.cs
+  s_3b74c344a6c1b2::t_8b969520f23830 1-177,179-199
+  s_3b74c344a6c1b2::t_6acea9a79d2eaf 178
+src/BrimDeck.Core/Themes/pixel-blocks.json
+  s_3b74c344a6c1b2::t_fb2a2a2fe1a54a 59
+docs/zh-CN/themes.md
+  s_3b74c344a6c1b2::t_27a831d326caa9 77
+src/BrimDeck.Core/Themes/island-holiday-2.json
+  s_3b74c344a6c1b2::t_fb2a2a2fe1a54a 63,137
+src/BrimDeck.Core/Themes/github-dark.json
+  s_3b74c344a6c1b2::t_fb2a2a2fe1a54a 54
+src/BrimDeck.Core/Themes/github-light.json
+  s_3b74c344a6c1b2::t_fb2a2a2fe1a54a 54
+src/BrimDeck/SettingsThemeEditor.cs
+  s_3b74c344a6c1b2::t_00ecd9378349e1 39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a6a135b793f9ec295ba5e2aa473b3f1775270958",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_2dc55b86210800": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e9ab321a-8baf-4108-a861-411dfc83ea36",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_3b74c344a6c1b2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3118c0fa-bcaf-4d32-892f-69bed2ffb3ed",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
