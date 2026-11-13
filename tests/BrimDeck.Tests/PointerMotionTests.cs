@@ -19,6 +19,9 @@ internal static class PointerMotionTests
         check("A mouse over a control hovers it", PressFeedback.Hovers(true, false));
         check("Touch or a pen over a control does not hover it", !PressFeedback.Hovers(true, true));
         check("Nothing over a control, nothing hovered", !PressFeedback.Hovers(false, false) && !PressFeedback.Hovers(false, true));
+        // A press by touch or a pen starts with no hover, and still shows its fill.
+        check("A press shows the whole fill even with no hover", PressFeedback.FillShown(0, true) == 1 && PressFeedback.FillShown(.3, true) == 1);
+        check("Without a press the fill follows the hover", PressFeedback.FillShown(0, false) == 0 && PressFeedback.FillShown(.4, false) == .4);
 
         // F5, F6: one rule for every animation.
         check("Animations run when the app and Windows allow them", MotionConditions.Allowed(true, true, false));

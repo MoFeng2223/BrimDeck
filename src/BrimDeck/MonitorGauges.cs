@@ -197,7 +197,7 @@ internal sealed class FigureGauge : FrameworkElement
             + (_detail.Length > 0 ? gap + detail.WidthIncludingTrailingWhitespace : 0);
         double x = _right ? Math.Max(0, w - width) : 0, baseline = Math.Round(h / 2 + number.Baseline - number.Height / 2 + _figure * .05);
         var center = new Point(x + badge / 2, h / 2);
-        double hover = _button ? Math.Clamp(_hover.At(now), 0, 1) : 0;
+        double hover = _button ? PressFeedback.FillShown(Math.Clamp(_hover.At(now), 0, 1), _pressed) : 0;
         if (hover > .01)
         {
             drawing.PushOpacity(hover);

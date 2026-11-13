@@ -13,6 +13,10 @@ public static class PressFeedback
     // Touch and a pen stand in for the pointer only while they press: over a control by touch or a pen, nothing is hovered.
     public static bool Hovers(bool mouseOver, bool byTouchOrPen) => mouseOver && !byTouchOrPen;
 
+    // How much of a hover/press fill shows: a press shows it whole whatever the hover is, since touch and a pen press without
+    // hovering first.
+    public static double FillShown(double hover, bool pressed) => pressed ? 1 : hover;
+
     // The length of a press changing to pressed (or back) for a scale.
     public static int ScaleLength(bool pressed) => pressed ? Down : Up;
 }

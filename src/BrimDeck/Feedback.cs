@@ -22,7 +22,7 @@ internal static class Feedback
     public static bool GetFade(DependencyObject element) => (bool)element.GetValue(FadeProperty);
     public static void SetFade(DependencyObject element, bool value) => element.SetValue(FadeProperty, value);
 
-    private static readonly MouseButtonEventHandler ButtonHandler = (sender, _) => Update(sender);
+    private static readonly MouseButtonEventHandler ButtonHandler = (sender, e) => { Source(sender, e); Update(sender); };
     // Whether the pointer came onto the button by touch or a pen (motion-review F4).
     private static readonly DependencyProperty TouchedProperty = DependencyProperty.RegisterAttached("Touched", typeof(bool), typeof(Feedback));
     private static readonly MouseEventHandler PointerHandler = (sender, e) =>
@@ -33,10 +33,19 @@ internal static class Feedback
     // The mouse moving over a button that touch or a pen came onto means the pointer has taken over: it hovers again.
     private static readonly MouseEventHandler MoveHandler = (sender, e) =>
     {
-        bool touchEnded = e.StylusDevice is null && sender is DependencyObject button && (bool)button.GetValue(TouchedProperty);
-        if (touchEnded) ((DependencyObject)sender).SetValue(TouchedProperty, false);
-        if (touchEnded || sender is UIElement { IsMouseCaptured: true }) Update(sender);
+        bool changed = Source(sender, e);
+        if (changed || sender is UIElement { IsMouseCaptured: true }) Update(sender);
     };
+    // Touch or a pen taking over (or giving back to) the mouse on a button the mouse is already over sends no MouseEnter, so every
+    // press and move says which pointer it is. True when that changed what the button believes.
+    private static bool Source(object sender, MouseEventArgs e)
+    {
+        if (sender is not DependencyObject button) return false;
+        bool touch = e.StylusDevice is not null;
+        if ((bool)button.GetValue(TouchedProperty) == touch) return false;
+        button.SetValue(TouchedProperty, touch);
+        return true;
+    }
     private static readonly DependencyPropertyChangedEventHandler EnabledHandler = (sender, _) => Update(sender);
     private static readonly KeyEventHandler KeyHandler = (sender, _) => Update(sender);
     private static readonly KeyboardFocusChangedEventHandler FocusHandler = (sender, _) => Update(sender);

@@ -25,10 +25,14 @@ public sealed class MusicControlButton : Button
         if (e.Property == IsMouseOverProperty || e.Property == IsPressedProperty || e.Property == IsEnabledProperty) UpdateState();
     }
     protected override void OnMouseEnter(MouseEventArgs e) { _touched = e.StylusDevice is not null; base.OnMouseEnter(e); UpdateState(); }
-    protected override void OnMouseMove(MouseEventArgs e)
+    protected override void OnMouseMove(MouseEventArgs e) { base.OnMouseMove(e); Source(e); }
+    // Touch or a pen taking over from a mouse that is already over the button sends no MouseEnter: presses and moves say who it is.
+    protected override void OnPreviewMouseDown(MouseButtonEventArgs e) { Source(e); base.OnPreviewMouseDown(e); }
+    private void Source(MouseEventArgs e)
     {
-        base.OnMouseMove(e);
-        if (_touched && e.StylusDevice is null) { _touched = false; UpdateState(); }
+        bool touch = e.StylusDevice is not null;
+        if (_touched == touch) return;
+        _touched = touch; UpdateState();
     }
     public override void OnApplyTemplate() { base.OnApplyTemplate(); UpdateState(); }
     private void UpdateState()
@@ -91,10 +95,17 @@ public sealed class MusicSeekSlider : Slider
     }
     private bool _touched;
     protected override void OnMouseEnter(MouseEventArgs e) { _touched = e.StylusDevice is not null; base.OnMouseEnter(e); UpdateState(); }
+    protected override void OnPreviewMouseDown(MouseButtonEventArgs e) { Source(e); base.OnPreviewMouseDown(e); }
+    private void Source(MouseEventArgs e)
+    {
+        bool touch = e.StylusDevice is not null;
+        if (_touched == touch) return;
+        _touched = touch; UpdateState();
+    }
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
-        if (_touched && e.StylusDevice is null) { _touched = false; UpdateState(); }
+        Source(e);
         if (Seeking && IsMouseCaptured && Mouse.LeftButton == MouseButtonState.Pressed)
             Value = Math.Clamp(e.GetPosition(this).X / Math.Max(1, ActualWidth), 0, 1);
         UpdateBubble();
