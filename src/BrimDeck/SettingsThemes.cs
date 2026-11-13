@@ -43,7 +43,7 @@ public sealed partial class SettingsWindow
         ThemeSection(Loc.T("基础", "Basics"));
         ThemeCards([(PanelThemes.SystemId, Loc.T("跟随系统", "System"), PanelTheme.Find(PanelThemes.SystemId)),
             .. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Basic).Select(Card)], chosen);
-        ThemeSection(Loc.T("主题扩展", "Theme extensions"));
+        ThemeSection(Loc.T("更多主题", "More themes"));
         ThemeCards([.. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Extension).Select(Card)], chosen);
         CustomSection(users, chosen);
         _themeDetails = Collect(() => ThemeDetails(chosen, users)); _content.Children.Add(_themeDetails);
