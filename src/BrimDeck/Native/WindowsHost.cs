@@ -34,6 +34,10 @@ public sealed class WindowsHost : IDisposable
     private uint _backgroundPid;
     private string _backgroundIdentityName = "", _backgroundIdentityPath = "";
     public event Action<ScreenContext>? ContextChanged;
+    // A panel that took the foreground for the keyboard (PanelKeyboard). While it is the foreground window the user's
+    // application has not changed: every panel keeps the context and app it had, so nothing closes or hides because of it.
+    public static IntPtr KeyboardPanel { get => s_keyboardPanel; set => s_keyboardPanel = value; }
+    private static volatile nint s_keyboardPanel;
     // The app the answer was resolved for changed while the context stayed, carrying that app and the way its window
     // fills the screen, as they were for the last answer. The app rules may now answer differently for the same context,
     // but nothing about the panel's own state needs to change — the panel does not fold away for an app switch, only for
@@ -412,6 +416,7 @@ public sealed class WindowsHost : IDisposable
             return background.Value;
         }
         if (foreground == IntPtr.Zero || !IsWindowVisible(foreground) || IsIconic(foreground)) { _appName = ""; _appPath = ""; return Desktop(); }
+        if (foreground == KeyboardPanel) return Current;
         GetWindowThreadProcessId(foreground, out var pid);
         if (pid == Environment.ProcessId) { _appName = ""; _appPath = ""; return Desktop(); }
         if (MonitorFromWindow(foreground, 2) != monitor) { _appName = ""; _appPath = ""; return Desktop(); }
