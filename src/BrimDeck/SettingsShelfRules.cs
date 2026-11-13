@@ -47,10 +47,10 @@ public partial class SettingsWindow
 
     // In the row, a small label that says what happens to what is in the category and changes it when clicked: "一直保留" (on)
     // or "退出时清除" (off, it goes with the history when BrimDeck exits). Both words are laid out, the other hidden, so the label
-    // keeps its width.
+    // keeps its width. Each word is centred in the label by its letters as drawn (InkCentredText), whatever the font and scale.
     private ToggleButton KeepSwitch(ShelfCategory category)
     {
-        TextBlock Word(string text) => new() { Text = text, FontFamily = SettingsFont(UiFontRole.Panel), HorizontalAlignment = HorizontalAlignment.Center };
+        InkCentredText Word(string text) => new(new TextBlock { Text = text, FontFamily = SettingsFont(UiFontRole.Panel) }) { HorizontalAlignment = HorizontalAlignment.Center };
         var kept = Word(Loc.T("一直保留", "Kept"));
         var cleared = Word(Loc.T("退出时清除", "Cleared on exit"));
         void Show(bool on) { kept.Visibility = on ? Visibility.Visible : Visibility.Hidden; cleared.Visibility = on ? Visibility.Hidden : Visibility.Visible; }
@@ -70,9 +70,10 @@ public partial class SettingsWindow
     // always kept.
     private FrameworkElement AlwaysKept()
     {
-        var lockIcon = Stroke("M 2,5 H 8 V 9.5 H 2 Z M 3.2,5 V 3.4 A 1.8,1.8 0 0 1 6.8,3.4 V 5", 10, 10, _palette.Accent); lockIcon.StrokeThickness = 1.2;
+        // The lock's outline runs from 1.05 to 8.95, centred in its 10 like the words beside it.
+        var lockIcon = Stroke("M 2,4.45 H 8 V 8.95 H 2 Z M 3.2,4.45 V 2.85 A 1.8,1.8 0 0 1 6.8,2.85 V 4.45", 10, 10, _palette.Accent); lockIcon.StrokeThickness = 1.2;
         lockIcon.Margin = new Thickness(0, 0, 4, 0);
-        var words = new TextBlock { Text = Loc.T("一直保留", "Kept"), FontFamily = SettingsFont(UiFontRole.Panel), VerticalAlignment = VerticalAlignment.Center };
+        var words = new InkCentredText(new TextBlock { Text = Loc.T("一直保留", "Kept"), FontFamily = SettingsFont(UiFontRole.Panel) });
         var mark = new ToggleButton { Style = (Style)FindResource("SettingsStateChip"), IsChecked = true, IsHitTestVisible = false, Focusable = false, Opacity = 0.6,
             Content = new StackPanel { Orientation = Orientation.Horizontal, Children = { lockIcon, words } },
             Width = KeepChipWidth, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
