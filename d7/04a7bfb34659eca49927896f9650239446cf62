@@ -1,0 +1,38 @@
+tests/BrimDeck.Tests/MaasPricingTests.cs
+  s_6e52e25f6c2d36::t_129fe07523b8bd 45
+  s_6e52e25f6c2d36::t_65c393234dbcb3 53
+  s_6e52e25f6c2d36::t_3ef43cadc9dd95 1-44,46-52,54-59
+tests/BrimDeck.Tests/Program.cs
+  h_dc4d9c798f1bc1 18
+src/BrimDeck.Core/Pricing.cs
+  s_26eb13f5533a12::t_958e9768238715 49-50,335,404-405,529-569
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d704a7bfb34659eca49927896f9650239446cf62",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_26eb13f5533a12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2fe4cd94-1942-4117-8347-31f57780d122",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_6e52e25f6c2d36": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f8982054-f528-4d98-aae2-f953240e294b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
