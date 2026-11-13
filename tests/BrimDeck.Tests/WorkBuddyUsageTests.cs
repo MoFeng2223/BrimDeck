@@ -198,7 +198,7 @@ static class WorkBuddyUsageTests
         check("WorkBuddy AI keeps its data in .workbuddy-ai",
             DataLocations.Resolve(Path.Combine(root, "profile"), root, root, null, null).WorkBuddyAiHome == Path.Combine(root, "profile", ".workbuddy-ai"));
         check("WorkBuddy AI is its own quota source and usage app with WorkBuddy's color", ProviderCatalog.IsBuiltIn(ProviderId.WorkBuddyAi)
-            && ProviderCatalog.IsUsageSource(ProviderId.WorkBuddyAi) && ProviderCatalog.Name(ProviderId.WorkBuddyAi) == "WorkBuddy AI"
+            && ProviderCatalog.IsUsageSource(ProviderId.WorkBuddyAi) && ProviderCatalog.Name(ProviderId.WorkBuddyAi) == "WorkBuddy AI" && (int)ProviderId.WorkBuddyAi == (int)ProviderId.WorkBuddy + 1
             && PanelThemes.AppKey(ProviderId.WorkBuddyAi) == "workbuddy" && AppPresets.ThemeColor(ProviderId.WorkBuddyAi) == AppPresets.ThemeColor(ProviderId.WorkBuddy));
         check("Each edition has its own website and saved sign-in", WorkBuddyUsage.For(ProviderId.WorkBuddy) == WorkBuddyUsage.China
             && WorkBuddyUsage.For(ProviderId.WorkBuddyAi) == WorkBuddyUsage.International && WorkBuddyUsage.International.Origin == "https://www.workbuddy.ai"

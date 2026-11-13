@@ -389,7 +389,13 @@ public partial class MainWindow
                     !header && (total && i >= 2 || !total && i == 0 || i == widths.Length - 1) ? FontWeights.SemiBold : FontWeights.Normal);
                 text.TextAlignment = i >= 2 ? TextAlignment.Right : TextAlignment.Left;
                 FrameworkElement cell = text;
-                if (i == 0 && provider is { } id) cell = new CapDot(text, UI.Brush(StatisticsTheme(id)), 7, 13);
+                if (i == 0 && provider is { } id)
+                {
+                    cell = new CapDot(text, UI.Brush(StatisticsTheme(id)), 7, 13);
+                    // A name cut off by its ellipsis shows in full on hover; one that fits shows no tooltip.
+                    text.ToolTip = labels[i];
+                    text.ToolTipOpening += (_, e) => { if (!UI.IsCut(text)) e.Handled = true; };
+                }
                 Grid.SetColumn(cell, i * 2); row.Children.Add(cell);
             }
             return row;
@@ -401,7 +407,7 @@ public partial class MainWindow
             var record = result.Rows[i];
             var row = Row(AppPresets.Name(record.Provider), record.Model, values[i], false, false, record.Provider);
             var tips = Tips(record.Entries, false);
-            // The model name shows the unit prices; the app name shows no tooltip.
+            // The model name shows the unit prices; the app name, inside its dot cell, shows its full name only when cut off (Row).
             foreach (var text in row.Children.OfType<TextBlock>())
             {
                 int column = Grid.GetColumn(text) / 2;
