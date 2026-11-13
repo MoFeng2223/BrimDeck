@@ -1,0 +1,36 @@
+src/BrimDeck/InkCentredText.cs
+  s_f9c80f675d6689::t_5ee61f78a77959 1-86
+src/BrimDeck/SettingsResources.xaml
+  s_1ead00e520d884::t_332f00a2fa3a2c 477-478
+src/BrimDeck/SettingsShelfRules.cs
+  s_1ead00e520d884::t_332f00a2fa3a2c 50,53,73-74,76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "eb7984d9094779e7f795637c123ba6c55e6a9ba0",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_1ead00e520d884": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0dafbee4-fa79-4797-b4ac-ac2636f87fdb",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_f9c80f675d6689": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ba0794f3-cbda-4b09-8976-3a53b69fba09",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
