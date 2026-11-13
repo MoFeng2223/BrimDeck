@@ -453,7 +453,7 @@ public partial class MainWindow : Window
         var (widthMin, widthMax) = CollapsedGeometry.WidthRange(style, monitor, work, _scale);
         // At the height the surface takes, which a short screen or work area can lower below the saved one (as Resolve does).
         double surfaceHeight = CollapsedGeometry.SurfaceHeight(style, height, monitor, work, _scale);
-        widthMin = Math.Min(widthMax, Math.Max(widthMin, CollapsedGeometry.SurfaceWidth(style, surfaceHeight, _compactRequired)));
+        widthMin = Math.Min(widthMax, Math.Max(widthMin, CollapsedGeometry.SurfaceWidth(style, surfaceHeight, _compactRequired, _scale)));
         var (_, offsetMax) = CollapsedGeometry.OffsetXRange(style, width * _scale, monitor, work);
         var (topMin, topMax) = style switch
         {
