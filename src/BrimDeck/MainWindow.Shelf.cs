@@ -350,7 +350,7 @@ public partial class MainWindow
         }
         else if (!Searching && _clipTab is null && !Settings.ClipboardRecord)
         {
-            panel.Children.Add(Label(Loc.T("开启后保存在本机，加密存放", "Kept on this computer, encrypted"), layout.Aux, UI.Tertiary, HorizontalAlignment.Center, top: 4));
+            panel.Children.Add(Label(Loc.T("开启后只保存在本机", "Kept only on this computer"), layout.Aux, UI.Tertiary, HorizontalAlignment.Center, top: 4));
             var on = PillButton(Loc.T("开启记录", "Turn on"), primary: true, () => _app.UpdateSettings(SettingsWith(s => s.ClipboardRecord = true)));
             on.Margin = new Thickness(0, 10, 0, 0); on.HorizontalAlignment = HorizontalAlignment.Center; panel.Children.Add(on);
         }

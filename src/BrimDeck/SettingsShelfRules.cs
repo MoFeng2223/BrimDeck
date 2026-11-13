@@ -46,13 +46,14 @@ public partial class SettingsWindow
     }
 
     // In the row, a small label that says what happens to what is in the category and changes it when clicked: "一直保留" (on)
-    // or "退出时清除" (off, it goes with the history when BrimDeck exits). Both words are laid out, the other hidden, so the label
-    // keeps its width. Each word is centred in the label by its letters as drawn (InkCentredText), whatever the font and scale.
+    // or, off, what happens to the history, which it goes with (HistoryFate: "退出时清除", "保留 30 天"). Both words are laid out,
+    // the other hidden, so the label keeps its width. Each word is centred in the label by its letters as drawn (InkCentredText),
+    // whatever the font and scale.
     private ToggleButton KeepSwitch(ShelfCategory category)
     {
         InkCentredText Word(string text) => new(new TextBlock { Text = text, FontFamily = SettingsFont(UiFontRole.Panel) }) { HorizontalAlignment = HorizontalAlignment.Center };
         var kept = Word(Loc.T("一直保留", "Kept"));
-        var cleared = Word(Loc.T("退出时清除", "Cleared on exit"));
+        var cleared = Word(HistoryFate());
         void Show(bool on) { kept.Visibility = on ? Visibility.Visible : Visibility.Hidden; cleared.Visibility = on ? Visibility.Hidden : Visibility.Visible; }
         Show(category.Keep);
         var keep = new ToggleButton { Style = (Style)FindResource("SettingsStateChip"), IsChecked = category.Keep, Content = new Grid { Children = { kept, cleared } },
@@ -69,7 +70,7 @@ public partial class SettingsWindow
     // Their height, the style's: the words make it one device pixel taller where that centres them (InkCentredText.FitHeight).
     // Every label in the column weighs every word one may show, so they are all one height and keep it when clicked.
     private const double KeepChipHeight = 22;
-    private static string[] KeepChipWords() => [Loc.T("一直保留", "Kept"), Loc.T("退出时清除", "Cleared on exit")];
+    private string[] KeepChipWords() => [Loc.T("一直保留", "Kept"), HistoryFate()];
 
     // "常用"'s place in that column: the same label, on, with a lock before the words and paler, and not to be clicked: "常用" is
     // always kept.

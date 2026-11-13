@@ -21,7 +21,9 @@ public sealed partial class SettingsWindow
             var choice = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = option.Label, GroupName = title, IsChecked = EqualityComparer<T>.Default.Equals(option.Value, selected) };
             AutomationProperties.SetName(choice, title + " " + option.Label); choice.Checked += (_, _) => change(option.Value); strip.Children.Add(choice);
         }
-        var row = Row(title, SegmentBorder(strip), help: help is null ? null : () => help); row.IsEnabled = enabled; return row;
+        // Only the options are turned off: the row's info mark still shows its description on hover.
+        var segments = SegmentBorder(strip); segments.IsEnabled = enabled;
+        return Row(title, segments, help: help is null ? null : () => help);
     }
     // The options under the style cards belong to the chosen style. Choosing another card slides the current options
     // out and the chosen style's options in, moving the way the chosen card lies from the previous one.
