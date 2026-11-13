@@ -231,7 +231,8 @@ internal sealed class FigureGauge : FrameworkElement
         }));
     }
 
-    protected override void OnMouseEnter(MouseEventArgs e) { base.OnMouseEnter(e); if (_button) Hover(true); }
+    // Touch and a pen do not hover (motion-review F4).
+    protected override void OnMouseEnter(MouseEventArgs e) { base.OnMouseEnter(e); if (_button && PressFeedback.Hovers(true, e.StylusDevice is not null)) Hover(true); }
     protected override void OnMouseLeave(MouseEventArgs e) { base.OnMouseLeave(e); if (_button) { _pressed = false; Hover(false); } }
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
     {
@@ -434,7 +435,7 @@ internal sealed class BlockGauge : FrameworkElement
         double y = Math.Round((1 - Math.Clamp(_tick.At(now), 0, 1)) * (h - 2)) + 1;
         drawing.DrawLine(pen, new Point(w * .2, y), new Point(w * .8, y));
     }
-    protected override void OnMouseEnter(MouseEventArgs e) { base.OnMouseEnter(e); Hover(true); }
+    protected override void OnMouseEnter(MouseEventArgs e) { base.OnMouseEnter(e); if (PressFeedback.Hovers(true, e.StylusDevice is not null)) Hover(true); }
     protected override void OnMouseLeave(MouseEventArgs e) { base.OnMouseLeave(e); Hover(false); }
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e) { base.OnMouseLeftButtonUp(e); e.Handled = true; Clicked?.Invoke(); }
 }

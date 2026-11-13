@@ -64,6 +64,9 @@ public partial class MainWindow
     private Button? _musicFullControl;
     private TextBlock? _musicSmtcHint;
     private readonly Dictionary<MediaCommand, (MusicControlButton Button, string Icon)> _musicControlButtons = new();
+    // The transport button the pointer last clicked, and when (Environment.TickCount64): only its own new glyph grows into place
+    // (motion-review F10, GlyphGrowth).
+    private (MediaCommand Id, long At)? _musicPointerClick;
     private MusicEqualizer? _musicEqualizer, _compactEqualizer;
     private readonly double[] _flowLevels = new double[CompactMusicLayout.MaximumBars];
     private MusicMarquee? _compactMarquee;
@@ -460,7 +463,7 @@ public partial class MainWindow
         // Fitting the usage page for them is kept until its size, data or settings change (CachedUsageHeader): this runs on every
         // update of the song and many times a second during a drag.
         ApplyHeader(Settings.UsagePage ? PanelHeader.Music(c).WithControlsOf(CachedUsageHeader()) : PanelHeader.Music(c));
-        bool animate = Settings.Animations && SystemParameters.ClientAreaAnimation;
+        bool animate = Soft.Enabled;
         // Without the cover the lyrics, or a message, take a column of their own; with neither the titles have the width.
         bool lyricColumn = !Settings.MusicPageCover && (hasLyrics || message.Length > 0);
         string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.EqualizerColor}|{Settings.EqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{Settings.MusicEqualizerBars}|{Settings.UiFont}|{Loc.Language}|{animate}";
@@ -516,8 +519,8 @@ public partial class MainWindow
             body.Children.Add(upper);
             var art = MusicVisuals.Cover(_mediaCover, layout.Cover, layout.CoverRadius, outlined: true);
             art.RenderTransformOrigin = new Point(.5, .5); art.RenderTransform = _musicCoverScale;
-            MusicControlButton.Animate(_musicCoverScale, ScaleTransform.ScaleXProperty, track.State == MediaState.Paused ? .94 : 1, animate, Soft.Move);
-            MusicControlButton.Animate(_musicCoverScale, ScaleTransform.ScaleYProperty, track.State == MediaState.Paused ? .94 : 1, animate, Soft.Move);
+            Soft.Glide(_musicCoverScale, ScaleTransform.ScaleXProperty, track.State == MediaState.Paused ? .94 : 1, animate, Soft.Move);
+            Soft.Glide(_musicCoverScale, ScaleTransform.ScaleYProperty, track.State == MediaState.Paused ? .94 : 1, animate, Soft.Move);
             AutomationProperties.SetName(art, Loc.T("专辑封面", "Album cover")); upper.Children.Add(art);
             AttachCoverFocus(art);
             if (newCover && animate) { var fade = Soft.Fade(0, 1, Soft.Move, Soft.Follow); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop; art.BeginAnimation(OpacityProperty, fade); }
@@ -620,7 +623,11 @@ public partial class MainWindow
             if (!_musicControlButtons.TryGetValue(id, out var slot))
             {
                 var created = new MusicControlButton { Style = (Style)FindResource("MusicControl") };
-                created.Click += async (_, _) => { if (created.Tag is Func<Task> execute) await execute(); };
+                created.Click += async (_, _) =>
+                {
+                    if (InputManager.Current.MostRecentInputDevice is MouseDevice or StylusDevice or TouchDevice) _musicPointerClick = (id, Environment.TickCount64);
+                    if (created.Tag is Func<Task> execute) await execute();
+                };
                 slot = (created, ""); controls.Children.Add(created);
             }
             var button = slot.Button;
@@ -635,13 +642,17 @@ public partial class MainWindow
                     singleLabel.HorizontalAlignment = HorizontalAlignment.Center;
                     container.Children.Add(singleLabel); icon = container;
                 }
-                // A changed glyph (play and pause, the playback mode, the heart) grows into place instead of switching.
-                if (glide && button.IsVisible && slot.Icon.Length > 0 && icon is FrameworkElement grown)
+                // A glyph changed by a click on it (play and pause, the playback mode, the heart) grows into place from nearly its
+                // size instead of switching (motion-review F10); one changed by a media key, the keyboard or the player itself
+                // switches at once.
+                bool clicked = _musicPointerClick is { } click && click.Id == id && GlyphGrowth.Grows(click.At, Environment.TickCount64);
+                if (clicked) _musicPointerClick = null;
+                if (glide && clicked && button.IsVisible && slot.Icon.Length > 0 && icon is FrameworkElement grown)
                 {
-                    var scale = new ScaleTransform(.6, .6);
+                    var scale = new ScaleTransform(GlyphGrowth.From, GlyphGrowth.From);
                     grown.RenderTransformOrigin = new Point(.5, .5); grown.RenderTransform = scale;
-                    var grow = Soft.Fade(.6, 1, Soft.Choose, Soft.Follow); grow.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
-                    var fade = Soft.Fade(0, 1, Soft.Choose, Soft.Follow); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
+                    var grow = Soft.Fade(GlyphGrowth.From, 1, GlyphGrowth.Milliseconds); grow.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
+                    var fade = Soft.Fade(0, 1, GlyphGrowth.Milliseconds); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
                     scale.ScaleX = scale.ScaleY = 1;
                     scale.BeginAnimation(ScaleTransform.ScaleXProperty, grow); scale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
                     grown.BeginAnimation(OpacityProperty, fade);
@@ -1130,7 +1141,7 @@ public partial class MainWindow
         int title = shown.FindIndex(entry => entry.Part is CompactPart.Music);
         // One gap between every two parts; what is left widens them evenly and then centres the row.
         var place = CompactSpacing.Arrange([.. shown.Select(entry => entry.Size)], title, titleWanted, shortest, grid.Width, unit, scale, dpi);
-        bool animate = Settings.Animations && SystemParameters.ClientAreaAnimation;
+        bool animate = Soft.Enabled;
         for (int i = 0; i < shown.Count; i++)
         {
             double left = place.Left[i], room = place.Room[i];
@@ -1224,7 +1235,7 @@ public partial class MainWindow
         bool musicVisible = MusicPresentationVisible, systemVisible = SystemLevelsVisible;
         _app.PresentMedia(this, PlayerLevelsVisible, systemVisible);
         bool progressVisible = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.MusicIndicatorProgress && _mediaTrack is { HasTimeline: true, State: not MediaState.Stopped };
-        bool animations = Settings.Animations && SystemParameters.ClientAreaAnimation;
+        bool animations = Soft.Enabled;
         // A paused song rests at the start of its line; an endless scroll would keep the window composing for hours. So does a
         // display that is off: the line rests until it is back.
         _compactMarquee?.SetScrolling(animations && MusicAudioActive && IsVisible && !IsSuppressed && !DisplayPower.Off && !_expanded && _alert is null && EffectiveStyle != CompactStyle.Line);
@@ -1247,7 +1258,7 @@ public partial class MainWindow
     // rest cut at its start with no way to read the rest.
     private void UpdateLyricScrolling()
     {
-        bool open = Settings.Animations && SystemParameters.ClientAreaAnimation
+        bool open = Soft.Enabled
             && IsVisible && !IsSuppressed && !DisplayPower.Off && _expanded && IsMusicPage;
         _lyricCurrent?.SetScrolling(open && MusicAudioActive); _musicTitle?.SetScrolling(open);
     }
@@ -1280,7 +1291,7 @@ public partial class MainWindow
     private void TickMusic()
     {
         var now = DateTimeOffset.UtcNow; double seconds = Math.Min(.5, (now - _lastMusicTick).TotalSeconds); _lastMusicTick = now;
-        bool animations = Settings.Animations && SystemParameters.ClientAreaAnimation;
+        bool animations = Soft.Enabled;
         bool playerVisible = PlayerLevelsVisible, systemVisible = SystemLevelsVisible;
         bool playing = animations && MusicAudioActive, compactPlaying = playing || animations && systemVisible;
         _app.PresentMedia(this, playerVisible, systemVisible);

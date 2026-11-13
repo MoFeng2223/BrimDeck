@@ -31,6 +31,10 @@ internal static class Soft
     // HoverOut its quicker way out), a glide between choices the monitor's sort pill (Choose), content that moves in or out the
     // monitor's readings (Move).
     public const int Quick = 160, Short = 240, Hover = (int)(Eased.Hover * 1000), HoverOut = (int)(Eased.HoverOut * 1000 + .5), Choose = (int)(Eased.Seconds * 750), Move = (int)(Eased.Seconds * 1000);
+    // A press (motion-review F11, F12): what shrinks under the button goes down in Press to PressScale, a pressed fill or glyph
+    // in PressFill, so the press is felt at once; both let go in Quick.
+    public const int Press = PressFeedback.Down, PressFill = PressFeedback.Fill;
+    public const double PressScale = PressFeedback.Scale;
     // How small content is as it steps out of or into its place (the island's compact content, motion-review F15): never so
     // small that it reads as coming from nothing.
     public const double Shrunk = .94;
@@ -64,6 +68,35 @@ internal static class Soft
         if (element.RenderTransform is not (null or MatrixTransform { Matrix.IsIdentity: true } or TranslateTransform { IsFrozen: false })) return;
         if (element.RenderTransform is not TranslateTransform shift) element.RenderTransform = shift = new TranslateTransform();
         shift.BeginAnimation(TranslateTransform.YProperty, Fade(shift.Y, -rise, Quick));
+    }
+
+    // A scale that answers a press: down to PressScale in Press, back in Quick.
+    public static void Pressed(ScaleTransform scale, bool down, bool animate)
+    {
+        Glide(scale, ScaleTransform.ScaleXProperty, down ? PressScale : 1, animate, PressFeedback.ScaleLength(down));
+        Glide(scale, ScaleTransform.ScaleYProperty, down ? PressScale : 1, animate, PressFeedback.ScaleLength(down));
+    }
+
+    // Sets a property to its new value and, when animate, glides there from where it was (Soft.Follow, Hover by default): the
+    // animation only covers the way and ends without holding the property, so the value set is what stays. Changes of at most
+    // tolerance are set at once.
+    public static void Glide<T>(T target, DependencyProperty property, double to, bool animate, int milliseconds = Hover, double tolerance = 0)
+        where T : DependencyObject, IAnimatable
+    {
+        double from = (double)target.GetValue(property);
+        target.BeginAnimation(property, null);
+        target.SetValue(property, to);
+        if (!animate || !double.IsFinite(from) || Math.Abs(from - to) <= tolerance) return;
+        target.BeginAnimation(property, new DoubleAnimation(from, to, TimeSpan.FromMilliseconds(milliseconds)) { EasingFunction = Follow, FillBehavior = FillBehavior.Stop });
+    }
+
+    // The same for a brush's color.
+    public static void Glide(SolidColorBrush brush, Color to, bool animate, int milliseconds = Hover)
+    {
+        var from = brush.Color;
+        brush.BeginAnimation(SolidColorBrush.ColorProperty, null);
+        brush.Color = to;
+        if (animate && from != to) brush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(from, to, TimeSpan.FromMilliseconds(milliseconds)) { EasingFunction = Follow, FillBehavior = FillBehavior.Stop });
     }
 
     private static IEasingFunction Frozen(Freezable ease) { ease.Freeze(); return (IEasingFunction)ease; }

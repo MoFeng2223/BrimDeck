@@ -23,7 +23,14 @@ public partial class MainWindow
         double x = button.TranslatePoint(new Point(), (UIElement)PageCapsule.Parent).X, width = button.ActualWidth, height = button.Height;
         bool glide = _expanded && !_preview && PageSwitch.IsVisible && Soft.Enabled && PageCapsule.Width > 0 && Math.Abs(PageCapsuleShift.X - x) > .5;
         PageCapsule.Height = height;
-        PageHandover.Glide(PageCapsule, WidthProperty, width, glide, Soft.Choose);
+        // motion-review F8: the width is set at once and the change is drawn by stretching the capsule from its left edge, so the
+        // glide lays nothing out again. A stretch still under way goes on from the width it draws now, not from its laid-out width.
+        double was = PageCapsule.Width * PageCapsuleStretch.ScaleX;
+        PageCapsule.Width = width;
+        PageCapsuleStretch.BeginAnimation(ScaleTransform.ScaleXProperty, null); PageCapsuleStretch.ScaleX = 1;
+        if (glide && StretchGlide.From(was, width) is { } stretchFrom)
+            PageCapsuleStretch.BeginAnimation(ScaleTransform.ScaleXProperty, new System.Windows.Media.Animation.DoubleAnimation(stretchFrom, 1, TimeSpan.FromMilliseconds(Soft.Choose))
+            { EasingFunction = Soft.Follow, FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop });
         double from = PageCapsuleShift.X;
         PageCapsuleShift.BeginAnimation(TranslateTransform.XProperty, null);
         PageCapsuleShift.X = x;
