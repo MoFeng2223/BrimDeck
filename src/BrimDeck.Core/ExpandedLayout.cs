@@ -54,7 +54,12 @@ public sealed class ExpandedPlan
     public double Width { get; init; }
     public double Height { get; init; }
 
-    public IEnumerable<ExpandedItem> Shown => Parts.Select(part => part.Item).Concat(List != ExpandedList.None ? [ExpandedItem.Processes] : []);
+    // The rates the network block shows: it is one block of one line, with the download, the upload or both.
+    public bool Downloads { get; init; }
+    public bool Uploads { get; init; }
+    public IEnumerable<ExpandedItem> Shown => Parts.Select(part => part.Item).Where(item => item is not (ExpandedItem.Download or ExpandedItem.Upload))
+        .Concat(Downloads ? [ExpandedItem.Download] : []).Concat(Uploads ? [ExpandedItem.Upload] : [])
+        .Concat(List != ExpandedList.None ? [ExpandedItem.Processes] : []);
     public ExpandedPart? Part(ExpandedItem item) => Parts.FirstOrDefault(part => part.Item == item);
     // Type sizes as drawn.
     public double Figure => Steps.Figure * Scale;
@@ -123,7 +128,7 @@ public static class ExpandedLayout
         double w = width / scale, h = height / scale;
 
         bool cpu = order.Contains(ExpandedItem.Cpu), gpu = order.Contains(ExpandedItem.Gpu), gauge = cpu || gpu;
-        bool mem = order.Contains(ExpandedItem.Memory), net = order.Contains(ExpandedItem.Network), metrics = mem || net;
+        bool mem = order.Contains(ExpandedItem.Memory), down = order.Contains(ExpandedItem.Download), up = order.Contains(ExpandedItem.Upload), net = down || up, metrics = mem || net;
         bool frames = order.Contains(ExpandedItem.Frames), processes = order.Contains(ExpandedItem.Processes);
         int drives = order.Contains(ExpandedItem.Storage) ? Math.Max(0, content.Drives) : 0;
         int powerWant = order.Contains(ExpandedItem.Power) ? Math.Clamp(content.PowerLines, 0, 2) : 0;
@@ -206,7 +211,7 @@ public static class ExpandedLayout
             double restNow = Rest2(mode, memShown, netShown);
             var bands = new List<Band>();
             if (gaugeShown) bands.Add(new Band { Kind = BandKind.Gauge, Index = Index(ExpandedItem.Cpu, ExpandedItem.Gpu), Height = head + margins + graphMin });
-            if (restNow > 0) bands.Add(new Band { Kind = BandKind.Metrics, Index = Index(ExpandedItem.Memory, ExpandedItem.Network), Height = restNow, Stretch = StretchBlocks });
+            if (restNow > 0) bands.Add(new Band { Kind = BandKind.Metrics, Index = Index(ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload), Height = restNow, Stretch = StretchBlocks });
             if (frameLine) bands.Add(new Band { Kind = BandKind.Frames, Index = Index(ExpandedItem.Frames), Height = rowS, Stretch = StretchRows });
             if (storageLines > 0) bands.Add(new Band { Kind = BandKind.Storage, Index = Index(ExpandedItem.Storage), Height = storageLines * rowS, Stretch = StretchDrives });
             if (powerLines > 0) bands.Add(new Band { Kind = BandKind.Power, Index = Index(ExpandedItem.Power), Height = powerLines * rowS, Stretch = StretchRows });
@@ -304,7 +309,7 @@ public static class ExpandedLayout
                     break;
                 }
                 case BandKind.Metrics:
-                    PlaceMetrics(parts, order, mode, memShown, netShown, readingsW, y, bh, ln, body, k, scale);
+                    PlaceMetrics(parts, order, mode, memShown, netShown, down ? ExpandedItem.Download : ExpandedItem.Upload, readingsW, y, bh, ln, body, k, scale);
                     break;
                 case BandKind.Frames:
                     parts.Add(new(ExpandedItem.Frames, Scaled(new(0, y, readingsW, bh), scale), ExpandedForm.Row, rowS));
@@ -319,7 +324,7 @@ public static class ExpandedLayout
             y += bh;
         }
 
-        var steps = new MonitorLayout(figure, body, caption, metrics ? mode : MetricsMode.Line, (ListPlacement)(int)(list == ExpandedList.Full ? ExpandedList.None : list), row)
+        var steps = new MonitorLayout(figure, body, caption, mode, (ListPlacement)(int)(list == ExpandedList.Full ? ExpandedList.None : list), row)
         {
             StorageLines = storageLines, StorageColumns = storageLines > 0 ? columns : 0, PowerLines = powerLines, FrameLine = frameLine
         };
@@ -332,23 +337,25 @@ public static class ExpandedLayout
         var plan = new ExpandedPlan
         {
             Kind = ExpandedKind.Readings, Steps = steps, Scale = scale, Parts = parts, Readings = Scaled(new(0, 0, readingsW, readingsH), scale), List = list,
-            ListBox = Scaled(listBox, scale), Dropped = dropped, Squeezed = squeezed, Hole = hole * scale, Width = width, Height = height
+            ListBox = Scaled(listBox, scale), Dropped = dropped, Squeezed = squeezed, Hole = hole * scale, Width = width, Height = height,
+            Downloads = down && netShown, Uploads = up && netShown
         };
         var present = plan.Shown.ToHashSet();
         dropped.AddRange(order.Where(item => !present.Contains(item)));
         return plan;
     }
 
-    private static void PlaceMetrics(List<ExpandedPart> parts, List<ExpandedItem> order, MetricsMode mode, bool mem, bool net, double width, double y, double height,
+    private static void PlaceMetrics(List<ExpandedPart> parts, List<ExpandedItem> order, MetricsMode mode, bool mem, bool net, ExpandedItem netItem, double width, double y, double height,
         double ln, double body, double k, double scale)
     {
         bool both = mem && net;
-        bool memFirst = !both || order.IndexOf(ExpandedItem.Memory) < order.IndexOf(ExpandedItem.Network);
-        var firstItem = memFirst ? (mem ? ExpandedItem.Memory : ExpandedItem.Network) : ExpandedItem.Network;
-        var secondItem = firstItem == ExpandedItem.Memory ? ExpandedItem.Network : ExpandedItem.Memory;
+        int memAt = order.IndexOf(ExpandedItem.Memory), netAt = Math.Min(order.IndexOf(ExpandedItem.Download) is var d and >= 0 ? d : int.MaxValue, order.IndexOf(ExpandedItem.Upload) is var u and >= 0 ? u : int.MaxValue);
+        bool memFirst = !both || memAt < netAt;
+        var firstItem = memFirst ? (mem ? ExpandedItem.Memory : netItem) : netItem;
+        var secondItem = firstItem == ExpandedItem.Memory ? netItem : ExpandedItem.Memory;
         if (mode == MetricsMode.Line)
         {
-            if (!both) { parts.Add(new(mem ? ExpandedItem.Memory : ExpandedItem.Network, Scaled(new(0, y, width, height), scale), ExpandedForm.Line, ln)); return; }
+            if (!both) { parts.Add(new(mem ? ExpandedItem.Memory : netItem, Scaled(new(0, y, width, height), scale), ExpandedForm.Line, ln)); return; }
             double half = Math.Floor((width - MetricsGap) / 2);
             parts.Add(new(firstItem, Scaled(new(0, y, half, height), scale), ExpandedForm.Line, ln));
             parts.Add(new(secondItem, Scaled(new(half + MetricsGap, y, width - half - MetricsGap, height), scale), ExpandedForm.Line, ln));
@@ -359,7 +366,7 @@ public static class ExpandedLayout
         double Natural(ExpandedItem item) => mode == MetricsMode.Blocks && item == ExpandedItem.Memory ? block : ln;
         if (!both)
         {
-            var only = mem ? ExpandedItem.Memory : ExpandedItem.Network;
+            var only = mem ? ExpandedItem.Memory : netItem;
             parts.Add(new(only, Scaled(new(0, y, width, height), scale), form, Natural(only)));
             return;
         }

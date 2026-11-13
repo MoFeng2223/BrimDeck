@@ -640,6 +640,8 @@ public sealed class DeckSettings
     // Once set, the table is what the page follows and Normalize writes the four switches to match it, for older versions.
     [JsonPropertyName("ExpandedReadings"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<ExpandedReading>? ExpandedTable { get => _expanded; set => _expanded = value; }
+    // Whether the expanded page shows an item (the table, or the old switches before one is set).
+    public bool ShowsExpanded(ExpandedItem item) => ExpandedReadings.Any(reading => reading.Item == item && reading.Visible);
     [JsonIgnore]
     public List<ExpandedReading> ExpandedReadings
     {

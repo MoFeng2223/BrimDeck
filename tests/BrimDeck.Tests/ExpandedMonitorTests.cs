@@ -9,7 +9,7 @@ using BrimDeck.Core;
 internal static class ExpandedMonitorTests
 {
     private static readonly ExpandedItem[] Every = [.. Enum.GetValues<ExpandedItem>()];
-    private static readonly ExpandedItem[] Before = [ExpandedItem.Cpu, ExpandedItem.Gpu, ExpandedItem.Memory, ExpandedItem.Network];
+    private static readonly ExpandedItem[] Before = [ExpandedItem.Cpu, ExpandedItem.Gpu, ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload];
     private static readonly double[] Widths = [300, 440, 560, 620, 860, 1200];
     private static readonly double[] Heights = [60, 100, 120, 140, 160, 200, 220, 260, 320, 400, 520];
     private static readonly FontMetrics[] Fonts = [FontMetrics.Default, new(1.25, 1.7), new(1.5, 1.7), new(1, 2.1), new(.85, 1.5)];
@@ -19,6 +19,7 @@ internal static class ExpandedMonitorTests
     internal static void Run(Action<string, bool> check)
     {
         Table(check);
+        Network(check);
         SettingsFile(check);
         Regression(check);
         Special(check);
@@ -34,30 +35,67 @@ internal static class ExpandedMonitorTests
         var defaults = ExpandedMonitor.Defaults();
         check("Expanded table: the default order and shown items are the page as it was",
             defaults.Select(r => r.Item).SequenceEqual(ExpandedMonitor.Order) && ExpandedMonitor.Shown(defaults).SequenceEqual(
-                [ExpandedItem.Cpu, ExpandedItem.Gpu, ExpandedItem.Memory, ExpandedItem.Network, ExpandedItem.Storage, ExpandedItem.Power, ExpandedItem.Processes]));
+                [ExpandedItem.Cpu, ExpandedItem.Gpu, ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload, ExpandedItem.Storage, ExpandedItem.Power, ExpandedItem.Processes]));
         var off = ExpandedMonitor.Defaults(processes: false, storage: false, power: false, frames: true);
         check("Expanded table: the four old switches say which of their items show",
-            ExpandedMonitor.Shown(off).SequenceEqual([ExpandedItem.Cpu, ExpandedItem.Gpu, ExpandedItem.Memory, ExpandedItem.Network, ExpandedItem.Frames])
+            ExpandedMonitor.Shown(off).SequenceEqual([ExpandedItem.Cpu, ExpandedItem.Gpu, ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload, ExpandedItem.Frames])
             && ExpandedMonitor.Switches(off) == (false, false, false, true));
         var messy = ExpandedMonitor.Normalize([new() { Item = ExpandedItem.Power }, null, new() { Item = (ExpandedItem)99 }, new() { Item = ExpandedItem.Power, Visible = false },
             new() { Item = ExpandedItem.Cpu, Visible = false }]);
         check("Expanded table: unknown and repeated items are dropped, missing ones join at the end, the first of a repeat wins",
-            messy.Count == 8 && messy[0].Item == ExpandedItem.Power && messy[0].Visible && messy[1].Item == ExpandedItem.Cpu && !messy[1].Visible
-            && messy.Select(r => r.Item).Distinct().Count() == 8 && messy.Skip(2).Select(r => r.Item).SequenceEqual(ExpandedMonitor.Order.Where(i => i is not (ExpandedItem.Power or ExpandedItem.Cpu))));
+            messy.Count == 9 && messy[0].Item == ExpandedItem.Power && messy[0].Visible && messy[1].Item == ExpandedItem.Cpu && !messy[1].Visible
+            && messy.Select(r => r.Item).Distinct().Count() == 9 && messy.Skip(2).Select(r => r.Item).SequenceEqual(ExpandedMonitor.Order.Where(i => i is not (ExpandedItem.Power or ExpandedItem.Cpu))));
         var nothing = ExpandedMonitor.Normalize(ExpandedMonitor.Order.Select(item => new ExpandedReading { Item = item, Visible = false }));
-        check("Expanded table: a table with nothing shown stays so", ExpandedMonitor.Shown(nothing).Count == 0 && nothing.Count == 8);
+        check("Expanded table: a table with nothing shown stays so", ExpandedMonitor.Shown(nothing).Count == 0 && nothing.Count == 9);
         check("Expanded table: nothing chosen reads nothing, and a temperature is read only with a reading that has one",
             ExpandedMonitor.Demand([], true) == ExpandedDemand.None
-            && ExpandedMonitor.Demand([ExpandedItem.Memory, ExpandedItem.Network], true) == (ExpandedDemand.Memory | ExpandedDemand.Network)
+            && ExpandedMonitor.Demand([ExpandedItem.Memory, ExpandedItem.Upload], true) == (ExpandedDemand.Memory | ExpandedDemand.Network)
             && ExpandedMonitor.Demand([ExpandedItem.Cpu], true) == (ExpandedDemand.Cpu | ExpandedDemand.Temperatures)
             && ExpandedMonitor.Demand([ExpandedItem.Storage], false) == ExpandedDemand.Storage);
+    }
+
+    private static void Network(Action<string, bool> check)
+    {
+        var preset = ExpandedMonitor.Defaults();
+        check("Expanded presets: the default table is the All preset (the frame rate aside)", ExpandedMonitor.Preset(preset) == ExpandedPreset.All);
+        ExpandedMonitor.Apply(preset, ExpandedPreset.Brief);
+        check("Expanded presets: Brief shows the CPU, memory, download and upload only, and the process list stays",
+            ExpandedMonitor.Shown(preset).SequenceEqual([ExpandedItem.Cpu, ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload, ExpandedItem.Processes]) && ExpandedMonitor.Preset(preset) == ExpandedPreset.Brief);
+        ExpandedMonitor.Apply(preset, ExpandedPreset.CpuMemory);
+        check("Expanded presets: CPU and memory", ExpandedMonitor.Shown(preset).SequenceEqual([ExpandedItem.Cpu, ExpandedItem.Memory, ExpandedItem.Processes]) && ExpandedMonitor.Preset(preset) == ExpandedPreset.CpuMemory);
+        ExpandedMonitor.Apply(preset, ExpandedPreset.None);
+        check("Expanded presets: None chooses no reading but leaves the process list", ExpandedMonitor.Shown(preset).SequenceEqual([ExpandedItem.Processes]) && ExpandedMonitor.Preset(preset) == ExpandedPreset.None);
+        ExpandedMonitor.Apply(preset, ExpandedPreset.All);
+        preset.First(r => r.Item == ExpandedItem.Frames).Visible = true;
+        check("Expanded presets: All leaves the frame rate as it is, and a table that is none of them matches none",
+            ExpandedMonitor.Preset(preset) == ExpandedPreset.All && (preset.First(r => r.Item == ExpandedItem.Gpu).Visible = false) == false && ExpandedMonitor.Preset(preset) is null);
+        var moved = ExpandedMonitor.Normalize(ExpandedMonitor.Order.Reverse().Select(i => new ExpandedReading { Item = i }));
+        ExpandedMonitor.Apply(moved, ExpandedPreset.Brief);
+        check("Expanded presets: a preset keeps the order", moved.Select(r => r.Item).SequenceEqual(ExpandedMonitor.Normalize(moved).Select(r => r.Item)) && moved[0].Item == ExpandedItem.Processes && moved[^1].Item == ExpandedItem.Cpu);
+        var content = new ExpandedContent(1, 1);
+        var split = ExpandedMonitor.Normalize([new() { Item = ExpandedItem.Memory }, new() { Item = ExpandedItem.Download, Visible = false }, new() { Item = ExpandedItem.Cpu }]);
+        check("Expanded table: a table from before the network was split gets the upload after the download, shown as the download is",
+            split.Select(r => r.Item).Take(4).SequenceEqual([ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload, ExpandedItem.Cpu]) && !split[2].Visible);
+        var shown = ExpandedMonitor.Normalize([new() { Item = ExpandedItem.Download }]);
+        check("Expanded table: a shown network migrates to a shown download and upload", shown[0].Item == ExpandedItem.Download && shown[1].Item == ExpandedItem.Upload && shown[1].Visible);
+        check("Expanded table: the download keeps the number the network had", (int)ExpandedItem.Download == 3 && (int)ExpandedItem.Upload > (int)ExpandedItem.Processes);
+        var old = SettingsMigrations.Read("{\"AppVersion\":\"9.0.0\",\"ExpandedReadings\":[{\"Item\":3,\"Visible\":true},{\"Item\":0,\"Visible\":true}]}");
+        check("Expanded settings: a saved network (number 3) reads as the download and the upload follows it",
+            old.ExpandedReadings.Take(3).Select(r => r.Item).SequenceEqual([ExpandedItem.Download, ExpandedItem.Upload, ExpandedItem.Cpu]) && old.ExpandedReadings[1].Visible);
+        var both = ExpandedLayout.For([ExpandedItem.Download, ExpandedItem.Upload], 620, 200, content);
+        var down = ExpandedLayout.For([ExpandedItem.Download], 620, 200, content);
+        var up = ExpandedLayout.For([ExpandedItem.Upload], 620, 200, content);
+        check("Expanded layout: download and upload are one block of one line, which shows the one or both",
+            both.Parts.Count == 1 && both.Downloads && both.Uploads && both.Dropped.Count == 0 && both.Shown.Contains(ExpandedItem.Upload)
+            && down.Downloads && !down.Uploads && down.Dropped.Count == 0 && up.Uploads && !up.Downloads && up.Part(ExpandedItem.Upload) is not null && up.Dropped.Count == 0);
+        check("Expanded layout: the same box whichever rates the block shows", both.Parts[0].Box == down.Parts[0].Box && down.Parts[0].Box == up.Parts[0].Box);
     }
 
     private static void SettingsFile(Action<string, bool> check)
     {
         var old = SettingsMigrations.Read("""{"AppVersion":"1.2.0","MonitorProcesses":false,"MonitorStorage":true,"MonitorPower":false,"MonitorFrames":true}""");
         check("Expanded settings: a file saved before the table shows the page as it was",
-            ExpandedMonitor.Shown(old.ExpandedReadings).SequenceEqual([ExpandedItem.Cpu, ExpandedItem.Gpu, ExpandedItem.Memory, ExpandedItem.Network, ExpandedItem.Frames, ExpandedItem.Storage]));
+            ExpandedMonitor.Shown(old.ExpandedReadings).SequenceEqual([ExpandedItem.Cpu, ExpandedItem.Gpu, ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload, ExpandedItem.Frames, ExpandedItem.Storage]));
         check("Expanded settings: a table nobody set is not written (older files stay as they were)",
             JsonSerializer.SerializeToNode(old)!.AsObject()["ExpandedReadings"] is null);
         var fresh = new DeckSettings();
@@ -67,10 +105,10 @@ internal static class ExpandedMonitorTests
         fresh.MonitorStorage = false;
         check("Expanded settings: before a table is set the switches decide", !ExpandedMonitor.Shown(fresh.ExpandedReadings).Contains(ExpandedItem.Storage));
 
-        var chosen = new DeckSettings { ExpandedReadings = [new() { Item = ExpandedItem.Network }, new() { Item = ExpandedItem.Cpu, Visible = false }, new() { Item = ExpandedItem.Processes, Visible = false }] };
+        var chosen = new DeckSettings { ExpandedReadings = [new() { Item = ExpandedItem.Download }, new() { Item = ExpandedItem.Cpu, Visible = false }, new() { Item = ExpandedItem.Processes, Visible = false }] };
         chosen.Normalize();
         check("Expanded settings: a set table is completed and the old switches follow it",
-            chosen.ExpandedReadings.Count == 8 && chosen.ExpandedReadings[0].Item == ExpandedItem.Network && !chosen.MonitorProcesses && chosen.MonitorStorage && chosen.MonitorPower && !chosen.MonitorFrames);
+            chosen.ExpandedReadings.Count == 9 && chosen.ExpandedReadings[0].Item == ExpandedItem.Download && !chosen.MonitorProcesses && chosen.MonitorStorage && chosen.MonitorPower && !chosen.MonitorFrames);
         var json = JsonSerializer.Serialize(chosen);
         var back = SettingsMigrations.Read(json);
         check("Expanded settings: the table survives a save and a read, order included",
@@ -88,7 +126,7 @@ internal static class ExpandedMonitorTests
         check("Expanded settings: an item this version does not know is dropped on reading",
             newer.ExpandedReadings.Count == 3 || newer.ExpandedReadings.All(r => Enum.IsDefined(r.Item)));
         newer.Normalize();
-        check("Expanded settings: after normalizing every item is there once", newer.ExpandedReadings.Count == 8 && newer.ExpandedReadings[0].Item == ExpandedItem.Memory);
+        check("Expanded settings: after normalizing every item is there once", newer.ExpandedReadings.Count == 9 && newer.ExpandedReadings[0].Item == ExpandedItem.Memory);
     }
 
     // With all of CPU, GPU, memory and network (and any of the rest) chosen the layout is MonitorLayout's: the steps, and the places
@@ -121,7 +159,7 @@ internal static class ExpandedMonitorTests
                                 var metrics = plan.Part(ExpandedItem.Memory)!;
                                 bool same = Math.Abs(gauge.Box.Height - (parts[1].Top + parts[1].Height + (old.Metrics == MetricsMode.Line ? 6 : 10))) < .01 && gauge.Box.Y == 0
                                     && Math.Abs(metrics.Box.Y - parts[2].Top) < .01;
-                                var network = plan.Part(ExpandedItem.Network)!;
+                                var network = plan.Part(ExpandedItem.Download)!;
                                 same &= old.Metrics == MetricsMode.Line ? network.Box.Y == metrics.Box.Y : Math.Abs(network.Box.Bottom - (parts[2].Top + parts[2].Height)) < .01;
                                 if (plan.Part(ExpandedItem.Frames) is { } fp) same &= fp.Box.Y == parts[5].Top + gap && fp.Box.Height == parts[5].Height - gap;
                                 else same &= !old.FrameLine;
@@ -156,7 +194,7 @@ internal static class ExpandedMonitorTests
                 && part.Box.Width == 620 && plan.Demand(false) == ExpandedMonitor.Demand([item], false));
             // The gauges, memory and network flex to the whole page; the curves and the drives only to their limits, the rest is kept as room around.
             check($"Expanded layout: {item} alone leaves no unused height, or only past its largest",
-                item is ExpandedItem.Cpu or ExpandedItem.Gpu or ExpandedItem.Memory or ExpandedItem.Network ? plan.Hole <= 1 : plan.Hole <= 260 - part!.MinHeight * 1.45 + 1);
+                item is ExpandedItem.Cpu or ExpandedItem.Gpu or ExpandedItem.Memory or ExpandedItem.Download ? plan.Hole <= 1 : plan.Hole <= 260 - part!.MinHeight * 1.45 + 1);
         }
         var cpuOnly = ExpandedLayout.For([ExpandedItem.Cpu], 620, 260, content);
         check("Expanded layout: a lone gauge is the main view, taking the whole height", cpuOnly.Part(ExpandedItem.Cpu) is { Form: ExpandedForm.Solo } p && p.Box.Height == 260 && cpuOnly.Hole == 0);
@@ -168,8 +206,8 @@ internal static class ExpandedMonitorTests
         var pair = ExpandedLayout.For([ExpandedItem.Cpu, ExpandedItem.Gpu], 620, 220, content, main: MonitorMain.Gpu);
         check("Expanded layout: both gauges are a pair, the chosen one large", pair.Part(ExpandedItem.Gpu) is { Form: ExpandedForm.Pair } big && pair.Part(ExpandedItem.Cpu) is { Form: ExpandedForm.Pair } small
             && big.Box.Width > small.Box.Width && big.Box.X < small.Box.X);
-        var memoryNetwork = ExpandedLayout.For([ExpandedItem.Network, ExpandedItem.Memory], 620, 60, content);
-        check("Expanded layout: memory and network share a line in the table's order", memoryNetwork.Part(ExpandedItem.Network)!.Box.X < memoryNetwork.Part(ExpandedItem.Memory)!.Box.X
+        var memoryNetwork = ExpandedLayout.For([ExpandedItem.Download, ExpandedItem.Memory], 620, 60, content);
+        check("Expanded layout: memory and network share a line in the table's order", memoryNetwork.Part(ExpandedItem.Download)!.Box.X < memoryNetwork.Part(ExpandedItem.Memory)!.Box.X
             && memoryNetwork.Steps.Metrics == MetricsMode.Line);
         var reordered = ExpandedLayout.For([ExpandedItem.Power, ExpandedItem.Cpu, ExpandedItem.Memory], 620, 260, content);
         check("Expanded layout: items stack in the table's order", reordered.Part(ExpandedItem.Power)!.Box.Y < reordered.Part(ExpandedItem.Cpu)!.Box.Y
