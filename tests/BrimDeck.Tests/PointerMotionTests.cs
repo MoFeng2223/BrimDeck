@@ -20,6 +20,12 @@ internal static class PointerMotionTests
         check("Touch or a pen over a control does not hover it", !PressFeedback.Hovers(true, true));
         check("Nothing over a control, nothing hovered", !PressFeedback.Hovers(false, false) && !PressFeedback.Hovers(false, true));
 
+        // F5, F6: one rule for every animation.
+        check("Animations run when the app and Windows allow them", MotionConditions.Allowed(true, true, false));
+        check("Animations off in the app stop them", !MotionConditions.Allowed(false, true, false));
+        check("Windows' animation effects off stop them", !MotionConditions.Allowed(true, false, false));
+        check("High contrast stops them", !MotionConditions.Allowed(true, true, true));
+
         // F10: a glyph grows into place only for a click on its own button, not long after.
         long now = 1_000_000;
         check("A glyph changed right after the pointer clicked its button grows", GlyphGrowth.Grows(now - 120, now));

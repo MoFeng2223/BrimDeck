@@ -17,6 +17,13 @@ public static class PressFeedback
     public static int ScaleLength(bool pressed) => pressed ? Down : Up;
 }
 
+// Whether animations may run at all: BrimDeck's own setting, Windows' "animation effects", and never in high contrast. The one
+// rule for every animation in the app (motion-review F5, F6).
+public static class MotionConditions
+{
+    public static bool Allowed(bool appSetting, bool systemAnimations, bool highContrast) => appSetting && systemAnimations && !highContrast;
+}
+
 // A transport button's glyph (play and pause, the playback mode, the heart) grows into place from nearly its size, and only
 // after the pointer clicked that button: a change made by a media key, the keyboard or the player switches at once.
 public static class GlyphGrowth

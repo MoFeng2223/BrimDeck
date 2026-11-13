@@ -39,8 +39,9 @@ internal static class Soft
     // small that it reads as coming from nothing.
     public const double Shrunk = .94;
 
-    // Whether anything moves: the setting in BrimDeck and Windows' own "animation effects".
-    public static bool Enabled => SystemParameters.ClientAreaAnimation && (Application.Current as App)?.Settings.Animations != false;
+    // Whether anything moves: the setting in BrimDeck and Windows' own "animation effects", and never in high contrast. The one
+    // rule for every animation in the app (motion-review F5, F6): nothing outside it decides for itself.
+    public static bool Enabled => MotionConditions.Allowed((Application.Current as App)?.Settings.Animations != false, SystemParameters.ClientAreaAnimation, SystemParameters.HighContrast);
 
     public static DoubleAnimation Fade(double from, double to, int milliseconds, IEasingFunction? easing = null) =>
         new(from, to, TimeSpan.FromMilliseconds(milliseconds)) { EasingFunction = easing ?? Out };

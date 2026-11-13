@@ -91,7 +91,7 @@ public partial class MainWindow
         else ringTimer.Stop();
 
         // A read asked for by hand, or on the details page, spins until it ends; an automatic sync turns the arrows once.
-        bool animations = Settings.Animations && SystemParameters.ClientAreaAnimation;
+        bool animations = Soft.Enabled;
         string spin = !onScreen || !animations || !Refreshing ? "" : _details || Lead._syncAsked ? "details" : _syncCountdown ? "once" : "";
         if (_syncSpin == spin) return;
         _syncSpin = spin;

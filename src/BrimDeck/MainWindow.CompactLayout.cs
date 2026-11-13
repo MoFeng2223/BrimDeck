@@ -150,7 +150,7 @@ public partial class MainWindow
         glide.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(0)));
         glide.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(start)));
         // Without animations the notice steps to its end once, when the glide would have finished.
-        if (Settings.Animations && SystemParameters.ClientAreaAnimation) glide.KeyFrames.Add(new SplineDoubleKeyFrame(-overflow, At(end), new KeySpline(.4, 0, .6, 1)));
+        if (Soft.Enabled) glide.KeyFrames.Add(new SplineDoubleKeyFrame(-overflow, At(end), new KeySpline(.4, 0, .6, 1)));
         else glide.KeyFrames.Add(new DiscreteDoubleKeyFrame(-overflow, At(end)));
         var clock = glide.CreateClock();
         shift.ApplyAnimationClock(TranslateTransform.XProperty, clock);
