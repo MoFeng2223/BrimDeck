@@ -1,0 +1,14 @@
+src/BrimDeck/Native/WindowsHost.cs
+  h_dc4d9c798f1bc1 153,155-164,256-260
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "df9e51dddb0b173a5c2e11396c48cbed975e3979",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
