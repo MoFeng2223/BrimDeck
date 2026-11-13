@@ -22,6 +22,7 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | OpenCode | ✓ | ✓ | Quota: sign in to OpenCode Console in OpenCode (CLI or desktop app) on this PC, with an OpenCode Go plan on the workspace. Usage only needs OpenCode to be used on this PC |
 | Command Code | ✓ | ✓ | Sign in to Command Code (CLI or desktop app) on this PC |
 | WorkBuddy | ✓ | ✓ | Quota: sign in on the WorkBuddy website in the browser from settings. Usage only needs the WorkBuddy China edition desktop app to be used on this PC |
+| WorkBuddy AI | ✓ | ✓ | Quota: sign in on the WorkBuddy AI website in the browser from settings. Usage only needs the WorkBuddy AI desktop app to be used on this PC |
 | Zhipu GLM, Z.ai GLM | ✓ | | Enter an API key in settings |
 | DeepSeek | ✓ | | Enter an API key in settings |
 | Kimi Code API | ✓ | | Enter a Kimi Code API key in settings |
@@ -120,7 +121,7 @@ Supports the WorkBuddy China edition (www.workbuddy.cn). The WorkBuddy desktop a
 - **Sign-in**: expand the WorkBuddy row in settings, click "Sign in in the browser", then sign in and allow access on the WorkBuddy website that opens, within 10 minutes. BrimDeck gets a sign-in of its own, stored encrypted on this PC and sent only to www.workbuddy.cn. It is renewed automatically when it expires; when renewal fails, the status reads "Sign-in expired" and signing in again fixes it. "Sign out" removes the sign-in saved on this PC. Only personal accounts are supported.
 - **Tokens and cost**: read from the session records of the WorkBuddy China edition desktop app on this PC (`%USERPROFILE%\.workbuddy\projects`), counting the input, cache read, cache write and output tokens of each model reply. The cost is estimated at public model prices, not the credits WorkBuddy charged. WorkBuddy names models with a channel suffix (such as `hy4-free`); the statistics show that name, and the price is looked up by the model name the record also keeps (such as Hy4, `tencent/hy4` in the price list). Models missing from the price list show tokens only. A reply that appears in several sessions is counted once.
 - WorkBuddy plan credits can be used only in WorkBuddy and CodeBuddy; there is no API key that spends them in other tools.
-- The WorkBuddy international edition (WorkBuddy AI) is not supported yet.
+- **International edition**: the WorkBuddy international edition (www.workbuddy.ai, desktop app WorkBuddy AI) has accounts of its own; choose WorkBuddy AI as the quota source and usage app, and it is signed in to and shown apart from the China edition. It is read the same way, with session records from `%USERPROFILE%\.workbuddy-ai\projects`, and its sign-in is sent only to www.workbuddy.ai. Credits are sorted as the WorkBuddy AI client sorts them; trial credits, for example, count as reward credits there. Its default color is the China edition's.
 
 ## Sources entered by hand
 

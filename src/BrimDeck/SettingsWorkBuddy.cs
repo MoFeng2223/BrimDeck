@@ -11,17 +11,19 @@ namespace BrimDeck;
 
 public sealed partial class SettingsWindow
 {
-    // The sign-in under way, kept across rebuilt rows so the row keeps showing it; null when none is.
-    private static CancellationTokenSource? _workBuddyLogin;
+    // The sign-in under way for each edition, kept across rebuilt rows so the row keeps showing it.
+    private static readonly Dictionary<ProviderId, CancellationTokenSource> _workBuddyLogins = [];
 
     // The WorkBuddy row signs in on the WorkBuddy website in the default browser (UsageService.ConnectWorkBuddyAsync); the sign-in
     // is saved encrypted on this PC. The line shows whether it is signed in and offers to sign in or out.
     private FrameworkElement WorkBuddyDetails(AppEntry entry)
     {
         var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, 12);
-        string title = Loc.T("WorkBuddy 账号", "WorkBuddy account");
-        string help = Loc.T("在默认浏览器中打开 WorkBuddy 官网，登录并授权后，BrimDeck 获得自己的登录凭据，用它读取积分余额。凭据加密保存在本机，只发往 www.workbuddy.cn。不读取 WorkBuddy 桌面版的登录。",
-            "Opens the WorkBuddy website in the default browser. After you sign in and allow access, BrimDeck gets a sign-in of its own and reads the credits with it. The sign-in is stored encrypted on this PC and sent only to www.workbuddy.cn. The WorkBuddy desktop app's sign-in is not read.");
+        var id = entry.QuotaSource;
+        string name = ProviderCatalog.Name(id), host = new Uri(WorkBuddyUsage.For(id).Origin).Host;
+        string title = Loc.T(name + " 账号", name + " account");
+        string help = Loc.T($"在默认浏览器中打开 {name} 官网，登录并授权后，BrimDeck 获得自己的登录凭据，用它读取积分余额。凭据加密保存在本机，只发往 {host}。不读取 {name} 桌面版的登录。",
+            $"Opens the {name} website in the default browser. After you sign in and allow access, BrimDeck gets a sign-in of its own and reads the credits with it. The sign-in is stored encrypted on this PC and sent only to {host}. The {name} desktop app's sign-in is not read.");
         var line = new Grid();
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "SourceLabel" });
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -43,7 +45,7 @@ public sealed partial class SettingsWindow
 
         void Show()
         {
-            bool waiting = _workBuddyLogin is not null, connected = _app.Usage.WorkBuddyConnected;
+            bool waiting = _workBuddyLogins.ContainsKey(id), connected = _app.Usage.WorkBuddyConnected(id);
             state.Text = waiting ? Loc.T("等待在浏览器中登录…", "Waiting for the sign-in in the browser…") : connected ? Loc.T("已登录", "Signed in") : Loc.T("未登录", "Not signed in");
             signIn.Content = waiting ? Loc.T("取消", "Cancel") : connected ? Loc.T("重新登录", "Sign in again") : Loc.T("在浏览器中登录", "Sign in in the browser");
             signOut.Visibility = connected && !waiting ? Visibility.Visible : Visibility.Collapsed;
@@ -56,25 +58,25 @@ public sealed partial class SettingsWindow
         }
         signIn.Click += async (_, _) =>
         {
-            if (_workBuddyLogin is { } running) { running.Cancel(); return; }
+            if (_workBuddyLogins.TryGetValue(id, out var running)) { running.Cancel(); return; }
             var login = CancellationTokenSource.CreateLinkedTokenSource(_app.Lifetime.Token);
-            _workBuddyLogin = login; note.Text = ""; Show();
+            _workBuddyLogins[id] = login; note.Text = ""; Show();
             try
             {
-                bool done = await _app.Usage.ConnectWorkBuddyAsync(Open, login.Token);
+                bool done = await _app.Usage.ConnectWorkBuddyAsync(id, Open, login.Token);
                 note.Text = done ? "" : Loc.T("10 分钟内没有完成登录，请重试。", "The sign-in was not finished within 10 minutes. Try again.");
                 if (done) _ = _app.Deck.RefreshAsync();
             }
             catch (OperationCanceledException) { note.Text = ""; }
             catch (Exception ex) when (ex is HttpRequestException or InvalidDataException or System.Text.Json.JsonException or WorkBuddyUsage.RejectedException)
-            { note.Text = ex is InvalidDataException ? ex.Message : Loc.T("暂时无法连接 WorkBuddy 官网，请稍后重试。", "The WorkBuddy website cannot be reached right now. Try again later."); }
+            { note.Text = ex is InvalidDataException ? ex.Message : Loc.T($"暂时无法连接 {name} 官网，请稍后重试。", $"The {name} website cannot be reached right now. Try again later."); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException)
             { note.Text = Loc.T("登录凭据保存失败，请检查本机设置目录。", "The sign-in could not be saved. Check the local settings folder."); }
-            finally { if (_workBuddyLogin == login) _workBuddyLogin = null; login.Dispose(); Show(); }
+            finally { if (_workBuddyLogins.TryGetValue(id, out var current) && current == login) _workBuddyLogins.Remove(id); login.Dispose(); Show(); }
         };
         signOut.Click += (_, _) =>
         {
-            try { _app.Usage.DisconnectWorkBuddy(); }
+            try { _app.Usage.DisconnectWorkBuddy(id); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException or System.Text.Json.JsonException)
             { note.Text = Loc.T("登录凭据删除失败，请检查本机设置目录。", "The sign-in could not be removed. Check the local settings folder."); }
             Show(); _ = _app.Deck.RefreshAsync();

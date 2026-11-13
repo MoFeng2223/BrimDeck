@@ -19,6 +19,8 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
     // WorkBuddy (China edition) keeps its session records under projects in %USERPROFILE%\.workbuddy; the desktop app sets this
     // folder itself and offers no variable that moves it.
     public string WorkBuddyHome { get; init; } = "";
+    // WorkBuddy AI (international edition) keeps them in %USERPROFILE%\.workbuddy-ai the same way.
+    public string WorkBuddyAiHome { get; init; } = "";
     // The environment variables that change which Kimi Code service is used (KIMI_CODE_BASE_URL, KIMI_CODE_OAUTH_HOST and
     // the others in KimiEnvironment); all null when unset.
     public KimiEnvironment KimiEnvironment { get; init; } = new();
@@ -53,7 +55,7 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
         ConfigDirectory(codexOverride, Path.Combine(home, ".codex")),
         Path.Combine(roaming, "Cursor", "User", "globalStorage", "state.vscdb"), roaming, local)
     { ZCodeHome = ConfigDirectory(zcodeOverride, Path.Combine(home, ".zcode")), DshHome = ConfigDirectory(dshOverride, Path.Combine(home, ".dsh")), KimiHome = ConfigDirectory(kimiOverride, Path.Combine(home, ".kimi-code")), AntigravityConversations = AntigravityUsage.Folders(home),
-      PiSessions = PiSessionDirectory(home, piOverride, piSessionOverride), CodeAgentHome = ConfigDirectory(codeAgentOverride, Path.Combine(home, ".cac")), CommandCodeHome = Path.Combine(home, ".commandcode"), WorkBuddyHome = Path.Combine(home, ".workbuddy"), OpenCodeData = OpenCodeUsage.DataFolder(home, null), OpenCodeDatabase = OpenCodeUsage.Database(OpenCodeUsage.DataFolder(home, null), null) };
+      PiSessions = PiSessionDirectory(home, piOverride, piSessionOverride), CodeAgentHome = ConfigDirectory(codeAgentOverride, Path.Combine(home, ".cac")), CommandCodeHome = Path.Combine(home, ".commandcode"), WorkBuddyHome = Path.Combine(home, ".workbuddy"), WorkBuddyAiHome = Path.Combine(home, ".workbuddy-ai"), OpenCodeData = OpenCodeUsage.DataFolder(home, null), OpenCodeDatabase = OpenCodeUsage.Database(OpenCodeUsage.DataFolder(home, null), null) };
 
     private static string ConfigDirectory(string? value, string fallback) =>
         !string.IsNullOrWhiteSpace(value) && Path.IsPathFullyQualified(value) ? Path.GetFullPath(value) : fallback;

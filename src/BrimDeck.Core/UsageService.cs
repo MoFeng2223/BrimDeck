@@ -253,9 +253,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         var now = _clock();
         var start = new DateTimeOffset(usageStart?.Date ?? now.LocalDateTime.Date.AddDays(-29));
         // The reader owns a cache and is accessed serially before the first asynchronous request.
-        var snapshot = id is ProviderId.Claude or ProviderId.Codex or ProviderId.Pi or ProviderId.CodeAgent or ProviderId.CommandCode or ProviderId.WorkBuddy
+        var snapshot = id is ProviderId.Claude or ProviderId.Codex or ProviderId.Pi or ProviderId.CodeAgent or ProviderId.CommandCode or ProviderId.WorkBuddy or ProviderId.WorkBuddyAi
             ? _logs.Read(id, id switch { ProviderId.Pi => _locations.PiSessions, ProviderId.Codex => _locations.CodexHome, ProviderId.CodeAgent => _locations.CodeAgentHome,
-                ProviderId.CommandCode => _locations.CommandCodeHome, ProviderId.WorkBuddy => _locations.WorkBuddyHome, _ => _locations.ClaudeHome },
+                ProviderId.CommandCode => _locations.CommandCodeHome, ProviderId.WorkBuddy => _locations.WorkBuddyHome, ProviderId.WorkBuddyAi => _locations.WorkBuddyAiHome, _ => _locations.ClaudeHome },
                 now, start.LocalDateTime) : new ProviderSnapshot(id) { UsageStart = start.LocalDateTime.Date };
         var claudeAccount = id == ProviderId.Claude ? ReadClaudeProfile(snapshot) : ("", "");
         var wslRead = _includeWsl && id is ProviderId.Claude or ProviderId.Codex ? StartWsl(snapshot, now, start.LocalDateTime) : null;
@@ -274,8 +274,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 case ProviderId.CommandCode:
                     await ReadCommandCodeAsync(snapshot, now, ct);
                     break;
-                case ProviderId.WorkBuddy:
-                    await ReadWorkBuddyAsync(snapshot, now, ct);
+                case ProviderId.WorkBuddy or ProviderId.WorkBuddyAi:
+                    await ReadWorkBuddyAsync(snapshot, WorkBuddyUsage.For(id), now, ct);
                     break;
                 case ProviderId.Pi:
                     snapshot.UsageNote += Loc.T(" · 费用取自 Pi 记录，非订阅账单", " · Costs recorded by Pi, not subscription charges");
@@ -1270,15 +1270,15 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (reading.Warnings.Count > 0) snapshot.Status = string.Join(Loc.T("；", "; "), reading.Warnings);
     }
 
-    // WorkBuddy's credits (WorkBuddyUsage), read with the sign-in BrimDeck got from the WorkBuddy website (ConnectWorkBuddyAsync).
+    // WorkBuddy's credits (WorkBuddyUsage), read with the sign-in BrimDeck got from the edition's website (ConnectWorkBuddyAsync).
     // A renewed sign-in is saved at once, as the website may replace the refresh token with it.
-    private async Task ReadWorkBuddyAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    private async Task ReadWorkBuddyAsync(ProviderSnapshot snapshot, WorkBuddyUsage.Edition edition, DateTimeOffset now, CancellationToken ct)
     {
         if (snapshot.UsageAvailable) snapshot.UsageNote += Loc.T(" · 费用按模型公开单价估算，非 WorkBuddy 积分", " · Costs estimated at public model prices, not WorkBuddy credits");
-        if (ReadWorkBuddySession() is not { } session)
+        if (ReadWorkBuddySession(edition) is not { } session)
         { snapshot.StatusLabel = Loc.T("未连接", "Not connected"); snapshot.Status = Loc.T("请在设置中登录 WorkBuddy", "Sign in to WorkBuddy in settings"); return; }
         WorkBuddyUsage.Reading reading;
-        try { reading = await WorkBuddyUsage.ReadAsync(_http, session, renewed => secrets?.Write(WorkBuddyUsage.SessionKey, renewed.Serialize()), ct); }
+        try { reading = await WorkBuddyUsage.ReadAsync(_http, edition, session, renewed => secrets?.Write(edition.SessionKey, renewed.Serialize()), ct); }
         catch (WorkBuddyUsage.RejectedException)
         {
             snapshot.StatusLabel = Loc.T("登录已失效", "Sign-in expired");
@@ -1288,33 +1288,34 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (reading.Metrics.Count == 0) throw new InvalidDataException(Loc.T("WorkBuddy 没有返回积分", "WorkBuddy returned no credits"));
         snapshot.Metrics = reading.Metrics;
         snapshot.Plan = reading.Plan;
-        snapshot.PlanSource = Loc.T("WorkBuddy 账户", "WorkBuddy account");
+        snapshot.PlanSource = ProviderCatalog.Name(edition.Id) + Loc.T(" 账户", " account");
         snapshot.Scope = "account";
-        Connected(snapshot, Loc.T("WorkBuddy 账户", "WorkBuddy account"), now);
+        Connected(snapshot, snapshot.PlanSource, now);
     }
 
-    private WorkBuddyUsage.Session? ReadWorkBuddySession()
+    private WorkBuddyUsage.Session? ReadWorkBuddySession(WorkBuddyUsage.Edition edition)
     {
-        try { return WorkBuddyUsage.Session.Parse(secrets?.Read(WorkBuddyUsage.SessionKey) ?? ""); }
+        try { return WorkBuddyUsage.Session.Parse(secrets?.Read(edition.SessionKey) ?? ""); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException or JsonException or FormatException) { return null; }
     }
 
-    public bool WorkBuddyConnected => ReadWorkBuddySession() is not null;
+    public bool WorkBuddyConnected(ProviderId id) => ReadWorkBuddySession(WorkBuddyUsage.For(id)) is not null;
 
     // Signs in to WorkBuddy in the browser (WorkBuddyUsage): open receives the website's sign-in page and returns false when it
     // could not be opened. True once the sign-in is saved; false when the user did not finish within ten minutes.
-    public async Task<bool> ConnectWorkBuddyAsync(Func<string, bool> open, CancellationToken ct)
+    public async Task<bool> ConnectWorkBuddyAsync(ProviderId id, Func<string, bool> open, CancellationToken ct)
     {
         if (secrets is null) throw new InvalidOperationException("No secrets store");
-        var (state, url) = await WorkBuddyUsage.StartLoginAsync(_http, ct);
+        var edition = WorkBuddyUsage.For(id);
+        var (state, url) = await WorkBuddyUsage.StartLoginAsync(_http, edition, ct);
         if (!open(url)) throw new InvalidDataException(Loc.T("无法打开默认浏览器", "The default browser could not be opened"));
-        var session = await WorkBuddyUsage.WaitForLoginAsync(_http, state, ct);
+        var session = await WorkBuddyUsage.WaitForLoginAsync(_http, edition, state, ct);
         if (session is null) return false;
-        secrets.Write(WorkBuddyUsage.SessionKey, session.Serialize());
+        secrets.Write(edition.SessionKey, session.Serialize());
         return true;
     }
 
-    public void DisconnectWorkBuddy() => secrets?.Delete(WorkBuddyUsage.SessionKey);
+    public void DisconnectWorkBuddy(ProviderId id) => secrets?.Delete(WorkBuddyUsage.For(id).SessionKey);
 
     private async Task ReadOpenCodeAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
     {

@@ -179,7 +179,7 @@ public sealed partial class SettingsWindow
     private FrameworkElement? SourceDetails(AppEntry entry)
     {
         if (ProviderCatalog.HasOnlineSwitch(entry.QuotaSource)) return OnlineQuotaDetails(entry);
-        if (entry.QuotaSource == ProviderId.WorkBuddy) return WorkBuddyDetails(entry);
+        if (entry.QuotaSource is ProviderId.WorkBuddy or ProviderId.WorkBuddyAi) return WorkBuddyDetails(entry);
         if (ProviderCatalog.IsBuiltIn(entry.QuotaSource)) return null;
         var grid = AppColumns();
         var result = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(6, 4, 6, 4) };

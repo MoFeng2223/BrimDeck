@@ -96,7 +96,7 @@ public static partial class PanelThemes
     public static string AppKey(ProviderId id) => id switch
     {
         ProviderId.Claude => "claude", ProviderId.Codex => "codex", ProviderId.Antigravity => "antigravity", ProviderId.Cursor => "cursor",
-        ProviderId.ZCode => "zcode", ProviderId.Dsh => "dsh", ProviderId.GrokBot => "grokBot", ProviderId.Kimi => "kimi", ProviderId.OpenCode => "opencode", ProviderId.CodeAgent => "codeagent", ProviderId.CommandCode => "commandcode", ProviderId.WorkBuddy => "workbuddy",
+        ProviderId.ZCode => "zcode", ProviderId.Dsh => "dsh", ProviderId.GrokBot => "grokBot", ProviderId.Kimi => "kimi", ProviderId.OpenCode => "opencode", ProviderId.CodeAgent => "codeagent", ProviderId.CommandCode => "commandcode", ProviderId.WorkBuddy or ProviderId.WorkBuddyAi => "workbuddy",
         ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.DeepSeek or ProviderId.KimiApi or ProviderId.OpenCodeGo or ProviderId.CommandCodeApi or ProviderId.OpenRouter or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => "manual",
         _ => "other"
     };

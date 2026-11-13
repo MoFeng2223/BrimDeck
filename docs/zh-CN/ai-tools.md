@@ -22,6 +22,7 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 | OpenCode | ✓ | ✓ | 配额：在本机的 OpenCode（CLI 或桌面版）中登录 OpenCode Console，且工作区订阅了 OpenCode Go。用量统计只需在本机使用 OpenCode |
 | Command Code | ✓ | ✓ | 在本机登录 Command Code（CLI 或桌面版） |
 | WorkBuddy | ✓ | ✓ | 配额：在设置中通过浏览器登录 WorkBuddy 官网。用量统计只需在本机使用 WorkBuddy 国内版桌面应用 |
+| WorkBuddy AI | ✓ | ✓ | 配额：在设置中通过浏览器登录 WorkBuddy 国际版官网。用量统计只需在本机使用 WorkBuddy AI 桌面应用 |
 | 智谱 GLM、Z.ai GLM | ✓ | | 在设置中填写 API 密钥 |
 | DeepSeek | ✓ | | 在设置中填写 API 密钥 |
 | Kimi Code API | ✓ | | 在设置中填写 Kimi Code API 密钥 |
@@ -120,7 +121,7 @@ Command Code CLI 与桌面版共用同一个数据目录（`%USERPROFILE%\.comma
 - **登录**：在设置中展开 WorkBuddy 行，点击“在浏览器中登录”，在打开的 WorkBuddy 官网页面登录并授权即可，需在 10 分钟内完成。BrimDeck 获得自己的登录凭据，加密保存在本机，只发往 www.workbuddy.cn；过期时自动续期，续期失败时状态显示“登录已失效”，重新登录即可。点击“退出登录”删除本机保存的凭据。只支持个人账号。
 - **Token 用量与费用**：读取本机 WorkBuddy 国内版桌面应用的会话记录（`%USERPROFILE%\.workbuddy\projects`），统计每次模型回复的输入、缓存读取、缓存写入与输出 Token。费用按模型公开单价估算，不是 WorkBuddy 扣除的积分。WorkBuddy 记录的模型名带有通道后缀（例如 `hy4-free`），统计中按原样显示，查单价时使用记录中的模型名称（例如 Hy4，对应单价表中的 `tencent/hy4`）；单价表中没有的模型只统计 Token。同一次回复出现在多个会话中时只计一次。
 - WorkBuddy 的套餐积分只能在 WorkBuddy 与 CodeBuddy 中使用，没有可在其他工具中消耗积分的 API 密钥。
-- WorkBuddy 国际版（WorkBuddy AI）目前不支持。
+- **国际版**：WorkBuddy 国际版（www.workbuddy.ai，桌面应用名为 WorkBuddy AI）是独立的账号体系，在“配额来源”与“统计应用”中单独选择 WorkBuddy AI，与国内版分别登录、分别显示。读取方式与国内版相同，会话记录读取 `%USERPROFILE%\.workbuddy-ai\projects`；凭据只发往 www.workbuddy.ai。积分归类与 WorkBuddy AI 客户端一致，例如体验类积分在国际版中计为奖励积分。默认颜色与国内版相同。
 
 ## 手动填写的来源
 

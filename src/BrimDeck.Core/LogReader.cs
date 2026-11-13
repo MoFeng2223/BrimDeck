@@ -109,7 +109,8 @@ public sealed class LogReader
     }
 
     // ParseLine reads only lines with one of these keys.
-    private static readonly byte[][] UsageKeys = ["\"token_count\""u8.ToArray(), "\"turn_context\""u8.ToArray(), "\"usage\""u8.ToArray()];
+    // WorkBuddy's replies carry "rawUsage", usually with its own "usage" as well.
+    private static readonly byte[][] UsageKeys = ["\"token_count\""u8.ToArray(), "\"turn_context\""u8.ToArray(), "\"usage\""u8.ToArray(), "\"rawUsage\""u8.ToArray()];
     private static bool HasUsageKey(ReadOnlySpan<byte> span) => AppendedLines.Holds(span, UsageKeys);
 
     // Pi records disjoint token categories. Read only accounting metadata, never message content or auth files.
@@ -170,7 +171,7 @@ public sealed class LogReader
     // (prompt_tokens_details.cached_tokens, also given as prompt_cache_hit_tokens) and writes (cache_creation_input_tokens), and
     // completion_tokens includes the reasoning. providerData.usage is WorkBuddy's own summary of the same counts, used when rawUsage is
     // missing. The credits WorkBuddy records are not dollars, so the cost is left to the model price table.
-    private static void ParseWorkBuddy(JsonElement obj, DateTimeOffset? time, CacheItem item)
+    private static void ParseWorkBuddy(JsonElement obj, DateTimeOffset? time, CacheItem item, string prefix)
     {
         if (obj.Get("type").Text() != "message" || obj.Get("role").Text() != "assistant" || time is null || time < item.Cutoff) return;
         var data = obj.Get("providerData");
@@ -201,7 +202,7 @@ public sealed class LogReader
         var model = data.Get("model").Text();
         // The name shown is the channel's ("hy4-free"); the price is looked up by the model's own name ("Hy4").
         var priced = data.Get("requestModelName").Text().Trim();
-        Add(item, new("wb:" + key, time.Value, string.Intern(model.Length == 0 ? "unknown" : model), input - read - write, read, write, 0, output)
+        Add(item, new(prefix + key, time.Value, string.Intern(model.Length == 0 ? "unknown" : model), input - read - write, read, write, 0, output)
             { PriceModel = priced.Length == 0 ? null : string.Intern(priced) });
     }
 
@@ -231,9 +232,9 @@ public sealed class LogReader
             {
                 ParseCommandCode(obj, time, item);
             }
-            else if (id == ProviderId.WorkBuddy)
+            else if (id is ProviderId.WorkBuddy or ProviderId.WorkBuddyAi)
             {
-                ParseWorkBuddy(obj, time, item);
+                ParseWorkBuddy(obj, time, item, id == ProviderId.WorkBuddyAi ? "wbai:" : "wb:");
             }
             else if (id == ProviderId.Codex)
             {

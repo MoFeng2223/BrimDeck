@@ -70,6 +70,7 @@ static class WorkBuddyUsageTests
             && snapshot.Metrics.Count == 0 && !snapshot.LiveQuota && snapshot.StatusLabel == Loc.T("未连接", "Not connected"));
 
         CheckPrices(root, check);
+        await CheckInternationalAsync(root, now, check);
         CheckQuota(check);
         await CheckReadingAsync(check);
     }
@@ -122,9 +123,11 @@ static class WorkBuddyUsageTests
         using var packages = JsonDocument.Parse("""{"Packages":[{"CycleTotalCapacity":"300","CycleRemainCapacity":"100"},{"CycleTotalCapacity":200,"CycleRemainCapacity":200}]}""");
         var summed = WorkBuddyUsage.Parse(packages.RootElement);
         check("WorkBuddy adds up the packages without credit groups", summed.Metrics.Single() is { Total: 500, Used: 200 });
-        check("WorkBuddy accepts only its own login page for the state", WorkBuddyUsage.LoginUrlMatches("https://www.workbuddy.cn/login?platform=brimdeck&state=abc", "abc")
-            && !WorkBuddyUsage.LoginUrlMatches("https://www.workbuddy.cn/login?state=other", "abc") && !WorkBuddyUsage.LoginUrlMatches("https://example.com/login?state=abc", "abc")
-            && !WorkBuddyUsage.LoginUrlMatches("http://www.workbuddy.cn/login?state=abc", "abc"));
+        check("WorkBuddy accepts only its own login page for the state", WorkBuddyUsage.LoginUrlMatches(WorkBuddyUsage.China, "https://www.workbuddy.cn/login?platform=brimdeck&state=abc", "abc")
+            && !WorkBuddyUsage.LoginUrlMatches(WorkBuddyUsage.China, "https://www.workbuddy.cn/login?state=other", "abc") && !WorkBuddyUsage.LoginUrlMatches(WorkBuddyUsage.China, "https://example.com/login?state=abc", "abc")
+            && !WorkBuddyUsage.LoginUrlMatches(WorkBuddyUsage.China, "http://www.workbuddy.cn/login?state=abc", "abc")
+            && WorkBuddyUsage.LoginUrlMatches(WorkBuddyUsage.International, "https://www.workbuddy.ai/login?platform=brimdeck&state=abc", "abc")
+            && !WorkBuddyUsage.LoginUrlMatches(WorkBuddyUsage.International, "https://www.workbuddy.cn/login?platform=brimdeck&state=abc", "abc"));
         check("WorkBuddy sign-in survives saving", WorkBuddyUsage.Session.Parse(new WorkBuddyUsage.Session("a", "r", "u", "www.workbuddy.cn").Serialize()) is { AccessToken: "a", RefreshToken: "r", Uid: "u" }
             && WorkBuddyUsage.Session.Parse("") is null && WorkBuddyUsage.Session.Parse("{broken") is null);
     }
@@ -169,7 +172,7 @@ static class WorkBuddyUsageTests
         });
         using var http = new HttpClient(handler);
         WorkBuddyUsage.Session? saved = null;
-        var reading = await WorkBuddyUsage.ReadAsync(http, new("old-token", "old-refresh", "uid-1", "www.workbuddy.cn"), session => saved = session, CancellationToken.None);
+        var reading = await WorkBuddyUsage.ReadAsync(http, WorkBuddyUsage.China, new("old-token", "old-refresh", "uid-1", "www.workbuddy.cn"), session => saved = session, CancellationToken.None);
         check("WorkBuddy renews a refused sign-in and saves it before reading again", saved is { AccessToken: "new-token", RefreshToken: "new-refresh", Uid: "uid-1" } && reading.Metrics.Count == 2);
         var plan = reading.Metrics.Single(m => m.Label == "套餐积分");
         check("WorkBuddy plan credits reset one second after the plan's own cycle ends", plan.ResetAt is { } at && at.Offset == TimeSpan.FromHours(8)
@@ -181,12 +184,81 @@ static class WorkBuddyUsageTests
         check("WorkBuddy asks about the packages the summary lists", bodies.Where(body => body.Contains("PackageCodes")).All(body => body.Contains("TCACA_code_008") && body.Contains("TCACA_code_009")));
         async Task<string> Renewal(string refresh)
         {
-            try { await WorkBuddyUsage.ReadAsync(http, new("old-token", refresh, "uid-1", ""), _ => { }, CancellationToken.None); return "read"; }
+            try { await WorkBuddyUsage.ReadAsync(http, WorkBuddyUsage.China, new("old-token", refresh, "uid-1", ""), _ => { }, CancellationToken.None); return "read"; }
             catch (WorkBuddyUsage.RejectedException) { return "rejected"; }
             catch (HttpRequestException ex) { return "failed " + (int?)ex.StatusCode; }
         }
         check("WorkBuddy reports a sign-in that cannot be renewed, on 401 and 403 only",
             await Renewal("bad-refresh") == "rejected" && await Renewal("forbidden-refresh") == "rejected" && await Renewal("bad-request-refresh") == "failed 400");
+    }
+
+    // WorkBuddy AI, the international edition: its own data folder, website, sign-in and package kinds, read the same way.
+    private static async Task CheckInternationalAsync(string root, DateTimeOffset now, Action<string, bool> check)
+    {
+        check("WorkBuddy AI keeps its data in .workbuddy-ai",
+            DataLocations.Resolve(Path.Combine(root, "profile"), root, root, null, null).WorkBuddyAiHome == Path.Combine(root, "profile", ".workbuddy-ai"));
+        check("WorkBuddy AI is its own quota source and usage app with WorkBuddy's color", ProviderCatalog.IsBuiltIn(ProviderId.WorkBuddyAi)
+            && ProviderCatalog.IsUsageSource(ProviderId.WorkBuddyAi) && ProviderCatalog.Name(ProviderId.WorkBuddyAi) == "WorkBuddy AI"
+            && PanelThemes.AppKey(ProviderId.WorkBuddyAi) == "workbuddy" && AppPresets.ThemeColor(ProviderId.WorkBuddyAi) == AppPresets.ThemeColor(ProviderId.WorkBuddy));
+        check("Each edition has its own website and saved sign-in", WorkBuddyUsage.For(ProviderId.WorkBuddy) == WorkBuddyUsage.China
+            && WorkBuddyUsage.For(ProviderId.WorkBuddyAi) == WorkBuddyUsage.International && WorkBuddyUsage.International.Origin == "https://www.workbuddy.ai"
+            && WorkBuddyUsage.China.SessionKey != WorkBuddyUsage.International.SessionKey);
+        check("The trial package is the plan in China and reward credits abroad",
+            WorkBuddyUsage.China.PackageKinds["TCACA_code_008_cfWoLwvjU4"] == "plan_base" && WorkBuddyUsage.International.PackageKinds["TCACA_code_008_cfWoLwvjU4"] == "benefit"
+            && WorkBuddyUsage.International.PackageKinds["TCACA_code_006_DbXS0lrypC"] == "benefit" && !WorkBuddyUsage.China.PackageKinds.ContainsKey("TCACA_code_006_DbXS0lrypC")
+            && WorkBuddyUsage.International.PackageKinds["TCACA_code_035_ArVxJcGDsm"] == "plan_base");
+
+        var home = Path.Combine(root, "workbuddy-ai-home");
+        var folder = Path.Combine(home, "projects", "c-Users-test-WorkBuddyAI");
+        Directory.CreateDirectory(folder);
+        var reply = JsonSerializer.Serialize(new
+        {
+            id = "a1", timestamp = now.AddMinutes(-1).ToUnixTimeMilliseconds(), type = "message", role = "assistant",
+            providerData = new { messageId = "m1", stepSeq = 1, model = "glm-5.3", requestModelName = "GLM-5.3",
+                rawUsage = new { prompt_tokens = 1000, completion_tokens = 50, prompt_tokens_details = new { cached_tokens = 400 } } }
+        });
+        File.WriteAllText(Path.Combine(folder, "session.jsonl"), reply + "\n");
+        var entry = new LogReader().Read(ProviderId.WorkBuddyAi, home, now).Entries.Single();
+        check("WorkBuddy AI session records are read the same way", entry is { Input: 600, CacheRead: 400, Output: 50, Model: "glm-5.3", PriceModel: "GLM-5.3" } && entry.Key.StartsWith("wbai:"));
+
+        var hosts = new HashSet<string>();
+        var valid = now.AddDays(25);
+        using var handler = new Site(request =>
+        {
+            hosts.Add(request.RequestUri!.Host);
+            return request.RequestUri.AbsolutePath switch
+            {
+                "/billing/meter/get-user-resource-summary" => (HttpStatusCode.OK, """
+                    {"code":0,"data":{"Packages":[{"PackageCode":"TCACA_code_035_ArVxJcGDsm","CycleTotalCapacity":"100","CycleRemainCapacity":"60"},
+                      {"PackageCode":"TCACA_code_008_cfWoLwvjU4","CycleTotalCapacity":"300","CycleRemainCapacity":"300"}],"SubscriptionPackageName":"Free",
+                     "CreditGroups":[{"Kind":"plan_base","CycleTotalCapacity":"100","CycleRemainCapacity":"60"},{"Kind":"benefit","CycleTotalCapacity":"300","CycleRemainCapacity":"300"}]}}
+                    """),
+                "/billing/meter/get-user-resource-free-packages" => (HttpStatusCode.OK, "{\"code\":0,\"data\":{\"Accounts\":["
+                    + "{\"PackageCode\":\"TCACA_code_035_ArVxJcGDsm\",\"CycleEndTime\":\"" + now.ToOffset(TimeSpan.FromHours(8)).AddDays(10).ToString("yyyy-MM-dd") + " 23:59:59\",\"DeductionEndTime\":" + now.AddDays(3000).ToUnixTimeMilliseconds() + "},"
+                    + "{\"PackageCode\":\"TCACA_code_008_cfWoLwvjU4\",\"CycleEndTime\":\"" + now.ToOffset(TimeSpan.FromHours(8)).AddDays(2).ToString("yyyy-MM-dd") + " 23:59:59\",\"DeductionEndTime\":" + valid.ToUnixTimeMilliseconds() + "}]}}"),
+                "/billing/meter/get-user-resource-paid-packages" => (HttpStatusCode.OK, """{"code":0,"data":{"Accounts":[]}}"""),
+                _ => (HttpStatusCode.NotFound, "{}")
+            };
+        });
+        using var http = new HttpClient(handler);
+        var reading = await WorkBuddyUsage.ReadAsync(http, WorkBuddyUsage.International, new("token", "refresh", "uid", "www.workbuddy.ai"), _ => { }, CancellationToken.None);
+        // The international sign-in names the platform "cli", the one its website's page opens no app for; the China one names BrimDeck.
+        var started = new List<string>();
+        using var states = new Site(request =>
+        {
+            started.Add(request.RequestUri!.Host + request.RequestUri.PathAndQuery);
+            return (HttpStatusCode.OK, "{\"code\":0,\"data\":{\"state\":\"s1\",\"authUrl\":\"https://" + request.RequestUri.Host + "/login?platform=x&state=s1\"}}");
+        });
+        using var signIn = new HttpClient(states);
+        await WorkBuddyUsage.StartLoginAsync(signIn, WorkBuddyUsage.International, CancellationToken.None);
+        await WorkBuddyUsage.StartLoginAsync(signIn, WorkBuddyUsage.China, CancellationToken.None);
+        check("WorkBuddy AI signs in as cli so its website opens no app; the China edition names BrimDeck", started.SequenceEqual(
+            ["www.workbuddy.ai/v2/plugin/auth/state?platform=cli", "www.workbuddy.cn/v2/plugin/auth/state?platform=brimdeck"]));
+        check("WorkBuddy AI is read at its own website", hosts.SetEquals(["www.workbuddy.ai"]) && reading.Plan == "Free");
+        var plan = reading.Metrics.Single(m => m.Label == "套餐积分");
+        var reward = reading.Metrics.Single(m => m.Label == "奖励积分");
+        check("WorkBuddy AI sorts its packages the international way", plan is { Total: 100, Used: 40, ExpiresAt: null } && plan.ResetAt is not null
+            && reward is { Total: 300, Used: 0, ResetAt: null } && reward.ExpiresAt == DateTimeOffset.FromUnixTimeMilliseconds(valid.ToUnixTimeMilliseconds()));
     }
 
     private sealed class Site(Func<HttpRequestMessage, (HttpStatusCode Status, string Body)> answer) : HttpMessageHandler
