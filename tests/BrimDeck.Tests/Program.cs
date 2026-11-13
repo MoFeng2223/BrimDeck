@@ -24,6 +24,7 @@ try
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
     await AppleMusicLyricsTests.Run(root, Check);
+    await QueMusicLyricsTests.Run(root, Check);
     await KugouTests.Run(Check);
     EqualizerSignalTests.Run(Check);
     EqualizerSpectrumTests.Run(Check);
