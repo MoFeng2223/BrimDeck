@@ -1,0 +1,19 @@
+src/BrimDeck/UsagePanel.cs
+  s_d1f86ba7d61cae::t_ebd664f228cbf8 670
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fd77f1df511963ba9f2c6da917d63f79bfc104c1",
+  "prompts": {},
+  "sessions": {
+    "s_d1f86ba7d61cae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "478ba7d9-4c12-45f0-a58b-4b8680ebc1e4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
