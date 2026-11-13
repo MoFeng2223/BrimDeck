@@ -843,10 +843,11 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         await ReadCursorEvents(snapshot, token, unified, spend, now, start, ct);
     }
 
-    // The account's records can run to thousands a day, more than one refresh can read, so they are read a day at a time,
-    // newest first, and every day read in full is kept. The days a refresh did not reach are read by the next ones.
-    // A plan merged with Grok has no records in the usage event list; its records are the account's billing items, priced
-    // from the week's amount (CursorPrices), whose readings may need days before those shown.
+    // The account's records can run to thousands a day, more than one refresh can read, so they are read newest first and
+    // every day read in full is kept. The days a refresh did not reach are read by the next ones. An older plan reads its
+    // usage event list a day at a time. A plan merged with Grok has no records there; its records are the account's billing
+    // items, read a range of days at a time (ReadCursorBillingDays) and priced from the week's amount (CursorPrices), whose
+    // readings may need days before those shown.
     private async Task ReadCursorEvents(ProviderSnapshot snapshot, string token, bool unified, (DateTimeOffset Start, long Cents)? spend, DateTimeOffset now, DateTimeOffset start, CancellationToken ct)
     {
         var account = CursorAccount(token);
@@ -864,14 +865,17 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         foreach (var day in _cursorDays.Keys.Where(day => day < first || day > last).ToList()) _cursorDays.Remove(day);
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
         budget.CancelAfter(TimeSpan.FromSeconds(20));
+        bool Settled(DateTime day) => _cursorDays.TryGetValue(day, out var kept) && kept.ReadAt >= new DateTimeOffset(day.AddDays(1)).AddHours(1);
         try
         {
             for (var day = last; day >= first; day = day.AddDays(-1))
             {
-                var end = new DateTimeOffset(day.AddDays(1));
-                if (_cursorDays.TryGetValue(day, out var kept) && kept.ReadAt >= end.AddHours(1)) continue;
-                var read = unified ? ReadCursorBillingDay(token, new DateTimeOffset(day), end, budget.Token) : ReadCursorDay(token, new DateTimeOffset(day), end, budget.Token);
-                _cursorDays[day] = (await read, now);
+                if (Settled(day)) continue;
+                if (!unified) { _cursorDays[day] = (await ReadCursorDay(token, new DateTimeOffset(day), new DateTimeOffset(day.AddDays(1)), budget.Token), now); continue; }
+                // A merged plan reads each run of days still to read with one range of billing items.
+                var newest = day;
+                while (day > first && !Settled(day.AddDays(-1))) day = day.AddDays(-1);
+                await ReadCursorBillingDays(token, day, newest, now, budget.Token);
             }
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or IOException or InvalidDataException ||
@@ -934,24 +938,58 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         throw new InvalidDataException();
     }
 
+    // The local days oldest to newest of a merged plan, read as one range of billing items. The items come newest first, so
+    // after each page every day after the oldest item so far is complete and is kept at once; a refresh that stops part way
+    // keeps those, and the next reads only the days left. Should a page that has more after it come out of that order, the
+    // days not yet kept are read one at a time instead.
+    private async Task ReadCursorBillingDays(string token, DateTime oldest, DateTime newest, DateTimeOffset now, CancellationToken ct)
+    {
+        DateTimeOffset from = new(oldest), to = new(newest.AddDays(1));
+        var found = new Dictionary<DateTime, Dictionary<string, TokenEntry>>();
+        DateTimeOffset? earliest = null;
+        var pending = newest;
+        var next = "";
+        for (int page = 1; page <= 100; page++)
+        {
+            using var response = await ReadCursorBillingPage(token, from, to, next, ct);
+            bool ordered = true;
+            foreach (var item in response.RootElement.Get("data").EnumerateArray())
+            {
+                if (item.Get("eventTime").Date() is { } time) { if (time > earliest) ordered = false; earliest = time; }
+                if (ParseCursorBillingItem(item) is { } entry && entry.Time >= from && entry.Time < to)
+                {
+                    var day = entry.Time.LocalDateTime.Date;
+                    if (!found.TryGetValue(day, out var entries)) found[day] = entries = [];
+                    entries.TryAdd(entry.Key, entry);
+                }
+            }
+            var pagination = response.RootElement.Get("pagination");
+            bool more = pagination.Get("hasMore").ValueKind == JsonValueKind.True;
+            if (more && !ordered)
+            {
+                for (; pending >= oldest; pending = pending.AddDays(-1))
+                    _cursorDays[pending] = (await ReadCursorBillingDay(token, new DateTimeOffset(pending), new DateTimeOffset(pending.AddDays(1)), ct), now);
+                return;
+            }
+            var complete = !more ? oldest : earliest is { } reached ? reached.LocalDateTime.Date.AddDays(1) : DateTime.MaxValue;
+            for (; pending >= oldest && pending >= complete; pending = pending.AddDays(-1))
+                _cursorDays[pending] = (found.TryGetValue(pending, out var entries) ? [.. entries.Values] : [], now);
+            if (!more) return;
+            next = pagination.Get("nextCursor").Text();
+            if (next.Length == 0) throw new InvalidDataException();
+        }
+        throw new InvalidDataException();
+    }
+
     // One local day's billing items, [from, to), read a page at a time by the cursor each page gives for the next.
     private async Task<List<TokenEntry>> ReadCursorBillingDay(string token, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
     {
-        var subject = CursorAccount(token);
-        if (subject.Length == 0) throw new InvalidDataException();
         var entries = new Dictionary<string, TokenEntry>();
         var next = "";
-        static string Time(DateTimeOffset time) => Uri.EscapeDataString(time.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", System.Globalization.CultureInfo.InvariantCulture));
         for (int page = 1; page <= 100; page++)
         {
-            var uri = $"https://cursor.com/api/dashboard/v2/query-billing-items?scope=user&startTime={Time(from)}&endTime={Time(to)}&pageSize=500";
-            if (next.Length > 0) uri += "&cursor=" + Uri.EscapeDataString(next);
-            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-            request.Headers.TryAddWithoutValidation("Cookie", CursorSession(subject, token));
-            using var response = await SendAsync(_http, request, ct);
-            var items = response.RootElement.Get("data");
-            if (items.ValueKind != JsonValueKind.Array) throw new InvalidDataException();
-            foreach (var item in items.EnumerateArray())
+            using var response = await ReadCursorBillingPage(token, from, to, next, ct);
+            foreach (var item in response.RootElement.Get("data").EnumerateArray())
                 if (ParseCursorBillingItem(item) is { } entry && entry.Time >= from && entry.Time < to) entries.TryAdd(entry.Key, entry);
             var pagination = response.RootElement.Get("pagination");
             if (pagination.Get("hasMore").ValueKind != JsonValueKind.True) return entries.Values.ToList();
@@ -959,6 +997,21 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             if (next.Length == 0) throw new InvalidDataException();
         }
         throw new InvalidDataException();
+    }
+
+    // One page of billing items in [from, to), 500 at most; next is the cursor the page before gave, "" for the first.
+    private async Task<JsonDocument> ReadCursorBillingPage(string token, DateTimeOffset from, DateTimeOffset to, string next, CancellationToken ct)
+    {
+        var subject = CursorAccount(token);
+        if (subject.Length == 0) throw new InvalidDataException();
+        static string Time(DateTimeOffset time) => Uri.EscapeDataString(time.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", System.Globalization.CultureInfo.InvariantCulture));
+        var uri = $"https://cursor.com/api/dashboard/v2/query-billing-items?scope=user&startTime={Time(from)}&endTime={Time(to)}&pageSize=500";
+        if (next.Length > 0) uri += "&cursor=" + Uri.EscapeDataString(next);
+        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        request.Headers.TryAddWithoutValidation("Cookie", CursorSession(subject, token));
+        var response = await SendAsync(_http, request, ct);
+        if (response.RootElement.Get("data").ValueKind != JsonValueKind.Array) { response.Dispose(); throw new InvalidDataException(); }
+        return response;
     }
 
     private static string CursorSession(string subject, string token) => "WorkosCursorSessionToken=" + Uri.EscapeDataString(subject + "::" + token);
