@@ -222,7 +222,7 @@ public partial class MainWindow
         // Opening marks the list seen before it draws the page (SetExpanded): marked here afterwards, the page was built a second
         // time in the middle of the opening.
         _keepPageOnOpen = true;
-        try { OpenFromHotkey(byKey); } finally { _keepPageOnOpen = false; }
+        try { OpenFromHotkey(byKey: byKey); } finally { _keepPageOnOpen = false; }
     }
 
     private void NoticesPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Notices);
@@ -358,7 +358,7 @@ public partial class MainWindow
         fresh |= NoticesContent.Visibility != Visibility.Visible;
         SubscribeNotices();
         RefreshStatus();
-        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Visible;
+        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         ApplyHeader(Settings.UsagePage ? UsageHeader(_usageWidth, UsagePageHeight) : UnfittedHeader(ContentCanvas.Height));
         double offset = fresh ? 0 : _pageScroll?.VerticalOffset ?? 0;
@@ -421,7 +421,7 @@ public partial class MainWindow
         // The status line: what kind of notice is in front, and how many of the same conversation it stands for.
         var group = center.Hub.Notices.Where(n => n.AppKey == notice.AppKey && n.Title.Length > 0 && n.Title == notice.Title).ToList();
         var meta = new DockPanel { Height = 20 };
-        DockPanel.SetDock(meta, Dock.Top); stack.Children.Add(meta);
+        DockPanel.SetDock(meta, System.Windows.Controls.Dock.Top); stack.Children.Add(meta);
         var (status, color) = StatusOf(notice, center);
         if (color is not null)
         {
@@ -437,7 +437,7 @@ public partial class MainWindow
         var hero = new Grid { Margin = new Thickness(0, 12, 0, 0) };
         hero.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         hero.ColumnDefinitions.Add(new ColumnDefinition());
-        DockPanel.SetDock(hero, Dock.Top); stack.Children.Add(hero);
+        DockPanel.SetDock(hero, System.Windows.Controls.Dock.Top); stack.Children.Add(hero);
         var plate = NoticePlate(notice, 56);
         plate.VerticalAlignment = VerticalAlignment.Center;
         hero.Children.Add(plate);
@@ -452,7 +452,7 @@ public partial class MainWindow
 
         // The buttons, at the foot of the column.
         var buttons = FocusButtons(notice, center);
-        DockPanel.SetDock(buttons, Dock.Bottom); stack.Children.Add(buttons);
+        DockPanel.SetDock(buttons, System.Windows.Controls.Dock.Bottom); stack.Children.Add(buttons);
 
         // The words, scrolling within the column when they are long; the other messages of the same conversation under them.
         var words = new StackPanel { Margin = new Thickness(0, 0, 0, WordsFadeHeight) };
@@ -471,7 +471,7 @@ public partial class MainWindow
             foreach (var other in group.Where(n => !ReferenceEquals(n, notice)).Take(20))
             {
                 var line = new DockPanel { Height = 22 };
-                var when = UI.Fixed(NoticeText.Relative(other.ReceivedAt, now), 11, 22, UI.Tertiary); DockPanel.SetDock(when, Dock.Right); when.Margin = new Thickness(8, 0, 0, 0);
+                var when = UI.Fixed(NoticeText.Relative(other.ReceivedAt, now), 11, 22, UI.Tertiary); DockPanel.SetDock(when, System.Windows.Controls.Dock.Right); when.Margin = new Thickness(8, 0, 0, 0);
                 line.Children.Add(when);
                 var text = UI.Fixed(privacy == NoticePrivacy.Full ? NoticeText.Summary(other.Body) : other.AppName, 12, 22, UI.Secondary); text.TextTrimming = TextTrimming.CharacterEllipsis;
                 line.Children.Add(IslandNotice.Directed(text));
@@ -500,7 +500,7 @@ public partial class MainWindow
     {
         double done = Math.Clamp(progress, 0, 1);
         var row = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
-        var label = UI.Fixed(Loc.T($"{done:P0}", $"{done:P0}"), 11, 16, UI.Tertiary); DockPanel.SetDock(label, Dock.Right); label.Margin = new Thickness(10, 0, 0, 0);
+        var label = UI.Fixed(Loc.T($"{done:P0}", $"{done:P0}"), 11, 16, UI.Tertiary); DockPanel.SetDock(label, System.Windows.Controls.Dock.Right); label.Margin = new Thickness(10, 0, 0, 0);
         row.Children.Add(label);
         var track = new Grid { Height = 3, VerticalAlignment = VerticalAlignment.Center };
         track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(done, GridUnitType.Star), MinWidth = 3 });
@@ -580,7 +580,7 @@ public partial class MainWindow
         var border = new Border { BorderBrush = UI.Brush(UI.Hairline), BorderThickness = new Thickness(1, 0, 0, 0), Padding = new Thickness(14, 0, 0, 0), Child = column };
         // The title, its count and the tools on one line; when the column is too narrow for that the count goes under them (NoticeHead).
         var head = new NoticeHead();
-        DockPanel.SetDock(head, Dock.Top); column.Children.Add(head);
+        DockPanel.SetDock(head, System.Windows.Controls.Dock.Top); column.Children.Add(head);
         head.Children.Add(UI.Fixed(Loc.T("通知", "Notices"), 15, 20, UI.Primary, FontWeights.SemiBold));
         int today = center.Hub.Notices.Count(Today);
         string count = Loc.T($"今天 {today} 条", $"{today} today");
@@ -774,7 +774,7 @@ public partial class MainWindow
     {
         if (NoticesContent.Children.OfType<Grid>().FirstOrDefault()?.Children.OfType<DockPanel>().FirstOrDefault() is not { } column) return;
         var hint = UI.Line(text, 11, PanelTheme.Hex("danger")); hint.TextWrapping = TextWrapping.Wrap; hint.Margin = new Thickness(0, 6, 0, 0);
-        DockPanel.SetDock(hint, Dock.Bottom);
+        DockPanel.SetDock(hint, System.Windows.Controls.Dock.Bottom);
         column.Children.Insert(0, hint);
     }
 

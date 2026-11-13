@@ -23,8 +23,8 @@
     "clock": "#F8F8F2",
     "equalizer": "#BD93F9",
     "hairline": "#343746",
-    "track": "#343746",
-    "ringTrack": "#44475A",
+    "track": "#424553",
+    "ringTrack": "#424553",
     "fill": "#282A36",
     "fillSelected": "#44475A",
     "hover": "#343746",
@@ -53,7 +53,7 @@
   },
   "apps": {
     "claude": "#FFB86C", "codex": "#50FA7B", "antigravity": "#8BE9FD", "cursor": "#BDBFD0", "zcode": "#BD93F9",
-    "dsh": "#8BE9FD", "grokBot": "#BDBFD0", "kimi": "#4FC1E9", "opencode": "#8B8D98", "manual": "#FF79C6", "other": "#BDBFD0", "warning": "#F1FA8C", "critical": "#FF5555"
+    "dsh": "#8BE9FD", "grokBot": "#BDBFD0", "kimi": "#4FC1E9", "opencode": "#8B8D98", "codeagent": "#22D3C5", "commandcode": "#B1BAF9", "manual": "#FF79C6", "other": "#BDBFD0", "warning": "#F1FA8C", "critical": "#FF5555"
   },
   "clock": {
     "style": "minimal", "color": "default",

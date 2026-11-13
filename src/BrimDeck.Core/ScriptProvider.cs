@@ -35,6 +35,7 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
     {
         if (entry.QuotaSource == ProviderId.KimiApi) return await RunKimiAsync();
         if (entry.QuotaSource == ProviderId.OpenCodeGo) return await RunOpenCodeGoAsync();
+        if (entry.QuotaSource == ProviderId.CommandCodeApi) return await RunCommandCodeAsync();
         using var engine = new Engine(options =>
         {
             options.ExperimentalFeatures = ExperimentalFeature.TaskInterop;
@@ -214,6 +215,26 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
         if (quotas.Count == 0) throw new InvalidDataException(t("OpenCode 返回的 Go 用量无法识别。", "The Go usage OpenCode returned is not recognized."));
         List<string> warnings = limited ? [t("已达到 OpenCode Go 的用量上限，重置前请求会被拒绝", "The OpenCode Go limit is reached; requests are refused until it resets.")] : [];
         return new(quotas.Select(UsageMetric.FromQuota).ToList(), "", "plan", [], warnings) { Source = "OpenCode Go" };
+    }
+    // A Command Code API key (created in Command Code Studio) reads the same plan quota as Command Code's own sign-in, read by
+    // CommandCodeUsage. The key is sent only to api.commandcode.ai.
+    private async Task<ProviderResult> RunCommandCodeAsync()
+    {
+        async Task<(int Status, string Body)> Get(string path)
+        {
+            var headers = new Dictionary<string, string> { ["Authorization"] = "Bearer " + secret, ["Accept"] = "application/json", ["User-Agent"] = "BrimDeck/0.1" };
+            using var reply = JsonDocument.Parse(await SendAsync("GET", JsonSerializer.Serialize(new { url = CommandCodeUsage.Api + path, options = new { headers } })));
+            if (reply.RootElement.Get("error").Text() is { Length: > 0 } error) throw new InvalidDataException(error);
+            return ((int)(reply.RootElement.Get("status").Number() ?? 0), reply.RootElement.Get("body").Text());
+        }
+        CommandCodeUsage.Reading reading;
+        try { reading = await CommandCodeUsage.ReadAsync(Get); }
+        catch (CommandCodeUsage.RejectedException)
+        {
+            throw new InvalidDataException(Loc.T("Command Code 拒绝了这个 API 密钥，请确认它是在 Command Code Studio 中创建的密钥，且未被删除。",
+                "Command Code rejected this API key. Check that it was created in Command Code Studio and has not been deleted."));
+        }
+        return new(reading.Metrics, reading.Plan, "account", [], reading.Warnings) { Source = ProviderCatalog.Name(ProviderId.CommandCodeApi) };
     }
     private static string Error(string error) => JsonSerializer.Serialize(new { error });
     // pick: { path: "data", fields: ["a", "b"] } keeps only those fields of each object in the array at path; anything else becomes null.

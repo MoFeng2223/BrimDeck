@@ -16,9 +16,15 @@ public partial class MainWindow
         if (!IsUsagePage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false);
         bool wanted = details && Settings.UsagePage;
         if (wanted != _details) _usageHandover = wanted ? Handover.Forward : Handover.Back;
-        _details = wanted; RenderUsage();
+        _details = wanted;
+        // The panel takes clicks without taking focus, so an open date or app pop-up stays open when the back button is
+        // clicked, and RenderUsage leaves the page as it is while a pop-up is open. The pop-up goes at once, before the page
+        // moves: faded out, it would close (and hand activation back to the panel) in the middle of the page's move, and the
+        // page would be built twice, once by the pop-up's closing and once here. Closed now, its closing builds the page once,
+        // with the motion set above, and the call below finds it built.
+        if (_detailPopup is { } popup) { _popupAtOnce = true; try { popup.Close(); } finally { _popupAtOnce = false; } }
+        RenderUsage();
     }
-    internal FrameworkElement ScaledContent => ContentCanvas;
 
     private const double ColumnTopInset = 2, EdgeInset = 6;
 
@@ -123,7 +129,9 @@ public partial class MainWindow
         RenderPageSwitch();
         ClockLabel.Text = DateTime.Now.ToString("HH:mm");
         // The gear shows a tooltip only while it carries the update notice.
-        SettingsButton.ToolTip = _app.Updates.NoticeVersion is { } version ? Loc.T($"新版本 {version} 可用", $"Version {version} is available") : null;
+        var updates = _app.Updates;
+        SettingsButton.ToolTip = updates.NoticeVersion is { } version ? Loc.T($"新版本 {version} 可用", $"Version {version} is available")
+            : updates.UpdatedFrom is not null ? Loc.T($"已更新到 {updates.CurrentVersion}，点击查看更新内容", $"Updated to {updates.CurrentVersion}. Click to see what's new") : null;
     }
 
     // How the next rebuild of the usage page takes over (PageHandover); the action that changes the page's form sets it.
@@ -136,9 +144,10 @@ public partial class MainWindow
     // What the quota columns were last built from: their form and the data, page and settings they show, not the panel's exact
     // size. As the monitor page is built once per layout step and stretches within it, a render with the same key keeps the
     // page instead of building it again: a drag that stays within a size step, a return from another page, the sync button.
+    // The screen's and the panel's scales are part of it, as the title rows are placed on the screen's pixels (TitlePlaces).
     private UsageBuild? _usageBuilt;
     private PanelHeader _usageHeaderBuilt = PanelHeader.For(36, 20);
-    private sealed record UsageBuild(string Form, object Snapshots, object Settings, int ApplicationPage, string QuotaPages, int Theme, string Language, long Minute);
+    private sealed record UsageBuild(string Form, object Snapshots, object Settings, int ApplicationPage, string QuotaPages, int Theme, string Language, long Minute, double Dpi, double Scale);
 
     private UsageBuild? ColumnsBuild()
     {
@@ -148,7 +157,7 @@ public partial class MainWindow
         var fit = FitColumns(columns, ContentCanvas.Width, ContentCanvas.Height);
         return new UsageBuild($"{fit.Layout.Tier}|{fit.Layout.Footer}|{fit.Inline}|{fit.Wide}|{fit.Count}", Snapshots, Settings, _applicationPage,
             string.Join(",", _quotaPages.OrderBy(page => page.Key).Select(page => $"{page.Key:N}:{page.Value}")), PanelTheme.Generation, Loc.Language,
-            DateTime.Now.Ticks / TimeSpan.TicksPerMinute);
+            DateTime.Now.Ticks / TimeSpan.TicksPerMinute, VisualTreeHelper.GetDpi(this).DpiScaleY, _scale);
     }
 
     public void RenderUsage()
@@ -157,9 +166,11 @@ public partial class MainWindow
         if (CurrentPage == DeckPage.Notices) { RenderNoticesPage(); return; }
         if (IsMusicPage) { RenderMusic(); return; }
         if (IsMonitorPage) { RenderMonitor(); return; }
+        if (IsShelfPage) { RenderShelf(lazy: true); return; }
+        if (CurrentPage == DeckPage.Devices) { RenderDevices(); return; }
         // Only a page that was on screen hands over; one that arrives by the page switch or with the panel opening comes in whole.
         bool shown = UsageContent.IsVisible && _expanded && !_preview;
-        MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Collapsed; UsageContent.Visibility = Visibility.Visible;
+        MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Collapsed; UsageContent.Visibility = Visibility.Visible;
         if (!Settings.UsagePage) _details = false;
         RefreshStatus();
         if (_detailPopup is not null) { _flippedColumn = null; return; }
@@ -271,13 +282,21 @@ public partial class MainWindow
         // Antigravity labels its quotas "Gemini · 5 小时", "Claude · 每周" and so on. Each group starts its own page, Gemini first,
         // so the first page shows rows 1 and 2 (Gemini) and a click on the column shows rows 3 and 4 (Claude), the same rows and
         // click-to-page as any other app with more than two quotas. Labels without a group come last.
-        var sets = snapshot.Id == ProviderId.Antigravity
-            ? quotas.GroupBy(x => UI.QuotaGroup(new Quota(x.Label, 0, null))).OrderBy(x => x.Key == "Gemini" ? 0 : x.Key.Length > 0 ? 1 : 2).Select(x => x.ToList()).ToList()
-            : [quotas];
+        // Claude groups by organization when an account reads several ("Pro · 5 小时额度", "Team · 每周额度"): each organization
+        // starts its own page, in the order the service gave them, so Pro's 5-hour and weekly quotas come first, then its Fable
+        // quota, then Team's.
+        string Group(UsageMetric metric) => UI.QuotaGroup(new Quota(metric.Label, 0, null));
+        var order = snapshot.Metrics.Select(Group).Distinct().ToList();
+        var sets = snapshot.Id switch
+        {
+            ProviderId.Antigravity => quotas.GroupBy(Group).OrderBy(x => x.Key == "Gemini" ? 0 : x.Key.Length > 0 ? 1 : 2).Select(x => x.ToList()).ToList(),
+            ProviderId.Claude => quotas.GroupBy(Group).OrderBy(x => order.IndexOf(x.Key)).Select(x => x.ToList()).ToList(),
+            _ => [quotas]
+        };
         var pages = sets.SelectMany(set => set.Chunk(capacity)).Select(x => x.ToList()).ToList();
         if (pages.Count == 0) pages.Add([]);
         // Sized for the fullest page the column can switch to.
-        int slots = Math.Clamp(pages.Max(x => x.Count), 1, capacity);
+        int slots = Awaiting(snapshot) ? capacity : Math.Clamp(pages.Max(x => x.Count), 1, capacity);
         int page = Math.Clamp(_quotaPages.GetValueOrDefault(entry.InstanceId), 0, pages.Count - 1);
         return new QuotaView(pages[page], pages.Count, page, slots);
     }
@@ -319,9 +338,21 @@ public partial class MainWindow
         UsageContent.Children.Add(grid);
     }
 
+    // Before its first reading a quota has its defaults: nothing read, no time, and the label and the detail alike.
+    // Only until the first read has ended, whatever it brought: a read that failed or found nothing shows its state, not the skeleton.
+    // And only while a read is under way or will come by itself: with the automatic sync off nothing reads at the start, and the
+    // skeleton would wait forever, so the column shows its state and the way to sync now.
+    private bool ReadComing => (_lead ?? this)._refreshing || Settings.UsageAutoSync;
+    private bool Awaiting(ProviderSnapshot snapshot) => !_firstReadEnded && ReadComing && snapshot.Metrics.Count == 0 && !snapshot.LiveQuota && snapshot.QuotaTime is null && snapshot.Status == snapshot.StatusLabel;
+
     private FrameworkElement Column(AppEntry entry, ProviderSnapshot snapshot, ProviderSnapshot usage, QuotaView view, Layout layout, bool inline, bool wide, bool center, bool separator, double innerWidth)
     {
-        bool off = view.Quotas.Count == 0;
+        // Waiting for its first reading, the column shows its quotas' places in the same layout (SkeletonBlock), so the readings
+        // fill in where they will stay instead of the whole column changing when they arrive.
+        bool awaiting = Awaiting(snapshot);
+        int blocks = awaiting ? view.Slots : view.Quotas.Count;
+        FrameworkElement Block(int i) => awaiting ? SkeletonBlock(entry, layout, i) : QuotaBlock(entry, view.Quotas[i], layout, i, Settings.QuotaRingRemaining);
+        bool off = blocks == 0;
         // Only this column changes: it comes up from faint while the others stay as they are.
         void NextQuotaPage() { _quotaPages[entry.InstanceId] = (view.Page + 1) % view.Pages; _flippedColumn = entry.InstanceId; RenderUsage(); }
         var column = new Grid();
@@ -334,15 +365,17 @@ public partial class MainWindow
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.ColumnDefinitions.Add(new ColumnDefinition());
+        var (nameTop, chipTop, chipLift) = TitlePlaces(layout, VisualTreeHelper.GetDpi(this).DpiScaleY, _scale);
         var name = UI.Centered(entry.Name, layout.Name, off ? UI.Secondary : UI.Primary, FontWeights.SemiBold);
         name.HorizontalAlignment = HorizontalAlignment.Left;
+        name.VerticalAlignment = VerticalAlignment.Top; name.Margin = new Thickness(0, nameTop, 0, 0);
         name.ToolTip = QuotaTooltip(snapshot);
         AutomationProperties.SetAutomationId(name, "quota-title-" + entry.InstanceId.ToString("N"));
         head.Children.Add(name);
         double occupied = 0;
         if (snapshot.Plan.Length > 0)
         {
-            var chip = PlanChip(snapshot, layout);
+            var chip = PlanChip(snapshot, layout, chipTop, chipLift);
             Grid.SetColumn(chip, 1); head.Children.Add(chip);
             chip.Measure(new Size(double.PositiveInfinity, layout.Head)); occupied += chip.DesiredSize.Width;
         }
@@ -355,21 +388,48 @@ public partial class MainWindow
         FrameworkElement body;
         if (off)
         {
+            // No readings: what the state is, why, and a way to sync now, centered in the column. Left-aligned, the button's text sat
+            // inside its outline and padding, so it looked further right than the lines above it.
             var status = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            status.Children.Add(UI.Fixed(snapshot.StatusLabel, Math.Max(11, layout.Label + 1), Math.Ceiling(layout.Label * 1.5), UI.Secondary, FontWeights.SemiBold));
-            var detail = UI.Text(snapshot.Status, Math.Max(10, layout.Reset), UI.Tertiary); detail.FontFamily = UI.PanelFont; detail.Margin = new Thickness(0, 3, 0, 0); detail.MaxHeight = 34; detail.TextTrimming = TextTrimming.CharacterEllipsis;
-            status.Children.Add(detail); body = status;
+            var label = UI.Fixed(snapshot.StatusLabel, Math.Max(11, layout.Label + 1), Math.Ceiling(layout.Label * 1.5), UI.Secondary, FontWeights.SemiBold);
+            label.TextAlignment = TextAlignment.Center; label.ToolTip = snapshot.Status;
+            status.Children.Add(label);
+            // The detail is dropped when it only repeats the label, and when the column is too short for it (the smallest panel):
+            // the label and the button stay, the full text is in the label's tip.
+            TextBlock? detail = null;
+            if (snapshot.Status != snapshot.StatusLabel)
+            {
+                detail = UI.Text(snapshot.Status, Math.Max(10, layout.Reset), UI.Tertiary);
+                detail.FontFamily = UI.PanelFont; detail.Margin = new Thickness(0, 3, 0, 0); detail.TextWrapping = TextWrapping.Wrap;
+                detail.TextAlignment = TextAlignment.Center;
+                status.Children.Add(detail);
+            }
+            var sync = new Button { Style = (Style)FindResource("PanelOutlineButton"), FontFamily = UI.TextFont, Padding = new Thickness(10, 2, 10, 2), Height = 24,
+                HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 6, 0, 0), Content = Loc.T("立即同步", "Sync now") };
+            AutomationProperties.SetName(sync, Loc.T("立即同步用量", "Sync usage now"));
+            sync.Click += (_, _) => SyncNow();
+            status.Children.Add(sync);
+            var holder = new Grid { VerticalAlignment = VerticalAlignment.Stretch };
+            holder.Children.Add(status);
+            if (detail is not null)
+                holder.SizeChanged += (_, _) =>
+                {
+                    detail.Visibility = Visibility.Visible;
+                    status.Measure(new Size(Math.Max(1, holder.ActualWidth), double.PositiveInfinity));
+                    detail.Visibility = status.DesiredSize.Height > holder.ActualHeight + .5 ? Visibility.Collapsed : Visibility.Visible;
+                };
+            body = holder;
         }
         else if (wide)
         {
             // A page with fewer quotas keeps the width of a full page's quotas instead of widening them, and is centered.
-            int cells = Math.Max(view.Quotas.Count, view.Slots);
-            if (view.Quotas.Count < cells)
+            int cells = Math.Max(blocks, view.Slots);
+            if (blocks < cells)
             {
                 var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-                for (int i = 0; i < view.Quotas.Count; i++)
+                for (int i = 0; i < blocks; i++)
                 {
-                    var block = QuotaBlock(entry, view.Quotas[i], layout, i);
+                    var block = Block(i);
                     block.Width = Math.Max(0, innerWidth / cells - 18);
                     row.Children.Add(block);
                 }
@@ -385,9 +445,9 @@ public partial class MainWindow
             else
             {
                 var row = new UniformGrid { Rows = 1, Columns = cells, VerticalAlignment = VerticalAlignment.Center };
-                for (int i = 0; i < view.Quotas.Count; i++)
+                for (int i = 0; i < blocks; i++)
                 {
-                    var block = QuotaBlock(entry, view.Quotas[i], layout, i);
+                    var block = Block(i);
                     block.Margin = new Thickness(i > 0 ? 18 : 0, 0, i < cells - 1 ? 18 : 0, 0);
                     row.Children.Add(block);
                 }
@@ -398,9 +458,9 @@ public partial class MainWindow
         {
             // A page with fewer quotas is centered like a column that has only one quota; type sizes and spacing do not change.
             var stack = new StackPanel { VerticalAlignment = center ? VerticalAlignment.Center : VerticalAlignment.Top };
-            for (int i = 0; i < view.Quotas.Count; i++)
+            for (int i = 0; i < blocks; i++)
             {
-                var block = QuotaBlock(entry, view.Quotas[i], layout, i);
+                var block = Block(i);
                 if (i > 0) block.Margin = new Thickness(0, layout.QuotaGap, 0, 0);
                 stack.Children.Add(block);
             }
@@ -444,23 +504,76 @@ public partial class MainWindow
         return surface;
     }
 
-    private static Border PlanChip(ProviderSnapshot snapshot, Layout layout)
+    // Where the name and the plan chip go in the title row, from its top. Centered on their own line boxes and rounded to pixels
+    // apart, the smaller plan ended up as much as two pixels above the name; instead the chip goes where its capitals' middle
+    // comes closest to the name's as drawn. Positions fall on the layout's pixels (1 / dpi), text baselines on the screen's
+    // (the panel's scale applied), and the border is a whole number of pixels thick. At 150 % a layout pixel is one and a half
+    // screen pixels, too coarse to reach the name's line: the chip's text then also moves by whole screen pixels (Lift), which
+    // keeps it sharp. At 100 % it never moves.
+    private static (double Name, double Chip, double Lift) TitlePlaces(Layout layout, double dpi, double scale)
+    {
+        double pixel = 1 / dpi, screen = dpi * scale;
+        double Snap(double value) => Math.Round(value / pixel) * pixel;
+        double Capitals(double top, double size) => Math.Round((top + UI.Baseline(size)) * screen) / screen - UI.CapHeight(size) / 2;
+        double name = Snap((layout.Head - UI.LineBox(layout.Name)) / 2), border = Snap(1);
+        double target = Capitals(name, layout.Name), ideal = target - border - UI.Baseline(layout.Plan) + UI.CapHeight(layout.Plan) / 2;
+        // Of equally close places, the one nearest the ideal.
+        double Miss(double top) => Math.Abs(Capitals(top + border, layout.Plan) - target) + 1e-6 * Math.Abs(top - ideal);
+        var chip = Enumerable.Range(-3, 7).Select(step => Snap(ideal) + step * pixel).MinBy(Miss);
+        double lift = Math.Round((target - Capitals(chip + border, layout.Plan)) * screen) / screen;
+        return (name, chip, lift);
+    }
+
+    // top and lift: from TitlePlaces. The text sits right below the border: centered, it moved by a pixel where the rounded
+    // border leaves the chip half a pixel short of or over the text.
+    private static Border PlanChip(ProviderSnapshot snapshot, Layout layout, double top, double lift)
     {
         var text = UI.Centered(UI.DisplayPlan(snapshot.Plan), layout.Plan, UI.Tertiary);
+        text.VerticalAlignment = VerticalAlignment.Top;
+        if (lift != 0) text.RenderTransform = new TranslateTransform(0, lift);
         return new Border
         {
             Child = text, BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(PanelTheme.Corner(4)),
-            Padding = new Thickness(layout.Tier >= Tier.Dense ? 4 : 5, 0, layout.Tier >= Tier.Dense ? 4 : 5, 0), Margin = new Thickness(6, 0, 0, 0),
-            VerticalAlignment = VerticalAlignment.Center
+            Padding = new Thickness(layout.Tier >= Tier.Dense ? 4 : 5, 0, layout.Tier >= Tier.Dense ? 4 : 5, 0),
+            Margin = new Thickness(6, top, 0, 0), VerticalAlignment = VerticalAlignment.Top
         };
+    }
+
+    // A quota's place before its first reading, in QuotaBlock's three rows: the first says it is being read and the others hold
+    // a neutral bar where the period's name goes, the share is a dash, and the track is empty. The track is the quota's own bar
+    // (same key), so the first reading eases it up from nothing.
+    private static Grid SkeletonBlock(AppEntry entry, Layout layout, int slot)
+    {
+        var block = new Grid();
+        foreach (double height in new[] { layout.LabelRow, layout.RowGap, layout.NumberRow, layout.RowGap, layout.Track })
+            block.RowDefinitions.Add(new RowDefinition { Height = new GridLength(height) });
+        FrameworkElement label = slot == 0 ? UI.Fixed(Loc.T("正在读取…", "Reading…"), layout.Label, layout.LabelRow, UI.Tertiary)
+            : new Border { Width = Math.Round(layout.Label * 3.5), Height = Math.Max(4, Math.Round(layout.Label * .7)), CornerRadius = new CornerRadius(PanelTheme.Corner(3)),
+                Background = UI.Brush(UI.Fill), VerticalAlignment = VerticalAlignment.Center };
+        label.HorizontalAlignment = HorizontalAlignment.Left;
+        block.Children.Add(label);
+        var number = new TextBlock { FontFamily = UI.DisplayFont, LineHeight = layout.NumberRow, LineStackingStrategy = LineStackingStrategy.BlockLineHeight, Height = layout.NumberRow,
+            TextWrapping = TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
+        number.Inlines.Add(new Run("—%") { FontSize = layout.Number, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(UI.Tertiary) });
+        Grid.SetRow(number, 2); block.Children.Add(number);
+        var track = new QuotaBar($"{entry.InstanceId:N}:{slot}", 0, PanelTheme.AppTheme(entry)); Grid.SetRow(track, 4);
+        block.Children.Add(track);
+        AutomationProperties.SetName(block, Loc.T("正在读取配额", "Reading the quota"));
+        return block;
     }
 
     // Three rows per quota: the period name, the used share with its reset countdown, and the track.
     // slot is the quota's place in its column: a bar keeps its place's last share (QuotaBar), so a new reading eases the same bar
     // and a quota page flip eases each bar from the quota it replaces, as the monitor page's values move.
-    private static Grid QuotaBlock(AppEntry entry, UsageMetric quota, Layout layout, int slot)
+    // remaining (DeckSettings.QuotaRingRemaining): a quota with a share shows what is left: the bar's length, a percentage as the big
+    // number ("58% 剩余") and the share at the label's right; an amount (a balance, an amount spent) keeps its figure. The colors
+    // still follow the used share, so warning and critical mean the same either way.
+    private static Grid QuotaBlock(AppEntry entry, UsageMetric quota, Layout layout, int slot, bool remaining = false)
     {
         double used = Math.Clamp(quota.UsedPercent ?? 100, 0, 100);
+        bool left = remaining && quota.UsedPercent is not null;
+        bool share = quota.Kind is MetricKind.Percent or MetricKind.Count;
+        string valueText = left && share ? $"{100 - used:0.#}%" : quota.ValueText, valueSuffix = left && share ? Loc.T("剩余", "left") : quota.ValueSuffix;
         string color = quota.UsedPercent is null ? PanelTheme.QuotaTheme(entry) : PanelTheme.QuotaColor(entry, used);
         int level = quota.UsedPercent is null ? 0 : AppPresets.Level(used);
         var block = new Grid();
@@ -475,15 +588,16 @@ public partial class MainWindow
         var number = new TextBlock { FontFamily = UI.DisplayFont, LineHeight = layout.NumberRow, LineStackingStrategy = LineStackingStrategy.BlockLineHeight, Height = layout.NumberRow,
             TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
         // A custom item without a value leaves the row empty; the row keeps its height so blocks stay aligned.
-        if (quota.ValueText.Length > 0) number.Inlines.Add(new Run(quota.ValueText) { FontSize = layout.Number, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(level > 0 ? color : UI.Primary) });
-        if (layout.UsedWord && quota.ValueSuffix.Length > 0) number.Inlines.Add(new Run(" " + quota.ValueSuffix) { FontSize = 11, FontFamily = UI.PanelFont, Foreground = UI.Brush(UI.Tertiary) });
+        if (valueText.Length > 0) number.Inlines.Add(new Run(valueText) { FontSize = layout.Number, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(level > 0 ? color : UI.Primary) });
+        if (layout.UsedWord && valueSuffix.Length > 0) number.Inlines.Add(new Run(" " + valueSuffix) { FontSize = 11, FontFamily = UI.PanelFont, Foreground = UI.Brush(UI.Tertiary) });
         number.ToolTip = quota.Kind switch
         {
             MetricKind.Balance => Loc.T("可用 " + quota.ValueText, quota.ValueText + " available")
                 + (quota.Total is { } total ? quota.TotalIsTarget
                     ? Loc.T(" · 目标余额 " + UsageMetric.Money(total, quota.Currency), " · target " + UsageMetric.Money(total, quota.Currency))
                     : Loc.T(" · 总额 " + UsageMetric.Money(total, quota.Currency), " · " + UsageMetric.Money(total, quota.Currency) + " total") : ""),
-            MetricKind.Spend => Loc.T("已用 " + quota.ValueText, quota.ValueText + " used") + (quota.Unlimited ? Loc.T(" · 无上限", " · no limit") : ""),
+            MetricKind.Spend => Loc.T("已用 " + quota.ValueText, quota.ValueText + " used") + (quota.Unlimited ? Loc.T(" · 无上限", " · no limit") : "")
+                + (quota.Total is { } goal && quota.TotalIsTarget ? Loc.T(" · 目标金额 " + UsageMetric.Money(goal, quota.Currency), " · target " + UsageMetric.Money(goal, quota.Currency)) : ""),
             MetricKind.Count => CountTooltip(quota),
             _ => MetricPercentTooltip(quota)
         };
@@ -491,7 +605,8 @@ public partial class MainWindow
         var resetText = UI.ShortReset(quota.ResetAt);
         var expiryText = quota.ExpiresAt is { } expiry ? (expiry <= DateTimeOffset.Now ? Loc.T("已到期", "Expired") : Loc.T(UI.ShortReset(expiry) + "到期", "expires " + UI.ShortReset(expiry))) : "";
         var countText = CountLabel(quota);
-        var sideText = countText.Length > 0 ? countText : quota.Kind == MetricKind.Balance && quota.UsedPercent is { } percent ? Loc.T($"{Math.Max(0, percent):0.#}% 已用", $"{Math.Max(0, percent):0.#}% used") : quota.Unlimited ? Loc.T("无上限", "No limit") : "";
+        var sideText = countText.Length > 0 ? countText : quota.Kind is MetricKind.Balance or MetricKind.Spend && quota.UsedPercent is { } percent
+            ? left ? Loc.T($"{100 - used:0.#}% 剩余", $"{100 - used:0.#}% left") : Loc.T($"{Math.Max(0, percent):0.#}% 已用", $"{Math.Max(0, percent):0.#}% used") : quota.Unlimited ? Loc.T("无上限", "No limit") : "";
         // Times sit beside the number, next to the track; shares, counts and "无上限" sit at the label's right.
         // A quota with both a reset and an expiry keeps the reset below and moves the expiry up.
         bool expiryAbove = resetText.Length > 0 && expiryText.Length > 0;
@@ -511,21 +626,49 @@ public partial class MainWindow
                 : countText.Length > 0 ? CountTooltip(quota) : MetricPercentTooltip(quota);
             Grid.SetColumn(reset, 1); labelRow.Children.Add(reset);
         }
+        // A quota spent only in busy or idle hours (CodeAgent) shows when its hours next start, or end while they are on, in place of
+        // the daily reset.
+        var hours = quota is { Hours: { } schedule, Period: { } period } ? schedule.Next(period, DateTimeOffset.Now) : default;
+        bool timed = hours.At is not null;
         var rightText = text ? quota.ResetText : offPeak ? (change is { } next ? Loc.T(UI.ShortReset(next) + "切换", "switches " + UI.ShortReset(next)) : "")
+            : timed ? (hours.On ? Loc.T(UI.ShortReset(hours.At) + "结束", "ends " + UI.ShortReset(hours.At)) : Loc.T(UI.ShortReset(hours.At) + "开始", "starts " + UI.ShortReset(hours.At)))
             : resetText.Length > 0 ? resetText : expiryText;
         if (rightText.Length > 0)
         {
             var right = UI.Line(rightText, layout.Reset, UI.Tertiary);
             right.FontFamily = UI.PanelFont;
             right.ToolTip = text ? null : offPeak ? Loc.T($"{change:yyyy-MM-dd HH:mm} 转为" + (offPeakNow ? "高峰时段" : "低峰时段"), (offPeakNow ? "Peak" : "Off-peak") + $" from {change:yyyy-MM-dd HH:mm}")
+                : timed ? CreditHoursTooltip(quota, hours.At!.Value, hours.On)
                 : (quota.ResetAt ?? quota.ExpiresAt)!.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
             right.VerticalAlignment = VerticalAlignment.Bottom; right.HorizontalAlignment = HorizontalAlignment.Right;
             right.Margin = new Thickness(6, 0, 0, 1); Grid.SetColumn(right, 1); numbers.Children.Add(right);
         }
         block.Children.Add(numbers);
-        var track = new QuotaBar($"{entry.InstanceId:N}:{slot}", used / 100, color); Grid.SetRow(track, 4);
+        var track = new QuotaBar($"{entry.InstanceId:N}:{slot}", (left ? 100 - used : used) / 100, color); Grid.SetRow(track, 4);
         block.Children.Add(track);
         return block;
+    }
+
+    // The busy and idle hours of CodeAgent credits and when this quota's hours next start or end, for example
+    // "忙时（消耗 3 倍）：工作日 10:00–12:00、15:00–18:00" / "闲时（消耗 0.2 倍）：其余时间，包括周末全天" / "闲时进行中，11-13 15:00 结束".
+    // The definition's hours are China Standard Time and are written as they are; local times are given for the next change.
+    private static string CreditHoursTooltip(UsageMetric quota, DateTimeOffset at, bool on)
+    {
+        var hours = quota.Hours!;
+        static string Clock(double hour) => $"{(int)hour:00}:{(int)Math.Round(hour % 1 * 60):00}";
+        string Ranges(bool weekend) => string.Join(Loc.T("、", ", "), hours.Ranges(CreditPeriod.Busy, weekend).Select(range => Clock(range.From) + "–" + Clock(range.To)));
+        string Rate(CreditPeriod period) => hours.Rates.TryGetValue(period, out var rate) ? Loc.T($"（消耗 {rate:0.##} 倍）", $" ({rate:0.##}× credits)") : "";
+        string weekdays = Ranges(false), weekends = Ranges(true);
+        var busy = Loc.T("忙时", "Busy hours") + Rate(CreditPeriod.Busy) + Loc.T("：", ": ") + string.Join(Loc.T("；", "; "), new[]
+        {
+            weekdays.Length > 0 ? Loc.T("工作日 ", "weekdays ") + weekdays : "",
+            weekends.Length > 0 ? Loc.T("周末 ", "weekends ") + weekends : ""
+        }.Where(part => part.Length > 0));
+        var idle = Loc.T("闲时", "Idle hours") + Rate(CreditPeriod.Idle) + Loc.T("：其余时间", ": every other hour") + (weekends.Length == 0 ? Loc.T("，包括周末全天", ", all weekend included") : "");
+        var own = quota.Period == CreditPeriod.Busy ? Loc.T("忙时", "Busy hours") : Loc.T("闲时", "Idle hours");
+        var next = own + (on ? Loc.T($"进行中，{at.LocalDateTime:MM-dd HH:mm} 结束", $" now, until {at.LocalDateTime:MM-dd HH:mm}")
+            : Loc.T($" {at.LocalDateTime:MM-dd HH:mm} 开始", $" from {at.LocalDateTime:MM-dd HH:mm}"));
+        return string.Join("\n", busy, idle, next);
     }
 
     // The row's off-peak periods, written as the settings write them.

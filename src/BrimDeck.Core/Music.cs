@@ -88,7 +88,6 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     public double EqualizerBar { get; init; } = 3;
     // System readings region (CompactMonitor), with a gap toward its neighbour; alone in the row it is centred.
     public double MonitorWidth { get; init; }
-    public double MonitorFace { get; init; }
     public bool MonitorAlone { get; init; }
     // Clock region: the gap, then the face; a lone clock has no gap and is centred.
     public double ClockWidth { get; init; }
@@ -114,6 +113,42 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     // Any scale is accepted; non-numbers and non-positive values mean the default size.
     public static double SafeScale(double scale) => double.IsFinite(scale) && scale > 0 ? Math.Clamp(scale, .25, 8) : 1;
     private static double Safe(double width) => double.IsFinite(width) && width > 0 ? width : 0;
+    // The first letter or digit of an application's name, upper case, for the middle of its collapsed quota ring; empty without one.
+    public static string RingLetter(string? name)
+    {
+        // By Unicode scalar (Rune), not UTF-16 unit: a name starting with a supplementary-plane character must give that whole character.
+        foreach (var r in (name ?? "").EnumerateRunes()) if (System.Text.Rune.IsLetterOrDigit(r)) return System.Text.Rune.ToUpperInvariant(r).ToString();
+        return "";
+    }
+    // The letter to draw: empty unless the setting is on (DeckSettings.QuotaRingLetters), else the name's (RingLetter).
+    public static string RingLetterFor(bool enabled, string? name) => enabled ? RingLetter(name) : "";
+    // The box (in whole device pixels) a letter's ink fills inside a ring, so that the box is centred on the ring's centre exactly.
+    // A box with whole-pixel edges is symmetric about a centre only when its width has the parity of the cell's: a ring 12 pixels
+    // across centres a letter 4 or 6 pixels wide, not 5 (which leaves the ink half a pixel to one side, as the eye sees). So the
+    // ink (inkWidth, inkHeight: the glyph's own box in device pixels, stroke included, never the line box with its ascent and
+    // descent) takes the nearest size of the cell's parity, never more than limit pixels (the ring's inner diameter less one), and
+    // the glyph is scaled to it (about a fifth of the letter's size at most at 6 pixels, less in larger rings).
+    // twiceCenter: twice the ring's centre in device pixels from the cell's corner (the cell's width, whole for a ring on whole
+    // pixels), which keeps a cell half a pixel off whole centred too. centroidX/centroidY: where the letter's mass lies in its box,
+    // 0 to 1 from left/top. The box is centred, then moved toward the mass (a V's is above, a T's near the bar) by half the mass's
+    // distance from the centre, to whole pixels: the box and the mass each end up that far off the centre, instead of one of them
+    // all of it. A mass within a pixel of the centre moves nothing, so the small letters of a small ring stay exactly centred; larger ones get the move.
+    public static (int Left, int Top, int Width, int Height) RingLetterBox(double inkWidth, double inkHeight, int twiceCenter, double centroidX, double centroidY, double limit)
+    {
+        int Size(double ink, int twice)
+        {
+            int parity = Math.Abs(twice) & 1, most = Math.Max(parity == 0 ? 2 : 1, (int)Math.Floor(double.IsFinite(limit) ? limit : twice / 2.0));
+            if ((most & 1) != parity) most--;
+            if (!double.IsFinite(ink) || ink <= 0) return Math.Max(1, parity == 0 ? 2 : 1);
+            int near = (int)Math.Round(ink);
+            if ((near & 1) != parity) near = Math.Abs(ink - (near - 1)) <= Math.Abs(ink - (near + 1)) ? near - 1 : near + 1;
+            return Math.Clamp(near, parity == 0 ? 2 : 1, Math.Max(most, parity == 0 ? 2 : 1));
+        }
+        int width = Size(inkWidth, twiceCenter), height = Size(inkHeight, twiceCenter);
+        static double Fraction(double value) => double.IsFinite(value) ? Math.Clamp(value, 0, 1) : .5;
+        int Move(int size, double fraction) => -(int)Math.Round((Fraction(fraction) - .5) * size / 2, MidpointRounding.ToEven);
+        return ((twiceCenter - width) / 2 + Move(width, centroidX), (twiceCenter - height) / 2 + Move(height, centroidY), width, height);
+    }
     // The gap between any two neighbours in the row, and between two rings or two readings (CompactSpacing).
     public static double Gap(double scale) => Whole(8 * SafeScale(scale));
 
@@ -138,22 +173,47 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     // keeps its width from line to line; a longer line scrolls in it.
     public const double TextSlot = 160;
 
+    // The middle text's room when it follows its length (DeckSettings.MusicLyricAutoWidth for the lyric, MusicTitleAutoWidth for
+    // the title), at scale 1. It is never shorter than FollowSlotMin, so a short line or the pause between lines does not shrink
+    // the surface to a sliver, and never longer than FollowSlotMax; longer text scrolls in it. FollowScreenShare is the largest
+    // share of the screen (the work area for the capsule) a surface may take because of the text; content that needs more
+    // without it keeps its own width.
+    public const double FollowSlotMin = 48, FollowSlotMax = 400, FollowScreenShare = .5;
+    // The room for text textWidth DIPs wide (its drawn width), at this scale, in whole DIPs: one DIP is added so rounding never
+    // makes fitting text scroll.
+    public static double FollowSlot(double textWidth, double scale)
+    {
+        double s = SafeScale(scale), wanted = double.IsFinite(textWidth) && textWidth > 0 ? Math.Ceiling(textWidth - 1e-9) + 1 : 0;
+        return Math.Clamp(wanted, Whole(FollowSlotMin * s), Whole(FollowSlotMax * s));
+    }
+    // The content width an auto-width surface takes with the middle text following its length: natural, the width with the
+    // text's room (NaturalWidth with FollowSlot); steady, the width with the fixed slot (TextSlot); limit, the content width that
+    // keeps the surface within FollowScreenShare of the screen. Text that would pass the limit stops there, unless the content
+    // needs more with the fixed slot, whose width it then keeps; a non-finite limit leaves the natural width.
+    public static double FollowWidth(double natural, double steady, double limit)
+    {
+        if (!double.IsFinite(limit) || natural <= limit) return natural;
+        return Math.Max(Math.Max(0, limit), Math.Min(steady, natural));
+    }
+
     // The width a row with this content takes without cutting or rotating anything: the cover, every ring, the lyric's fixed
     // slot, the system readings, the equalizer and the clock, with their gaps. An auto-width surface takes it
     // (CollapsedGeometry.Resolve). dpi (device pixels per DIP, 0 for none): the width is rounded up to whole device pixels. The row
     // is laid out in whole device pixels, rounded down (DevicePixels.Down), so a width with a fraction left in it (a clock face
     // that is not a whole number of DIPs) would leave the readings a fraction short of the room they asked for, and they would scroll.
-    public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, double dpi = 0, bool? equalizer = null, int bars = DefaultBars, bool cover = true)
-        => dpi > 0 ? DevicePixels.Up(Natural(scale, media, rings, text, clockFace, monitorFace, equalizer ?? media, bars, cover), dpi) : Natural(scale, media, rings, text, clockFace, monitorFace, equalizer ?? media, bars, cover);
+    // ring: the rings' diameter at scale 1 (QuotaRing.Diameter). textSlot: the middle text's room in DIPs at this scale (FollowSlot); 0
+    // for the fixed slot (TextSlot).
+    public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, double dpi = 0, bool? equalizer = null, int bars = DefaultBars, bool cover = true, double ring = QuotaRing.Nested, double textSlot = 0)
+        => dpi > 0 ? DevicePixels.Up(Natural(scale, media, rings, text, clockFace, monitorFace, equalizer ?? media, bars, cover, ring, textSlot), dpi) : Natural(scale, media, rings, text, clockFace, monitorFace, equalizer ?? media, bars, cover, ring, textSlot);
 
-    private static double Natural(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, bool equalizer, int count, bool cover)
+    private static double Natural(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, bool equalizer, int count, bool cover, double ring, double textSlot)
     {
         double s = SafeScale(scale), face = Safe(clockFace), monitor = Safe(monitorFace), bars = BarsWidth(count, s);
         rings = Math.Max(0, rings);
         // Media without the cover shows only its text and the equalizer, which are counted on their own.
         media &= cover;
         double width = media ? Whole(20 * s) + Whole(8 * s) : 0;
-        width += RingsAndText(s, rings, text);
+        width += RingsAndText(s, rings, text, RingSizeFor(ring, s), textSlot);
         bool alone = monitor > 0 && !media && !equalizer && rings == 0 && !text && face == 0;
         width += monitor == 0 ? 0 : alone ? monitor : monitor + Whole(8 * s);
         // The bars hold the gap toward the middle, the clock the gap toward whatever is before it.
@@ -162,12 +222,16 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
         return width;
     }
 
+    // A ring's size in the row: its diameter at scale 1 (ring: QuotaRing.Diameter) at this scale, in whole DIPs.
+    public static double RingSizeFor(double scale) => RingSizeFor(QuotaRing.Nested, scale);
+    public static double RingSizeFor(double ring, double scale) => Math.Max(1, Whole((double.IsFinite(ring) && ring > 0 ? ring : QuotaRing.Nested) * SafeScale(scale)));
+
     // The width the rings and the lyric's fixed slot take without cutting or rotating the rings.
-    private static double RingsAndText(double s, int rings, bool text)
+    private static double RingsAndText(double s, int rings, bool text, double size, double textSlot = 0)
     {
-        double ringSpan = rings == 0 ? 0 : rings * Math.Max(1, Whole(12 * s)) + (rings - 1) * Whole(8 * s);
+        double ringSpan = rings == 0 ? 0 : rings * size + (rings - 1) * Whole(8 * s);
         // Beside a lyric the rings may take at most 40 % of the middle (Calculate), so the middle is wide enough for that too.
-        double desired = Whole(TextSlot * s);
+        double desired = double.IsFinite(textSlot) && textSlot > 0 ? Whole(textSlot) : Whole(TextSlot * s);
         return !text ? ringSpan : rings == 0 ? desired : Math.Max(Math.Ceiling(ringSpan / .4), ringSpan + Whole(8 * s) + desired);
     }
 
@@ -178,7 +242,8 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     // contentWidth is the whole row in DIPs; clockFace is the clock's reserved width at this scale, or 0 without a clock;
     // monitorFace is the width all chosen system readings want, or 0 without them; readings wider than their region scroll in it.
     // showCover false leaves the cover out while media plays; the lyric and the equalizer still show with the media.
-    public static CompactMusicLayout Calculate(double contentWidth, double scale, bool media, int rings, bool text, double clockFace, double monitorFace = 0, bool? equalizer = null, int barCount = DefaultBars, bool showCover = true)
+    // ring: the rings' diameter at scale 1 (QuotaRing.Diameter).
+    public static CompactMusicLayout Calculate(double contentWidth, double scale, bool media, int rings, bool text, double clockFace, double monitorFace = 0, bool? equalizer = null, int barCount = DefaultBars, bool showCover = true, double ring = QuotaRing.Nested)
     {
         double s = SafeScale(scale), width = Safe(contentWidth), face = Safe(clockFace), monitorWanted = Safe(monitorFace);
         rings = Math.Max(0, rings);
@@ -204,15 +269,15 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
         // One ring and the shortest lyric always stay. Alone, the readings have the row. All are min and max of linear
         // functions of the width, with slopes from 0 to 1, as above.
         bool monitorAlone = monitorWanted > 0 && !media && !bars && rings == 0 && !text && face == 0;
-        double monitorNeed = monitorWanted + Whole(8 * s);
+        double monitorNeed = monitorWanted + Whole(8 * s), size = RingSizeFor(ring, s);
         double monitorRegion = monitorWanted == 0 ? 0 : monitorAlone ? Math.Min(monitorWanted, middle)
-            : Math.Min(Math.Min(monitorNeed, Math.Max(middle - RingsAndText(s, rings, text), middle / 2)),
-                Math.Max(0, middle - (rings > 0 ? Math.Max(1, Whole(12 * s)) : 0) - (text ? Whole(MinimumText * s) : 0)));
+            : Math.Min(Math.Min(monitorNeed, Math.Max(middle - RingsAndText(s, rings, text, size), middle / 2)),
+                Math.Max(0, middle - (rings > 0 ? size : 0) - (text ? Whole(MinimumText * s) : 0)));
         middle = Math.Max(0, middle - monitorRegion);
 
         // Rings have one size for a given height: the width never shrinks them. The ring region is cut at its edge, through a
         // ring if need be, and rotates while it is narrower than all the rings.
-        double size = Math.Max(1, Whole(12 * s)), gap = Whole(8 * s);
+        double gap = Whole(8 * s);
         double between = Whole(8 * s), desired = Whole(56 * s), minimum = Whole(MinimumText * s);
         static double Span(int count, double size, double gap) => count == 0 ? 0 : count * size + (count - 1) * gap;
         double all = Span(rings, size, gap);
@@ -240,7 +305,7 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
             CoverWidth = coverRegion, CoverSize = cover, CoverRadius = Whole(4 * s),
             EqualizerWidth = eqRegion, EqualizerSize = eqW, EqualizerHeight = eqH, EqualizerBar = bar,
             ClockWidth = clockRegion, ClockFace = face, ClockAlone = clockAlone,
-            MonitorWidth = monitorRegion, MonitorFace = monitorWanted, MonitorAlone = monitorAlone,
+            MonitorWidth = monitorRegion, MonitorAlone = monitorAlone,
             Between = used, RingThickness = Math.Max(.5, Half(2 * s)), RingEdge = Whole(3 * s), TextEdge = Whole(6 * s),
             TextFont = Math.Max(1, Half(11.5 * s)), TextHeight = Math.Max(1, Whole(22 * s)), TextScrolls = text && textWidth >= minimum
         };

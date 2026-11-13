@@ -60,6 +60,9 @@ public sealed class AppUpdateState
     public string? SkippedVersion { get; set; }
     public bool AutoCheck { get; set; } = true;
     public bool Beta { get; set; }
+    // The version that ran last, and the one an update replaced until its notes are opened ("" when not recorded).
+    public string? RunVersion { get; set; }
+    public string? UpdatedFrom { get; set; }
 }
 
 // All commands originate on the UI thread. The backend may report progress from a worker thread.
@@ -95,7 +98,10 @@ public sealed class AppUpdates
     {
         _backend = backend; _clock = clock ?? (() => DateTimeOffset.UtcNow); _started = _clock();
         _stateFile = Path.Combine(dataDirectory, "update-state.json");
-        LoadState(Path.Combine(dataDirectory, "update-prompt.txt"));
+        var legacyFile = Path.Combine(dataDirectory, "update-prompt.txt");
+        bool ranBefore = File.Exists(_stateFile) || File.Exists(legacyFile);
+        LoadState(legacyFile);
+        RecordRun(ranBefore);
         LastChecked = _state.LastSuccess;
         var failure = backend.LastRestartFailure;
         Release = backend.PendingRelease;
@@ -107,6 +113,8 @@ public sealed class AppUpdates
                 "Administrator rights were not granted, so this version was kept. You can download the new portable version from GitHub and replace this folder with it."),
             RestartFailure.Failed => Loc.T("无法替换程序文件，已保留当前版本。可以前往 GitHub 下载新的免安装版本，解压后替换当前文件夹。",
                 "The program files could not be replaced, so this version was kept. You can download the new portable version from GitHub and replace this folder with it."),
+            RestartFailure.Installer => Loc.T("新版本未能安装，已恢复当前版本。可以重试，或前往 GitHub 下载安装包。",
+                "The new version could not be installed, so this version was restored. Try again, or download the installer from GitHub."),
             _ => null
         };
     }
@@ -132,6 +140,28 @@ public sealed class AppUpdates
             }
             SaveState(); Notify();
         }
+    }
+
+    // The version this copy was updated from, kept until the notes are opened: the panel's gear carries a dot for it and the
+    // What's new window marks the versions since. Empty when an earlier version ran without recording itself; null after a
+    // new installation, a downgrade, or once the notes were opened.
+    public string? UpdatedFrom => _state.UpdatedFrom;
+
+    public void MarkNotesSeen()
+    {
+        if (_state.UpdatedFrom is null) return;
+        _state.UpdatedFrom = null; SaveState(); Notify();
+    }
+
+    // A second update before the notes are opened keeps the earlier version, so the window marks both.
+    private void RecordRun(bool ranBefore)
+    {
+        string? previous = _state.RunVersion, current = CurrentVersion;
+        if (previous == current) return;
+        int order = previous is null ? 1 : ApplicationVersion.Compare(current, previous);
+        if (order > 0 && (previous is not null || ranBefore)) _state.UpdatedFrom = _state.UpdatedFrom is { Length: > 0 } earlier ? earlier : previous ?? "";
+        else if (order < 0) _state.UpdatedFrom = null;
+        _state.RunVersion = current; SaveState();
     }
 
     public bool IsSkipped(string? version) => version is not null && version == _state.SkippedVersion;
@@ -254,6 +284,7 @@ public sealed class AppUpdates
                     _state.LastSuccess = saved.LastSuccess is { } time && time <= _clock() ? time : null;
                     _state.AvailableVersion = saved.AvailableVersion; _state.PromptedVersion = saved.PromptedVersion;
                     _state.SkippedVersion = saved.SkippedVersion; _state.AutoCheck = saved.AutoCheck; _state.Beta = saved.Beta;
+                    _state.RunVersion = saved.RunVersion; _state.UpdatedFrom = saved.UpdatedFrom;
                 }
             }
             else if (File.Exists(legacyFile))

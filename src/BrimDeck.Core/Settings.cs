@@ -9,8 +9,12 @@ namespace BrimDeck.Core;
 public enum CompactStyle { Notch, Capsule, Line }
 // The screen edge the notch hangs from (DeckSettings.NotchEdge); see EdgeFrame.
 public enum ScreenEdge { Top, Bottom, Left, Right }
+// What the notch or the line hangs from on its edge where a taskbar is: the screen's edge, over the taskbar, or the taskbar's inner
+// edge. Without a taskbar on that edge the two are the same line. See DeckSettings.Dock.
+public enum EdgeAnchor { Screen, Taskbar }
 public enum WindowBehavior { Normal, Line, Hide }
-public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive }
+// BackgroundFullscreen: a full-screen window on the panel's monitor that is not the foreground window.
+public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive, BackgroundFullscreen }
 // The monitors that show the panel. Chosen uses DisplayMonitors and falls back to the primary monitor while none of them is connected.
 public enum DisplayPlacement { Primary, Chosen }
 // A chosen monitor: its device path, and its name at the time, so that a disconnected monitor can still be named.
@@ -25,6 +29,9 @@ public sealed record FullscreenRule(string Name = "", string Path = "")
     public WindowBehavior? Borderless { get; init; }
     public WindowBehavior? Exclusive { get; init; }
 }
+// An application whose playback the panel leaves out: AppId is the id its media session reports (MediaAppTarget.Ignores),
+// Name the name the panel gave it when it was added, and Path its executable when one was found, for the list's icon.
+public sealed record IgnoredMediaApp(string AppId = "", string Name = "", string Path = "");
 // ZCode reads the ZCode desktop application's local request records and its signed-in Coding Plan quota.
 // Dsh reads the DeepSeek account or API key that DeepSeek Harness (desktop app or local web app) signed in with; DeepSeek uses a key entered by hand.
 // GrokBot reads the weekly allowance of the Grok Bot desktop app; it is a quota source only.
@@ -32,27 +39,46 @@ public sealed record FullscreenRule(string Name = "", string Path = "")
 // KimiApi reads the same plan quota with a Kimi Code API key entered by hand.
 // OpenCode reads the OpenCode Go allowance of the workspace OpenCode (CLI or desktop app) signed in to OpenCode Console with, and its
 // local records; OpenCodeGo reads the same allowance with an OpenCode Console API key entered by hand.
+// CommandCode reads the plan quota of the account Command Code (CLI or desktop app) signed in with, and its local session records;
+// CommandCodeApi reads the same quota with a Command Code API key entered by hand.
 // Statistics sources are saved as numbers. 8 and 9 were a short-lived split of Claude and are retired:
 // SettingsMigrations maps them back to Claude, and later members keep their saved numbers.
-public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, OpenCode = 17, OpenCodeGo = 18, OpenRouter = 19 }
+public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, OpenCode = 17, OpenCodeGo = 18, OpenRouter = 19, Pi = 20, CodeAgent = 21, CommandCode = 22, CommandCodeApi = 23 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckSettings.PageOrder.
-public enum DeckPage { Usage, Music, Monitor, Notices }
-public enum DefaultDeckPage { Last, Usage, Music, Monitor, Notices }
+public enum DeckPage { Usage, Music, Monitor, Clipboard, Devices, Notices }
+public enum DefaultDeckPage { Last, Usage, Music, Monitor, Clipboard, Devices, Notices }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
+// What a double click on an end of the collapsed notch or capsule does: turn its auto width on or off, or start moving it
+// (MainWindow.Move.cs); moving is the default. Off shows no handle at its ends at all. Saved as numbers, so new members go at the end.
+public enum GripDoubleClick { AutoWidth, Move, Off }
 public enum CompactMusicText { None, Title, Lyrics }
 // The monitor an arriving notice is shown on: the one with the foreground window, or always the main panel's.
 public enum NoticeScreen { Foreground, Main }
+// What the collapsed music hides while the song is paused: the title or lyric, the cover, or both. Saved as numbers, so new
+// members go at the end.
+public enum PausedMusicHide { None, Text, Cover, Both }
+// How the level bars show the sound. Flow: one value for the whole sound that runs from one end of the bars to the other, so a
+// drum beat or a voice is seen crossing them. Spectrum: the sound split by pitch, each bar one band, low on the left and high
+// on the right. Saved as numbers, so new members go at the end; a file without it, or with a number not listed, is Flow.
+public enum EqualizerMode { Flow = 0, Spectrum = 1 }
+// How the collapsed quota rings are drawn (QuotaRing). Nested: up to three rings about one centre, 20 DIP across, each quota in
+// a ring of its own. Single: one 12 DIP ring per application with its highest share, as before there were nested rings. Saved
+// as numbers, so new members go at the end; a file without it, or with a number not listed, is Single.
+public enum QuotaRingStyle { Nested = 0, Single = 1 }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left; Music places
 // only the title or lyric. Saved as numbers, so new members go at the end.
-public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock }
+public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer, Devices }
 public static class CompactParts
 {
-    // A file saved before the equalizer and the clock were put in order adds them after its parts, the clock last, where they stood.
-    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock];
-    // Each known part once, in the saved order; a part missing from the file takes its default place after the others.
-    public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Default).Distinct()];
+    // The order of new settings and of restoring the defaults: the equalizer and the clock come last.
+    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices, CompactPart.Equalizer, CompactPart.Clock];
+    // The order in which parts missing from a saved file are added after its own. A file saved before the equalizer and the clock
+    // were put in order adds them after its parts, the clock last, where they stood; the devices' batteries (1.3.0) join last.
+    private static readonly IReadOnlyList<CompactPart> Missing = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices];
+    // Each known part once, in the saved order; a part missing from the file takes its place after the others.
+    public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Missing).Distinct()];
 }
 // Saved settings keep the number, so a new style goes at the end.
 public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed, Pixel, Rounded }
@@ -129,6 +155,16 @@ public sealed class AppEntry
     public string OffPeakColor { get; set; } = "";
     public string OffPeakWarningColor { get; set; } = "";
     public string OffPeakCriticalColor { get; set; } = "";
+    // This row's collapsed quota ring (QuotaRing.For). SingleRingQuota: the quota (UsageMetric.Id) the single ring shows; empty
+    // shows the default. RingQuotas: the quotas the nested rings show by place, outer, middle and inner, an empty string for a ring
+    // left out (QuotaRing.Slots); an empty list shows the default rings. The letter inside always comes from the display name
+    // (CompactMusicLayout.RingLetterFor).
+    // QuotaTargets: the amount that counts as 100% for each other balance or amount spent (UsageMetric.Id → amount), such as a gift
+    // balance, a key's balance or today's spending, as BalanceTarget is for the account balance; the rings, the panel's bars and the
+    // notices all follow it (DashboardUsage.Quota).
+    public string SingleRingQuota { get; set; } = "";
+    public List<string> RingQuotas { get; set; } = [];
+    public Dictionary<string, decimal> QuotaTargets { get; set; } = [];
     public bool IsOffPeak(DateTime local) => OffPeak?.Any(period => period.Contains(local)) == true;
     // The next minute at which this row enters or leaves its off-peak time; null without periods, or when they cover the
     // whole day. A boundary inside another period changes nothing, so the first boundary that flips the state is taken.
@@ -146,6 +182,8 @@ public sealed class AppEntry
         var copy = (AppEntry)MemberwiseClone();
         copy.UsageSource = UsageSource;
         copy.OffPeak = [.. (OffPeak ?? []).Select(period => period.Copy())];
+        copy.RingQuotas = [.. RingQuotas ?? []];
+        copy.QuotaTargets = new(QuotaTargets ?? []);
         return copy;
     }
     public void Normalize()
@@ -165,6 +203,11 @@ public sealed class AppEntry
         OffPeakColor = AppPresets.NormalizeColor(OffPeakColor);
         OffPeakWarningColor = AppPresets.NormalizeColor(OffPeakWarningColor);
         OffPeakCriticalColor = AppPresets.NormalizeColor(OffPeakCriticalColor);
+        SingleRingQuota = (SingleRingQuota ?? "").Trim();
+        if (SingleRingQuota.Length > 500) SingleRingQuota = "";
+        RingQuotas = QuotaRing.Slots(RingQuotas);
+        QuotaTargets = (QuotaTargets ?? []).Where(pair => pair.Key.Length is > 0 and <= 500 && pair.Value > 0 && pair.Value <= AppPresets.MaximumBalanceTarget).Take(32)
+            .ToDictionary(pair => pair.Key, pair => decimal.Round(pair.Value, 2, MidpointRounding.AwayFromZero));
     }
 }
 
@@ -201,6 +244,7 @@ public static class AppPresets
     public const int MaximumApps = 7;
     // A long list would be hard to review, and the exceptions are meant for a few shell-level apps.
     public const int MaximumFullscreenExceptions = 32;
+    public const int MaximumIgnoredMediaApps = 32;
     public const string WarningColor = "#E5C890", CriticalColor = "#E78284";
     public const int MaximumOffPeakPeriods = 6;
     public const decimal MaximumBalanceTarget = 1_000_000_000;
@@ -215,8 +259,8 @@ public static class AppPresets
     public static string Name(ProviderId id) => ProviderCatalog.Name(id);
     // The original preset colors: coral for Claude, mint for Codex, periwinkle for Antigravity, light gray for Cursor.
     public static string ThemeColor(ProviderId id) => id switch
-    { ProviderId.Claude => "#E5A385", ProviderId.Codex => "#98DBB0", ProviderId.Antigravity => "#9CB9FF", ProviderId.ZCode => "#3A538D", ProviderId.Dsh => "#6081DA", ProviderId.Kimi => "#68CDEB", ProviderId.OpenCode => "#8E8E93",
-      ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.DeepSeek or ProviderId.KimiApi or ProviderId.OpenCodeGo or ProviderId.OpenRouter or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => ManualColor, _ => "#D4D5DF" };
+    { ProviderId.Claude => "#E5A385", ProviderId.Codex => "#98DBB0", ProviderId.Antigravity => "#9CB9FF", ProviderId.ZCode => "#3A538D", ProviderId.Dsh => "#6081DA", ProviderId.Kimi => "#68CDEB", ProviderId.OpenCode => "#8E8E93", ProviderId.CodeAgent => "#22D3C5", ProviderId.CommandCode => "#B1BAF9",
+      ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.DeepSeek or ProviderId.KimiApi or ProviderId.OpenCodeGo or ProviderId.CommandCodeApi or ProviderId.OpenRouter or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => ManualColor, _ => "#D4D5DF" };
     // Sources entered by hand share one purple by default.
     public const string ManualColor = "#CC9EED";
     public static int Level(double usedPercent) => usedPercent >= CriticalPercent ? 2 : usedPercent >= WarningPercent ? 1 : 0;
@@ -256,6 +300,14 @@ public static class PanelSizes
 }
 
 // The system monitor page's quick sizes. Unlike the usage page's they do not depend on the applications.
+// The clipboard and file transfer page's sizes, the same as the system monitor's.
+public static class ShelfSizes
+{
+    public static readonly (double Width, double Height) Default = (620, 220);
+    public static (double Width, double Height) For(PanelSize size) => size switch
+    { PanelSize.Compact => (480, 160), PanelSize.Spacious => (860, 320), _ => Default };
+}
+
 public static class MonitorSizes
 {
     public static readonly (double Width, double Height) Default = (620, 220);
@@ -270,9 +322,16 @@ public sealed class DeckSettings
     private List<CompactPart> _notchOrder = [.. CompactParts.Default], _capsuleOrder = [.. CompactParts.Default];
     private List<DeckPage> _pageOrder = [.. DeckPages.Order];
     private int _equalizerBars = CompactMusicLayout.DefaultBars, _musicEqualizerBars = 5;
+    private EqualizerMode _equalizerMode = EqualizerMode.Flow;
+    private PausedMusicHide _musicPausedHide;
+    private MusicGestureAction _musicDragLeft = MusicGestureAction.PreviousTrack, _musicDragRight = MusicGestureAction.NextTrack, _musicDragUp, _musicDragDown,
+        _musicSwipeLeft = MusicGestureAction.PreviousTrack, _musicSwipeRight = MusicGestureAction.NextTrack;
     // Version of the BrimDeck that last saved settings.json; see SettingsMigrations. Empty in files saved before 0.1.0.
     public string AppVersion { get; set; } = "";
     public bool LaunchAtStartup { get; set; }
+    // Off, the notification area has no BrimDeck icon. Starting BrimDeck again then shows the panels and the settings
+    // (App.ShowFromRelaunch), and the settings window has its own exit button.
+    public bool ShowTrayIcon { get; set; } = true;
     public SettingsTheme Theme { get; set; } = SettingsTheme.System;
     // The panel's color theme (see PanelThemes): "system", "dark", "light", a built-in theme or a theme file's id.
     // The dark default is the original look. An id whose file is missing is kept and shown as the dark theme meanwhile.
@@ -285,7 +344,16 @@ public sealed class DeckSettings
     // A first start replaces the default with the Windows display language (SettingsStore.Load); files saved before
     // English existed are Chinese (SettingsMigrations).
     public string Language { get; set; } = Loc.English;
+    // The family the interface's text is drawn in (UiFonts), in front of the app's own fonts; empty is those fonts alone, as before
+    // the setting existed. Icons, figures in code and the clock styles' own faces are not affected. A file without it reads as empty.
+    public string UiFont { get; set; } = "";
+    // On, the settings window is drawn in the chosen font too; off (the default), it keeps the app's own fonts. Either way the
+    // font row itself keeps them, so a font that is hard to read can still be changed back.
+    public bool SettingsFollowsFont { get; set; }
     public CompactStyle Style { get; set; } = CompactStyle.Notch;
+    // The notch or the capsule last chosen, which the line style hotkey (HotkeyKind.LineStyle) returns to from the line. Normalize
+    // keeps it up to date.
+    public CompactStyle ShapeStyle { get; set; } = CompactStyle.Notch;
     // Size and position of each collapsed style in DIPs; limits and defaults are in CollapsedLimits. OffsetX moves the surface
     // from the centre; each monitor narrows the offset to what fits (CollapsedGeometry) without changing the saved value.
     public double NotchWidth { get; set; } = CollapsedLimits.NotchWidthDefault;
@@ -294,9 +362,24 @@ public sealed class DeckSettings
     // The edge the notch hangs from. On the other edges it keeps its width (along the edge), height and offset (along the edge
     // too); see EdgeFrame. The capsule always sits below the top edge.
     public ScreenEdge NotchEdge { get; set; } = ScreenEdge.Top;
-    // The edge the panel works from: the notch's, or the top for the capsule and the line chosen as the style. A window rule that
-    // turns the notch into the line keeps the notch's edge.
-    [JsonIgnore] public ScreenEdge DockEdge => Style == CompactStyle.Notch ? NotchEdge : ScreenEdge.Top;
+    // What the notch hangs from on that edge; null until chosen, which is the screen's edge at the top and the taskbar's elsewhere,
+    // as before the choice existed.
+    public EdgeAnchor? NotchAnchor { get; set; }
+    // The edge and the anchor of the line, as the notch's; the line keeps to the taskbar's side by default. A window rule that turns
+    // the notch or the capsule into the line shows it where the line's own settings put it.
+    public ScreenEdge LineEdge { get; set; } = ScreenEdge.Top;
+    public EdgeAnchor? LineAnchor { get; set; }
+    // Where a style works from: the edge and whether it hangs from the screen's edge over a taskbar there (EdgeFrame.For). The
+    // capsule floats below the top of the screen.
+    public (ScreenEdge Edge, bool OverTaskbar) Dock(CompactStyle style) => style switch
+    {
+        CompactStyle.Notch => (NotchEdge, Anchor(style, NotchEdge, NotchAnchor) == EdgeAnchor.Screen),
+        CompactStyle.Line => (LineEdge, Anchor(style, LineEdge, LineAnchor) == EdgeAnchor.Screen),
+        _ => (ScreenEdge.Top, true)
+    };
+    public static EdgeAnchor Anchor(CompactStyle style, ScreenEdge edge, EdgeAnchor? chosen)
+        => chosen ?? (style == CompactStyle.Notch && edge == ScreenEdge.Top ? EdgeAnchor.Screen : EdgeAnchor.Taskbar);
+    public ScreenEdge CompactEdge(CompactStyle style) => style == CompactStyle.Line ? LineEdge : style == CompactStyle.Notch ? NotchEdge : ScreenEdge.Top;
     public double CapsuleWidth { get; set; } = CollapsedLimits.CapsuleWidthDefault;
     public double CapsuleHeight { get; set; } = CollapsedLimits.CapsuleHeightDefault;
     public double CapsuleOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
@@ -307,10 +390,66 @@ public sealed class DeckSettings
     public double LineThickness { get; set; } = CollapsedLimits.LineThicknessDefault;
     public double LineTop { get; set; } = CollapsedLimits.LineTopDefault;
     public double LineOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
+    // The global shortcuts (HotkeyKind), all unset by default; Hotkey and SetHotkey reach them by kind.
     public string HideHotkey { get; set; } = "";
     public string ExpandHotkey { get; set; } = "";
-    // The resize shortcut: modifiers with the arrow keys ("Ctrl+Alt+Arrows", HotkeyText.Arrows); unset by default.
+    // The resize and move shortcuts: modifiers with the arrow keys ("Ctrl+Alt+Arrows", HotkeyText.Arrows).
     public string ResizeHotkey { get; set; } = "";
+    public string MoveHotkey { get; set; } = "";
+    public string ClickThroughHotkey { get; set; } = "";
+    public string SettingsHotkey { get; set; } = "";
+    public string Page1Hotkey { get; set; } = "";
+    public string Page2Hotkey { get; set; } = "";
+    public string Page3Hotkey { get; set; } = "";
+    public string Page4Hotkey { get; set; } = "";
+    public string Page5Hotkey { get; set; } = "";
+    public string Page6Hotkey { get; set; } = "";
+    public string Page7Hotkey { get; set; } = "";
+    public string Page8Hotkey { get; set; } = "";
+    public string Page9Hotkey { get; set; } = "";
+    public string Page10Hotkey { get; set; } = "";
+    public string RefreshHotkey { get; set; } = "";
+    public string CycleStyleHotkey { get; set; } = "";
+    public string LineStyleHotkey { get; set; } = "";
+    public string Hotkey(HotkeyKind kind) => (kind switch
+    {
+        HotkeyKind.Hide => HideHotkey, HotkeyKind.Expand => ExpandHotkey, HotkeyKind.Resize => ResizeHotkey, HotkeyKind.Move => MoveHotkey,
+        HotkeyKind.ClickThrough => ClickThroughHotkey, HotkeyKind.OpenSettings => SettingsHotkey, HotkeyKind.Page1 => Page1Hotkey,
+        HotkeyKind.Page2 => Page2Hotkey, HotkeyKind.Page3 => Page3Hotkey, HotkeyKind.Page4 => Page4Hotkey,
+        HotkeyKind.Page5 => Page5Hotkey, HotkeyKind.Page6 => Page6Hotkey, HotkeyKind.Page7 => Page7Hotkey, HotkeyKind.Page8 => Page8Hotkey,
+        HotkeyKind.Page9 => Page9Hotkey, HotkeyKind.Page10 => Page10Hotkey, HotkeyKind.Refresh => RefreshHotkey,
+        HotkeyKind.CycleStyle => CycleStyleHotkey, HotkeyKind.LineStyle => LineStyleHotkey, HotkeyKind.Notices => NoticeHotkey, _ => ""
+    }) ?? "";
+    public void SetHotkey(HotkeyKind kind, string value)
+    {
+        switch (kind)
+        {
+            case HotkeyKind.Hide: HideHotkey = value; break;
+            case HotkeyKind.Expand: ExpandHotkey = value; break;
+            case HotkeyKind.Resize: ResizeHotkey = value; break;
+            case HotkeyKind.Move: MoveHotkey = value; break;
+            case HotkeyKind.ClickThrough: ClickThroughHotkey = value; break;
+            case HotkeyKind.OpenSettings: SettingsHotkey = value; break;
+            case HotkeyKind.Page1: Page1Hotkey = value; break;
+            case HotkeyKind.Page2: Page2Hotkey = value; break;
+            case HotkeyKind.Page3: Page3Hotkey = value; break;
+            case HotkeyKind.Page4: Page4Hotkey = value; break;
+            case HotkeyKind.Page5: Page5Hotkey = value; break;
+            case HotkeyKind.Page6: Page6Hotkey = value; break;
+            case HotkeyKind.Page7: Page7Hotkey = value; break;
+            case HotkeyKind.Page8: Page8Hotkey = value; break;
+            case HotkeyKind.Page9: Page9Hotkey = value; break;
+            case HotkeyKind.Page10: Page10Hotkey = value; break;
+            case HotkeyKind.Refresh: RefreshHotkey = value; break;
+            case HotkeyKind.CycleStyle: CycleStyleHotkey = value; break;
+            case HotkeyKind.LineStyle: LineStyleHotkey = value; break;
+            case HotkeyKind.Notices: NoticeHotkey = value; break;
+        }
+    }
+    // Mouse pass-through: hovering does not open the panel and every click goes to the window beneath; only the shortcuts open
+    // it. ClickThroughPanel lets the open panel take clicks as usual.
+    public bool ClickThrough { get; set; }
+    public bool ClickThroughPanel { get; set; }
     public bool MusicPage { get; set; } = true;
     public double MusicWidth { get; set; } = 440;
     public double MusicHeight { get; set; } = 200;
@@ -318,6 +457,15 @@ public sealed class DeckSettings
     public bool NotchSummary { get; set; } = true;
     public bool NotchMusic { get; set; } = true;
     public bool CapsuleSummary { get; set; } = true;
+    // Writes each application's first letter (or digit) of its name inside its collapsed quota ring, in the notch, the capsule and
+    // the side column. Off by default; a file without it reads as off.
+    public bool QuotaRingLetters { get; set; }
+    // The quota rings' style (QuotaRingStyle), in every style and in the side column; each application's choice of quotas for it is
+    // its own (AppEntry.SingleRingQuota, AppEntry.RingQuotas).
+    public QuotaRingStyle QuotaRingStyle { get => _quotaRingStyle; set => _quotaRingStyle = Enum.IsDefined(value) ? value : QuotaRingStyle.Single; }
+    private QuotaRingStyle _quotaRingStyle = QuotaRingStyle.Single;
+    // The rings' arcs show what is left of each quota instead of what is used. Off by default; a file without it reads as off.
+    public bool QuotaRingRemaining { get; set; }
     public bool CapsuleMusic { get; set; } = true;
     // The notch and the capsule each switch the equalizer on. It shows while a song plays (or is paused), or, with EqualizerAlways,
     // at all times: then it reads the whole system's sound while no song plays.
@@ -326,13 +474,16 @@ public sealed class DeckSettings
     public bool EqualizerAlways { get; set; }
     // How many bars the collapsed equalizer has, which sets its length (CompactMusicLayout.BarsWidth).
     public int EqualizerBars { get => _equalizerBars; set => _equalizerBars = CompactMusicLayout.SafeBars(value); }
-    // The collapsed equalizer's color, chosen among the clock's swatches: White is the theme's equalizer color, Cover the playing
-    // song's, Custom EqualizerCustomColor. Gradient is not offered and reads as White.
+    // The color of the collapsed equalizer and the music page's, chosen among the clock's swatches: White is the theme's equalizer
+    // color, Cover the playing song's, Custom EqualizerCustomColor. Gradient is not offered and reads as White.
     public ClockColor EqualizerColor { get; set; } = ClockColor.Cover;
     public string EqualizerCustomColor { get; set; } = ClockColors.DefaultCustom;
     // The notch and the capsule each switch the clock on; its style, color, hour format and seconds are shared.
     public bool NotchClock { get; set; }
     public bool CapsuleClock { get; set; }
+    // The file transfer's count on the notch and the capsule; shown only while the file transfer holds files.
+    public bool NotchTransfer { get; set; } = true;
+    public bool CapsuleTransfer { get; set; } = true;
     public ClockStyle ClockStyle { get; set; }
     public ClockColor ClockColor { get; set; }
     public string ClockCustomColor { get; set; } = ClockColors.DefaultCustom;
@@ -341,25 +492,56 @@ public sealed class DeckSettings
     public bool ClockSeconds { get; set; }
     public CompactMusicText MusicText { get; set; }
     public bool MusicTrackNotice { get; set; } = true;
+    // A song taken as instrumental (Lyrics.Instrumental) shows its title in the collapsed lyric's place instead of "♪".
+    public bool MusicInstrumentalTitle { get; set; }
+    // With auto width (CompactAutoWidth), the collapsed middle text's room follows the length of what it shows, within
+    // CompactMusicLayout.FollowSlot's limits: MusicLyricAutoWidth while the middle text is the lyric (the notch or capsule then
+    // changes width from line to line), MusicTitleAutoWidth while it is the title (from song to song). The two are separate
+    // choices; only the one for the chosen middle text applies. Off, the text keeps a fixed slot (TextSlot).
+    public bool MusicLyricAutoWidth { get; set; }
+    public bool MusicTitleAutoWidth { get; set; }
+    // The surface narrows without what is hidden; a number not listed shows everything.
+    public PausedMusicHide MusicPausedHide { get => _musicPausedHide; set => _musicPausedHide = Enum.IsDefined(value) ? value : PausedMusicHide.None; }
     // The album cover at the left of the collapsed row and on the music page; some players give no cover, only a placeholder.
     public bool MusicCompactCover { get; set; } = true;
     public bool MusicPageCover { get; set; } = true;
     public bool MusicIndicatorProgress { get; set; } = true;
     public bool LyricsEnabled { get; set; } = true;
+    // What dragging with the left button over the expanded music page does in each direction, and a two-finger touchpad swipe
+    // to either side (MusicGestures). A number not listed does nothing.
+    public MusicGestureAction MusicDragLeft { get => _musicDragLeft; set => _musicDragLeft = Gesture(value); }
+    public MusicGestureAction MusicDragRight { get => _musicDragRight; set => _musicDragRight = Gesture(value); }
+    public MusicGestureAction MusicDragUp { get => _musicDragUp; set => _musicDragUp = Gesture(value); }
+    public MusicGestureAction MusicDragDown { get => _musicDragDown; set => _musicDragDown = Gesture(value); }
+    public MusicGestureAction MusicSwipeLeft { get => _musicSwipeLeft; set => _musicSwipeLeft = Gesture(value); }
+    public MusicGestureAction MusicSwipeRight { get => _musicSwipeRight; set => _musicSwipeRight = Gesture(value); }
+    private static MusicGestureAction Gesture(MusicGestureAction value) => Enum.IsDefined(value) ? value : MusicGestureAction.None;
     // How many bars the music page's equalizer has, beside the title; its bars keep their spacing, so more bars make it longer.
     public int MusicEqualizerBars { get => _musicEqualizerBars; set => _musicEqualizerBars = CompactMusicLayout.SafeBars(value); }
+    // How the collapsed equalizer and the music page's equalizer show the sound; one choice for both, while each has its own length.
+    public EqualizerMode EqualizerMode { get => _equalizerMode; set => _equalizerMode = Enum.IsDefined(value) ? value : EqualizerMode.Flow; }
+    // The music page's current lyric, its color chosen as the equalizer's is (EqualizerColor): White is the theme's primary text color.
+    public ClockColor MusicLyricColor { get; set; } = ClockColor.Cover;
+    public string MusicLyricCustomColor { get; set; } = ClockColors.DefaultCustom;
     // Offers "网易云音乐 · 完整控制" in the source menu, or alone in its place when nothing plays.
     public bool NeteaseFullControlEntry { get; set; }
     // Restarts a player started the normal way with full control, without asking again; switching it on asks once.
     public bool NeteaseAutoFullControl { get; set; }
+    // NetEase Cloud Music's full control, which the user confirmed when switching it on: its libcef.dll is kept changed, also after
+    // an update replaces it (a running player then restarts once), so every start opens the port. Switching it off restores the file.
+    public bool NeteaseFullControl { get; set; }
     // KuGou's full control, which the user confirmed when switching it on: its libcef.dll is kept changed, also after a KuGou
     // update replaces it (a running KuGou then restarts once). Switching it off restores the file.
     public bool KugouFullControl { get; set; }
     // Enables Apple Music's full control when BrimDeck starts, without the entry and its explanation.
     public bool AppleMusicFullControl { get; set; }
+    // Applications whose playback is not shown: their songs stay off the panel and out of the source menu.
+    public List<IgnoredMediaApp> IgnoredMediaApps { get; set; } = [];
     public DefaultDeckPage DefaultPage { get; set; }
     // A right click on the expanded panel opens the settings window.
     public bool RightClickSettings { get; set; } = true;
+    // A notch or capsule wider than every page opens its panel under the pointer when hovered, instead of at its middle.
+    public bool ExpandAtPointer { get; set; }
     // What the mouse wheel does while the panel is expanded; scrolling parts of a page keep their wheel.
     public MouseWheelAction MouseWheel { get; set; } = MouseWheelAction.Pages;
     // Read only to carry the switch of a file saved before MouseWheel existed; Normalize moves it across and the member
@@ -374,15 +556,32 @@ public sealed class DeckSettings
     // BrimDeck drawn larger, in percent (PanelScales): the collapsed surface and the expanded panel, its pages, header and menus
     // grow together, as Windows' display scaling would for BrimDeck alone. Sizes stay saved before the scale.
     public int PanelScale { get; set; } = PanelScales.Default;
+    // How much of what lies behind shows through the panel's surface, collapsed and expanded, in percent: 0 is opaque. Only the
+    // surface and its theme layers are see-through; text, icons and the rim are drawn as before.
+    public int SurfaceTransparency { get; set; }
+    public const int MaxSurfaceTransparency = 90;
     public int OpenDelay { get; set; } = 0;
+    // The collapsed panel opens on a click instead of on hover; OpenDelay then does not apply.
+    public bool ClickToExpand { get; set; }
     public int CloseDelay { get; set; } = 0;
     public int AnimationDuration { get; set; } = 360;
     public bool Animations { get; set; } = true;
+    // The panel stays above other windows. Off, it is an ordinary window that others cover: it comes to the front when it
+    // opens, and over the desktop while the desktop is shown; ForceTopmost then does not apply. The window rules still do:
+    // Normal leaves it covered, Line puts the indicator above the window that fills the screen, Hide hides it.
+    public bool AlwaysOnTop { get; set; } = true;
+    public bool ForceTopmost { get; set; }
+    // The panel window can be captured on its own by recording apps (OBS window capture). Off, the window keeps the no-activate
+    // style that recording apps cannot capture, and that keeps it out of Alt+Tab.
+    public bool WindowCapture { get; set; }
     public WindowBehavior Maximized { get; set; } = WindowBehavior.Line;
     public WindowBehavior Borderless { get; set; } = WindowBehavior.Hide;
     public WindowBehavior Exclusive { get; set; } = WindowBehavior.Hide;
+    // Whether a window behind the foreground one counts too: maximized or borderless across the panel's monitor, it calls for
+    // the same rule as if it were in front. Off, only the foreground window is read, as before the background was looked at.
+    public bool BackgroundWindows { get; set; } = true;
     // Applications whose windows are not counted as full screen, so that a desktop beautification tool does not hide the
-    // panel. Empty by default: every app follows the three rules above.
+    // panel. Empty by default: every app follows the rules above.
     public List<FullscreenRule> FullscreenRules { get; set; } = [];
     // Read only to carry the exceptions of a file saved before app rules existed; Normalize moves them across and the
     // member then disappears from the saved file.
@@ -395,6 +594,14 @@ public sealed class DeckSettings
     // The system monitor page; it reads the system only while it is open on screen.
     public bool MonitorPage { get; set; } = true;
     public double MonitorWidth { get; set; } = MonitorSizes.Default.Width;
+    // The clipboard and file transfer page. The clipboard is recorded from the start; a settings file saved before keeps its choice.
+    public bool ClipboardPage { get; set; } = true;
+    public double ClipboardWidth { get; set; } = ShelfSizes.Default.Width;
+    public double ClipboardHeight { get; set; } = ShelfSizes.Default.Height;
+    public bool ClipboardRecord { get; set; } = true;
+    // Applications whose copies are not recorded: the executable's path, or a process name (ClipboardExclusions).
+    public List<string> ClipboardExcluded { get; set; } = [];
+    public TransferDragOut TransferDragOut { get; set; } = TransferDragOut.Copy;
     public double MonitorHeight { get; set; } = MonitorSizes.Default.Height;
     public MonitorPalette MonitorPalette { get; set; } = MonitorPalette.Theme;
     // The Custom scheme's colors; kept while another scheme is chosen.
@@ -414,6 +621,8 @@ public sealed class DeckSettings
     // name it while it is not connected; null for 自动 (GpuChoice.Auto). Files saved before there was a choice read as 自动.
     public string? MonitorGpu { get; set; }
     public string? MonitorGpuName { get; set; }
+    // Where the graphics adapters' usage comes from, on the page and the collapsed row alike (GpuUsageSource).
+    public GpuUsageSource MonitorGpuUsage { get; set; }
     public MonitorProcessView MonitorProcessView { get; set; }
     // The expanded page shows the temperatures the system reports (Temperatures); off, none are read for it. Off by default: asking
     // a driver for a temperature froze one laptop (SensorStops), so a new user turns them on knowingly.
@@ -423,6 +632,25 @@ public sealed class DeckSettings
     // The expanded page shows the whole machine's power draw with its curve, and the machine's own battery when it has one (PowerResolver,
     // BatteryModel); off, neither is read for it. The collapsed row's Power and Charge readings are chosen in its table.
     public bool MonitorPower { get; set; } = true;
+    // The devices page: the battery of the connected wireless devices (Devices); it reads them only while it shows.
+    public bool DevicesPage { get; set; } = true;
+    public double DevicesWidth { get; set; } = 460;
+    public double DevicesHeight { get; set; } = 200;
+    // The devices' order, names and where each shows (DeviceLists), by their key (DeviceBattery.Key). Empty until the user changes
+    // the list; a device not in it shows everywhere, after those that are.
+    public List<DeviceChoice> DeviceChoices { get; set; } = [];
+    // The collapsed row shows each device's figure after its ring.
+    public bool DeviceFigures { get; set; } = true;
+    // At or under these charges a battery shows as low and as getting low (Devices.Level).
+    public int DeviceLowPercent { get; set; } = Devices.DefaultLowPercent;
+    public int DeviceWarningPercent { get; set; } = Devices.DefaultWarningPercent;
+    // The notch and the capsule each show the devices' batteries (CompactPart.Devices).
+    public bool NotchDevices { get; set; }
+    public bool CapsuleDevices { get; set; }
+    // The expanded page shows a line under memory and network with the frame rate of the program in front, its name and its display's
+    // refresh rate (FrameRates). Off by default; read only while the page is open, and only where the user may read Windows' frame
+    // events (the Performance Log Users group, or BrimDeck elevated).
+    public bool MonitorFrames { get; set; }
     // The notch and the capsule each switch the system readings on; what they show is shared.
     public bool NotchMonitor { get; set; }
     public bool CapsuleMonitor { get; set; }
@@ -434,10 +662,13 @@ public sealed class DeckSettings
     // Whether the notch and the capsule widen to their content (CollapsedGeometry.Resolve). Resizing one by dragging an end turns
     // its own off, so the width set by hand stays.
     public bool NotchAutoWidth { get; set; } = true;
-    // Compacts the heap and trims the working set after the panel has been collapsed and idle for a while (App.Memory.cs). Off
-    // by default: the memory is read back in when the panel next opens, which can stutter.
-    public bool TrimMemoryWhenIdle { get; set; }
+    // How much is kept in memory between uses (MemoryPlan, App.Memory.cs).
+    private MemoryMode _memoryMode = MemoryMode.Balanced;
+    public MemoryMode MemoryMode { get => _memoryMode; set => _memoryMode = Enum.IsDefined(value) ? value : MemoryMode.Balanced; }
+    // The on/off switch MemoryMode replaced (SettingsMigrations.MemoryModeFromSwitch). Written to match the mode, for older versions.
+    public bool TrimMemoryWhenIdle => MemoryMode == MemoryMode.Saver;
     public bool CapsuleAutoWidth { get; set; } = true;
+    public GripDoubleClick GripDoubleClick { get; set; } = GripDoubleClick.Move;
     // What the collapsed readings showed before their table (CompactReadings). Kept to read older files and, written to match the
     // table (the preset it matches and the readings shown), for older versions.
     public CompactMonitorMode CompactMonitor { get; set; }
@@ -504,6 +735,9 @@ public sealed class DeckSettings
     public bool ShowsClock(CompactStyle style) => style switch { CompactStyle.Notch => NotchClock, CompactStyle.Capsule => CapsuleClock, _ => false };
     // The indicator is too thin for readings, as for the clock.
     public bool ShowsMonitor(CompactStyle style) => style switch { CompactStyle.Notch => NotchMonitor, CompactStyle.Capsule => CapsuleMonitor, _ => false };
+    public bool ShowsDevices(CompactStyle style) => style switch { CompactStyle.Notch => NotchDevices, CompactStyle.Capsule => CapsuleDevices, _ => false };
+    // The file transfer's count needs the page: with the page off, nothing can be dropped there.
+    public bool ShowsTransfer(CompactStyle style) => ClipboardPage && style switch { CompactStyle.Notch => NotchTransfer, CompactStyle.Capsule => CapsuleTransfer, _ => false };
     public IReadOnlyList<CompactPart> CompactOrder(CompactStyle style) => style == CompactStyle.Capsule ? CapsuleOrder : NotchOrder;
     public void SetCompactOrder(CompactStyle style, IEnumerable<CompactPart> order) { if (style == CompactStyle.Notch) NotchOrder = [.. order]; else if (style == CompactStyle.Capsule) CapsuleOrder = [.. order]; }
     public bool CompactAutoWidth(CompactStyle style) => style switch { CompactStyle.Notch => NotchAutoWidth, CompactStyle.Capsule => CapsuleAutoWidth, _ => false };
@@ -543,13 +777,18 @@ public sealed class DeckSettings
     }
     // The behavior a context calls for: the app's own rule first, where it chooses one for that context, and the global
     // rules everywhere else. The app is the one the context was detected for; a null app, as on the desktop, has no rule.
-    public WindowBehavior Behavior(ScreenContext context, string? processName = null, string? imagePath = null)
+    // A background full screen has no rules of its own: backgroundKind, the way the window behind the foreground one fills
+    // the screen (Maximized or Borderless), picks the rule, the app's own first and the global one after it, as if that
+    // window were in front. Without a kind nothing fills the screen, and the panel stays as it is.
+    public WindowBehavior Behavior(ScreenContext context, string? processName = null, string? imagePath = null,
+        ScreenContext? backgroundKind = null)
     {
+        var kind = context == ScreenContext.BackgroundFullscreen ? backgroundKind ?? ScreenContext.Desktop : context;
         if (processName is not null || imagePath is not null)
             foreach (var rule in FullscreenRules)
                 if (ScreenPolicy.Matches(rule, processName, imagePath))
                 {
-                    var own = context switch
+                    var own = kind switch
                     {
                         ScreenContext.Maximized => rule.Maximized, ScreenContext.Borderless => rule.Borderless,
                         ScreenContext.Exclusive => rule.Exclusive, _ => null
@@ -557,7 +796,7 @@ public sealed class DeckSettings
                     if (own is { } choice) return choice;
                     break;
                 }
-        return context switch
+        return kind switch
         {
             ScreenContext.Maximized => Maximized, ScreenContext.Borderless => Borderless,
             ScreenContext.Exclusive => Exclusive, _ => WindowBehavior.Normal
@@ -576,6 +815,8 @@ public sealed class DeckSettings
         copy.FullscreenRules = FullscreenRules.Select(rule => rule with { }).ToList();
         copy.NoticeWslDistros = [.. NoticeWslDistros ?? []];
         copy.NoticeApps = (NoticeApps ?? []).Select(rule => rule.Copy()).ToList();
+        copy.IgnoredMediaApps = [.. IgnoredMediaApps ?? []];
+        copy.DeviceChoices = [.. (DeviceChoices ?? []).Select(device => device.Copy())];
         return copy;
     }
     public void Normalize()
@@ -604,8 +845,29 @@ public sealed class DeckSettings
         MusicWidth = double.IsFinite(MusicWidth) ? Math.Clamp(MusicWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : 440;
         MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
         MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : MonitorSizes.Default.Width;
+        DevicesWidth = double.IsFinite(DevicesWidth) ? Math.Clamp(DevicesWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : 460;
+        DevicesHeight = double.IsFinite(DevicesHeight) ? Math.Clamp(DevicesHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
+        DeviceChoices = [.. (DeviceChoices ?? []).OfType<DeviceChoice>().Where(device => !string.IsNullOrWhiteSpace(device.Key)).DistinctBy(device => device.Key).Take(256)];
+        foreach (var device in DeviceChoices)
+        {
+            device.Name ??= "";
+            device.Kind = Enum.IsDefined(device.Kind) ? device.Kind : DeviceKind.Other;
+            var label = device.Label?.Trim();
+            device.Label = string.IsNullOrEmpty(label) ? null : label.Length > DeviceLists.MaximumLabel ? label[..DeviceLists.MaximumLabel] : label;
+            static string? Hex(string? color) => AppPresets.NormalizeColor(color) is { Length: > 0 } valid ? valid : null;
+            device.Color = Hex(device.Color); device.ChargeColor = Hex(device.ChargeColor); device.WarningColor = Hex(device.WarningColor); device.CriticalColor = Hex(device.CriticalColor);
+        }
+        DeviceLowPercent = Devices.LowChoices.Contains(DeviceLowPercent) ? DeviceLowPercent : Devices.DefaultLowPercent;
+        // Getting low starts above low: a warning at or under the low threshold takes the next choice above it.
+        DeviceWarningPercent = Devices.WarningChoices.Contains(DeviceWarningPercent) ? DeviceWarningPercent : Devices.DefaultWarningPercent;
+        if (DeviceWarningPercent <= DeviceLowPercent) DeviceWarningPercent = Devices.WarningChoices.First(percent => percent > DeviceLowPercent);
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
+        ClipboardWidth = double.IsFinite(ClipboardWidth) ? Math.Clamp(ClipboardWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : ShelfSizes.Default.Width;
+        ClipboardHeight = double.IsFinite(ClipboardHeight) ? Math.Clamp(ClipboardHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ShelfSizes.Default.Height;
+        if (!Enum.IsDefined(TransferDragOut)) TransferDragOut = TransferDragOut.Copy;
+        ClipboardExcluded = ClipboardExclusions.Normalize(ClipboardExcluded);
         PanelScale = PanelScales.Fit(PanelScale);
+        SurfaceTransparency = Math.Clamp(SurfaceTransparency, 0, MaxSurfaceTransparency);
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
         MonitorCustomColors ??= new();
         MonitorCustomColors.Normalize();
@@ -614,6 +876,7 @@ public sealed class DeckSettings
         MonitorInterval = Math.Clamp(MonitorInterval, 1, 2);
         if (!Enum.IsDefined(MonitorSort)) MonitorSort = ProcessSort.Cpu;
         if (!Enum.IsDefined(MonitorMain)) MonitorMain = MonitorMain.Cpu;
+        if (!Enum.IsDefined(MonitorGpuUsage)) MonitorGpuUsage = GpuUsageSource.Driver;
         MonitorGpu = string.IsNullOrWhiteSpace(MonitorGpu) ? null : MonitorGpu.Trim();
         MonitorGpuName = MonitorGpu is null || string.IsNullOrWhiteSpace(MonitorGpuName) ? null : MonitorGpuName.Trim();
         if (!Enum.IsDefined(MonitorProcessView)) MonitorProcessView = MonitorProcessView.Auto;
@@ -642,13 +905,20 @@ public sealed class DeckSettings
         ThemeDaylight = (ThemeDaylight ?? "").Split('-', 2) is [var day, var night] && PanelThemes.ParseTimeOfDay(day) is { } d && PanelThemes.ParseTimeOfDay(night) is { } n && d != n
             ? PanelThemes.FormatDaylight(d, n) : "";
         Language = Loc.Normalize(Language);
+        UiFont = UiFonts.Normalize(UiFont);
         if (!Enum.IsDefined(Style)) Style = CompactStyle.Notch;
+        if (Style != CompactStyle.Line) ShapeStyle = Style;
+        else if (ShapeStyle is not (CompactStyle.Notch or CompactStyle.Capsule)) ShapeStyle = CompactStyle.Notch;
         static double Fit(double value, double min, double max, double fallback) => double.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;
         static double Offset(double value) => Fit(value, -CollapsedLimits.OffsetLimit, CollapsedLimits.OffsetLimit, CollapsedLimits.OffsetDefault);
         NotchWidth = Fit(NotchWidth, CollapsedLimits.NotchWidthMin, CollapsedLimits.NotchWidthMax, CollapsedLimits.NotchWidthDefault);
         NotchHeight = Fit(NotchHeight, CollapsedLimits.NotchHeightMin, CollapsedLimits.NotchHeightMax, CollapsedLimits.NotchHeightDefault);
         NotchOffsetX = Offset(NotchOffsetX);
         if (!Enum.IsDefined(NotchEdge)) NotchEdge = ScreenEdge.Top;
+        if (!Enum.IsDefined(LineEdge)) LineEdge = ScreenEdge.Top;
+        if (NotchAnchor is { } notchAnchor && !Enum.IsDefined(notchAnchor)) NotchAnchor = null;
+        if (LineAnchor is { } lineAnchor && !Enum.IsDefined(lineAnchor)) LineAnchor = null;
+        if (!Enum.IsDefined(GripDoubleClick)) GripDoubleClick = GripDoubleClick.Move;
         CapsuleWidth = Fit(CapsuleWidth, CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax, CollapsedLimits.CapsuleWidthDefault);
         CapsuleHeight = Fit(CapsuleHeight, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, CollapsedLimits.CapsuleHeightDefault);
         CapsuleOffsetX = Offset(CapsuleOffsetX);
@@ -657,9 +927,7 @@ public sealed class DeckSettings
         LineThickness = CollapsedGeometry.RoundLineThickness(LineThickness);
         LineTop = Fit(LineTop, CollapsedLimits.LineTopMin, CollapsedLimits.LineTopMax, CollapsedLimits.LineTopDefault);
         LineOffsetX = Offset(LineOffsetX);
-        HideHotkey ??= "";
-        ExpandHotkey ??= "";
-        ResizeHotkey ??= "";
+        foreach (var kind in Enum.GetValues<HotkeyKind>()) SetHotkey(kind, Hotkey(kind));
         if (QuickSize is { } quick && !Enum.IsDefined(quick)) QuickSize = null;
         if (!Enum.IsDefined(Maximized)) Maximized = WindowBehavior.Line;
         if (!Enum.IsDefined(Borderless)) Borderless = WindowBehavior.Hide;
@@ -688,6 +956,9 @@ public sealed class DeckSettings
             .DistinctBy(ScreenPolicy.Key, StringComparer.OrdinalIgnoreCase)
             .Take(AppPresets.MaximumFullscreenExceptions).ToList();
         static WindowBehavior? Valid(WindowBehavior? choice) => choice is null || Enum.IsDefined(choice.Value) ? choice : null;
+        IgnoredMediaApps = (IgnoredMediaApps ?? []).OfType<IgnoredMediaApp>().Where(app => !string.IsNullOrWhiteSpace(app.AppId))
+            .Select(app => new IgnoredMediaApp(app.AppId.Trim(), (app.Name ?? "").Trim(), (app.Path ?? "").Trim()))
+            .DistinctBy(app => app.AppId, StringComparer.OrdinalIgnoreCase).Take(AppPresets.MaximumIgnoredMediaApps).ToList();
         DisplayMonitors = (DisplayMonitors ?? []).OfType<ChosenDisplay>().Where(d => !string.IsNullOrWhiteSpace(d.Id))
             .Select(d => new ChosenDisplay(d.Id.Trim(), (d.Name ?? "").Trim())).DistinctBy(d => d.Id).ToList();
         if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;
@@ -701,7 +972,6 @@ public sealed class DeckSettings
         NoticeHistoryFolder = (NoticeHistoryFolder ?? "").Trim();
         // A folder written out in full; a relative one would depend on BrimDeck's current directory.
         if (NoticeHistoryFolder.Length > 0 && !Path.IsPathFullyQualified(NoticeHistoryFolder)) NoticeHistoryFolder = "";
-        NoticeHotkey ??= "";
         NoticesWidth = double.IsFinite(NoticesWidth) ? Math.Clamp(NoticesWidth, 440, 1200) : 460;
         NoticesHeight = double.IsFinite(NoticesHeight) ? Math.Clamp(NoticesHeight, 140, 400) : 280;
         NoticeApps = (NoticeApps ?? []).Where(rule => rule is not null && !string.IsNullOrWhiteSpace(rule.Key)).DistinctBy(rule => rule.Key).Take(500).ToList();

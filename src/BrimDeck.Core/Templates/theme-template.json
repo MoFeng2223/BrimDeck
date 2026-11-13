@@ -31,8 +31,8 @@
     "clock": "#F5F5F7",             // The clock when its color is "Theme default" ("default" below). At least 4.5:1.
     "equalizer": "#9EEBEBF5",       // The equalizer when it does not follow the cover. At least 3:1.
     "hairline": "#17FFFFFF",        // Dividers between columns and rows.
-    "track": "#1FFFFFFF",           // The empty part of a quota bar.
-    "ringTrack": "#29FFFFFF",       // The empty part of a quota ring.
+    "track": "#32FFFFFF",           // The empty part of a quota bar. Keep it visible on the surface; the bar on it needs at least 3:1.
+    "ringTrack": "#32FFFFFF",       // The empty part of a quota ring. Keep it as visible as the bar's.
     "fill": "#12FFFFFF",            // The background of joined switches.
     "fillSelected": "#24FFFFFF",    // The chosen segment.
     "hover": "#18FFFFFF",
@@ -65,7 +65,7 @@
   // by hand; "other" anything not listed.
   "apps": {
     "claude": "#E5A385", "codex": "#98DBB0", "antigravity": "#9CB9FF", "cursor": "#D4D5DF", "zcode": "#4A64A6",
-    "dsh": "#6081DA", "grokBot": "#D4D5DF", "kimi": "#68CDEB", "opencode": "#8E8E93", "manual": "#CC9EED", "other": "#D4D5DF", "warning": "#E5C890", "critical": "#E78284"
+    "dsh": "#6081DA", "grokBot": "#D4D5DF", "kimi": "#68CDEB", "opencode": "#8E8E93", "codeagent": "#22D3C5", "commandcode": "#B1BAF9", "manual": "#CC9EED", "other": "#D4D5DF", "warning": "#E5C890", "critical": "#E78284"
   },
 
   // The clock that suits the theme. Choosing the theme in settings switches the clock to it; the clock can still be changed after.

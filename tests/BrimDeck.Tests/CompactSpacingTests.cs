@@ -51,6 +51,12 @@ internal static class CompactSpacingTests
         check("Compact spacing: on whole device pixels at every scale, the gaps stay equal and the row stays inside", scaled);
         var tight = CompactSpacing.Arrange(parts, 1, 100, 18, 150, 8, 1, 1);
         check("Compact spacing: a row too short for its gaps narrows them alike and keeps the shortest title", Even(tight, 150, 1) && tight.Room[1] >= 18 && tight.Gap < 8);
+        // A lyric that follows its line: the surface is as wide as the line's room, and the line gets all of it before the gaps widen.
+        CompactSpacing.Part[] lyricRow = [new(20), new(0), new(18)];
+        var line = CompactSpacing.Arrange(lyricRow, 1, 300, 18, 354, 8, 1, 1, 300);
+        var fixedFirst = CompactSpacing.Arrange(lyricRow, 1, 300, 18, 354, 8, 1, 1);
+        check("Compact spacing: a lyric given its line's room takes it before the gaps widen", line.Room[1] == 300 && line.Gap == 8 && Even(line, 354, 1)
+            && fixedFirst.Room[1] == 284 && fixedFirst.Gap == 16);
     }
 
     private static void Windows(Action<string, bool> check)

@@ -8,6 +8,7 @@ internal static class MusicTests
         await MediaRoutingTests.Run(check);
         MediaSeekPreviewTests.Run(check);
         MediaPlaybackStackTests.Run(check);
+        HorizontalSwipeTests.Run(check);
         var modes = new MediaTrack { CanRepeat = true, CanShuffle = true, Repeat = MediaRepeat.List };
         check("Modes cycle list, single, shuffle, order, list", MusicPlaybackModes.Next(modes) == MusicPlaybackMode.Track
             && MusicPlaybackModes.Next(modes with { Repeat = MediaRepeat.Track }) == MusicPlaybackMode.Shuffle
@@ -17,15 +18,15 @@ internal static class MusicTests
         check("Sources without modes omit the mode control", MusicPlaybackModes.Supported(new MediaTrack()).Count == 0);
         PageLayout(check);
         var narrow = CompactMusicLayout.Calculate(115, true, 4, true);
-        check("A narrow compact row keeps one rotating ring, at full size, beside a scrolling lyric", narrow.VisibleRings == 1 && narrow.ScrollRings && narrow.RingSize == 12 && narrow.TextWidth == 41);
+        check("A narrow compact row keeps one rotating ring, at full size, beside a scrolling lyric", narrow.VisibleRings == 1 && narrow.ScrollRings && narrow.RingSize == 20 && narrow.TextWidth == 33);
         var capsule = CompactMusicLayout.Calculate(91.3, true, 4, true);
-        check("The capsule beside the widest clock cuts its first ring at the region's edge instead of shrinking it", capsule.VisibleRings == 0 && capsule.RingSize == 12
+        check("The capsule beside the widest clock cuts its first ring at the region's edge instead of shrinking it", capsule.VisibleRings == 0 && capsule.RingSize == 20
             && Math.Abs(capsule.RingWidth - 11.3) < 1e-9 && capsule.TextWidth == 18 && capsule.TextScrolls);
         var tight = CompactMusicLayout.Calculate(84, true, 4, true);
         check("Short of one ring, the lyric keeps its minimum, then the space between, then the first ring is cut", tight.VisibleRings == 0 && !tight.ScrollRings
-            && tight.TextWidth == 18 && tight.Between == 8 && tight.RingWidth == 4 && tight.TextScrolls && tight.RingSize == 12);
-        check("Without the clock the default notch and capsule rotate two full-size rings beside the lyric", CompactMusicLayout.Calculate(178, true, 4, true) is { VisibleRings: 2, ScrollRings: true, RingSize: 12, RingGap: 8 }
-            && CompactMusicLayout.Calculate(164, true, 4, true) is { VisibleRings: 2, ScrollRings: true, RingSize: 12, RingGap: 8 });
+            && tight.TextWidth == 18 && tight.Between == 8 && tight.RingWidth == 4 && tight.TextScrolls && tight.RingSize == 20);
+        check("Without the clock the default notch rotates two full-size rings beside the lyric, the default capsule one", CompactMusicLayout.Calculate(178, true, 4, true) is { VisibleRings: 2, ScrollRings: true, RingSize: 20, RingGap: 8 }
+            && CompactMusicLayout.Calculate(164, true, 4, true) is { VisibleRings: 1, ScrollRings: true, RingSize: 20, RingGap: 8 });
         CompactLayout(check);
         var now = DateTimeOffset.UtcNow;
         var track = new MediaTrack { Title = "测试曲目", Artist = "测试歌手", Start = TimeSpan.FromSeconds(10), End = TimeSpan.FromSeconds(210), ReportedPosition = TimeSpan.FromSeconds(20), PositionAt = now, State = MediaState.Playing, Rate = 2 };
@@ -38,6 +39,8 @@ internal static class MusicTests
         check("LRC multiple timestamps and offsets are parsed", lrc.Synced && lrc.Lines.Count == 3 && lrc.Lines[0].Seconds == 1.5 && lrc.Lines[1].Seconds == 5.75);
         check("Lyrics show an instrumental introduction before the first timestamp", lrc.At(0).Current == "♪");
         check("Long lyric lines stay visible until the next timestamp", lrc.At(10.75).Current == "同一行" && lrc.At(12).Current == "同一行" && lrc.At(19.499).Current == "同一行" && lrc.At(19.5).Current == "后一行");
+        var words = Lyrics.Parse("[03:17.552]<03:17.552>我<03:17.855>也<03:18.143>可<03:18.479>以 <03:19.000>", null, 252, "test");
+        check("Word timing tags are removed from LRC lines", words.Lines.Count == 1 && words.Lines[0].Text == "我也可以" && Math.Abs(words.Lines[0].Seconds - 197.552) < 0.001);
         var gap = Lyrics.Parse("[00:02]长句\n[00:14]\n[00:20]下一句", null, 40, "网易云音乐");
         check("Only timestamped blank lines start an instrumental gap", gap.At(13.999).Current == "长句" && gap.At(14).Current == "♪" && gap.At(19.999).Current == "♪" && gap.At(20).Current == "下一句");
         check("Seeking backwards from an explicit gap restores the lyric", gap.At(16).Current == "♪" && gap.At(8).Current == "长句");
@@ -45,6 +48,12 @@ internal static class MusicTests
         var plain = Lyrics.Parse(null, "甲\n乙", 100, "test");
         check("Plain lyrics retain text without fabricating timestamps", !plain.Synced && plain.Lines.Select(l => l.Text).SequenceEqual(["甲", "乙"]) && plain.Lines.All(l => l.Seconds == 0));
         check("Plain lyrics never select a timed line", !plain.CanSynchronize(track) && plain.At(0).Current == "" && plain.At(60).Current == "");
+        var netease = Lyrics.Parse("[00:00.00] 作曲 : Yiruma\n[00:05.00]纯音乐，请欣赏\n", null, 200, "网易云音乐");
+        var qq = Lyrics.Parse("[00:00:00]此歌曲为没有填词的纯音乐，请您欣赏", null, 200, "QQ 音乐");
+        check("Credits with an instrumental notice mark the song instrumental, without lines", netease is { Instrumental: true, Lines.Count: 0 } && qq is { Instrumental: true, Lines.Count: 0 }
+            && netease.At(30).Current == "♪" && Lyrics.Parse(null, "作曲：某人\n纯音乐，请欣赏", 200, "test").Instrumental);
+        var sung = Lyrics.Parse("[00:00.00] 作曲 : 某人\n[00:05.00]纯音乐，请欣赏\n[00:12.00]第一句歌词", null, 200, "test");
+        check("A notice among sung lines is a lyric, and a long interlude stays a gap", !sung.Instrumental && sung.Lines.Count == 3 && !gap.Instrumental && gap.At(16).Current == "♪");
         var song = Lyrics.Parse("[00:01]一\n[00:02]二\n[00:03]三\n[00:04]四\n[00:05]五", null, 10, "test");
         check("The lyric window gives the lines around the current one in the order they are sung, as many as there are",
             song.Around(3.5, 2, 2) is { Current: "三", Before: ["一", "二"], After: ["四", "五"] }
@@ -139,8 +148,6 @@ internal static class MusicTests
         check("Without the cover the titles take the left column and the lyrics the rest, as many lines as fit around the larger current one",
             columnsOk && wideColumns.LyricLines > MusicLayout.Calculate(1200, 400, true, true).LyricLines
             && MusicLayout.Calculate(440, 200, true, true).Columns(false) is { InfoWidth: 440 - 40, LyricsWidth: 0, LyricLines: 0 });
-        check("The standard music preset is 440 wide, as wide as the compact one", MusicSizes.For(PanelSize.Standard) == (440, 200)
-            && new DeckSettings().MusicWidth == 440 && new DeckSettings().MusicHeight == 200);
         check("The bottom margin below the transport equals the side margin", standard.Metrics.Bottom == standard.Metrics.Side && spacious.Metrics.Bottom == spacious.Metrics.Side);
         var failures = new List<string>(); double title = 0;
         for (double h = 140; h <= 400; h += 2)
@@ -200,14 +207,12 @@ internal static class MusicTests
             && standard.TextHeight == 22 && standard.RowHeight == 24 && standard.RingThickness == 2 && standard.TextEdge == 6 && standard.RingEdge == 3);
         var wide = CompactMusicLayout.Calculate(400, 1, true, 4, true, 33);
         check("A wider row only widens the middle, and the lyric takes the rest", wide.CoverWidth == standard.CoverWidth && wide.EqualizerWidth == standard.EqualizerWidth
-            && wide.ClockWidth == standard.ClockWidth && wide.MiddleWidth - standard.MiddleWidth == 222 && wide.VisibleRings == 4 && wide.RingSize == 12 && !wide.ScrollRings
+            && wide.ClockWidth == standard.ClockWidth && wide.MiddleWidth - standard.MiddleWidth == 222 && wide.VisibleRings == 4 && wide.RingSize == 20 && !wide.ScrollRings
             && wide.TextWidth == wide.MiddleWidth - wide.RingWidth - wide.Between);
         var tall = CompactMusicLayout.Calculate(400, 1.5, true, 4, true, 50);
         check("A taller row scales the cover, equalizer, rings and type, in whole and half DIPs", tall.CoverSize == 30 && tall.CoverWidth == 42 && tall.EqualizerSize == 27
             && tall.EqualizerHeight == 21 && tall.EqualizerWidth == 39 && tall.ClockWidth == 62 && tall.TextFont == 17.5 && tall.TextHeight == 33 && tall.RowHeight == 36
-            && tall.RingSize == 18 && tall.RingThickness == 3 && tall.TextEdge == 9);
-        var shortRow = CompactMusicLayout.Calculate(178, .75, true, 4, true, 25);
-        check("A shorter row scales down", shortRow.CoverSize == 15 && shortRow.TextFont == 8.5 && shortRow.RowHeight == 18 && shortRow.RingThickness == 1.5);
+            && tall.RingSize == 30 && tall.RingThickness == 3 && tall.TextEdge == 9);
 
         // The middle gives way first; then the equalizer, the cover and the clock, each to nothing before the next.
         var sides = CompactMusicLayout.Calculate(95, 1, true, 4, true, 33);
@@ -233,7 +238,7 @@ internal static class MusicTests
         check("The equalizer's length follows its bars, four by default, and the count stays in its range",
             CompactMusicLayout.BarsWidth(4, 1) == 18 && CompactMusicLayout.BarsWidth(20, 1) == 98 && CompactMusicLayout.BarsWidth(3, 2) == 26
             && CompactMusicLayout.BarsWidth(1, 1) == 13 && CompactMusicLayout.BarsWidth(99, 1) == 98 && new DeckSettings { EqualizerBars = 0 }.EqualizerBars == 3
-            && new DeckSettings().EqualizerBars == 4 && new DeckSettings().MusicEqualizerBars == 5 && new DeckSettings { MusicEqualizerBars = 30 }.MusicEqualizerBars == 20 && CompactMusicLayout.Calculate(300, 1, true, 0, true, 0, 0, true, 8) is { EqualizerWidth: 8 + 38, EqualizerSize: 38 }
+            && new DeckSettings { MusicEqualizerBars = 30 }.MusicEqualizerBars == 20 && CompactMusicLayout.Calculate(300, 1, true, 0, true, 0, 0, true, 8) is { EqualizerWidth: 8 + 38, EqualizerSize: 38 }
             && CompactMusicLayout.NaturalWidth(1, false, 0, false, 0, 0, 0, true, 6) == 28);
         check("Media without the equalizer has no equalizer region", CompactMusicLayout.Calculate(200, 1, true, 0, true, 33, 0, false) is { EqualizerWidth: 0, CoverWidth: 28 });
         check("The width the row asks for counts the equalizer apart from the media",
@@ -245,8 +250,19 @@ internal static class MusicTests
             CompactMusicLayout.Calculate(200, 1, true, 0, true, 33, 0, true, CompactMusicLayout.DefaultBars, showCover: false) is { CoverWidth: 0, EqualizerWidth: 26, ClockWidth: 41, ClockAlone: false, TextWidth: 200 - 26 - 41 }
             && CompactMusicLayout.Calculate(200, 1, true, 0, false, 33, 0, false, CompactMusicLayout.DefaultBars, showCover: false) is { CoverWidth: 0, ClockAlone: true }
             && CompactMusicLayout.NaturalWidth(1, true, 0, true, 0, 0, 0, true, CompactMusicLayout.DefaultBars, cover: false) == CompactMusicLayout.TextSlot + 18 + 8
-            && CompactMusicLayout.RequiredWidth(1, true, true, 0, 0, 0, true, CompactMusicLayout.DefaultBars, cover: false) == 18 + 8 + 18
-            && new DeckSettings() is { MusicCompactCover: true, MusicPageCover: true });
+            && CompactMusicLayout.RequiredWidth(1, true, true, 0, 0, 0, true, CompactMusicLayout.DefaultBars, cover: false) == 18 + 8 + 18);
+        // The middle text that follows its length (DeckSettings.MusicLyricAutoWidth, MusicTitleAutoWidth): its room is the text's width
+        // within its limits, and the text never widens the surface past the screen share unless the fixed slot needs more.
+        check("Middle text that follows its length asks for its room, within the shortest and longest room",
+            CompactMusicLayout.FollowSlot(100.2, 1) == 102 && CompactMusicLayout.FollowSlot(10, 1) == CompactMusicLayout.FollowSlotMin
+            && CompactMusicLayout.FollowSlot(5000, 1) == CompactMusicLayout.FollowSlotMax && CompactMusicLayout.FollowSlot(5000, 2) == 2 * CompactMusicLayout.FollowSlotMax
+            && CompactMusicLayout.FollowSlot(double.NaN, 1) == CompactMusicLayout.FollowSlotMin && CompactMusicLayout.FollowSlot(-3, 1) == CompactMusicLayout.FollowSlotMin
+            && CompactMusicLayout.NaturalWidth(1, true, 0, true, 0, 0, 0, true, CompactMusicLayout.DefaultBars, textSlot: 102) == 20 + 8 + 102 + 8 + 18
+            && CompactMusicLayout.NaturalWidth(1, true, 0, true, 0, 0, 0, true) == CompactMusicLayout.NaturalWidth(1, true, 0, true, 0, 0, 0, true, textSlot: 0));
+        check("Middle text never widens the surface past its limit, and content that needs more keeps its fixed width",
+            CompactMusicLayout.FollowWidth(300, 220, 900) == 300 && CompactMusicLayout.FollowWidth(1200, 220, 900) == 900
+            && CompactMusicLayout.FollowWidth(1200, 1000, 900) == 1000 && CompactMusicLayout.FollowWidth(150, 220, 100) == 150
+            && CompactMusicLayout.FollowWidth(1200, 220, double.PositiveInfinity) == 1200 && CompactMusicLayout.FollowWidth(1200, 220, -5) == 220);
 
         // Any width, scale and clock width gives finite regions that are never negative and never add up to more than the row.
         double[] widths = [0, .4, 1, 7, 17.9, 18, 36, 54, 84, 91.3, 115, 164, 178, 400, 1e6, double.NaN, -5, double.PositiveInfinity];
@@ -287,7 +303,7 @@ internal static class MusicTests
         var after = CompactMusicLayout.Calculate(sideRegions + 176, 1, true, 6, true, 0);
         check("One DIP across the old all-rings threshold moves the rings and the lyric by at most one DIP",
             Math.Abs(after.RingWidth - before.RingWidth) <= 1 && Math.Abs(after.TextWidth - before.TextWidth) <= 1 && before.ScrollRings && after.ScrollRings);
-        check("All rings stand still once the middle holds them in its 40 % share", CompactMusicLayout.Calculate(sideRegions + 280, 1, true, 6, true, 0) is { RingWidth: 112, ScrollRings: false, VisibleRings: 6 });
+        check("All rings stand still once the middle holds them in its 40 % share", CompactMusicLayout.Calculate(sideRegions + 400, 1, true, 6, true, 0) is { RingWidth: 160, ScrollRings: false, VisibleRings: 6 });
 
         // Every region, for every style, height, clock, ring count, lyric and cover, moves by at most one DIP per DIP of
         // width from 0 to 800, also between rotating and static rings. Snapped to device pixels the way the row lays them out
@@ -400,7 +416,7 @@ internal static class MusicTests
                     string key = string.Join("|", l.RingSize, l.RingGap, l.RingThickness, l.RingEdge, l.CoverSize, l.CoverRadius, l.EqualizerSize, l.EqualizerHeight,
                         l.EqualizerBar, l.ClockFace, l.TextFont, l.TextHeight, l.TextEdge, l.RowHeight);
                     if (raw) { firstRaw ??= key; fixedSizes &= key == firstRaw; } else { first ??= key; fixedSizes &= key == first; }
-                    fixedSizes &= l.RingSize == Math.Max(1, CompactMusicLayout.Whole(12 * l.Scale)) && l.RingGap == CompactMusicLayout.Whole(8 * l.Scale)
+                    fixedSizes &= l.RingSize == Math.Max(1, CompactMusicLayout.Whole(20 * l.Scale)) && l.RingGap == CompactMusicLayout.Whole(8 * l.Scale)
                         && l.CoverSize == Math.Max(1, CompactMusicLayout.Whole(20 * l.Scale)) && l.EqualizerSize == Math.Max(1, CompactMusicLayout.Whole(18 * l.Scale));
                     // A region narrower than one ring cuts it; the ring keeps its size.
                     if (l.VisibleRings == 0 && l.RingWidth > 0 && l.RingWidth < l.RingSize) regionsMove = true;

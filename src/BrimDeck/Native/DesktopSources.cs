@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using BrimDeck.Core;
 
@@ -11,21 +12,90 @@ public sealed class DesktopSources : IDesktopSources
     public ClaudeDesktopState ReadClaudeDesktop(DataLocations locations) => ClaudeDesktopReader.Read(locations);
     public GrokBotSignIn ReadGrokBotDesktop(DataLocations locations) => GrokBotDesktopReader.Read(locations);
 
+    // Starts `codeagentcli auth status` without a window, with the environment the codeagent launcher sets (its certificates,
+    // no proxy) and the data folder BrimDeck reads, and waits until the sign-in file holds a later expiry or the CLI ends. The
+    // CLI writes the renewed sign-in within a few seconds; it is ended once that is written, or after 30 seconds.
+    public async Task<bool> RenewCodeAgentAsync(string home, CancellationToken cancellation)
+    {
+        var cli = CodeAgentUsage.FindCli(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), Environment.GetEnvironmentVariable("PATH"));
+        if (cli is null) return false;
+        long before = CodeAgentUsage.StoredExpiry(home);
+        var install = Path.GetDirectoryName(Path.GetDirectoryName(cli))!;
+        var start = new ProcessStartInfo(cli, "auth status --json")
+        {
+            UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetTempPath(),
+            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        var cert = Path.Combine(install, "custom", "cert.pem");
+        if (File.Exists(cert)) { start.Environment["NODE_EXTRA_CA_CERTS"] = cert; start.Environment["SSL_CERT_FILE"] = cert; }
+        foreach (var name in new[] { "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY" }) start.Environment.Remove(name);
+        start.Environment["CODEAGENT3_CONFIG_DIR"] = home;
+        using var process = Process.Start(start);
+        if (process is null) return false;
+        process.StandardInput.Close();
+        _ = process.StandardOutput.ReadToEndAsync(cancellation); _ = process.StandardError.ReadToEndAsync(cancellation);
+        bool Renewed() { try { return CodeAgentUsage.StoredExpiry(home) > before; } catch (IOException) { return false; } }
+        try
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (!Renewed() && !process.HasExited && DateTime.UtcNow < deadline) await Task.Delay(300, cancellation);
+            // The CLI may still be writing the file when it ends; give it a moment.
+            if (!Renewed() && process.HasExited) await Task.Delay(1000, cancellation);
+            // A renewed CLI may still be writing the rest of the sign-in; it is left a few seconds to end by itself.
+            if (Renewed()) for (int wait = 0; wait < 10 && !process.HasExited; wait++) await Task.Delay(300, cancellation);
+            return Renewed();
+        }
+        finally { try { if (!process.HasExited) process.Kill(true); } catch (InvalidOperationException) { } }
+    }
+
+    public string? UnprotectUserData(string base64)
+    {
+        byte[]? plain = null;
+        try
+        {
+            plain = ProtectedData.Unprotect(Convert.FromBase64String(base64), null, DataProtectionScope.CurrentUser);
+            return System.Text.Encoding.UTF8.GetString(plain);
+        }
+        catch (Exception ex) when (ex is FormatException or CryptographicException) { return null; }
+        finally { if (plain is not null) CryptographicOperations.ZeroMemory(plain); }
+    }
+
+    // Newer Cursor clients store the access token as "cursor-safe-storage:v1:" and the base64 of a value encrypted with
+    // Cursor's own os_crypt key (Local State in %APPDATA%\Cursor); older clients store the token itself.
+    private const string CursorSafeStorage = "cursor-safe-storage:v1:";
+
     public string? ReadCursorToken(string database)
     {
         if (!File.Exists(database)) return null;
+        string? value;
         IntPtr db = IntPtr.Zero, statement = IntPtr.Zero;
         try
         {
             if (sqlite3_open_v2(database, out db, 1, IntPtr.Zero) != 0) return null; // SQLITE_OPEN_READONLY
             sqlite3_busy_timeout(db, 1000);
             if (sqlite3_prepare_v2(db, "SELECT value FROM ItemTable WHERE key='cursorAuth/accessToken' LIMIT 1", -1, out statement, IntPtr.Zero) != 0) return null;
-            return sqlite3_step(statement) == 100 ? Marshal.PtrToStringUTF8(sqlite3_column_text(statement, 0)) : null;
+            value = sqlite3_step(statement) == 100 ? Marshal.PtrToStringUTF8(sqlite3_column_text(statement, 0)) : null;
         }
         finally
         {
             if (statement != IntPtr.Zero) sqlite3_finalize(statement);
             if (db != IntPtr.Zero) sqlite3_close(db);
+        }
+        if (value is null || !value.StartsWith(CursorSafeStorage, StringComparison.Ordinal)) return value;
+        // database is %APPDATA%\Cursor\User\globalStorage\state.vscdb.
+        var folder = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(database)))!;
+        byte[]? key = null, plain = null;
+        try
+        {
+            key = ChromiumSecrets.Key(Path.Combine(folder, "Local State"));
+            plain = ChromiumSecrets.Decrypt(key, value[CursorSafeStorage.Length..]);
+            return System.Text.Encoding.UTF8.GetString(plain).Trim();
+        }
+        catch (CryptographicException ex) { throw new IOException("The Cursor sign-in cannot be decrypted.", ex); }
+        finally
+        {
+            if (key is not null) CryptographicOperations.ZeroMemory(key);
+            if (plain is not null) CryptographicOperations.ZeroMemory(plain);
         }
     }
 
@@ -65,6 +135,8 @@ public sealed class DesktopSources : IDesktopSources
         var known = _antigravity.Where(p => Alive(p.Id, p.Started) &&
             p.Endpoints.All(e => listeners.Any(l => l.ProcessId == p.Id && l.Port == e.Port))).ToArray();
         if (known.Length > 0 && known.Length == _antigravity.Length) return known.SelectMany(p => p.Endpoints).ToList();
+        // No language server running (Antigravity closed): nothing to ask WMI about.
+        if (!ProcessSnapshot.Any(name => name.Contains("language_server", StringComparison.OrdinalIgnoreCase))) { _antigravity = []; return []; }
         // A WMI query has no timeout of its own; a stalled service must not hold the refresh.
         var processes = await Task.Run(FindAntigravityProcesses, cancellation).WaitAsync(TimeSpan.FromSeconds(15), cancellation);
         var found = new List<(int, DateTime, IReadOnlyList<LocalEndpoint>)>();

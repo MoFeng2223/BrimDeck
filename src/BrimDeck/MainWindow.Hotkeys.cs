@@ -9,7 +9,8 @@ namespace BrimDeck;
 
 // How a panel follows the global hotkeys (see App.Hotkeys.cs).
 // Opened by the expand hotkey, the panel stays open until the pointer has been inside it once; after that the usual leave
-// rules close it. While the panels are hidden, the expand hotkey still opens this panel; once it closes, it hides again.
+// rules close it (under mouse pass-through, a panel that ignores the pointer stays open until a hotkey or Esc closes it). While
+// the panels are hidden, the expand hotkey still opens this panel; once it closes, it hides again.
 // Opened by a hotkey, the panel also takes the keyboard (Tab, arrows, Enter work its pages, the recent notices among them)
 // and gives it back to the window that had it when it closes. The panel never activates otherwise (WS_EX_NOACTIVATE): opened
 // by the pointer, it leaves the keyboard where it is.
@@ -29,15 +30,23 @@ public partial class MainWindow
     internal bool IsOpenForHotkey => _expanded && !_preview;
     internal bool IsHotkeyPinned => _hotkeyPinned;
 
-    // byKey: the hotkey itself; false when a click asked for the same opening ("View all" on a notice), which leaves the
-    // keyboard where it is.
-    internal void OpenFromHotkey(bool byKey = true)
+    // page: the page to open on (a page hotkey), in place of the page chosen for opening (ApplyDefaultMusicPage). byKey: the
+    // hotkey itself; false when a click asked for the same opening ("View all" on a notice), which leaves the keyboard where it is.
+    internal void OpenFromHotkey(DeckPage? page = null, bool byKey = true)
     {
         if (_expanded) return;
+        _hotkeyPage = page;
+        try { Open(byKey); } finally { _hotkeyPage = null; }
+    }
+
+    private DeckPage? _hotkeyPage;
+
+    private void Open(bool byKey)
+    {
         // A collapsed preview of the settings ends as hovering would end it; a preview of the open panel is left alone.
         if (_preview) { if (_previewExpanded) return; _app.EndPreviewFromDeck(); }
         // The full-screen rule hides the panel; the hotkey does not override it.
-        if (Settings.Behavior(_context, _host.App.Name, _host.App.Path) == WindowBehavior.Hide) return;
+        if (Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Hide) return;
         if (_app.UserHidden && !_hotkeyOpened) { _hotkeyOpened = true; ApplySettings(); }
         _hover.Stop(); _leave.Stop();
         _hotkeyPinned = true;
@@ -63,8 +72,7 @@ public partial class MainWindow
     private void FocusPanelStart()
     {
         if (CurrentPage == DeckPage.Notices && _pageRows.Count > 0) { _pageRows[0].Row.Focus(); return; }
-        var button = CurrentPage switch { DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, DeckPage.Notices => NoticesPageButton, _ => AIUsageButton };
-        Keyboard.Focus(button);
+        Keyboard.Focus(PageButton(CurrentPage));
     }
 
     // The panel closed (or the user went to another window): it cannot be active again until the next hotkey, and the window
@@ -75,7 +83,8 @@ public partial class MainWindow
         _keyboardPanel = false;
         var own = new WindowInteropHelper(this).Handle;
         if (own == IntPtr.Zero) return;
-        NoticeNative.SetActivatable(own, false);
+        // Back to what the settings give an idle panel: not activatable, unless recording apps may capture it (WindowCapture).
+        WindowsHost.SetCapturable(this, Settings.WindowCapture);
         if (giveBack) NoticeNative.ReturnForeground(own, _keyboardReturn);
         _keyboardReturn = IntPtr.Zero;
         // Only once the foreground has moved on: until then the panel being in front must not read as a change of context.

@@ -20,6 +20,8 @@ public partial class MainWindow
     private readonly Button AIUsageButton = new() { Content = "Usage", Width = 60, Height = 24 };
     private readonly Button MusicPageButton = new() { Content = "Music", Width = 60, Height = 24 };
     private readonly Button MonitorPageButton = new() { Content = "Monitor", Width = 60, Height = 24 };
+    private readonly Button ShelfPageButton = new() { Content = "Clipboard", Width = 60, Height = 24 };
+    private readonly Button DevicesPageButton = new() { Content = "Devices", Width = 60, Height = 24 };
     private readonly Button NoticesPageButton = new() { Content = "Notices", Width = 60, Height = 24 };
     private readonly Grid PageSwitch = new();
     private readonly Border PageCapsule = new() { Width = 60, Height = 24 };
@@ -32,7 +34,7 @@ public partial class MainWindow
         var window = new MainWindow { Width = 260, Height = 100, Left = -20000, Top = -20000,
             ShowActivated = false, WindowStyle = WindowStyle.None };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
-        buttons.Children.Add(window.AIUsageButton); buttons.Children.Add(window.MonitorPageButton); buttons.Children.Add(window.MusicPageButton);
+        buttons.Children.Add(window.AIUsageButton); buttons.Children.Add(window.MonitorPageButton); buttons.Children.Add(window.MusicPageButton); buttons.Children.Add(window.ShelfPageButton);
         buttons.Children.Add(window.NoticesPageButton);
         window.PageCapsule.RenderTransform = window.PageCapsuleShift;
         window.PageSwitch.Children.Add(window.PageCapsule); window.PageSwitch.Children.Add(buttons);
@@ -64,6 +66,35 @@ public partial class MainWindow
             window.Hide(); window.MonitorPageButton.Width = 95;
             PumpCapsule(() => window.PlacePageCapsule(), check);
             check("hidden production window does not spin while waiting for layout", window._capsulePending);
+        }
+        finally { window.Close(); }
+    }
+
+    // The header changes size tier: the capsule follows the buttons' new drawn height at once (ApplyHeader), not at the next refresh.
+    internal static void CheckPageCapsuleFit(Action<string, bool> check)
+    {
+        var window = new MainWindow { Width = 260, Height = 100, Left = -20000, Top = -20000, ShowActivated = false, WindowStyle = WindowStyle.None };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal };
+        buttons.Children.Add(window.AIUsageButton); buttons.Children.Add(window.MonitorPageButton); buttons.Children.Add(window.MusicPageButton); buttons.Children.Add(window.ShelfPageButton);
+        window.PageCapsule.RenderTransform = window.PageCapsuleShift;
+        window.PageSwitch.Children.Add(window.PageCapsule); window.PageSwitch.Children.Add(buttons);
+        window.Content = window.PageSwitch;
+        try
+        {
+            window.Show();
+            var tall = PanelHeader.For(36, 20); var short_ = PanelHeader.For(30, 20);
+            window.FitPageButtons(tall); window.UpdateLayout(); window.PlacePageCapsule();
+            check("page capsule is as tall as the buttons draw in the tall header", window.PageCapsule.Height == tall.ButtonHeight && tall.ButtonHeight == 24);
+
+            // The header moves to the shorter tier: the capsule follows the buttons at once, and a placement before the next layout
+            // pass (RefreshStatus runs PlacePageCapsule before ApplyHeader) keeps it there, though ActualHeight is still the old tier's.
+            window.FitPageButtons(short_);
+            check("the capsule takes the new tier's height as the buttons change", window.PageCapsule.Height == short_.ButtonHeight && short_.ButtonHeight != tall.ButtonHeight);
+            check("a button's ActualHeight before the next layout pass is still the old tier's", window.AIUsageButton.ActualHeight == tall.ButtonHeight);
+            window.PlacePageCapsule();
+            check("a placement before the next layout pass keeps the new tier's height", window.PageCapsule.Height == short_.ButtonHeight);
+            window.UpdateLayout(); window.PlacePageCapsule();
+            check("after layout the capsule and the buttons agree", window.PageCapsule.Height == window.AIUsageButton.ActualHeight);
         }
         finally { window.Close(); }
     }

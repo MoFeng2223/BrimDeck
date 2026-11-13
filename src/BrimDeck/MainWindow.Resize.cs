@@ -12,8 +12,9 @@ namespace BrimDeck;
 //   and lays itself out for it as it changes.
 // - Collapsed, either end of the notch, the capsule or the line changes its width. Pointing at an end shows the resize cursor
 //   instead of opening the panel. The content reflows as the width changes: the readings, the rings and the lyric take what
-//   fits. A width set this way is kept, so the surface no longer widens to its content; a double click on an end gives that
-//   back (the line returns to its usual length).
+//   fits. A width set this way is kept, so the surface no longer widens to its content; a double click on an end turns that
+//   back on or off (the line returns to its usual length), or starts moving the surface, as the settings choose (MainWindow.Move.cs).
+//   The settings can also turn the ends' handles off; the resize shortcut still changes the width then.
 // The grips and their hints are a layer over the window (ResizeGripLayer); where they are is ResizeGrips's. The pointer is
 // followed both by mouse messages on the layer and by TrackPointer's polling, which also sees it when the messages go to another
 // window, and arms the collapsed surface's end before the pointer reaches it.
@@ -66,8 +67,8 @@ public partial class MainWindow
         Stage.Children.Add(_grips);
         _grips.MouseMove += GripMove;
         _grips.MouseLeftButtonDown += GripDown;
-        _grips.MouseLeftButtonUp += (_, e) => { if (Dragging) { e.Handled = true; EndResize(); } };
-        _grips.LostMouseCapture += (_, _) => { if (Dragging) EndResize(); };
+        _grips.MouseLeftButtonUp += (_, e) => { if (_movePressed) { e.Handled = true; EndMovePress(); } else if (Dragging) { e.Handled = true; EndResize(); } };
+        _grips.LostMouseCapture += (_, _) => { if (_movePressed) EndMovePress(); else if (Dragging) EndResize(); };
         // The grips outside the panel are part of it: arriving there from the panel is not leaving it.
         _grips.MouseEnter += (_, _) => { if (_expanded) PointerChanged(true); };
         _grips.MouseLeave += (_, _) =>
@@ -97,7 +98,11 @@ public partial class MainWindow
     private void UpdateGrips()
     {
         if (_grips is null) return;
-        var form = PanelResizable ? ResizeGripLayer.Form.Panel : CompactResizable || Resizing && _resizeCompact ? ResizeGripLayer.Form.Compact : ResizeGripLayer.Form.None;
+        if (_moveArmed) { ShowMoveGrips(); return; }
+        // Under mouse pass-through the grips are not offered, nor the collapsed ones when the settings turn them off; the resize
+        // shortcut still works.
+        var form = PanelResizable && !PanelIgnoresPointer ? ResizeGripLayer.Form.Panel
+            : CompactResizable && !ClickThrough && Settings.GripDoubleClick != GripDoubleClick.Off || Resizing && _resizeCompact ? ResizeGripLayer.Form.Compact : ResizeGripLayer.Form.None;
         if (Resizing && !_resizeCompact) form = ResizeGripLayer.Form.Panel;
         _grips.Show(form, IslandBox(), _header.Row * _scale, PanelRadius, EffectiveStyle == CompactStyle.Line);
         if (form == ResizeGripLayer.Form.None && _hoverEdge != ResizeEdges.None && !Dragging) SetHoverEdge(ResizeEdges.None);
@@ -153,6 +158,7 @@ public partial class MainWindow
 
     private void GripMove(object sender, MouseEventArgs e)
     {
+        if (_moveArmed) { if (_movePressed) { e.Handled = true; MoveDrag(); } return; }
         if (!Dragging) { if (!_resizeSettling) SetHoverEdge(_grips.EdgeAt(e.GetPosition(_grips))); return; }
         e.Handled = true;
         if (ResizeOvertaken()) return;
@@ -185,18 +191,18 @@ public partial class MainWindow
 
     private void GripDown(object sender, MouseButtonEventArgs e)
     {
+        if (_grips.Shape == ResizeGripLayer.Form.Move)
+        {
+            if (_grips.OverMove(e.GetPosition(_grips))) { e.Handled = true; BeginMovePress(); }
+            return;
+        }
         var edge = _grips.EdgeAt(e.GetPosition(_grips));
         if (edge == ResizeEdges.None) return;
         e.Handled = true;
         bool compact = _grips.Shape == ResizeGripLayer.Form.Compact;
         var style = EffectiveStyle;
-        if (compact && e.ClickCount >= 2 && !_resizeSettling)
-        {
-            // A double click on an end lets the surface widen to its content again; the line returns to its usual length.
-            var fitted = Settings.Copy();
-            if (style == CompactStyle.Line) fitted.LineLength = CollapsedLimits.LineLengthDefault; else fitted.SetCompactAutoWidth(style, true);
-            _app.UpdateSettings(fitted); return;
-        }
+        // A double click on an end does what the settings choose (MainWindow.Move.cs).
+        if (compact && e.ClickCount >= 2 && !_resizeSettling) { GripDoubleClicked(style); return; }
         BeginResize(compact);
         _resizeSettling = false; _resizeByKey = false;
         _resizeEdge = edge; _resizeStart = WindowsHost.Cursor();
@@ -314,6 +320,10 @@ public partial class MainWindow
         // second during the drag, and once more when it ends (FinishResize saves the size).
         bool stretched = _resizePage == DeckPage.Notices && NoticesContent.Visibility == Visibility.Visible && FitNoticeLayout();
         if (_resizePage == DeckPage.Monitor) RenderMonitor();
+        else if (_resizePage == DeckPage.Devices) RenderDevices();
+        // The clipboard page is built again only where its sizes step; in between its columns stretch (StretchShelf). It is built
+        // once more when the size is saved (FinishResize).
+        else if (_resizePage == DeckPage.Clipboard) StretchShelf();
         else if (!stretched && Environment.TickCount64 - _resizeRendered >= 40)
         {
             _resizeRendered = Environment.TickCount64;

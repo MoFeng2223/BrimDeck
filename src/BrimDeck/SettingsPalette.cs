@@ -20,9 +20,16 @@ internal sealed record SettingsPalette(bool Dark)
     public string Input => Dark ? "#202026" : "#FFFFFF";
     public string Popup => Dark ? "#222227" : "#FCFCFD";
     public string Border => Dark ? "#42424B" : "#CED1DA";
+    // The edge of what takes input (text and number fields, drop-downs, a switch's off track): at least 3:1 against the surface,
+    // the inset and the input fill (WCAG 1.4.11, SW-07). Frames and dividers keep the lighter Border.
+    public string InputBorder => Dark ? "#6F6F79" : "#848997";
     public string Accent => Dark ? "#88B0EE" : "#347BDF";
     // Text that says something failed or is unavailable.
     public string Negative => Dark ? "#F0A6AA" : "#B12E3A";
+    // A status dot for something set up and working: at least 3:1 against the surface (WCAG 1.4.11).
+    public string Positive => Dark ? "#5DC98C" : "#2F9E5E";
+    // A link inside running text: at least 4.5:1 against the surface, so it reads as text and stands apart from it.
+    public string Link => Dark ? "#88B0EE" : "#2374DE";
     public void Apply(ResourceDictionary resources)
     {
         void Brush(string key, string color) => resources[key] = UI.Brush(color);
@@ -35,6 +42,8 @@ internal sealed record SettingsPalette(bool Dark)
         // The fill of buttons with white text on the accent: at least 4.5:1 for that text, at rest and under the pointer, in both
         // modes (the dark mode's own accent is too light for it).
         Brush("SettingsAccentFill", "#2374DE");
+        // A small label that is on (a category kept): the accent's text on a pale wash of it.
+        Brush("SettingsAccentText", Accent); Brush("SettingsAccentTint", Dark ? "#24324A" : "#E4EEFC");
         Brush("SettingsAccentHover", "#1964C7");
         Brush("SettingsSliderAccent", Accent); Brush("SettingsTrackBrush", Dark ? "#42424A" : "#D3D6DF");
         Brush("SettingsBorder", Border); Brush("SettingsInput", Input); Brush("SettingsPopup", Popup);
@@ -47,7 +56,7 @@ internal sealed record SettingsPalette(bool Dark)
         // Thumb.MinHeight alone makes the thumb draw outside Track's allotted slot.
         resources[SystemParameters.VerticalScrollBarButtonHeightKey] = 56d;
         Brush("SettingsInset", Inset); Brush("SettingsSurface", Surface);
-        Brush("SettingsSwitchOff", Dark ? "#4A4A52" : "#BFC3CE");
+        Brush("SettingsSwitchOff", InputBorder); Brush("SettingsInputBorder", InputBorder);
         Brush("SettingsError", Dark ? "#F0A6AA" : "#B12E3A");
     }
     public static bool IsDark(SettingsTheme theme)

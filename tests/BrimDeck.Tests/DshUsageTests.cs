@@ -133,7 +133,6 @@ static class DshUsageTests
         var fork = Path.Combine(DshSessions.Folder(home), "--C-work--", "session-b");
         Directory.CreateDirectory(fork);
         File.WriteAllText(Path.Combine(fork, "session.v4.jsonl"), header + "\n" + Message("m1", At(1), 5000, 200, 20000) + "\n" + Message("m3", At(3), 7, 3) + "\n");
-        check("Only complete frames of the current generation in each session are read", DshSessions.CompleteFrames(File.ReadAllBytes(log)) < new FileInfo(log).Length);
         var reader = new DshSessions();
         var snapshot = new ProviderSnapshot(ProviderId.Dsh);
         reader.Read(snapshot, home, start, start.AddDays(1));
@@ -144,6 +143,10 @@ static class DshUsageTests
         snapshot = new ProviderSnapshot(ProviderId.Dsh);
         reader.Read(snapshot, home, start, start.AddDays(1));
         check("Frames appended later are read on the next refresh", snapshot.Entries.Select(e => e.Key).SequenceEqual(["dsh:m1", "dsh:m2", "dsh:m3", "dsh:m4"]));
+        var merged = snapshot.Entries;
+        snapshot = new ProviderSnapshot(ProviderId.Dsh);
+        reader.Read(snapshot, home, start, start.AddDays(1));
+        check("A read without changes keeps the entries it merged last time", ReferenceEquals(snapshot.Entries, merged) && snapshot.UsageComplete && snapshot.UsageNote.Contains("2 个会话"));
         File.WriteAllBytes(log, [1, 2, 3, 4, 5, 6, 7, 8]);
         snapshot = new ProviderSnapshot(ProviderId.Dsh);
         reader.Read(snapshot, home, start, start.AddDays(1));

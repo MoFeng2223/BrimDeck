@@ -36,7 +36,7 @@ public sealed partial class SettingsWindow
     private static string AppColorName(string key) => key switch
     {
         "claude" => "Claude", "codex" => "Codex", "antigravity" => "Antigravity", "cursor" => "Cursor", "zcode" => "ZCode", "dsh" => "DeepSeek Harness",
-        "grokBot" => "Grok Bot", "kimi" => "Kimi Code", "opencode" => "OpenCode", "manual" => Loc.T("手动填写的来源", "Sources entered by hand"), "other" => Loc.T("其他应用", "Other apps"),
+        "grokBot" => "Grok Bot", "kimi" => "Kimi Code", "opencode" => "OpenCode", "codeagent" => "CodeAgent", "commandcode" => "Command Code", "manual" => Loc.T("手动填写的来源", "Sources entered by hand"), "other" => Loc.T("其他应用", "Other apps"),
         "warning" => Loc.T("预警", "Warning"), "critical" => Loc.T("告警", "Critical"), _ => key
     };
 
@@ -135,7 +135,7 @@ public sealed partial class SettingsWindow
         var text = TextLine(color.ToString(), 12, TextPrimary); text.VerticalAlignment = VerticalAlignment.Center;
         line.Children.Add(text);
         var chip = new Button { Style = (Style)FindResource("SettingsButton"), Content = line, MinWidth = 120, HorizontalContentAlignment = HorizontalAlignment.Left,
-            Background = UI.Brush(_palette.Input), BorderBrush = UI.Brush(_palette.Border), Padding = new Thickness(10, 5, 12, 5) };
+            Background = UI.Brush(_palette.Input), BorderBrush = UI.Brush(_palette.InputBorder), Padding = new Thickness(10, 5, 12, 5) };
         AutomationProperties.SetName(chip, title + " " + color); chip.ToolTip = Loc.T("选择颜色", "Choose a color");
         var popup = new Popup { PlacementTarget = chip, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
         popup.Child = ColorPicker(color.WithAlpha(255).ToString(), !canUndo, value =>
@@ -319,7 +319,7 @@ public sealed partial class SettingsWindow
     private void ShowSavedTheme(bool reload)
     {
         _themesFresh = !reload; ShowPage(ThemePage);
-        _preview = true; _previewPage = S.UsagePage ? DeckPage.Usage : DeckPage.Music; _app.Deck.Preview(true);
+        _preview = true; _app.Deck.Preview(true);
     }
 
     // Chooses a theme file just written to the folder (read again by the caller), keeping what was changed under the theme being left.

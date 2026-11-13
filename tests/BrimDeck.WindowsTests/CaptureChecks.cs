@@ -11,22 +11,18 @@ internal static class CaptureChecks
         var window = new Window { Title = "BrimDeck capture test", Width = 160, Height = 80,
             WindowStyle = WindowStyle.None, AllowsTransparency = true, Background = Brushes.Black,
             ShowInTaskbar = false, ShowActivated = false, Topmost = true };
-        window.SourceInitialized += (_, _) => WindowsHost.ConfigureOverlay(window);
+        window.SourceInitialized += (_, _) => WindowsHost.ConfigureOverlay(window, false);
         try
         {
             window.Show();
             var handle = new WindowInteropHelper(window).Handle;
             check("overlay delivers mouse clicks without activation", SendMessage(handle, 0x21, IntPtr.Zero, new IntPtr(0x02010001)) == new IntPtr(3));
-            long style = GetWindowLongPtrW(handle, -20).ToInt64();
-            check("overlay has no WGC-incompatible no-activate style", (style & 0x08000000) == 0);
-            check("transparent overlay supports WGC", CreateItem(handle) == 0);
-            try
-            {
-                SetWindowLongPtrW(handle, -20, new IntPtr(style | 0x08000000));
-                check("old overlay style reproduces WGC E_INVALIDARG", CreateItem(handle) == unchecked((int)0x80070057));
-            }
-            finally { SetWindowLongPtrW(handle, -20, new IntPtr(style)); }
-            check("restoring capturable style restores WGC", CreateItem(handle) == 0);
+            check("overlay keeps the no-activate style by default", (GetWindowLongPtrW(handle, -20).ToInt64() & 0x08000000) != 0);
+            WindowsHost.SetCapturable(window, true);
+            check("capturable overlay drops the no-activate style", (GetWindowLongPtrW(handle, -20).ToInt64() & 0x08000000) == 0);
+            check("capturable transparent overlay supports WGC", CreateItem(handle) == 0);
+            WindowsHost.SetCapturable(window, false);
+            check("overlay takes the no-activate style back", (GetWindowLongPtrW(handle, -20).ToInt64() & 0x08000000) != 0);
         }
         finally { window.Close(); }
     }
@@ -57,6 +53,5 @@ internal static class CaptureChecks
     [DllImport("combase.dll")] private static extern int WindowsDeleteString(IntPtr text);
     [DllImport("combase.dll")] private static extern int RoGetActivationFactory(IntPtr text, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out CaptureInterop factory);
     [DllImport("user32.dll")] private static extern IntPtr GetWindowLongPtrW(IntPtr handle, int index);
-    [DllImport("user32.dll")] private static extern IntPtr SetWindowLongPtrW(IntPtr handle, int index, IntPtr value);
     [DllImport("user32.dll", EntryPoint = "SendMessageW")] private static extern IntPtr SendMessage(IntPtr handle, int message, IntPtr wParam, IntPtr lParam);
 }

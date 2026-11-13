@@ -28,9 +28,10 @@ internal static class CompactReadingTests
     private static void Migration(Action<string, bool> check)
     {
         var full = Read("""{"AppVersion":"0.1.0","CompactMonitor":0,"CompactMonitorItems":3}""");
+        // The old Full mode had no drives, power, battery or frame rate, so it matches the Full preset no longer.
         check("Compact readings: old Full shows every usage reading with figures in the default order",
             Same(full.CompactReadings, [.. CompactMonitor.Order]) && full.CompactReadings.All(r => r.Visible == ((All & r.Item) != 0) && r.ShowValue && r.Color is null)
-            && full.CompactMonitor == CompactMonitorMode.Full && full.CompactMonitorItems == All);
+            && full.CompactMonitor == CompactMonitorMode.Custom && full.CompactMonitorItems == All);
         var brief = Read("""{"AppVersion":"0.1.0","CompactMonitor":1,"CompactMonitorItems":63}""");
         check("Compact readings: old Brief shows the three rings without figures",
             CompactMonitor.Visible(brief.CompactReadings) == CompactMonitor.Rings && CompactMonitor.Values(brief.CompactReadings) == CompactMonitorItems.None
@@ -42,14 +43,14 @@ internal static class CompactReadingTests
         var empty = Read("""{"AppVersion":"0.1.0","CompactMonitor":2,"CompactMonitorItems":0}""");
         check("Compact readings: old Custom with nothing chosen shows CPU", CompactMonitor.Visible(empty.CompactReadings) == Cpu && empty.CompactMonitorItems == Cpu);
         var unknownMode = Read("""{"AppVersion":"0.1.0","CompactMonitor":9}""");
-        check("Compact readings: an unknown old mode reads as Full", CompactMonitor.Preset(unknownMode.CompactReadings) == CompactMonitorMode.Full);
+        check("Compact readings: an unknown old mode reads as the old Full", CompactMonitor.Visible(unknownMode.CompactReadings) == All);
         var defaults = new DeckSettings(); defaults.Normalize();
-        check("Compact readings: defaults are Full", defaults.CompactMonitor == CompactMonitorMode.Full && CompactMonitor.Preset(defaults.CompactReadings) == CompactMonitorMode.Full
+        check("Compact readings: defaults show every usage reading", CompactMonitor.Visible(defaults.CompactReadings) == All && CompactMonitor.Values(defaults.CompactReadings) == CompactMonitor.Rings
             && Same(defaults.CompactReadings, [.. CompactMonitor.Order]));
 
-        var odd = Read("""{"AppVersion":"0.1.0","CompactMonitor":0,"CompactReadings":[{"Item":256,"Visible":true},null,{"Item":16,"Visible":true,"ShowValue":false,"Color":"#12ab3c"},{"Item":2,"Visible":false,"Color":"red"},{"Item":16,"Visible":false}]}""");
+        var odd = Read("""{"AppVersion":"0.1.0","CompactMonitor":0,"CompactReadings":[{"Item":4096,"Visible":true},null,{"Item":16,"Visible":true,"ShowValue":false,"Color":"#12ab3c"},{"Item":2,"Visible":false,"Color":"red"},{"Item":16,"Visible":false}]}""");
         check("Compact readings: unknown and repeated readings are dropped, missing ones join hidden",
-            Same(odd.CompactReadings, Download, Cpu, Columns, Memory, Gpu, Upload, CompactMonitorItems.Storage, CompactMonitorItems.Power, CompactMonitorItems.Charge) && odd.CompactReadings[0].Visible && !odd.CompactReadings[1].Visible
+            Same(odd.CompactReadings, Download, Cpu, Columns, Memory, Gpu, Upload, CompactMonitorItems.Storage, CompactMonitorItems.Power, CompactMonitorItems.Charge, CompactMonitorItems.Frames) && odd.CompactReadings[0].Visible && !odd.CompactReadings[1].Visible
             && odd.CompactReadings.Skip(2).All(r => !r.Visible) && odd.CompactMonitorItems == Download && odd.CompactMonitor == CompactMonitorMode.Custom);
         check("Compact readings: an older own color moves into the custom scheme, normalized", odd.MonitorPalette == MonitorPalette.Custom
             && odd.MonitorCustomColors is { Base: MonitorPalette.Theme, Download: "#12AB3C", Cpu: null } && odd.CompactReadings.All(r => !r.HasOwnColors));
@@ -73,7 +74,8 @@ internal static class CompactReadingTests
             && CompactMonitor.Visible(readings) == CompactMonitor.Rings && CompactMonitor.Values(readings) == CompactMonitorItems.None);
         CompactMonitor.Apply(readings, CompactMonitorMode.Full);
         check("Compact readings: Full keeps the order and the colors", readings.Select(r => r.Item).SequenceEqual(order) && readings[0].Color == "#112233");
-        check("Compact readings: Full shows everything with figures", CompactMonitor.Preset(readings) == CompactMonitorMode.Full && CompactMonitor.Visible(readings) == All);
+        check("Compact readings: Full shows everything with figures", CompactMonitor.Preset(readings) == CompactMonitorMode.Full && CompactMonitor.Visible(readings) == CompactMonitor.Every
+            && CompactMonitor.Values(readings) == CompactMonitor.Rings && readings.Where(r => CompactFigures.Has(r.Item)).All(r => CompactFigures.Of(r).SequenceEqual([CompactFigures.Usage, CompactFigures.Temperature])));
         var before = readings.Select(r => (r.Item, r.Visible, r.ShowValue, r.Color)).ToArray();
         CompactMonitor.Apply(readings, CompactMonitorMode.Custom);
         check("Compact readings: no preset (Custom) changes nothing", readings.Select(r => (r.Item, r.Visible, r.ShowValue, r.Color)).SequenceEqual(before));
@@ -92,6 +94,17 @@ internal static class CompactReadingTests
 
     private static void Layout(Action<string, bool> check)
     {
+        // The core columns take the width they measure: at every scale and count, the columns and gaps add up to it.
+        foreach (double scale in new[] { .5, 1, 1.25, 1.5, 2 })
+            foreach (int cores in new[] { 4, 8, 16, 20, 24, 32, 48, 64, 128 })
+            {
+                var (column, gap, room) = CompactMonitor.CoreColumns(cores, scale);
+                check($"Compact readings: {cores} core columns at {scale} fill their width", Math.Abs(cores * column + (cores - 1) * gap - room) < 1e-9 && column >= 1 && gap >= .5);
+            }
+        check("Compact readings: 32 core columns fit the usual room", CompactMonitor.CoreColumns(32, 1) is { Gap: .5, Width: 56 } wide && wide.Column > 1);
+        check("Compact readings: few core columns keep their full size", CompactMonitor.CoreColumns(8, 1) == (2, 1, 23));
+        check("Compact readings: too many core columns widen the reading", CompactMonitor.CoreColumns(64, 1) == (1, .5, 95.5));
+
         CompactMonitorItems[] order = [Upload, Gpu, Cpu, Columns, Download, Memory];
         var width = CompactMonitor.Widths(CompactMonitor.Rings, 12, _ => 30, 14, 20, 50);
         var arranged = CompactMonitor.Arrange(order, All & ~Download, width, 10, _ => 1);
@@ -146,12 +159,10 @@ internal static class CompactReadingTests
                 && strip.Normal(Download) == scheme.Download && strip.Normal(Upload) == scheme.Upload
                 && CompactMonitor.Order.All(item => strip.At(item, Normal) == strip.Normal(item) && strip.At(item, Elevated) == scheme.Warning && strip.At(item, Critical) == scheme.Critical);
         }));
-        check("Level colors: the fixed schemes give memory and upload the efficiency color, download the performance color",
-            schemes.All(scheme => scheme.Memory == scheme.Efficiency && scheme.Upload == scheme.Efficiency && scheme.Download == scheme.Performance));
-        // The drives follow memory, power and the battery the CPU color, while they have none of their own.
+        // The drives follow memory, power and the battery the CPU color, the frame rate the GPU color, while they have none of their own.
         static MonitorRole? Follows(MonitorRole role) => role switch
         {
-            MonitorRole.Storage => MonitorRole.Memory, MonitorRole.Power or MonitorRole.Battery => MonitorRole.Cpu, _ => null
+            MonitorRole.Storage => MonitorRole.Memory, MonitorRole.Power or MonitorRole.Battery => MonitorRole.Cpu, MonitorRole.Frames => MonitorRole.Gpu, _ => null
         };
         check("Level colors: each color of a scheme by its role", Enum.GetValues<MonitorRole>().All(role =>
             palette.With(role, "#010203")[role] == "#010203" && Enum.GetValues<MonitorRole>().Where(other => other != role)
@@ -213,7 +224,7 @@ internal static class CompactReadingTests
             && Read("""{"AppVersion":"0.1.0","CompactSmoothing":30}""").CompactSmoothing == CompactSmoothing.Thirty
             && Read("""{"AppVersion":"0.1.0","CompactSmoothing":0}""").CompactSmoothing == CompactSmoothing.Off);
         check("Older colors: they leave the readings, which keep the rest", read.CompactReadings.All(r => !r.HasOwnColors)
-            && !read.CompactReadings.First(r => r.Item == Columns).Visible && Same(read.CompactReadings, Memory, Cpu, Columns, Download, Gpu, Upload, CompactMonitorItems.Storage, CompactMonitorItems.Power, CompactMonitorItems.Charge));
+            && !read.CompactReadings.First(r => r.Item == Columns).Visible && Same(read.CompactReadings, Memory, Cpu, Columns, Download, Gpu, Upload, CompactMonitorItems.Storage, CompactMonitorItems.Power, CompactMonitorItems.Charge, CompactMonitorItems.Frames));
         var plain = Read("""{"AppVersion":"0.1.0","MonitorPalette":1,"CompactReadings":[{"Item":4}]}""");
         check("Older colors: without own colors the scheme stays", plain.MonitorPalette == MonitorPalette.Graphite && !plain.MonitorCustomColors.Changed);
         var readings = JsonSerializer.Serialize(read.CompactReadings);
@@ -241,11 +252,11 @@ internal static class CompactReadingTests
     private static void Highlight(Action<string, bool> check)
     {
         var readings = CompactMonitor.Readings(CompactMonitorMode.Full, CompactMonitorItems.None);
-        check("Compact readings: the defaults light Full", CompactMonitor.Preset(readings) == CompactMonitorMode.Full);
+        check("Compact readings: the defaults, without the drives, light no preset", CompactMonitor.Preset(readings) is null);
+        CompactMonitor.Apply(readings, CompactMonitorMode.Full);
         readings.First(r => r.Item == Columns).Visible = false;
         check("Compact readings: one reading off lights no preset", CompactMonitor.Preset(readings) is null);
         CompactMonitor.Apply(readings, CompactMonitorMode.Brief);
-        check("Compact readings: Brief after it lights Brief", CompactMonitor.Preset(readings) == CompactMonitorMode.Brief);
         readings.First(r => r.Item == Memory).Visible = false;
         check("Compact readings: Brief less a ring lights no preset", CompactMonitor.Preset(readings) is null);
         readings.First(r => r.Item == Memory).Visible = true; readings.First(r => r.Item == Memory).ShowValue = true;
@@ -253,7 +264,7 @@ internal static class CompactReadingTests
         var settings = new DeckSettings { CompactReadings = readings }; settings.Normalize();
         check("Compact readings: no preset is saved as Custom in the old key", settings.CompactMonitor == CompactMonitorMode.Custom);
         CompactMonitor.Apply(settings.CompactReadings, CompactMonitorMode.Full); settings.Normalize();
-        check("Compact readings: Full is saved as Full in the old key", settings.CompactMonitor == CompactMonitorMode.Full && settings.CompactMonitorItems == All);
+        check("Compact readings: Full is saved as Full in the old key", settings.CompactMonitor == CompactMonitorMode.Full && settings.CompactMonitorItems == CompactMonitor.Every);
     }
 
     private static void Copies(Action<string, bool> check)
@@ -275,18 +286,18 @@ internal static class CompactReadingTests
     // The order of the collapsed parts: one per style, each part once, kept by copies and by saving.
     private static void PartOrder(Action<string, bool> check)
     {
-        CompactPart[] standard = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock];
-        var defaults = new DeckSettings();
-        check("Compact order: defaults are rings, music, readings, equalizer, clock", defaults.NotchOrder.SequenceEqual(standard) && defaults.CapsuleOrder.SequenceEqual(standard));
+        CompactPart[] standard = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices, CompactPart.Equalizer, CompactPart.Clock];
+        check("Compact order: by default the equalizer and the clock come last", new DeckSettings().NotchOrder.SequenceEqual(standard)
+            && CompactParts.Default.SequenceEqual(standard));
         var odd = Read("""{"AppVersion":"0.1.0","NotchOrder":[2,9,2,0]}""");
-        check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactPart.Monitor, CompactPart.Rings, CompactPart.Music, CompactPart.Equalizer, CompactPart.Clock])
+        check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactPart.Monitor, CompactPart.Rings, CompactPart.Music, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices])
             && odd.CapsuleOrder.SequenceEqual(standard));
         var older = Read("""{"AppVersion":"1.2.2","NotchOrder":[1,2,0]}""");
         check("Compact order: an order saved before the equalizer and the clock had a place puts the equalizer before the clock, at the end",
-            older.NotchOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Clock]));
+            older.NotchOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices]));
         var moved = Read("""{"AppVersion":"1.2.3","NotchOrder":[4,0,3,1,2]}""");
         check("Compact order: the equalizer and the clock keep a place chosen for them",
-            moved.NotchOrder.SequenceEqual([CompactPart.Clock, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Music, CompactPart.Monitor]));
+            moved.NotchOrder.SequenceEqual([CompactPart.Clock, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices]));
         var musicOff = Upgraded("""{"AppVersion":"1.2.2","NotchMusic":false}""");
         check("Compact equalizer: a file from before its own switch shows it as the music was shown",
             !musicOff.NotchEqualizer && musicOff.CapsuleEqualizer && !musicOff.EqualizerAlways && Upgraded("""{"AppVersion":"1.2.2"}""").NotchEqualizer);
@@ -309,6 +320,6 @@ internal static class CompactReadingTests
         check("Compact order: each style keeps its own and Copy is deep", settings.CompactOrder(CompactStyle.Capsule)[0] == CompactPart.Music
             && settings.CompactOrder(CompactStyle.Notch).SequenceEqual(standard));
         var read = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
-        check("Compact order: survives saving and reading", read.CapsuleOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Clock]));
+        check("Compact order: survives saving and reading", read.CapsuleOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices]));
     }
 }

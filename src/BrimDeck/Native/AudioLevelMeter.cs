@@ -26,12 +26,24 @@ internal sealed class AudioLevelMeter : IDisposable
     private static readonly MediaAppOwner Everything = new(null, "\0", "\0");
     public float Peak => Volatile.Read(ref _peak);
     public static double Now => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
+    // How long a capture keeps running after nothing asks for it (MemoryPlan.MediaLinger): a song paused and played again, or bars
+    // hidden and shown again, within it find the capture running instead of starting it again, which waits up to two seconds for
+    // the system and shows flat bars meanwhile.
+    public TimeSpan Linger { get; set; }
+    private Timer? _release;
     public void SetSource(MediaAppOwner? owner, bool enabled, bool system = false)
     {
         var target = enabled ? owner : system ? Everything : null;
         lock (_gate)
         {
-            if (_disposed || _requested == target) return;
+            if (_disposed) return;
+            if (target is not null || Linger <= TimeSpan.Zero) { _release?.Dispose(); _release = null; }
+            else if (_requested is not null)
+            {
+                _release ??= new Timer(_ => Release(), null, Linger, Timeout.InfiniteTimeSpan);
+                return;
+            }
+            if (_requested == target) return;
             _requested = target; _revision++;
             if (_thread is null)
             {
@@ -41,11 +53,23 @@ internal sealed class AudioLevelMeter : IDisposable
             _wake.Set();
         }
     }
-    // Fills the flowing bar values when captured audio drives them.
-    public bool TryFill(Span<double> levels)
+    // The linger ran out with nothing asking again: the capture stops.
+    private void Release()
+    {
+        lock (_gate)
+        {
+            if (_disposed || _release is null) return;
+            _release.Dispose(); _release = null;
+            if (_requested is null) return;
+            _requested = null; _revision++; _wake.Set();
+        }
+    }
+    // Fills the bars' levels from the captured audio, in the given way: flowing along the bars, or one band of pitch for each of
+    // the levels.Length bars.
+    public bool TryFill(Span<double> levels, EqualizerMode mode)
     {
         if (_capture is not { } capture) return false;
-        capture.Signal.Fill(levels, Now);
+        capture.Signal.Fill(levels, Now, mode);
         return true;
     }
     private void Run()
@@ -161,6 +185,6 @@ internal sealed class AudioLevelMeter : IDisposable
     }
     public void Dispose()
     {
-        lock (_gate) { if (_disposed) return; _disposed = true; if (_thread is null) _wake.Dispose(); else _wake.Set(); }
+        lock (_gate) { if (_disposed) return; _disposed = true; _release?.Dispose(); _release = null; if (_thread is null) _wake.Dispose(); else _wake.Set(); }
     }
 }
