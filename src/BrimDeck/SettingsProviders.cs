@@ -30,15 +30,25 @@ public sealed partial class SettingsWindow
     }
     internal void QuotasChanged()
     {
-        if (!IsLoaded || _page != 3 || _appRows is null) return;
+        // While a list is open nothing is rebuilt: the list would stay on screen for a row that is gone. Its closing calls this again.
+        if (!IsLoaded || _page != 3 || _appRows is null || _shownPopups.Count > 0) return;
         foreach (var entry in S.Apps.ToList())
         {
             if (!_ringChoices.TryGetValue(entry.InstanceId, out var built) || RingChoices(entry) == built) continue;
             // A row being worked in (a field being typed in, an open list) waits for a later reading, so nothing is lost.
             var row = _appRows.Children.OfType<Border>().FirstOrDefault(border => border.Tag is AppEntry shown && shown.InstanceId == entry.InstanceId);
-            if (row is null || Keyboard.FocusedElement is TextBox typing && row.IsAncestorOf(typing)) continue;
+            if (row is null || Keyboard.FocusedElement is TextBox typing && row.IsAncestorOf(typing) || OpenCombo(row)) continue;
             RefreshAppRow(entry.InstanceId);
         }
+    }
+    private static bool OpenCombo(DependencyObject parent)
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is ComboBox { IsDropDownOpen: true } || OpenCombo(child)) return true;
+        }
+        return false;
     }
 
     private void CollapseSourceRows()
@@ -103,6 +113,8 @@ public sealed partial class SettingsWindow
         _sourceRows[entry.InstanceId] = (border, detail, arrow);
         row.MouseLeftButtonDown += (_, e) =>
         {
+            // The press that closes a list (TogglePopup) reaches the row with the list's button not taking the mouse; it only closes the list.
+            if (_shownPopups.Count > 0) return;
             if (ReferenceEquals(e.OriginalSource, row)) { ToggleSourceRow(entry.InstanceId); e.Handled = true; }
         };
     }
@@ -451,6 +463,8 @@ public sealed partial class SettingsWindow
             var box = new ComboBox { Width = 140, Style = (Style)FindResource("SettingsCombo"), VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left,
                 ItemsSource = options.Select(option => option.Label).ToList(), SelectedIndex = Math.Max(0, options.FindIndex(option => option.Id == selected)) };
             AutomationProperties.SetName(box, entry.Name + " " + name); PopupMotion.Attach(box);
+            // A reading that came while the list was open left the row as it was (QuotasChanged).
+            box.DropDownClosed += (_, _) => Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, QuotasChanged);
             box.SelectionChanged += (_, _) => { if (box.SelectedIndex >= 0 && options[box.SelectedIndex].Id != selected) choose(options[box.SelectedIndex].Id); };
             return box;
         }

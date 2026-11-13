@@ -1029,7 +1029,8 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
             }
             return double.PositiveInfinity;
         }
-        select.Click += (_, _) => { if (!menu.IsOpen) FitMenuToScreen(select, menu, surface, MenuLimit()); };
+        // The list sits right against its button, as the other drop-downs of the settings do.
+        select.Click += (_, _) => { if (!menu.IsOpen) { FitMenuToScreen(select, menu, surface, MenuLimit()); menu.VerticalOffset = 0; } };
         TogglePopup(select, menu);
         return select;
     }
@@ -1058,13 +1059,21 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
 
     // A popup that closes when the mouse goes down outside it also closes when its own button is pressed.
     // While the popup is open the button ignores the mouse, so that press only closes the popup and does not open it again.
-    private static void TogglePopup(ButtonBase button, Popup popup)
+    // WPF then passes that press on to the window: the popup is already shut (IsOpen is false) but Closed comes only after the
+    // press has been routed, so the popup stays in _shownPopups until then and the app rows let the press only close it.
+    private void TogglePopup(ButtonBase button, Popup popup)
     {
-        popup.Opened += (_, _) => button.IsHitTestVisible = false;
+        popup.Opened += (_, _) => { button.IsHitTestVisible = false; _shownPopups.Add(popup); };
         PopupMotion.Attach(popup);
-        popup.Closed += (_, _) => button.IsHitTestVisible = true;
+        popup.Closed += (_, _) =>
+        {
+            button.IsHitTestVisible = true; _shownPopups.Remove(popup);
+            // A reading that came while the list was open left the rows as they were (QuotasChanged); they are brought up to date now.
+            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, QuotasChanged);
+        };
         button.Click += (_, _) => popup.IsOpen = !popup.IsOpen;
     }
+    private readonly HashSet<Popup> _shownPopups = [];
 
     // One line of the application menu: the name at the left, an optional note at the right.
     private Button MenuEntry(string name, string note, bool enabled, bool current)
