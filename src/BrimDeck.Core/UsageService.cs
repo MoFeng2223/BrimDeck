@@ -1187,6 +1187,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private async Task ReadCommandCodeAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
     {
         if (snapshot.UsageAvailable) snapshot.UsageNote += Loc.T(" · 费用取自 Command Code 记录，按其标价计算", " · Costs recorded by Command Code at its list prices");
+        snapshot.ListedPrices = CommandCodeUsage.ReadPrices(_locations.CommandCodeHome) is { Count: > 0 } listed ? listed : null;
         var key = CommandCodeUsage.ReadKey(_locations.CommandCodeHome);
         if (key is null) { snapshot.StatusLabel = Loc.T("未连接", "Not connected"); snapshot.Status = Loc.T("请先登录 Command Code", "Sign in to Command Code first"); return; }
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(TimeSpan.FromSeconds(20));

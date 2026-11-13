@@ -48,6 +48,8 @@ public sealed class ProviderSnapshot(ProviderId id)
     // worked out from it; null until they are.
     public bool WeeklyShares { get; set; }
     public TokenPrices? WeeklyPrices { get; set; }
+    // The prices the application itself lists for its models, by model name (CommandCodeUsage.ReadPrices); null when it lists none.
+    public IReadOnlyDictionary<string, ModelPrice>? ListedPrices { get; set; }
     // A shallow copy: setting a property of the copy leaves this snapshot as it was, but the two share their lists.
     public ProviderSnapshot Copy() => (ProviderSnapshot)MemberwiseClone();
 }

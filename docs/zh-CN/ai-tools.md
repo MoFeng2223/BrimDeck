@@ -109,7 +109,7 @@ Command Code CLI 与桌面版共用同一个数据目录（`%USERPROFILE%\.comma
 
 - **配额**：显示 Command Code 登录账户的套餐额度，包括 5 小时、每周与每月额度的已用比例和重置时间。每月额度按本账期计算，在账期结束时重置。悬停时显示已用金额与上限（美元）。购买或获赠的额外积分不受这些额度限制，有余额时另外显示。名称旁显示套餐名称（例如 Go、Pro）。用完 5 小时或每周额度时，状态中会提示。
 - **登录**：使用 Command Code 保存的登录密钥（`auth.json`）。该密钥没有有效期，不需要续期。Command Code 拒绝该密钥时（例如已退出登录或删除了密钥），状态显示“登录已失效”，在 Command Code 中重新登录即可。
-- **Token 用量与费用**：读取本机 Command Code 的会话记录（`projects` 目录），包含 CLI 与桌面版。费用使用 Command Code 记录的金额，即按 Command Code 标价计算的金额。同一条消息出现在多个会话中（例如分叉的会话）时只计一次。Command Code 为会话生成标题等不写入会话记录的请求不计入，因此统计可能略少于 Command Code 账户中的用量。
+- **Token 用量与费用**：读取本机 Command Code 的会话记录（`projects` 目录），包含 CLI 与桌面版。费用使用 Command Code 记录的金额，即按 Command Code 标价计算的金额。模型明细中的单价取自 Command Code 在本机缓存的模型目录（`cache\model-catalog`），即 Command Code 计算这些金额所用的单价。同一条消息出现在多个会话中（例如分叉的会话）时只计一次。Command Code 为会话生成标题等不写入会话记录的请求不计入，因此统计可能略少于 Command Code 账户中的用量。
 
 ## 手动填写的来源
 
