@@ -61,7 +61,7 @@ public partial class MainWindow
                 var strip = new MonitorStrip([reading], colors, scale, true, _stripPresence, dpi, _stripUnavailable, _stripAdmission, drives);
                 if (strip.PreferredWidth > 0) strips.Add(strip);
             }
-            foreach (var reading in Settings.CompactReadings)
+            foreach (var reading in CompactColumn.Readings(Settings.CompactReadings))
             {
                 if (reading.Item != CompactMonitorItems.Storage) { Line(reading); continue; }
                 foreach (var letter in CompactSources.Of(reading))

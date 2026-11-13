@@ -1019,7 +1019,7 @@ public partial class MainWindow
         var style = shape.Style;
         var (monitor, work) = style == CompactStyle.Capsule ? (_screenMonitor, _screenWork) : (MonitorBoundsDip, WorkDip);
         double span = CollapsedGeometry.WidthRange(style, monitor, work, _scale).Max;
-        double insets = CollapsedGeometry.SurfaceWidth(style, shape.Surface.Height, 1) - 1;
+        double insets = CollapsedGeometry.SurfaceWidth(style, shape.Surface.Height, 1, _scale) - 1;
         return double.IsFinite(span) && span > 0 ? Math.Max(0, span * CompactMusicLayout.FollowScreenShare - Math.Max(0, insets)) : double.PositiveInfinity;
     }
     // The collapsed lyric: the line, or the title without one, and for an instrumental when chosen (DeckSettings.MusicInstrumentalTitle).
