@@ -3,7 +3,7 @@
   "apiMinor": 10,
   "id": "sample-reading-progress",
   "name": "阅读进度 / Reading progress",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "记录书名、目标页数与阅读进度；支持收起行显示、快捷键翻页、撤销与完成高亮。附可展开的接口验收详情。",
   "descriptionEn": "Track a book and page goal with compact progress, shortcut updates, undo and a completion accent. Includes optional acceptance details.",
   "author": "BrimDeck contributors",

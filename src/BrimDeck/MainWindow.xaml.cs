@@ -1061,7 +1061,6 @@ public partial class MainWindow : Window
     {
         if (_app.Updates.NoticeVersion is not null) _app.OpenUpdateSettings();
         else if (_app.Updates.UpdatedFrom is not null) _app.OpenReleaseNotes();
-        else if (IsMiniAppsPage) _app.OpenMiniAppsSettings();
         else _app.OpenSettings();
     }
     private async Task<IReadOnlyList<ProviderSnapshot>> LoadSnapshotsAsync(DateTime? historyStart)

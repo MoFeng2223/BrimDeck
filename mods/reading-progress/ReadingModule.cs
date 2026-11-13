@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json.Serialization;
 using BrimDeck.Modules;
 
 namespace BrimDeck.ReadingProgress;
@@ -9,6 +10,7 @@ public sealed class ReadingModule : IModule
 {
     public const string Id = "sample-reading-progress";
     public const string PageId = Id + ":book";
+    public const string BookGlyph = "M12,5 C8,2 4,2 1,3 L1,20 C5,19 8,19 12,22 C16,19 19,19 23,20 L23,3 C19,2 16,2 12,5 Z M12,5 L12,22";
 
     public ValueTask ActivateAsync(IModuleContext context, CancellationToken cancellationToken)
     {
@@ -18,11 +20,11 @@ public sealed class ReadingModule : IModule
         context.Register("book", new ModulePage("阅读进度", "Reading progress", view => new ReadingPage(session, view), 450)
         {
             Size = new ModulePageSize(580, 310, 440, 900, 230, 500),
-            IconPath = "M12,5 C8,2 4,2 1,3 L1,20 C5,19 8,19 12,22 C16,19 19,19 23,20 L23,3 C19,2 16,2 12,5 Z M12,5 L12,22"
+            IconPath = BookGlyph
         });
         context.Register<IModuleCompactPart>("progress", new ReadingPart(session));
         context.Register<IModuleSettings>("preferences", new ReadingSettings(session));
-        foreach (string action in new[] { "next-page", "advance", "undo", "open-page", "celebrate", "release-accent", "check-background", "check-page-scope" })
+        foreach (string action in new[] { "next-page", "advance", "undo", "open-page", "release-accent", "check-background", "check-page-scope" })
             context.Register<IModuleCommand>(action, new ReadingCommand(session, action));
         return ValueTask.CompletedTask;
     }
@@ -34,6 +36,9 @@ public sealed class ReadingData
     public int Target { get; set; } = 100;
     public int Page { get; set; }
     public int Step { get; set; } = 5;
+    public List<int> UndoPages { get; set; } = [];
+    // Read the first sample's single undo entry without losing an existing user's progress.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? PreviousPage { get; set; }
     public string Accent { get; set; } = "#57B8A6";
 }
@@ -44,6 +49,8 @@ internal sealed class ReadingSession : IDisposable
     private readonly IModuleHostControl _controls;
     private readonly bool _canSave;
     private ModuleAccentOverride? _accent;
+    private bool _hostReady, _completionHandled;
+    private string? _completionColor;
     private bool _disposed;
     internal ReadingData Data { get; private set; }
     internal ModuleHostStateSnapshot? Host { get; private set; }
@@ -68,7 +75,12 @@ internal sealed class ReadingSession : IDisposable
         }
         // One subscription per activation, replayed after activation commits. Views share this snapshot and never
         // create a sampling timer. The returned lease is also explicitly owned by the activation.
-        context.Own(context.GetService<IModuleHostState>().Subscribe(value => { if (!_disposed) { Host = value; Notify(); } }));
+        context.Own(context.GetService<IModuleHostState>().Subscribe(value =>
+        {
+            if (_disposed) return;
+            Host = value; _hostReady = true;
+            UpdateCompletionAccent(); Notify();
+        }));
     }
 
     private void Normalize()
@@ -77,15 +89,24 @@ internal sealed class ReadingSession : IDisposable
         Data.Target = Math.Clamp(Data.Target, 1, 9999);
         Data.Page = Math.Clamp(Data.Page, 0, Data.Target);
         Data.Step = Math.Clamp(Data.Step, 1, 100);
-        Data.PreviousPage = Data.PreviousPage is { } previous ? Math.Clamp(previous, 0, Data.Target) : null;
+        Data.UndoPages ??= [];
+        if (Data.PreviousPage is { } previous && Data.UndoPages.Count == 0) Data.UndoPages.Add(previous);
+        Data.PreviousPage = null;
+        var history = new List<int>();
+        foreach (int page in Data.UndoPages.TakeLast(10000))
+        {
+            int normalized = Math.Clamp(page, 0, Data.Target);
+            if (history.Count == 0 || history[^1] != normalized) history.Add(normalized);
+        }
+        if (history.Count > 0 && history[^1] == Data.Page) history.RemoveAt(history.Count - 1);
+        Data.UndoPages = history;
         Data.Accent = ValidColor(Data.Accent) ? Data.Accent.ToUpperInvariant() : "#57B8A6";
     }
     internal static bool ValidColor(string? value) => value is { Length: 7 } && value[0] == '#' && value.AsSpan(1).ToArray().All(Uri.IsHexDigit);
     internal bool CanExecute(string action) => !_disposed && action switch
     {
         "next-page" or "advance" => Data.Page < Data.Target,
-        "undo" => Data.PreviousPage is not null,
-        "celebrate" => Data.Page == Data.Target,
+        "undo" => Data.UndoPages.Count > 0,
         _ => true
     };
     internal async Task<ModuleCommandResult> Invoke(string action, CancellationToken cancellation)
@@ -109,25 +130,16 @@ internal sealed class ReadingSession : IDisposable
         switch (action)
         {
             case "next-page": case "advance":
-                Data.PreviousPage = Data.Page;
-                Data.Page = Math.Min(Data.Target, Data.Page + (action == "next-page" ? 1 : Data.Step));
-                Save();
+                SetPage(Data.Page + (action == "next-page" ? 1 : Data.Step));
                 return Finish(ModuleHostResult.Completed, $"已记到第 {Data.Page} 页。", $"Moved to page {Data.Page}.");
             case "undo":
-                Data.Page = Data.PreviousPage!.Value; Data.PreviousPage = null;
-                _accent?.Dispose(); _accent = null; Save();
+                Data.Page = Data.UndoPages[^1]; Data.UndoPages.RemoveAt(Data.UndoPages.Count - 1);
+                Save();
                 return Finish(ModuleHostResult.Completed, "已撤销上次页码变更。", "Undid the last page update.");
             case "open-page":
                 var opened = await _controls.Panel.RequestExpandAsync(ModuleCommandOrigin.User, cancellation);
                 if (opened.Ok) opened = await _controls.Pages.OpenOwnPageAsync(ReadingModule.PageId, cancellation);
                 return Finish(opened, "已打开阅读进度。", "Opened reading progress.");
-            case "celebrate":
-                // Reapply explicitly rather than assuming an earlier lease is still effective: changing the user's
-                // theme clears host overrides even while this module remains enabled.
-                _accent?.Dispose();
-                var request = _controls.Accent.RequestAccentOverride(Data.Accent);
-                _accent = request.Override;
-                return Finish(new(request.Kind, request.Reason), "目标已完成，已申请临时高亮；切换主题会清除。", "Goal complete. Applied a temporary accent; changing the theme clears it.");
             case "release-accent":
                 _accent?.Dispose(); _accent = null;
                 return Finish(ModuleHostResult.Completed, "已释放本模组的临时高亮。", "Released this module's temporary accent.");
@@ -164,9 +176,31 @@ internal sealed class ReadingSession : IDisposable
     internal void Save()
     {
         Normalize();
-        if (Data.Page < Data.Target) { _accent?.Dispose(); _accent = null; }
+        UpdateCompletionAccent();
         if (!_disposed && _canSave) _context.Storage.Write("reading", Data);
         Notify();
+    }
+    internal void SetPage(int page)
+    {
+        page = Math.Clamp(page, 0, Data.Target);
+        if (page != Data.Page) { Data.UndoPages.Add(Data.Page); Data.Page = page; }
+        Save();
+    }
+    private void UpdateCompletionAccent()
+    {
+        if (_disposed) return;
+        if (Data.Page < Data.Target)
+        {
+            _completionHandled = false; _completionColor = null;
+            var previous = _accent; _accent = null; previous?.Dispose();
+            return;
+        }
+        if (!_hostReady || _completionHandled && _completionColor == Data.Accent) return;
+        // Set the guard before requesting: repainting the host can synchronously deliver another state snapshot.
+        // A theme change or explicit release remains effective until the next completion or a changed goal color.
+        _completionHandled = true; _completionColor = Data.Accent;
+        var old = _accent; _accent = null; old?.Dispose();
+        _accent = _controls.Accent.RequestAccentOverride(Data.Accent).Override;
     }
     internal void Report(Exception error)
     {
@@ -186,7 +220,6 @@ internal sealed class ReadingCommand(ReadingSession session, string action) : IM
         "advance" => new("阅读：按步长前进", "Reading: advance by step"),
         "undo" => new("阅读：撤销页码变更", "Reading: undo page update"),
         "open-page" => new("打开阅读进度", "Open reading progress") { Requires = [ModuleApi.HostControl, ModuleHostControlActions.Page, ModuleHostControlActions.Expand] },
-        "celebrate" => new("阅读：完成目标高亮", "Reading: highlight completed goal") { Requires = [ModuleApi.HostControl, ModuleHostControlActions.Accent] },
         "release-accent" => new("阅读：释放高亮", "Reading: release accent") { Requires = [ModuleApi.HostControl, ModuleHostControlActions.Accent] },
         "check-background" => new("阅读示例：验证后台展开拦截", "Reading sample: check background expand policy") { Requires = [ModuleApi.HostControl, ModuleHostControlActions.Expand] },
         _ => new("阅读示例：验证页面归属", "Reading sample: check page ownership") { Requires = [ModuleApi.HostControl, ModuleHostControlActions.Page] }
@@ -222,7 +255,7 @@ internal sealed class ReadingSettings(ReadingSession session) : IModuleSettings
             int count = (int)Math.Clamp(Math.Round(number), 0, 9999);
             if (key == "target") session.Data.Target = Math.Max(1, count);
             else if (key == "step") session.Data.Step = Math.Clamp(count, 1, 100);
-            else { session.Data.PreviousPage = session.Data.Page; session.Data.Page = count; }
+            else { session.SetPage(count); return; }
         }
         else throw new ArgumentException("Invalid reading setting.");
         session.Save();

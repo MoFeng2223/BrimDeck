@@ -19,7 +19,8 @@ internal static partial class Program
     }
     private sealed class ReadingControls : IModuleHostControl, IModulePageControl, IModulePanelControl, IModuleAccentControl
     {
-        internal int ActiveAccents, ExpandCalls;
+        internal int ActiveAccents, AccentRequests, ExpandCalls;
+        internal Action? AccentRequested;
         internal string? LastPage;
         internal ModuleCommandOrigin LastOrigin;
         public IModulePageControl Pages => this;
@@ -30,7 +31,7 @@ internal static partial class Program
         { LastPage = pageId; return Task.FromResult(pageId == ReadingModule.PageId ? ModuleHostResult.Completed : ModuleHostResult.Rejected("page-not-own")); }
         public Task<ModuleHostResult> RequestExpandAsync(ModuleCommandOrigin origin, CancellationToken cancellation = default)
         { LastOrigin = origin; if (origin == ModuleCommandOrigin.User) ExpandCalls++; return Task.FromResult(origin == ModuleCommandOrigin.User ? ModuleHostResult.Completed : ModuleHostResult.Rejected("user-initiated-only")); }
-        public ModuleAccentResult RequestAccentOverride(string color) { ActiveAccents++; return new(ModuleHostResultKind.Completed, new ReadingAccent(this, color)); }
+        public ModuleAccentResult RequestAccentOverride(string color) { ActiveAccents++; AccentRequests++; AccentRequested?.Invoke(); return new(ModuleHostResultKind.Completed, new ReadingAccent(this, color)); }
         private sealed class ReadingAccent(ReadingControls owner, string color) : ModuleAccentOverride
         {
             private bool _ended;
@@ -102,11 +103,23 @@ internal static partial class Program
         FindReading<Button>(first, "reading-next-page").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Check("page button goes through the shared command service", routed == 1 && (int)settings.Read("page") == 1);
         Check("a second mount updates without recreating its controls", FindReading<TextBlock>(second, "reading-page-count").Text == "1 / 7");
+        controls.AccentRequested = () => source.Publish(source.Read() with { Revision = source.Read().Revision + 1 });
         Run("advance"); Run("advance");
         Check("reading commands clamp at the goal and disable further advance", (int)settings.Read("page") == 7 && !Command("next-page").CanExecute && !Command("advance").CanExecute);
-        Run("celebrate"); Check("a completed goal may hold a temporary accent", controls.ActiveAccents == 1);
+        Check("reaching the goal automatically requests exactly one accent despite reentrant host updates", controls.ActiveAccents == 1 && controls.AccentRequests == 1);
+        source.Publish(source.Read() with { Revision = 20 }); settings.Write("book", "验收用阅读目标");
+        Check("an unchanged completed goal does not repeatedly request its accent", controls.AccentRequests == 1);
+        Run("release-accent"); source.Publish(source.Read() with { Revision = 21 });
+        Check("explicit accent release survives subsequent host updates", controls.ActiveAccents == 0 && controls.AccentRequests == 1);
         Run("undo");
-        Check("undo restores the last page once and releases the goal accent", (int)settings.Read("page") == 6 && !Command("undo").CanExecute && controls.ActiveAccents == 0);
+        Check("undo below the goal releases the accent and retains earlier history", (int)settings.Read("page") == 6 && Command("undo").CanExecute && controls.ActiveAccents == 0);
+        Run("next-page"); Check("completing the goal again requests a new accent", controls.ActiveAccents == 1 && controls.AccentRequests == 2);
+        Run("undo"); Run("undo");
+        Check("consecutive undo walks back through earlier page updates", (int)settings.Read("page") == 1 && Command("undo").CanExecute && controls.ActiveAccents == 0);
+        Run("undo"); Check("undo stops at the start of history", (int)settings.Read("page") == 0 && !Command("undo").CanExecute);
+        settings.Write("page", 2d); settings.Write("page", 5d); Run("undo");
+        Check("page edits in settings also support consecutive undo", (int)settings.Read("page") == 2 && Command("undo").CanExecute);
+        Run("undo"); settings.Write("page", 6d);
         Check("progress persists in the module storage", JsonSerializer.Deserialize<ReadingData>(File.ReadAllText(dataFile)) is { Page: 6, Target: 7, Book: "验收用阅读目标" });
         Run("check-background");
         Check("background probe sends the Host origin without expanding", controls.LastOrigin == ModuleCommandOrigin.Host && controls.ExpandCalls == 0);
@@ -122,12 +135,16 @@ internal static partial class Program
         using var compactContext = Context();
         using var compact = host.Registry.List<IModuleCompactPart>().Single().Value.CreateView(compactContext);
         MountResources(compact, compactContext);
-        foreach (var size in new[] { new Size(128, 24), new Size(76, 24), new Size(28, 44) })
+        foreach (var size in new[] { new Size(24, 24), new Size(18, 24), new Size(28, 24) })
         { Layout(compact, size.Width, size.Height); Check("reading compact part stays bounded at " + size, compact.Element.DesiredSize.Width <= size.Width + .1 && compact.Element.DesiredSize.Height <= size.Height + .1); }
         Check("views do not add snapshot demand or timers", source.SubscriberCount == 1 && scheduler.Callbacks.Count == 0);
+        Check("the compact ring uses the reading page's book icon and exposes exact progress", FindReading<System.Windows.Shapes.Path>(compact, "reading-compact-icon").Data.ToString() == Geometry.Parse(ReadingModule.BookGlyph).ToString() && AutomationProperties.GetName(compact.Element).Contains("6/7", StringComparison.Ordinal));
         SaveReadingPreview(first, Path.Combine(_root, "reading-page-zh.png"), 580, 310);
         SaveReadingPreview(second, Path.Combine(_root, "reading-page-en.png"), 580, 310);
-        SaveReadingPreview(compact, Path.Combine(_root, "reading-compact-vertical.png"), 28, 44);
+        SaveReadingPreview(compact, Path.Combine(_root, "reading-compact.png"), 24, 24);
+        Run("next-page"); Layout(compact, 24, 24);
+        Check("the completed ring icon takes the configured completion color", FindReading<System.Windows.Shapes.Path>(compact, "reading-compact-icon").Stroke is SolidColorBrush brush && brush.Color == (Color)ColorConverter.ConvertFromString((string)settings.Read("accent")));
+        SaveReadingPreview(compact, Path.Combine(_root, "reading-compact-complete.png"), 24, 24); Run("undo");
         var oldAdvance = Command("advance");
         host.ReconcileAsync([definition with { Enabled = false }]).GetAwaiter().GetResult();
         Check("disable releases state subscription and contributions", source.SubscriberCount == 0 && host.Registry.List<ModulePage>().Count == 0 && controls.ActiveAccents == 0);
@@ -135,7 +152,14 @@ internal static partial class Program
         FindReading<Button>(first, "reading-next-page").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Check("a late page click during retirement neither escapes nor writes", JsonSerializer.Deserialize<ReadingData>(File.ReadAllText(dataFile))?.Page == 6);
         host.ReconcileAsync([definition]).GetAwaiter().GetResult();
-        Check("reenabling restores saved book and page", host.Registry.List<IModuleSettings>().Single().Value.Read("page") is 6 && source.SubscriberCount == 1);
+        Check("reenabling restores saved book, page and undo history", host.Registry.List<IModuleSettings>().Single().Value.Read("page") is 6 && Command("undo").CanExecute && source.SubscriberCount == 1);
+        host.ReconcileAsync([definition with { Enabled = false }]).GetAwaiter().GetResult();
+        File.WriteAllText(dataFile, JsonSerializer.Serialize(new ReadingData { Page = 7, Target = 7, PreviousPage = 5 }));
+        int requests = controls.AccentRequests;
+        host.ReconcileAsync([definition]).GetAwaiter().GetResult();
+        Check("a restored completed goal highlights after activation becomes ready", controls.AccentRequests == requests + 1 && controls.ActiveAccents == 1);
+        Run("undo");
+        Check("legacy single-step undo migrates without losing saved progress", (int)host.Registry.List<IModuleSettings>().Single().Value.Read("page") == 5 && !Command("undo").CanExecute && controls.ActiveAccents == 0);
         host.ReconcileAsync([definition with { Enabled = false }]).GetAwaiter().GetResult();
         File.WriteAllText(dataFile, "{broken-reading-data");
         host.ReconcileAsync([definition]).GetAwaiter().GetResult(); Run("next-page");

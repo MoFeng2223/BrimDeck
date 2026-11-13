@@ -49,10 +49,17 @@ public sealed partial class SettingsWindow
     {
         var commands = _app.ModuleCommands();
         if (commands.Count == 0) return;
-        SectionTitle(Loc.T("插件命令", "Plugin commands"),
-            help: () => Loc.T("快捷键默认未绑定；与内置快捷键或其他命令重复时不会生效。停用插件后绑定会保留。",
-                "Shortcuts are unbound by default and do not take a combination another shortcut or command has. Bindings are kept when the plugin is disabled."));
-        Group([.. commands.Select(entry => CommandHotkeyRow(entry))]);
+        foreach (var plugin in commands.GroupBy(entry => entry.ModuleId))
+        {
+            string name = _app.Modules.Modules.FirstOrDefault(module => module.Id == plugin.Key)?.Name ?? plugin.Key;
+            SectionTitle(name,
+                help: () => Loc.T("快捷键默认未绑定；与内置快捷键或其他命令重复时不会生效。停用插件后绑定会保留。",
+                    "Shortcuts are unbound by default and do not take a combination another shortcut or command has. Bindings are kept when the plugin is disabled."));
+            Group([.. plugin.Select(entry => CommandHotkeyRow(entry))]);
+            var group = (FrameworkElement)Target.Children[Target.Children.Count - 1];
+            AutomationProperties.SetAutomationId(group, "module-hotkeys-" + plugin.Key);
+            AutomationProperties.SetName(group, name);
+        }
     }
 
     private FrameworkElement CommandHotkeyRow(Contribution<BrimDeck.Modules.IModuleCommand> entry)

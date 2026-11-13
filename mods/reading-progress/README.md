@@ -24,24 +24,24 @@ dotnet build BrimDeck.ReadingProgress.csproj -c Release -t:GetModulePackage -p:B
 ## 使用
 
 - 在「阅读进度」设置中填写书名、目标页数、当前页码和每次前进的页数。
-- 页面中的「＋1 页」「按步长前进」与快捷键调用同一份命令；「撤销」恢复上次页码。
+- 页面中的「＋1 页」「按步长前进」与快捷键调用同一份命令；「撤销」可连续回退页码变更，包括设置中的页码编辑。历史随进度保存，最多保留 10000 次。
 - 进度保存到本模组的 `reading` 存储键。切页、收起和停用不会清除；卸载由宿主按其规则清理数据。
-- 收起行显示 `阅读 当前页/目标页`；空间较窄时只保留数字，侧边竖排分行显示。它不占用持续活动的控制条。
-- 达到目标后可以点「完成高亮」，向宿主申请临时强调色。「验收详情 → 释放高亮」、停用模组或用户切换主题会结束覆盖；不写入用户主题。
+- 收起行以书本图标和进度环显示完成比例，悬停可读书名、准确页码和百分比；横排与侧边均占 24 DIP。完成后环与图标采用设置的高亮色。它不占用持续活动的控制条。
+- 页码达到目标时自动向宿主申请临时强调色；恢复已完成的进度时也会在激活就绪后申请。「验收详情 → 释放高亮」、停用模组或用户切换主题会结束覆盖；不写入用户主题，也不会在后续状态更新时反复抢回主题。撤销到未完成时自动释放，再次达标时重新申请。
 
 ## 作者验收步骤
 
 | 步骤 | 预期 |
 | --- | --- |
-| 首次启用 | 页面、设置、收起行部件与 8 条命令可见；不自动展开，不改变主题，不新增轮询 |
-| 书名设为任意文本，目标设 7 页，步长设 5 页，当前设 0 | 页面和收起行同步显示 0/7 |
-| 点「＋1 页」，再点「＋5 页」 | 两处都显示 6/7；再前进到 7/7 后按钮停止增长 |
-| 点「撤销」 | 回到 6/7；再撤销不可用，不会成为无限来回切换 |
+| 首次启用 | 页面、设置、收起行部件与 7 条命令可见；未完成时不自动展开、不改变主题、不新增轮询 |
+| 书名设为任意文本，目标设 7 页，步长设 5 页，当前设 0 | 页面显示 0/7，收起进度环为空，悬停提示准确进度 |
+| 点「＋1 页」，再点「＋5 页」 | 页面显示 6/7，进度环同步；再前进到 7/7 后按钮停止增长并自动高亮 |
+| 连续点「撤销」 | 依次回到 6/7、1/7、0/7，历史用尽后禁用；离开达标状态自动释放临时色 |
 | 设置快捷键「阅读：前进一页」 | 收起或切到其他页后，快捷键只更新进度；绑定「打开阅读进度」才展开并切到本页 |
 | 停用后按上述快捷键，再重新启用 | 停用期间不执行；绑定偏好由宿主保留，启用后恢复；页码仍在 |
 | 关闭再打开页面、刷新未变更的模组、重启宿主 | 进度保留；每个挂载创建独立控件，多个显示器共享同一进度 |
 | 拖窄收起行、切到侧边、在设置中排序/关闭该部件 | 正常降级或由宿主说明空间不足；不会遮住其他部件、抢占活动或停止内置读数 |
-| 到达目标后点「完成高亮」，然后切换主题 | 临时色出现；用户主题变化清除它，再点一次可重新申请；停用也会释放 |
+| 到达目标，然后切换主题 | 自动出现临时色；主题变化清除覆盖，后续面板状态更新不抢回；再次从未完成到达目标才重新申请。完成状态的环与图标保留目标色 |
 | 展开「验收详情」 | 能看到宿主交付的初始面板状态；切页/主题/缩放后重新打开可看到新的修订 |
 | 点「验证后台拦截」 | `Host` 来源的展开请求返回 `user-initiated-only`，没有展开副作用 |
 | 点「验证页面归属」 | 其他模组页面返回 `page-not-own`，不发生导航 |
@@ -58,4 +58,4 @@ dotnet build BrimDeck.ReadingProgress.csproj -c Release -t:GetModulePackage -p:B
 
 Track a book and page goal with a compact progress part, persistent page updates, undo, shortcut commands and a temporary completion accent. No network, account, local service or hardware access is required. This sample is installed explicitly and is not bundled by default. Use a contract-1.10 host built from this branch, including its command capability, accent repaint and panel-state fixes; earlier 1.10 builds and the current 1.3.0 release are not the acceptance target.
 
-Build the package with the command above, copy its `sample-reading-progress` directory into the module folder opened by host settings, refresh and enable it. The optional `BrimDeckSdk` build mode works outside the repository without host project references. Buttons and shortcuts use the same commands; only the open-page command opens the panel. Acceptance details expose the initial panel snapshot and safe refusal probes; background expansion and foreign-page navigation must be rejected. Unreadable saved data is preserved. Theme changes, disabling the module or releasing the override end the temporary accent.
+Build the package with the command above, copy its `sample-reading-progress` directory into the module folder opened by host settings, refresh and enable it. The optional `BrimDeckSdk` build mode works outside the repository without host project references. Buttons and shortcuts use the same commands; only the open-page command opens the panel. Undo can walk back through saved page updates (up to 10000 entries), including settings edits, and migrates the earlier single undo entry. The compact part is a book icon inside a progress ring; completion automatically applies the configured accent to the ring and icon and requests a temporary host accent. Undoing below the goal releases that override. Theme changes or an explicit release remain effective until the next completion. Acceptance details expose the initial panel snapshot and safe refusal probes; background expansion and foreign-page navigation must be rejected. Unreadable saved data is preserved.

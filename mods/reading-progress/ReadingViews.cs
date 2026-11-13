@@ -45,17 +45,14 @@ internal sealed class ReadingPart(ReadingSession session) : IModuleCompactPart
 
 internal sealed class ProgressPartView : ReadingView, IModuleCompactWidth
 {
-    private readonly StackPanel _row = new() { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-    private readonly TextBlock _title = Label("", 11, "PanelSecondary"), _value = Label("", 12);
-    private double _scale = 1, _width = 128, _height = 24;
-    public double? PreferredWidth => 128;
-    public double? CompactWidth => 76;
-    public double? PreferredHeight => 44;
+    private double _scale = 1, _width = 24, _height = 24;
+    public double? PreferredWidth => 24;
+    public double? CompactWidth => 24;
+    public double? PreferredHeight => 24;
 
     internal ProgressPartView(ReadingSession session, ModuleViewContext context) : base(session, context)
     {
         AutomationProperties.SetAutomationId(this, "reading-compact");
-        _row.Children.Add(_title); _row.Children.Add(_value); Children.Add(_row);
         Listen();
     }
     public override void SetViewport(ModuleViewport viewport)
@@ -66,15 +63,28 @@ internal sealed class ProgressPartView : ReadingView, IModuleCompactWidth
     }
     protected override void Render()
     {
-        bool vertical = _height > _width;
-        _row.Orientation = vertical ? Orientation.Vertical : Orientation.Horizontal;
-        _title.Text = T("阅读", "Read"); _title.FontSize = 11 * _scale; _value.FontSize = 12 * _scale;
-        _title.Visibility = vertical || _width >= 120 * _scale ? Visibility.Visible : Visibility.Collapsed;
-        _title.Margin = vertical ? new Thickness(0, 0, 0, 2 * _scale) : new Thickness(0, 0, 7 * _scale, 0);
-        _title.TextAlignment = _value.TextAlignment = TextAlignment.Center;
-        _value.Text = vertical ? $"{Session.Data.Page}\n/{Session.Data.Target}" : $"{Session.Data.Page}/{Session.Data.Target}";
-        if (vertical) _value.FontSize = Math.Max(7, Math.Min(12 * _scale, (_width - 2) / ((Session.Data.Target.ToString().Length + 1) * .65)));
-        ToolTip = $"{Session.Data.Book} · {T("第", "Page ")}{Session.Data.Page}/{Session.Data.Target}";
+        var data = Session.Data;
+        double size = Math.Max(8, Math.Min(20 * _scale, Math.Min(_width, _height)));
+        var ring = ModuleUi.Ring(100.0 * data.Page / data.Target, size, 1.75 * size / 20);
+        ring.HorizontalAlignment = HorizontalAlignment.Center; ring.VerticalAlignment = VerticalAlignment.Center;
+        bool completed = data.Page == data.Target;
+        var ink = new SolidColorBrush((Color)ColorConverter.ConvertFromString(data.Accent)); ink.Freeze();
+        foreach (var arc in ring.Children.OfType<System.Windows.Shapes.Shape>().Skip(1))
+        {
+            if (completed) arc.Stroke = ink;
+            else arc.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "PanelPrimary");
+        }
+        var book = new System.Windows.Shapes.Path
+        {
+            Data = Geometry.Parse(ReadingModule.BookGlyph), Width = size * .55, Height = size * .55,
+            Stretch = Stretch.Uniform, StrokeThickness = Math.Max(.75, 1.1 * size / 20),
+            StrokeLineJoin = PenLineJoin.Round, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
+        };
+        if (completed) book.Stroke = ink;
+        else book.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "PanelPrimary");
+        AutomationProperties.SetAutomationId(book, "reading-compact-icon");
+        ring.Children.Add(book); Children.Clear(); Children.Add(ring);
+        ToolTip = $"{data.Book} · {data.Page}/{data.Target} · {100.0 * data.Page / data.Target:0}%";
         AutomationProperties.SetName(this, ToolTip.ToString());
     }
 }
@@ -106,7 +116,7 @@ internal sealed class ReadingPage : ReadingView
         fill.SetResourceReference(Border.BackgroundProperty, "PanelAccent"); _progress.Children.Add(fill);
         _contents.Children.Add(_book); _contents.Children.Add(_count); _contents.Children.Add(_remaining); _contents.Children.Add(_progress);
         var mainActions = new WrapPanel { Margin = new Thickness(0, 14, 0, 8) };
-        foreach (string action in new[] { "next-page", "advance", "undo", "celebrate" }) mainActions.Children.Add(ActionButton(action));
+        foreach (string action in new[] { "next-page", "advance", "undo" }) mainActions.Children.Add(ActionButton(action));
         _settings = ModuleUi.Button(context, "", () => context.OpenSettings(ReadingModule.Id + ":preferences"));
         _settings.Margin = new Thickness(0, 0, 6, 4); _settings.MinHeight = 30;
         AutomationProperties.SetAutomationId(_settings, "reading-settings"); mainActions.Children.Add(_settings);
@@ -170,7 +180,7 @@ internal sealed class ReadingPage : ReadingView
             string label = action switch
             {
                 "next-page" => T("＋1 页", "+1 page"), "advance" => T($"＋{data.Step} 页", $"+{data.Step} pages"),
-                "undo" => T("撤销", "Undo"), "celebrate" => T("完成高亮", "Highlight goal"),
+                "undo" => T("撤销", "Undo"),
                 "check-background" => T("验证后台拦截", "Check background policy"), "check-page-scope" => T("验证页面归属", "Check page ownership"),
                 _ => T("释放高亮", "Release accent")
             };

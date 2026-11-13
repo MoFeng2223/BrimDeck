@@ -362,7 +362,11 @@ public partial class MainWindow
         _moduleHandover?.Drop();
         var leaving = PageHandover.Capture(ModuleControlHost);
         _moduleControls = false; _moduleClosing = false;
-        SelectPage(id); RenderMiniApps(); SetExpanded(true);
+        SelectPage(id); RenderMiniApps();
+        // An explicit page request has the same priority as a page shortcut. The ordinary opening preference applies
+        // again the next time the panel opens; it must not replace the page the user just asked to see.
+        _hotkeyPage = id;
+        try { SetExpanded(true); } finally { _hotkeyPage = null; }
         if (leaving is not null) _handover.Send(leaving, new Thickness(0), MiniAppsContent, Handover.Morph);
     }
     internal void ShowModuleControls()
