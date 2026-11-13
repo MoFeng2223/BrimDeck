@@ -19,6 +19,10 @@ public interface IDesktopSources
     // Runs CodeAgent CLI's `auth status` to renew an expired CodeAgent sign-in kept in home (CodeAgentUsage); true when the file
     // then holds a later expiry than before.
     Task<bool> RenewCodeAgentAsync(string home, CancellationToken cancellation) => Task.FromResult(false);
+    // The Xiaomi account signed in to in BrimDeck for Xiaomi MiMo (MiMoUsage.MiMoSession, serialized); null when none is.
+    string? ReadMiMoSession() => null;
+    // Replaces it with a renewed one.
+    void SaveMiMoSession(string session) { }
 }
 
 // quotaCache is the file that keeps the last Claude quota read online across restarts (ClaudeQuotaCache); null keeps none.
@@ -162,6 +166,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             // Grok Bot has no usage records, so it is read only for its online quota rows.
             var sources = ProviderCatalog.UsageSources.Where(required.Contains);
             if (grokBotOnline) sources = sources.Append(ProviderId.GrokBot);
+            // Xiaomi MiMo's linked keys have no records of their own: their statistics are MiMo's.
+            if (required.Contains(ProviderId.MiMoLinked)) sources = sources.Append(ProviderId.MiMoLinked);
             var tasks = sources.Select(id => FetchAsync(id, usageStart, claudeOnline, deadline.Token, cancellation));
             var configured = _configured.RefreshAsync(settings.EnabledApps, deadline.Token);
             List<ProviderSnapshot> results = [.. await Task.WhenAll(tasks), .. await configured];
@@ -264,6 +270,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (id == ProviderId.Dsh) _dsh.Read(snapshot, _locations.DshHome, start, now);
         if (id == ProviderId.Kimi) _kimi.Read(snapshot, _locations.KimiHome, start, now);
         if (id == ProviderId.OpenCode) OpenCodeUsage.Read(snapshot, desktop, _locations.OpenCodeDatabase, start, now);
+        if (id == ProviderId.MiMo) MiMoUsage.Read(snapshot, desktop, _locations.MiMoDatabase, start, now);
         try
         {
             switch (id)
@@ -326,6 +333,12 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     break;
                 case ProviderId.OpenCode:
                     await ReadOpenCodeAsync(snapshot, now, ct);
+                    break;
+                case ProviderId.MiMo:
+                    await ReadMiMoAsync(snapshot, now, ct);
+                    break;
+                case ProviderId.MiMoLinked:
+                    await ReadMiMoLinkedAsync(snapshot, now, ct);
                     break;
             }
         }
@@ -1270,6 +1283,71 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (reading.Warnings.Count > 0) snapshot.Status = string.Join(Loc.T("；", "; "), reading.Warnings);
     }
 
+    // The Xiaomi MiMo Desktop membership (MiMoUsage), read with the MiMo server's cookies for the Xiaomi account signed in to in
+    // BrimDeck. Refused cookies are renewed once with the account's longer sign-in (MiMoUsage.RenewAsync) and the reading tried
+    // again; a renewal that fails is not tried again for ten minutes, as it needs the user to sign in again.
+    private DateTimeOffset? _mimoRenewFailed;
+    private async Task ReadMiMoAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
+        if (snapshot.UsageAvailable) snapshot.UsageNote += Loc.T(" · 桌面版会员请求按公开单价估算，其余费用取自 MiMo 记录",
+            " · Desktop membership requests are estimated at public prices; other costs are as MiMo recorded them");
+        void SignedOut()
+        {
+            snapshot.StatusLabel = Loc.T("登录已失效", "Sign-in expired");
+            snapshot.Status = Loc.T("小米账号的登录已失效，请在设置中重新登录", "The Xiaomi account sign-in has expired. Sign in again in Settings.");
+        }
+        var session = MiMoUsage.MiMoSession.Parse(desktop.ReadMiMoSession());
+        if (session is null)
+        {
+            snapshot.StatusLabel = Loc.T("未连接", "Not connected");
+            snapshot.Status = Loc.T("请在设置中登录小米账号", "Sign in to a Xiaomi account in Settings first.");
+            return;
+        }
+        async Task<HttpResponseMessage> Send(string cookie)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, MiMoUsage.SubscriptionAddress);
+            request.Headers.TryAddWithoutValidation("Cookie", cookie);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            return await _http.SendAsync(request, ct);
+        }
+        var response = await Send(session.Cookie);
+        try
+        {
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                response.Dispose();
+                bool waiting = _mimoRenewFailed is { } failed && now >= failed && now - failed < TimeSpan.FromMinutes(10);
+                var renewed = waiting ? null : await MiMoUsage.RenewAsync(session, null, ct);
+                if (renewed is null) { if (!waiting) _mimoRenewFailed = now; SignedOut(); return; }
+                _mimoRenewFailed = null;
+                desktop.SaveMiMoSession(renewed.Serialize());
+                session = renewed;
+                response = await Send(renewed.Cookie);
+                if (response.StatusCode == HttpStatusCode.Unauthorized) { SignedOut(); return; }
+            }
+            if (response.StatusCode == HttpStatusCode.TooManyRequests) throw RateLimitedException.From(response);
+            response.EnsureSuccessStatusCode();
+            // The MiMo server may hand out new cookies with an answer; they replace the kept ones.
+            var cookie = MiMoUsage.Merge(session.Cookie, MiMoUsage.SetCookies(response));
+            if (cookie != session.Cookie && cookie.Length > 0) desktop.SaveMiMoSession((session with { Cookie = cookie }).Serialize());
+            using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+            var membership = MiMoUsage.ParseSubscription(doc.RootElement);
+            snapshot.Scope = "account";
+            snapshot.Plan = membership.Plan;
+            snapshot.PlanSource = Loc.T("Xiaomi MiMo 账户", "Xiaomi MiMo account");
+            if (membership.Weekly is not { } weekly)
+            {
+                snapshot.StatusLabel = Loc.T("未订阅会员", "No membership");
+                snapshot.Status = Loc.T("这个小米账号没有生效中的 Xiaomi MiMo 桌面版会员", "This Xiaomi account has no Xiaomi MiMo desktop membership in force.");
+                return;
+            }
+            snapshot.Quotas = [weekly];
+            Connected(snapshot, Loc.T("Xiaomi MiMo 桌面版会员", "Xiaomi MiMo desktop membership"), now);
+            if (weekly.UsedPercent >= 100) snapshot.Status = Loc.T("本周额度已用完", "This week's allowance is used up");
+        }
+        finally { response.Dispose(); }
+    }
+
     // WorkBuddy's credits (WorkBuddyUsage), read with the sign-in BrimDeck got from the edition's website (ConnectWorkBuddyAsync).
     // A renewed sign-in is saved at once, as the website may replace the refresh token with it.
     private async Task ReadWorkBuddyAsync(ProviderSnapshot snapshot, WorkBuddyUsage.Edition edition, DateTimeOffset now, CancellationToken ct)
@@ -1316,6 +1394,60 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     }
 
     public void DisconnectWorkBuddy(ProviderId id) => secrets?.Delete(WorkBuddyUsage.For(id).SessionKey);
+
+    // Xiaomi MiMo: the keys Xiaomi MiMo Desktop and MiMo Code linked (MiMoUsage.ReadLinkedKeys), read again on every refresh. A Token
+    // Plan key shows the plan quota, a pay-as-you-go key the balances and this month's charges; with both, one column shows them all,
+    // the plan first. A refused key is named in the status while the other is still shown.
+    private async Task ReadMiMoLinkedAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
+        var keys = MiMoUsage.ReadLinkedKeys(_locations.MiMoDatabase);
+        if (keys.Count == 0)
+        {
+            snapshot.StatusLabel = Loc.T("未连接", "Not connected");
+            snapshot.Status = Loc.T("请先在 Xiaomi MiMo 桌面版或 MiMo Code CLI 中关联开放平台", "Link the Open Platform in the Xiaomi MiMo desktop app or MiMo Code CLI first.");
+            return;
+        }
+        async Task<JsonDocument?> Get(MiMoUsage.LinkedKey key, string path)
+        {
+            using var request = Bearer(HttpMethod.Get, key.Host + path.TrimStart('/'), key.Key);
+            using var response = await _http.SendAsync(request, ct);
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden) return null;
+            if (response.StatusCode == HttpStatusCode.TooManyRequests) throw RateLimitedException.From(response);
+            response.EnsureSuccessStatusCode();
+            return await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        }
+        var metrics = new List<UsageMetric>();
+        var warnings = new List<string>();
+        foreach (var key in keys)
+        {
+            if (key.TokenPlan)
+            {
+                using var answer = await Get(key, "/v1/platform/token_plan");
+                if (answer is null) { warnings.Add(Loc.T("Token Plan 密钥已失效", "The Token Plan key is no longer valid")); continue; }
+                if (MiMoUsage.TokenPlan(answer.RootElement) is var (plan, quota)) { snapshot.Plan = plan; metrics.Add(quota); }
+                else warnings.Add(Loc.T("没有生效中的 Token Plan", "No Token Plan in force"));
+                continue;
+            }
+            using var balance = await Get(key, "/v1/platform/balance");
+            if (balance is null) { warnings.Add(Loc.T("API 密钥已失效", "The API key is no longer valid")); continue; }
+            var amounts = MiMoUsage.Balance(balance.RootElement, out bool available);
+            metrics.AddRange(amounts);
+            if (!available) warnings.Add(Loc.T("余额不足", "The balance is insufficient"));
+            using var usage = await Get(key, "/v1/platform/usage/daily?" + MiMoUsage.UsageQuery(now));
+            if (usage is not null) metrics.Add(MiMoUsage.MonthSpend(usage.RootElement, amounts[0].Currency, now));
+        }
+        snapshot.Scope = "account";
+        if (metrics.Count == 0)
+        {
+            snapshot.StatusLabel = Loc.T("读取失败", "Read failed");
+            snapshot.Status = string.Join(Loc.T("；", "; "), warnings);
+            return;
+        }
+        snapshot.Metrics = metrics;
+        snapshot.PlanSource = "Xiaomi MiMo";
+        Connected(snapshot, "Xiaomi MiMo", now);
+        if (warnings.Count > 0) snapshot.Status = string.Join(Loc.T("；", "; "), warnings);
+    }
 
     private async Task ReadOpenCodeAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
     {

@@ -7,8 +7,10 @@ using BrimDeck.Core;
 
 namespace BrimDeck.Native;
 
-public sealed class DesktopSources : IDesktopSources
+public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
 {
+    public string? ReadMiMoSession() => mimo?.Read();
+    public void SaveMiMoSession(string session) => mimo?.Save(session);
     public ClaudeDesktopState ReadClaudeDesktop(DataLocations locations) => ClaudeDesktopReader.Read(locations);
     public GrokBotSignIn ReadGrokBotDesktop(DataLocations locations) => GrokBotDesktopReader.Read(locations);
 

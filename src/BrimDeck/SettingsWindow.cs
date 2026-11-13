@@ -940,7 +940,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     {
         string role = quota ? Loc.T("配额来源", "Quota source") : Loc.T("统计应用", "Usage app");
         ProviderId selected = quota ? entry.QuotaSource : entry.UsageSource;
-        string Label(ProviderId id) => AppPresets.Name(id);
+        string Label(ProviderId id) => quota ? AppPresets.Name(id) : ProviderCatalog.UsageName(id);
         var select = new DropDownButton { Style = (Style)FindResource("SettingsButton"), Value = () => Label(selected) };
         var selectContent = new DockPanel();
         var chevron = Chevron(); chevron.Foreground = UI.Brush(TextSecondary); chevron.Margin = new Thickness(8, ChevronDrop.Top, 0, ChevronDrop.Bottom); DockPanel.SetDock(chevron, Dock.Right); selectContent.Children.Add(chevron);

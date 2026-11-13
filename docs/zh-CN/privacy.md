@@ -18,7 +18,9 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | Command Code | 读取 Command Code 的登录密钥（`%USERPROFILE%\.commandcode\auth.json`），向 api.commandcode.ai 查询套餐额度、账期与本账期用量；不修改 Command Code 的任何文件 | 读取本地会话记录（`%USERPROFILE%\.commandcode\projects`）与模型目录中的单价（`%USERPROFILE%\.commandcode\cache\model-catalog`） |
 | WorkBuddy | 使用在设置中通过 WorkBuddy 官网登录获得的凭据（加密保存在 BrimDeck 设置目录的 `secrets.dat`），向 www.workbuddy.cn 查询积分余额、套餐名称与周期，过期时向同一地址续期；不读取 WorkBuddy 桌面版的登录，不修改 WorkBuddy 的任何文件 | 读取本地会话记录（`%USERPROFILE%\.workbuddy\projects`）中的 Token 数 |
 | WorkBuddy AI | 与 WorkBuddy 相同，凭据单独保存，只发往 www.workbuddy.ai；不读取 WorkBuddy AI 桌面版的登录 | 读取本地会话记录（`%USERPROFILE%\.workbuddy-ai\projects`）中的 Token 数 |
-| 智谱 GLM、Z.ai GLM、DeepSeek、Kimi Code API、OpenCode Go、Command Code API、OpenRouter、New API、Sub2API、自定义 | 使用在设置中填写的密钥与站点地址；Kimi Code API 的密钥只发往 api.kimi.com 与 api.kimi.ai，读取的额度不写入 `kimi-quota.json`；OpenCode Go 的密钥只发往 opencode.ai；Command Code API 的密钥只发往 api.commandcode.ai；OpenRouter 的密钥只发往 openrouter.ai。密钥只通过 HTTPS 或发往本机地址；New API、Sub2API、自定义来源打开“允许 HTTP”后，也会通过 HTTP 以明文发送 | 不提供 |
+| Xiaomi MiMo 桌面订阅 | 使用在设置中通过浏览器登录小米账号获得的登录信息（加密保存在 BrimDeck 设置目录的 `mimo-session.dat`），向 mimo-server-cn.xiaomimimo.com 查询桌面版会员额度，过期时经 account.xiaomi.com 续期；登录时打开的浏览器窗口使用独立的临时目录，登录后删除 | 读取本地数据库（`%USERPROFILE%\.local\share\mimocode\mimocode.db`） |
+| Xiaomi MiMo | 读取 Xiaomi MiMo 桌面版与 MiMo Code CLI 保存的开放平台密钥（`%USERPROFILE%\.local\share\mimocode\auth.json`），向 api.xiaomimimo.com 查询余额与本月扣费，向对应集群的 token-plan 地址查询 Token Plan 额度；不修改这个文件 | 使用 Xiaomi MiMo 的本机记录 |
+| 智谱 GLM、Z.ai GLM、Xiaomi MiMo API、Xiaomi MiMo Token Plan、DeepSeek、Kimi Code API、OpenCode Go、Command Code API、OpenRouter、New API、Sub2API、自定义 | 使用在设置中填写的密钥与站点地址；Kimi Code API 的密钥只发往 api.kimi.com 与 api.kimi.ai，读取的额度不写入 `kimi-quota.json`；OpenCode Go 的密钥只发往 opencode.ai；Command Code API 的密钥只发往 api.commandcode.ai；Xiaomi MiMo API 的密钥只发往 api.xiaomimimo.com；Xiaomi MiMo Token Plan 的密钥只发往 token-plan-cn、token-plan-sgp 与 token-plan-ams.xiaomimimo.com；OpenRouter 的密钥只发往 openrouter.ai。密钥只通过 HTTPS 或发往本机地址；New API、Sub2API、自定义来源打开“允许 HTTP”后，也会通过 HTTP 以明文发送 | 不提供 |
 
 - 设置了 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`ZCODE_HOME`、`DSH_HOME` 或 `KIMI_CODE_HOME`（须为绝对路径）时，从该目录读取。OpenCode 按 `XDG_DATA_HOME` 与 `OPENCODE_DB` 确定数据库位置。
 - 这些账户接口与本地数据格式并非公开的稳定接口。无法读取时，面板显示实际状态，不会显示虚构的数值。
@@ -31,6 +33,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | --- | --- |
 | `settings.json` | 设置，不含任何登录令牌或 API 密钥 |
 | `secrets.dat` | 手动填写的 API 密钥与 WorkBuddy 的登录凭据，使用 Windows 的加密功能按当前用户加密 |
+| `mimo-session.dat` | Xiaomi MiMo 的小米账号登录信息，使用 Windows 的加密功能按当前用户加密 |
 | `model-prices.json`、`manual-model-prices.json` | 同步的模型单价、手动添加的单价 |
 | `official-prices.json` | 从 OpenRouter 同步的模型厂商官方渠道单价，只包含记录中用到的模型，以及 Kimi Code 计费所需的 Kimi K3、K3.1 Pro 与 K3.1 Pro Highspeed。没有这个文件时，读取旧版本保存的 `moonshot-prices.json` |
 | `claude-quota.json` | 最近一次联网读取的 Claude 额度（各项百分比、重置时间与订阅名称），重启后接口被限流时用来继续显示 Fable 等额度；不含登录令牌；账户与组织仅以其 ID 的单向哈希记录（不保存 ID 本身），每个组织一条，只在同一账户登录时使用；超过 7 天不再使用，登录失效或退出登录时删除 |

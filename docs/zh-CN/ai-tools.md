@@ -23,7 +23,11 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 | Command Code | ✓ | ✓ | 在本机登录 Command Code（CLI 或桌面版） |
 | WorkBuddy | ✓ | ✓ | 配额：在设置中通过浏览器登录 WorkBuddy 官网。用量统计只需在本机使用 WorkBuddy 国内版桌面应用 |
 | WorkBuddy AI | ✓ | ✓ | 配额：在设置中通过浏览器登录 WorkBuddy 国际版官网。用量统计只需在本机使用 WorkBuddy AI 桌面应用 |
+| Xiaomi MiMo 桌面订阅 | ✓ | ✓ | 配额：在设置中通过浏览器登录小米账号。用量统计只需在本机使用 MiMo Code CLI 或 Xiaomi MiMo 桌面版 |
+| Xiaomi MiMo | ✓ | | 在 Xiaomi MiMo 桌面版或 MiMo Code CLI 中关联开放平台 API 密钥或 Token Plan |
 | 智谱 GLM、Z.ai GLM | ✓ | | 在设置中填写 API 密钥 |
+| Xiaomi MiMo API | ✓ | | 在设置中填写小米 MiMo 开放平台按量计费 API 密钥 |
+| Xiaomi MiMo Token Plan | ✓ | | 在设置中填写小米 MiMo Token Plan 密钥 |
 | DeepSeek | ✓ | | 在设置中填写 API 密钥 |
 | Kimi Code API | ✓ | | 在设置中填写 Kimi Code API 密钥 |
 | OpenCode Go | ✓ | | 在设置中填写 OpenCode Console API 密钥 |
@@ -123,9 +127,25 @@ Command Code CLI 与桌面版共用同一个数据目录（`%USERPROFILE%\.comma
 - WorkBuddy 的套餐积分只能在 WorkBuddy 与 CodeBuddy 中使用，没有可在其他工具中消耗积分的 API 密钥。
 - **国际版**：WorkBuddy 国际版（www.workbuddy.ai，桌面应用名为 WorkBuddy AI）是独立的账号体系，在“配额来源”与“统计应用”中单独选择 WorkBuddy AI，与国内版分别登录、分别显示。读取方式与国内版相同，会话记录读取 `%USERPROFILE%\.workbuddy-ai\projects`；凭据只发往 www.workbuddy.ai。积分归类与 WorkBuddy AI 客户端一致，例如体验类积分在国际版中计为奖励积分。默认颜色与国内版相同。
 
+## Xiaomi MiMo 桌面订阅
+
+MiMo Code CLI 与 Xiaomi MiMo 桌面版共用同一个数据库（`%USERPROFILE%\.local\share\mimocode\mimocode.db`），两者的对话记录一起统计。
+
+- **配额**：显示 Xiaomi MiMo 桌面版会员的每周额度的已用比例与重置时间，名称旁显示会员档位（入门、进阶、高阶或尊享）。桌面版会员与 Token Plan 是两套独立的订阅，这里不显示 Token Plan 的额度。
+- **登录**：桌面版会员没有 API 密钥，需要在 BrimDeck 中单独登录小米账号。在设置中展开 Xiaomi MiMo 桌面订阅行，点击“登录”，BrimDeck 会用默认浏览器（不是 Chrome、Edge 等 Chromium 浏览器时改用 Edge）在一个独立的新窗口中打开小米账号的官方登录页，可用密码、手机号、微信、支付宝等方式登录，需在 10 分钟内完成。登录后 BrimDeck 关闭这个窗口，只保存查询额度所需的登录信息，加密保存在本机；你平时使用的浏览器与它的登录状态不受影响。登录过期时自动续期，续期失败时状态显示“登录已失效”，重新登录即可。点击“退出登录”删除本机保存的登录信息。
+- **Token 用量与费用**：读取本机 MiMo 数据库中每次模型回复的输入、缓存读取、缓存写入与输出 Token。桌面版会员的请求在记录中金额为 0，按模型公开单价估算；使用开放平台密钥的请求使用 MiMo 记录的金额。
+
+## Xiaomi MiMo
+
+自动读取 Xiaomi MiMo 桌面版与 MiMo Code CLI 已关联的开放平台 API 密钥或 Token Plan（与数据库同目录的 `auth.json`），不需要在 BrimDeck 中填写。
+
+- 关联了 Token Plan 时显示套餐名称与 Credits 额度；关联了按量计费 API 密钥时显示账户余额、充值余额、赠送余额与本月扣费。两者都关联时，在同一列中一起显示。
+- 每次刷新都重新读取这个文件。桌面版关联和 CLI 登录都会改写它，例如在 CLI 中重新登录后，桌面版关联的 Token Plan 会从文件中消失，这里也随之不再显示。
+- 用量统计使用 Xiaomi MiMo 的本机记录。
+
 ## 手动填写的来源
 
-在"配额来源"中选择智谱 GLM、Z.ai GLM、DeepSeek、Kimi Code API、OpenCode Go、Command Code API、OpenRouter、New API、Sub2API 或自定义后，该行会展开，填写所需内容即可。
+在"配额来源"中选择智谱 GLM、Z.ai GLM、Xiaomi MiMo API、Xiaomi MiMo Token Plan、DeepSeek、Kimi Code API、OpenCode Go、Command Code API、OpenRouter、New API、Sub2API 或自定义后，该行会展开，填写所需内容即可。
 
 - **密钥**：使用 Windows 的加密功能保存在本机，不写入设置文件。删除该列或更换配额来源时，密钥一并删除。
 - **站点地址**：填写站点首页地址即可。末尾的 `/v1`，以及直接粘贴的控制台页面路径，会自动去掉。请求会带上 API 密钥，所以站点地址须使用 HTTPS；HTTP 仅限本机地址（`localhost`、`127.0.0.1`、`[::1]`）。
@@ -136,6 +156,16 @@ Command Code CLI 与桌面版共用同一个数据目录（`%USERPROFILE%\.comma
 ### 智谱 GLM 与 Z.ai GLM
 
 填写 GLM Coding Plan 的 API 密钥。显示 5 小时与每周额度，以及工具调用次数；积分制套餐显示已用积分与总积分。不返回额度的团队套餐暂不支持。
+
+### Xiaomi MiMo API
+
+填写在小米 MiMo 开放平台（platform.xiaomimimo.com）创建的按量计费 API 密钥（`sk-` 开头）。显示账户余额、充值余额、赠送余额（有冻结金额时也显示），以及本月扣费。本月按 UTC 自然月计算。可以设置目标余额。
+
+Xiaomi MiMo 桌面版会员不提供 API 密钥，它的额度请使用"Xiaomi MiMo 桌面订阅"。
+
+### Xiaomi MiMo Token Plan
+
+填写 Token Plan 页面上的专属 API 密钥（`tp-` 或 `ttp-` 开头）。显示套餐名称（例如 Lite）与 Credits 额度的已用量，以及当前周期的结束时间。BrimDeck 依次在中国、新加坡、欧洲集群查询，直到找到密钥所属的集群。Token Plan 额度由使用这个套餐的所有工具共用。
 
 ### DeepSeek
 

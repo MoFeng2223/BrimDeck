@@ -23,7 +23,11 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | Command Code | ✓ | ✓ | Sign in to Command Code (CLI or desktop app) on this PC |
 | WorkBuddy | ✓ | ✓ | Quota: sign in on the WorkBuddy website in the browser from settings. Usage only needs the WorkBuddy China edition desktop app to be used on this PC |
 | WorkBuddy AI | ✓ | ✓ | Quota: sign in on the WorkBuddy AI website in the browser from settings. Usage only needs the WorkBuddy AI desktop app to be used on this PC |
+| Xiaomi MiMo Desktop subscription | ✓ | ✓ | Quota: sign in to a Xiaomi account in the browser from settings. Usage only needs MiMo Code CLI or the Xiaomi MiMo desktop app to be used on this PC |
+| Xiaomi MiMo | ✓ | | Link an Open Platform API key or Token Plan in the Xiaomi MiMo desktop app or MiMo Code CLI |
 | Zhipu GLM, Z.ai GLM | ✓ | | Enter an API key in settings |
+| Xiaomi MiMo API | ✓ | | Enter a Xiaomi MiMo Open Platform pay-as-you-go API key in settings |
+| Xiaomi MiMo Token Plan | ✓ | | Enter a Xiaomi MiMo Token Plan key in settings |
 | DeepSeek | ✓ | | Enter an API key in settings |
 | Kimi Code API | ✓ | | Enter a Kimi Code API key in settings |
 | OpenCode Go | ✓ | | Enter an OpenCode Console API key in settings |
@@ -123,9 +127,25 @@ Supports the WorkBuddy China edition (www.workbuddy.cn). The WorkBuddy desktop a
 - WorkBuddy plan credits can be used only in WorkBuddy and CodeBuddy; there is no API key that spends them in other tools.
 - **International edition**: the WorkBuddy international edition (www.workbuddy.ai, desktop app WorkBuddy AI) has accounts of its own; choose WorkBuddy AI as the quota source and usage app, and it is signed in to and shown apart from the China edition. It is read the same way, with session records from `%USERPROFILE%\.workbuddy-ai\projects`, and its sign-in is sent only to www.workbuddy.ai. Credits are sorted as the WorkBuddy AI client sorts them; trial credits, for example, count as reward credits there. Its default color is the China edition's.
 
+## Xiaomi MiMo Desktop subscription
+
+MiMo Code CLI and the Xiaomi MiMo desktop app share one database (`%USERPROFILE%\.local\share\mimocode\mimocode.db`), so the conversations of both are counted together.
+
+- **Quota**: shows the share used and the reset time of the weekly allowance of the Xiaomi MiMo desktop membership, with the membership tier (Starter, Plus, Pro or Ultra) beside the name. The desktop membership and Token Plan are separate subscriptions; Token Plan is not shown here.
+- **Sign-in**: the desktop membership has no API key, so BrimDeck signs in to a Xiaomi account of its own. Expand the Xiaomi MiMo Desktop subscription row in settings and click "Sign in": BrimDeck opens Xiaomi's own sign-in page in a separate new window of the default browser (Edge when the default browser is not a Chromium browser such as Chrome or Edge), where a password, a text message, WeChat, Alipay and the other ways Xiaomi offers all work, within 10 minutes. BrimDeck then closes that window and keeps only what reading the quota needs, encrypted on this PC; the browser you normally use and its sign-ins are not touched. An expired sign-in is renewed automatically; when renewing fails, the status shows "Sign-in expired" and signing in again fixes it. "Sign out" deletes what is kept on this PC.
+- **Tokens and cost**: the input, cache read, cache write and output tokens of each model reply in the MiMo database on this PC. Desktop membership requests are recorded at 0 and estimated at public model prices; requests made with an Open Platform key use the amount MiMo recorded.
+
+## Xiaomi MiMo
+
+Reads the Open Platform API key or Token Plan linked in the Xiaomi MiMo desktop app and MiMo Code CLI (`auth.json` beside the database); nothing needs to be entered in BrimDeck.
+
+- A linked Token Plan shows the plan name and its Credits quota; a linked pay-as-you-go API key shows the account balance, the topped-up and granted balances and this month's charges. With both linked, one column shows them together.
+- The file is read again on every refresh. Linking in the desktop app and signing in to the CLI both rewrite it: after signing in to the CLI again, for example, the Token Plan the desktop app linked is gone from the file and is no longer shown here.
+- Usage comes from Xiaomi MiMo's local records.
+
 ## Sources entered by hand
 
-Choose Zhipu GLM, Z.ai GLM, DeepSeek, Kimi Code API, OpenCode Go, Command Code API, OpenRouter, New API, Sub2API or Custom as the quota source, and the row expands so you can fill in what it needs.
+Choose Zhipu GLM, Z.ai GLM, Xiaomi MiMo API, Xiaomi MiMo Token Plan, DeepSeek, Kimi Code API, OpenCode Go, Command Code API, OpenRouter, New API, Sub2API or Custom as the quota source, and the row expands so you can fill in what it needs.
 
 - **Key**: stored on this PC, encrypted by Windows, and never written to the settings file. It is deleted when you remove the column or change its quota source.
 - **Site address**: the home page address is enough. A trailing `/v1`, or the path of a console page you paste, is removed automatically. Requests carry the API key, so the address must use HTTPS; HTTP is only for this PC (`localhost`, `127.0.0.1`, `[::1]`).
@@ -136,6 +156,16 @@ Choose Zhipu GLM, Z.ai GLM, DeepSeek, Kimi Code API, OpenCode Go, Command Code A
 ### Zhipu GLM and Z.ai GLM
 
 Enter the API key of your GLM Coding Plan. Shows the 5-hour and weekly limits and tool call counts; credit-based plans show credits used and the total. Team plans whose API returns no limits are not supported yet.
+
+### Xiaomi MiMo API
+
+Enter a pay-as-you-go API key (starting with `sk-`) created on the Xiaomi MiMo Open Platform (platform.xiaomimimo.com). Shows the account balance, the topped-up and granted balances (and a frozen amount when there is one), and this month's charges. The month is the calendar month in UTC. A target balance can be set.
+
+The Xiaomi MiMo desktop membership has no API key; use "Xiaomi MiMo Desktop subscription" for its quota.
+
+### Xiaomi MiMo Token Plan
+
+Enter the API key shown on the Token Plan page (starting with `tp-` or `ttp-`). Shows the plan name (Lite, for example), the Credits used of the plan's quota, and when the current period ends. BrimDeck asks the China, Singapore and Europe clusters in turn until the key's own answers. The Token Plan quota is shared by every tool that uses the plan.
 
 ### DeepSeek
 

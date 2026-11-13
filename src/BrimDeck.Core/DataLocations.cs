@@ -30,6 +30,9 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
     // (OPENCODE_DB, otherwise opencode.db there); its CLI and desktop app share both.
     public string OpenCodeData { get; init; } = "";
     public string OpenCodeDatabase { get; init; } = "";
+    // MiMo Code, a fork of OpenCode, keeps its database in $XDG_DATA_HOME\mimocode, otherwise %USERPROFILE%\.local\share\mimocode
+    // (mimocode.db); Xiaomi MiMo Desktop runs MiMo Code as its engine and writes the same database.
+    public string MiMoDatabase { get; init; } = "";
 
     public static DataLocations Detect() => (Resolve(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -47,7 +50,7 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
     public DataLocations WithOpenCode(string home, string? xdgData, string? database)
     {
         var data = OpenCodeUsage.DataFolder(home, xdgData);
-        return this with { OpenCodeData = data, OpenCodeDatabase = OpenCodeUsage.Database(data, database) };
+        return this with { OpenCodeData = data, OpenCodeDatabase = OpenCodeUsage.Database(data, database), MiMoDatabase = MiMoUsage.Database(home, xdgData) };
     }
 
     public static DataLocations Resolve(string home, string roaming, string local, string? claudeOverride, string? codexOverride, string? zcodeOverride = null, string? dshOverride = null, string? kimiOverride = null, string? piOverride = null, string? piSessionOverride = null, string? codeAgentOverride = null) => new(
@@ -55,7 +58,7 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
         ConfigDirectory(codexOverride, Path.Combine(home, ".codex")),
         Path.Combine(roaming, "Cursor", "User", "globalStorage", "state.vscdb"), roaming, local)
     { ZCodeHome = ConfigDirectory(zcodeOverride, Path.Combine(home, ".zcode")), DshHome = ConfigDirectory(dshOverride, Path.Combine(home, ".dsh")), KimiHome = ConfigDirectory(kimiOverride, Path.Combine(home, ".kimi-code")), AntigravityConversations = AntigravityUsage.Folders(home),
-      PiSessions = PiSessionDirectory(home, piOverride, piSessionOverride), CodeAgentHome = ConfigDirectory(codeAgentOverride, Path.Combine(home, ".cac")), CommandCodeHome = Path.Combine(home, ".commandcode"), WorkBuddyHome = Path.Combine(home, ".workbuddy"), WorkBuddyAiHome = Path.Combine(home, ".workbuddy-ai"), OpenCodeData = OpenCodeUsage.DataFolder(home, null), OpenCodeDatabase = OpenCodeUsage.Database(OpenCodeUsage.DataFolder(home, null), null) };
+      PiSessions = PiSessionDirectory(home, piOverride, piSessionOverride), CodeAgentHome = ConfigDirectory(codeAgentOverride, Path.Combine(home, ".cac")), CommandCodeHome = Path.Combine(home, ".commandcode"), WorkBuddyHome = Path.Combine(home, ".workbuddy"), WorkBuddyAiHome = Path.Combine(home, ".workbuddy-ai"), OpenCodeData = OpenCodeUsage.DataFolder(home, null), OpenCodeDatabase = OpenCodeUsage.Database(OpenCodeUsage.DataFolder(home, null), null), MiMoDatabase = MiMoUsage.Database(home, null) };
 
     private static string ConfigDirectory(string? value, string fallback) =>
         !string.IsNullOrWhiteSpace(value) && Path.IsPathFullyQualified(value) ? Path.GetFullPath(value) : fallback;
