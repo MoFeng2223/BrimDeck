@@ -237,6 +237,13 @@ public sealed partial class SettingsWindow
             text.Add(Toggle(Loc.T("纯音乐时显示歌名", "Show the title for instrumentals"), S.MusicInstrumentalTitle, v => Change(s => s.MusicInstrumentalTitle = v),
                 help: Loc.T("歌曲本身没有可靠的纯音乐标识，只能根据歌词内容推断，因此可能判断错误。",
                     "Songs carry no reliable instrumental mark, so this is inferred from the lyrics and can be wrong.")));
+        // The two length choices are separate; each shows with its own middle text.
+        if (S.MusicText == CompactMusicText.Lyrics)
+            text.Add(Toggle(Loc.T("歌词区域随歌词长度变化", "Lyric area follows the line length"), S.MusicLyricAutoWidth, v => Change(s => s.MusicLyricAutoWidth = v),
+                help: Loc.T("需要为刘海或胶囊开启“自适应宽度”。", "Needs \"Fit width to content\" for the notch or capsule.")));
+        else if (S.MusicText == CompactMusicText.Title)
+            text.Add(Toggle(Loc.T("歌名区域随歌名长度变化", "Title area follows the title length"), S.MusicTitleAutoWidth, v => Change(s => s.MusicTitleAutoWidth = v),
+                help: Loc.T("需要为刘海或胶囊开启“自适应宽度”。", "Needs \"Fit width to content\" for the notch or capsule.")));
         Group([.. text,
             MusicChoice(Loc.T("暂停时隐藏", "Hide while paused"), S.MusicPausedHide, new[] { (PausedMusicHide.None, Loc.T("不隐藏", "Nothing")), (PausedMusicHide.Text, Loc.T("文字", "Text")),
                 (PausedMusicHide.Cover, Loc.T("封面", "Cover")), (PausedMusicHide.Both, Loc.T("全部", "Both")) }, v => Change(s => s.MusicPausedHide = v),

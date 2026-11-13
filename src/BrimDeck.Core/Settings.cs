@@ -488,6 +488,12 @@ public sealed class DeckSettings
     public bool MusicTrackNotice { get; set; } = true;
     // A song taken as instrumental (Lyrics.Instrumental) shows its title in the collapsed lyric's place instead of "♪".
     public bool MusicInstrumentalTitle { get; set; }
+    // With auto width (CompactAutoWidth), the collapsed middle text's room follows the length of what it shows, within
+    // CompactMusicLayout.FollowSlot's limits: MusicLyricAutoWidth while the middle text is the lyric (the notch or capsule then
+    // changes width from line to line), MusicTitleAutoWidth while it is the title (from song to song). The two are separate
+    // choices; only the one for the chosen middle text applies. Off, the text keeps a fixed slot (TextSlot).
+    public bool MusicLyricAutoWidth { get; set; }
+    public bool MusicTitleAutoWidth { get; set; }
     // The surface narrows without what is hidden; a number not listed shows everything.
     public PausedMusicHide MusicPausedHide { get => _musicPausedHide; set => _musicPausedHide = Enum.IsDefined(value) ? value : PausedMusicHide.None; }
     // The album cover at the left of the collapsed row and on the music page; some players give no cover, only a placeholder.
