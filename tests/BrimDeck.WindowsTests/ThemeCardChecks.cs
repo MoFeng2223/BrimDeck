@@ -34,8 +34,10 @@ internal static class ThemeCardChecks
             check($"theme card {id}: the open panel's corner shows the theme's primary text color", bars.Contains(ColorOf(palette, "textPrimary")));
             check($"theme card {id}: the corner shows the secondary text color", bars.Contains(ColorOf(palette, "textSecondary")));
             check($"theme card {id}: the corner shows the accent color", bars.Contains(ColorOf(palette, "accent")));
-            var surfaces = Walk(card).OfType<IslandBorder>().Count(b => b.Background is SolidColorBrush s && s.Color == ColorOf(palette, "surface"));
-            check($"theme card {id}: the corner's panel has the theme's surface color beside the capsule's", surfaces >= 2);
+            // The corner's panel is the one island border that holds the bars; the capsule and its shadow shape have their own surface.
+            var corners = Walk(card).OfType<IslandBorder>().Where(b => b.Child is Grid g && g.Children.OfType<Border>().Any()).ToList();
+            check($"theme card {id}: the card has exactly one open-panel corner", corners.Count == 1);
+            check($"theme card {id}: the corner's own panel has the theme's surface color", corners.Count == 1 && corners[0].Background is SolidColorBrush s && s.Color == ColorOf(palette, "surface"));
         }
         // Themes that differ show different corners, which is what tells apart capsules that look alike.
         var dark = PanelThemes.Resolve(PanelThemes.BuiltIn(PanelThemes.Dark)!);
