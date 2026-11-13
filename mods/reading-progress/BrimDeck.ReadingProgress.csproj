@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <ModuleId>sample-reading-progress</ModuleId>
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
   </PropertyGroup>
   <ItemGroup Condition="'$(BrimDeckSdk)' == ''">
     <ProjectReference Include="../../src/BrimDeck.Modules.Abstractions/BrimDeck.Modules.Abstractions.csproj" />

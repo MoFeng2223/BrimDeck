@@ -74,10 +74,20 @@ internal sealed class ProgressPartView : ReadingView, IModuleCompactWidth
             if (completed) arc.Stroke = ink;
             else arc.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "PanelPrimary");
         }
+        double stroke = Math.Max(.65, .9 * size / 20);
+        var glyph = Geometry.Parse(ReadingModule.BookGlyph).Clone();
+        double fit = Math.Max(.1, size * .48 - stroke) / Math.Max(glyph.Bounds.Width, glyph.Bounds.Height);
+        var placement = new Matrix(fit, 0, 0, fit, 0, 0);
+        glyph.Transform = new MatrixTransform(placement);
+        // Center the actual strokes, not the Path's layout box (its origin and unused space are asymmetric).
+        Rect strokes = glyph.GetRenderBounds(new Pen(Brushes.Black, stroke) { LineJoin = PenLineJoin.Round });
+        placement.OffsetX = size / 2 - (strokes.Left + strokes.Width / 2);
+        placement.OffsetY = size / 2 - (strokes.Top + strokes.Height / 2);
+        glyph.Transform = new MatrixTransform(placement); glyph.Freeze();
         var book = new System.Windows.Shapes.Path
         {
-            Data = Geometry.Parse(ReadingModule.BookGlyph), Width = size * .55, Height = size * .55,
-            Stretch = Stretch.Uniform, StrokeThickness = Math.Max(.75, 1.1 * size / 20),
+            Data = glyph, Width = size, Height = size,
+            Stretch = Stretch.None, StrokeThickness = stroke,
             StrokeLineJoin = PenLineJoin.Round, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
         };
         if (completed) book.Stroke = ink;
