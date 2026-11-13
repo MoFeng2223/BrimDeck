@@ -23,12 +23,16 @@ internal static class PanelKeyboardTests
                 var keys = new PanelKeyboard(window, () => capturable);
                 string setting = capturable ? "capturable panel" : "default panel";
                 check($"{setting}: before the hotkey the window is {(capturable ? "" : "not ")}activatable", NoActivateSet(handle) == !capturable);
+                var before = PasteInput.Foreground;
                 check($"{setting}: Take reports the keyboard taken", keys.Take() && keys.Holding);
+                check($"{setting}: a paste from the panel goes to the window that had the keyboard before it (or nowhere)",
+                    keys.Previous == (before == handle ? IntPtr.Zero : before));
                 check($"{setting}: holding the keyboard, the window can be active", !NoActivateSet(handle));
                 check($"{setting}: holding the keyboard, a foreground panel does not read as a change of application", WindowsHost.KeyboardPanel == handle);
                 keys.Release(giveBack: false);
                 check($"{setting}: after Release the window is back to its style ({(capturable ? "activatable" : "never activates")})", NoActivateSet(handle) == !capturable);
                 check($"{setting}: after Release the keyboard is not held and the panel no longer counts as the user's foreground", !keys.Holding && WindowsHost.KeyboardPanel == IntPtr.Zero);
+                check($"{setting}: after Release no paste target is kept", keys.Previous == IntPtr.Zero);
                 keys.Release(giveBack: true);
                 check($"{setting}: a second Release changes nothing", NoActivateSet(handle) == !capturable);
             }

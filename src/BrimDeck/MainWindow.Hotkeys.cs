@@ -55,6 +55,8 @@ public partial class MainWindow
     private void TakeKeyboard()
     {
         if (!PanelKeys.Take()) return;
+        // A paste from the panel goes to the window that had the keyboard before it, not to one typed in earlier or to none.
+        _app.Shelf.TypingTarget = PanelKeys.Previous;
         Dispatcher.BeginInvoke(() => { if (PanelKeys.Holding && _expanded) FocusPanelStart(); }, DispatcherPriority.Input);
     }
 

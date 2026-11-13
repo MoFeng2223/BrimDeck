@@ -20,6 +20,10 @@ internal sealed class PanelKeyboard
     // True from Take until the keyboard is given up, by the panel closing or by the user going to another window.
     public bool Holding { get; private set; }
 
+    // The window that had the keyboard before the panel took it (zero when there was none): where a paste from the panel goes.
+    // A window of this process is no target; Paste leaves those out.
+    public IntPtr Previous => Holding ? _previous : IntPtr.Zero;
+
     public bool Take()
     {
         var own = new WindowInteropHelper(_window).Handle;

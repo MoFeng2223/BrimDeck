@@ -393,6 +393,8 @@ public sealed class WindowsHost : IDisposable
     private ScreenContext Detect(IntPtr monitor)
     {
         var foreground = GetForegroundWindow();
+        // The panel holding the keyboard is in front: nothing has changed, and the background app read last time is kept.
+        if (foreground != IntPtr.Zero && foreground == KeyboardPanel && IsWindowVisible(foreground) && !IsIconic(foreground)) return Current;
         _backgroundName = ""; _backgroundPath = ""; _backgroundKind = ScreenContext.Desktop;
         // Nothing but the desktop: a full-screen window elsewhere on this monitor still owns the screen, so the answer is
         // BackgroundFullscreen rather than Desktop. Looked up once, only where it can matter, and only while the settings ask
@@ -416,7 +418,6 @@ public sealed class WindowsHost : IDisposable
             return background.Value;
         }
         if (foreground == IntPtr.Zero || !IsWindowVisible(foreground) || IsIconic(foreground)) { _appName = ""; _appPath = ""; return Desktop(); }
-        if (foreground == KeyboardPanel) return Current;
         GetWindowThreadProcessId(foreground, out var pid);
         if (pid == Environment.ProcessId) { _appName = ""; _appPath = ""; return Desktop(); }
         if (MonitorFromWindow(foreground, 2) != monitor) { _appName = ""; _appPath = ""; return Desktop(); }
