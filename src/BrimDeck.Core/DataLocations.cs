@@ -13,6 +13,9 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
     // CodeAgent CLI resolves its data directory as CODEAGENT3_CONFIG_DIR, otherwise %USERPROFILE%\.cac; its session records
     // use the Claude Code format under projects.
     public string CodeAgentHome { get; init; } = "";
+    // Command Code keeps its sign-in (auth.json) and session records (projects) in %USERPROFILE%\.commandcode, shared by its CLI and
+    // desktop app; neither offers a variable that moves it.
+    public string CommandCodeHome { get; init; } = "";
     // The environment variables that change which Kimi Code service is used (KIMI_CODE_BASE_URL, KIMI_CODE_OAUTH_HOST and
     // the others in KimiEnvironment); all null when unset.
     public KimiEnvironment KimiEnvironment { get; init; } = new();
@@ -47,7 +50,7 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
         ConfigDirectory(codexOverride, Path.Combine(home, ".codex")),
         Path.Combine(roaming, "Cursor", "User", "globalStorage", "state.vscdb"), roaming, local)
     { ZCodeHome = ConfigDirectory(zcodeOverride, Path.Combine(home, ".zcode")), DshHome = ConfigDirectory(dshOverride, Path.Combine(home, ".dsh")), KimiHome = ConfigDirectory(kimiOverride, Path.Combine(home, ".kimi-code")), AntigravityConversations = AntigravityUsage.Folders(home),
-      PiSessions = PiSessionDirectory(home, piOverride, piSessionOverride), CodeAgentHome = ConfigDirectory(codeAgentOverride, Path.Combine(home, ".cac")), OpenCodeData = OpenCodeUsage.DataFolder(home, null), OpenCodeDatabase = OpenCodeUsage.Database(OpenCodeUsage.DataFolder(home, null), null) };
+      PiSessions = PiSessionDirectory(home, piOverride, piSessionOverride), CodeAgentHome = ConfigDirectory(codeAgentOverride, Path.Combine(home, ".cac")), CommandCodeHome = Path.Combine(home, ".commandcode"), OpenCodeData = OpenCodeUsage.DataFolder(home, null), OpenCodeDatabase = OpenCodeUsage.Database(OpenCodeUsage.DataFolder(home, null), null) };
 
     private static string ConfigDirectory(string? value, string fallback) =>
         !string.IsNullOrWhiteSpace(value) && Path.IsPathFullyQualified(value) ? Path.GetFullPath(value) : fallback;

@@ -20,10 +20,12 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | Kimi Code | ✓ | ✓ | Sign in to Kimi Code (CLI, desktop app or VS Code extension) on this PC |
 | Pi | | ✓ | Use Pi Coding Agent on this PC (reads session token and cost statistics) |
 | OpenCode | ✓ | ✓ | Quota: sign in to OpenCode Console in OpenCode (CLI or desktop app) on this PC, with an OpenCode Go plan on the workspace. Usage only needs OpenCode to be used on this PC |
+| Command Code | ✓ | ✓ | Sign in to Command Code (CLI or desktop app) on this PC |
 | Zhipu GLM, Z.ai GLM | ✓ | | Enter an API key in settings |
 | DeepSeek | ✓ | | Enter an API key in settings |
 | Kimi Code API | ✓ | | Enter a Kimi Code API key in settings |
 | OpenCode Go | ✓ | | Enter an OpenCode Console API key in settings |
+| Command Code API | ✓ | | Enter a Command Code API key in settings |
 | OpenRouter | ✓ | | Enter an OpenRouter API key in settings |
 | New API, Sub2API relay sites | ✓ | | Enter the site address and key in settings |
 | Custom | ✓ | | Write a short JavaScript script |
@@ -32,7 +34,7 @@ Sources you enter by hand and Grok Bot have no local usage records; choose anoth
 
 ## Cost estimates
 
-When a record carries its own amount (Cursor and OpenCode, for example), that amount is used. Other records are costed at the prices in the OpenRouter model list.
+When a record carries its own amount (Cursor, OpenCode and Command Code, for example), that amount is used. Other records are costed at the prices in the OpenRouter model list.
 
 A price in that list usually comes from the cheapest provider and can differ from the model maker's list price. For example, GLM-5.3 is listed at 0.07 and 1.4 USD per million input and output tokens, while Z.AI charges 1.4 and 4.4. So for each model your records use, BrimDeck looks up the model maker's own endpoint on OpenRouter and uses its prices instead; a model whose maker has no endpoint there keeps the list price. Each model's endpoint prices are looked up once a day and saved on this PC; when a lookup fails, the prices saved before are used. Prices added by hand take precedence.
 
@@ -101,9 +103,17 @@ The OpenCode CLI and desktop app share one data folder (`%USERPROFILE%\.local\sh
 - **Tokens and cost**: read from every model request in the OpenCode database on this PC, covering the CLI and the desktop app, and records left by OpenCode 1.x. The cost is the amount OpenCode recorded, at OpenCode's list prices: free models cost 0, and OpenCode Go models are costed at list price too, showing what the request is worth rather than what was taken from the account balance. Failed requests have no tokens and are not counted. The request OpenCode makes to title a session has no record of its own and is not counted.
 - The pay-as-you-go balance of OpenCode Console is not shown yet.
 
+## Command Code
+
+The Command Code CLI and desktop app share one data folder (`%USERPROFILE%\.commandcode`) and keep the sign-in and session records there, so signing in to either is enough.
+
+- **Quota**: shows the plan quota of the account signed in to Command Code: the share used and reset time of the 5-hour, weekly and monthly limits. The monthly limit covers the current billing period and resets when it ends. Hovering shows the amount used and the cap in US dollars. Purchased or granted extra credits are not limited by these windows and are shown as well when there are any. The plan name (Go or Pro, for example) is shown next to the name. When the 5-hour or weekly limit is used up, the status says so.
+- **Sign-in**: uses the sign-in key Command Code saved (`auth.json`). The key does not expire and is never renewed. When Command Code refuses it (after signing out or deleting the key, for example), the status shows "Sign-in expired"; signing in to Command Code again fixes it.
+- **Tokens and cost**: read from Command Code's session records on this PC (the `projects` folder), covering the CLI and the desktop app. The cost is the amount Command Code recorded, at Command Code's list prices. A message that appears in several sessions (a forked session, for example) is counted once. Requests Command Code does not write to the session records, such as the ones that name a session, are not counted, so the figures can be slightly lower than the usage of the Command Code account.
+
 ## Sources entered by hand
 
-Choose Zhipu GLM, Z.ai GLM, DeepSeek, Kimi Code API, OpenCode Go, OpenRouter, New API, Sub2API or Custom as the quota source, and the row expands so you can fill in what it needs.
+Choose Zhipu GLM, Z.ai GLM, DeepSeek, Kimi Code API, OpenCode Go, Command Code API, OpenRouter, New API, Sub2API or Custom as the quota source, and the row expands so you can fill in what it needs.
 
 - **Key**: stored on this PC, encrypted by Windows, and never written to the settings file. It is deleted when you remove the column or change its quota source.
 - **Site address**: the home page address is enough. A trailing `/v1`, or the path of a console page you paste, is removed automatically. Requests carry the API key, so the address must use HTTPS; HTTP is only for this PC (`localhost`, `127.0.0.1`, `[::1]`).
@@ -126,6 +136,10 @@ Enter an API key created in the Kimi Code console (starting with `sk-kimi-`); Ki
 ### OpenCode Go
 
 Enter an API key created in OpenCode Console (starting with `oc_sk_`); OpenCode does not need to be installed or signed in on this PC. Shows the OpenCode Go allowance of the key's workspace, the same as the automatic OpenCode source: the 5-hour, weekly and monthly limits. When the workspace has no OpenCode Go plan, the status says so. No token usage is counted.
+
+### Command Code API
+
+Enter a key created on the API keys page of Command Code Studio (https://commandcode.ai/settings/keys); Command Code does not need to be installed or signed in on this PC. Shows the same quota as the automatic Command Code source: the 5-hour, weekly and monthly limits, and extra credits; the plan name is shown next to the name. The same key also works in other coding tools through Command Code's Provider API, and those requests use the same account's quota. No token usage is counted.
 
 ### OpenRouter
 

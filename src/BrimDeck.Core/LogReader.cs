@@ -143,6 +143,28 @@ public sealed class LogReader
             input, read, write - hour, hour, output, cost));
     }
 
+    // Command Code writes each message as one line {"type":"message","timestamp","message":{"meta":{"messageId"}},"model","usage"}, the
+    // usage only on the model's replies: {inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cacheWriteTokens1h, costUsd}.
+    // inputTokens includes the cache reads and writes; Command Code charges only the rest as uncached input, and costUsd is its own
+    // estimate at its list prices. The message id is kept by a resumed or forked session, so a copied message is counted once.
+    private static void ParseCommandCode(JsonElement obj, DateTimeOffset? time, CacheItem item)
+    {
+        if (obj.Get("type").Text() != "message" || time is null || time < item.Cutoff) return;
+        var usage = obj.Get("usage");
+        if (usage.ValueKind != JsonValueKind.Object) return;
+        long input = usage.Get("inputTokens").Count(), read = usage.Get("cacheReadTokens").Count(), write = usage.Get("cacheWriteTokens").Count();
+        long hour = Math.Min(write, usage.Get("cacheWriteTokens1h").Count());
+        decimal? cost = null;
+        var reported = usage.Get("costUsd");
+        if (reported.ValueKind == JsonValueKind.Number && reported.TryGetDecimal(out var value) && value >= 0) cost = value;
+        var key = obj.Get("message").Get("meta").Get("messageId").Text();
+        if (key.Length == 0) key = obj.Get("id").Text();
+        if (key.Length == 0) key = $"{time:O}:{usage.GetRawText()}";
+        var model = obj.Get("model").Text();
+        Add(item, new("cmd:" + key, time.Value, string.Intern(model.Length == 0 ? "unknown" : model), Math.Max(0, input - read - write), read,
+            write - hour, hour, usage.Get("outputTokens").Count(), cost));
+    }
+
     // Claude writes one line per content block of a message, each with the message's usage so far: a repeat of the entry just added
     // replaces it when at least as complete, so the cache holds each message once. Repeats across files are merged in Read.
     private static void Add(CacheItem item, TokenEntry entry)
@@ -164,6 +186,10 @@ public sealed class LogReader
             if (id == ProviderId.Pi)
             {
                 ParsePi(obj, time, item);
+            }
+            else if (id == ProviderId.CommandCode)
+            {
+                ParseCommandCode(obj, time, item);
             }
             else if (id == ProviderId.Codex)
             {

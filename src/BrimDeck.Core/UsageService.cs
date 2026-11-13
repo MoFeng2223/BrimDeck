@@ -253,8 +253,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         var now = _clock();
         var start = new DateTimeOffset(usageStart?.Date ?? now.LocalDateTime.Date.AddDays(-29));
         // The reader owns a cache and is accessed serially before the first asynchronous request.
-        var snapshot = id is ProviderId.Claude or ProviderId.Codex or ProviderId.Pi or ProviderId.CodeAgent
-            ? _logs.Read(id, id switch { ProviderId.Pi => _locations.PiSessions, ProviderId.Codex => _locations.CodexHome, ProviderId.CodeAgent => _locations.CodeAgentHome, _ => _locations.ClaudeHome },
+        var snapshot = id is ProviderId.Claude or ProviderId.Codex or ProviderId.Pi or ProviderId.CodeAgent or ProviderId.CommandCode
+            ? _logs.Read(id, id switch { ProviderId.Pi => _locations.PiSessions, ProviderId.Codex => _locations.CodexHome, ProviderId.CodeAgent => _locations.CodeAgentHome,
+                ProviderId.CommandCode => _locations.CommandCodeHome, _ => _locations.ClaudeHome },
                 now, start.LocalDateTime) : new ProviderSnapshot(id) { UsageStart = start.LocalDateTime.Date };
         var claudeAccount = id == ProviderId.Claude ? ReadClaudeProfile(snapshot) : ("", "");
         var wslRead = _includeWsl && id is ProviderId.Claude or ProviderId.Codex ? StartWsl(snapshot, now, start.LocalDateTime) : null;
@@ -269,6 +270,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             {
                 case ProviderId.CodeAgent:
                     await ReadCodeAgentAsync(snapshot, now, ct);
+                    break;
+                case ProviderId.CommandCode:
+                    await ReadCommandCodeAsync(snapshot, now, ct);
                     break;
                 case ProviderId.Pi:
                     snapshot.UsageNote += Loc.T(" · 费用取自 Pi 记录，非订阅账单", " · Costs recorded by Pi, not subscription charges");
@@ -1178,6 +1182,37 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
 
     // OpenCode's own sign-in to OpenCode Console reads the Go allowance of its workspace (OpenCodeUsage). The token is used as
     // it is and never renewed; an expired one is not sent. A workspace without Go is refused with HTTP 403.
+    // Command Code's plan quota (CommandCodeUsage), read with the key Command Code is signed in with. The key does not expire; a
+    // refused one means Command Code was signed out or the key was deleted, which only signing in again in Command Code fixes.
+    private async Task ReadCommandCodeAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
+        if (snapshot.UsageAvailable) snapshot.UsageNote += Loc.T(" · 费用取自 Command Code 记录，按其标价计算", " · Costs recorded by Command Code at its list prices");
+        var key = CommandCodeUsage.ReadKey(_locations.CommandCodeHome);
+        if (key is null) { snapshot.StatusLabel = Loc.T("未连接", "Not connected"); snapshot.Status = Loc.T("请先登录 Command Code", "Sign in to Command Code first"); return; }
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(TimeSpan.FromSeconds(20));
+        async Task<(int Status, string Body)> Get(string path)
+        {
+            using var request = Bearer(HttpMethod.Get, CommandCodeUsage.Api + path, key);
+            using var response = await _http.SendAsync(request, deadline.Token);
+            if (response.StatusCode == HttpStatusCode.TooManyRequests) throw RateLimitedException.From(response);
+            return ((int)response.StatusCode, await response.Content.ReadAsStringAsync(deadline.Token));
+        }
+        CommandCodeUsage.Reading reading;
+        try { reading = await CommandCodeUsage.ReadAsync(Get); }
+        catch (CommandCodeUsage.RejectedException)
+        {
+            snapshot.StatusLabel = Loc.T("登录已失效", "Sign-in expired");
+            snapshot.Status = Loc.T("Command Code 拒绝了本机保存的登录，请在 Command Code 中重新登录", "Command Code refused the sign-in saved on this PC. Sign in to Command Code again.");
+            return;
+        }
+        snapshot.Metrics = reading.Metrics;
+        snapshot.Plan = reading.Plan;
+        snapshot.PlanSource = Loc.T("Command Code 账户", "Command Code account");
+        snapshot.Scope = "account";
+        Connected(snapshot, Loc.T("Command Code 账户", "Command Code account"), now);
+        if (reading.Warnings.Count > 0) snapshot.Status = string.Join(Loc.T("；", "; "), reading.Warnings);
+    }
+
     private async Task ReadOpenCodeAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
     {
         var credential = OpenCodeUsage.ReadCredential(desktop, _locations.OpenCodeDatabase, _locations.OpenCodeData);

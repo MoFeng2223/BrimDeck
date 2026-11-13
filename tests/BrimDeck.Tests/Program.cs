@@ -15,6 +15,7 @@ try
 {
     await PiUsageTests.Run(root, Check);
     await CodeAgentUsageTests.Run(root, Check);
+    await CommandCodeUsageTests.Run(root, Check);
     MaasPricingTests.Run(root, Check);
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
