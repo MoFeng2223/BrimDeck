@@ -165,6 +165,46 @@ public sealed class LogReader
             write - hour, hour, usage.Get("outputTokens").Count(), cost));
     }
 
+    // WorkBuddy writes each model reply as one line {"type":"message","role":"assistant","timestamp":<ms>,"providerData":{"messageId",
+    // "stepSeq","model","rawUsage","usage"}}. rawUsage is the gateway's OpenAI-style usage: prompt_tokens includes the cache reads
+    // (prompt_tokens_details.cached_tokens, also given as prompt_cache_hit_tokens) and writes (cache_creation_input_tokens), and
+    // completion_tokens includes the reasoning. providerData.usage is WorkBuddy's own summary of the same counts, used when rawUsage is
+    // missing. The credits WorkBuddy records are not dollars, so the cost is left to the model price table.
+    private static void ParseWorkBuddy(JsonElement obj, DateTimeOffset? time, CacheItem item)
+    {
+        if (obj.Get("type").Text() != "message" || obj.Get("role").Text() != "assistant" || time is null || time < item.Cutoff) return;
+        var data = obj.Get("providerData");
+        var raw = data.Get("rawUsage");
+        long input, read, write, output;
+        if (raw.ValueKind == JsonValueKind.Object)
+        {
+            input = raw.Get("prompt_tokens").Count();
+            read = Math.Max(raw.Get("prompt_tokens_details").Get("cached_tokens").Count(),
+                Math.Max(raw.Get("prompt_cache_hit_tokens").Count(), raw.Get("cache_read_input_tokens").Count()));
+            write = Math.Max(raw.Get("cache_creation_input_tokens").Count(), raw.Get("prompt_cache_write_tokens").Count());
+            output = raw.Get("completion_tokens").Count();
+        }
+        else
+        {
+            var usage = data.Get("usage");
+            if (usage.ValueKind != JsonValueKind.Object) return;
+            input = usage.Get("inputTokens").Count();
+            read = usage.Get("inputTokensDetails").Items().Select(detail => detail.Get("cached_tokens").Count()).DefaultIfEmpty().Max();
+            write = 0;
+            output = usage.Get("outputTokens").Count();
+        }
+        read = Math.Min(read, input);
+        write = Math.Min(write, input - read);
+        var key = data.Get("messageId").Text();
+        key = key.Length > 0 ? $"{key}:{data.Get("stepSeq").Number()}" : obj.Get("id").Text();
+        if (key.Length == 0) key = $"{time:O}:{input}:{read}:{write}:{output}";
+        var model = data.Get("model").Text();
+        // The name shown is the channel's ("hy4-free"); the price is looked up by the model's own name ("Hy4").
+        var priced = data.Get("requestModelName").Text().Trim();
+        Add(item, new("wb:" + key, time.Value, string.Intern(model.Length == 0 ? "unknown" : model), input - read - write, read, write, 0, output)
+            { PriceModel = priced.Length == 0 ? null : string.Intern(priced) });
+    }
+
     // Claude writes one line per content block of a message, each with the message's usage so far: a repeat of the entry just added
     // replaces it when at least as complete, so the cache holds each message once. Repeats across files are merged in Read.
     private static void Add(CacheItem item, TokenEntry entry)
@@ -190,6 +230,10 @@ public sealed class LogReader
             else if (id == ProviderId.CommandCode)
             {
                 ParseCommandCode(obj, time, item);
+            }
+            else if (id == ProviderId.WorkBuddy)
+            {
+                ParseWorkBuddy(obj, time, item);
             }
             else if (id == ProviderId.Codex)
             {

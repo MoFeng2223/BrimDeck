@@ -21,6 +21,7 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 | Pi | | ✓ | 在本机使用 Pi Coding Agent（读取会话 Token 与费用统计） |
 | OpenCode | ✓ | ✓ | 配额：在本机的 OpenCode（CLI 或桌面版）中登录 OpenCode Console，且工作区订阅了 OpenCode Go。用量统计只需在本机使用 OpenCode |
 | Command Code | ✓ | ✓ | 在本机登录 Command Code（CLI 或桌面版） |
+| WorkBuddy | ✓ | ✓ | 配额：在设置中通过浏览器登录 WorkBuddy 官网。用量统计只需在本机使用 WorkBuddy 国内版桌面应用 |
 | 智谱 GLM、Z.ai GLM | ✓ | | 在设置中填写 API 密钥 |
 | DeepSeek | ✓ | | 在设置中填写 API 密钥 |
 | Kimi Code API | ✓ | | 在设置中填写 Kimi Code API 密钥 |
@@ -110,6 +111,16 @@ Command Code CLI 与桌面版共用同一个数据目录（`%USERPROFILE%\.comma
 - **配额**：显示 Command Code 登录账户的套餐额度，包括 5 小时、每周与每月额度的已用比例和重置时间。每月额度按本账期计算，在账期结束时重置。悬停时显示已用金额与上限（美元）。购买或获赠的额外积分不受这些额度限制，有余额时另外显示。名称旁显示套餐名称（例如 Go、Pro）。用完 5 小时或每周额度时，状态中会提示。
 - **登录**：使用 Command Code 保存的登录密钥（`auth.json`）。该密钥没有有效期，不需要续期。Command Code 拒绝该密钥时（例如已退出登录或删除了密钥），状态显示“登录已失效”，在 Command Code 中重新登录即可。
 - **Token 用量与费用**：读取本机 Command Code 的会话记录（`projects` 目录），包含 CLI 与桌面版。费用使用 Command Code 记录的金额，即按 Command Code 标价计算的金额。模型明细中的单价取自 Command Code 在本机缓存的模型目录（`cache\model-catalog`），即 Command Code 计算这些金额所用的单价。同一条消息出现在多个会话中（例如分叉的会话）时只计一次。Command Code 为会话生成标题等不写入会话记录的请求不计入，因此统计可能略少于 Command Code 账户中的用量。
+
+## WorkBuddy
+
+支持 WorkBuddy 国内版（www.workbuddy.cn）。WorkBuddy 桌面版把自己的登录加密保存，BrimDeck 不读取它，而是通过 WorkBuddy 官网单独登录一次。
+
+- **配额**：显示 WorkBuddy 账户的积分余额，按套餐积分、套餐赠送积分、购买积分与奖励积分分别显示，没有的种类不显示。名称旁显示套餐名称（例如体验版）。时间与 WorkBuddy 客户端的显示方式一致：套餐积分与套餐赠送积分显示本周期结束后的刷新时间；购买积分与奖励积分不按周期刷新，显示尚未过期的包中最早的过期时间，已过期的包不计入。国内版 WorkBuddy 与 CodeBuddy 同一账号的积分共享，所以这里的余额也包含在 CodeBuddy 中的消耗。
+- **登录**：在设置中展开 WorkBuddy 行，点击“在浏览器中登录”，在打开的 WorkBuddy 官网页面登录并授权即可，需在 10 分钟内完成。BrimDeck 获得自己的登录凭据，加密保存在本机，只发往 www.workbuddy.cn；过期时自动续期，续期失败时状态显示“登录已失效”，重新登录即可。点击“退出登录”删除本机保存的凭据。只支持个人账号。
+- **Token 用量与费用**：读取本机 WorkBuddy 国内版桌面应用的会话记录（`%USERPROFILE%\.workbuddy\projects`），统计每次模型回复的输入、缓存读取、缓存写入与输出 Token。费用按模型公开单价估算，不是 WorkBuddy 扣除的积分。WorkBuddy 记录的模型名带有通道后缀（例如 `hy4-free`），统计中按原样显示，查单价时使用记录中的模型名称（例如 Hy4，对应单价表中的 `tencent/hy4`）；单价表中没有的模型只统计 Token。同一次回复出现在多个会话中时只计一次。
+- WorkBuddy 的套餐积分只能在 WorkBuddy 与 CodeBuddy 中使用，没有可在其他工具中消耗积分的 API 密钥。
+- WorkBuddy 国际版（WorkBuddy AI）目前不支持。
 
 ## 手动填写的来源
 

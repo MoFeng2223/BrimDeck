@@ -400,7 +400,8 @@ public sealed class Pricing : IDisposable
     // The catalog or manual model whose prices apply to a record.
     public ModelPrice? Match(TokenEntry entry)
     {
-        var model = Find(entry.Model);
+        // A record's own price name (TokenEntry.PriceModel) is tried first, then the name it shows.
+        var model = Find(entry.PriceModel ?? entry.Model) ?? (entry.PriceModel is null ? null : Find(entry.Model));
         if (model is null && MaasName(Normalize(entry.Model)) is { } maas) model = FindMaas(maas);
         else if (model is null && entry.Key.StartsWith("ag:", StringComparison.Ordinal))
             model = FindAntigravityBase(entry.Model);

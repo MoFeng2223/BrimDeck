@@ -21,6 +21,7 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | Pi | | ✓ | Use Pi Coding Agent on this PC (reads session token and cost statistics) |
 | OpenCode | ✓ | ✓ | Quota: sign in to OpenCode Console in OpenCode (CLI or desktop app) on this PC, with an OpenCode Go plan on the workspace. Usage only needs OpenCode to be used on this PC |
 | Command Code | ✓ | ✓ | Sign in to Command Code (CLI or desktop app) on this PC |
+| WorkBuddy | ✓ | ✓ | Quota: sign in on the WorkBuddy website in the browser from settings. Usage only needs the WorkBuddy China edition desktop app to be used on this PC |
 | Zhipu GLM, Z.ai GLM | ✓ | | Enter an API key in settings |
 | DeepSeek | ✓ | | Enter an API key in settings |
 | Kimi Code API | ✓ | | Enter a Kimi Code API key in settings |
@@ -110,6 +111,16 @@ The Command Code CLI and desktop app share one data folder (`%USERPROFILE%\.comm
 - **Quota**: shows the plan quota of the account signed in to Command Code: the share used and reset time of the 5-hour, weekly and monthly limits. The monthly limit covers the current billing period and resets when it ends. Hovering shows the amount used and the cap in US dollars. Purchased or granted extra credits are not limited by these windows and are shown as well when there are any. The plan name (Go or Pro, for example) is shown next to the name. When the 5-hour or weekly limit is used up, the status says so.
 - **Sign-in**: uses the sign-in key Command Code saved (`auth.json`). The key does not expire and is never renewed. When Command Code refuses it (after signing out or deleting the key, for example), the status shows "Sign-in expired"; signing in to Command Code again fixes it.
 - **Tokens and cost**: read from Command Code's session records on this PC (the `projects` folder), covering the CLI and the desktop app. The cost is the amount Command Code recorded, at Command Code's list prices. The unit prices in the model details come from the model catalog Command Code caches on this PC (`cache\model-catalog`), the prices Command Code works those amounts out from. A message that appears in several sessions (a forked session, for example) is counted once. Requests Command Code does not write to the session records, such as the ones that name a session, are not counted, so the figures can be slightly lower than the usage of the Command Code account.
+
+## WorkBuddy
+
+Supports the WorkBuddy China edition (www.workbuddy.cn). The WorkBuddy desktop app keeps its own sign-in encrypted; BrimDeck does not read it and signs in once on the WorkBuddy website instead.
+
+- **Quota**: shows the credits left in the WorkBuddy account, split into plan credits, plan bonus credits, bought credits and reward credits; kinds the account does not have are not shown. The plan name (for example 体验版, the trial plan) appears next to the name. Times follow the WorkBuddy client: plan and plan bonus credits show when their current cycle renews; bought and reward credits do not renew, so they show the earliest expiry among the packages not yet expired, leaving expired ones out. A China edition account shares its credits between WorkBuddy and CodeBuddy, so the balance includes what CodeBuddy used.
+- **Sign-in**: expand the WorkBuddy row in settings, click "Sign in in the browser", then sign in and allow access on the WorkBuddy website that opens, within 10 minutes. BrimDeck gets a sign-in of its own, stored encrypted on this PC and sent only to www.workbuddy.cn. It is renewed automatically when it expires; when renewal fails, the status reads "Sign-in expired" and signing in again fixes it. "Sign out" removes the sign-in saved on this PC. Only personal accounts are supported.
+- **Tokens and cost**: read from the session records of the WorkBuddy China edition desktop app on this PC (`%USERPROFILE%\.workbuddy\projects`), counting the input, cache read, cache write and output tokens of each model reply. The cost is estimated at public model prices, not the credits WorkBuddy charged. WorkBuddy names models with a channel suffix (such as `hy4-free`); the statistics show that name, and the price is looked up by the model name the record also keeps (such as Hy4, `tencent/hy4` in the price list). Models missing from the price list show tokens only. A reply that appears in several sessions is counted once.
+- WorkBuddy plan credits can be used only in WorkBuddy and CodeBuddy; there is no API key that spends them in other tools.
+- The WorkBuddy international edition (WorkBuddy AI) is not supported yet.
 
 ## Sources entered by hand
 

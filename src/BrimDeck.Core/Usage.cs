@@ -14,6 +14,9 @@ public sealed record TokenEntry(string Key, DateTimeOffset Time, string Model,
     long Input, long CacheRead, long CacheWrite, long CacheWriteHour, long Output, decimal? ReportedCostUsd = null, bool FittedCost = false)
 {
     public long Total => Input + CacheRead + CacheWrite + CacheWriteHour + Output;
+    // The name to look the price up by when the record names the model its own way; null prices it by Model. WorkBuddy names a
+    // model by its channel ("hy4-free") and keeps the model's own name apart ("Hy4", the catalog's tencent/hy4).
+    public string? PriceModel { get; init; }
 }
 
 // The most recent account quota values; Local marks values taken from the desktop application's own usage history.
