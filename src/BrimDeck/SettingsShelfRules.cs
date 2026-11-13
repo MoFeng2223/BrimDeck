@@ -58,6 +58,7 @@ public partial class SettingsWindow
         var keep = new ToggleButton { Style = (Style)FindResource("SettingsStateChip"), IsChecked = category.Keep, Content = new Grid { Children = { kept, cleared } },
             Width = KeepChipWidth, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
         AutomationProperties.SetName(keep, Loc.T($"{category.Name}一直保留", $"Keep {category.Name}"));
+        foreach (var word in new[] { kept, cleared }) word.FitHeight(keep, KeepChipHeight, KeepChipWords());
         keep.Checked += (_, _) => { category.Keep = true; Show(true); ShelfEdited(); };
         keep.Unchecked += (_, _) => { category.Keep = false; Show(false); ShelfEdited(); };
         return keep;
@@ -65,18 +66,24 @@ public partial class SettingsWindow
 
     // Every label in that column is this wide and centred in it, so they line up whichever words they show.
     private static double KeepChipWidth => Loc.IsEnglish ? 108 : 86;
+    // Their height, the style's: the words make it one device pixel taller where that centres them (InkCentredText.FitHeight).
+    // Every label in the column weighs every word one may show, so they are all one height and keep it when clicked.
+    private const double KeepChipHeight = 22;
+    private static string[] KeepChipWords() => [Loc.T("一直保留", "Kept"), Loc.T("退出时清除", "Cleared on exit")];
 
     // "常用"'s place in that column: the same label, on, with a lock before the words and paler, and not to be clicked: "常用" is
     // always kept.
     private FrameworkElement AlwaysKept()
     {
-        // The lock's outline runs from 1.05 to 8.95, centred in its 10 like the words beside it.
+        // The lock's outline runs from 1.05 to 8.95, centred in its 10 like the words beside it. It is not rounded to whole
+        // pixels, so that it stays in the middle where the label is an odd number of pixels tall.
         var lockIcon = Stroke("M 2,4.45 H 8 V 8.95 H 2 Z M 3.2,4.45 V 2.85 A 1.8,1.8 0 0 1 6.8,2.85 V 4.45", 10, 10, _palette.Accent); lockIcon.StrokeThickness = 1.2;
-        lockIcon.Margin = new Thickness(0, 0, 4, 0);
+        lockIcon.Margin = new Thickness(0, 0, 4, 0); lockIcon.UseLayoutRounding = false;
         var words = new InkCentredText(new TextBlock { Text = Loc.T("一直保留", "Kept"), FontFamily = SettingsFont(UiFontRole.Panel) });
         var mark = new ToggleButton { Style = (Style)FindResource("SettingsStateChip"), IsChecked = true, IsHitTestVisible = false, Focusable = false, Opacity = 0.6,
             Content = new StackPanel { Orientation = Orientation.Horizontal, Children = { lockIcon, words } },
             Width = KeepChipWidth, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
+        words.FitHeight(mark, KeepChipHeight, KeepChipWords());
         AutomationProperties.SetName(mark, Loc.T("常用一直保留", "Favorites are always kept"));
         return mark;
     }
