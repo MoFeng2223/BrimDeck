@@ -67,11 +67,13 @@ public enum QuotaRingStyle { Nested = 0, Single = 1 }
 public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer, Devices }
 public static class CompactParts
 {
-    // A file saved before the equalizer and the clock were put in order adds them after its parts, the clock last, where they stood.
-    // The devices' batteries (1.3.0) join last.
-    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices];
-    // Each known part once, in the saved order; a part missing from the file takes its default place after the others.
-    public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Default).Distinct()];
+    // The order of new settings and of restoring the defaults: the equalizer and the clock come last.
+    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices, CompactPart.Equalizer, CompactPart.Clock];
+    // The order in which parts missing from a saved file are added after its own. A file saved before the equalizer and the clock
+    // were put in order adds them after its parts, the clock last, where they stood; the devices' batteries (1.3.0) join last.
+    private static readonly IReadOnlyList<CompactPart> Missing = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices];
+    // Each known part once, in the saved order; a part missing from the file takes its place after the others.
+    public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Missing).Distinct()];
 }
 // Saved settings keep the number, so a new style goes at the end.
 public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed, Pixel, Rounded }
