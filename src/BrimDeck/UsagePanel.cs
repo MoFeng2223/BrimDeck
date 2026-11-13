@@ -667,7 +667,7 @@ public partial class MainWindow
         var own = quota.Period == CreditPeriod.Busy ? Loc.T("忙时", "Busy hours") : Loc.T("闲时", "Idle hours");
         var next = own + (on ? Loc.T($"进行中，{at.LocalDateTime:MM-dd HH:mm} 结束", $" now, until {at.LocalDateTime:MM-dd HH:mm}")
             : Loc.T($" {at.LocalDateTime:MM-dd HH:mm} 开始", $" from {at.LocalDateTime:MM-dd HH:mm}"));
-        return string.Join("\n", busy, idle, next, Loc.T("时间为北京时间；法定节假日是否按周末计算，CodeAgent 未说明", "Times are China Standard Time; CodeAgent does not say whether public holidays count as weekends"));
+        return string.Join("\n", busy, idle, next);
     }
 
     // The row's off-peak periods, written as the settings write them.
