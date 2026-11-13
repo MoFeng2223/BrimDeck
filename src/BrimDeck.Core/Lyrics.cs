@@ -124,7 +124,12 @@ public sealed partial class LyricsService : IDisposable
         if (!enabled || string.IsNullOrWhiteSpace(track.Title) || string.IsNullOrWhiteSpace(track.Artist)) return Lyrics.Empty;
         if (!track.IsQqMusic && !string.IsNullOrWhiteSpace(track.EmbeddedLyrics))
             return Lyrics.Parse(track.EmbeddedLyrics, null, track.Duration.TotalSeconds, track.Source);
-        if (track.IsQueMusic && await FindQueMusic(track, token) is { } local) return local;
+        if (track.IsQueMusic)
+        {
+            var found = await FindQueMusic(track, token);
+            if (found.Lyrics is { } local) return local;
+            if (found.SongId.Length > 0) track = track with { SongId = found.SongId };
+        }
         await _gate.WaitAsync(token);
         try
         {

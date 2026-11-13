@@ -24,7 +24,7 @@ BrimDeck reads only the sign-in state and usage records that apps already keep. 
 
 - When `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `ZCODE_HOME`, `DSH_HOME` or `KIMI_CODE_HOME` is set to an absolute path, that folder is read instead. OpenCode's database is found from `XDG_DATA_HOME` and `OPENCODE_DB`.
 - These account APIs and local data formats are not stable public interfaces. When they cannot be read, the panel shows the actual status and never makes up numbers.
-- When QueMusic plays a local song, BrimDeck finds the file in the play history in QueMusic's settings file (`%LOCALAPPDATA%\BroNekoX\QueMusic.ini`) and reads that file's tags and any `.lrc` or `.txt` file of the same name in its folder, to show the lyrics. These files are read only on this PC, never changed or uploaded.
+- When QueMusic plays a local song, BrimDeck finds the file in the play history in QueMusic's settings file (`%LOCALAPPDATA%\BroNekoX\QueMusic.ini`) and reads that file's tags and any `.lrc` or `.txt` file of the same name in its folder, to show the lyrics. These files are read only on this PC, never changed or uploaded. When QueMusic streams a song from NetEase Cloud Music, KuGou Music or QQ Music, BrimDeck reads the song's ID from the same play history and sends it to that platform's lyric service to look up the song's lyrics.
 
 ## Files stored on this PC
 

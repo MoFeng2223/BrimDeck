@@ -24,7 +24,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 
 - 设置了 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`ZCODE_HOME`、`DSH_HOME` 或 `KIMI_CODE_HOME`（须为绝对路径）时，从该目录读取。OpenCode 按 `XDG_DATA_HOME` 与 `OPENCODE_DB` 确定数据库位置。
 - 这些账户接口与本地数据格式并非公开的稳定接口。无法读取时，面板显示实际状态，不会显示虚构的数值。
-- QueMusic 播放本地歌曲时，BrimDeck 从 QueMusic 的设置文件（`%LOCALAPPDATA%\BroNekoX\QueMusic.ini`）的播放记录中找到正在播放的文件，读取该文件的标签，以及同一目录下同名的 `.lrc`、`.txt` 文件，用来显示歌词。这些文件只在本机读取，不修改，也不上传。
+- QueMusic 播放本地歌曲时，BrimDeck 从 QueMusic 的设置文件（`%LOCALAPPDATA%\BroNekoX\QueMusic.ini`）的播放记录中找到正在播放的文件，读取该文件的标签，以及同一目录下同名的 `.lrc`、`.txt` 文件，用来显示歌词。这些文件只在本机读取，不修改，也不上传。QueMusic 在线播放网易云音乐、酷狗音乐或 QQ 音乐的歌曲时，BrimDeck 从同一播放记录中读取歌曲编号，发送给对应平台的歌词服务以查询这首歌的歌词。
 
 ## 本机保存的文件
 

@@ -74,6 +74,28 @@ internal static class QueMusicLyricsTests
             lyrics = await service.FindAsync(track with { Title = "在线歌曲" }, true, CancellationToken.None);
             check("A song QueMusic streams goes straight to the lyric services", web.Requests > asked && watch.Elapsed < TimeSpan.FromSeconds(3));
 
+            // NetEase, KuGou and QQ Music songs are looked up by the ID QueMusic recorded, not by title.
+            var online = track with { Title = "在线歌曲", Artist = "歌手" };
+            WriteSettings(settings, ("1234567", 1, "在线歌曲"));
+            web.Uris.Clear(); await service.FindAsync(online, true, CancellationToken.None);
+            check("A NetEase song QueMusic streams is looked up by its song ID",
+                web.Uris.FirstOrDefault()?.AbsoluteUri.Contains("music.163.com/api/song/lyric?id=1234567", StringComparison.Ordinal) == true);
+            WriteSettings(settings, ("ABCDEF0123456789ABCDEF0123456789", 0, "在线歌曲"));
+            web.Uris.Clear(); await service.FindAsync(online with { Album = "酷狗" }, true, CancellationToken.None);
+            check("A KuGou song is looked up by its file hash, in lower case",
+                web.Uris.FirstOrDefault() is { Host: "krcs.kugou.com" } kugou && kugou.Query.Contains("keyword=&", StringComparison.Ordinal)
+                && kugou.Query.Contains("hash=abcdef0123456789abcdef0123456789", StringComparison.Ordinal));
+            WriteSettings(settings, ("002WCV372JMZJw", 3, "在线歌曲"));
+            web.Uris.Clear(); await service.FindAsync(online with { Album = "QQ" }, true, CancellationToken.None);
+            check("A QQ Music song is looked up by its mid, without a title search",
+                web.Uris.Count > 0 && web.Uris.All(uri => uri.Host.EndsWith(".y.qq.com", StringComparison.Ordinal)
+                    && !uri.AbsolutePath.Contains("search", StringComparison.Ordinal)
+                    && Uri.UnescapeDataString(uri.Query).Contains("002WCV372JMZJw", StringComparison.Ordinal)));
+            WriteSettings(settings, ("BV1xx411c7mD", 2, "在线歌曲"));
+            web.Uris.Clear(); await service.FindAsync(online with { Album = "哔哩哔哩" }, true, CancellationToken.None);
+            check("A song from a platform without an ID lookup here is found by title",
+                web.Uris.FirstOrDefault()?.Host == "lrclib.net");
+
             string untitled = Path.Combine(folder, "无标签歌曲.flac"); File.WriteAllBytes(untitled, Flac(("LYRICS", "[00:00.00]无标签")));
             WriteSettings(settings, (new Uri(untitled).AbsoluteUri, -1, "无标签歌曲.flac"));
             lyrics = await service.FindAsync(track with { Title = "无标签歌曲.flac", Artist = "未知歌手" }, true, CancellationToken.None);
@@ -116,6 +138,7 @@ internal static class QueMusicLyricsTests
     {
         private int _requests;
         public int Requests => _requests;
+        public readonly List<Uri> Uris = [];
         public HttpClient Http { get; }
         public Web() => Http = new HttpClient(new Handler(this));
         public void Dispose() => Http.Dispose();
@@ -124,6 +147,7 @@ internal static class QueMusicLyricsTests
             protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             {
                 Interlocked.Increment(ref web._requests);
+                lock (web.Uris) web.Uris.Add(request.RequestUri!);
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
             }
         }

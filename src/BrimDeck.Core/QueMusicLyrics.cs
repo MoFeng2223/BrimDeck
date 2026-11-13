@@ -7,6 +7,7 @@ namespace BrimDeck.Core;
 // the file, then the lyrics in the file's tags. Windows reports QueMusic's song without its file, so the file is the newest entry
 // of QueMusic's play history, which QueMusic saves to its settings file about two seconds after a song starts (measured). The
 // entry is taken only when the file's own title and artist are the song's: the history still names the previous song until then.
+// A song QueMusic streams is looked up online, by the platform's song ID the history records where the lookups here take one.
 public sealed partial class LyricsService
 {
     public const string QueMusicSource = "QueMusic";
@@ -18,8 +19,11 @@ public sealed partial class LyricsService
     private static string QueMusicSettingsFile() =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BroNekoX", "QueMusic.ini");
 
-    // Null when the song is not a local file QueMusic recorded, or the file has no lyrics; the lyric services are asked then.
-    private async Task<Lyrics?> FindQueMusic(MediaTrack track, CancellationToken token)
+    // The lyrics of a local file, or for a song QueMusic streams the song's ID in the form the lyric services below take it
+    // ("" when its platform has none here). Neither when QueMusic has not recorded the song; the lyric services are asked then.
+    private sealed record QueMusicMatch(Lyrics? Lyrics, string SongId);
+
+    private async Task<QueMusicMatch> FindQueMusic(MediaTrack track, CancellationToken token)
     {
         var deadline = DateTime.UtcNow + QueMusicWait;
         DateTime written = default;
@@ -31,19 +35,30 @@ public sealed partial class LyricsService
                 written = file.LastWriteTimeUtc;
                 if (ReadQueMusicLatest(file.FullName) is { } latest)
                 {
-                    // A song QueMusic streams is not a file here.
-                    if (latest.Source != -1) { if (SameText(latest.Title, track.Title)) return null; }
+                    // A streamed song is recorded with its title from the start, and with its platform's own ID.
+                    if (latest.Source != -1) { if (SameText(latest.Title, track.Title)) return new(null, QueMusicSongId(latest.Source, latest.Path)); }
                     else if (LocalPath(latest.Path) is { } path && File.Exists(path))
                     {
                         var tags = AudioTags.Read(path);
-                        if (IsQueMusicSong(track, path, tags)) return LocalLyrics(path, tags, track);
+                        if (IsQueMusicSong(track, path, tags)) return new(LocalLyrics(path, tags, track), "");
                     }
                 }
             }
-            if (DateTime.UtcNow >= deadline) return null;
+            if (DateTime.UtcNow >= deadline) return new(null, "");
             await Task.Delay(QueMusicPoll, token);
         }
     }
+
+    // QueMusic numbers its built-in platforms (api/ApiActions.h): KuGou 0, NetEase 1, Bilibili 2, QQ Music 3, Spotify 4,
+    // Apple Music 5, plug-ins from 100. It records a KuGou song by its file hash, a NetEase song by its ID and a QQ Music song by
+    // its mid, which the lookups below take as they take them from those players' own apps. The others are found by title.
+    internal static string QueMusicSongId(int source, string id) => source switch
+    {
+        0 when id.Length == 32 && id.All(char.IsAsciiHexDigit) => "kugou:" + id.ToLowerInvariant(),
+        1 when id.Length is > 0 and <= 16 && id.All(char.IsAsciiDigit) => "netease:" + id,
+        3 when id.Length is >= 8 and <= 32 && id.All(char.IsAsciiLetterOrDigit) => "qq:" + id,
+        _ => "",
+    };
 
     internal sealed record QueMusicEntry(string Path, int Source, string Title);
 
