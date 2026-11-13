@@ -14,10 +14,17 @@ Directory.CreateDirectory(root);
 try
 {
     await PiUsageTests.Run(root, Check);
+    await CodeAgentUsageTests.Run(root, Check);
+    await CommandCodeUsageTests.Run(root, Check);
+    await WorkBuddyUsageTests.Run(root, Check);
+    await MiMoUsageTests.Run(root, Check);
+    await MiMoApiTests.Run(root, Check);
+    MaasPricingTests.Run(root, Check);
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
     await AppleMusicLyricsTests.Run(root, Check);
+    await QueMusicLyricsTests.Run(root, Check);
     await KugouTests.Run(Check);
     EqualizerSignalTests.Run(Check);
     EqualizerSpectrumTests.Run(Check);
