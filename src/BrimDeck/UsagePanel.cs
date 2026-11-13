@@ -16,7 +16,14 @@ public partial class MainWindow
         if (!IsUsagePage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false);
         bool wanted = details && Settings.UsagePage;
         if (wanted != _details) _usageHandover = wanted ? Handover.Forward : Handover.Back;
-        _details = wanted; RenderUsage();
+        _details = wanted;
+        // The panel takes clicks without taking focus, so an open date or app pop-up stays open when the back button is
+        // clicked, and RenderUsage leaves the page as it is while a pop-up is open. The pop-up goes at once, before the page
+        // moves: faded out, it would close (and hand activation back to the panel) in the middle of the page's move, and the
+        // page would be built twice, once by the pop-up's closing and once here. Closed now, its closing builds the page once,
+        // with the motion set above, and the call below finds it built.
+        if (_detailPopup is { } popup) { _popupAtOnce = true; try { popup.Close(); } finally { _popupAtOnce = false; } }
+        RenderUsage();
     }
 
     private const double ColumnTopInset = 2, EdgeInset = 6;
@@ -160,7 +167,7 @@ public partial class MainWindow
         MiniAppsContent.Visibility = Visibility.Collapsed;
         if (IsMusicPage) { RenderMusic(); return; }
         if (IsMonitorPage) { RenderMonitor(); return; }
-        if (IsShelfPage) { RenderShelf(); return; }
+        if (IsShelfPage) { RenderShelf(lazy: true); return; }
         if (CurrentPage == DeckPage.Devices) { RenderDevices(); return; }
         // Only a page that was on screen hands over; one that arrives by the page switch or with the panel opening comes in whole.
         bool shown = UsageContent.IsVisible && _expanded && !_preview;
@@ -345,7 +352,7 @@ public partial class MainWindow
         // fill in where they will stay instead of the whole column changing when they arrive.
         bool awaiting = Awaiting(snapshot);
         int blocks = awaiting ? view.Slots : view.Quotas.Count;
-        FrameworkElement Block(int i) => awaiting ? SkeletonBlock(entry, layout, i) : QuotaBlock(entry, view.Quotas[i], layout, i);
+        FrameworkElement Block(int i) => awaiting ? SkeletonBlock(entry, layout, i) : QuotaBlock(entry, view.Quotas[i], layout, i, Settings.QuotaRingRemaining);
         bool off = blocks == 0;
         // Only this column changes: it comes up from faint while the others stay as they are.
         void NextQuotaPage() { _quotaPages[entry.InstanceId] = (view.Page + 1) % view.Pages; _flippedColumn = entry.InstanceId; RenderUsage(); }
@@ -559,9 +566,15 @@ public partial class MainWindow
     // Three rows per quota: the period name, the used share with its reset countdown, and the track.
     // slot is the quota's place in its column: a bar keeps its place's last share (QuotaBar), so a new reading eases the same bar
     // and a quota page flip eases each bar from the quota it replaces, as the monitor page's values move.
-    private static Grid QuotaBlock(AppEntry entry, UsageMetric quota, Layout layout, int slot)
+    // remaining (DeckSettings.QuotaRingRemaining): a quota with a share shows what is left: the bar's length, a percentage as the big
+    // number ("58% 剩余") and the share at the label's right; an amount (a balance, an amount spent) keeps its figure. The colors
+    // still follow the used share, so warning and critical mean the same either way.
+    private static Grid QuotaBlock(AppEntry entry, UsageMetric quota, Layout layout, int slot, bool remaining = false)
     {
         double used = Math.Clamp(quota.UsedPercent ?? 100, 0, 100);
+        bool left = remaining && quota.UsedPercent is not null;
+        bool share = quota.Kind is MetricKind.Percent or MetricKind.Count;
+        string valueText = left && share ? $"{100 - used:0.#}%" : quota.ValueText, valueSuffix = left && share ? Loc.T("剩余", "left") : quota.ValueSuffix;
         string color = quota.UsedPercent is null ? PanelTheme.QuotaTheme(entry) : PanelTheme.QuotaColor(entry, used);
         int level = quota.UsedPercent is null ? 0 : AppPresets.Level(used);
         var block = new Grid();
@@ -576,15 +589,16 @@ public partial class MainWindow
         var number = new TextBlock { FontFamily = UI.DisplayFont, LineHeight = layout.NumberRow, LineStackingStrategy = LineStackingStrategy.BlockLineHeight, Height = layout.NumberRow,
             TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
         // A custom item without a value leaves the row empty; the row keeps its height so blocks stay aligned.
-        if (quota.ValueText.Length > 0) number.Inlines.Add(new Run(quota.ValueText) { FontSize = layout.Number, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(level > 0 ? color : UI.Primary) });
-        if (layout.UsedWord && quota.ValueSuffix.Length > 0) number.Inlines.Add(new Run(" " + quota.ValueSuffix) { FontSize = 11, FontFamily = UI.PanelFont, Foreground = UI.Brush(UI.Tertiary) });
+        if (valueText.Length > 0) number.Inlines.Add(new Run(valueText) { FontSize = layout.Number, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(level > 0 ? color : UI.Primary) });
+        if (layout.UsedWord && valueSuffix.Length > 0) number.Inlines.Add(new Run(" " + valueSuffix) { FontSize = 11, FontFamily = UI.PanelFont, Foreground = UI.Brush(UI.Tertiary) });
         number.ToolTip = quota.Kind switch
         {
             MetricKind.Balance => Loc.T("可用 " + quota.ValueText, quota.ValueText + " available")
                 + (quota.Total is { } total ? quota.TotalIsTarget
                     ? Loc.T(" · 目标余额 " + UsageMetric.Money(total, quota.Currency), " · target " + UsageMetric.Money(total, quota.Currency))
                     : Loc.T(" · 总额 " + UsageMetric.Money(total, quota.Currency), " · " + UsageMetric.Money(total, quota.Currency) + " total") : ""),
-            MetricKind.Spend => Loc.T("已用 " + quota.ValueText, quota.ValueText + " used") + (quota.Unlimited ? Loc.T(" · 无上限", " · no limit") : ""),
+            MetricKind.Spend => Loc.T("已用 " + quota.ValueText, quota.ValueText + " used") + (quota.Unlimited ? Loc.T(" · 无上限", " · no limit") : "")
+                + (quota.Total is { } goal && quota.TotalIsTarget ? Loc.T(" · 目标金额 " + UsageMetric.Money(goal, quota.Currency), " · target " + UsageMetric.Money(goal, quota.Currency)) : ""),
             MetricKind.Count => CountTooltip(quota),
             _ => MetricPercentTooltip(quota)
         };
@@ -592,7 +606,8 @@ public partial class MainWindow
         var resetText = UI.ShortReset(quota.ResetAt);
         var expiryText = quota.ExpiresAt is { } expiry ? (expiry <= DateTimeOffset.Now ? Loc.T("已到期", "Expired") : Loc.T(UI.ShortReset(expiry) + "到期", "expires " + UI.ShortReset(expiry))) : "";
         var countText = CountLabel(quota);
-        var sideText = countText.Length > 0 ? countText : quota.Kind == MetricKind.Balance && quota.UsedPercent is { } percent ? Loc.T($"{Math.Max(0, percent):0.#}% 已用", $"{Math.Max(0, percent):0.#}% used") : quota.Unlimited ? Loc.T("无上限", "No limit") : "";
+        var sideText = countText.Length > 0 ? countText : quota.Kind is MetricKind.Balance or MetricKind.Spend && quota.UsedPercent is { } percent
+            ? left ? Loc.T($"{100 - used:0.#}% 剩余", $"{100 - used:0.#}% left") : Loc.T($"{Math.Max(0, percent):0.#}% 已用", $"{Math.Max(0, percent):0.#}% used") : quota.Unlimited ? Loc.T("无上限", "No limit") : "";
         // Times sit beside the number, next to the track; shares, counts and "无上限" sit at the label's right.
         // A quota with both a reset and an expiry keeps the reset below and moves the expiry up.
         bool expiryAbove = resetText.Length > 0 && expiryText.Length > 0;
@@ -612,21 +627,49 @@ public partial class MainWindow
                 : countText.Length > 0 ? CountTooltip(quota) : MetricPercentTooltip(quota);
             Grid.SetColumn(reset, 1); labelRow.Children.Add(reset);
         }
+        // A quota spent only in busy or idle hours (CodeAgent) shows when its hours next start, or end while they are on, in place of
+        // the daily reset.
+        var hours = quota is { Hours: { } schedule, Period: { } period } ? schedule.Next(period, DateTimeOffset.Now) : default;
+        bool timed = hours.At is not null;
         var rightText = text ? quota.ResetText : offPeak ? (change is { } next ? Loc.T(UI.ShortReset(next) + "切换", "switches " + UI.ShortReset(next)) : "")
+            : timed ? (hours.On ? Loc.T(UI.ShortReset(hours.At) + "结束", "ends " + UI.ShortReset(hours.At)) : Loc.T(UI.ShortReset(hours.At) + "开始", "starts " + UI.ShortReset(hours.At)))
             : resetText.Length > 0 ? resetText : expiryText;
         if (rightText.Length > 0)
         {
             var right = UI.Line(rightText, layout.Reset, UI.Tertiary);
             right.FontFamily = UI.PanelFont;
             right.ToolTip = text ? null : offPeak ? Loc.T($"{change:yyyy-MM-dd HH:mm} 转为" + (offPeakNow ? "高峰时段" : "低峰时段"), (offPeakNow ? "Peak" : "Off-peak") + $" from {change:yyyy-MM-dd HH:mm}")
+                : timed ? CreditHoursTooltip(quota, hours.At!.Value, hours.On)
                 : (quota.ResetAt ?? quota.ExpiresAt)!.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
             right.VerticalAlignment = VerticalAlignment.Bottom; right.HorizontalAlignment = HorizontalAlignment.Right;
             right.Margin = new Thickness(6, 0, 0, 1); Grid.SetColumn(right, 1); numbers.Children.Add(right);
         }
         block.Children.Add(numbers);
-        var track = new QuotaBar($"{entry.InstanceId:N}:{slot}", used / 100, color); Grid.SetRow(track, 4);
+        var track = new QuotaBar($"{entry.InstanceId:N}:{slot}", (left ? 100 - used : used) / 100, color); Grid.SetRow(track, 4);
         block.Children.Add(track);
         return block;
+    }
+
+    // The busy and idle hours of CodeAgent credits and when this quota's hours next start or end, for example
+    // "忙时（消耗 3 倍）：工作日 10:00–12:00、15:00–18:00" / "闲时（消耗 0.2 倍）：其余时间，包括周末全天" / "闲时进行中，11-13 15:00 结束".
+    // The definition's hours are China Standard Time and are written as they are; local times are given for the next change.
+    private static string CreditHoursTooltip(UsageMetric quota, DateTimeOffset at, bool on)
+    {
+        var hours = quota.Hours!;
+        static string Clock(double hour) => $"{(int)hour:00}:{(int)Math.Round(hour % 1 * 60):00}";
+        string Ranges(bool weekend) => string.Join(Loc.T("、", ", "), hours.Ranges(CreditPeriod.Busy, weekend).Select(range => Clock(range.From) + "–" + Clock(range.To)));
+        string Rate(CreditPeriod period) => hours.Rates.TryGetValue(period, out var rate) ? Loc.T($"（消耗 {rate:0.##} 倍）", $" ({rate:0.##}× credits)") : "";
+        string weekdays = Ranges(false), weekends = Ranges(true);
+        var busy = Loc.T("忙时", "Busy hours") + Rate(CreditPeriod.Busy) + Loc.T("：", ": ") + string.Join(Loc.T("；", "; "), new[]
+        {
+            weekdays.Length > 0 ? Loc.T("工作日 ", "weekdays ") + weekdays : "",
+            weekends.Length > 0 ? Loc.T("周末 ", "weekends ") + weekends : ""
+        }.Where(part => part.Length > 0));
+        var idle = Loc.T("闲时", "Idle hours") + Rate(CreditPeriod.Idle) + Loc.T("：其余时间", ": every other hour") + (weekends.Length == 0 ? Loc.T("，包括周末全天", ", all weekend included") : "");
+        var own = quota.Period == CreditPeriod.Busy ? Loc.T("忙时", "Busy hours") : Loc.T("闲时", "Idle hours");
+        var next = own + (on ? Loc.T($"进行中，{at.LocalDateTime:MM-dd HH:mm} 结束", $" now, until {at.LocalDateTime:MM-dd HH:mm}")
+            : Loc.T($" {at.LocalDateTime:MM-dd HH:mm} 开始", $" from {at.LocalDateTime:MM-dd HH:mm}"));
+        return string.Join("\n", busy, idle, next);
     }
 
     // The row's off-peak periods, written as the settings write them.

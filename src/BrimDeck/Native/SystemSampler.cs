@@ -6,8 +6,8 @@ using BrimDeck.Core;
 
 namespace BrimDeck.Native;
 
-// Reads the system for the monitor page on a thread of its own, only while a panel shows the page and for a short while
-// after, so the page costs nothing while it is not looked at. The structure follows ftop's SystemSampler by Nongfsq
+// Reads the system for the monitor page on a thread of its own, only while a panel shows the page and for a while after (the
+// memory mode's ReadingsLinger), so the page costs nothing while it is not looked at. The structure follows ftop's SystemSampler by Nongfsq
 // (https://github.com/Nongfsq/ftop, MIT License; see ThirdPartyNotices.txt): one provider per module keeps the counters
 // it needs for deltas and returns a Reading; nothing here throws; listing processes, the costliest reading, runs every
 // other tick. The readings themselves are the Windows ones Task Manager shows.
@@ -15,8 +15,6 @@ namespace BrimDeck.Native;
 // thread with providers of its own, and the old one ends should the driver ever answer (ReadingAbandoned).
 internal sealed class SystemSampler : IDisposable
 {
-    // Reopening the page within this time finds the sampler still running and the readings current.
-    private static readonly TimeSpan Linger = TimeSpan.FromSeconds(10);
     // After a pause the counters are read once and again after this short window, so the page has figures almost at once.
     private const int PrimeMilliseconds = 300;
     // The network readings the sparklines draw, oldest first: a minute at one reading a second.
@@ -28,6 +26,8 @@ internal sealed class SystemSampler : IDisposable
     // Raised when a thread is replaced: only the thread of the current generation reads.
     private int _generation;
     private volatile bool _wanted, _disposed, _listProcesses, _primeProcesses, _primeCounters;
+    // The memory mode keeps the process list's buffer and the programs' icons while the readings pause (MemoryPlan.KeepCaches).
+    private volatile bool _keepCaches;
     private volatile int _intervalMilliseconds = 1000;
     // The providers belong to the sampling thread, which creates them: adding the performance counters can take tens of
     // milliseconds, which the panel must not wait for. Only HoldProcesses reaches them from the UI thread. Each kind of counter has a
@@ -53,6 +53,9 @@ internal sealed class SystemSampler : IDisposable
     // the machine's charge reading needs without any of the rest.
     // _gpuWanted: the graphics adapters' counters, for the page, the row's GPU reading and the power.
     private volatile bool _temperatures, _storageWanted, _driveTemperatures, _powerWanted, _batteryWanted, _gpuWanted, _diskWanted;
+    // Where the adapters' usage comes from (DeckSettings.MonitorGpuUsage), set on the UI thread and read on the sampling thread.
+    private volatile GpuUsageSource _gpuUsage;
+    public GpuUsageSource GpuUsage { set => _gpuUsage = value; }
     // The whole machine's power and the machine's battery (PowerProvider, BatteryProvider), made on the sampling thread.
     private PowerProvider? _power;
     private BatteryProvider? _battery;
@@ -76,6 +79,8 @@ internal sealed class SystemSampler : IDisposable
     // machine near idle (300 ms read true). Collections of a query closer together than this are not made (Collect).
     private const double ShortestCounterSeconds = .2;
     private double _cpuAt = double.NegativeInfinity, _gpuAt = double.NegativeInfinity, _diskAt = double.NegativeInfinity;
+    // When the adapters' counters last joined their query (GpuProvider.Want).
+    private double _gpuJoinedAt = double.NegativeInfinity;
     private Reading<CpuSample> _lastCpu = Reading<CpuSample>.Unavailable(Why.Waiting);
     private Reading<IReadOnlyList<GpuSample>> _lastGpus = Reading<IReadOnlyList<GpuSample>>.Unavailable(Why.Waiting);
     private readonly Queue<(double Down, double Up)> _history = new(HistoryLength);
@@ -90,7 +95,7 @@ internal sealed class SystemSampler : IDisposable
     public SystemSampler(Dispatcher dispatcher, Func<(string? Key, string? Name)> gpuChoice)
     {
         _dispatcher = dispatcher; _gpuChoice = gpuChoice;
-        _linger = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = Linger };
+        _linger = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = MemoryPlan.For(MemoryMode.Balanced).ReadingsLinger };
         // Once paused the readings grow old, so they are dropped: a page opened later shows dashes until new ones arrive
         // instead of old figures as if they were current.
         _linger.Tick += (_, _) => { _linger.Stop(); _wanted = false; Latest = null; };
@@ -98,6 +103,8 @@ internal sealed class SystemSampler : IDisposable
 
     // The newest readings while the sampler runs; null once it has paused. Raised on the UI thread.
     public MonitorSnapshot? Latest { get; private set; }
+    // Paused: nothing asks for readings and the linger has run out, so the thread, if started, waits.
+    public bool Resting => !_wanted;
     public event Action<MonitorSnapshot>? Updated;
     // The saved choice of graphics adapter was found under an older key (the first) and is to be saved under its key now (the
     // second). Raised on the UI thread.
@@ -105,9 +112,18 @@ internal sealed class SystemSampler : IDisposable
     // While set, rows already in the process lists keep their rank (the pointer is over a list).
     public bool HoldProcesses { get => _processes.Hold; set => _processes.Hold = value; }
 
+    // The memory mode's rules (MemoryPlan): reopening the page within ReadingsLinger finds the sampler still running and the readings
+    // current. Called on the UI thread.
+    public void UsePlan(MemoryPlan plan) { _linger.Interval = plan.ReadingsLinger; _keepCaches = plan.KeepCaches; }
+
+    // Starts the sampling thread without reading, so the counters and the adapters' descriptions are set up before the page first
+    // opens (the smooth memory mode). Called on the UI thread.
+    public void Warm() { if (!_disposed && _thread is null) StartThread(0); }
+
     // Called on the UI thread whenever a panel opens or closes the page or shows or hides the readings in its collapsed row.
-    // processes: the expanded page is open, so the process list is read too.
-    public void SetDemand(bool wanted, int intervalSeconds, bool processes)
+    // processes: the expanded page is open, so the process list is read too. immediate: a sampler no longer wanted stops at once, as it
+    // has already lingered (App.LingerPageExtras).
+    public void SetDemand(bool wanted, int intervalSeconds, bool processes, bool immediate = false)
     {
         if (_disposed) return;
         _intervalMilliseconds = Math.Clamp(intervalSeconds, 1, 2) * 1000;
@@ -116,6 +132,7 @@ internal sealed class SystemSampler : IDisposable
         // The page opened while the collapsed row kept the sampler running: the processes are read at once and again shortly,
         // instead of waiting up to two readings for a list.
         if (_listProcesses && !listing && _wanted) { _primeProcesses = true; _wake.Set(); }
+        if (!wanted && immediate) { _linger.Stop(); _wanted = false; Latest = null; _wake.Set(); return; }
         if (!wanted) { if (_wanted && !_linger.IsEnabled) _linger.Start(); return; }
         _linger.Stop();
         if (_wanted) return;
@@ -195,7 +212,7 @@ internal sealed class SystemSampler : IDisposable
         _power = new PowerProvider(_meterPdh, stuck);
         _gpuTemperatures = new GpuTemperatures(stuck);
         _battery = new BatteryProvider();
-        bool primed = false, first = false;
+        bool primed = false, first = false, holdGpu = false;
         while (!_disposed && Volatile.Read(ref _generation) == generation)
         {
             try
@@ -212,18 +229,21 @@ internal sealed class SystemSampler : IDisposable
                     bool primeProcesses = _primeProcesses;
                     _primeProcesses = false;
                     // Readings starting (the monitor opened or came back): a hardware monitor started meanwhile is looked for again.
-                    if (!primed) { _bridges.Rescan(); Collect(listProcesses: true); }
+                    if (!primed) { _bridges.Rescan(); Collect(listProcesses: true); holdGpu = false; }
                     else
                     {
-                        if (primeCounters) PrimeCounters();
+                        // Adapters already read before this priming keep their last reading in the snapshot after it (Collect): a
+                        // collection there would cover little more than the panel opening, which keeps the busiest engine (the
+                        // desktop composing the animation) at 40 to 60 %, and the GPU figure read high for a second.
+                        holdGpu = !(primeCounters && PrimeCounters());
                         if (_listProcesses && (primeProcesses || !_lastProcesses.HasValue)) _processes.Sample(Now());
                     }
                     primed = true; first = true;
                     Pause(PrimeMilliseconds);
                     continue;
                 }
-                var snapshot = Collect(listProcesses: first);
-                first = false;
+                var snapshot = Collect(listProcesses: first, holdGpu);
+                first = false; holdGpu = false;
                 if (_disposed) break;
                 // A reading taken just as the sampler paused would bring back figures that then grow old. The adapter shown is
                 // resolved again here: a reading taken before the user chose another adapter would otherwise bring the old one back.
@@ -259,30 +279,39 @@ internal sealed class SystemSampler : IDisposable
     }
 
     // Paused: the histories start over, and what only the readings need is let go until they start again: the process table's buffer
-    // (a megabyte or more), the last list and the programs' icons, read again with the first list.
+    // (a megabyte or more), the last list and the programs' icons, read again with the first list. The smooth memory mode keeps the
+    // buffer and the icons (MemoryPlan.KeepCaches).
     private void Rest()
     {
         _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _powerHistory.Clear(); _powerStats.Reset(); _powerSource = null; _cpuPower.Clear(); _gpuPower.Clear();
         _power!.Sample(false, false, 0, [], default, false); _storage.Rest(); _bridges.Rest();
-        _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting); _processes.Dispose(); ProcessIcons.Clear();
+        _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting);
+        if (!_keepCaches) { _processes.Dispose(); ProcessIcons.Clear(); }
         _cpu!.Forget();
     }
 
-    // The counters just asked for, read once: the power meter's, and the adapters' when they have just joined their query.
-    private void PrimeCounters()
+    // The counters just asked for, read once: the power meter's, and the adapters' when they have just joined their query. Whether
+    // the adapters' did.
+    private bool PrimeCounters()
     {
         _power!.Prepare(_powerWanted);
-        if (_gpu!.Want(_gpuWanted)) { _gpuPdh?.Collect(); _gpuAt = Now(); }
         if (_disk!.Want(_diskWanted)) { _diskPdh?.Collect(); _diskAt = Now(); }
+        if (!_gpu!.Want(_gpuWanted)) return false;
+        _gpuPdh?.Collect(); _gpuJoinedAt = _gpuAt = Now();
+        return true;
     }
 
-    private MonitorSnapshot Collect(bool listProcesses)
+    // holdGpu: the adapters keep their last reading, as if collected too soon, when it came from a collection after their counters
+    // joined the query (one over a whole interval, not the priming's); their next collection then covers the time since that one.
+    private MonitorSnapshot Collect(bool listProcesses, bool holdGpu = false)
     {
         double now = Now();
         bool meter = _power!.Prepare(_powerWanted);
-        _gpu!.Want(_gpuWanted);
+        bool gpuJoined = _gpu!.Want(_gpuWanted);
+        if (gpuJoined) _gpuJoinedAt = now;
         // A collection this soon after the last is skipped, and the processor and the adapters keep the readings they gave then.
-        bool cpuSoon = now - _cpuAt < ShortestCounterSeconds, gpuSoon = now - _gpuAt < ShortestCounterSeconds;
+        bool cpuSoon = now - _cpuAt < ShortestCounterSeconds;
+        bool gpuSoon = now - _gpuAt < ShortestCounterSeconds || holdGpu && !gpuJoined && _gpuWanted && _gpuAt > _gpuJoinedAt && _lastGpus.HasValue;
         bool diskSoon = now - _diskAt < ShortestCounterSeconds;
         bool cpuCollected = !cpuSoon && _cpuPdh?.Collect() == true;
         bool gpuCollected = !gpuSoon && _gpuWanted && _gpuPdh?.Collect() == true;
@@ -325,7 +354,7 @@ internal sealed class SystemSampler : IDisposable
         IReadOnlyList<StorageDrive> storage = _storageWanted ? _storage.Sample(now, _driveTemperatures) : [];
         Remember(_cpuHistory, cpu.OrDefault?.Usage);
         // The usage each adapter's driver gives, where it gives one (GpuDrivers); the curves follow the figure shown.
-        var adapters = gpus.TryGet(out var read) ? Remember(_drivers!.Read(read, now, temperatures)) : [];
+        var adapters = gpus.TryGet(out var read) ? Remember(_drivers!.Read(read, now, temperatures, _gpuUsage)) : [];
         if (!_gpuWanted) _gpuHistories.Clear();
         // The machine's power and battery: read only while something shows them; the history and the peak start over once none does.
         var power = Reading<PowerSample>.Unavailable(Why.Waiting);
@@ -833,7 +862,7 @@ internal sealed class ProcessProvider : IDisposable
         string image = entry.AppKey ?? entry.Name;
         if (_apps.TryGetValue(image, out var known) && known.Path is not null) return known;
         string plain = entry.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? entry.Name[..^4] : entry.Name;
-        string? path = _unreadable.Contains(entry.Pid) ? null : ImagePath(entry.Pid);
+        string? path = _unreadable.Contains(entry.Pid) ? null : AppIdentity.ImagePath(entry.Pid) is { Length: > 0 } read ? read : null;
         if (path is null) { _unreadable.Add(entry.Pid); return _apps[image] = known.Name is { } kept ? (null, kept) : (null, plain); }
         string name = plain;
         try
@@ -843,18 +872,6 @@ internal sealed class ProcessProvider : IDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { }
         return _apps[image] = (path, name);
-    }
-
-    private static string? ImagePath(int pid)
-    {
-        var process = OpenProcess(0x1000, false, pid);
-        if (process == IntPtr.Zero) return null;
-        try
-        {
-            var text = new char[1024]; int size = text.Length;
-            return QueryFullProcessImageNameW(process, 0, text, ref size) ? new string(text, 0, size) : null;
-        }
-        finally { CloseHandle(process); }
     }
 
     private bool Read()
@@ -875,7 +892,4 @@ internal sealed class ProcessProvider : IDisposable
     public void Dispose() { if (_buffer != IntPtr.Zero) { Marshal.FreeHGlobal(_buffer); _buffer = IntPtr.Zero; } }
 
     [DllImport("ntdll.dll")] private static extern int NtQuerySystemInformation(int informationClass, IntPtr buffer, int length, out int returnLength);
-    [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] private static extern bool QueryFullProcessImageNameW(IntPtr process, int flags, char[] name, ref int size);
-    [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
 }

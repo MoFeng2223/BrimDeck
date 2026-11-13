@@ -14,6 +14,9 @@ Directory.CreateDirectory(root);
 try
 {
     await PiUsageTests.Run(root, Check);
+    await CodeAgentUsageTests.Run(root, Check);
+    await CommandCodeUsageTests.Run(root, Check);
+    MaasPricingTests.Run(root, Check);
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
@@ -27,7 +30,7 @@ try
     CompactSpacingTests.Run(Check);
     CompactDragTests.Run(Check);
     RingLetterTests.Run(root, Check);
-    QuotaRingTests.Run(Check);
+    QuotaRingTests.Run(root, Check);
     PanelThemeTests.Run(root, Check);
     PanelThemeEditorTests.Run(root, Check);
     PixelBlocksTests.Run(root, Check);
@@ -63,6 +66,7 @@ try
     ExpandBounceTests.Run(Check);
     ExpandStillTests.Run(Check);
     FontTests.Run(root, Check);
+    SurfaceTransparencyTests.Run(Check);
     ExpandSnapTests.Run(Check);
     MotionReviewTests.Run(Check);
     IdleCostTests.Run(Check);
@@ -82,6 +86,7 @@ try
     await InstallerUpdateTests.Run(root, Check);
     await PortableUpdateTests.Run(root, Check);
     SettingsMigrationTests.Run(root, Check);
+    MemoryModeTests.Run(Check);
     OffPeakTests.Run(root, Check);
     FullscreenRuleTests.Run(Check);
     LanguageTests.Run(root, Check);

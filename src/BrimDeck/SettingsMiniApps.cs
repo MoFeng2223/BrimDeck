@@ -45,7 +45,7 @@ public sealed partial class SettingsWindow
         var directory = _app.PageDirectory(S);
         var declared = _app.Modules.Registry.List<ModulePage>().Where(e => e.Value.Size is not null).Select(e => e.Id).ToHashSet();
         if (directory.Visible.FirstOrDefault(p => p.BuiltIn is null && !declared.Contains(p.Id)) is not { } target) return;
-        _preview = true; _previewPage = DeckPage.MiniApps; _app.Deck.Preview(true);
+        _preview = true; _app.Deck.Preview(true);
         _app.Deck.SelectPage(target.Id, remember: false);
     }
 }

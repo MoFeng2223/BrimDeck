@@ -287,7 +287,9 @@ internal static class CompactReadingTests
     // are a part of their own, joined to the order from the modules that offer them.
     private static void PartOrder(Action<string, bool> check)
     {
-        CompactRowPart[] standard = [CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Clock), CompactRowPart.Of(CompactPart.Transfer), CompactRowPart.Of(CompactPart.Devices)];
+        CompactRowPart[] standard = [CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Transfer), CompactRowPart.Of(CompactPart.Devices), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Clock)];
+        check("Compact order: by default the equalizer and the clock come last", new DeckSettings().NotchOrder.SequenceEqual(standard)
+            && CompactParts.Default.SequenceEqual(standard));
         var odd = Read("""{"AppVersion":"0.1.0","NotchOrder":[2,9,2,0]}""");
         check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Clock), CompactRowPart.Of(CompactPart.Transfer), CompactRowPart.Of(CompactPart.Devices)])
             && odd.CapsuleOrder.SequenceEqual(standard));

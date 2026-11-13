@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -21,7 +20,7 @@ public sealed class LogReader
         public int Errors;
         public string Model = "unknown", LastTotal = "";
     }
-    // Claude and Codex read different folders; each keeps only the files its latest read visited.
+    // Claude, CodeAgent and Codex read different folders; each keeps only the files its latest read visited.
     private readonly Dictionary<ProviderId, Dictionary<string, CacheItem>> _caches = [];
     // The merged entries of the latest read, kept while no file changed and the start date stayed: most refreshes find nothing new.
     private readonly Dictionary<ProviderId, (DateTimeOffset Cutoff, List<TokenEntry> Entries)> _merged = [];
@@ -100,78 +99,18 @@ public sealed class LogReader
         return result;
     }
 
-    // Reads complete lines after the remembered offset. A line still being written is left for the next refresh. The first
-    // megabyte comes from the shared pool, so a refresh that finds many changed files does not allocate one for each of them.
-    // A longer line gets a buffer of its own, collected after the read, instead of leaving large, rarely rented arrays in the pool.
+    // Reads the complete lines after the remembered offset (AppendedLines). Of the lines over the limit, only one that held
+    // usage counts as unreadable; others, such as a large tool result or an attached file, are dropped quietly.
     private void Parse(string file, ProviderId id, CacheItem item, FileInfo info)
     {
         using var stream = SharedFile.Open(file);
-        stream.Seek(item.Offset, SeekOrigin.Begin);
-        // capacity is how much of the buffer is used: the pool may hand out a larger array than asked for, and a line is measured
-        // against _maxLine, not against the array.
-        int capacity = Math.Min(Chunk, _maxLine);
-        var pooled = ArrayPool<byte>.Shared.Rent(capacity);
-        var buffer = pooled;
-        // The bytes dropped so far of a line over the limit. The offset moves past them only once the line's end is found, so a
-        // long line still being written is looked at again on the next refresh and counted once, when it is complete.
-        long skipped = 0;
-        bool skipping = false, usage = false;
-        try
-        {
-            int filled = 0, read;
-            while ((read = stream.Read(buffer, filled, capacity - filled)) > 0)
-            {
-                filled += read;
-                int start = 0, newline;
-                while ((newline = Array.IndexOf(buffer, (byte)'\n', start, filled - start)) >= 0)
-                {
-                    if (skipping)
-                    {
-                        // Only a dropped line that held usage leaves a gap in the statistics. Others, such as a large tool result
-                        // or an attached file, are dropped quietly, as they always were.
-                        if (usage || HasUsageKey(buffer.AsSpan(start, newline - start))) item.Errors++;
-                        skipping = usage = false; item.Offset += skipped; skipped = 0;
-                    }
-                    else ParseLine(buffer.AsMemory(start, newline - start), id, item);
-                    start = newline + 1;
-                }
-                item.Offset += start;
-                Buffer.BlockCopy(buffer, start, buffer, 0, filled - start);
-                filled -= start;
-                if (filled < capacity) continue;
-                // A single line fills the buffer: it grows up to the limit, beyond which the line is dropped.
-                if (capacity < _maxLine)
-                {
-                    capacity = (int)Math.Min(_maxLine, capacity * 2L);
-                    if (capacity > buffer.Length)
-                    {
-                        var larger = new byte[capacity];
-                        Buffer.BlockCopy(buffer, 0, larger, 0, filled);
-                        buffer = larger;
-                    }
-                }
-                else
-                {
-                    // The last bytes stay in the buffer, so a key split between two reads is still found.
-                    usage |= HasUsageKey(buffer.AsSpan(0, filled));
-                    skipping = true; skipped += filled - KeyTail;
-                    Buffer.BlockCopy(buffer, filled - KeyTail, buffer, 0, KeyTail);
-                    filled = KeyTail;
-                }
-            }
-        }
-        finally { ArrayPool<byte>.Shared.Return(pooled); }
+        AppendedLines.Read(stream, ref item.Offset, Chunk, _maxLine, UsageKeys, line => ParseLine(line, id, item), () => item.Errors++);
         item.Length = info.Length; item.Modified = info.LastWriteTimeUtc;
     }
 
     // ParseLine reads only lines with one of these keys.
     private static readonly byte[][] UsageKeys = ["\"token_count\""u8.ToArray(), "\"turn_context\""u8.ToArray(), "\"usage\""u8.ToArray()];
-    private static readonly int KeyTail = UsageKeys.Max(key => key.Length) - 1;
-    private static bool HasUsageKey(ReadOnlySpan<byte> span)
-    {
-        foreach (var key in UsageKeys) if (span.IndexOf(key) >= 0) return true;
-        return false;
-    }
+    private static bool HasUsageKey(ReadOnlySpan<byte> span) => AppendedLines.Holds(span, UsageKeys);
 
     // Pi records disjoint token categories. Read only accounting metadata, never message content or auth files.
     // Entry ids and timestamps survive forks/clones, so copied history is counted once across session files.
@@ -204,6 +143,28 @@ public sealed class LogReader
             input, read, write - hour, hour, output, cost));
     }
 
+    // Command Code writes each message as one line {"type":"message","timestamp","message":{"meta":{"messageId"}},"model","usage"}, the
+    // usage only on the model's replies: {inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cacheWriteTokens1h, costUsd}.
+    // inputTokens includes the cache reads and writes; Command Code charges only the rest as uncached input, and costUsd is its own
+    // estimate at its list prices. The message id is kept by a resumed or forked session, so a copied message is counted once.
+    private static void ParseCommandCode(JsonElement obj, DateTimeOffset? time, CacheItem item)
+    {
+        if (obj.Get("type").Text() != "message" || time is null || time < item.Cutoff) return;
+        var usage = obj.Get("usage");
+        if (usage.ValueKind != JsonValueKind.Object) return;
+        long input = usage.Get("inputTokens").Count(), read = usage.Get("cacheReadTokens").Count(), write = usage.Get("cacheWriteTokens").Count();
+        long hour = Math.Min(write, usage.Get("cacheWriteTokens1h").Count());
+        decimal? cost = null;
+        var reported = usage.Get("costUsd");
+        if (reported.ValueKind == JsonValueKind.Number && reported.TryGetDecimal(out var value) && value >= 0) cost = value;
+        var key = obj.Get("message").Get("meta").Get("messageId").Text();
+        if (key.Length == 0) key = obj.Get("id").Text();
+        if (key.Length == 0) key = $"{time:O}:{usage.GetRawText()}";
+        var model = obj.Get("model").Text();
+        Add(item, new("cmd:" + key, time.Value, string.Intern(model.Length == 0 ? "unknown" : model), Math.Max(0, input - read - write), read,
+            write - hour, hour, usage.Get("outputTokens").Count(), cost));
+    }
+
     // Claude writes one line per content block of a message, each with the message's usage so far: a repeat of the entry just added
     // replaces it when at least as complete, so the cache holds each message once. Repeats across files are merged in Read.
     private static void Add(CacheItem item, TokenEntry entry)
@@ -225,6 +186,10 @@ public sealed class LogReader
             if (id == ProviderId.Pi)
             {
                 ParsePi(obj, time, item);
+            }
+            else if (id == ProviderId.CommandCode)
+            {
+                ParseCommandCode(obj, time, item);
             }
             else if (id == ProviderId.Codex)
             {
@@ -259,6 +224,21 @@ public sealed class LogReader
                 }
                 Add(item, new($"codex:{time:O}:{Convert.ToHexString(digest[..16])}", time.Value, item.Model, input - cached, cached, write, 0, output));
             }
+            else if (id == ProviderId.CodeAgent && type == "query-metrics")
+            {
+                // CodeAgent's observability/obs.jsonl records each model request with its usage. A session record can keep only the
+                // empty usage of a message whose request was cut short; the same message id here gives the real counts, and Read keeps
+                // the larger of the two. Requests outside the conversation (such as session titles) appear only here.
+                if (time is null || time < item.Cutoff) return;
+                var usage = obj.Get("usage");
+                if (usage.ValueKind != JsonValueKind.Object) return;
+                var key = obj.Get("message_id").Text();
+                if (key.Length == 0) key = $"{time:O}:{usage.GetRawText()}";
+                var creation = usage.Get("cache_creation_input_tokens").Count();
+                var hour = Math.Min(creation, usage.Get("cache_creation").Get("ephemeral_1h_input_tokens").Count());
+                Add(item, new("cac:" + key, time.Value, string.Intern(obj.Get("model").Text()), usage.Get("input_tokens").Count(),
+                    usage.Get("cache_read_input_tokens").Count(), creation - hour, hour, usage.Get("output_tokens").Count()));
+            }
             else
             {
                 if (type != "assistant" || time is null || time < item.Cutoff) return;
@@ -270,7 +250,7 @@ public sealed class LogReader
                 var key = message.Get("id").Text();
                 if (key.Length == 0) key = obj.Get("uuid").Text();
                 if (key.Length == 0) key = $"{time:O}:{usage.GetRawText()}";
-                Add(item, new("claude:" + key, time.Value, string.Intern(message.Get("model").Text()), usage.Get("input_tokens").Count(),
+                Add(item, new((id == ProviderId.CodeAgent ? "cac:" : "claude:") + key, time.Value, string.Intern(message.Get("model").Text()), usage.Get("input_tokens").Count(),
                     usage.Get("cache_read_input_tokens").Count(), creation - hour, hour, usage.Get("output_tokens").Count()));
             }
         }
