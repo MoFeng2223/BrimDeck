@@ -826,7 +826,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         SectionTitle(Loc.T("应用", "Apps"));
         _appRows = new StackPanel();
         foreach (var entry in S.Apps) _appRows.Children.Add(AppRow(entry));
-        UpdateDividers();
+        UpdateDividers(); UpdateShowLimit();
         var list = new StackPanel();
         var headings = AppColumns(); headings.Height = 34;
         AddHeadings(headings, new[]
@@ -837,25 +837,22 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
             (Loc.T("主题", "Theme"), 4, Loc.T("本列进度条和配额环的颜色。配额环始终使用这个颜色。", "The color of this column's progress bars and quota ring. The quota ring always uses this color.")),
             (Loc.T("预警", "Warning"), 5, Loc.T("已用达到 70%（即剩余 30%）时，进度条和数字改用这个颜色。", "At 70% used (30% left), progress bars and numbers change to this color.")),
             (Loc.T("告警", "Critical"), 6, Loc.T("已用达到 90%（即剩余 10%）时，进度条和数字改用这个颜色。", "At 90% used (10% left), progress bars and numbers change to this color.")),
-            (Loc.T("显示", "Show"), 7, "")
+            (Loc.T("显示", "Show"), 7, Loc.T($"最多同时显示 {AppPresets.MaximumShownApps} 个应用。关闭的应用保留其设置。", $"Up to {AppPresets.MaximumShownApps} apps are shown at once. Apps switched off keep their settings."))
         });
         list.Children.Add(headings);
         list.Children.Add(new Border { Child = _appRows, BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(0, 1, 0, 1) });
-        bool atLimit = S.Apps.Count >= AppPresets.MaximumApps;
         var add = ActionButton("", () =>
         {
-            if (S.Apps.Count >= AppPresets.MaximumApps) return;
-            Change(s => s.Apps.Add(new AppEntry { QuotaSource = ProviderId.Claude, UsageSource = ProviderId.Claude }));
+            // Past the display limit a new app is added switched off.
+            Change(s => s.Apps.Add(new AppEntry { QuotaSource = ProviderId.Codex, UsageSource = ProviderId.Codex, Enabled = !s.ShownAppsFull }));
             ShowPage(3);
         });
-        add.IsEnabled = !atLimit; add.Opacity = atLimit ? .45 : 1;
         var addContent = new StackPanel { Orientation = Orientation.Horizontal };
         addContent.Children.Add(Stroke("M 5,0 L 5,10 M 0,5 L 10,5", 10, 10, TextSecondary));
         var addLabel = TextLine(Loc.T("添加应用", "Add app"), 12.5, TextSecondary); addLabel.Margin = new Thickness(8, 0, 0, 0); addLabel.VerticalAlignment = VerticalAlignment.Center; addContent.Children.Add(addLabel);
         add.Content = addContent; add.HorizontalAlignment = HorizontalAlignment.Left; add.Margin = new Thickness(10, 6, 0, 6); add.Padding = new Thickness(10, 6, 12, 6);
-        add.ToolTip = atLimit ? Loc.T($"最多配置 {AppPresets.MaximumApps} 个应用；移除一行后可以继续添加", $"Up to {AppPresets.MaximumApps} apps. Remove a row to add another.")
-            : Loc.T($"最多配置 {AppPresets.MaximumApps} 个应用；同一配额来源或统计应用可以重复选择", $"Up to {AppPresets.MaximumApps} apps. The same quota source or usage app can be chosen more than once.");
-        ToolTipService.SetShowOnDisabled(add, true);
+        add.ToolTip = Loc.T($"同一配额来源或统计应用可以重复选择。已显示 {AppPresets.MaximumShownApps} 个应用时，新添加的应用默认不显示。",
+            $"The same quota source or usage app can be chosen more than once. With {AppPresets.MaximumShownApps} apps shown, a new app is added switched off.");
         AutomationProperties.SetName(add, Loc.T("添加应用", "Add app"));
         list.Children.Add(add);
         _content.Children.Add(list);
@@ -914,7 +911,9 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         Grid.SetColumn(theme, 4); row.Children.Add(theme); Grid.SetColumn(warning, 5); row.Children.Add(warning); Grid.SetColumn(critical, 6); row.Children.Add(critical);
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = entry.Enabled, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, Loc.T("显示 ", "Show ") + name); AutomationProperties.SetAutomationId(toggle, "enabled-" + entry.InstanceId.ToString("N"));
-        toggle.Checked += (_, _) => Change(s => s.Entry(entry.InstanceId)!.Enabled = true); toggle.Unchecked += (_, _) => Change(s => s.Entry(entry.InstanceId)!.Enabled = false);
+        toggle.Tag = ShowToggleTag; ToolTipService.SetShowOnDisabled(toggle, true);
+        toggle.Checked += (_, _) => { Change(s => s.Entry(entry.InstanceId)!.Enabled = true); UpdateShowLimit(); };
+        toggle.Unchecked += (_, _) => { Change(s => s.Entry(entry.InstanceId)!.Enabled = false); UpdateShowLimit(); };
         Grid.SetColumn(toggle, 7); row.Children.Add(toggle);
         AttachDrag(handle, name);
         // Removing drops the app's colors and sources with it, so it asks first (SW-09).
@@ -1181,7 +1180,22 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         int index = _appRows.Children.IndexOf(old);
         _sourceRows.Remove(id);
         _appRows.Children.RemoveAt(index); _appRows.Children.Insert(index, AppRow(entry));
-        UpdateDividers();
+        UpdateDividers(); UpdateShowLimit();
+    }
+
+    private const string ShowToggleTag = "show";
+    // With the most apps shown, the switches of the others are disabled until one is switched off.
+    private void UpdateShowLimit()
+    {
+        if (_appRows is null) return;
+        bool full = S.ShownAppsFull;
+        foreach (var toggle in _appRows.Children.OfType<Border>().Select(border => border.Child).OfType<Grid>()
+            .SelectMany(row => row.Children.OfType<CheckBox>()).Where(box => ShowToggleTag.Equals(box.Tag)))
+        {
+            bool blocked = full && toggle.IsChecked != true;
+            toggle.IsEnabled = !blocked;
+            toggle.ToolTip = blocked ? Loc.T($"最多同时显示 {AppPresets.MaximumShownApps} 个应用，请先关闭一个", $"Up to {AppPresets.MaximumShownApps} apps can be shown. Switch one off first.") : null;
+        }
     }
 
     private void UpdateDividers() { if (_appRows is not null) UpdateDividers(_appRows); }

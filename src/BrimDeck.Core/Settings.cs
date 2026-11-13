@@ -238,7 +238,8 @@ public sealed class OffPeakPeriod
 
 public static class AppPresets
 {
-    public const int MaximumApps = 7;
+    // Any number of applications can be configured; at most this many are shown at once, the first ones switched on.
+    public const int MaximumShownApps = 7;
     // A long list would be hard to review, and the exceptions are meant for a few shell-level apps.
     public const int MaximumFullscreenExceptions = 32;
     public const int MaximumIgnoredMediaApps = 32;
@@ -720,7 +721,8 @@ public sealed class DeckSettings
         && (Style == CompactStyle.Line || Maximized == WindowBehavior.Line || Borderless == WindowBehavior.Line || Exclusive == WindowBehavior.Line);
     // The switched-on applications. Their quotas are read for the AI usage page or for the rings of the chosen compact
     // style; the two are shown independently, so either one keeps the data current.
-    [JsonIgnore] public IReadOnlyList<AppEntry> ConfiguredApps => Apps.Where(app => app.Enabled).ToList();
+    [JsonIgnore] public IReadOnlyList<AppEntry> ConfiguredApps => Apps.Where(app => app.Enabled).Take(AppPresets.MaximumShownApps).ToList();
+    [JsonIgnore] public bool ShownAppsFull => ConfiguredApps.Count >= AppPresets.MaximumShownApps;
     [JsonIgnore] public bool QuotaWanted => UsagePage || ShowsSummary(Style);
     [JsonIgnore] public IReadOnlyList<AppEntry> EnabledApps => QuotaWanted ? ConfiguredApps : [];
     [JsonIgnore] public IReadOnlySet<ProviderId> RequiredProviders => EnabledApps.SelectMany(app => new[] { app.QuotaSource, app.UsageSource }).ToHashSet();
@@ -739,7 +741,7 @@ public sealed class DeckSettings
     public void SetEnabled(ProviderId id, bool enabled)
     {
         var entries = Apps.Where(app => app.QuotaSource == id || app.UsageSource == id).ToList();
-        if (entries.Count == 0) { if (enabled && Apps.Count < AppPresets.MaximumApps) Apps.Add(new AppEntry { QuotaSource = id, UsageSource = id }); }
+        if (entries.Count == 0) { if (enabled) Apps.Add(new AppEntry { QuotaSource = id, UsageSource = id, Enabled = !ShownAppsFull }); }
         else foreach (var entry in entries) entry.Enabled = enabled;
     }
     // The behavior a context calls for: the app's own rule first, where it chooses one for that context, and the global
@@ -795,9 +797,12 @@ public sealed class DeckSettings
                 return choices;
             });
         var seen = new HashSet<Guid>();
-        Apps = Apps.Where(app => app is not null && ProviderCatalog.Sources.Contains(app.QuotaSource)).Take(AppPresets.MaximumApps).ToList();
+        Apps = Apps.Where(app => app is not null && ProviderCatalog.Sources.Contains(app.QuotaSource)).ToList();
+        int shown = 0;
         foreach (var app in Apps)
         {
+            // Rows switched on past the limit are kept with their settings but switched off.
+            if (app.Enabled && ++shown > AppPresets.MaximumShownApps) app.Enabled = false;
             if (app.InstanceId == Guid.Empty || !seen.Add(app.InstanceId))
             {
                 do { app.InstanceId = Guid.NewGuid(); } while (!seen.Add(app.InstanceId));
