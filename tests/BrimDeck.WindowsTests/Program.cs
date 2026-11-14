@@ -53,6 +53,7 @@ internal static class Program
                 DeviceChecks.Run(Check);
                 PowerChecks.Run(Check);
             }
+            CpuProviderChecks.Run(Check);
             SensorGuardChecks.Run(Check);
             FontFollowTests.Run(Check);
 
