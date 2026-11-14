@@ -39,6 +39,7 @@ internal static class Program
             DrawnAutomationTests.Run(Check);
             RingLetterChecks.Run(Check);
             SettingsFocusTests.Run(Check);
+            PanelKeyboardTests.Run(Check);
             BrimDeck.MainWindow.CheckPageCapsule(Check);
             BrimDeck.MainWindow.CheckPageCapsuleFit(Check);
             BrimDeck.MainWindow.CheckShadowLifetime();

@@ -34,6 +34,10 @@ public sealed class WindowsHost : IDisposable
     private uint _backgroundPid;
     private string _backgroundIdentityName = "", _backgroundIdentityPath = "";
     public event Action<ScreenContext>? ContextChanged;
+    // A panel that took the foreground for the keyboard (PanelKeyboard). While it is the foreground window the user's
+    // application has not changed: every panel keeps the context and app it had, so nothing closes or hides because of it.
+    public static IntPtr KeyboardPanel { get => s_keyboardPanel; set => s_keyboardPanel = value; }
+    private static volatile nint s_keyboardPanel;
     // The app the answer was resolved for changed while the context stayed, carrying that app and the way its window
     // fills the screen, as they were for the last answer. The app rules may now answer differently for the same context,
     // but nothing about the panel's own state needs to change — the panel does not fold away for an app switch, only for
@@ -405,6 +409,8 @@ public sealed class WindowsHost : IDisposable
     private ScreenContext Detect(IntPtr monitor)
     {
         var foreground = GetForegroundWindow();
+        // The panel holding the keyboard is in front: nothing has changed, and the background app read last time is kept.
+        if (foreground != IntPtr.Zero && foreground == KeyboardPanel && IsWindowVisible(foreground) && !IsIconic(foreground)) return Current;
         _backgroundName = ""; _backgroundPath = ""; _backgroundKind = ScreenContext.Desktop;
         // Nothing but the desktop: a full-screen window elsewhere on this monitor still owns the screen, so the answer is
         // BackgroundFullscreen rather than Desktop. Looked up once, only where it can matter, and only while the settings ask
