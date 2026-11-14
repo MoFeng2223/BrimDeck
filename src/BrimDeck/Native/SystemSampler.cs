@@ -51,6 +51,8 @@ internal sealed class SystemSampler : IDisposable
     // _powerWanted: the whole machine's power (the Energy Meter counters, NVIDIA's board power); _batteryWanted: the battery alone, which
     // the machine's charge reading needs without any of the rest.
     // _gpuWanted: the graphics adapters' counters, for the page, the row's GPU reading and the power.
+    // Whether the processor, memory and the network are read (SetReads): a page that does not show one does not ask for it.
+    private volatile bool _readCpu = true, _readMemory = true, _readNetwork = true;
     private volatile bool _temperatures, _storageWanted, _driveTemperatures, _powerWanted, _batteryWanted, _gpuWanted;
     // Where the adapters' usage comes from (DeckSettings.MonitorGpuUsage), set on the UI thread and read on the sampling thread.
     private volatile GpuUsageSource _gpuUsage;
@@ -164,6 +166,13 @@ internal sealed class SystemSampler : IDisposable
     // row's drive); driveTemperatures, the drives' temperatures (the page with both on). The drives are first read at once, so the
     // page knows early how many lines it needs for them. frames: a collapsed row or an open page shows the frame rate. gpu: the graphics
     // adapters (the page, the row's GPU reading, the power).
+    // Turning the network off is noted here, not only seen as the flag: off and on again between two collections still starts over.
+    private volatile bool _networkRestart;
+    public void SetReads(bool cpu, bool memory, bool network)
+    {
+        if (_readNetwork && !network) _networkRestart = true;
+        _readCpu = cpu; _readMemory = memory; _readNetwork = network;
+    }
     public void SetExtras(bool temperatures, bool storage, bool driveTemperatures, bool power = false, bool battery = false, bool frames = false, bool gpu = false)
     {
         if (!_disposed) _frames.Want(frames);
@@ -346,7 +355,7 @@ internal sealed class SystemSampler : IDisposable
         // A collection this soon after the last is skipped, and the processor and the adapters keep the readings they gave then.
         bool cpuSoon = now - _cpuAt < ShortestCounterSeconds;
         bool gpuSoon = now - _gpuAt < ShortestCounterSeconds || holdGpu && !gpuJoined && _gpuWanted && _gpuAt > _gpuJoinedAt && _lastGpus.HasValue;
-        bool cpuCollected = !cpuSoon && counters && _cpuPdh?.Collect() == true;
+        bool cpuCollected = _readCpu && !cpuSoon && counters && _cpuPdh?.Collect() == true;
         bool gpuCollected = !gpuSoon && _gpuWanted && counters && _gpuPdh?.Collect() == true;
         if (!cpuSoon) _cpuAt = now;
         if (!gpuSoon) _gpuAt = now;
@@ -356,14 +365,17 @@ internal sealed class SystemSampler : IDisposable
             // Named after the first list is shown (Resolve): the executables' descriptions and icons take 200 to 480 ms on the first list.
             _lastProcesses = _processes.Sample(now, name: !listProcesses); _processesAt = now;
         }
-        var network = _network.Sample(now);
+        // While network is not read the provider forgets its baseline and the history goes, so the first rate after it turns on is not an
+        // average over the time off and old readings do not join new ones.
+        if (!_readNetwork || _networkRestart) { _networkRestart = false; _network.Forget(); _history.Clear(); }
+        var network = _readNetwork ? _network.Sample(now) : Reading<NetworkSample>.Unavailable(Why.Waiting);
         if (network.TryGet(out var rates))
         {
             if (_history.Count == HistoryLength) _history.Dequeue();
             _history.Enqueue((rates.DownBytesPerSecond, rates.UpBytesPerSecond));
         }
         bool temperatures = _temperatures;
-        var cpu = cpuSoon ? _lastCpu : _cpu!.Sample(cpuCollected); var gpus = gpuSoon ? _lastGpus : _gpu.Sample(gpuCollected);
+        var cpu = !_readCpu ? Reading<CpuSample>.Unavailable(Why.Waiting) : cpuSoon ? _lastCpu : _cpu!.Sample(cpuCollected); var gpus = gpuSoon ? _lastGpus : _gpu.Sample(gpuCollected);
         _lastCpu = cpu; _lastGpus = gpus;
         // Asked on every tick, so the zones' counters leave the query once temperatures are no longer wanted or a better source gives them.
         if (_zones!.Sample(temperatures && !_processorHeat && counters, now) is { } zone) cpu = cpu.Map(sample => sample with { Temperature = zone.Celsius, TemperatureZone = zone.Zone });
@@ -435,7 +447,7 @@ internal sealed class SystemSampler : IDisposable
         var frames = _frames.Sample(now);
         // The program's icon, read here as the process list's are (the shell's lookup wants this thread's apartment).
         if (frames.TryGet(out var drawing) && drawing.Path is { } program) ProcessIcons.Prepare(program);
-        var snapshot = new MonitorSnapshot(DateTimeOffset.Now, Environment.ProcessorCount, cpu, MemoryProvider.Sample(), network,
+        var snapshot = new MonitorSnapshot(DateTimeOffset.Now, Environment.ProcessorCount, cpu, _readMemory ? MemoryProvider.Sample() : Reading<MemorySample>.Unavailable(Why.Waiting), network,
             Reading<GpuSample>.Unavailable(gpus.Reason), _lastProcesses)
         {
             DownHistory = _history.Select(reading => reading.Down).ToArray(), UpHistory = _history.Select(reading => reading.Up).ToArray(),
@@ -570,6 +582,9 @@ internal sealed class NetworkProvider : IDisposable
     private int _sinceList = Relist;
     private double? _time;
     private readonly IntPtr _row = Marshal.AllocHGlobal(RowSize);
+
+    // Starts over: the next sample only sets the baseline, and the adapters are listed again.
+    public void Forget() { _previous = []; _time = null; _sinceList = Relist; }
 
     public Reading<NetworkSample> Sample(double now)
     {

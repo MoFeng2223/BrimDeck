@@ -74,6 +74,8 @@ public partial class MainWindow : Window
     // Threshold levels seen per quota; a rise after the first reading briefly widens the compact island.
     private readonly Dictionary<string, int> _levels = new();
     private bool _levelsSeeded;
+    // The number of the latest read; a partial result belongs to the read that sent it and is dropped once another has begun or its own is whole.
+    private int _round;
     private CompactAlertInfo? _alert;
     private DeckSettings Settings => _app.Settings;
     public bool IsExpanded => _expanded;
@@ -574,9 +576,11 @@ public partial class MainWindow : Window
         ApplySettings();
         PointerChanged(_pointerInside);
     }
-    public void SetSnapshots(IReadOnlyList<ProviderSnapshot> snapshots)
+    // partial: a first-round list that holds only the sources read so far; the ones still being read keep their waiting look.
+    public void SetSnapshots(IReadOnlyList<ProviderSnapshot> snapshots, bool partial = false)
     {
-        Snapshots = snapshots; _updatedAt = DateTimeOffset.Now; FirstReadEnded();
+        Snapshots = snapshots; _updatedAt = DateTimeOffset.Now;
+        if (!partial) FirstReadEnded();
         DetectThresholds();
         RenderCompact(); RenderUsage();
     }
@@ -1027,13 +1031,24 @@ public partial class MainWindow : Window
         else if (_app.Updates.UpdatedFrom is not null) _app.OpenReleaseNotes();
         else _app.OpenSettings();
     }
-    private async Task<IReadOnlyList<ProviderSnapshot>> LoadSnapshotsAsync(DateTime? historyStart)
+    // The usage read never waits for the price catalog: the amounts show as soon as the usage is in, and again when prices arrive.
+    private BackgroundPrices? _prices;
+    private void RefreshPrices()
+    {
+        _prices ??= new BackgroundPrices(cancellation => _app.Prices.RefreshAsync(cancellation: cancellation),
+            () => Dispatcher.BeginInvoke(() => { foreach (var deck in _app.Decks) deck.PricesChanged(); }));
+        _prices.Start(_app.Lifetime.Token);
+    }
+    internal void PricesChanged()
+    {
+        if (Snapshots.Count == 0 || !_firstReadEnded) return;
+        _usageBuilt = null; RenderUsage();
+    }
+    private Task<List<ProviderSnapshot>> LoadSnapshotsAsync(DateTime? historyStart, Action<IReadOnlyList<ProviderSnapshot>> progress)
     {
         var settings = Settings.Copy();
-        var prices = _app.Prices.RefreshAsync(cancellation: _app.Lifetime.Token);
-        var usage = Task.Run(() => _app.Usage.RefreshAsync(settings, _app.Lifetime.Token, historyStart));
-        await Task.WhenAll(prices, usage);
-        return await usage;
+        RefreshPrices();
+        return Task.Run(() => _app.Usage.RefreshAsync(settings, _app.Lifetime.Token, historyStart, progress));
     }
     // Only the main panel reads; every panel shows the result. The history goes back as far as any panel's model details need.
     public async Task RefreshAsync(bool queueIfBusy = true)
@@ -1043,11 +1058,18 @@ public partial class MainWindow : Window
         // date range still require one follow-up, and automatic requests must not clear it.
         if (_refreshing) { if (queueIfBusy) _refreshRequested = true; return; }
         _refreshing = true;
+        int round = ++_round; bool whole = false;
         var decks = _app.Decks.ToList();
         foreach (var deck in decks) deck.RenderSyncButton();
         try
         {
-            var result = await LoadSnapshotsAsync(decks.Min(deck => deck._historyStart));
+            // The first read hands over what each source has as it ends (UsageService.RefreshAsync throttles this); the whole result follows.
+            var result = await LoadSnapshotsAsync(decks.Min(deck => deck._historyStart), partial =>
+                // Background priority keeps input and animation ahead of the partial renders; one that runs after the whole result, or
+                // after the next read began, is of an older round and does nothing.
+                Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,
+                    () => { if (_round == round && !whole) foreach (var deck in _app.Decks) deck.SetSnapshots(partial, true); }));
+            whole = true;
             foreach (var deck in _app.Decks) deck.SetSnapshots(result);
             _app.SnapshotsChanged();
         }

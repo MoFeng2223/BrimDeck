@@ -323,6 +323,7 @@ public sealed class DeckSettings
 {
     private List<AppEntry>? _apps;
     private List<CompactReading>? _readings;
+    private List<ExpandedReading>? _expanded;
     private List<CompactPart> _notchOrder = [.. CompactParts.Default], _capsuleOrder = [.. CompactParts.Default];
     private List<DeckPage> _pageOrder = [.. DeckPages.Order];
     private int _equalizerBars = CompactMusicLayout.DefaultBars, _musicEqualizerBars = 5;
@@ -619,6 +620,8 @@ public sealed class DeckSettings
     public string? CompactCriticalColor { get; set; }
     // The collapsed readings' dials and core columns ease to each reading at this many frames a second, or not at all.
     public CompactSmoothing CompactSmoothing { get; set; } = CompactSmoothing.Ten;
+    // How the processor's cores are drawn, collapsed and expanded: columns, a dot matrix, or by the count and the room (Auto).
+    public CoreDisplay CoreDisplay { get; set; } = CoreDisplay.Auto;
     // Seconds between readings: 1 or 2.
     public int MonitorInterval { get; set; } = 1;
     public bool MonitorProcesses { get; set; } = true;
@@ -658,6 +661,19 @@ public sealed class DeckSettings
     // refresh rate (FrameRates). Off by default; read only while the page is open, and only where the user may read Windows' frame
     // events (the Performance Log Users group, or BrimDeck elevated).
     public bool MonitorFrames { get; set; }
+    // The table of what the expanded page shows and in which order (ExpandedMonitor). A file saved before it has none: the table is then
+    // the four switches above in the default order, so the page looks as it did, and follows those switches until a table is set.
+    // Once set, the table is what the page follows and Normalize writes the four switches to match it, for older versions.
+    [JsonPropertyName("ExpandedReadings"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ExpandedReading>? ExpandedTable { get => _expanded; set => _expanded = value; }
+    // Whether the expanded page shows an item (the table, or the old switches before one is set).
+    public bool ShowsExpanded(ExpandedItem item) => ExpandedReadings.Any(reading => reading.Item == item && reading.Visible);
+    [JsonIgnore]
+    public List<ExpandedReading> ExpandedReadings
+    {
+        get => _expanded ?? ExpandedMonitor.Defaults(MonitorProcesses, MonitorStorage, MonitorPower, MonitorFrames);
+        set => _expanded = value;
+    }
     // The notch and the capsule each switch the system readings on; what they show is shared.
     public bool NotchMonitor { get; set; }
     public bool CapsuleMonitor { get; set; }
@@ -786,6 +802,7 @@ public sealed class DeckSettings
         var copy = (DeckSettings)MemberwiseClone();
         copy._apps = _apps?.Select(app => app.Copy()).ToList();
         copy._readings = _readings?.Select(reading => reading?.Copy()!).ToList();
+        copy._expanded = _expanded?.Select(reading => reading?.Copy()!).ToList();
         copy.MonitorCustomColors = (MonitorCustomColors ?? new()).Copy();
         copy._notchOrder = [.. _notchOrder]; copy._capsuleOrder = [.. _capsuleOrder]; copy._pageOrder = [.. _pageOrder];
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
@@ -862,9 +879,15 @@ public sealed class DeckSettings
         MonitorGpuName = MonitorGpu is null || string.IsNullOrWhiteSpace(MonitorGpuName) ? null : MonitorGpuName.Trim();
         if (!Enum.IsDefined(MonitorProcessView)) MonitorProcessView = MonitorProcessView.Auto;
         if (!Enum.IsDefined(CompactSmoothing)) CompactSmoothing = CompactSmoothing.Ten;
+        if (!Enum.IsDefined(CoreDisplay)) CoreDisplay = CoreDisplay.Auto;
         if (!Enum.IsDefined(CompactMonitor)) CompactMonitor = CompactMonitorMode.Full;
         CompactMonitorItems &= CompactMonitorItems.All;
         if (CompactMonitorItems == CompactMonitorItems.None) CompactMonitorItems = CompactMonitorItems.Cpu;
+        if (_expanded is not null)
+        {
+            _expanded = ExpandedMonitor.Normalize(_expanded);
+            (MonitorProcesses, MonitorStorage, MonitorPower, MonitorFrames) = ExpandedMonitor.Switches(_expanded);
+        }
         CompactReadings = Core.CompactMonitor.Normalize(CompactReadings);
         Core.CompactMonitor.MoveColors(this);
         CompactMonitor = Core.CompactMonitor.Preset(CompactReadings) ?? CompactMonitorMode.Custom;
