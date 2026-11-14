@@ -116,10 +116,17 @@ public partial class MainWindow
         return (Layout.For(Tier.Tiny), false, wide);
     }
 
+    // A snapshot is read-only once published, so what a filter selects from it is kept with it: a render that finds the same snapshot,
+    // the same number of days and the same date takes the earlier list instead of sorting the (tens of thousands of) entries again.
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ProviderSnapshot, Dictionary<(int Days, DateTime Start), List<TokenEntry>>> EntryFilters = new();
     private static List<TokenEntry> Entries(ProviderSnapshot snapshot, int days)
     {
         var start = DateTime.Now.Date.AddDays(1 - days);
-        return snapshot.Entries.Where(x => x.Time.LocalDateTime >= start).ToList();
+        var filters = EntryFilters.GetOrCreateValue(snapshot);
+        if (filters.TryGetValue((days, start), out var kept)) return kept;
+        // A new date or a new day count replaces what was kept: few filters are asked for at once.
+        if (filters.Count >= 4) filters.Clear();
+        return filters[(days, start)] = snapshot.Entries.Where(x => x.Time.LocalDateTime >= start).ToList();
     }
 
     // The cheap part of a render: clock, gear tooltip and the synchronization button. Run on every expansion.
@@ -225,8 +232,17 @@ public partial class MainWindow
             empty.Children.Add(open); UsageContent.Children.Add(empty);
             return;
         }
-        if (_details) { _usageForm = "details"; RenderModels(DashboardUsage.Statistics(Settings, Snapshots)); }
-        else RenderColumns(DashboardUsage.Columns(Settings, Snapshots));
+        if (_details)
+        {
+            _usageForm = "details";
+            var shownStatistics = DashboardUsage.Statistics(Settings, Snapshots);
+            RenderModels(shownStatistics);
+            // Totals of the previous run (UsageLastSeen) are dimmed, and the page says so in its tip, until the new ones replace them.
+            var restored = shownStatistics.Where(snapshot => snapshot.LastSeenAt is not null).ToList();
+            UsageContent.Opacity = restored.Count > 0 ? .55 : 1;
+            UsageContent.ToolTip = restored.Count > 0 ? string.Join("\n", restored.Select(snapshot => snapshot.Name + " · " + snapshot.UsageNote)) : null;
+        }
+        else { UsageContent.Opacity = 1; UsageContent.ToolTip = null; RenderColumns(DashboardUsage.Columns(Settings, Snapshots)); }
     }
 
     // A joined switch: one rounded strip, the selected segment filled. Buttons carry accessible names. With a glide key the fill
@@ -378,6 +394,17 @@ public partial class MainWindow
             Grid.SetColumn(chip, 1); head.Children.Add(chip);
             chip.Measure(new Size(double.PositiveInfinity, layout.Head)); occupied += chip.DesiredSize.Width;
         }
+        // Readings of the previous run (UsageLastSeen) are marked at the right of the title, and dimmed below, until the new ones replace them.
+        // A column that shows no readings says so in its own label instead.
+        // The title marker belongs to the quotas; restored totals alone are dimmed and say so in their tips.
+        if (snapshot.LastSeenAt is { } seenAt && !off)
+        {
+            var marker = UI.Text(UsageLastSeen.Label(seenAt, DateTimeOffset.Now), Math.Max(10, layout.Reset), UI.Tertiary);
+            marker.FontFamily = UI.PanelFont; marker.HorizontalAlignment = HorizontalAlignment.Right; marker.VerticalAlignment = VerticalAlignment.Top;
+            marker.Margin = new Thickness(8, nameTop, 0, 0); marker.TextTrimming = TextTrimming.CharacterEllipsis; marker.ToolTip = snapshot.Status;
+            Grid.SetColumn(marker, 2); head.Children.Add(marker);
+            marker.Measure(new Size(double.PositiveInfinity, layout.Head)); occupied += marker.DesiredSize.Width + 8;
+        }
         name.MaxWidth = Math.Max(20, innerWidth - occupied);
         // The page stretches within its size step instead of being built again (RenderUsage), so the name gives way to the plan
         // as the column's width changes.
@@ -390,7 +417,7 @@ public partial class MainWindow
             // No readings: what the state is, why, and a way to sync now, centered in the column. Left-aligned, the button's text sat
             // inside its outline and padding, so it looked further right than the lines above it.
             var status = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            var label = UI.Fixed(snapshot.StatusLabel, Math.Max(11, layout.Label + 1), Math.Ceiling(layout.Label * 1.5), UI.Secondary, FontWeights.SemiBold);
+            var label = UI.Fixed(snapshot.LastSeenAt is { } seen ? UsageLastSeen.Label(seen, DateTimeOffset.Now) : snapshot.StatusLabel, Math.Max(11, layout.Label + 1), Math.Ceiling(layout.Label * 1.5), UI.Secondary, FontWeights.SemiBold);
             label.TextAlignment = TextAlignment.Center; label.ToolTip = snapshot.Status;
             status.Children.Add(label);
             // The detail is dropped when it only repeats the label, and when the column is too short for it (the smallest panel):
@@ -465,6 +492,7 @@ public partial class MainWindow
             }
             body = stack;
         }
+        if (snapshot.LastSeenAt is not null) body.Opacity = .55;
         Grid.SetRow(body, 1); column.Children.Add(body);
 
         if (layout.Footer)
@@ -486,6 +514,7 @@ public partial class MainWindow
             {
                 var rows = new StackPanel(); rows.Children.Add(today); rows.Children.Add(week); footer.Children.Add(rows);
             }
+            if (usage.LastSeenAt is not null) footer.Opacity = .55;
             Grid.SetRow(footer, 2); column.Children.Add(footer);
         }
         var surface = new Border
@@ -625,13 +654,19 @@ public partial class MainWindow
                 : countText.Length > 0 ? CountTooltip(quota) : MetricPercentTooltip(quota);
             Grid.SetColumn(reset, 1); labelRow.Children.Add(reset);
         }
+        // A quota spent only in busy or idle hours (CodeAgent) shows when its hours next start, or end while they are on, in place of
+        // the daily reset.
+        var hours = quota is { Hours: { } schedule, Period: { } period } ? schedule.Next(period, DateTimeOffset.Now) : default;
+        bool timed = hours.At is not null;
         var rightText = text ? quota.ResetText : offPeak ? (change is { } next ? Loc.T(UI.ShortReset(next) + "切换", "switches " + UI.ShortReset(next)) : "")
+            : timed ? (hours.On ? Loc.T(UI.ShortReset(hours.At) + "结束", "ends " + UI.ShortReset(hours.At)) : Loc.T(UI.ShortReset(hours.At) + "开始", "starts " + UI.ShortReset(hours.At)))
             : resetText.Length > 0 ? resetText : expiryText;
         if (rightText.Length > 0)
         {
             var right = UI.Line(rightText, layout.Reset, UI.Tertiary);
             right.FontFamily = UI.PanelFont;
             right.ToolTip = text ? null : offPeak ? Loc.T($"{change:yyyy-MM-dd HH:mm} 转为" + (offPeakNow ? "高峰时段" : "低峰时段"), (offPeakNow ? "Peak" : "Off-peak") + $" from {change:yyyy-MM-dd HH:mm}")
+                : timed ? CreditHoursTooltip(quota, hours.At!.Value, hours.On)
                 : (quota.ResetAt ?? quota.ExpiresAt)!.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
             right.VerticalAlignment = VerticalAlignment.Bottom; right.HorizontalAlignment = HorizontalAlignment.Right;
             right.Margin = new Thickness(6, 0, 0, 1); Grid.SetColumn(right, 1); numbers.Children.Add(right);
@@ -640,6 +675,28 @@ public partial class MainWindow
         var track = new QuotaBar($"{entry.InstanceId:N}:{slot}", (left ? 100 - used : used) / 100, color); Grid.SetRow(track, 4);
         block.Children.Add(track);
         return block;
+    }
+
+    // The busy and idle hours of CodeAgent credits and when this quota's hours next start or end, for example
+    // "忙时（消耗 3 倍）：工作日 10:00–12:00、15:00–18:00" / "闲时（消耗 0.2 倍）：其余时间，包括周末全天" / "闲时进行中，11-13 15:00 结束".
+    // The definition's hours are China Standard Time and are written as they are; local times are given for the next change.
+    private static string CreditHoursTooltip(UsageMetric quota, DateTimeOffset at, bool on)
+    {
+        var hours = quota.Hours!;
+        static string Clock(double hour) => $"{(int)hour:00}:{(int)Math.Round(hour % 1 * 60):00}";
+        string Ranges(bool weekend) => string.Join(Loc.T("、", ", "), hours.Ranges(CreditPeriod.Busy, weekend).Select(range => Clock(range.From) + "–" + Clock(range.To)));
+        string Rate(CreditPeriod period) => hours.Rates.TryGetValue(period, out var rate) ? Loc.T($"（消耗 {rate:0.##} 倍）", $" ({rate:0.##}× credits)") : "";
+        string weekdays = Ranges(false), weekends = Ranges(true);
+        var busy = Loc.T("忙时", "Busy hours") + Rate(CreditPeriod.Busy) + Loc.T("：", ": ") + string.Join(Loc.T("；", "; "), new[]
+        {
+            weekdays.Length > 0 ? Loc.T("工作日 ", "weekdays ") + weekdays : "",
+            weekends.Length > 0 ? Loc.T("周末 ", "weekends ") + weekends : ""
+        }.Where(part => part.Length > 0));
+        var idle = Loc.T("闲时", "Idle hours") + Rate(CreditPeriod.Idle) + Loc.T("：其余时间", ": every other hour") + (weekends.Length == 0 ? Loc.T("，包括周末全天", ", all weekend included") : "");
+        var own = quota.Period == CreditPeriod.Busy ? Loc.T("忙时", "Busy hours") : Loc.T("闲时", "Idle hours");
+        var next = own + (on ? Loc.T($"进行中，{at.LocalDateTime:MM-dd HH:mm} 结束", $" now, until {at.LocalDateTime:MM-dd HH:mm}")
+            : Loc.T($" {at.LocalDateTime:MM-dd HH:mm} 开始", $" from {at.LocalDateTime:MM-dd HH:mm}"));
+        return string.Join("\n", busy, idle, next);
     }
 
     // The row's off-peak periods, written as the settings write them.
@@ -691,7 +748,8 @@ public partial class MainWindow
         FrameworkElement tokens = snapshot.UsageAvailable ? UI.Centered(UI.Number(total), layout.Foot, UI.Secondary)
             : UI.CenteredSymbol("—", layout.Foot, UI.Secondary);
         tokens.HorizontalAlignment = HorizontalAlignment.Left;
-        tokens.ToolTip = ProviderCatalog.UsageTip(snapshot.Id) + "\n" + (snapshot.UsageAvailable ? Loc.T($"{label} Token · {total:N0}", $"{label} tokens · {total:N0}") : snapshot.UsageNote); Grid.SetColumn(tokens, 1); row.Children.Add(tokens);
+        tokens.ToolTip = ProviderCatalog.UsageTip(snapshot.Id) + "\n" + (snapshot.UsageAvailable ? Loc.T($"{label} Token · {total:N0}", $"{label} tokens · {total:N0}") : snapshot.UsageNote)
+            + (snapshot.LastSeenAt is not null && snapshot.UsageAvailable ? "\n" + snapshot.UsageNote : ""); Grid.SetColumn(tokens, 1); row.Children.Add(tokens);
         FrameworkElement price = snapshot.UsageAvailable ? UI.Centered(UI.Amount(cost!), layout.Foot, UI.Primary, FontWeights.SemiBold)
             : UI.CenteredSymbol("—", layout.Foot, UI.Tertiary, FontWeights.SemiBold);
         price.Margin = new Thickness(grouped ? 12 : 8, 0, 0, 0); price.ToolTip = snapshot.UsageAvailable ? UI.CostNote(cost!, _app.Prices) : snapshot.UsageNote; Grid.SetColumn(price, 2); row.Children.Add(price);

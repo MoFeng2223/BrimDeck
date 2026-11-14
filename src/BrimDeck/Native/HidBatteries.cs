@@ -373,8 +373,8 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         else foreach (var info in hidpp) claimed.Add(info.Path);
         if (ask)
             foreach (var group in infos.Where(info => info.Vendor == Razer.Vendor).GroupBy(info => info.Product))
-                // Basilisk Ultimate, cable and receiver, measured answering battery queries with Synapse 4 running.
-                if (Razer.Find(group.Key) is { } model && (model.Product is 0x0086 or 0x0088 || !Aside(Razer.Vendor))) Try(() => ReadRazer(model, [.. group], claimed));
+                // Read with Synapse running as well (VendorSoftware says why).
+                if (Razer.Find(group.Key) is { } model) Try(() => ReadRazer(model, [.. group], claimed));
         // The devices (GroupKey) a dongle protocol has read this pass.
         var answered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // The ROG Omni receivers, each read as a whole (its pairing table, then its paired devices).
@@ -696,7 +696,9 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     private static IEnumerable<DeviceBattery> Vgn(HidInfo info, HashSet<string> claimed)
     {
         using var device = new HidDevice(info);
-        var read = Hid.Transact<object>([device], () => device.Write(Dongles.VgnRequest()), r => Dongles.VgnBattery(r) is { } b ? b : null, 500);
+        bool v108 = info.Vendor == Dongles.VgnV108Vendor && info.Product == Dongles.VgnV108Receiver;
+        var read = Hid.Transact<object>([device], () => device.Write(v108 ? Dongles.VgnV108Request() : Dongles.VgnRequest()),
+            r => (v108 ? Dongles.VgnV108Battery(r) : Dongles.VgnBattery(r)) is { } b ? b : null, 500);
         if (read is not BatteryRead battery) return [];
         claimed.Add(info.Path);
         bool atk = info.Vendor == Dongles.AtkVendor;
