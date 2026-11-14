@@ -98,6 +98,7 @@ try
     await KimiUsageTests.Run(root, Check);
     await ClaudeRateLimitTests.Run(root, Check);
     await UsageStartupTests.Run(root, Check);
+    UsageLastSeenTests.Run(root, Check);
     await OpenCodeUsageTests.Run(root, Check);
     await OfficialPriceTests.Run(root, Check);
     await GrokBotUsageTests.Run(root, Check);
