@@ -133,10 +133,19 @@ public sealed class WindowsHost : IDisposable
                 GetWindowThreadProcessId(above, out var pid);
                 if (pid == Environment.ProcessId)
                 {
-                    // The panel's own menu raised over it (a shelf context menu, a detail popup): recovering the panel from
-                    // another app would raise it across that menu, covering the items the user is reaching for. The menu is
-                    // transient; the next poll restores the panel once it is gone.
-                    if (IsMenu(above)) return;
+                    // A topmost window of the app itself above the panel — its shelf menu, a detail popup, a tooltip; WPF
+                    // hosts these as unowned topmost windows, so IsMenu does not name them — is transient: raising the
+                    // panel now would cover the items the user is reaching for. The next poll recovers once it is gone.
+                    // An ordinary own window (the settings) is skipped as before: it cannot belong over a topmost panel.
+                    if ((GetWindowLongPtr(above, -20).ToInt64() & 0x8) != 0)
+                    {
+                        if (_heldAbove != above || Environment.TickCount64 - _heldLoggedAt > 10000)
+                        {
+                            _heldAbove = above; _heldLoggedAt = Environment.TickCount64;
+                            NoteOrder($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} recovery held for own {ClassName(above, stackalloc char[32])}");
+                        }
+                        return;
+                    }
                     continue;
                 }
                 bool over = (GetWindowLongPtr(above, -20).ToInt64() & 0x8) != 0;
@@ -259,6 +268,10 @@ public sealed class WindowsHost : IDisposable
     }
     private (string Cause, IntPtr Window)? _orderCulprit;
     private long _orderLoggedAt;
+    // The own window the recovery last waited for, and when that wait was logged, so a held recovery is noted once rather
+    // than every poll.
+    private IntPtr _heldAbove;
+    private long _heldLoggedAt;
     // An app that raises itself whenever it is covered would trade places with the panel without end, the two flickering
     // in turn. Past ten recoveries from topmost windows within two seconds, the panel leaves them above it for five.
     private long _raisesFrom, _yieldUntil;
