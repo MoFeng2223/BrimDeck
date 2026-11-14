@@ -131,7 +131,14 @@ public sealed class WindowsHost : IDisposable
                 if (!IsWindowVisible(above) || IsIconic(above)) continue;
                 if (DwmGetWindowAttribute(above, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) continue;
                 GetWindowThreadProcessId(above, out var pid);
-                if (pid == Environment.ProcessId) continue;
+                if (pid == Environment.ProcessId)
+                {
+                    // The panel's own menu raised over it (a shelf context menu, a detail popup): recovering the panel from
+                    // another app would raise it across that menu, covering the items the user is reaching for. The menu is
+                    // transient; the next poll restores the panel once it is gone.
+                    if (IsMenu(above)) return;
+                    continue;
+                }
                 bool over = (GetWindowLongPtr(above, -20).ToInt64() & 0x8) != 0;
                 if (!over) { cause = "under"; culprit = above; recover = true; break; }
                 if (island is { } strip && Covers(above, strip))
@@ -361,20 +368,18 @@ public sealed class WindowsHost : IDisposable
             if (above == hit) return true;
         return false;
     }
-    // Whether the window the pointer reaches at a point in device pixels is a system menu above everything there: the hit
-    // test only names a menu when the menu is above the panel's own window at that point. A topmost panel is never under an
-    // ordinary window, but a menu raised over it is (WatchOrder leaves it alone), and hovering onto one must not open the
-    // panel across it. This process's own windows count only as the system menu class: BrimDeck's own popups and tooltips
-    // are narrow owned windows the panel must not yield to.
+    // Whether the window the pointer reaches at a point in device pixels is a menu the panel yields to even while topmost:
+    // the system's own menus (#32768) and, in any process including BrimDeck's, a narrow window owned by a shown one —
+    // which is how a WPF ContextMenu or a detail popup of the shelf itself reads (its host is an HwndWrapper owned by the
+    // panel, not #32768). A topmost panel is never under an ordinary window, but a menu raised over it is (WatchOrder
+    // leaves it alone), and hovering onto one must not open the panel across it. The panel's own window is not a menu: its
+    // owner is the hidden root, and it is full-width, so IsMenu answers false for it and normal hovering still opens.
     public static bool MenuAt(Point point)
     {
         var hit = WindowFromPoint(new POINT { X = (int)point.X, Y = (int)point.Y });
         if (hit == IntPtr.Zero) return false;
         hit = GetAncestor(hit, 2); // GA_ROOT
-        if (hit == IntPtr.Zero) return false;
-        GetWindowThreadProcessId(hit, out var pid);
-        if (pid == Environment.ProcessId) return ClassName(hit, stackalloc char[32]) is "#32768";
-        return IsMenu(hit);
+        return hit != IntPtr.Zero && IsMenu(hit);
     }
     // Puts a window directly beneath another, without moving, sizing or activating it.
     public static void PlaceBelow(IntPtr window, IntPtr above)

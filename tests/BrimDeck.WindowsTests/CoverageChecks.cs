@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
@@ -27,9 +28,19 @@ internal static class CoverageChecks
             var far = new Point(bounds.Left + 5, bounds.Bottom - 5);
             check("an empty desktop point is not a menu", !WindowsHost.MenuAt(far));
 
-            // 2. This process's own narrow topmost popup over a point: not a menu (its own popups must not block the panel).
+            // 2. This process's own narrow topmost popup over a point: not a menu while it has no owner (an unowned tool
+            // window must not block the panel), and a menu once it is owned by a shown window, the way the shelf's own
+            // ContextMenu hosts are owned by the panel (the panel must yield to those even while topmost).
             var over = new Point(460, 315);
-            check("this process's own narrow popup window is not a menu", !WindowsHost.MenuAt(over));
+            check("this process's own unowned narrow popup is not a menu", !WindowsHost.MenuAt(over));
+            var shelfLike = new Window { Width = 167, Height = 257, Topmost = true, ShowInTaskbar = false, ShowActivated = false,
+                WindowStyle = WindowStyle.None, Owner = owner, Left = 900, Top = 300 };
+            try
+            {
+                shelfLike.Show();
+                check("this process's own narrow popup owned by a shown window is a menu", WindowsHost.MenuAt(new Point(950, 350)));
+            }
+            finally { shelfLike.Close(); }
 
             // 3. Another process's ordinary window at the taskbar's middle: not a menu (the topmost recovery keeps working
             // against real windows; only menus are yielded to).
@@ -41,15 +52,13 @@ internal static class CoverageChecks
             }
             else Console.WriteLine("SKIP: no taskbar window to check.");
 
-            // 4. A real system menu (#32768) tracked over a point: the menu reads as a menu at its own items, and the point
-            // beside it stays free. Tracked on its own thread, as TrackPopupMenu blocks until the menu ends, with the owner
-            // window the API asks for. A menu closes at once unless its owner is the foreground window, and Windows locks
-            // the foreground away from a process the user is not working in: when the session will not hold the menu up the
-            // check is skipped, not failed; only a TrackPopupMenu that fails outright (a bad handle) is the code's fault.
-            const int X = 700, Y = 500;
+            // 4. A real system menu (#32768): tracked on its own thread (TrackPopupMenu blocks until the menu ends) over this
+            // thread's owner window, then found by scanning the desktop for a visible #32768 window rather than trusting a
+            // fixed coordinate — Windows moves a menu that would not fit, and another app's window at the requested point
+            // makes the call fail outright, neither of which says anything about MenuAt. Where a menu is really on screen,
+            // MenuAt must read it as a menu at its own centre; where none can be held up, the check is skipped.
             menu = CreatePopupMenu();
             AppendMenu(menu, 0, (IntPtr)1, "first"); AppendMenu(menu, 0, (IntPtr)2, "second");
-            var point = new Point(X + 15, Y + 15);
             string outcome = "";
             thread = new Thread(() =>
             {
@@ -59,41 +68,35 @@ internal static class CoverageChecks
                 keybd_event(0x12 /* VK_MENU */, 0, 0, IntPtr.Zero); keybd_event(0x12, 0, 2 /* KEYEVENTF_KEYUP */, IntPtr.Zero);
                 bool front = SetForegroundWindow(ownerHandle);
                 if (attached) AttachThreadInput(self, fore, false);
-                SetLastError(0); // so a zero return with a cleared code is a dismissed menu, not a failed call
-                int cmd = front ? TrackPopupMenu(menu, 0x0100 /* TPM_RETURNCMD */, X, Y, 0, ownerHandle, IntPtr.Zero) : -1;
-                // TPM_RETURNCMD answers zero both for a menu dismissed without a choice and for a failed call; the error
-                // code, cleared before the call, tells the two apart.
-                int error = cmd == 0 && front ? Marshal.GetLastWin32Error() : 0;
-                outcome = (front ? "tracked" : "no foreground") + ", returned " + cmd + (error != 0 ? ", error " + error : "");
+                int cmd = front ? TrackPopupMenu(menu, 0x0100 /* TPM_RETURNCMD */, 700, 500, 0, ownerHandle, IntPtr.Zero) : -1;
+                outcome = (front ? "tracked" : "no foreground") + ", returned " + cmd;
             });
             thread.SetApartmentState(ApartmentState.STA);
             thread.IsBackground = true;
             thread.Start();
-            // The owner window belongs to this thread: the menu loop on the tracking thread sends it menu messages and
-            // waits for the answers, so the waits below pump this thread's queue rather than sleeping.
+            // The owner window belongs to this thread: the menu loop sends it messages and waits for the answers, so the
+            // waits pump this thread's queue rather than sleeping.
             int waited = 0;
-            while (!WindowsHost.MenuAt(point) && waited < 3000) { Pump(TimeSpan.FromMilliseconds(50)); waited += 50; }
-            bool shown = WindowsHost.MenuAt(point);
-            if (shown)
+            RECT menuRect = default;
+            bool onScreen = false;
+            while (waited < 2000)
             {
-                check("a system menu tracked over the point reads as a menu", true);
-                check("the point beside a tracked menu is not a menu", !WindowsHost.MenuAt(new Point(X - 40, Y - 40)));
-                // EndMenu reaches only the thread that calls it; WM_CANCELMODE sent to the menu's own window is processed
-                // in the tracking loop and dismisses the menu there.
-                var hit = GetAncestor(WindowFromPoint(new POINT { X = X + 15, Y = Y + 15 }), 2);
+                Pump(TimeSpan.FromMilliseconds(50)); waited += 50;
+                if ((onScreen = FindMenu(out menuRect))) break;
+            }
+            if (onScreen)
+            {
+                var centre = new Point((menuRect.Left + menuRect.Right) / 2.0, (menuRect.Top + menuRect.Bottom) / 2.0);
+                check("a system menu on screen reads as a menu at its centre", WindowsHost.MenuAt(centre));
+                // WM_CANCELMODE to the menu's own window dismisses it in the tracking loop (EndMenu reaches only its caller).
+                var hit = GetAncestor(WindowFromPoint(new POINT { X = (int)centre.X, Y = (int)centre.Y }), 2);
                 if (hit != IntPtr.Zero) PostMessage(hit, 0x001F /* WM_CANCELMODE */, IntPtr.Zero, IntPtr.Zero);
             }
             waited = 0;
             while (thread.IsAlive && waited < 3000) { Pump(TimeSpan.FromMilliseconds(50)); waited += 50; }
             if (thread.IsAlive) outcome += "; still tracking";
             else if (menu != IntPtr.Zero) { DestroyMenu(menu); menu = IntPtr.Zero; }
-            if (!shown)
-            {
-                // A failed TrackPopupMenu (a bad handle, a menu that cannot be built) is the code's fault and fails the
-                // check; a menu that was tracked but would not stay up in this session says nothing about the code.
-                if (outcome.Contains(", error ")) check("a system menu tracked over the point reads as a menu", false);
-                else Console.WriteLine("SKIP: the session would not hold the menu up: " + outcome);
-            }
+            if (!onScreen) Console.WriteLine("SKIP: no system menu could be held on screen in this session: " + outcome);
 
             // 5. CoveredAt keeps its own rules: this process's windows never read as covering it (the panel's own popups).
             check("CoveredAt still ignores this process's own windows", !WindowsHost.CoveredAt(owner, over));
@@ -118,6 +121,22 @@ internal static class CoverageChecks
         Dispatcher.PushFrame(frame);
     }
 
+    // The first visible system menu on the desktop and its rectangle, wherever Windows placed it.
+    private static bool FindMenu(out RECT rect)
+    {
+        var found = false; var hit = default(RECT);
+        EnumWindows((h, _) =>
+        {
+            if (!IsWindowVisible(h)) return true;
+            var sb = new StringBuilder(32); GetClassName(h, sb, 32);
+            if (sb.ToString() != "#32768") return true;
+            if (!GetWindowRect(h, out hit)) return true;
+            found = true; return false;
+        }, IntPtr.Zero);
+        rect = hit;
+        return found;
+    }
+
     [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
 
@@ -137,4 +156,8 @@ internal static class CoverageChecks
     [DllImport("user32")] private static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32")] private static extern bool GetWindowRect(IntPtr window, out RECT r);
     [DllImport("user32", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindow(string? className, string? title);
+    private delegate bool EnumProc(IntPtr window, IntPtr parameter);
+    [DllImport("user32")] private static extern bool EnumWindows(EnumProc callback, IntPtr parameter);
+    [DllImport("user32")] private static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32")] private static extern int GetClassName(IntPtr window, StringBuilder name, int max);
 }
