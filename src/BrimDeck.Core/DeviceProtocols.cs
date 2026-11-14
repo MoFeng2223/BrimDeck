@@ -595,6 +595,9 @@ public static class Dongles
     // Device info is command 0x0900: its payload (from byte 8) holds the connection at 10, charging at 11 and the level at 12;
     // a level of 0 means the mouse is not connected, and a first byte of 0xFF that the receiver is not ready.
     public const int MchoseVendor = 0x3837;
+    // The A7 V3 Ultra+ (3837:1018) is identified by USBTreeView: MI_02's FF01/0001 collection declares
+    // 64-byte input and output reports, including report id 0x4D. The exchange itself still needs an on-device reply test.
+    public const int MchoseA7V3UltraPlus = 0x1018;
     public static byte[] MchoseRequest()
     {
         var frame = new byte[64];
@@ -603,9 +606,10 @@ public static class Dongles
         frame[8] = xor;
         return frame;
     }
-    // The MCHOSE devices the mouse protocol is sent to: those that name themselves a mouse (its keyboards, headsets and the
-    // MagDock 3837:1012 speak other protocols).
-    public static bool IsMchoseMouse(int product, string name) => product is not (0x1012 or 0x6045)
+    // Most MCHOSE mice identify themselves by name. The A7 V3 Ultra+ does not; Find admits it only on its verified
+    // MI_02 / FF01 / 0001 collection, never on the receiver's other collections.
+    public static bool IsMchoseMouse(int product, string name) => product == MchoseA7V3UltraPlus
+        || product is not (0x1012 or 0x6045)
         && (name.Contains("mouse", StringComparison.OrdinalIgnoreCase) || name.Contains("鼠标", StringComparison.Ordinal));
     public static BatteryRead? MchoseBattery(byte[] reply)
     {
@@ -750,8 +754,12 @@ public static class Dongles
         if (vendor == InphicVendor && product is 0x5B2E or 0x5B2F && featureLength >= 33) return Protocol.Inphic;
         // The 2.4 GHz receiver's product is not fixed (InphicBatteryTray): only its vendor collection.
         if (vendor == InphicWireless && usagePage >= 0xFF00 && featureLength >= 33) return Protocol.Inphic;
-        // MCHOSE's mouse protocol only on MCHOSE devices that call themselves a mouse (its keyboards, headsets and the MagDock
-        // speak other protocols).
+        // The A7 V3 Ultra+ (3837:1018) omits "Mouse" from its product string. USBTreeView identifies the protocol
+        // collection as MI_02, usage page FF01, usage 0001, with 64-byte input and output reports. Do not send to FF0B or
+        // either of the receiver's standard HID collections.
+        if (vendor == MchoseVendor && product == MchoseA7V3UltraPlus)
+            return iface == 2 && usagePage == 0xFF01 && usage == 0x0001 && inputLength >= 64 && outputLength >= 64 ? Protocol.Mchose : null;
+        // Other MCHOSE mice identify themselves by name; keyboards, headsets and the MagDock speak other protocols.
         if (vendor == MchoseVendor && usagePage is 0xFF01 or 0xFF0B && IsMchoseMouse(product, productName)) return Protocol.Mchose;
         return null;
     }

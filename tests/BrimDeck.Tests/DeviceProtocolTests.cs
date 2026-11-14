@@ -344,7 +344,16 @@ static class DeviceProtocolTests
         var off = (byte[])mchose.Clone(); off[8 + 12] = 0;
         check("MCHOSE: a reply's level; a disconnected mouse is none", Dongles.MchoseBattery(mchose) == new BatteryRead(91) && Dongles.MchoseBattery(off) is null);
         check("MCHOSE: the mouse protocol only for its mice, never the MagDock or the X9", Dongles.IsMchoseMouse(0x5011, "MCHOSE G7 Mouse") && Dongles.IsMchoseMouse(0x5011, "迈从无线鼠标")
+            && Dongles.IsMchoseMouse(Dongles.MchoseA7V3UltraPlus, "MCHOSE A7 V3 Ultra+")
             && !Dongles.IsMchoseMouse(0x1012, "MCHOSE MagDock Mouse") && !Dongles.IsMchoseMouse(0x6045, "X9") && !Dongles.IsMchoseMouse(0x4001, "MCHOSE K99"));
+        check("MCHOSE A7 V3 Ultra+: only MI_02 / FF01 Usage 0001 with 64-byte input and output reports",
+            Dongles.Find(Dongles.MchoseVendor, Dongles.MchoseA7V3UltraPlus, 0xFF01, "MCHOSE A7 V3 Ultra+", 0, 2, 0x0001, 64, 64) == Dongles.Protocol.Mchose
+            && Dongles.Find(Dongles.MchoseVendor, Dongles.MchoseA7V3UltraPlus, 0xFF01, "", 0, 2, 0x0001, 64, 64) == Dongles.Protocol.Mchose
+            && Dongles.Find(Dongles.MchoseVendor, Dongles.MchoseA7V3UltraPlus, 0xFF01, "", 0, 1, 0x0001, 64, 64) is null
+            && Dongles.Find(Dongles.MchoseVendor, Dongles.MchoseA7V3UltraPlus, 0xFF01, "", 0, 2, 0x0002, 64, 64) is null
+            && Dongles.Find(Dongles.MchoseVendor, Dongles.MchoseA7V3UltraPlus, 0xFF0B, "", 0, 2, 0x00C4, 64, 64) is null
+            && Dongles.Find(Dongles.MchoseVendor, Dongles.MchoseA7V3UltraPlus, 0xFF01, "", 0, 2, 0x0001, 63, 64) is null
+            && Dongles.Find(Dongles.MchoseVendor, Dongles.MchoseA7V3UltraPlus, 0xFF01, "", 0, 2, 0x0001, 64, 63) is null);
         // AJAZZ AJ179 / XCTECH: report-id 0 + 0x10; asleep keeps last %, never a false 0 %.
         var ajazzReq = Dongles.AjazzInfoRequest();
         check("AJAZZ: 0x10 request is report-id 0, cmd 0x10, zero checksum", ajazzReq.Length == 33 && ajazzReq[0] == 0 && ajazzReq[1] == 0x10 && ajazzReq[2] == 0 && ajazzReq[3] == 0
