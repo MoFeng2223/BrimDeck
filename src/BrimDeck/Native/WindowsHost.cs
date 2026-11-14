@@ -131,7 +131,23 @@ public sealed class WindowsHost : IDisposable
                 if (!IsWindowVisible(above) || IsIconic(above)) continue;
                 if (DwmGetWindowAttribute(above, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) continue;
                 GetWindowThreadProcessId(above, out var pid);
-                if (pid == Environment.ProcessId) continue;
+                if (pid == Environment.ProcessId)
+                {
+                    // A topmost window of the app itself above the panel — its shelf menu, a detail popup, a tooltip; WPF
+                    // hosts these as unowned topmost windows, so IsMenu does not name them — is transient: raising the
+                    // panel now would cover the items the user is reaching for. The next poll recovers once it is gone.
+                    // An ordinary own window (the settings) is skipped as before: it cannot belong over a topmost panel.
+                    if ((GetWindowLongPtr(above, -20).ToInt64() & 0x8) != 0)
+                    {
+                        if (_heldAbove != above || Environment.TickCount64 - _heldLoggedAt > 10000)
+                        {
+                            _heldAbove = above; _heldLoggedAt = Environment.TickCount64;
+                            NoteOrder($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} recovery held for own {ClassName(above, stackalloc char[32])}");
+                        }
+                        return;
+                    }
+                    continue;
+                }
                 bool over = (GetWindowLongPtr(above, -20).ToInt64() & 0x8) != 0;
                 if (!over) { cause = "under"; culprit = above; recover = true; break; }
                 if (island is { } strip && Covers(above, strip))
@@ -252,6 +268,10 @@ public sealed class WindowsHost : IDisposable
     }
     private (string Cause, IntPtr Window)? _orderCulprit;
     private long _orderLoggedAt;
+    // The own window the recovery last waited for, and when that wait was logged, so a held recovery is noted once rather
+    // than every poll.
+    private IntPtr _heldAbove;
+    private long _heldLoggedAt;
     // An app that raises itself whenever it is covered would trade places with the panel without end, the two flickering
     // in turn. Past ten recoveries from topmost windows within two seconds, the panel leaves them above it for five.
     private long _raisesFrom, _yieldUntil;
@@ -360,6 +380,19 @@ public sealed class WindowsHost : IDisposable
         for (var above = GetWindow(handle, 3); above != IntPtr.Zero; above = GetWindow(above, 3))
             if (above == hit) return true;
         return false;
+    }
+    // Whether the window the pointer reaches at a point in device pixels is a menu the panel yields to even while topmost:
+    // the system's own menus (#32768) and, in any process including BrimDeck's, a narrow window owned by a shown one —
+    // which is how a WPF ContextMenu or a detail popup of the shelf itself reads (its host is an HwndWrapper owned by the
+    // panel, not #32768). A topmost panel is never under an ordinary window, but a menu raised over it is (WatchOrder
+    // leaves it alone), and hovering onto one must not open the panel across it. The panel's own window is not a menu: its
+    // owner is the hidden root, and it is full-width, so IsMenu answers false for it and normal hovering still opens.
+    public static bool MenuAt(Point point)
+    {
+        var hit = WindowFromPoint(new POINT { X = (int)point.X, Y = (int)point.Y });
+        if (hit == IntPtr.Zero) return false;
+        hit = GetAncestor(hit, 2); // GA_ROOT
+        return hit != IntPtr.Zero && IsMenu(hit);
     }
     // Puts a window directly beneath another, without moving, sizing or activating it.
     public static void PlaceBelow(IntPtr window, IntPtr above)
