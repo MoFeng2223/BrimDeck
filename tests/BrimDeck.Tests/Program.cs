@@ -611,6 +611,9 @@ try
         failingDesktop.Fail = false;
         var recovered = (await service.RefreshAsync(onlyAntigravity)).Single();
         Check("Discovery errors do not prevent subsequent refresh", recovered.StatusLabel != failed.StatusLabel);
+        failingDesktop.Unreadable = true;
+        var elevated = (await service.RefreshAsync(onlyAntigravity)).Single();
+        Check("An Antigravity language server that cannot be read says it runs as administrator", elevated.StatusLabel == "无法读取" && elevated.Status.Contains("管理员", StringComparison.Ordinal));
     }
     var quotas = QuotaParser.Codex(Json("""
         {"rate_limit":{"primary_window":{"used_percent":16,"limit_window_seconds":604800,"reset_after_seconds":3600}}}
@@ -870,6 +873,8 @@ sealed class CatalogHandler(string json) : HttpMessageHandler
 sealed class FailingDesktopSources : IDesktopSources
 {
     public bool Fail { get; set; } = true;
+    public bool Unreadable { get; set; }
+    public bool AntigravityUnreadable => Unreadable;
     public string? ReadCursorToken(string database) => null;
     public Task<IReadOnlyList<LocalEndpoint>> FindAntigravityAsync(CancellationToken cancellation)
         => Fail ? Task.FromException<IReadOnlyList<LocalEndpoint>>(new System.Runtime.InteropServices.COMException()) : Task.FromResult<IReadOnlyList<LocalEndpoint>>([]);
