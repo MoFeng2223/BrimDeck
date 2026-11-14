@@ -440,7 +440,8 @@ public partial class MainWindow
         string missing = incomplete ? Loc.T("部分明细尚未读取完整：", "Some details are not fully read yet: ") + string.Join(Loc.T("、", ", "), result.IncompleteProviders.Select(AppPresets.Name)) : "";
         // The label cells explain only an incomplete total; otherwise the visible summary says it all.
         string? totalTip = incomplete ? missing : null;
-        if (restoredApps.Count > 0) totalRow.Opacity = .55;
+        // The total is dimmed only when a row it adds up is the previous run's.
+        if (result.Rows.Any(row => restoredApps.Contains(row.Provider))) totalRow.Opacity = .55;
         // Figures shown as "—" are not known yet, so their tooltips say why instead of giving a count of zero.
         var totalTips = incomplete && result.Entries.Count == 0 ? totals.Select(_ => (string?)missing).ToArray() : Tips(result.Entries, true);
         if (incomplete && result.Entries.Count > 0) totalTips[^1] = totalTips[^1] is { } note ? note + "\n" + missing : missing;
