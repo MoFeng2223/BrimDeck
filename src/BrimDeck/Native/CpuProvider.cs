@@ -54,6 +54,9 @@ internal sealed class CpuProvider
         }
         var busy = _shares.Fill(pdhCollected && _busy ? Processors(_pdh!.Read(BusyPath)) : []);
         _busyReads = busy.Count > 0;
+        // While the counters give the readings the kernel's times are not read, so the baseline would grow old: it is dropped, and the
+        // times that stand in once the counters stop start a window of their own (the last reading is kept until it has one).
+        if (_busyReads) _previousTimes = [];
         IReadOnlyList<(string, double)> performanceValues = pdhCollected && _frequency ? _pdh!.Read(PerformancePath) : [];
         IReadOnlyList<(string, double)> nominalValues = pdhCollected && _frequency ? _pdh!.Read(BasePath) : [];
         var (performance, nominal) = (Processors(performanceValues), Processors(nominalValues));
