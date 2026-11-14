@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using BrimDeck.Core;
 
 // The collapsed readings' table: migration from the old modes, presets, order, drop priority, widths and copies.
@@ -301,10 +301,10 @@ internal static class CompactReadingTests
             moved.NotchOrder.SequenceEqual([CompactRowPart.Of(CompactPart.Clock), CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Transfer), CompactRowPart.Of(CompactPart.Devices)]));
         // A module's part joins right after the system readings, in the caller's order; uninstalling it keeps its place.
         var withModule = Read("""{"AppVersion":"0.1.0"}""");
-        var joined = CompactParts.Normalize(withModule.NotchOrder, ["thrm", "net"]);
+        var joined = CompactParts.Normalize(withModule.NotchOrder, ["sample-reading-progress", "net"]);
         check($"Compact order: a module's part joins after the system readings, in the caller's order [{string.Join(",", joined)}]",
-            joined.IndexOf(CompactRowPart.Module("thrm")) == joined.IndexOf(CompactRowPart.Of(CompactPart.Monitor)) + 1
-            && joined.IndexOf(CompactRowPart.Module("net")) == joined.IndexOf(CompactRowPart.Module("thrm")) + 1);
+            joined.IndexOf(CompactRowPart.Module("sample-reading-progress")) == joined.IndexOf(CompactRowPart.Of(CompactPart.Monitor)) + 1
+            && joined.IndexOf(CompactRowPart.Module("net")) == joined.IndexOf(CompactRowPart.Module("sample-reading-progress")) + 1);
         var musicOff = Upgraded("""{"AppVersion":"1.2.2","NotchMusic":false}""");
         check("Compact equalizer: a file from before its own switch shows it as the music was shown",
             !musicOff.NotchEqualizer && musicOff.CapsuleEqualizer && !musicOff.EqualizerAlways && Upgraded("""{"AppVersion":"1.2.2"}""").NotchEqualizer);
@@ -329,11 +329,11 @@ internal static class CompactReadingTests
         var read = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
         check("Compact order: survives saving and reading", read.CapsuleOrder.SequenceEqual([CompactRowPart.Of(CompactPart.Music), CompactRowPart.Of(CompactPart.Monitor), CompactRowPart.Of(CompactPart.Rings), CompactRowPart.Of(CompactPart.Equalizer), CompactRowPart.Of(CompactPart.Clock), CompactRowPart.Of(CompactPart.Transfer), CompactRowPart.Of(CompactPart.Devices)]));
         // A saved module part survives saving and reading, and its switch is kept separately.
-        settings.SetCompactOrder(CompactStyle.Notch, [CompactRowPart.Module("thrm"), .. standard]);
-        settings.SetModulePartEnabled(CompactStyle.Notch, "thrm", false);
+        settings.SetCompactOrder(CompactStyle.Notch, [CompactRowPart.Module("sample-reading-progress"), .. standard]);
+        settings.SetModulePartEnabled(CompactStyle.Notch, "sample-reading-progress", false);
         var roundTrip = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
         check("Compact order: a module's part and its switch survive saving and reading",
-            roundTrip.NotchOrder[0] == CompactRowPart.Module("thrm") && !roundTrip.ShowsModulePart(CompactStyle.Notch, "thrm")
+            roundTrip.NotchOrder[0] == CompactRowPart.Module("sample-reading-progress") && !roundTrip.ShowsModulePart(CompactStyle.Notch, "sample-reading-progress")
             && roundTrip.ShowsModulePart(CompactStyle.Notch, "other"));
     }
 }

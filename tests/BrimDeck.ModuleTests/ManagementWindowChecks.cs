@@ -36,7 +36,7 @@ internal static partial class Program
         public Task DownloadAsync(AppRelease release, Action<int> progress, CancellationToken cancellation) => throw new InvalidOperationException();
         public void PrepareRestart() => throw new InvalidOperationException();
     }
-    private static void CheckUnifiedPagesWindow(App app, ModuleHost host)
+    private static void CheckUnifiedPagesWindow(App app, ModuleHost host, SettingsWindow settingsWindow)
     {
         var options = app.Settings; options.Animations = false; options.UsageAutoSync = false;
         int mounts = 0; TextBox? editor = null;
@@ -65,6 +65,25 @@ internal static partial class Program
             Check("production page switch includes mixed ordered plugin tabs and overflow", buttons.Length >= 1 && Descendants(deck).OfType<Button>().Any(b => AutomationProperties.GetName(b) == "更多页面"));
             deck.SelectPage("nav-14:page");
             Check("production navigation opens an overflow page without a second selector", deck.CurrentPageId == "nav-14:page" && !Descendants(deck).OfType<Button>().Any(b => AutomationProperties.GetName(b) == "切换小程序"));
+            deck.SelectPage(DeckPage.Usage); deck.SetExpanded(false, true); deck.OpenFromHotkey();
+            Check("ordinary reopening keeps the last selected built-in page after visiting a plugin", deck.CurrentPageId == DeckPageIds.Usage && deck.UsageContent.Visibility == Visibility.Visible && deck.MiniAppsContent.Visibility == Visibility.Collapsed);
+            options.Pages.DefaultId = DeckPageIds.Monitor;
+            deck.SetExpanded(false, true); deck.OpenFromHotkey();
+            Check("ordinary reopening follows a fixed built-in default after a plugin visit", deck.CurrentPageId == DeckPageIds.Monitor && deck.MiniAppsContent.Visibility == Visibility.Collapsed);
+            deck.SetExpanded(false, true); deck.OpenFromHotkey("nav-1:page");
+            Check("a page shortcut can explicitly override the opening default", deck.CurrentPageId == "nav-1:page");
+            deck.SetExpanded(false, true); deck.OpenModulePageFromSettings("nav-0:page");
+            Check("an explicit plugin page request can override the opening default", deck.CurrentPageId == "nav-0:page" && deck.MiniAppsContent.Visibility == Visibility.Visible);
+            options.Pages.DefaultId = null;
+            var activeSettings = typeof(App).GetField("_settingsWindow", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            activeSettings.SetValue(app, settingsWindow);
+            try
+            {
+                settingsWindow.ShowPage(SettingsWindow.HotkeysPage);
+                typeof(MainWindow).GetMethod("Settings_Click", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(deck, [deck, new RoutedEventArgs()]);
+                Check("the general gear keeps the settings location when the deck shows a plugin", (int)typeof(SettingsWindow).GetField("_page", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(settingsWindow)! == SettingsWindow.HotkeysPage);
+            }
+            finally { activeSettings.SetValue(app, null); }
             var image = new System.Windows.Shapes.Rectangle { Fill = new VisualBrush((Visual)deck.Content) { Stretch = Stretch.Fill } }; Render(image, new Size(1000, 600), "unified-pages.png");
         }
         finally { deck?.Close(); }
@@ -89,7 +108,7 @@ internal static partial class Program
         var options = app.Settings; options.Language = Loc.Chinese; options.Theme = SettingsTheme.Dark; Loc.Use(options.Language);
         options.Modules.EnabledModules.AddRange(["window-test", "no-settings"]);
         var settings = new ModuleSettingsStore("Synthetic settings", "Synthetic settings", [new("text", "Text", "Text", ModuleSettingKind.Text) { DefaultValue = "synthetic" }], new ModuleStorage(Path.Combine(root, "modules-data", "window-test")));
-        host.ReconcileAsync([Def("window-test", c => { c.Register<IModuleSettings>("settings", settings); return ValueTask.CompletedTask; }), Def("no-settings", Done)]).GetAwaiter().GetResult();
+        host.ReconcileAsync([Def("window-test", c => { c.Register<IModuleSettings>("settings", settings); c.Register<IModuleCommand>("first", new TestCommand("First command")); return ValueTask.CompletedTask; }), Def("no-settings", c => { c.Register<IModuleCommand>("second", new TestCommand("Second command")); return ValueTask.CompletedTask; })]).GetAwaiter().GetResult();
         SettingsWindow? window = null;
         try
         {
@@ -99,7 +118,10 @@ internal static partial class Program
             Check("plugin deep link reaches its detail rather than bouncing to management", Descendants(window).OfType<TextBox>().Any(t => t.Text == "synthetic"));
             window.ShowModuleSettings("no-settings"); Pump();
             Check("enabled plugin without settings still has a dedicated detail page", Descendants(window).OfType<TextBlock>().Any(t => t.Text.Contains("没有自定义设置", StringComparison.Ordinal)));
-            CheckUnifiedPagesWindow(app, host);
+            window.ShowPage(SettingsWindow.HotkeysPage); Pump();
+            var groups = Descendants(window).OfType<FrameworkElement>().Where(e => AutomationProperties.GetAutomationId(e).StartsWith("module-hotkeys-", StringComparison.Ordinal)).ToArray();
+            Check("shortcut settings group each plugin's commands under its own name", groups.Length == 2 && groups.Any(g => AutomationProperties.GetName(g) == "window-test" && Descendants(g).OfType<TextBlock>().Any(t => t.Text == "First command")) && groups.Any(g => AutomationProperties.GetName(g) == "no-settings" && Descendants(g).OfType<TextBlock>().Any(t => t.Text == "Second command")));
+            CheckUnifiedPagesWindow(app, host, window);
             options.Modules.Enabled = false; host.ReconcileAsync([]).GetAwaiter().GetResult(); window.ShowPage(SettingsWindow.ModulesPage); Pump();
             Check("system off hides runtime cards and exposes explicit maintenance", !Descendants(window).OfType<CheckBox>().Any(c => AutomationProperties.GetAutomationId(c).StartsWith("module-enable-", StringComparison.Ordinal)) && Descendants(window).OfType<Expander>().Any());
             var picture = new System.Windows.Shapes.Rectangle { Fill = new System.Windows.Media.VisualBrush(window.RootVisual) { Stretch = System.Windows.Media.Stretch.Fill } };

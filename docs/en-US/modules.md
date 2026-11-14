@@ -76,6 +76,8 @@ Existing page enum values remain unchanged. New preferences support defaults, no
 
 See the [external sample](../../mods/notes/README.md), [detailed Chinese guide](../zh-CN/modules.md) and `tests/BrimDeck.ModuleTests` for executable examples and lifecycle checks.
 
+The [reading progress sample](../../mods/reading-progress/README.md) demonstrates compact parts, persistent page goals, shortcut commands, panel-state snapshots and scoped host controls without an external service. It supports repository and standalone SDK builds, includes an acceptance checklist, and is installed explicitly rather than bundled by default.
+
 Contract 1.5 exposes `context.Platform().Registries`, `.Events` and `.Services` without changing the original entry interface. Registrations have namespaced disposable handles. Event handlers have stable priorities; host-only `ModulePageOpening` and `ModuleActivityOpening` hooks support one-way cancellation. The scoped `ui.presentation` service coalesces contribution refreshes. Widgets can supply an icon and module-owned reorder callbacks; settings add integer-valued choices. Timers use all these public surfaces and no UI friend access. All example source packages are under `mods/`, using `build/ModulePackage.targets`.
 
 ## Contract 1.6

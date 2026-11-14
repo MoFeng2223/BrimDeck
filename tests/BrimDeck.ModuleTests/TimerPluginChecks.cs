@@ -19,7 +19,7 @@ internal static partial class Program
         ModuleBundleInstaller.Install(Path.GetDirectoryName(packaged)!, installed, receipts);
         var catalog = new ModuleCatalog(installed, Path.Combine(root, "cache"), [typeof(ModuleUi).Assembly, typeof(DeckSettings).Assembly]);
         var found = catalog.Discover().Single();
-        Check("complete timer example is a discoverable ordinary DLL module", found.Manifest.Id == "timers" && found.Manifest.ApiMinor == 5 && catalog.Failures.Count == 0);
+        Check("complete timer example is a discoverable ordinary DLL module", found.Manifest.Id == "timers" && found.Manifest.ApiMinor == 8 && catalog.Failures.Count == 0);
         Check("timer package contains its own domain implementation and no SDK copies", File.Exists(Path.Combine(found.Directory, "BrimDeck.Timers.Core.dll"))
             && !Directory.EnumerateFiles(found.Directory).Any(f => Path.GetFileName(f) is "BrimDeck.UI.dll" or "BrimDeck.Core.dll" or "BrimDeck.Modules.Abstractions.dll"));
         var scheduler = new Scheduler();

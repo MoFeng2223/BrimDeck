@@ -1,7 +1,7 @@
 namespace BrimDeck.Modules;
 
 // A stable, user-facing action a module offers. Registered like any other contribution, so the contribution id is the
-// command id ("thrm:open-page"): a command cannot address another module's contribution and keeps its id across restarts.
+// command id ("sample-reading-progress:open-page"): a command cannot address another module's contribution and keeps its id across restarts.
 // One implementation serves every entry point — a global shortcut, the tray menu and a page button invoke the same command.
 //
 // Requires names capabilities the command needs at run time. The host answers CapabilityMissing instead of running the

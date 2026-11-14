@@ -17,7 +17,7 @@ public partial class App
     // registrations were released with the activation.
     internal IReadOnlyList<Contribution<IModuleCommand>> ModuleCommands() => Modules.Registry.List<IModuleCommand>();
 
-    // Runs a command by its full contribution id ("thrm:open-page"). The result always describes what happened; the caller
+    // Runs a command by its full contribution id ("sample-reading-progress:open-page"). The result always describes what happened; the caller
     // decides whether to tell the user.
     internal async Task<ModuleCommandResult> InvokeModuleCommandAsync(string commandId, IReadOnlyDictionary<string, string>? parameters = null,
         ModuleCommandOrigin origin = ModuleCommandOrigin.User, CancellationToken cancellation = default)

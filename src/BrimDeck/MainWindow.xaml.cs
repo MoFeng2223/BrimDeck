@@ -763,6 +763,7 @@ public partial class MainWindow : Window
         // host's own state, as a new screen context closes the panel without passing here.
         if (expanded != _host.Open) _host.Front(expanded);
         _expanded = expanded;
+        _app.DeckStateChanged();
         RefreshModulePresentation();
         // The smooth memory mode holds off full collections while a panel is open (App.UpdateCollectionLatency).
         if (expanded && !wasExpanded) _app.UpdateCollectionLatency();
@@ -1098,7 +1099,6 @@ public partial class MainWindow : Window
     {
         if (_app.Updates.NoticeVersion is not null) _app.OpenUpdateSettings();
         else if (_app.Updates.UpdatedFrom is not null) _app.OpenReleaseNotes();
-        else if (IsMiniAppsPage) _app.OpenMiniAppsSettings();
         else _app.OpenSettings();
     }
     private async Task<IReadOnlyList<ProviderSnapshot>> LoadSnapshotsAsync(DateTime? historyStart)

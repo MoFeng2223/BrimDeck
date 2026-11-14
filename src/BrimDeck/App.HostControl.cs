@@ -149,7 +149,7 @@ public partial class App
     {
         if (Exiting || Dispatcher.HasShutdownStarted) throw new ModuleApiException("panel-unavailable", "The panel is not running.");
         var lease = ModuleAccents.Add(moduleId, color);
-        ApplyModuleAccent();
+        // Requests and releases repaint through the same Changed subscription (InitializeModules).
         return lease;
     }
     // Draws the accent the stack currently asks for, or the theme's own when it is empty. Called after a request or a release.

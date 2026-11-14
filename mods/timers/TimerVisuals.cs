@@ -46,7 +46,7 @@ internal static class TimerVisuals
     }
     internal static FrameworkElement Icon(string color, double size = 18)
     {
-        var path = new Path { Data = Geometry.Parse("M 8,2 H 16 M 12,2 V 5 M 18,5 L 20,7 M 12,9 V 13 L 15,15 M 21,14 A 9,9 0 1 1 3,14 A 9,9 0 1 1 21,14"),
+        var path = new Path { Data = Geometry.Parse(TimerModule.IconPath),
             Stroke = UI.Brush(color), StrokeThickness = 1.8, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, StrokeLineJoin = PenLineJoin.Round };
         return new Viewbox { Width = size, Height = size, Child = new Canvas { Width = 24, Height = 24, Children = { path } } };
     }

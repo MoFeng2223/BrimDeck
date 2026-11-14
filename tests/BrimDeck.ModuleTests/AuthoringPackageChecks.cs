@@ -15,8 +15,11 @@ internal static partial class Program
     private static int AuthoringPackageChecks(string directory)
     {
         directory = Path.GetFullPath(directory);
-        if (!directory.StartsWith("E:\\", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("Use an E: disposable verification directory.");
-        _root = Path.Combine(Path.GetDirectoryName(directory)!, "runtime-checks");
+        string verificationRoot = Path.GetDirectoryName(directory)!;
+        string marker = Path.Combine(verificationRoot, ".brimdeck-authoring-verification");
+        if (Path.GetFileName(directory) != "packages" || !File.Exists(marker) || File.ReadAllText(marker) != "brimdeck-authoring-verification/v1")
+            throw new ArgumentException("Use the packages directory created by build/TestModuleAuthoring.ps1.");
+        _root = Path.Combine(verificationRoot, "runtime-checks-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_root);
         try
         {

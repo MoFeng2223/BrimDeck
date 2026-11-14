@@ -9,13 +9,14 @@ public sealed class TimerModule : IModule
 {
     public const string Id = "timers";
     public const string PageId = Id + ":timers", ActivityId = Id + ":session";
+    public const string IconPath = "M9,2 H15 M12,2 V5 M18.5,5.5 L20.5,7.5 M20,14 A8,8 0 1 1 4,14 A8,8 0 1 1 20,14 M12,9 V14 L15.5,16";
     public ValueTask ActivateAsync(IModuleContext context, CancellationToken cancellationToken)
     {
         var platform = context.Platform();
         var workspace = new TimerWorkspace(context);
         context.Own(workspace);
         platform.Registries.Register("timers", new ModulePage("计时器", "Timers", view => new TimerPageView(workspace, view.Owner,
-            () => view.ShowActivity(ActivityId), () => view.OpenSettings(Id + ":general")), 100));
+            () => view.ShowActivity(ActivityId), () => view.OpenSettings(Id + ":general")), 100) { IconPath = IconPath });
         platform.Registries.Register<IModuleActivity>("session", new TimerActivity(workspace));
         platform.Registries.Register<IModuleSettings>("general", new TimerGeneralSettings(workspace));
         platform.Events.On<ModuleActivityOpening>(e => { if (e.ContributionId == ActivityId && !workspace.Timer.Active) e.Cancel(); });

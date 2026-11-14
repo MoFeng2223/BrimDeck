@@ -40,6 +40,7 @@ internal static class PanelTheme
     private static string _signature = "";
     private static bool _loaded;
     private static string? _chosen;
+    private static string? _appliedAccent;
     // Changes made on the theme page and not yet saved, by theme id. They take effect only once saved: until then neither the
     // panel nor the theme cards show them, and they last as long as BrimDeck runs. Each draft's palette, which the theme page
     // shows, is kept until the draft or the theme's file changes.
@@ -77,7 +78,7 @@ internal static class PanelTheme
         var chosen = PanelThemes.NormalizeId(settings.PanelTheme);
         // The hour reaching the other look, or new hours for it, counts as a change too.
         bool high = SystemParameters.HighContrast;
-        if (!reload && !systemChanged && _loaded && chosen == _chosen && PanelThemes.IsNight(ShownTheme.File, DateTime.Now, settings.ThemeDaylight) == Night && high == HighContrast) return false;
+        if (!reload && !systemChanged && _loaded && chosen == _chosen && AccentOverride == _appliedAccent && PanelThemes.IsNight(ShownTheme.File, DateTime.Now, settings.ThemeDaylight) == Night && high == HighContrast) return false;
         if (reload || !_loaded) Reload();
         _chosen = chosen;
         var theme = Find(chosen);
@@ -91,13 +92,14 @@ internal static class PanelTheme
         bool night = PanelThemes.IsNight(theme.File, DateTime.Now, settings.ThemeDaylight);
         // The same theme and look as now (the common case for "system") needs no new palette.
         // Under high contrast the system's colors may have changed with the same theme chosen, so its palette is always made anew.
-        if (!reload && !high && !HighContrast && ReferenceEquals(theme, ShownTheme) && night == Night && _signature.Length > 0) return false;
+        if (!reload && !high && !HighContrast && ReferenceEquals(theme, ShownTheme) && night == Night && AccentOverride == _appliedAccent && _signature.Length > 0) return false;
         ShownTheme = theme; Night = night; HighContrast = high;
         var palette = high ? SystemPalette() : PanelThemes.Resolve(theme, night);
         // A module's temporary accent (host.control.accent) is laid over the theme, never saved into it; the user's own theme
         // change clears those requests in App before this runs, so a chosen theme always ends up as chosen.
         if (AccentOverride is { } accent && ThemeColor.TryParse(accent, out var temporary)) palette = palette.WithColor("accent", temporary);
         var signature = Signature(theme, palette);
+        _appliedAccent = AccentOverride;
         if (signature == _signature) return false;
         // Panels on screen take a picture of their old look now, before any brush changes (MainWindow.ThemeFade).
         Changing?.Invoke(Current.Id == palette.Id && Current.IsNight != palette.IsNight);

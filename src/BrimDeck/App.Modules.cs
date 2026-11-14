@@ -23,6 +23,7 @@ public partial class App
         ModuleFiles = new(Store.DirectoryPath);
         Modules = new(Path.Combine(Store.DirectoryPath, "modules-data"), new DispatcherModuleScheduler(Dispatcher), [], ModuleKinds(), HostApiBindings()) { ApplicationVersion = ApplicationVersion.Current.ToString() };
         Modules.RequireCapabilities(ModuleApi.Capabilities);
+        ModuleAccents.Changed += ApplyModuleAccent;
         InitializeHostApiDemand();
         ModuleCatalog = new(ModuleDirectory, Path.Combine(Store.DirectoryPath, "modules-cache"), [typeof(ModuleUi).Assembly, typeof(DeckSettings).Assembly], ApplicationVersion.Current.ToString());
         Modules.Registry.Changed += QueueModuleViewsRefresh;
