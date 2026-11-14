@@ -34,6 +34,10 @@ public sealed class WindowsHost : IDisposable
     private uint _backgroundPid;
     private string _backgroundIdentityName = "", _backgroundIdentityPath = "";
     public event Action<ScreenContext>? ContextChanged;
+    // A panel that took the foreground for the keyboard (PanelKeyboard). While it is the foreground window the user's
+    // application has not changed: every panel keeps the context and app it had, so nothing closes or hides because of it.
+    public static IntPtr KeyboardPanel { get => s_keyboardPanel; set => s_keyboardPanel = value; }
+    private static volatile nint s_keyboardPanel;
     // The app the answer was resolved for changed while the context stayed, carrying that app and the way its window
     // fills the screen, as they were for the last answer. The app rules may now answer differently for the same context,
     // but nothing about the panel's own state needs to change — the panel does not fold away for an app switch, only for
@@ -51,6 +55,8 @@ public sealed class WindowsHost : IDisposable
         _alwaysOnTop = alwaysOnTop;
         _timer.Tick += (_, _) => Poll();
         _timer.Start();
+        DisplayPower.Changed += DisplayChanged;
+        if (DisplayPower.Off) _timer.Stop(); // created while the display is already off: it rests until the display comes on
         _desktopSettle.Tick += (_, _) => { _desktopSettle.Stop(); RaiseOverDesktop(_window()); };
         _lowerAgain.Tick += (_, _) => { _lowerAgain.Stop(); if (!_overDesktop) Lower(_window()); };
         _orderEvent = OnOrderEvent;
@@ -85,6 +91,14 @@ public sealed class WindowsHost : IDisposable
     private readonly Func<Rect?> _island;
     private string _raisedName = "", _raisedPath = "";
     private ScreenContext _raisedKind = ScreenContext.Desktop;
+    // With the display off nothing can be seen or covered, so the poll rests; when it comes on again one check runs at once.
+    private void DisplayChanged()
+    {
+        if (DisplayPower.Off) { _timer.Stop(); return; }
+        if (_timer.IsEnabled) return;
+        _timer.Start();
+        Poll();
+    }
     private void Poll()
     {
         var context = DetectNow();
@@ -150,15 +164,18 @@ public sealed class WindowsHost : IDisposable
                 }
             }
         }
-        if (cause is null) { _orderCulprit = null; return; }
-        // Log repeated obstruction at most every ten seconds, including whether recovery was requested.
+        if (cause is null) return;
         if (recover) SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
-        if (_orderCulprit != (cause, culprit) || Environment.TickCount64 - _orderLoggedAt > 10000)
-        {
-            _orderCulprit = (cause, culprit); _orderLoggedAt = Environment.TickCount64;
-            var named = culprit == IntPtr.Zero ? cause : cause + " " + ProcessName(culprit);
-            NoteOrder($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} panel {named}" + (recover ? "; topmost restored" : "; left as is"));
-        }
+        // The same note, by cause, process and outcome, is logged at most every ten seconds. An app can cover the panel
+        // with a new window every moment, or uncover it for a moment between two, so neither the window nor a break in
+        // the obstruction makes a note new.
+        if (culprit != _namedWindow) { _namedWindow = culprit; _namedProcess = culprit == IntPtr.Zero ? "" : ProcessName(culprit); }
+        var note = "panel " + (_namedProcess.Length == 0 ? cause : cause + " " + _namedProcess) + (recover ? "; topmost restored" : "; left as is");
+        var now = Environment.TickCount64;
+        if (_orderNotes.TryGetValue(note, out var at) && now - at < 10000) return;
+        if (_orderNotes.Count >= 32) foreach (var old in _orderNotes.Where(n => now - n.Value >= 10000).Select(n => n.Key).ToList()) _orderNotes.Remove(old);
+        _orderNotes[note] = now;
+        NoteOrder($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {note}");
     }
     // An ordinary panel. Show desktop puts the desktop above every ordinary window, the panel among them; a click on the
     // desktop leaves it beneath them. Once the desktop has stayed in front for a moment, the panel is made topmost over
@@ -250,8 +267,11 @@ public sealed class WindowsHost : IDisposable
             return;
         }
     }
-    private (string Cause, IntPtr Window)? _orderCulprit;
-    private long _orderLoggedAt;
+    // When each note of the order watch was last logged; the window last named and its process, which is looked up only
+    // when the window changes.
+    private readonly Dictionary<string, long> _orderNotes = [];
+    private IntPtr _namedWindow;
+    private string _namedProcess = "";
     // An app that raises itself whenever it is covered would trade places with the panel without end, the two flickering
     // in turn. Past ten recoveries from topmost windows within two seconds, the panel leaves them above it for five.
     private long _raisesFrom, _yieldUntil;
@@ -389,6 +409,8 @@ public sealed class WindowsHost : IDisposable
     private ScreenContext Detect(IntPtr monitor)
     {
         var foreground = GetForegroundWindow();
+        // The panel holding the keyboard is in front: nothing has changed, and the background app read last time is kept.
+        if (foreground != IntPtr.Zero && foreground == KeyboardPanel && IsWindowVisible(foreground) && !IsIconic(foreground)) return Current;
         _backgroundName = ""; _backgroundPath = ""; _backgroundKind = ScreenContext.Desktop;
         // Nothing but the desktop: a full-screen window elsewhere on this monitor still owns the screen, so the answer is
         // BackgroundFullscreen rather than Desktop. Looked up once, only where it can matter, and only while the settings ask
@@ -523,6 +545,7 @@ public sealed class WindowsHost : IDisposable
     }
     public void Dispose()
     {
+        DisplayPower.Changed -= DisplayChanged;
         _timer.Stop(); _desktopSettle.Stop(); _lowerAgain.Stop();
         foreach (var hook in _hooks) if (hook != IntPtr.Zero) UnhookWinEvent(hook);
     }

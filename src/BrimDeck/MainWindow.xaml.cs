@@ -72,8 +72,9 @@ public partial class MainWindow : Window
     private DateTimeOffset? _updatedAt;
     private ScreenContext _context;
     // Threshold levels seen per quota; a rise after the first reading briefly widens the compact island.
-    private readonly Dictionary<string, int> _levels = new();
-    private bool _levelsSeeded;
+    private readonly QuotaLevels _levels = new();
+    // The number of the latest read; a partial result belongs to the read that sent it and is dropped once another has begun or its own is whole.
+    private int _round;
     private CompactAlertInfo? _alert;
     private DeckSettings Settings => _app.Settings;
     public bool IsExpanded => _expanded;
@@ -163,6 +164,8 @@ public partial class MainWindow : Window
             _context = context;
             ApplySettings(!_expanded);
         };
+        // The user went to another window while a hotkey had given the panel the keyboard: it keeps the foreground it was given.
+        Deactivated += (_, _) => ReleaseKeyboard(giveBack: false);
         // Esc also leaves move mode (MainWindow.Move.cs).
         SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this, Settings.WindowCapture); _escapeDismissal = new EscapeDismissal(this, () => { if (_moveArmed) CancelMove(); else if (!ShelfEscape()) SetExpanded(false, keyboard: true); }); };
         Loaded += async (_, _) =>
@@ -174,7 +177,7 @@ public partial class MainWindow : Window
             Boot();
             _trackPointer = true; UpdatePointerTracking();
             ScheduleClock(); _clock.Start(); StartMusic();
-            if (_lead is null) { _app.AssignDisplays(); await RefreshAutomaticallyAsync(); }
+            if (_lead is null) { _app.AssignDisplays(); RestoreLastSeen(); await RefreshAutomaticallyAsync(); }
         };
         Closing += (_, e) => { if (!_app.Exiting && !_retiring) { e.Cancel = true; SetExpanded(false); } };
         Closed += (_, _) => { CancelMove(); _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _seconds.Stop(); _refresh.Stop(); _alertTimer.Stop(); _clipSettle?.Stop(); };
@@ -264,7 +267,8 @@ public partial class MainWindow : Window
         ApplyLanguage();
         ApplyTheme();
         ApplySurface();
-        WindowsHost.SetCapturable(this, Settings.WindowCapture);
+        // A panel holding the keyboard stays one that can be active, whatever the setting (PanelKeyboard).
+        WindowsHost.SetCapturable(this, Settings.WindowCapture || PanelKeys.Holding);
         // Made ordinary, at startup too, the panel goes beneath the window in use like a closed one; so does an ordinary panel
         // whose indicator is no longer called for.
         if (Topmost != KeepsAbove) { Topmost = KeepsAbove; if (!Topmost && !_expanded) _host.Front(false); }
@@ -453,7 +457,7 @@ public partial class MainWindow : Window
         var (widthMin, widthMax) = CollapsedGeometry.WidthRange(style, monitor, work, _scale);
         // At the height the surface takes, which a short screen or work area can lower below the saved one (as Resolve does).
         double surfaceHeight = CollapsedGeometry.SurfaceHeight(style, height, monitor, work, _scale);
-        widthMin = Math.Min(widthMax, Math.Max(widthMin, CollapsedGeometry.SurfaceWidth(style, surfaceHeight, _compactRequired)));
+        widthMin = Math.Min(widthMax, Math.Max(widthMin, CollapsedGeometry.SurfaceWidth(style, surfaceHeight, _compactRequired, _scale)));
         var (_, offsetMax) = CollapsedGeometry.OffsetXRange(style, width * _scale, monitor, work);
         var (topMin, topMax) = style switch
         {
@@ -574,9 +578,32 @@ public partial class MainWindow : Window
         ApplySettings();
         PointerChanged(_pointerInside);
     }
-    public void SetSnapshots(IReadOnlyList<ProviderSnapshot> snapshots)
+    // Before the first read: what the previous run last read, marked as such (UsageLastSeen), so the panels are not empty while the sources answer.
+    // Nothing is shown when the usage is not wanted at all; a source no longer enabled has none. The file is read off the first frame's path in
+    // a few milliseconds at most (its size is capped), and a missing or damaged one holds nothing.
+    private void RestoreLastSeen()
     {
-        Snapshots = snapshots; _updatedAt = DateTimeOffset.Now; FirstReadEnded();
+        // Usage that is not wanted keeps nothing on disk.
+        if (!Settings.QuotaWanted) { try { _app.LastSeen.Clear(); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); } return; }
+        if (Snapshots.Count > 0) return;
+        List<ProviderSnapshot> restored;
+        try { restored = _app.LastSeen.Load(Settings); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); return; }
+        if (restored.Count == 0) return;
+        _app.RestoredUsage = restored;
+        foreach (var deck in _app.Decks) deck.ShowRestored(restored);
+    }
+    private void ShowRestored(IReadOnlyList<ProviderSnapshot> restored)
+    {
+        if (_firstReadEnded) return;
+        Snapshots = restored; _usageBuilt = null;
+        RenderCompact(); RenderUsage();
+    }
+    // partial: a first-round list that holds only the sources read so far; the ones still being read keep their waiting look.
+    public void SetSnapshots(IReadOnlyList<ProviderSnapshot> snapshots, bool partial = false)
+    {
+        Snapshots = snapshots; _updatedAt = DateTimeOffset.Now;
+        if (!partial) FirstReadEnded();
         DetectThresholds();
         RenderCompact(); RenderUsage();
     }
@@ -612,23 +639,9 @@ public partial class MainWindow : Window
 
     private void DetectThresholds()
     {
-        CompactAlertInfo? risen = null;
-        foreach (var entry in Settings.EnabledApps)
-        {
-            var snapshot = DashboardUsage.Quota(entry, Snapshots);
-            if (snapshot.IsStale || !snapshot.LiveQuota) continue;
-            foreach (var quota in snapshot.Metrics)
-            {
-                if (quota.UsedPercent is not { } used) continue;
-                var key = $"{entry.InstanceId}:{entry.ConfigurationKey}:{quota.Id}";
-                int level = AppPresets.Level(used);
-                bool rose = _levelsSeeded && _levels.TryGetValue(key, out var previous) && level > previous;
-                _levels[key] = level;
-                if (rose && level > 0 && (risen is null || used > risen.Used))
-                    risen = new CompactAlertInfo(entry, entry.Name, MetricLabel(quota) + " ", Math.Clamp(used, 0, 100), quota.ResetAt);
-            }
-        }
-        _levelsSeeded = true;
+        // Only fresh readings count: what a start shows from the previous run (UsageLastSeen) neither seeds a level nor rises past one.
+        var rise = _levels.Update(Settings, Snapshots);
+        CompactAlertInfo? risen = rise is null ? null : new CompactAlertInfo(rise.Entry, rise.Entry.Name, MetricLabel(rise.Metric) + " ", Math.Clamp(rise.Used, 0, 100), rise.Metric.ResetAt);
         // Levels are still tracked while notices are off, so switching them back on does not replay an earlier rise.
         if (risen is not null && Settings.QuotaAlerts && !IsSuppressed) ShowAlert(risen);
     }
@@ -1027,13 +1040,32 @@ public partial class MainWindow : Window
         else if (_app.Updates.UpdatedFrom is not null) _app.OpenReleaseNotes();
         else _app.OpenSettings();
     }
-    private async Task<IReadOnlyList<ProviderSnapshot>> LoadSnapshotsAsync(DateTime? historyStart)
+    // The usage read never waits for the price catalog: the amounts show as soon as the usage is in, and again when prices arrive.
+    private BackgroundPrices? _prices;
+    private void RefreshPrices()
+    {
+        _prices ??= new BackgroundPrices(cancellation => _app.Prices.RefreshAsync(cancellation: cancellation),
+            () => Dispatcher.BeginInvoke(() => { foreach (var deck in _app.Decks) deck.PricesChanged(); }));
+        _prices.Start(_app.Lifetime.Token);
+    }
+    internal void PricesChanged()
+    {
+        if (Snapshots.Count == 0 || !_firstReadEnded) return;
+        _usageBuilt = null; RenderUsage();
+    }
+    private Task<List<ProviderSnapshot>> LoadSnapshotsAsync(DateTime? historyStart, Action<IReadOnlyList<ProviderSnapshot>> progress)
     {
         var settings = Settings.Copy();
-        var prices = _app.Prices.RefreshAsync(cancellation: _app.Lifetime.Token);
-        var usage = Task.Run(() => _app.Usage.RefreshAsync(settings, _app.Lifetime.Token, historyStart));
-        await Task.WhenAll(prices, usage);
-        return await usage;
+        RefreshPrices();
+        return Task.Run(() => _app.Usage.RefreshAsync(settings, _app.Lifetime.Token, historyStart, progress));
+    }
+    // The finished round is kept for the next start, off the UI thread; the snapshots are not changed once published.
+    private void KeepLastSeen(IReadOnlyList<ProviderSnapshot> round)
+    {
+        var settings = Settings.Copy();
+        var store = _app.LastSeen;
+        if (!settings.QuotaWanted) { _ = Task.Run(store.Clear); return; }
+        _ = Task.Run(() => { try { store.Save(round, settings); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); } });
     }
     // Only the main panel reads; every panel shows the result. The history goes back as far as any panel's model details need.
     public async Task RefreshAsync(bool queueIfBusy = true)
@@ -1043,13 +1075,23 @@ public partial class MainWindow : Window
         // date range still require one follow-up, and automatic requests must not clear it.
         if (_refreshing) { if (queueIfBusy) _refreshRequested = true; return; }
         _refreshing = true;
+        int round = ++_round; bool whole = false;
         var decks = _app.Decks.ToList();
         foreach (var deck in decks) deck.RenderSyncButton();
         try
         {
-            var result = await LoadSnapshotsAsync(decks.Min(deck => deck._historyStart));
+            // The first read hands over what each source has as it ends (UsageService.RefreshAsync throttles this); the whole result follows.
+            var result = await LoadSnapshotsAsync(decks.Min(deck => deck._historyStart), partial =>
+                // Background priority keeps input and animation ahead of the partial renders; one that runs after the whole result, or
+                // after the next read began, is of an older round and does nothing.
+                Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,
+                    () => { if (_round == round && !whole) foreach (var deck in _app.Decks) deck.SetSnapshots(UsageLastSeen.Display(partial, _app.RestoredUsage, false), true); }));
+            whole = true;
+            // The whole result replaces what the previous run showed, source by source or not at all.
+            _app.RestoredUsage = [];
             foreach (var deck in _app.Decks) deck.SetSnapshots(result);
             _app.SnapshotsChanged();
+            KeepLastSeen(result);
         }
         catch (OperationCanceledException) { }
         // A read that failed in a way the sources did not expect leaves the panels with what they showed; the next one tries again.

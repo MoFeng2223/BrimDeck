@@ -324,6 +324,17 @@ static class DeviceProtocolTests
             && Dongles.CompxBattery([0x08, 0x04, 0, 0, 0, 1, 63, 2]) == new BatteryRead(63) && Dongles.CompxBattery([0x08, 0x03, 0, 0, 0, 0, 63, 0]) is null);
         var vgn = new byte[64]; vgn[0] = 0x04; vgn[3] = 0x1A; vgn[8] = 41; vgn[9] = 0;
         check("VGN keyboards: the request and a reply", Dongles.VgnRequest().Take(5).SequenceEqual(new byte[] { 0x04, 0, 0, 0x1A, 0x06 }) && Dongles.VgnBattery(vgn) == new BatteryRead(41));
+        var vgn108Reply = Bytes("13 4A 01 00 02 64 01 00 00 00 00 00 00 00 00 00 00 00 00 C5");
+        check("VGN V108: HUB's 0x13/0x4A request, 100 % reply and checksum",
+            Dongles.VgnV108Request().SequenceEqual(Bytes("13 4A 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5E"))
+            && Dongles.VgnV108Battery(vgn108Reply) == new BatteryRead(100)
+            && Dongles.VgnV108Battery(vgn108Reply[..^1].Concat(new byte[] { 0 }).ToArray()) is null
+            && Dongles.VgnV108Battery(Bytes("13 4A 01 00 02 65 01 00 00 00 00 00 00 00 00 00 00 00 00 C6")) is null);
+        check("VGN V108: only its MI_01 HID collection with full reports",
+            Dongles.Find(Dongles.VgnV108Vendor, Dongles.VgnV108Receiver, 0x0001, "VGN V108 2.4G Dongle", 0, 1, 0x0006, 25, 20) == Dongles.Protocol.Vgn
+            && Dongles.Find(Dongles.VgnV108Vendor, Dongles.VgnV108Receiver, 0x0001, "VGN V108 2.4G Dongle", 0, 0, 0x0006, 8, 0) is null
+            && Dongles.Find(Dongles.VgnV108Vendor, Dongles.VgnV108Receiver, 0x0001, "VGN V108 2.4G Dongle", 0, 1, 0x0006, 19, 20) is null
+            && Dongles.Find(Dongles.VgnV108Vendor, Dongles.VgnV108Receiver, 0x0001, "VGN V108 2.4G Dongle", 0, 1, 0x0006, 25, 19) is null);
         // The ATK Z87 Pro's dongle (373B:1012) answers that frame on its 0xFF1C collection; the reply below is the one it gave.
         var atk = (byte[])vgn.Clone(); atk[8] = 92;
         check("ATK keyboards: the Z87 Pro's dongle read with VGN's frame, its model name given over the dongle's",
@@ -392,6 +403,32 @@ static class DeviceProtocolTests
 
     private static void HeadsetReplies(Action<string, bool> check)
     {
+        foreach (int product in new[] { 0x220A, 0x22A7, 0x2298 })
+        {
+            bool steps = product == 0x220A;
+            var kind = Headsets.Find(0x1038, product);
+            check($"Nova 7P {product:X4}: recognized with the firmware's battery scale",
+                kind == (steps ? Headsets.Kind.Nova7Steps : Headsets.Kind.Nova7Percent));
+            if (kind is not { } model) continue;
+            check($"Nova 7P {product:X4}: vendor collection, status request and headset source",
+                Headsets.Channel(model) == (-1, 0xFFC0)
+                && Headsets.Request(model).SequenceEqual(new byte[] { 0x00, 0xB0 })
+                && Headsets.Source(model) == DeviceSource.SteelSeries);
+            byte level = steps ? (byte)3 : (byte)64;
+            check($"Nova 7P {product:X4}: battery and both charging states",
+                Headsets.Battery(model, [0xB0, 0, level, 3]) == new BatteryRead(steps ? 75 : 64, Coarse: steps)
+                && Headsets.Battery(model, [0xB0, 0, level, 1]) == new BatteryRead(steps ? 75 : 64, true, steps)
+                && Headsets.Battery(model, [0xB0, 0, level, 2]) == new BatteryRead(steps ? 75 : 64, true, steps));
+            check($"Nova 7P {product:X4}: empty and full batteries are valid",
+                Headsets.Battery(model, [0xB0, 0, 0, 3]) == new BatteryRead(0, Coarse: steps)
+                && Headsets.Battery(model, [0xB0, 0, steps ? (byte)4 : (byte)100, 3]) == new BatteryRead(100, Coarse: steps));
+            check($"Nova 7P {product:X4}: offline, short and invalid reports have no reading",
+                Headsets.Battery(model, [0xB0, 0, level, 0]) is null
+                && Headsets.Battery(model, [0xB0, 0, level]) is null
+                && Headsets.Battery(model, [0xB0, 0, steps ? (byte)5 : (byte)101, 3]) is null);
+            check($"Nova 7P {product:X4}: the product ID alone does not match another vendor",
+                Headsets.Find(0xFFFF, product) is null);
+        }
         check("Headsets: the HyperX requests go to the vendor collections only", Headsets.Channel(Headsets.Kind.CloudAlpha).UsagePage == Headsets.VendorPages);
         check("Headsets: models found by vendor and product", Headsets.Find(0x1038, 0x12AD) == Headsets.Kind.Arctis7 && Headsets.Find(0x1038, 0x2202) == Headsets.Kind.Nova7Steps
             && Headsets.Find(0x03F0, 0x098D) == Headsets.Kind.CloudAlpha && Headsets.Find(0x3837, 0x6045) == Headsets.Kind.MchoseX9 && Headsets.Find(0x3837, 0x1012) is null);

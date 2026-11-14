@@ -299,8 +299,25 @@ public static class Dongles
     // VGN 2.4 GHz keyboards (320F:5088, usage page 0xFF1C, report 0x04, 64 bytes): command 0x1A; the reply echoes it at byte 3,
     // the percentage at 8 and charging at 9.
     public const int VgnVendor = 0x320F;
+    public const int VgnV108Vendor = 0x391D, VgnV108Receiver = 0x2A02;
     public static byte[] VgnRequest() { var frame = new byte[64]; frame[0] = 0x04; frame[3] = 0x1A; frame[4] = 0x06; return frame; }
     public static BatteryRead? VgnBattery(byte[] reply) => reply.Length >= 10 && reply[0] == 0x04 && reply[3] == 0x1A && reply[8] <= 100 ? new(reply[8], reply[9] != 0) : null;
+
+    // VGN V108 2.4 GHz receiver (391D:2A02, MI_01): the HUB asks with Output Report 0x13 / command 0x4A,
+    // 20 bytes over HID SET_REPORT. The reply echoes 13 4A 01 00, status 02, percentage at 5 and an additive checksum at 19.
+    // The meaning of byte 6 (01 in the captured 100 % reply) is not established, so charging is deliberately not inferred.
+    public static byte[] VgnV108Request()
+    {
+        var frame = new byte[20];
+        frame[0] = 0x13; frame[1] = 0x4A; frame[2] = 0x01;
+        int checksum = 0;
+        for (int i = 0; i < frame.Length - 1; i++) checksum += frame[i];
+        frame[^1] = (byte)checksum;
+        return frame;
+    }
+    public static BatteryRead? VgnV108Battery(byte[] reply)
+        => reply.Length >= 20 && reply[0] == 0x13 && reply[1] == 0x4A && reply[2] == 0x01 && reply[3] == 0x00
+            && reply[4] == 0x02 && reply[5] <= 100 && reply.Take(19).Sum(b => b) % 256 == reply[19] ? new(reply[5]) : null;
 
     // ATK's keyboards answer that same frame on the same page: the Z87 Pro's dongle (373B:1012, "ATK Z87 Dongle", usage page
     // 0xFF1C, usage 0x0092, 64-byte reports) answered 04 00 00 1A 06 00 00 00 5C ... to it on a keyboard at 92 %, which is what
@@ -743,6 +760,9 @@ public static class Dongles
         if (vendor == RapooVendor && RapooGen1Products.Contains(product)) return usagePage >= 0xFF00 && outputLength >= 33 ? Protocol.RapooGen1 : null;
         if (vendor == AtkVendor && usagePage == 0xFF05) return Protocol.BitMouse;
         if (CompxVerified.Contains((vendor, product, usagePage))) return Protocol.Compx;
+        // VGN V108's receiver uses a different Output Report (0x13/0x4A), on MI_01. The exact receiver id and
+        // interface are required; do not send it to the standard keyboard collection on MI_00.
+        if (vendor == VgnV108Vendor && product == VgnV108Receiver) return iface == 1 && inputLength >= 20 && outputLength >= 20 ? Protocol.Vgn : null;
         if (vendor == VgnVendor && usagePage == 0xFF1C && product == 0x5088) return Protocol.Vgn;
         // ATK's keyboards on the same page, answered with VGN's frame (AtkKeyboards): only a product measured here, and only its
         // keyboard collection.
@@ -1108,8 +1128,10 @@ public static class Headsets
     {
         (SteelSeries, 0x1260 or 0x12AD or 0x1252 or 0x1280) => Kind.Arctis7,
         (SteelSeries, 0x12C2 or 0x12C4) => Kind.Arctis9,
-        (SteelSeries, 0x22A1 or 0x227E or 0x2258 or 0x229E or 0x22AD or 0x22A9 or 0x22A5) => Kind.Nova7Percent,
-        (SteelSeries, 0x2202 or 0x2206 or 0x223A or 0x227A or 0x22A4) => Kind.Nova7Steps,
+        // Nova 7P uses the same status request as the 7/7X: 220A reports steps; 22A7 and 2298 report percent.
+        // Product IDs and scales: HeadsetControl lib/devices/steelseries_arctis_nova_7p.hpp (protocol facts only).
+        (SteelSeries, 0x22A1 or 0x227E or 0x2258 or 0x229E or 0x22AD or 0x22A9 or 0x22A5 or 0x22A7 or 0x2298) => Kind.Nova7Percent,
+        (SteelSeries, 0x2202 or 0x2206 or 0x223A or 0x227A or 0x22A4 or 0x220A) => Kind.Nova7Steps,
         (SteelSeries, 0x12E0 or 0x12E5) => Kind.NovaPro,
         (HyperXHp, 0x098D) => Kind.CloudAlpha,
         (HyperXHp, 0x0696 or 0x018B) => Kind.CloudII,

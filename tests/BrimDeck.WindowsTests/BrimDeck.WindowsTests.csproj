@@ -11,12 +11,17 @@
     <ProjectReference Include="..\..\src\BrimDeck.Core\BrimDeck.Core.csproj" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
     <Compile Include="..\..\src\BrimDeck\Native\PdhQuery.cs" Link="PdhQuery.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\CpuProvider.cs" Link="CpuProvider.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\MonitorLog.cs" Link="MonitorLog.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\TemperatureSensors.cs" Link="TemperatureSensors.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\PowerSensors.cs" Link="PowerSensors.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\StorageReader.cs" Link="StorageReader.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\SensorGuard.cs" Link="SensorGuard.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\SettingsChrome.cs" Link="SettingsChrome.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\WindowsHost.cs" Link="WindowsHost.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\PasteInput.cs" Link="PasteInput.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\PanelKeyboard.cs" Link="PanelKeyboard.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\DisplayPower.cs" Link="DisplayPower.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\FrameRates.cs" Link="FrameRates.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\ProcessSnapshot.cs" Link="ProcessSnapshot.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\Displays.cs" Link="Displays.cs" />
