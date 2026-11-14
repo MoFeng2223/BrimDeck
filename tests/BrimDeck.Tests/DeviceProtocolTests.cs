@@ -145,6 +145,24 @@ static class DeviceProtocolTests
         check("MCHOSE RealTek: the inverted request and an inverted reply", Dongles.MchoseRealtekRequest(false)[..4].SequenceEqual(new byte[] { 0x11, 0xF9, 0xFF, 0xFF })
             && Dongles.MchoseRealtekRequest(false).Length == 21 && Dongles.MchoseRealtekRequest(true).Length == 65 && Dongles.MchoseRealtekRequest(true)[0] == 0x12
             && Dongles.MchoseRealtekBattery(realtek) == (new BatteryRead(93, true), 0x0031) && Dongles.MchoseRealtekBattery(Dongles.MchoseRealtekRequest(false)) is null);
+        // mchose-battery-tray's A7 reply as its notes print it: model 0x0070, 97 % at the level's place.
+        var a7 = Bytes("11 F9 AC AD 8F FF F9 FA FC FD F6 9E FF 62 FF");
+        check("MCHOSE A7: its receiver takes the RealTek exchange; the sample's level and model", Dongles.Find(0x5253, 0x1021, 0xFF01, "", 65) == Dongles.Protocol.MchoseRealtek
+            && Dongles.Find(0x5253, 0x1021, 0xFF02, "", 65) is null && Dongles.MchoseRealtekBattery(a7) == (new BatteryRead(97), 0x0070)
+            && Dongles.MchoseRealtekModel(0x0070) == "MCHOSE A7" && Dongles.MchoseRealtekModel(0x00B0) == "MCHOSE L7 Pro" && Dongles.MchoseRealtekModel(0x1234) is null);
+        check("MCHOSE 7 series: any receiver of either vendor on its configuration collection (the K7 Ultra's id is not known)",
+            Dongles.Find(0x5253, 0x1099, 0xFF01, "", 21) == Dongles.Protocol.MchoseRealtek && Dongles.Find(0x3837, 0x100B, 0xFF01, "2.4G Receiver", 65) == Dongles.Protocol.MchoseRealtek
+            && Dongles.Find(0x5253, 0x1099, 0xFF0B, "", 21) is null && Dongles.Find(0x5253, 0x1099, 0xFF01, "", 0) is null);
+        check("MCHOSE 7 series: never the 0x3837 products of other protocols, nor a keyboard or headset by its name",
+            Dongles.Find(0x3837, 0x4245, 0xFF01, "Mouse", 65, 2, 0x0001, 65, 65) is null && Dongles.Find(0x3837, 0x1015, 0xFF01, "", 65) is null
+            && Dongles.Find(0x3837, 0x1012, 0xFF01, "MCHOSE MagDock Mouse", 65) is null && Dongles.Find(0x3837, 0x600A, 0xFF01, "", 65) is null
+            && Dongles.Find(0x3837, 0x4001, 0xFF01, "MCHOSE Keyboard", 65) is null && Dongles.Find(0x3837, 0x4002, 0xFF01, "MCHOSE 耳机", 65) is null);
+        check("MCHOSE 41E4 keyboards: the battery command, the G87's and the K87's answers, and an echo of the command is none", Dongles.MchoseKeyboardRequest().SequenceEqual(Bytes("134A0100" + new string('0', 32)))
+            && Dongles.MchoseKeyboardBattery(Bytes("13 4A 01 00 02 34 01 00")) == new BatteryRead(52) && Dongles.MchoseKeyboardBattery(Bytes("13 4A 01 00 02 64 01 00 00 00 00 00 00 00 00 00 00 00 00 C5")) == new BatteryRead(100)
+            && Dongles.MchoseKeyboardBattery(Dongles.MchoseKeyboardRequest()) is null
+            && Dongles.MchoseKeyboardBattery(Bytes("13 4A 01 00 02 65 01")) is null && Dongles.MchoseKeyboardBattery(Bytes("06 00 02 64 64 64")) is null);
+        check("MCHOSE 41E4 keyboards: only the receiver's 0xFF02 collection", Dongles.Find(0x41E4, 0x2001, 0xFF02, "", 0, -1, 1, 20, 20) == Dongles.Protocol.MchoseKeyboard
+            && Dongles.Find(0x41E4, 0x2001, 0xFF04, "", 8, -1, 1, 20, 20) is null && Dongles.Find(0x41E4, 0x2002, 0xFF02, "", 0, -1, 1, 20, 20) is null);
         check("MCHOSE Gmouse: the query and the G7's replies (HaloBattery #8)", Dongles.GmouseRequest()[..9].SequenceEqual(new byte[] { 0x00, 0x55, 0x30, 0xA5, 0x0B, 0x2E, 0x01, 0x01, 0x01 })
             && Dongles.GmouseRequest().Length == 65 && Dongles.GmouseBattery(Bytes("aa 30 a5 0b 0a 01 01 01 2e 00 00 00")) == new BatteryRead(46)
             && Dongles.GmouseBattery(Bytes("00 aa 30 a5 3c 0a 01 01 01 2e 01 00")) == new BatteryRead(46, true) && Dongles.GmouseBattery(Bytes("4d 01 00 00 00 09 00 00 00 00 00")) is null);

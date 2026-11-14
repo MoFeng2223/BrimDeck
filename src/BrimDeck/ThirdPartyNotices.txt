@@ -862,7 +862,7 @@ HaloBattery
 https://github.com/HeyOkay/HaloBattery
 
 The devices page's reading of the Compx 17-byte reply, the 0x83 feature exchange of WLmouse, G-Wolves, LAMZU and the
-MCHOSE A5 Pro Max with its model lists, the MCHOSE RealTek and G7 exchanges, the HyperX Cloud III, III S and Alpha 2
+MCHOSE A5 Pro Max with its model lists, the MCHOSE RealTek, G7 and K87 exchanges, the HyperX Cloud III, III S and Alpha 2
 requests, the NZXT Lift Elite's telemetry, the SteelSeries mouse replies, the Razer keyboards' transaction ids, the
 Corsair receivers' get-property exchange and the JBL Quantum 910's reports (Core/DeviceProtocols.cs), and the listening
 to the receivers that report on their own (Native/PushEvents.cs, after jbl.py's reader), follow HaloBattery's providers

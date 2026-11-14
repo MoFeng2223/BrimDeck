@@ -22,7 +22,7 @@ HID devices that carry the standard battery report are shown too.
 | Mice, keyboards and headsets | Logitech (Unifying, Bolt and Lightspeed receivers, and cable), ASUS ROG |
 | Mice and keyboards | Razer |
 | Mice | ATK, VXE, VGN, Pulsar, MCHOSE, Endgame Gear, VAXEE, Inphic, AJAZZ, WLmouse, G-Wolves, LAMZU, Ninjutso, LINGBAO, NZXT, HECATE, Dareu, SteelSeries, Rapoo, Attack Shark, DELUX, Corsair |
-| Keyboards | VGN, ATK Z87 Pro, AULA F87 PRO, CHERRY PIXIU75 |
+| Keyboards | VGN, ATK Z87 Pro, AULA F87 PRO, CHERRY PIXIU75, MCHOSE K87 and G87 |
 | Headsets | SteelSeries, HyperX, MCHOSE, Corsair, AULA G9, JBL Quantum 910, PULSE 3D |
 | Controllers | Xbox, PlayStation, Steam Controller |
 

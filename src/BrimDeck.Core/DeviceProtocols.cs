@@ -24,6 +24,10 @@ namespace BrimDeck.Core;
 // - After vigil-watt (https://github.com/evren-oct/vigil-watt, MIT): the ATK, HECATE and VGN collections for the Compx frame,
 //   the LINGBAO M5PRO Max, CHERRY PIXIU75 and HECATE G5M Pro reads, the MCHOSE G3 V2 query, the ROG Delta II headset, the ROG
 //   Omni receiver's pairing table, and the DELUX, Inphic ZHEN, Rapoo, AULA G9 and HyperX Cloud Flight 2 reports.
+// - The MCHOSE A7's receiver and the 41E4:2001 keyboards' battery command: from marsuyone/mchose-battery-tray's notes
+//   (https://github.com/marsuyone/mchose-battery-tray, no license; the bytes only), with HaloBattery's mchose_kb.py (the K87)
+//   and its reading of the 0x3837 receivers. The MCHOSE RealTek model names: the vendor driver's table as
+//   alexfrih/mchose-linux lists it (MIT; names only).
 // - Rapoo's first generation: after mousectl's rapoo_vt3pro driver (https://github.com/D3m0nZOnFire/mousectl, MIT).
 // - SteelSeries mice: rivalcfg's device profiles (https://github.com/flozz/rivalcfg, WTFPL). Beken (Attack Shark) receivers:
 //   after incconutwo's and misaka310's mouse-battery-tray (MIT). Rapoo: also Iris-0109's rapoo-tray (MIT). The LAMZU Inca on
@@ -467,13 +471,25 @@ public static class Dongles
 
     // ----- MCHOSE on its RealTek receivers (5253) and the Gmouse query -----
 
-    // The 0x5253 receivers (M7 Ultra, L7 family; 5253:1020, the mouse on its cable 5253:0031), usage page 0xFF01: feature report
-    // 0x11 (20 bytes) or 0x12 (64) carrying command 0x06 with every payload byte inverted, set and then got back, asked afresh
-    // each time (one ask read twice only returns the request). The reply echoes 0xF9 (0x06 inverted) at 1 and inverts its
-    // payload from 2: vendor id and model little endian, firmware (4 bytes), flags, level, charging. From HaloBattery's
-    // mchose.py (measured on an M7 Ultra), after alexfrih/mchose-linux's PROTOCOL.md.
+    // MCHOSE's 7 series (L7, M7, A7, K7) on vendor 0x5253 (the M7 Ultra's and L7 Pro's receiver 5253:1020, the A7's
+    // 5253:1021, the M7 Ultra on its cable 5253:0031) and on MCHOSE's newer 0x3837 (the A7 V2 Ultra's 3837:100B), usage page
+    // 0xFF01: feature report 0x11 (20 bytes) or 0x12 (64) carrying command 0x06 with every payload byte inverted, set and then
+    // got back, asked afresh each time (one ask read twice only returns the request). The reply echoes 0xF9 (0x06 inverted) at
+    // 1 and inverts its payload from 2: vendor id and model little endian, firmware (4 bytes), flags, level, charging. From
+    // HaloBattery's mchose.py (measured on an M7 Ultra), after alexfrih/mchose-linux's PROTOCOL.md (the vendor driver's
+    // protocol for the 7 series). The driver, and both of them, take any device of the two vendors with that collection rather
+    // than a list of products, so the models whose receiver id nobody has published (the K7 Ultra's) are read too; the products
+    // known to speak another protocol are left out (MchoseRealtekOther). The A7's receiver id is from
+    // marsuyone/mchose-battery-tray's notes (facts only), whose sample reply carries model 0x0070 (the A7 in the driver's
+    // table) and its level where the M7 Ultra's is.
     public const int MchoseRealtek = 0x5253;
-    public static readonly int[] MchoseRealtekProducts = [0x1020, 0x0031];
+    // On 0x3837: the G3 V2 (Gmouse), the MagDock, the X9 headset, the V9 headset and its dongle, and the G98 V3 keyboard,
+    // which does not answer this query (HaloBattery #362). Nor any 0x3837 device whose name says it is a keyboard, a headset
+    // or a speaker: the 7 series are mice.
+    public static readonly int[] MchoseRealtekOther = [0x4245, 0x1012, 0x6045, 0x600A, 0x6008, 0x1015];
+    public static bool IsMchoseRealtek(int vendor, int product, string name)
+        => vendor == MchoseRealtek || vendor == MchoseVendor && !MchoseRealtekOther.Contains(product)
+            && Devices.Named(name) is not (DeviceKind.Keyboard or DeviceKind.Headphones or DeviceKind.Earbuds or DeviceKind.Speaker);
     public static byte[] MchoseRealtekRequest(bool longReport)
     {
         var frame = new byte[longReport ? 65 : 21];
@@ -490,7 +506,25 @@ public static class Dongles
         if (vendor is not (MchoseRealtek or MchoseVendor) || Byte(9) > 100) return null;
         return (new(Byte(9), Byte(10) != 0), Byte(2) | Byte(3) << 8);
     }
-    public static string? MchoseRealtekModel(int model) => model == 0x0031 ? "MCHOSE M7 Ultra" : null;
+    // The model in the reply, by the vendor driver's own table as mchose-linux lists it (names only).
+    public static string? MchoseRealtekModel(int model) => model switch
+    {
+        0x00B0 => "MCHOSE L7 Pro", 0x00B1 => "MCHOSE L7 Ultra", 0x00C0 => "MCHOSE L7",
+        0x0020 => "MCHOSE M7", 0x0030 => "MCHOSE M7 Pro", 0x0031 => "MCHOSE M7 Ultra", 0x0070 => "MCHOSE A7",
+        _ => null
+    };
+
+    // MCHOSE keyboards on the 2.4 GHz receiver 41E4:2001 (a G87 in marsuyone/mchose-battery-tray's notes, a K87 in
+    // HaloBattery's mchose_kb.py; each measured its own), usage page 0xFF02: the output report 13 4A 01 00 (20 bytes, zeros
+    // after: getBattery's wireless command in the vendor's web driver), answered by an input report 13 4A 01 00 02 with the
+    // percent at 5. Byte 4 (02 in every answer either saw, 00 in the request) tells the answer from an echo of the request. A
+    // keyboard asleep does not answer. The byte after the level reads 1 on a full keyboard off its cable (HaloBattery), so it
+    // is no charging state and is not read. The receiver's feature report 0x06 on 0xFF04 is not read either. Facts only from
+    // the first; the second is MIT.
+    public const int MchoseKeyboardVendor = 0x41E4, MchoseKeyboardReceiver = 0x2001;
+    public static byte[] MchoseKeyboardRequest() { var frame = new byte[20]; frame[0] = 0x13; frame[1] = 0x4A; frame[2] = 0x01; return frame; }
+    public static BatteryRead? MchoseKeyboardBattery(byte[] reply)
+        => reply.Length >= 6 && reply[0] == 0x13 && reply[1] == 0x4A && reply[4] > 0 && reply[5] <= 100 ? new(reply[5]) : null;
 
     // The Gmouse query (MCHOSE G3 V2 on 3837:4245 and G7 on A8A5:2255, collection 0xFF01 usage 0x10): a 65-byte output
     // report 00 55 30 A5 0B 2E 01 01 01, answered by an input report starting AA 30 with the level at 8 and charging at 9. As
@@ -707,7 +741,7 @@ public static class Dongles
     public enum Protocol
     {
         BitMouse, Compx, Vgn, Endgame, Vaxee, Inphic, Mchose, Ajazz, CompxFramed, F83, Nordic, MchoseRealtek, Gmouse, Lingbao, Nzxt, Cherry, Hecate,
-        Asus, SteelSeries, RapooGen1, Aula
+        Asus, SteelSeries, RapooGen1, Aula, MchoseKeyboard
     }
 
     // The Compx receivers atkctl documents (the ATK A9 Ultra), by vendor, product and usage page.
@@ -733,7 +767,11 @@ public static class Dongles
         if (F83Find(vendor, product) is { } f83) return F83Collection(f83, iface, usagePage, featureLength) ? Protocol.F83 : null;
         if (Gmouse.Contains((vendor, product))) return usagePage == 0xFF01 && usage == 0x0010 && outputLength >= 65 ? Protocol.Gmouse : null;
         if (vendor == NordicVendor && NinjutsoProducts.Contains(product)) return usagePage == 0xFFA0 && featureLength >= 32 ? Protocol.Nordic : null;
-        if (vendor == MchoseRealtek && MchoseRealtekProducts.Contains(product)) return usagePage == 0xFF01 && featureLength >= 21 ? Protocol.MchoseRealtek : null;
+        // The 7 series on either MCHOSE vendor, on its configuration collection only. A 0x3837 device's other collections still
+        // go to the 0x4D frame below where they call themselves a mouse.
+        if (IsMchoseRealtek(vendor, product, productName) && usagePage == 0xFF01 && featureLength >= 21) return Protocol.MchoseRealtek;
+        if (vendor == MchoseRealtek) return null;
+        if (vendor == MchoseKeyboardVendor && product == MchoseKeyboardReceiver) return usagePage == 0xFF02 && inputLength >= 6 && outputLength >= 20 ? Protocol.MchoseKeyboard : null;
         if (vendor == 0x3151 && product == 0x402D) return iface == 2 && usagePage == 0xFFFF && usage == 0x0002 && featureLength == 65 ? Protocol.Lingbao : null;
         if (vendor == 0x1E71 && product is 0x2101 or 0x2129) return usagePage == 0xFFCA && usage == 0x0001 && outputLength >= 64 ? Protocol.Nzxt : null;
         if (vendor == 0x046A && product is 0x01E4 or 0x01E2) return usagePage == 0xFF1C && usage == 0x0092 && outputLength >= 64 ? Protocol.Cherry : null;

@@ -22,7 +22,7 @@ BrimDeck 只读取电量：不会配对、断开或改动任何设备与 Windows
 | 鼠标、键盘与耳机 | 罗技（Unifying、Bolt、Lightspeed 接收器与数据线）、华硕 ROG |
 | 鼠标与键盘 | 雷蛇 |
 | 鼠标 | ATK、VXE、VGN、Pulsar、迈从（MCHOSE）、Endgame Gear、VAXEE、英菲克（Inphic）、黑爵（AJAZZ）、WLmouse、G-Wolves、LAMZU、Ninjutso、LINGBAO、NZXT、HECATE、达尔优（Dareu）、赛睿（SteelSeries）、雷柏（Rapoo）、Attack Shark、多彩（DELUX）、海盗船（Corsair） |
-| 键盘 | VGN、ATK Z87 Pro、狼蛛 AULA F87 PRO、CHERRY PIXIU75 |
+| 键盘 | VGN、ATK Z87 Pro、狼蛛 AULA F87 PRO、CHERRY PIXIU75、迈从（MCHOSE）K87 与 G87 |
 | 耳机 | 赛睿（SteelSeries）、HyperX、迈从（MCHOSE）、海盗船（Corsair）、狼蛛 AULA G9、JBL Quantum 910、PULSE 3D |
 | 手柄 | Xbox、PlayStation、Steam Controller |
 

@@ -647,6 +647,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             Dongles.Protocol.SteelSeries => SteelSeriesMouse,
             Dongles.Protocol.RapooGen1 => RapooGen1,
             Dongles.Protocol.Aula => Aula,
+            Dongles.Protocol.MchoseKeyboard => MchoseKeyboard,
             _ => null
         };
 
@@ -829,6 +830,17 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             }
         }
         return [];
+    }
+
+    // The MCHOSE keyboards on 41E4:2001 (Dongles.MchoseKeyboardRequest): the command written, the answer read off the input
+    // reports, given the 1.5 seconds mchose-battery-tray waits for it. Named by the receiver (a G87 and a K87 share it).
+    private static IEnumerable<DeviceBattery> MchoseKeyboard(HidInfo info, HashSet<string> claimed)
+    {
+        using var device = new HidDevice(info);
+        var read = Hid.Transact<object>([device], () => device.Write(Dongles.MchoseKeyboardRequest()), r => Dongles.MchoseKeyboardBattery(r) is { } b ? b : null, 1500);
+        if (read is not BatteryRead battery) return [];
+        claimed.Add(info.Path);
+        return [Mouse("mchose", info, "MCHOSE", battery, DeviceKind.Keyboard)];
     }
 
     private static IEnumerable<DeviceBattery> Gmouse(HidInfo info, HashSet<string> claimed)
