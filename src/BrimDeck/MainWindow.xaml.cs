@@ -940,8 +940,10 @@ public partial class MainWindow : Window
         // The surface's ends resize it (MainWindow.Resize.cs); pointing there does not open the panel.
         var grip = TrackGrips(cursor);
         // An ordinary panel under another window is out of the pointer's reach (DeckSettings.AlwaysOnTop); asked only where
-        // the pointer would otherwise count as inside.
-        bool Covered() => !KeepsAbove && WindowsHost.CoveredAt(this, cursor);
+        // the pointer would otherwise count as inside. Topmost, the panel is never under an ordinary window, but a menu
+        // raised over it is, and opening across one (a context menu near the island) would cover it: yield to menus either
+        // way, as WatchOrder does.
+        bool Covered() => KeepsAbove ? WindowsHost.MenuAt(cursor) : WindowsHost.CoveredAt(this, cursor);
         bool inCompact = area.Contains(cursor) && grip == ResizeEdges.None && !Covered();
         double dx = Math.Max(0, Math.Max(area.Left - cursor.X, cursor.X - area.Right)), dy = Math.Max(0, Math.Max(area.Top - cursor.Y, cursor.Y - area.Bottom));
         // Whole 20 ms steps, so small movements far away do not reschedule the timer on every check.

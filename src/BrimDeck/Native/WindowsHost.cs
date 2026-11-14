@@ -361,6 +361,21 @@ public sealed class WindowsHost : IDisposable
             if (above == hit) return true;
         return false;
     }
+    // Whether the window the pointer reaches at a point in device pixels is a system menu above everything there: the hit
+    // test only names a menu when the menu is above the panel's own window at that point. A topmost panel is never under an
+    // ordinary window, but a menu raised over it is (WatchOrder leaves it alone), and hovering onto one must not open the
+    // panel across it. This process's own windows count only as the system menu class: BrimDeck's own popups and tooltips
+    // are narrow owned windows the panel must not yield to.
+    public static bool MenuAt(Point point)
+    {
+        var hit = WindowFromPoint(new POINT { X = (int)point.X, Y = (int)point.Y });
+        if (hit == IntPtr.Zero) return false;
+        hit = GetAncestor(hit, 2); // GA_ROOT
+        if (hit == IntPtr.Zero) return false;
+        GetWindowThreadProcessId(hit, out var pid);
+        if (pid == Environment.ProcessId) return ClassName(hit, stackalloc char[32]) is "#32768";
+        return IsMenu(hit);
+    }
     // Puts a window directly beneath another, without moving, sizing or activating it.
     public static void PlaceBelow(IntPtr window, IntPtr above)
         => SetWindowPos(window, above, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
