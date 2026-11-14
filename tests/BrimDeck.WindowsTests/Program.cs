@@ -39,6 +39,7 @@ internal static class Program
             SettingsFocusTests.Run(Check);
             BrimDeck.MainWindow.CheckPageCapsule(Check);
             BrimDeck.MainWindow.CheckPageCapsuleFit(Check);
+            BrimDeck.MainWindow.CheckPageCapsuleStretch(Check);
             BrimDeck.MainWindow.CheckShadowLifetime();
             if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: GPU, display, frame rate, temperature, device battery and power readings, and the application identity the shell resolves (they read this machine or its shell).");
             else

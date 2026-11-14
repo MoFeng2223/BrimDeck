@@ -72,7 +72,7 @@ public partial class MainWindow
             }
         }
         _stripLayout = _stripAdmission.Layout;
-        bool animate = Settings.Animations && SystemParameters.ClientAreaAnimation;
+        bool animate = Soft.Enabled;
         double gap = CompactMusicLayout.Gap(scale), ringGap = CompactMusicLayout.Whole(CompactColumn.RingGap * scale);
         // The devices one below the other, with the gap the readings' lines keep.
         devices?.Stack(gap);

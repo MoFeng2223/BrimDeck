@@ -88,7 +88,7 @@ public partial class MainWindow
         : new(PowerStyle.For(MonitorThemeColors.For(Settings)), BatteryModel.LowPercent, false, default, animate);
     private static MonitorSnapshot WaitingSnapshot => MonitorSnapshot.Empty(Environment.ProcessorCount, Loc.T("正在读取", "Reading"));
 
-    private bool MonitorMotion => Settings.Animations && SystemParameters.ClientAreaAnimation;
+    private bool MonitorMotion => Soft.Enabled;
 
     private void MonitorUpdated(MonitorSnapshot snapshot)
     {
