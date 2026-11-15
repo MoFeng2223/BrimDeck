@@ -27,7 +27,7 @@ public partial class MainWindow
         double right = _header.RightMargin + PanelHeader.SettingsWidth + 6;
         if (_shelfDetail is { } detail)
         {
-            ClockLabel.Visibility = Visibility.Collapsed; ShelfSearchButton.Visibility = Visibility.Collapsed;
+            ClockLabel.Visibility = Visibility.Collapsed; ClipboardSearchButton.Visibility = Visibility.Collapsed;
             var list = DetailList(detail.Side);
             int at = list.IndexOf(detail.Id);
             var left = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(_header.Side - 6, 0, 0, 0) };
@@ -43,9 +43,10 @@ public partial class MainWindow
             ShelfToolbar.Children.Add(left); ShelfToolbar.Children.Add(arrows);
             return;
         }
-        if (_shelfSearching)
+        if (CurrentPage != DeckPage.Clipboard) { ClipboardSearchButton.Visibility = Visibility.Collapsed; return; }
+        if (_clipboardSearching)
         {
-            ShelfSearchButton.Visibility = Visibility.Collapsed;
+            ClipboardSearchButton.Visibility = Visibility.Collapsed;
             // The box takes the room right of the clock, up to its usual width (ShelfLayout.SearchWidth); only when that room is under
             // 140 does it keep 140 and cover the clock.
             double clock = ClockLabel.Text.Length > 0 ? TextWidth(ClockLabel.Text, 12, FontWeights.Normal) : 34;
@@ -78,7 +79,7 @@ public partial class MainWindow
                 Stretch = Stretch.Uniform, Width = 12, Height = 12, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(9, 0, 0, 0), IsHitTestVisible = false });
             // The text starts 28 in (the box's padding 26 and the text box's own 2), where the caret blinks; the hint starts just after
             // it, so the caret does not cross its first letter.
-            var hint = Label(Loc.T("搜索剪贴板与文件", "Search clipboard and files"), 12.5, UI.Tertiary, HorizontalAlignment.Left, left: 30);
+            var hint = Label(Loc.T("搜索剪贴板", "Search clipboard"), 12.5, UI.Tertiary, HorizontalAlignment.Left, left: 30);
             hint.IsHitTestVisible = false; hint.Visibility = box.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed; hint.Tag = "hint";
             host.Children.Add(hint);
             ShelfToolbar.Children.Add(host);
@@ -86,7 +87,7 @@ public partial class MainWindow
             ClockLabel.Visibility = boxWidth > room ? Visibility.Collapsed : Visibility.Visible;
             return;
         }
-        ShelfSearchButton.Visibility = Visibility.Visible;
+        ClipboardSearchButton.Visibility = Visibility.Visible;
         ClockLabel.Visibility = Visibility.Visible;
     }
     private Button ToolbarGlyph(string data, string name, Action click)
@@ -103,38 +104,39 @@ public partial class MainWindow
     }
     private TextBox NewSearchBox()
     {
-        var box = new TextBox { Style = (Style)FindResource("ShelfTextBox") };
-        AutomationProperties.SetName(box, Loc.T("搜索剪贴板与文件", "Search clipboard and files"));
+        var box = new TextBox { Style = (Style)FindResource("ClipboardTextBox") };
+        AutomationProperties.SetName(box, Loc.T("搜索剪贴板", "Search clipboard"));
         TakeKeyboardOnClick(box);
         box.TextChanged += (_, _) =>
         {
-            _shelfQuery = box.Text;
+            _clipboardQuery = box.Text;
             if (box.Parent is Grid host) foreach (var hint in host.Children.OfType<TextBlock>().Where(t => Equals(t.Tag, "hint"))) hint.Visibility = box.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-            if (_shelfSearching && IsShelfPage) RenderShelf();
+            if (_clipboardSearching && IsClipboardPage) RenderClipboard();
         };
         return box;
     }
-    private void ShelfSearch_Click(object sender, RoutedEventArgs e)
+    private void ClipboardSearch_Click(object sender, RoutedEventArgs e)
     {
-        _shelfSearching = true; _shelfDetail = null; _shelfQuery = _searchBox?.Text ?? "";
-        RenderShelf();
+        if (CurrentPage != DeckPage.Clipboard) return;
+        _clipboardSearching = true; _shelfDetail = null; _clipboardQuery = _searchBox?.Text ?? "";
+        RenderClipboard();
         BeginTyping(_searchBox);
     }
     private void CloseSearch()
     {
-        _shelfSearching = false; _shelfQuery = "";
+        _clipboardSearching = false; _clipboardQuery = "";
         if (_searchBox is not null) _searchBox.Text = "";
         EndTyping();
-        RenderShelf();
+        RenderClipboard();
     }
 
     // Esc leaves the menu, the typing, the search or the details, in that order, before it closes the panel.
     internal bool ShelfEscape()
     {
-        if (!_expanded || !IsShelfPage) return false;
+        if (!_expanded || !(IsClipboardPage || IsTransferPage)) return false;
         if (_shelfMenu?.IsOpen == true) { _shelfMenu.IsOpen = false; return true; }
-        if (_shelfEdit is not null) { _shelfEdit = null; EndTyping(); RenderShelf(); return true; }
-        if (_shelfSearching) { CloseSearch(); return true; }
+        if (_clipboardEdit is not null) { _clipboardEdit = null; EndTyping(); RenderClipboard(); return true; }
+        if (_clipboardSearching) { CloseSearch(); return true; }
         if (_shelfDetail is not null) { CloseDetail(); return true; }
         return false;
     }
@@ -142,12 +144,12 @@ public partial class MainWindow
     // opening only when one of them was ended: a page closed as it was built opens as it is.
     private void ResetShelf()
     {
-        bool ended = _shelfEdit is not null || _shelfDetail is not null || _shelfSearching || _shelfQuery.Length > 0 || _picked.Count > 0;
-        if (_shelfEdit is not null || _shelfSearching) EndTyping();
-        _shelfEdit = null; _shelfDetail = null; _shelfSearching = false; _shelfQuery = ""; _picked.Clear();
+        bool ended = _clipboardEdit is not null || _shelfDetail is not null || _clipboardSearching || _clipboardQuery.Length > 0 || _picked.Count > 0;
+        if (_clipboardEdit is not null || _clipboardSearching) EndTyping();
+        _clipboardEdit = null; _shelfDetail = null; _clipboardSearching = false; _clipboardQuery = ""; _picked.Clear();
         if (_searchBox is not null) _searchBox.Text = "";
         _shelfMenu?.SetCurrentValue(ContextMenu.IsOpenProperty, false);
-        if (ended && IsShelfPage) _shelfStale = true;
+        if (ended) { _clipboardStale = true; _transferStale = true; }
     }
 
     // ---- Typing ----
@@ -169,20 +171,20 @@ public partial class MainWindow
     private void RefocusTyping()
     {
         if (!IsActive) return;
-        Control? box = _shelfEdit is not null ? _editBox : _shelfSearching ? _searchBox : null;
+        Control? box = _clipboardEdit is not null ? _editBox : _clipboardSearching ? _searchBox : null;
         if (box is not null) Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, () => { if (box.IsVisible) { box.Focus(); Keyboard.Focus(box); } });
     }
     private void BeginEdit(Guid id)
     {
-        _shelfEdit = id; _shelfDetail = null;
+        _clipboardEdit = id; _shelfDetail = null;
         _editBox = NewEditBox();
         _editBox.Text = ShelfData.Clips.FirstOrDefault(c => c.Id == id)?.Text ?? "";
-        RenderShelf();
+        RenderClipboard();
         BeginTyping(_editBox);
     }
     private TextBox NewEditBox()
     {
-        var box = new TextBox { Style = (Style)FindResource("ShelfTextBox"), AcceptsReturn = true, AcceptsTab = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        var box = new TextBox { Style = (Style)FindResource("ClipboardTextBox"), AcceptsReturn = true, AcceptsTab = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             Padding = new Thickness(8, 6, 8, 6), VerticalContentAlignment = VerticalAlignment.Top };
         AutomationProperties.SetName(box, Loc.T("文字内容", "Text"));
         TakeKeyboardOnClick(box);
@@ -203,7 +205,7 @@ public partial class MainWindow
         bar.ColumnDefinitions.Add(new ColumnDefinition()); bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         bar.Children.Add(Label(Loc.T("编辑 · Ctrl+Enter 保存 · Esc 取消", "Edit · Ctrl+Enter saves · Esc cancels"), layout.Aux, UI.Tertiary, HorizontalAlignment.Left));
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
-        var cancel = PillButton(Loc.T("取消", "Cancel"), false, () => { _shelfEdit = null; EndTyping(); RenderShelf(); });
+        var cancel = PillButton(Loc.T("取消", "Cancel"), false, () => { _clipboardEdit = null; EndTyping(); RenderClipboard(); });
         var save = PillButton(Loc.T("保存", "Save"), true, CommitText); save.Margin = new Thickness(6, 0, 0, 0);
         buttons.Children.Add(cancel); buttons.Children.Add(save);
         Grid.SetColumn(buttons, 1); bar.Children.Add(buttons);
@@ -212,28 +214,28 @@ public partial class MainWindow
     }
     private void CommitText()
     {
-        if (_shelfEdit is not { } id || _editBox is null) return;
+        if (_clipboardEdit is not { } id || _editBox is null) return;
         string text = _editBox.Text;
         _editCommitting = true;
-        _shelfEdit = null;
+        _clipboardEdit = null;
         if (text.Trim().Length > 0 && ShelfData.Clips.FirstOrDefault(c => c.Id == id) is { } clip) { clip.Text = text; clip.Kind = Shelf.Classify(text); clip.Html = ""; clip.Rtf = ""; }
         EndTyping();
         _editCommitting = false;
         _app.Shelf.Edited();
-        RenderShelf();
+        RenderClipboard();
     }
 
     // ---- The full-content view ----
     private List<Guid> DetailList(ShelfSide side) => side == ShelfSide.Clipboard ? VisibleClips().Select(c => c.Id).ToList() : VisibleFiles().Select(f => f.Id).ToList();
-    private void OpenDetail(ShelfSide side, Guid id) { CloseMenu(); _shelfDetail = (side, id); RenderShelf(); }
-    private void CloseDetail() { _shelfDetail = null; RenderShelf(); }
+    private void OpenDetail(ShelfSide side, Guid id) { CloseMenu(); _shelfDetail = (side, id); if (IsClipboardPage) RenderClipboard(); else if (IsTransferPage) RenderTransfer(); }
+    private void CloseDetail() { _shelfDetail = null; if (IsClipboardPage) RenderClipboard(); else if (IsTransferPage) RenderTransfer(); }
     private void StepDetail(int step)
     {
         if (_shelfDetail is not { } detail) return;
         var list = DetailList(detail.Side);
         int at = list.IndexOf(detail.Id) + step;
         if (at < 0 || at >= list.Count) return;
-        _shelfDetail = (detail.Side, list[at]); RenderShelf();
+        _shelfDetail = (detail.Side, list[at]); if (IsClipboardPage) RenderClipboard(); else if (IsTransferPage) RenderTransfer();
     }
     private string DetailKind(ShelfSide side, Guid id)
     {
@@ -383,17 +385,17 @@ public partial class MainWindow
     }
     private FrameworkElement FileDetail(TransferFile file, ShelfLayout layout)
     {
-        bool exists = ShelfFiles.Exists(file.Path);
+        bool exists = TransferFiles.Exists(file.Path);
         var grid = new Grid { VerticalAlignment = VerticalAlignment.Top };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); grid.ColumnDefinitions.Add(new ColumnDefinition());
         double icon = layout.Tier == ShelfTier.Compact ? 32 : 48;
-        var image = new Image { Source = ShelfFiles.Icon(file.Path), Width = icon, Height = icon, VerticalAlignment = VerticalAlignment.Top, Opacity = exists ? 1 : .45, Margin = new Thickness(0, 2, 14, 0) };
+        var image = new Image { Source = TransferFiles.Icon(file.Path), Width = icon, Height = icon, VerticalAlignment = VerticalAlignment.Top, Opacity = exists ? 1 : .45, Margin = new Thickness(0, 2, 14, 0) };
         RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
         grid.Children.Add(image);
         var text = new StackPanel();
         var name = ReadOnlyText(file.Name, layout.DetailBody + 1, UI.PanelFont); name.FontWeight = FontWeights.SemiBold; name.Opacity = exists ? 1 : .55;
         text.Children.Add(name);
-        string type = ShelfFiles.TypeName(file.Path);
+        string type = TransferFiles.TypeName(file.Path);
         text.Children.Add(Label(exists ? type : Loc.T("原文件已不存在（被移动或删除）", "The original is gone (moved or deleted)"), layout.Aux, exists ? UI.Secondary : "#E5C890", HorizontalAlignment.Left, top: 4));
         var folder = ReadOnlyText(System.IO.Path.GetDirectoryName(file.Path) ?? "", layout.Aux, UI.PanelFont); folder.Foreground = UI.Brush(UI.Tertiary); folder.Margin = new Thickness(0, 4, 0, 0);
         text.Children.Add(folder);
@@ -413,12 +415,11 @@ public partial class MainWindow
     }
     private List<(string Label, string Value, Action<FrameworkElement>? Change)> FileFacts(TransferFile file)
     {
-        bool exists = ShelfFiles.Exists(file.Path);
-        string size = !exists ? Loc.T("已不存在", "Missing") : ShelfFiles.IsFolder(file.Path) ? FolderFacts(file.Path) : ShelfFiles.FileSize(file.Path) is { } bytes ? Shelf.Size(bytes) : "";
+        bool exists = TransferFiles.Exists(file.Path);
+        string size = !exists ? Loc.T("已不存在", "Missing") : TransferFiles.IsFolder(file.Path) ? FolderFacts(file.Path) : TransferFiles.FileSize(file.Path) is { } bytes ? Shelf.Size(bytes) : "";
         var facts = new List<(string, string, Action<FrameworkElement>?)> { (Loc.T("大小", "Size"), size, null) };
-        if (exists && ShelfFiles.Modified(file.Path) is { } modified) facts.Add((Loc.T("修改", "Modified"), modified.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture), null));
+        if (exists && TransferFiles.Modified(file.Path) is { } modified) facts.Add((Loc.T("修改", "Modified"), modified.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture), null));
         facts.Add((Loc.T("加入", "Added"), Shelf.When(file.Added, DateTimeOffset.Now), null));
-        facts.Add((Loc.T("分类", "Category"), CategoryNames(ShelfSide.Files, file.Categories), target => OpenMenu(CategoryChoices(ShelfSide.Files, [file.Id]), target)));
         return facts;
     }
     // The categories an entry is in, in their order, or "无".
@@ -453,7 +454,7 @@ public partial class MainWindow
     private StackPanel FileActions(TransferFile file)
     {
         var panel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom };
-        if (!ShelfFiles.Exists(file.Path)) { panel.Children.Add(PillButton(Loc.T("移除", "Remove"), false, () => RemoveFiles([file]))); return panel; }
+        if (!TransferFiles.Exists(file.Path)) { panel.Children.Add(PillButton(Loc.T("移除", "Remove"), false, () => RemoveFiles([file]))); return panel; }
         panel.Children.Add(PillButton(Loc.T("打开", "Open"), true, () => OpenFile(file.Path)));
         var show = PillButton(Loc.T("在文件夹中显示", "Show in folder"), false, () => ShowInFolder(file.Path)); show.Margin = new Thickness(6, 0, 0, 0);
         panel.Children.Add(show);
@@ -463,7 +464,6 @@ public partial class MainWindow
             var menu = NewMenu();
             menu.Items.Add(Item(Loc.T("粘贴", "Paste"), () => PasteFiles([file]), MenuIcons.Paste));
             menu.Items.Add(Item(Loc.T("复制路径", "Copy path"), () => CopyPath(file), MenuIcons.FilePath));
-            if (FilingMenu(ShelfSide.Files, [file.Id]) is { } filing) { menu.Items.Add(Separator()); menu.Items.Add(filing); }
             menu.Items.Add(Separator());
             AddRemoval(menu, [file]);
             OpenMenu(menu, more);
@@ -498,8 +498,8 @@ public partial class MainWindow
         var gone = new List<TransferFile>();
         foreach (var file in files)
         {
-            if (ShelfFiles.Exists(file.Path) && !Native.RecycleBin.Send(file.Path)) { Flash(file.Id, Loc.T("无法删除", "Not deleted")); continue; }
-            ShelfFiles.Forget(file.Path); gone.Add(file);
+            if (TransferFiles.Exists(file.Path) && !Native.RecycleBin.Send(file.Path)) { Flash(file.Id, Loc.T("无法删除", "Not deleted")); continue; }
+            TransferFiles.Forget(file.Path); gone.Add(file);
         }
         if (gone.Count > 0) RemoveFiles(gone);
     }
@@ -628,10 +628,9 @@ public partial class MainWindow
     private ContextMenu FileMenu(TransferFile file)
     {
         var menu = NewMenu();
-        if (!ShelfFiles.Exists(file.Path))
+        if (!TransferFiles.Exists(file.Path))
         {
             menu.Items.Add(Item(Loc.T("查看详情", "Details"), () => OpenDetail(ShelfSide.Files, file.Id), MenuIcons.Details));
-            if (FilingMenu(ShelfSide.Files, [file.Id]) is { } lost) menu.Items.Add(lost);
             menu.Items.Add(Separator());
             menu.Items.Add(Item(Loc.T("移除", "Remove"), () => RemoveFiles([file]), MenuIcons.Remove));
             return menu;
@@ -648,7 +647,6 @@ public partial class MainWindow
             menu.Items.Add(Separator());
             menu.Items.Add(Item(Loc.T("查看详情", "Details"), () => OpenDetail(ShelfSide.Files, file.Id), MenuIcons.Details));
         }
-        if (FilingMenu(ShelfSide.Files, files.Select(f => f.Id).ToList()) is { } filing) { if (many) menu.Items.Add(Separator()); menu.Items.Add(filing); }
         menu.Items.Add(Separator());
         AddRemoval(menu, files);
         return menu;
@@ -673,7 +671,7 @@ public partial class MainWindow
         var menu = NewMenu();
         var selected = side == ShelfSide.Clipboard ? _clipTab : _fileTab;
         string Number(Guid id) => (side == ShelfSide.Clipboard ? ShelfData.Clips.Count(c => c.Categories.Contains(id)) : ShelfData.Files.Count(f => f.Categories.Contains(id))).ToString(CultureInfo.InvariantCulture);
-        void Choose(Guid id) { if (side == ShelfSide.Clipboard) _clipTab = id; else { _fileTab = id; _picked.Clear(); } RenderShelf(); }
+        void Choose(Guid id) { if (side == ShelfSide.Clipboard) _clipTab = id; else { _fileTab = id; _picked.Clear(); } if (IsClipboardPage) RenderClipboard(); else if (IsTransferPage) RenderTransfer(); }
         // The check column only when one of them is the one shown, so the menu has no empty column at its left.
         var own = ShelfData.OwnCategories(side).ToList();
         bool chosen = own.Any(category => category.Id == selected);

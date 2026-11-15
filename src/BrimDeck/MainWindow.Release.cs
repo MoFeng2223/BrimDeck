@@ -40,9 +40,16 @@ public partial class MainWindow
                     _devicesView = null; _devicesKey = ""; _devicesLayout = null;
                     break;
                 case DeckPage.Clipboard:
-                    held |= _shelfBuilt is not null;
-                    ShelfToolbar.Children.Clear(); _shelfRows.Clear(); _shelfTabs.Clear(); _fileFrame = null; _searchBox = null; _editBox = null;
-                    _shelfBuilt = null; _shelfStale = true;
+                    held |= _clipboardBuilt is not null;
+                    _clipboardTabs.Clear(); _searchBox = null; _editBox = null;
+                    if (!IsTransferPage) { ShelfToolbar.Children.Clear(); _shelfRows.Clear(); }
+                    _clipboardBuilt = null; _clipboardStale = true;
+                    break;
+                case DeckPage.Transfer:
+                    held |= _transferRoot is not null;
+                    _transferRoot = null; _transferDropView = null; _fileFrame = null;
+                    if (!IsClipboardPage) { ShelfToolbar.Children.Clear(); _shelfRows.Clear(); }
+                    _transferBuilt = null; _transferStale = true;
                     break;
             }
             released |= held;

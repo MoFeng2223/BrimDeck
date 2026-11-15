@@ -126,7 +126,8 @@ public partial class MainWindow : Window
         _handover = new PageHandover(LeavingContent);
         InitializeMusic();
         InitializeMonitor();
-        InitializeShelf();
+        InitializeClipboard();
+        InitializeTransfer();
         InitializeDevices();
         InitializeResize();
         InitializeScale();
@@ -559,8 +560,9 @@ public partial class MainWindow : Window
     {
         System.Windows.Automation.AutomationProperties.SetName(AIUsageButton, Loc.T("AI 用量", "AI usage"));
         System.Windows.Automation.AutomationProperties.SetName(MonitorPageButton, Loc.T("系统监控", "System monitor"));
-        System.Windows.Automation.AutomationProperties.SetName(ShelfPageButton, Loc.T("剪贴板与文件中转", "Clipboard and file transfer"));
-        System.Windows.Automation.AutomationProperties.SetName(ShelfSearchButton, Loc.T("搜索剪贴板与文件中转", "Search the clipboard and file transfer"));
+        System.Windows.Automation.AutomationProperties.SetName(ClipboardPageButton, Loc.T("剪贴板", "Clipboard"));
+        System.Windows.Automation.AutomationProperties.SetName(TransferPageButton, Loc.T("文件中转", "File transfer"));
+        System.Windows.Automation.AutomationProperties.SetName(ClipboardSearchButton, Loc.T("搜索剪贴板", "Search clipboard"));
         System.Windows.Automation.AutomationProperties.SetName(DevicesPageButton, Loc.T("设备电量", "Device batteries"));
         System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("音乐", "Music"));
         System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));

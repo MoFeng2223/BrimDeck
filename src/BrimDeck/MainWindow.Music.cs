@@ -81,7 +81,8 @@ public partial class MainWindow
     internal bool IsMusicPage => CurrentPage == DeckPage.Music;
     internal bool IsMonitorPage => CurrentPage == DeckPage.Monitor;
     internal bool IsUsagePage => CurrentPage == DeckPage.Usage;
-    internal bool IsShelfPage => CurrentPage == DeckPage.Clipboard;
+    internal bool IsClipboardPage => CurrentPage == DeckPage.Clipboard;
+    internal bool IsTransferPage => CurrentPage == DeckPage.Transfer;
 
     private void InitializeMusic()
     {
@@ -112,12 +113,13 @@ public partial class MainWindow
     private void ApplyDefaultMusicPage()
     {
         // A page hotkey opens on its page and remembers it, as choosing it on the page switch does (MainWindow.Hotkeys.cs).
-        // Opened from the file transfer's count on the island, the panel opens on the clipboard and file transfer page.
-        var wanted = _hotkeyPage ?? (DeckPages.Shown(Settings, DeckPage.Clipboard) && PointerOnTransfer() ? DeckPage.Clipboard : (DeckPage?)null) ?? DeckPages.Opening(Settings.DefaultPage) ?? _page;
+        // Opened from the file transfer's count on the island, the panel opens on the clipboard page.
+        var wanted = _hotkeyPage ?? (DeckPages.Shown(Settings, DeckPage.Transfer) && PointerOnTransfer() ? DeckPage.Transfer : (DeckPage?)null) ?? DeckPages.Opening(Settings.DefaultPage) ?? _page;
         if (wanted != _page && DeckPages.Shown(Settings, wanted)) SelectPage(wanted, remember: _hotkeyPage is not null);
-        // The clipboard page builds nothing while the panel is closed (RenderShelf), the page switch just above included: it is
+        // The clipboard page builds nothing while the panel is closed (RenderClipboard), the page switch just above included: it is
         // built now, as the panel opens on it.
-        if (_shelfStale && IsShelfPage) RenderShelf();
+        if (IsClipboardPage && _clipboardStale) RenderClipboard();
+        if (IsTransferPage && _transferStale) RenderTransfer();
     }
     // The page switch moves as one: the page left behind leaves as a picture toward the side it is left for, while the next
     // page is built at once and comes in from the other side and the panel takes its size (PageHandover).
@@ -141,10 +143,11 @@ public partial class MainWindow
         bool back = Settings.PageOrder.IndexOf(page) < Settings.PageOrder.IndexOf(before);
         _handover.Send(picture, place, PageContent(page), back ? Handover.Back : Handover.Forward);
     }
-    private FrameworkElement PageContent(DeckPage page) => page switch { DeckPage.Music => MusicContent, DeckPage.Monitor => MonitorContent, DeckPage.Clipboard => ShelfContent, DeckPage.Devices => DevicesContent, _ => UsageContent };
+    private FrameworkElement PageContent(DeckPage page) => page switch { DeckPage.Music => MusicContent, DeckPage.Monitor => MonitorContent, DeckPage.Transfer => TransferCount, DeckPage.Clipboard => ClipboardContent, DeckPage.Devices => DevicesContent, _ => UsageContent };
     private void ShowPage(DeckPage page, bool animatePage)
     {
         // The music page keeps what it built while another page shows (RenderMusic's key), so switching back does not build it again.
+        if (page != CurrentPage && (page == DeckPage.Transfer || CurrentPage == DeckPage.Transfer)) { _shelfDetail = null; _clipboardSearching = false; _clipboardBuilt = null; _transferBuilt = null; }
         _detailPopup?.Close(); _details = false; _page = page; _handover.Drop();
         ApplySettings(animatePage, pageOnly: true);
     }
@@ -178,7 +181,7 @@ public partial class MainWindow
 
     private void MusicPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Music);
     private void MonitorPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Monitor);
-    private void ShelfPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Clipboard);
+    private void ClipboardPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Clipboard);
     private void DevicesPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Devices);
     // Where the usage page's application tabs start: after the page switch, which holds one 28 DIP button per shown page.
     private double ApplicationPagesLeft(double side) { int pages = DeckPages.Visible(Settings).Count; return side + (pages <= 1 ? 36 : 72 + 29 * (pages - 2)); }
@@ -196,7 +199,7 @@ public partial class MainWindow
         Toolbar.Height = header.Height;
         PageSwitch.Margin = new Thickness(header.Side, 0, 0, 0);
         FitPageButtons(header);
-        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton })
+        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, ClipboardPageButton, TransferPageButton, DevicesPageButton })
         {
             // A local corner for these two buttons only; PanelIconButton keeps its 5 DIP corner elsewhere.
             button.ApplyTemplate();
@@ -210,12 +213,18 @@ public partial class MainWindow
     private void RenderPageSwitch()
     {
         SetValue(SuppressMusicToolTipsProperty, IsMusicPage);
-        foreach (var control in new FrameworkElement[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton, MediaSourceButton, ClockLabel })
+        foreach (var control in new FrameworkElement[] { AIUsageButton, MonitorPageButton, MusicPageButton, ClipboardPageButton, TransferPageButton, DevicesPageButton, MediaSourceButton, ClockLabel })
             ToolTipService.SetIsEnabled(control, !IsMusicPage);
-        PageSwitch.Visibility = _details && IsUsagePage || IsShelfPage && ShelfHidesSwitch ? Visibility.Collapsed : Visibility.Visible;
+        PageSwitch.Visibility = _details && IsUsagePage || (IsClipboardPage || IsTransferPage) && ShelfHidesSwitch ? Visibility.Collapsed : Visibility.Visible;
         OrderPageButtons();
-        if (!IsShelfPage) { ShelfToolbar.Visibility = Visibility.Collapsed; ShelfSearchButton.Visibility = Visibility.Collapsed; }
-        foreach (var (button, page) in new[] { (AIUsageButton, DeckPage.Usage), (MusicPageButton, DeckPage.Music), (MonitorPageButton, DeckPage.Monitor), (ShelfPageButton, DeckPage.Clipboard), (DevicesPageButton, DeckPage.Devices) })
+        if (!(IsClipboardPage || IsTransferPage)) { ShelfToolbar.Visibility = Visibility.Collapsed; ClipboardSearchButton.Visibility = Visibility.Collapsed; }
+        // Leave the file page: remove its tools from the top toolbar so they don't linger on other pages.
+        if (CurrentPage != DeckPage.Transfer && SettingsButton.Parent is Panel tools)
+        {
+            var stale = tools.Children.OfType<FrameworkElement>().Where(c => ReferenceEquals(c.Tag, "transfer-tool")).ToList();
+            if (stale.Count > 0) foreach (var tool in stale) tools.Children.Remove(tool);
+        }
+        foreach (var (button, page) in new[] { (AIUsageButton, DeckPage.Usage), (MusicPageButton, DeckPage.Music), (MonitorPageButton, DeckPage.Monitor), (ClipboardPageButton, DeckPage.Clipboard), (TransferPageButton, DeckPage.Transfer), (DevicesPageButton, DeckPage.Devices) })
         {
             bool current = CurrentPage == page;
             button.Visibility = DeckPages.Shown(Settings, page) ? Visibility.Visible : Visibility.Collapsed;
@@ -433,7 +442,7 @@ public partial class MainWindow
         // Only a page that was on screen hands over; one that arrives by the page switch or with the panel opening comes in whole.
         bool shown = MusicContent.IsVisible && _expanded && !_preview;
         RefreshStatus();
-        UsageContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Visible;
+        UsageContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ClipboardContent.Visibility = Visibility.Collapsed; TransferCount.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         double h = ContentCanvas.Height, w = ContentCanvas.Width;
         var track = _mediaTrack;

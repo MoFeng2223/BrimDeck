@@ -318,10 +318,11 @@ public partial class MainWindow
         // layout step and stretch in between, so they follow too; the model details and the media page are built again whole,
         // about 25 times a second during the drag, and once more when it ends (FinishResize saves the size).
         if (_resizePage == DeckPage.Monitor) RenderMonitor();
+        else if (_resizePage == DeckPage.Transfer) RenderTransfer();
         else if (_resizePage == DeckPage.Devices) RenderDevices();
-        // The clipboard page is built again only where its sizes step; in between its columns stretch (StretchShelf). It is built
+        // The clipboard page is built again only where its sizes step; in between its columns stretch (StretchClipboard). It is built
         // once more when the size is saved (FinishResize).
-        else if (_resizePage == DeckPage.Clipboard) StretchShelf();
+        else if (_resizePage == DeckPage.Clipboard) StretchClipboard();
         else if (Environment.TickCount64 - _resizeRendered >= 40)
         {
             _resizeRendered = Environment.TickCount64;
