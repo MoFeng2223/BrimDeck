@@ -10,16 +10,13 @@ using BrimDeck.Native;
 
 namespace BrimDeck;
 
-// The clipboard and file transfer's settings, in their own group ("中转站"). The page's size is set with the other pages under
-// "展开外观". "剪贴板": whether the clipboard is recorded (the history stays on this computer, encrypted for the current Windows
-// user, until BrimDeck exits), its categories and the phrases; "文件中转": its categories. The panel only uses the categories and
-// phrases; they are made and changed here, each category with what goes in by itself (SettingsShelfRules) and, on the clipboard,
-// whether what is in it is kept. "文件中转" also sets whether files dragged out are copied or moved.
+// Settings for the "中转站" group: clipboard recording, categories and phrases, and file-transfer drag actions and animation.
+// Both pages have size controls under "展开外观"; category rule editing lives in SettingsShelfRules.
 public partial class SettingsWindow
 {
     internal const int ClipboardSettingsPage = 13, TransferSettingsPage = 14;
 
-    private void ShelfSizeControls()
+    private void ClipboardSizeControls()
     {
         var dimensions = new Grid { Margin = new Thickness(0, 8, 0, 0) }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
         var width = Dimension(Loc.T("宽度", "Width"), S.ClipboardWidth, 440, 1200, value => Resize(s => s.ClipboardWidth = value, DeckPage.Clipboard)); width.Margin = new Thickness(0, 0, 20, 0); dimensions.Children.Add(width);
@@ -28,9 +25,9 @@ public partial class SettingsWindow
         var sizes = KeepPreview(new UniformGrid { Columns = 3, Width = 292 });
         foreach (var size in Enum.GetValues<PanelSize>())
         {
-            var (w, h) = ShelfSizes.For(size);
-            var choice = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = PanelSizes.Name(size), GroupName = "ShelfSize", IsChecked = (S.ClipboardWidth, S.ClipboardHeight) == (w, h) };
-            AutomationProperties.SetName(choice, Loc.T("剪贴板与文件中转快捷尺寸 ", "Clipboard and file transfer quick size ") + PanelSizes.Name(size));
+            var (w, h) = ClipboardSizes.For(size);
+            var choice = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = PanelSizes.Name(size), GroupName = "ClipboardSize", IsChecked = (S.ClipboardWidth, S.ClipboardHeight) == (w, h) };
+            AutomationProperties.SetName(choice, Loc.T("剪贴板快捷尺寸 ", "Clipboard quick size ") + PanelSizes.Name(size));
             choice.Checked += (_, _) => { Resize(s => { s.ClipboardWidth = w; s.ClipboardHeight = h; }, DeckPage.Clipboard); ShowPage(2); };
             sizes.Children.Add(choice);
         }
@@ -102,14 +99,44 @@ public partial class SettingsWindow
     private void TransferSettings()
     {
         WatchShelf();
-        Group(MusicChoice(Loc.T("拖出文件", "Drag files out"), S.TransferDragOut,
+        Group(MusicChoice(Loc.T("左键拖动", "Left-button drag"), S.TransferDragOut,
             [(TransferDragOut.Copy, Loc.T("复制", "Copy")), (TransferDragOut.Move, Loc.T("移动", "Move"))],
             value => Change(s => s.TransferDragOut = value), width: 216,
             help: Loc.T("选择“移动”时，文件移到新位置后从列表中移除。聊天软件、浏览器等只接受复制的地方仍会复制。",
                 "With Move, files moved to a new place leave the list. Chat apps, browsers and other places that only take copies still get copies.")));
-        SectionTitle(Loc.T("分类", "Categories"), help: () => Loc.T("一个文件可以放进多个分类。单击筛选按钮设置自动放入的规则。拖动调整顺序。原文件不受影响。",
-            "A file can be in several categories. The filter button sets what goes in by itself. Drag to reorder. The original files are not touched."));
-        CategoryList(ShelfSide.Files);
+        Group(MusicChoice(Loc.T("右键拖动", "Right-button drag"), S.TransferRightDragOut,
+            [(TransferDragOut.Copy, Loc.T("复制", "Copy")), (TransferDragOut.Move, Loc.T("移动", "Move"))],
+            value => Change(s => s.TransferRightDragOut = value), width: 216,
+            help: Loc.T("按住鼠标右键拖出文件时使用此操作；仅支持复制的目标仍会复制。",
+                "Used when dragging files out with the right mouse button; targets that only accept copies still copy.")));
+        Group(ScrollAnimationRow());
+    }
+
+    // The transfer animation picker, shown below the left- and right-button drag settings.
+    private Grid ScrollAnimationRow()
+    {
+        var choices = TransferScrollEffects.All;
+        var animation = new ComboBox
+        {
+            Width = 200,
+            Style = (Style)FindResource("SettingsCombo"),
+            ItemsSource = choices.Select(effect => effect.Name).ToList(),
+            SelectedIndex = (int)S.TransferAnimation
+        };
+        System.Windows.Automation.AutomationProperties.SetName(animation, Loc.T("滚动动画", "Scroll animation")); PopupMotion.Attach(animation);
+        animation.SelectionChanged += (_, _) =>
+        {
+            if (animation.SelectedIndex >= 0) Change(s => s.TransferAnimation = (TransferScrollEffectId)animation.SelectedIndex);
+        };
+        return Row(Loc.T("滚动动画", "Scroll animation"), animation);
+    }
+
+    private void TransferSizeControls()
+    {
+        var dimensions = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
+        dimensions.Children.Add(Dimension(Loc.T("宽度", "Width"), S.TransferWidth, 440, 1200, value => Resize(s => s.TransferWidth = value, DeckPage.Transfer)));
+        dimensions.Children.Add(Dimension(Loc.T("高度", "Height"), S.TransferHeight, 140, 400, value => Resize(s => s.TransferHeight = value, DeckPage.Transfer)));
+        Target.Children.Add(dimensions);
     }
 
     // ---- Categories and phrases ----
