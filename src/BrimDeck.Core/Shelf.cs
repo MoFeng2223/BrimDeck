@@ -107,6 +107,24 @@ public sealed class ShelfData
 // target that only takes copies (a chat window, a browser) still copies them. Files moved away leave the list.
 public enum TransferDragOut { Copy, Move }
 
+// The scroll animation of the file transfer's row (TransferScrollEffects), in the order its picker lists them.
+public enum TransferScrollEffectId { Focus, Magnetic, Parallax }
+
+// DeckSettings.TransferAnimation reads and writes the animation as one of the members above. Files saved before the
+// animation was an enum keep their text id ("focus"…) and read into the matching member; the enum saves as its lower-case
+// name, so the key keeps its old string form and stays readable to earlier converters and editors.
+internal sealed class TransferScrollEffectIdConverter : JsonConverter<TransferScrollEffectId>
+{
+    public override TransferScrollEffectId Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Number) return (TransferScrollEffectId)reader.GetInt32();
+        var text = reader.GetString();
+        return Enum.TryParse<TransferScrollEffectId>(text, true, out var value) ? value : TransferScrollEffectId.Focus;
+    }
+    public override void Write(Utf8JsonWriter writer, TransferScrollEffectId value, JsonSerializerOptions options)
+        => writer.WriteStringValue(value.ToString().ToLowerInvariant());
+}
+
 public static class Shelf
 {
     // The most text one entry keeps; longer copies are not recorded.

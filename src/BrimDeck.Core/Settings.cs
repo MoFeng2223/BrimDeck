@@ -43,8 +43,8 @@ public sealed record IgnoredMediaApp(string AppId = "", string Name = "", string
 public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, OpenCode = 17, OpenCodeGo = 18, OpenRouter = 19, Pi = 20 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckSettings.PageOrder.
-public enum DeckPage { Usage, Music, Monitor, Clipboard, Devices }
-public enum DefaultDeckPage { Last, Usage, Music, Monitor, Clipboard, Devices }
+public enum DeckPage { Usage, Music, Monitor, Clipboard, Transfer, Devices}
+public enum DefaultDeckPage { Last, Usage, Music, Monitor, Clipboard, Transfer, Devices }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
 // What a double click on an end of the collapsed notch or capsule does: turn its auto width on or off, or start moving it
@@ -292,16 +292,23 @@ public static class PanelSizes
     public static string Name(PanelSize size) => size switch { PanelSize.Compact => Loc.T("紧凑", "Compact"), PanelSize.Spacious => Loc.T("宽敞", "Spacious"), _ => Loc.T("标准", "Standard") };
 }
 
-// The system monitor page's quick sizes. Unlike the usage page's they do not depend on the applications.
-// The clipboard and file transfer page's sizes, the same as the system monitor's.
-public static class ShelfSizes
+// The system monitor, the clipboard and the file transfer pages' sizes, the same for the three; unlike the usage page's.
+public static class MonitorSizes
 {
     public static readonly (double Width, double Height) Default = (620, 220);
     public static (double Width, double Height) For(PanelSize size) => size switch
     { PanelSize.Compact => (480, 160), PanelSize.Spacious => (860, 320), _ => Default };
 }
 
-public static class MonitorSizes
+public static class ClipboardSizes
+{
+    public static readonly (double Width, double Height) Default = (620, 220);
+    public static (double Width, double Height) For(PanelSize size) => size switch
+    { PanelSize.Compact => (480, 160), PanelSize.Spacious => (860, 320), _ => Default };
+}
+
+// The file transfer page's sizes, the same as the clipboard's and the system monitor's.
+public static class TransferSizes
 {
     public static readonly (double Width, double Height) Default = (620, 220);
     public static (double Width, double Height) For(PanelSize size) => size switch
@@ -577,15 +584,21 @@ public sealed class DeckSettings
     // The system monitor page; it reads the system only while it is open on screen.
     public bool MonitorPage { get; set; } = true;
     public double MonitorWidth { get; set; } = MonitorSizes.Default.Width;
+    public double MonitorHeight { get; set; } = MonitorSizes.Default.Height;
     // The clipboard and file transfer page. The clipboard is recorded from the start; a settings file saved before keeps its choice.
     public bool ClipboardPage { get; set; } = true;
-    public double ClipboardWidth { get; set; } = ShelfSizes.Default.Width;
-    public double ClipboardHeight { get; set; } = ShelfSizes.Default.Height;
     public bool ClipboardRecord { get; set; } = true;
     // Applications whose copies are not recorded: the executable's path, or a process name (ClipboardExclusions).
     public List<string> ClipboardExcluded { get; set; } = [];
+    public double ClipboardWidth { get; set; } = ClipboardSizes.Default.Width;
+    public double ClipboardHeight { get; set; } = ClipboardSizes.Default.Height;
+    // The file transfer page; its sizes are the shelf's (ShelfSizes).
+    public bool TransferPage { get; set; } = true;
+    public TransferScrollEffectId TransferAnimation { get; set; } = TransferScrollEffectId.Focus;
+    public double TransferWidth { get; set; } = TransferSizes.Default.Width;
+    public double TransferHeight { get; set; } = TransferSizes.Default.Height;
     public TransferDragOut TransferDragOut { get; set; } = TransferDragOut.Copy;
-    public double MonitorHeight { get; set; } = MonitorSizes.Default.Height;
+    public TransferDragOut TransferRightDragOut { get; set; } = TransferDragOut.Move;
     public MonitorPalette MonitorPalette { get; set; } = MonitorPalette.Theme;
     // The Custom scheme's colors; kept while another scheme is chosen.
     public MonitorCustomColors MonitorCustomColors { get; set; } = new();
@@ -814,9 +827,12 @@ public sealed class DeckSettings
         DeviceWarningPercent = Devices.WarningChoices.Contains(DeviceWarningPercent) ? DeviceWarningPercent : Devices.DefaultWarningPercent;
         if (DeviceWarningPercent <= DeviceLowPercent) DeviceWarningPercent = Devices.WarningChoices.First(percent => percent > DeviceLowPercent);
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
-        ClipboardWidth = double.IsFinite(ClipboardWidth) ? Math.Clamp(ClipboardWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : ShelfSizes.Default.Width;
-        ClipboardHeight = double.IsFinite(ClipboardHeight) ? Math.Clamp(ClipboardHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ShelfSizes.Default.Height;
+        ClipboardWidth = double.IsFinite(ClipboardWidth) ? Math.Clamp(ClipboardWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : ClipboardSizes.Default.Width;
+        ClipboardHeight = double.IsFinite(ClipboardHeight) ? Math.Clamp(ClipboardHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ClipboardSizes.Default.Height;
+        TransferWidth = double.IsFinite(TransferWidth) ? Math.Clamp(TransferWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : TransferSizes.Default.Width;
+        TransferHeight = double.IsFinite(TransferHeight) ? Math.Clamp(TransferHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : TransferSizes.Default.Height;
         if (!Enum.IsDefined(TransferDragOut)) TransferDragOut = TransferDragOut.Copy;
+        if (!Enum.IsDefined(TransferRightDragOut)) TransferRightDragOut = TransferDragOut.Copy;
         ClipboardExcluded = ClipboardExclusions.Normalize(ClipboardExcluded);
         PanelScale = PanelScales.Fit(PanelScale);
         SurfaceTransparency = Math.Clamp(SurfaceTransparency, 0, MaxSurfaceTransparency);
