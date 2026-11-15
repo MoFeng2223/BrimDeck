@@ -166,8 +166,15 @@ internal static class ShelfTests
             settings.ClipboardPage && settings.ClipboardRecord && DeckPages.Order.Contains(DeckPage.Clipboard));
         check("Shelf settings: a settings file that turned recording off keeps it off",
             !System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{\"ClipboardRecord\":false}")!.ClipboardRecord);
-        var dragOut = new DeckSettings { TransferDragOut = (TransferDragOut)7 };
+        var dragOut = new DeckSettings { TransferDragOut = (TransferDragOut)7, TransferRightDragOut = (TransferDragOut)7 };
         dragOut.Normalize();
+        var separateDrag = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{\"TransferDragOut\":1,\"TransferRightDragOut\":0}")!;
+        var dragRoundTrip = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>(System.Text.Json.JsonSerializer.Serialize(
+            new DeckSettings { TransferDragOut = TransferDragOut.Copy, TransferRightDragOut = TransferDragOut.Move }))!;
+        check("File drag settings: buttons are independent, persist, and default safely",
+            separateDrag.TransferDragOut == TransferDragOut.Move && separateDrag.TransferRightDragOut == TransferDragOut.Copy
+            && dragRoundTrip.TransferDragOut == TransferDragOut.Copy && dragRoundTrip.TransferRightDragOut == TransferDragOut.Move
+            && settings.TransferRightDragOut == TransferDragOut.Move && dragOut.TransferRightDragOut == TransferDragOut.Copy);
         check("Shelf settings: files dragged out are copied unless moving is chosen; an older file copies; an unknown choice copies",
             settings.TransferDragOut == TransferDragOut.Copy && System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{}")!.TransferDragOut == TransferDragOut.Copy
             && System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{\"TransferDragOut\":1}")!.TransferDragOut == TransferDragOut.Move && dragOut.TransferDragOut == TransferDragOut.Copy);
@@ -179,12 +186,12 @@ internal static class ShelfTests
         var normalized = new DeckSettings { ClipboardExcluded = ["KeePass.exe", " keepass ", "", "1Password", @" C:\Apps\Bitwarden.exe ", "bitwarden", @"D:\.exe"], ClipboardWidth = double.NaN };
         normalized.Normalize();
         check("Shelf settings: excluded names lose .exe, paths stay whole, repeats of a process go, and a bad size returns to the default",
-            normalized.ClipboardExcluded.SequenceEqual(["KeePass", "1Password", @"C:\Apps\Bitwarden.exe"]) && normalized.ClipboardWidth == ShelfSizes.Default.Width);
+            normalized.ClipboardExcluded.SequenceEqual(["KeePass", "1Password", @"C:\Apps\Bitwarden.exe"]) && normalized.ClipboardWidth == ClipboardSizes.Default.Width);
         check("Shelf settings: an excluded name or path matches its process, in any case",
             ClipboardExclusions.Excludes(normalized.ClipboardExcluded, "bitwarden") && ClipboardExclusions.Excludes(normalized.ClipboardExcluded, "KEEPASS")
             && !ClipboardExclusions.Excludes(normalized.ClipboardExcluded, "Bitwarden.exe") && !ClipboardExclusions.Excludes(normalized.ClipboardExcluded, ""));
         check("Shelf settings: the page order of an older file gains the page at the end",
-            DeckPages.Normalize([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music]).SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Clipboard, DeckPage.Devices]));
+            DeckPages.Normalize([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music]).SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Clipboard, DeckPage.Transfer, DeckPage.Devices]));
     }
 
 
