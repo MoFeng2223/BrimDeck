@@ -11,7 +11,7 @@ namespace BrimDeck;
 // What the file transfer shows about a file: the icon and type name the Explorer shows (SHGetFileInfo, as the monitor page's
 // process list does), whether the file is still there, its size, and for a folder the items in it and, counted in the background,
 // its total size. A folder's figures arrive later; Changed then asks the page to show them.
-internal static class ShelfFiles
+internal static class TransferFiles
 {
     private static readonly ConcurrentDictionary<string, ImageSource?> Icons = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, string> Types = new(StringComparer.OrdinalIgnoreCase);

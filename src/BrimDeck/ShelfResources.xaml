@@ -55,7 +55,7 @@
     </ControlTemplate></Setter.Value></Setter>
   </Style>
   <!-- A text box on the panel: 7 % white with a 1 DIP outline inside, blue while it has the keyboard, as the design sets for input. -->
-  <Style x:Key="ShelfTextBox" TargetType="TextBox">
+  <Style x:Key="ClipboardTextBox" TargetType="TextBox">
     <Setter Property="OverridesDefaultStyle" Value="True"/>
     <Setter Property="Foreground" Value="{DynamicResource PanelPrimary}"/><Setter Property="CaretBrush" Value="{DynamicResource PanelPrimary}"/>
     <Setter Property="SelectionBrush" Value="{DynamicResource PanelAccent}"/>

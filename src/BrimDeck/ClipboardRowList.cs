@@ -3,17 +3,17 @@ using System.Windows.Controls;
 
 namespace BrimDeck;
 
-// A list of the clipboard and file transfer page that builds and lays out only the rows on screen and a few either side
+// A list of the clipboard page that builds and lays out only the rows on screen and a few either side
 // (VirtualizingStackPanel), and builds the others as they scroll into view. A page with many entries laid out every row again at
 // each change of its width, which made resizing the panel stutter; this keeps that work to the rows that show.
 // The rows are made by the page (build) and handed back when they leave (release). It scrolls by pixels, as the whole list did.
-internal sealed class ShelfRowList : ItemsControl
+internal sealed class ClipboardRowList : ItemsControl
 {
     private readonly Func<object, FrameworkElement> _build;
     private readonly Action<object, FrameworkElement>? _release;
     public ScrollViewer Viewer { get; }
 
-    public ShelfRowList(Func<object, FrameworkElement> build, Action<object, FrameworkElement>? release = null)
+    public ClipboardRowList(Func<object, FrameworkElement> build, Action<object, FrameworkElement>? release = null)
     {
         _build = build; _release = release;
         ItemsPanel = new ItemsPanelTemplate(new FrameworkElementFactory(typeof(VirtualizingStackPanel)));
@@ -23,7 +23,7 @@ internal sealed class ShelfRowList : ItemsControl
         viewer.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);
         viewer.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
         viewer.AppendChild(new FrameworkElementFactory(typeof(ItemsPresenter)));
-        Template = new ControlTemplate(typeof(ShelfRowList)) { VisualTree = viewer };
+        Template = new ControlTemplate(typeof(ClipboardRowList)) { VisualTree = viewer };
         Focusable = false;
         VirtualizingPanel.SetIsVirtualizing(this, true);
         VirtualizingPanel.SetVirtualizationMode(this, VirtualizationMode.Standard);

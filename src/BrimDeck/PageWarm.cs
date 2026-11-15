@@ -28,7 +28,7 @@ internal static class PageWarm
         typeof(MonitorView), typeof(FigureGauge), typeof(ColumnGraph), typeof(BlockGauge), typeof(MemoryBlock), typeof(NetworkBlock), typeof(StorageBlock),
         typeof(FramesBlock), typeof(ProcessListView), typeof(ProcessCard), typeof(MonitorDraw), typeof(PowerBlock),
         typeof(MusicVisuals), typeof(MusicEqualizer), typeof(MusicMarquee), typeof(MusicControlButton), typeof(MusicSeekSlider),
-        typeof(ShelfRowList), typeof(DevicesView), typeof(QuotaBar), typeof(OffPeakBar),
+        typeof(ClipboardRowList), typeof(DevicesView), typeof(QuotaBar), typeof(OffPeakBar),
         typeof(MusicLayout), typeof(MonitorLayout), typeof(PanelHeader), typeof(DeckPages),
     ];
 

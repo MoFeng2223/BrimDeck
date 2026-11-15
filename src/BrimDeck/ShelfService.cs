@@ -141,7 +141,7 @@ internal sealed class ShelfService : IDisposable
     // they are what is saved. False when there was nothing to let go.
     public bool Rest()
     {
-        bool held = _thumbs.Count > 0 | ShelfFiles.Rest();
+        bool held = _thumbs.Count > 0 | TransferFiles.Rest();
         _thumbs.Clear();
         return held;
     }
@@ -249,7 +249,7 @@ internal sealed class ShelfService : IDisposable
         return false;
     }
 
-    // The window to paste into after the panel took the focus for typing (MainWindow.ShelfTyping).
+    // The window to paste into after the panel took the focus for typing (MainWindow.ClipboardTyping).
     public IntPtr TypingTarget { get; set; }
 
     // Puts data on the clipboard and pastes it into the window the user was typing in. done: true once Ctrl+V was sent, false when
