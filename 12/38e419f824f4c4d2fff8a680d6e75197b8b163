@@ -1,0 +1,46 @@
+docs/clipboard-sync.md
+  h_dc4d9c798f1bc1 1-23
+tests/BrimDeck.Tests/ClipboardSyncTests.cs
+  h_dc4d9c798f1bc1 1-52
+src/BrimDeck.Core/BrimDeck.Core.csproj
+  h_dc4d9c798f1bc1 21
+src/BrimDeck/ClipboardSyncService.cs
+  h_dc4d9c798f1bc1 1-224
+src/BrimDeck.Core/ClipboardSync/SyncTransport.cs
+  h_dc4d9c798f1bc1 1-41
+src/BrimDeck/ShelfService.cs
+  h_dc4d9c798f1bc1 101-107
+src/BrimDeck/SettingsClipboardSync.cs
+  h_dc4d9c798f1bc1 1-126
+src/BrimDeck.Core/ClipboardSync/WeTypeWire.cs
+  h_dc4d9c798f1bc1 1-100
+src/BrimDeck/App.xaml.cs
+  h_dc4d9c798f1bc1 46,134,279,617
+src/BrimDeck.Core/ClipboardSync/DoubaoSyncClient.cs
+  h_dc4d9c798f1bc1 1-108
+src/BrimDeck/Native/DoubaoBrowserLogin.cs
+  h_dc4d9c798f1bc1 1-113
+src/BrimDeck/SettingsSyncDialogs.cs
+  h_dc4d9c798f1bc1 1-128
+src/BrimDeck/SettingsWindow.cs
+  h_dc4d9c798f1bc1 33,37,358,381
+src/BrimDeck/ThirdPartyNotices.txt
+  h_dc4d9c798f1bc1 1727-1744
+src/BrimDeck.Core/ClipboardSync/WeTypeSyncClient.cs
+  h_dc4d9c798f1bc1 1-247
+tests/BrimDeck.Tests/Program.cs
+  h_dc4d9c798f1bc1 16
+src/BrimDeck.Core/Settings.cs
+  h_dc4d9c798f1bc1 618-619
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1238e419f824f4c4d2fff8a680d6e75197b8b163",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
