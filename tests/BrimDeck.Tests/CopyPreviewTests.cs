@@ -9,7 +9,11 @@ internal static class CopyPreviewTests
         check("copy preview removes direction controls", CopyPreviewText.Summarize("a\u202eb\u0000c") == "abc");
         check("copy preview preserves emoji clusters", CopyPreviewText.Summarize("你好 👨‍👩‍👧‍👦 e\u0301") == "你好 👨‍👩‍👧‍👦 e\u0301");
         check("copy preview bounds long input", CopyPreviewText.Summarize(new string('字', 1000000)) == new string('字', 20) + "…");
-        check("copy preview bounds whitespace scans", CopyPreviewText.Summarize(new string(' ', 1000000)).Length <= 1);
+        check("copy preview whitespace-only input stays empty", CopyPreviewText.Summarize(new string(' ', 1000000)) == "");
+        check("copy preview leading whitespace does not consume body budget", CopyPreviewText.Summarize(new string(' ', 1024) + "订单123") == "订单123");
+        check("copy preview skips mixed leading whitespace", CopyPreviewText.Summarize(new string('\u3000', 2048) + "\r\n\t订单123") == "订单123");
+        check("copy preview long leading whitespace keeps emoji intact", CopyPreviewText.Summarize(new string(' ', 10000) + "👨‍👩‍👧‍👦 订单") == "👨‍👩‍👧‍👦 订单");
+        check("copy preview still truncates long bodies after whitespace", CopyPreviewText.Summarize(new string(' ', 1024) + new string('字', 31), 30) == new string('字', 30) + "…");
         check("copy preview empty input", CopyPreviewText.Summarize("") == "");
         check("copy preview bounds combining sequences", CopyPreviewText.Summarize("e" + new string('\u0301', 10000)) == "…");
         check("copy preview exact limit", CopyPreviewText.Summarize(new string('a', 20)) == new string('a', 20));

@@ -7,12 +7,15 @@ public static class CopyPreviewText
 {
     public const int MinimumLength = 10, MaximumLength = 30, DefaultLength = 20;
 
-    // Bound work even for a million-character history item; keep emoji/combining sequences intact.
+    // Skip leading whitespace without allocating a trimmed copy, then bound the body scan.
+    // Keep emoji/combining sequences intact.
     public static string Summarize(string text, int maximum = DefaultLength)
     {
         maximum = Math.Clamp(maximum, MinimumLength, MaximumLength);
         var result = new StringBuilder();
-        var elements = StringInfo.GetTextElementEnumerator(text);
+        int start = 0;
+        while (start < text.Length && char.IsWhiteSpace(text[start])) start++;
+        var elements = StringInfo.GetTextElementEnumerator(text, start);
         int scanned = 0, shown = 0;
         bool space = false;
         while (elements.MoveNext())
