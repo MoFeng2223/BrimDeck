@@ -823,6 +823,29 @@ public partial class MainWindow : Window
         _app.RequestTrim();
     }
 
+    private BitmapCache? _contentCache;
+    private bool _panelAnimating;
+    private int _contentFadeGen, _surfaceAnimGen;
+    private void BindExpandedWidth(bool bind)
+    {
+        if (bind && !_frame.Across)
+        {
+            if (System.Windows.Data.BindingOperations.GetBindingExpression(ExpandedContent, WidthProperty) is null)
+                ExpandedContent.SetBinding(WidthProperty, new System.Windows.Data.Binding(nameof(ActualWidth)) { Source = Island, Converter = _unscaled });
+            return;
+        }
+        System.Windows.Data.BindingOperations.ClearBinding(ExpandedContent, WidthProperty);
+        ExpandedContent.Width = _pageWidth;
+    }
+    private void SetContentCache(bool enable, double dpi)
+    {
+        if (!enable) { if (ExpandedContent.CacheMode is not null) ExpandedContent.CacheMode = null; return; }
+        _contentCache ??= new BitmapCache { EnableClearType = false, SnapsToDevicePixels = true };
+        double render = dpi * _scale / SystemScale;
+        if (double.IsFinite(render) && render > 0 && _contentCache.RenderAtScale != render) _contentCache.RenderAtScale = render;
+        if (!ReferenceEquals(ExpandedContent.CacheMode, _contentCache)) ExpandedContent.CacheMode = _contentCache;
+    }
+
     // The panel's last opening or closing, so that one turned back part way can tell (motion-review F1, F2).
     private readonly MoveTurn _turn = new();
     // keyboard: a hotkey or Escape asked for it (motion-review C4), so the move is quicker and has no give.
@@ -884,7 +907,7 @@ public partial class MainWindow : Window
         if (!expanded && KeepBootDot(shape)) return;
         Island.BorderThickness = new Thickness(0);
         // On a side edge the page keeps its width as well (MainWindow.Edge.cs).
-        if (across) ExpandedContent.Width = _pageWidth;
+        // Width of ExpandedContent is set via BindExpandedWidth once duration is known.
         ExpandedContent.Height = pageHeight;
         // The page and its header start headerExtra below the panel's top edge. The header row keeps its own height, so its
         // controls keep their size tier. Collapsing keeps the offset the content had, so it fades out without moving.
@@ -908,6 +931,7 @@ public partial class MainWindow : Window
         int carried = !turning && !expanded ? _turn.Carried(now, false, duration) : 0;
         if (carried > 0) duration = carried;
         ExpandedContent.IsHitTestVisible = expanded;
+        BindExpandedWidth(expanded && (!turning || duration == 0));
         if (expanded) ExpandedContent.Visibility = Visibility.Visible;
         // The indicator has no content: it fades out with the other tracks and is hidden once gone.
         if (!line) Compact.Visibility = Visibility.Visible;
@@ -921,7 +945,7 @@ public partial class MainWindow : Window
         // Collapsed, hovering is detected by polling the cursor (TrackPointer), so the strip is not drawn: its nearly transparent
         // pixels would still catch clicks for this layered window (Windows only lets clicks through fully transparent pixels).
         HoverExtension.IsHitTestVisible = expanded;
-        HoverExtension.Visibility = expanded ? Visibility.Visible : Visibility.Hidden;
+        HoverExtension.Visibility = expanded ? Visibility.Collapsed : Visibility.Hidden;
         double boxTop = double.IsFinite(box.Top) ? box.Top : 0;
         // Collapsing runs in three stages: the content leaves first, the surface follows a moment later on the drawer's curve
         // (leaving at once, landing softly), the compact content lands last.
@@ -980,7 +1004,16 @@ public partial class MainWindow : Window
         IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = morphing ? Soft.Follow : reshaping ? Soft.InOut : expanded || booting ? Soft.Out
             : resizing ? resizeUnderWay ? Soft.Out : Soft.InOut : Soft.Drawer;
         IEasingFunction settle = bounce ? Soft.Bounce : corners;
-        Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
+        double contentDpi = VisualTreeHelper.GetDpi(Island).DpiScaleX;
+        int contentGen = ++_contentFadeGen;
+        SetContentCache(turning && duration > 0, contentDpi);
+        // Populate the content BitmapCache on frame 0 (alpha ~1/255, invisible) instead of stalling mid-motion when the fade track begins.
+        if (expanded && turning && duration > 0 && ExpandedContent.Opacity < 0.004) SetImmediate(ExpandedContent, OpacityProperty, 0.004d);
+        Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () =>
+        {
+            if (contentGen == _contentFadeGen) SetContentCache(false, contentDpi);
+            if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden;
+        });
         // The content only fades, in and out on the same track and curve (motion-review F13: what leaves eases out as what arrives
         // does). It used to scale between .96 and 1 as well; text under a scale that is not exactly 1 is drawn unhinted at fractional
         // places, and snapped onto the pixel grid on the frame the scale reached 1.
@@ -996,10 +1029,33 @@ public partial class MainWindow : Window
         else Island.BeginAnimation(WidthProperty, Timed(new SnappedWidthAnimation { To = width, Page = centred, Scale = dpi, EasingFunction = settle }, duration, surface), HandoffBehavior.SnapshotAndReplace);
         // The row built for the new width travels there with the surface's ends rather than standing there from the start.
         if (resizing && !line && !across) SlideCompactRow(width - fromWidth, duration, surface, settle);
-        Animate(Island, HeightProperty, height, duration, surface, settle);
+        int surfaceGen = ++_surfaceAnimGen;
+        if (duration > 0)
+        {
+            _panelAnimating = true;
+            _grips?.Show(ResizeGripLayer.Form.None, default, 0, 0, false);
+            Animate(Island, HeightProperty, height, duration, surface, settle, () =>
+            {
+                if (surfaceGen != _surfaceAnimGen) return;
+                _panelAnimating = false;
+                if (_expanded)
+                {
+                    BindExpandedWidth(true);
+                    UpdateMusicTimer();
+                    UpdateMonitorDemand();
+                }
+                UpdateGrips();
+            });
+        }
+        else
+        {
+            _panelAnimating = false;
+            Animate(Island, HeightProperty, height, duration, surface, settle);
+        }
         Animate(Island, IslandBorder.ShoulderRadiusProperty, expanded ? 0 : shape.Shoulder, duration, shoulderTrack, corners);
         // Compact notch and capsule hover over their full bounding box from the screen edge; the open panel uses its own outline.
-        Animate(HoverExtension, HeightProperty, double.IsFinite(box.Height) ? Math.Max(0, box.Height) : 0, duration, surface, settle);
+        if (expanded) SetImmediate(HoverExtension, HeightProperty, 0d);
+        else Animate(HoverExtension, HeightProperty, double.IsFinite(box.Height) ? Math.Max(0, box.Height) : 0, duration, surface, settle);
         if (duration == 0)
         {
             SetImmediate(HoverZone, MarginProperty, new Thickness(left, 0, 0, 0));
@@ -1029,20 +1085,22 @@ public partial class MainWindow : Window
         Animate(CompactScale, ScaleTransform.ScaleYProperty, compactGone ? Soft.Shrunk : 1, duration, compact, easeOut);
         // The line's playback progress, hidden while the surface was the boot's dot, comes back with the compact content.
         Animate(MusicIndicator, OpacityProperty, 1, duration, compact, easeOut);
-        Animate(ShadowHost, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);
+        // On expand, collapse ShadowHost immediately so IslandShadow bindings, layout, and DropShadowEffect do not run per frame.
+        if (expanded) { ShadowHost.Visibility = Visibility.Collapsed; SetImmediate(ShadowHost, OpacityProperty, 0d); }
+        else { ShadowHost.Visibility = Visibility.Visible; Animate(ShadowHost, OpacityProperty, !line ? 1 : 0, duration, shadow, easeOut); }
         // The surface stays opaque throughout; it loses its rim and turns grey only once it has the indicator's shape.
         Animate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0 : 1, duration, rim, easeOut);
         var tone = Look.ColorOf(indicator ? "indicator" : "surface");
         // Opening from the indicator, the surface takes its own color while it is still the thin line: the opening spring is
         // half way open within a few frames, and a tint still under way showed for those frames as a large block in the
         // indicator's color.
-        if (duration == 0 || expanded && line && !wasExpanded) SetImmediate(_surface, SolidColorBrush.ColorProperty, tone);
+        if (duration == 0 || expanded && line && !wasExpanded || _surface.Color == tone) SetImmediate(_surface, SolidColorBrush.ColorProperty, tone);
         else _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = tone, EasingFunction = easeInOut }, duration, tint), HandoffBehavior.SnapshotAndReplace);
         // The panel is rebuilt when data or settings change, never here: a rebuild on the first frame reads as a stall.
         if (expanded) { RefreshStatus(); UpdateMusicPosition(); }
         else RenderSyncButton();
-        UpdateMusicTimer();
-        UpdateMonitorDemand();
+        if (!expanded || duration == 0) UpdateMusicTimer();
+        if (!expanded || duration == 0) UpdateMonitorDemand();
         UpdateGrips();
         ApplyClickThrough();
     }

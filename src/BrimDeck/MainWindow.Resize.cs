@@ -97,7 +97,7 @@ public partial class MainWindow
     // Brings the layer up to date with the island; cheap when nothing changed.
     private void UpdateGrips()
     {
-        if (_grips is null) return;
+        if (_grips is null || _panelAnimating) return;
         if (_moveArmed) { ShowMoveGrips(); return; }
         // Under mouse pass-through the grips are not offered, nor the collapsed ones when the settings turn them off; the resize
         // shortcut still works.
