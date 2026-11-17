@@ -129,13 +129,6 @@ public partial class MainWindow
         return filters[(days, start)] = snapshot.Entries.Where(x => x.Time.LocalDateTime >= start).ToList();
     }
 
-    // The share of the allowance a source without token records (Grok Bot) used over the last days.
-    private static double ShareTotal(ProviderSnapshot snapshot, int days)
-    {
-        var start = DateTime.Now.Date.AddDays(1 - days);
-        return snapshot.Shares.Where(share => share.Day.LocalDateTime.Date >= start).Sum(share => share.Percent);
-    }
-
     // The cheap part of a render: clock, gear tooltip and the synchronization button. Run on every expansion.
     internal void RefreshStatus()
     {
@@ -752,22 +745,14 @@ public partial class MainWindow
         // Each row prices its records once; the figure and its tooltip share the result.
         long total = entries.Sum(x => x.Total);
         var cost = snapshot.UsageAvailable ? _app.Prices.Summarize(entries) : null;
-        // A source without token records (Grok Bot) totals its daily shares of the allowance instead.
-        double? share = snapshot.Shares.Count > 0 ? ShareTotal(snapshot, days) : null;
-        FrameworkElement tokens = share is { } shareValue ? UI.Centered($"{shareValue:0.#}%", layout.Foot, Look.Secondary)
-            : snapshot.UsageAvailable ? UI.Centered(UI.Number(total), layout.Foot, Look.Secondary)
+        FrameworkElement tokens = snapshot.UsageAvailable ? UI.Centered(UI.Number(total), layout.Foot, Look.Secondary)
             : UI.CenteredSymbol("—", layout.Foot, Look.Secondary);
         tokens.HorizontalAlignment = HorizontalAlignment.Left;
-        tokens.ToolTip = ProviderCatalog.UsageTip(snapshot.Id) + "\n" + (share is { } tipShare
-            ? Loc.T($"{label} 份额 · 每周额度的 {tipShare:0.#}%", $"{label} share · {tipShare:0.#}% of the weekly allowance")
-            : snapshot.UsageAvailable ? Loc.T($"{label} Token · {total:N0}", $"{label} tokens · {total:N0}") : snapshot.UsageNote)
+        tokens.ToolTip = ProviderCatalog.UsageTip(snapshot.Id) + "\n" + (snapshot.UsageAvailable ? Loc.T($"{label} Token · {total:N0}", $"{label} tokens · {total:N0}") : snapshot.UsageNote)
             + (snapshot.LastSeenAt is not null && snapshot.UsageAvailable ? "\n" + snapshot.UsageNote : ""); Grid.SetColumn(tokens, 1); row.Children.Add(tokens);
-        FrameworkElement price = share is not null ? UI.CenteredSymbol("—", layout.Foot, Look.Tertiary, FontWeights.SemiBold)
-            : snapshot.UsageAvailable ? UI.Centered(UI.Amount(cost!), layout.Foot, Look.Primary, FontWeights.SemiBold)
+        FrameworkElement price = snapshot.UsageAvailable ? UI.Centered(UI.Amount(cost!), layout.Foot, Look.Primary, FontWeights.SemiBold)
             : UI.CenteredSymbol("—", layout.Foot, Look.Tertiary, FontWeights.SemiBold);
-        price.Margin = new Thickness(grouped ? 12 : 8, 0, 0, 0);
-        price.ToolTip = share is not null ? Loc.T("Grok Bot 没有 Token 与费用明细，只统计每周额度的每日份额。", "Grok Bot keeps no token or cost details; only the daily shares of its weekly allowance are counted.")
-            : snapshot.UsageAvailable ? UI.CostNote(cost!, _app.Prices) : snapshot.UsageNote; Grid.SetColumn(price, 2); row.Children.Add(price);
+        price.Margin = new Thickness(grouped ? 12 : 8, 0, 0, 0); price.ToolTip = snapshot.UsageAvailable ? UI.CostNote(cost!, _app.Prices) : snapshot.UsageNote; Grid.SetColumn(price, 2); row.Children.Add(price);
         // The "+" for unpriced records hangs in the arrow column, so the amounts of both rows still end on one vertical line.
         if (cost is { Unpriced: > 0 })
         {

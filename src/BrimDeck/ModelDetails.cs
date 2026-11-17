@@ -263,7 +263,8 @@ public partial class MainWindow
     }
 
     // Every record in a row shares one model name and application, so the first record finds the row's prices.
-    // A price table: one column per prompt-size tier, so standard and long-context prices sit side by side.
+    // A price table: one column per prompt-size tier, so standard and long-context prices sit side by side; DeepSeek's own prices
+    // show their peak and off-peak columns the same way.
     // source is the snapshot the row's records came from.
     private FrameworkElement PriceBreakdown(ModelUsageRow record, ProviderSnapshot? source)
     {
@@ -285,122 +286,53 @@ public partial class MainWindow
         var recovery = listed is null && !shared && record.Entries.All(t => t.ReportedCostUsd is not null) ? Pricing.FromReported(record.Entries) : null;
         var derived = shared ? source!.WeeklyPrices : recovery?.Prices;
         var model = listed ?? (recovery is null && !shared ? _app.Prices.Match(record.Entries[0]) : null);
-        // Amounts reported by an API are in dollars; a catalog or built-in price names its own money.
-        string currency = derived is not null ? "USD" : model?.Currency ?? "USD";
-        string size = currency == "CNY" ? Loc.T("人民币 / 百万 Token", "CNY per million tokens") : Loc.T("USD / 百万 Token", "USD per million tokens");
         var tiers = model?.Tiers.Where(t => t.MinimumPromptTokens > 0).ToArray() ?? [];
         var columns = derived is not null ? [derived] : model is null ? [] : tiers.Select(t => t.Prices).Prepend(model.Tiers.LastOrDefault(t => t.MinimumPromptTokens <= 0)?.Prices ?? model.Prices)
             .Select(prices => _app.Prices.Effective(model, prices)).ToArray();
+        bool peak = derived is null && tiers.Length == 0 && model?.OffPeakPrices is not null;
+        if (peak) columns = [.. columns, _app.Prices.Effective(model!, model!.OffPeakPrices!)];
         for (int i = 0; i <= columns.Length; i++) grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         int span = columns.Length + 1, line = 0;
         Cell($"{AppPresets.Name(record.Provider)} · {record.Model}", line++, 0, span: span, margin: new Thickness(0, 0, 0, 3));
-        if (tiers.Length > 0)
-            for (int i = 0; i < columns.Length; i++)
-                Cell(i == 0 ? $"< {UI.Number(tiers[0].MinimumPromptTokens)}" : i < tiers.Length ? $"{UI.Number(tiers[i - 1].MinimumPromptTokens)}–{UI.Number(tiers[i].MinimumPromptTokens)}"
-                    : $"≥ {UI.Number(tiers[i - 1].MinimumPromptTokens)}", line, i + 1, Look.Secondary, true, margin: new Thickness(16, 0, 0, 0));
-        if (tiers.Length > 0) line++;
+        string[] headings = tiers.Length > 0 ? [.. Enumerable.Range(0, columns.Length).Select(i => i == 0 ? $"< {UI.Number(tiers[0].MinimumPromptTokens)}"
+                : i < tiers.Length ? $"{UI.Number(tiers[i - 1].MinimumPromptTokens)}–{UI.Number(tiers[i].MinimumPromptTokens)}" : $"≥ {UI.Number(tiers[i - 1].MinimumPromptTokens)}")]
+            : peak ? [Loc.T("高峰", "Peak"), Loc.T("低峰", "Off-peak")] : [];
+        for (int i = 0; i < headings.Length; i++) Cell(headings[i], line, i + 1, Look.Secondary, true, margin: new Thickness(16, 0, 0, 0));
+        if (headings.Length > 0) line++;
+        // DeepSeek charges no cache write: a token written to the cache costs the input price, so the row would only repeat it.
         (string Label, Func<TokenPrices, decimal?> Price)[] kinds =
         [
-            (Loc.T("输入", "Input"), p => p.Input), (Loc.T("输出", "Output"), p => p.Output), (Loc.T("缓存写入", "Cache write"), p => p.CacheWrite),
+            (Loc.T("输入", "Input"), p => p.Input), (Loc.T("输出", "Output"), p => p.Output), (Loc.T("缓存写入", "Cache write"), p => peak ? null : p.CacheWrite),
             (Loc.T("缓存写入（1 小时）", "Cache write (1 hour)"), p => p.CacheWriteHour == p.CacheWrite ? null : p.CacheWriteHour), (Loc.T("缓存读取", "Cache read"), p => p.CacheRead),
         ];
         foreach (var (label, price) in kinds.Where(kind => columns.Any(prices => kind.Price(prices) is not null)))
         {
             Cell(label, line, 0, Look.Secondary);
             for (int i = 0; i < columns.Length; i++)
-                Cell(price(columns[i]) is { } value ? UI.Symbol(currency) + (value * 1_000_000m).ToString("0.00####", System.Globalization.CultureInfo.InvariantCulture) : "—",
+                Cell(price(columns[i]) is { } value ? "$" + (value * 1_000_000m).ToString("0.00####", System.Globalization.CultureInfo.InvariantCulture) : "—",
                     line, i + 1, right: true, margin: new Thickness(16, 0, 0, 0));
             line++;
         }
         string note = shared ? derived is null ? Loc.T("单价尚未推算出来", "The prices have not been worked out yet")
-            : size + Loc.T(" · 根据每周已用金额推算", " · worked out from the weekly amount used") : recovery switch
+            : Loc.T("USD / 百万 Token · 根据每周已用金额推算", "USD per million tokens · worked out from the weekly amount used") : recovery switch
         {
-            { Status: RecoveryStatus.Recovered } => size + Loc.T(" · 根据接口金额推算", " · worked out from the API amounts"),
+            { Status: RecoveryStatus.Recovered } => Loc.T("USD / 百万 Token · 根据接口金额推算", "USD per million tokens · worked out from the API amounts"),
             { Status: RecoveryStatus.TooFewRecords, Records: var count } => Loc.T($"所选时段只有 {count} 条记录，不足以推算单价",
                 $"The selected period has only {Loc.Count(count, "record", "records")}, too few to work out the prices"),
             { Status: RecoveryStatus.Undetermined } => Loc.T("所选时段的记录不足以确定各项单价", "The records in the selected period cannot determine each price"),
             { Status: RecoveryStatus.Inconsistent } => Loc.T("各条记录的金额不符合固定单价，无法推算单价", "The amounts of the records do not fit fixed prices, so the prices cannot be worked out"),
             _ => model is null ? Loc.T("未找到该模型的单价", "No unit price was found for this model")
-                : size + (listed is null ? "" : Loc.T($" · {AppPresets.Name(record.Provider)} 标价", $" · {AppPresets.Name(record.Provider)} list prices"))
-                    + (tiers.Length > 0 ? Loc.T(" · 按单次请求的输入量分档", " · tiered by the input of each request") : ""),
+                : Loc.T("USD / 百万 Token", "USD per million tokens") + (listed is null ? "" : Loc.T($" · {AppPresets.Name(record.Provider)} 标价", $" · {AppPresets.Name(record.Provider)} list prices"))
+                    + (tiers.Length > 0 ? Loc.T(" · 按单次请求的输入量分档", " · tiered by the input of each request") : peak ? Loc.T(" · DeepSeek 官方价", " · DeepSeek list prices") : ""),
         };
-        Cell(note, line, 0, Look.Secondary, span: span, margin: new Thickness(0, columns.Length == 0 ? 0 : 3, 0, 0));
+        Cell(note, line++, 0, Look.Secondary, span: span, margin: new Thickness(0, columns.Length == 0 ? 0 : 3, 0, 0));
+        if (peak) Cell(Pricing.PeakHours, line, 0, Look.Secondary, span: span);
         return grid;
-    }
-
-    // A source without token records (Grok Bot) shows the daily shares of its allowance here instead of a token table.
-    private void RenderShares(IReadOnlyList<ProviderSnapshot> snapshots)
-    {
-        bool tiny = ContentCanvas.Height < 170;
-        double font = tiny ? 11.5 : 12.5, rowHeight = tiny ? 22 : 27, headerHeight = tiny ? 18 : 22, totalHeight = tiny ? 24 : 29;
-        double inset = tiny ? 14 : 20, gap = 12;
-        UsageContent.Margin = new Thickness(inset, 0, inset, tiny ? 8 : 10);
-        var range = ModelRange;
-        var rows = snapshots.SelectMany(snapshot => snapshot.Shares
-            .Where(share => range.Contains(share.Day)).OrderBy(share => share.Day)
-            .Select(share => (Snapshot: snapshot, Share: share))).ToList();
-        var panel = new Grid { Name = "ModelTable" };
-        panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(headerHeight + 1) });
-        panel.RowDefinitions.Add(new RowDefinition());
-        panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(totalHeight + 1) });
-        Grid Row(string app, string day, string percent, bool header, bool total)
-        {
-            var row = new Grid { Height = header ? headerHeight : total ? totalHeight : rowHeight, Name = header ? "ModelHeader" : total ? "ModelTotal" : "ModelDataRow" };
-            row.ColumnDefinitions.Add(new ColumnDefinition());
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(gap) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            for (int i = 0; i < 3; i++)
-            {
-                var text = UI.Centered(i == 0 ? app : i == 1 ? day : percent, header ? tiny ? 10 : 11 : font,
-                    header || total ? Look.Tertiary : i == 2 ? Look.Primary : Look.Secondary,
-                    i == 2 && !total && !header ? FontWeights.SemiBold : FontWeights.Normal);
-                text.TextAlignment = i >= 1 ? TextAlignment.Right : TextAlignment.Left;
-                // Four columns: app, date, the gap, and the share; the gap holds no text.
-                Grid.SetColumn(text, i switch { 0 => 0, 1 => 1, _ => 3 }); row.Children.Add(text);
-            }
-            return row;
-        }
-        panel.Children.Add(new Border { Child = Row(Loc.T("应用", "App"), Loc.T("日期", "Date"), Loc.T("占每周额度", "Of weekly allowance"), true, false), BorderBrush = UI.Brush(UI.Hairline), BorderThickness = new Thickness(0, 0, 0, 1) });
-        var list = new StackPanel();
-        for (int i = 0; i < rows.Count; i++)
-        {
-            var (snapshot, share) = rows[i];
-            var row = Row(AppPresets.Name(snapshot.Id), share.Day.LocalDateTime.ToString("MM-dd"), $"{share.Percent:0.#}%", false, false);
-            var item = new Border { Child = row, Background = Brushes.Transparent, BorderBrush = UI.Brush(PanelTheme.Hex("rowDivider")), BorderThickness = new Thickness(0, i > 0 ? 1 : 0, 0, 0) };
-            item.MouseEnter += (_, _) => item.Background = UI.Brush(PanelTheme.Hex("rowHover")); item.MouseLeave += (_, _) => item.Background = Brushes.Transparent;
-            list.Children.Add(item);
-        }
-        // The viewport clip would turn the rows grayscale; they lie over the island's opaque surface.
-        RenderOptions.SetClearTypeHint(list, ClearTypeHint.Enabled);
-        var scroll = new ScrollViewer { Content = list, Style = (Style)FindResource("ModelScrollViewer"), Focusable = true, FocusVisualStyle = null };
-        _modelScroll = scroll;
-        var offset = _modelScrollOffset;
-        scroll.Loaded += (_, _) => scroll.ScrollToVerticalOffset(offset);
-        Grid.SetRow(scroll, 1); panel.Children.Add(scroll);
-        if (rows.Count == 0)
-        {
-            var message = UI.Centered(Loc.T("所选时段暂无用量记录", "No usage records in the selected period"), 12, Look.Tertiary);
-            message.HorizontalAlignment = HorizontalAlignment.Center; message.VerticalAlignment = VerticalAlignment.Center; Grid.SetRow(message, 1); panel.Children.Add(message);
-        }
-        double total = rows.Sum(row => row.Share.Percent);
-        string selected = _modelApps.Count == 1 ? AppPresets.Name(_modelApps.Single()) : Loc.T($"{_modelApps.Count} 个应用", Loc.Count(_modelApps.Count, "app", "apps"));
-        var totalRow = Row(Loc.T("合计", "Total"), $"{selected} · {ModelPeriodLabel}", $"{total:0.#}%", false, true);
-        totalRow.ToolTip = Loc.T("Grok Bot 没有 Token 与费用明细，这里统计每周额度的每日份额。", "Grok Bot keeps no token or cost details; these are the daily shares of its weekly allowance.");
-        var footer = new Border { Child = totalRow, BorderBrush = UI.Brush(Look.Outline), BorderThickness = new Thickness(0, 1, 0, 0) };
-        Grid.SetRow(footer, 2); panel.Children.Add(footer);
-        UsageContent.Children.Add(panel);
     }
 
     private void RenderModels(IReadOnlyList<ProviderSnapshot> snapshots)
     {
         var result = ModelUsage.Filter(snapshots, _modelApps, ModelRange);
-        // A source without token records (Grok Bot) shows its daily shares in place of the token table.
-        if (result.Rows.Count == 0)
-        {
-            var shareSources = snapshots.Where(source => _modelApps.Contains(source.Id) && source.Shares.Count > 0).ToList();
-            if (shareSources.Count > 0) { RenderShares(shareSources); return; }
-        }
         bool expanded = ContentCanvas.Width >= 600, compact = ContentCanvas.Width < 640 || ContentCanvas.Height < 170, tiny = ContentCanvas.Height < 170;
         double font = tiny ? 11.5 : 12.5, rowHeight = tiny ? 22 : 27, headerHeight = tiny ? 18 : 22, totalHeight = tiny ? 24 : 29;
         double inset = tiny ? 14 : 20, gap = expanded ? 8 : 12;
@@ -431,11 +363,9 @@ public partial class MainWindow
         if (incomplete && result.Entries.Count == 0) totals = totals.Select(_ => "—").ToArray();
         double[] widths = expanded ? [compact ? 72 : 80, 0, ..Enumerable.Repeat(compact ? 52d : 56d, 4), compact ? 58 : 62, compact ? 64 : 78] : [84, 0, 84, 84];
         var values = result.Rows.Select(row => Values(row.Entries)).ToArray();
-        var costTotals = _app.Prices.Summarize(result.Entries);
-        string costHeading = Loc.T("费用", "Cost") + " · " + (costTotals.Currency == "MIX" ? Loc.T("混合", "Mixed") : costTotals.Currency);
         var headings = expanded
-            ? new[] { Loc.T("输入", "Input"), Loc.T("缓存写入", "Cache write"), Loc.T("缓存读取", "Cache read"), Loc.T("输出", "Output"), Loc.T("Token 合计", "Total tokens"), costHeading }
-            : [Loc.T("Token 合计", "Total tokens"), costHeading];
+            ? new[] { Loc.T("输入", "Input"), Loc.T("缓存写入", "Cache write"), Loc.T("缓存读取", "Cache read"), Loc.T("输出", "Output"), Loc.T("Token 合计", "Total tokens"), Loc.T("费用 · USD", "Cost · USD") }
+            : [Loc.T("Token 合计", "Total tokens"), Loc.T("费用 · USD", "Cost · USD")];
         for (int n = 0; n < totals.Length; n++)
         {
             // English headings are longer than the numbers under them; a column also fits its heading.

@@ -149,13 +149,7 @@ internal static class UI
     { >= 1_000_000_000 => (number / 1_000_000_000d).ToString("0.##", CultureInfo.InvariantCulture) + "B", >= 1_000_000 => (number / 1_000_000d).ToString("0.##", CultureInfo.InvariantCulture) + "M", >= 1000 => (number / 1000d).ToString("0.#", CultureInfo.InvariantCulture) + "K", _ => number.ToString("N0") };
     public static string Cost(IEnumerable<TokenEntry> entries, Pricing pricing) => Cost(pricing.Summarize(entries));
     public static string Cost(CostSummary cost) => Amount(cost) + (cost.Unpriced > 0 ? " +" : "");
-    // A column mixing monies shows each subtotal apart, never one sum of dollars and yuan.
-    public static string Amount(CostSummary cost) => cost.ByCurrency is { Count: > 1 } byCurrency
-        ? string.Join(" + ", byCurrency.OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => Money(pair.Value, pair.Key)))
-        : Money(cost.Amount, cost.Currency);
-    // "¥" for the yuan-priced records (DeepSeek), "$" for the catalog's dollars; a column mixing both shows "≈".
-    public static string Symbol(string currency) => currency switch { "CNY" => "¥", "MIX" => "≈", _ => "$" };
-    public static string Money(decimal amount, string currency) => Symbol(currency) + amount.ToString("N2", CultureInfo.InvariantCulture);
+    public static string Amount(CostSummary cost) => "$" + cost.Amount.ToString("N2", CultureInfo.InvariantCulture);
     public static string? CostNote(IEnumerable<TokenEntry> entries, Pricing pricing) => CostNote(pricing.Summarize(entries), pricing);
     // Null when there is nothing to add to the amount itself, so the cost shows no tooltip.
     public static string? CostNote(CostSummary cost, Pricing pricing)

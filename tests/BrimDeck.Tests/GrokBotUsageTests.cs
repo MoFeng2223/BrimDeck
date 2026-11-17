@@ -52,18 +52,15 @@ static class GrokBotUsageTests
         async Task<IReadOnlyList<DashboardColumn>> Columns(DeckSettings s) => DashboardUsage.Columns(s, await service.RefreshAsync(s));
 
         var one = Rows(true);
-        check("Grok Bot is read automatically, is a usage source for its daily shares and keeps its key",
-            ProviderCatalog.IsBuiltIn(ProviderId.GrokBot) && ProviderCatalog.IsUsageSource(ProviderId.GrokBot) && ProviderCatalog.HasOnlineSwitch(ProviderId.GrokBot) &&
-            one.Apps[0].UsageSource == ProviderId.GrokBot && ProviderCatalog.Key(ProviderId.GrokBot) == "grokbot" &&
+        check("Grok Bot is read automatically, is a quota source only and keeps its key",
+            ProviderCatalog.IsBuiltIn(ProviderId.GrokBot) && !ProviderCatalog.IsUsageSource(ProviderId.GrokBot) && ProviderCatalog.HasOnlineSwitch(ProviderId.GrokBot) &&
+            one.Apps[0].UsageSource == ProviderId.Claude && ProviderCatalog.Key(ProviderId.GrokBot) == "grokbot" &&
             SettingsMigrations.Read(JsonSerializer.Serialize(one)).Apps.Single().QuotaSource == ProviderId.GrokBot);
 
         var column = (await Columns(one)).Single().Quota;
         check("An online Grok Bot row uses the desktop app's own sign-in and shows only the weekly allowance",
             handler.Calls.SequenceEqual(["fixture-grok"]) && column.LiveQuota && !column.IsStale && column.Plan == "Grok Bot Plan" &&
             column.Quotas is [{ Label: "每周额度", UsedPercent: 2.5, Minutes: 10080 }] && column.StatusLabel == "已连接");
-        check("The daily shares of the weekly allowance come from the breakdown, summed per day in percent",
-            column.Shares.Count == 1 && Math.Abs(column.Shares[0].Percent - 18.2498) < 0.0001 && column.SharePeriodStart == DateTimeOffset.FromUnixTimeMilliseconds(1793869211651) &&
-            column.SharePeriodEnd == DateTimeOffset.FromUnixTimeMilliseconds(1794474011651));
         handler.Calls.Clear();
         await Columns(Rows(true, true));
         check("Two online Grok Bot rows share one request", handler.Calls.Count == 1);
@@ -128,22 +125,13 @@ static class GrokBotUsageTests
     {
         public HttpStatusCode Status { get; set; } = HttpStatusCode.OK;
         public List<string> Calls { get; } = [];
-        public List<string> Destinations { get; } = [];
-        private const string StatusJson = """{"usagePercent":2.5,"nextResetTimestampUtc":"2026-10-18T07:21:38.721Z","grokPlanLabel":"Grok Bot Plan","onDemand":{"spendCents":120}}""";
-        private const string BreakdownJson = """{"weeklyLimitPpm":{"periodStartMs":"1793869211651","periodEndMs":"1794474011651","bySource":[{"dayMs":"1793923200000","source":"GROK_BOT_USAGE_SOURCE_AGENT","ppm":47096},{"dayMs":"1793923200000","source":"GROK_BOT_USAGE_SOURCE_USER","ppm":135402}]}}""";
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            var uri = request.RequestUri?.AbsoluteUri;
-            if (uri is not (GrokBotUsage.StatusUri or GrokBotUsage.BreakdownUri) || request.Method != HttpMethod.Post)
+            if (request.RequestUri?.AbsoluteUri != GrokBotUsage.StatusUri || request.Method != HttpMethod.Post)
                 throw new InvalidOperationException("Unexpected Grok Bot destination");
-            lock (Calls)
-            {
-                Destinations.Add(uri);
-                // Calls counts the weekly-allowance reads, which each row's quota depends on.
-                if (uri == GrokBotUsage.StatusUri) Calls.Add(request.Headers.Authorization?.Parameter ?? "");
-            }
+            lock (Calls) Calls.Add(request.Headers.Authorization?.Parameter ?? "");
             return Task.FromResult(new HttpResponseMessage(Status) { Content = new StringContent(Status == HttpStatusCode.OK
-                ? uri == GrokBotUsage.BreakdownUri ? BreakdownJson : StatusJson : "") });
+                ? """{"usagePercent":2.5,"nextResetTimestampUtc":"2026-10-18T07:21:38.721Z","grokPlanLabel":"Grok Bot Plan","onDemand":{"spendCents":120}}""" : "") });
         }
     }
 }

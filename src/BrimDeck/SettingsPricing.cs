@@ -14,7 +14,7 @@ public sealed partial class SettingsWindow
 {
     private sealed record PriceRow(ModelPrice Model)
     {
-        public string Name => Model.Currency == "CNY" ? Model.Model + "  ¥" : Model.Model;
+        public string Name => Model.Model;
         public string Input => Format(Model.Prices.Input);
         public string Output => Format(Model.Prices.Output);
         public string Read => Format(Model.Prices.CacheRead);
@@ -30,8 +30,8 @@ public sealed partial class SettingsWindow
     private void ModelPrices()
     {
         // Sits directly under the page title, closer to it than the usual gap below a title.
-        var description=TextLine(Loc.T("面板和模型明细中的费用按这里的单价估算。价格每天从 OpenRouter 更新；DeepSeek 官方人民币价（含高峰与空闲时段）已内置，手动添加的价格优先。",
-            "Costs in the panel and model details are estimated with these unit prices. Prices are updated daily from OpenRouter. DeepSeek's own yuan prices, peak and off-peak, are built in; prices added by hand take precedence."),12,TextSecondary);
+        var description=TextLine(Loc.T("面板和模型明细中的费用按这里的单价估算。价格每天从 OpenRouter 更新，手动添加的价格优先。DeepSeek 使用官方单价，列表中为高峰价，低峰时段减半。",
+            "Costs in the panel and model details are estimated with these unit prices. Prices are updated daily from OpenRouter; prices added by hand take precedence. DeepSeek uses its own list prices: the list shows the peak price, and off-peak hours cost half."),12,TextSecondary);
         description.TextWrapping=TextWrapping.Wrap;description.Margin=new Thickness(0,-8,0,14);_content.Children.Add(description);
         var toolbar=new DockPanel {Margin=new Thickness(0,0,0,20)};
         var refresh=ActionButton(Loc.T("更新价格", "Update prices"),()=>{});refresh.BorderBrush=UI.Brush(_palette.Border);refresh.Background=UI.Brush(_palette.Input);
@@ -81,7 +81,7 @@ public sealed partial class SettingsWindow
         var tail=new DockPanel {Margin=new Thickness(0,16,0,0),HorizontalAlignment=HorizontalAlignment.Left};
         var add=ActionButton(Loc.T("+  添加模型", "+  Add model"),()=>CreatePriceEditor(null).ShowDialog());add.BorderBrush=UI.Brush(_palette.Border);add.Background=UI.Brush(_palette.Input);AutomationProperties.SetName(add,Loc.T("添加模型", "Add model"));DockPanel.SetDock(add,Dock.Left);tail.Children.Add(add);
         var details=new StackPanel {Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,0,2)};
-        var units=TextLine(Loc.T("单价单位：按每个模型的币种（¥ / $） / 百万 Token，带 ¥ 的为人民。", "Unit prices in each model's money (¥ / $) per million tokens; ¥ marks yuan."),11,TextTertiary);units.Margin=new Thickness(16,0,16,0);details.Children.Add(units);
+        var units=TextLine(Loc.T("单价单位：美元 / 百万 Token", "Unit prices in US dollars per million tokens"),11,TextTertiary);units.Margin=new Thickness(16,0,16,0);details.Children.Add(units);
         _priceCount=TextLine("",11,TextTertiary);details.Children.Add(_priceCount);tail.Children.Add(details);_content.Children.Add(tail);
         var table=_priceTable;
         table.Loaded+=(_,_)=>
@@ -135,7 +135,7 @@ public sealed partial class SettingsWindow
         body.Children.Add(TextLine(Loc.T("模型 ID", "Model ID"),12,TextSecondary));
         var id=new TextBox {Style=(Style)dialog.FindResource("SettingsField"),Text=model?.Model??"",MaxLength=200,IsReadOnly=!adding,Margin=new Thickness(0,7,0,18)};
         AutomationProperties.SetName(id,Loc.T("模型 ID", "Model ID"));body.Children.Add(id);
-        var units=TextLine(model is { Currency: "CNY" } ? Loc.T("人民币 / 百万 Token", "yuan per million tokens") : Loc.T("美元 / 百万 Token", "US dollars per million tokens"),11,TextTertiary);units.Margin=new Thickness(0,0,0,14);body.Children.Add(units);
+        var units=TextLine(Loc.T("美元 / 百万 Token", "US dollars per million tokens"),11,TextTertiary);units.Margin=new Thickness(0,0,0,14);body.Children.Add(units);
         var fields=new Dictionary<string,TextBox>();var grid=new Grid();grid.ColumnDefinitions.Add(new());grid.ColumnDefinitions.Add(new());
         var values=new (string Name,decimal? Value)[]{(Loc.T("输入", "Input"),model?.Prices.Input),(Loc.T("输出", "Output"),model?.Prices.Output),(Loc.T("缓存读取", "Cache read"),model?.Prices.CacheRead),
             (Loc.T("缓存写入", "Cache write"),model?.Prices.CacheWrite),(Loc.T("缓存写入（1 小时）", "Cache write (1 hour)"),model?.Prices.CacheWriteHour)};

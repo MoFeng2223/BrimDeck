@@ -25,7 +25,6 @@ public sealed class GrokBotSignIn(bool detected, string token, bool readFailed =
 public static class GrokBotUsage
 {
     public const string StatusUri = "https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus";
-    public const string BreakdownUri = "https://api2.cursor.sh/aiserver.v1.DashboardService/GetGrokBotUsageBreakdown";
     private const string CacheSuffix = ".weekly-usage.cache";
     public static string Folder(string roaming) => Path.Combine(roaming, "Grok Bot");
 
@@ -79,30 +78,6 @@ public static class GrokBotUsage
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         return newest;
-    }
-
-    // The daily shares of the weekly allowance: weeklyLimitPpm splits each day by source (agent, automation, group and
-    // user), in parts per million of the weekly allowance. A day's share is the sum of its sources, in percent.
-    public static List<UsageShare> Breakdown(JsonElement root)
-    {
-        var bySource = root.Get("weeklyLimitPpm").Get("bySource");
-        if (bySource.ValueKind != JsonValueKind.Array) return [];
-        var days = new Dictionary<DateTime, double>();
-        foreach (var item in bySource.Items())
-        {
-            if (item.Get("dayMs").Date() is not { } time) continue;
-            if (item.Get("ppm").Number() is not { } ppm || ppm < 0) continue;
-            var day = time.ToLocalTime().Date;
-            days[day] = days.GetValueOrDefault(day) + ppm / 10_000d;
-        }
-        return [.. days.OrderBy(pair => pair.Key).Select(pair => new UsageShare(new DateTimeOffset(pair.Key), pair.Value))];
-    }
-
-    // The period the shares cover, when the response names one.
-    public static (DateTimeOffset? Start, DateTimeOffset? End) BreakdownPeriod(JsonElement root)
-    {
-        var weekly = root.Get("weeklyLimitPpm");
-        return (weekly.Get("periodStartMs").Date(), weekly.Get("periodEndMs").Date());
     }
 
     // Decodes a file name written as lowercase base32 without padding; null when it is not one.

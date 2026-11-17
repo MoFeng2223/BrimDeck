@@ -13,9 +13,8 @@ public static class ProviderCatalog
     // Xiaomi MiMo is read like the automatic sources but needs a sign-in in settings, so the menu lists it with the sources entered by
     // hand, next to Xiaomi MiMo API and Token Plan.
     public static readonly ProviderId[] Sources = [.. AutomaticSources.Where(id => id != ProviderId.MiMo), ProviderId.GlmChina, ProviderId.GlmGlobal, ProviderId.MiMo, ProviderId.MiMoApi, ProviderId.MiMoTokenPlan, ProviderId.DeepSeek, ProviderId.KimiApi, ProviderId.KimiPlatform, ProviderId.OpenCodeGo, ProviderId.CommandCodeApi, ProviderId.OpenRouter, ProviderId.NewApi, ProviderId.Sub2Api, ProviderId.Custom];
-    // Grok Bot keeps no token records: its usage statistics are the daily shares of its weekly allowance.
-    // Pi is usage-only and must never appear in the quota-source menu.
-    public static readonly ProviderId[] UsageSources = [.. BuiltIns, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.OpenCode, ProviderId.Pi, ProviderId.GrokBot, ProviderId.CodeAgent, ProviderId.CommandCode, ProviderId.WorkBuddy, ProviderId.WorkBuddyAi, ProviderId.MiMo];
+    // Grok Bot is quota-only; Pi is usage-only and must never appear in the quota-source menu.
+    public static readonly ProviderId[] UsageSources = [.. BuiltIns, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.OpenCode, ProviderId.Pi, ProviderId.CodeAgent, ProviderId.CommandCode, ProviderId.WorkBuddy, ProviderId.WorkBuddyAi, ProviderId.MiMo];
     public static bool IsBuiltIn(ProviderId id) => AutomaticSources.Contains(id);
     public static bool IsUsageSource(ProviderId id) => UsageSources.Contains(id);
     // Which clients a statistics source covers; each reads the local records all of its clients share.
@@ -32,7 +31,6 @@ public static class ProviderCatalog
         ProviderId.Dsh => Loc.T("DeepSeek Harness 桌面版 + 本地 Web 版", "DeepSeek Harness desktop app + local web app"),
         ProviderId.Kimi => Loc.T("Kimi Code CLI + 桌面版 + VS Code 扩展", "Kimi Code CLI + desktop app + VS Code extension"),
         ProviderId.OpenCode => Loc.T("OpenCode CLI + 桌面版", "OpenCode CLI + desktop app"),
-        ProviderId.GrokBot => Loc.T("Grok Bot 桌面版每周额度的每日份额（没有 Token 明细）", "Daily shares of the Grok Bot desktop app's weekly allowance (no token details)"),
         ProviderId.CommandCode => Loc.T("Command Code CLI + 桌面版", "Command Code CLI + desktop app"),
         ProviderId.MiMo => Loc.T("MiMo Code CLI + Xiaomi MiMo 桌面版", "MiMo Code CLI + Xiaomi MiMo desktop app"),
         ProviderId.Cursor => Loc.T("Cursor 账户用量，包含其他设备", "Cursor account usage, including other devices"),

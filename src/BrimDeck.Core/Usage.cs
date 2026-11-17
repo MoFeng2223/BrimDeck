@@ -24,10 +24,6 @@ public sealed record TokenEntry(string Key, DateTimeOffset Time, string Model,
 // sample newer than them carries them over from an earlier online reading.
 public sealed record ClaudeQuotaSnapshot(DateTimeOffset Time, string Plan, string PlanSource, string Source, List<Quota> Quotas, bool Local = false, DateTimeOffset? ScopedTime = null);
 
-// One day's share of a source's allowance. Percent is how much of the weekly allowance that day used, 0-100; a source
-// without token records (Grok Bot) is counted in these shares instead of tokens.
-public sealed record UsageShare(DateTimeOffset Day, double Percent);
-
 public sealed class ProviderSnapshot(ProviderId id)
 {
     public ProviderId Id { get; } = id;
@@ -54,10 +50,6 @@ public sealed class ProviderSnapshot(ProviderId id)
     public DateTime? UsageStart { get; set; }
     public List<Quota> Quotas { get; set; } = [];
     public List<TokenEntry> Entries { get; set; } = [];
-    // The daily shares of a source that keeps no token records (Grok Bot); empty for every other source.
-    public List<UsageShare> Shares { get; set; } = [];
-    public DateTimeOffset? SharePeriodStart { get; set; }
-    public DateTimeOffset? SharePeriodEnd { get; set; }
     // A merged Cursor plan, whose included records share the weekly amount used (CursorPrices), and the prices per token
     // worked out from it; null until they are.
     public bool WeeklyShares { get; set; }

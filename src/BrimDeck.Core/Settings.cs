@@ -38,7 +38,7 @@ public sealed record FullscreenRule(string Name = "", string Path = "")
 public sealed record IgnoredMediaApp(string AppId = "", string Name = "", string Path = "");
 // ZCode reads the ZCode desktop application's local request records and its signed-in Coding Plan quota.
 // Dsh reads the DeepSeek account or API key that DeepSeek Harness (desktop app or local web app) signed in with; DeepSeek uses a key entered by hand.
-// GrokBot reads the weekly allowance of the Grok Bot desktop app, and as a usage source the daily shares of that allowance.
+// GrokBot reads the weekly allowance of the Grok Bot desktop app; it is a quota source only.
 // Kimi reads the plan quota of the account Kimi Code (CLI, desktop app or VS Code extension) signed in with, and its local session records;
 // KimiApi reads the same plan quota with a Kimi Code API key entered by hand. KimiPlatform reads the pay-as-you-go balance of a Kimi
 // Open Platform (Moonshot) API key entered by hand, which is billed apart from the membership.

@@ -63,11 +63,6 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     // Home folders are searched again every few minutes: listing them touches the distributions' file systems.
     private (DateTimeOffset Time, IReadOnlyList<WslHome> Homes)? _wsl;
     private bool _includeWsl;
-    // Whether the daily shares of the Grok Bot allowance are shown as its usage statistics in this refresh.
-    private bool _grokBotSharesWanted;
-    // The last daily shares of the Grok Bot allowance read online, for the account they were read for, shown with a kept
-    // reading when a later read fails.
-    private (string Account, List<UsageShare> Shares, DateTimeOffset? Start, DateTimeOffset? End)? _grokBotShares;
     private readonly AntigravityUsage _antigravity = new();
     private readonly DshSessions _dsh = new();
     private readonly KimiSessions _kimi = new();
@@ -187,17 +182,11 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             // A stalled source ends with a timeout status instead of holding every later refresh behind this gate.
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             deadline.CancelAfter(Deadline);
-            // Grok Bot keeps no token records: as a usage source it reads the daily shares of its weekly allowance. Its
-            // shares come with the online allowance read, and a row that is offline neither reads the sign-in nor them.
-            bool grokBotRows = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.GrokBot);
-            bool grokBotShares = settings.StatisticsProviders.Contains(ProviderId.GrokBot);
-            bool readGrokBot = grokBotOnline || grokBotShares && !grokBotRows;
-            var sources = ProviderCatalog.UsageSources.Where(required.Contains).ToList();
-            sources.Remove(ProviderId.GrokBot);
-            if (readGrokBot) sources.Add(ProviderId.GrokBot);
-            _grokBotSharesWanted = grokBotShares;
+            // Grok Bot has no usage records, so it is read only for its online quota rows.
+            var sources = ProviderCatalog.UsageSources.Where(required.Contains);
+            if (grokBotOnline) sources = sources.Append(ProviderId.GrokBot);
             // Xiaomi MiMo's linked keys have no records of their own: their statistics are MiMo's.
-            if (required.Contains(ProviderId.MiMoLinked) && !sources.Contains(ProviderId.MiMoLinked)) sources.Add(ProviderId.MiMoLinked);
+            if (required.Contains(ProviderId.MiMoLinked)) sources = sources.Append(ProviderId.MiMoLinked);
             using var publisher = progress is not null && !_published ? new SnapshotPublisher(progress, ProgressInterval) : null;
             var finished = new Dictionary<string, ProviderSnapshot>();
             void Finished(string key, ProviderSnapshot snapshot)
@@ -793,18 +782,6 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 snapshot.Quotas = reading.Quotas;
                 snapshot.Plan = reading.Plan;
                 snapshot.PlanSource = reading.Plan.Length > 0 ? Loc.T("Grok Bot 账户", "Grok Bot account") : "";
-                if (_grokBotSharesWanted)
-                {
-                    var account = GrokBotAccount(signIn.Token);
-                    var (shares, shareStart, shareEnd, read) = await ReadGrokBotSharesAsync(signIn.Token, ct);
-                    if (read)
-                    {
-                        snapshot.Shares = shares; snapshot.SharePeriodStart = shareStart; snapshot.SharePeriodEnd = shareEnd;
-                        _grokBotShares = (account, shares, shareStart, shareEnd);
-                    }
-                    else if (_grokBotShares is { } keptShares && keptShares.Account == account)
-                    { snapshot.Shares = keptShares.Shares; snapshot.SharePeriodStart = keptShares.Start; snapshot.SharePeriodEnd = keptShares.End; }
-                }
                 Connected(snapshot, Loc.T("Grok Bot 账户 · 每周额度", "Grok Bot account · weekly allowance"), now);
                 if (reading.UsedPercent is null) snapshot.Status += PooledNote;
                 _grokBotRetained = new(now, snapshot.Plan, snapshot.PlanSource, snapshot.Source, reading.Quotas);
@@ -813,8 +790,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             catch (Exception ex) when (!ct.IsCancellationRequested && ex is
                 HttpRequestException or OperationCanceledException or IOException or InvalidDataException or JsonException or FormatException)
             { failure = ex; }
-            if (failure is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden })
-            { _grokBotRetained = null; _grokBotShares = null; }
+            if (failure is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }) _grokBotRetained = null;
         }
         else if (!signIn.ReadFailed)
         {
@@ -823,39 +799,11 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             snapshot.Status = Loc.T("请先登录 Grok Bot 桌面版，然后刷新配额", "Sign in to the Grok Bot desktop app, then refresh the quota.");
             return;
         }
-        if (GrokBotFreshest(now) is { } kept)
-        {
-            // Only the shares read for the account signed in now; a sign-in that could not be read keeps none.
-            if (signIn.Token.Length > 0 && _grokBotShares is { } shares && shares.Account == GrokBotAccount(signIn.Token))
-            { snapshot.Shares = shares.Shares; snapshot.SharePeriodStart = shares.Start; snapshot.SharePeriodEnd = shares.End; }
-            RetainGrokBot(snapshot, kept, failure, now); return;
-        }
+        if (GrokBotFreshest(now) is { } kept) { RetainGrokBot(snapshot, kept, failure, now); return; }
         if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
         snapshot.StatusLabel = Loc.T("读取失败", "Read failed");
         snapshot.Status = Loc.T("已发现 Grok Bot 桌面版，暂时无法读取登录信息", "The Grok Bot desktop app was found, but its sign-in cannot be read right now.");
     }
-
-    // The daily shares of the weekly allowance, from GetGrokBotUsageBreakdown. A failure here leaves the quota reading as
-    // it is: the shares are statistics, and their absence only leaves the totals of the row empty. Read is false when the
-    // request failed, so an empty answer from the service is not mistaken for a failure.
-    private async Task<(List<UsageShare> Shares, DateTimeOffset? Start, DateTimeOffset? End, bool Read)> ReadGrokBotSharesAsync(string token, CancellationToken ct)
-    {
-        try
-        {
-            using var request = Bearer(HttpMethod.Post, GrokBotUsage.BreakdownUri, token);
-            request.Headers.TryAddWithoutValidation("Connect-Protocol-Version", "1");
-            request.Content = JsonBody(new { });
-            using var doc = await SendAsync(_http, request, ct);
-            var (start, end) = GrokBotUsage.BreakdownPeriod(doc.RootElement);
-            return (GrokBotUsage.Breakdown(doc.RootElement), start, end, true);
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested && ex is
-            HttpRequestException or OperationCanceledException or IOException or InvalidDataException or JsonException or FormatException)
-        { return ([], null, null, false); }
-    }
-
-    // The account a Grok Bot sign-in belongs to, without keeping the token itself.
-    private static string GrokBotAccount(string token) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(token)))[..16];
 
     // The desktop app's cached reading, ignored when it claims a time well in the future.
     private GrokBotReading? ReadGrokBotCache(DateTimeOffset now)
