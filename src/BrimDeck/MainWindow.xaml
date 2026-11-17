@@ -150,10 +150,10 @@
                     <Grid>
                       <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                       <!-- The device choice's chevron; shown only while a target can still be picked. -->
-                      <TextBlock x:Name="ShelfDeviceChevron" Grid.Column="0" Text="&#xE96E;" FontFamily="{StaticResource FontIcon}" FontSize="12" Margin="0,1,5,0"
-                                 Foreground="{Binding Foreground, ElementName=ShelfDeviceButton}" VerticalAlignment="Center" Visibility="Collapsed"/>
                       <TextBlock x:Name="ShelfDeviceLabel" Grid.Column="1" FontFamily="{DynamicResource FontPanel}" FontSize="12"
                                  Foreground="{Binding Foreground, ElementName=ShelfDeviceButton}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                      <TextBlock x:Name="ShelfDeviceChevron" Grid.Column="2" Text="&#xE96E;" FontFamily="{StaticResource FontIcon}" FontSize="12" Margin="5,1,0,0"
+                                 Foreground="{Binding Foreground, ElementName=ShelfDeviceButton}" VerticalAlignment="Center" Visibility="Collapsed"/>
                     </Grid>
                   </Button>
                   <Button x:Name="SettingsButton" Style="{StaticResource PanelSettingsButton}" Content="&#xE713;" FontFamily="{StaticResource FontIconMdl2}" FontSize="16" Click="Settings_Click"/>

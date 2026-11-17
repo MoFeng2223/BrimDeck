@@ -36,11 +36,21 @@ public partial class MainWindow
     }
 
     private TransferCardState? _transfer;
-    private TextBlock? _transferTitle;
     private TextBlock? _transferDetail;
     private ProgressBar? _transferProgress;
     private TextBlock? _transferPercent;
     private TextBox? _transferDebug;
+    private StackPanel? _transferFilesHost;
+    private StackPanel? _receiveListHost;
+    // 接收历史仅保存在内存：接收完成时记一条，程序退出即释放，不落盘。列表刷新只检查文件是否还在原位。
+    private sealed record ReceiveRecord(string Path, string Name, DateTime At);
+    private readonly List<ReceiveRecord> _receiveHistory = [];
+    private void AppendReceive(string path)
+    {
+        string name = System.IO.Path.GetFileName(path);
+        _receiveHistory.Insert(0, new ReceiveRecord(path, name, DateTime.Now));
+        if (_receiveHistory.Count > 50) _receiveHistory.RemoveRange(50, _receiveHistory.Count - 50);
+    }
 
     // Ctrl + drop on the island, or a file invite from the phone: the page comes forward. A drop only sends when a file
     // session is already open (the Send button and a Ctrl+drag are both just "send"), so connecting stays a separate event.
@@ -53,9 +63,10 @@ public partial class MainWindow
             current.Paths = [.. current.Paths, .. paths];
             current.Done = [.. current.Done, .. new bool[paths.Count]];
             current.Detail = Loc.T("点击“连接”建立会话，确认后再点“发送”传输。", "Connect to open the session, then Send.");
-            ShowTransferPage();
+            if (current.Hidden) { ShowTransferPage(); return; }
+            // 页面已在前台：只重建左侧待发送列表，不刷新整页。
+            RefreshTransferFiles();
             if (_app.ClipboardSync.FileTransferConnected) { SendFiles(); return; }
-            RenderShelf();
             return;
         }
         _transfer = new TransferCardState
@@ -215,8 +226,14 @@ public partial class MainWindow
         }
         if (incoming)
         {
+            // 接收完成时把该文件记入内存历史，供右侧列表展示（不扫描目录、不落盘）。
+            if (update.Phase == FileTransferPhase.Completed && !string.IsNullOrEmpty(update.ReceivedPath))
+                AppendReceive(update.ReceivedPath);
             state.ReceiveDetail = update.Title + " · " + update.Detail;
-            if (!state.Hidden) RenderShelf();
+            if (state.Hidden) return;
+            // 页面已在前台：只刷新右侧接收列表，让新收到的文件立即出现，不做整页重建。
+            if (_receiveListHost is null) RenderShelf();
+            else RefreshReceiveList();
             return;
         }
         state.Phase = update.Phase;
@@ -266,14 +283,7 @@ public partial class MainWindow
     private void UpdateTransferControls()
     {
         if (_transfer is not { } state) return;
-        if (_transferTitle is null) { RenderShelf(); return; }
-        _transferTitle.Text = state.Title;
-        _transferTitle.Foreground = state.Phase switch
-        {
-            FileTransferPhase.Failed => UI.Brush("#D9534F"),
-            FileTransferPhase.Completed => UI.Brush("#3FA37C"),
-            _ => UI.Brush(UI.Primary),
-        };
+        if (_transferProgress is null) { RenderShelf(); return; }
         if (_transferDetail is not null) _transferDetail.Text = state.Detail;
         if (_transferProgress is not null) _transferProgress.Value = Math.Clamp(state.Fraction, 0, 1);
         if (_transferPercent is not null) _transferPercent.Text = state.Fraction.ToString("P0");
@@ -287,46 +297,31 @@ public partial class MainWindow
         var state = _transfer!;
         var secondary = UI.Brush(UI.Secondary);
 
-        _transferTitle = new TextBlock
-        {
-            Text = state.Title, FontFamily = UI.PanelFont, FontSize = layout.Body + 2, FontWeight = FontWeights.SemiBold,
-            Foreground = state.Phase switch
-            {
-                FileTransferPhase.Failed => UI.Brush("#D9534F"),
-                FileTransferPhase.Completed => UI.Brush("#3FA37C"),
-                _ => UI.Brush(UI.Primary),
-            },
-            VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis,
-        };
         _transferDetail = new TextBlock
         {
             Text = state.Detail, FontFamily = UI.PanelFont, FontSize = layout.Aux, Foreground = secondary,
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0),
         };
 
-        var head = new Grid { Margin = new Thickness(0, 0, 0, 10) };
-        head.ColumnDefinitions.Add(new ColumnDefinition());
-        head.Children.Add(_transferTitle);
-
         bool narrow = ContentCanvas.Width < 420;
-        var content = new StackPanel
-        {
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            Margin = new Thickness(6, layout.Stacked ? 8 : 14, 6, 16),
-        };
-        content.Children.Add(head);
+        // 布局参考音乐页：第 0 行是占满剩余高度的列表区（内部滚动），第 1 行是固定显示的进度条+控制按钮+调试区。
+        // 底部高度变化（例如「详情」展开调试区）时，列表区高度随之自适应。
+        var root = new Grid { Margin = new Thickness(6, 0, 6, 0) };
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
+        var body = new StackPanel { HorizontalAlignment = HorizontalAlignment.Stretch };
         // 发送与接收在同一页：左侧为发送，右侧为本机接收到的文件；窄窗口改为上下排列。
         var send = SendPanel(state, layout);
         var received = ReceivePanel(state, layout);
         if (narrow)
         {
-            content.Children.Add(send);
-            content.Children.Add(received);
+            body.Children.Add(send);
+            body.Children.Add(received);
         }
         else
         {
-            var columns = new Grid { Margin = new Thickness(0, 12, 0, 0) };
+            var columns = new Grid();
             columns.ColumnDefinitions.Add(new ColumnDefinition());
             columns.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             columns.ColumnDefinitions.Add(new ColumnDefinition());
@@ -334,10 +329,20 @@ public partial class MainWindow
             var divider = new Border { Width = 1, Background = UI.Brush(UI.Hairline), Margin = new Thickness(12, 0, 12, 0) };
             Grid.SetColumn(divider, 1); columns.Children.Add(divider);
             Grid.SetColumn(received, 2); columns.Children.Add(received);
-            content.Children.Add(columns);
+            body.Children.Add(columns);
         }
+        var scroll = new ScrollViewer
+        {
+            Content = body,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        };
+        Grid.SetRow(scroll, 0); root.Children.Add(scroll);
 
-        var progressRow = new Grid { Margin = new Thickness(0, 12, 0, 0) };
+        var bottom = new StackPanel { Margin = new Thickness(0, 8, 0, 12) };
+        Grid.SetRow(bottom, 1); root.Children.Add(bottom);
+        var progressRow = new Grid();
         progressRow.ColumnDefinitions.Add(new ColumnDefinition());
         progressRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _transferProgress = new ProgressBar
@@ -353,9 +358,9 @@ public partial class MainWindow
             Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
         };
         Grid.SetColumn(_transferPercent, 1); progressRow.Children.Add(_transferPercent);
-        content.Children.Add(progressRow);
+        bottom.Children.Add(progressRow);
 
-        content.Children.Add(TransferFooter(state, secondary));
+        bottom.Children.Add(TransferFooter(state, secondary));
 
         _transferDebug = new TextBox
         {
@@ -365,23 +370,23 @@ public partial class MainWindow
             Padding = new Thickness(6), Margin = new Thickness(0, 8, 0, 0),
             Visibility = state.Details ? Visibility.Visible : Visibility.Collapsed,
         };
-        content.Children.Add(_transferDebug);
+        bottom.Children.Add(_transferDebug);
 
-        return new ScrollViewer
-        {
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            Content = content,
-        };
+        return root;
     }
 
     // ---- Files section: what is going ----
     private FrameworkElement TransferFiles(TransferCardState state, ShelfLayout layout)
     {
-        var panel = new StackPanel();
-        panel.Children.Add(SectionLabel(Loc.T("发送文件", "Files"), layout));
+        _transferFilesHost = new StackPanel();
+        BuildTransferFiles(state, layout);
+        return _transferFilesHost;
+    }
+
+    private void BuildTransferFiles(TransferCardState state, ShelfLayout layout)
+    {
+        var host = _transferFilesHost ??= new StackPanel();
+        host.Children.Clear();
         var list = new StackPanel();
         long total = 0;
         int folders = 0;
@@ -415,27 +420,49 @@ public partial class MainWindow
             Grid.SetColumn(figure, 1); row.Children.Add(figure);
             list.Children.Add(row);
         }
-        panel.Children.Add(new ScrollViewer
+        // 标题行：左侧为「发送文件」，右侧汇总文件总数与总大小。
+        var head = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+        head.ColumnDefinitions.Add(new ColumnDefinition());
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        head.Children.Add(SectionLabel(Loc.T("发送文件", "Files"), layout, verticalAlignCenter: true));
+        string summary = Loc.T("共 " + state.Paths.Count + " 项", state.Paths.Count + " item(s)");
+        if (total > 0) summary += " · " + SizeText(total);
+        if (folders > 0) summary += Loc.T(" · 含 " + folders + " 个文件夹", " · " + folders + " folder(s)");
+        var summaryText = new TextBlock
+        {
+            Text = summary, FontFamily = UI.PanelFont, FontSize = layout.Aux, Foreground = UI.Brush(UI.Secondary),
+            Margin = new Thickness(8, 0, 0, 6), VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        Grid.SetColumn(summaryText, 1); head.Children.Add(summaryText);
+        host.Children.Add(head);
+        host.Children.Add(new ScrollViewer
         {
             MaxHeight = 170, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = list,
         });
-        string summary = Loc.T("共 " + state.Paths.Count + " 项", state.Paths.Count + " item(s)");
-        if (total > 0) summary += " · " + SizeText(total);
-        if (folders > 0) summary += Loc.T(" · 含 " + folders + " 个文件夹", " · " + folders + " folder(s)");
-        panel.Children.Add(new TextBlock
-        {
-            Text = summary, FontFamily = UI.PanelFont, FontSize = layout.Aux, Foreground = UI.Brush(UI.Secondary),
-            Margin = new Thickness(0, 6, 0, 0),
-        });
-        return panel;
     }
 
-    private static FrameworkElement SectionLabel(string text, ShelfLayout layout) => new TextBlock
+    // 只重建左侧待发送列表（含标题行的个数汇总），不触碰页面其余部分。
+    private void RefreshTransferFiles()
+    {
+        if (_transfer is not { Receive: false } state) return;
+        BuildTransferFiles(state, _shelfLayout);
+    }
+
+    private static FrameworkElement SectionLabel(string text, ShelfLayout layout, bool verticalAlignCenter = false) => new TextBlock
     {
         Text = text, FontFamily = UI.PanelFont, FontSize = layout.Aux, FontWeight = FontWeights.SemiBold,
         Foreground = UI.Brush(UI.Secondary), Margin = new Thickness(0, 0, 0, 6),
+        VerticalAlignment = verticalAlignCenter ? VerticalAlignment.Center : VerticalAlignment.Top,
     };
+
+    // A device's phone or computer mark in the header picker, drawn with the devices' own glyphs in one ink.
+    private sealed class PeerGlyph(DeviceKind kind, string ink) : FrameworkElement
+    {
+        protected override void OnRender(DrawingContext drawing)
+            => DeviceGlyphs.Draw(drawing, kind, new Rect(0, 0, ActualWidth, ActualHeight), ink);
+    }
 
     // ---- Header device picker: the transfer lives in the toolbar, so the target device is chosen from the header. ----
     private bool FileTransferShown => _transfer is { Hidden: false };
@@ -455,8 +482,14 @@ public partial class MainWindow
         foreach (var peer in state.Peers)
         {
             bool selected = peer.Uin == state.TargetUin;
-            var item = new MenuItem { Style = (Style)FindResource("MediaSourceMenuItem"), Header = peer.Name, IsCheckable = true, IsChecked = selected };
-            if (selected) item.Tag = "selected";
+            // 每行自带其设备标记（手机或电脑）；当前选中项用主题强调色（蓝）标注，其余用次要墨色。
+            string ink = selected ? UI.Accent : UI.Secondary;
+            var header = new StackPanel { Orientation = Orientation.Horizontal };
+            header.Children.Add(new PeerGlyph(peer.Platform == 1 ? DeviceKind.Other : DeviceKind.Phone, ink)
+                { Width = 13, Height = 13, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center });
+            header.Children.Add(new TextBlock
+                { Text = peer.Name, FontFamily = UI.PanelFont, FontSize = 12.5, Foreground = UI.Brush(ink), VerticalAlignment = VerticalAlignment.Center });
+            var item = new MenuItem { Style = (Style)FindResource("ShelfDeviceMenuItem"), Header = header };
             item.Click += async (_, _) =>
             {
                 if (_transfer is not { Receive: false } current || !ReferenceEquals(current, state)) return;
@@ -479,7 +512,12 @@ public partial class MainWindow
             };
             menu.Items.Add(item);
         }
-        ShelfDeviceButton.ContextMenu = menu; menu.PlacementTarget = ShelfDeviceButton; menu.Placement = PlacementMode.Bottom; menu.IsOpen = true;
+        ShelfDeviceButton.ContextMenu = menu; menu.PlacementTarget = ShelfDeviceButton;
+        // The picker hangs from the header's right edge, so the menu opens below the button, right-aligned to it.
+        menu.Placement = PlacementMode.Custom;
+        menu.CustomPopupPlacementCallback = (popupSize, targetSize, _) =>
+            [new CustomPopupPlacement(new Point(targetSize.Width - popupSize.Width, targetSize.Height), PopupPrimaryAxis.Vertical)];
+        menu.IsOpen = true;
     }
 
     // ---- Send & receive on one page: the left panel sends, the right lists what the PC received. ----
@@ -493,34 +531,65 @@ public partial class MainWindow
 
     private FrameworkElement ReceivePanel(TransferCardState state, ShelfLayout layout)
     {
-        var recv = new StackPanel();
-        recv.Children.Add(SectionLabel(Loc.T("接收", "Receive"), layout));
+        _receiveListHost = new StackPanel();
+        BuildReceiveList(state, layout);
+        return _receiveListHost;
+    }
+
+    private void BuildReceiveList(TransferCardState state, ShelfLayout layout)
+    {
+        var host = _receiveListHost ??= new StackPanel();
+        host.Children.Clear();
         var list = new StackPanel();
-        // 本机接收到的文件都落在同步目录的 incoming 文件夹里，按时间倒序列出最近的。
-        var folder = new System.IO.DirectoryInfo(System.IO.Path.Combine(_app.ClipboardSync.Folder, "incoming"));
-        var files = folder.Exists ? folder.GetFiles().OrderByDescending(f => f.LastWriteTime).Take(20).ToList() : [];
-        if (files.Count == 0)
+        // 接收历史是内存记录，不读文件目录也不落盘。刷新时每条只检查文件是否还在原位。
+        var history = _receiveHistory;
+        // 标题行：右侧显示接收记录条数。
+        var head = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+        head.ColumnDefinitions.Add(new ColumnDefinition());
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        head.Children.Add(SectionLabel(Loc.T("接收", "Receive"), layout, verticalAlignCenter: true));
+        var summaryText = new TextBlock
+        {
+            Text = Loc.T("共 " + history.Count + " 项", history.Count + " item(s)"),
+            FontFamily = UI.PanelFont, FontSize = layout.Aux, Foreground = UI.Brush(UI.Secondary),
+            Margin = new Thickness(8, 0, 0, 6), VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        Grid.SetColumn(summaryText, 1); head.Children.Add(summaryText);
+        host.Children.Add(head);
+        if (history.Count == 0)
         {
             list.Children.Add(new TextBlock
             {
-                Text = Loc.T("还没有收到文件", "Nothing received yet"),
+                Text = Loc.T("还没有收到的文件", "Nothing received yet"),
                 FontFamily = UI.PanelFont, FontSize = layout.Aux, Foreground = UI.Brush(UI.Tertiary),
             });
         }
-        else foreach (var file in files)
+        else foreach (var r in history)
         {
+            bool exists = File.Exists(r.Path);
             var row = new Grid { Margin = new Thickness(0, 3, 0, 3) };
             row.ColumnDefinitions.Add(new ColumnDefinition());
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var name = new TextBlock { Text = file.Name, FontFamily = UI.PanelFont, FontSize = layout.Aux, Foreground = UI.Brush(UI.Primary), TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
-            var size = new TextBlock { Text = SizeText(file.Length), FontFamily = UI.PanelFont, FontSize = layout.Aux, Foreground = UI.Brush(UI.Tertiary), Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var name = new TextBlock { Text = r.Name, FontFamily = UI.PanelFont, FontSize = layout.Aux, Foreground = UI.Brush(UI.Primary), TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };  // 文件名不换行，超长用省略号截断
+            var time = new TextBlock { Text = r.At.ToString("MM-dd HH:mm"), FontFamily = UI.PanelFont, FontSize = layout.Aux, Foreground = UI.Brush(UI.Tertiary), TextWrapping = TextWrapping.NoWrap, Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+            // 文件已被移动/删除则标记为「已移走」，否则说明仍在接收目录。
+            var statusText = new TextBlock { Text = Loc.T(exists ? "在目录" : "已移走", exists ? "Saved" : "Moved"), FontFamily = UI.PanelFont, FontSize = layout.Aux, Foreground = UI.Brush(exists ? UI.Tertiary : "#B5473F"), TextWrapping = TextWrapping.NoWrap, Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
             row.Children.Add(name);
-            Grid.SetColumn(size, 1); row.Children.Add(size);
+            Grid.SetColumn(time, 1); row.Children.Add(time);
+            Grid.SetColumn(statusText, 2); row.Children.Add(statusText);
             list.Children.Add(row);
         }
-        recv.Children.Add(new TextBlock { Text = state.ReceiveDetail, TextWrapping = TextWrapping.Wrap, Foreground = UI.Brush(UI.Secondary) });
-        recv.Children.Add(list);
-        return recv;
+        // 接收状态（正在接收 / 完成 / 失败）由页面顶部的标题与详情实时显示，不混入右侧历史列表。
+        host.Children.Add(list);
+    }
+
+    // 接收进度/完成时只重建右侧接收列表（含个数汇总），立即反映新收到的文件，不触碰页面其余部分。
+    private void RefreshReceiveList()
+    {
+        if (_transfer is not { } state) return;
+        BuildReceiveList(state, _shelfLayout);
     }
 
     private FrameworkElement TransferFooter(TransferCardState state, System.Windows.Media.Brush secondary)
@@ -618,8 +687,7 @@ public partial class MainWindow
         };
     }
 
-    private static string SizeText(long bytes) => bytes >= 1 << 30 ? (bytes / (double)(1 << 30)).ToString("0.0") + " GiB"
-        : bytes >= 1 << 20 ? (bytes / (double)(1 << 20)).ToString("0.0") + " MiB"
-        : bytes >= 1 << 10 ? (bytes / (double)(1 << 10)).ToString("0.0") + " KiB" : bytes + " B";
+    private static string SizeText(long bytes) => bytes >= 1_000_000_000 ? (bytes / 1_000_000_000.0).ToString("0.0") + " GB"
+        : bytes >= 1_000_000 ? (bytes / 1_000_000.0).ToString("0.0") + " MB"
+        : bytes >= 1_000 ? (bytes / 1_000.0).ToString("0.0") + " KB" : bytes + " B";
 }
-

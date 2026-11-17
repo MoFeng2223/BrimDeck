@@ -625,6 +625,8 @@ public sealed class DeckSettings
     public double ClipboardWidth { get; set; } = ShelfSizes.Default.Width;
     public double ClipboardHeight { get; set; } = ShelfSizes.Default.Height;
     public bool ClipboardRecord { get; set; } = true;
+    // Where received files are saved. Empty means the system Downloads folder (the default); a path here overrides it.
+    public string FileReceiveFolder { get; set; } = "";
     public bool WeTypeClipboardSync { get; set; }
     public bool DoubaoClipboardSync { get; set; }
     public bool LanClipboardSync { get; set; }

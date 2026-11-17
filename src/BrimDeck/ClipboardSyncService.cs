@@ -680,7 +680,7 @@ internal sealed partial class ClipboardSyncService : IDisposable
             try
             {
                 string source = peer.Name;
-                string receiveFolder = Path.Combine(Folder, "incoming");
+                string receiveFolder = ReceiveFolderBase();
                 Directory.CreateDirectory(receiveFolder);
                 var sent = await WeTypeFileSender.OpenAsync(control, identity, peer.Uin, line => { debug.AppendLine(line); Log("wetype connect: " + line); },
                     receiveFolder,
@@ -732,7 +732,7 @@ internal sealed partial class ClipboardSyncService : IDisposable
             FileConnectionStatus = Loc.T("已连接 · 已接收文件", "Connected · received");
             _app.Shelf.AddFiles([file.Path], null);
             IncomingFileTransfer?.Invoke(new FileTransferUpdate(FileTransferPhase.Completed,
-                Loc.T("接收完成", "Received"), file.Name + " · " + Size(file.Bytes), 1, ""));
+                Loc.T("接收完成", "Received"), file.Name + " · " + Size(file.Bytes), 1, "", ReceivedPath: file.Path));
             Log("wetype file session received: \"" + file.Name + "\" " + file.Bytes + " bytes from " + source);
         });
     }
@@ -939,6 +939,15 @@ internal sealed partial class ClipboardSyncService : IDisposable
         }
     }
 
+    // Where received files are saved: the folder the user chose in the settings, or the system Downloads folder by default.
+    private string ReceiveFolderBase()
+    {
+        string path = _app.Settings.FileReceiveFolder;
+        if (string.IsNullOrWhiteSpace(path))
+            path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+        return path;
+    }
+
     // Accepts one file invitation in the background: joining is the acceptance, and the file goes to the file transfer
     // column when it has arrived and matched its identifier.
     private async Task ReceiveWeTypeFileAsync(WeTypeFileInvite invite, WeTypeSyncClient control, CancellationToken ct)
@@ -956,7 +965,7 @@ internal sealed partial class ClipboardSyncService : IDisposable
         {
             Log("wetype file invite: \"" + source + "\" uin=" + invite.SenderUin + " platform=" + invite.Platform);
             Send(FileTransferPhase.Receiving, Loc.T("正在接收文件", "Receiving"), Loc.T("来自 " + source, "From " + source), 0);
-            string folder = Path.Combine(Folder, "incoming");
+            string folder = ReceiveFolderBase();
             Directory.CreateDirectory(folder);
             Report(false, Loc.T($"正在接收来自 {source} 的文件…", $"Receiving a file from {source}…"), SyncLevel.Active);
             // The phone may open the stream and then end it without sending a file (e.g. it abandoned the transfer).
@@ -1036,6 +1045,4 @@ public enum FileTransferPhase { Preparing, Waiting, Sending, Receiving, Complete
 // One step of a file transfer, for the transfer card: what is happening, how far it has come, and the protocol
 // details that tell afterwards which part did not work. FileIndex is which file of the batch a Sending/Completed step
 // refers to, so one row can turn green as soon as it is done; Fraction always covers the whole batch.
-public sealed record FileTransferUpdate(FileTransferPhase Phase, string Title, string Detail, double Fraction, string Debug, int? FileIndex = null, bool Expand = true);
-
-
+public sealed record FileTransferUpdate(FileTransferPhase Phase, string Title, string Detail, double Fraction, string Debug, int? FileIndex = null, bool Expand = true, string? ReceivedPath = null);

@@ -159,4 +159,19 @@
   <Style x:Key="PanelOutlineButton" TargetType="Button" BasedOn="{StaticResource PanelTextButton}">
     <Setter Property="BorderBrush" Value="{DynamicResource PanelPopupBorder}"/>
   </Style>
+  <!-- A device picker row: just the icon and the name, no check/pin column, so nothing is reserved on the left.
+       The current row's blue is colored from code. -->
+  <Style x:Key="ShelfDeviceMenuItem" TargetType="MenuItem">
+    <Setter Property="OverridesDefaultStyle" Value="True"/><Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Padding" Value="6,0,8,0"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="MenuItem">
+      <Border x:Name="Chrome" Background="Transparent" CornerRadius="{DynamicResource PanelR5}" Padding="{TemplateBinding Padding}">
+        <ContentPresenter ContentSource="Header" VerticalAlignment="Center" HorizontalAlignment="Stretch"/>
+      </Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource PanelHover}"/></Trigger>
+        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value=".4"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
 </ResourceDictionary>
