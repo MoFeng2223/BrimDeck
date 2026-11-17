@@ -628,6 +628,9 @@ public sealed class DeckSettings
     public bool WeTypeClipboardSync { get; set; }
     public bool DoubaoClipboardSync { get; set; }
     public bool LanClipboardSync { get; set; }
+    public bool ClipboardPreview { get; set; } = true;
+    public bool ClipboardPreviewContent { get; set; } = true;
+    public int ClipboardPreviewMaxLength { get; set; } = CopyPreviewText.DefaultLength;
     // Applications whose copies are not recorded: the executable's path, or a process name (ClipboardExclusions).
     public List<string> ClipboardExcluded { get; set; } = [];
     // Off, the clipboard history goes when BrimDeck exits; on, it stays, and each copy goes once it is older than ClipboardKeepFor.
@@ -925,6 +928,7 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(ShelfClipView)) ShelfClipView = ClipView.Single;
         if (!Enum.IsDefined(ShelfFileView)) ShelfFileView = FileView.Two;
         ShelfFileShare = ShelfLayout.ClampShare(Math.Round(ShelfFileShare, 1), ShelfFileView);
+        ClipboardPreviewMaxLength = Math.Clamp(ClipboardPreviewMaxLength, CopyPreviewText.MinimumLength, CopyPreviewText.MaximumLength);
         if (!Enum.IsDefined(ClipboardKeepFor)) ClipboardKeepFor = HistoryLength.Month;
         ClipboardExcluded = ClipboardExclusions.Normalize(ClipboardExcluded);
         PanelScale = PanelScales.Fit(PanelScale);

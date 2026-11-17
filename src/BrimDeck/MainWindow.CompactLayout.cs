@@ -76,6 +76,16 @@ public partial class MainWindow
             if (CompactAlert.Children.Count > 0 && CompactAlert.Children[0] is FrameworkElement { Tag: var own } && ReferenceEquals(own, AlertRegionTag)) CompactAlert.Children.Clear();
             _alertRendered = null; _alertSince = null; return;
         }
+        if (alert.CopyText is { } copied)
+        {
+            CompactAlert.Children.Clear();
+            double copyScale = CompactMusicLayout.SafeScale(shape.Scale);
+            var label = CopyPreviewLayout.Label(copied, copyScale, Look.Primary);
+            label.MaxWidth = Math.Max(1, ColumnFor(shape.Style) ? ColumnWidth(shape) : CompactContentWidth(shape));
+            label.TextTrimming = TextTrimming.CharacterEllipsis;
+            CompactAlert.Children.Add(label);
+            return;
+        }
         // The scroll follows the time since the notice appeared, so a rebuild (a new shape or theme) carries on where it was.
         if (_alertSince is not { } since || !ReferenceEquals(since.Alert, alert)) _alertSince = (alert, Environment.TickCount64);
         // An unchanged notice that this file built is kept, so opening and closing the panel do not rebuild it.

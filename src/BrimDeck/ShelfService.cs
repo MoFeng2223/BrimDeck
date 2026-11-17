@@ -27,6 +27,8 @@ internal sealed class ShelfService : IDisposable
     public ShelfData Data { get; private set; } = new();
     // A copy was recorded, an entry changed, files were added: the panels show the page again.
     public event Action? Changed;
+    // Only a successfully captured external copy, never a history edit or replay.
+    public event Action<ClipEntry>? CopyCaptured;
     // The category each column shows, null for "全部". It is one for every panel, as the entries are: chosen on one display, it
     // is the one shown on the others, so no display shows an empty category while another shows everything.
     public Guid? ClipTab { get; private set; }
@@ -94,6 +96,7 @@ internal sealed class ShelfService : IDisposable
         // The categories whose rules it meets take it, the same text copied again too.
         ShelfRules.Apply(Data, entry);
         Changed?.Invoke();
+        CopyCaptured?.Invoke(entry);
         // Unless the history is kept past an exit, it goes when BrimDeck exits and when it next starts, so a copy that is only history
         // has nothing to keep on disk: saving it turned the whole list into bytes, on this thread, after every copy. A picture
         // is saved all the same: its file is deleted with its entry, and a start after a forced end finds that entry only in the

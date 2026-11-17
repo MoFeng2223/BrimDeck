@@ -76,3 +76,11 @@ The clipboard history, the file transfer's list and the categories are stored in
 Settings › File transfer › Drag files out has two choices: "Left copies, right moves" (the default) and "Left moves, right copies". A right drag does its action directly, without the shell's drop menu. A right click without dragging still opens the entry menu.
 
 The optional remove-after-copy/link setting defaults off. When enabled, a moving drag successfully accepted as Copy or Link by an external application removes its transfer entries without deleting the original files. Canceled or rejected drops, Explorer, internal drops and Ctrl-copy gestures retain entries. Success means the target reported accepting the drop, not that an attachment finished uploading. Other file managers reporting Copy are also subject to this option.
+
+### Copy previews
+
+With Settings › Clipboard › Preview copies on the island enabled, a successful copy briefly shows a summary on the collapsed island before restoring its contents. The island fits the text; rapid copies replace the previous preview. Images show their dimensions.
+
+Maximum preview characters ranges from 10 to 30 (default 20), counting the copied text with combined emoji as one character. Longer text is truncated. Turn off Show copied content in previews to show only Copied. Text follows the interface font and theme colors.
+
+Previews require clipboard recording and the clipboard page, respecting excluded apps and clipboard privacy markers. File copies are excluded. Previews do not interrupt an open or hidden island, the indicator style, or a quota alert. Side-docked notches only fade; disabling animations switches immediately.
