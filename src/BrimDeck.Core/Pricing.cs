@@ -28,11 +28,13 @@ public sealed class Pricing : IDisposable
     // DeepSeek's own list prices in US dollars, from api-docs.deepseek.com/quick_start/pricing (read 2026-11-17). The page lists
     // dollar prices of their own, not yuan converted at a rate; the off-peak price is half the peak one in every category. The
     // catalog has no deepseek-flash, and its deepseek/deepseek-v4-pro has no off-peak price, so these take the bare IDs that
-    // DeepSeek's own clients write. deepseek-v4-flash is the retired name, billed at the Flash price. DeepSeek charges no cache
-    // write: a token written to the cache is a cache miss, at the input price.
+    // DeepSeek's own clients and MaaS gateways (MaasName) write. deepseek-flash is served by DeepSeek-V4.1-Flash, so that name takes
+    // the Flash price too, as does the retired deepseek-v4-flash. DeepSeek charges no cache write: a token written to the cache is
+    // a cache miss, at the input price.
     private static readonly ModelPrice[] BuiltIn =
     [
         DeepSeek("deepseek-flash", .30m, 1.20m, .006m),
+        DeepSeek("deepseek-v4.1-flash", .30m, 1.20m, .006m),
         DeepSeek("deepseek-v4-flash", .30m, 1.20m, .006m),
         DeepSeek("deepseek-v4-pro", 1.32m, 3.96m, .044m),
     ];
@@ -74,8 +76,6 @@ public sealed class Pricing : IDisposable
     private System.Collections.Concurrent.ConcurrentDictionary<string, ModelPrice?> _found = new(StringComparer.Ordinal);
     // FindMaas answers by name, kept until the table changes as _found is.
     private System.Collections.Concurrent.ConcurrentDictionary<string, ModelPrice?> _maas = new(StringComparer.Ordinal);
-    // The table FindMaas reads: _lookup, with DeepSeek's own prices (BuiltIn) left to the catalog's, as a gateway bills at its own.
-    private Dictionary<string, ModelPrice> _maasLookup = new(StringComparer.OrdinalIgnoreCase);
     public int ModelCount { get; private set; }
     public DateTimeOffset? UpdatedAt { get; private set; }
     public string? LastError { get; private set; }
@@ -381,15 +381,7 @@ public sealed class Pricing : IDisposable
             if (OfficialIds.Contains(Normalize(model.Model)) && _remote.TryGetValue(Normalize(model.Model), out var remote) && ReferenceEquals(remote, model)) unofficial.Add(model);
         _unofficial = unofficial;
         Interlocked.Increment(ref _version);
-        var maasLookup = new Dictionary<string, ModelPrice>(lookup, StringComparer.OrdinalIgnoreCase);
-        foreach (var builtIn in BuiltIn)
-        {
-            var key = Normalize(builtIn.Model);
-            if (!maasLookup.TryGetValue(key, out var taken) || !ReferenceEquals(taken, builtIn)) continue;
-            var catalog = models.Where(m => !ReferenceEquals(m, builtIn) && Normalize(m.Model[(m.Model.IndexOf('/') + 1)..]) == key).Take(2).ToArray();
-            if (catalog.Length == 1) maasLookup[key] = catalog[0]; else maasLookup.Remove(key);
-        }
-        _lookup = lookup; _maasLookup = maasLookup; _tiers = tiers; _found = new(StringComparer.Ordinal); _maas = new(StringComparer.Ordinal); ModelCount = models.Length;
+        _lookup = lookup; _tiers = tiers; _found = new(StringComparer.Ordinal); _maas = new(StringComparer.Ordinal); ModelCount = models.Length;
         Changed?.Invoke();
     }
     private Dictionary<string, ModelPrice> MergedModels()
@@ -618,7 +610,7 @@ public sealed class Pricing : IDisposable
         return price;
     }
     // Model names of MaaS gateways, such as CodeAgent's and those of tools that reach its models through a proxy, take the price of
-    // the catalog model they serve. Only names that start with "maas-", or that name an automatic route ("GLM-5.2-Auto(Volcano-MaaS)"),
+    // the catalog model they serve; a DeepSeek model takes DeepSeek's own price (BuiltIn). Only names that start with "maas-", or that name an automatic route ("GLM-5.2-Auto(Volcano-MaaS)"),
     // are read this way; MaasName returns the name to look for, or null for any other model:
     //   - the "maas-" prefix goes, and an automatic route is read as the model it is named after ("glm-5.2"): it also sends simple
     //     requests to smaller models, so its records are priced at the dearest one;
@@ -641,7 +633,7 @@ public sealed class Pricing : IDisposable
     // Applies to the records of every tool, in Match: Find, which the editor of prices added by hand also uses, stays an exact lookup.
     private ModelPrice? FindMaas(string name)
     {
-        var cache = _maas; var lookup = _maasLookup;
+        var cache = _maas; var lookup = _lookup;
         if (cache.TryGetValue(name, out var known)) return known;
         return cache[name] = FindMaas(name, lookup);
     }
