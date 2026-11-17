@@ -49,7 +49,7 @@ public sealed class WeTypeWire
     }
     public static WeTypeWire Parse(ReadOnlySpan<byte> input)
     {
-        if (input.Length > 2 * 1024 * 1024) throw new InvalidDataException("Packet too large.");
+        if (input.Length > 4 * 1024 * 1024) throw new InvalidDataException("Packet too large.");
         var result = new WeTypeWire(); int at = 0;
         while (at < input.Length)
         {

@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.IO;
+using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -8,6 +10,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using BrimDeck.Core;
 using BrimDeck.Core.ClipboardSync;
+using BrimDeck.Core.FileTransfer;
 using BrimDeck.Native;
 
 namespace BrimDeck;
@@ -35,6 +38,10 @@ internal sealed partial class ClipboardSyncService : IDisposable
     private readonly Dictionary<bool, (string Text, SyncLevel Level)> _status = [];
     // What was last sent to each service, as a hash: its own application on this computer may hand the same thing back.
     private readonly Dictionary<bool, string> _lastSent = [];
+    // Transfer invitations already taken, so one sent again before it is accepted starts nothing twice.
+    private readonly ConcurrentDictionary<string, DateTime> _fileInvites = new();
+    private readonly ConcurrentQueue<Func<WeTypeSyncClient, Task>> _weTypeJobs = new();
+    private int _fileSending;
     private bool _disposed;
     // Cancelled when this computer's network addresses change: a connection waiting to retry tries again at once.
     private CancellationTokenSource _wake = new();
@@ -340,6 +347,13 @@ internal sealed partial class ClipboardSyncService : IDisposable
                         initialized = true; failures = 0;
                         Report(doubao, Loc.T("已连接", "Connected"), SyncLevel.Active);
                     }
+                    // File work runs on this worker's one control session. A second client with the same account made
+                    // the server move the session key and the phone kept the previous device busy, so every send raced
+                    // with a 400 and the next invitation was refused.
+                    if (!doubao && client is WeTypeSyncClient weTypeSession)
+                    {
+                        while (_weTypeJobs.TryDequeue(out var job)) await job(weTypeSession);
+                    }
                     if (_pending.Remove(doubao, out var copy))
                     {
                         sending = true;
@@ -359,6 +373,15 @@ internal sealed partial class ClipboardSyncService : IDisposable
                         // Another device's copy is now the latest there: what was sent before may be sent again.
                         _lastSent.Remove(doubao);
                         await AcceptAsync(remote, source, doubao, sequence, stop.Token);
+                    }
+                    if (!doubao && client is WeTypeSyncClient weType && weType.TakePendingInvite() is { } invite)
+                    {
+                        // An invitation is handled once. Retrying after the phone cancels it only produced 400s and
+                        // broke the clipboard connection while the installed WeType accepted the same file.
+                        foreach (var stale in _fileInvites.Where(pair => pair.Value < DateTime.UtcNow).Select(pair => pair.Key).ToList())
+                            _fileInvites.TryRemove(stale, out _);
+                        if (_fileInvites.TryAdd(invite.Code, DateTime.UtcNow.AddMinutes(10)))
+                            await ReceiveWeTypeFileAsync(invite, weType, stop.Token);
                     }
                 }
                 catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
@@ -471,6 +494,228 @@ internal sealed partial class ClipboardSyncService : IDisposable
             or ArgumentException or InvalidOperationException or OverflowException) { Log((doubao ? "doubao" : "wetype") + " not accepted: " + Describe(ex)); }
     }
 
+    // Progress of an incoming file, for the transfer card on the clipboard page; raised from the sync worker.
+    public event Action<FileTransferUpdate>? IncomingFileTransfer;
+
+    // Sends files, or folders as a zip, to a paired WeType device. A folder is archived beside the temporary folder and
+    // removed afterwards; the other device receives one ordinary file.
+    public Task SendWeTypeFilesAsync(IReadOnlyList<string> paths) => SendWeTypeFilesAsync(paths, null, null);
+
+    public async Task SendWeTypeFilesAsync(IReadOnlyList<string> paths, ulong? peerUin, Action<FileTransferUpdate>? update)
+    {
+        if (paths.Count == 0) return;
+        if (!Connected(false))
+        {
+            Report(false, Loc.T("未关联微信输入法", "WeType is not linked"), SyncLevel.Attention);
+            update?.Invoke(new FileTransferUpdate(FileTransferPhase.Failed, Loc.T("无法发送", "Cannot send"),
+                Loc.T("未关联微信输入法", "WeType is not linked"), 0, ""));
+            return;
+        }
+        if (Interlocked.Exchange(ref _fileSending, 1) != 0)
+        {
+            Log("wetype file: a send is already running");
+            update?.Invoke(new FileTransferUpdate(FileTransferPhase.Failed, Loc.T("发送失败", "Send failed"),
+                Loc.T("已有发送任务正在进行", "A send is already running"), 0, ""));
+            return;
+        }
+        var ct = _app.Lifetime.Token;
+        try
+        {
+            // Archiving, hashing and waiting for acknowledgements stay off the interface thread.
+            EnsureWeTypeWorker();
+            await RunWeTypeJobAsync(async control =>
+            {
+                await SendWeTypeFilesCoreAsync(paths, peerUin, update, control, ct);
+                return true;
+            }, ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Log("wetype file send failed: " + Describe(ex));
+            Report(false, Loc.T("文件发送失败：", "File send failed: ") + ex.Message, SyncLevel.Attention);
+        }
+        finally { Interlocked.Exchange(ref _fileSending, 0); }
+    }
+
+    // The devices in the paired group, for choosing where a file goes.
+    public Task<IReadOnlyList<WeTypePeer>> WeTypePeersAsync(CancellationToken ct)
+    {
+        if (!Connected(false)) return Task.FromResult<IReadOnlyList<WeTypePeer>>([]);
+        EnsureWeTypeWorker();
+        return RunWeTypeJobAsync(control => control.ListPeersAsync(ct), ct);
+    }
+
+    // One control session for the worker and every file operation: the service binds a session key to the account, so
+    // two clients made it invalidate the other's key and left the phone seeing a busy device.
+    private Task<T> RunWeTypeJobAsync<T>(Func<WeTypeSyncClient, Task<T>> job, CancellationToken ct)
+    {
+        var done = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        ct.Register(() => done.TrySetCanceled(ct));
+        _weTypeJobs.Enqueue(async control =>
+        {
+            try { done.TrySetResult(await job(control)); }
+            catch (OperationCanceledException error) { done.TrySetCanceled(error.CancellationToken); }
+            catch (Exception error) { done.TrySetException(error); }
+        });
+        try { _wake.Cancel(); }
+        catch (ObjectDisposedException) { }
+        return done.Task;
+    }
+
+    private void EnsureWeTypeWorker()
+    {
+        if (_workers.ContainsKey(false) || !Connected(false)) return;
+        var stop = new CancellationTokenSource();
+        _workers[false] = stop;
+        _ = RunAsync(false, stop);
+    }
+
+    private async Task SendWeTypeFilesCoreAsync(IReadOnlyList<string> paths, ulong? peerUin, Action<FileTransferUpdate>? update,
+        WeTypeSyncClient control, CancellationToken ct)
+    {
+        var debug = new StringBuilder();
+        void Send(FileTransferPhase phase, string title, string detail, double fraction) =>
+            update?.Invoke(new FileTransferUpdate(phase, title, detail, fraction, debug.ToString().TrimEnd()));
+        try
+        {
+            Send(FileTransferPhase.Preparing, Loc.T("准备发送", "Preparing"), Loc.T("正在连接微信输入法…", "Connecting to WeType…"), 0);
+            var peers = await control.ListPeersAsync(ct);
+            debug.AppendLine("设备列表：" + string.Join("；", peers.Select(item => item.Name + "（Uin " + item.Uin + "，platform " + item.Platform + "，文件 " + (item.SupportsFileTransfer ? "支持" : "未知") + "）")));
+            var peer = peerUin is { } chosen
+                ? peers.FirstOrDefault(item => item.Uin == chosen) ?? throw new InvalidDataException("The chosen device is gone.")
+                : peers.FirstOrDefault(item => item.Platform == 1 && item.SupportsFileTransfer)
+                  ?? peers.FirstOrDefault(item => item.Platform == 1)
+                  ?? peers.FirstOrDefault(item => item.SupportsFileTransfer)
+                  ?? peers.FirstOrDefault() ?? throw new InvalidDataException("No paired WeType device.");
+            debug.AppendLine("目标：" + peer.Name + "（Uin " + peer.Uin + "，platform " + peer.Platform + "）");
+            Send(FileTransferPhase.Waiting, Loc.T("等待对方确认", "Waiting"), Loc.T($"目标 {peer.Name}，请在对方设备上确认接收", $"Target {peer.Name}; confirm on the other device"), 0);
+            foreach (string original in paths)
+            {
+                string path = original;
+                string? archive = null;
+                try
+                {
+                    if (Directory.Exists(original))
+                    {
+                        Send(FileTransferPhase.Preparing, Loc.T("正在打包文件夹", "Archiving"), new DirectoryInfo(original).Name, 0);
+                        (path, archive) = ArchiveFolder(original);
+                    }
+                    using var identity = new WeTypeFileIdentity();
+                    var receipt = await WeTypeFileSender.SendAsync(control, identity, peer.Uin, path, progress =>
+                    {
+                        Report(false, Loc.T($"正在发送到 {peer.Name} · {progress.Name} {progress.Fraction:P0}",
+                            $"Sending to {peer.Name} · {progress.Name} {progress.Fraction:P0}"), SyncLevel.Active);
+                        Send(FileTransferPhase.Sending, Loc.T("正在发送到 ", "Sending to ") + peer.Name,
+                            progress.Name + " · " + Size(progress.Transferred) + " / " + Size(progress.Total), progress.Fraction);
+                    }, line => { debug.AppendLine(line); Log("wetype file: " + line); }, ct);
+                    debug.AppendLine("已发送：" + Path.GetFileName(path) + "，" + receipt.Bytes + " 字节");
+                    Log("wetype file sent: \"" + Path.GetFileName(path) + "\" " + receipt.Bytes + " bytes");
+                    Report(false, At(Loc.T($"已发送 {Path.GetFileName(path)}", $"Sent {Path.GetFileName(path)}")), SyncLevel.Active);
+                    Send(FileTransferPhase.Completed, Loc.T("发送完成", "Sent"),
+                        Path.GetFileName(path) + " · " + Size(receipt.Bytes), 1);
+                }
+                finally
+                {
+                    if (archive is not null)
+                    {
+                        try { Directory.Delete(archive, true); }
+                        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception error)
+        {
+            debug.AppendLine("失败：" + Describe(error));
+            string detail = error.Message.Contains("No file endpoints")
+                ? Loc.T("手机没有公布局域网地址（返回里只有 awdl/wfd）。请让手机和电脑连接同一个 Wi-Fi，再重新发送。",
+                    "The phone exposed only awdl/wfd and no LAN address. Connect both devices to the same Wi-Fi and retry.")
+                : error.Message;
+            Send(FileTransferPhase.Failed, Loc.T("发送失败", "Send failed"), detail, 0);
+            throw;
+        }
+    }
+
+    private static string Size(long bytes) => bytes >= 1 << 30 ? (bytes / (double)(1 << 30)).ToString("0.0") + " GiB"
+        : bytes >= 1 << 20 ? (bytes / (double)(1 << 20)).ToString("0.0") + " MiB"
+        : bytes >= 1 << 10 ? (bytes / (double)(1 << 10)).ToString("0.0") + " KiB" : bytes + " B";
+
+    private static (string Zip, string Folder) ArchiveFolder(string directory)
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "BrimDeck-file-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        string name = new DirectoryInfo(directory).Name;
+        if (name.Length == 0) name = "folder";
+        string zip = Path.Combine(folder, name + ".zip");
+        try
+        {
+            ZipFile.CreateFromDirectory(directory, zip, CompressionLevel.Fastest, true);
+            if (new FileInfo(zip).Length > WeTypeFileSender.MaxBytes)
+                throw new InvalidDataException("The folder is larger than 1 GiB.");
+            return (zip, folder);
+        }
+        catch
+        {
+            try { Directory.Delete(folder, true); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            throw;
+        }
+    }
+
+    // Accepts one file invitation in the background: joining is the acceptance, and the file goes to the file transfer
+    // column when it has arrived and matched its identifier.
+    private async Task ReceiveWeTypeFileAsync(WeTypeFileInvite invite, WeTypeSyncClient control, CancellationToken ct)
+    {
+        string source = invite.SenderName.Length > 0 ? invite.SenderName : Loc.T("另一台设备", "Another device");
+        var debug = new StringBuilder();
+        debug.AppendLine("来自：" + source + "（Uin " + invite.SenderUin + "，platform " + invite.Platform + "）");
+        debug.AppendLine("邀请码：" + (invite.Code.Length <= 6 ? invite.Code : invite.Code[..6] + "…"));
+        void Send(FileTransferPhase phase, string title, string detail, double fraction) =>
+            IncomingFileTransfer?.Invoke(new FileTransferUpdate(phase, title, detail, fraction, debug.ToString().TrimEnd()));
+        try
+        {
+            Log("wetype file invite: \"" + source + "\" uin=" + invite.SenderUin + " platform=" + invite.Platform);
+            Send(FileTransferPhase.Receiving, Loc.T("正在接收文件", "Receiving"), Loc.T("来自 " + source, "From " + source), 0);
+            string folder = Path.Combine(Folder, "incoming");
+            Directory.CreateDirectory(folder);
+            Report(false, Loc.T($"正在接收来自 {source} 的文件…", $"Receiving a file from {source}…"), SyncLevel.Active);
+            await using var receiver = await WeTypeFileReceiver.StartAsync(control, invite, Accounts.WeType.DeviceName, folder, progress =>
+            {
+                Report(false, Loc.T($"正在接收 · {progress.Name} {progress.Fraction:P0}",
+                    $"Receiving · {progress.Name} {progress.Fraction:P0}"), SyncLevel.Active);
+                Send(FileTransferPhase.Receiving, Loc.T("正在接收文件", "Receiving"),
+                    progress.Name + " · " + Size(progress.Transferred) + " / " + Size(progress.Total), progress.Fraction);
+            }, line => { debug.AppendLine(line); Log("wetype file: " + line); }, ct);
+            debug.AppendLine("监听端口：" + receiver.Port);
+            Send(FileTransferPhase.Receiving, Loc.T("等待手机连接", "Waiting"), Loc.T("端口 " + receiver.Port + "，请确认手机与电脑在同一局域网", "Port " + receiver.Port + "; both devices must share a LAN"), 0);
+            var file = await receiver.Completed.WaitAsync(TimeSpan.FromSeconds(90), ct);
+            Log("wetype file received: \"" + file.Name + "\" " + file.Bytes + " bytes");
+            _ = _app.Dispatcher.BeginInvoke(() => _app.Shelf.AddFiles([file.Path], null));
+            Report(false, At(Loc.T($"已接收 {file.Name}", $"Received {file.Name}")), SyncLevel.Active);
+            debug.AppendLine("已保存：" + file.Path);
+            Send(FileTransferPhase.Completed, Loc.T("接收完成", "Received"), file.Name + " · " + Size(file.Bytes), 1);
+        }
+        catch (WeTypeFileCanceledException canceled)
+        {
+            // The installed WeType on this PC accepted the invitation first, so the phone dropped this join. That is not
+            // an error for the person, and the file is already on the clipboard device they normally use.
+            Log("wetype file invite handled by another device: \"" + source + "\" " + canceled.Message);
+            Report(false, At(Loc.T("文件已由本机微信输入法接收", "Received by the installed WeType")), SyncLevel.Active);
+            Send(FileTransferPhase.Completed, Loc.T("已由本机微信输入法接收", "Handled by the installed WeType"),
+                Loc.T("另一台客户端先接受了这次传输，BrimDeck 没有重复接收。", "Another client accepted first; BrimDeck did not duplicate it."), 1);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            debug.AppendLine("失败：" + Describe(ex));
+            Log("wetype file receive failed: " + Describe(ex));
+            Report(false, Loc.T("文件接收失败：", "File receive failed: ") + ex.Message, SyncLevel.Attention);
+            Send(FileTransferPhase.Failed, Loc.T("接收失败", "Receive failed"), ex.Message, 0);
+        }
+    }
+
     public void Dispose()
     {
         _disposed = true;
@@ -480,3 +725,9 @@ internal sealed partial class ClipboardSyncService : IDisposable
         _workers.Clear(); _pending.Clear(); _watch?.Dispose(); _watch = null;
     }
 }
+
+public enum FileTransferPhase { Preparing, Waiting, Sending, Receiving, Completed, Failed }
+
+// One step of a file transfer, for the transfer card: what is happening, how far it has come, and the protocol
+// details that tell afterwards which part did not work.
+public sealed record FileTransferUpdate(FileTransferPhase Phase, string Title, string Detail, double Fraction, string Debug);

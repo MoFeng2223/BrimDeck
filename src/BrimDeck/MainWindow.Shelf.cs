@@ -26,6 +26,13 @@ public partial class MainWindow
     private string _shelfQuery = "";
     private bool _shelfSearching;
     private (ShelfSide Side, Guid Id)? _shelfDetail;
+
+    // A file invitation from the paired phone is shown as a card on this page; the service keeps receiving if it is closed.
+    private void OnIncomingFileTransfer(FileTransferUpdate update)
+    {
+        if (!Dispatcher.CheckAccess()) { _ = Dispatcher.BeginInvoke(() => OnIncomingFileTransfer(update)); return; }
+        ApplyTransferUpdate(update, incoming: true);
+    }
     // The text entry being edited in place of the list (MainWindow.ShelfDetail.cs).
     private Guid? _shelfEdit;
     private readonly HashSet<Guid> _picked = [];
@@ -202,6 +209,7 @@ public partial class MainWindow
             // The pointer may have left a row that is about to be replaced; its scroll positions are kept.
             RememberShelfScroll();
             ShelfContent.Children.Clear(); _shelfRows.Clear(); _rowRules.Clear(); _shelfTabs.Clear(); _fileFrame = null; _fileTotal = null;
+            ShelfContent.RowDefinitions.Clear();
         }
         // The header's own parts are set again either way: another page shown meanwhile has hidden them.
         RenderShelfToolbar(width);
@@ -210,8 +218,10 @@ public partial class MainWindow
         RenderPageSwitch();
         if (keep) return;
 
-        // Side by side or stacked as cards (MainWindow.ShelfArrange.cs).
-        ShelfContent.Children.Add(ShelfColumns(layout));
+        // The transfer takes the page while it runs; its own view replaces both columns and gives them back when closed.
+        ShelfContent.RowDefinitions.Clear();
+        if (_transfer is { Hidden: false }) ShelfContent.Children.Add(TransferView(layout));
+        else ShelfContent.Children.Add(ShelfColumns(layout));
         RefocusTyping();
     }
     // During a resize, and while the divider between the columns is dragged, the page is built again only where its sizes step (row
@@ -231,7 +241,7 @@ public partial class MainWindow
         if (stepped && !dragged) { RenderShelf(); return; }
         if (stepped) SettleShare(); else _shelfLayout = layout;
         if (layout.Stacked) { PlaceDeck(); return; }
-        if (ShelfContent.Children.Count == 1 && ShelfContent.Children[0] is Grid { ColumnDefinitions.Count: 3 } grid)
+        if (ShelfContent.Children.OfType<Grid>().FirstOrDefault(item => item.ColumnDefinitions.Count == 3) is { } grid)
             grid.ColumnDefinitions[2].Width = new GridLength(layout.FileColumn);
     }
     private void RememberShelfScroll()
@@ -1244,10 +1254,12 @@ public partial class MainWindow
     private void ShelfDragEnter(object sender, DragEventArgs e)
     {
         _dropLeave?.Stop();
-        // Showing the clipboard alone, files dragged over the panel have nowhere to go.
+        // Showing the clipboard alone, files dragged over the panel have nowhere to go; with Ctrl they are sent instead.
         // A selection of desktop icons with "此电脑" or "回收站" among them comes without a list of paths: its files are read from
         // the shell's own list (DroppedFiles).
-        if (_draggingOut || !Settings.ClipboardPage || Settings.ShelfShown == ShelfShown.Clipboard || DroppedFiles.Paths(e.Data).Length == 0) return;
+        string[] paths = DroppedFiles.Paths(e.Data);
+        bool send = paths.Length > 0 && ((e.KeyStates & DragDropKeyStates.ControlKey) != 0 || (Keyboard.Modifiers & ModifierKeys.Control) != 0);
+        if (_draggingOut || !Settings.ClipboardPage || (!send && (Settings.ShelfShown == ShelfShown.Clipboard || paths.Length == 0))) return;
         e.Effects = DragDropEffects.Copy; e.Handled = true;
         if (_dropping) return;
         _dropping = true;
@@ -1289,11 +1301,20 @@ public partial class MainWindow
     {
         _dropLeave?.Stop();
         if (_draggingOut || !_dropping) return;
+        string[] paths = DroppedFiles.Paths(e.Data);
+        // With Ctrl held, files and folders dropped on the island go to the paired WeType device instead of the list.
+        if (paths.Length > 0 && ((e.KeyStates & DragDropKeyStates.ControlKey) != 0 || (Keyboard.Modifiers & ModifierKeys.Control) != 0))
+        {
+            e.Handled = true;
+            EndDrop(dropped: true);
+            BeginFileTransferSend(paths);
+            return;
+        }
         if (e.OriginalSource is DependencyObject over && _shelfTabs.FirstOrDefault(tab => tab.Side == ShelfSide.Files && tab.Tab.IsAncestorOf(over)) is { Tab: not null } tab)
-        { HighlightTab(tab.Tab, false); EndDrop(dropped: true); AddDropped(DroppedFiles.Paths(e.Data), tab.Id); e.Handled = true; return; }
+        { HighlightTab(tab.Tab, false); EndDrop(dropped: true); AddDropped(paths, tab.Id); e.Handled = true; return; }
         e.Handled = true;
         EndDrop(dropped: true);
-        AddDropped(DroppedFiles.Paths(e.Data), null);
+        AddDropped(paths, null);
     }
     private void AddDropped(string[] paths, Guid? category)
     {

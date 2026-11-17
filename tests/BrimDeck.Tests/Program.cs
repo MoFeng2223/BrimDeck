@@ -14,6 +14,7 @@ Directory.CreateDirectory(root);
 try
 {
     ClipboardSyncTests.Run(Check);
+    WeTypeFileTransferTests.Run(Check);
     await PiUsageTests.Run(root, Check);
     await CodeAgentUsageTests.Run(root, Check);
     await CommandCodeUsageTests.Run(root, Check);

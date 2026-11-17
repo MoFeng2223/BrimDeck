@@ -45,6 +45,7 @@ internal sealed class FrameRates : IDisposable
     private static readonly Guid Dxgi = new("CA11C036-0102-4A2D-A6AD-F03CFED5D3C9"), D3D9 = new("783ACA0A-790E-4D7F-8451-AA850511C6B9"),
         DxgKrnl = new("802EC45A-1E99-4B83-9920-87C98277BA9D");
     private const uint DxgiData1 = 0xCA11C036, D3D9Data1 = 0x783ACA0A, DxgKrnlData1 = 0x802EC45A;
+    private const uint ProcessQueryLimitedInformation = 0x1000, StillActive = 259;
     private readonly object _lock = new();
     // The frames not yet counted, each at the time it was presented (the performance counter, as Sample's clock): runtime presents
     // by process and swap chain, kernel present records by process (Kernel as the chain). Windows hands the events over in
@@ -417,8 +418,10 @@ internal sealed class FrameRates : IDisposable
     }
     private static bool Running(int pid)
     {
-        try { using var process = Process.GetProcessById(pid); return !process.HasExited; }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { return false; }
+        nint handle = OpenProcess(ProcessQueryLimitedInformation, false, (uint)pid);
+        if (handle == 0) return false;
+        try { return GetExitCodeProcess(handle, out uint exit) && exit == StillActive; }
+        finally { CloseHandle(handle); }
     }
 
     private static void Control(ulong session, string? name, uint code)
@@ -514,6 +517,9 @@ internal sealed class FrameRates : IDisposable
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void EventRecordCallback(IntPtr record);
     private delegate bool WindowProc(IntPtr window, IntPtr data);
     [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
+    [DllImport("kernel32.dll")] private static extern nint OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll")] private static extern bool GetExitCodeProcess(nint process, out uint exit);
+    [DllImport("kernel32.dll")] private static extern bool CloseHandle(nint handle);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode)] private static extern uint StartTraceW(out ulong handle, string name, IntPtr properties);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode)] private static extern uint ControlTraceW(ulong handle, string? name, IntPtr properties, uint code);
     [DllImport("advapi32.dll")] private static extern uint EnableTraceEx2(ulong handle, in Guid provider, uint code, byte level, ulong any, ulong all, uint timeout, IntPtr parameters);

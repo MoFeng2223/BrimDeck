@@ -77,7 +77,7 @@ public sealed partial class SettingsWindow
                 Loc.T("同一网络中两台装有 BrimDeck 的电脑直接同步文字和图片，不经过互联网。", "Two PCs with BrimDeck on the same network sync text and images directly, without the internet."),
                 Loc.T("新复制的文字和图片会发送到另一台电脑。两台电脑都要开启。", "Newly copied text and images are sent to the other PC. Turn this on on both PCs.")),
             SyncKind.WeType => (Loc.T("微信输入法", "WeType"), Loc.T("关联设备", "Link a device"), Loc.T("解除关联", "Unlink"),
-                Loc.T("与手机或其他电脑上的微信输入法同步文字和图片。", "Syncs text and images with WeType on your phone or other PCs."),
+                Loc.T("与手机或其他电脑上的微信输入法同步文字和图片，也可把文件拖到岛上直接发送。", "Syncs text and images with WeType on your phone or other PCs, and sends files dropped on the island."),
                 Loc.T("新复制的文字和图片会发送到已关联的设备，它们复制的内容会写入本机剪贴板。", "Newly copied text and images are sent to the linked devices, and what they copy is put on this PC's clipboard.")),
             _ => (Loc.T("豆包输入法", "Doubao IME"), Loc.T("登录", "Sign in"), Loc.T("退出登录", "Sign out"),
                 Loc.T("与登录同一豆包账号的手机或电脑同步文字和图片。", "Syncs text and images with phones and PCs signed in to the same Doubao account."),

@@ -37,6 +37,14 @@ Notes:
 - BrimDeck cannot take this PC off the other devices' lists. After unlinking in BrimDeck, delete this PC under My devices (我的设备) in their cross-device pages, or linking again will list it twice.
 - Images are PNG or JPEG, up to 16 MiB.
 
+### File transfer (same LAN only)
+
+- Hold `Ctrl` and drop files or folders on the island, choose a linked device, and confirm. Folders are zipped first.
+- Both devices must be on the same LAN and able to reach each other. The phone needs the same Wi-Fi as this PC, without client isolation.
+- There is no cross-network transfer, relay or cloud upload. When the devices are on different networks, use WeType's own 隔空传送.
+- Received files are saved under `clipboard-sync\incoming` and added to the island's file column. 
+- Allow BrimDeck on the private network if Windows Firewall asks during the first receive.
+
 ## Doubao IME
 
 Doubao IME calls this feature 超级互传; the devices of one account sync with each other.
