@@ -146,6 +146,16 @@
                   <Button x:Name="ShelfSearchButton" Style="{StaticResource PanelGlyphButton}" Margin="0,0,4,0" VerticalAlignment="Center" Click="ShelfSearch_Click" Visibility="Collapsed">
                     <Viewbox Width="15" Height="15"><Canvas Width="24" Height="24"><Path Data="M 10.5,3.5 A 7,7 0 1 1 10.5,17.5 A 7,7 0 1 1 10.5,3.5 Z M 15.6,15.6 L 21,21" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/></Canvas></Viewbox>
                   </Button>
+                  <Button x:Name="ShelfDeviceButton" Style="{StaticResource PanelSourceButton}" Width="Auto" MaxWidth="150" Padding="8,0" Margin="0,0,4,0" Click="ShelfDevice_Click" Visibility="Collapsed">
+                    <Grid>
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                      <!-- The device choice's chevron; shown only while a target can still be picked. -->
+                      <TextBlock x:Name="ShelfDeviceChevron" Grid.Column="0" Text="&#xE96E;" FontFamily="{StaticResource FontIcon}" FontSize="12" Margin="0,1,5,0"
+                                 Foreground="{Binding Foreground, ElementName=ShelfDeviceButton}" VerticalAlignment="Center" Visibility="Collapsed"/>
+                      <TextBlock x:Name="ShelfDeviceLabel" Grid.Column="1" FontFamily="{DynamicResource FontPanel}" FontSize="12"
+                                 Foreground="{Binding Foreground, ElementName=ShelfDeviceButton}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                    </Grid>
+                  </Button>
                   <Button x:Name="SettingsButton" Style="{StaticResource PanelSettingsButton}" Content="&#xE713;" FontFamily="{StaticResource FontIconMdl2}" FontSize="16" Click="Settings_Click"/>
                 </StackPanel>
               </Grid>

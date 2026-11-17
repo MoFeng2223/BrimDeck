@@ -73,7 +73,14 @@ static class WeTypeFileTransferTests
             await using var app = await server.StartAsync(port, default);
             using var channel = WeTypeFileGrpc.Connect(clientIdentity, serverCa, serverIdentity.ServerName, IPAddress.Loopback, port);
             string id = await WeTypeFileSender.HashAsync(source, default);
-            var receipt = await WeTypeFileSender.UploadAsync(channel, id, "sample.bin", (ulong)content.Length, source, null, default);
+            var reverse = new TaskCompletionSource<WeTypeReceivedFile>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var receipt = await WeTypeFileSender.UploadBatchAsync(channel,
+                [(id, "sample.bin", (ulong)content.Length, source)], (ulong)content.Length,
+                null, null, null, Path.Combine(folder, "reverse"), null, file => reverse.TrySetResult(file), null, default);
+            await Task.WhenAll(server.Session!.SendAsync([small], null, null, null, default),
+                receipt.SendAsync([small], null, null, null, default)).WaitAsync(TimeSpan.FromSeconds(20));
+            var reverseFile = await reverse.Task.WaitAsync(TimeSpan.FromSeconds(20));
+            check("same session transfers in both directions concurrently", await File.ReadAllTextAsync(reverseFile.Path) == "abc" && receipt.IsOpen);
             var saved = await server.Completed.Task.WaitAsync(TimeSpan.FromSeconds(20));
             check("file session stays open after first batch", receipt.IsOpen);
             await receipt.SendAsync([small, source], null, null, null, default);
@@ -109,3 +116,4 @@ static class WeTypeFileTransferTests
         return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 }
+

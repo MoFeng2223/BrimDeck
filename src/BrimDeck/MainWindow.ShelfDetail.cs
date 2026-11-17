@@ -27,7 +27,7 @@ public partial class MainWindow
         double right = _header.RightMargin + PanelHeader.SettingsWidth + 6;
         if (_shelfDetail is { } detail)
         {
-            ClockLabel.Visibility = Visibility.Collapsed; ShelfSearchButton.Visibility = Visibility.Collapsed;
+            ClockLabel.Visibility = Visibility.Collapsed; ShelfSearchButton.Visibility = Visibility.Collapsed; ShelfDeviceButton.Visibility = Visibility.Collapsed;
             var list = DetailList(detail.Side);
             int at = list.IndexOf(detail.Id);
             var left = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(_header.Side - 6, 0, 0, 0) };
@@ -45,7 +45,7 @@ public partial class MainWindow
         }
         if (_shelfSearching)
         {
-            ShelfSearchButton.Visibility = Visibility.Collapsed;
+            ShelfSearchButton.Visibility = Visibility.Collapsed; ShelfDeviceButton.Visibility = Visibility.Collapsed;
             // The box takes the room right of the clock, up to its usual width (ShelfLayout.SearchWidth); only when that room is under
             // 140 does it keep 140 and cover the clock.
             double clock = ClockLabel.Text.Length > 0 ? TextWidth(ClockLabel.Text, 12, FontWeights.Normal) : 34;
@@ -94,8 +94,10 @@ public partial class MainWindow
             ClockLabel.Visibility = boxWidth > room ? Visibility.Collapsed : Visibility.Visible;
             return;
         }
-        ShelfSearchButton.Visibility = Visibility.Visible;
+        ShelfSearchButton.Visibility = FileTransferShown ? Visibility.Collapsed : Visibility.Visible;
+        ShelfDeviceButton.Visibility = FileTransferShown ? Visibility.Visible : Visibility.Collapsed;
         ClockLabel.Visibility = Visibility.Visible;
+        UpdateShelfDeviceButton();
     }
     private Button ToolbarGlyph(string data, string name, Action click)
     {

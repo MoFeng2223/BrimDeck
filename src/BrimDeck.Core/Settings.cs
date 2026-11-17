@@ -628,9 +628,6 @@ public sealed class DeckSettings
     public bool WeTypeClipboardSync { get; set; }
     public bool DoubaoClipboardSync { get; set; }
     public bool LanClipboardSync { get; set; }
-    // How many minutes a finished file-transfer session stays open before it releases its slot by itself; the session is
-    // released at once on a manual close or when the program exits (ClipboardSyncService.AutoReleaseDelay).
-    public double WeTypeAutoReleaseMinutes { get; set; } = 2;
     // Applications whose copies are not recorded: the executable's path, or a process name (ClipboardExclusions).
     public List<string> ClipboardExcluded { get; set; } = [];
     // Off, the clipboard history goes when BrimDeck exits; on, it stays, and each copy goes once it is older than ClipboardKeepFor.
