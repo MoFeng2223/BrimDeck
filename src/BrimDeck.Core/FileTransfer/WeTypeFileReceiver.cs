@@ -155,7 +155,13 @@ internal sealed class WeTypeFileReceiveService(WeTypeFileReceiveServer server) :
                         incoming = Incoming.Create(server, chunk.File);
                         break;
                     case 2:
-                        if (incoming is null) throw new RpcException(new Status(StatusCode.InvalidArgument, "Data before metadata."));
+                        // Some peers attach the file metadata to the first data block instead of sending a
+                        // separate metadata message, so initialize the receiver from that block when needed.
+                        if (incoming is null)
+                        {
+                            if (chunk.File is null) throw new RpcException(new Status(StatusCode.InvalidArgument, "Data before metadata."));
+                            incoming = Incoming.Create(server, chunk.File);
+                        }
                         var (start, end, complete) = await incoming.AppendAsync(chunk, ct);
                         if (complete)
                         {
@@ -179,7 +185,11 @@ internal sealed class WeTypeFileReceiveService(WeTypeFileReceiveServer server) :
                         if (chunk.Business is not { } business || chunk.ControlId is not { } controlId ||
                             business.Length > 64 * 1024 || controlId.Length > 1024)
                             throw new InvalidDataException("Invalid control message.");
-                        if (WeTypeFileControl.IsDisconnect(business)) break;
+                        if (WeTypeFileControl.IsDisconnect(business))
+                        {
+                            await responseStream.WriteAsync(new WeTypeFileChunk { Kind = 5, ControlId = controlId });
+                            return;
+                        }
                         await responseStream.WriteAsync(new WeTypeFileChunk { Kind = 5, ControlId = controlId });
                         break;
                     default:

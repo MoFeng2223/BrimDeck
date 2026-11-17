@@ -32,7 +32,10 @@ public sealed partial class SettingsWindow
         }
         _syncCards.Clear();
         Target.Children.Add(SyncDeviceName());
-        AddSyncCard(SyncKind.Lan); AddSyncCard(SyncKind.WeType); AddSyncCard(SyncKind.Doubao);
+        AddSyncCard(SyncKind.Lan); AddSyncCard(SyncKind.WeType);
+
+        Group(AutoRelease());
+        AddSyncCard(SyncKind.Doubao);
         var note = TextLine(Loc.T("只同步开启之后新复制的内容。", "Only what is copied after syncing is turned on is synced.") + " ", 12, TextSecondary);
         note.Inlines.Add(InlineLink(Loc.T("使用说明 ↗", "How it works ↗"),
             Updates.GitHubUpdates.RepositoryUrl + Loc.T("/blob/main/docs/zh-CN/clipboard-sync.md", "/blob/main/docs/en-US/clipboard-sync.md")));
@@ -42,6 +45,26 @@ public sealed partial class SettingsWindow
         // The names the paired WeType devices show can change on those devices at any time.
         _syncNameTimer ??= new System.Windows.Threading.DispatcherTimer(TimeSpan.FromSeconds(15), System.Windows.Threading.DispatcherPriority.Background, async (_, _) => await ReadSyncNamesAsync(), Dispatcher);
         _ = ReadSyncNamesAsync();
+    }
+
+    // How long a finished WeType transfer keeps its slot before it releases by itself; the transfer is also released at
+    // once on a manual close or when the program exits. Laid out like the collapsed-size slider rows: the label on the
+    // left, the slider beside it and the number box with steppers on the right.
+    private FrameworkElement AutoRelease()
+    {
+        var controls = NumericControls(Loc.T("自动释放时长", "Auto-release"), S.WeTypeAutoReleaseMinutes, 1, 60, 1, Loc.T("分钟", "min"),
+            value => Change(s => s.WeTypeAutoReleaseMinutes = value));
+        controls.Slider.Margin = new Thickness(0, 0, 18, 0);
+        var row = new Grid { MinHeight = 44 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(174) });
+        row.ColumnDefinitions.Add(new ColumnDefinition());
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.Children.Add(SettingLabel(Loc.T("自动释放时长", "Auto-release"),
+            () => Loc.T("传输完成后闲置到设定时长会自动关闭会话；也可手动点关闭，程序退出时同样会释放。",
+                "A finished transfer closes by itself after being idle this long; a manual close or app exit also releases it.")));
+        Grid.SetColumn(controls.Slider, 1); row.Children.Add(controls.Slider);
+        Grid.SetColumn(controls.Number, 2); row.Children.Add(controls.Number);
+        return row;
     }
 
     private Grid SyncDeviceName()

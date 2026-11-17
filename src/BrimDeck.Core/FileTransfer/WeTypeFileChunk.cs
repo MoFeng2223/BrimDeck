@@ -10,8 +10,6 @@ public readonly record struct WeTypeFileProgress(long Transferred, long Total, s
 
 public sealed record WeTypeReceivedFile(string Id, string Path, long Bytes, string Name);
 
-public sealed record WeTypeFileReceipt(string Id, long Bytes);
-
 // flurry.FileInfo and flurry.FileChunk, the messages of the gRPC file stream (see wx-ime-sdk's flurry.proto).
 public sealed class WeTypeFileInfo
 {
@@ -92,5 +90,17 @@ public static class WeTypeFileControl
     {
         try { return WeTypeWire.Parse(payload).GetNumber(2) == 1001; }
         catch (InvalidDataException) { return false; }
+    }
+
+    // The native client closes every finished transfer with this notice. Without it the phone keeps the previous
+    // file in its receive queue and refuses the next invitation.
+    public static byte[] Disconnect(ulong id) => new WeTypeWire().Number(1, id).Number(2, 1001).Encode();
+
+    public static byte[] Varint(ulong value)
+    {
+        var bytes = new List<byte>();
+        while (value >= 0x80) { bytes.Add((byte)(value | 0x80)); value >>= 7; }
+        bytes.Add((byte)value);
+        return [.. bytes];
     }
 }

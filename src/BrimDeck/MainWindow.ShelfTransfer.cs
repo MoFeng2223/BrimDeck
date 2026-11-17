@@ -18,6 +18,7 @@ public partial class MainWindow
     {
         public bool Receive;
         public IReadOnlyList<string> Paths = [];
+        public bool[] Done = [];
         public IReadOnlyList<WeTypePeer> Peers = [];
         public ulong? TargetUin;
         public FileTransferPhase Phase = FileTransferPhase.Preparing;
@@ -46,6 +47,7 @@ public partial class MainWindow
         _transfer = new TransferCardState
         {
             Paths = [.. paths],
+            Done = new bool[paths.Count],
             Title = Loc.T("发送到微信输入法", "Send to WeType"),
             Detail = Loc.T("正在读取已关联设备…", "Reading linked devices…"),
         };
@@ -57,7 +59,9 @@ public partial class MainWindow
     {
         try
         {
-            var peers = await _app.ClipboardSync.WeTypePeersAsync(_app.Lifetime.Token);
+            var peers = _app.ClipboardSync.CachedWeTypePeers;
+            if (peers.Count == 0)
+                peers = await _app.ClipboardSync.WeTypePeersAsync(_app.Lifetime.Token);
             if (!ReferenceEquals(state, _transfer)) return;
             state.Peers = peers;
             if (peers.Count == 0)
@@ -69,6 +73,18 @@ public partial class MainWindow
             }
             else
             {
+                // Files went to a device before: that one is used again at once. Only a first send, or a device no longer
+                // in the group, waits for the person to choose.
+                var recent = _app.ClipboardSync.LastFilePeer is { } uin
+                    ? peers.FirstOrDefault(peer => peer.Uin == uin) : null;
+                if (recent is not null)
+                {
+                    state.TargetUin = recent.Uin;
+                    StartTransfer();
+                    return;
+                }
+                // The device picked before is no longer in the group: it is not counted any more, and the person chooses again.
+                if (_app.ClipboardSync.LastFilePeer is not null) _app.ClipboardSync.LastFilePeer = null;
                 state.TargetUin = peers.FirstOrDefault(peer => peer.Platform == 1)?.Uin ?? peers[0].Uin;
                 state.Detail = Loc.T("选择目标设备后开始。手机端需要确认接收。", "Choose a target; confirm on the phone.");
             }
@@ -150,8 +166,16 @@ public partial class MainWindow
         bool finished = update.Phase is FileTransferPhase.Completed or FileTransferPhase.Failed;
         bool wasFinished = state.Finished;
         state.Finished = finished;
+        bool fileDone = false;
+        if (!incoming && update.FileIndex is { } idx && idx >= 0 && idx < state.Done.Length && !state.Done[idx])
+        {
+            state.Done[idx] = true;
+            fileDone = true;
+        }
         if (state.Hidden) return;
         if (finished && !wasFinished) { RenderShelf(); return; }
+        // A finished file turns green: rebuild the card so the row reflects it.
+        if (fileDone) { RenderShelf(); return; }
         UpdateTransferControls();
     }
 
@@ -164,11 +188,15 @@ public partial class MainWindow
         RenderShelf();
     }
 
-    private void DismissTransfer()
+    private async void DismissTransfer()
     {
-        if (_transfer is null) return;
-        if (_transfer.Finished) _transfer = null;
+        if (_transfer is not { } state) return;
+        if (state.Finished && !state.Receive) await _app.ClipboardSync.CloseOpenFileTransferAsync();
+        if (!ReferenceEquals(state, _transfer)) return;
+        if (state.Finished) _transfer = null;
         else _transfer.Hidden = true;
+        // Closing a finished send is what releases the phone's receive slot.
+
         RenderShelf();
     }
 
@@ -191,8 +219,7 @@ public partial class MainWindow
         if (_transferStart is not null && (state.Finished || state.Started)) _transferStart.Visibility = Visibility.Collapsed;
     }
 
-    // Files on the left; devices and the send button on the right. The transfer takes the whole page instead of standing
-    // above the two lists: it is one task, and the lists come back as soon as it is closed.
+    // One flat page with a hairline dividing the device choice from the file list; no islands, it is one continuous task.
     private FrameworkElement TransferView(ShelfLayout layout)
     {
         var state = _transfer!;
@@ -229,33 +256,38 @@ public partial class MainWindow
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Margin = new Thickness(6, layout.Stacked ? 8 : 14, 6, 16),
         };
-        content.Children.Add(head);
         content.Children.Add(_transferDetail);
+        if (!state.Receive)
+        {
+            var connection = new TextBlock { Foreground = UI.Brush(UI.Secondary), FontSize = 12,
+                Margin = new Thickness(0, 4, 0, 4), Text = _app.ClipboardSync.FileConnectionDisplay };
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+            timer.Tick += (_, _) => connection.Text = _app.ClipboardSync.FileConnectionDisplay;
+            connection.Loaded += (_, _) => timer.Start();
+            connection.Unloaded += (_, _) => timer.Stop();
+            content.Children.Add(connection);
+        }
 
         if (!state.Receive)
         {
-            var files = PanelCard(TransferFiles(state, layout));
-            var rightBody = new Grid();
-            rightBody.RowDefinitions.Add(new RowDefinition());
-            rightBody.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            rightBody.Children.Add(TransferDevices(state, layout));
-            var actions = TransferActions(state);
-            Grid.SetRow(actions, 1); rightBody.Children.Add(actions);
-            var right = PanelCard(rightBody);
+            // Files on the left, the device choice on the right, split by a vertical hairline and no islands.
+            var files = TransferFiles(state, layout);
+            var right = new StackPanel { Children = { TransferDevices(state, layout), TransferActions(state) } };
             if (narrow)
             {
-                files.Margin = new Thickness(0, 12, 0, 0);
-                right.Margin = new Thickness(0, 10, 0, 0);
                 content.Children.Add(files);
+                content.Children.Add(new Border { Height = 1, Background = UI.Brush(UI.Hairline), Margin = new Thickness(0, 12, 0, 12) });
                 content.Children.Add(right);
             }
             else
             {
                 var columns = new Grid { Margin = new Thickness(0, 12, 0, 0) };
                 columns.ColumnDefinitions.Add(new ColumnDefinition());
-                columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
+                columns.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 columns.ColumnDefinitions.Add(new ColumnDefinition());
                 columns.Children.Add(files);
+                var divider = new Border { Width = 1, Background = UI.Brush(UI.Hairline), Margin = new Thickness(12, 0, 12, 0) };
+                Grid.SetColumn(divider, 1); columns.Children.Add(divider);
                 Grid.SetColumn(right, 2); columns.Children.Add(right);
                 content.Children.Add(columns);
             }
@@ -290,6 +322,10 @@ public partial class MainWindow
         };
         content.Children.Add(_transferDebug);
 
+        // The title and the close button sit on the bottom row of the card.
+        head.Margin = new Thickness(0, 10, 0, 0);
+        content.Children.Add(head);
+
         return new ScrollViewer
         {
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -300,15 +336,7 @@ public partial class MainWindow
         };
     }
 
-    // Two columns deserve two surfaces: the pair reads as a split, not as content floating in the middle.
-    private FrameworkElement PanelCard(FrameworkElement child) => new Border
-    {
-        Background = UI.Brush(UI.Fill), BorderBrush = UI.Brush(UI.Hairline), BorderThickness = new Thickness(1),
-        CornerRadius = new CornerRadius(Look.Corner(10)), Padding = new Thickness(12, 10, 12, 10),
-        VerticalAlignment = VerticalAlignment.Stretch, Child = child,
-    };
-
-    // ---- Left: what is going ----
+    // ---- Files section: what is going ----
     private FrameworkElement TransferFiles(TransferCardState state, ShelfLayout layout)
     {
         var panel = new StackPanel();
@@ -316,9 +344,11 @@ public partial class MainWindow
         var list = new StackPanel();
         long total = 0;
         int folders = 0;
-        foreach (string path in state.Paths)
+        for (int i = 0; i < state.Paths.Count; i++)
         {
+            string path = state.Paths[i];
             bool folder = Directory.Exists(path);
+            bool done = state.Done.Length > i && state.Done[i];
             long size = 0;
             if (folder) folders++;
             else
@@ -329,13 +359,13 @@ public partial class MainWindow
             var name = new TextBlock
             {
                 Text = System.IO.Path.GetFileName(path) + (folder ? Loc.T("（文件夹）", " (folder)") : ""),
-                FontFamily = UI.PanelFont, FontSize = layout.Aux, Foreground = UI.Brush(UI.Primary),
+                FontFamily = UI.PanelFont, FontSize = layout.Aux, Foreground = UI.Brush(done ? "#3FA37C" : UI.Primary),
                 TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center,
             };
             var figure = new TextBlock
             {
                 Text = folder ? Loc.T("文件夹", "Folder") : SizeText(size), FontFamily = UI.PanelFont, FontSize = layout.Aux,
-                Foreground = UI.Brush(UI.Tertiary), Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
+                Foreground = UI.Brush(done ? "#3FA37C" : UI.Tertiary), Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
             };
             var row = new Grid { Margin = new Thickness(0, 3, 0, 3) };
             row.ColumnDefinitions.Add(new ColumnDefinition());
@@ -366,7 +396,7 @@ public partial class MainWindow
         Foreground = UI.Brush(UI.Secondary), Margin = new Thickness(0, 0, 0, 6),
     };
 
-    // ---- Right: where it goes, and the actions ----
+    // ---- Devices section: where it goes, and the actions ----
     // The devices of the paired group, as rows that can be picked. A send shows them until it starts; afterwards only the
     // one it went to stays. Only the platform and the name are shown: the Uin is an implementation detail.
     private FrameworkElement TransferDevices(TransferCardState state, ShelfLayout layout)
@@ -417,7 +447,7 @@ public partial class MainWindow
                 BorderBrush = selected ? UI.Brush(UI.Accent) : UI.Brush(UI.Hairline),
                 BorderThickness = new Thickness(1), Cursor = only ? Cursors.Arrow : Cursors.Hand,
             };
-            if (!only) row.MouseLeftButtonUp += (_, e) => { e.Handled = true; state.TargetUin = peer.Uin; RenderShelf(); };
+            if (!only) row.MouseLeftButtonUp += (_, e) => { e.Handled = true; state.TargetUin = peer.Uin; _app.ClipboardSync.LastFilePeer = peer.Uin; RenderShelf(); };
             panel.Children.Add(row);
         }
         return panel;
@@ -432,7 +462,36 @@ public partial class MainWindow
             _transferStart.Margin = new Thickness(0, 0, 6, 0);
             actions.Children.Add(_transferStart);
         }
-        if (state.Finished) actions.Children.Add(PillButton(Loc.T("完成", "Done"), true, DismissTransfer));
+        if (state.Finished && !state.Receive)
+        {
+            var disconnect = PillButton(Loc.T("断开连接", "Disconnect"), false, async () =>
+            {
+                await _app.ClipboardSync.CloseOpenFileTransferAsync();
+                if (ReferenceEquals(state, _transfer)) UpdateTransferControls();
+            });
+            disconnect.Margin = new Thickness(0, 0, 6, 0);
+            actions.Children.Add(disconnect);
+        }
+        if (state.Finished && !state.Receive && state.Peers.Count > 1)
+        {
+            var change = PillButton(Loc.T("更换设备", "Change device"), false, async () =>
+            {
+                await _app.ClipboardSync.CloseOpenFileTransferAsync();
+                if (!ReferenceEquals(state, _transfer)) return;
+                // The remembered device is dropped so the next send does not silently reuse it.
+                _app.ClipboardSync.LastFilePeer = null;
+                state.Started = false;
+                state.Finished = false;
+                state.Phase = FileTransferPhase.Preparing;
+                state.Fraction = 0;
+                state.Title = Loc.T("发送到微信输入法", "Send to WeType");
+                state.Detail = Loc.T("选择目标设备后开始。手机端需要确认接收。", "Choose a target; confirm on the phone.");
+
+                RenderShelf();
+            });
+            change.Margin = new Thickness(6, 0, 0, 0);
+            actions.Children.Add(change);
+        }
         var details = PillButton(state.Details ? Loc.T("收起详情", "Hide details") : Loc.T("详情", "Details"), false, () =>
         {
             state.Details = !state.Details;

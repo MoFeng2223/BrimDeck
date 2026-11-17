@@ -37,6 +37,7 @@ public static class WeTypeFileGrpc
     // The channel authenticates with this side's client certificate and trusts only the CA the other side sent.
     public static GrpcChannel Connect(WeTypeFileIdentity identity, X509Certificate2 peerCa, string serverName, IPAddress address, int port)
     {
+        byte[] authorityBytes = peerCa.RawData;
         var handler = new SocketsHttpHandler
         {
             ConnectTimeout = TimeSpan.FromSeconds(10),
@@ -48,8 +49,11 @@ public static class WeTypeFileGrpc
                 // The platform verifies the name against the IP literal it connected to; the certificate instead names
                 // the rendezvous, so the expected name is checked here against the SAN.
                 RemoteCertificateValidationCallback = (_, certificate, _, _) =>
-                    certificate is X509Certificate2 peer && WeTypeFileIdentity.Validate(peer, peerCa) &&
-                    (serverName.Length == 0 || peer.MatchesHostname(serverName)),
+                {
+                    using var authority = X509CertificateLoader.LoadCertificate(authorityBytes);
+                    return certificate is X509Certificate2 peer && WeTypeFileIdentity.Validate(peer, authority) &&
+                        (serverName.Length == 0 || peer.MatchesHostname(serverName));
+                },
             },
         };
         return GrpcChannel.ForAddress($"https://{address}:{port}", new GrpcChannelOptions

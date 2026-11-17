@@ -52,6 +52,8 @@ public sealed partial class WeTypeSyncClient(WeTypeIdentity identity, Action sav
     private uint _task = 1;
     private ulong _group;
     private HashSet<ulong> _members = [];
+    private IReadOnlyList<WeTypePeer> _lastPeers = [];
+    public IReadOnlyList<WeTypePeer> LastPeers => _lastPeers;
     private static readonly ECDomainParameters Domain = new(SecNamedCurves.GetByName("secp128r1"));
     private string DeviceInfo => "BrimDeck;Windows;standalone;BrimDeck;sdk 34;PHONE";
     private long Stamp => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + _offset;
@@ -184,6 +186,7 @@ public sealed partial class WeTypeSyncClient(WeTypeIdentity identity, Action sav
         var group = response.GetMessage(1);
         var devices = group.Messages(2).Select(d => (Uin: d.GetNumber(1), Name: d.GetMessage(2).GetText(1))).ToList();
         _group = group.GetNumber(1); _members = devices.Select(d => d.Uin).ToHashSet();
+        _lastPeers = [.. group.Messages(2).Select(ReadPeer).Where(p => p.Uin != 0 && p.Uin != identity.Uin)];
         if (_group == 0 || !_members.Contains(identity.Uin) || _members.Count < 2) throw new WeTypeUnpairedException();
         if (Trace is { } trace)
         {

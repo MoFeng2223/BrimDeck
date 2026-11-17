@@ -21,6 +21,8 @@ internal sealed class ClipboardSyncAccounts
     public WeTypeIdentity WeType { get; set; } = new();
     public DoubaoIdentity? Doubao { get; set; }
     public LanClipboardPeer? Lan { get; set; }
+    // The device files last went to, so the next drop goes there again instead of asking a second time.
+    public ulong? FilePeerUin { get; set; }
     public string DoubaoDeviceId { get; set; } = (1_000_000_000_000_000L + RandomNumberGenerator.GetInt32(1_000_000_000) * 1_000_000L + RandomNumberGenerator.GetInt32(1_000_000)).ToString();
 }
 
@@ -41,7 +43,20 @@ internal sealed partial class ClipboardSyncService : IDisposable
     // Transfer invitations already taken, so one sent again before it is accepted starts nothing twice.
     private readonly ConcurrentDictionary<string, DateTime> _fileInvites = new();
     private readonly ConcurrentQueue<Func<WeTypeSyncClient, Task>> _weTypeJobs = new();
+    private readonly object _openSentFileGate = new();
+    private WeTypeFileSender.SentFile? _openSentFile;
+    private WeTypeFileIdentity? _openFileIdentity;
+    private CancellationTokenSource? _fileIdleTimer;
+    private DateTimeOffset? _fileReleaseAt;
+    private Task _fileClosing = Task.CompletedTask;
+    public string FileConnectionStatus { get; private set; } = "未连接";
+    public string FileConnectionDisplay => _openSentFile is { IsOpen: true }
+        ? _fileSending != 0 ? "已连接 · 正在传输" : _fileReleaseAt is { } at
+            ? $"已连接 · 空闲 {Math.Max(0, (int)(at - DateTimeOffset.UtcNow).TotalSeconds)} 秒后释放" : "已连接"
+        : _openSentFile is not null ? "对端连接已断开" : FileConnectionStatus;
+
     private int _fileSending;
+    private IReadOnlyList<WeTypePeer> _cachedWeTypePeers = [];
     private bool _disposed;
     // Cancelled when this computer's network addresses change: a connection waiting to retry tries again at once.
     private CancellationTokenSource _wake = new();
@@ -363,6 +378,7 @@ internal sealed partial class ClipboardSyncService : IDisposable
                     uint sequence = ClipboardWatch.GetClipboardSequenceNumber();
                     var remote = await client.ReceiveAsync(lastId, stop.Token);
                     stop.Token.ThrowIfCancellationRequested();
+                    if (client is WeTypeSyncClient weTypeCache) _cachedWeTypePeers = weTypeCache.LastPeers;
                     // The same thing again from the same service is already on the clipboard.
                     if (remote is not null && Signature(remote) is var signature && signature == lastSignature) { lastId = remote.Id; remote = null; }
                     else if (remote is not null) lastSignature = Signature(remote);
@@ -501,6 +517,18 @@ internal sealed partial class ClipboardSyncService : IDisposable
     // removed afterwards; the other device receives one ordinary file.
     public Task SendWeTypeFilesAsync(IReadOnlyList<string> paths) => SendWeTypeFilesAsync(paths, null, null);
 
+    // Where files went last time; null before the first send. A new drop reuses it while it is still paired.
+    public ulong? LastFilePeer
+    {
+        get => Accounts.FilePeerUin;
+        set
+        {
+            if (Accounts.FilePeerUin == value) return;
+            Accounts.FilePeerUin = value;
+            Save();
+        }
+    }
+
     public async Task SendWeTypeFilesAsync(IReadOnlyList<string> paths, ulong? peerUin, Action<FileTransferUpdate>? update)
     {
         if (paths.Count == 0) return;
@@ -537,6 +565,9 @@ internal sealed partial class ClipboardSyncService : IDisposable
         }
         finally { Interlocked.Exchange(ref _fileSending, 0); }
     }
+
+    // The paired devices the sync worker last read; the transfer view opens with these instead of waiting for its own.
+    public IReadOnlyList<WeTypePeer> CachedWeTypePeers => _cachedWeTypePeers;
 
     // The devices in the paired group, for choosing where a file goes.
     public Task<IReadOnlyList<WeTypePeer>> WeTypePeersAsync(CancellationToken ct)
@@ -575,10 +606,13 @@ internal sealed partial class ClipboardSyncService : IDisposable
         WeTypeSyncClient control, CancellationToken ct)
     {
         var debug = new StringBuilder();
-        void Send(FileTransferPhase phase, string title, string detail, double fraction) =>
-            update?.Invoke(new FileTransferUpdate(phase, title, detail, fraction, debug.ToString().TrimEnd()));
+        void Send(FileTransferPhase phase, string title, string detail, double fraction, int? fileIndex = null) =>
+            update?.Invoke(new FileTransferUpdate(phase, title, detail, fraction, debug.ToString().TrimEnd(), fileIndex));
         try
         {
+            await _fileClosing;
+            lock (_openSentFileGate) { _fileIdleTimer?.Cancel(); _fileIdleTimer = null; _fileReleaseAt = null; }
+            FileConnectionStatus = "正在连接";
             Send(FileTransferPhase.Preparing, Loc.T("准备发送", "Preparing"), Loc.T("正在连接微信输入法…", "Connecting to WeType…"), 0);
             var peers = await control.ListPeersAsync(ct);
             debug.AppendLine("设备列表：" + string.Join("；", peers.Select(item => item.Name + "（Uin " + item.Uin + "，platform " + item.Platform + "，文件 " + (item.SupportsFileTransfer ? "支持" : "未知") + "）")));
@@ -590,40 +624,72 @@ internal sealed partial class ClipboardSyncService : IDisposable
                   ?? peers.FirstOrDefault() ?? throw new InvalidDataException("No paired WeType device.");
             debug.AppendLine("目标：" + peer.Name + "（Uin " + peer.Uin + "，platform " + peer.Platform + "）");
             Send(FileTransferPhase.Waiting, Loc.T("等待对方确认", "Waiting"), Loc.T($"目标 {peer.Name}，请在对方设备上确认接收", $"Target {peer.Name}; confirm on the other device"), 0);
-            foreach (string original in paths)
+            // Reuse the connected peer; switching devices or a closed stream needs a new invitation.
+            if (_openSentFile is { } previous && (!previous.IsOpen || previous.PeerUin != peer.Uin)) await CloseOpenFileTransferAsync();
+            // Prepare every item first (folders become zips), then send them all in one session.
+            var items = new List<string>();
+            var cleanups = new List<string>();
+            try
             {
-                string path = original;
-                string? archive = null;
-                try
+                for (int index = 0; index < paths.Count; index++)
                 {
-                    if (Directory.Exists(original))
-                    {
-                        Send(FileTransferPhase.Preparing, Loc.T("正在打包文件夹", "Archiving"), new DirectoryInfo(original).Name, 0);
-                        (path, archive) = ArchiveFolder(original);
-                    }
-                    using var identity = new WeTypeFileIdentity();
-                    var receipt = await WeTypeFileSender.SendAsync(control, identity, peer.Uin, path, progress =>
-                    {
-                        Report(false, Loc.T($"正在发送到 {peer.Name} · {progress.Name} {progress.Fraction:P0}",
-                            $"Sending to {peer.Name} · {progress.Name} {progress.Fraction:P0}"), SyncLevel.Active);
-                        Send(FileTransferPhase.Sending, Loc.T("正在发送到 ", "Sending to ") + peer.Name,
-                            progress.Name + " · " + Size(progress.Transferred) + " / " + Size(progress.Total), progress.Fraction);
-                    }, line => { debug.AppendLine(line); Log("wetype file: " + line); }, ct);
-                    debug.AppendLine("已发送：" + Path.GetFileName(path) + "，" + receipt.Bytes + " 字节");
-                    Log("wetype file sent: \"" + Path.GetFileName(path) + "\" " + receipt.Bytes + " bytes");
-                    Report(false, At(Loc.T($"已发送 {Path.GetFileName(path)}", $"Sent {Path.GetFileName(path)}")), SyncLevel.Active);
-                    Send(FileTransferPhase.Completed, Loc.T("发送完成", "Sent"),
-                        Path.GetFileName(path) + " · " + Size(receipt.Bytes), 1);
+                    if (!Directory.Exists(paths[index])) { items.Add(paths[index]); continue; }
+                    Send(FileTransferPhase.Preparing, Loc.T("正在打包文件夹", "Archiving"), new DirectoryInfo(paths[index]).Name, 0);
+                    (string path, string folder) = ArchiveFolder(paths[index]);
+                    items.Add(path);
+                    cleanups.Add(folder);
                 }
-                finally
+                async Task<WeTypeFileSender.SentFile> SendBatch(Action<WeTypeFileProgress> progress,
+                    Action<int, string, long, long> fileDone, Action<string> trace)
                 {
-                    if (archive is not null)
+                    if (_openSentFile is { IsOpen: true } existing && existing.PeerUin == peer.Uin)
                     {
-                        try { Directory.Delete(archive, true); }
-                        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+                        trace("复用已连接设备，无需再次邀请。");
+                        await existing.SendAsync(items, progress, fileDone, trace, ct);
+                        return existing;
                     }
+                    var identity = new WeTypeFileIdentity();
+                    try
+                    {
+                        var connected = await WeTypeFileSender.SendAsync(control, identity, peer.Uin, items, progress, fileDone, trace, ct);
+                        _openFileIdentity = identity;
+                        return connected;
+                    }
+                    catch { identity.Dispose(); throw; }
+                }
+                var sent = await SendBatch(progress =>
+                {
+                    double fraction = progress.Total > 0 ? progress.Transferred / (double)progress.Total : 1;
+                    Report(false, Loc.T($"正在发送到 {peer.Name} · {progress.Name} {fraction:P0}",
+                        $"Sending to {peer.Name} · {progress.Name} {fraction:P0}"), SyncLevel.Active);
+                    Send(FileTransferPhase.Sending, Loc.T("正在发送到 ", "Sending to ") + peer.Name,
+                        progress.Name + " · " + Size(progress.Transferred) + " / " + Size(progress.Total), fraction);
+                }, (int index, string name, long transferred, long total) =>
+                {
+                    double fraction = total > 0 ? transferred / (double)total : 1;
+                    Send(FileTransferPhase.Sending, Loc.T("发送完成", "Sent") + " · " + name,
+                        Size(transferred) + " / " + Size(total), fraction, index);
+                    debug.AppendLine("已发送 " + (index + 1) + "/" + items.Count + "：" + name + "，" + Size(transferred) + " / " + Size(total));
+                    Log("wetype file sent: \"" + name + "\"");
+                }, line => { debug.AppendLine(line); Log("wetype file: " + line); });
+                // The whole batch is one session: it stays open instead of closing, so the phone keeps its receive slot
+                // until the idle timeout, an explicit close, a peer disconnect, or program exit.
+                await HoldSentFileAsync(sent);
+                // A device that took a file is the one a later drop goes to without asking again.
+                LastFilePeer = peer.Uin;
+                debug.AppendLine("已发送 " + items.Count + " 个文件，共 " + sent.Bytes + " 字节");
+                Report(false, At(Loc.T($"已发送 {items.Count} 个文件", $"Sent {items.Count} file(s)")), SyncLevel.Active);
+            }
+            finally
+            {
+                foreach (var folder in cleanups)
+                {
+                    try { Directory.Delete(folder, true); }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
                 }
             }
+            Send(FileTransferPhase.Completed, Loc.T("全部发送完成", "All sent"),
+                Loc.T($"已发送 {paths.Count} 个文件到 {peer.Name}", $"Sent {paths.Count} file(s) to {peer.Name}"), 1);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception error)
@@ -638,6 +704,66 @@ internal sealed partial class ClipboardSyncService : IDisposable
         }
     }
 
+    // Keep the completed batch connected; each completed batch starts a new idle-release countdown.
+
+    private Task HoldSentFileAsync(WeTypeFileSender.SentFile sent)
+    {
+        lock (_openSentFileGate)
+        {
+            _fileIdleTimer?.Cancel();
+            _openSentFile = sent;
+            FileConnectionStatus = "已连接";
+            _fileReleaseAt = DateTimeOffset.UtcNow.AddMinutes(Math.Max(0.5, _app.Settings.WeTypeAutoReleaseMinutes));
+            _fileIdleTimer = new CancellationTokenSource();
+            _ = ReleaseIdleFileAsync(sent, _fileIdleTimer);
+        }
+        return Task.CompletedTask;
+    }
+
+    private async Task ReleaseIdleFileAsync(WeTypeFileSender.SentFile sent, CancellationTokenSource timer)
+    {
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(500, timer.Token);
+                Task? closing = null;
+                lock (_openSentFileGate)
+                {
+                    if (timer.IsCancellationRequested || !ReferenceEquals(sent, _openSentFile)) return;
+                    if (_fileSending == 0 && (!sent.IsOpen || _fileReleaseAt <= DateTimeOffset.UtcNow))
+                        closing = CloseOpenFileTransferAsync();
+                }
+                if (closing is not null) { await closing; return; }
+            }
+        }
+        catch (OperationCanceledException) { }
+        finally { timer.Dispose(); }
+    }
+
+    public Task CloseOpenFileTransferAsync()
+    {
+        lock (_openSentFileGate)
+        {
+            if (_openSentFile is not { } sent) return _fileClosing;
+            var identity = _openFileIdentity;
+            _openSentFile = null; _openFileIdentity = null;
+            _fileIdleTimer?.Cancel(); _fileIdleTimer = null; _fileReleaseAt = null;
+            FileConnectionStatus = "正在断开 · 等待对端确认";
+            return _fileClosing = CloseFileSessionAsync(sent, identity);
+        }
+    }
+
+    private async Task CloseFileSessionAsync(WeTypeFileSender.SentFile sent, WeTypeFileIdentity? identity)
+    {
+        try
+        {
+            await sent.CloseAsync();
+            FileConnectionStatus = sent.DisconnectAcknowledged ? "已断开 · 对端已确认" : "本地已关闭 · 未收到对端断开确认";
+            Log("wetype file: " + FileConnectionStatus);
+        }
+        finally { identity?.Dispose(); }
+    }
     private static string Size(long bytes) => bytes >= 1 << 30 ? (bytes / (double)(1 << 30)).ToString("0.0") + " GiB"
         : bytes >= 1 << 20 ? (bytes / (double)(1 << 20)).ToString("0.0") + " MiB"
         : bytes >= 1 << 10 ? (bytes / (double)(1 << 10)).ToString("0.0") + " KiB" : bytes + " B";
@@ -720,6 +846,7 @@ internal sealed partial class ClipboardSyncService : IDisposable
     {
         _disposed = true;
         System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged -= NetworkChanged;
+        _ = CloseOpenFileTransferAsync();
         StopLan();
         foreach (var source in _workers.Values) source.Cancel();
         _workers.Clear(); _pending.Clear(); _watch?.Dispose(); _watch = null;
@@ -729,5 +856,6 @@ internal sealed partial class ClipboardSyncService : IDisposable
 public enum FileTransferPhase { Preparing, Waiting, Sending, Receiving, Completed, Failed }
 
 // One step of a file transfer, for the transfer card: what is happening, how far it has come, and the protocol
-// details that tell afterwards which part did not work.
-public sealed record FileTransferUpdate(FileTransferPhase Phase, string Title, string Detail, double Fraction, string Debug);
+// details that tell afterwards which part did not work. FileIndex is which file of the batch a Sending/Completed step
+// refers to, so one row can turn green as soon as it is done; Fraction always covers the whole batch.
+public sealed record FileTransferUpdate(FileTransferPhase Phase, string Title, string Detail, double Fraction, string Debug, int? FileIndex = null);

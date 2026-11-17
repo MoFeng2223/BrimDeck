@@ -54,8 +54,9 @@ static class WeTypeFileTransferTests
             await using (var emptyApp = await emptyServer.StartAsync(emptyPort, default))
             {
                 using var emptyChannel = WeTypeFileGrpc.Connect(clientIdentity, serverCa, serverIdentity.ServerName, IPAddress.Loopback, emptyPort);
-                await WeTypeFileSender.UploadAsync(emptyChannel, await WeTypeFileSender.HashAsync(empty, default), "empty.txt", 0, empty, null, default);
+                await using var emptyReceipt = await WeTypeFileSender.UploadAsync(emptyChannel, await WeTypeFileSender.HashAsync(empty, default), "empty.txt", 0, empty, null, default);
                 var emptyFile = await emptyServer.Completed.Task.WaitAsync(TimeSpan.FromSeconds(20));
+                await emptyReceipt.CloseAsync();
                 await emptyApp.StopAsync();
                 check("empty file transfer completes", emptyFile.Bytes == 0 && new FileInfo(emptyFile.Path).Length == 0);
             }
@@ -66,15 +67,31 @@ static class WeTypeFileTransferTests
             string source = Path.Combine(folder, "sample.bin");
             await File.WriteAllBytesAsync(source, content);
 
-            var server = new WeTypeFileReceiveServer(serverIdentity, received, null, null) { PeerCa = otherCa };
+            int connections = 0;
+            var server = new WeTypeFileReceiveServer(serverIdentity, received, null, line => { if (line.StartsWith("已接受局域网连接：")) Interlocked.Increment(ref connections); }) { PeerCa = otherCa };
             int port = FreePort();
             await using var app = await server.StartAsync(port, default);
             using var channel = WeTypeFileGrpc.Connect(clientIdentity, serverCa, serverIdentity.ServerName, IPAddress.Loopback, port);
             string id = await WeTypeFileSender.HashAsync(source, default);
             var receipt = await WeTypeFileSender.UploadAsync(channel, id, "sample.bin", (ulong)content.Length, source, null, default);
             var saved = await server.Completed.Task.WaitAsync(TimeSpan.FromSeconds(20));
+            check("file session stays open after first batch", receipt.IsOpen);
+            await receipt.SendAsync([small, source], null, null, null, default);
+            check("file session sends a second multi-file batch", receipt.IsOpen && receipt.Bytes == content.Length + 3);
+            await receipt.SendAsync([small], null, null, null, default);
+            check("file session sends a third batch without reconnecting", receipt.IsOpen && receipt.Bytes == 3);
+            check("multiple batches share one duplex stream", connections == 1);
+            await receipt.CloseAsync();
+
+            await receipt.CloseAsync();
+            check("file session closes idempotently", !receipt.IsOpen);
+            check("file close waits for matching peer acknowledgement", receipt.DisconnectAcknowledged);
+            bool closedRejected = false;
+            try { await receipt.SendAsync([small], null, null, null, default); }
+            catch (IOException) { closedRejected = true; }
+            check("closed file session rejects later sends", closedRejected);
             await app.StopAsync();
-            check("file transfer acknowledges every range", receipt.Bytes == content.Length && saved.Bytes == content.Length);
+            check("file transfer acknowledges every range", saved.Bytes == content.Length);
             check("file transfer writes the same bytes", File.ReadAllBytes(saved.Path).SequenceEqual(content));
             check("file transfer keeps the name and identifier", Path.GetFileName(saved.Path) == "sample.bin" && saved.Id == id);
         }
