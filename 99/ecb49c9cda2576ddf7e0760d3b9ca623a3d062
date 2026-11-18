@@ -1,0 +1,29 @@
+src/BrimDeck.Core/DeviceProtocols.cs
+  s_a0509b6222d341::t_1596447a64bf66 1047-1051,1055-1064
+  s_a0509b6222d341::t_ca51608a0e609b 1303
+  s_a0509b6222d341::t_8925a8f85fad43 1353
+src/BrimDeck/Native/HidBatteries.cs
+  s_a0509b6222d341::t_6a9136a1042fa8 1516-1538
+  s_a0509b6222d341::t_7e89c5343ce270 801
+tests/BrimDeck.Tests/DeviceProtocolTests.cs
+  s_a0509b6222d341::t_3795ae99c19ddf 417
+  s_a0509b6222d341::t_389357a5ac1555 425-437
+src/BrimDeck/ThirdPartyNotices.txt
+  s_a0509b6222d341::t_ed3f1c12529298 1013-1015
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "99ecb49c9cda2576ddf7e0760d3b9ca623a3d062",
+  "prompts": {},
+  "sessions": {
+    "s_a0509b6222d341": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ad363c96-ab09-4386-a0e1-76fc11665245",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
