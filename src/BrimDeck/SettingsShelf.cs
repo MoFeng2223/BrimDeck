@@ -62,6 +62,9 @@ public partial class SettingsWindow
         maxLength.ToolTip = Loc.T("只计算复制正文，空格计入，组合表情算一个字。岛宽随实际文字变化，仅超出屏幕可用宽度时提前省略。", "Counts copied text only, including spaces; combined emoji count as one character. The island fits the text; only the available screen width can truncate it earlier.");
         Group(preview, content, maxLength);
         Group(record, _excludedHost = new Border { Child = ExcludedAppsContent() }, keep, length);
+        Group(Toggle(Loc.T("单击只复制，不粘贴", "Click copies only"), S.ClipboardClickCopyOnly, value => Change(s => s.ClipboardClickCopyOnly = value),
+            help: Loc.T("开启后，单击一条记录只复制，不粘贴到当前窗口。右键菜单仍可粘贴。",
+                "On, clicking an entry only copies it, without pasting it into the current window. Its right-click menu can still paste.")));
         SectionTitle(Loc.T("分类", "Categories"), help: () => Loc.T("一条内容可以放进多个分类。关闭“一直保留”的分类，其中的内容与普通历史一样清除。单击筛选按钮设置自动放入的规则。拖动调整顺序。",
             "An entry can be in several categories. What is in a category with Keep off is cleared with the rest of the history. The filter button sets what goes in by itself. Drag to reorder."));
         CategoryList(ShelfSide.Clipboard);
