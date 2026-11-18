@@ -1,0 +1,29 @@
+src/BrimDeck/Native/WindowsHost.cs
+  h_dc4d9c798f1bc1 53-54,58,107-108,484-504,511
+tests/BrimDeck.WindowsTests/CaptureChecks.cs
+  h_dc4d9c798f1bc1 24,31-56,58
+  s_a30a54eeb0091c::t_c7a15e18dc9306 57
+src/BrimDeck/MainWindow.xaml.cs
+  h_dc4d9c798f1bc1 128-129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ce45ac89f1cc0eb431c1ae4f027f12446bde0050",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_a30a54eeb0091c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ec45-f97d-75e3-9760-b38640bc792a",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,121 @@
+src/BrimDeck/App.xaml.cs
+  s_423a6332e76d14::t_c3b060183c7fd1 131-133
+  s_423a6332e76d14::t_0b3115200b6106 134-137
+src/BrimDeck.Core/Loc.cs
+  s_423a6332e76d14::t_0ab2be95a9a45b 37
+src/BrimDeck.Core/Themes/dark.json
+  s_423a6332e76d14::t_eb9880f0aec810 55
+src/BrimDeck.Core/Themes/github-light.json
+  s_423a6332e76d14::t_eb9880f0aec810 54
+src/BrimDeck.Core/Templates/theme-template.json
+  s_423a6332e76d14::t_eb9880f0aec810 75
+src/BrimDeck.Core/Themes/dracula.json
+  s_423a6332e76d14::t_eb9880f0aec810 54
+docs/en-US/ai-tools.md
+  s_423a6332e76d14::t_ced49e7038e828 152,154-155
+  s_423a6332e76d14::t_12efe98f725210 150-151,153,157
+  s_423a6332e76d14::t_4ee411e2caab10 28,156
+docs/en-US/themes.md
+  s_423a6332e76d14::t_0f2269ac5ac70a 77
+src/BrimDeck.Core/Themes/pixel-blocks.json
+  s_423a6332e76d14::t_eb9880f0aec810 59
+src/BrimDeck/SettingsThemeEditor.cs
+  s_423a6332e76d14::t_4a5eba48b9376d 39
+src/BrimDeck.Core/Themes/island-holiday.json
+  s_423a6332e76d14::t_eb9880f0aec810 60,126
+docs/zh-CN/themes.md
+  s_423a6332e76d14::t_0f2269ac5ac70a 77
+src/BrimDeck/SettingsQoder.cs
+  s_423a6332e76d14::t_0adcb92802a750 1-3,6-13,17-22,25-32,38-41,46-47,51-53,57-58,77-78,81-83,85-87,90,92-103
+  s_423a6332e76d14::t_e45b2144f5411b 4-5,14-16,23-24,33-37,42-45,48-50,54-56,59-76,79-80,84,88-89,91
+src/BrimDeck.Core/QoderUsage.cs
+  s_423a6332e76d14::t_f26c9105688405 298-299,309,313,316,332,359-405
+  s_423a6332e76d14::t_e67c5826d4e6e5 289-297,300-301,310-312,315,317-331,333-358
+  s_423a6332e76d14::t_16d501e2cd18c5 1-288,406-414
+  s_423a6332e76d14::t_bf46affa89f28b 302-308,314
+docs/zh-CN/ai-tools.md
+  s_423a6332e76d14::t_ced49e7038e828 152,154-155
+  s_423a6332e76d14::t_4ee411e2caab10 28,156
+  s_423a6332e76d14::t_12efe98f725210 150-151,153,157
+src/BrimDeck.Core/Themes/island-holiday-2.json
+  s_423a6332e76d14::t_eb9880f0aec810 63,137
+src/BrimDeck/Native/QoderProcesses.cs
+  s_423a6332e76d14::t_fa081634dc9b92 1-11,36-37,44,49-50,52,54,56,68,71,74-75,79-112
+  s_423a6332e76d14::t_f034f44df8949f 12-35,38-43,45-48,51,53,55,57-67,69-70,72-73,76-78,113
+src/BrimDeck.Core/DataLocations.cs
+  s_423a6332e76d14::t_f9513267928da5 24-27,65
+src/BrimDeck.Core/ProviderCatalog.cs
+  s_423a6332e76d14::t_196676cbd2490b 74-76
+  s_423a6332e76d14::t_87768c2a67265e 16-17
+  s_423a6332e76d14::t_bf46affa89f28b 37
+  s_423a6332e76d14::t_025fca045ff302 12,64,84,89
+src/BrimDeck.Core/Themes/github-dark.json
+  s_423a6332e76d14::t_eb9880f0aec810 54
+src/BrimDeck.Core/Themes/light.json
+  s_423a6332e76d14::t_eb9880f0aec810 54
+src/BrimDeck/Native/DesktopSources.cs
+  s_423a6332e76d14::t_a7c85cd239ca5e 16-17
+src/BrimDeck.Core/Themes/one-dark-pro.json
+  s_423a6332e76d14::t_eb9880f0aec810 54
+tests/BrimDeck.Tests/QoderUsageTests.cs
+  s_423a6332e76d14::t_8516ed1e597f2f 1-29,31-36,39-84,158-191,193-235,238,241,244,246,248-272,278-279,282-286,288,291,293-294,297-302,324,326-335,344-345
+  s_423a6332e76d14::t_641aa14ecc5b80 30,37-38,85-105,107-109,140-141,149,156-157,336-343
+  s_423a6332e76d14::t_16d501e2cd18c5 192
+  s_423a6332e76d14::t_744cd7cd4d0b0d 236-237,239-240,242-243,245,247,273-277,280-281,287,289-290,292,295-296,303-323,325
+  s_3dbdad85b06190::t_9de4ea202182e5 138
+  s_423a6332e76d14::t_194e3d27bab987 106,110-137,139,142-148,150-155
+src/BrimDeck.Core/Themes/cyberpunk-edgerunners.json
+  s_423a6332e76d14::t_eb9880f0aec810 60
+src/BrimDeck.Core/LogReader.cs
+  s_423a6332e76d14::t_2deae4509970b9 112-114,210-236,300-303
+src/BrimDeck.Core/PanelThemes.cs
+  s_423a6332e76d14::t_4a5eba48b9376d 95,99
+src/BrimDeck.Core/Themes/night-owl.json
+  s_423a6332e76d14::t_eb9880f0aec810 54
+src/BrimDeck.Core/UsageService.cs
+  s_423a6332e76d14::t_196676cbd2490b 409,1646-1650,1657-1662,1664-1665,1668,1670,1672-1673,1679,1683-1685,1688,1690-1734,1736,1738-1741,1743-1744,1747,1749,1754,1759-1760,1763-1764,1767,1769-1779,1781-1790,1792-1804
+  s_423a6332e76d14::t_f9513267928da5 29-33,1825-1826
+  s_423a6332e76d14::t_fb0b908f3c4a64 1663,1671,1686-1687,1689
+  s_423a6332e76d14::t_e3810ead30bf6b 408,410,1645,1651-1656,1666-1667,1669,1674-1676,1678,1680-1682,1735,1737,1742,1745-1746,1748,1750-1753,1755-1758,1761-1762,1765-1766,1768,1780,1791,1805-1824
+  s_423a6332e76d14::t_bf46affa89f28b 323,325-326,336-338,1677
+docs/en-US/privacy.md
+  s_3dbdad85b06190::t_2c5b7a669ac021 23
+docs/zh-CN/privacy.md
+  s_3dbdad85b06190::t_2c5b7a669ac021 23
+src/BrimDeck.Core/Settings.cs
+  s_423a6332e76d14::t_87768c2a67265e 55-56
+  s_423a6332e76d14::t_4a5eba48b9376d 274
+  s_423a6332e76d14::t_bbbd07d94f8b3c 59
+src/BrimDeck/Native/QoderDesktopReader.cs
+  s_423a6332e76d14::t_bfbb7af4dc25b6 1-71
+tests/BrimDeck.Tests/Program.cs
+  s_423a6332e76d14::t_b3a2de3a5f9843 21
+src/BrimDeck/SettingsProviders.cs
+  s_423a6332e76d14::t_4f317ed2b4b389 106
+src/BrimDeck/SettingsWindow.cs
+  s_423a6332e76d14::t_c734fb8017d5f8 954-955
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0722707f083746ca868a7ba32d94c9ef3c6de478",
+  "prompts": {},
+  "sessions": {
+    "s_3dbdad85b06190": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ae8b9618-ccc9-4170-994f-c5b4bfeed682",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_423a6332e76d14": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ba1e9eff-76ca-4846-bd32-f8aab5a66e1b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
