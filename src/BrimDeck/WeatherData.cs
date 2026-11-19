@@ -10,12 +10,40 @@ internal sealed record City(string Name, double Latitude, double Longitude);
 // Data layer: weather fetching, city search, location, JSON parsing and persistence. No WPF controls or view lifetime.
 internal static class WeatherData
 {
-    internal sealed class State { public List<City> Cities {get;set;}=[]; public int Selected {get;set;}=-1; public Dictionary<string,string> Cache {get;set;}=[]; }
+    internal sealed class State { public List<City> Cities {get;set;}=[]; public int Selected {get;set;}=-1; public Dictionary<string,WeatherSnapshot> Cache {get;set;}=[]; public WeatherSettings Schedule {get;set;}=new(); }
     private static readonly string FilePath=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"BrimDeck","weather.json");
     private static readonly HttpClient Http=new() {Timeout=TimeSpan.FromSeconds(20)};
-    internal static State Load() {try {return JsonSerializer.Deserialize<State>(File.ReadAllText(FilePath))??new();}catch{return new();}}
+    // 快照用 NaN 表示来源未提供的数值；命名浮点字面量让缓存可以安全写入并还原，缩进让 weather.json 可读。
+    private static readonly JsonSerializerOptions WeatherJson=new() {WriteIndented=true,Encoder=System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,NumberHandling=System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals};
+    // 手动读取以兼容旧版“缓存值是 JSON 字符串”的格式：新格式直接把快照对象写进 Cache。
+    internal static State Load()
+    {
+        try
+        {
+            using var doc=JsonDocument.Parse(File.ReadAllText(FilePath));
+            var root=doc.RootElement;
+            var state=new State();
+            if(root.TryGetProperty("Cities",out var cities))state.Cities=cities.Deserialize<List<City>>(WeatherJson)??[];
+            if(root.TryGetProperty("Selected",out var selected)&&selected.ValueKind==JsonValueKind.Number)state.Selected=selected.GetInt32();
+            if(root.TryGetProperty("Schedule",out var schedule))state.Schedule=schedule.Deserialize<WeatherSettings>(WeatherJson)??new();
+            if(root.TryGetProperty("Cache",out var cache)&&cache.ValueKind==JsonValueKind.Object)
+                foreach(var entry in cache.EnumerateObject())
+                {
+                    try
+                    {
+                        var snapshot=entry.Value.ValueKind==JsonValueKind.String
+                            ? JsonSerializer.Deserialize<WeatherSnapshot>(entry.Value.GetString()??"",WeatherJson)
+                            : entry.Value.Deserialize<WeatherSnapshot>(WeatherJson);
+                        if(snapshot is not null)state.Cache[entry.Name]=snapshot;
+                    }
+                    catch { }
+                }
+            return state;
+        }
+        catch { return new(); }
+    }
     // Merges local cache into the persisted one so an in-flight refresh never wipes another view's result.
-    internal static void Save(State state) {var latest=Load();foreach(var (key,value) in state.Cache)latest.Cache[key]=value;state.Cache=latest.Cache;Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);File.WriteAllText(FilePath,JsonSerializer.Serialize(state));}
+    internal static void Save(State state) {var latest=Load();foreach(var (key,value) in state.Cache)latest.Cache[key]=value;state.Cache=latest.Cache;Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);File.WriteAllText(FilePath,JsonSerializer.Serialize(state,WeatherJson));}
     internal static async Task<List<City>> Search(string query,CancellationToken token)
     {
         using var doc=JsonDocument.Parse(await Http.GetStringAsync("https://geocoding-api.open-meteo.com/v1/search?count=10&language="+(Loc.IsEnglish?"en":"zh")+"&name="+Uri.EscapeDataString(query),token));
@@ -41,59 +69,46 @@ internal static class WeatherData
             return new City(parts.Count>0?string.Join(" · ",parts):"当前位置",lat,lon);
         } catch { return null; }
     }
-    // Fetches current + 13-day forecast + 10-day history + 24 hourly readings from Open-Meteo, parses them into a strongly-typed snapshot. No JSON knowledge leaks to the views.
-    internal static async Task<WeatherSnapshot> CurrentAsync(City city,CancellationToken token)
-    {
-        string url=FormattableString.Invariant($"https://api.open-meteo.com/v1/forecast?latitude={city.Latitude}&longitude={city.Longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m&hourly=temperature_2m,relative_humidity_2m,weather_code,precipitation_probability&forecast_hours=24&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max&timezone=auto&past_days=10&forecast_days=14");
-        using var doc=JsonDocument.Parse(await Http.GetStringAsync(url,token));
-        return Parse(doc.RootElement,city.Name);
-    }
-    // 从缓存字符串还原快照；与 Encode 严格对称，仅支持当前版本格式，旧版缓存数据视为损坏丢弃。
-    internal static WeatherSnapshot Decode(string json)
-    {
-        var s = JsonSerializer.Deserialize<WeatherSnapshot>(json) ?? throw new InvalidDataException("缓存数据损坏");
-        if (s.DayHighC.Length == 0 || s.HourTimes.Length == 0) throw new InvalidDataException("缓存数据损坏");
-        return s;
-    }
-    internal static string Encode(WeatherSnapshot s) => JsonSerializer.Serialize(s);
+    // 多源调度入口：当前、24 小时、24 天（历史 10 + 今天 + 未来 13）、日出日落与空气质量由 WeatherAggregator 统一拼装。
+    internal static async Task<WeatherSnapshot> CurrentAsync(City city, WeatherSettings schedule, CancellationToken token)
+        => await WeatherAggregator.FetchAsync(city, schedule, token);
     // 在 daily 正序数组中定位“今天”的索引；直接按日期匹配，兼容任意缓存天数，找不到时回退 0。
     internal static int TodayIndex(WeatherSnapshot s)
     {
-        string today = s.FetchedAt.ToLocalTime().ToString("yyyy-MM-dd");
+        // 优先使用聚合时写下的城市当地日期；旧缓存没有该字段时回退到用户本地日期。
+        string today = s.Today.Length > 0 ? s.Today : s.FetchedAt.ToLocalTime().ToString("yyyy-MM-dd");
         for (int i = 0; i < s.DayDates.Length; i++) if (s.DayDates[i].StartsWith(today)) return i;
         return 0;
     }
-    private static WeatherSnapshot Parse(JsonElement root,string name)
-    {
-        var c=root.GetProperty("current");var h=root.GetProperty("hourly");var d=root.GetProperty("daily");
-        return new WeatherSnapshot {
-            Name=name,FetchedAt=DateTimeOffset.Now,
-            Temperature=c.GetProperty("temperature_2m").GetDouble(),FeelsLike=c.GetProperty("apparent_temperature").GetDouble(),
-            HumidityPercent=c.GetProperty("relative_humidity_2m").GetInt32(),WindKmh=c.GetProperty("wind_speed_10m").GetDouble(),
-            WeatherCode=c.GetProperty("weather_code").GetInt32(),IsDay=c.GetProperty("is_day").GetInt32()!=0,
-            HourTimes=h.GetProperty("time").EnumerateArray().Select(x=>x.GetString()!).ToArray(),
-            HourTempsC=h.GetProperty("temperature_2m").EnumerateArray().Select(x=>x.GetDouble()).ToArray(),
-            HourHumidity=h.GetProperty("relative_humidity_2m").EnumerateArray().Select(x=>x.GetInt32()).ToArray(),
-            HourCodes=h.GetProperty("weather_code").EnumerateArray().Select(x=>x.GetInt32()).ToArray(),
-            HourRainProb=h.GetProperty("precipitation_probability").EnumerateArray().Select(x=>x.GetInt32()).ToArray(),
-            DayDates=d.GetProperty("time").EnumerateArray().Select(x=>x.GetString()!).ToArray(),
-            DayCodes=d.GetProperty("weather_code").EnumerateArray().Select(x=>x.GetInt32()).ToArray(),
-            DayHighC=d.GetProperty("temperature_2m_max").EnumerateArray().Select(x=>x.GetDouble()).ToArray(),
-            DayLowC=d.GetProperty("temperature_2m_min").EnumerateArray().Select(x=>x.GetDouble()).ToArray(),
-            SunriseTimes=d.GetProperty("sunrise").EnumerateArray().Select(x=>x.GetString()!).ToArray(),
-            SunsetTimes=d.GetProperty("sunset").EnumerateArray().Select(x=>x.GetString()!).ToArray(),
-            DayRainProb=d.GetProperty("precipitation_probability_max").EnumerateArray().Select(x=>x.GetInt32()).ToArray()
-        };
-    }
 }
 // Strongly-typed weather model; the only data contract between the data layer and the views. Views never touch JSON.
+// 所有数组都以 DayDates / HourTimes 对齐；来源没有提供的数值用 NaN（数值）或 -1（整数）表示，界面自行隐藏。
 internal sealed class WeatherSnapshot
 {
-    public string Name {get;set;}=""; public DateTimeOffset FetchedAt {get;set;}
+    public string Name {get;set;}=""; public DateTimeOffset FetchedAt {get;set;} public string Today {get;set;}="";
     // 当前时刻
     public double Temperature {get;set;} public double FeelsLike {get;set;} public int HumidityPercent {get;set;} public double WindKmh {get;set;} public int WeatherCode {get;set;} public bool IsDay {get;set;}
+    public double WindGustKmh {get;set;} public double WindDirectionDeg {get;set;} public string WindDirection {get;set;}="";
+    public double PressureHpa {get;set;} public double VisibilityKm {get;set;} public double DewPointC {get;set;} public double UvIndex {get;set;}
+    public double CloudPercent {get;set;} public double PrecipitationMm {get;set;} public string ConditionText {get;set;}="";
+    // 空气质量：-1 表示来源没有提供，界面据此隐藏。
+    public int Aqi {get;set;}=-1; public int Pm25 {get;set;}=-1; public int Pm10 {get;set;}=-1; public int AqiLevel {get;set;}=-1; public string AqiText {get;set;}="";
     // 当日各时段（24 个）
     public string[] HourTimes {get;set;}=[]; public double[] HourTempsC {get;set;}=[]; public int[] HourHumidity {get;set;}=[]; public int[] HourCodes {get;set;}=[]; public int[] HourRainProb {get;set;}=[];
-    // 全 24 天 = 过去 10 天 + 今天 + 未来 13 天（Open-Meteo daily 正序返回）
+    public double[] HourFeelsLikeC {get;set;}=[]; public double[] HourPrecipMm {get;set;}=[]; public double[] HourWindKmh {get;set;}=[]; public double[] HourWindGustKmh {get;set;}=[];
+    public double[] HourWindDirDeg {get;set;}=[]; public double[] HourPressureHpa {get;set;}=[]; public double[] HourUv {get;set;}=[]; public double[] HourDewPointC {get;set;}=[];
+    public double[] HourCloudPercent {get;set;}=[]; public double[] HourVisibilityKm {get;set;}=[];
+    // 全 24 天 = 过去 10 天 + 今天 + 未来 13 天（按日期正序）
     public string[] DayDates {get;set;}=[]; public int[] DayCodes {get;set;}=[]; public double[] DayHighC {get;set;}=[]; public double[] DayLowC {get;set;}=[]; public string[] SunriseTimes {get;set;}=[]; public string[] SunsetTimes {get;set;}=[]; public int[] DayRainProb {get;set;}=[];
+    public string[] DayConditions {get;set;}=[]; public double[] DayFeelsHighC {get;set;}=[]; public double[] DayFeelsLowC {get;set;}=[];
+    public double[] DayPrecipMm {get;set;}=[]; public double[] DayUvMax {get;set;}=[]; public double[] DayWindMaxKmh {get;set;}=[]; public double[] DayGustMaxKmh {get;set;}=[];
+    public double[] DayWindDirDeg {get;set;}=[]; public string[] DayWindDir {get;set;}=[]; public int[] DayHumidity {get;set;}=[]; public double[] DayPressureHpa {get;set;}=[]; public string[] DayMoonPhase {get;set;}=[];
+    // 每个数据域实际贡献的来源，例如 Daily → "中国天气网 + Open-Meteo"。
+    public Dictionary<string,string> Sources {get;set;}=[];
+    // 当前读数逐字段的来源（字段名 → 来源 id），供详情页逐项着色标注；旧缓存没有时为空字典，界面自动降级为不标注。
+    public Dictionary<string,string> FieldSources {get;set;}=[];
+    // 每个域参与调度的全部来源（含未提供数据的，保序去重），供详情页把每一家来源都标注出来。
+    public Dictionary<string,string[]> DomainSources {get;set;}=[];
+    // 某来源本次是否实际提供了数据（任一域），未提供的在详情页以灰色标注"未提供数据"。
+    public Dictionary<string,bool> SourceProvided {get;set;}=[];
 }
