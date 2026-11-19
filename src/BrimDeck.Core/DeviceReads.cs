@@ -17,8 +17,9 @@ public sealed class DeviceReadEntry
 
 // Which of a brand's reads each device answers, kept across runs and versions (device-reads.json), so a device is asked
 // only the read it answered and is not tried again with every one:
-// - No entry: the reads are tried, at most ProbeRounds times (when it is first seen, then RetryMs apart), and again only when
-//   it arrives anew (Arrived).
+// - No entry: the reads are tried whenever it is due: at once when it is first seen, then RetryMs apart, the last interval for
+//   as long as the device is there. A device whose link sleeps (a keyboard switched off, a receiver whose device is away) is
+//   still found when it wakes rather than never asked again.
 // - An entry: only its read, on its collection. After MissesBeforeRecheck readings in a row without an answer it is checked
 //   once (its read first, then the others); another read that answers then replaces it. A check that finds nothing is not
 //   made again until the kept read answers again or the device arrives anew, so a device asleep for days is not asked every
@@ -26,14 +27,24 @@ public sealed class DeviceReadEntry
 // - A read that went wrong on the device (Harmed) is never sent to it again; after HarmToStop of them the device is not read.
 // - The user can turn a device's reading off (DeviceReadSwitches) and on again, which clears what went wrong (Resume).
 // Times are Environment.TickCount64 values for the waits, wall-clock values for what is kept.
+//
+// The file says which rule its "Bad" lists were kept under (Schema). Up to schema 1 a run that ended while a first try was
+// under way (quit, update, sleep, a firmware that dropped the collection) was written down as a read that harmed the device,
+// which kept a device from ever being read again however well it worked: those lists are dropped once (Schema 2), while a
+// device stopped for misbehaving stays stopped until the user turns its reading on again.
 public sealed class DeviceReadBook
 {
-    public const int ProbeRounds = 3, MissesBeforeRecheck = 20, HarmToStop = 2, MaximumEntries = 512;
+    public const int Schema = 2;
+    public const int MissesBeforeRecheck = 20, HarmToStop = 2, MaximumEntries = 512;
     public static readonly long[] RetryMs = [5 * 60_000, 30 * 60_000];
 
     private sealed class Run { public int Rounds; public long Next; public int Misses; public bool Rechecked; }
     private readonly Dictionary<string, DeviceReadEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Run> _runs = new(StringComparer.OrdinalIgnoreCase);
+    // Reads left out for this run only ("device|way"): a first try that was under way when the app ended, from the mark left on
+    // disk. Nothing was seen going wrong there (the process stopped, the machine slept), so the read is not kept out of the
+    // next run the way a read that harmed a device is (Harmed).
+    private readonly HashSet<string> _skipped = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
 
     // Set when something kept changed; cleared by Serialize.
@@ -50,12 +61,28 @@ public sealed class DeviceReadBook
         if (string.IsNullOrWhiteSpace(json)) return book;
         try
         {
-            var entries = JsonSerializer.Deserialize<List<DeviceReadEntry>>(json, Options) ?? [];
+            // The file as this version keeps it, or as the bare list earlier versions wrote (schema 1, and older still, none).
+            int schema = 1;
+            List<DeviceReadEntry> entries;
+            if (json.TrimStart().StartsWith('[')) entries = JsonSerializer.Deserialize<List<DeviceReadEntry>>(json, Options) ?? [];
+            else
+            {
+                using var document = JsonDocument.Parse(json);
+                var root = document.RootElement;
+                if (root.ValueKind != JsonValueKind.Object) return book;
+                if (root.TryGetProperty("Schema", out var version) && version.TryGetInt32(out int read)) schema = read;
+                entries = root.TryGetProperty("Entries", out var listed) ? listed.Deserialize<List<DeviceReadEntry>>(Options) ?? [] : [];
+            }
+            bool dropped = false;
             foreach (var entry in entries.Where(entry => entry is not null && !string.IsNullOrWhiteSpace(entry.Device)).Take(MaximumEntries))
             {
                 entry.Bad = [.. (entry.Bad ?? []).Where(way => !string.IsNullOrWhiteSpace(way)).Distinct()];
+                // A read named under the old rule may have been written down for nothing more than an interrupted run: it is
+                // asked again. A device stopped for misbehaving keeps stopping.
+                if (schema < Schema && entry.Bad.Count > 0) { entry.Bad.Clear(); dropped = true; }
                 book._entries[entry.Device] = entry;
             }
+            if (dropped || schema < Schema) book.Dirty = true;
         }
         catch (JsonException) { }
         return book;
@@ -66,7 +93,7 @@ public sealed class DeviceReadBook
         lock (_gate)
         {
             Dirty = false;
-            return JsonSerializer.Serialize(_entries.Values.OrderBy(entry => entry.Device, StringComparer.OrdinalIgnoreCase).ToList(), Options);
+            return JsonSerializer.Serialize(new { Schema, Entries = _entries.Values.OrderBy(entry => entry.Device, StringComparer.OrdinalIgnoreCase).ToList() }, Options);
         }
     }
 
@@ -84,14 +111,16 @@ public sealed class DeviceReadBook
     public bool Stopped(string device) { lock (_gate) return _entries.TryGetValue(device, out var entry) && entry.Stopped; }
 
     // What to ask a collection of the device now. ways: the reads that collection takes, in the brand's order. keptPresent: the
-    // device's kept collection (KeptCollection) is among its collections now.
-    public Ask Plan(string device, string collection, IReadOnlyList<string> ways, long now, bool keptPresent)
+    // device's kept collection (KeptCollection) is among its collections now. due: the user came back or the machine woke, so a
+    // search that is waiting out its interval is made now (a keyboard woken by the first key press answers at once).
+    public Ask Plan(string device, string collection, IReadOnlyList<string> ways, long now, bool keptPresent, bool due = false)
     {
         lock (_gate)
         {
             _entries.TryGetValue(device, out var entry);
             if (entry?.Stopped == true) return new(Kind.None, []);
             var usable = entry is null ? ways : [.. ways.Where(way => !entry.Bad.Contains(way))];
+            if (_skipped.Count > 0) usable = [.. usable.Where(way => !_skipped.Contains(device + "|" + way))];
             if (usable.Count == 0) return new(Kind.None, []);
             var run = RunOf(device, collection);
             // A device with a kept read is asked on its kept collection only, while that is there.
@@ -105,7 +134,7 @@ public sealed class DeviceReadBook
                     return new(Kind.Kept, [way], way);
                 }
             }
-            if (run.Rounds >= ProbeRounds || now < run.Next) return new(Kind.None, []);
+            if (!due && now < run.Next) return new(Kind.None, []);
             return new(Kind.Probe, usable);
         }
     }
@@ -135,8 +164,10 @@ public sealed class DeviceReadBook
                 case Kind.Kept: run.Misses++; break;
                 case Kind.Recheck: run.Misses = 0; run.Rechecked = true; break;
                 case Kind.Probe:
+                    // An unanswered try waits longer each time, and then keeps to the last interval rather than ever stopping:
+                    // a device behind a sleeping link (a keyboard switched off, its receiver still listed) answers when it wakes.
                     run.Rounds++;
-                    run.Next = run.Rounds <= RetryMs.Length ? now + RetryMs[run.Rounds - 1] : long.MaxValue;
+                    run.Next = now + RetryMs[Math.Min(run.Rounds, RetryMs.Length) - 1];
                     break;
             }
         }
@@ -147,6 +178,18 @@ public sealed class DeviceReadBook
     {
         lock (_gate) foreach (var key in _runs.Keys.Where(key => key.StartsWith(device + "|", StringComparison.OrdinalIgnoreCase)).ToList()) _runs.Remove(key);
     }
+
+    // The device came back for real (pulled out and in again, its receiver moved): what went wrong on it in an earlier session
+    // is forgotten. A device stopped for misbehaving stays stopped until the user turns its reading on again (Resume).
+    public void CameBack(string device)
+    {
+        lock (_gate)
+            if (_entries.TryGetValue(device, out var entry) && !entry.Stopped && entry.Bad.Count > 0) { entry.Bad.Clear(); Dirty = true; }
+    }
+
+    // A read a mark left on disk names (a first try that was under way when the last run ended): nothing says it went wrong, so
+    // it is only left out for this run, and is asked again from the next start on.
+    public void Skip(string device, string way) { lock (_gate) _skipped.Add(device + "|" + way); }
 
     // A read went wrong on the device: it is not sent to it again. True when the device is no longer read at all.
     public bool Harmed(string device, string way)

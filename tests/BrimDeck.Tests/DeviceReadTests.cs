@@ -16,16 +16,25 @@ static class DeviceReadTests
         check("Device reads: an unknown device is tried with the reads its collection takes, in order, each a first try",
             first.Kind == DeviceReadBook.Kind.Probe && first.Ways.SequenceEqual(ways) && first.Kept is null);
         book.Silent(device, mouse, first.Kind, 0);
-        check("Device reads: an unanswered search waits 5 minutes, then 30, then stops until the device comes again",
+        check("Device reads: an unanswered search waits 5 minutes, then 30",
             book.Plan(device, mouse, ways, 60_000, false).Kind == DeviceReadBook.Kind.None
             && book.Plan(device, mouse, ways, 5 * 60_000, false).Kind == DeviceReadBook.Kind.Probe);
         book.Silent(device, mouse, DeviceReadBook.Kind.Probe, 5 * 60_000);
         bool thirtyLater = book.Plan(device, mouse, ways, 35 * 60_000, false).Kind == DeviceReadBook.Kind.Probe;
         book.Silent(device, mouse, DeviceReadBook.Kind.Probe, 35 * 60_000);
-        bool stopped = book.Plan(device, mouse, ways, 10L * 24 * 3600_000, false).Kind == DeviceReadBook.Kind.None;
+        // A device whose link sleeps (a keyboard switched off behind a receiver still listed) is asked again after the last
+        // interval instead of never: it is found when it wakes.
+        bool wakes = book.Plan(device, mouse, ways, 2L * 24 * 3600_000, false).Kind == DeviceReadBook.Kind.Probe;
+        book.Silent(device, mouse, DeviceReadBook.Kind.Probe, 2L * 24 * 3600_000);
+        bool keepsAsking = book.Plan(device, mouse, ways, 40L * 24 * 3600_000, false).Kind == DeviceReadBook.Kind.Probe;
         book.Arrived(device);
-        check("Device reads: after three searches nothing more is sent, and a device plugged in again is searched again",
-            thirtyLater && stopped && book.Plan(device, mouse, ways, 10L * 24 * 3600_000, false).Kind == DeviceReadBook.Kind.Probe);
+        check("Device reads: a search never stops while the device is there (only the interval grows), and a device plugged in again searches at once",
+            thirtyLater && wakes && keepsAsking && book.Plan(device, mouse, ways, 40L * 24 * 3600_000, false).Kind == DeviceReadBook.Kind.Probe);
+        // A search waiting out its interval is made at once when the user comes back (a keyboard woken by the first key press).
+        book.Silent(device, mouse, DeviceReadBook.Kind.Probe, 100_000);
+        check("Device reads: a pass the user asked for makes a waiting search now",
+            book.Plan(device, mouse, ways, 100_001, false).Kind == DeviceReadBook.Kind.None
+            && book.Plan(device, mouse, ways, 100_001, false, due: true).Kind == DeviceReadBook.Kind.Probe);
 
         book.Answered(device, mouse, "mchose.frame4d", at);
         var kept = book.Plan(device, mouse, ways, 0, keptPresent: true);
@@ -81,9 +90,46 @@ static class DeviceReadTests
         check("Device reads: the user turning the reading on again forgets what went wrong",
             !saved.Stopped(device) && saved.Plan(device, mouse, ways, 0, false).Ways.SequenceEqual(ways));
 
+        // A mark left on disk (the app ended while a first try was under way): that read is left out of this run only, and the
+        // device is not kept out of it, since nothing was seen going wrong.
+        var marked = new DeviceReadBook();
+        marked.Skip(device, "mchose.realtek");
+        check("Device reads: a read left marked by an unfinished run is left out for that run only, the device's others still asked",
+            marked.Plan(device, mouse, ways, 0, false) is { Kind: DeviceReadBook.Kind.Probe } skipped
+            && skipped.Ways.SequenceEqual(["mchose.frame4d", "mchose.status"])
+            && marked.Entry(device) is null && !marked.Stopped(device));
+        // A device that comes back for real has what went wrong on it forgotten, unless it was stopped for it.
+        var back = new DeviceReadBook();
+        back.Harmed(device, "mchose.status");
+        bool excluded = back.Plan(device, mouse, ways, 0, false).Ways.SequenceEqual(["mchose.realtek", "mchose.frame4d"]);
+        back.CameBack(device);
+        bool forgotten = back.Plan(device, mouse, ways, 0, false).Ways.SequenceEqual(ways) && back.Entry(device)!.Bad.Count == 0;
+        back.Harmed(device, "mchose.status");
+        back.Harmed(device, "mchose.realtek");
+        bool wasStopped = back.Stopped(device);
+        back.CameBack(device);
+        check("Device reads: a device plugged in again forgets an earlier session's misbehaving, a stopped one stays stopped",
+            excluded && forgotten && wasStopped && back.Stopped(device)
+            && back.Plan(device, mouse, ways, 0, false).Kind == DeviceReadBook.Kind.None);
+
         check("Device reads: a damaged or empty file is an empty book, never an error",
             DeviceReadBook.Parse("{not json").Entry(device) is null && DeviceReadBook.Parse("").Entry(device) is null
             && DeviceReadBook.Parse("[{\"Device\":\"\"},null]").Entry("") is null && DeviceReadBook.Parse("{\"Device\":\"3837:1014\"}").Entry(device) is null);
+        // A file from before this version wrote its schema: what it calls bad may be no more than an interrupted run, so the
+        // lists are dropped once (a device stopped for misbehaving stays stopped), and what is found is kept.
+        var old = """
+            [{"Device":"258A:024F","Bad":["vgn.13"],"Stopped":false},
+             {"Device":"3837:1014","Way":"mchose.frame4d","Collection":"FF01:0001:2:1","Bad":["mchose.status"],"Stopped":true}]
+            """;
+        var migrated = DeviceReadBook.Parse(old);
+        check("Device reads: an old file's bad reads are dropped (a run cut short was taken for a harmed device), a stopped device stays stopped",
+            migrated.Plan("258A:024F", mouse, ["vgn.13"], 0, false) is { Kind: DeviceReadBook.Kind.Probe, Ways: ["vgn.13"] }
+            && migrated.Entry("258A:024F") is { Bad.Count: 0, Stopped: false } && migrated.Dirty
+            && migrated.Stopped("3837:1014") && migrated.Entry("3837:1014")!.Way == "mchose.frame4d" && migrated.Entry("3837:1014")!.Bad.Count == 0);
+        var rewritten = DeviceReadBook.Parse(migrated.Serialize());
+        check("Device reads: the file names its schema, so a later run does not drop the lists again",
+            migrated.Serialize().Contains("\"Schema\": 2") && !rewritten.Dirty
+            && rewritten.Plan("258A:024F", mouse, ["vgn.13"], 0, false).Kind == DeviceReadBook.Kind.Probe);
         var full = new DeviceReadBook();
         for (int i = 0; i < DeviceReadBook.MaximumEntries + 40; i++) full.Answered($"1234:{i:X4}", mouse, "way", at.AddMinutes(i));
         check("Device reads: the book never holds more than its limit, the oldest found let go first",

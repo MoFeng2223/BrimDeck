@@ -8,9 +8,10 @@ namespace BrimDeck.Native;
 // The kept reads (DeviceReadBook) on disk, in the app's data folder (device-reads.json), and the guard around trying a read
 // a device has not answered before: a mark (device-probe.json) is written through to the disk before the read is sent and
 // emptied when it returns. A mark left at the next start means the app ended while the device was being asked (the read hung
-// it, or the machine froze): that read is never sent to that device again (DeviceReadBook.Harmed). A clean exit (Finish)
-// empties the mark and lets no first try start after it, so quitting the app, or an update restarting it, during a first try
-// harms nothing. Reads already kept are not marked, so a device in use costs no disk write per reading.
+// it, the machine froze, or the user quit or updated): that read is left out for the new run only (DeviceReadBook.Skip), not
+// kept out of the device for good, since nothing was seen going wrong. A clean exit (Finish) empties the mark and lets no
+// first try start after it, so quitting the app, or an update restarting it, during a first try harms nothing. Reads already
+// kept are not marked, so a device in use costs no disk write per reading.
 internal static class DeviceReadStore
 {
     private const string BookFile = "device-reads.json", ProbeFile = "device-probe.json";
@@ -33,7 +34,7 @@ internal static class DeviceReadStore
                 try
                 {
                     var mark = JsonSerializer.Deserialize<Mark>(left);
-                    if (mark is { Device.Length: > 0, Way.Length: > 0 }) _book.Harmed(mark.Device, mark.Way);
+                    if (mark is { Device.Length: > 0, Way.Length: > 0 }) _book.Skip(mark.Device, mark.Way);
                 }
                 catch (JsonException) { }
                 _marked = true; Clear();

@@ -76,7 +76,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
 
     // The page opened: the worker reads what is due. ReadNow: every device at once (the computer woke, the user came back).
     public void Refresh() { if (_demand == DeviceDemand.Watch) Wake(); }
-    public void ReadNow() { if (_demand == DeviceDemand.Watch) { _forced = true; _corsair?.ReadNow(); Wake(); } }
+    public void ReadNow() { if (_demand == DeviceDemand.Watch) { _forced = true; _due = true; _corsair?.ReadNow(); Wake(); } }
 
     public void Dispose()
     {
@@ -94,6 +94,9 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     // asked (every other brand and the standard usages) and those only listened to (the PlayStation controllers).
     private long _logitechAt = Never, _askAt = Never, _listenAt = Never;
     private volatile bool _arrived, _removed, _forced;
+    // Set by ReadNow (the user came back, the machine woke): a brand read whose search is waiting out its interval is made now,
+    // since a device that was asleep behind its receiver has just been woken.
+    private volatile bool _due;
     // The worker's own: whether it has made a full pass since it started (_listed waits for the UI thread to take the result).
     private bool _scanned;
     private volatile bool _restart;
@@ -257,6 +260,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             bool followUp = !changed && _followUps > 0 && Due(_askAt, FollowUpDelay);
             if (followUp) _followUps--;
             bool forced = _forced; _forced = false;
+            bool due = _due; _due = false;
             bool linkUp = false;
             bool moved = ApplyEvents(ref linkUp) | ApplySide();
             bool all = changed || followUp || forced || !_scanned;
@@ -270,8 +274,10 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             bool listen = all || _current.TryGetValue(DeviceSource.Sony, out var sony) && sony.Count > 0 && Due(_listenAt, DevicePolling.Listen);
             if (logitech || ask || listen)
             {
+                _familyDue = due;
                 try { Scan(logitech, ask, listen); moved = true; }
                 catch { }
+                finally { _familyDue = false; }
                 // A pass counts as done even when it failed, so a failing one is tried again at its next interval, not at once.
                 long now = Environment.TickCount64;
                 if (logitech) _logitechAt = now;
@@ -950,8 +956,10 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     internal static string Collection(HidInfo info) => $"{info.UsagePage:X4}:{info.Usage:X4}:{info.Interface}:{info.Collection}";
 
     // On the calling thread: how often Family was entered and how often it went on to ask a read, for Scan to tell a device that
-    // gave no reading from one that was sent nothing.
+    // gave no reading from one that was sent nothing. _familyDue: this pass is one the user asked for (ReadNow), so a search
+    // waiting out its interval is made now.
     [ThreadStatic] private static int _familyCalls, _familyAsks;
+    [ThreadStatic] private static bool _familyDue;
 
     // Asks a collection the reads DeviceReadBook plans out of ways (the brand's reads this collection takes, in order): the
     // kept one alone, or each in turn while it is being found. ask: one read on the collection, null when it was not answered;
@@ -967,7 +975,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         var book = DeviceReadStore.Book;
         bool keptPresent = book.KeptCollection(device) is { } kept && _present.Contains(device + "|" + kept);
         long now = Environment.TickCount64;
-        var plan = book.Plan(device, collection, ways, now, keptPresent);
+        var plan = book.Plan(device, collection, ways, now, keptPresent, _familyDue);
         if (plan.Ways.Count == 0) return null;
         if (plan.Kind == DeviceReadBook.Kind.Probe && ArrivedAt.TryGetValue(device, out var came) && now - came < SettleMs) return null;
         // In a check of a kept read gone quiet, another read that finds the device asleep tells why it is quiet, not that it
@@ -1009,17 +1017,23 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             if (!_seen.Contains(device))
             {
                 book.Arrived(device);
-                // The devices there at the first pass have not just been plugged in.
-                if (!first) ArrivedAt[device] = now;
+                // The devices there at the first pass have not just been plugged in. One that comes back during the run (a
+                // receiver pulled out and in again, a cable put back) has its old readings tried afresh: what went wrong on it
+                // in an earlier session is forgotten (CameBack), unless the device was stopped for it.
+                if (!first) { ArrivedAt[device] = now; book.CameBack(device); }
             }
         lock (Probed)
         {
             var harmed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var tries in Probed.GroupBy(tried => tried.Device, StringComparer.OrdinalIgnoreCase))
             {
+                // Only a device that is gone altogether is one a read may have harmed (a firmware that resets on the request):
+                // a collection of it that Windows drops and lists again (a receiver's, while the keyboard comes and goes, or
+                // one it re-enumerates on its own) says nothing about the read.
+                if (devices.Contains(tries.Key)) continue;
                 long lost;
                 if (Removals.TryGetValue(tries.Key, out var removed)) lost = removed;
-                else if (_seen.Contains(tries.Key) && !devices.Contains(tries.Key)) lost = now;
+                else if (_seen.Contains(tries.Key)) lost = now;
                 else continue;
                 var culprit = tries.Where(tried => tried.Start <= lost && lost <= tried.End + ProbeHarmMs).MaxBy(tried => tried.Start);
                 if (culprit is null) continue;
