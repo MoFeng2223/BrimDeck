@@ -78,10 +78,13 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("可选 API Key","Optional API keys"));
         var hefengKey=KeyField(state.Schedule.HeFengKey,text=>{state.Schedule.HeFengKey=text;Save();});
         var hefengHost=KeyField(state.Schedule.HeFengHost,text=>{state.Schedule.HeFengHost=text;Save();});
-        var amapKey=KeyField(state.Schedule.AmapKey,text=>{state.Schedule.AmapKey=text;Save();});
+        // 时光机默认关闭：10 天要 10 次请求，开不开由用户按自己的配额决定。
+        var hefengHistory=new CheckBox {Style=(Style)FindResource("SettingsToggle"),Padding=new Thickness(0),IsChecked=state.Schedule.HeFengHistory,VerticalAlignment=VerticalAlignment.Center};
+        hefengHistory.Checked+=(_,_)=>{if(state.Schedule.HeFengHistory)return;state.Schedule.HeFengHistory=true;Save();preview.Content=new WeatherSettingsPreview(state);};
+        hefengHistory.Unchecked+=(_,_)=>{if(!state.Schedule.HeFengHistory)return;state.Schedule.HeFengHistory=false;Save();preview.Content=new WeatherSettingsPreview(state);};
         Group(Row(Loc.T("和风天气 Key","QWeather key"),hefengKey,TextLine(Loc.T("填写后自动优先使用和风的全维度数据。","With a key, QWeather is preferred for all domains."),11,TextSecondary)),
-              Row(Loc.T("和风 API Host","QWeather host"),hefengHost,TextLine("devapi.qweather.com",11,TextSecondary)),
-              Row(Loc.T("高德 Key","Amap key"),amapKey,TextLine(Loc.T("国内实况与 4 天预报的补充来源。","Supplementary source for China current and 4-day."),11,TextSecondary)));
+              Row(Loc.T("和风 API Host","QWeather host"),hefengHost,TextLine(Loc.T("留空用 devapi.qweather.com；建议填控制台的专属 Host","Blank uses devapi.qweather.com; set the host from your console"),11,TextSecondary)),
+              Row(Loc.T("历史天气用时光机","History from time machine"),hefengHistory,TextLine(Loc.T("过去 10 天改由和风提供，含日出日落与月相；每天最多请求一次，结果按日期缓存。","The past 10 days come from QWeather, with sun and moon; at most one request per day, cached by date."),11,TextSecondary)));
         cityRows.Unloaded+=(_,_)=>{active=false;pending?.Cancel();pending?.Dispose();pending=null;fetchCts?.Cancel();fetchCts?.Dispose();fetchCts=null;popup.IsOpen=false;};
 
         string DomainLabel(WeatherDomain domain)=>domain switch
@@ -96,7 +99,7 @@ public sealed partial class SettingsWindow
             WeatherDomain.Daily=>Loc.T("24 天每日天气、高低温、降水、风与紫外线。","24 days of highs, lows, rain, wind and UV."),
             WeatherDomain.Sun=>Loc.T("每天日出与日落时间。","Sunrise and sunset for each day."),
             WeatherDomain.Air=>Loc.T("AQI、PM2.5 与 PM10。","AQI, PM2.5 and PM10."),
-            WeatherDomain.History=>Loc.T("过去 10 天的实测数据。","Observed data for the past 10 days."),_=>""
+            WeatherDomain.History=>Loc.T("过去 10 天；打开上方的时光机开关后改由和风提供。","The past 10 days; QWeather supplies them once the time-machine switch above is on."),_=>""
         };
         TextBox KeyField(string value,Action<string> save)
         {

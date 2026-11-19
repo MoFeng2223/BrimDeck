@@ -93,6 +93,9 @@ internal sealed class WeatherSnapshot
     public double CloudPercent {get;set;} public double PrecipitationMm {get;set;} public string ConditionText {get;set;}="";
     // 空气质量：-1 表示来源没有提供，界面据此隐藏。
     public int Aqi {get;set;}=-1; public int Pm25 {get;set;}=-1; public int Pm10 {get;set;}=-1; public int AqiLevel {get;set;}=-1; public string AqiText {get;set;}="";
+    // 空气详情：首要污染物、健康影响与两类人群建议；AirPollutants 是「污染物名称 → 值 单位」的展示用列表。
+    public string AirPrimary {get;set;}=""; public string AirEffect {get;set;}=""; public string AirAdvice {get;set;}=""; public string AirAdviceSensitive {get;set;}="";
+    public Dictionary<string,string> AirPollutants {get;set;}=[];
     // 当日各时段（24 个）
     public string[] HourTimes {get;set;}=[]; public double[] HourTempsC {get;set;}=[]; public int[] HourHumidity {get;set;}=[]; public int[] HourCodes {get;set;}=[]; public int[] HourRainProb {get;set;}=[];
     public double[] HourFeelsLikeC {get;set;}=[]; public double[] HourPrecipMm {get;set;}=[]; public double[] HourWindKmh {get;set;}=[]; public double[] HourWindGustKmh {get;set;}=[];
