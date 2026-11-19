@@ -143,7 +143,8 @@ internal sealed class WeatherView : UserControl
             City city;
             if (selected >= 0 && selected < state.Cities.Count) city = state.Cities[selected];
             else city = await WeatherData.LocateAsync(token) ?? new City("当前位置", 0, 0);
-            var snapshot = await WeatherData.CurrentAsync(city, state.Schedule, token);
+            // 历史单独一轮：先画不含历史的一版，历史到了再整体替换。首屏不必等 10 个时光机请求。
+            var snapshot = await WeatherData.CurrentAsync(city, state.Schedule, token, partial => { if (request == generation) Render(partial); });
             if (request != generation) return;
             if (token.IsCancellationRequested) return;
             Render(snapshot); state.Cache[key] = snapshot; WeatherData.Save(state); _cycleStart = DateTime.UtcNow;

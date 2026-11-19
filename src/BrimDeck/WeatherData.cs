@@ -11,39 +11,81 @@ internal sealed record City(string Name, double Latitude, double Longitude);
 internal static class WeatherData
 {
     internal sealed class State { public List<City> Cities {get;set;}=[]; public int Selected {get;set;}=-1; public Dictionary<string,WeatherSnapshot> Cache {get;set;}=[]; public WeatherSettings Schedule {get;set;}=new(); }
-    private static readonly string FilePath=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"BrimDeck","weather.json");
+    // 设置文件只放城市与调度：快照按城市各存一份，刷新一座城不会重写整个文件，也不会和别的窗口互相覆盖。
+    private sealed class SettingsFile
+    {
+        public List<City> Cities { get; set; } = [];
+        public int Selected { get; set; } = -1;
+        public WeatherSettings Schedule { get; set; } = new();
+    }
+    private sealed class SnapshotFile { public string Key {get;set;}=""; public WeatherSnapshot? Value {get;set;} }
+    private static readonly string FilePath=Path.Combine(WeatherFiles.Root,"weather.json");
     private static readonly HttpClient Http=new() {Timeout=TimeSpan.FromSeconds(20)};
     // 快照用 NaN 表示来源未提供的数值；命名浮点字面量让缓存可以安全写入并还原，缩进让 weather.json 可读。
-    private static readonly JsonSerializerOptions WeatherJson=new() {WriteIndented=true,Encoder=System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,NumberHandling=System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals};
-    // 手动读取以兼容旧版“缓存值是 JSON 字符串”的格式：新格式直接把快照对象写进 Cache。
+    private static readonly JsonSerializerOptions WeatherJson=new() {WriteIndented=true,Encoder=System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,NumberHandling=System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals,DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull};
+    // 已落盘的快照时间：同一条数据没有更新就不再重复写盘，刷新一座城只碰一个文件。
+    private static readonly object SnapLock=new();
+    private static readonly Dictionary<string,DateTimeOffset> Written=new(StringComparer.Ordinal);
+    private static int _started;
+    // 进程内只做一次：清理过期缓存条目、恢复当日请求计数。
+    private static void Start()
+    {
+        if(Interlocked.Exchange(ref _started,1)==1)return;
+        WeatherFiles.Ensure(WeatherFiles.Snapshots);
+        WeatherCache.Prune(TimeSpan.FromDays(14));
+        RequestGate.Restore();
+    }
     internal static State Load()
     {
+        Start();
+        var state=new State();
         try
         {
-            using var doc=JsonDocument.Parse(File.ReadAllText(FilePath));
-            var root=doc.RootElement;
-            var state=new State();
-            if(root.TryGetProperty("Cities",out var cities))state.Cities=cities.Deserialize<List<City>>(WeatherJson)??[];
-            if(root.TryGetProperty("Selected",out var selected)&&selected.ValueKind==JsonValueKind.Number)state.Selected=selected.GetInt32();
-            if(root.TryGetProperty("Schedule",out var schedule))state.Schedule=schedule.Deserialize<WeatherSettings>(WeatherJson)??new();
-            if(root.TryGetProperty("Cache",out var cache)&&cache.ValueKind==JsonValueKind.Object)
-                foreach(var entry in cache.EnumerateObject())
-                {
-                    try
-                    {
-                        var snapshot=entry.Value.ValueKind==JsonValueKind.String
-                            ? JsonSerializer.Deserialize<WeatherSnapshot>(entry.Value.GetString()??"",WeatherJson)
-                            : entry.Value.Deserialize<WeatherSnapshot>(WeatherJson);
-                        if(snapshot is not null)state.Cache[entry.Name]=snapshot;
-                    }
-                    catch { }
-                }
-            return state;
+            string text=File.Exists(FilePath)?File.ReadAllText(FilePath):"";
+            if(text.Length>0&&JsonSerializer.Deserialize<SettingsFile>(text,WeatherJson) is { } file)
+            {
+                state.Cities=file.Cities??[];
+                state.Selected=file.Selected;
+                state.Schedule=file.Schedule??new();
+            }
         }
-        catch { return new(); }
+        catch { }
+        foreach(var (key,snapshot) in ReadSnapshots())state.Cache[key]=snapshot;
+        return state;
     }
-    // Merges local cache into the persisted one so an in-flight refresh never wipes another view's result.
-    internal static void Save(State state) {var latest=Load();foreach(var (key,value) in state.Cache)latest.Cache[key]=value;state.Cache=latest.Cache;Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);File.WriteAllText(FilePath,JsonSerializer.Serialize(state,WeatherJson));}
+    private static IEnumerable<(string Key,WeatherSnapshot Value)> ReadSnapshots()
+    {
+        string[] files;
+        try { files=Directory.Exists(WeatherFiles.Snapshots)?Directory.GetFiles(WeatherFiles.Snapshots,"*.json"):[]; }
+        catch { yield break; }
+        foreach(var file in files)
+        {
+            string key="";WeatherSnapshot? snapshot=null;
+            try
+            {
+                if(JsonSerializer.Deserialize<SnapshotFile>(File.ReadAllText(file),WeatherJson) is { Value:{ } value } entry){key=entry.Key;snapshot=value;}
+            }
+            catch { }
+            if(snapshot is null||key.Length==0)continue;
+            // 记下已落盘的时间，接下来的保存就不会把它再写一遍。
+            lock(SnapLock)Written[key]=snapshot.FetchedAt;
+            yield return (key,snapshot);
+        }
+    }
+    // 设置与快照分开写：任一文件损坏都只影响自己，不会连带把城市列表一起弄丢。
+    internal static void Save(State state)
+    {
+        WeatherFiles.WriteAtomic(FilePath,JsonSerializer.Serialize(new SettingsFile{Cities=state.Cities,Selected=state.Selected,Schedule=state.Schedule},WeatherJson));
+        lock(SnapLock)
+            foreach(var (key,snapshot) in state.Cache)
+            {
+                if(Written.TryGetValue(key,out var at)&&snapshot.FetchedAt<=at)continue;
+                if(!WeatherFiles.WriteAtomic(Path.Combine(WeatherFiles.Snapshots,WeatherFiles.Name(key,".json")),JsonSerializer.Serialize(new SnapshotFile{Key=key,Value=snapshot},WeatherJson)))continue;
+                Written[key]=snapshot.FetchedAt;
+            }
+        // 请求计数随保存一起落盘：重启后不会把当天额度重新算满。
+        RequestGate.Flush();
+    }
     internal static async Task<List<City>> Search(string query,CancellationToken token)
     {
         using var doc=JsonDocument.Parse(await Http.GetStringAsync("https://geocoding-api.open-meteo.com/v1/search?count=10&language="+(Loc.IsEnglish?"en":"zh")+"&name="+Uri.EscapeDataString(query),token));
@@ -70,13 +112,13 @@ internal static class WeatherData
         } catch { return null; }
     }
     // 多源调度入口：当前、24 小时、24 天（历史 10 + 今天 + 未来 13）、日出日落与空气质量由 WeatherAggregator 统一拼装。
-    internal static async Task<WeatherSnapshot> CurrentAsync(City city, WeatherSettings schedule, CancellationToken token)
-        => await WeatherAggregator.FetchAsync(city, schedule, token);
-    // 在 daily 正序数组中定位“今天”的索引；直接按日期匹配，兼容任意缓存天数，找不到时回退 0。
+    // 历史单独一轮，progress 让界面先画不含历史的版本，历史到了再用返回值整体替换。
+    internal static async Task<WeatherSnapshot> CurrentAsync(City city, WeatherSettings schedule, CancellationToken token, Action<WeatherSnapshot>? progress = null)
+        => await WeatherAggregator.FetchAsync(city, schedule, token, progress);
+    // 在 daily 正序数组中定位“今天”的索引；Today 是聚合时写下的城市当地日期，找不到时回退 0。
     internal static int TodayIndex(WeatherSnapshot s)
     {
-        // 优先使用聚合时写下的城市当地日期；旧缓存没有该字段时回退到用户本地日期。
-        string today = s.Today.Length > 0 ? s.Today : s.FetchedAt.ToLocalTime().ToString("yyyy-MM-dd");
+        string today = s.Today;
         for (int i = 0; i < s.DayDates.Length; i++) if (s.DayDates[i].StartsWith(today)) return i;
         return 0;
     }
@@ -108,7 +150,7 @@ internal sealed class WeatherSnapshot
     public double[] DayWindDirDeg {get;set;}=[]; public string[] DayWindDir {get;set;}=[]; public int[] DayHumidity {get;set;}=[]; public double[] DayPressureHpa {get;set;}=[]; public string[] DayMoonPhase {get;set;}=[];
     // 每个数据域实际贡献的来源，例如 Daily → "中国天气网 + Open-Meteo"。
     public Dictionary<string,string> Sources {get;set;}=[];
-    // 当前读数逐字段的来源（字段名 → 来源 id），供详情页逐项着色标注；旧缓存没有时为空字典，界面自动降级为不标注。
+    // 当前读数逐字段的来源（字段名 → 来源 id），供详情页逐项着色标注；来源未给出时为空字典，界面不标注。
     public Dictionary<string,string> FieldSources {get;set;}=[];
     // 每个域参与调度的全部来源（含未提供数据的，保序去重），供详情页把每一家来源都标注出来。
     public Dictionary<string,string[]> DomainSources {get;set;}=[];

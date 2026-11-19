@@ -53,13 +53,19 @@ public sealed partial class SettingsWindow
             try {await Task.Delay(350,token);var found=await WeatherData.Search(query,token);if(token.IsCancellationRequested||!active)return;options.ItemsSource=found;popup.IsOpen=found.Count>0;}catch(OperationCanceledException){}catch{return;}
         };
         var controlsRow=new StackPanel {Orientation=Orientation.Horizontal};controlsRow.Children.Add(inputHost);controlsRow.Children.Add(add);Group(Row(Loc.T("搜索城市","Search city"),controlsRow));
-        SectionTitle(Loc.T("更新与数据","Updates and data"));Group(Row(Loc.T("自动更新","Auto update"),TextLine(Loc.T("每 15 分钟","Every 15 minutes"),12,TextSecondary)),Row(Loc.T("离线时","Offline"),TextLine(Loc.T("保留最近天气","Keep recent weather"),12,TextSecondary)));
+        SectionTitle(Loc.T("更新与数据","Updates and data"));Group(Row(Loc.T("自动更新","Auto update"),TextLine(Loc.T("每 15 分钟","Every 15 minutes"),12,TextSecondary)),Row(Loc.T("离线时","Offline"),TextLine(Loc.T("自动使用本地缓存","Falls back to the local cache"),12,TextSecondary)));
+        // 请求与缓存：调度是「按需下探 + 分域缓存」，这里把当天的实际请求量和磁盘占用摆出来，配额一目了然。
+        SectionTitle(Loc.T("请求与缓存","Requests and cache"));
+        var usage=WeatherCache.Usage();
+        var used=WeatherSources.All.Select(source=>(Name:source.Info.Id switch{"tencent"=>Loc.T("腾讯","Tencent"),"weathercomcn"=>Loc.T("中国天气网","ChinaWx"),"hefeng"=>Loc.T("和风","QWeather"),_=>source.Info.Name},Count:RequestGate.Today(source.Info.Id))).Where(item=>item.Count>0).ToArray();
+        Group(Row(Loc.T("今日请求","Requests today"),TextLine(used.Length==0?Loc.T("尚未发起请求","No requests yet"):string.Join(" · ",used.Select(item=>$"{item.Name} {item.Count}")),12,TextSecondary)),
+              Row(Loc.T("本地缓存","Local cache"),TextLine(Loc.T($"{usage.Count} 项 · {usage.Bytes/1024.0:0} KB（14 天未用自动清理）",$"{usage.Count} entries · {usage.Bytes/1024.0:0} KB (unused entries purged after 14 days)"),12,TextSecondary)));
         // 来源调度：每个数据域可单独指定来源；自动档在国内城市优先国内源，国外城市优先全球源，Open-Meteo 永远兜底。
         SectionTitle(Loc.T("数据来源调度","Data source scheduling"));
         var domestic=new ComboBox {Width=200,Style=(Style)FindResource("SettingsCombo"),ItemsSource=new[]{Loc.T("国内源优先","Domestic first"),Loc.T("全球源优先","Global first")},SelectedIndex=state.Schedule.PreferDomestic?0:1};
         PopupMotion.Attach(domestic);
         domestic.SelectionChanged+=(_,_)=>{if(domestic.SelectedIndex<0)return;bool value=domestic.SelectedIndex==0;if(state.Schedule.PreferDomestic==value)return;state.Schedule.PreferDomestic=value;Save();preview.Content=new WeatherSettingsPreview(state);};
-        Group(Row(Loc.T("调度策略","Scheduling"),domestic,TextLine(Loc.T("国内城市优先腾讯/中国天气网，国外城市优先 Open-Meteo/MET Norway；缺口自动补齐。","Chinese cities prefer Tencent/China Weather; other cities prefer Open-Meteo/MET Norway. Gaps are filled automatically."),11,TextSecondary)));
+        Group(Row(Loc.T("调度策略","Scheduling"),domestic,TextLine(Loc.T("每个域按需下探：首选来源够用就停手，缺哪块才找下一家；Open-Meteo 永远兜底。","Each domain stops at its first source that covers it; Open-Meteo always backs up."),11,TextSecondary)));
         var domainRows=new List<FrameworkElement>();
         foreach(var domain in new[]{WeatherDomain.Current,WeatherDomain.Hourly,WeatherDomain.Daily,WeatherDomain.Sun,WeatherDomain.Air,WeatherDomain.History})
         {
@@ -78,13 +84,8 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("可选 API Key","Optional API keys"));
         var hefengKey=KeyField(state.Schedule.HeFengKey,text=>{state.Schedule.HeFengKey=text;Save();});
         var hefengHost=KeyField(state.Schedule.HeFengHost,text=>{state.Schedule.HeFengHost=text;Save();});
-        // 时光机默认关闭：10 天要 10 次请求，开不开由用户按自己的配额决定。
-        var hefengHistory=new CheckBox {Style=(Style)FindResource("SettingsToggle"),Padding=new Thickness(0),IsChecked=state.Schedule.HeFengHistory,VerticalAlignment=VerticalAlignment.Center};
-        hefengHistory.Checked+=(_,_)=>{if(state.Schedule.HeFengHistory)return;state.Schedule.HeFengHistory=true;Save();preview.Content=new WeatherSettingsPreview(state);};
-        hefengHistory.Unchecked+=(_,_)=>{if(!state.Schedule.HeFengHistory)return;state.Schedule.HeFengHistory=false;Save();preview.Content=new WeatherSettingsPreview(state);};
         Group(Row(Loc.T("和风天气 Key","QWeather key"),hefengKey,TextLine(Loc.T("填写后自动优先使用和风的全维度数据。","With a key, QWeather is preferred for all domains."),11,TextSecondary)),
-              Row(Loc.T("和风 API Host","QWeather host"),hefengHost,TextLine(Loc.T("留空用 devapi.qweather.com；建议填控制台的专属 Host","Blank uses devapi.qweather.com; set the host from your console"),11,TextSecondary)),
-              Row(Loc.T("历史天气用时光机","History from time machine"),hefengHistory,TextLine(Loc.T("过去 10 天改由和风提供，含日出日落与月相；每天最多请求一次，结果按日期缓存。","The past 10 days come from QWeather, with sun and moon; at most one request per day, cached by date."),11,TextSecondary)));
+              Row(Loc.T("和风 API Host","QWeather host"),hefengHost,TextLine(Loc.T("必填：控制台分配的项目 Host，例如 abcxyz.re.qweatherapi.com；留空则不启用和风。","Required: the project host from your console, e.g. abcxyz.re.qweatherapi.com; blank disables QWeather."),11,TextSecondary)));
         cityRows.Unloaded+=(_,_)=>{active=false;pending?.Cancel();pending?.Dispose();pending=null;fetchCts?.Cancel();fetchCts?.Dispose();fetchCts=null;popup.IsOpen=false;};
 
         string DomainLabel(WeatherDomain domain)=>domain switch
@@ -99,7 +100,7 @@ public sealed partial class SettingsWindow
             WeatherDomain.Daily=>Loc.T("24 天每日天气、高低温、降水、风与紫外线。","24 days of highs, lows, rain, wind and UV."),
             WeatherDomain.Sun=>Loc.T("每天日出与日落时间。","Sunrise and sunset for each day."),
             WeatherDomain.Air=>Loc.T("AQI、PM2.5 与 PM10。","AQI, PM2.5 and PM10."),
-            WeatherDomain.History=>Loc.T("过去 10 天；打开上方的时光机开关后改由和风提供。","The past 10 days; QWeather supplies them once the time-machine switch above is on."),_=>""
+            WeatherDomain.History=>Loc.T("过去 10 天；选「和风天气」会启用时光机，10 天 = 10 次请求。","The past 10 days; choosing QWeather enables the time machine, 10 days = 10 requests."),_=>""
         };
         TextBox KeyField(string value,Action<string> save)
         {

@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Net;
-using System.Net.Http;
 using System.Text.Json;
 using BrimDeck.Core;
 
@@ -116,12 +114,11 @@ internal sealed class WeatherSettings
     public bool PreferDomestic { get; set; } = true;
     public Dictionary<string, string> Sources { get; set; } = [];
     public string HeFengKey { get; set; } = "";
-    public string HeFengHost { get; set; } = "devapi.qweather.com";
-    // 和风时光机：过去 10 天每天一次请求，默认关闭；开启后历史由和风提供，覆盖中国天气网的实测降水。
-    public bool HeFengHistory { get; set; }
+    // 控制台分配的项目 Host：公共 devapi 域名已停止服务，不再提供默认值，留空即不启用和风。
+    public string HeFengHost { get; set; } = "";
     public string Choice(WeatherDomain domain) => Sources.TryGetValue(domain.ToString(), out var value) && value.Length > 0 ? value : "auto";
-    // 历史域：显式把「历史天气」指定为和风，或打开时光机开关，才走和风。默认关闭——10 天要 10 次请求。
-    public bool WantsHeFengHistory() => HeFengHistory || Choice(WeatherDomain.History) == "hefeng";
+    // 历史域由用户在来源调度里显式选「和风天气」才走时光机：10 天 = 10 次请求，不做隐式默认。
+    public bool PicksHeFengForHistory() => Choice(WeatherDomain.History) == "hefeng";
 }
 
 // 来源集合与查询入口。
@@ -142,21 +139,31 @@ internal interface IWeatherSource
 {
     WeatherSourceInfo Info { get; }
     bool CanServe(City city, WeatherSettings settings);
-    Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, CancellationToken token);
+    // need 是本次真正缺的域：来源只请求覆盖这些域的接口，不必为一个日出日落把逐时和空气一起拉回来。
+    Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token);
 }
 
-// 多源调度与合并：每个域按一条来源链依次尝试，先到先得，缺失字段由后续来源补齐。
+// 多源调度：每个域一条来源链，逐轮按需下探——第 1 轮只请求各域的首选来源，
+// 合并后检查覆盖情况，只对仍缺口的数据域才去请求链上的下一家。
+// 这样既保留「先到先得、后续补缺」的合并语义，又不会为了一个字段把整条链全打一遍。
 internal static class WeatherAggregator
 {
     private static readonly TimeSpan SourceTimeout = TimeSpan.FromSeconds(15);
 
-    public static async Task<WeatherSnapshot> FetchAsync(City city, WeatherSettings settings, CancellationToken token)
+    // 两段式：先取实况与预报让首屏立刻出数，历史（10 次请求）再单独补一轮。
+    // progress 在第一段结束时回调一次，界面可以先画不含历史的版本，历史到了再整体替换。
+    public static async Task<WeatherSnapshot> FetchAsync(City city, WeatherSettings settings, CancellationToken token, Action<WeatherSnapshot>? progress = null)
     {
         var chains = Enum.GetValues<WeatherDomain>().ToDictionary(domain => domain, domain => Chain(domain, city, settings));
-        var sources = chains.Values.SelectMany(chain => chain).DistinctBy(source => source.Info.Id).ToArray();
-        var fetched = await Task.WhenAll(sources.Select(async source => (source.Info.Id, Part: await TryAsync(source, city, settings, token))));
-        var parts = fetched.Where(item => item.Part is not null).ToDictionary(item => item.Id, item => item.Part!);
+        var parts = new Dictionary<string, WeatherPart>(StringComparer.Ordinal);
+        var tried = new HashSet<string>(StringComparer.Ordinal);
+        var served = new Dictionary<string, HashSet<WeatherDomain>>(StringComparer.Ordinal);
+        var live = Enum.GetValues<WeatherDomain>().Where(domain => domain != WeatherDomain.History).ToArray();
+        await RoundsAsync(city, settings, chains, parts, tried, served, live, token);
         if (parts.Count == 0) throw new InvalidOperationException("没有可用的天气来源");
+        // 第一段结果先交给界面；历史补上后返回的快照会覆盖它。
+        if (progress is not null && chains[WeatherDomain.History].Count > 0) progress(Merge(city, chains, parts));
+        await RoundsAsync(city, settings, chains, parts, tried, served, [WeatherDomain.History], token);
         return Merge(city, chains, parts);
     }
 
@@ -173,7 +180,7 @@ internal static class WeatherAggregator
         if (choice != "auto") Add(WeatherSources.Find(choice));
         // 有 key 的和风天气质量最好，自动调度时优先（用户在单个域手动指定时不被覆盖）。
         // 历史域例外：时光机按天计费，只有用户显式打开开关或指定来源时才请求。
-        if (settings.HeFengKey.Trim().Length > 0 && (domain != WeatherDomain.History || settings.WantsHeFengHistory())) Add(WeatherSources.Find("hefeng"));
+        if (settings.HeFengKey.Trim().Length > 0 && (domain != WeatherDomain.History || settings.PicksHeFengForHistory())) Add(WeatherSources.Find("hefeng"));
         bool china = Geo.IsChina(city);
         if (china && settings.PreferDomestic)
         {
@@ -182,6 +189,8 @@ internal static class WeatherAggregator
                 case WeatherDomain.Current: Add(WeatherSources.Find("tencent")); Add(WeatherSources.Find("weathercomcn")); break;
                 case WeatherDomain.Daily: Add(WeatherSources.Find("weathercomcn")); Add(WeatherSources.Find("tencent")); break;
                 case WeatherDomain.Air: Add(WeatherSources.Find("tencent")); Add(WeatherSources.Find("weathercomcn")); break;
+                // 中国天气网的月历带「过去 10 天的实测降水」，是免费历史的首选，排在和风时光机之后。
+                case WeatherDomain.History: Add(WeatherSources.Find("weathercomcn")); break;
                 case WeatherDomain.Sun: break;                 // 国内源不提供日出日落，交给 Open-Meteo
                 case WeatherDomain.Hourly: break;              // 国内源没有稳定的小时接口
             }
@@ -191,11 +200,130 @@ internal static class WeatherAggregator
         return chain;
     }
 
-    private static async Task<WeatherPart?> TryAsync(IWeatherSource source, City city, WeatherSettings settings, CancellationToken token)
+    // 逐轮下探：每轮把「同一来源的多个域」合并成一次请求，取完再看缺口。
+    private static async Task RoundsAsync(City city, WeatherSettings settings, Dictionary<WeatherDomain, List<IWeatherSource>> chains,
+        Dictionary<string, WeatherPart> parts, HashSet<string> tried, Dictionary<string, HashSet<WeatherDomain>> served,
+        IReadOnlyCollection<WeatherDomain> domains, CancellationToken token)
+    {
+        var pending = domains.ToHashSet();
+        int max = chains.Values.Select(chain => chain.Count).DefaultIfEmpty(0).Max();
+        for (int round = 0; round < max && pending.Count > 0; round++)
+        {
+            var wanted = new Dictionary<IWeatherSource, List<WeatherDomain>>();
+            foreach (var domain in pending)
+            {
+                var chain = chains[domain];
+                int index = round;
+                // 跳过这条链上已经为同一域试过的来源，避免失败后在下一轮重复请求。
+                while (index < chain.Count && tried.Contains(chain[index].Info.Id + "|" + domain)) index++;
+                if (index >= chain.Count) continue;
+                var source = chain[index];
+                if (!wanted.TryGetValue(source, out var list)) wanted[source] = list = [];
+                list.Add(domain);
+                tried.Add(source.Info.Id + "|" + domain);
+            }
+            if (wanted.Count == 0) break;
+            // 该来源本轮要补的域；已经取过且确实覆盖这些域的来源不再请求，直接进入合并。
+            var calls = wanted.Where(pair => !Covers(served, pair.Key.Info.Id, pair.Value)).ToArray();
+            if (calls.Length > 0)
+            {
+                var results = await Task.WhenAll(calls.Select(async pair =>
+                {
+                    var part = await TryAsync(pair.Key, city, settings, pair.Value, token);
+                    return (Id: pair.Key.Info.Id, Domains: (IReadOnlyCollection<WeatherDomain>)pair.Value, Part: part);
+                }));
+                foreach (var (id, covered, part) in results)
+                {
+                    if (!served.TryGetValue(id, out var set)) served[id] = set = [];
+                    foreach (var domain in covered) set.Add(domain);
+                    if (part is null) continue;
+                    // 记下响应里实际带了哪些域：一个接口常顺带给多个域，下一轮就不必为这些域再请求一次。
+                    if (part.Current is not null) set.Add(WeatherDomain.Current);
+                    if (part.Hours is { Count: > 0 }) set.Add(WeatherDomain.Hourly);
+                    if (part.Air is not null) set.Add(WeatherDomain.Air);
+                    if (part.Days is { Count: > 0 } provided)
+                    {
+                        set.Add(WeatherDomain.Daily);
+                        if (provided.Any(day => day.Sunrise is not null || day.Sunset is not null)) set.Add(WeatherDomain.Sun);
+                    }
+                    // 同一个来源可能在两段里各被请求一次（例如和风先给预报、第二轮单独补历史），
+                    // 后一段只拿到部分数据，直接覆盖会把前一段的逐时/空气弄丢，所以按字段补齐。
+                    if (parts.TryGetValue(id, out var existing)) Absorb(existing, part);
+                    else parts[id] = part;
+                }
+            }
+            var snapshot = Merge(city, chains, parts);
+            pending.RemoveWhere(domain => Satisfied(domain, snapshot));
+        }
+    }
+
+    private static bool Covers(Dictionary<string, HashSet<WeatherDomain>> served, string id, IReadOnlyCollection<WeatherDomain> domains)
+        => served.TryGetValue(id, out var set) && domains.All(set.Contains);
+
+    // 同一来源分多次返回时把结果并进同一份：能空位补齐的就补，日级数据按日期合并而不是互相覆盖。
+    private static void Absorb(WeatherPart target, WeatherPart extra)
+    {
+        target.TimeZone ??= extra.TimeZone;
+        target.Current ??= extra.Current;
+        target.Air ??= extra.Air;
+        target.Hours ??= extra.Hours;
+        if (extra.Days is not { Count: > 0 } incoming) return;
+        if (target.Days is not { Count: > 0 }) { target.Days = incoming; return; }
+        var known = target.Days.Select(day => day.Date).ToHashSet(StringComparer.Ordinal);
+        var merged = new List<DayPoint>(target.Days);
+        merged.AddRange(incoming.Where(day => known.Add(day.Date)));
+        target.Days = merged;
+    }
+
+    // 覆盖判定：只认界面真正要画的字段，够用就停手，不追求「所有字段都齐」。
+    private static bool Satisfied(WeatherDomain domain, WeatherSnapshot snapshot)
+    {
+        int today = Array.IndexOf(snapshot.DayDates, snapshot.Today);
+        if (today < 0) today = Math.Min(10, Math.Max(0, snapshot.DayDates.Length - 1));
+        bool Has(double[] values, int index) => index >= 0 && index < values.Length && !double.IsNaN(values[index]);
+        bool Day(int offset)
+        {
+            int index = today + offset;
+            return index >= 0 && index < snapshot.DayDates.Length && Has(snapshot.DayHighC, index) && Has(snapshot.DayLowC, index);
+        }
+        switch (domain)
+        {
+            case WeatherDomain.Current:
+                // 温度、湿度、风、气压到手就能画完今日天气；能见度、露点、紫外线不单独触发一轮请求。
+                return !double.IsNaN(snapshot.Temperature) && snapshot.HumidityPercent >= 0
+                    && !double.IsNaN(snapshot.WindKmh) && !double.IsNaN(snapshot.PressureHpa);
+            case WeatherDomain.Hourly:
+                // 逐时窗口是 24 小时，允许头部少量缺测。
+                int hours = snapshot.HourTimes.Length, filled = 0;
+                for (int i = 0; i < hours; i++) if (!double.IsNaN(snapshot.HourTempsC[i])) filled++;
+                return hours >= 20 && filled >= 20;
+            case WeatherDomain.Daily:
+                // 今天起 13 天里至少 11 天有高低温；和风 v1 只有 10 天，最后 3 天由下一家补。
+                int days = 0; for (int offset = 0; offset <= 12; offset++) if (Day(offset)) days++;
+                return days >= 11;
+            case WeatherDomain.Sun:
+                int sun = 0;
+                for (int offset = 0; offset <= 13; offset++)
+                {
+                    int index = today + offset;
+                    if (index >= 0 && index < snapshot.SunriseTimes.Length && snapshot.SunriseTimes[index].Length >= 16) sun++;
+                }
+                return sun >= 10;
+            case WeatherDomain.Air:
+                return snapshot.Aqi >= 0 || snapshot.Pm25 >= 0;
+            case WeatherDomain.History:
+                int past = 0; for (int offset = -10; offset <= -1; offset++) if (Day(offset)) past++;
+                return past >= 9;
+            default:
+                return true;
+        }
+    }
+
+    private static async Task<WeatherPart?> TryAsync(IWeatherSource source, City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
         cts.CancelAfter(SourceTimeout);
-        try { return await source.FetchAsync(city, settings, cts.Token); }
+        try { return await source.FetchAsync(city, settings, need, cts.Token); }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch { return null; }
     }
@@ -563,18 +691,6 @@ internal static class WeatherCodes
     }
 }
 
-// 统一的网络入口：显式解压、固定 User-Agent，避免个别接口因压缩或 UA 被拒。
-internal static class WeatherHttp
-{
-    public static readonly HttpClient Client = new(new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All }) { Timeout = TimeSpan.FromSeconds(20) };
-    static WeatherHttp()
-    {
-        // 浏览器 UA 加应用标识：国内站点对非浏览器 UA 偶尔会长时间不响应，MET Norway 则要求 UA 可识别。
-        Client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 BrimDeck/1.4");
-        Client.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/plain, */*");
-    }
-}
-
 // JSON 小工具：容忍 number/string 混用，缺失返回 null。
 internal static class Json
 {
@@ -596,12 +712,16 @@ internal sealed class OpenMeteoSource : IWeatherSource
         [WeatherDomain.Current, WeatherDomain.Hourly, WeatherDomain.Daily, WeatherDomain.Sun, WeatherDomain.Air, WeatherDomain.History], WeatherRegion.Global, false);
     public bool CanServe(City city, WeatherSettings settings) => true;
 
-    public async Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, CancellationToken token)
+    public async Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
     {
+        bool Want(WeatherDomain domain) => need.Contains(domain);
+        // 一份 forecast 响应同时覆盖实况、每日、日出日落与过去 10 天，这四个域共用一次请求。
+        bool wantForecast = Want(WeatherDomain.Current) || Want(WeatherDomain.Daily) || Want(WeatherDomain.Sun) || Want(WeatherDomain.History);
         string location = FormattableString.Invariant($"latitude={city.Latitude.ToString(CultureInfo.InvariantCulture)}&longitude={city.Longitude.ToString(CultureInfo.InvariantCulture)}&timezone=auto");
-        var forecast = GetStringAsync($"https://api.open-meteo.com/v1/forecast?{location}&current=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,weather_code,pressure_msl,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,sunrise,sunset,uv_index_max,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,relative_humidity_2m_mean,pressure_msl_mean&past_days=10&forecast_days=14", token);
-        var hourly = GetStringAsync($"https://api.open-meteo.com/v1/forecast?{location}&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,precipitation_probability,weather_code,pressure_msl,cloud_cover,visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index&forecast_hours=24", token);
-        var air = GetStringAsync($"https://air-quality-api.open-meteo.com/v1/air-quality?{location}&current=pm2_5,pm10,us_aqi,european_aqi", token);
+        string site = FormattableString.Invariant($"{city.Latitude:0.00},{city.Longitude:0.00}");
+        var forecast = wantForecast ? Body("forecast|" + site, TimeSpan.FromMinutes(15), $"https://api.open-meteo.com/v1/forecast?{location}&current=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,weather_code,pressure_msl,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,sunrise,sunset,uv_index_max,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,relative_humidity_2m_mean,pressure_msl_mean&past_days=10&forecast_days=14", token) : Task.FromResult("");
+        var hourly = Want(WeatherDomain.Hourly) ? Body("hourly|" + site, TimeSpan.FromMinutes(30), $"https://api.open-meteo.com/v1/forecast?{location}&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,precipitation_probability,weather_code,pressure_msl,cloud_cover,visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index&forecast_hours=24", token) : Task.FromResult("");
+        var air = Want(WeatherDomain.Air) ? Body("air|" + site, TimeSpan.FromMinutes(30), $"https://air-quality-api.open-meteo.com/v1/air-quality?{location}&current=pm2_5,pm10,us_aqi,european_aqi", token) : Task.FromResult("");
         await Task.WhenAll(forecast, hourly, air);
         var part = new WeatherPart();
         try
@@ -690,7 +810,9 @@ internal sealed class OpenMeteoSource : IWeatherSource
         return part.Current is null && part.Days is null && part.Hours is null && part.Air is null ? null : part;
     }
 
-    private static async Task<string> GetStringAsync(string url, CancellationToken token) => await WeatherHttp.Client.GetStringAsync(url, token);
+    // 响应体落盘：三份数据各自过期，未过期直接读盘，重启后同样能复用，断网时退回上一份。
+    private static async Task<string> Body(string key, TimeSpan ttl, string url, CancellationToken token)
+        => await WeatherCache.GetAsync<string>("openmeteo", key, ttl, async ct => (await WeatherHttp.GetAsync("openmeteo", url, ct)).Body, token) ?? "";
     private static int AqiLevel(int aqi) => aqi <= 50 ? 1 : aqi <= 100 ? 2 : aqi <= 150 ? 3 : aqi <= 200 ? 4 : aqi <= 300 ? 5 : 6;
 }
 
@@ -706,11 +828,13 @@ internal sealed class TencentSource : IWeatherSource
         return Geo.IsChina(city) && name.Length > 0 && (Geo.HasChinese(name) || name.All(char.IsLetter));
     }
 
-    public async Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, CancellationToken token)
+    public async Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
     {
         var (name, province) = Geo.Parts(city);
+        // 一个接口同时给实况、8 天预报与今日空气，分不出更细的粒度，所以按最短的那个周期缓存（15 分钟）。
         string url = $"https://wis.qq.com/weather/common?source=pc&weather_type=observe%7Cforecast_24h&province={Json.Esc(province)}&city={Json.Esc(name)}";
-        string body = await WeatherHttp.Client.GetStringAsync(url, token);
+        string body = await WeatherCache.GetAsync<string>("tencent", $"all|{name}|{province}", TimeSpan.FromMinutes(15),
+            async ct => (await WeatherHttp.GetAsync("tencent", url, ct)).Body, token) ?? "";
         using var doc = JsonDocument.Parse(body);
         if (Json.Get(doc.RootElement, "data") is not { } data) return null;
         var part = new WeatherPart();
@@ -757,7 +881,6 @@ internal sealed class TencentSource : IWeatherSource
 
 internal sealed class WeatherComCnSource : IWeatherSource
 {
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> Ids = new();
     public WeatherSourceInfo Info { get; } = new("weathercomcn", Loc.T("中国天气网", "China Weather"), Loc.T("国内实况、15 天预报与历史降水 · 免 Key", "China current, 15-day & history · no key"),
         [WeatherDomain.Current, WeatherDomain.Daily, WeatherDomain.History, WeatherDomain.Air], WeatherRegion.China, false);
 
@@ -767,21 +890,26 @@ internal sealed class WeatherComCnSource : IWeatherSource
         return Geo.IsChina(city) && name.Length > 0 && Geo.HasChinese(name);
     }
 
-    public async Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, CancellationToken token)
+    public async Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
     {
         var (name, _) = Geo.Parts(city);
         string? id = await ResolveIdAsync(name, token);
         if (id is null) return null;
         var part = new WeatherPart();
-        // 每个请求独立超时且失败返回 null：实况偶尔很慢，不能让它拖住已经拿到的每日预报。
-        var currentTask = TryGetAsync($"http://d1.weather.com.cn/sk_2d/{id}.html", token, 4);
-        // 24 天窗口可能跨月，按起止日期枚举涉及的每个月份。
+        bool wantCurrent = need.Contains(WeatherDomain.Current) || need.Contains(WeatherDomain.Air);
+        bool wantDays = need.Contains(WeatherDomain.Daily) || need.Contains(WeatherDomain.Sun) || need.Contains(WeatherDomain.History);
+        // 实况偶尔很慢，单独限时 4 秒并落盘 5 分钟：它拖不住已经拿到的每日预报。
+        var currentTask = wantCurrent ? Body($"{id}|current", TimeSpan.FromMinutes(5), $"http://d1.weather.com.cn/sk_2d/{id}.html", token, 4) : Task.FromResult<string?>(null);
+        // 24 天窗口可能跨月，按起止日期枚举涉及的每个月份；月历一个月只变一次，缓存 6 小时。
         var months = new List<Task<string?>>();
-        var start = DateTime.Today.AddDays(-10); var end = DateTime.Today.AddDays(13);
-        for (var month = new DateTime(start.Year, start.Month, 1); month <= end; month = month.AddMonths(1))
+        if (wantDays)
         {
-            string stamp = month.ToString("yyyyMM");
-            months.Add(TryGetAsync($"http://d1.weather.com.cn/calendar_new/{stamp[..4]}/{id}_{stamp}.html", token, 6));
+            var start = DateTime.Today.AddDays(-10); var end = DateTime.Today.AddDays(13);
+            for (var month = new DateTime(start.Year, start.Month, 1); month <= end; month = month.AddMonths(1))
+            {
+                string stamp = month.ToString("yyyyMM");
+                months.Add(Body($"{id}|{stamp}", TimeSpan.FromHours(6), $"http://d1.weather.com.cn/calendar_new/{stamp[..4]}/{id}_{stamp}.html", token, 6));
+            }
         }
         var currentBody = await currentTask;
         if (currentBody is not null && ExtractObject(currentBody) is { } sk)
@@ -834,40 +962,29 @@ internal sealed class WeatherComCnSource : IWeatherSource
 
     private static async Task<string?> ResolveIdAsync(string name, CancellationToken token)
     {
-        if (Ids.TryGetValue(name, out var cached)) return cached;
-        try
+        // 城市 ID 是静态数据，落盘 30 天：启动后不必先搜一次城市，断网也能定位到已有城市。
+        return await WeatherCache.GetAsync<string>("weathercomcn", "id|" + name, TimeSpan.FromDays(30), async ct =>
         {
-            string? body = await TryGetAsync($"http://toy1.weather.com.cn/search?cityname={Json.Esc(name)}", token, 3);
-            if (body is null) return null;
-            string json = body.Trim().TrimStart('(').TrimEnd(')');
+            var result = await WeatherHttp.GetAsync("weathercomcn", $"http://toy1.weather.com.cn/search?cityname={Json.Esc(name)}", ct,
+                request => request.Headers.Referrer = new Uri("http://www.weather.com.cn/"), 3);
+            if (result.Body is null) return null;
+            string json = result.Body.Trim().TrimStart('(').TrimEnd(')');
             if (ExtractArray(json) is not { } array) return null;
             using var doc = JsonDocument.Parse(array);
             foreach (var item in doc.RootElement.EnumerateArray())
             {
                 string? reference = Json.Text(item, "ref");
-                string? id = reference?.Split('~')[0];
-                if (id is { Length: >= 9 } && id.All(char.IsDigit) && id.StartsWith("101")) { Ids[name] = id; return id; }
+                string? found = reference?.Split('~')[0];
+                if (found is { Length: >= 9 } && found.All(char.IsDigit) && found.StartsWith("101")) return found;
             }
-        }
-        catch { }
-        return null;
+            return null;
+        }, token);
     }
 
-    private static async Task<string?> TryGetAsync(string url, CancellationToken token, int seconds)
-    {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
-        cts.CancelAfter(TimeSpan.FromSeconds(seconds));
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Referrer = new Uri("http://www.weather.com.cn/");
-            using var response = await WeatherHttp.Client.SendAsync(request, cts.Token);
-            response.EnsureSuccessStatusCode();
-            return await response.Content.ReadAsStringAsync(cts.Token);
-        }
-        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-        catch { return null; }
-    }
+    // 响应体落盘：国内站点不稳定，缓存同时也是断网时的兜底。
+    private static Task<string?> Body(string key, TimeSpan ttl, string url, CancellationToken token, int seconds)
+        => WeatherCache.GetAsync<string>("weathercomcn", key, ttl, async ct =>
+            (await WeatherHttp.GetAsync("weathercomcn", url, ct, request => request.Headers.Referrer = new Uri("http://www.weather.com.cn/"), seconds)).Body, token);
 
     private static string? ExtractObject(string body)
     {
@@ -891,156 +1008,106 @@ internal sealed class WeatherComCnSource : IWeatherSource
 }
 
 // 和风天气：需要用户自己的 Key，走 v1 接口覆盖实况、逐时、每日、日月与空气，质量最高，因此在自动调度中优先。
-// v1 每日最多 10 天；v7 的 15 天仅作为旧 key 的退路保留，2027-06 停服后可整段删除。
+// 只用 v1：v7 城市天气 2027-06 停服，不再保留旧接口的退路。
 internal sealed class HeFengSource : IWeatherSource
 {
     public WeatherSourceInfo Info { get; } = new("hefeng", Loc.T("和风天气", "QWeather"), Loc.T("全维度 · v1 + 时光机 · 需 Key", "All domains (v1 + time machine) · key required"),
         [WeatherDomain.Current, WeatherDomain.Hourly, WeatherDomain.Daily, WeatherDomain.Sun, WeatherDomain.Air, WeatherDomain.History], WeatherRegion.Global, true);
-    public bool CanServe(City city, WeatherSettings settings) => settings.HeFengKey.Trim().Length > 0;
+    public bool CanServe(City city, WeatherSettings settings) => settings.HeFengKey.Trim().Length > 0 && settings.HeFengHost.Trim().Length > 0;
 
-    public async Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, CancellationToken token)
+    // 一次请求要用到的公共参数：坐标只保留两位小数（v1 只认这个精度）。
+    private sealed record Context(string Host, string Key, City City)
+    {
+        public string Lat => City.Latitude.ToString("0.00", CultureInfo.InvariantCulture);
+        public string Lon => City.Longitude.ToString("0.00", CultureInfo.InvariantCulture);
+        public string Lang => Loc.IsEnglish ? "en" : "zh";
+        public string Site => $"{Lat},{Lon}|{Lang}";
+        // 城市当地日期：跨过当地零点后逐时/逐天窗口整体前移，缓存键带上它，旧响应自动作废（文档专门警告过「跨天」）。
+        public string Day => DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(Geo.UtcOffsetHours(City))).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    }
+
+    public async Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
     {
         string host = settings.HeFengHost.Trim().TrimEnd('/');
-        if (host.Length == 0) host = "devapi.qweather.com";
         if (!host.StartsWith("http", StringComparison.OrdinalIgnoreCase)) host = "https://" + host;
-        string key = settings.HeFengKey.Trim();
-        // 两代接口都只接受小数点后两位的坐标，先取整再拼路径，避免长小数被拒。
-        string lat = city.Latitude.ToString("0.00", CultureInfo.InvariantCulture);
-        string lon = city.Longitude.ToString("0.00", CultureInfo.InvariantCulture);
-        string lang = Loc.IsEnglish ? "en" : "zh";
-        // v1 是现行接口（v7 城市天气 2027-06-01 停服）。旧版 key 绑定在公共 Host 上时 v1 可能整个不存在，
-        // 因此 v1 一条都取不到时才回退 v7，两代结果不混用。
-        // 时光机本身只有 v7 实现，与主请求并行发出；开关关闭时不请求（10 天 = 10 次调用）。
-        var history = settings.WantsHeFengHistory() ? FetchHistory(host, key, lat, lon, city, token) : null;
-        var part = await FetchV1(host, key, lat, lon, lang, city, token) ?? await FetchV7(host, key, lat, lon, lang, token);
-        if (part is not null && history is not null && await history is { Count: > 0 } past)
-        {
-            // 历史日并入 Days：Daily 链里和风排在第一位，过去 10 天会先于中国天气网的实测降水被采用。
-            part.Days ??= [];
-            var known = part.Days.Select(day => day.Date).ToHashSet(StringComparer.Ordinal);
-            part.Days.AddRange(past.Where(day => known.Add(day.Date)));
-        }
-        return part;
+        var context = new Context(host, settings.HeFengKey.Trim(), city);
+        // 历史单独占一段：时光机只认 LocationID、一天一次请求，不能挂在首屏链路上。
+        // 调度器把它放在独立的第二轮，这里只负责那一段。
+        if (need.All(domain => domain == WeatherDomain.History))
+            return await FetchHistory(context, token) is { Count: > 0 } past ? new WeatherPart { Days = past } : null;
+        return await FetchV1(context, need, token);
     }
 
     // v1：坐标走路径，数值包在 { value, unit } 里，湿度/云量/降水概率是 0..1 的比例。
-    private static async Task<WeatherPart?> FetchV1(string host, string key, string lat, string lon, string lang, City city, CancellationToken token)
+    private static async Task<WeatherPart?> FetchV1(Context context, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
     {
+        bool Want(WeatherDomain domain) => need.Contains(domain);
+        string host = context.Host;
         // localTime=true：v1 默认返回 UTC，而界面和“今天”都按城市当地时刻算，不换算会整体错一天。
-        string query = $"localTime=true&lang={lang}";
-        // 缓存键带上城市当地日期：跨过当地零点后逐时/逐天窗口会整体前移，旧响应必须作废（文档专门警告过「跨天」）。
-        string day = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(Geo.UtcOffsetHours(city))).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        string site = $"{lat},{lon}|{lang}|{day}";
-        var bodies = await Task.WhenAll(
-            Get($"{host}/weather/v1/current/{lat}/{lon}?{query}", key, token),
-            Get($"{host}/weather/v1/hourly/{lat}/{lon}?hours=24&{query}", key, token, TimeSpan.FromMinutes(30), "hourly|" + site),
-            Get($"{host}/weather/v1/daily/{lat}/{lon}?days=10&{query}", key, token, TimeSpan.FromHours(2), "daily|" + site),
-            Get($"{host}/airquality/v1/current/{lat}/{lon}?lang={lang}", key, token, TimeSpan.FromMinutes(30), "air|" + site));
+        string query = $"localTime=true&lang={context.Lang}";
+        // 四个接口各自过期：实况最短、逐天最长，互不牵连（官方推荐 10–30 分钟 / 30–60 分钟 / 1–6 小时）。
+        var current = Want(WeatherDomain.Current) ? Body(context, "current|" + context.Site, TimeSpan.FromMinutes(10), $"{host}/weather/v1/current/{context.Lat}/{context.Lon}?{query}", token) : Task.FromResult<string?>(null);
+        var hours = Want(WeatherDomain.Hourly) ? Body(context, "hourly|" + context.Site + "|" + context.Day, TimeSpan.FromMinutes(30), $"{host}/weather/v1/hourly/{context.Lat}/{context.Lon}?hours=24&{query}", token) : Task.FromResult<string?>(null);
+        var days = Want(WeatherDomain.Daily) || Want(WeatherDomain.Sun) ? Body(context, "daily|" + context.Site + "|" + context.Day, TimeSpan.FromHours(2), $"{host}/weather/v1/daily/{context.Lat}/{context.Lon}?days=10&{query}", token) : Task.FromResult<string?>(null);
+        var air = Want(WeatherDomain.Air) ? Body(context, "air|" + context.Site, TimeSpan.FromMinutes(30), $"{host}/airquality/v1/current/{context.Lat}/{context.Lon}?lang={context.Lang}", token) : Task.FromResult<string?>(null);
+        await Task.WhenAll(current, hours, days, air);
         var part = new WeatherPart();
-        if (ParseCurrentV1(bodies[0], city) is { } now) part.Current = now;
-        if (ParseHoursV1(bodies[1], city) is { Count: > 0 } hours) part.Hours = hours;
-        if (ParseDaysV1(bodies[2], city) is { Count: > 0 } days) part.Days = days;
-        if (ParseAirV1(bodies[3]) is { } air) part.Air = air;
+        if (ParseCurrentV1(current.Result, context.City) is { } now) part.Current = now;
+        if (ParseHoursV1(hours.Result, context.City) is { Count: > 0 } list) part.Hours = list;
+        if (ParseDaysV1(days.Result, context.City) is { Count: > 0 } forecast) part.Days = forecast;
+        if (ParseAirV1(air.Result) is { } quality) part.Air = quality;
         return part.Current is null && part.Hours is null && part.Days is null && part.Air is null ? null : part;
     }
 
-    // v7：迁移完成前给旧 key 留的退路，2027-06 停服后可整段删除。
-    private static async Task<WeatherPart?> FetchV7(string host, string key, string lat, string lon, string lang, CancellationToken token)
-    {
-        string location = $"{lon},{lat}";
-        var bodies = await Task.WhenAll(
-            Get($"{host}/v7/weather/now?location={location}&lang={lang}", key, token),
-            Get($"{host}/v7/weather/24h?location={location}&lang={lang}", key, token),
-            Get($"{host}/v7/weather/15d?location={location}&lang={lang}", key, token),
-            Get($"{host}/v7/air/now?location={location}&lang={lang}", key, token));
-        var part = new WeatherPart();
-        if (ParseNowV7(bodies[0]) is { } now) part.Current = now;
-        if (ParseHoursV7(bodies[1]) is { Count: > 0 } hours) part.Hours = hours;
-        if (ParseDaysV7(bodies[2]) is { Count: > 0 } days) part.Days = days;
-        if (ParseAirV7(bodies[3]) is { } air) part.Air = air;
-        return part.Current is null && part.Hours is null && part.Days is null && part.Air is null ? null : part;
-    }
-
-    // 请求体缓存：和风文档的推荐缓存是「实况 10–30 分钟、逐小时 30–60 分钟、逐天 1–6 小时、实时空气 30–60 分钟」。
-    // 界面每 15 分钟刷新一次，逐时/逐天/空气不缓存等于把请求量放大 2–16 倍。
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTimeOffset At, string Body)> BodyCache = new();
+    private static Task<string?> Body(Context context, string key, TimeSpan ttl, string url, CancellationToken token)
+        => WeatherCache.GetAsync<string>("hefeng", key, ttl, ct => SendAsync(context, url, ct), token);
 
     // Key 走 X-QW-Api-Key 请求头：比放在查询字符串里安全，也避免同时使用两种认证方式。
-    // life + cacheKey 同时给出时才缓存；cacheKey 里带上城市当地日期，跨过当地零点旧响应自动作废。
-    private static async Task<string?> Get(string url, string key, CancellationToken token, TimeSpan? life = null, string? cacheKey = null)
+    private static async Task<string?> SendAsync(Context context, string url, CancellationToken token)
     {
-        if (life is { } ttl && cacheKey is not null && BodyCache.TryGetValue(cacheKey, out var hit) && DateTimeOffset.Now - hit.At < ttl) return hit.Body;
-        string? body;
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.TryAddWithoutValidation("X-QW-Api-Key", key);
-            using var response = await WeatherHttp.Client.SendAsync(request, token);
-            // 老账号的 key 可能只认查询参数，按文档允许的第二种形式再试一次，避免整个来源失效。
-            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                body = await WeatherHttp.Client.GetStringAsync($"{url}{(url.Contains('?') ? "&" : "?")}key={Uri.EscapeDataString(key)}", token);
-            else if (!response.IsSuccessStatusCode) return null;
-            else body = await response.Content.ReadAsStringAsync(token);
-        }
-        catch { return null; }
-        if (body is not null && life is not null && cacheKey is not null) BodyCache[cacheKey] = (DateTimeOffset.Now, body);
-        return body;
+        var result = await WeatherHttp.GetAsync("hefeng", url, token, request => request.Headers.TryAddWithoutValidation("X-QW-Api-Key", context.Key));
+        return result.Body;
     }
 
     // ---- 时光机：/v7/historical/weather 只认 LocationID、单日一次请求、最多回溯 10 天（不含今天）----
-    // 缓存 12 小时：历史是再分析数据，不会分钟级变化，避免 15 分钟一次的刷新把请求量放大近 100 倍。
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTimeOffset At, DayPoint Day)> HistoryCache = new();
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> HistoryIds = new();
 
-    private static async Task<List<DayPoint>?> FetchHistory(string host, string key, string lat, string lon, City city, CancellationToken token)
+    private static async Task<List<DayPoint>?> FetchHistory(Context context, CancellationToken token)
     {
-        string? id = await LocationId(host, key, lat, lon, token);
+        string? id = await LocationId(context, token);
         if (id is null) return null;
         // 按城市当地日期回溯：跨时区时用本机日期会整体错一天。
-        var today = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(Geo.UtcOffsetHours(city))).Date;
+        var today = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(Geo.UtcOffsetHours(context.City))).Date;
+        // 并发 4 路：冷启动要补 10 天，但不该把 10 个请求同时砸出去。
         using var gate = new SemaphoreSlim(4);
         var days = await Task.WhenAll(Enumerable.Range(1, 10).Select(async offset =>
         {
             string stamp = today.AddDays(-offset).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-            string cacheKey = id + ":" + stamp;
-            // 历史是定稿数据：昨天那条还可能被再分析修订，留 24 小时；更早的日期基本不再变，缓存 7 天。
-            // 于是稳态下每天只补 1 个新日期，而不是每次刷新重拉 10 天。
-            var life = offset == 1 ? TimeSpan.FromHours(24) : TimeSpan.FromDays(7);
-            if (HistoryCache.TryGetValue(cacheKey, out var cached) && DateTimeOffset.Now - cached.At < life) return cached.Day;
+            // 历史是定稿数据：昨天那条还可能被再分析修订，留 24 小时；更早的日期基本不再变，留 7 天。
+            // 于是稳态下每次刷新只补 1 个新日期，而不是重拉 10 天。
+            var ttl = offset == 1 ? TimeSpan.FromHours(24) : TimeSpan.FromDays(7);
             await gate.WaitAsync(token);
             try
             {
-                string? body = await Get($"{host}/v7/historical/weather?location={id}&date={stamp.Replace("-", "")}", key, token);
-                if (ParseHistory(body, stamp) is not { } day) return null;
-                HistoryCache[cacheKey] = (DateTimeOffset.Now, day);
-                return day;
+                var body = await Body(context, $"history|{id}|{stamp}", ttl, $"{context.Host}/v7/historical/weather?location={id}&date={stamp.Replace("-", "")}", token);
+                return ParseHistory(body, stamp);
             }
             finally { gate.Release(); }
         }));
-        return days.Where(day => day is not null).Select(day => day!).OrderBy(day => day.Date, StringComparer.Ordinal).ToList();
+        return [.. days.Where(day => day is not null).Select(day => day!).OrderBy(day => day.Date, StringComparer.Ordinal)];
     }
 
-    // 时光机只接受 LocationID，用与本城相同的坐标反查一次并记住；失败就整个历史域跳过，不影响其它数据。
-    private static async Task<string?> LocationId(string host, string key, string lat, string lon, CancellationToken token)
-    {
-        string cacheKey = lat + "," + lon;
-        if (HistoryIds.TryGetValue(cacheKey, out var cached)) return cached;
-        try
+    // 时光机只接受 LocationID，用与本城相同的坐标反查一次并落盘 30 天；失败就整个历史域跳过，不影响其它数据。
+    private static Task<string?> LocationId(Context context, CancellationToken token)
+        => WeatherCache.GetAsync<string>("hefeng", $"place|{context.Lat},{context.Lon}", TimeSpan.FromDays(30), async ct =>
         {
-            string? body = await Get($"{host}/geo/v2/city/lookup?location={lon},{lat}&number=1", key, token);
+            var body = await SendAsync(context, $"{context.Host}/geo/v2/city/lookup?location={context.Lon},{context.Lat}&number=1", ct);
             if (body is null) return null;
             using var doc = JsonDocument.Parse(body);
             if (Json.Get(doc.RootElement, "location") is { ValueKind: JsonValueKind.Array } locations)
                 foreach (var item in locations.EnumerateArray())
-                {
-                    if (Json.Text(item, "id") is not { Length: > 0 } id) continue;
-                    HistoryIds[cacheKey] = id;
-                    return id;
-                }
-        }
-        catch { }
-        return null;
-    }
+                    if (Json.Text(item, "id") is { Length: > 0 } id) return id;
+            return null;
+        }, token);
 
     // 时光机返回 weatherDaily（高低温、降水、气压、日月相）+ weatherHourly（没有日级天气现象）。
     // 天气现象与风取当地 12 点那一小时，风速取全天最大值，和每日预报的口径保持一致。
@@ -1137,96 +1204,6 @@ internal sealed class HeFengSource : IWeatherSource
     };
 
 
-    private static CurrentPart? ParseNowV7(string? body)
-    {
-        if (body is null) return null;
-        try
-        {
-            using var doc = JsonDocument.Parse(body);
-            if (Json.Get(doc.RootElement, "now") is not { } now || Json.Text(doc.RootElement, "code") is not "200") return null;
-            string? text = Json.Text(now, "text");
-            return new CurrentPart
-            {
-                Temperature = Json.Number(now, "temp"), FeelsLike = Json.Number(now, "feelsLike"), Humidity = Json.Integer(now, "humidity"),
-                WindKmh = Json.Number(now, "windSpeed"), WindDirDeg = Json.Number(now, "wind360"), WindDir = Json.Text(now, "windDir"),
-                PressureHpa = Json.Number(now, "pressure"), VisibilityKm = Json.Number(now, "vis"), CloudPercent = Json.Number(now, "cloud"),
-                DewPointC = Json.Number(now, "dew"), PrecipMm = Json.Number(now, "precip"), Code = WeatherCodes.FromHeFeng(Json.Text(now, "icon")),
-                Condition = text, IsDay = DateTime.Now.Hour is >= 6 and < 18
-            };
-        }
-        catch { return null; }
-    }
-
-    private static List<HourPoint>? ParseHoursV7(string? body)
-    {
-        if (body is null) return null;
-        try
-        {
-            using var doc = JsonDocument.Parse(body);
-            if (Json.Get(doc.RootElement, "hourly") is not { } hourly || hourly.ValueKind != JsonValueKind.Array) return null;
-            var hours = new List<HourPoint>();
-            foreach (var item in hourly.EnumerateArray())
-            {
-                string? time = Json.Text(item, "fxTime"); if (time is null) continue;
-                hours.Add(new HourPoint
-                {
-                    Time = time.Length >= 16 ? time[..16] : time, Temperature = Json.Number(item, "temp"), Humidity = Json.Integer(item, "humidity"),
-                    Code = WeatherCodes.FromHeFeng(Json.Text(item, "icon")), RainProb = Json.Integer(item, "pop"), PrecipMm = Json.Number(item, "precip"),
-                    WindKmh = Json.Number(item, "windSpeed"), WindDirDeg = Json.Number(item, "wind360"), PressureHpa = Json.Number(item, "pressure"),
-                    CloudPercent = Json.Number(item, "cloud"), DewPointC = Json.Number(item, "dew"), FeelsLike = Json.Number(item, "feelsLike")
-                });
-            }
-            return hours;
-        }
-        catch { return null; }
-    }
-
-    private static List<DayPoint>? ParseDaysV7(string? body)
-    {
-        if (body is null) return null;
-        try
-        {
-            using var doc = JsonDocument.Parse(body);
-            if (Json.Get(doc.RootElement, "daily") is not { } daily || daily.ValueKind != JsonValueKind.Array) return null;
-            var days = new List<DayPoint>();
-            foreach (var item in daily.EnumerateArray())
-            {
-                string? date = Json.Text(item, "fxDate"); if (date is null) continue;
-                days.Add(new DayPoint
-                {
-                    Date = date[..10], Code = WeatherCodes.FromHeFeng(Json.Text(item, "iconDay")), Condition = Json.Text(item, "textDay"),
-                    HighC = Json.Number(item, "tempMax"), LowC = Json.Number(item, "tempMin"),
-                    // v7 的日出日落只有 "06:58"，而界面按 ISO 时间取第 11–16 位，这里补上日期成为完整时刻。
-                    Sunrise = Clock(date[..10], Json.Text(item, "sunrise")), Sunset = Clock(date[..10], Json.Text(item, "sunset")),
-                    PrecipMm = Json.Number(item, "precip"), RainProb = null, UvMax = Json.Number(item, "uvIndex"),
-                    WindMaxKmh = Json.Number(item, "windSpeedDay"), WindDirDeg = Json.Number(item, "wind360Day"),
-                    Humidity = Json.Integer(item, "humidity"), PressureHpa = Json.Number(item, "pressure"),
-                    MoonPhase = Json.Text(item, "moonPhase")
-                });
-            }
-            return days;
-        }
-        catch { return null; }
-    }
-
-    // 把 "06:58" 与日期拼成 "2026-11-19T06:58"；已经带日期或为空时原样返回。
-    private static string? Clock(string date, string? time)
-        => string.IsNullOrWhiteSpace(time) || time.Length < 5 ? null : time.Length >= 16 ? time[..16] : $"{date}T{time[..5]}";
-
-    private static AirPart? ParseAirV7(string? body)
-    {
-        if (body is null) return null;
-        try
-        {
-            using var doc = JsonDocument.Parse(body);
-            if (Json.Get(doc.RootElement, "now") is not { } now) return null;
-            int? aqi = Json.Integer(now, "aqi");
-            if (aqi is null) return null;
-            return new AirPart { Aqi = aqi, Pm25 = Json.Integer(now, "pm2p5"), Pm10 = Json.Integer(now, "pm10"), Level = aqi <= 50 ? 1 : aqi <= 100 ? 2 : aqi <= 150 ? 3 : aqi <= 200 ? 4 : 5, Text = Json.Text(now, "category") };
-        }
-        catch { return null; }
-    }
-
     // ---- v1 解析：数值是 { value, unit } 对象，时间默认 UTC，比例字段是 0..1 ----
     private static CurrentPart? ParseCurrentV1(string? body, City city)
     {
@@ -1304,7 +1281,7 @@ internal sealed class HeFengSource : IWeatherSource
         catch { return null; }
     }
 
-    // v1 每日最多 10 天（v7 的 15d 提供 15 天），第 11 天以后由调度链上的下一家来源补齐。
+    // v1 每日最多 10 天，第 11 天以后由调度链上的下一家来源补齐。
     private static List<DayPoint>? ParseDaysV1(string? body, City city)
     {
         if (body is null) return null;
