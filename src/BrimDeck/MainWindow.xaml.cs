@@ -1040,7 +1040,7 @@ public partial class MainWindow : Window
         else _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = tone, EasingFunction = easeInOut }, duration, tint), HandoffBehavior.SnapshotAndReplace);
         // The panel is rebuilt when data or settings change, never here: a rebuild on the first frame reads as a stall.
         if (expanded) { RefreshStatus(); UpdateMusicPosition(); }
-        else RenderSyncButton();
+        else { RenderSyncButton(); RenderWeatherRefreshButton(); }
         UpdateMusicTimer();
         UpdateMonitorDemand();
         UpdateGrips();
@@ -1193,7 +1193,8 @@ public partial class MainWindow : Window
     }
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
-        if (_app.Updates.NoticeVersion is not null) _app.OpenUpdateSettings();
+        if (CurrentPage == DeckPage.Weather) _app.OpenSettingsPage(SettingsWindow.WeatherSettingsPage);
+        else if (_app.Updates.NoticeVersion is not null) _app.OpenUpdateSettings();
         else if (_app.Updates.UpdatedFrom is not null) _app.OpenReleaseNotes();
         else _app.OpenSettings();
     }

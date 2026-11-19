@@ -129,11 +129,12 @@ public partial class MainWindow
         return filters[(days, start)] = snapshot.Entries.Where(x => x.Time.LocalDateTime >= start).ToList();
     }
 
-    // The cheap part of a render: clock, gear tooltip and the synchronization button. Run on every expansion.
+    // The cheap part of a render: clock, gear tooltip and the synchronization and weather buttons. Run on every expansion.
     internal void RefreshStatus()
     {
         RenderSyncButton();
         RenderPageSwitch();
+        RenderWeatherRefreshButton();
         ClockLabel.Text = DateTime.Now.ToString("HH:mm");
         // The gear shows a tooltip only while it carries the update notice.
         var updates = _app.Updates;
@@ -170,13 +171,14 @@ public partial class MainWindow
     public void RenderUsage()
     {
         if (UsageContent is null) return;
+        if (IsWeatherPage) { RenderWeather(); return; }
         if (IsMusicPage) { RenderMusic(); return; }
         if (IsMonitorPage) { RenderMonitor(); return; }
         if (IsShelfPage) { RenderShelf(lazy: true); return; }
         if (CurrentPage == DeckPage.Devices) { RenderDevices(); return; }
         // Only a page that was on screen hands over; one that arrives by the page switch or with the panel opening comes in whole.
         bool shown = UsageContent.IsVisible && _expanded && !_preview;
-        MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; UsageContent.Visibility = Visibility.Visible;
+        MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; WeatherContent.Visibility = Visibility.Collapsed; UsageContent.Visibility = Visibility.Visible;
         if (!Settings.UsagePage) _details = false;
         RefreshStatus();
         if (_detailPopup is not null) { _flippedColumn = null; return; }

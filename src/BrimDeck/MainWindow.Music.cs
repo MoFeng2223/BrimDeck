@@ -88,6 +88,7 @@ public partial class MainWindow
     internal bool IsMonitorPage => CurrentPage == DeckPage.Monitor;
     internal bool IsUsagePage => CurrentPage == DeckPage.Usage;
     internal bool IsShelfPage => CurrentPage == DeckPage.Clipboard;
+    internal bool IsWeatherPage => CurrentPage == DeckPage.Weather;
 
     private void InitializeMusic()
     {
@@ -149,7 +150,7 @@ public partial class MainWindow
     }
     // The page chosen on another display's panel (App.PageChosen).
     internal void FollowPage(DeckPage page) { if (CurrentPage != page) SelectPage(page, remember: false); }
-    private FrameworkElement PageContent(DeckPage page) => page switch { DeckPage.Music => MusicContent, DeckPage.Monitor => MonitorContent, DeckPage.Clipboard => ShelfContent, DeckPage.Devices => DevicesContent, _ => UsageContent };
+    private FrameworkElement PageContent(DeckPage page) => page switch { DeckPage.Music => MusicContent, DeckPage.Monitor => MonitorContent, DeckPage.Clipboard => ShelfContent, DeckPage.Weather => WeatherContent, DeckPage.Devices => DevicesContent, _ => UsageContent };
     private void ShowPage(DeckPage page, bool animatePage)
     {
         // The music page keeps what it built while another page shows (RenderMusic's key), so switching back does not build it again.
@@ -213,7 +214,7 @@ public partial class MainWindow
         Toolbar.Height = header.Height;
         PageSwitch.Margin = new Thickness(header.Side, 0, 0, 0);
         FitPageButtons(header);
-        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton })
+        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, WeatherPageButton, DevicesPageButton })
         {
             // A local corner for these two buttons only; PanelIconButton keeps its 5 DIP corner elsewhere.
             button.ApplyTemplate();
@@ -229,12 +230,12 @@ public partial class MainWindow
     private void RenderPageSwitch()
     {
         SetValue(SuppressMusicToolTipsProperty, IsMusicPage);
-        foreach (var control in new FrameworkElement[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton, MediaSourceButton, ClockLabel })
+        foreach (var control in new FrameworkElement[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, WeatherPageButton, DevicesPageButton, MediaSourceButton, ClockLabel })
             ToolTipService.SetIsEnabled(control, !IsMusicPage);
         PageSwitch.Visibility = _details && IsUsagePage || IsShelfPage && ShelfHidesSwitch ? Visibility.Collapsed : Visibility.Visible;
         OrderPageButtons();
         if (!IsShelfPage) { ShelfToolbar.Visibility = Visibility.Collapsed; ShelfSearchButton.Visibility = Visibility.Collapsed; }
-        foreach (var (button, page) in new[] { (AIUsageButton, DeckPage.Usage), (MusicPageButton, DeckPage.Music), (MonitorPageButton, DeckPage.Monitor), (ShelfPageButton, DeckPage.Clipboard), (DevicesPageButton, DeckPage.Devices) })
+        foreach (var (button, page) in new[] { (AIUsageButton, DeckPage.Usage), (MusicPageButton, DeckPage.Music), (MonitorPageButton, DeckPage.Monitor), (ShelfPageButton, DeckPage.Clipboard), (WeatherPageButton, DeckPage.Weather), (DevicesPageButton, DeckPage.Devices) })
         {
             bool current = CurrentPage == page;
             button.Visibility = DeckPages.Shown(Settings, page) ? Visibility.Visible : Visibility.Collapsed;
@@ -453,7 +454,7 @@ public partial class MainWindow
         // Only a page that was on screen hands over; one that arrives by the page switch or with the panel opening comes in whole.
         bool shown = MusicContent.IsVisible && _expanded && !_preview;
         RefreshStatus();
-        UsageContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Visible;
+        UsageContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; WeatherContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         double h = ContentCanvas.Height, w = ContentCanvas.Width;
         var track = _mediaTrack;

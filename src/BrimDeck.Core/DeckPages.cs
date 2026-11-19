@@ -6,14 +6,14 @@ public static class DeckPages
 {
     // The page switch, left to right, until the order is changed in the settings (DeckSettings.PageOrder). The clipboard comes
     // before the devices, as their groups do in the settings' list.
-    public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Clipboard, DeckPage.Devices];
+    public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Clipboard, DeckPage.Devices, DeckPage.Weather];
     // Each known page once, in the saved order; a page missing from the file takes its default place after the others.
     public static List<DeckPage> Normalize(IEnumerable<DeckPage>? order) => [.. (order ?? []).Where(page => Enum.IsDefined(page)).Concat(Order).Distinct()];
 
     public static bool Shown(DeckSettings settings, DeckPage page) => page switch
     {
         DeckPage.Usage => settings.UsagePage, DeckPage.Music => settings.MusicPage, DeckPage.Monitor => settings.MonitorPage, DeckPage.Devices => settings.DevicesPage,
-        DeckPage.Clipboard => settings.ClipboardPage, _ => false
+        DeckPage.Weather => settings.WeatherPage, DeckPage.Clipboard => settings.ClipboardPage, _ => false
     };
 
     public static IReadOnlyList<DeckPage> Visible(DeckSettings settings) => settings.PageOrder.Where(page => Shown(settings, page)).ToList();
@@ -27,7 +27,7 @@ public static class DeckPages
     public static DeckPage? Opening(DefaultDeckPage choice) => choice switch
     {
         DefaultDeckPage.Usage => DeckPage.Usage, DefaultDeckPage.Music => DeckPage.Music, DefaultDeckPage.Monitor => DeckPage.Monitor, DefaultDeckPage.Devices => DeckPage.Devices,
-        DefaultDeckPage.Clipboard => DeckPage.Clipboard, _ => null
+        DefaultDeckPage.Weather => DeckPage.Weather, DefaultDeckPage.Clipboard => DeckPage.Clipboard, _ => null
     };
 
     // Every page's size lies within these; the usage page is also at least as wide as its columns need (MinimumWidth).
@@ -46,6 +46,7 @@ public static class DeckPages
         width = Math.Clamp(width, minWidth, Math.Max(minWidth, maxWidth)); height = Math.Clamp(height, minHeight, maxHeight);
         switch (page)
         {
+            case DeckPage.Weather: settings.WeatherWidth = width; settings.WeatherHeight = height; break;
             case DeckPage.Music: settings.MusicWidth = width; settings.MusicHeight = height; break;
             case DeckPage.Monitor: settings.MonitorWidth = width; settings.MonitorHeight = height; break;
             case DeckPage.Devices: settings.DevicesWidth = width; settings.DevicesHeight = height; break;
@@ -56,6 +57,7 @@ public static class DeckPages
 
     public static (double Width, double Height) Size(DeckSettings settings, DeckPage page) => page switch
     {
+        DeckPage.Weather => (settings.WeatherWidth, settings.WeatherHeight),
         DeckPage.Music => (settings.MusicWidth, settings.MusicHeight),
         DeckPage.Monitor => (settings.MonitorWidth, settings.MonitorHeight),
         DeckPage.Devices => (settings.DevicesWidth, settings.DevicesHeight),

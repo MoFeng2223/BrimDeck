@@ -179,7 +179,7 @@ public partial class MainWindow
     {
         RefreshStatus();
         UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed;
-        ShelfContent.Visibility = Visibility.Visible;
+        WeatherContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed;
         double width = ContentCanvas.Width, height = ContentCanvas.Height;
         if (!double.IsFinite(width) || !double.IsFinite(height)) return;

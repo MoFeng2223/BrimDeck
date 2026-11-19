@@ -57,8 +57,8 @@ public sealed record IgnoredMediaApp(string AppId = "", string Name = "", string
 public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, OpenCode = 17, OpenCodeGo = 18, OpenRouter = 19, Pi = 20, CodeAgent = 21, CommandCode = 22, CommandCodeApi = 23, WorkBuddy = 24, WorkBuddyAi = 25, MiMo = 26, MiMoApi = 27, MiMoTokenPlan = 28, MiMoLinked = 29, KimiPlatform = 30 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckSettings.PageOrder.
-public enum DeckPage { Usage, Music, Monitor, Clipboard, Devices }
-public enum DefaultDeckPage { Last, Usage, Music, Monitor, Clipboard, Devices }
+public enum DeckPage { Usage, Music, Monitor, Clipboard, Devices, Weather }
+public enum DefaultDeckPage { Last, Usage, Music, Monitor, Clipboard, Devices, Weather }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
 // What a double click on an end of the collapsed notch or capsule does: turn its auto width on or off, or start moving it
@@ -695,6 +695,10 @@ public sealed class DeckSettings
     // The expanded page shows the whole machine's power draw with its curve, and the machine's own battery when it has one (PowerResolver,
     // BatteryModel); off, neither is read for it. The collapsed row's Power and Charge readings are chosen in its table.
     public bool MonitorPower { get; set; } = true;
+    // The weather page: the forecast for the chosen city or automatic location (WeatherData); it fetches only while it shows.
+    public bool WeatherPage { get; set; } = true;
+    public double WeatherWidth { get; set; } = 660;
+    public double WeatherHeight { get; set; } = 360;
     // The devices page: the battery of the connected wireless devices (Devices); it reads them only while it shows.
     public bool DevicesPage { get; set; } = true;
     public double DevicesWidth { get; set; } = 460;

@@ -44,6 +44,11 @@ public partial class MainWindow
                     ShelfToolbar.Children.Clear(); _shelfRows.Clear(); _shelfTabs.Clear(); _fileFrame = null; _searchBox = null; _editBox = null;
                     _shelfBuilt = null; _shelfStale = true;
                     break;
+                case DeckPage.Weather:
+                    held |= _weatherView is not null;
+                    _weatherRingTimer?.Stop();
+                    _weatherView = null; _weatherSpin = ""; _weatherRingTimer = null;
+                    break;
             }
             released |= held;
         }

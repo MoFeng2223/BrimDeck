@@ -130,7 +130,7 @@ public partial class MainWindow
         bool shown = handover && DevicesContent.Visibility == Visibility.Visible && _devicesView is not null && DevicesContent.Children.Contains(_devicesView);
         RefreshStatus();
         UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed;
-        DevicesContent.Visibility = Visibility.Visible;
+        WeatherContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         double width = ContentCanvas.Width, height = ContentCanvas.Height;
         if (!double.IsFinite(width) || !double.IsFinite(height)) return;
