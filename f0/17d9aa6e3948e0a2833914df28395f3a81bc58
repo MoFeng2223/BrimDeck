@@ -1,0 +1,54 @@
+tests/BrimDeck.Tests/QoderUsageTests.cs
+  s_1e75b81ddbb220::t_8d97cea3e5121f 227,233,238-241,243
+  s_1e75b81ddbb220::t_85052d417d97c3 191
+  s_1e75b81ddbb220::t_ec4c07963f814c 92-107
+  s_1e75b81ddbb220::t_7f1cab9037329d 247
+  s_1e75b81ddbb220::t_33e4d74eb27e84 2,7-9,12-21
+  s_1e75b81ddbb220::t_7e767504dc677a 72-85
+  s_1e75b81ddbb220::t_509459af8d8385 213
+  s_1e75b81ddbb220::t_1c24feeafe3a90 264,266,269,271,273-274,279-280,285,288,291,298-301,305,309-322,327-328,332-334,338-340,345-347,350,352-366,388-404,421
+src/BrimDeck.Core/ProviderCatalog.cs
+  s_1e75b81ddbb220::t_1c7532e8b3a360 83-84
+docs/zh-CN/ai-tools.md
+  s_1e75b81ddbb220::t_130a8284fa1b11 157
+src/BrimDeck/Native/QoderDesktopReader.cs
+  s_1e75b81ddbb220::t_2efd68284c2a19 12-14
+src/BrimDeck.Core/QoderUsage.cs
+  s_1e75b81ddbb220::t_fae2e3bec2d84c 188
+  s_1e75b81ddbb220::t_c4a3251788a609 206-208
+  s_1e75b81ddbb220::t_0ba3a116353958 173-174
+  s_1e75b81ddbb220::t_1bb14f2af223e8 134-135,143-145
+  s_1e75b81ddbb220::t_be698e109dd5e6 68-69,71-72,75,77,83-98,103-119
+  s_1e75b81ddbb220::t_ff33572b491a51 35-36,39,41-42
+  s_1e75b81ddbb220::t_5c6b9581891e16 234-238
+  s_1e75b81ddbb220::t_ab61c46b15996f 10,12-23,27-31,120
+  s_1e75b81ddbb220::t_c1127573162c82 220
+src/BrimDeck.Core/UsageService.cs
+  s_1e75b81ddbb220::t_c39250efabc359 1774-1780,1787-1789,1879
+  s_1e75b81ddbb220::t_01b71f864f1bc4 1844
+  s_1e75b81ddbb220::t_b27664d2c4fd2a 1848-1849,1858,1861-1862,1865-1866,1870,1876-1878,1880-1894,1897,1902,1908-1910,1912-1914,1919-1920,1924,1926-1928
+  s_1e75b81ddbb220::t_ecec958787019c 1804-1805
+  s_1e75b81ddbb220::t_34f6b701644b74 1950
+docs/en-US/ai-tools.md
+  s_1e75b81ddbb220::t_9371e33b23c9a2 157
+docs/zh-CN/privacy.md
+  s_1e75b81ddbb220::t_a784222bdfb57d 23
+docs/en-US/privacy.md
+  s_1e75b81ddbb220::t_5266c257c5b145 23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f017d9aa6e3948e0a2833914df28395f3a81bc58",
+  "prompts": {},
+  "sessions": {
+    "s_1e75b81ddbb220": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ca84dbd1-5e9f-4aeb-bf23-02aaea502936",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
