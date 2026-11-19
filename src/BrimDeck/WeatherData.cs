@@ -128,6 +128,8 @@ internal static class WeatherData
 internal sealed class WeatherSnapshot
 {
     public string Name {get;set;}=""; public DateTimeOffset FetchedAt {get;set;} public string Today {get;set;}="";
+    // 城市所在地的 UTC 偏移（分钟）：逐时「现在」列要按城市时钟认，查国外城市时不能用本机时间。MinValue = 未知。
+    public int UtcOffsetMinutes {get;set;} = int.MinValue;
     // 当前时刻
     public double Temperature {get;set;} public double FeelsLike {get;set;} public int HumidityPercent {get;set;} public double WindKmh {get;set;} public int WeatherCode {get;set;} public bool IsDay {get;set;}
     public double WindGustKmh {get;set;} public double WindDirectionDeg {get;set;} public string WindDirection {get;set;}="";

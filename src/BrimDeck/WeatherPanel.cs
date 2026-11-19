@@ -33,14 +33,75 @@ public partial class MainWindow
             _weatherView.StateChanged += RenderWeatherRefreshButton;
             WeatherContent.Children.Add(new Viewbox { Stretch = Stretch.Uniform, Child = _weatherView });
         }
-        _weatherView.Fit(ContentCanvas.Width, ContentCanvas.Height - 36);
+        FitWeather();
         RenderWeatherRefreshButton();
+        RenderWeatherCityButton();
+    }
+
+    // 拖动调尺寸时每帧只让面板内容跟上新尺寸：页头、刷新环、城市按钮、状态栏都与尺寸无关，
+    // 留给 RenderWeather 按节流重建，否则一次拖宽要把它们连同自动化信息重算上百遍。
+    internal void FitWeather() => _weatherView?.Fit(ContentCanvas.Width, ContentCanvas.Height - 36);
+
+    // 城市选择与播放来源同一个控件：胶囊按钮 + 下拉浮层，第一个是自动定位（带定位到的城市），中间是已存城市，
+    // 最后是「添加城市」——它跳到设置页，新增/删除城市仍只有设置页一个入口。
+    private void WeatherCity_Click(object sender, RoutedEventArgs e)
+    {
+        if (_weatherView is null) return;
+        if (ReferenceEquals(WeatherCityButton.ContextMenu, _toolbarMenu) && ToolbarMenuOpen) { CloseSourceMenu(); return; }
+        var menu = new ContextMenu { Style = (Style)FindResource("MediaSourceMenu") };
+        menu.SetValue(SuppressMusicToolTipsProperty, true);
+        foreach (var choice in _weatherView.CityChoices())
+        {
+            var label = new TextBlock
+            {
+                Text = choice.Label, FontSize = 12.5, Foreground = UI.Brush(Look.Primary),
+                TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center
+            };
+            // Tag "single" 让勾选列只画对勾、不变成图钉（图钉是播放来源专用的固定播放器功能）。
+            var item = new MenuItem { Style = (Style)FindResource("MediaSourceMenuItem"), Header = label, Tag = "single", IsCheckable = true, IsChecked = choice.Selected };
+            AutomationProperties.SetName(item, choice.Label);
+            int index = choice.Index;
+            item.Click += (_, _) => { CloseSourceMenu(); _ = ChooseCity(index); };
+            menu.Items.Add(item);
+        }
+        menu.Items.Add(new Separator { Style = (Style)FindResource("MediaSourceMenuSeparator") });
+        var addLabel = new TextBlock
+        {
+            Text = Loc.T("添加城市…", "Add a city…"), FontSize = 12.5, Foreground = UI.Brush(Look.Primary),
+            TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center
+        };
+        var add = new MenuItem { Style = (Style)FindResource("MediaSourceMenuItem"), Header = addLabel, Tag = "action" };
+        AutomationProperties.SetName(add, addLabel.Text);
+        add.Click += (_, _) => { CloseSourceMenu(); _weatherView?.SettingsRequested?.Invoke(); };
+        menu.Items.Add(add);
+        ShowToolbarMenu(WeatherCityButton, menu);
+    }
+    private async Task ChooseCity(int index)
+    {
+        if (_weatherView is null) return;
+        await _weatherView.ChooseCityAsync(index);
+        RenderWeatherCityButton();
+        RenderWeatherRefreshButton();
+    }
+    // 按钮文字跟着选择与定位结果走；抓取中、定位到的城市还没回来时保持上一版文字，不闪成空。
+    private void RenderWeatherCityButton()
+    {
+        if (WeatherCityButton is null) return;
+        bool show = Settings.WeatherPage && IsWeatherPage && _weatherView is not null;
+        WeatherCityButton.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (!show) return;
+        string label = _weatherView!.CityLabel;
+        WeatherCityLabel.Text = label;
+        var tip = Loc.T("切换城市", "Switch city");
+        if (WeatherCityButton.ToolTip is System.Windows.Controls.ToolTip shown) shown.Content = tip; else WeatherCityButton.ToolTip = UI.LeftwardToolTip(tip);
+        AutomationProperties.SetName(WeatherCityButton, label);
     }
 
     // The weather button shares the sync button's look (ring, shrinking arrows, spin); only the click differs, as the weather
     // page always refreshes itself and a second click stops the refresh under way instead of toggling anything.
     private void RenderWeatherRefreshButton()
     {
+        RenderWeatherCityButton();
         if (_weatherView is null || WeatherRefreshButton is null) return;
         bool page = IsWeatherPage;
         bool onScreen = _expanded && page && !IsSuppressed;

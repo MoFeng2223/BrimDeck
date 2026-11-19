@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
@@ -41,7 +41,7 @@ public partial class MainWindow
         MusicContent.LostMouseCapture += (_, _) => { if (_dragging) EndTrail(); };
     }
 
-    private bool GesturesAllowed => _expanded && !_preview && IsMusicPage && _detailPopup is null && MediaSourceButton.ContextMenu?.IsOpen != true;
+    private bool GesturesAllowed => _expanded && !_preview && IsMusicPage && _detailPopup is null && !ToolbarMenuOpen;
 
     private void BeginMusicDrag(MouseButtonEventArgs e)
     {

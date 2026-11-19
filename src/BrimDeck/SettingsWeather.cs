@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
@@ -148,12 +148,15 @@ internal sealed class WeatherSettingsPreview : Border
         headRight.Children.Add(upd);headRight.Children.Add(src);
         head.Children.Add(locIcon);Grid.SetColumn(headRight,1);head.Children.Add(headRight);
         var headBar=new Border {Height=34,CornerRadius=new CornerRadius(13,13,0,0),Background=new SolidColorBrush(Color.FromArgb(46,0,0,0)),BorderBrush=new SolidColorBrush(Color.FromArgb(24,255,255,255)),BorderThickness=new Thickness(0,0,0,1),Child=head};
-        var body=new Grid();body.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(250)});body.ColumnDefinitions.Add(new ColumnDefinition());
+        // 左侧「现在」占星号列，右侧「三天」按固定列宽靠右收成一小簇。
+        // 三天如果一起放进星号列，UniformGrid 会把可用宽度三等分：内容只有几十像素、格子却有一百多，
+        // 数字被拉开、今天的高亮框也胀成一大块——这就是它看起来「胖」的原因。
+        var body=new Grid();body.ColumnDefinitions.Add(new ColumnDefinition());body.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
         var now=new StackPanel {Margin=new Thickness(20,0,0,0),VerticalAlignment=VerticalAlignment.Center};
         var first=new StackPanel {Orientation=Orientation.Horizontal};first.Children.Add(new WeatherGlyph(code,day) {Width=52,Height=52,Margin=new Thickness(0,0,8,0),VerticalAlignment=VerticalAlignment.Center});
         first.Children.Add(new TextBlock {Text=snap is null?"":Deg(snap.Temperature),FontSize=46,FontWeight=FontWeights.Light,Foreground=Brushes.White,VerticalAlignment=VerticalAlignment.Center});now.Children.Add(first);
         now.Children.Add(new TextBlock {Text=snap is null?"":WeatherView.Condition(code),FontSize=15,FontWeight=FontWeights.Medium,Foreground=new SolidColorBrush(Color.FromRgb(234,242,255))});
-        var forecast=new UniformGrid {Rows=1,Columns=3,Margin=new Thickness(0,0,16,0),VerticalAlignment=VerticalAlignment.Center};
+        var forecast=new UniformGrid {Rows=1,Columns=3,Margin=new Thickness(12,0,14,0),VerticalAlignment=VerticalAlignment.Center,HorizontalAlignment=HorizontalAlignment.Right};
         int today=snap is null?0:WeatherData.TodayIndex(snap);   // 正序数组中“今天”的索引
         for(int i=0;i<3;i++) {
             string dayTitle="";int dCode=0;string rain="";string high="";string low="";
@@ -165,13 +168,21 @@ internal sealed class WeatherSettingsPreview : Border
                 int r=snap.DayRainProb.Length>idx?snap.DayRainProb[idx]:-1;rain=r>=20?r+"%":"–";
                 high=Deg(snap.DayHighC.Length>idx?snap.DayHighC[idx]:double.NaN);low=Deg(snap.DayLowC.Length>idx?snap.DayLowC[idx]:double.NaN);
             }
-            var col=new StackPanel {Margin=new Thickness(4,0,4,0)};
-            col.Children.Add(new TextBlock {Text=dayTitle,FontSize=11.5,FontWeight=FontWeights.SemiBold,Foreground=new SolidColorBrush(Color.FromRgb(205,224,247)),TextAlignment=TextAlignment.Center});
-            col.Children.Add(new WeatherGlyph(dCode,true) {Width=30,Height=30,HorizontalAlignment=HorizontalAlignment.Center,Margin=new Thickness(0,4,0,2)});
-            col.Children.Add(new TextBlock {Text=rain,FontSize=10.5,Foreground=new SolidColorBrush(Color.FromRgb(143,208,255)),TextAlignment=TextAlignment.Center,Height=14});
-            col.Children.Add(new TextBlock {Text=high,FontSize=15,FontWeight=FontWeights.SemiBold,Foreground=Brushes.White,TextAlignment=TextAlignment.Center});
-            col.Children.Add(new TextBlock {Text=low,FontSize=11.5,Foreground=new SolidColorBrush(Color.FromRgb(182,201,226)),TextAlignment=TextAlignment.Center});
-            FrameworkElement holder=col;if(i==0)holder=new Border {Child=col,CornerRadius=new CornerRadius(12),Padding=new Thickness(6),Background=new SolidColorBrush(Color.FromArgb(26,255,255,255)),BorderBrush=new SolidColorBrush(Color.FromArgb(56,255,255,255)),BorderThickness=new Thickness(1)};
+            // 每列固定 64px：正好装下「今天 / 图标 / 降水 / 15°/4°」，三列合计 192，右边留出呼吸位。
+            var col=new StackPanel {Width=64,VerticalAlignment=VerticalAlignment.Center};
+            col.Children.Add(new TextBlock {Text=dayTitle,FontSize=11.5,FontWeight=FontWeights.SemiBold,Foreground=new SolidColorBrush(Color.FromRgb(205,224,247)),TextAlignment=TextAlignment.Center,TextWrapping=TextWrapping.NoWrap});
+            col.Children.Add(new WeatherGlyph(dCode,true) {Width=28,Height=28,HorizontalAlignment=HorizontalAlignment.Center,Margin=new Thickness(0,5,0,3)});
+            col.Children.Add(new TextBlock {Text=rain,FontSize=10.5,Foreground=new SolidColorBrush(Color.FromRgb(143,208,255)),TextAlignment=TextAlignment.Center,Height=13,TextWrapping=TextWrapping.NoWrap});
+            // 高低温并成一行：每列只有一天，分成两行会把格子撑得又高又空，两个数字还各占一侧。
+            var range=new StackPanel {Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Center,Margin=new Thickness(0,1,0,0)};
+            range.Children.Add(new TextBlock {Text=high,FontSize=14.5,FontWeight=FontWeights.SemiBold,Foreground=Brushes.White,TextWrapping=TextWrapping.NoWrap});
+            range.Children.Add(new TextBlock {Text="/",FontSize=10.5,Foreground=new SolidColorBrush(Color.FromRgb(150,168,192)),VerticalAlignment=VerticalAlignment.Bottom,Margin=new Thickness(2,0,2,2)});
+            range.Children.Add(new TextBlock {Text=low,FontSize=11.5,Foreground=new SolidColorBrush(Color.FromRgb(182,201,226)),VerticalAlignment=VerticalAlignment.Bottom,Margin=new Thickness(0,0,0,2),TextWrapping=TextWrapping.NoWrap});
+            col.Children.Add(range);
+            // 三列套同一层壳，只有今天有底色与描边：保持等宽，不会因为高亮框多出 2px 而串位。
+            var holder=new Border {Child=col,Padding=new Thickness(0,6,0,6),CornerRadius=new CornerRadius(11),BorderThickness=new Thickness(1),
+                Background=i==0?new SolidColorBrush(Color.FromArgb(26,255,255,255)):Brushes.Transparent,
+                BorderBrush=i==0?new SolidColorBrush(Color.FromArgb(56,255,255,255)):Brushes.Transparent};
             forecast.Children.Add(holder);
         }
         body.Children.Add(now);Grid.SetColumn(forecast,1);body.Children.Add(forecast);

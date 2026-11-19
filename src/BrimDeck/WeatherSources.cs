@@ -296,7 +296,10 @@ internal static class WeatherAggregator
                 // 逐时窗口是 24 小时，允许头部少量缺测。
                 int hours = snapshot.HourTimes.Length, filled = 0;
                 for (int i = 0; i < hours; i++) if (!double.IsNaN(snapshot.HourTempsC[i])) filled++;
-                return hours >= 20 && filled >= 20;
+                // 还要求窗口锚点（当前整点前 1 小时）落在数据里：和风从下一个整点起返回，
+                // 缺这一条就继续下探到 Open-Meteo 的 past_hours，否则窗口第一列只能是未来。
+                bool anchored = hours > 0 && string.CompareOrdinal(snapshot.HourTimes[0], HourKey(SnapshotClock(snapshot).AddHours(-1))) <= 0;
+                return hours >= 20 && filled >= 20 && anchored;
             case WeatherDomain.Daily:
                 // 今天起 13 天里至少 11 天有高低温；和风 v1 只有 10 天，最后 3 天由下一家补。
                 int days = 0; for (int offset = 0; offset <= 12; offset++) if (Day(offset)) days++;
@@ -411,13 +414,23 @@ internal static class WeatherAggregator
             }
         }
 
-        // 小时来源本身已从当地当前整点开始返回，按时间正序取前 24 条即可，不再用用户本地时钟过滤。
-        var hourList = hours.Values.Take(24).ToArray();
+        // 逐时窗口固定以「当前整点前 1 小时」为起点、共 24 条：前面 1 小时作参照 + 当前 + 未来 22 小时。
+        // 窗口窄到只剩 7 列时，这 24 条的前 7 条正好是 前1h / 当前 / 未来5h，两种列数共用同一套锚点。
+        // 和风 v1 从下一个整点起返回、没有当前和过去这 1 小时，靠 Open-Meteo 的 past_hours 补齐；
+        // 两家都拿不到更早的小时（断网、只剩和风）时，退化为从最早一条开始，界面照样能画。
+        var ordered = hours.Values.ToList();
+        int start = 0;
+        string anchor = HourKey(DateTimeOffset.Now.ToOffset(ClockOffset(zone, city)).AddHours(-1));
+        for (int index = 0; index < ordered.Count; index++)
+            if (string.CompareOrdinal(ordered[index].Time, anchor) >= 0) { start = index; break; }
+        var hourList = ordered.Skip(start).Take(24).ToArray();
         var snapshot = new WeatherSnapshot
         {
             Name = city.Name,
             Today = today.ToString("yyyy-MM-dd"),
             FetchedAt = DateTimeOffset.Now,
+            // 城市时钟偏移：界面靠它把「现在」认到正确的整点列上（国外城市与本机不在同一时区）。
+            UtcOffsetMinutes = (int)ClockOffset(zone, city).TotalMinutes,
             Temperature = current.Temperature ?? double.NaN,
             FeelsLike = current.FeelsLike ?? current.Temperature ?? double.NaN,
             HumidityPercent = current.Humidity ?? -1,
@@ -576,6 +589,24 @@ internal static class WeatherAggregator
         try { return TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(zone)).Date; }
         catch { return DateTime.Today; }
     }
+    // 城市当地的「现在」：逐时窗口锚点按当地时钟算，查询国外城市时不能用用户本地时间。
+    private static DateTimeOffset LocalNow(string? zone)
+    {
+        if (string.IsNullOrWhiteSpace(zone)) return DateTimeOffset.Now;
+        try { return TimeZoneInfo.ConvertTime(DateTimeOffset.Now, TimeZoneInfo.FindSystemTimeZoneById(zone)); }
+        catch { return DateTimeOffset.Now; }
+    }
+    // 城市时钟偏移（分钟）：优先用来源给的时区名（能带夏令时），拿不到就按经纬度估算，国内固定 +8。
+    private static TimeSpan ClockOffset(string? zone, City city)
+        => TimeSpan.FromMinutes(string.IsNullOrWhiteSpace(zone) ? Geo.UtcOffsetHours(city) * 60 : LocalNow(zone).Offset.TotalMinutes);
+    // 按快照自带的偏移还原城市时钟：界面与覆盖判定用同一份，不会两边算出不同的「现在」。
+    private static DateTimeOffset SnapshotClock(WeatherSnapshot snapshot)
+        => snapshot.UtcOffsetMinutes is > -1440 and < 1440
+            ? DateTimeOffset.Now.ToOffset(TimeSpan.FromMinutes(snapshot.UtcOffsetMinutes))
+            : DateTimeOffset.Now;
+    // 整点键：与 HourPoint.Time 同一格式（yyyy-MM-ddTHH:mm，当地时钟），可直接做字符串比较。
+    private static string HourKey(DateTimeOffset at)
+        => new DateTimeOffset(at.Year, at.Month, at.Day, at.Hour, 0, 0, at.Offset).ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
 }
 
 // 国内/国外判断与统一的城市名拆分。
@@ -720,7 +751,9 @@ internal sealed class OpenMeteoSource : IWeatherSource
         string location = FormattableString.Invariant($"latitude={city.Latitude.ToString(CultureInfo.InvariantCulture)}&longitude={city.Longitude.ToString(CultureInfo.InvariantCulture)}&timezone=auto");
         string site = FormattableString.Invariant($"{city.Latitude:0.00},{city.Longitude:0.00}");
         var forecast = wantForecast ? Body("forecast|" + site, TimeSpan.FromMinutes(15), $"https://api.open-meteo.com/v1/forecast?{location}&current=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,weather_code,pressure_msl,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,sunrise,sunset,uv_index_max,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,relative_humidity_2m_mean,pressure_msl_mean&past_days=10&forecast_days=14", token) : Task.FromResult("");
-        var hourly = Want(WeatherDomain.Hourly) ? Body("hourly|" + site, TimeSpan.FromMinutes(30), $"https://api.open-meteo.com/v1/forecast?{location}&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,precipitation_probability,weather_code,pressure_msl,cloud_cover,visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index&forecast_hours=24", token) : Task.FromResult("");
+        // past_hours=2：逐时窗口以「当前整点前 1 小时」为起点，得先有这条过去的数据，多取 1 小时做取整余量。
+        // 缓存键带 |p2，换参数后不复用旧响应（旧响应没有过去的小时）。
+        var hourly = Want(WeatherDomain.Hourly) ? Body("hourly|" + site + "|p2", TimeSpan.FromMinutes(30), $"https://api.open-meteo.com/v1/forecast?{location}&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,precipitation_probability,weather_code,pressure_msl,cloud_cover,visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index&past_hours=2&forecast_hours=24", token) : Task.FromResult("");
         var air = Want(WeatherDomain.Air) ? Body("air|" + site, TimeSpan.FromMinutes(30), $"https://air-quality-api.open-meteo.com/v1/air-quality?{location}&current=pm2_5,pm10,us_aqi,european_aqi", token) : Task.FromResult("");
         await Task.WhenAll(forecast, hourly, air);
         var part = new WeatherPart();

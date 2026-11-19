@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Automation.Peers;
 using System.Windows.Automation.Provider;
 using System.Windows.Controls;
@@ -173,7 +173,7 @@ public partial class MainWindow : Window
         _host.ContextChanged += context =>
         {
             _context = context;
-            if (_expanded && !_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true && !ShelfHolds)
+            if (_expanded && !_preview && _detailPopup is null && _popupReturnArea is null && !ToolbarMenuOpen && !ShelfHolds)
             {
                 _expanded = false;
                 PanelClosed();
@@ -668,7 +668,7 @@ public partial class MainWindow : Window
         _musicAccent = MusicVisuals.Accent(_mediaCover, out _coverAccent, Look);
         _musicRenderKey = ""; _compactRendered = null; _alertRendered = null;
         if (_detailPopup is { } popup) Dispatcher.BeginInvoke(() => { if (ReferenceEquals(_detailPopup, popup)) popup.Close(); });
-        if (MediaSourceButton.ContextMenu?.IsOpen == true) Dispatcher.BeginInvoke(CloseSourceMenu);
+        if (ToolbarMenuOpen) Dispatcher.BeginInvoke(CloseSourceMenu);
     }
     // The surface's transparency (DeckSettings.SurfaceTransparency). ClearType needs an opaque color under the text, so over a
     // see-through surface the island's text is smoothed in grayscale (a pixel theme's stays unsmoothed, PanelTheme.Text). The
@@ -1170,7 +1170,7 @@ public partial class MainWindow : Window
         {
             _hover.Stop();
             if (_expanded && !_preview) WatchOutsidePress(true);
-            if (!_expanded || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true || ShelfHolds) return;
+            if (!_expanded || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || ToolbarMenuOpen || ShelfHolds) return;
             // A press outside closes the panel at once (MainWindow.OutsidePress.cs).
             int delay = _pressedOutside ? 1 : Math.Max(_popupReturnArea is null ? 1 : 50, Settings.CloseDelay);
             _leftAt = Environment.TickCount64;
@@ -1180,7 +1180,7 @@ public partial class MainWindow : Window
     internal void CheckPointerExit(Point screenPoint)
     {
         if (IsHotkeyPinned || Resizing) { _leave.Stop(); return; }
-        if (_pointerInside || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true || ShelfHolds) { _leave.Stop(); return; }
+        if (_pointerInside || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || ToolbarMenuOpen || ShelfHolds) { _leave.Stop(); return; }
         // Closing a calendar with either button must leave a path back to the results.
         // Keep checking until the cursor leaves that area; entering the island restores normal hover behavior.
         if (_popupReturnArea is { } area && area.Contains(screenPoint) && !_pressedOutside) return;

@@ -319,7 +319,17 @@ public partial class MainWindow
         // about 25 times a second during the drag, and once more when it ends (FinishResize saves the size).
         if (_resizePage == DeckPage.Monitor) RenderMonitor();
         else if (_resizePage == DeckPage.Devices) RenderDevices();
-        else if (_resizePage == DeckPage.Weather) RenderWeather();
+        // 天气页：宽度每变一点，列数要重推、预报列与折线都要重画，整页重建（页头、刷新环、城市按钮、状态栏）更贵。
+        // 所以拖动时每帧只重排面板内容，整页按 40ms 节流重建，和配额页同一档。
+        else if (_resizePage == DeckPage.Weather)
+        {
+            FitWeather();
+            if (Environment.TickCount64 - _resizeRendered >= 40)
+            {
+                _resizeRendered = Environment.TickCount64;
+                RenderWeather();
+            }
+        }
         // The clipboard page is built again only where its sizes step; in between its columns stretch (StretchShelf). It is built
         // once more when the size is saved (FinishResize).
         else if (_resizePage == DeckPage.Clipboard) StretchShelf();

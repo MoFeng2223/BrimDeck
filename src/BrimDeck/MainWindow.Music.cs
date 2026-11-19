@@ -162,7 +162,7 @@ public partial class MainWindow
     // an open menu or the detail popup keeps the wheel to itself as well.
     private void PanelWheel(object sender, MouseWheelEventArgs e)
     {
-        if (Settings.MouseWheel == MouseWheelAction.None || !_expanded || _preview || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) return;
+        if (Settings.MouseWheel == MouseWheelAction.None || !_expanded || _preview || _detailPopup is not null || ToolbarMenuOpen) return;
         if (Settings.MouseWheel == MouseWheelAction.Volume) { WheelVolume(e.Delta); e.Handled = true; return; }
         var shown = DeckPages.Visible(Settings);
         if (shown.Count < 2) return;
@@ -420,10 +420,7 @@ public partial class MainWindow
             AutomationProperties.SetName(entry, FullControlEntryLabel);
             entry.Click += (_, _) => { CloseSourceMenu(); _ = StartNeteaseFullControl(); }; menu.Items.Add(entry);
         }
-        WatchSourceMenu(menu);
-        MediaSourceButton.ContextMenu = menu; menu.PlacementTarget = MediaSourceButton; menu.Placement = PlacementMode.Bottom;
-        // A pop-up is not part of the panel's visual tree, so it takes the panel's scale itself.
-        UI.Scale(menu, _scale); menu.VerticalOffset = 6 * _scale; ResizeSourceMenu(menu); menu.IsOpen = true;
+        ShowToolbarMenu(MediaSourceButton, menu);
     }
     // Guidance shown in place of the transport when Netease runs without SMTC. Both sentences stay at every size:
     // what is required and where to switch it on. Only the type size and the entry's label adapt to the row.

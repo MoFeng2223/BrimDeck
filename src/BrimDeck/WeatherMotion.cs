@@ -46,7 +46,9 @@ internal sealed class WeatherMetaIcon : FrameworkElement
 internal sealed class WeatherGlyph : FrameworkElement
 {
     private readonly int code; private readonly bool day;
-    internal WeatherGlyph(int code,bool day) { this.code=code;this.day=day; WeatherMotion.Attach(this); }
+    // 图标不再挂 WeatherMotion：以前鼠标划过任何一个图标它都会放大 1.035，
+    // 指针在卡片或预报列上挪动时一个个图标跟着抖，属于多余动效。图标只负责画，交互交给外层容器。
+    internal WeatherGlyph(int code,bool day) { this.code=code;this.day=day; }
     protected override void OnRender(DrawingContext d)
     {
         base.OnRender(d); d.PushTransform(new ScaleTransform(ActualWidth/80,ActualHeight/80));

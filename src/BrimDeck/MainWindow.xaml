@@ -150,6 +150,23 @@
                   <Button x:Name="ShelfSearchButton" Style="{StaticResource PanelGlyphButton}" Margin="0,0,4,0" VerticalAlignment="Center" Click="ShelfSearch_Click" Visibility="Collapsed">
                     <Viewbox Width="15" Height="15"><Canvas Width="24" Height="24"><Path Data="M 10.5,3.5 A 7,7 0 1 1 10.5,17.5 A 7,7 0 1 1 10.5,3.5 Z M 15.6,15.6 L 21,21" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/></Canvas></Viewbox>
                   </Button>
+                  <Button x:Name="WeatherCityButton" Style="{StaticResource PanelSourceButton}" Width="Auto" MaxWidth="140" Padding="8,0" Margin="0,0,2,0" Click="WeatherCity_Click" Visibility="Collapsed">
+                    <Grid>
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                      <!-- The location pin the summary's place row uses, at the toolbar's label size. -->
+                      <Viewbox Width="10" Height="10" Margin="0,0,4,0" VerticalAlignment="Center">
+                        <Viewbox.RenderTransform><TranslateTransform Y="1"/></Viewbox.RenderTransform>
+                        <Canvas Width="16" Height="16">
+                          <Path Data="M8,2.5 C10.6,2.5 12.3,4.4 12.3,6.8 C12.3,10.2 8,13.4 8,13.4 C8,13.4 3.7,10.2 3.7,6.8 C3.7,4.4 5.4,2.5 8,2.5 Z M8,5.3 A1.7,1.7 0 1 0 8,8.7 A1.7,1.7 0 1 0 8,5.3 Z"
+                                Stroke="{Binding Foreground, ElementName=WeatherCityButton}" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                        </Canvas>
+                      </Viewbox>
+                      <TextBlock x:Name="WeatherCityLabel" Grid.Column="1" FontFamily="{DynamicResource FontPanel}" FontSize="12"
+                                 Foreground="{Binding Foreground, ElementName=WeatherCityButton}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                      <TextBlock Grid.Column="2" Text="&#xE96E;" FontFamily="{StaticResource FontIcon}" FontSize="12" Margin="5,1,0,-1"
+                                 Foreground="{Binding Foreground, ElementName=WeatherCityButton}" VerticalAlignment="Center"/>
+                    </Grid>
+                  </Button>
                   <Button x:Name="WeatherRefreshButton" Style="{StaticResource PanelGlyphButton}" Visibility="Collapsed" Click="WeatherRefresh_Click" Margin="0,0,4,0" VerticalAlignment="Center">
                     <Grid Width="24" Height="24">
                     <!-- Countdown to the next automatic update: a static ring filled once a second, 12 o'clock, counterclockwise. -->
