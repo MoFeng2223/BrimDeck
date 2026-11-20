@@ -1,0 +1,54 @@
+src/BrimDeck.Core/Settings.cs
+  s_d94663f9fe3759::t_bb6ca382d83c38 144-147
+docs/zh-CN/privacy.md
+  s_d94663f9fe3759::t_01d6048d0aa399 11
+tests/BrimDeck.Tests/AntigravityUsageTests.cs
+  s_d94663f9fe3759::t_69b3c2560ceece 65,69-92
+  s_d94663f9fe3759::t_44865623eb6581 93-94
+docs/zh-CN/ai-tools.md
+  s_d94663f9fe3759::t_01d6048d0aa399 17
+src/BrimDeck.Core/UsageService.cs
+  s_d94663f9fe3759::t_44888f29586f94 1252,1254-1255,1257,1265,1269-1272
+  s_d94663f9fe3759::t_46b783ca6a22a0 74-75
+  s_d94663f9fe3759::t_daad85fc126022 1282-1284
+  s_d94663f9fe3759::t_c7b0859f4d793f 193-194
+  s_8a96349c553340::t_c7dbe61d349f8d 1273-1281,1285-1286
+docs/en-US/ai-tools.md
+  s_d94663f9fe3759::t_01d6048d0aa399 17
+src/BrimDeck/SettingsProviders.cs
+  s_d94663f9fe3759::t_6b59b05dc1dd00 159-161,164-165
+  s_d94663f9fe3759::t_2247e6451c7b5b 153-158,162-163,166-168,177,179,181,183-184,252,256
+  s_d94663f9fe3759::t_41e5e48cc26a12 152
+docs/en-US/privacy.md
+  s_d94663f9fe3759::t_01d6048d0aa399 11
+README.md
+  s_d94663f9fe3759::t_17a226af4a6bea 193
+README.zh-CN.md
+  s_d94663f9fe3759::t_b77d043154a1b3 193
+src/BrimDeck/Native/DesktopSources.cs
+  s_d94663f9fe3759::t_ad199d52d2d3e9 165-167,178-186,188-190,209-215,225
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "26b16aaaa0f4c77d226e7b5ee786a2aaa9ea7745",
+  "prompts": {},
+  "sessions": {
+    "s_8a96349c553340": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "593adff0-3142-4b17-b3e6-f5b3ec1bca24",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_d94663f9fe3759": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "834acb0d-b79f-4e11-b498-2623a6912e99",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
