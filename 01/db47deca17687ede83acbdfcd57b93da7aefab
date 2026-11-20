@@ -1,0 +1,42 @@
+src/BrimDeck.Core/QianwenUsage.cs
+  s_8a96349c553340::t_1d243b9398d1e9 69-80,146-147,150,153,156,162,165,169,180,187,189,193
+src/BrimDeck.Core/UsageService.cs
+  s_8a96349c553340::t_916151d21cecda 2033
+  s_8a96349c553340::t_8a73a02c10dc9e 1462,1530,1584-1585,1592,1597-1601,1605,1608,1610,1621
+  s_8a96349c553340::t_b1ab6fd5753793 42,256,348-349,432,452,454,456,458-459,1467,1472,1507,1514,1526-1529,1531,1538,1547,1569,1573,1580-1583,1615-1616,1618-1620,1622-1626,1640,1644,1651,1690-1691,1713,1717,1878-1879,1957,2045-2047
+tests/BrimDeck.Tests/QoderUsageTests.cs
+  s_8a96349c553340::t_4731cdcae6140a 386-419
+src/BrimDeck.Core/UsageService.LastReadings.cs
+  s_8a96349c553340::t_a836ac6f6cdc8f 1-6,9-46,57-64,66-126
+  s_8a96349c553340::t_916151d21cecda 7-8,47-56,65
+tests/BrimDeck.Tests/WorkBuddyUsageTests.cs
+  h_dc4d9c798f1bc1 76-86,88-90,92-144
+  s_8a96349c553340::t_cf282ce39043a6 87,91
+tests/BrimDeck.Tests/QianwenUsageTests.cs
+  s_8a96349c553340::t_eb9e6c65604d88 127-128,166,223-239
+tests/BrimDeck.Tests/QwenWorkUsageTests.cs
+  h_dc4d9c798f1bc1 219-220
+src/BrimDeck/MainWindow.xaml.cs
+  h_dc4d9c798f1bc1 719-720
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "01db47deca17687ede83acbdfcd57b93da7aefab",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_8a96349c553340": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "593adff0-3142-4b17-b3e6-f5b3ec1bca24",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
