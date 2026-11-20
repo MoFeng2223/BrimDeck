@@ -19,9 +19,11 @@ public sealed partial class SettingsWindow
             for(int i=-1;i<state.Cities.Count;i++) {
                 int index=i;bool selected=i==state.Selected;var city=i<0?null:state.Cities[i];
                 string? temperature=null;int code=3;bool day=true;string? full=null;
-                string name=city is null?Loc.T("自动定位","Auto location"):city.Name.Split(" · ")[0],detail=city?.Name??Loc.T("自动定位","Auto location");
+                // 行标题取地名主体（新版 Name 即主体；旧格式 Name 内嵌「城市 · 省 · 国家」，取第一段）；
+                // 副行是完整层级（洪山区 · 武汉市 · 湖北省），同名区县一眼可辨。
+                string name=city is null?Loc.T("自动定位","Auto location"):city.Name.Split(" · ")[0],detail=city is null?Loc.T("自动定位","Auto location"):city.Full;
                 if(city is null&&autoName.Trim().Length>0&&!autoName.Contains("当前位置"))full=autoName;
-                if(state.Cache.TryGetValue(city?.ToString()??"auto",out var snap)){temperature=$"{snap.Temperature:0}°";code=snap.WeatherCode;day=snap.IsDay;if(city is null&&!snap.Name.Contains("当前位置"))full=snap.Name;}
+                if(state.Cache.TryGetValue(city?.ToString()??"auto",out var snap)){temperature=$"{snap.Temperature:0}°";code=snap.WeatherCode;day=snap.IsDay;if(city is null&&!snap.Name.Contains("当前位置"))full=snap.FullName.Length>0?snap.FullName:snap.Name;}
                 if(city is null&&full is not null)detail=full;
                 var controls=new StackPanel {Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};if(temperature is not null)controls.Children.Add(TextLine(temperature,14,TextPrimary));
                 void Select(){state.Selected=index;Save();preview.Content=new WeatherSettingsPreview(state);Fill();}
@@ -36,12 +38,12 @@ public sealed partial class SettingsWindow
         Target.Children.Add(preview);SectionTitle(Loc.T("当前城市","Current city"));Fill();Group(cityRows);
         _ = DetectAsync();
         // 设置页打开即尝试定位：成功则刷新「自动定位」行展示当地城市名，不干扰其余行。
-        async Task DetectAsync() { if(!active)return;try {var local=await WeatherData.LocateAsync(CancellationToken.None);if(active&&local is not null&&!local.Name.Contains("当前位置")){autoName=local.Name;Fill();}}catch{}}
+        async Task DetectAsync() { if(!active)return;try {var local=await WeatherData.LocateAsync(state.Schedule,CancellationToken.None);if(active&&local is not null&&!local.Name.Contains("当前位置")){autoName=local.Full;Fill();}}catch{}}
         SectionTitle(Loc.T("添加城市","Add city"));
         var input=new TextBox {Width=250,Height=31,Style=(Style)FindResource("SettingsField")};
         var placeholder=new TextBlock {Text=Loc.T("支持中英文","Chinese or English"),FontSize=13,Foreground=(Brush)FindResource("SettingsTextSecondary"),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(12,0,0,0),IsHitTestVisible=false};void UpdatePlaceholder()=>placeholder.Visibility=input.Text.Length==0?Visibility.Visible:Visibility.Collapsed;input.TextChanged+=(_,_)=>UpdatePlaceholder();
         var inputHost=new Grid {Width=250};inputHost.Children.Add(input);inputHost.Children.Add(placeholder);UpdatePlaceholder();
-        var options=new ListBox {MaxHeight=240,DisplayMemberPath="Name",Style=(Style)FindResource("SettingsSearchList")};
+        var options=new ListBox {MaxHeight=240,DisplayMemberPath="Full",Style=(Style)FindResource("SettingsSearchList")};
         var popup=new Popup {PlacementTarget=input,Placement=PlacementMode.Bottom,StaysOpen=false,AllowsTransparency=true,Child=new Border {Width=250,Background=(Brush)FindResource("SettingsInput"),BorderBrush=(Brush)FindResource("SettingsBorder"),BorderThickness=new Thickness(1),Padding=new Thickness(4),Margin=new Thickness(0,4,0,0),CornerRadius=new CornerRadius(6),Child=options}};
         PopupMotion.Attach(popup);
         City? picked=null;bool programmatic=false;CancellationTokenSource? pending=null;CancellationTokenSource? fetchCts=null;
@@ -50,7 +52,7 @@ public sealed partial class SettingsWindow
         input.TextChanged+=async (_,_)=>{
             if(programmatic)return;
             pending?.Cancel();pending?.Dispose();pending=new();var token=pending.Token;picked=null;add.IsEnabled=false;popup.IsOpen=false;var query=input.Text.Trim();if(query.Length<2)return;
-            try {await Task.Delay(350,token);var found=await WeatherData.Search(query,token);if(token.IsCancellationRequested||!active)return;options.ItemsSource=found;popup.IsOpen=found.Count>0;}catch(OperationCanceledException){}catch{return;}
+            try {await Task.Delay(350,token);var found=await WeatherData.Search(query,state.Schedule,token);if(token.IsCancellationRequested||!active)return;options.ItemsSource=found;popup.IsOpen=found.Count>0;}catch(OperationCanceledException){}catch{return;}
         };
         var controlsRow=new StackPanel {Orientation=Orientation.Horizontal};controlsRow.Children.Add(inputHost);controlsRow.Children.Add(add);Group(Row(Loc.T("搜索城市","Search city"),controlsRow));
         SectionTitle(Loc.T("更新与数据","Updates and data"));Group(Row(Loc.T("自动更新","Auto update"),TextLine(Loc.T("每 15 分钟","Every 15 minutes"),12,TextSecondary)),Row(Loc.T("离线时","Offline"),TextLine(Loc.T("自动使用本地缓存","Falls back to the local cache"),12,TextSecondary)));
@@ -60,48 +62,82 @@ public sealed partial class SettingsWindow
         var used=WeatherSources.All.Select(source=>(Name:source.Info.Id switch{"tencent"=>Loc.T("腾讯","Tencent"),"weathercomcn"=>Loc.T("中国天气网","ChinaWx"),"hefeng"=>Loc.T("和风","QWeather"),_=>source.Info.Name},Count:RequestGate.Today(source.Info.Id))).Where(item=>item.Count>0).ToArray();
         Group(Row(Loc.T("今日请求","Requests today"),TextLine(used.Length==0?Loc.T("尚未发起请求","No requests yet"):string.Join(" · ",used.Select(item=>$"{item.Name} {item.Count}")),12,TextSecondary)),
               Row(Loc.T("本地缓存","Local cache"),TextLine(Loc.T($"{usage.Count} 项 · {usage.Bytes/1024.0:0} KB（14 天未用自动清理）",$"{usage.Count} entries · {usage.Bytes/1024.0:0} KB (unused entries purged after 14 days)"),12,TextSecondary)));
-        // 来源调度：每个数据域可单独指定来源；自动档在国内城市优先国内源，国外城市优先全球源，Open-Meteo 永远兜底。
-        SectionTitle(Loc.T("数据来源调度","Data source scheduling"));
-        var domestic=new ComboBox {Width=200,Style=(Style)FindResource("SettingsCombo"),ItemsSource=new[]{Loc.T("国内源优先","Domestic first"),Loc.T("全球源优先","Global first")},SelectedIndex=state.Schedule.PreferDomestic?0:1};
-        PopupMotion.Attach(domestic);
-        domestic.SelectionChanged+=(_,_)=>{if(domestic.SelectedIndex<0)return;bool value=domestic.SelectedIndex==0;if(state.Schedule.PreferDomestic==value)return;state.Schedule.PreferDomestic=value;Save();preview.Content=new WeatherSettingsPreview(state);};
-        Group(Row(Loc.T("调度策略","Scheduling"),domestic,TextLine(Loc.T("每个域按需下探：首选来源够用就停手，缺哪块才找下一家；Open-Meteo 永远兜底。","Each domain stops at its first source that covers it; Open-Meteo always backs up."),11,TextSecondary)));
-        var domainRows=new List<FrameworkElement>();
-        foreach(var domain in new[]{WeatherDomain.Current,WeatherDomain.Hourly,WeatherDomain.Daily,WeatherDomain.Sun,WeatherDomain.Air,WeatherDomain.History})
+        // 数据来源：8 类数据能力逐一可配；区域切换放在明细表的正上方。
+        // 每行只列出「该区域能覆盖这一类」的来源，不支持的不进下拉；用户可逐类选择自动或指定来源。
+        SectionTitle(Loc.T("数据来源","Data sources"));
+        bool showChina=true;
+        // 日出日落/月升月落/月相属于「每天预报」，不单列配置。
+        var abilities=new (WeatherDomain[] Domains,string Label,string Hint)[]
         {
-            var ids=new List<string>{"auto"};var labels=new List<string>{Loc.T("自动（推荐）","Automatic (recommended)")};
-            foreach(var source in WeatherSources.All.Where(source=>source.Info.Domains.Contains(domain)))
-            {
-                ids.Add(source.Info.Id);
-                labels.Add(source.Info.Name+(source.Info.Region==WeatherRegion.China?Loc.T(" · 国内"," · China"):"")+(source.Info.NeedsKey?Loc.T(" · 需 Key"," · key"):""));
-            }
-            var picker=new ComboBox {Width=200,Style=(Style)FindResource("SettingsCombo"),ItemsSource=labels,SelectedIndex=Math.Max(0,ids.IndexOf(state.Schedule.Choice(domain)))};
-            PopupMotion.Attach(picker);
-            picker.SelectionChanged+=(_,_)=>{if(picker.SelectedIndex<0)return;string id=ids[picker.SelectedIndex];if(id=="auto")state.Schedule.Sources.Remove(domain.ToString());else state.Schedule.Sources[domain.ToString()]=id;Save();preview.Content=new WeatherSettingsPreview(state);};
-            domainRows.Add(Row(DomainLabel(domain),picker,TextLine(DomainHint(domain),11,TextSecondary)));
+            ([WeatherDomain.Current],Loc.T("实时预报","Current"),Loc.T("温度、体感、湿度、风、气压等实况。","Now: temperature, feels-like, humidity, wind, pressure.")),
+            ([WeatherDomain.Minutely],Loc.T("分钟预报","Minutely"),Loc.T("未来数小时的分钟级降水。","Minute-by-minute precipitation for the next hours.")),
+            ([WeatherDomain.Hourly],Loc.T("小时预报","Hourly"),Loc.T("未来 24 小时逐小时天气。","Hour by hour for the next 24 hours.")),
+            ([WeatherDomain.Daily],Loc.T("每天预报","Daily"),Loc.T("每日高低温、降水、风、紫外线与日出日落月相。","Daily highs, lows, rain, wind, UV and sun/moon times.")),
+            ([WeatherDomain.History],Loc.T("时光机","History"),Loc.T("过去一段时间的天气。","Past weather.")),
+            ([WeatherDomain.Warning],Loc.T("预警","Warnings"),Loc.T("官方极端天气预警。","Official severe weather warnings.")),
+            ([WeatherDomain.Indices],Loc.T("天气指数","Indices"),Loc.T("穿衣、紫外线、运动等生活指数。","Lifestyle indices: clothing, UV, sports and more.")),
+            ([WeatherDomain.Air],Loc.T("空气质量","Air quality"),Loc.T("AQI、PM2.5 与 PM10。","AQI, PM2.5 and PM10."))
+        };
+        bool loadingSources=false;
+        var sourceTable=new StackPanel();
+
+        // 区域切换：放在 8 类明细表的上方；切换后只重建下方下拉。
+        var regionStrip=new UniformGrid {Columns=2,Width=240};
+        foreach(var (china,label) in new[]{(true,Loc.T("国内城市","Chinese cities")),(false,Loc.T("国外城市","Outside China"))})
+        {
+            var opt=new RadioButton {Content=label,Style=(Style)FindResource("SettingsSegment"),GroupName="WeatherRegion",IsChecked=china};
+            opt.Checked+=(_,_)=>{showChina=china;FillSources();};
+            regionStrip.Children.Add(opt);
         }
-        Group(domainRows.ToArray());
-        SectionTitle(Loc.T("可选 API Key","Optional API keys"));
-        var hefengKey=KeyField(state.Schedule.HeFengKey,text=>{state.Schedule.HeFengKey=text;Save();});
+        Group(Row(Loc.T("城市区域","City region"),SegmentBorder(regionStrip),
+            TextLine(Loc.T("切换区域后，下方只列出该区域能提供的来源。","Switching region refreshes the sources available below."),11,TextSecondary)));
+        Target.Children.Add(sourceTable);
+
+        void FillSources()
+        {
+            loadingSources=true;
+            sourceTable.Children.Clear();
+            var rows=new List<FrameworkElement>();
+            var candidates=WeatherSources.Candidates(showChina).ToArray();
+            // 下拉展示顺序固定：和风 → 腾讯 → 中国天气网 → Open-Meteo（兜底恒最后），自动恒在首。
+            string[] displayOrder=["hefeng","tencent","weathercomcn","openmeteo"];
+            foreach(var (domains,label,hint) in abilities)
+            {
+                // 只列能覆盖整行所有域的来源；缺任一项就不放入下拉，按 displayOrder 排列。
+                var able=candidates.Where(s=>domains.All(d=>s.Info.Domains.Contains(d)))
+                    .OrderBy(s=>{int i=Array.IndexOf(displayOrder,s.Info.Id);return i<0?int.MaxValue:i;})
+                    .ToArray();
+                var ids=new List<string>{"auto"};
+                var labels=new List<string>{Loc.T("自动","Automatic")};
+                foreach(var s in able)
+                {
+                    ids.Add(s.Info.Id);labels.Add(s.Info.Name);
+                }
+                var chosen=domains.Select(state.Schedule.Choice).FirstOrDefault(c=>c!="auto")??"auto";
+                var picker=new ComboBox {Width=210,Style=(Style)FindResource("SettingsCombo"),ItemsSource=labels,SelectedIndex=Math.Max(0,ids.IndexOf(chosen))};
+                PopupMotion.Attach(picker);
+                picker.SelectionChanged+=(_,_)=>{
+                    if(loadingSources||picker.SelectedIndex<0)return;
+                    string id=ids[picker.SelectedIndex];
+                    foreach(var domain in domains){if(id=="auto")state.Schedule.Sources.Remove(domain.ToString());else state.Schedule.Sources[domain.ToString()]=id;}
+                    Save();preview.Content=new WeatherSettingsPreview(state);
+                };
+                string scope=able.Length==0?Loc.T("该区域暂无可用来源","No source in this region"):able.Length==candidates.Length?Loc.T("各家都能提供","from every source"):Loc.T($"仅 {able.Length} 家提供",$"from {able.Length} sources");
+                rows.Add(Row(label,picker,TextLine(hint+" · "+scope,11,TextSecondary)));
+            }
+            GroupInto(sourceTable,rows.ToArray());
+            loadingSources=false;
+        }
+        FillSources();
+
+
+        SectionTitle(Loc.T("和风天气配置","QWeather setup"));
         var hefengHost=KeyField(state.Schedule.HeFengHost,text=>{state.Schedule.HeFengHost=text;Save();});
-        Group(Row(Loc.T("和风天气 Key","QWeather key"),hefengKey,TextLine(Loc.T("填写后自动优先使用和风的全维度数据。","With a key, QWeather is preferred for all domains."),11,TextSecondary)),
-              Row(Loc.T("和风 API Host","QWeather host"),hefengHost,TextLine(Loc.T("必填：控制台分配的项目 Host，例如 abcxyz.re.qweatherapi.com；留空则不启用和风。","Required: the project host from your console, e.g. abcxyz.re.qweatherapi.com; blank disables QWeather."),11,TextSecondary)));
+        var hefengKey=KeyField(state.Schedule.HeFengKey,text=>{state.Schedule.HeFengKey=text;Save();});
+        Group(Row(Loc.T("和风 API Host","QWeather host"),hefengHost,TextLine(Loc.T("必填：控制台分配的项目 Host，例如 abcxyz.re.qweatherapi.com；留空则不启用和风。","Required: the project host from your console, e.g. abcxyz.re.qweatherapi.com; blank disables QWeather."),11,TextSecondary)),
+              Row(Loc.T("和风天气 Key","QWeather key"),hefengKey,TextLine(Loc.T("和风需要 Key：填入后优先使用其全维度数据；其余来源免 Key。","QWeather needs a key: with one it is preferred for all domains; other sources need none."),11,TextSecondary)));
         cityRows.Unloaded+=(_,_)=>{active=false;pending?.Cancel();pending?.Dispose();pending=null;fetchCts?.Cancel();fetchCts?.Dispose();fetchCts=null;popup.IsOpen=false;};
 
-        string DomainLabel(WeatherDomain domain)=>domain switch
-        {
-            WeatherDomain.Current=>Loc.T("当前天气","Current"),WeatherDomain.Hourly=>Loc.T("逐时天气","Hourly"),WeatherDomain.Daily=>Loc.T("每日天气","Daily"),
-            WeatherDomain.Sun=>Loc.T("日出日落","Sunrise & sunset"),WeatherDomain.Air=>Loc.T("空气质量","Air quality"),WeatherDomain.History=>Loc.T("历史天气","History"),_=>domain.ToString()
-        };
-        string DomainHint(WeatherDomain domain)=>domain switch
-        {
-            WeatherDomain.Current=>Loc.T("温度、体感、湿度、风、气压、能见度等实况。","Temperature, feels-like, humidity, wind, pressure and visibility."),
-            WeatherDomain.Hourly=>Loc.T("未来 24 小时逐时天气。","Hour-by-hour for the next 24 hours."),
-            WeatherDomain.Daily=>Loc.T("24 天每日天气、高低温、降水、风与紫外线。","24 days of highs, lows, rain, wind and UV."),
-            WeatherDomain.Sun=>Loc.T("每天日出与日落时间。","Sunrise and sunset for each day."),
-            WeatherDomain.Air=>Loc.T("AQI、PM2.5 与 PM10。","AQI, PM2.5 and PM10."),
-            WeatherDomain.History=>Loc.T("过去 10 天；选「和风天气」会启用时光机，10 天 = 10 次请求。","The past 10 days; choosing QWeather enables the time machine, 10 days = 10 requests."),_=>""
-        };
         TextBox KeyField(string value,Action<string> save)
         {
             var box=new TextBox {Width=250,Height=31,Style=(Style)FindResource("SettingsField"),Text=value};
@@ -129,7 +165,7 @@ internal sealed class WeatherSettingsPreview : Border
         WeatherSnapshot? snap=null;
         if(state.Cache.TryGetValue(key,out var cached)) snap=cached;
         int code=snap?.WeatherCode??0;bool day=snap?.IsDay??true;
-        string cityName=state.Selected>=0&&state.Selected<state.Cities.Count?state.Cities[state.Selected].Name:"当前位置";
+        string cityName=state.Selected>=0&&state.Selected<state.Cities.Count?state.Cities[state.Selected].Full:"当前位置";
         string Place(string n)=>n=="当前位置"?Loc.T("当前位置","Current location"):n;
         string Deg(double value)=>double.IsNaN(value)?"--":$"{value:0}°";
         string Num(double value,string suffix)=>double.IsNaN(value)?"--":value.ToString("0.#",System.Globalization.CultureInfo.InvariantCulture)+suffix;
@@ -140,7 +176,7 @@ internal sealed class WeatherSettingsPreview : Border
         head.ColumnDefinitions.Add(new ColumnDefinition());head.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
         var locIcon=new StackPanel {Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};
         locIcon.Children.Add(new WeatherMetaIcon(WeatherMetaKind.Location,Color.FromRgb(205,224,247)){Width=12,Height=12,VerticalAlignment=VerticalAlignment.Center});
-        locIcon.Children.Add(new TextBlock {Text=Place(snap?.Name??cityName),FontSize=12,FontWeight=FontWeights.SemiBold,Foreground=new SolidColorBrush(Color.FromRgb(234,242,255)),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(4,0,0,0),TextTrimming=TextTrimming.CharacterEllipsis});
+        locIcon.Children.Add(new TextBlock {Text=Place(snap is not null&&snap.FullName.Length>0?snap.FullName:(snap?.Name??cityName)),FontSize=12,FontWeight=FontWeights.SemiBold,Foreground=new SolidColorBrush(Color.FromRgb(234,242,255)),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(4,0,0,0),TextTrimming=TextTrimming.CharacterEllipsis});
         var headRight=new StackPanel {Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Center};
         var upd=new TextBlock {Text=snap is null?"":Loc.T($"更新于 {snap.FetchedAt:HH:mm}",$"Updated {snap.FetchedAt:HH:mm}"),FontSize=10.5,Foreground=new SolidColorBrush(Color.FromRgb(188,208,234)),VerticalAlignment=VerticalAlignment.Center};
         string source=snap is not null&&snap.Sources.TryGetValue("Daily",out var daily)&&daily.Length>0?daily:"Open-Meteo";

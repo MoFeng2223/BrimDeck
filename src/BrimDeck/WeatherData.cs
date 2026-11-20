@@ -1,12 +1,25 @@
-using System.IO;
+﻿using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using BrimDeck.Core;
 namespace BrimDeck;
-// Generic geographic place: a named city with coordinates. Lives in the data layer because it is used by
-// search, favourite storage and automatic location alike.
-internal sealed record City(string Name, double Latitude, double Longitude);
+// 通用地理地点：带坐标的命名城市。放在数据层，因为搜索、收藏与自动定位都用它。
+// 层级拆成结构化字段：Name 是地名主体（区县/城市本身，如「洪山区」），CityName/Province/Country 是所属
+// 地级市/省州/国家，LocationId 是和风城市 id（与中国天气网代码同源，中国天气网与时光机可直接使用）。
+// 旧格式（Name 内嵌「城市 · 省 · 国家」三段）不再写入，读取时保留兜底拆段。
+internal sealed record City(string Name, double Latitude, double Longitude, string Province = "", string CityName = "", string Country = "", string LocationId = "")
+{
+    // 完整层级展示名：「洪山区 · 武汉市 · 湖北省」。跳过空段与重复段，国内不再缀「中国」；
+    // 旧格式 Name 自带分隔，原样返回。设置页城市行、搜索下拉与详情页标题用它区分同名区县。
+    [JsonIgnore] public string Full => Name.Contains(" · ")
+        ? Name
+        : string.Join(" · ", new[] { Name, CityName, Province }
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct()
+            .Concat(Country is "" or "中国" or "China" or "中國" ? Array.Empty<string>() : new[] { Country }));
+}
 // Data layer: weather fetching, city search, location, JSON parsing and persistence. No WPF controls or view lifetime.
 internal static class WeatherData
 {
@@ -86,22 +99,86 @@ internal static class WeatherData
         // 请求计数随保存一起落盘：重启后不会把当天额度重新算满。
         RequestGate.Flush();
     }
-    internal static async Task<List<City>> Search(string query,CancellationToken token)
+    // 城市搜索：配置了和风 Key 时优先走和风 GeoAPI——能精确命中区县（搜「洪山区」得「洪山区 · 武汉市 · 湖北省」），
+    // 返回的 id 与中国天气网城市代码同源；未配置或查询失败时退回 Open-Meteo（全球地名库，中文覆盖一般）。
+    internal static async Task<List<City>> Search(string query, WeatherSettings settings, CancellationToken token)
     {
-        using var doc=JsonDocument.Parse(await Http.GetStringAsync("https://geocoding-api.open-meteo.com/v1/search?count=10&language="+(Loc.IsEnglish?"en":"zh")+"&name="+Uri.EscapeDataString(query),token));
-        var cities=new List<City>();if(doc.RootElement.TryGetProperty("results",out var list))foreach(var c in list.EnumerateArray())cities.Add(new City(string.Join(" · ",new[]{c.GetProperty("name").GetString(),c.TryGetProperty("admin1",out var a)?a.GetString():null,c.TryGetProperty("country",out var country)?country.GetString():null}.Where(x=>!string.IsNullOrWhiteSpace(x))),c.GetProperty("latitude").GetDouble(),c.GetProperty("longitude").GetDouble()));return cities;
+        if (settings.HeFengKey.Trim().Length > 0 && settings.HeFengHost.Trim().Length > 0)
+        {
+            try
+            {
+                var found = await SearchHeFeng(query, settings, token);
+                if (found.Count > 0) return found;
+            }
+            catch { /* 网络/额度失败不阻塞：退回 Open-Meteo 继续 */ }
+        }
+        using var doc = JsonDocument.Parse(await Http.GetStringAsync("https://geocoding-api.open-meteo.com/v1/search?count=10&language=" + (Loc.IsEnglish ? "en" : "zh") + "&name=" + Uri.EscapeDataString(query), token));
+        var cities = new List<City>();
+        if (doc.RootElement.TryGetProperty("results", out var list))
+            foreach (var c in list.EnumerateArray())
+                cities.Add(new City(
+                    Json.Text(c, "name") ?? "",
+                    c.GetProperty("latitude").GetDouble(), c.GetProperty("longitude").GetDouble(),
+                    Json.Text(c, "admin1") ?? "", Json.Text(c, "admin2") ?? "", Json.Text(c, "country") ?? ""));
+        return cities;
     }
-    // 自动定位：IP 反查得到城市名后，复用与搜索相同的地理编码源解析标准名与坐标，保证名称格式与手动添加完全一致。
-    internal static async Task<City?> LocateAsync(CancellationToken token)
+    // 和风 GeoAPI v2 city/lookup：按地名或「经度,纬度」坐标反查最多 10 个，结构化解析省/市/国家/城市 id。
+    // 结果落盘一天：输入框防抖后的每一次查询不重复烧免费额度。
+    private static async Task<List<City>> SearchHeFeng(string query, WeatherSettings settings, CancellationToken token)
+    {
+        string host = settings.HeFengHost.Trim().TrimEnd('/');
+        if (!host.StartsWith("http", StringComparison.OrdinalIgnoreCase)) host = "https://" + host;
+        string lang = Loc.IsEnglish ? "en" : "zh";
+        string body = await WeatherCache.GetAsync<string>("hefeng", "search|" + lang + "|" + query, TimeSpan.FromDays(1), async ct =>
+        {
+            var result = await WeatherHttp.GetAsync("hefeng", $"{host}/geo/v2/city/lookup?location={Uri.EscapeDataString(query)}&number=10&lang={lang}", ct,
+                request => request.Headers.TryAddWithoutValidation("X-QW-Api-Key", settings.HeFengKey.Trim()));
+            return result.Body;
+        }, token) ?? "";
+        var cities = new List<City>();
+        if (body.Length == 0) return cities;
+        using var doc = JsonDocument.Parse(body);
+        if (Json.Get(doc.RootElement, "location") is not { ValueKind: JsonValueKind.Array } list) return cities;
+        foreach (var item in list.EnumerateArray())
+        {
+            double? lat = Json.Number(item, "lat"), lon = Json.Number(item, "lon");
+            if (Json.Text(item, "name") is not { Length: > 0 } name || lat is null || lon is null) continue;
+            cities.Add(new City(name, lat.Value, lon.Value, Json.Text(item, "adm1") ?? "", Json.Text(item, "adm2") ?? "", Json.Text(item, "country") ?? "", Json.Text(item, "id") ?? ""));
+        }
+        return cities;
+    }
+    // 自动定位，精度分层，不冒充：
+    // 1) Windows 系统定位（WiFi/网络，数百米级）→ 和风反查到区县，「洪山区 · 武汉市 · 湖北省」才真正可信；
+    // 2) IP 定位（城市级精度，坐标常是数据库里的城市中心点——武汉的中心点恰好落在江汉区，
+    //    反查到区县只会给出错的位置）→ 反查结果只取城市与省两级，诚实显示「武汉市 · 湖北省」；
+    // 3) 无和风 Key：退回按 IP 城市名搜索或直接用 IP 返回的地名拼装。
+    internal static async Task<City?> LocateAsync(WeatherSettings settings, CancellationToken token)
     {
         try {
+            bool hefeng=settings.HeFengKey.Trim().Length>0&&settings.HeFengHost.Trim().Length>0;
+            if(hefeng&&await WindowsLocation.PositionAsync(token) is { } precise)
+            {
+                var found=await SearchHeFeng(Math.Round(precise.Lon,3)+","+Math.Round(precise.Lat,3),settings,token);
+                if(found.Count>0)return found[0];
+            }
             using var doc=JsonDocument.Parse(await Http.GetStringAsync("https://ipwho.is/?lang="+(Loc.IsEnglish?"en":"zh-CN"),token));
             var root=doc.RootElement;
             if(root.TryGetProperty("success",out var ok)&&ok.ValueKind==JsonValueKind.False)return null;
             if(!root.TryGetProperty("latitude",out var la)||!root.TryGetProperty("longitude",out var lo))return null;
             double lat=la.GetDouble(),lon=lo.GetDouble();
+            if(hefeng)
+            {
+                var found=await SearchHeFeng(Math.Round(lon,3)+","+Math.Round(lat,3),settings,token);
+                if(found.Count>0)
+                {
+                    // IP 坐标只有城市精度：只保留城市与省两级；区县名与区县 id 都不可信，一并不带。
+                    var city=found[0];
+                    string cityName=city.CityName.Length>0?city.CityName:city.Name;
+                    return new City(cityName,lat,lon,city.Province,cityName,city.Country,"");
+                }
+            }
             if(root.TryGetProperty("city",out var name)&&name.ValueKind==JsonValueKind.String&&name.GetString() is {Length:>0} query) {
-                var found=await Search(query,token);
+                var found=await Search(query,settings,token);
                 if(found.Count>0)return found.OrderBy(c=>Math.Abs(c.Latitude-lat)+Math.Abs(c.Longitude-lon)).First();
             }
             var parts=new List<string>();
@@ -127,7 +204,8 @@ internal static class WeatherData
 // 所有数组都以 DayDates / HourTimes 对齐；来源没有提供的数值用 NaN（数值）或 -1（整数）表示，界面自行隐藏。
 internal sealed class WeatherSnapshot
 {
-    public string Name {get;set;}=""; public DateTimeOffset FetchedAt {get;set;} public string Today {get;set;}="";
+    public string Name {get;set;}=""; public string FullName {get;set;}=""; public DateTimeOffset FetchedAt {get;set;} public string Today {get;set;}="";
+    // FullName 是城市完整层级（洪山区 · 武汉市 · 湖北省），详情页标题与设置预览用它；空时退回 Name。
     // 城市所在地的 UTC 偏移（分钟）：逐时「现在」列要按城市时钟认，查国外城市时不能用本机时间。MinValue = 未知。
     public int UtcOffsetMinutes {get;set;} = int.MinValue;
     // 当前时刻
@@ -135,8 +213,12 @@ internal sealed class WeatherSnapshot
     public double WindGustKmh {get;set;} public double WindDirectionDeg {get;set;} public string WindDirection {get;set;}="";
     public double PressureHpa {get;set;} public double VisibilityKm {get;set;} public double DewPointC {get;set;} public double UvIndex {get;set;}
     public double CloudPercent {get;set;} public double PrecipitationMm {get;set;} public string ConditionText {get;set;}="";
+    // 风级（和风 wind.scale；-1 表示无）、降水强度 mm/h 与降水类型（rain/snow/none）。
+    public int WindScale {get;set;}=-1; public double PrecipRateMmH {get;set;} public string PrecipType {get;set;}="";
+    // 通用国际标准 AQI（qaqi，-1 表示无）：国内同时有中国标准时并列展示。
     // 空气质量：-1 表示来源没有提供，界面据此隐藏。
     public int Aqi {get;set;}=-1; public int Pm25 {get;set;}=-1; public int Pm10 {get;set;}=-1; public int AqiLevel {get;set;}=-1; public string AqiText {get;set;}="";
+    public int AqiGlobal {get;set;}=-1;
     // 空气详情：首要污染物、健康影响与两类人群建议；AirPollutants 是「污染物名称 → 值 单位」的展示用列表。
     public string AirPrimary {get;set;}=""; public string AirEffect {get;set;}=""; public string AirAdvice {get;set;}=""; public string AirAdviceSensitive {get;set;}="";
     public Dictionary<string,string> AirPollutants {get;set;}=[];
@@ -150,6 +232,20 @@ internal sealed class WeatherSnapshot
     public string[] DayConditions {get;set;}=[]; public double[] DayFeelsHighC {get;set;}=[]; public double[] DayFeelsLowC {get;set;}=[];
     public double[] DayPrecipMm {get;set;}=[]; public double[] DayUvMax {get;set;}=[]; public double[] DayWindMaxKmh {get;set;}=[]; public double[] DayGustMaxKmh {get;set;}=[];
     public double[] DayWindDirDeg {get;set;}=[]; public string[] DayWindDir {get;set;}=[]; public int[] DayHumidity {get;set;}=[]; public double[] DayPressureHpa {get;set;}=[]; public string[] DayMoonPhase {get;set;}=[];
+    public string[] MoonriseTimes {get;set;}=[]; public string[] MoonsetTimes {get;set;}=[];
+    // 晨昏蒙影三级（天文/航海/民用）、太阳正午/午夜、月过中天/月下点：和风 astro 独有，Open-Meteo 无此数据。
+    public string[] AstronomicalDawnTimes {get;set;}=[]; public string[] NauticalDawnTimes {get;set;}=[]; public string[] CivilDawnTimes {get;set;}=[]; public string[] CivilDuskTimes {get;set;}=[];
+    public string[] NauticalDuskTimes {get;set;}=[]; public string[] AstronomicalDuskTimes {get;set;}=[]; public string[] SolarNoonTimes {get;set;}=[]; public string[] SolarMidnightTimes {get;set;}=[];
+    public string[] MoonTransitTimes {get;set;}=[]; public string[] MoonUnderfootTimes {get;set;}=[];
+    // 日均温与白天云量（和风独有）；夜间分段（夜间天气/湿度/风/降水/云量）。
+    public double[] DayAvgC {get;set;}=[]; public double[] DayCloudPercent {get;set;}=[];
+    public int[] DayNightCodes {get;set;}=[]; public string[] DayNightConditions {get;set;}=[]; public int[] DayNightHumidity {get;set;}=[];
+    public double[] DayNightWindMaxKmh {get;set;}=[]; public double[] DayNightGustMaxKmh {get;set;}=[]; public double[] DayNightWindDirDeg {get;set;}=[]; public string[] DayNightWindDir {get;set;}=[];
+    public double[] DayNightPrecipMm {get;set;}=[]; public int[] DayNightRainProb {get;set;}=[]; public double[] DayNightCloudPercent {get;set;}=[];
+    // 扩展域：分钟降水 / 预警 / 生活指数。台风来袭由「预警」域覆盖，不再单列台风/辐照/海洋。
+    public string[] MinuteTimes {get;set;}=[]; public double[] MinutePrecip {get;set;}=[]; public string MinuteSummary {get;set;}="";
+    public WarningItem[] Warnings {get;set;}=[];
+    public IndexItem[] Indices {get;set;}=[];
     // 每个数据域实际贡献的来源，例如 Daily → "中国天气网 + Open-Meteo"。
     public Dictionary<string,string> Sources {get;set;}=[];
     // 当前读数逐字段的来源（字段名 → 来源 id），供详情页逐项着色标注；来源未给出时为空字典，界面不标注。

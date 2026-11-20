@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -1222,7 +1222,10 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         Target.Children.Add(row);
     }
 
-    private void Group(params FrameworkElement[] rows)
+    private void Group(params FrameworkElement[] rows) => GroupInto(Target, rows);
+
+    // 同一套行/分隔线，但落进指定容器：用来做可折叠的高级分组（先建好，再整体显隐）。
+    private void GroupInto(Panel host, params FrameworkElement[] rows)
     {
         var panel = new StackPanel();
         foreach (var row in rows)
@@ -1230,7 +1233,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
             if (panel.Children.Count > 0) panel.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
             panel.Children.Add(row);
         }
-        Target.Children.Add(new Border { Child = panel, Background = Brushes.Transparent, BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(0,1,0,0), Margin = new Thickness(0, 0, 0, 28) });
+        host.Children.Add(new Border { Child = panel, Background = Brushes.Transparent, BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(0,1,0,0), Margin = new Thickness(0, 0, 0, 28) });
     }
 
     // One line per setting: the label at the left, the control at the right, an optional description underneath the label.

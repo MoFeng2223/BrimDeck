@@ -1,17 +1,51 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.Json;
 using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// 数据域：来源调度的最小粒度。每个域可以由不同来源提供，聚合器再按下表的顺序拼接。
-internal enum WeatherDomain { Current, Hourly, Daily, Sun, Air, History }
+// 数据域：应用实际使用的 8 类，与设置页下拉逐行一一对应。日出日落/月升月落/月相属于「每日预报」
+// 的 astro 字段，不单列数据源——它由 Daily 请求顺带返回，禁用每日预报时天文也随之消失。
+internal enum WeatherDomain
+{
+    Current, Hourly, Daily, Minutely, Warning, Indices, Air, History
+}
+
+// ---- 各域各自的传输数据，字段全部可空/可空串，来源只填自己知道的部分 ----
+
+// 分钟降水：每 5 分钟一个点（和风 /v7/minutely/5m、Open-Meteo minutely_15 折算）
+internal sealed class MinutePoint
+{
+    public string Time { get; set; } = "";
+    public double? Precip { get; set; }
+}
+
+// 气象预警：一条预警的标题、正文、等级、类型与生效区间
+internal sealed class WarningItem
+{
+    public string Title { get; set; } = "";
+    public string Text { get; set; } = "";
+    public string Level { get; set; } = "";
+    public string Type { get; set; } = "";
+    public string Start { get; set; } = "";
+    public string End { get; set; } = "";
+}
+
+// 生活指数：名称、等级、类别与说明
+internal sealed class IndexItem
+{
+    public string Date { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Level { get; set; } = "";
+    public string Category { get; set; } = "";
+    public string Text { get; set; } = "";
+}
 
 // 来源覆盖范围。国内源只在中国坐标附近可用，国外源全球可用。
 internal enum WeatherRegion { Global, China }
 
-// 一个来源的静态能力描述：能做哪些域、覆盖哪里、是否需要 key。
-internal sealed record WeatherSourceInfo(string Id, string Name, string Detail, WeatherDomain[] Domains, WeatherRegion Region, bool NeedsKey);
+// 一个来源的静态能力描述：能做哪些域、覆盖哪里。
+internal sealed record WeatherSourceInfo(string Id, string Name, string Detail, WeatherDomain[] Domains, WeatherRegion Region);
 
 // 当前实况：所有字段可空，来源只填自己知道的字段。用字段而不是属性，合并时可以 ref 写入。
 internal sealed class CurrentPart
@@ -32,6 +66,11 @@ internal sealed class CurrentPart
     public int? Code;
     public bool? IsDay;
     public string? Condition;
+    // 风级（和风 wind.scale，蒲福级数；Open-Meteo 无，界面由风速换算兜底）。
+    public int? WindScale;
+    // 降水强度（mm/h）与降水类型（rain/snow/none），和风 precipitation.intensity/type。
+    public double? PrecipRateMmH;
+    public string? PrecipType;
 }
 
 // 空气质量：AQI、首要污染物、健康建议与全部污染物浓度。
@@ -39,6 +78,8 @@ internal sealed class CurrentPart
 internal sealed class AirPart
 {
     public int? Aqi { get; set; }
+    // 通用国际标准的 AQI（和风 qaqi）：国内来源同时返回中国标准（cn-mee）时并列展示。
+    public int? AqiGlobal { get; set; }
     public int? Pm25 { get; set; }
     public int? Pm10 { get; set; }
     public int? Level { get; set; }
@@ -71,6 +112,9 @@ internal sealed class HourPoint
     public double? DewPointC { get; set; }
     public double? CloudPercent { get; set; }
     public double? VisibilityKm { get; set; }
+    public int? WindScale { get; set; }
+    public double? PrecipRateMmH { get; set; }
+    public string? PrecipType { get; set; }
 }
 
 // 一天的预报/历史，日期统一为 yyyy-MM-dd。用字段而不是属性，合并时可以 ref 写入。
@@ -95,6 +139,35 @@ internal sealed class DayPoint
     public int? Humidity;
     public double? PressureHpa;
     public string? MoonPhase;
+    public string? Moonrise;
+    public string? Moonset;
+    // 晨昏蒙影三级与太阳正午/午夜（和风 astro 独有，Open-Meteo 无）。
+    public string? AstronomicalDawn;
+    public string? NauticalDawn;
+    public string? CivilDawn;
+    public string? CivilDusk;
+    public string? NauticalDusk;
+    public string? AstronomicalDusk;
+    public string? SolarNoon;
+    public string? SolarMidnight;
+    // 月过中天/月下点：月亮最高与最低时刻。
+    public string? MoonTransit;
+    public string? MoonUnderfoot;
+    // 日均温（和风 temperatureAvg；Open-Meteo 无）。
+    public double? AvgTempC;
+    // 白天云量（和风 daytime.cloudCover）。
+    public double? CloudPercent;
+    // 夜间分段（和风 nighttime）：夜间天气、湿度、风、降水与云量，白天数据沿用上方字段。
+    public int? NightCode;
+    public string? NightCondition;
+    public int? NightHumidity;
+    public double? NightWindMaxKmh;
+    public double? NightGustMaxKmh;
+    public double? NightWindDirDeg;
+    public string? NightWindDir;
+    public double? NightPrecipMm;
+    public int? NightRainProb;
+    public double? NightCloudPercent;
 }
 
 // 一个来源一次请求能拿到的全部数据；聚合器按域挑选。
@@ -104,21 +177,36 @@ internal sealed class WeatherPart
     public AirPart? Air { get; set; }
     public List<HourPoint>? Hours { get; set; }
     public List<DayPoint>? Days { get; set; }
+    // 扩展载荷：分钟/预警/指数。台风来袭由「预警」域覆盖，不再单列台风/辐照/海洋域。
+    public List<MinutePoint>? Minutes { get; set; }
+    // 分钟降水的文字总结（如「未来两小时无降水」），和风 /v7/minutely/5m 顶层 summary。
+    public string? MinuteSummary { get; set; }
+    public List<WarningItem>? Warnings { get; set; }
+    public List<IndexItem>? Indices { get; set; }
     // 城市所在时区（Open-Meteo 的 timezone 字段），用于确定“当地今天”和小时窗口。
     public string? TimeZone { get; set; }
 }
 
-// 来源调度的持久化配置：每个域可选 auto 或具体来源 id；和风为唯一需要 key 的来源。
+// 来源调度配置：Sources 按域指定来源（auto 或具体来源 id），另有国内、国外两条下探顺序。
+// 和风是唯一需要 key 的来源，key 与控制台分配的 API Host 一并保存在这里。
 internal sealed class WeatherSettings
 {
-    public bool PreferDomestic { get; set; } = true;
+    private static readonly string[] ChinaDefault = ["hefeng", "weathercomcn", "tencent", "openmeteo"];
+    private static readonly string[] WorldDefault = ["hefeng", "openmeteo"];
+    // 下探顺序：列表里出现的来源即启用，先后决定失败时的补位次序。
+    // 默认 国内=和风→中国天气网→腾讯→Open-Meteo，国外=和风→Open-Meteo。
+    public List<string> ChinaOrder { get; set; } = [.. ChinaDefault];
+    public List<string> WorldOrder { get; set; } = [.. WorldDefault];
+    // 每个数据域选的来源："auto"=按下探顺序补齐，具体 id=优先用这家。
     public Dictionary<string, string> Sources { get; set; } = [];
     public string HeFengKey { get; set; } = "";
-    // 控制台分配的项目 Host：公共 devapi 域名已停止服务，不再提供默认值，留空即不启用和风。
+    // 公共 devapi 域名已停服，不再提供默认值；留空即不启用和风。
     public string HeFengHost { get; set; } = "";
-    public string Choice(WeatherDomain domain) => Sources.TryGetValue(domain.ToString(), out var value) && value.Length > 0 ? value : "auto";
-    // 历史域由用户在来源调度里显式选「和风天气」才走时光机：10 天 = 10 次请求，不做隐式默认。
-    public bool PicksHeFengForHistory() => Choice(WeatherDomain.History) == "hefeng";
+    public string Choice(WeatherDomain domain)
+        => Sources.TryGetValue(domain.ToString(), out var value) && value.Length > 0 ? value : "auto";
+    // 该区域的下探顺序；空列表回退到默认。
+    public List<string> Ranking(bool china)
+        => (china ? ChinaOrder : WorldOrder) is { Count: > 0 } list ? list : [.. (china ? ChinaDefault : WorldDefault)];
 }
 
 // 来源集合与查询入口。
@@ -133,6 +221,10 @@ internal static class WeatherSources
     // 某域可用的来源，按“是否可用”过滤（国内源需要中文城市名，key 源需要有 key）。
     public static IEnumerable<IWeatherSource> For(WeatherDomain domain, City city, WeatherSettings settings)
         => All.Where(s => s.Info.Domains.Contains(domain) && s.CanServe(city, settings));
+    // 某个区域的候选来源：国内城市四家都能用（国内源只服务中国坐标），国外城市只有全球源。
+    // 设置页按这个集合动态生成每个域的下拉选项，不写死名单。
+    public static IEnumerable<IWeatherSource> Candidates(bool china)
+        => All.Where(s => china || s.Info.Region == WeatherRegion.Global);
 }
 
 internal interface IWeatherSource
@@ -158,16 +250,20 @@ internal static class WeatherAggregator
         var parts = new Dictionary<string, WeatherPart>(StringComparer.Ordinal);
         var tried = new HashSet<string>(StringComparer.Ordinal);
         var served = new Dictionary<string, HashSet<WeatherDomain>>(StringComparer.Ordinal);
-        var live = Enum.GetValues<WeatherDomain>().Where(domain => domain != WeatherDomain.History).ToArray();
+        // 首屏只取轻量域；历史与和风 v7 重域（预警/指数）放到第二轮，避免拖慢首屏。
+        bool Deferred(WeatherDomain d) => d is WeatherDomain.History or WeatherDomain.Warning or WeatherDomain.Indices;
+        var domains = Enum.GetValues<WeatherDomain>();
+        var live = domains.Where(domain => !Deferred(domain)).ToArray();
+        var later = domains.Where(Deferred).ToArray();
         await RoundsAsync(city, settings, chains, parts, tried, served, live, token);
         if (parts.Count == 0) throw new InvalidOperationException("没有可用的天气来源");
-        // 第一段结果先交给界面；历史补上后返回的快照会覆盖它。
-        if (progress is not null && chains[WeatherDomain.History].Count > 0) progress(Merge(city, chains, parts));
-        await RoundsAsync(city, settings, chains, parts, tried, served, [WeatherDomain.History], token);
+        // 第一段结果先交给界面；重域补上后返回的快照会覆盖它。
+        if (progress is not null && later.Any(d => chains[d].Count > 0)) progress(Merge(city, chains, parts));
+        await RoundsAsync(city, settings, chains, parts, tried, served, later, token);
         return Merge(city, chains, parts);
     }
 
-    // 来源链：显式选择优先；默认国内城市用国内源，国外城市用全球源；Open-Meteo 永远兜底。
+    // 来源链：显式选择优先，然后按该区域的下探顺序逐家补位；Open-Meteo 永远兜底。
     private static List<IWeatherSource> Chain(WeatherDomain domain, City city, WeatherSettings settings)
     {
         var chain = new List<IWeatherSource>();
@@ -178,24 +274,13 @@ internal static class WeatherAggregator
         // 手动指定的来源放在最前；它失败时仍会走完整回退链。
         string choice = settings.Choice(domain);
         if (choice != "auto") Add(WeatherSources.Find(choice));
-        // 有 key 的和风天气质量最好，自动调度时优先（用户在单个域手动指定时不被覆盖）。
-        // 历史域例外：时光机按天计费，只有用户显式打开开关或指定来源时才请求。
-        if (settings.HeFengKey.Trim().Length > 0 && (domain != WeatherDomain.History || settings.PicksHeFengForHistory())) Add(WeatherSources.Find("hefeng"));
-        bool china = Geo.IsChina(city);
-        if (china && settings.PreferDomestic)
+        // 按区域顺序补位：国内走 4 家；国外只列全球源（国内源的服务范围本就不含国外坐标）。
+        // 不按域特判：某家能否补这个域由 Info.Domains 决定，Add() 直接跳过不支持的那几家。
+        foreach (string id in settings.Ranking(Geo.IsChina(city)))
         {
-            switch (domain)
-            {
-                case WeatherDomain.Current: Add(WeatherSources.Find("tencent")); Add(WeatherSources.Find("weathercomcn")); break;
-                case WeatherDomain.Daily: Add(WeatherSources.Find("weathercomcn")); Add(WeatherSources.Find("tencent")); break;
-                case WeatherDomain.Air: Add(WeatherSources.Find("tencent")); Add(WeatherSources.Find("weathercomcn")); break;
-                // 中国天气网的月历带「过去 10 天的实测降水」，是免费历史的首选，排在和风时光机之后。
-                case WeatherDomain.History: Add(WeatherSources.Find("weathercomcn")); break;
-                case WeatherDomain.Sun: break;                 // 国内源不提供日出日落，交给 Open-Meteo
-                case WeatherDomain.Hourly: break;              // 国内源没有稳定的小时接口
-            }
+            Add(WeatherSources.Find(id));
         }
-        // Open-Meteo 全球可用，任何域都排在最后兜底。
+        // Open-Meteo 全球可用，任何域都排在最后兜底；即便用户把它从列表里关掉也不至于无源可用。
         Add(WeatherSources.Find("openmeteo"));
         return chain;
     }
@@ -241,11 +326,10 @@ internal static class WeatherAggregator
                     if (part.Current is not null) set.Add(WeatherDomain.Current);
                     if (part.Hours is { Count: > 0 }) set.Add(WeatherDomain.Hourly);
                     if (part.Air is not null) set.Add(WeatherDomain.Air);
-                    if (part.Days is { Count: > 0 } provided)
-                    {
-                        set.Add(WeatherDomain.Daily);
-                        if (provided.Any(day => day.Sunrise is not null || day.Sunset is not null)) set.Add(WeatherDomain.Sun);
-                    }
+                    if (part.Minutes is { Count: > 0 }) set.Add(WeatherDomain.Minutely);
+                    if (part.Warnings is { Count: > 0 }) set.Add(WeatherDomain.Warning);
+                    if (part.Indices is { Count: > 0 }) set.Add(WeatherDomain.Indices);
+                    if (part.Days is { Count: > 0 }) set.Add(WeatherDomain.Daily);
                     // 同一个来源可能在两段里各被请求一次（例如和风先给预报、第二轮单独补历史），
                     // 后一段只拿到部分数据，直接覆盖会把前一段的逐时/空气弄丢，所以按字段补齐。
                     if (parts.TryGetValue(id, out var existing)) Absorb(existing, part);
@@ -267,6 +351,10 @@ internal static class WeatherAggregator
         target.Current ??= extra.Current;
         target.Air ??= extra.Air;
         target.Hours ??= extra.Hours;
+        target.Minutes ??= extra.Minutes;
+        target.MinuteSummary ??= extra.MinuteSummary;
+        target.Warnings ??= extra.Warnings;
+        target.Indices ??= extra.Indices;
         if (extra.Days is not { Count: > 0 } incoming) return;
         if (target.Days is not { Count: > 0 }) { target.Days = incoming; return; }
         var known = target.Days.Select(day => day.Date).ToHashSet(StringComparer.Ordinal);
@@ -304,19 +392,18 @@ internal static class WeatherAggregator
                 // 今天起 13 天里至少 11 天有高低温；和风 v1 只有 10 天，最后 3 天由下一家补。
                 int days = 0; for (int offset = 0; offset <= 12; offset++) if (Day(offset)) days++;
                 return days >= 11;
-            case WeatherDomain.Sun:
-                int sun = 0;
-                for (int offset = 0; offset <= 13; offset++)
-                {
-                    int index = today + offset;
-                    if (index >= 0 && index < snapshot.SunriseTimes.Length && snapshot.SunriseTimes[index].Length >= 16) sun++;
-                }
-                return sun >= 10;
             case WeatherDomain.Air:
                 return snapshot.Aqi >= 0 || snapshot.Pm25 >= 0;
             case WeatherDomain.History:
                 int past = 0; for (int offset = -10; offset <= -1; offset++) if (Day(offset)) past++;
                 return past >= 9;
+            // 扩展域：必须真的拿到数据才算满足，否则继续下探到其它来源。
+            case WeatherDomain.Minutely:
+                return snapshot.MinuteTimes.Length >= 2;
+            case WeatherDomain.Warning:
+                return snapshot.Warnings.Length > 0;
+            case WeatherDomain.Indices:
+                return snapshot.Indices.Length > 0;
             default:
                 return true;
         }
@@ -343,6 +430,10 @@ internal static class WeatherAggregator
         var hours = new SortedDictionary<string, HourPoint>(StringComparer.Ordinal);
         var current = new CurrentPart();
         AirPart? air = null;
+        var minutes = new List<MinutePoint>();
+        var warnings = new List<WarningItem>();
+        var indices = new List<IndexItem>();
+        string? minuteSummary = null;
         var used = new Dictionary<WeatherDomain, List<string>>();
         var provided = new Dictionary<string, bool>();
         var fieldSources = new Dictionary<string, string>();
@@ -393,8 +484,17 @@ internal static class WeatherAggregator
                     case WeatherDomain.Hourly:
                         if (part.Hours is { Count: > 0 } hs) { bool any = false; foreach (var hour in hs) if (!hours.ContainsKey(hour.Time)) { hours[hour.Time] = hour; fieldSources.TryAdd("h:" + hour.Time, source.Info.Id); any = true; } if (any) Use(domain, source); }
                         break;
+                    case WeatherDomain.Minutely:
+                        if (part.Minutes is { Count: > 0 } mins) { minutes.AddRange(mins.Where(m => !minutes.Any(x => x.Time == m.Time))); Use(domain, source); }
+                        minuteSummary ??= part.MinuteSummary;
+                        break;
+                    case WeatherDomain.Warning:
+                        if (part.Warnings is { Count: > 0 } warns) { warnings.AddRange(warns); Use(domain, source); }
+                        break;
+                    case WeatherDomain.Indices:
+                        if (part.Indices is { Count: > 0 } idxs) { indices.AddRange(idxs); Use(domain, source); }
+                        break;
                     case WeatherDomain.Daily:
-                    case WeatherDomain.Sun:
                     case WeatherDomain.History:
                         if (part.Days is { Count: > 0 } ds)
                         {
@@ -402,12 +502,9 @@ internal static class WeatherAggregator
                             foreach (var day in ds)
                             {
                                 if (!dayMap.TryGetValue(day.Date, out var target)) continue;
-                                bool filled = domain == WeatherDomain.Sun ? MergeSun(target, day, source.Info.Id, fieldSources) : MergeDay(target, day, source.Info.Id, fieldSources);
-                                if (filled) any = true;
+                                if (MergeDay(target, day, source.Info.Id, fieldSources)) any = true;
                             }
                             if (any) Use(domain, source);
-                            // 每日域里顺带填上的日出日落也要记到「日出日落」来源，详情页才能逐域列出。
-                            if (domain == WeatherDomain.Daily && part.Days.Any(day => day.Sunrise is not null || day.Sunset is not null)) Use(WeatherDomain.Sun, source);
                         }
                         break;
                 }
@@ -427,6 +524,7 @@ internal static class WeatherAggregator
         var snapshot = new WeatherSnapshot
         {
             Name = city.Name,
+            FullName = city.Full,
             Today = today.ToString("yyyy-MM-dd"),
             FetchedAt = DateTimeOffset.Now,
             // 城市时钟偏移：界面靠它把「现在」认到正确的整点列上（国外城市与本机不在同一时区）。
@@ -444,10 +542,14 @@ internal static class WeatherAggregator
             UvIndex = current.Uv ?? double.NaN,
             CloudPercent = current.CloudPercent ?? double.NaN,
             PrecipitationMm = current.PrecipMm ?? double.NaN,
+            WindScale = current.WindScale ?? -1,
+            PrecipRateMmH = current.PrecipRateMmH ?? double.NaN,
+            PrecipType = current.PrecipType ?? "",
             WeatherCode = current.Code ?? 0,
             IsDay = current.IsDay ?? (DateTime.Now.Hour is >= 6 and < 18),
             ConditionText = current.Condition ?? "",
             Aqi = air?.Aqi ?? -1,
+            AqiGlobal = air?.AqiGlobal ?? -1,
             Pm25 = air?.Pm25 ?? -1,
             Pm10 = air?.Pm10 ?? -1,
             AqiLevel = air?.Level ?? -1,
@@ -476,6 +578,35 @@ internal static class WeatherAggregator
             DayHumidity = datePoints(dayMap, dates, point => point.Humidity ?? -1),
             DayPressureHpa = datePoints(dayMap, dates, point => point.PressureHpa ?? double.NaN),
             DayMoonPhase = datePoints(dayMap, dates, point => point.MoonPhase ?? ""),
+            MoonriseTimes = datePoints(dayMap, dates, point => point.Moonrise ?? ""),
+            MoonsetTimes = datePoints(dayMap, dates, point => point.Moonset ?? ""),
+            DayAvgC = datePoints(dayMap, dates, point => point.AvgTempC ?? double.NaN),
+            DayCloudPercent = datePoints(dayMap, dates, point => point.CloudPercent ?? double.NaN),
+            DayNightCodes = datePoints(dayMap, dates, point => point.NightCode ?? -1),
+            DayNightConditions = datePoints(dayMap, dates, point => point.NightCondition ?? ""),
+            DayNightHumidity = datePoints(dayMap, dates, point => point.NightHumidity ?? -1),
+            DayNightWindMaxKmh = datePoints(dayMap, dates, point => point.NightWindMaxKmh ?? double.NaN),
+            DayNightGustMaxKmh = datePoints(dayMap, dates, point => point.NightGustMaxKmh ?? double.NaN),
+            DayNightWindDirDeg = datePoints(dayMap, dates, point => point.NightWindDirDeg ?? double.NaN),
+            DayNightWindDir = datePoints(dayMap, dates, point => point.NightWindDir ?? ""),
+            DayNightPrecipMm = datePoints(dayMap, dates, point => point.NightPrecipMm ?? double.NaN),
+            DayNightRainProb = datePoints(dayMap, dates, point => point.NightRainProb ?? -1),
+            DayNightCloudPercent = datePoints(dayMap, dates, point => point.NightCloudPercent ?? double.NaN),
+            AstronomicalDawnTimes = datePoints(dayMap, dates, point => point.AstronomicalDawn ?? ""),
+            NauticalDawnTimes = datePoints(dayMap, dates, point => point.NauticalDawn ?? ""),
+            CivilDawnTimes = datePoints(dayMap, dates, point => point.CivilDawn ?? ""),
+            CivilDuskTimes = datePoints(dayMap, dates, point => point.CivilDusk ?? ""),
+            NauticalDuskTimes = datePoints(dayMap, dates, point => point.NauticalDusk ?? ""),
+            AstronomicalDuskTimes = datePoints(dayMap, dates, point => point.AstronomicalDusk ?? ""),
+            SolarNoonTimes = datePoints(dayMap, dates, point => point.SolarNoon ?? ""),
+            SolarMidnightTimes = datePoints(dayMap, dates, point => point.SolarMidnight ?? ""),
+            MoonTransitTimes = datePoints(dayMap, dates, point => point.MoonTransit ?? ""),
+            MoonUnderfootTimes = datePoints(dayMap, dates, point => point.MoonUnderfoot ?? ""),
+            MinuteTimes = minutes.OrderBy(m => m.Time, StringComparer.Ordinal).Select(m => m.Time).ToArray(),
+            MinutePrecip = minutes.OrderBy(m => m.Time, StringComparer.Ordinal).Select(m => m.Precip ?? double.NaN).ToArray(),
+            MinuteSummary = minuteSummary ?? "",
+            Warnings = [.. warnings],
+            Indices = [.. indices],
             HourTimes = hourList.Select(hour => hour.Time).ToArray(),
             HourTempsC = hourList.Select(hour => hour.Temperature ?? double.NaN).ToArray(),
             HourFeelsLikeC = hourList.Select(hour => hour.FeelsLike ?? double.NaN).ToArray(),
@@ -549,8 +680,11 @@ internal static class WeatherAggregator
         any |= Mark(Set(ref target.PrecipMm, source.PrecipMm), "precip");
         any |= Mark(Set(ref target.Code, source.Code), "code");
         any |= Mark(Set(ref target.IsDay, source.IsDay), "is_day");
+        any |= Mark(Set<int>(ref target.WindScale, source.WindScale), "wind_scale");
+        any |= Mark(Set(ref target.PrecipRateMmH, source.PrecipRateMmH), "precip_rate");
         if (target.WindDir is null && source.WindDir is not null) { target.WindDir = source.WindDir; fieldSources["wind_dir_text"] = sourceId; any = true; }
         if (target.Condition is null && source.Condition is not null) { target.Condition = source.Condition; fieldSources["condition"] = sourceId; any = true; }
+        if (target.PrecipType is null && source.PrecipType is not null) { target.PrecipType = source.PrecipType; any = true; }
         return any;
     }
 
@@ -568,17 +702,30 @@ internal static class WeatherAggregator
         any |= Mark(Set<double>(ref target.WindMaxKmh, source.WindMaxKmh) || Set<double>(ref target.GustMaxKmh, source.GustMaxKmh)
             || Set<double>(ref target.WindDirDeg, source.WindDirDeg) || (target.WindDir is null && source.WindDir is not null), "d_wind");
         if (target.WindDir is null && source.WindDir is not null) { target.WindDir = source.WindDir; }
-        if (target.MoonPhase is null && source.MoonPhase is not null) { target.MoonPhase = source.MoonPhase; fieldSources.TryAdd("d_moon:" + target.Date, sourceId); fieldSources.TryAdd(key, sourceId); any = true; }
         any |= Mark(Set<int>(ref target.Humidity, source.Humidity), "d_humidity");
         any |= Mark(Set<double>(ref target.PressureHpa, source.PressureHpa), "d_pressure");
-        return MergeSun(target, source, sourceId, fieldSources) || any;
-    }
-
-    private static bool MergeSun(DayPoint target, DayPoint source, string sourceId, Dictionary<string, string> fieldSources)
-    {
-        bool any = false;
-        if (target.Sunrise is null && source.Sunrise is not null) { target.Sunrise = source.Sunrise; fieldSources.TryAdd("d_sun:" + target.Date, sourceId); any = true; }
-        if (target.Sunset is null && source.Sunset is not null) { target.Sunset = source.Sunset; fieldSources.TryAdd("d_sun:" + target.Date, sourceId); any = true; }
+        // 天文（日出日落、月升月落、月相）随每日预报一起返回，是 Daily 的普通字段。
+        bool FillString(ref string? field, string? value) { if (field is not null || value is null) return false; field = value; return true; }
+        any |= Mark(FillString(ref target.Sunrise, source.Sunrise) || FillString(ref target.Sunset, source.Sunset), "d_sun");
+        // 晨昏蒙影与太阳正午/午夜、月过中天/月下点：和风 astro 独有的扩展时刻，同为 Daily 字段。
+        any |= Mark(FillString(ref target.AstronomicalDawn, source.AstronomicalDawn) || FillString(ref target.NauticalDawn, source.NauticalDawn)
+            || FillString(ref target.CivilDawn, source.CivilDawn) || FillString(ref target.CivilDusk, source.CivilDusk)
+            || FillString(ref target.NauticalDusk, source.NauticalDusk) || FillString(ref target.AstronomicalDusk, source.AstronomicalDusk)
+            || FillString(ref target.SolarNoon, source.SolarNoon) || FillString(ref target.SolarMidnight, source.SolarMidnight), "d_astro");
+        any |= Mark(FillString(ref target.MoonTransit, source.MoonTransit) || FillString(ref target.MoonUnderfoot, source.MoonUnderfoot), "d_moon");
+        any |= Mark(FillString(ref target.Moonrise, source.Moonrise) || FillString(ref target.Moonset, source.Moonset)
+            || FillString(ref target.MoonPhase, source.MoonPhase), "d_moon");
+        // 日均温与白天云量：和风独有（Open-Meteo daily 不返回这两项）。
+        any |= Mark(Set<double>(ref target.AvgTempC, source.AvgTempC), "d_avg");
+        any |= Mark(Set<double>(ref target.CloudPercent, source.CloudPercent), "d_cloud");
+        // 夜间分段：夜间天气/湿度/风/降水/云量，缺哪项补哪项。
+        any |= Mark(Set<int>(ref target.NightCode, source.NightCode) || (target.NightCondition is null && source.NightCondition is not null), "d_night");
+        if (target.NightCondition is null && source.NightCondition is not null) { target.NightCondition = source.NightCondition; }
+        any |= Mark(Set<int>(ref target.NightHumidity, source.NightHumidity), "d_night");
+        any |= Mark(Set<double>(ref target.NightWindMaxKmh, source.NightWindMaxKmh) || Set<double>(ref target.NightGustMaxKmh, source.NightGustMaxKmh)
+            || Set<double>(ref target.NightWindDirDeg, source.NightWindDirDeg) || (target.NightWindDir is null && source.NightWindDir is not null), "d_night");
+        any |= Mark(Set<double>(ref target.NightPrecipMm, source.NightPrecipMm) || Set<int>(ref target.NightRainProb, source.NightRainProb), "d_night");
+        any |= Mark(Set<double>(ref target.NightCloudPercent, source.NightCloudPercent), "d_night");
         return any;
     }
 
@@ -615,12 +762,19 @@ internal static class Geo
     // 中国范围框（含港澳台与南海诸岛），用于决定“国内源优先”还是“全球源优先”。
     public static bool IsChina(City city) => city.Latitude is >= 17 and <= 54 && city.Longitude is >= 73 and <= 136;
     public static bool HasChinese(string text) => text.Any(ch => ch is >= '\u4e00' and <= '\u9fff');
-    // City.Name 的格式是「城市 · 省/州 · 国家」，拆出前两段供国内接口使用。
+    // 城市级名称与省份：结构化字段优先（和风/新搜索写入，区县城市取其所属地级市，腾讯接口只认城市级）；
+    // 旧格式 Name「城市 · 省/州 · 国家」兜底拆段。
     public static (string City, string Province) Parts(City city)
     {
-        var parts = city.Name.Split(" · ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        string name = parts.Length > 0 ? parts[0] : city.Name;
-        string province = parts.Length > 1 ? parts[1] : "";
+        string name = city.CityName.Length > 0 ? city.CityName : "";
+        string province = city.Province;
+        if ((name.Length == 0 || province.Length == 0) && city.Name.Contains(" · "))
+        {
+            var parts = city.Name.Split(" · ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (name.Length == 0) name = parts.Length > 0 ? parts[0] : city.Name;
+            if (province.Length == 0 && parts.Length > 1) province = parts[1];
+        }
+        if (name.Length == 0) name = city.Name;
         if (province is "中国" or "China" or "中國") province = "";
         return (name, province);
     }
@@ -691,6 +845,23 @@ internal static class WeatherCodes
         return upper[index] * 0.8 * 3.6;
     }
 
+    // 风速 km/h → 蒲福风级：按各级风速上界（m/s）反向查表，来源没给风级（Open-Meteo）时由界面调用兜底。
+    public static int FromWindSpeed(double? kmh)
+    {
+        if (kmh is not { } speed || double.IsNaN(speed)) return -1;
+        double ms = speed / 3.6;
+        double[] upper = [0.2, 1.5, 3.3, 5.4, 7.9, 10.7, 13.8, 17.1, 20.7, 24.4, 28.4, 32.6, double.MaxValue];
+        for (int i = 0; i < upper.Length; i++) if (ms <= upper[i]) return i;
+        return 12;
+    }
+
+    // 风向度数 → 16 方位文字（仅 tooltip 等紧凑展示用）。
+    public static string DegreeToCompass(double deg)
+    {
+        string[] names = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+        return names[(int)Math.Round(((deg % 360 + 360) % 360) / 22.5) % 16];
+    }
+
     public static string Text(int code) => code switch
     {
         0 => Loc.T("晴", "Clear"), 1 or 2 => Loc.T("多云", "Cloudy"), 3 => Loc.T("阴", "Overcast"),
@@ -739,15 +910,15 @@ internal static class Json
 
 internal sealed class OpenMeteoSource : IWeatherSource
 {
-    public WeatherSourceInfo Info { get; } = new("openmeteo", "Open-Meteo", Loc.T("全球数值预报 · 免 Key · CC BY 4.0", "Global forecast · no key · CC BY 4.0"),
-        [WeatherDomain.Current, WeatherDomain.Hourly, WeatherDomain.Daily, WeatherDomain.Sun, WeatherDomain.Air, WeatherDomain.History], WeatherRegion.Global, false);
+    public WeatherSourceInfo Info { get; } = new("openmeteo", "Open-Meteo", Loc.T("全球数值预报 · CC BY 4.0", "Global forecast · CC BY 4.0"),
+        [WeatherDomain.Current, WeatherDomain.Hourly, WeatherDomain.Daily, WeatherDomain.Air, WeatherDomain.History, WeatherDomain.Minutely], WeatherRegion.Global);
     public bool CanServe(City city, WeatherSettings settings) => true;
 
     public async Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
     {
         bool Want(WeatherDomain domain) => need.Contains(domain);
-        // 一份 forecast 响应同时覆盖实况、每日、日出日落与过去 10 天，这四个域共用一次请求。
-        bool wantForecast = Want(WeatherDomain.Current) || Want(WeatherDomain.Daily) || Want(WeatherDomain.Sun) || Want(WeatherDomain.History);
+        // 一份 forecast 响应同时覆盖实况、每日（含天文）与过去 10 天，三者共用一次请求。
+        bool wantForecast = Want(WeatherDomain.Current) || Want(WeatherDomain.Daily) || Want(WeatherDomain.History);
         string location = FormattableString.Invariant($"latitude={city.Latitude.ToString(CultureInfo.InvariantCulture)}&longitude={city.Longitude.ToString(CultureInfo.InvariantCulture)}&timezone=auto");
         string site = FormattableString.Invariant($"{city.Latitude:0.00},{city.Longitude:0.00}");
         var forecast = wantForecast ? Body("forecast|" + site, TimeSpan.FromMinutes(15), $"https://api.open-meteo.com/v1/forecast?{location}&current=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,weather_code,pressure_msl,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,sunrise,sunset,uv_index_max,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,relative_humidity_2m_mean,pressure_msl_mean&past_days=10&forecast_days=14", token) : Task.FromResult("");
@@ -755,7 +926,9 @@ internal sealed class OpenMeteoSource : IWeatherSource
         // 缓存键带 |p2，换参数后不复用旧响应（旧响应没有过去的小时）。
         var hourly = Want(WeatherDomain.Hourly) ? Body("hourly|" + site + "|p2", TimeSpan.FromMinutes(30), $"https://api.open-meteo.com/v1/forecast?{location}&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,precipitation_probability,weather_code,pressure_msl,cloud_cover,visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index&past_hours=2&forecast_hours=24", token) : Task.FromResult("");
         var air = Want(WeatherDomain.Air) ? Body("air|" + site, TimeSpan.FromMinutes(30), $"https://air-quality-api.open-meteo.com/v1/air-quality?{location}&current=pm2_5,pm10,us_aqi,european_aqi", token) : Task.FromResult("");
-        await Task.WhenAll(forecast, hourly, air);
+        // 分钟降水（未来 2 小时的 15 分钟级）独立缓存。
+        var minute = Want(WeatherDomain.Minutely) ? Body("minute|" + site, TimeSpan.FromMinutes(15), $"https://api.open-meteo.com/v1/forecast?{location}&minutely_15=precipitation&forecast_minutely_15=8", token) : Task.FromResult("");
+        await Task.WhenAll(forecast, hourly, air, minute);
         var part = new WeatherPart();
         try
         {
@@ -840,7 +1013,26 @@ internal sealed class OpenMeteoSource : IWeatherSource
                 };
         }
         catch { }
-        return part.Current is null && part.Days is null && part.Hours is null && part.Air is null ? null : part;
+        // 分钟降水：minutely_15.precipitation
+        try
+        {
+            using var doc = JsonDocument.Parse(minute.Result);
+            if (Json.Get(doc.RootElement, "minutely_15") is { } m && Json.Get(m, "time") is { } times)
+            {
+                int count = times.GetArrayLength();
+                part.Minutes = [];
+                for (int i = 0; i < count; i++)
+                {
+                    string? time = times[i].ValueKind == JsonValueKind.String ? times[i].GetString() : null;
+                    if (time is null) continue;
+                    double? precip = Json.Get(m, "precipitation") is { } arr && i < arr.GetArrayLength() && arr[i].ValueKind == JsonValueKind.Number ? arr[i].GetDouble() : null;
+                    part.Minutes.Add(new MinutePoint { Time = time, Precip = precip });
+                }
+            }
+        }
+        catch { }
+        return part.Current is null && part.Days is null && part.Hours is null && part.Air is null
+            && part.Minutes is not { Count: > 0 } ? null : part;
     }
 
     // 响应体落盘：三份数据各自过期，未过期直接读盘，重启后同样能复用，断网时退回上一份。
@@ -851,8 +1043,8 @@ internal sealed class OpenMeteoSource : IWeatherSource
 
 internal sealed class TencentSource : IWeatherSource
 {
-    public WeatherSourceInfo Info { get; } = new("tencent", Loc.T("腾讯天气", "Tencent Weather"), Loc.T("国内实况与 8 天预报 · 免 Key", "China current & 8-day · no key"),
-        [WeatherDomain.Current, WeatherDomain.Daily, WeatherDomain.Air], WeatherRegion.China, false);
+    public WeatherSourceInfo Info { get; } = new("tencent", Loc.T("腾讯天气", "Tencent Weather"), Loc.T("国内实况与 8 天预报", "China current & 8-day"),
+        [WeatherDomain.Current, WeatherDomain.Daily, WeatherDomain.Air], WeatherRegion.China);
 
     public bool CanServe(City city, WeatherSettings settings)
     {
@@ -914,8 +1106,8 @@ internal sealed class TencentSource : IWeatherSource
 
 internal sealed class WeatherComCnSource : IWeatherSource
 {
-    public WeatherSourceInfo Info { get; } = new("weathercomcn", Loc.T("中国天气网", "China Weather"), Loc.T("国内实况、15 天预报与历史降水 · 免 Key", "China current, 15-day & history · no key"),
-        [WeatherDomain.Current, WeatherDomain.Daily, WeatherDomain.History, WeatherDomain.Air], WeatherRegion.China, false);
+    public WeatherSourceInfo Info { get; } = new("weathercomcn", Loc.T("中国天气网", "China Weather"), Loc.T("国内实况、15 天预报与历史降水", "China current, 15-day & history"),
+        [WeatherDomain.Current, WeatherDomain.Daily, WeatherDomain.History, WeatherDomain.Air], WeatherRegion.China);
 
     public bool CanServe(City city, WeatherSettings settings)
     {
@@ -926,11 +1118,15 @@ internal sealed class WeatherComCnSource : IWeatherSource
     public async Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
     {
         var (name, _) = Geo.Parts(city);
-        string? id = await ResolveIdAsync(name, token);
+        // 和风城市 id 与中国天气网代码同源：结构化 id（如洪山区 101200113）直接定位到区县站，
+        // 免去按城市名搜索一次；没有 id 时退回原路径按城市名解析。
+        string? id = city.LocationId is { Length: >= 9 } code && code.StartsWith("101") && code.All(char.IsDigit)
+            ? code
+            : await ResolveIdAsync(name, token);
         if (id is null) return null;
         var part = new WeatherPart();
         bool wantCurrent = need.Contains(WeatherDomain.Current) || need.Contains(WeatherDomain.Air);
-        bool wantDays = need.Contains(WeatherDomain.Daily) || need.Contains(WeatherDomain.Sun) || need.Contains(WeatherDomain.History);
+        bool wantDays = need.Contains(WeatherDomain.Daily) || need.Contains(WeatherDomain.History);
         // 实况偶尔很慢，单独限时 4 秒并落盘 5 分钟：它拖不住已经拿到的每日预报。
         var currentTask = wantCurrent ? Body($"{id}|current", TimeSpan.FromMinutes(5), $"http://d1.weather.com.cn/sk_2d/{id}.html", token, 4) : Task.FromResult<string?>(null);
         // 24 天窗口可能跨月，按起止日期枚举涉及的每个月份；月历一个月只变一次，缓存 6 小时。
@@ -1044,8 +1240,10 @@ internal sealed class WeatherComCnSource : IWeatherSource
 // 只用 v1：v7 城市天气 2027-06 停服，不再保留旧接口的退路。
 internal sealed class HeFengSource : IWeatherSource
 {
-    public WeatherSourceInfo Info { get; } = new("hefeng", Loc.T("和风天气", "QWeather"), Loc.T("全维度 · v1 + 时光机 · 需 Key", "All domains (v1 + time machine) · key required"),
-        [WeatherDomain.Current, WeatherDomain.Hourly, WeatherDomain.Daily, WeatherDomain.Sun, WeatherDomain.Air, WeatherDomain.History], WeatherRegion.Global, true);
+    public WeatherSourceInfo Info { get; } = new("hefeng", Loc.T("和风天气", "QWeather"), Loc.T("实况/预报/分钟/预警/指数/空气/历史", "Now/forecast/minute/alert/indices/air/history"),
+        // 官方「天气和基础服务」每月前 5 万次免费（个人用量等于免费）；台风/辐照/海洋等付费或无坐标接口的能力不接入。
+        [WeatherDomain.Current, WeatherDomain.Hourly, WeatherDomain.Daily, WeatherDomain.Air, WeatherDomain.History, WeatherDomain.Minutely, WeatherDomain.Warning, WeatherDomain.Indices],
+        WeatherRegion.Global);
     public bool CanServe(City city, WeatherSettings settings) => settings.HeFengKey.Trim().Length > 0 && settings.HeFengHost.Trim().Length > 0;
 
     // 一次请求要用到的公共参数：坐标只保留两位小数（v1 只认这个精度）。
@@ -1064,11 +1262,50 @@ internal sealed class HeFengSource : IWeatherSource
         string host = settings.HeFengHost.Trim().TrimEnd('/');
         if (!host.StartsWith("http", StringComparison.OrdinalIgnoreCase)) host = "https://" + host;
         var context = new Context(host, settings.HeFengKey.Trim(), city);
-        // 历史单独占一段：时光机只认 LocationID、一天一次请求，不能挂在首屏链路上。
-        // 调度器把它放在独立的第二轮，这里只负责那一段。
-        if (need.All(domain => domain == WeatherDomain.History))
-            return await FetchHistory(context, token) is { Count: > 0 } past ? new WeatherPart { Days = past } : null;
-        return await FetchV1(context, need, token);
+        // 历史单独占一段：时光机只认 LocationID、一天一次请求，挂在独立的第二轮，不混进首屏。
+        // 延后轮次可能把历史与预警/指数等一起送来，这里按需拆分，互不干扰。
+        bool wantHistory = need.Contains(WeatherDomain.History);
+        var part = wantHistory ? await FetchV1(context, need.Where(d => d != WeatherDomain.History).ToArray(), token) : await FetchV1(context, need, token);
+        if (wantHistory && await FetchHistory(context, token) is { Count: > 0 } past)
+        {
+            part ??= new WeatherPart();
+            part.Days = part.Days is { Count: > 0 } existing
+                ? [.. existing.Concat(past.Where(p => !existing.Any(e => e.Date == p.Date)))]
+                : past;
+        }
+        // v7 扩展域：分钟/预警/指数，按本轮真正缺的域请求，逐域并入同一份 part。
+        // 台风来袭由「预警」域的官方台风预警类型覆盖，不再单独请求台风/辐照/海洋。
+        var extraNeed = need.Where(d => d is WeatherDomain.Minutely or WeatherDomain.Warning or WeatherDomain.Indices).ToArray();
+        if (extraNeed.Length > 0)
+        {
+            var extra = await FetchExtraV7(context, extraNeed, token);
+            if (extra is not null)
+            {
+                part ??= new WeatherPart();
+                part.Minutes ??= extra.Minutes; part.Warnings ??= extra.Warnings; part.Indices ??= extra.Indices;
+            }
+        }
+        return part;
+    }
+
+    // v7 扩展接口：分钟降水 / 实时预警 / 天气指数。均在「天气和基础服务」每月前 5 万次免费额度内。
+    private static async Task<WeatherPart?> FetchExtraV7(Context context, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
+    {
+        bool Want(WeatherDomain domain) => need.Contains(domain);
+        string host = context.Host, loc = $"{context.Lon},{context.Lat}", lang = $"lang={context.Lang}";
+        // 端点均以 2026-11-20 官方文档 + 本地实测为准：
+        // 分钟降水 /v7/minutely/5m（仅中国）；预警旧 /v7/warning/now 已弃用(403)，改用 /weatheralert/v1/current/{lat}/{lon}（预警事件含 1001 台风、1604 热带气旋等）；
+        // 指数 /v7/indices/1d。
+        var minute = Want(WeatherDomain.Minutely) ? Body(context, "v7m|" + context.Site, TimeSpan.FromMinutes(10), $"{host}/v7/minutely/5m?location={loc}&{lang}", token) : Task.FromResult<string?>(null);
+        var warning = Want(WeatherDomain.Warning) ? Body(context, "v7w|" + context.Site, TimeSpan.FromMinutes(10), $"{host}/weatheralert/v1/current/{context.Lat}/{context.Lon}?{lang}", token) : Task.FromResult<string?>(null);
+        var indices = Want(WeatherDomain.Indices) ? Body(context, "v7i|" + context.Site + "|" + context.Day, TimeSpan.FromHours(2), $"{host}/v7/indices/1d?location={loc}&type=0&{lang}", token) : Task.FromResult<string?>(null);
+        await Task.WhenAll(minute, warning, indices);
+        var part = new WeatherPart();
+        if (ParseMinutelyV7(minute.Result) is { Count: > 0 } minutes) part.Minutes = minutes;
+        part.MinuteSummary = ParseMinutelySummaryV7(minute.Result);
+        if (ParseWarningV7(warning.Result) is { Count: > 0 } warnings) part.Warnings = warnings;
+        if (ParseIndicesV7(indices.Result) is { Count: > 0 } entries) part.Indices = entries;
+        return part.Minutes is null && part.MinuteSummary is null && part.Warnings is null && part.Indices is null ? null : part;
     }
 
     // v1：坐标走路径，数值包在 { value, unit } 里，湿度/云量/降水概率是 0..1 的比例。
@@ -1081,7 +1318,7 @@ internal sealed class HeFengSource : IWeatherSource
         // 四个接口各自过期：实况最短、逐天最长，互不牵连（官方推荐 10–30 分钟 / 30–60 分钟 / 1–6 小时）。
         var current = Want(WeatherDomain.Current) ? Body(context, "current|" + context.Site, TimeSpan.FromMinutes(10), $"{host}/weather/v1/current/{context.Lat}/{context.Lon}?{query}", token) : Task.FromResult<string?>(null);
         var hours = Want(WeatherDomain.Hourly) ? Body(context, "hourly|" + context.Site + "|" + context.Day, TimeSpan.FromMinutes(30), $"{host}/weather/v1/hourly/{context.Lat}/{context.Lon}?hours=24&{query}", token) : Task.FromResult<string?>(null);
-        var days = Want(WeatherDomain.Daily) || Want(WeatherDomain.Sun) ? Body(context, "daily|" + context.Site + "|" + context.Day, TimeSpan.FromHours(2), $"{host}/weather/v1/daily/{context.Lat}/{context.Lon}?days=10&{query}", token) : Task.FromResult<string?>(null);
+        var days = Want(WeatherDomain.Daily) ? Body(context, "daily|" + context.Site + "|" + context.Day, TimeSpan.FromHours(2), $"{host}/weather/v1/daily/{context.Lat}/{context.Lon}?days=10&{query}", token) : Task.FromResult<string?>(null);
         var air = Want(WeatherDomain.Air) ? Body(context, "air|" + context.Site, TimeSpan.FromMinutes(30), $"{host}/airquality/v1/current/{context.Lat}/{context.Lon}?lang={context.Lang}", token) : Task.FromResult<string?>(null);
         await Task.WhenAll(current, hours, days, air);
         var part = new WeatherPart();
@@ -1266,6 +1503,9 @@ internal sealed class HeFengSource : IWeatherSource
                 Uv = Json.Number(root, "uvIndex"),
                 CloudPercent = Percent(root, "cloudCover"),
                 PrecipMm = precipitation is { } p && Json.Get(p, "amount") is { } amount ? Json.Number(amount, "value") : null,
+                WindScale = wind is { } scaleBox ? Json.Number(scaleBox, "scale") is { } sc ? (int)Math.Round(sc) : null : null,
+                PrecipRateMmH = precipitation is { } pr && Json.Get(pr, "intensity") is { } inten ? Json.Number(inten, "value") : null,
+                PrecipType = precipitation is { } pt ? Json.Text(pt, "type") : null,
                 Code = WeatherCodes.FromHeFeng(Json.Text(condition, "code")),
                 Condition = Json.Text(condition, "text"),
                 // v1 不给昼夜标记，按城市当地时刻判断，国外城市才不会用本机时区算错。
@@ -1299,6 +1539,9 @@ internal sealed class HeFengSource : IWeatherSource
                     Code = WeatherCodes.FromHeFeng(Json.Get(item, "condition") is { } c ? Json.Text(c, "code") : null),
                     RainProb = precipitation is { } pp ? PercentInt(pp, "probability") : null,
                     PrecipMm = precipitation is { } pa && Json.Get(pa, "amount") is { } amount ? Json.Number(amount, "value") : null,
+                    WindScale = wind is { } scaleBox ? Json.Number(scaleBox, "scale") is { } sc ? (int)Math.Round(sc) : null : null,
+                    PrecipRateMmH = precipitation is { } pi && Json.Get(pi, "intensity") is { } inten ? Json.Number(inten, "value") : null,
+                    PrecipType = precipitation is { } ptype ? Json.Text(ptype, "type") : null,
                     WindKmh = wind is { } windBox ? SpeedKmh(windBox, "speed") : null,
                     WindGustKmh = SpeedKmh(item, "windGust"),
                     WindDirDeg = direction is { } dirBox ? Json.Number(dirBox, "degree") : null,
@@ -1332,6 +1575,7 @@ internal sealed class HeFengSource : IWeatherSource
                     Date = stamp.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                     HighC = Value(item, "temperatureMax"),
                     LowC = Value(item, "temperatureMin"),
+                    AvgTempC = Value(item, "temperatureAvg"),
                     UvMax = Json.Number(item, "uvIndexMax")
                 };
                 if (Json.Get(item, "daytime") is { } daytime)
@@ -1352,6 +1596,28 @@ internal sealed class HeFengSource : IWeatherSource
                         day.PrecipMm = Json.Get(precipitation, "amount") is { } amount ? Json.Number(amount, "value") : null;
                         day.RainProb = PercentInt(precipitation, "probability");
                     }
+                    day.CloudPercent = Percent(daytime, "cloudCover");
+                }
+                // 夜间分段：夜间天气、湿度、风、降水、云量，与白天并列展示。
+                if (Json.Get(item, "nighttime") is { } night)
+                {
+                    var nightCondition = Json.Get(night, "condition");
+                    day.NightCode = WeatherCodes.FromHeFeng(nightCondition is { } nc ? Json.Text(nc, "code") : null);
+                    day.NightCondition = nightCondition is { } nct ? Json.Text(nct, "text") : null;
+                    day.NightHumidity = PercentInt(night, "humidity");
+                    if (Json.Get(night, "wind") is { } nightWind)
+                    {
+                        day.NightWindMaxKmh = SpeedKmh(nightWind, "speed");
+                        day.NightWindDirDeg = Json.Get(nightWind, "direction") is { } ndir ? Json.Number(ndir, "degree") : null;
+                        day.NightWindDir = Json.Get(nightWind, "direction") is { } ncompass ? CompassText(Json.Text(ncompass, "compass")) : null;
+                    }
+                    day.NightGustMaxKmh = SpeedKmh(night, "windGustMax");
+                    if (Json.Get(night, "precipitation") is { } nightPrecip)
+                    {
+                        day.NightPrecipMm = Json.Get(nightPrecip, "amount") is { } namount ? Json.Number(namount, "value") : null;
+                        day.NightRainProb = PercentInt(nightPrecip, "probability");
+                    }
+                    day.NightCloudPercent = Percent(night, "cloudCover");
                 }
                 if (Json.Get(item, "astro") is { } astro)
                 {
@@ -1359,6 +1625,19 @@ internal sealed class HeFengSource : IWeatherSource
                     day.Sunrise = Stamp(Json.Text(astro, "sunrise"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
                     day.Sunset = Stamp(Json.Text(astro, "sunset"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
                     day.MoonPhase = Json.Text(astro, "moonPhase");
+                    day.Moonrise = Stamp(Json.Text(astro, "moonrise"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.Moonset = Stamp(Json.Text(astro, "moonset"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    // 晨昏蒙影三级（天文学→航海→民用，由暗到亮）、太阳正午/午夜、月过中天/月下点。
+                    day.AstronomicalDawn = Stamp(Json.Text(astro, "astronomicalDawn"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.NauticalDawn = Stamp(Json.Text(astro, "nauticalDawn"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.CivilDawn = Stamp(Json.Text(astro, "civilDawn"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.CivilDusk = Stamp(Json.Text(astro, "civilDusk"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.NauticalDusk = Stamp(Json.Text(astro, "nauticalDusk"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.AstronomicalDusk = Stamp(Json.Text(astro, "astronomicalDusk"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.SolarNoon = Stamp(Json.Text(astro, "solarNoon"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.SolarMidnight = Stamp(Json.Text(astro, "solarMidnight"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.MoonTransit = Stamp(Json.Text(astro, "moonTransit"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.MoonUnderfoot = Stamp(Json.Text(astro, "moonUnderfoot"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
                 }
                 days.Add(day);
             }
@@ -1387,9 +1666,13 @@ internal sealed class HeFengSource : IWeatherSource
             var primary = Json.Get(chosen, "primaryPollutant");
             var health = Json.Get(chosen, "health");
             var advice = health is { } h && Json.Get(h, "advice") is { } a ? a : (JsonElement?)null;
+            // 通用国际标准（qaqi）：国内标准为主时并列展示，国外场景本身就用 qaqi 为主、不再重复存。
+            int? aqiGlobal = Json.Text(chosen, "code") != "qaqi" && indexes.FirstOrDefault(item => Json.Text(item, "code") == "qaqi") is { } global
+                ? Json.Number(global, "aqi") is { } g ? (int)Math.Round(g) : null : null;
             var air = new AirPart
             {
                 Aqi = aqi,
+                AqiGlobal = aqiGlobal,
                 Level = int.TryParse(level, out var parsed) ? parsed : null,
                 Text = Json.Text(chosen, "category"),
                 Primary = primary is { } p ? Json.Text(p, "code") : null,
@@ -1410,6 +1693,95 @@ internal sealed class HeFengSource : IWeatherSource
             if (air.Pollutants.TryGetValue("pm2p5", out var pm25)) air.Pm25 = (int)Math.Round(pm25);
             if (air.Pollutants.TryGetValue("pm10", out var pm10)) air.Pm10 = (int)Math.Round(pm10);
             return air.HasData ? air : null;
+        }
+        catch { return null; }
+    }
+
+    // ---- v7 扩展域解析：非 200 或未订阅一律返回空，让调度器下探到其它来源 ----
+    private static bool V7Ok(JsonElement root) => Json.Text(root, "code") is "200" or "0";
+
+    private static List<MinutePoint>? ParseMinutelyV7(string? body)
+    {
+        if (body is null) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (!V7Ok(root) || Json.Get(root, "minutely") is not { ValueKind: JsonValueKind.Array } list) return null;
+            var result = new List<MinutePoint>();
+            foreach (var item in list.EnumerateArray())
+            {
+                string? time = Json.Text(item, "fxTime") ?? Json.Text(item, "time");
+                if (time is null) continue;
+                result.Add(new MinutePoint { Time = time, Precip = Json.Number(item, "precip") });
+            }
+            return result.Count > 0 ? result : null;
+        }
+        catch { return null; }
+    }
+
+    // 分钟降水的整段文字总结（如「未来两小时无降水」），与逐点数据同一响应。
+    private static string? ParseMinutelySummaryV7(string? body)
+    {
+        if (body is null) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            return V7Ok(doc.RootElement) ? Json.Text(doc.RootElement, "summary") : null;
+        }
+        catch { return null; }
+    }
+
+    private static List<WarningItem>? ParseWarningV7(string? body)
+    {
+        if (body is null) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            // /weatheralert/v1/current 返回 alerts[]，事件类型在 eventType.name，等级在 severity/color.code。
+            if (!V7Ok(root) || Json.Get(root, "alerts") is not { ValueKind: JsonValueKind.Array } list) return null;
+            var result = new List<WarningItem>();
+            foreach (var item in list.EnumerateArray())
+            {
+                string type = Json.Text(item, "headline") ?? "";
+                if (Json.Get(item, "eventType") is { } evt) type = Json.Text(evt, "name") ?? type;
+                string level = Json.Text(item, "severity") ?? "";
+                if (Json.Get(item, "color") is { } color) level = Json.Text(color, "code") ?? level;
+                result.Add(new WarningItem
+                {
+                    Title = Json.Text(item, "headline") ?? "",
+                    Text = Json.Text(item, "description") ?? "",
+                    Level = level,
+                    Type = type,
+                    Start = Json.Text(item, "onsetTime") ?? Json.Text(item, "effectiveTime") ?? "",
+                    End = Json.Text(item, "expireTime") ?? ""
+                });
+            }
+            return result.Count > 0 ? result : null;
+        }
+        catch { return null; }
+    }
+
+    private static List<IndexItem>? ParseIndicesV7(string? body)
+    {
+        if (body is null) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (!V7Ok(root) || Json.Get(root, "daily") is not { ValueKind: JsonValueKind.Array } list) return null;
+            var result = new List<IndexItem>();
+            foreach (var item in list.EnumerateArray())
+                result.Add(new IndexItem
+                {
+                    Date = Json.Text(item, "date") ?? "",
+                    Name = Json.Text(item, "name") ?? "",
+                    Level = Json.Text(item, "level") ?? "",
+                    Category = Json.Text(item, "category") ?? "",
+                    Text = Json.Text(item, "text") ?? ""
+                });
+            return result.Count > 0 ? result : null;
         }
         catch { return null; }
     }

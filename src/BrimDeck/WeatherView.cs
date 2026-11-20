@@ -221,7 +221,7 @@ internal sealed class WeatherView : UserControl
         try {
             City city;
             if (selected >= 0 && selected < state.Cities.Count) city = state.Cities[selected];
-            else city = await WeatherData.LocateAsync(token) ?? new City("当前位置", 0, 0);
+            else city = await WeatherData.LocateAsync(state.Schedule, token) ?? new City("当前位置", 0, 0);
             // 历史单独一轮：先画不含历史的一版，历史到了再整体替换。首屏不必等 10 个时光机请求。
             var snapshot = await WeatherData.CurrentAsync(city, state.Schedule, token, partial => { if (request == generation) Render(partial); });
             if (request != generation) return;
@@ -372,12 +372,18 @@ internal sealed class WeatherView : UserControl
         overlay.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) { Close(); e.Handled = true; } };
         overlay.Focusable = true; overlay.Focus();
 
-        // 标题行：城市、天气、更新时间、来源，右侧关闭。
+        // 标题行：城市完整层级（洪山区 · 武汉市 · 湖北省）、天气、更新时间、来源，右侧关闭。
         var header = new Grid { Margin = new Thickness(0, 0, 0, 12) };
         header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var title = new StackPanel();
         string condition = s.ConditionText.Length > 0 ? s.ConditionText : WeatherCodes.Text(s.WeatherCode);
-        title.Children.Add(new TextBlock { Text = s.Name == "当前位置" ? Loc.T("当前位置", "Current location") : DisplayName(s.Name), FontSize = 18, FontWeight = FontWeights.SemiBold, Foreground = Brushes.White });
+        title.Children.Add(new TextBlock
+        {
+            Text = s.FullName.Length > 0
+                ? (s.FullName == "当前位置" ? Loc.T("当前位置", "Current location") : s.FullName)
+                : (s.Name == "当前位置" ? Loc.T("当前位置", "Current location") : DisplayName(s.Name)),
+            FontSize = 18, FontWeight = FontWeights.SemiBold, Foreground = Brushes.White
+        });
         title.Children.Add(new TextBlock { Text = $"{condition} · {Num(s.Temperature, "°")} · " + Loc.T($"更新于 {s.FetchedAt:HH:mm}", $"Updated {s.FetchedAt:HH:mm}"), FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(158, 178, 200)), Margin = new Thickness(0, 3, 0, 0) });
         header.Children.Add(title);
         var close = new Button { Content = new WeatherMetaIcon(WeatherMetaKind.Close, Colors.White) { Width = 13, Height = 13 }, Width = 28, Height = 28, Padding = new Thickness(0), Background = new SolidColorBrush(Color.FromArgb(36, 255, 255, 255)), Foreground = Brushes.White, BorderThickness = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Cursor = System.Windows.Input.Cursors.Hand };
@@ -409,11 +415,16 @@ internal sealed class WeatherView : UserControl
         Metric(Loc.T("湿度", "Humidity"), s.HumidityPercent >= 0 ? $"{s.HumidityPercent}%" : "--", src("humidity"));
         Metric(Loc.T("风速", "Wind"), Num(s.WindKmh, " km/h"), src("wind"));
         Metric(Loc.T("阵风", "Gusts"), Num(s.WindGustKmh, " km/h"), src("gust"));
+        // 风向卡带风级（和风 wind.scale；无数据时按风速换算蒲福级数兜底）。
+        int scale = s.WindScale >= 0 ? s.WindScale : WeatherCodes.FromWindSpeed(s.WindKmh);
+        string dirText = s.WindDirection.Length > 0 ? s.WindDirection : Num(s.WindDirectionDeg, "°");
+        Metric(Loc.T("风向", "Wind direction"), dirText + (scale >= 0 ? $" · {Loc.T("风级 ", "Bft ")}{scale}" : ""), src("wind_dir_text") ?? src("wind_dir") ?? src("wind_scale"));
         Metric(Loc.T("气压", "Pressure"), Num(s.PressureHpa, " hPa"), src("pressure"));
         Metric(Loc.T("能见度", "Visibility"), Num(s.VisibilityKm, " km", 1), src("visibility"));
         Metric(Loc.T("露点", "Dew point"), Num(s.DewPointC, "°"), src("dew"));
         Metric(Loc.T("紫外线", "UV index"), Num(s.UvIndex, ""), src("uv"));
-        Metric(Loc.T("降水", "Precipitation"), Num(s.PrecipitationMm, " mm", 1), src("precip"));
+        Metric(Loc.T("降水", "Precipitation"), Num(s.PrecipitationMm, " mm", 1) + (s.PrecipType.Length > 0 && s.PrecipType != "none" ? (s.PrecipType == "rain" ? Loc.T(" 雨", " rain") : s.PrecipType == "snow" ? Loc.T(" 雪", " snow") : "") : ""), src("precip"));
+        Metric(Loc.T("降水强度", "Precip rate"), Num(s.PrecipRateMmH, " mm/h", 2), src("precip_rate"));
         Metric(Loc.T("云量", "Cloud cover"), Num(s.CloudPercent, "%"), src("cloud"));
         // 空气质量：AQI / PM2.5 / PM10 三个字段在同一张卡内各自带来源色点，和风速、降水等读数并列显示。
         {
@@ -430,6 +441,8 @@ internal sealed class WeatherView : UserControl
                 airText.Children.Add(line);
             }
             AirLine(s.Aqi >= 0 ? $"AQI {s.Aqi} · {s.AqiText}" : "--", src("aqi"), src("aqi") is { } aq ? SourceName(aq) : null);
+            // 通用国际标准（qaqi）：与中国标准（cn-mee）并列展示，便于国内外对照。
+            AirLine(s.AqiGlobal >= 0 ? Loc.T("国际 AQI ", "Global AQI ") + s.AqiGlobal : Loc.T("国际 AQI --", "Global AQI --"), src("aqi"), src("aqi") is { } ag ? SourceName(ag) : null);
             AirLine(s.Pm25 >= 0 ? $"PM2.5 {s.Pm25}" : "--", src("pm25"), src("pm25") is { } p2 ? SourceName(p2) : null);
             AirLine(s.Pm10 >= 0 ? $"PM10 {s.Pm10}" : "--", src("pm10"), src("pm10") is { } p1 ? SourceName(p1) : null);
             var airBox = new Border { Background = new SolidColorBrush(Color.FromArgb(24, 255, 255, 255)), CornerRadius = new CornerRadius(10), Margin = new Thickness(3), Padding = new Thickness(10, 7, 10, 7), Child = airText };
@@ -445,7 +458,6 @@ internal sealed class WeatherView : UserControl
             if (details.Count > 0) System.Windows.Controls.ToolTipService.SetToolTip(airBox, string.Join("\n", details));
             metrics.Children.Add(airBox);
         }
-        Metric(Loc.T("风向", "Wind direction"), s.WindDirection.Length > 0 ? s.WindDirection : Num(s.WindDirectionDeg, "°"), src("wind_dir_text") ?? src("wind_dir"));
         body.Children.Add(metrics);
 
         // 未来 24 小时：每格显示时间、图标、温度、降水概率与风速。
@@ -466,13 +478,30 @@ internal sealed class WeatherView : UserControl
                 string rain = s.HourRainProb.Length > i && s.HourRainProb[i] >= 0 ? $"{s.HourRainProb[i]}%" : "";
                 cell.Children.Add(new TextBlock { Text = rain, FontSize = 8.5, Foreground = new SolidColorBrush(Color.FromRgb(99, 179, 244)), TextAlignment = TextAlignment.Center, Height = 12 });
                 cell.Children.Add(new TextBlock { Text = s.HourWindKmh.Length > i ? Num(s.HourWindKmh[i], "", 0) : "", FontSize = 8.5, Foreground = new SolidColorBrush(Color.FromRgb(140, 200, 220)), TextAlignment = TextAlignment.Center });
-                var hourBox = new Border { Background = new SolidColorBrush(Color.FromArgb(18, 255, 255, 255)), CornerRadius = new CornerRadius(8), Margin = new Thickness(1), Padding = new Thickness(2, 5, 2, 5), Child = cell };
+                // 悬停展示这一小时的全部字段：格面只放时间/图标/温度/降水/风速，其余进 tooltip 不撑布局。
+                var tip = new List<string>();
+                string HourLine(string label, double value, string unit, int digits = 0) => double.IsNaN(value) ? "" : $"{label} {value.ToString("0" + (digits > 0 ? "." + new string('0', digits) : ""), CultureInfo.CurrentCulture)}{unit}";
+                tip.Add(HourLine(Loc.T("体感", "Feels"), s.HourFeelsLikeC.Length > i ? s.HourFeelsLikeC[i] : double.NaN, "°"));
+                if (s.HourHumidity.Length > i && s.HourHumidity[i] >= 0) tip.Add(Loc.T("湿度 ", "RH ") + s.HourHumidity[i] + "%");
+                tip.Add(HourLine(Loc.T("降水", "Precip"), s.HourPrecipMm.Length > i ? s.HourPrecipMm[i] : double.NaN, "mm", 1));
+                if (s.HourRainProb.Length > i && s.HourRainProb[i] >= 0) tip.Add(Loc.T("降水概率 ", "PoP ") + s.HourRainProb[i] + "%");
+                tip.Add(HourLine(Loc.T("阵风", "Gust"), s.HourWindGustKmh.Length > i ? s.HourWindGustKmh[i] : double.NaN, "km/h"));
+                if (s.HourWindDirDeg.Length > i && !double.IsNaN(s.HourWindDirDeg[i])) tip.Add(Loc.T("风向 ", "Dir ") + WeatherCodes.DegreeToCompass(s.HourWindDirDeg[i]));
+                tip.Add(HourLine(Loc.T("气压", "Pressure"), s.HourPressureHpa.Length > i ? s.HourPressureHpa[i] : double.NaN, "hPa"));
+                tip.Add(HourLine(Loc.T("紫外线", "UV"), s.HourUv.Length > i ? s.HourUv[i] : double.NaN, "", 1));
+                tip.Add(HourLine(Loc.T("露点", "Dew"), s.HourDewPointC.Length > i ? s.HourDewPointC[i] : double.NaN, "°", 1));
+                tip.Add(HourLine(Loc.T("云量", "Cloud"), s.HourCloudPercent.Length > i ? s.HourCloudPercent[i] : double.NaN, "%", 0));
+                tip.Add(HourLine(Loc.T("能见度", "Vis"), s.HourVisibilityKm.Length > i ? s.HourVisibilityKm[i] : double.NaN, "km", 1));
+                var hourTip = string.Join("\n", tip.Where(line => line.Length > 0));
+                var hourBox = new Border { Background = new SolidColorBrush(Color.FromArgb(18, 255, 255, 255)), CornerRadius = new CornerRadius(8), Margin = new Thickness(1), Padding = new Thickness(2, 5, 2, 5), Child = cell, ToolTip = hourTip.Length > 0 ? hourTip : null };
                 if (src("h:" + s.HourTimes[i]) is { } hid)
                 {
                     var hc = SourceColor(hid);
                     hourBox.BorderBrush = new SolidColorBrush(Color.FromArgb(150, hc.R, hc.G, hc.B));
                     hourBox.BorderThickness = new Thickness(1, 2, 1, 0);
-                    System.Windows.Controls.ToolTipService.SetToolTip(hourBox, SourceName(hid));
+                    // 来源名并入 tooltip 首行，不覆盖上面的字段明细。
+                    if (hourTip.Length > 0) System.Windows.Controls.ToolTipService.SetToolTip(hourBox, $"{SourceName(hid)}\n{hourTip}");
+                    else System.Windows.Controls.ToolTipService.SetToolTip(hourBox, SourceName(hid));
                 }
                 hours.Children.Add(hourBox);
             }
@@ -520,12 +549,15 @@ internal sealed class WeatherView : UserControl
                 bool isToday = index == today, past = index < today;
                 int code = s.DayCodes.Length > index && s.DayCodes[index] >= 0 ? s.DayCodes[index] : 3;
                 string name = s.DayConditions.Length > index && s.DayConditions[index].Length > 0 ? s.DayConditions[index] : WeatherCodes.Text(code);
+                // 白天/夜间天气并列展示（夜间未单独给时复用白天口径）。
+                string nightName = s.DayNightConditions.Length > index && s.DayNightConditions[index].Length > 0 ? s.DayNightConditions[index] : name;
+                string dayNight = nightName != name ? $"{name} / {nightName}" : name;
                 Cell(0, date.ToString("MM/dd"), align: TextAlignment.Left, dim: past);
                 Cell(1, isToday ? Loc.T("今天", "Today") : Loc.T(new[] { "周日", "周一", "周二", "周三", "周四", "周五", "周六" }[(int)date.DayOfWeek], new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }[(int)date.DayOfWeek]), dim: past);
                 string dkey = "d:" + s.DayDates[index];
                 var glyph = new WeatherGlyph(code, true) { Width = 22, Height = 22, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
                 Grid.SetColumn(glyph, 2); row.Children.Add(glyph);
-                Cell(3, name, sourceId: src("d_cond:" + s.DayDates[index]) ?? src(dkey), dim: past);
+                Cell(3, dayNight, sourceId: src("d_cond:" + s.DayDates[index]) ?? src(dkey), dim: past);
                 Cell(4, Degree(s.DayHighC.Length > index ? s.DayHighC[index] : double.NaN), new SolidColorBrush(Color.FromRgb(255, 176, 102)), align: TextAlignment.Center, sourceId: src("d_high:" + s.DayDates[index]) ?? src(dkey), dim: past);
                 Cell(5, Degree(s.DayLowC.Length > index ? s.DayLowC[index] : double.NaN), new SolidColorBrush(Color.FromRgb(143, 200, 255)), align: TextAlignment.Center, sourceId: src("d_low:" + s.DayDates[index]) ?? src(dkey), dim: past);
                 string rain = s.DayRainProb.Length > index && s.DayRainProb[index] >= 0 ? $"{s.DayRainProb[index]}%" : s.DayPrecipMm.Length > index && !double.IsNaN(s.DayPrecipMm[index]) ? $"{s.DayPrecipMm[index]:0.0}mm" : "--";
@@ -535,10 +567,44 @@ internal sealed class WeatherView : UserControl
                 Cell(7, wind.Length > 0 ? wind : "--", sourceId: src("d_wind:" + s.DayDates[index]) ?? src(dkey), dim: past);
                 Cell(8, s.DayUvMax.Length > index ? Num(s.DayUvMax[index], "") : "--", align: TextAlignment.Center, sourceId: src("d_uv:" + s.DayDates[index]) ?? src(dkey), dim: past);
                 Cell(9, $"{Clock(s.SunriseTimes, index)} / {Clock(s.SunsetTimes, index)}", sourceId: src("d_sun:" + s.DayDates[index]) ?? src(dkey), dim: past);
+                // 行悬停展示这一天的全部字段：表体只放日期/天气/高低温/降水/风/UV/日出日落，其余进 tooltip。
+                string T(string[] arr, int idx) => arr.Length > idx && arr[idx].Length >= 16 ? arr[idx][11..16] : "";
+                var dayTip = new List<string>();
+                string Line(string label, double value, string unit, int digits = 0) => double.IsNaN(value) ? "" : $"{label} {value.ToString("0" + (digits > 0 ? "." + new string('0', digits) : ""), CultureInfo.CurrentCulture)}{unit}";
+                dayTip.Add(Line(Loc.T("均温", "Avg"), s.DayAvgC.Length > index ? s.DayAvgC[index] : double.NaN, "°", 1));
+                dayTip.Add(Line(Loc.T("体感高/低", "Feels hi/lo"), s.DayFeelsHighC.Length > index ? s.DayFeelsHighC[index] : double.NaN, "°") + (s.DayFeelsLowC.Length > index && !double.IsNaN(s.DayFeelsLowC[index]) ? $" / {s.DayFeelsLowC[index]:0}°" : ""));
+                if (s.DayHumidity.Length > index && s.DayHumidity[index] >= 0) dayTip.Add(Loc.T("白天湿度 ", "Day RH ") + s.DayHumidity[index] + "%");
+                dayTip.Add(Line(Loc.T("白天云量", "Day cloud"), s.DayCloudPercent.Length > index ? s.DayCloudPercent[index] : double.NaN, "%"));
+                dayTip.Add(Line(Loc.T("气压", "Pressure"), s.DayPressureHpa.Length > index ? s.DayPressureHpa[index] : double.NaN, "hPa"));
+                dayTip.Add(Line(Loc.T("阵风", "Gust"), s.DayGustMaxKmh.Length > index ? s.DayGustMaxKmh[index] : double.NaN, "km/h"));
+                string nightTip = "";
+                if (s.DayNightHumidity.Length > index && s.DayNightHumidity[index] >= 0) nightTip += Loc.T("夜间湿度 ", "Night RH ") + s.DayNightHumidity[index] + "%  ";
+                nightTip += Line(Loc.T("夜间风", "Night wind"), s.DayNightWindMaxKmh.Length > index ? s.DayNightWindMaxKmh[index] : double.NaN, "km/h") + Line(Loc.T(" 夜间阵风", " gust"), s.DayNightGustMaxKmh.Length > index ? s.DayNightGustMaxKmh[index] : double.NaN, "km/h");
+                string nightRain = s.DayNightRainProb.Length > index && s.DayNightRainProb[index] >= 0 ? Loc.T("夜间降水概率 ", "Night PoP ") + s.DayNightRainProb[index] + "%" : Line(Loc.T("夜间降水", "Night precip"), s.DayNightPrecipMm.Length > index ? s.DayNightPrecipMm[index] : double.NaN, "mm", 1);
+                if (nightRain.Length > 0) nightTip += (nightTip.Length > 0 ? "  " : "") + nightRain;
+                dayTip.Add(Line(Loc.T("夜间云量", "Night cloud"), s.DayNightCloudPercent.Length > index ? s.DayNightCloudPercent[index] : double.NaN, "%"));
+                if (nightTip.Length > 0) dayTip.Add(nightTip.TrimEnd());
+                // 月相与月升月落、月过中天/月下点。
+                string moonPhase = s.DayMoonPhase.Length > index ? s.DayMoonPhase[index] : "";
+                string moonLine = $"{Loc.T("月升 ", "Moonrise ")}{Clock(s.MoonriseTimes, index)} · {Loc.T("月落 ", "Moonset ")}{Clock(s.MoonsetTimes, index)}";
+                if (T(s.MoonTransitTimes, index).Length > 0) moonLine += $" · {Loc.T("月过中天 ", "Transit ")}{T(s.MoonTransitTimes, index)}";
+                if (T(s.MoonUnderfootTimes, index).Length > 0) moonLine += $" · {Loc.T("月下点 ", "Underfoot ")}{T(s.MoonUnderfootTimes, index)}";
+                if (moonPhase.Length > 0) moonLine += $" · {moonPhase}";
+                dayTip.Add(moonLine);
+                // 晨昏蒙影与太阳正午/午夜（和风独有，有值才显示）。
+                string astroLine = $"{Loc.T("天光 ", "Astro ")}{T(s.AstronomicalDawnTimes, index)}–{T(s.AstronomicalDuskTimes, index)} · {Loc.T("航海 ", "Nautical ")}{T(s.NauticalDawnTimes, index)}–{T(s.NauticalDuskTimes, index)} · {Loc.T("民用 ", "Civil ")}{T(s.CivilDawnTimes, index)}–{T(s.CivilDuskTimes, index)}";
+                if (T(s.AstronomicalDawnTimes, index).Length > 0) dayTip.Add(astroLine);
+                string sunLine = $"{Loc.T("日出 ", "Sunrise ")}{Clock(s.SunriseTimes, index)} · {Loc.T("日落 ", "Sunset ")}{Clock(s.SunsetTimes, index)} · {Loc.T("太阳正午 ", "Noon ")}{T(s.SolarNoonTimes, index)} · {Loc.T("太阳午夜 ", "Midnight ")}{T(s.SolarMidnightTimes, index)}";
+                if (T(s.SolarNoonTimes, index).Length > 0) dayTip.Add(sunLine);
+                var dayTipText = string.Join("\n", dayTip.Where(line => line.Length > 0 && line.Trim().Length > 0));
+                if (dayTipText.Length > 0) row.ToolTip = dayTipText;
                 row.Background = isToday ? new SolidColorBrush(Color.FromArgb(30, 255, 255, 255)) : Brushes.Transparent;
             }
             table.Children.Add(row);
         }
+
+        // 扩展区：分钟降水 / 预警 / 指数 / 天文月相。台风来袭由预警覆盖，不再单列台风/辐照/潮汐。
+        ShowExtraSections(body, s);
 
         // 数据来源图例：列出所有声明支持的来源色点，提供数据的是专属色，未提供/未启用的一律灰色圆点，不再逐域说明谁不提供。
         body.Children.Add(SectionLabel(Loc.T("数据来源", "Sources")));
@@ -560,6 +626,101 @@ internal sealed class WeatherView : UserControl
         }
         body.Children.Add(info);
         Soft.Enter(card);
+    }
+
+    // 扩展数据展示：全部收在详情浮层，主视图维持紧凑与掉帧级性能。
+    // 每个分区各自判断有无数据，缺省只显示一行轻提示，不为没有数据的域留大片空白。
+    private static void ShowExtraSections(StackPanel body, WeatherSnapshot s)
+    {
+        Color dim = Color.FromRgb(143, 166, 192), ink = Color.FromRgb(226, 236, 248), accent = Color.FromRgb(99, 179, 244);
+        static TextBlock Pill(string text, Color color, double size = 11) => new()
+        {
+            Text = text, FontSize = size, Foreground = new SolidColorBrush(color), TextWrapping = TextWrapping.NoWrap
+        };
+
+        // 1) 分钟降水：未来数小时的逐点降水条，按降水量映射高度。
+        body.Children.Add(SectionLabel(Loc.T("分钟降水", "Minute precipitation")));
+        if (s.MinuteTimes.Length == 0) body.Children.Add(Note(Loc.T("暂无分钟降水数据", "No minute precipitation")));
+        else
+        {
+            var bars = new UniformGrid { Columns = 8, Margin = new Thickness(2, 0, 2, 4) };
+            double max = s.MinutePrecip.Where(v => !double.IsNaN(v)).DefaultIfEmpty(0).Max();
+            for (int i = 0; i < s.MinuteTimes.Length; i++)
+            {
+                string time = s.MinuteTimes[i].Length >= 16 ? s.MinuteTimes[i][11..16] : "--:--";
+                double value = s.MinutePrecip.Length > i ? s.MinutePrecip[i] : double.NaN;
+                double h = double.IsNaN(value) || max <= 0 ? 0 : Math.Max(3, value / max * 34);
+                var cell = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(2) };
+                cell.Children.Add(new Border { Width = 14, Height = h, CornerRadius = new CornerRadius(3), Background = new SolidColorBrush(double.IsNaN(value) ? dim : accent), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 3) });
+                cell.Children.Add(Pill(time, dim, 9.5));
+                cell.Children.Add(Pill(double.IsNaN(value) ? "--" : $"{value:0.0}", ink, 10));
+                bars.Children.Add(cell);
+            }
+            body.Children.Add(bars);
+            // 和风分钟响应的文字总结（如「未来两小时无降水」）。
+            if (s.MinuteSummary.Length > 0) body.Children.Add(Pill(s.MinuteSummary, ink, 10.5));
+        }
+
+        // 2) 预警：每条一行，等级着色，标题 + 正文 + 生效区间。
+        body.Children.Add(SectionLabel(Loc.T("气象预警", "Weather warnings")));
+        if (s.Warnings.Length == 0) body.Children.Add(Note(Loc.T("暂无预警", "No active warnings")));
+        else foreach (var w in s.Warnings)
+        {
+            var line = new StackPanel { Margin = new Thickness(2, 0, 2, 6) };
+            line.Children.Add(Pill((w.Level.Length > 0 ? $"[{w.Level}] " : "") + (w.Title.Length > 0 ? w.Title : w.Type), Color.FromRgb(242, 153, 74), 12));
+            if (w.Text.Length > 0) { var msg = Pill(w.Text, ink, 11); msg.TextWrapping = TextWrapping.Wrap; line.Children.Add(msg); }
+            if (w.Start.Length > 0 || w.End.Length > 0) line.Children.Add(Pill($"{w.Start} → {w.End}", dim, 10));
+            body.Children.Add(line);
+        }
+
+        // 3) 生活指数：两列卡，名称 + 等级 + 说明。
+        body.Children.Add(SectionLabel(Loc.T("天气指数", "Lifestyle indices")));
+        if (s.Indices.Length == 0) body.Children.Add(Note(Loc.T("暂无生活指数", "No lifestyle indices")));
+        else
+        {
+            var grid = new UniformGrid { Columns = 2, Margin = new Thickness(2, 0, 2, 4) };
+            foreach (var item in s.Indices)
+            {
+                var card = new StackPanel { Margin = new Thickness(3) };
+                card.Children.Add(Pill((item.Name.Length > 0 ? item.Name : item.Category) + (item.Level.Length > 0 ? $" · {item.Level}" : ""), accent, 11.5));
+                if (item.Text.Length > 0) { var msg = Pill(item.Text, ink, 10.5); msg.TextWrapping = TextWrapping.Wrap; card.Children.Add(msg); }
+                grid.Children.Add(new Border { Child = card, Background = new SolidColorBrush(Color.FromArgb(18, 255, 255, 255)), CornerRadius = new CornerRadius(8), Padding = new Thickness(8, 6, 8, 6) });
+            }
+            body.Children.Add(grid);
+        }
+
+        // 4) 天文：今天的全部天文时刻——月相月升月落、日出日落、三级晨昏蒙影、太阳正午/午夜、月过中天/月下点。
+        int today = WeatherData.TodayIndex(s);
+        string moonrise = s.MoonriseTimes.Length > today && s.MoonriseTimes[today].Length >= 16 ? s.MoonriseTimes[today][11..16] : "--:--";
+        string moonset = s.MoonsetTimes.Length > today && s.MoonsetTimes[today].Length >= 16 ? s.MoonsetTimes[today][11..16] : "--:--";
+        string phase = s.DayMoonPhase.Length > today ? s.DayMoonPhase[today] : "";
+        // 取当天 ISO 时刻的 HH:mm；数组缺省返回空串，展示时跳过。
+        string HHmm(string[] arr) => arr.Length > today && arr[today].Length >= 16 ? arr[today][11..16] : "";
+        string sunrise = HHmm(s.SunriseTimes), sunset = HHmm(s.SunsetTimes);
+        bool hasAstro = moonrise != "--:--" || moonset != "--:--" || phase.Length > 0 || sunrise.Length > 0;
+        if (hasAstro)
+        {
+            body.Children.Add(SectionLabel(Loc.T("天文", "Astronomy")));
+            // 月相组：升落/相位/过中天/下点。
+            var moonParts = new List<string> { $"{Loc.T("月升", "Moonrise")} {moonrise} · {Loc.T("月落", "Moonset")} {moonset}" };
+            if (phase.Length > 0) moonParts.Add(phase);
+            string transit = HHmm(s.MoonTransitTimes), underfoot = HHmm(s.MoonUnderfootTimes);
+            if (transit.Length > 0) moonParts.Add($"{Loc.T("月过中天", "Transit")} {transit}");
+            if (underfoot.Length > 0) moonParts.Add($"{Loc.T("月下点", "Underfoot")} {underfoot}");
+            body.Children.Add(Pill(string.Join(" · ", moonParts), ink, 11));
+            // 太阳组：日出日落 + 太阳正午/午夜（正午/午夜仅和风提供）。
+            var sunParts = new List<string> { $"{Loc.T("日出", "Sunrise")} {sunrise} · {Loc.T("日落", "Sunset")} {sunset}" };
+            string solarNoon = HHmm(s.SolarNoonTimes), solarMidnight = HHmm(s.SolarMidnightTimes);
+            if (solarNoon.Length > 0) sunParts.Add($"{Loc.T("太阳正午", "Solar noon")} {solarNoon}");
+            if (solarMidnight.Length > 0) sunParts.Add($"{Loc.T("太阳午夜", "Solar midnight")} {solarMidnight}");
+            body.Children.Add(Pill(string.Join(" · ", sunParts), ink, 11));
+            // 晨昏蒙影三级：天光（天文）→ 航海 → 民用，由暗到亮；仅和风提供。
+            string civilDawn = HHmm(s.CivilDawnTimes), civilDusk = HHmm(s.CivilDuskTimes);
+            string nauticalDawn = HHmm(s.NauticalDawnTimes), nauticalDusk = HHmm(s.NauticalDuskTimes);
+            string astroDawn = HHmm(s.AstronomicalDawnTimes), astroDusk = HHmm(s.AstronomicalDuskTimes);
+            if (astroDawn.Length > 0 || nauticalDawn.Length > 0 || civilDawn.Length > 0)
+                body.Children.Add(Pill($"{Loc.T("天光", "Astro")} {astroDawn}–{astroDusk} · {Loc.T("航海", "Nautical")} {nauticalDawn}–{nauticalDusk} · {Loc.T("民用", "Civil")} {civilDawn}–{civilDusk}", dim, 10.5));
+        }
     }
 
     private static TextBlock SectionLabel(string text) => new() { Text = text, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(143, 166, 192)), Margin = new Thickness(2, 16, 0, 8) };
@@ -938,9 +1099,8 @@ internal sealed class WeatherView : UserControl
     // 工具栏只负责画一个和播放来源同款的按钮，不碰天气数据。
     internal sealed record CityChoice(string Label, bool Selected, int Index);
 
-    // 城市全名是「城市 · 省/州 · 国家」三段（见 WeatherData 的检索拼装）。工具栏按钮只放得下两段，
-    // 所以常驻显示砍掉最后一段国家、留「城市·省份」；城市与省份重名时（上海 · 上海 · 中国）再合并成一段。
-    // 注意：下拉菜单里已存城市仍用全名，同名城市要靠省份/国家区分，不能在这里砍。
+    // 城市名展示：新版城市存的是结构化层级（Name 是区县/城市主体，Full 是「区县 · 市 · 省」完整名）。
+    // 工具栏按钮只放得下短名；下拉菜单用 Full，同名区县要靠省市区分。
     internal static string DisplayName(string name)
     {
         var parts = name.Split(" · ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -969,7 +1129,7 @@ internal sealed class WeatherView : UserControl
     internal List<CityChoice> CityChoices()
     {
         var choices = new List<CityChoice> { new(AutoMenuLabel, AutoSelected, -1) };
-        for (int i = 0; i < state.Cities.Count; i++) choices.Add(new CityChoice(state.Cities[i].Name, !AutoSelected && state.Selected == i, i));
+        for (int i = 0; i < state.Cities.Count; i++) choices.Add(new CityChoice(state.Cities[i].Full, !AutoSelected && state.Selected == i, i));
         return choices;
     }
     internal async Task ChooseCityAsync(int index)
