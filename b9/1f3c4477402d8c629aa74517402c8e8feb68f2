@@ -1,0 +1,14 @@
+tests/BrimDeck.WindowsTests/BrimDeck.WindowsTests.csproj
+  h_dc4d9c798f1bc1 45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b91f3c4477402d8c629aa74517402c8e8feb68f2",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
