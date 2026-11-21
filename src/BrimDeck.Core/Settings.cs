@@ -179,6 +179,10 @@ public sealed class AppEntry
     // notices all follow it (DashboardUsage.Quota).
     public string SingleRingQuota { get; set; } = "";
     public List<string> RingQuotas { get; set; } = [];
+    // Quotas chosen for collapsed detail text (UsageMetric.Id); empty follows the primary quota unless QuotaRingAll is on.
+    public List<string> CompactQuotas { get; set; } = [];
+    // Display priority for quota groups in the expanded panel (group names in preferred order).
+    public List<string> QuotaGroupOrder { get; set; } = [];
     public Dictionary<string, decimal> QuotaTargets { get; set; } = [];
     public bool IsOffPeak(DateTime local) => OffPeak?.Any(period => period.Contains(local)) == true;
     // The next minute at which this row enters or leaves its off-peak time; null without periods, or when they cover the
@@ -198,6 +202,8 @@ public sealed class AppEntry
         copy.UsageSource = UsageSource;
         copy.OffPeak = [.. (OffPeak ?? []).Select(period => period.Copy())];
         copy.RingQuotas = [.. RingQuotas ?? []];
+        copy.CompactQuotas = [.. CompactQuotas ?? []];
+        copy.QuotaGroupOrder = [.. QuotaGroupOrder ?? []];
         copy.QuotaTargets = new(QuotaTargets ?? []);
         return copy;
     }
@@ -221,6 +227,8 @@ public sealed class AppEntry
         SingleRingQuota = (SingleRingQuota ?? "").Trim();
         if (SingleRingQuota.Length > 500) SingleRingQuota = "";
         RingQuotas = QuotaRing.Slots(RingQuotas);
+        CompactQuotas = (CompactQuotas ?? []).Select(id => id?.Trim() ?? "").Where(id => id.Length is > 0 and <= 500).Distinct(StringComparer.Ordinal).Take(100).ToList();
+        QuotaGroupOrder = (QuotaGroupOrder ?? []).Select(group => group?.Trim() ?? "").Where(group => group.Length is > 0 and <= 100).Distinct(StringComparer.Ordinal).Take(32).ToList();
         QuotaTargets = (QuotaTargets ?? []).Where(pair => pair.Key.Length is > 0 and <= 500 && pair.Value > 0 && pair.Value <= AppPresets.MaximumBalanceTarget).Take(32)
             .ToDictionary(pair => pair.Key, pair => decimal.Round(pair.Value, 2, MidpointRounding.AwayFromZero));
     }
@@ -481,6 +489,13 @@ public sealed class DeckSettings
     // Writes each application's first letter (or digit) of its name inside its collapsed quota ring, in the notch, the capsule and
     // the side column. Off by default; a file without it reads as off.
     public bool QuotaRingLetters { get; set; }
+    // Shows each application's name, quota label, primary quota figure or reset countdown beside its collapsed quota ring. Off by default.
+    public bool QuotaRingNames { get; set; }
+    public bool QuotaRingLabels { get; set; }
+    public bool QuotaRingFigures { get; set; }
+    public bool QuotaRingResets { get; set; }
+    public bool QuotaRingAll { get; set; }
+    [JsonIgnore] public bool ShowsQuotaDetails => QuotaRingNames || QuotaRingLabels || QuotaRingFigures || QuotaRingResets || QuotaRingAll;
     // The quota rings' style (QuotaRingStyle), in every style and in the side column; each application's choice of quotas for it is
     // its own (AppEntry.SingleRingQuota, AppEntry.RingQuotas).
     public QuotaRingStyle QuotaRingStyle { get => _quotaRingStyle; set => _quotaRingStyle = Enum.IsDefined(value) ? value : QuotaRingStyle.Single; }

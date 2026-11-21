@@ -20,6 +20,9 @@ public partial class MainWindow
     // each reading (UpdateCompactStrips).
     private readonly List<MonitorStrip> _columnStrips = [];
     private readonly List<ReadingsCarousel> _columnReadings = [];
+    // Pinned quota detail carousels in column mode keep per-app scroll progress separate from monitor/device readings.
+    private readonly Dictionary<Guid, ReadingsCarousel> _columnQuotaCarousels = [];
+    private readonly Dictionary<Guid, TimeSpan> _columnQuotaElapsed = [];
 
     // The column across the notch: its depth less ColumnPad on either side.
     private static double ColumnWidth(CollapsedShape shape)
@@ -79,6 +82,7 @@ public partial class MainWindow
         devices?.Stack(gap);
         double edge = Math.Min(Snap(layout.TextEdge, dpi), CompactMusicLayout.Whole(CollapsedLimits.ColumnPad * scale));
 
+        double ringsColumnWidth = apps.Count > 0 ? layout.RingSize : 0;
         var lines = new List<(FrameworkElement Element, double Height)>();
         void Add(FrameworkElement element, double height)
         {
@@ -98,7 +102,32 @@ public partial class MainWindow
             switch (part)
             {
                 case CompactPart.Rings when apps.Count > 0:
-                    Add(ColumnRings(apps, layout, ringGap, column, out double ringsHeight), ringsHeight); break;
+                    if (Settings.ShowsQuotaDetails)
+                    {
+                        var items = QuotaDetailItems(apps);
+                        var quotaStrip = new QuotaStrip(items, layout, ringGap, dpi, Look);
+                        double maxItemWidth = quotaStrip.ItemWidths.Count == 0 ? layout.RingSize : quotaStrip.ItemWidths.Max();
+                        ringsColumnWidth = Math.Min(maxItemWidth, CompactColumn.ReadingCap * scale);
+                        for (int i = 0; i < items.Count; i++)
+                        {
+                            if (quotaStrip.ItemWidths[i] > column + .5)
+                            {
+                                Guid appId = apps[i].InstanceId;
+                                var elapsed = _columnQuotaElapsed.GetValueOrDefault(appId);
+                                var pinnedRow = QuotaStrip.CreatePinnedRow(items[i], layout, dpi, column, edge, elapsed, animate, 0, Look, out var carousel);
+                                if (carousel is not null) _columnQuotaCarousels[appId] = carousel;
+                                Add(pinnedRow, quotaStrip.RowHeight);
+                            }
+                            else
+                            {
+                                var singleStrip = new QuotaStrip([items[i]], layout, ringGap, dpi, Look);
+                                Add(singleStrip, singleStrip.RowHeight);
+                            }
+                        }
+                    }
+                    else
+                        Add(ColumnRings(apps, layout, ringGap, column, out double ringsHeight), ringsHeight);
+                    break;
                 case CompactPart.Music when text.Length > 0:
                     Add(_compactMarquee = CompactTitle(text, column, layout), layout.TextHeight); break;
                 case CompactPart.Monitor:
@@ -140,7 +169,7 @@ public partial class MainWindow
         // The column's width and length for the shape (CollapsedGeometry.Resolve): the widest fixed part, the readings up to the cap,
         // and every line with the gaps; the surface never shortens below its tallest line. Like the row, the track notice is left out.
         var stack = CompactColumn.Stack([.. lines.Select(line => line.Height)], gap);
-        double wantedColumn = CompactColumn.Width(scale, [layout.CoverSize * (cover ? 1 : 0), equalizer ? layout.EqualizerSize : 0, clock?.ReservedWidth ?? 0, transfer?.Width ?? 0, devices?.PreferredWidth ?? 0, apps.Count > 0 ? layout.RingSize : 0],
+        double wantedColumn = CompactColumn.Width(scale, [layout.CoverSize * (cover ? 1 : 0), equalizer ? layout.EqualizerSize : 0, clock?.ReservedWidth ?? 0, transfer?.Width ?? 0, devices?.PreferredWidth ?? 0, ringsColumnWidth],
             strips.Select(strip => strip.PreferredWidth));
         double wanted = notice ? (double.IsNaN(_compactWanted) ? stack.Length : _compactWanted) : DevicePixels.Up(stack.Length, dpi);
         double required = lines.Count == 0 ? 0 : Math.Ceiling(lines.Max(line => line.Height));

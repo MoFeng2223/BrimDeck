@@ -166,7 +166,7 @@ public partial class MainWindow : Window
         InitializeThemeFade();
         Island.Background = _surface;
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
-        _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); else if (OffPeakChanged()) RenderCompact(); if (_lead is null) _app.CheckUpdatesIfDue(); };
+        _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); else if (OffPeakChanged() || CompactResetsChanged()) RenderCompact(); if (_lead is null) _app.CheckUpdatesIfDue(); };
         _seconds.Tick += (_, _) => { if (_compactClock is not null) _compactClock.Time = DateTime.Now; _seconds.Interval = SecondDelay(DateTime.Now); };
         _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false); };
         // A new foreground context closes the panel directly (ApplySettings lays it out collapsed), so SetExpanded never sees the
@@ -748,8 +748,9 @@ public partial class MainWindow : Window
             if (_columnCarousel is not null) { _columnElapsed = _columnCarousel.Elapsed; _columnCarousel.SetRunning(false, false); }
             if (_columnReadings.Count > 0) _stripElapsed = _columnReadings[0].Elapsed;
             foreach (var reading in _columnReadings) reading.SetRunning(false, false);
+            foreach (var pair in _columnQuotaCarousels) { _columnQuotaElapsed[pair.Key] = pair.Value.Elapsed; pair.Value.SetRunning(false, false); }
             _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _stripCarousel = null; _compactClock = null; _compactStrip = null;
-            _columnCarousel = null; _columnReadings.Clear(); _columnStrips.Clear();
+            _columnCarousel = null; _columnReadings.Clear(); _columnQuotaCarousels.Clear(); _columnStrips.Clear();
             if (_alert is not null)
             {
                 CompactAlert.Visibility = Visibility.Visible; CompactRings.Visibility = Visibility.Collapsed;

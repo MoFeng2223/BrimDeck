@@ -11,6 +11,8 @@ internal static class CompactSpacingTests
         Windows(check);
         Share(check);
         Required(check);
+        check("Quota details scroll a wide label beside a reading", CompactSpacing.DetailSlots([500], 12, 16, 140, 40).SequenceEqual([100d]));
+        check("Quota details retain whole items when they fit", CompactSpacing.DetailSlots([45, 48], 12, 16, 140, 40).SequenceEqual([45d, 48d]));
     }
 
     private static bool Even(CompactSpacing.Placement place, double width, double dpi)

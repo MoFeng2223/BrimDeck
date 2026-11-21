@@ -65,7 +65,7 @@ public sealed partial class SettingsWindow
         var rows = new StackPanel();
         _partOptions.Clear();
         foreach (var part in S.CompactOrder(style))
-            rows.Children.Add(part switch { CompactPart.Clock => ClockRow(style, rows), _ => PartRow(style, part, rows) });
+            rows.Children.Add(part switch { CompactPart.Clock => ClockRow(style, rows), CompactPart.Rings => QuotaRingsRow(style, rows), _ => PartRow(style, part, rows) });
         UpdateDividers(rows);
         Group(rows);
     }
@@ -113,6 +113,28 @@ public sealed partial class SettingsWindow
         AttachPartDrag(handle, title, style, rows);
         return new Border { Child = row, Height = PartRowHeight, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0), Tag = part, RenderTransform = new TranslateTransform() };
     }
+    // The quota rings' row among the collapsed parts; expands to toggle name, percentage and reset countdown beside each ring.
+    private Border QuotaRingsRow(CompactStyle style, StackPanel rows)
+    {
+        bool notch = style == CompactStyle.Notch;
+        var options = new StackPanel();
+        options.Children.Add(Toggle(Loc.T("显示工具名称", "Show app name"), S.QuotaRingNames, v => Change(s => s.QuotaRingNames = v)));
+        options.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
+        options.Children.Add(Toggle(Loc.T("显示额度说明", "Show quota label"), S.QuotaRingLabels, v => Change(s => s.QuotaRingLabels = v),
+            help: Loc.T("显示主配额的周期或指标说明（例如 5h、周）。", "Shows the primary quota's period or label (such as 5h or 1w).")));
+        options.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
+        options.Children.Add(Toggle(Loc.T("显示配额百分比", "Show quota percentage"), S.QuotaRingFigures, v => Change(s => s.QuotaRingFigures = v),
+            help: Loc.T("显示主配额的已用或剩余百分比，跟随“AI 用量 › 配额显示”中的设置。", "Shows the primary quota percentage (used or left), following the AI usage › Quota display setting.")));
+        options.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
+        options.Children.Add(Toggle(Loc.T("显示重置时间", "Show reset time"), S.QuotaRingResets, v => Change(s => s.QuotaRingResets = v)));
+        options.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
+        options.Children.Add(Toggle(Loc.T("显示全部配额", "Show all quotas"), S.QuotaRingAll, v => Change(s => s.QuotaRingAll = v),
+            help: Loc.T("开启后在收起外观中显示每个工具的全部可用配额；关闭时仅显示主配额，或按“AI 用量”中各应用的勾选显示。",
+                "Shows every available quota for each app when collapsed; when off, shows only the primary quota or the ones selected under AI usage.")));
+        return OptionsPartRow(style, CompactPart.Rings, rows, Loc.T("配额环", "Quota rings"), Loc.T("配额环设置", "Quota ring settings"), S.ShowsSummary(style),
+            on => Change(s => { if (notch) s.NotchSummary = on; else s.CapsuleSummary = on; }), options, new Thickness(16, 4, 16, 4));
+    }
+
     // Dropped in a new place, the collapsed row takes the new order at once. The open options close when a drag begins, so every
     // row is one line high while they move.
     private void AttachPartDrag(Border handle, string name, CompactStyle style, StackPanel rows) => AttachDrag(handle, name, () => rows, PartRowHeight, list =>

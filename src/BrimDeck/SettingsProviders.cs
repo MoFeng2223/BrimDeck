@@ -26,7 +26,10 @@ public sealed partial class SettingsWindow
     private string RingChoices(AppEntry entry)
     {
         var snapshot = DashboardUsage.Quota(entry, _app.Deck.Snapshots);
-        return (snapshot.Metrics.Count > 0 ? "read\n" : "") + string.Join("\n", QuotaRing.Choices(snapshot).Select(metric => metric.Id));
+        return (snapshot.Metrics.Count > 0 ? "read\n" : "")
+            + string.Join("\n", QuotaRing.Choices(snapshot).Select(metric => metric.Id))
+            + "\n--\n"
+            + string.Join("\n", QuotaRing.DetailChoices(snapshot).Select(metric => metric.Id));
     }
     internal void QuotasChanged()
     {
@@ -616,16 +619,110 @@ public sealed partial class SettingsWindow
         }
         Targets();
 
+        void CompactDetails()
+        {
+            var detailChoices = QuotaRing.DetailChoices(snapshot);
+            if (detailChoices.Count <= 1) return;
+            var wrap = new WrapPanel { Orientation = Orientation.Horizontal };
+            var selected = entry.CompactQuotas.ToHashSet(StringComparer.Ordinal);
+            foreach (var metric in detailChoices)
+            {
+                string metricId = metric.Id;
+                var box = new CheckBox
+                {
+                    Content = Name(metric),
+                    IsChecked = selected.Contains(metricId),
+                    Foreground = UI.Brush(TextPrimary),
+                    FontFamily = UI.PanelFont,
+                    FontSize = 12,
+                    Margin = new Thickness(0, 4, 14, 4),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    IsEnabled = !S.QuotaRingAll
+                };
+                void UpdateSelection(bool check)
+                {
+                    Change(s =>
+                    {
+                        var target = s.Entry(id);
+                        if (target is null) return;
+                        var next = target.CompactQuotas.ToList();
+                        if (check) { if (!next.Contains(metricId, StringComparer.Ordinal)) next.Add(metricId); }
+                        else next.RemoveAll(q => string.Equals(q, metricId, StringComparison.Ordinal));
+                        target.CompactQuotas = next;
+                    });
+                }
+                box.Checked += (_, _) => UpdateSelection(true);
+                box.Unchecked += (_, _) => UpdateSelection(false);
+                wrap.Children.Add(box);
+            }
+            var container = new StackPanel();
+            container.Children.Add(wrap);
+            container.Children.Add(Note(S.QuotaRingAll
+                ? Loc.T("当前已在“收起外观”中开启显示全部配额。", "Show all quotas is currently enabled in Collapsed appearance.")
+                : Loc.T("不勾选时只显示主配额；勾选后会在收起外观中显示所选额度。", "Shows only the primary quota when none are checked; otherwise shows the selected quotas when collapsed.")));
+            Line(Loc.T("收起详情额度", "Collapsed detail quotas"), null, container);
+        }
+
+        void GroupPriority()
+        {
+            if (entry.QuotaSource is not (ProviderId.Claude or ProviderId.Antigravity)) return;
+            var groups = QuotaRing.OrderGroups(choices, m => m.Label, entry.QuotaGroupOrder, entry.QuotaSource, m => m.Window)
+                .Select(g => QuotaRing.GroupName(g[0].Label))
+                .Where(name => name.Length > 0)
+                .ToList();
+            if (groups.Count <= 1) return;
+            var list = new StackPanel();
+            for (int i = 0; i < groups.Count; i++)
+            {
+                int index = i;
+                string groupName = groups[i];
+                var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, i > 0 ? 4 : 0, 0, 0) };
+                var label = new TextBlock
+                {
+                    Text = $"{i + 1}. {groupName}",
+                    Foreground = UI.Brush(TextPrimary),
+                    FontFamily = UI.PanelFont,
+                    FontSize = 12,
+                    Width = 110,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    TextTrimming = TextTrimming.CharacterEllipsis
+                };
+                var up = ActionButton("↑", () =>
+                {
+                    if (index <= 0) return;
+                    Change(s => s.Entry(id)!.QuotaGroupOrder = QuotaRing.SwapGroupOrder(s.Entry(id)!.QuotaGroupOrder, groups, index - 1, index));
+                    RefreshAppRow(id);
+                });
+                up.FontSize = 11; up.Padding = new Thickness(7, 2, 7, 2); up.Margin = new Thickness(6, 0, 0, 0); up.IsEnabled = index > 0;
+                AutomationProperties.SetName(up, groupName + Loc.T(" 上移", " move up"));
+                var down = ActionButton("↓", () =>
+                {
+                    if (index >= groups.Count - 1) return;
+                    Change(s => s.Entry(id)!.QuotaGroupOrder = QuotaRing.SwapGroupOrder(s.Entry(id)!.QuotaGroupOrder, groups, index, index + 1));
+                    RefreshAppRow(id);
+                });
+                down.FontSize = 11; down.Padding = new Thickness(7, 2, 7, 2); down.Margin = new Thickness(4, 0, 0, 0); down.IsEnabled = index < groups.Count - 1;
+                AutomationProperties.SetName(down, groupName + Loc.T(" 下移", " move down"));
+                row.Children.Add(label); row.Children.Add(up); row.Children.Add(down);
+                list.Children.Add(row);
+            }
+            var container = new StackPanel();
+            container.Children.Add(list);
+            container.Children.Add(Note(Loc.T("调整展开面板中各模型分组从上到下的显示顺序。", "Sets the top-to-bottom display order of quota groups in the expanded panel.")));
+            Line(Loc.T("展开分组顺序", "Expanded group order"), null, container);
+        }
+
         if (S.QuotaRingStyle == QuotaRingStyle.Single)
         {
-            // By default the single ring shows the account balance where the source has one, else the most used quota (QuotaRing.For).
-            var account = choices.FirstOrDefault(QuotaRing.IsAccountBalance);
-            List<(string Id, string Label)> options = [("", account is not null ? Name(account) : hasAccount && snapshot.Metrics.Count == 0 ? Loc.T("账户余额", "Account balance") : Loc.T("已用最高的一项", "Most used")),
-                .. choices.Where(metric => metric != account).Select(metric => (metric.Id, Name(metric)))];
+            // Empty ID selects automatically (sole compact choice, else account balance, else most used); explicit IDs override it.
+            List<(string Id, string Label)> options = [("", Loc.T("自动选择", "Automatic")),
+                .. choices.Select(metric => (metric.Id, Name(metric)))];
             if (entry.SingleRingQuota.Length > 0 && choices.All(metric => metric.Id != entry.SingleRingQuota)) options.Add((entry.SingleRingQuota, Label(entry.SingleRingQuota)));
             string title = Loc.T("配额环额度", "Ring quota");
-            Line(title, null, Combo(title, options, account is not null && entry.SingleRingQuota == account.Id ? "" : entry.SingleRingQuota,
+            Line(title, null, Combo(title, options, entry.SingleRingQuota,
                 quota => { Change(s => s.Entry(id)!.SingleRingQuota = quota); RefreshAppRow(id); }));
+            CompactDetails();
+            GroupPriority();
             return grid;
         }
 
@@ -638,6 +735,7 @@ public sealed partial class SettingsWindow
             // Nothing read yet, or a source whose figures have nothing to draw (text only).
             Line(Loc.T("外环额度", "Outer ring"), null, Note(snapshot.Metrics.Count == 0 ? Loc.T("读取到额度后可以选择。", "Can be chosen once quotas are read.")
                 : Loc.T("这个来源没有可按比例显示的额度，配额环显示为满环。", "This source has no quota with a share to show; its ring is drawn full.")));
+            CompactDetails();
             return grid;
         }
         while (slots.Count < QuotaRing.MaximumRings) slots.Add("");
@@ -675,6 +773,8 @@ public sealed partial class SettingsWindow
             }
             Line(names[slot], null, line);
         }
+        CompactDetails();
+        GroupPriority();
         return grid;
     }
 
