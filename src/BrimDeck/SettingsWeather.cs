@@ -55,13 +55,6 @@ public sealed partial class SettingsWindow
             try {await Task.Delay(350,token);var found=await WeatherData.Search(query,state.Schedule,token);if(token.IsCancellationRequested||!active)return;options.ItemsSource=found;popup.IsOpen=found.Count>0;}catch(OperationCanceledException){}catch{return;}
         };
         var controlsRow=new StackPanel {Orientation=Orientation.Horizontal};controlsRow.Children.Add(inputHost);controlsRow.Children.Add(add);Group(Row(Loc.T("搜索城市","Search city"),controlsRow));
-        SectionTitle(Loc.T("更新与数据","Updates and data"));Group(Row(Loc.T("自动更新","Auto update"),TextLine(Loc.T("每 15 分钟","Every 15 minutes"),12,TextSecondary)),Row(Loc.T("离线时","Offline"),TextLine(Loc.T("自动使用本地缓存","Falls back to the local cache"),12,TextSecondary)));
-        // 请求与缓存：调度是「按需下探 + 分域缓存」，这里把当天的实际请求量和磁盘占用摆出来，配额一目了然。
-        SectionTitle(Loc.T("请求与缓存","Requests and cache"));
-        var usage=WeatherCache.Usage();
-        var used=WeatherSources.All.Select(source=>(Name:source.Info.Id switch{"tencent"=>Loc.T("腾讯","Tencent"),"weathercomcn"=>Loc.T("中国天气网","ChinaWx"),"hefeng"=>Loc.T("和风","QWeather"),_=>source.Info.Name},Count:RequestGate.Today(source.Info.Id))).Where(item=>item.Count>0).ToArray();
-        Group(Row(Loc.T("今日请求","Requests today"),TextLine(used.Length==0?Loc.T("尚未发起请求","No requests yet"):string.Join(" · ",used.Select(item=>$"{item.Name} {item.Count}")),12,TextSecondary)),
-              Row(Loc.T("本地缓存","Local cache"),TextLine(Loc.T($"{usage.Count} 项 · {usage.Bytes/1024.0:0} KB（14 天未用自动清理）",$"{usage.Count} entries · {usage.Bytes/1024.0:0} KB (unused entries purged after 14 days)"),12,TextSecondary)));
         // 数据来源：8 类数据能力逐一可配；区域切换放在明细表的正上方。
         // 每行只列出「该区域能覆盖这一类」的来源，不支持的不进下拉；用户可逐类选择自动或指定来源。
         SectionTitle(Loc.T("数据来源","Data sources"));
@@ -136,6 +129,14 @@ public sealed partial class SettingsWindow
         var hefengKey=KeyField(state.Schedule.HeFengKey,text=>{state.Schedule.HeFengKey=text;Save();});
         Group(Row(Loc.T("和风 API Host","QWeather host"),hefengHost,TextLine(Loc.T("必填：控制台分配的项目 Host，例如 abcxyz.re.qweatherapi.com；留空则不启用和风。","Required: the project host from your console, e.g. abcxyz.re.qweatherapi.com; blank disables QWeather."),11,TextSecondary)),
               Row(Loc.T("和风天气 Key","QWeather key"),hefengKey,TextLine(Loc.T("和风需要 Key：填入后优先使用其全维度数据；其余来源免 Key。","QWeather needs a key: with one it is preferred for all domains; other sources need none."),11,TextSecondary)));
+        // 更新与请求状态放页尾：城市与来源才是高频改动项，运行状态看一眼就够。
+        SectionTitle(Loc.T("更新与数据","Updates and data"));Group(Row(Loc.T("自动更新","Auto update"),TextLine(Loc.T("每 15 分钟","Every 15 minutes"),12,TextSecondary)),Row(Loc.T("离线时","Offline"),TextLine(Loc.T("自动使用本地缓存","Falls back to the local cache"),12,TextSecondary)));
+        // 请求与缓存：调度是「按需下探 + 分域缓存」，这里把当天的实际请求量和磁盘占用摆出来，配额一目了然。
+        SectionTitle(Loc.T("请求与缓存","Requests and cache"));
+        var usage=WeatherCache.Usage();
+        var used=WeatherSources.All.Select(source=>(Name:source.Info.Id switch{"tencent"=>Loc.T("腾讯","Tencent"),"weathercomcn"=>Loc.T("中国天气网","ChinaWx"),"hefeng"=>Loc.T("和风","QWeather"),_=>source.Info.Name},Count:RequestGate.Today(source.Info.Id))).Where(item=>item.Count>0).ToArray();
+        Group(Row(Loc.T("今日请求","Requests today"),TextLine(used.Length==0?Loc.T("尚未发起请求","No requests yet"):string.Join(" · ",used.Select(item=>$"{item.Name} {item.Count}")),12,TextSecondary)),
+              Row(Loc.T("本地缓存","Local cache"),TextLine(Loc.T($"{usage.Count} 项 · {usage.Bytes/1024.0:0} KB（14 天未用自动清理）",$"{usage.Count} entries · {usage.Bytes/1024.0:0} KB (unused entries purged after 14 days)"),12,TextSecondary)));
         cityRows.Unloaded+=(_,_)=>{active=false;pending?.Cancel();pending?.Dispose();pending=null;fetchCts?.Cancel();fetchCts?.Dispose();fetchCts=null;popup.IsOpen=false;};
 
         TextBox KeyField(string value,Action<string> save)

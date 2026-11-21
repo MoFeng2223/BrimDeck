@@ -391,7 +391,8 @@ internal sealed class WeatherView : UserControl
         Grid.SetColumn(close, 1); header.Children.Add(close);
         body.Children.Add(header);
 
-        // 当前多维读数：两行六列的小卡，每张卡标注该字段真正贡献的来源（字段级配色而非笼统合并）。
+        // 当前多维读数：两行六列的小卡。来源只用色点表达（名字收进悬浮提示与图例），
+        // 13 张卡各写一遍「和风天气」太吵；卡片描边也随来源着色，一眼分辨数据归属。
         var metrics = new UniformGrid { Columns = 6, Margin = new Thickness(-3, 0, -3, 0) };
         string? src(string field) => s.FieldSources.TryGetValue(field, out var id) ? id : null;
         void Metric(string label, string value, string? sourceId)
@@ -402,10 +403,9 @@ internal sealed class WeatherView : UserControl
             if (sourceId is { Length: > 0 })
             {
                 var color = SourceColor(sourceId);
-                var chip = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
-                chip.Children.Add(new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(3.5), Background = new SolidColorBrush(color), VerticalAlignment = VerticalAlignment.Center });
-                chip.Children.Add(new TextBlock { Text = SourceName(sourceId), FontSize = 9.5, Foreground = new SolidColorBrush(color), Margin = new Thickness(4, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
-                text.Children.Add(chip);
+                var dot = new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(3.5), Background = new SolidColorBrush(color), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 4, 0, 0) };
+                System.Windows.Controls.ToolTipService.SetToolTip(dot, Loc.T($"来自 {SourceName(sourceId)}", $"From {SourceName(sourceId)}"));
+                text.Children.Add(dot);
             }
             var cellBox = new Border { Background = new SolidColorBrush(Color.FromArgb(24, 255, 255, 255)), CornerRadius = new CornerRadius(10), Margin = new Thickness(3), Padding = new Thickness(10, 7, 10, 7), Child = text };
             if (sourceId is { Length: > 0 }) { var c = SourceColor(sourceId); cellBox.BorderBrush = new SolidColorBrush(Color.FromArgb(110, c.R, c.G, c.B)); } cellBox.BorderThickness = new Thickness(1, 1, 1, 0);
@@ -674,7 +674,11 @@ internal sealed class WeatherView : UserControl
         }
 
         // 3) 生活指数：两列卡，名称 + 等级 + 说明。
+        // 标题颜色跟该域实际贡献的来源走（指数目前只有和风提供 → 和风紫），不再用固定蓝，
+        // 与上方读数卡/图例的来源配色保持一致；没有来源信息时才退回 accent。
         body.Children.Add(SectionLabel(Loc.T("天气指数", "Lifestyle indices")));
+        Color indexColor = accent;
+        if (s.DomainSources.TryGetValue("Indices", out var indexIds) && indexIds.FirstOrDefault(id => s.SourceProvided.TryGetValue(id, out var ok) && ok) is { } indicesId) indexColor = SourceColor(indicesId);
         if (s.Indices.Length == 0) body.Children.Add(Note(Loc.T("暂无生活指数", "No lifestyle indices")));
         else
         {
@@ -682,7 +686,7 @@ internal sealed class WeatherView : UserControl
             foreach (var item in s.Indices)
             {
                 var card = new StackPanel { Margin = new Thickness(3) };
-                card.Children.Add(Pill((item.Name.Length > 0 ? item.Name : item.Category) + (item.Level.Length > 0 ? $" · {item.Level}" : ""), accent, 11.5));
+                card.Children.Add(Pill((item.Name.Length > 0 ? item.Name : item.Category) + (item.Level.Length > 0 ? $" · {item.Level}" : ""), indexColor, 11.5));
                 if (item.Text.Length > 0) { var msg = Pill(item.Text, ink, 10.5); msg.TextWrapping = TextWrapping.Wrap; card.Children.Add(msg); }
                 grid.Children.Add(new Border { Child = card, Background = new SolidColorBrush(Color.FromArgb(18, 255, 255, 255)), CornerRadius = new CornerRadius(8), Padding = new Thickness(8, 6, 8, 6) });
             }
