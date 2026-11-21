@@ -7,6 +7,8 @@ void Check(string name, bool condition)
     if (!condition) throw new InvalidOperationException("FAIL: " + name);
     Console.WriteLine("PASS: " + name); passed++;
 }
+CopyPreviewTests.Run(Check);
+if (args.Contains("--copy-preview")) return;
 JsonElement Json(string value) { using var doc = JsonDocument.Parse(value); return doc.RootElement.Clone(); }
 DeckSettings Only(params ProviderId[] ids) => new() { Apps = ids.Select(id => new AppEntry { Id = id }).ToList() };
 var root = Path.Combine(Path.GetTempPath(), "BrimDeck-Tests-" + Guid.NewGuid().ToString("N"));

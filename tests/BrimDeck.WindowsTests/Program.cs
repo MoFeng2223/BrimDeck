@@ -17,6 +17,7 @@ internal static class Program
         try
         {
             // "--only power": just the power and battery checks, for a quick look at what this machine reports.
+            if (args is ["--only", "copy-preview"]) { CopyPreviewLayoutTests.Run(Check); return Finish(); }
             if (args is ["--only", "power"]) { PowerChecks.Run(Check); return Finish(); }
             if (args is ["--only", "cpu"]) { CpuProviderChecks.Run(Check); return Finish(); }
             if (args is ["--only", "gpu"]) { CheckGpus(); return Finish(); }
@@ -46,6 +47,7 @@ internal static class Program
             RingLetterChecks.Run(Check);
             SettingsFocusTests.Run(Check);
             ThemeCardChecks.Run(Check);
+            CopyPreviewLayoutTests.Run(Check);
             PopupGhostChecks.Run(Check);
             PanelKeyboardTests.Run(Check);
             BrimDeck.MainWindow.CheckPageCapsule(Check);

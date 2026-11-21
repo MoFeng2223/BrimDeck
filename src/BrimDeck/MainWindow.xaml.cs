@@ -119,7 +119,7 @@ public partial class MainWindow : Window
     // The page built while it waited is not reused (RenderUsage compares its build key, which a failed read does not change).
     internal void FirstReadEnded() { if (_firstReadEnded) return; _firstReadEnded = true; _usageBuilt = null; }
 
-    private sealed record CompactAlertInfo(AppEntry Entry, string Name, string Label, double Used, DateTimeOffset? ResetAt);
+    private sealed record CompactAlertInfo(AppEntry Entry, string Name, string Label, double Used, DateTimeOffset? ResetAt, string? CopyText = null);
 
     public MainWindow(App app, MainWindow? lead = null)
     {
@@ -159,6 +159,7 @@ public partial class MainWindow : Window
         InitializeMusic();
         InitializeMonitor();
         InitializeShelf();
+        InitializeCopyPreview();
         InitializeDevices();
         InitializeResize();
         InitializeScale();
@@ -168,7 +169,7 @@ public partial class MainWindow : Window
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); else if (OffPeakChanged()) RenderCompact(); if (_lead is null) _app.CheckUpdatesIfDue(); };
         _seconds.Tick += (_, _) => { if (_compactClock is not null) _compactClock.Time = DateTime.Now; _seconds.Interval = SecondDelay(DateTime.Now); };
-        _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false); };
+        _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); if (_alert?.CopyText is not null) EndCopyPreview(); else { _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false); } };
         // A new foreground context closes the panel directly (ApplySettings lays it out collapsed), so SetExpanded never sees the
         // panel turn from open to closed: what follows a closing is done here (PanelClosed), as SetExpanded does.
         _host.ContextChanged += context =>
@@ -394,7 +395,8 @@ public partial class MainWindow : Window
         // Made ordinary, at startup too, the panel goes beneath the window in use like a closed one; so does an ordinary panel
         // whose indicator is no longer called for.
         if (Topmost != KeepsAbove) { Topmost = KeepsAbove; if (!Topmost && !_expanded) _host.Front(false); }
-        if (!Settings.QuotaAlerts && _alert is not null) ClearAlert();
+        if (_copyReturning) ClearAlert(); else CancelCopyTransition();
+        if (_alert?.CopyText is not null ? !CanPreviewCopy || !Settings.ClipboardPreviewContent : !Settings.QuotaAlerts && _alert is not null) ClearAlert();
         ApplySyncSchedule();
         ApplyMusicSettings();
         ApplySecondClock();
@@ -533,13 +535,15 @@ public partial class MainWindow : Window
     private CollapsedShape ShapeFor(CompactStyle style)
     {
         double? wanted = Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null;
+        double required = _compactRequired;
+        if (_alert?.CopyText is not null && !ColumnFor(style)) { wanted = _copyPreviewWidth; required = 0; }
         // The capsule keeps its place on the screen; docked with the bottom (MainWindow.Edge.cs) it is only seen from there.
         if (style == CompactStyle.Capsule && _frame.Edge != ScreenEdge.Top)
         {
-            var onScreen = CollapsedGeometry.Resolve(Settings, style, _screenMonitor, _screenWork, _pixelsPerDip, wanted, _compactRequired, _scale);
+            var onScreen = CollapsedGeometry.Resolve(Settings, style, _screenMonitor, _screenWork, _pixelsPerDip, wanted, required, _scale);
             return onScreen with { Surface = _frame.FromScreen(onScreen.Surface) };
         }
-        return CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip, wanted, _compactRequired, _scale,
+        return CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip, wanted, required, _scale,
             ColumnFor(style) ? double.IsNaN(_compactColumn) ? 0 : _compactColumn : null, style == CompactStyle.Line && Dock(style).OverTaskbar);
     }
     // The width the collapsed column asks for (CompactColumn.Width); NaN until it is first built.
@@ -779,12 +783,14 @@ public partial class MainWindow : Window
 
     internal void ShowAlert(AppEntry entry, string label, double used, DateTimeOffset? resetAt)
         => ShowAlert(new CompactAlertInfo(entry, entry.Name, label + " ", used, resetAt));
-    internal void ClearAlert() { _alertTimer.Stop(); _alert = null; RenderCompact(); }
+    internal void ClearAlert() { CancelCopyTransition(); _alertTimer.Stop(); _alert = null; RenderCompact(); }
     // No alert while the panel is suppressed (full-screen rule or hidden by the user): it would not be seen, and it must not
     // appear later when the panel shows again.
     private void ShowAlert(CompactAlertInfo alert)
     {
         if (IsSuppressed) return;
+        CancelCopyTransition();
+        _alertTimer.Interval = TimeSpan.FromSeconds(alert.CopyText is null ? 5 : 2.4);
         _alert = alert; _alertTimer.Stop(); _alertTimer.Start();
         RenderCompact();
         if (!_expanded && !IsSuppressed) SetExpanded(false);
@@ -828,6 +834,7 @@ public partial class MainWindow : Window
     public void SetExpanded(bool expanded, bool instant = false, bool keyboard = false)
     {
         if (expanded && IsSuppressed || _poweringOff) return;
+        if (expanded) { CancelCopyTransition(); if (_alert?.CopyText is not null) ClearAlert(); }
         if (expanded && !_expanded) EndBoot();
         // Only the panel under the pointer is open; the others close at once and give up the Escape key.
         if (expanded && !_preview)
@@ -945,6 +952,7 @@ public partial class MainWindow : Window
         bool resizing = _contentResize && !turning && !expanded && carried == 0 && !morphing && !booting && duration > 0;
         bool resizeUnderWay = resizing && now < _contentResizeEnds;
         if (resizing) _contentResizeEnds = now + duration;
+        if (_copyRebounding && !expanded && duration > 0) duration = CopyReboundMs;
         Island.SettledClip = false;
         if (!expanded) SettleClip(duration);
         // The opening spring is most of the way there within a fifth of the move, so the content follows soon after it.
@@ -956,9 +964,14 @@ public partial class MainWindow : Window
         // top rounds after them; becoming the notch, the top squares first and the shoulders flare after it. On one track the
         // top stayed square until the shoulders were gone and then rounded in a single frame.
         bool intoShoulders = morphing && shape.Shoulder > 0, outOfShoulders = morphing && !intoShoulders && Island.ShoulderRadius > 0;
+        if (_copyRebounding && !expanded && duration > 0)
+        {
+            surface = new(0, 1);
+        }
         Track cornerTrack = outOfShoulders ? new(.3, .7) : morphing ? new(0, .4) : surface;
         Track shoulderTrack = intoShoulders ? new(.4, 1) : outOfShoulders ? new(0, .3) : surface;
         Track compact = booting ? new(.5, 1) : expanded ? new(0, .15) : line ? new(0, morphing ? .25 : .35) : morphing ? new(.55, 1) : new(.62, 1);
+        if (_copyRebounding && !expanded) compact = new(.12, .72);
         Track shadow = booting ? new(.35, 1) : expanded ? new(0, .3) : morphing ? new(.2, .9) : new(.5, 1);
         Track rim = expanded ? new(.2, .5) : morphing ? new(.2, .7) : new(.5, .8);
         // The indicator's color only ever shows at the line's size, never as a larger block: into the indicator it comes once the
@@ -978,7 +991,11 @@ public partial class MainWindow : Window
         bool bounce = !booting && expanded && !reshaping && !keyboard && duration > 0 && HasRoomToBounce(width, height, left, gap);
         IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = morphing ? Soft.Follow : reshaping ? Soft.InOut : expanded || booting ? Soft.Out
             : resizing ? resizeUnderWay ? Soft.Out : Soft.InOut : Soft.Drawer;
-        IEasingFunction settle = bounce ? Soft.Bounce : corners;
+        double copyGive = Math.Abs(width - Island.Width) * .06 + 2;
+        bool copyRoom = left >= copyGive && left + width + copyGive <= FrameWidth
+            && left + _windowOffset >= copyGive && left + _windowOffset + width + copyGive <= MonitorBoundsDip.Width;
+        IEasingFunction settle = _copyRebounding && !expanded && !ColumnFor(style) && copyRoom
+            ? CopySpring : bounce ? Soft.Bounce : corners;
         Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
         // The content only fades, in and out on the same track and curve (motion-review F13: what leaves eases out as what arrives
         // does). It used to scale between .96 and 1 as well; text under a scale that is not exactly 1 is drawn unhinted at fractional

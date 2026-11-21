@@ -62,6 +62,7 @@
     <Compile Include="..\..\src\BrimDeck\IslandBorder.cs" Link="IslandBorder.cs" />
     <Compile Include="..\..\src\BrimDeck\IslandDecor.cs" Link="IslandDecor.cs" />
     <Compile Include="..\..\src\BrimDeck\CompactStylePreview.cs" Link="CompactStylePreview.cs" />
+    <Compile Include="..\..\src\BrimDeck\CopyPreviewLayout.cs" Link="CopyPreviewLayout.cs" />
     <Compile Include="..\..\src\BrimDeck\UI.cs" Link="UI.cs" />
     <Compile Include="..\..\src\BrimDeck\PanelTheme.cs" Link="PanelTheme.cs" />
     <Compile Include="..\..\src\BrimDeck\SettingsPalette.cs" Link="SettingsPalette.cs" />

@@ -50,6 +50,17 @@ public partial class SettingsWindow
         var length = MusicChoice(Loc.T("保存时长", "Keep for"), S.ClipboardKeepFor, [.. Enum.GetValues<HistoryLength>().Select(value => (value, LengthName(value)))],
             value => { Change(s => s.ClipboardKeepFor = value); ShowPage(_page); }, enabled: S.ClipboardKeepHistory, width: 216,
             help: Loc.T("从最后一次复制起计算。", "Counted from the last copy."));
+        var preview = Toggle(Loc.T("复制时在岛上提示", "Preview copies on the island"), S.ClipboardPreview,
+            value => Change(s => s.ClipboardPreview = value),
+            help: Loc.T("需要开启记录剪贴板；岛收起时短暂显示，连续复制只显示最新一条。", "Requires clipboard recording. Briefly shows the latest copy while the island is collapsed."));
+        var content = Toggle(Loc.T("提示中显示复制内容", "Show copied content in previews"), S.ClipboardPreviewContent,
+            value => Change(s => s.ClipboardPreviewContent = value),
+            help: Loc.T("关闭后只显示“复制成功”。", "When off, only shows Copied."));
+        var maxLength = SliderRow(Loc.T("最长显示字数", "Maximum preview characters"), S.ClipboardPreviewMaxLength,
+            CopyPreviewText.MinimumLength, CopyPreviewText.MaximumLength, 1, Loc.T("字", "characters"),
+            value => Change(s => s.ClipboardPreviewMaxLength = (int)value));
+        maxLength.ToolTip = Loc.T("只计算复制正文，空格计入，组合表情算一个字。岛宽随实际文字变化，仅超出屏幕可用宽度时提前省略。", "Counts copied text only, including spaces; combined emoji count as one character. The island fits the text; only the available screen width can truncate it earlier.");
+        Group(preview, content, maxLength);
         Group(record, _excludedHost = new Border { Child = ExcludedAppsContent() }, keep, length);
         Group(Toggle(Loc.T("单击只复制，不粘贴", "Click copies only"), S.ClipboardClickCopyOnly, value => Change(s => s.ClipboardClickCopyOnly = value),
             help: Loc.T("开启后，单击一条记录只复制，不粘贴到当前窗口。右键菜单仍可粘贴。",
