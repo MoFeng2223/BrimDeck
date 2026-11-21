@@ -1153,8 +1153,9 @@ internal sealed class WeatherView : UserControl
                 double u = (nowT - rise) / (set - rise), a = Math.Clamp((apex - rise) / (set - rise), 0.05, 0.95);
                 double h = Math.Sin((u <= a ? u / a : (1 - u) / (1 - a)) * Math.PI / 2);
                 double px = Math.Clamp(x(nowT), 0, w), py = yBase - h * (yBase - yApex);
-                var glyph = new CelestialGlyph(body == "day", color) { Width = 20, Height = 20 };
-                Canvas.SetLeft(glyph, px - 10); Canvas.SetTop(glyph, py - 10); sunArc.Children.Add(glyph);
+                // 用项目里通用的 WeatherGlyph（code=0 晴）：day=true 画带光芒的太阳，false 画弯钩月。
+                var glyph = new WeatherGlyph(0, body == "day") { Width = 24, Height = 24 };
+                Canvas.SetLeft(glyph, px - 12); Canvas.SetTop(glyph, py - 12); sunArc.Children.Add(glyph);
             }
             // 两端时刻标注（与时间轴对齐）：升 / 落。
             Txt(sunArc, x(rise), 90, HHmm(rise), color, 9, 46);
@@ -1207,18 +1208,25 @@ internal sealed class WeatherView : UserControl
             tick.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             Canvas.SetLeft(tick, Math.Max(0, Math.Min(w - tick.DesiredSize.Width, w * hh / 24.0 - tick.DesiredSize.Width / 2))); Canvas.SetTop(tick, 41); chart.Children.Add(tick);
         }
-        // 分界点注释：每条色段的起止处画竖直虚线到条上，并标注「名称 时刻」——日=金、月=银，颜色与色段呼应。
-        // 时刻取当日 0–24 轴上的读数，和刻度严格对齐；虚线取代原先那行脱离位置的静态文字。
-        var marks = new List<(string name, double t, Color c)>();
-        if (!double.IsNaN(a)) marks.Add((Loc.T("日出", "Sunrise"), a, gold));
-        if (!double.IsNaN(b)) marks.Add((Loc.T("日落", "Sunset"), b, gold));
-        if (!double.IsNaN(mr)) marks.Add((Loc.T("月升", "Moonrise"), mr, silver));
-        if (!double.IsNaN(ms)) marks.Add((Loc.T("月落", "Moonset"), ms, silver)); // ms 已是当日轴读数；跨午夜由 moonSetAbs 处理色段
-        foreach (var (name, t, c) in marks)
+        // 注释点：色段起止（日出/日落/月升/月落）+ 弧顶中天（正午/月中天）。都画竖直虚线到条上并标「名称 时刻」——日=金、月=银。
+        // 中天不是色段分界而是弧顶，用点线区分；时刻取当日 0–24 轴读数，与刻度严格对齐。
+        var marks = new List<(string name, double t, Color c, bool apex)>();
+        if (!double.IsNaN(a)) marks.Add((Loc.T("日出", "Sunrise"), a, gold, false));
+        if (!double.IsNaN(b)) marks.Add((Loc.T("日落", "Sunset"), b, gold, false));
+        if (!double.IsNaN(mr)) marks.Add((Loc.T("月升", "Moonrise"), mr, silver, false));
+        if (!double.IsNaN(ms)) marks.Add((Loc.T("月落", "Moonset"), ms, silver, false)); // ms 已是当日轴读数；跨午夜由 moonSetAbs 处理色段
+        double sn = Frac(s.SolarNoonTimes, today), mn = Frac(s.MoonTransitTimes, today);
+        if (!double.IsNaN(sn) && sn >= a && sn <= b) marks.Add((Loc.T("正午", "Noon"), sn, gold, true));
+        if (!double.IsNaN(mn)) marks.Add((Loc.T("月中天", "Moon peak"), mn, silver, true));
+        foreach (var (name, t, c, apex) in marks)
         {
             double px = w * t / 24;
-            chart.Children.Add(new Line { X1 = px, Y1 = 13, X2 = px, Y2 = 29, Stroke = new SolidColorBrush(c), StrokeThickness = 1, StrokeDashArray = new DoubleCollection(new double[] { 2, 3 }) });
-            Txt(chart, px, 1, $"{name} {HHmm(t)}", c, 9, 58);
+            chart.Children.Add(new Line
+            {
+                X1 = px, Y1 = apex ? 9 : 13, X2 = px, Y2 = 29, Stroke = new SolidColorBrush(c),
+                StrokeThickness = 1, StrokeDashArray = new DoubleCollection(apex ? new double[] { 1, 2 } : new double[] { 2, 3 })
+            });
+            Txt(chart, px, 1, $"{name} {HHmm(t)}", c, 9, 62);
         }
         double now = (CityNow(s).Hour * 60 + CityNow(s).Minute) / 1440.0;
         var dot = new System.Windows.Shapes.Ellipse { Width = 7, Height = 7, Fill = Brushes.White };
@@ -1311,37 +1319,5 @@ internal sealed class WeatherView : UserControl
         state.Selected = index; WeatherData.Save(state);
         await Refresh();
     }
-    // 日照弧线上的天体标记：真矢量日/月，而不是一个纯色圆点。太阳带八道光芒，月亮是弯钩加一颗星。
-    // 用 FrameworkElement 自绘，跟 WeatherGlyph 一样缩放到实际尺寸；颜色由调用方按日/月弧传入。
-    private sealed class CelestialGlyph : FrameworkElement
-    {
-        private readonly bool sun; private readonly SolidColorBrush ink;
-        internal CelestialGlyph(bool sun, Color color) { this.sun = sun; ink = new SolidColorBrush(color); IsHitTestVisible = false; }
-        protected override void OnRender(DrawingContext d)
-        {
-            base.OnRender(d);
-            double s = Math.Min(ActualWidth, ActualHeight) / 24; if (s <= 0) return;
-            d.PushTransform(new MatrixTransform(s, 0, 0, s, (ActualWidth - 24 * s) / 2, (ActualHeight - 24 * s) / 2));
-            if (sun)
-            {
-                d.DrawEllipse(ink, null, new Point(12, 12), 5, 5);
-                var pen = new Pen(ink, 1.6) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
-                for (int i = 0; i < 8; i++)
-                {
-                    double a = i * Math.PI / 4, c = Math.Cos(a), sn = Math.Sin(a);
-                    d.DrawLine(pen, new Point(12 + 7.5 * c, 12 + 7.5 * sn), new Point(12 + 10.5 * c, 12 + 10.5 * sn));
-                }
-            }
-            else
-            {
-                var crescent = new CombinedGeometry(GeometryCombineMode.Exclude,
-                    new EllipseGeometry(new Point(12, 12), 8, 8), new EllipseGeometry(new Point(17, 8), 7.5, 7.5));
-                d.DrawGeometry(ink, null, crescent);
-                d.DrawEllipse(ink, null, new Point(19.5, 15.5), 1.1, 1.1);
-            }
-            d.Pop();
-        }
-    }
-
     internal Action? SettingsRequested;
 }
