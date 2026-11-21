@@ -694,38 +694,40 @@ internal static class WeatherAggregator
         string key = "d:" + target.Date;
         bool Mark(bool ok, string field) { if (ok) { fieldSources.TryAdd(field + ":" + target.Date, sourceId); fieldSources.TryAdd(key, sourceId); return true; } return false; }
         bool any = false;
-        any |= Mark(Set<int>(ref target.Code, source.Code) || (target.Condition is null && source.Condition is not null), "d_cond");
+        // 注意：这里所有字段必须用非短路的 `|` 串联。`Set`/`FillString` 只在目标为空时填入并返回 true，
+        // 用 `||` 会在第一个成功字段处短路，导致同一来源后续字段（如 solarNoon）永远补不进来。
+        any |= Mark(Set<int>(ref target.Code, source.Code) | (target.Condition is null && source.Condition is not null), "d_cond");
         if (target.Condition is null && source.Condition is not null) { target.Condition = source.Condition; }
-        any |= Mark(Set<double>(ref target.HighC, source.HighC) || Set<double>(ref target.FeelsHighC, source.FeelsHighC), "d_high");
-        any |= Mark(Set<double>(ref target.LowC, source.LowC) || Set<double>(ref target.FeelsLowC, source.FeelsLowC), "d_low");
-        any |= Mark(Set<int>(ref target.RainProb, source.RainProb) || Set<double>(ref target.PrecipMm, source.PrecipMm), "d_rain");
+        any |= Mark(Set<double>(ref target.HighC, source.HighC) | Set<double>(ref target.FeelsHighC, source.FeelsHighC), "d_high");
+        any |= Mark(Set<double>(ref target.LowC, source.LowC) | Set<double>(ref target.FeelsLowC, source.FeelsLowC), "d_low");
+        any |= Mark(Set<int>(ref target.RainProb, source.RainProb) | Set<double>(ref target.PrecipMm, source.PrecipMm), "d_rain");
         any |= Mark(Set<double>(ref target.UvMax, source.UvMax), "d_uv");
-        any |= Mark(Set<double>(ref target.WindMaxKmh, source.WindMaxKmh) || Set<double>(ref target.GustMaxKmh, source.GustMaxKmh)
-            || Set<double>(ref target.WindDirDeg, source.WindDirDeg) || (target.WindDir is null && source.WindDir is not null), "d_wind");
+        any |= Mark(Set<double>(ref target.WindMaxKmh, source.WindMaxKmh) | Set<double>(ref target.GustMaxKmh, source.GustMaxKmh)
+            | Set<double>(ref target.WindDirDeg, source.WindDirDeg) | (target.WindDir is null && source.WindDir is not null), "d_wind");
         if (target.WindDir is null && source.WindDir is not null) { target.WindDir = source.WindDir; }
         any |= Mark(Set<int>(ref target.Humidity, source.Humidity), "d_humidity");
         any |= Mark(Set<double>(ref target.PressureHpa, source.PressureHpa), "d_pressure");
         // 天文（日出日落、月升月落、月相）随每日预报一起返回，是 Daily 的普通字段。
         bool FillString(ref string? field, string? value) { if (field is not null || value is null) return false; field = value; return true; }
-        any |= Mark(FillString(ref target.Sunrise, source.Sunrise) || FillString(ref target.Sunset, source.Sunset), "d_sun");
+        any |= Mark(FillString(ref target.Sunrise, source.Sunrise) | FillString(ref target.Sunset, source.Sunset), "d_sun");
         // 晨昏蒙影与太阳正午/午夜、月过中天/月下点：和风 astro 独有的扩展时刻，同为 Daily 字段。
-        any |= Mark(FillString(ref target.AstronomicalDawn, source.AstronomicalDawn) || FillString(ref target.NauticalDawn, source.NauticalDawn)
-            || FillString(ref target.CivilDawn, source.CivilDawn) || FillString(ref target.CivilDusk, source.CivilDusk)
-            || FillString(ref target.NauticalDusk, source.NauticalDusk) || FillString(ref target.AstronomicalDusk, source.AstronomicalDusk)
-            || FillString(ref target.SolarNoon, source.SolarNoon) || FillString(ref target.SolarMidnight, source.SolarMidnight), "d_astro");
-        any |= Mark(FillString(ref target.MoonTransit, source.MoonTransit) || FillString(ref target.MoonUnderfoot, source.MoonUnderfoot), "d_moon");
-        any |= Mark(FillString(ref target.Moonrise, source.Moonrise) || FillString(ref target.Moonset, source.Moonset)
-            || FillString(ref target.MoonPhase, source.MoonPhase), "d_moon");
+        any |= Mark(FillString(ref target.AstronomicalDawn, source.AstronomicalDawn) | FillString(ref target.NauticalDawn, source.NauticalDawn)
+            | FillString(ref target.CivilDawn, source.CivilDawn) | FillString(ref target.CivilDusk, source.CivilDusk)
+            | FillString(ref target.NauticalDusk, source.NauticalDusk) | FillString(ref target.AstronomicalDusk, source.AstronomicalDusk)
+            | FillString(ref target.SolarNoon, source.SolarNoon) | FillString(ref target.SolarMidnight, source.SolarMidnight), "d_astro");
+        any |= Mark(FillString(ref target.MoonTransit, source.MoonTransit) | FillString(ref target.MoonUnderfoot, source.MoonUnderfoot), "d_moon");
+        any |= Mark(FillString(ref target.Moonrise, source.Moonrise) | FillString(ref target.Moonset, source.Moonset)
+            | FillString(ref target.MoonPhase, source.MoonPhase), "d_moon");
         // 日均温与白天云量：和风独有（Open-Meteo daily 不返回这两项）。
         any |= Mark(Set<double>(ref target.AvgTempC, source.AvgTempC), "d_avg");
         any |= Mark(Set<double>(ref target.CloudPercent, source.CloudPercent), "d_cloud");
         // 夜间分段：夜间天气/湿度/风/降水/云量，缺哪项补哪项。
-        any |= Mark(Set<int>(ref target.NightCode, source.NightCode) || (target.NightCondition is null && source.NightCondition is not null), "d_night");
+        any |= Mark(Set<int>(ref target.NightCode, source.NightCode) | (target.NightCondition is null && source.NightCondition is not null), "d_night");
         if (target.NightCondition is null && source.NightCondition is not null) { target.NightCondition = source.NightCondition; }
         any |= Mark(Set<int>(ref target.NightHumidity, source.NightHumidity), "d_night");
-        any |= Mark(Set<double>(ref target.NightWindMaxKmh, source.NightWindMaxKmh) || Set<double>(ref target.NightGustMaxKmh, source.NightGustMaxKmh)
-            || Set<double>(ref target.NightWindDirDeg, source.NightWindDirDeg) || (target.NightWindDir is null && source.NightWindDir is not null), "d_night");
-        any |= Mark(Set<double>(ref target.NightPrecipMm, source.NightPrecipMm) || Set<int>(ref target.NightRainProb, source.NightRainProb), "d_night");
+        any |= Mark(Set<double>(ref target.NightWindMaxKmh, source.NightWindMaxKmh) | Set<double>(ref target.NightGustMaxKmh, source.NightGustMaxKmh)
+            | Set<double>(ref target.NightWindDirDeg, source.NightWindDirDeg) | (target.NightWindDir is null && source.NightWindDir is not null), "d_night");
+        any |= Mark(Set<double>(ref target.NightPrecipMm, source.NightPrecipMm) | Set<int>(ref target.NightRainProb, source.NightRainProb), "d_night");
         any |= Mark(Set<double>(ref target.NightCloudPercent, source.NightCloudPercent), "d_night");
         return any;
     }
