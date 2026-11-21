@@ -76,6 +76,58 @@ public enum EqualizerMode { Flow = 0, Spectrum = 1 }
 // a ring of its own. Single: one 12 DIP ring per application with its highest share, as before there were nested rings. Saved
 // as numbers, so new members go at the end; a file without it, or with a number not listed, is Single.
 public enum QuotaRingStyle { Nested = 0, Single = 1 }
+
+// Weather configuration lives with every other setting in settings.json. City is a saved value, so it belongs here rather
+// than in the UI project: the settings store serializes it as part of DeckSettings.
+// Name is the place itself ("洪山区"); the other fields are its hierarchy, so identically named districts stay distinct.
+public sealed record City(string Name, double Latitude, double Longitude, string Province = "", string CityName = "", string Country = "", string LocationId = "")
+{
+    [JsonIgnore] public string Full => Name.Contains(" · ")
+        ? Name
+        : string.Join(" · ", new[] { Name, CityName, Province }
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct()
+            .Concat(Country is "" or "中国" or "China" or "中國" ? Array.Empty<string>() : new[] { Country }));
+}
+
+// Weather's eight data domains, as offered in the settings page.
+public enum WeatherDomain { Current, Hourly, Daily, Minutely, Warning, Indices, Air, History }
+
+// Per-domain source choices and the QWeather credentials, saved as one object in settings.json.
+public sealed class WeatherSettings
+{
+    private static readonly string[] ChinaDefault = ["hefeng", "weathercomcn", "tencent", "openmeteo"];
+    private static readonly string[] WorldDefault = ["hefeng", "openmeteo"];
+    public List<string> ChinaOrder { get; set; } = [.. ChinaDefault];
+    public List<string> WorldOrder { get; set; } = [.. WorldDefault];
+    public Dictionary<string, string> Sources { get; set; } = [];
+    public string HeFengKey { get; set; } = "";
+    public string HeFengHost { get; set; } = "";
+    public string Choice(WeatherDomain domain)
+        => Sources.TryGetValue(domain.ToString(), out var value) && value.Length > 0 ? value : "auto";
+    public List<string> Ranking(bool china)
+        => (china ? ChinaOrder : WorldOrder) is { Count: > 0 } list ? list : [.. (china ? ChinaDefault : WorldDefault)];
+    public WeatherSettings Copy() => new()
+    {
+        ChinaOrder = [.. ChinaOrder ?? []],
+        WorldOrder = [.. WorldOrder ?? []],
+        Sources = new Dictionary<string, string>(Sources ?? []),
+        HeFengKey = HeFengKey ?? "",
+        HeFengHost = HeFengHost ?? ""
+    };
+    public void Normalize()
+    {
+        ChinaOrder = [.. (ChinaOrder ?? []).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase)];
+        if (ChinaOrder.Count == 0) ChinaOrder = [.. ChinaDefault];
+        WorldOrder = [.. (WorldOrder ?? []).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase)];
+        if (WorldOrder.Count == 0) WorldOrder = [.. WorldDefault];
+        Sources = (Sources ?? []).Where(pair => Enum.TryParse<WeatherDomain>(pair.Key, out _) && !string.IsNullOrWhiteSpace(pair.Value))
+            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        HeFengKey = (HeFengKey ?? "").Trim();
+        HeFengHost = (HeFengHost ?? "").Trim();
+    }
+}
+
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left; Music places
 // only the title or lyric. Saved as numbers, so new members go at the end.
 public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer, Devices }
@@ -699,6 +751,11 @@ public sealed class DeckSettings
     public bool WeatherPage { get; set; } = true;
     public double WeatherWidth { get; set; } = 660;
     public double WeatherHeight { get; set; } = 360;
+    // Cities, the selected city and the per-domain source schedule are ordinary settings, saved in settings.json like every
+    // other settings page. WeatherData keeps only downloaded snapshots under weather/snapshot/.
+    public List<City> WeatherCities { get; set; } = [];
+    public int WeatherSelected { get; set; } = -1;
+    public WeatherSettings Weather { get; set; } = new();
     // The devices page: the battery of the connected wireless devices (Devices); it reads them only while it shows.
     public bool DevicesPage { get; set; } = true;
     public double DevicesWidth { get; set; } = 460;
@@ -877,6 +934,8 @@ public sealed class DeckSettings
         copy.FullscreenRules = FullscreenRules.Select(rule => rule with { }).ToList();
         copy.IgnoredMediaApps = [.. IgnoredMediaApps ?? []];
         copy.DeviceChoices = [.. (DeviceChoices ?? []).Select(device => device.Copy())];
+        copy.WeatherCities = [.. (WeatherCities ?? []).Select(city => city with { })];
+        copy.Weather = (Weather ?? new()).Copy();
         copy.Profiles = [.. (Profiles ?? []).Select(profile => profile.Copy())];
         copy.ProfileRules = [.. (ProfileRules ?? []).Select(rule => rule.Copy())];
         return copy;
@@ -1043,6 +1102,14 @@ public sealed class DeckSettings
         DisplayMonitors = (DisplayMonitors ?? []).OfType<ChosenDisplay>().Where(d => !string.IsNullOrWhiteSpace(d.Id))
             .Select(d => d with { Id = d.Id.Trim(), Name = (d.Name ?? "").Trim() }).DistinctBy(d => d.Id).ToList();
         if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;
+        WeatherCities = (WeatherCities ?? []).Where(city => city is not null && !string.IsNullOrWhiteSpace(city.Name))
+            .Select(city => city with
+            {
+                Name = city.Name.Trim(), Province = (city.Province ?? "").Trim(), CityName = (city.CityName ?? "").Trim(),
+                Country = (city.Country ?? "").Trim(), LocationId = (city.LocationId ?? "").Trim()
+            }).Take(32).ToList();
+        WeatherSelected = WeatherCities.Count == 0 ? -1 : Math.Clamp(WeatherSelected, -1, WeatherCities.Count - 1);
+        Weather ??= new(); Weather.Normalize();
         Core.Profiles.Normalize(this);
     }
 }

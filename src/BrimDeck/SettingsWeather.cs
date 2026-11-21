@@ -9,10 +9,11 @@ public sealed partial class SettingsWindow
     internal const int WeatherSettingsPage = 19;
     private void WeatherSettings()
     {
-        var state=WeatherData.Load();var cityRows=new StackPanel();bool active=true;
+        var state=WeatherData.Load(() => S);var cityRows=new StackPanel();bool active=true;
         string autoName="当前位置";if(state.Cache.TryGetValue("auto",out var autoSnap))autoName=autoSnap.Name;
         var preview=new ContentControl {Content=new WeatherSettingsPreview(state)};
-        void Save() {try {WeatherData.Save(state);}catch {}}
+        // 天气配置现在就是 DeckSettings 的一部分：改动后走与其他设置页相同的保存队列写 settings.json。
+        void Save() {try {_app.QueueSave(); WeatherData.Save(state);}catch {}}
         void Fill()
         {
             cityRows.Children.Clear();

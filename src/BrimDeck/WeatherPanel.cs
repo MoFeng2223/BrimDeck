@@ -29,7 +29,7 @@ public partial class MainWindow
         ApplyHeader(PanelHeader.For(36, 20));
         if (_weatherView is null)
         {
-            _weatherView = new WeatherView { SettingsRequested = () => _app.OpenSettingsPage(SettingsWindow.WeatherSettingsPage) };
+            _weatherView = new WeatherView(_app) { SettingsRequested = () => _app.OpenSettingsPage(SettingsWindow.WeatherSettingsPage) };
             _weatherView.StateChanged += RenderWeatherRefreshButton;
             WeatherContent.Children.Add(new Viewbox { Stretch = Stretch.Uniform, Child = _weatherView });
         }

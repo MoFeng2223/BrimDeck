@@ -8,7 +8,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using BrimDeck.Core;
-using City = BrimDeck.City;
+using City = BrimDeck.Core.City;
 using State = BrimDeck.WeatherData.State;
 
 namespace BrimDeck;
@@ -16,7 +16,8 @@ namespace BrimDeck;
 // Open-Meteo weather, stored separately from account and device settings.
 internal sealed class WeatherView : UserControl
 {
-    private State state = new();
+    private readonly App _app;
+    private State state;
     // 第一行为「今日天气」区域：Star 弹性行 + MinHeight，高度足够时内容拉伸居中，压到最小高度后不再往下压缩。
     private readonly RowDefinition summaryRow = new() { Height = new GridLength(1, GridUnitType.Star), MinHeight = 112 };
     private readonly Grid summary = new();
@@ -159,11 +160,12 @@ internal sealed class WeatherView : UserControl
     internal event Action? StateChanged;
     private void RaiseState() => StateChanged?.Invoke();
 
-    public WeatherView()
+    public WeatherView(App app)
     {
+        _app = app;
         Width = 620; Height = 290;
         Background = Brushes.Transparent; Foreground = Brushes.White;
-        try { state = WeatherData.Load(); } catch { }
+        state = WeatherData.Load(() => _app.Settings);
         // Grid 两行：今日天气(Star 弹性行+MinHeight) / 底部预报(Auto 贴地)，宽度与高度都随 Fit 传入值整体填充。
         // 底边距 16 与用量页列表底部一致（UsageContent 的 layout.Bottom），预报区与窗口底部保持相同的留白。
         // 上边距 0：页头那一行（36）本身就是内容的上沿，用量页也是把内容直接贴在页头下沿的
@@ -203,7 +205,7 @@ internal sealed class WeatherView : UserControl
         };
         lowRow.Margin = new Thickness(6, 2, 6, 0); Grid.SetRow(lowRow, 2); days.Children.Add(lowRow);
         Grid.SetRow(nowText, 0); Grid.SetRowSpan(nowText, 2); days.Children.Add(nowText);
-        IsVisibleChanged += async (_, _) => { if (IsVisible) { try { state = WeatherData.Load(); } catch { } await Refresh(); } };
+        IsVisibleChanged += async (_, _) => { if (IsVisible) { state = WeatherData.Load(() => _app.Settings); await Refresh(); } };
         Loaded += async (_, _) => { await Refresh(); timer.Start(); }; timer.Tick += async (_, _) => await Refresh(); Unloaded += (_, _) => { timer.Stop(); generation++; };
     }
 
@@ -603,7 +605,7 @@ internal sealed class WeatherView : UserControl
                 string moonLine = $"{Loc.T("月升 ", "Moonrise ")}{Clock(s.MoonriseTimes, index)} · {Loc.T("月落 ", "Moonset ")}{Clock(s.MoonsetTimes, index)}";
                 if (T(s.MoonTransitTimes, index).Length > 0) moonLine += $" · {Loc.T("月过中天 ", "Transit ")}{T(s.MoonTransitTimes, index)}";
                 if (T(s.MoonUnderfootTimes, index).Length > 0) moonLine += $" · {Loc.T("月下点 ", "Underfoot ")}{T(s.MoonUnderfootTimes, index)}";
-                if (moonPhase.Length > 0) moonLine += $" · {moonPhase}";
+                if (moonPhase.Length > 0) moonLine += $" · {MoonPhaseName(moonPhase)}";
                 dayTip.Add(moonLine);
                 // 晨昏蒙影与太阳正午/午夜（和风独有，有值才显示）。
                 string astroLine = $"{Loc.T("天光 ", "Astro ")}{T(s.AstronomicalDawnTimes, index)}–{T(s.AstronomicalDuskTimes, index)} · {Loc.T("航海 ", "Nautical ")}{T(s.NauticalDawnTimes, index)}–{T(s.NauticalDuskTimes, index)} · {Loc.T("民用 ", "Civil ")}{T(s.CivilDawnTimes, index)}–{T(s.CivilDuskTimes, index)}";
@@ -758,7 +760,7 @@ internal sealed class WeatherView : UserControl
         var cards = new List<(string Label, string Text)>();
         // 月相卡：升落/相位/过中天/下点。
         var moon = new List<string> { $"{Loc.T("月升", "Moonrise")} {moonrise} · {Loc.T("月落", "Moonset")} {moonset}" };
-        if (phase.Length > 0) moon.Add(phase);
+        if (phase.Length > 0) moon.Add(MoonPhaseName(phase));
         string transit = HHmm(s.MoonTransitTimes), underfoot = HHmm(s.MoonUnderfootTimes);
         if (transit.Length > 0) moon.Add($"{Loc.T("月过中天", "Transit")} {transit}");
         if (underfoot.Length > 0) moon.Add($"{Loc.T("月下点", "Underfoot")} {underfoot}");
@@ -785,6 +787,25 @@ internal sealed class WeatherView : UserControl
             grid.Children.Add(new Border { Child = stack, Background = new SolidColorBrush(Color.FromArgb(18, 255, 255, 255)), CornerRadius = new CornerRadius(8), Padding = new Thickness(9, 7, 9, 7), Margin = new Thickness(4) });
         }
         body.Children.Add(grid);
+    }
+    // 和风 moonPhase 给的是英文枚举（如 waxing-gibbous），显示层映射成中文月相；未识别的值仍原样显示，
+    // 避免接口以后增加相位时把数据吞掉。内部快照仍保存原始枚举值，不改来源口径。
+    private static string MoonPhaseName(string phase)
+    {
+        if (phase.Length == 0) return "";
+        string key = new(phase.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+        return key switch
+        {
+            "new" or "newmoon" => Loc.T("新月", "New moon"),
+            "waxingcrescent" => Loc.T("蛾眉月", "Waxing crescent"),
+            "firstquarter" or "waxingquarter" => Loc.T("上弦月", "First quarter"),
+            "waxinggibbous" => Loc.T("盈凸月", "Waxing gibbous"),
+            "full" or "fullmoon" => Loc.T("满月", "Full moon"),
+            "waninggibbous" => Loc.T("亏凸月", "Waning gibbous"),
+            "lastquarter" or "thirdquarter" or "waningquarter" => Loc.T("下弦月", "Last quarter"),
+            "waningcrescent" => Loc.T("残月", "Waning crescent"),
+            _ => phase.Replace('-', ' ')
+        };
     }
 
     private static TextBlock SectionLabel(string text) => new() { Text = text, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(143, 166, 192)), Margin = new Thickness(2, 16, 0, 8) };
@@ -1316,7 +1337,7 @@ internal sealed class WeatherView : UserControl
     internal async Task ChooseCityAsync(int index)
     {
         if (state.Selected == index) return;
-        state.Selected = index; WeatherData.Save(state);
+        state.Selected = index; _app.QueueSave(); WeatherData.Save(state);
         await Refresh();
     }
     internal Action? SettingsRequested;

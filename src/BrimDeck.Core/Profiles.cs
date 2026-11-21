@@ -68,6 +68,7 @@ public static class Profiles
         nameof(DeckSettings.NeteaseFullControlEntry), nameof(DeckSettings.NeteaseAutoFullControl), nameof(DeckSettings.NeteaseFullControl),
         nameof(DeckSettings.KugouFullControl), nameof(DeckSettings.AppleMusicFullControl), nameof(DeckSettings.IgnoredMediaApps),
         nameof(DeckSettings.Display), nameof(DeckSettings.DisplayMonitors),
+        nameof(DeckSettings.WeatherCities), nameof(DeckSettings.WeatherSelected), nameof(DeckSettings.Weather),
         nameof(DeckSettings.ClipboardRecord), nameof(DeckSettings.ClipboardClickCopyOnly), nameof(DeckSettings.ClipboardExcluded), nameof(DeckSettings.ClipboardKeepHistory),
         nameof(DeckSettings.ClipboardKeepFor), nameof(DeckSettings.TransferDragOut), nameof(DeckSettings.TransferRemoveAfterCopyDrop),
         nameof(DeckSettings.MonitorInterval), nameof(DeckSettings.MonitorTrafficPeriod), nameof(DeckSettings.MonitorGpu), nameof(DeckSettings.MonitorGpuName), nameof(DeckSettings.MonitorGpuUsage),

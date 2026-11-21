@@ -4,14 +4,8 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// 数据域：应用实际使用的 8 类，与设置页下拉逐行一一对应。日出日落/月升月落/月相属于「每日预报」
-// 的 astro 字段，不单列数据源——它由 Daily 请求顺带返回，禁用每日预报时天文也随之消失。
-internal enum WeatherDomain
-{
-    Current, Hourly, Daily, Minutely, Warning, Indices, Air, History
-}
-
 // ---- 各域各自的传输数据，字段全部可空/可空串，来源只填自己知道的部分 ----
+// WeatherDomain 与 WeatherSettings 定义在 BrimDeck.Core：它们是 settings.json 的一部分，与别的设置项同处一层。
 
 // 分钟降水：每 5 分钟一个点（和风 /v7/minutely/5m、Open-Meteo minutely_15 折算）
 internal sealed class MinutePoint
@@ -185,28 +179,6 @@ internal sealed class WeatherPart
     public List<IndexItem>? Indices { get; set; }
     // 城市所在时区（Open-Meteo 的 timezone 字段），用于确定“当地今天”和小时窗口。
     public string? TimeZone { get; set; }
-}
-
-// 来源调度配置：Sources 按域指定来源（auto 或具体来源 id），另有国内、国外两条下探顺序。
-// 和风是唯一需要 key 的来源，key 与控制台分配的 API Host 一并保存在这里。
-internal sealed class WeatherSettings
-{
-    private static readonly string[] ChinaDefault = ["hefeng", "weathercomcn", "tencent", "openmeteo"];
-    private static readonly string[] WorldDefault = ["hefeng", "openmeteo"];
-    // 下探顺序：列表里出现的来源即启用，先后决定失败时的补位次序。
-    // 默认 国内=和风→中国天气网→腾讯→Open-Meteo，国外=和风→Open-Meteo。
-    public List<string> ChinaOrder { get; set; } = [.. ChinaDefault];
-    public List<string> WorldOrder { get; set; } = [.. WorldDefault];
-    // 每个数据域选的来源："auto"=按下探顺序补齐，具体 id=优先用这家。
-    public Dictionary<string, string> Sources { get; set; } = [];
-    public string HeFengKey { get; set; } = "";
-    // 公共 devapi 域名已停服，不再提供默认值；留空即不启用和风。
-    public string HeFengHost { get; set; } = "";
-    public string Choice(WeatherDomain domain)
-        => Sources.TryGetValue(domain.ToString(), out var value) && value.Length > 0 ? value : "auto";
-    // 该区域的下探顺序；空列表回退到默认。
-    public List<string> Ranking(bool china)
-        => (china ? ChinaOrder : WorldOrder) is { Count: > 0 } list ? list : [.. (china ? ChinaDefault : WorldDefault)];
 }
 
 // 来源集合与查询入口。

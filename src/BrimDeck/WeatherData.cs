@@ -5,36 +5,24 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using BrimDeck.Core;
 namespace BrimDeck;
-// 通用地理地点：带坐标的命名城市。放在数据层，因为搜索、收藏与自动定位都用它。
-// 层级拆成结构化字段：Name 是地名主体（区县/城市本身，如「洪山区」），CityName/Province/Country 是所属
-// 地级市/省州/国家，LocationId 是和风城市 id（与中国天气网代码同源，中国天气网与时光机可直接使用）。
-// 旧格式（Name 内嵌「城市 · 省 · 国家」三段）不再写入，读取时保留兜底拆段。
-internal sealed record City(string Name, double Latitude, double Longitude, string Province = "", string CityName = "", string Country = "", string LocationId = "")
-{
-    // 完整层级展示名：「洪山区 · 武汉市 · 湖北省」。跳过空段与重复段，国内不再缀「中国」；
-    // 旧格式 Name 自带分隔，原样返回。设置页城市行、搜索下拉与详情页标题用它区分同名区县。
-    [JsonIgnore] public string Full => Name.Contains(" · ")
-        ? Name
-        : string.Join(" · ", new[] { Name, CityName, Province }
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .Distinct()
-            .Concat(Country is "" or "中国" or "China" or "中國" ? Array.Empty<string>() : new[] { Country }));
-}
-// Data layer: weather fetching, city search, location, JSON parsing and persistence. No WPF controls or view lifetime.
+// Data layer: weather fetching, city search, location, JSON parsing and snapshot persistence. No WPF controls or view lifetime.
+// City and WeatherSettings live in BrimDeck.Core because they are saved in settings.json; this file keeps only downloaded
+// snapshots in weather/snapshot/.
 internal static class WeatherData
 {
-    internal sealed class State { public List<City> Cities {get;set;}=[]; public int Selected {get;set;}=-1; public Dictionary<string,WeatherSnapshot> Cache {get;set;}=[]; public WeatherSettings Schedule {get;set;}=new(); }
-    // 设置文件只放城市与调度：快照按城市各存一份，刷新一座城不会重写整个文件，也不会和别的窗口互相覆盖。
-    private sealed class SettingsFile
+    // 配置全部来自 settings.json；本类只把其中的天气字段投影成视图使用的 State，并另存下载的快照。
+    internal sealed class State
     {
-        public List<City> Cities { get; set; } = [];
-        public int Selected { get; set; } = -1;
-        public WeatherSettings Schedule { get; set; } = new();
+        private readonly Func<DeckSettings> _settings;
+        internal State(Func<DeckSettings> settings) { _settings = settings; }
+        public List<City> Cities { get => _settings().WeatherCities; set => _settings().WeatherCities = value; }
+        public int Selected { get => _settings().WeatherSelected; set => _settings().WeatherSelected = value; }
+        public WeatherSettings Schedule { get => _settings().Weather; set => _settings().Weather = value; }
+        public Dictionary<string, WeatherSnapshot> Cache { get; set; } = [];
     }
     private sealed class SnapshotFile { public string Key {get;set;}=""; public WeatherSnapshot? Value {get;set;} }
-    private static readonly string FilePath=Path.Combine(WeatherFiles.Root,"weather.json");
     private static readonly HttpClient Http=new() {Timeout=TimeSpan.FromSeconds(20)};
-    // 快照用 NaN 表示来源未提供的数值；命名浮点字面量让缓存可以安全写入并还原，缩进让 weather.json 可读。
+    // 快照用 NaN 表示来源未提供的数值；命名浮点字面量让缓存可以安全写入并还原，缩进让缓存可读。
     private static readonly JsonSerializerOptions WeatherJson=new() {WriteIndented=true,Encoder=System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,NumberHandling=System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals,DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull};
     // 已落盘的快照时间：同一条数据没有更新就不再重复写盘，刷新一座城只碰一个文件。
     private static readonly object SnapLock=new();
@@ -48,21 +36,10 @@ internal static class WeatherData
         WeatherCache.Prune(TimeSpan.FromDays(14));
         RequestGate.Restore();
     }
-    internal static State Load()
+    internal static State Load(Func<DeckSettings> settings)
     {
         Start();
-        var state=new State();
-        try
-        {
-            string text=File.Exists(FilePath)?File.ReadAllText(FilePath):"";
-            if(text.Length>0&&JsonSerializer.Deserialize<SettingsFile>(text,WeatherJson) is { } file)
-            {
-                state.Cities=file.Cities??[];
-                state.Selected=file.Selected;
-                state.Schedule=file.Schedule??new();
-            }
-        }
-        catch { }
+        var state=new State(settings);
         foreach(var (key,snapshot) in ReadSnapshots())state.Cache[key]=snapshot;
         return state;
     }
@@ -85,10 +62,10 @@ internal static class WeatherData
             yield return (key,snapshot);
         }
     }
-    // 设置与快照分开写：任一文件损坏都只影响自己，不会连带把城市列表一起弄丢。
+    // 只写下载快照与请求计数。用户在设置页改动的 cities/selected/schedule 属于 DeckSettings，
+    // 由 SettingsWindow/App 的常规设置保存流程写回 settings.json，不再另存 weather.json。
     internal static void Save(State state)
     {
-        WeatherFiles.WriteAtomic(FilePath,JsonSerializer.Serialize(new SettingsFile{Cities=state.Cities,Selected=state.Selected,Schedule=state.Schedule},WeatherJson));
         lock(SnapLock)
             foreach(var (key,snapshot) in state.Cache)
             {
