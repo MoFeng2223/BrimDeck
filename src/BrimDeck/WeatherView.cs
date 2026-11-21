@@ -22,13 +22,13 @@ internal sealed class WeatherView : UserControl
     private readonly Grid summary = new();
     private readonly UniformGrid stats = new() { Rows = 2, Columns = 2 };
     private readonly UniformGrid forecast = new() { Rows = 1, Columns = 7 };
-    // 日照镜头上段：与 forecast 同处 row0、互斥显示，画一条随昼夜切换的日/月天体弧线。
-    private readonly Canvas sunArc = new() { Height = 96, Background = Brushes.Transparent, Visibility = Visibility.Collapsed };
+    // 日月镜头上段：与 forecast 同处 row0、互斥显示，画一条随昼夜切换的日/月天体弧线。
+    private readonly Canvas celestialArc = new() { Height = 96, Background = Brushes.Transparent, Visibility = Visibility.Collapsed };
     private readonly Grid days = new();
     private readonly Canvas chart = new() { Height = 68, Width = 588, Background = Brushes.Transparent };
     private bool _hourlyMode;    // 底部曲线视图：false=每日高低温，true=当日 24h 逐时
     // 底部「看什么」：卡片点一下换成该指标的逐时曲线，再点一次回到气温。逐日只有气温，所以非气温镜头一律切到逐时。
-    private enum Lens { Temp, Feels, Humidity, Wind, Sun }
+    private enum Lens { Temp, Feels, Humidity, Wind, Celestial }
     private Lens _lens = Lens.Temp;
     // 每列纵向顺序：星期/日期/图标/降雨/高温 →【折线图】→ 低温。低温独立成行夹在折线下方，折线正好插在高温与低温之间。
     private readonly UniformGrid lowRow = new() { Rows = 1, Columns = 7, Height = 18 };
@@ -76,7 +76,7 @@ internal sealed class WeatherView : UserControl
         bool columnsChanged = columns != _columns, shownChanged = shownValue != forecast.Columns;
         bool heightChanged = Math.Abs(avail - _measuredAvail) > 0.5;
         bool redraw = force || columnsChanged || Math.Abs(chartWidth - _chartWidth) > 0.5;
-        _columns = columns; _chartWidth = chartWidth; forecast.Columns = shownValue; lowRow.Columns = shownValue; chart.Width = chartWidth; sunArc.Width = chartWidth;
+        _columns = columns; _chartWidth = chartWidth; forecast.Columns = shownValue; lowRow.Columns = shownValue; chart.Width = chartWidth; celestialArc.Width = chartWidth;
         // 拖动调宽时这里每帧都会进来。画布宽度与列数立刻生效，重建则压到 30fps：
         // 一帧里重建 24 列的列元素加整条折线要几毫秒，120Hz 下就是持续掉帧，看起来正是「卡」。
         if (redraw && _last is { } f)
@@ -185,8 +185,8 @@ internal sealed class WeatherView : UserControl
         // 「现在」分界线垫在同一层：竖线在两格之间、文字在列区上方那两行空位里，都不参与命中测试。
         Grid.SetRow(nowRule, 0); Grid.SetRowSpan(nowRule, 3); days.Children.Add(nowRule);
         forecast.Margin = new Thickness(6, 2, 6, 0); Grid.SetRow(forecast, 0); days.Children.Add(forecast);
-        // 日照镜头的弧线画布与 forecast 同格互斥（切镜头时一个 Collapsed 一个 Visible，不会叠加）。
-        sunArc.Margin = new Thickness(6, 2, 6, 0); Grid.SetRow(sunArc, 0); days.Children.Add(sunArc);
+        // 日月镜头的弧线画布与 forecast 同格互斥（切镜头时一个 Collapsed 一个 Visible，不会叠加）。
+        celestialArc.Margin = new Thickness(6, 2, 6, 0); Grid.SetRow(celestialArc, 0); days.Children.Add(celestialArc);
         // 折线画布与预报网格左边距同为 6px 显式左对齐，画布原点与列起点完全重合，点坐标按列中心计算。
         chart.Margin = new Thickness(6, 8, 6, 0); chart.HorizontalAlignment = HorizontalAlignment.Left; Grid.SetRow(chart, 1); days.Children.Add(chart);
         // 整块底部（列 + 折线 + 低温行）就是一个切换区：鼠标移上去变手型，点一下在「逐时」与「逐日」之间互换。
@@ -265,7 +265,7 @@ internal sealed class WeatherView : UserControl
             DrawSummary(s); DrawForecast(s); DrawChart(s);
         } catch { }
     }
-    // 左上：大图标 + 大字温度 + 天气描述 + 高低温 + 来源/详情；右上：体感 / 湿度 / 风速 / 日照入口四张小卡。
+    // 左上：大图标 + 大字温度 + 天气描述 + 高低温 + 来源/详情；右上：体感 / 湿度 / 风速 / 日月入口四张小卡。
     private void DrawSummary(WeatherSnapshot s)
     {
         summary.Children.Clear(); summary.ColumnDefinitions.Clear();
@@ -296,7 +296,7 @@ internal sealed class WeatherView : UserControl
         stats.Children.Clear(); stats.VerticalAlignment = VerticalAlignment.Top; Grid.SetColumn(stats, 1); summary.Children.Add(stats);
         string rise = Clock(s.SunriseTimes, today), set = Clock(s.SunsetTimes, today);
         // 四张卡既是读数也是镜头：点一下底部换成该指标的逐时曲线，再点一次回到气温（卡片自身高亮表示当前镜头）。
-        var tiles = new[] { (WeatherMetaKind.Thermo, Color.FromRgb(255, 176, 102), Loc.T("体感", "Feels like"), Num(s.FeelsLike, "°"), Lens.Feels), (WeatherMetaKind.Droplet, Color.FromRgb(112, 178, 255), Loc.T("湿度", "Humidity"), s.HumidityPercent >= 0 ? $"{s.HumidityPercent}%" : "--", Lens.Humidity), (WeatherMetaKind.Wind, Color.FromRgb(140, 200, 220), Loc.T("风速", "Wind"), Num(s.WindKmh, " km/h"), Lens.Wind), (WeatherMetaKind.Sunrise, Color.FromRgb(255, 200, 90), Loc.T($"日出 {rise}", $"Sunrise {rise}"), Loc.T($"日落 {set}", $"Sunset {set}"), Lens.Sun) };
+        var tiles = new[] { (WeatherMetaKind.Thermo, Color.FromRgb(255, 176, 102), Loc.T("体感", "Feels like"), Num(s.FeelsLike, "°"), Lens.Feels), (WeatherMetaKind.Droplet, Color.FromRgb(112, 178, 255), Loc.T("湿度", "Humidity"), s.HumidityPercent >= 0 ? $"{s.HumidityPercent}%" : "--", Lens.Humidity), (WeatherMetaKind.Wind, Color.FromRgb(140, 200, 220), Loc.T("风速", "Wind"), Num(s.WindKmh, " km/h"), Lens.Wind), (WeatherMetaKind.Sunrise, Color.FromRgb(255, 200, 90), Loc.T($"日出 {rise}", $"Sunrise {rise}"), Loc.T($"日落 {set}", $"Sunset {set}"), Lens.Celestial) };
         foreach (var (kind, ink, label, value, lens) in tiles)
         {
             var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
@@ -354,7 +354,7 @@ internal sealed class WeatherView : UserControl
     private static string Num(double value, string suffix, int digits = 0) => double.IsNaN(value) ? "--" : value.ToString($"F{digits}", System.Globalization.CultureInfo.InvariantCulture) + suffix;
     private static string Degree(double value) => double.IsNaN(value) ? "--" : $"{value:0}°";
     private static string Clock(string[] times, int index) => index >= 0 && index < times.Length && times[index].Length >= 16 ? times[index][11..16] : "--:--";
-    // ISO 时刻 → 0–24 的小时分数，供日照镜头把时刻映射到弧线/色条的同一条横轴。
+    // ISO 时刻 → 0–24 的小时分数，供日月镜头把时刻映射到弧线/色条的同一条横轴。
     private static double Frac(string[] times, int index) => index >= 0 && index < times.Length && times[index].Length >= 16
         && int.TryParse(times[index].AsSpan(11, 2), out int h) && int.TryParse(times[index].AsSpan(14, 2), out int m)
         ? h + m / 60.0 : double.NaN;
@@ -825,8 +825,8 @@ internal sealed class WeatherView : UserControl
     {
         forecast.Children.Clear(); lowRow.Children.Clear(); tempLabels.Clear();
         nowRule.Visibility = Visibility.Collapsed; nowText.Visibility = Visibility.Collapsed;   // 「现在」分界线只属于逐时
-        if (_lens == Lens.Sun) { DrawSunArc(s); return; }                                        // 日照镜头：上段换成天体弧线
-        forecast.Visibility = Visibility.Visible; sunArc.Visibility = Visibility.Collapsed;
+        if (_lens == Lens.Celestial) { DrawCelestialArc(s); return; }                                        // 日月镜头：上段换成天体弧线
+        forecast.Visibility = Visibility.Visible; celestialArc.Visibility = Visibility.Collapsed;
         if (_hourlyMode) { DrawHourlyForecast(s); return; }
         DrawDailyForecast(s);
     }
@@ -997,7 +997,7 @@ internal sealed class WeatherView : UserControl
             case Lens.Feels when Has(s.HourFeelsLikeC): DrawHourlyLine(s.HourFeelsLikeC, new SolidColorBrush(Color.FromRgb(255, 176, 102)), true); return;
             case Lens.Humidity when s.HourHumidity.Any(v => v >= 0): DrawBars(Array.ConvertAll(s.HourHumidity, v => v < 0 ? double.NaN : v), 100, "%"); return;
             case Lens.Wind when Has(s.HourWindKmh): DrawBars(s.HourWindKmh, double.NaN, ""); return;
-            case Lens.Sun when s.SunriseTimes.Length > 0: DrawSunBand(s); return;
+            case Lens.Celestial when s.SunriseTimes.Length > 0: DrawCelestialBand(s); return;
         }
         if (_hourlyMode) { DrawHourly(s); return; }
         var high = s.DayHighC; var low = s.DayLowC;
@@ -1089,19 +1089,19 @@ internal sealed class WeatherView : UserControl
             Canvas.SetLeft(label, X(p) - label.DesiredSize.Width / 2); Canvas.SetTop(label, 50 - h - 13); chart.Children.Add(label);
         }
     }
-    // 日照镜头上段：天体弧线。白天画日弧、夜晚画月弧；昼夜交界同时标注两个天体；
+    // 日月镜头上段：天体弧线。白天画日弧、夜晚画月弧；昼夜交界同时标注两个天体；
     // 弧顶落在中天/正午时刻（非时间中点，故不对称），天体按「现在」时刻投影到弧上对应位置。全部取和风字段。
-    private void DrawSunArc(WeatherSnapshot s)
+    private void DrawCelestialArc(WeatherSnapshot s)
     {
-        forecast.Visibility = Visibility.Collapsed; sunArc.Visibility = Visibility.Visible;
-        sunArc.Children.Clear();
-        // 日照镜头不显示预报列，「今天」那块圆角高亮底（逐日/逐时专用）也要收起，否则从逐日切过来会残留一个空白长方体。
+        forecast.Visibility = Visibility.Collapsed; celestialArc.Visibility = Visibility.Visible;
+        celestialArc.Children.Clear();
+        // 日月镜头不显示预报列，「今天」那块圆角高亮底（逐日/逐时专用）也要收起，否则从逐日切过来会残留一个空白长方体。
         todayGlow.Visibility = Visibility.Collapsed;
         int today = WeatherData.TodayIndex(s);
-        double w = Math.Max(30, sunArc.Width);
+        double w = Math.Max(30, celestialArc.Width);
         double x(double t) => t / 24.0 * w;
         // 地平线：与下方 bar 共用 0–24 横轴（两者左边距同为 6、宽度同为 chartWidth）。
-        sunArc.Children.Add(new Line { X1 = 0, Y1 = 88, X2 = w, Y2 = 88, Stroke = new SolidColorBrush(Color.FromArgb(60, 143, 166, 192)), StrokeThickness = 1, StrokeDashArray = new DoubleCollection(new double[] { 2, 4 }) });
+        celestialArc.Children.Add(new Line { X1 = 0, Y1 = 88, X2 = w, Y2 = 88, Stroke = new SolidColorBrush(Color.FromArgb(60, 143, 166, 192)), StrokeThickness = 1, StrokeDashArray = new DoubleCollection(new double[] { 2, 4 }) });
 
         double sr = Frac(s.SunriseTimes, today), ss = Frac(s.SunsetTimes, today);
         double mr = Frac(s.MoonriseTimes, today), ms = Frac(s.MoonsetTimes, today);
@@ -1146,7 +1146,7 @@ internal sealed class WeatherView : UserControl
                 h = Math.Sin(h * Math.PI / 2);                              // 圆润拱形
                 poly.Points.Add(new Point(Math.Clamp(x(t), 0, w), yBase - h * (yBase - yApex)));
             }
-            sunArc.Children.Add(poly);
+            celestialArc.Children.Add(poly);
             // 天体标记：落在 now 对应位置（仅在升起区间内）；交界时两弧各标各的天体。
             if (nowT >= rise && nowT <= set)
             {
@@ -1155,22 +1155,22 @@ internal sealed class WeatherView : UserControl
                 double px = Math.Clamp(x(nowT), 0, w), py = yBase - h * (yBase - yApex);
                 // 用项目里通用的 WeatherGlyph（code=0 晴）：day=true 画带光芒的太阳，false 画弯钩月。
                 var glyph = new WeatherGlyph(0, body == "day") { Width = 24, Height = 24 };
-                Canvas.SetLeft(glyph, px - 12); Canvas.SetTop(glyph, py - 12); sunArc.Children.Add(glyph);
+                Canvas.SetLeft(glyph, px - 12); Canvas.SetTop(glyph, py - 12); celestialArc.Children.Add(glyph);
             }
             // 两端时刻标注（与时间轴对齐）：升 / 落。
-            Txt(sunArc, x(rise), 90, HHmm(rise), color, 9, 46);
-            Txt(sunArc, x(set), 90, HHmm(set), color, 9, 46);
-            Txt(sunArc, x(apex), 3, body == "moon" ? Loc.T("月中天", "Moon peak") : Loc.T("正午", "Noon"), color, 9, 62);
+            Txt(celestialArc, x(rise), 90, HHmm(rise), color, 9, 46);
+            Txt(celestialArc, x(set), 90, HHmm(set), color, 9, 46);
+            Txt(celestialArc, x(apex), 3, body == "moon" ? Loc.T("月中天", "Moon peak") : Loc.T("正午", "Noon"), color, 9, 62);
         }
     }
-    // 在指定 Canvas 上放一条居中文字（日照镜头弧线标注专用）。
+    // 在指定 Canvas 上放一条居中文字（日月镜头弧线标注专用）。
     private static void Txt(Canvas host, double cx, double top, string text, Color c, double size, double width)
     {
         var t = new TextBlock { Text = text, FontSize = size, Foreground = new SolidColorBrush(c), Width = width, TextAlignment = TextAlignment.Center };
         Canvas.SetLeft(t, Math.Max(0, Math.Min(host.Width - width, cx - width / 2))); Canvas.SetTop(t, top); host.Children.Add(t);
     }
-    // 日照镜头：一条 24 小时轨道。银白段是月亮在地平线上、金黄段是太阳、交汇段两色渐变，白点是此刻。
-    private void DrawSunBand(WeatherSnapshot s)
+    // 日月轨道：一条 24 小时色带。银白段是月亮在地平线上、金黄段是太阳、交汇段两色渐变，白点是此刻。
+    private void DrawCelestialBand(WeatherSnapshot s)
     {
         int today = WeatherData.TodayIndex(s);
         double w = Math.Max(30, chart.Width);
@@ -1232,7 +1232,7 @@ internal sealed class WeatherView : UserControl
         var dot = new System.Windows.Shapes.Ellipse { Width = 7, Height = 7, Fill = Brushes.White };
         Canvas.SetLeft(dot, w * now - 3.5); Canvas.SetTop(dot, 29); chart.Children.Add(dot);
     }
-    // 逐时列底部那行跟着镜头走：气温/体感出温度，湿度出百分比，风速出 km/h，日照仍用气温（白昼由轨道表达）。
+    // 逐时列底部那行跟着镜头走：气温/体感出温度，湿度出百分比，风速出 km/h，日月镜头仍用气温（昼夜由轨道表达）。
     private string HourValue(WeatherSnapshot s, int p)
     {
         string pick(double[] a) => p >= 0 && p < a.Length ? Degree(a[p]) : "--";
