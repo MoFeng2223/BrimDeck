@@ -127,7 +127,9 @@ internal static class WeatherData
     private static async Task<List<City>> SearchHeFeng(string query, WeatherSettings settings, CancellationToken token)
     {
         string host = settings.HeFengHost.Trim().TrimEnd('/');
-        if (!host.StartsWith("http", StringComparison.OrdinalIgnoreCase)) host = "https://" + host;
+        // 与天气请求同一策略：Key 走请求头，强制 HTTPS，绝不落明文。
+        host = host.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ? "https://" + host[7..]
+             : host.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ? host : "https://" + host;
         string lang = Loc.IsEnglish ? "en" : "zh";
         string body = await WeatherCache.GetAsync<string>("hefeng", "search|" + lang + "|" + query, TimeSpan.FromDays(1), async ct =>
         {

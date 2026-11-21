@@ -1260,7 +1260,9 @@ internal sealed class HeFengSource : IWeatherSource
     public async Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
     {
         string host = settings.HeFengHost.Trim().TrimEnd('/');
-        if (!host.StartsWith("http", StringComparison.OrdinalIgnoreCase)) host = "https://" + host;
+        // Key 随请求头明文传输，一律强制 HTTPS：用户填 http:// 也升级，避免 Key 在明文连接里裸奔。
+        host = host.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ? "https://" + host[7..]
+             : host.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ? host : "https://" + host;
         var context = new Context(host, settings.HeFengKey.Trim(), city);
         // 历史单独占一段：时光机只认 LocationID、一天一次请求，挂在独立的第二轮，不混进首屏。
         // 延后轮次可能把历史与预警/指数等一起送来，这里按需拆分，互不干扰。
@@ -1739,8 +1741,11 @@ internal sealed class HeFengSource : IWeatherSource
         {
             using var doc = JsonDocument.Parse(body);
             var root = doc.RootElement;
-            // /weatheralert/v1/current 返回 alerts[]，事件类型在 eventType.name，等级在 severity/color.code。
-            if (!V7Ok(root) || Json.Get(root, "alerts") is not { ValueKind: JsonValueKind.Array } list) return null;
+            // /weatheralert/v1/current 成功响应不带 code 字段（{"metadata":…,"alerts":[…]}，2026-11-21 实测），
+            // 不能用 v7 的 V7Ok 校验：只在显式给出错误 code 时判失败，alerts[] 存在即成功，否则预警永远解析不出来。
+            string? code = Json.Text(root, "code");
+            if (code is { Length: > 0 } && code is not ("200" or "0")) return null;
+            if (Json.Get(root, "alerts") is not { ValueKind: JsonValueKind.Array } list) return null;
             var result = new List<WarningItem>();
             foreach (var item in list.EnumerateArray())
             {

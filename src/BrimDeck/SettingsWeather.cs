@@ -196,7 +196,7 @@ internal sealed class WeatherSettingsPreview : Border
         int today=snap is null?0:WeatherData.TodayIndex(snap);   // 正序数组中“今天”的索引
         for(int i=0;i<3;i++) {
             string dayTitle="";int dCode=0;string rain="";string high="";string low="";
-            if(snap is not null) {
+            if(snap is not null&&snap.DayDates.Length>0) {
                 int idx=Math.Min(today+i,snap.DayDates.Length-1);
                 var date=DateTime.Parse(snap.DayDates[idx]);
          dayTitle=i==0?Loc.T("今天","Today"):i==1?Loc.T("明天","Tomorrow"):Loc.T(new[]{"周日","周一","周二","周三","周四","周五","周六"}[(int)date.DayOfWeek],new[]{"Sun","Mon","Tue","Wed","Thu","Fri","Sat"}[(int)date.DayOfWeek]);
