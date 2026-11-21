@@ -284,7 +284,12 @@ internal sealed class WeatherView : UserControl
         var side = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         side.Children.Add(new TextBlock { Text = Degree(s.Temperature), FontSize = 44, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center });
         var bottom = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(2, 2, 0, 0) };
-        bottom.Children.Add(new TextBlock { Text = $"{Degree(s.DayHighC[today])} / {Degree(s.DayLowC[today])}", FontSize = 13, Foreground = new SolidColorBrush(Color.FromRgb(205, 224, 247)), VerticalAlignment = VerticalAlignment.Center });
+        // 今日高低温取自 daily 数组（当天域），与实况温度分属两个数据域：实况来源成功而当天来源
+        // 失败时数组可能为空，直接索引会越界异常、被 Render 的 catch 吞成整页空白。缺当天就显示
+        // 占位符，实况大温度/图标/四张卡照常渲染——两个域互不牵连。
+        bool hasDay = today < s.DayHighC.Length && today < s.DayLowC.Length;
+        string range = hasDay ? $"{Degree(s.DayHighC[today])} / {Degree(s.DayLowC[today])}" : "-- / --";
+        bottom.Children.Add(new TextBlock { Text = range, FontSize = 13, Foreground = new SolidColorBrush(Color.FromRgb(205, 224, 247)), VerticalAlignment = VerticalAlignment.Center });
         side.Children.Add(bottom);
         // 来源与详情：来源只显示主每日来源，完整分域来源在详情浮层里逐项列出。
         var footer = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 3, 0, 0) };
@@ -476,8 +481,20 @@ internal sealed class WeatherView : UserControl
         }
         body.Children.Add(metrics);
 
-        // 未来 24 小时：每格显示时间、图标、温度、降水概率与风速。
-        body.Children.Add(SectionLabel(Loc.T("未来 24 小时", "Next 24 hours")));
+        // 逐时详情标题与实际窗口一致：主视图窗口含「上一小时 + 当前 + 未来 22 小时」，
+        // 过去列由本地历史补齐，缺失时窗口会从更晚的小时开始——按数据实际覆盖动态生成标题，不写死「未来 24 小时」。
+        int totalHours = s.HourTimes.Length, pastHours = 0;
+        if (totalHours > 0)
+        {
+            var cityNow = CityNow(s);
+            string nowKey = $"{cityNow.Year:0000}-{cityNow.Month:00}-{cityNow.Day:00}T{cityNow.Hour:00}";
+            for (int i = 0; i < totalHours; i++)
+                if (s.HourTimes[i].Length >= 13 && string.CompareOrdinal(s.HourTimes[i][..13], nowKey) < 0) pastHours++;
+        }
+        string hourlyTitle = totalHours == 0 ? Loc.T("未来 24 小时", "Next 24 hours")
+            : pastHours > 0 ? Loc.T($"过去 {pastHours} 小时至今后 {totalHours - pastHours} 小时", $"Past {pastHours} h to next {totalHours - pastHours} h")
+            : Loc.T($"未来 {totalHours} 小时", $"Next {totalHours} hours");
+        body.Children.Add(SectionLabel(hourlyTitle));
         if (s.HourTimes.Length == 0) body.Children.Add(Note(Loc.T("暂无逐时数据", "No hourly data")));
         else
         {
@@ -817,12 +834,14 @@ internal sealed class WeatherView : UserControl
         "tencent" => Color.FromRgb(87, 199, 133),      // 腾讯绿
         "weathercomcn" => Color.FromRgb(255, 163, 72), // 中国天气网橙
         "hefeng" => Color.FromRgb(188, 139, 255),      // 和风紫
+        "local" => Color.FromRgb(158, 178, 200),       // 本地历史：灰，区别于任何在线来源
         _ => Color.FromRgb(158, 178, 200)
     };
     private static string SourceName(string id) => id switch
     {
         "openmeteo" => "Open-Meteo", "tencent" => Loc.T("腾讯天气", "Tencent"), "weathercomcn" => Loc.T("中国天气网", "China Weather"),
-        "hefeng" => Loc.T("和风天气", "QWeather"), _ => id
+        "hefeng" => Loc.T("和风天气", "QWeather"),
+        "local" => Loc.T("本地记录", "Local history"), _ => id
     };
     // 宽度自适应列数，按时间正序（过去→今天→未来）取窗口：最小 7 列=今天+未来6天，最大 24 列=过去10+今天+未来13，左右按同比例同步扩展。
     private static int[] Order(WeatherSnapshot s, int columns)
@@ -1110,6 +1129,42 @@ internal sealed class WeatherView : UserControl
             Canvas.SetLeft(label, X(p) - label.DesiredSize.Width / 2); Canvas.SetTop(label, 50 - h - 13); chart.Children.Add(label);
         }
     }
+    // 日月镜头视口窗口左缘。窗口宽 24h，规则：当前时段所处天体弧以其中天为窗口中心——
+    // 日弧以正午居中、月弧以月中天居中；两弧之间的晨昏间隙以「现在」居中。
+    // 中天近似弧线时间中点，弧长 < 24h 时两侧余量各 (24−弧长)/2，当前曲线必落在视口内、不被 0/24 边界拆开；
+    // 中天极端偏移时 clamp 进 [落端−12, 升端+12] 强制满足不跨条件，clamp 区间退化（弧长>24h）则退回弧线中点。
+    private static double CelestialWindowStart(WeatherSnapshot s)
+    {
+        int today = WeatherData.TodayIndex(s);
+        double sr = Frac(s.SunriseTimes, today), ss = Frac(s.SunsetTimes, today);
+        double mr = Frac(s.MoonriseTimes, today), ms = Frac(s.MoonsetTimes, today);
+        double mn = Frac(s.MoonTransitTimes, today), sn = Frac(s.SolarNoonTimes, today);
+        double now = CityNow(s).Hour + CityNow(s).Minute / 60.0;
+        bool sunOk = !double.IsNaN(sr) && !double.IsNaN(ss) && ss > sr;
+        bool moonOk = !double.IsNaN(mr) && !double.IsNaN(ms);
+        bool moonUp = moonOk && (ms > mr ? now >= mr && now <= ms : now >= mr || now <= ms);   // 月落读数小于月升即跨午夜
+        // 日弧：正午居中。不跨条件 c−rise≤12 且 set−c≤12，即 c ∈ [set−12, rise+12]。
+        if (sunOk && now >= sr && now < ss)
+        {
+            double lo = ss - 12, hi = sr + 12, c = double.IsNaN(sn) ? (sr + ss) / 2 : sn;
+            if (lo <= hi) c = Math.Clamp(c, lo, hi); else c = (sr + ss) / 2;
+            return c - 12;
+        }
+        // 月弧：月中天居中。弧线折到绝对轴 [mr, mr+时长]，中天取落在弧内的那个平移候选。
+        if (moonUp)
+        {
+            double dur = ((ms - mr) % 24 + 24) % 24, setU = mr + dur;
+            double lo = setU - 12, hi = mr + 12;
+            double c = double.IsNaN(mn) ? mr + dur / 2
+                : mn >= mr && mn <= setU ? mn
+                : mn + 24 >= mr && mn + 24 <= setU ? mn + 24
+                : mr + dur / 2;
+            if (lo <= hi) c = Math.Clamp(c, lo, hi); else c = mr + dur / 2;
+            return c - 12;
+        }
+        // 晨昏间隙（日月都不在地平线上）：以「现在」居中——白点必在视口中央，两弧各露一段作上下文。
+        return now - 12;
+    }
     // 日月镜头上段：天体弧线。白天画日弧、夜晚画月弧；昼夜交界同时标注两个天体；
     // 弧顶落在中天/正午时刻（非时间中点，故不对称），天体按「现在」时刻投影到弧上对应位置。全部取和风字段。
     private void DrawCelestialArc(WeatherSnapshot s)
@@ -1120,52 +1175,68 @@ internal sealed class WeatherView : UserControl
         todayGlow.Visibility = Visibility.Collapsed;
         int today = WeatherData.TodayIndex(s);
         double w = Math.Max(30, celestialArc.Width);
-        double x(double t) => t / 24.0 * w;
-        // 地平线：与下方 bar 共用 0–24 横轴（两者左边距同为 6、宽度同为 chartWidth）。
+        double win = CelestialWindowStart(s);
+        double x(double t) => (t - win) / 24.0 * w;
+        // 把 0–24 读数折进窗口 [win, win+24)：负数回绕加 24，落到窗口左缘之后的唯一位置。
+        double InWin(double t) { t = (t - win) % 24; if (t < 0) t += 24; return win + t; }
+        // 地平线：与下方 bar 共用同一偏移窗口（两者左边距同为 6、宽度同为 chartWidth）。
         celestialArc.Children.Add(new Line { X1 = 0, Y1 = 88, X2 = w, Y2 = 88, Stroke = new SolidColorBrush(Color.FromArgb(60, 143, 166, 192)), StrokeThickness = 1, StrokeDashArray = new DoubleCollection(new double[] { 2, 4 }) });
 
         double sr = Frac(s.SunriseTimes, today), ss = Frac(s.SunsetTimes, today);
         double mr = Frac(s.MoonriseTimes, today), ms = Frac(s.MoonsetTimes, today);
         double mn = Frac(s.MoonTransitTimes, today), sn = Frac(s.SolarNoonTimes, today);
-        double now = (CityNow(s).Hour * 60 + CityNow(s).Minute) / 1440.0;
-        double moonSetAbs = double.IsNaN(ms) ? double.NaN : (ms <= mr ? ms + 24 : ms);      // 月落常跨午夜
+        // 「现在」统一用 0–24 小时数，与 Frac 的日出/日落读数同单位；投影前折进窗口。
+        double now = CityNow(s).Hour + CityNow(s).Minute / 60.0;
+        double nowU = InWin(now);
         bool sunOk = !double.IsNaN(sr) && !double.IsNaN(ss) && ss > sr;
-        bool moonOk = !double.IsNaN(mr) && !double.IsNaN(moonSetAbs);
+        bool moonOk = !double.IsNaN(mr) && !double.IsNaN(ms);
         bool day = sunOk && now >= sr && now < ss;
-        // 昼夜交界：现在落在日出/日落前后 40 分钟内 → 日月两个天体同标。
-        bool edge = sunOk && (Math.Abs(now - sr) < 40.0 / 1440 || Math.Abs(now - ss) < 40.0 / 1440);
-        // 白天画日弧、夜晚画月弧、交界两者都画；各自顶点落在正午/月中天，不是时间中点（故不对称）。
+        // 昼夜交界：现在落在日出/日落前后 40 分钟内 → 日月两个天体同标（40/60 小时，与 now 同单位）。
+        bool edge = sunOk && (Math.Abs(now - sr) < 40.0 / 60 || Math.Abs(now - ss) < 40.0 / 60);
+        double sunDur = sunOk ? ss - sr : 0;
+        double moonDur = moonOk ? ((ms - mr) % 24 + 24) % 24 : 0;        // 月落读数小于月升即跨午夜，取模后即持续时长
+        // 白天画日弧、夜晚画月弧、交界两者都画；每条弧把 ±24 平移的候选都检查一遍，
+        // 与窗口相交的段才画（裁剪到窗内）——跨午夜的月弧因此是一整条连贯曲线，而不是 0/24 两段碎块。
+        // 弧顶/视口中心：中天数据存在用中天，不存在用出落中点（只作几何对齐，不冒充中天数据）；
+        // 「正午/月中天」标注只在数据真实存在时画。
         if (sunOk && (day || edge))
         {
-            double apex = double.IsNaN(sn) || sn <= sr || sn >= ss ? (sr + ss) / 2 : sn;
-            Arc(sr, ss, apex, Color.FromRgb(255, 201, 77), now, "day", edge);
+            bool apexKnown = !double.IsNaN(sn);
+            double apexOff = apexKnown ? ((sn - sr) % 24 + 24) % 24 : sunDur / 2;
+            EachArc(sr, sunDur, apexOff, apexKnown, Color.FromRgb(255, 201, 77), "day");
         }
         if (moonOk && (!day || edge))
         {
-            double apex = double.IsNaN(mn) ? (mr + moonSetAbs) / 2 : (mn <= mr ? mn + 24 : mn);
-            if (moonSetAbs > 24)
+            bool apexKnown = !double.IsNaN(mn);
+            double apexOff = apexKnown ? ((mn - mr) % 24 + 24) % 24 : moonDur / 2;
+            EachArc(mr, moonDur, apexOff, apexKnown, Color.FromRgb(232, 238, 248), "moon");
+        }
+
+        void EachArc(double rise, double dur, double apexOff, bool apexKnown, Color color, string body)
+        {
+            for (double k = -24; k <= 24; k += 24)
             {
-                // 跨午夜拆两段：月升→24 与 0→月落；顶点按绝对时刻决定落在哪段。
-                if (apex <= 24) Arc(mr, 24, apex, Color.FromRgb(232, 238, 248), now, "moon", edge);
-                else Arc(0, moonSetAbs - 24, apex - 24, Color.FromRgb(232, 238, 248), now, "moon", edge);
+                double r = rise + k;
+                if (r + dur < win - 1e-6 || r > win + 24 + 1e-6) continue;
+                Arc(r, r + dur, r + apexOff, apexKnown, color, nowU, body, edge);
             }
-            else Arc(mr, moonSetAbs, apex, Color.FromRgb(232, 238, 248), now, "moon", edge);
         }
 
         // 弧体：从升到落的参数化抛物拱，顶点在 apex（不是时间中点）。天体按 now 投影到弧上。
-        void Arc(double rise, double set, double apex, Color color, double nowT, string body, bool edge)
+        // rise/set 为已平移的绝对读数，先裁剪到窗口再画；端点标注只画落在窗口内的那端，弧顶标注收紧到可见段。
+        void Arc(double rise, double set, double apex, bool apexKnown, Color color, double nowT, string body, bool edge)
         {
-            double left = Math.Min(x(rise), x(set)), right = Math.Max(x(rise), x(set));
+            double a0 = Math.Max(rise, win), a1 = Math.Min(set, win + 24);
+            if (a1 <= a0) return;
             double yApex = 14, yBase = 88;
             var poly = new System.Windows.Shapes.Polyline { Stroke = new SolidColorBrush(color), StrokeThickness = 2, StrokeDashArray = body == "moon" && edge ? new DoubleCollection(new double[] { 5, 3 }) : null };
-            for (double t = rise; t <= set + 1e-6; t += Math.Max(0.05, (set - rise) / 60))
+            for (double t = a0; t <= a1 + 1e-6; t += Math.Max(0.05, (set - rise) / 60))
             {
-                double u = (t - rise) / (set - rise);                       // 0..1 沿弧
-                double a = (apex - rise) / (set - rise);                    // 顶点位置（非 0.5 即不对称）
-                a = Math.Clamp(a, 0.05, 0.95);
+                double u = Math.Min(1, (t - rise) / (set - rise));          // 0..1 沿整条弧（不是沿可见段）
+                double a = Math.Clamp((apex - rise) / (set - rise), 0.05, 0.95);  // 顶点位置（非 0.5 即不对称）
                 double h = u <= a ? u / a : (1 - u) / (1 - a);             // 升段/降段线性到顶
                 h = Math.Sin(h * Math.PI / 2);                              // 圆润拱形
-                poly.Points.Add(new Point(Math.Clamp(x(t), 0, w), yBase - h * (yBase - yApex)));
+                poly.Points.Add(new Point(x(t), yBase - h * (yBase - yApex)));
             }
             celestialArc.Children.Add(poly);
             // 天体标记：落在 now 对应位置（仅在升起区间内）；交界时两弧各标各的天体。
@@ -1173,15 +1244,20 @@ internal sealed class WeatherView : UserControl
             {
                 double u = (nowT - rise) / (set - rise), a = Math.Clamp((apex - rise) / (set - rise), 0.05, 0.95);
                 double h = Math.Sin((u <= a ? u / a : (1 - u) / (1 - a)) * Math.PI / 2);
-                double px = Math.Clamp(x(nowT), 0, w), py = yBase - h * (yBase - yApex);
+                double px = x(nowT), py = yBase - h * (yBase - yApex);
                 // 用项目里通用的 WeatherGlyph（code=0 晴）：day=true 画带光芒的太阳，false 画弯钩月。
                 var glyph = new WeatherGlyph(0, body == "day") { Width = 24, Height = 24 };
                 Canvas.SetLeft(glyph, px - 12); Canvas.SetTop(glyph, py - 12); celestialArc.Children.Add(glyph);
             }
-            // 两端时刻标注（与时间轴对齐）：升 / 落。
-            Txt(celestialArc, x(rise), 90, HHmm(rise), color, 9, 46);
-            Txt(celestialArc, x(set), 90, HHmm(set), color, 9, 46);
-            Txt(celestialArc, x(apex), 3, body == "moon" ? Loc.T("月中天", "Moon peak") : Loc.T("正午", "Noon"), color, 9, 62);
+            // 两端时刻标注（与时间轴对齐）：升 / 落，只标窗口内的端点，裁剪掉的端点标出去会出画布。
+            if (rise >= win - 1e-6) Txt(celestialArc, x(rise), 90, HHmm(rise), color, 9, 46);
+            if (set <= win + 24 + 1e-6) Txt(celestialArc, x(set), 90, HHmm(set), color, 9, 46);
+            // 弧顶标注：仅当中天数据真实存在才画「正午/月中天」；缺失时弧顶只是出落中点，不冒充中天。
+            if (apexKnown)
+            {
+                double apexShow = Math.Clamp(apex, a0, a1);
+                Txt(celestialArc, x(apexShow), 3, body == "moon" ? Loc.T("月中天", "Moon peak") : Loc.T("正午", "Noon"), color, 9, 62);
+            }
         }
     }
     // 在指定 Canvas 上放一条居中文字（日月镜头弧线标注专用）。
@@ -1190,7 +1266,8 @@ internal sealed class WeatherView : UserControl
         var t = new TextBlock { Text = text, FontSize = size, Foreground = new SolidColorBrush(c), Width = width, TextAlignment = TextAlignment.Center };
         Canvas.SetLeft(t, Math.Max(0, Math.Min(host.Width - width, cx - width / 2))); Canvas.SetTop(t, top); host.Children.Add(t);
     }
-    // 日月轨道：一条 24 小时色带。银白段是月亮在地平线上、金黄段是太阳、交汇段两色渐变，白点是此刻。
+    // 日月轨道：一条 24 小时色带，横轴与上方弧线共用同一偏移（窗口左缘 = 当前天体弧升起时刻）。
+    // 银白段是月亮在地平线上、金黄段是太阳、交汇段两色渐变，白点是此刻。
     private void DrawCelestialBand(WeatherSnapshot s)
     {
         int today = WeatherData.TodayIndex(s);
@@ -1198,50 +1275,56 @@ internal sealed class WeatherView : UserControl
         double a = Frac(s.SunriseTimes, today), b = Frac(s.SunsetTimes, today);
         double mr = Frac(s.MoonriseTimes, today), ms = Frac(s.MoonsetTimes, today);
         if (double.IsNaN(a) || double.IsNaN(b) || b <= a) return;
-        double moonSetAbs = double.IsNaN(ms) ? double.NaN : (ms <= mr ? ms + 24 : ms);
+        double win = CelestialWindowStart(s);
         Color gold = Color.FromRgb(255, 201, 77), silver = Color.FromRgb(226, 236, 248);
+        // 区间按 ±24 平移取所有与窗口相交的段画出（裁剪到窗内）——跨午夜的月段因此连贯，不被 0/24 边界拆开。
         void Seg(double t0, double t1, Brush fill)
         {
             if (double.IsNaN(t0) || double.IsNaN(t1) || t1 <= t0) return;
-            var seg = new System.Windows.Shapes.Rectangle { Width = w * (t1 - t0) / 24, Height = 5, RadiusX = 2.5, RadiusY = 2.5, Fill = fill };
-            Canvas.SetLeft(seg, w * t0 / 24); Canvas.SetTop(seg, 30); chart.Children.Add(seg);
+            for (double k = -24; k <= 24; k += 24)
+            {
+                double u0 = Math.Max(t0 + k, win), u1 = Math.Min(t1 + k, win + 24);
+                if (u1 - u0 < 1e-4) continue;
+                var seg = new System.Windows.Shapes.Rectangle { Width = Math.Max(1, w * (u1 - u0) / 24), Height = 5, RadiusX = 2.5, RadiusY = 2.5, Fill = fill };
+                Canvas.SetLeft(seg, w * (u0 - win) / 24); Canvas.SetTop(seg, 30); chart.Children.Add(seg);
+            }
         }
         var track = new System.Windows.Shapes.Rectangle { Width = w, Height = 5, RadiusX = 2.5, RadiusY = 2.5, Fill = new SolidColorBrush(Color.FromArgb(38, 255, 255, 255)) };
         Canvas.SetTop(track, 30); chart.Children.Add(track);
-        // 月相段（银白）：月升到次日月落，落在 0–24 轴上的部分。
-        if (!double.IsNaN(mr) && !double.IsNaN(moonSetAbs))
-        {
-            Seg(Math.Max(0, mr), Math.Min(24, moonSetAbs), new SolidColorBrush(silver));
-            if (moonSetAbs > 24) Seg(0, Math.Min(24, moonSetAbs - 24), new SolidColorBrush(silver));
-        }
+        double sunDur = b - a;
+        double moonDur = double.IsNaN(ms) ? 0 : ((ms - mr) % 24 + 24) % 24;   // 月落读数小于月升即跨午夜，取模后即持续时长
+        // 月相段（银白）：月升到次日月落。
+        if (!double.IsNaN(mr) && moonDur > 0) Seg(mr, mr + moonDur, new SolidColorBrush(silver));
         // 太阳段（金黄）。
-        Seg(a, b, new SolidColorBrush(gold));
-        // 交汇段（日月同天）：月亮与白昼重叠区间，两色渐变。
-        if (!double.IsNaN(mr) && !double.IsNaN(moonSetAbs))
+        Seg(a, a + sunDur, new SolidColorBrush(gold));
+        // 交汇段（日月同天）：两区间重叠部分，两色渐变。
+        if (!double.IsNaN(mr) && moonDur > 0)
         {
-            var grad = new LinearGradientBrush(gold, silver, 0);
-            Seg(Math.Max(a, mr), Math.Min(b, Math.Min(24, moonSetAbs)), grad);
-            if (moonSetAbs > 24) Seg(Math.Max(a, 0), Math.Min(b, moonSetAbs - 24), grad);
+            double ov0 = Math.Max(a, mr), ov1 = Math.Min(a + sunDur, mr + moonDur);
+            if (ov1 > ov0) Seg(ov0, ov1, new LinearGradientBrush(gold, silver, 0));
         }
         for (int hh = 0; hh <= 24; hh += 6)
         {
-            var tick = new TextBlock { Text = $"{hh:00}", FontSize = 8.5, Foreground = new SolidColorBrush(Color.FromRgb(150, 168, 192)) };
+            // 刻度随窗口偏移，显示真实钟点：窗口起点不一定是 0 点，先四舍五入再取正模。
+            int label = (int)Math.Floor(win + hh + 0.5); label = ((label % 24) + 24) % 24;
+            var tick = new TextBlock { Text = $"{label:00}", FontSize = 8.5, Foreground = new SolidColorBrush(Color.FromRgb(150, 168, 192)) };
             tick.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             Canvas.SetLeft(tick, Math.Max(0, Math.Min(w - tick.DesiredSize.Width, w * hh / 24.0 - tick.DesiredSize.Width / 2))); Canvas.SetTop(tick, 41); chart.Children.Add(tick);
         }
         // 注释点：色段起止（日出/日落/月升/月落）+ 弧顶中天（正午/月中天）。都画竖直虚线到条上并标「名称 时刻」——日=金、月=银。
-        // 中天不是色段分界而是弧顶，用点线区分；时刻取当日 0–24 轴读数，与刻度严格对齐。
+        // 中天不是色段分界而是弧顶，用点线区分；时刻折进窗口后定位，与刻度严格对齐，文字仍显示原钟点。
         var marks = new List<(string name, double t, Color c, bool apex)>();
         if (!double.IsNaN(a)) marks.Add((Loc.T("日出", "Sunrise"), a, gold, false));
         if (!double.IsNaN(b)) marks.Add((Loc.T("日落", "Sunset"), b, gold, false));
         if (!double.IsNaN(mr)) marks.Add((Loc.T("月升", "Moonrise"), mr, silver, false));
-        if (!double.IsNaN(ms)) marks.Add((Loc.T("月落", "Moonset"), ms, silver, false)); // ms 已是当日轴读数；跨午夜由 moonSetAbs 处理色段
+        if (!double.IsNaN(ms)) marks.Add((Loc.T("月落", "Moonset"), ms, silver, false));
         double sn = Frac(s.SolarNoonTimes, today), mn = Frac(s.MoonTransitTimes, today);
         if (!double.IsNaN(sn) && sn >= a && sn <= b) marks.Add((Loc.T("正午", "Noon"), sn, gold, true));
         if (!double.IsNaN(mn)) marks.Add((Loc.T("月中天", "Moon peak"), mn, silver, true));
         foreach (var (name, t, c, apex) in marks)
         {
-            double px = w * t / 24;
+            double tu = (t - win) % 24; if (tu < 0) tu += 24; tu += win;      // 折进窗口 [win, win+24)
+            double px = w * (tu - win) / 24;
             chart.Children.Add(new Line
             {
                 X1 = px, Y1 = apex ? 9 : 13, X2 = px, Y2 = 29, Stroke = new SolidColorBrush(c),
@@ -1249,9 +1332,9 @@ internal sealed class WeatherView : UserControl
             });
             Txt(chart, px, 1, $"{name} {HHmm(t)}", c, 9, 62);
         }
-        double now = (CityNow(s).Hour * 60 + CityNow(s).Minute) / 1440.0;
+        double nowU = win + ((CityNow(s).Hour + CityNow(s).Minute / 60.0 - win) % 24 + 24) % 24;
         var dot = new System.Windows.Shapes.Ellipse { Width = 7, Height = 7, Fill = Brushes.White };
-        Canvas.SetLeft(dot, w * now - 3.5); Canvas.SetTop(dot, 29); chart.Children.Add(dot);
+        Canvas.SetLeft(dot, w * (nowU - win) / 24 - 3.5); Canvas.SetTop(dot, 29); chart.Children.Add(dot);
     }
     // 逐时列底部那行跟着镜头走：气温/体感出温度，湿度出百分比，风速出 km/h，日月镜头仍用气温（昼夜由轨道表达）。
     private string HourValue(WeatherSnapshot s, int p)

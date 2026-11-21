@@ -353,13 +353,11 @@ internal static class WeatherAggregator
                 return !double.IsNaN(snapshot.Temperature) && snapshot.HumidityPercent >= 0
                     && !double.IsNaN(snapshot.WindKmh) && !double.IsNaN(snapshot.PressureHpa);
             case WeatherDomain.Hourly:
-                // 逐时窗口是 24 小时，允许头部少量缺测。
+                // 逐时窗口是 24 小时，允许头部少量缺测。过去那一格来自本地历史、本地没有就留空，
+                // 所以不再要求锚点必须落在数据里——只看是否有足够的未来数据值得画图。
                 int hours = snapshot.HourTimes.Length, filled = 0;
                 for (int i = 0; i < hours; i++) if (!double.IsNaN(snapshot.HourTempsC[i])) filled++;
-                // 还要求窗口锚点（当前整点前 1 小时）落在数据里：和风从下一个整点起返回，
-                // 缺这一条就继续下探到 Open-Meteo 的 past_hours，否则窗口第一列只能是未来。
-                bool anchored = hours > 0 && string.CompareOrdinal(snapshot.HourTimes[0], HourKey(SnapshotClock(snapshot).AddHours(-1))) <= 0;
-                return hours >= 20 && filled >= 20 && anchored;
+                return hours >= 20 && filled >= 20;
             case WeatherDomain.Daily:
                 // 今天起 13 天里至少 11 天有高低温；和风 v1 只有 10 天，最后 3 天由下一家补。
                 int days = 0; for (int offset = 0; offset <= 12; offset++) if (Day(offset)) days++;
@@ -484,11 +482,16 @@ internal static class WeatherAggregator
             }
         }
 
-        // 逐时窗口固定以「当前整点前 1 小时」为起点、共 24 条：前面 1 小时作参照 + 当前 + 未来 22 小时。
-        // 窗口窄到只剩 7 列时，这 24 条的前 7 条正好是 前1h / 当前 / 未来5h，两种列数共用同一套锚点。
-        // 和风 v1 从下一个整点起返回、没有当前和过去这 1 小时，靠 Open-Meteo 的 past_hours 补齐；
-        // 两家都拿不到更早的小时（断网、只剩和风）时，退化为从最早一条开始，界面照样能画。
-        var ordered = hours.Values.ToList();
+        // 逐时窗口固定以「当前整点前 1 小时」为起点、共 24 条：过去 1 小时 + 当前 + 未来 22 小时。
+        // 过去那 1 小时和风/各预报源都拿不到（和风从下一整点起、时光机不含今天），改由本地历史补：
+        // 每次成功刷新都把当时的整点数据存进 weather/hour-history，下一小时它就成了「过去」那一格。
+        // 本地也没有就留空（NaN / -1），界面隐藏数值，不联网补、不冒充预报。
+        var cityKey = city.ToString();
+        var local = WeatherHourHistory.Read(cityKey);
+        foreach (var (time, point) in local)
+            if (!hours.ContainsKey(time)) { hours[time] = point; fieldSources.TryAdd("h:" + time, "local"); }
+        // 字典合并后顺序不保证有序（本地历史与预报源交错插入），先按整点键排好序再找锚点，窗口切片才可靠。
+        var ordered = hours.Values.OrderBy(p => p.Time, StringComparer.Ordinal).ToList();
         int start = 0;
         string anchor = HourKey(DateTimeOffset.Now.ToOffset(ClockOffset(zone, city)).AddHours(-1));
         for (int index = 0; index < ordered.Count; index++)
@@ -896,10 +899,10 @@ internal sealed class OpenMeteoSource : IWeatherSource
         bool wantForecast = Want(WeatherDomain.Current) || Want(WeatherDomain.Daily) || Want(WeatherDomain.History);
         string location = FormattableString.Invariant($"latitude={city.Latitude.ToString(CultureInfo.InvariantCulture)}&longitude={city.Longitude.ToString(CultureInfo.InvariantCulture)}&timezone=auto");
         string site = FormattableString.Invariant($"{city.Latitude:0.00},{city.Longitude:0.00}");
-        var forecast = wantForecast ? Body("forecast|" + site, TimeSpan.FromMinutes(15), $"https://api.open-meteo.com/v1/forecast?{location}&current=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,weather_code,pressure_msl,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,sunrise,sunset,uv_index_max,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,relative_humidity_2m_mean,pressure_msl_mean&past_days=10&forecast_days=14", token) : Task.FromResult("");
-        // past_hours=2：逐时窗口以「当前整点前 1 小时」为起点，得先有这条过去的数据，多取 1 小时做取整余量。
-        // 缓存键带 |p2，换参数后不复用旧响应（旧响应没有过去的小时）。
-        var hourly = Want(WeatherDomain.Hourly) ? Body("hourly|" + site + "|p2", TimeSpan.FromMinutes(30), $"https://api.open-meteo.com/v1/forecast?{location}&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,precipitation_probability,weather_code,pressure_msl,cloud_cover,visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index&past_hours=2&forecast_hours=24", token) : Task.FromResult("");
+        var forecast = wantForecast ? Body("forecast|" + site, TimeSpan.FromMinutes(15), $"https://api.open-meteo.com/v1/forecast?{location}&current=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,weather_code,pressure_msl,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,sunrise,sunset,moonrise,moonset,uv_index_max,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,relative_humidity_2m_mean,pressure_msl_mean&past_days=10&forecast_days=14", token) : Task.FromResult("");
+        // 逐时只要未来窗口：过去那一格由本地历史提供，不再向 Open-Meteo 请求 past_hours。
+        // forecast_hours=24 给当前起 24 小时，窗口切片取锚点起 24 条；缓存键去掉 |p2 以区分旧响应。
+        var hourly = Want(WeatherDomain.Hourly) ? Body("hourly|" + site, TimeSpan.FromMinutes(30), $"https://api.open-meteo.com/v1/forecast?{location}&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,precipitation_probability,weather_code,pressure_msl,cloud_cover,visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index&forecast_hours=24", token) : Task.FromResult("");
         var air = Want(WeatherDomain.Air) ? Body("air|" + site, TimeSpan.FromMinutes(30), $"https://air-quality-api.open-meteo.com/v1/air-quality?{location}&current=pm2_5,pm10,us_aqi,european_aqi", token) : Task.FromResult("");
         // 分钟降水（未来 2 小时的 15 分钟级）独立缓存。
         var minute = Want(WeatherDomain.Minutely) ? Body("minute|" + site, TimeSpan.FromMinutes(15), $"https://api.open-meteo.com/v1/forecast?{location}&minutely_15=precipitation&forecast_minutely_15=8", token) : Task.FromResult("");
@@ -924,7 +927,7 @@ internal sealed class OpenMeteoSource : IWeatherSource
             if (Json.Get(root, "daily") is { } daily && Json.Get(daily, "time") is { } dates)
             {
                 int count = dates.GetArrayLength();
-                string[] names = ["weather_code", "temperature_2m_max", "temperature_2m_min", "apparent_temperature_max", "apparent_temperature_min", "sunrise", "sunset", "uv_index_max", "precipitation_sum", "precipitation_probability_max", "wind_speed_10m_max", "wind_gusts_10m_max", "wind_direction_10m_dominant", "relative_humidity_2m_mean", "pressure_msl_mean"];
+                string[] names = ["weather_code", "temperature_2m_max", "temperature_2m_min", "apparent_temperature_max", "apparent_temperature_min", "sunrise", "sunset", "moonrise", "moonset", "uv_index_max", "precipitation_sum", "precipitation_probability_max", "wind_speed_10m_max", "wind_gusts_10m_max", "wind_direction_10m_dominant", "relative_humidity_2m_mean", "pressure_msl_mean"];
                 var arrays = names.ToDictionary(name => name, name => Json.Get(daily, name));
                 double? At(string name, int index) => arrays[name] is { } array && index < array.GetArrayLength() && array[index].ValueKind == JsonValueKind.Number ? array[index].GetDouble() : null;
                 string? TextAt(string name, int index) => arrays[name] is { } array && index < array.GetArrayLength() && array[index].ValueKind == JsonValueKind.String ? array[index].GetString() : null;
@@ -937,7 +940,9 @@ internal sealed class OpenMeteoSource : IWeatherSource
                     {
                         Date = date[..10], Code = (int?)(At("weather_code", i)), HighC = At("temperature_2m_max", i), LowC = At("temperature_2m_min", i),
                         FeelsHighC = At("apparent_temperature_max", i), FeelsLowC = At("apparent_temperature_min", i),
-                        Sunrise = TextAt("sunrise", i), Sunset = TextAt("sunset", i), UvMax = At("uv_index_max", i),
+                        Sunrise = TextAt("sunrise", i), Sunset = TextAt("sunset", i),
+                        // 月出/月落：Open-Meteo 返回 ISO 时刻；某天月不升/不落时该日为 null，合并层自然跳过。
+                        Moonrise = TextAt("moonrise", i), Moonset = TextAt("moonset", i), UvMax = At("uv_index_max", i),
                         PrecipMm = At("precipitation_sum", i), RainProb = (int?)At("precipitation_probability_max", i),
                         WindMaxKmh = At("wind_speed_10m_max", i), GustMaxKmh = At("wind_gusts_10m_max", i),
                         WindDirDeg = At("wind_direction_10m_dominant", i), Humidity = (int?)At("relative_humidity_2m_mean", i),

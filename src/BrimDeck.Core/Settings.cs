@@ -747,6 +747,8 @@ public sealed class DeckSettings
     // The expanded page shows the whole machine's power draw with its curve, and the machine's own battery when it has one (PowerResolver,
     // BatteryModel); off, neither is read for it. The collapsed row's Power and Charge readings are chosen in its table.
     public bool MonitorPower { get; set; } = true;
+    // The maximum number of saved cities. Kept as one constant so the settings page and Normalize enforce the same limit.
+    public const int MaxWeatherCities = 10;
     // The weather page: the forecast for the chosen city or automatic location (WeatherData); it fetches only while it shows.
     public bool WeatherPage { get; set; } = true;
     public double WeatherWidth { get; set; } = 660;
@@ -1102,13 +1104,24 @@ public sealed class DeckSettings
         DisplayMonitors = (DisplayMonitors ?? []).OfType<ChosenDisplay>().Where(d => !string.IsNullOrWhiteSpace(d.Id))
             .Select(d => d with { Id = d.Id.Trim(), Name = (d.Name ?? "").Trim() }).DistinctBy(d => d.Id).ToList();
         if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;
-        WeatherCities = (WeatherCities ?? []).Where(city => city is not null && !string.IsNullOrWhiteSpace(city.Name))
-            .Select(city => city with
+        // 过滤空白城市时保留原索引：选中项若被删掉就回退到自动定位（-1），不能被后面一座城顶替。
+        int selectedBefore = WeatherSelected;
+        var kept = new List<(int Original, City City)>();
+        var cities = WeatherCities ?? [];
+        for (int i = 0; i < cities.Count; i++)
+        {
+            var city = cities[i];
+            if (city is null || string.IsNullOrWhiteSpace(city.Name)) continue;
+            kept.Add((i, city with
             {
                 Name = city.Name.Trim(), Province = (city.Province ?? "").Trim(), CityName = (city.CityName ?? "").Trim(),
                 Country = (city.Country ?? "").Trim(), LocationId = (city.LocationId ?? "").Trim()
-            }).Take(32).ToList();
-        WeatherSelected = WeatherCities.Count == 0 ? -1 : Math.Clamp(WeatherSelected, -1, WeatherCities.Count - 1);
+            }));
+        }
+        WeatherCities = kept.Take(MaxWeatherCities).Select(entry => entry.City).ToList();
+        int selectedAt = selectedBefore >= 0 ? kept.FindIndex(entry => entry.Original == selectedBefore) : -1;
+        // 被过滤或超限截断的选中项回退到自动定位，绝不滑到相邻城市。
+        WeatherSelected = selectedAt >= 0 && selectedAt < WeatherCities.Count ? selectedAt : -1;
         Weather ??= new(); Weather.Normalize();
         Core.Profiles.Normalize(this);
     }

@@ -29,15 +29,14 @@ public sealed partial class SettingsWindow
                 var controls=new StackPanel {Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};if(temperature is not null)controls.Children.Add(TextLine(temperature,14,TextPrimary));
                 void Select(){state.Selected=index;Save();preview.Content=new WeatherSettingsPreview(state);Fill();}
                 var brush=(SolidColorBrush)FindResource("SettingsTextSecondary");
-                if(city is not null){var remove=new Button {Content=new WeatherMetaIcon(WeatherMetaKind.Close,brush.Color){Width=12,Height=12},Style=(Style)FindResource("SettingsGlyphButton"),ToolTip=Loc.T("删除城市","Remove city")};remove.Click+=(_,_)=>{state.Cities.RemoveAt(index);if(state.Selected==index)state.Selected=-1;else if(state.Selected>index)state.Selected--;Save();preview.Content=new WeatherSettingsPreview(state);Fill();};controls.Children.Add(remove);}
+                if(city is not null){var remove=new Button {Content=new WeatherMetaIcon(WeatherMetaKind.Close,brush.Color){Width=12,Height=12},Style=(Style)FindResource("SettingsGlyphButton"),ToolTip=Loc.T("删除城市","Remove city")};remove.Click+=(_,_)=>{state.Cities.RemoveAt(index);if(state.Selected==index)state.Selected=-1;else if(state.Selected>index)state.Selected--;Save();preview.Content=new WeatherSettingsPreview(state);Fill();UpdateAdd();};controls.Children.Add(remove);}
                 var row=Row(name,controls,TextLine(detail,11,TextSecondary));row.Margin=new Thickness(42,0,8,0);
                 var grid=new Grid();grid.Children.Add(row);grid.Children.Add(new WeatherGlyph(code,day) {Width=28,Height=28,HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(4,0,0,0),IsHitTestVisible=false});
                 if(selected){var indicator=new Border {Width=3,CornerRadius=new CornerRadius(0,2,2,0),Background=(Brush)FindResource("SettingsAccent"),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Stretch};grid.Children.Add(indicator);}
                 var border=new Border {Child=grid,Background=selected?(Brush)FindResource("SettingsAccentTint"):Brushes.Transparent,CornerRadius=new CornerRadius(6),Cursor=System.Windows.Input.Cursors.Hand};border.MouseLeftButtonUp+=(_,e)=>{if(e.OriginalSource is not Button)Select();};cityRows.Children.Add(border);
             }
         }
-        Target.Children.Add(preview);SectionTitle(Loc.T("当前城市","Current city"));Fill();Group(cityRows);
-        _ = DetectAsync();
+        Target.Children.Add(preview);SectionTitle(Loc.T("当前城市","Current city"));Group(cityRows);
         // 设置页打开即尝试定位：成功则刷新「自动定位」行展示当地城市名，不干扰其余行。
         async Task DetectAsync() { if(!active)return;try {var local=await WeatherData.LocateAsync(state.Schedule,CancellationToken.None);if(active&&local is not null&&!local.Name.Contains("当前位置")){autoName=local.Full;Fill();}}catch{}}
         SectionTitle(Loc.T("添加城市","Add city"));
@@ -48,8 +47,14 @@ public sealed partial class SettingsWindow
         var popup=new Popup {PlacementTarget=input,Placement=PlacementMode.Bottom,StaysOpen=false,AllowsTransparency=true,Child=new Border {Width=250,Background=(Brush)FindResource("SettingsInput"),BorderBrush=(Brush)FindResource("SettingsBorder"),BorderThickness=new Thickness(1),Padding=new Thickness(4),Margin=new Thickness(0,4,0,0),CornerRadius=new CornerRadius(6),Child=options}};
         PopupMotion.Attach(popup);
         City? picked=null;bool programmatic=false;CancellationTokenSource? pending=null;CancellationTokenSource? fetchCts=null;
-        var add=ActionButton(Loc.T("添加","Add"),()=> {if(picked is null||state.Cities.Contains(picked))return;var city=picked;state.Cities.Add(city);Save();Fill();input.Clear();_=FetchCityAsync(city);});add.Style=(Style)FindResource("SettingsPrimaryButton");add.IsEnabled=false;add.Margin=new Thickness(10,0,0,0);
-        options.SelectionChanged+=(_,_)=>{if(options.SelectedItem is City city){picked=city;popup.IsOpen=false;programmatic=true;input.Text=city.Name;programmatic=false;add.IsEnabled=!state.Cities.Contains(city);}};
+        // 城市上限与 DeckSettings.Normalize 共用同一常量：满了就禁用添加并说明原因，不会出现「加了却被规范化丢掉」。
+        bool CanAdd() => state.Cities.Count < DeckSettings.MaxWeatherCities;
+        string AtCapTip() => Loc.T($"最多添加 {DeckSettings.MaxWeatherCities} 个城市，请先删除一个", $"At most {DeckSettings.MaxWeatherCities} cities; remove one first");
+        Button add=null!; add=ActionButton(Loc.T("添加","Add"),()=> {if(picked is null||state.Cities.Contains(picked)||!CanAdd())return;var city=picked;state.Cities.Add(city);Save();Fill();UpdateAdd();input.Clear();_=FetchCityAsync(city);});add.Style=(Style)FindResource("SettingsPrimaryButton");add.IsEnabled=false;add.Margin=new Thickness(10,0,0,0);
+        void UpdateAdd(){add.IsEnabled=picked is not null&&!state.Cities.Contains(picked)&&CanAdd();System.Windows.Controls.ToolTipService.SetToolTip(add,CanAdd()?null:AtCapTip());}
+        Fill();
+        _ = DetectAsync();
+        options.SelectionChanged+=(_,_)=>{if(options.SelectedItem is City city){picked=city;popup.IsOpen=false;programmatic=true;input.Text=city.Name;programmatic=false;UpdateAdd();}};
         input.TextChanged+=async (_,_)=>{
             if(programmatic)return;
             pending?.Cancel();pending?.Dispose();pending=new();var token=pending.Token;picked=null;add.IsEnabled=false;popup.IsOpen=false;var query=input.Text.Trim();if(query.Length<2)return;

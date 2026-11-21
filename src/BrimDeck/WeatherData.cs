@@ -69,6 +69,8 @@ internal static class WeatherData
         lock(SnapLock)
             foreach(var (key,snapshot) in state.Cache)
             {
+                // 每次新快照都把其中的整点数据并入本地历史，供下次窗口的过去小时使用（失败不影响快照写入）。
+                WeatherHourHistory.Record(key,snapshot);
                 if(Written.TryGetValue(key,out var at)&&snapshot.FetchedAt<=at)continue;
                 if(!WeatherFiles.WriteAtomic(Path.Combine(WeatherFiles.Snapshots,WeatherFiles.Name(key,".json")),JsonSerializer.Serialize(new SnapshotFile{Key=key,Value=snapshot},WeatherJson)))continue;
                 Written[key]=snapshot.FetchedAt;
@@ -178,6 +180,91 @@ internal static class WeatherData
         for (int i = 0; i < s.DayDates.Length; i++) if (s.DayDates[i].StartsWith(today)) return i;
         return 0;
     }
+}
+
+// 本地逐时历史：每次快照落盘时把其中的整点数据按「城市 + 整点」累积，供下一个窗口的过去小时使用。
+// 和风逐小时只有未来、时光机不含今天，过去的小时只能靠本机历史；本地没有就留空，绝不联网补。
+internal static class WeatherHourHistory
+{
+    // 保留最近 48 小时：足以覆盖「过去 10 小时」，也给隔天再打开留余量。
+    private const int KeepHours = 48;
+    private static readonly string Root = Path.Combine(WeatherFiles.Root, "weather", "hour-history");
+    private static readonly JsonSerializerOptions Json = new()
+    {
+        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+    private static readonly object Lock = new();
+    private static readonly Dictionary<string, Dictionary<string, HourPoint>> Memory = new(StringComparer.Ordinal);
+    private static int _started;
+
+    private sealed class FileFormat { public string Key { get; set; } = ""; public List<HourPoint> Hours { get; set; } = []; }
+
+    private static void Start()
+    {
+        if (Interlocked.Exchange(ref _started, 1) == 1) return;
+        WeatherFiles.Ensure(Root);
+        string[] files;
+        try { files = Directory.GetFiles(Root, "*.json"); } catch { return; }
+        foreach (var file in files)
+        {
+            try
+            {
+                if (JsonSerializer.Deserialize<FileFormat>(File.ReadAllText(file), Json) is not { } entry) continue;
+                var dict = new Dictionary<string, HourPoint>(StringComparer.Ordinal);
+                foreach (var hour in entry.Hours ?? []) if (!string.IsNullOrWhiteSpace(hour.Time)) dict[hour.Time] = hour;
+                if (dict.Count > 0) Memory[entry.Key] = dict;
+            }
+            catch { }
+        }
+    }
+
+    // 读出该城市已累积的整点数据（副本，调用方改不到内存库）。
+    internal static Dictionary<string, HourPoint> Read(string key)
+    {
+        Start();
+        lock (Lock) return Memory.TryGetValue(key, out var dict) ? new Dictionary<string, HourPoint>(dict, StringComparer.Ordinal) : [];
+    }
+
+    // 把一份快照里的整点数据并入历史；以最新整点为基准保留最近 KeepHours 小时，写盘失败不影响刷新。
+    internal static void Record(string key, WeatherSnapshot snapshot)
+    {
+        if (string.IsNullOrWhiteSpace(key)) return;
+        Start();
+        lock (Lock)
+        {
+            if (!Memory.TryGetValue(key, out var dict)) Memory[key] = dict = new Dictionary<string, HourPoint>(StringComparer.Ordinal);
+            for (int i = 0; i < snapshot.HourTimes.Length; i++)
+            {
+                string time = snapshot.HourTimes[i];
+                if (string.IsNullOrWhiteSpace(time)) continue;
+                dict[time] = new HourPoint
+                {
+                    Time = time,
+                    Temperature = At(snapshot.HourTempsC, i), FeelsLike = At(snapshot.HourFeelsLikeC, i),
+                    Humidity = Int(snapshot.HourHumidity, i), Code = Int(snapshot.HourCodes, i), RainProb = Int(snapshot.HourRainProb, i),
+                    PrecipMm = At(snapshot.HourPrecipMm, i), WindKmh = At(snapshot.HourWindKmh, i), WindGustKmh = At(snapshot.HourWindGustKmh, i),
+                    WindDirDeg = At(snapshot.HourWindDirDeg, i), PressureHpa = At(snapshot.HourPressureHpa, i), Uv = At(snapshot.HourUv, i),
+                    DewPointC = At(snapshot.HourDewPointC, i), CloudPercent = At(snapshot.HourCloudPercent, i), VisibilityKm = At(snapshot.HourVisibilityKm, i)
+                };
+            }
+            if (dict.Count == 0) return;
+            var newest = dict.Keys.Select(ParseTime).DefaultIfEmpty(DateTime.MinValue).Max();
+            string cutoff = newest.AddHours(-KeepHours).ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture);
+            foreach (var old in dict.Keys.Where(t => string.CompareOrdinal(t, cutoff) < 0).ToList()) dict.Remove(old);
+            try
+            {
+                WeatherFiles.WriteAtomic(Path.Combine(Root, WeatherFiles.Name(key, ".json")),
+                    JsonSerializer.Serialize(new FileFormat { Key = key, Hours = [.. dict.Values.OrderBy(p => p.Time)] }, Json));
+            }
+            catch { }
+        }
+    }
+
+    private static DateTime ParseTime(string t)
+        => DateTime.TryParseExact(t, "yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var value) ? value : DateTime.MinValue;
+    private static double? At(double[] values, int i) => i >= 0 && i < values.Length && !double.IsNaN(values[i]) ? values[i] : null;
+    private static int? Int(int[] values, int i) => i >= 0 && i < values.Length && values[i] >= 0 ? values[i] : null;
 }
 // Strongly-typed weather model; the only data contract between the data layer and the views. Views never touch JSON.
 // 所有数组都以 DayDates / HourTimes 对齐；来源没有提供的数值用 NaN（数值）或 -1（整数）表示，界面自行隐藏。
