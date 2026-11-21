@@ -489,7 +489,8 @@ internal static class WeatherAggregator
                         minuteSummary ??= part.MinuteSummary;
                         break;
                     case WeatherDomain.Warning:
-                        if (part.Warnings is { Count: > 0 } warns) { warnings.AddRange(warns); Use(domain, source); }
+                        // 空列表也是一次有效回答（「当前无预警」），同样记来源，详情页预警区才能标出是谁在值守。
+                        if (part.Warnings is { } warns) { warnings.AddRange(warns); Use(domain, source); }
                         break;
                     case WeatherDomain.Indices:
                         if (part.Indices is { Count: > 0 } idxs) { indices.AddRange(idxs); Use(domain, source); }
@@ -1305,7 +1306,8 @@ internal sealed class HeFengSource : IWeatherSource
         var part = new WeatherPart();
         if (ParseMinutelyV7(minute.Result) is { Count: > 0 } minutes) part.Minutes = minutes;
         part.MinuteSummary = ParseMinutelySummaryV7(minute.Result);
-        if (ParseWarningV7(warning.Result) is { Count: > 0 } warnings) part.Warnings = warnings;
+        // 解析成功（含空列表=「当前无预警」）都写入；失败/错误码保持 null，与"没请求"区分。
+        if (ParseWarningV7(warning.Result) is { } warnings) part.Warnings = warnings;
         if (ParseIndicesV7(indices.Result) is { Count: > 0 } entries) part.Indices = entries;
         return part.Minutes is null && part.MinuteSummary is null && part.Warnings is null && part.Indices is null ? null : part;
     }

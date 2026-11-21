@@ -640,8 +640,31 @@ internal sealed class WeatherView : UserControl
             Text = text, FontSize = size, Foreground = new SolidColorBrush(color), TextWrapping = TextWrapping.NoWrap
         };
 
-        // 1) 分钟降水：未来数小时的逐点降水条，按降水量映射高度。
-        body.Children.Add(SectionLabel(Loc.T("分钟降水", "Minute precipitation")));
+        // 区块标题行：标题右侧放该域实际贡献来源的色点，来源名收进悬浮提示；颜色含义由底部图例统一解释。
+        // fieldPrefixes 非空时改从字段级来源取（天文等域混在 Daily 里，按实际字段归源才准确）。
+        void Header(string text, string domain, params string[] fieldPrefixes)
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(2, 16, 0, 8) };
+            row.Children.Add(new TextBlock { Text = text, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(dim), VerticalAlignment = VerticalAlignment.Center });
+            List<string> ids;
+            if (fieldPrefixes.Length > 0)
+                ids = s.FieldSources.Where(kv => kv.Value.Length > 0 && fieldPrefixes.Any(p => kv.Key.StartsWith(p, StringComparison.Ordinal))).Select(kv => kv.Value).Distinct().ToList();
+            else if (s.DomainSources.TryGetValue(domain, out var declared))
+                ids = declared.Where(id => s.SourceProvided.TryGetValue(id, out var ok) && ok).ToList();
+            else ids = [];
+            foreach (var id in ids)
+            {
+                var dot = new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(3.5), Background = new SolidColorBrush(SourceColor(id)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) };
+                System.Windows.Controls.ToolTipService.SetToolTip(dot, Loc.T($"来自 {SourceName(id)}", $"From {SourceName(id)}"));
+                row.Children.Add(dot);
+            }
+            body.Children.Add(row);
+        }
+
+        // 1) 分钟降水：未来数小时的逐点降水条，按降水量映射高度；条色跟该域来源走，不再用固定蓝。
+        Header(Loc.T("分钟降水", "Minute precipitation"), "Minutely");
+        Color minuteColor = accent;
+        if (s.DomainSources.TryGetValue("Minutely", out var minuteIds) && minuteIds.FirstOrDefault(id => s.SourceProvided.TryGetValue(id, out var ok) && ok) is { } minuteId) minuteColor = SourceColor(minuteId);
         if (s.MinuteTimes.Length == 0) body.Children.Add(Note(Loc.T("暂无分钟降水数据", "No minute precipitation")));
         else
         {
@@ -653,7 +676,7 @@ internal sealed class WeatherView : UserControl
                 double value = s.MinutePrecip.Length > i ? s.MinutePrecip[i] : double.NaN;
                 double h = double.IsNaN(value) || max <= 0 ? 0 : Math.Max(3, value / max * 34);
                 var cell = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(2) };
-                cell.Children.Add(new Border { Width = 14, Height = h, CornerRadius = new CornerRadius(3), Background = new SolidColorBrush(double.IsNaN(value) ? dim : accent), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 3) });
+                cell.Children.Add(new Border { Width = 14, Height = h, CornerRadius = new CornerRadius(3), Background = new SolidColorBrush(double.IsNaN(value) ? dim : minuteColor), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 3) });
                 cell.Children.Add(Pill(time, dim, 9.5));
                 cell.Children.Add(Pill(double.IsNaN(value) ? "--" : $"{value:0.0}", ink, 10));
                 bars.Children.Add(cell);
@@ -663,8 +686,8 @@ internal sealed class WeatherView : UserControl
             if (s.MinuteSummary.Length > 0) body.Children.Add(Pill(s.MinuteSummary, ink, 10.5));
         }
 
-        // 2) 预警：每条一行，等级着色，标题 + 正文 + 生效区间。
-        body.Children.Add(SectionLabel(Loc.T("气象预警", "Weather warnings")));
+        // 2) 预警：每条一行，等级着色，标题 + 正文 + 生效区间。来源响应（含「当前无预警」）都标色点。
+        Header(Loc.T("气象预警", "Weather warnings"), "Warning");
         if (s.Warnings.Length == 0) body.Children.Add(Note(Loc.T("暂无预警", "No active warnings")));
         else foreach (var w in s.Warnings)
         {
@@ -678,7 +701,7 @@ internal sealed class WeatherView : UserControl
         // 3) 生活指数：两列卡，名称 + 等级 + 说明。
         // 标题颜色跟该域实际贡献的来源走（指数目前只有和风提供 → 和风紫），不再用固定蓝，
         // 与上方读数卡/图例的来源配色保持一致；没有来源信息时才退回 accent。
-        body.Children.Add(SectionLabel(Loc.T("天气指数", "Lifestyle indices")));
+        Header(Loc.T("天气指数", "Lifestyle indices"), "Indices");
         Color indexColor = accent;
         if (s.DomainSources.TryGetValue("Indices", out var indexIds) && indexIds.FirstOrDefault(id => s.SourceProvided.TryGetValue(id, out var ok) && ok) is { } indicesId) indexColor = SourceColor(indicesId);
         if (s.Indices.Length == 0) body.Children.Add(Note(Loc.T("暂无生活指数", "No lifestyle indices")));
@@ -706,7 +729,8 @@ internal sealed class WeatherView : UserControl
         bool hasAstro = moonrise != "--:--" || moonset != "--:--" || phase.Length > 0 || sunrise.Length > 0;
         if (hasAstro)
         {
-            body.Children.Add(SectionLabel(Loc.T("天文", "Astronomy")));
+            // 天文混在 Daily 域里，但晨昏蒙影/月过中天等扩展时刻只有和风提供，按实际字段归源。
+            Header(Loc.T("天文", "Astronomy"), "Daily", "d_sun:", "d_astro:", "d_moon:");
             // 月相组：升落/相位/过中天/下点。
             var moonParts = new List<string> { $"{Loc.T("月升", "Moonrise")} {moonrise} · {Loc.T("月落", "Moonset")} {moonset}" };
             if (phase.Length > 0) moonParts.Add(phase);
