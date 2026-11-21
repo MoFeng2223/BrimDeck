@@ -74,7 +74,7 @@ static class DevicesPageTests
         var older = SettingsMigrations.Read("""{"AppVersion":"1.2.2","MonitorPage":true,"PanelScale":150,"PageOrder":[2,0,1]}""");
         check("Devices settings: a file from before the page reads with the page's defaults, in its default place",
             older.DevicesPage && older.DevicesWidth == 460 && older.DevicesHeight == 200 && older.DeviceChoices.Count == 0 && older.DeviceLowPercent == Devices.DefaultLowPercent
-            && older.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Clipboard, DeckPage.Devices]) && older.PanelScale == 150);
+            && older.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Clipboard, DeckPage.Devices, DeckPage.Weather]) && older.PanelScale == 150);
         // 1.3.0: a device switched off was off on the page and in the collapsed row; the battery reading among the system readings
         // becomes the devices' own part where the readings showed it; getting low was ten points above low.
         var hidden = SettingsMigrations.Read("""
