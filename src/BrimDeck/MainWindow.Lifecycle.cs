@@ -25,7 +25,7 @@ public partial class MainWindow
     // Pointing at the surface does not open the panel while it waits out of sight for its boot, or until the boot has played
     // (TrackPointer): a pointer already resting there would open an invisible panel, or cut the swell short.
     private long _bootEnds;
-    private bool BootHoldsPointer => _bootWaiting || Environment.TickCount64 < _bootEnds;
+    private bool BootHoldsPointer => _bootWaiting || _bootDot || Environment.TickCount64 < _bootEnds;
     // The swell from the dot into the shape (SetExpanded), and the surface drawing back into the dot, as multiples of the
     // duration set for the panel: these change the panel's shape as opening and closing do. The dot's own motion keeps its
     // pace (DotMotion).
@@ -117,7 +117,6 @@ public partial class MainWindow
             SetImmediate(CompactScale, ScaleTransform.ScaleXProperty, Soft.Shrunk); SetImmediate(CompactScale, ScaleTransform.ScaleYProperty, Soft.Shrunk);
         }
         const double swell = DotMotion.SwellStart;
-        _bootEnds = Environment.TickCount64 + (long)(swell + Settings.AnimationDuration * BootSwell);
         SetImmediate(HoverZone, OpacityProperty, 0d);
         PoseDot(DotMotion.Boot, swell, completed: () =>
         {
@@ -231,6 +230,9 @@ public partial class MainWindow
     // Hides the round island and draws the dot sinking into the water in its place (DropMerge).
     private void MergeIntoWater(CollapsedShape shape, int boot)
     {
+        // The sinking dot has its own solid fill. The glass HWND ends with the island's motion.
+        bool glass = _glassActive;
+        CloseGlass();
         ResetDotPose();
         SetImmediate(Island, OpacityProperty, 0d);
         SetImmediate(HoverZone, OpacityProperty, 1d);
@@ -241,7 +243,7 @@ public partial class MainWindow
         _merge.Width = width; _merge.Height = height;
         _merge.Margin = new Thickness(DotLeft(shape) + DotMotion.Size / 2 - width / 2, floor - (height - DropMerge.WaterBelow), 0, 0);
         // As see-through as the surface (DeckSettings.SurfaceTransparency).
-        var fill = _surface.Color; fill.A = (byte)Math.Round(fill.A * Island.SurfaceOpacity);
+        var fill = _surface.Color; fill.A = (byte)Math.Round(fill.A * (glass ? 1 : Island.SurfaceOpacity));
         _merge.Fill = fill;
         _merge.Visibility = Visibility.Visible;
         SetImmediate(_merge, DropMerge.ProgressProperty, 0d);

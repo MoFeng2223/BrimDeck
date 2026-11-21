@@ -1,5 +1,9 @@
 # Panel theme guide
 
+Choose **Liquid Glass** for a material that adapts to the backdrop in the capsule, notch, and expanded panel. If you open the panel during a color transition, the transition runs to completion. While the panel stays open, the glass keeps adapting and the text colors stay stable. Before the first sample, text colors follow the Windows app theme.
+
+Use **Settings › Panel theme › Current theme** to adjust glass transparency. The default is 50%. Higher values let more of the backdrop show through where text contrast allows. The panel uses a solid surface in high contrast or when Windows transparency effects are off.
+
 The Notch, Capsule and Indicator, the quota notice, the expanded panel and its pop-ups are colored by a "panel theme". Choose it in **Settings › Panel theme**. There are three kinds:
 
 | Kind | Themes |

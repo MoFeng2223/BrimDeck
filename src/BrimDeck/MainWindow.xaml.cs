@@ -241,12 +241,13 @@ public partial class MainWindow : Window
         {
             const int DisplayChange = 0x007E, SettingChange = 0x001A, SetWorkArea = 0x002F, Wheel = 0x020A, SideWheel = 0x020E;
             if (message == DisplayChange || message == SettingChange && wParam == SetWorkArea) _app.DisplaysChanged();
+            else if (message == 0x0047) QueueGlass(); // WM_WINDOWPOSCHANGED also carries z-order changes.
             // WPF has no event for the horizontal wheel; the vertical one is only noted, and WPF still handles it.
             else if (message == Wheel) { _swipe.Vertical(DateTimeOffset.UtcNow); if (!Native.PasteInput.KeyDown(0x10)) _shelfSwipe.Vertical(DateTimeOffset.UtcNow); }
             else if (message == SideWheel) { int delta = unchecked((short)((long)wParam >> 16)); handled = MusicWheelSwipe(delta) || ShelfSideWheel(delta); }
             return IntPtr.Zero;
         });
-        Closed += (_, _) => DisposeMusic();
+        Closed += (_, _) => { CloseGlass(); DisposeMusic(); };
     }
 
     private readonly TaskbarMirror _taskbarMirror;
@@ -391,6 +392,7 @@ public partial class MainWindow : Window
         ApplyTheme();
         _fx?.Check();
         ApplySurface();
+        UpdateGlassTheme();
         // A panel holding the keyboard stays one that can be active, whatever the setting (PanelKeyboard).
         WindowsHost.SetCapturable(this, Settings.WindowCapture || PanelKeys.Holding);
         // Made ordinary, at startup too, the panel goes beneath the window in use like a closed one; so does an ordinary panel
@@ -456,7 +458,8 @@ public partial class MainWindow : Window
             _hiding = false;
             if (!IsVisible) Show();
             if (appearing) SetImmediate(HoverZone, OpacityProperty, 1d);
-            SetExpanded(_expanded, !animatePage || !wasVisible || newEdge);
+            if (!Look.GlassTurnPublishing || !GlassPaletteTurning || appearing || newEdge)
+                SetExpanded(_expanded, !animatePage || !wasVisible || newEdge);
             bool cleared = _edgeCleared;
             _edgeCleared = false;
             if ((newEdge || cleared) && wasVisible && !appearing) FadeInOnNewEdge(cleared);
@@ -676,7 +679,7 @@ public partial class MainWindow : Window
     // shadow is cast by an opaque copy of the surface that would show through it, so a see-through surface casts none.
     private void ApplySurface()
     {
-        double opacity = 1 - Settings.SurfaceTransparency / 100d;
+        double opacity = _glassActive ? 0 : 1 - Settings.SurfaceTransparency / 100d;
         bool clear = opacity < 1;
         Island.SurfaceOpacity = opacity;
         if (Look.Current.Effects.Pixel <= 0)
@@ -866,6 +869,8 @@ public partial class MainWindow : Window
         double pageWidth = across ? pageHeight * _scale + headerExtra : _pageWidth * _scale, widestPage = across ? pageWidth : _widestPage * _scale;
         double width = expanded ? pageWidth : shape.Surface.Width;
         double height = expanded ? (across ? _pageWidth * _scale : pageHeight * _scale + headerExtra) : shape.Surface.Height;
+        if (expanded) _glassOpenHeight = height;
+        if (expanded != wasExpanded) GlassOpenChanged(expanded);
         // Every compact style opens into the same panel, hanging from the screen edge or, below a lowered capsule, rounded all round.
         double panelRadius = PanelRadius;
         var radius = expanded ? panelTop > 0 ? new CornerRadius(panelRadius) : new CornerRadius(0, 0, panelRadius, panelRadius)
@@ -939,7 +944,12 @@ public partial class MainWindow : Window
         // once the form has nearly settled.
         bool reshaping = expanded && wasExpanded, booting = _booting && !expanded && duration > 0, morphing = _morphingShape && !expanded && duration > 0;
         _booting = false; _morphingShape = false;
-        if (booting) duration = (int)(duration * BootSwell);
+        if (booting)
+        {
+            duration = (int)(duration * BootSwell);
+            // Start the hold with the actual swell, even if the dot's completion was delayed.
+            _bootEnds = Environment.TickCount64 + duration;
+        }
         if (morphing) duration = (int)(duration * 1.3);
         if (turning || carried > 0) _turn.Started(now, duration, expanded, width, height);
         // The surface at rest taking the width its content asks for (a lyric line of another length with MusicLyricAutoWidth):

@@ -28,6 +28,7 @@ internal static class Program
             if (args is ["--only", "settings"]) { SettingsFocusTests.Run(Check); BrimDeck.MainWindow.CheckPageCapsuleFit(Check); return Finish(); }
             if (args is ["--only", "popup"]) { PopupGhostChecks.Run(Check); return Finish(); }
             if (args is ["--only", "themecards"]) { ThemeCardChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "glass"]) { GlassChecks.Run(Check); AcrylicProbeChecks.Run(Check); return Finish(); }
             if (args is ["--only", "themelook"]) { ThemeLookChecks.Run(Check); return Finish(); }
             if (args is ["--only", "hoverowners"]) { HoverOwnerChecks.Run(Check); return Finish(); }
             if (args is ["--only", "fonts"]) { FontFollowTests.Run(Check); return Finish(); }
@@ -51,6 +52,7 @@ internal static class Program
             ThemeLookChecks.Run(Check);
             HoverOwnerChecks.Run(Check);
             PopupGhostChecks.Run(Check);
+            GlassChecks.Run(Check);
             PanelKeyboardTests.Run(Check);
             BrimDeck.MainWindow.CheckPageCapsule(Check);
             BrimDeck.MainWindow.CheckPageCapsuleFit(Check);
@@ -63,6 +65,7 @@ internal static class Program
                 var (bounds, work, scale) = WindowsHost.PrimaryScreen();
                 Check("primary display has usable bounds and DPI", bounds.Width > 0 && bounds.Height > 0
                     && work.Width > 0 && work.Height > 0 && scale > 0);
+                AcrylicProbeChecks.Run(Check);
                 AppIdentityChecks.Run(Check);
                 FrameRateChecks.Run(Check);
                 TemperatureChecks.Run(Check);

@@ -318,13 +318,14 @@ public partial class App : Application
         {
             if (Exiting) return;
             // High contrast turned on or off, or its scheme changed, shows the system's colors on the panel (PanelLook.HighContrast).
-            if (ShownSettings.Append(Settings).Any(settings => PanelThemes.NormalizeId(settings.PanelTheme) == PanelThemes.SystemId)
+            if (ShownSettings.Append(Settings).Any(settings => PanelThemes.NormalizeId(settings.PanelTheme) is PanelThemes.SystemId or PanelThemes.GlassAuto)
                 || SystemParameters.HighContrast || Decks.Any(deck => deck.Look.HighContrast)
                 // A theme whose day and night looks follow Windows' mode changes over like the dusk does (PanelThemes.LookAt).
                 || PanelTheme.FollowsWindowsMode(Settings) || Decks.Any(deck => deck is not null && deck.Profile is not null && deck.Look.FollowsWindowsMode(deck.PanelSettings)))
                 ApplyPanelTheme(systemChanged: true);
             // The theme page's "System" card shows the Windows mode whichever theme is chosen.
             else _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
+            foreach (var deck in Decks.ToList()) deck.UpdateGlassTheme();
         });
     }
     // Makes the chosen panel theme current (reading the theme folder again when asked) and repaints every panel if it changed.
@@ -337,11 +338,16 @@ public partial class App : Application
         // A panel that shows another profile has a look of its own, which changes on its own.
         var own = Decks.Where(deck => deck.UseLook(reload, systemChanged)).ToList();
         ScheduleDaylight();
-        if (!changed && own.Count == 0) return;
+        if (!changed && own.Count == 0)
+        {
+            if (systemChanged) _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
+            return;
+        }
         // Into or out of high contrast the theme itself has not changed, so the clock's gradient stays as the user left it.
         if (changed && systemChanged && !wasHigh && !PanelTheme.HighContrast && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
         foreach (var deck in Decks.ToList()) if (changed || own.Contains(deck)) deck.ApplySettings();
         if (changed && !reload) _settingsWindow?.PanelThemeChanged();
+        else if (systemChanged) _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
     }
     // A theme with a night look changes look at its hours (PanelThemes.LookAt): the timer is set for the next change, and at
     // most ten minutes ahead, so a clock changed by hand or a machine that slept past the hour catches up soon after. The switch
