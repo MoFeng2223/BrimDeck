@@ -399,14 +399,16 @@ internal sealed class WeatherView : UserControl
         {
             var text = new StackPanel();
             text.Children.Add(new TextBlock { Text = label, FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(143, 166, 192)) });
-            text.Children.Add(new TextBlock { Text = value, FontSize = 14, FontWeight = FontWeights.SemiBold, Foreground = Brushes.White, Margin = new Thickness(0, 2, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis });
+            // 来源色点放在数值左侧同一行（不是单独一行），悬停整行显示来源名。
+            var valueRow = new StackPanel { Orientation = Orientation.Horizontal };
             if (sourceId is { Length: > 0 })
             {
                 var color = SourceColor(sourceId);
-                var dot = new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(3.5), Background = new SolidColorBrush(color), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 4, 0, 0) };
-                System.Windows.Controls.ToolTipService.SetToolTip(dot, Loc.T($"来自 {SourceName(sourceId)}", $"From {SourceName(sourceId)}"));
-                text.Children.Add(dot);
+                valueRow.Children.Add(new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(3.5), Background = new SolidColorBrush(color), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 5, 1) });
+                System.Windows.Controls.ToolTipService.SetToolTip(valueRow, Loc.T($"来自 {SourceName(sourceId)}", $"From {SourceName(sourceId)}"));
             }
+            valueRow.Children.Add(new TextBlock { Text = value, FontSize = 14, FontWeight = FontWeights.SemiBold, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
+            text.Children.Add(valueRow);
             var cellBox = new Border { Background = new SolidColorBrush(Color.FromArgb(24, 255, 255, 255)), CornerRadius = new CornerRadius(10), Margin = new Thickness(3), Padding = new Thickness(10, 7, 10, 7), Child = text };
             if (sourceId is { Length: > 0 }) { var c = SourceColor(sourceId); cellBox.BorderBrush = new SolidColorBrush(Color.FromArgb(110, c.R, c.G, c.B)); } cellBox.BorderThickness = new Thickness(1, 1, 1, 0);
             metrics.Children.Add(cellBox);
