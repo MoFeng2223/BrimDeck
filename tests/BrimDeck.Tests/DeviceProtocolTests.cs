@@ -502,9 +502,35 @@ static class DeviceProtocolTests
             && Dongles.InphicBattery(inphic) == new BatteryRead(66, true) && Dongles.InphicBattery(With(inphic, 0x13, 1)) == new BatteryRead(66, true)
             && Dongles.InphicBattery(With(inphic, 0x13, 0)) == new BatteryRead(66) && Dongles.InphicBattery(With(inphic, 0x13, 3)) == new BatteryRead(66)
             && Dongles.InphicBattery(With(inphic, 6, 0)) is null && Dongles.InphicBattery(With(inphic, 0x12, 101)) is null);
-        check("Inphic: Machenike's mice on 248A:5B2E and 5B2F, read only on the 33-byte feature collection",
+        {
+            var m7 = With(With(inphic, 0x12, 100), 8, (byte)'M'); "M263"u8.ToArray().CopyTo(m7, 8);
+            check("Machenike's mice (model code M263, M230, M285): charging with no level (the firmware's 100 on the cable), full as 100, on battery as read; IN9 as before",
+                Dongles.InphicBattery(With(m7, 0x13, 1)) == new BatteryRead(null, true) && Dongles.InphicBattery(With(m7, 0x13, 2)) == new BatteryRead(100, true)
+                && Dongles.InphicBattery(With(With(m7, 0x13, 0), 0x12, 59)) == new BatteryRead(59)
+                && Dongles.InphicBattery(With(Coded(m7, "M909"), 0x13, 1)) == new BatteryRead(100, true)
+                && Dongles.InphicBattery(With(Coded(m7, "M230"), 0x13, 1)) == new BatteryRead(null, true)
+                && Dongles.InphicBattery(With(Coded(m7, "M285"), 0x13, 2)) == new BatteryRead(100, true));
+        }
+        static byte[] Coded(byte[] frame, string code) { var copy = (byte[])frame.Clone(); System.Text.Encoding.ASCII.GetBytes(code).CopyTo(copy, 8); return copy; }
+        check("Inphic: the mouse named by the model code at 8 to 11 (Machenike's M7 Pro, M720, M840, Inphic's IN9); another code or a short answer is no name",
+            Dongles.InphicModel(Coded(inphic, "M263")) == "Machenike M7 Pro" && Dongles.InphicModel(Coded(inphic, "M230")) == "Machenike M720"
+            && Dongles.InphicModel(Coded(inphic, "M285")) == "Machenike M840" && Dongles.InphicModel(Coded(inphic, "M909")) == "Inphic IN9"
+            && Dongles.InphicModel(Coded(inphic, "M264")) is null && Dongles.InphicModel(inphic) is null && Dongles.InphicModel(inphic[..11]) is null);
+        check("Inphic: Machenike's mice on 248A:5B2E and 5B2F, read on a feature collection of at least 33 bytes",
             Dongles.Find(0x248A, 0x5B2E, 0xFF00, "", 33) == Dongles.Protocol.Inphic && Dongles.Find(0x248A, 0x5B2F, 0xFF00, "", 33) == Dongles.Protocol.Inphic
             && Dongles.Find(0x248A, 0x5B2F, 0x0001, "", 0) is null);
+        {
+            var sent = new List<byte>(); int fetches = 0; byte next = 0;
+            var empty = new byte[33]; empty[0] = 0x0C; empty[2] = 0x20;
+            // The answer lands at the third fetch of the first round: fetched again, not given up.
+            var late = Dongles.InphicExchange(s => { sent.Add(s); return true; }, () => ++fetches < 3 ? empty : inphic, _ => { }, () => ++next);
+            int fetchesLate = fetches; sent.Clear(); fetches = 0;
+            // Never there: two rounds of four fetches, each round with a new sequence number.
+            var never = Dongles.InphicExchange(s => { sent.Add(s); return true; }, () => { fetches++; return empty; }, _ => { }, () => ++next);
+            check("Inphic: an answer not there yet is fetched again; with none, the request is sent once more with the next sequence number, then given up",
+                late?.Read == new BatteryRead(66, true) && late?.Reply == inphic && fetchesLate == 3 && never is null && fetches == 8 && sent.SequenceEqual(new byte[] { 2, 3 })
+                && Dongles.InphicExchange(_ => false, () => inphic, _ => { }, () => 1) is null);
+        }
         check("MCHOSE: the device info request with its checksum", Dongles.MchoseRequest()[..9].SequenceEqual(new byte[] { 0x4D, 0x01, 0x01, 0x00, 0x00, 0x09, 0x00, 0x00, 0x08 }));
         // mitsimi/mchose-tray's capture from a K7 V2 Ultra+ (3837:1014): 83 %, not charging, and that frame changed (its XOR
         // recomputed) for the other states.

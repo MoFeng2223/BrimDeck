@@ -918,14 +918,15 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         : Feature(info, claimed, "vaxee", "VAXEE", Dongles.VaxeeRequest(info.FeatureLength), 120, Dongles.VaxeeBattery);
 
     // Inphic IN9 and Machenike's mice on the same ids: the battery query alone (Dongles.InphicRequest), as Machenike's app sends it.
+    // A new sequence number for each request, as the official apps count it up (Dongles.InphicExchange).
+    private static int _inphicSequence;
     private static IEnumerable<DeviceBattery> Inphic(HidInfo info, HashSet<string> claimed)
     {
         using var device = new HidDevice(info);
-        if (!device.SetFeature(Dongles.InphicRequest(0x20, 1))) return [];
-        Thread.Sleep(10);
-        if (device.GetFeature(0x0C, 33) is not { } reply || Dongles.InphicBattery(reply) is not { } battery) return [];
+        if (Dongles.InphicExchange(sequence => device.SetFeature(Dongles.InphicRequest(0x20, sequence)), () => device.GetFeature(0x0C, 33), Thread.Sleep,
+            () => (byte)(Interlocked.Increment(ref _inphicSequence) % 255 + 1)) is not { } found) return [];
         claimed.Add(info.Path);
-        return [Mouse("inphic", info, "Inphic", battery)];
+        return [Mouse("inphic", info, "Inphic", found.Read, preferredName: Dongles.InphicModel(found.Reply))];
     }
 
     // ----- Brands read by whichever of their reads a device answers (DeviceReadBook) -----

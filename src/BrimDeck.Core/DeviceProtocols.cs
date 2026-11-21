@@ -1189,6 +1189,15 @@ public static class Dongles
     // InphicBatteryTray projects send a "handshake" 0C 01 F0 00 <seq> 01 01 FF before it, which neither says the read needs;
     // Machenike's app never sends F0, and on its firmware the same payload under command 0x0F is the factory reset (sent only
     // from its firmware-reset dialog). So only 0x20 is sent. Not measured by us on either brand.
+    // The exchange (InphicExchange) follows the official apps: a new sequence number for each request (InphicBatteryTray-IN9:
+    // the official app counts it up), and an answer that is not there yet (byte 6 still 0, the receiver still asking the mouse
+    // over the air) is fetched again rather than taken as no answer: Machenike's app sets the request again once, and
+    // InphicBatteryTray-IN9 says the official app tries up to two rounds. A Machenike M7 Pro on 248A:5B2F listed as unread
+    // with the single try and the fixed sequence number of before.
+    // The receiver's product string ("Wireless-Receiver") and ids are the same for every brand, so the mouse is named by the
+    // model code at 8 to 11 of the answer (InphicModels): Machenike's app checks its own model's code there ("M263" in the M7
+    // Pro's app, its PAW3104 and 3395 models alike, "M230" in the M720's, "M285" in the M840's), and InphicBatteryTray-IN9
+    // measured "M909" on an IN9. Another code leaves the product string as the name.
     public const int InphicVendor = 0x248A, InphicWireless = 0x249A;
     public static byte[] InphicRequest(byte command, byte sequence, params byte[] payload)
     {
@@ -1197,7 +1206,36 @@ public static class Dongles
         Array.Copy(payload, 0, frame, 5, Math.Min(payload.Length, frame.Length - 5));
         return frame;
     }
-    public static BatteryRead? InphicBattery(byte[] reply) => reply.Length >= 0x14 && reply[0] == 0x0C && reply[2] == 0x20 && reply[6] != 0 && reply[0x12] <= 100 ? new(reply[0x12], reply[0x13] is 1 or 2) : null;
+    // The reading and the answer it came in.
+    public static (BatteryRead Read, byte[] Reply)? InphicExchange(Func<byte, bool> send, Func<byte[]?> fetch, Action<int> sleep, Func<byte> sequence)
+    {
+        for (int round = 0; round < 2; round++)
+        {
+            if (!send(sequence())) return null;
+            for (int fetchCount = 0; fetchCount < 4; fetchCount++)
+            {
+                sleep(fetchCount == 0 ? 10 : 30);
+                if (fetch() is { } reply && InphicBattery(reply) is { } battery) return (battery, reply);
+            }
+        }
+        return null;
+    }
+    public static readonly IReadOnlyDictionary<string, string> InphicModels = new Dictionary<string, string>
+    {
+        ["M263"] = "Machenike M7 Pro", ["M230"] = "Machenike M720", ["M285"] = "Machenike M840", ["M909"] = "Inphic IN9",
+    };
+    public static string? InphicModel(byte[] reply)
+        => reply.Length >= 12 && InphicModels.TryGetValue(System.Text.Encoding.ASCII.GetString(reply, 8, 4), out var name) ? name : null;
+    // Machenike's mice (by their model code) as Machenike's app shows them: charging (1) with no level (the app hides it; an
+    // M7 Pro read 100 on the cable, 2026-11-22), full on the cable (2) as 100. Other brands' answers as before: the level as
+    // read, 1 or 2 on the cable.
+    public static BatteryRead? InphicBattery(byte[] reply)
+    {
+        if (reply.Length < 0x14 || reply[0] != 0x0C || reply[2] != 0x20 || reply[6] == 0 || reply[0x12] > 100) return null;
+        if (InphicModel(reply) is { } model && model.StartsWith("Machenike", StringComparison.Ordinal))
+            return reply[0x13] switch { 1 => new(null, true), 2 => new(100, true), _ => new(reply[0x12]) };
+        return new(reply[0x12], reply[0x13] is 1 or 2);
+    }
 
     // MCHOSE mice (VID 0x3837; usage page 0xFF01 or 0xFF0B; output report 0x4D, 64 bytes), from the vendor's web driver. Not
     // tested by us on a receiver. Realtek's 0x0BDA:0x4762 is not sent to: Realtek's id is on countless products and the pair is
