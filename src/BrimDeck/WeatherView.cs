@@ -391,6 +391,9 @@ internal sealed class WeatherView : UserControl
         Grid.SetColumn(close, 1); header.Children.Add(close);
         body.Children.Add(header);
 
+        // 天文卡放最前面：月相/太阳/晨昏蒙影三张卡，标题带来源色点（按字段级归源）。
+        AstronomyCards(body, s);
+
         // 当前多维读数：两行六列的小卡。来源只用色点表达（名字收进悬浮提示与图例），
         // 13 张卡各写一遍「和风天气」太吵；卡片描边也随来源着色，一眼分辨数据归属。
         var metrics = new UniformGrid { Columns = 6, Margin = new Thickness(-3, 0, -3, 0) };
@@ -644,21 +647,13 @@ internal sealed class WeatherView : UserControl
         // fieldPrefixes 非空时改从字段级来源取（天文等域混在 Daily 里，按实际字段归源才准确）。
         void Header(string text, string domain, params string[] fieldPrefixes)
         {
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(2, 16, 0, 8) };
-            row.Children.Add(new TextBlock { Text = text, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(dim), VerticalAlignment = VerticalAlignment.Center });
             List<string> ids;
             if (fieldPrefixes.Length > 0)
                 ids = s.FieldSources.Where(kv => kv.Value.Length > 0 && fieldPrefixes.Any(p => kv.Key.StartsWith(p, StringComparison.Ordinal))).Select(kv => kv.Value).Distinct().ToList();
             else if (s.DomainSources.TryGetValue(domain, out var declared))
                 ids = declared.Where(id => s.SourceProvided.TryGetValue(id, out var ok) && ok).ToList();
             else ids = [];
-            foreach (var id in ids)
-            {
-                var dot = new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(3.5), Background = new SolidColorBrush(SourceColor(id)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) };
-                System.Windows.Controls.ToolTipService.SetToolTip(dot, Loc.T($"来自 {SourceName(id)}", $"From {SourceName(id)}"));
-                row.Children.Add(dot);
-            }
-            body.Children.Add(row);
+            SectionHeader(body, text, ids);
         }
 
         // 1) 分钟降水：未来数小时的逐点降水条，按降水量映射高度；条色跟该域来源走，不再用固定蓝。
@@ -717,40 +712,70 @@ internal sealed class WeatherView : UserControl
             }
             body.Children.Add(grid);
         }
+    }
 
-        // 4) 天文：今天的全部天文时刻——月相月升月落、日出日落、三级晨昏蒙影、太阳正午/午夜、月过中天/月下点。
+    // 分区标题行（详情页共用）：标题右侧放该分区实际贡献来源的色点，名字收进悬浮提示，图例负责解释颜色。
+    private static void SectionHeader(StackPanel body, string text, IReadOnlyCollection<string> ids)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(2, 16, 0, 8) };
+        row.Children.Add(new TextBlock { Text = text, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(143, 166, 192)), VerticalAlignment = VerticalAlignment.Center });
+        foreach (var id in ids)
+        {
+            var dot = new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(3.5), Background = new SolidColorBrush(SourceColor(id)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) };
+            System.Windows.Controls.ToolTipService.SetToolTip(dot, Loc.T($"来自 {SourceName(id)}", $"From {SourceName(id)}"));
+            row.Children.Add(dot);
+        }
+        body.Children.Add(row);
+    }
+
+    // 天文卡：放在详情页最前面（标题行之下、读数卡之上）。三张卡——月相（升落/相位/过中天/下点）、
+    // 太阳（日出日落/正午午夜）、晨昏蒙影三级。数据随 Daily 域返回但扩展时刻仅和风提供，色点按字段级来源归。
+    private static void AstronomyCards(StackPanel body, WeatherSnapshot s)
+    {
+        Color dim = Color.FromRgb(143, 166, 192), ink = Color.FromRgb(226, 236, 248);
         int today = WeatherData.TodayIndex(s);
+        // 取当天 ISO 时刻的 HH:mm；数组缺省返回空串，对应项跳过。
+        string HHmm(string[] arr) => arr.Length > today && arr[today].Length >= 16 ? arr[today][11..16] : "";
         string moonrise = s.MoonriseTimes.Length > today && s.MoonriseTimes[today].Length >= 16 ? s.MoonriseTimes[today][11..16] : "--:--";
         string moonset = s.MoonsetTimes.Length > today && s.MoonsetTimes[today].Length >= 16 ? s.MoonsetTimes[today][11..16] : "--:--";
         string phase = s.DayMoonPhase.Length > today ? s.DayMoonPhase[today] : "";
-        // 取当天 ISO 时刻的 HH:mm；数组缺省返回空串，展示时跳过。
-        string HHmm(string[] arr) => arr.Length > today && arr[today].Length >= 16 ? arr[today][11..16] : "";
         string sunrise = HHmm(s.SunriseTimes), sunset = HHmm(s.SunsetTimes);
         bool hasAstro = moonrise != "--:--" || moonset != "--:--" || phase.Length > 0 || sunrise.Length > 0;
-        if (hasAstro)
+        if (!hasAstro) return;
+        var ids = s.FieldSources.Where(kv => kv.Value.Length > 0
+            && (kv.Key.StartsWith("d_sun:", StringComparison.Ordinal) || kv.Key.StartsWith("d_astro:", StringComparison.Ordinal) || kv.Key.StartsWith("d_moon:", StringComparison.Ordinal)))
+            .Select(kv => kv.Value).Distinct().ToList();
+        SectionHeader(body, Loc.T("天文", "Astronomy"), ids);
+        var cards = new List<(string Label, string Text)>();
+        // 月相卡：升落/相位/过中天/下点。
+        var moon = new List<string> { $"{Loc.T("月升", "Moonrise")} {moonrise} · {Loc.T("月落", "Moonset")} {moonset}" };
+        if (phase.Length > 0) moon.Add(phase);
+        string transit = HHmm(s.MoonTransitTimes), underfoot = HHmm(s.MoonUnderfootTimes);
+        if (transit.Length > 0) moon.Add($"{Loc.T("月过中天", "Transit")} {transit}");
+        if (underfoot.Length > 0) moon.Add($"{Loc.T("月下点", "Underfoot")} {underfoot}");
+        cards.Add((Loc.T("月相", "Moon"), string.Join(" · ", moon)));
+        // 太阳卡：日出日落 + 太阳正午/午夜（正午/午夜仅和风提供）。
+        var sun = new List<string> { $"{Loc.T("日出", "Sunrise")} {sunrise} · {Loc.T("日落", "Sunset")} {sunset}" };
+        string solarNoon = HHmm(s.SolarNoonTimes), solarMidnight = HHmm(s.SolarMidnightTimes);
+        if (solarNoon.Length > 0) sun.Add($"{Loc.T("太阳正午", "Solar noon")} {solarNoon}");
+        if (solarMidnight.Length > 0) sun.Add($"{Loc.T("太阳午夜", "Solar midnight")} {solarMidnight}");
+        cards.Add((Loc.T("太阳", "Sun"), string.Join(" · ", sun)));
+        // 晨昏蒙影三级卡：天光（天文）→ 航海 → 民用，由暗到亮；仅和风提供。
+        string civilDawn = HHmm(s.CivilDawnTimes), civilDusk = HHmm(s.CivilDuskTimes);
+        string nauticalDawn = HHmm(s.NauticalDawnTimes), nauticalDusk = HHmm(s.NauticalDuskTimes);
+        string astroDawn = HHmm(s.AstronomicalDawnTimes), astroDusk = HHmm(s.AstronomicalDuskTimes);
+        if (astroDawn.Length > 0 || nauticalDawn.Length > 0 || civilDawn.Length > 0)
+            cards.Add((Loc.T("晨昏蒙影", "Twilight"), $"{Loc.T("天光", "Astro")} {astroDawn}–{astroDusk} · {Loc.T("航海", "Nautical")} {nauticalDawn}–{nauticalDusk} · {Loc.T("民用", "Civil")} {civilDawn}–{civilDusk}"));
+        // 先收集再定列数：有的城市缺晨昏蒙影，避免 UniformGrid 留空列。
+        var grid = new UniformGrid { Columns = Math.Max(1, cards.Count), Margin = new Thickness(-1, 0, -1, 4) };
+        foreach (var (label, content) in cards)
         {
-            // 天文混在 Daily 域里，但晨昏蒙影/月过中天等扩展时刻只有和风提供，按实际字段归源。
-            Header(Loc.T("天文", "Astronomy"), "Daily", "d_sun:", "d_astro:", "d_moon:");
-            // 月相组：升落/相位/过中天/下点。
-            var moonParts = new List<string> { $"{Loc.T("月升", "Moonrise")} {moonrise} · {Loc.T("月落", "Moonset")} {moonset}" };
-            if (phase.Length > 0) moonParts.Add(phase);
-            string transit = HHmm(s.MoonTransitTimes), underfoot = HHmm(s.MoonUnderfootTimes);
-            if (transit.Length > 0) moonParts.Add($"{Loc.T("月过中天", "Transit")} {transit}");
-            if (underfoot.Length > 0) moonParts.Add($"{Loc.T("月下点", "Underfoot")} {underfoot}");
-            body.Children.Add(Pill(string.Join(" · ", moonParts), ink, 11));
-            // 太阳组：日出日落 + 太阳正午/午夜（正午/午夜仅和风提供）。
-            var sunParts = new List<string> { $"{Loc.T("日出", "Sunrise")} {sunrise} · {Loc.T("日落", "Sunset")} {sunset}" };
-            string solarNoon = HHmm(s.SolarNoonTimes), solarMidnight = HHmm(s.SolarMidnightTimes);
-            if (solarNoon.Length > 0) sunParts.Add($"{Loc.T("太阳正午", "Solar noon")} {solarNoon}");
-            if (solarMidnight.Length > 0) sunParts.Add($"{Loc.T("太阳午夜", "Solar midnight")} {solarMidnight}");
-            body.Children.Add(Pill(string.Join(" · ", sunParts), ink, 11));
-            // 晨昏蒙影三级：天光（天文）→ 航海 → 民用，由暗到亮；仅和风提供。
-            string civilDawn = HHmm(s.CivilDawnTimes), civilDusk = HHmm(s.CivilDuskTimes);
-            string nauticalDawn = HHmm(s.NauticalDawnTimes), nauticalDusk = HHmm(s.NauticalDuskTimes);
-            string astroDawn = HHmm(s.AstronomicalDawnTimes), astroDusk = HHmm(s.AstronomicalDuskTimes);
-            if (astroDawn.Length > 0 || nauticalDawn.Length > 0 || civilDawn.Length > 0)
-                body.Children.Add(Pill($"{Loc.T("天光", "Astro")} {astroDawn}–{astroDusk} · {Loc.T("航海", "Nautical")} {nauticalDawn}–{nauticalDusk} · {Loc.T("民用", "Civil")} {civilDawn}–{civilDusk}", dim, 10.5));
+            var stack = new StackPanel();
+            stack.Children.Add(new TextBlock { Text = label, FontSize = 10, Foreground = new SolidColorBrush(dim) });
+            stack.Children.Add(new TextBlock { Text = content, FontSize = 11, Foreground = new SolidColorBrush(ink), Margin = new Thickness(0, 3, 0, 0), TextWrapping = TextWrapping.Wrap });
+            grid.Children.Add(new Border { Child = stack, Background = new SolidColorBrush(Color.FromArgb(18, 255, 255, 255)), CornerRadius = new CornerRadius(8), Padding = new Thickness(9, 7, 9, 7), Margin = new Thickness(4) });
         }
+        body.Children.Add(grid);
     }
 
     private static TextBlock SectionLabel(string text) => new() { Text = text, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(143, 166, 192)), Margin = new Thickness(2, 16, 0, 8) };
