@@ -28,7 +28,7 @@ public partial class MainWindow
                     _musicControls = null; _musicFullControl = null; _musicSmtcHint = null; _musicControlButtons.Clear();
                     _musicSeek = null; _musicElapsed = null; _musicDuration = null; _musicEqualizer = null; _musicTitle = null; _musicMessage = null; _musicInfo = null;
                     _lyricCurrent = null; _lyricsAbove = []; _lyricsBelow = [];
-                    _musicRenderKey = ""; _musicSong = ""; _musicForm = ""; _musicCoverShown = null; _musicHadLyrics = false;
+                    _musicRenderKey = ""; _musicSong = null; _musicForm = ""; _musicCoverShown = null; _coverFadeAt = 0; _coverFadeUnder = null; _musicHadLyrics = false;
                     break;
                 case DeckPage.Monitor:
                     held |= _monitorView is not null;

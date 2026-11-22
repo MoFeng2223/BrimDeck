@@ -228,7 +228,7 @@ internal static class MusicTests
                 double titles = l.Metrics.TitleLine + (cols.ShowAlbum ? 2 : 1) * l.Metrics.ArtistLine + (cols.EqualizerBelow ? cols.EqualizerGap + l.Metrics.Equalizer : 0);
                 columnsOk &= cols.LyricLines >= 1 && lyricsHeight <= cols.Height + 1e-9 && titles <= cols.Height + 1e-9
                     && cols.InfoWidth + 2 * cols.DividerGap + 1 + cols.LyricsWidth == l.BodyWidth && cols.LyricsWidth > cols.InfoWidth
-                    && Math.Abs(cols.After - cols.Before) <= 1 && cols.Before <= cols.After && cols.CurrentLyric > l.Metrics.Lyric;
+                    && Math.Abs(cols.After - cols.Before) <= 1 && (cols.EqualizerBelow ? cols.Before <= cols.After : cols.Before >= cols.After) && cols.CurrentLyric > l.Metrics.Lyric;
             }
         }
         var wideColumns = MusicLayout.Calculate(1200, 400, true, true).Columns(true);
@@ -282,11 +282,32 @@ internal static class MusicTests
             {
                 var cols = MusicLayout.Calculate(760, height, true, true).Columns(true, withCover); int lines = cols.LyricLines;
                 if (withCover) counts.Add(lines);
-                int expected = (lines - 1) / 2;
+                int expected = lines % 2 == 1 || cols.EqualizerBelow ? (lines - 1) / 2 : lines / 2;
                 if (cols.Before != expected || cols.Before + 1 + cols.After != lines) linesFailures.Add($"{height} cover={withCover}: {cols.Before} before, {cols.After} after");
             }
-        check("Column layout: the current line sits high, with the extra line of an even count left for the lines after it" + (linesFailures.Count > 0 ? " (" + string.Join("; ", linesFailures.Take(4)) + ")" : ""),
+        check("Column layout: five lyric lines have the current one third, and six have it fourth beside the cover" + (linesFailures.Count > 0 ? " (" + string.Join("; ", linesFailures.Take(4)) + ")" : ""),
             linesFailures.Count == 0 && counts.Contains(5) && counts.Contains(6));
+        check("The extra line of an even count goes after the current one, and before it only beside the equalizer at the top right",
+            MusicLayout.LinesBefore(0) == 0 && MusicLayout.LinesBefore(1) == 0 && MusicLayout.LinesBefore(2) == 0 && MusicLayout.LinesBefore(3) == 1
+            && MusicLayout.LinesBefore(4) == 1 && MusicLayout.LinesBefore(2, nearBars: true) == 1 && MusicLayout.LinesBefore(4, nearBars: true) == 2
+            && MusicLayout.LinesBefore(3, nearBars: true) == 1);
+        // The type grows with the height in rounded steps, so a smaller line height could fit one more line into a slightly
+        // shorter panel: dragging it shorter went 3, 2, 3, 2 lines. Each count only falls as the panel gets shorter.
+        var rising = new List<string>();
+        foreach (double width in new[] { 440.0, 560, 760, 1000, 1200 })
+            foreach (bool timelineShown in new[] { true, false })
+            {
+                int stacked = int.MaxValue, columnLines = int.MaxValue;
+                for (double height = DeckPages.MaxHeight; height >= DeckPages.MinHeight; height -= .5)
+                {
+                    var l = MusicLayout.Calculate(width, height, true, timelineShown, lyricsExpected: true);
+                    int columnsNow = l.Columns(true).LyricLines;
+                    if (l.LyricLines > stacked || l.LyricRoom != l.LyricLines || columnsNow > columnLines)
+                        rising.Add($"{width}x{height} timeline={timelineShown}: stacked {l.LyricLines} after {stacked}, columns {columnsNow} after {columnLines}");
+                    stacked = l.LyricLines; columnLines = columnsNow;
+                }
+            }
+        check("Dragging the panel shorter never brings a lyric line back" + (rising.Count > 0 ? " (" + string.Join("; ", rising.Take(3)) + ")" : ""), rising.Count == 0);
         check("Column layout: without the cover nothing is kept for one", MusicLayout.Calculate(760, 300, true, true).Columns(true) is { Cover: 0, SideCover: 0 });
         check("The bottom margin below the transport equals the side margin", standard.Metrics.Bottom == standard.Metrics.Side && spacious.Metrics.Bottom == spacious.Metrics.Side);
         var failures = new List<string>(); double title = 0;

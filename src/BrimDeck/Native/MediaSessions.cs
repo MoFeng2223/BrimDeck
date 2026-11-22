@@ -382,12 +382,9 @@ internal sealed class MediaSessions : IDisposable
                     {
                         track = FromDesktop(native) with { Id = route.Id, Source = SourceName(route.ProcessName) };
                         var log = track;
-                        // NetEase's SMTC session reports the same song independently of the log. It is used only when the log
-                        // is on its song, has none, or has stopped reporting: a session that lags behind the log (or runs ahead
-                        // of it) would otherwise put a neighbouring song's title, artwork and lyrics on screen.
+                        // NetEase's SMTC session, when switched on, reports a skip before its log does; it leads and the log fills in.
                         var leading = route.Supplement && route.System?.Track is { } smtc && !string.IsNullOrWhiteSpace(smtc.Title) ? smtc : null;
-                        bool sessionLeads = MediaRouting.PreferSession(log, leading);
-                        if (sessionLeads) track = MediaRouting.PreferSystem(log, leading);
+                        if (leading is not null) track = MediaRouting.PreferSystem(log, leading);
                         else
                         {
                             // If the log format is unavailable, the system source owns metadata.
@@ -440,11 +437,11 @@ internal sealed class MediaSessions : IDisposable
                         if (neteaseId is not null && details is null && (string.IsNullOrWhiteSpace(track.Artist) || string.IsNullOrWhiteSpace(track.Album)
                             || native.Cover is null && (coverUrls.Length == 0 || cache.CoverFailed)))
                             _ = FetchDetailsAsync(neteaseId, track.SongId);
-                        // Artwork is only ever taken from the song on screen. The log's cover is the full-size album picture, used
-                        // once the log has reached the session's song; while the session leads with another song, only its own
-                        // thumbnail is used, and the previous song's cover is never shown in its place.
-                        if (leading is not null && sessionLeads)
-                            artwork = MediaRouting.LogMatchesSession(log, leading) && cache.Cover is { } logCover ? logCover : route.System!.Cover;
+                        // The log's cover is the full-size album picture, so it is used once the log has reached the session's song.
+                        // Until then the session's thumbnail stands in; while the session has none yet, the picture on screen stays
+                        // until it comes, and the page fades the new one in over it.
+                        if (leading is not null)
+                            artwork = MediaRouting.LogMatchesSession(log, leading) && cache.Cover is { } logCover ? logCover : route.System!.Cover ?? cache.Cover ?? cache.Previous;
                         else artwork = native.IsNeteaseLog && native.Title.Length == 0 ? route.System?.Cover : cache.Cover ?? cache.Previous;
                     }
                     else
@@ -766,10 +763,9 @@ internal sealed class MediaSessions : IDisposable
         CanShuffle = snapshot.CanShuffle, CanRepeat = snapshot.CanRepeat, Shuffle = snapshot.Shuffle == true, Repeat = snapshot.Repeat ?? MediaRepeat.None,
         CanLike = snapshot.CanLike, Liked = snapshot.CanLike && snapshot.Liked
     };
-    // The largest cover the music page draws is about 360 DIP (MusicLayout covers the upper part), so at 2x scaling the
-    // panel needs some 720 pixels; 320 is what the CDN returns in well under a second while staying sharp at the common
-    // scales. Asking for the panel's exact size would only trade a sharper picture for a later one.
-    private const int CoverPixels = 320;
+    // The size every cover is decoded at, and asked for from NetEase's image CDN. It also caps the artwork of the other
+    // players and of SMTC sessions, so it stays large enough for the music page's biggest cover at the common scales.
+    private const int CoverPixels = 512;
     private static readonly TimeSpan CoverAttempt = TimeSpan.FromSeconds(6);
     internal static BitmapSource? DecodeCover(byte[]? bytes)
     {

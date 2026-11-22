@@ -42,6 +42,10 @@ public partial class MainWindow
     // The track _lyrics were found for.
     private MediaTrack? _lyricsTrack;
     private CancellationTokenSource? _lyricsRequest;
+    // A new song's lyrics are being looked up and none are shown yet. The page keeps the lyric lines' room meanwhile, empty,
+    // instead of laying itself out without lyrics and back again once they are found (the column layout centred the titles
+    // across the whole width in between).
+    private bool _lyricsLoading;
     // Completed when Apple Music or KuGou writes a lyric file while the current song has none of its player's own.
     private TaskCompletionSource? _localLyricsWritten;
     private string _lyricsKey = "", _musicRenderKey = "", _compactLyric = "";
@@ -288,6 +292,8 @@ public partial class MainWindow
         if (changedSong)
         {
             _seeking = false; _seekTrack = null;
+            _albumExpected = track is not null && old?.Id == track.Id && (old.Album.Length > 0 || _albumExpected);
+            _songChangedAt = now; RenderMusicAfter(AlbumWait); RenderMusicAfter(LyricsWait);
             // A notice still on screen switches to the new title instead of giving way to the summary until playback starts.
             if (_mediaTrack is not null && Settings.MusicTrackNotice && notice) _trackNotice.Arm(now); else _trackNotice.Disarm();
         }
@@ -298,6 +304,25 @@ public partial class MainWindow
         // Native lyric events must update compact text even while playback is paused.
         UpdateMusicPosition();
         UpdateMusicTimer();
+    }
+    // When the song on screen changed: its timed lyrics wait for its timeline only for a while (LyricsAwaitTimeline), and the
+    // column layout keeps the album's line only for a while (AlbumPending).
+    private DateTimeOffset _songChangedAt;
+    private static readonly TimeSpan LyricsWait = MusicTimelineHold.PendingHold, AlbumWait = TimeSpan.FromSeconds(3);
+    // The player named the album of its previous song: the new song's album, missing at first, is likely on its way. NetEase's
+    // session leads a skip without one, and the log brings it a moment later (MediaRouting.PreferSystem). A player that names
+    // no album keeps nothing for it.
+    private bool _albumExpected;
+    // The column layout keeps the album's line, empty, while the album is on its way, rather than laying the titles out without
+    // it and moving them when it comes. An album that has not come within AlbumWait is not waited for any longer.
+    private bool AlbumPending(MediaTrack track) => _albumExpected && track.Album.Length == 0 && DateTimeOffset.UtcNow - _songChangedAt < AlbumWait;
+    // No update reports that a wait is over, so the page is laid out again then: with the lyrics whole if the timeline never
+    // came, without the album's line if the album never came. A render that changes nothing returns at once (_musicRenderKey).
+    private void RenderMusicAfter(TimeSpan delay)
+    {
+        var timer = new DispatcherTimer(DispatcherPriority.Normal, Dispatcher) { Interval = delay + TimeSpan.FromMilliseconds(50) };
+        timer.Tick += (_, _) => { timer.Stop(); if (IsMusicPage) RenderMusic(); };
+        timer.Start();
     }
     private void ScheduleTimelineHoldEnd(DateTimeOffset now)
     {
@@ -333,8 +358,9 @@ public partial class MainWindow
         // A player announces a song in a few updates (its title, then its length or its song ID), each of which looks the lyrics
         // up again. Lyrics found for the same song stay shown until the next ones are found: cleared, the lyrics of KuGou's own
         // file, found at once, went and came back.
+        _lyricsLoading = false;
         if (key.Length == 0 || requested is null || _lyricsTrack is not { } shown || shown.Id != requested.Id || !SameMediaSong(shown, requested))
-        { _lyrics = Lyrics.Empty; _lyricsTrack = null; _compactLyric = ""; _musicRenderKey = ""; }
+        { _lyrics = Lyrics.Empty; _lyricsTrack = null; _compactLyric = ""; _musicRenderKey = ""; _lyricsLoading = key.Length > 0; }
         if (key.Length == 0 || requested is null) return;
         if (!requested.IsQqMusic && !string.IsNullOrWhiteSpace(requested.EmbeddedLyrics))
         { ShowLyrics(Lyrics.Parse(requested.EmbeddedLyrics, null, requested.Duration.TotalSeconds, requested.Source), requested); return; }
@@ -359,13 +385,15 @@ public partial class MainWindow
         }
         catch (OperationCanceledException) { }
         catch (Exception) { /* Lyrics are optional; provider failures keep the no-lyrics layout. */ }
+        // A lookup that ended without showing anything (it failed) leaves the room kept for the lyrics.
+        if (_lyricsKey == key && _lyricsLoading) { _lyricsLoading = false; _musicRenderKey = ""; if (IsMusicPage) RenderMusic(); }
     }
     // Timed lyrics in place of timed lyrics (found again, or the player's own in place of a provider's) change only the lines
     // shown, as the song plays; the page and the collapsed row are built again only when the lyrics take another form.
     private void ShowLyrics(Lyrics lyrics, MediaTrack track)
     {
-        bool sameForm = ReferenceEquals(lyrics, _lyrics) || LyricsForm(lyrics).Equals(LyricsForm(_lyrics)) && lyrics.Synced && lyrics.Lines.Count > 0;
-        _lyrics = lyrics; _lyricsTrack = track;
+        bool sameForm = !_lyricsLoading && (ReferenceEquals(lyrics, _lyrics) || LyricsForm(lyrics).Equals(LyricsForm(_lyrics)) && lyrics.Synced && lyrics.Lines.Count > 0);
+        _lyrics = lyrics; _lyricsTrack = track; _lyricsLoading = false;
         if (sameForm) { UpdateMusicPosition(); return; }
         _musicRenderKey = "";
         if (IsMusicPage) RenderMusic(); RenderCompact();
@@ -457,10 +485,37 @@ public partial class MainWindow
     internal static string SmtcHintHow => Loc.T("位置：网易云音乐 › 设置 › 系统 › 开启 SMTC", "Where: NetEase Cloud Music › 设置 › 系统 › 开启 SMTC");
     // The song and the form (PageHandover) the media page was last built with: a new song swaps in, a new form (the lyric lines
     // the room holds, the title merged with the artist, the message or the entry shown) morphs in, as when a drag crosses a size step.
-    private string _musicSong = "", _musicForm = "";
+    private MediaTrack? _musicSong;
+    private string _musicForm = "";
     private bool _musicHadLyrics;
     private long _songArrived;
     private BitmapSource? _musicCoverShown;
+    // A new cover fades in over the picture it replaces, which stays under it until the fade ends (null: there was none, or
+    // the cover was cleared, and the whole cover fades in). The page is rebuilt several times while a song arrives (its
+    // timeline, its lyrics); each rebuild continues the fade from where it is rather than cutting it short.
+    private long _coverFadeAt;
+    private BitmapSource? _coverFadeUnder;
+    private bool CoverFading => Animates && _coverFadeAt != 0 && Environment.TickCount64 - _coverFadeAt < Soft.Move;
+    private BitmapSource? CoverUnder => CoverFading ? _coverFadeUnder : null;
+    // A cover that comes while one still fades in (the session's thumbnail, then the log's picture of the same song) takes
+    // the place of the fading one: the picture under it and the timing stay, so it does not start over from the old song.
+    // A cleared cover starts a fade of its own, without the old picture under it, which would otherwise stay on screen.
+    private void StartCoverFade(BitmapSource? from, BitmapSource? to)
+    {
+        if (CoverFading && to is not null) return;
+        _coverFadeAt = Environment.TickCount64; _coverFadeUnder = to is null ? null : from;
+    }
+    private void FadeCover(Border art)
+    {
+        if (!CoverFading) return;
+        double done = Math.Clamp((Environment.TickCount64 - _coverFadeAt) / (double)Soft.Move, 0, 1);
+        var fade = Soft.Fade(Curves.Follow(done), 1, (int)Math.Max(1, Soft.Move * (1 - done)), Soft.Follow);
+        fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
+        // Over the previous picture only the new one fades in (MusicVisuals.Cover puts it in Tag), and the previous one is
+        // taken away once it has, so it does not show through a cover with transparent parts.
+        fade.Completed += (_, _) => MusicVisuals.DropUnder(art);
+        (art.Tag as UIElement ?? art).BeginAnimation(OpacityProperty, fade);
+    }
     // The titles of a new song rise into place. A rebuild during the change continues it from where it is.
     private void RiseIn(FrameworkElement titles)
     {
@@ -487,7 +542,8 @@ public partial class MainWindow
         { UpdateMusicPosition(); return; }
         bool playerLyrics = track?.IsQqMusic == true && _lyrics.Lines.Count == 0 && !_lyrics.Instrumental;
         bool hasPlayerLyric = playerLyrics && Settings.LyricsEnabled && !string.IsNullOrWhiteSpace(track?.CurrentLyric) && track?.State != MediaState.Stopped;
-        bool hasLyrics = playerLyrics ? hasPlayerLyric : (_lyrics.Lines.Count > 0 || _lyrics.Instrumental) && Settings.LyricsEnabled;
+        bool lyricsLoading = _lyricsLoading && !playerLyrics && Settings.LyricsEnabled;
+        bool hasLyrics = playerLyrics ? hasPlayerLyric : (_lyrics.Lines.Count > 0 || _lyrics.Instrumental || lyricsLoading) && Settings.LyricsEnabled;
         bool logMode = track?.IsNeteaseLog == true;
         bool appleEntry = track is { IsAppleMusic: true } && _media?.AppleMusicFullControl == false;
         bool kugouEntry = track is { IsKugou: true } && (_media?.CanEnableKugouFullControl == true || _media?.RestartingKugou == true);
@@ -511,32 +567,34 @@ public partial class MainWindow
         bool bare = !Settings.MusicPageCover && !Settings.LyricsEnabled;
         bool splitLyrics = Settings.MusicLyricsLayout == MusicLyricsLayout.Columns && !bare;
         bool lyricColumn = splitLyrics && (hasLyrics || message.Length > 0);
-        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{LyricsForm(_lyrics).GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.MusicLyricsLayout}|{Settings.MusicLyricsAlign}|{Settings.EqualizerColor}|{Settings.EqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{Settings.MusicEqualizerBars}|{Settings.UiFont}|{Loc.Language}|{animate}";
+        bool albumPending = (splitLyrics || bare) && track is not null && AlbumPending(track);
+        string key = $"{track?.Id}|{albumPending}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{LyricsForm(_lyrics).GetHashCode()}|{lyricsLoading}|{(track is null ? false : LyricsAwaitTimeline(track))}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.MusicLyricsLayout}|{Settings.MusicLyricsAlign}|{Settings.EqualizerColor}|{Settings.EqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{Settings.MusicEqualizerBars}|{Settings.UiFont}|{Loc.Language}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
         _musicRenderKey = key;
-        string song = track is null ? "" : $"{track.Id}|{track.SongKey}|{track.Title}|{track.Artist}";
         // Lyrics that arrive after the song, or come and go with the player's line, only fade in their own lines (lyricsArrive):
         // the form counts the lyric lines the room holds, not whether lyrics are there.
-        string form = $"{track is null}|{layout.LyricRoom}|{layout.MergeTitle}|{layout.ShowFullControl}|{layout.ShowMessage}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.MusicLyricsLayout}|{lyricColumn}|{showSmtcHint}|{timeline}";
-        bool lyricsArrive = shown && hasLyrics && !_musicHadLyrics && Animates;
-        _musicHadLyrics = hasLyrics;
+        // The stacked layout's lyric room is part of its form; the column layout lays its lines out on its own (Columns) and does
+        // not morph when the stacked room changes.
+        string form = $"{track is null}|{(splitLyrics || bare ? -1 : layout.LyricRoom)}|{layout.MergeTitle}|{layout.ShowFullControl}|{layout.ShowMessage}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.MusicLyricsLayout}|{lyricColumn}|{showSmtcHint}|{timeline}|{albumPending}";
+        // The empty lines kept while the lyrics load are not lyrics: the found ones fade in into them.
+        bool lyricsShown = hasLyrics && !lyricsLoading;
+        bool lyricsArrive = shown && lyricsShown && !_musicHadLyrics && Animates;
+        _musicHadLyrics = lyricsShown;
         // A new song changes the titles and perhaps the cover; the rest of the page is the same and stays still. The titles
         // rise into place (RiseIn) and a new cover fades in. A player announces a song in a few updates (title, artist, and a
         // timeline that may go and come back); the first starts the change and the rest carry it on instead of starting it
         // again, and a form that changes during it is taken at once rather than morphed twice.
-        bool newCover = shown && !ReferenceEquals(_mediaCover, _musicCoverShown);
-        // The picture already on screen stays under the new one while it fades in, so the rebuild does not blink through
-        // the placeholder first. Only an animated change keeps it, and only while there is a new picture to cover it: a
-        // cover that was cleared (the download failed) must fall back to the placeholder instead of keeping the old one,
-        // which would otherwise stay for good once the fade is over.
-        var coverUnder = newCover && animate && _mediaCover is not null ? _musicCoverShown : null;
+        if (shown && animate && !ReferenceEquals(_mediaCover, _musicCoverShown)) StartCoverFade(_musicCoverShown, _mediaCover);
         _musicCoverShown = _mediaCover;
-        if (shown && song != _musicSong && Environment.TickCount64 - _songArrived >= Soft.Move) _songArrived = Environment.TickCount64;
+        // The same song filled in later (its album, its full artist list, its id, its length) is not a new song: its titles do not
+        // rise again.
+        bool newSong = track is not null && (_musicSong is not { } before || before.Id != track.Id || !SameMediaSong(before, track));
+        if (shown && newSong && Environment.TickCount64 - _songArrived >= Soft.Move) _songArrived = Environment.TickCount64;
         long sinceSong = Environment.TickCount64 - _songArrived;
         bool songChanging = sinceSong < Soft.Move;
         // A slow player may bring the timeline back a little after the move: the form is not morphed for twice its length.
         var motion = shown && form != _musicForm && sinceSong >= 2 * Soft.Move ? Handover.Morph : Handover.None;
-        _musicSong = song; _musicForm = form;
+        _musicSong = track; _musicForm = form;
         // Transport buttons that stay glide to their new places. While the panel is dragged they follow it frame by frame like
         // the rest of the page, and glide only when its form changes.
         bool glide = shown && animate && (!Resizing || motion != Handover.None);
@@ -558,8 +616,8 @@ public partial class MainWindow
             MusicContent.Children.Add(empty); _handover.Release(empty, motion); return;
         }
         var body = new Grid();
-        bool synchronized = playerLyrics || _lyrics.CanSynchronize(track);
-        if (splitLyrics || bare) MusicColumns(body, layout, track, lyricColumn, hasLyrics, synchronized, playerLyrics, message, shown && songChanging, lyricsArrive, coverUnder);
+        bool synchronized = playerLyrics || _lyrics.CanSynchronize(track) || LyricsAwaitTimeline(track) || lyricsLoading;
+        if (splitLyrics || bare) MusicColumns(body, layout, track, lyricColumn, hasLyrics, synchronized, playerLyrics, message, shown && songChanging, lyricsArrive);
         else
         {
             // Without the cover the titles' column can sit against the page's left edge or be centred (MusicLyricsAlign).
@@ -569,19 +627,14 @@ public partial class MainWindow
             upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Settings.MusicPageCover ? c.Gap : 0) });
             upper.ColumnDefinitions.Add(new ColumnDefinition());
             body.Children.Add(upper);
-            var art = MusicVisuals.Cover(_mediaCover, layout.Cover, layout.CoverRadius, outlined: true, look: Look, under: coverUnder);
+            var art = MusicVisuals.Cover(_mediaCover, layout.Cover, layout.CoverRadius, outlined: true, look: Look, under: CoverUnder);
             art.Visibility = Settings.MusicPageCover ? Visibility.Visible : Visibility.Collapsed;
             art.RenderTransformOrigin = new Point(.5, .5); art.RenderTransform = _musicCoverScale;
             Soft.Glide(_musicCoverScale, ScaleTransform.ScaleXProperty, track.State == MediaState.Paused ? .94 : 1, animate, Soft.Move);
             Soft.Glide(_musicCoverScale, ScaleTransform.ScaleYProperty, track.State == MediaState.Paused ? .94 : 1, animate, Soft.Move);
             AutomationProperties.SetName(art, Loc.T("专辑封面", "Album cover")); upper.Children.Add(art);
             AttachCoverFocus(art);
-            if (newCover && animate)
-            {
-                // Over the previous picture only the new one fades in; without one the whole cover fades in from the placeholder.
-                var fade = Soft.Fade(0, 1, Soft.Move, Soft.Follow); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
-                (art.Tag as UIElement ?? art).BeginAnimation(OpacityProperty, fade);
-            }
+            FadeCover(art);
             var right = new Grid(); Grid.SetColumn(right, 2); upper.Children.Add(right);
             int lyricLines = playerLyrics ? Math.Min(1, layout.LyricLines) : layout.LyricLines;
             // With the lyrics switched off no line comes under the titles, so they stand at the middle of the upper part's height
@@ -627,8 +680,9 @@ public partial class MainWindow
             if (hasLyrics && lyricLines > 0 && synchronized)
             {
                 // As many lines as the room under the titles holds, not just the current one and its neighbours: the lines
-                // above are filled from the bottom and the lines below from the top, as in the column layout.
-                int above = Math.Max(0, lyricLines - 1) / 2, below = lyricLines - 1 - above;
+                // above are filled from the bottom and the lines below from the top. The equalizer is not beside them, so the
+                // extra line of an even count goes after the current one.
+                int above = MusicLayout.LinesBefore(lyricLines), below = lyricLines - 1 - above;
                 var lyrics = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
                 TextBlock Dim() { var dim = UI.Fixed("", c.Lyric, c.LyricLine, Look.Tertiary); dim.TextAlignment = centered ? TextAlignment.Center : TextAlignment.Left; lyrics.Children.Add(dim); return dim; }
                 _lyricsAbove = [.. Enumerable.Range(0, above).Select(_ => Dim())];
@@ -871,7 +925,7 @@ public partial class MainWindow
     // (or at the right, read from the left). The page with neither the cover nor the lyrics is drawn here too, as the titles
     // alone.
     private void MusicColumns(Grid body, MusicLayout layout, MediaTrack track, bool lyricColumn, bool hasLyrics, bool synchronized, bool playerLyrics,
-        string message, bool rise, bool lyricsArrive, BitmapSource? coverUnder)
+        string message, bool rise, bool lyricsArrive)
     {
         var c = layout.Metrics;
         var columns = layout.Columns(lyricColumn, Settings.MusicPageCover);
@@ -888,17 +942,13 @@ public partial class MainWindow
         var info = new StackPanel { Width = columns.InfoWidth, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
         FrameworkElement Art(double size, bool over)
         {
-            var art = MusicVisuals.Cover(_mediaCover, size, layout.CoverRadius, outlined: true, look: Look, under: coverUnder);
+            var art = MusicVisuals.Cover(_mediaCover, size, layout.CoverRadius, outlined: true, look: Look, under: CoverUnder);
             art.HorizontalAlignment = over ? HorizontalAlignment.Center : HorizontalAlignment.Left;
             art.VerticalAlignment = over ? VerticalAlignment.Top : VerticalAlignment.Center;
             if (over) art.Margin = new Thickness(0, 0, 0, c.MiddleGap);
             AutomationProperties.SetName(art, Loc.T("专辑封面", "Album cover"));
             AttachCoverFocus(art);
-            if (coverUnder is not null && Animates)
-            {
-                var fade = Soft.Fade(0, 1, Soft.Move, Soft.Follow); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
-                (art.Tag as UIElement ?? art).BeginAnimation(OpacityProperty, fade);
-            }
+            FadeCover(art);
             return art;
         }
         if (coverAbove) info.Children.Add(Art(artSize, over: true));
@@ -906,9 +956,12 @@ public partial class MainWindow
         // from the left.
         var titles = new StackPanel();
         var title = PageTitle(track, c, center: !beside, merge: false); titles.Children.Add(title);
-        var details = (columns.ShowAlbum ? new[] { (Text: track.Artist, Color: Look.Secondary), (Text: track.Album, Color: Look.Tertiary) }
-            : [(Text: string.Join(" · ", new[] { track.Artist, track.Album }.Where(text => text.Length > 0)), Color: Look.Secondary)]).Where(detail => detail.Text.Length > 0).ToList();
-        foreach (var (text, color) in details)
+        // An album on its way keeps its line, empty (AlbumPending), so the titles do not move when it comes.
+        bool keepAlbum = columns.ShowAlbum && AlbumPending(track);
+        var details = (columns.ShowAlbum ? new[] { (Text: track.Artist, Color: Look.Secondary, Keep: false), (Text: track.Album, Color: Look.Tertiary, Keep: keepAlbum) }
+            : [(Text: string.Join(" · ", new[] { track.Artist, track.Album }.Where(text => text.Length > 0)), Color: Look.Secondary, Keep: false)])
+            .Where(detail => detail.Text.Length > 0 || detail.Keep).ToList();
+        foreach (var (text, color, _) in details)
         {
             var line = UI.Fixed(text, c.Artist, c.ArtistLine, color); line.TextAlignment = beside ? TextAlignment.Left : TextAlignment.Center;
             ShowCutText(line, text); titles.Children.Add(line);
@@ -1123,7 +1176,8 @@ public partial class MainWindow
         // How far the current line is sung (Karaoke): the lyric area lights each character up as it is sung, sweeping through
         // them, in the open page's line and in the collapsed row's middle text.
         var (words, sweep) = _lyrics.Karaoke(track, DateTimeOffset.UtcNow, _lyricHold, Settings.MusicSimulatedKaraoke);
-        if (page && _lyricCurrent is not null) { _lyricCurrent.Text = line.Current; _lyricCurrent.Karaoke(words, Animated(sweep)); }
+        if (page && _lyricCurrent is not null)
+        { _lyricCurrent.Text = LyricsAwaitTimeline(track) ? CurrentLyricWindow(track, 0, 0).Current : line.Current; _lyricCurrent.Karaoke(words, Animated(sweep)); }
         if (page && _lyricsAbove.Length + _lyricsBelow.Length > 0)
         {
             // The lines above are filled from the bottom, so the line just sung stays next to the current one.
@@ -1224,10 +1278,24 @@ public partial class MainWindow
     // The collapsed lyric: the line, or the title without one, and for an instrumental when chosen (DeckSettings.MusicInstrumentalTitle).
     private string CompactLyricText(MediaTrack track, string line)
         => line.Length == 0 || Settings.MusicInstrumentalTitle && _lyrics.Instrumental ? track.Caption : line;
+    // Right after a song change the player has not said yet where the new song is: it says so (TimelinePending), or its timeline
+    // went away with the previous song and the page still keeps the bar's room for it (MusicTimelineHold), in any player and
+    // with or without full control. Timed lyrics are then shown on the page from the song's start, laid out as timed lyrics,
+    // rather than whole from the top until the timeline comes and then laid out again with the first line in the middle. A
+    // timeline that has not come once the hold ends, or at most LyricsWait after the song changed, may never come (or the
+    // player keeps saying it will): the lyrics are then shown whole, the first line at the top. The collapsed row keeps the
+    // title meanwhile.
+    private bool LyricsAwaitTimeline(MediaTrack track)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return !track.HasTimeline && (track.TimelinePending || _timelineHold.Holds(now)) && now - _songChangedAt < LyricsWait
+            && _lyrics.Synced && _lyrics.Lines.Count > 0;
+    }
     private LyricWindow CurrentLyricWindow(MediaTrack track, int before, int after)
     {
         if (!NeedsLyrics || track.State == MediaState.Stopped) return LyricWindow.Empty;
         if (track.IsQqMusic && _lyrics.Lines.Count == 0 && !_lyrics.Instrumental) return LyricWindow.Only(track.CurrentLyric ?? "");
+        if (LyricsAwaitTimeline(track)) return _lyrics.Around(0, before, after);
         return _lyrics.Around(track, DateTimeOffset.UtcNow, before, after, _lyricHold);
     }
     // The color taken from the playing song's cover; null without one, or when the cover gave no color.
