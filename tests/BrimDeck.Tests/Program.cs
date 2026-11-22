@@ -30,6 +30,8 @@ try
     SeedPricingTests.Run(root, Check);
     ModelUsageTests.Run(Check);
     await NoticeProtocolTests.Run(Check);
+    NoticeMomentsTests.Run(Check);
+    NoticeAgendaTests.Run(Check);
     AuditWslTests.Run(Check);
     await AuditWsl2Tests.Run(Check);
     await NoticeWslOpsTests.Run(Check);
@@ -170,6 +172,7 @@ try
     await CursorUsageTests.Run(root, Check);
     await CursorPricesTests.Run(root, Check);
     PointerMotionTests.Run(Check);
+    AgendaTests.Run(root, Check);
     var priceTime = DateTimeOffset.UtcNow;
     const string catalogJson = """
         {"data":[

@@ -491,8 +491,8 @@ internal static class NoticeCoreTests
         var settings = new DeckSettings { NoticesPage = false };
         check("The notices page is hidden while its switch is off", !DeckPages.Shown(settings, DeckPage.Notices) && DeckPages.Resolve(settings, DeckPage.Notices) == DeckPage.Usage);
         settings.NoticesPage = true;
-        check("The notices page shows once its switch is on, last in the switch", DeckPages.Visible(settings).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Clipboard, DeckPage.Devices, DeckPage.Notices]));
-        settings.UsagePage = false; settings.MusicPage = false; settings.MonitorPage = false; settings.ClipboardPage = false; settings.DevicesPage = false;
+        check("The notices page shows once its switch is on, last in the switch", DeckPages.Visible(settings).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Clipboard, DeckPage.Devices, DeckPage.Notices, DeckPage.Agenda]));
+        settings.UsagePage = false; settings.MusicPage = false; settings.MonitorPage = false; settings.ClipboardPage = false; settings.DevicesPage = false; settings.AgendaPage = false;
         check("With only the notices page it is the one shown", DeckPages.Resolve(settings, DeckPage.Usage) == DeckPage.Notices && DeckPages.Largest(settings) == (settings.NoticesWidth, settings.NoticesHeight));
         check("The notices page opens by choice", DeckPages.Opening(DefaultDeckPage.Notices) == DeckPage.Notices && DeckPages.Opening(DefaultDeckPage.Last) is null);
         check("The notices page is saved as number 5, after the devices page; as the opening page, 7, after the part under the pointer", (int)DeckPage.Devices == 4 && (int)DeckPage.Notices == 5 && (int)DefaultDeckPage.Notices == 7);

@@ -45,6 +45,7 @@ public partial class MainWindow
         if (_noticesSubscribed || _app.Notices is null) return;
         _noticesSubscribed = true;
         _app.Notices.Changed += NoticesChanged;
+        SubscribeAgenda();
         _app.Notices.Icons.Loaded += NoticeIconLoaded;
         PrepareNoticeWindow();
     }
@@ -67,6 +68,7 @@ public partial class MainWindow
     {
         if (_noticesSubscribed) { _app.Notices.Changed -= NoticesChanged; _app.Notices.Icons.Loaded -= NoticeIconLoaded; }
         _noticesSubscribed = false;
+        UnsubscribeAgenda();
         if (_app.Notices is not null) { _liveRows.Clear(); WatchPageLive(); }
         _noticeWindow?.Close(); _noticeWindow = null;
         _bootNotice?.Stop(); _noticeAfterBoot = null;
@@ -359,6 +361,7 @@ public partial class MainWindow
     private bool UpdateNoticeRows()
     {
         var center = _app.Notices;
+        if (NoticeFormKeepsPage(center)) return true;
         if (_pageKey != NoticePageKey(center)) return false;
         var listed = Listed(center);
         if (_noticeBatches is { Pending: true } batches)
@@ -456,7 +459,7 @@ public partial class MainWindow
         fresh |= NoticesContent.Visibility != Visibility.Visible;
         SubscribeNotices();
         RefreshStatus();
-        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Visible;
+        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; AgendaContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         ApplyPageHeader(PanelHeader.ForPanel(ContentCanvas.Height));
         double offset = fresh ? 0 : _pageScroll?.VerticalOffset ?? 0;
@@ -471,6 +474,7 @@ public partial class MainWindow
         var now = DateTimeOffset.UtcNow;
         _pageKey = NoticePageKey(center); _noticeLayout = NoticeLayout();
         var focus = FocusedNotice(center);
+        KeepNoticeForm(focus);
         _focusKey = FocusKey(focus, now);
         if (focus is null) { NoticesContent.Children.Add(_pageEmpty = Empty(center)); WatchPageLive(); return; }
         // The columns share the width by proportion, but the list never gets less than ListMinimum: at the narrowest page (440) the
@@ -496,7 +500,7 @@ public partial class MainWindow
 
     // What the focus column shows apart from what RowKey covers: its relative time and its live words.
     private string FocusKey(Notice? notice, DateTimeOffset now) => notice is null ? "" : string.Join('\u0001', notice.Id, notice.Revision, NoticeText.Relative(notice.ReceivedAt, now),
-        notice.Progress, NoticeClock.IsLive(notice.Timing, now), _app.Notices.CanOpen(notice));
+        notice.Progress, NoticeClock.IsLive(notice.Timing, now), _app.Notices.CanOpen(notice), AgendaKey(notice));
 
     // ----- The focus column -----
 
@@ -558,12 +562,16 @@ public partial class MainWindow
         title.TextTrimming = TextTrimming.CharacterEllipsis; title.Margin = new Thickness(0, 2, 0, 0);
         if (shown.HasCode && notice.Title.Length > 0) AutomationProperties.SetName(title, shown.SpokenTitle);
         who.Children.Add(title);
-        string context = notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? NoticeText.CategoryName(notice.Category) : Loc.T("来源已关闭这条通知", "Closed at the source");
+        string context = NoticeFormOpen(notice) && NoticeText.Summary(shown.Body) is { Length: > 0 } summary ? summary : notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? NoticeText.CategoryName(notice.Category) : Loc.T("来源已关闭这条通知", "Closed at the source");
         if (context.Length > 0) { var ctx = UI.Fixed(context, 12, 17, UI.Tertiary); ctx.TextTrimming = TextTrimming.CharacterEllipsis; ctx.Margin = new Thickness(0, 2, 0, 0); who.Children.Add(ctx); }
 
         // The buttons, at the foot of the column.
         var buttons = FocusButtons(notice, center);
         DockPanel.SetDock(buttons, System.Windows.Controls.Dock.Bottom); stack.Children.Add(buttons);
+        // The form adding the notice to the planner, or changing what it added, takes the place of the strip and the words.
+        if (NoticeFormFor(notice, meta, hero) is { } form) { stack.Children.Add(form); return column; }
+        // Above them, what BrimDeck read from the notice: a time to add to the planner, what was added, a verification code.
+        if (NoticeAgendaStrip(notice) is { } strip) { DockPanel.SetDock(strip, System.Windows.Controls.Dock.Bottom); stack.Children.Add(strip); }
 
         // The words, scrolling within the column when they are long; the other messages of the same conversation under them.
         var words = new StackPanel { Margin = new Thickness(0, 0, 0, WordsFadeHeight) };
@@ -658,6 +666,7 @@ public partial class MainWindow
             copyAll = GlyphPill("", copyName, () => SayCopied(copyAll!, CopyWords(text), copyName));
             flow.Add(copyAll);
         }
+        if (NoticeTodoButton(notice) is { } todo) flow.Add(todo);
         // The notice's own buttons that can still do something (NoticeCenter.Buttons): one that answers its sender while the sender
         // waits, one that copies or opens always. The sender's main button is the page's main one when no application can be opened.
         var own = center.Buttons(notice);
@@ -670,14 +679,6 @@ public partial class MainWindow
         }
         foreach (var action in center.TimeActions(notice).Take(2))
             flow.Add(PillButton(action.Label, action.Label, () => { center.TimeAction(notice, action.Key); RenderNotices(); }));
-        // Only a click puts the code on the clipboard; the name says what the button does, never the code.
-        if (NoticeCodes.Words(notice, Settings.NoticeCodes).Hit is { } code)
-        {
-            string copyLabel = Loc.T("复制验证码", "Copy code");
-            Button? copy = null;
-            copy = PillButton(copyLabel, copyLabel, () => CopyCode(copy!, code.CopyText, copyLabel));
-            flow.Add(copy);
-        }
         if (center.CanOpen(notice))
         {
             string open = OpenLabel(notice);
@@ -947,6 +948,7 @@ public partial class MainWindow
             : notice.Category == NoticeCategory.Warning ? (NoticeText.CategoryName(notice.Category), WaitColor) : ("", "");
         if (status.Length > 0) second.Inlines.Add(new System.Windows.Documents.Run(status + " · ") { Foreground = UI.Brush(color) });
         if (NoticeClock.Live(notice.Timing, now, TimeZoneInfo.Local) is { } live) second.Inlines.Add(new System.Windows.Documents.Run(live + " · ") { Foreground = UI.Brush(UI.Accent) });
+        AddNoticeAgendaMark(second, notice, now);
         second.Inlines.Add(new System.Windows.Documents.Run(preview));
         IslandNotice.Directed(second);
         if (codeWords.HasCode && notice.Body.Length > 0) AutomationProperties.SetName(second, (status.Length > 0 ? status + ", " : "") + NoticeText.Summary(codeWords.SpokenBody));
@@ -989,7 +991,7 @@ public partial class MainWindow
     // Everything a row shows.
     private string RowKey(Notice notice, DateTimeOffset now)
         => string.Join('\u0001', Settings.NoticeCodes, notice.Title, notice.Body, notice.AppName, notice.IconRef, notice.Picture, notice.SourcePresent, notice.Category, notice.Call,
-            NoticeClock.Live(notice.Timing, now, TimeZoneInfo.Local), NoticeText.Relative(notice.ReceivedAt, now), ConversationOf(notice));
+            NoticeClock.Live(notice.Timing, now, TimeZoneInfo.Local), NoticeText.Relative(notice.ReceivedAt, now), ConversationOf(notice), NoticeAgendaRowKey(notice, now));
 
     // The notice whose row last had the keyboard focus, to keep it there when the page is built again.
     private string? _focusedNotice;

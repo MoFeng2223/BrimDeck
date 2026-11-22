@@ -42,7 +42,7 @@ public partial class MainWindow
     // which RefreshStatus runs before ApplyHeader, would otherwise leave it at the size tier left behind until the next refresh.
     private void FitPageButtons(PanelHeader header)
     {
-        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton, NoticesPageButton }) button.Height = header.ButtonHeight;
+        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton, NoticesPageButton, AgendaPageButton }) button.Height = header.ButtonHeight;
         PageCapsule.Height = header.ButtonHeight;
     }
     // The buttons stand in the order chosen in the settings; the first has no gap before it.
@@ -57,5 +57,29 @@ public partial class MainWindow
         }
         for (int i = 0; i < order.Count; i++) order[i].Margin = new Thickness(i == 0 ? 0 : 1, 0, 0, 0);
     }
-    private Button PageButton(DeckPage page) => page switch { DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, DeckPage.Clipboard => ShelfPageButton, DeckPage.Devices => DevicesPageButton, DeckPage.Notices => NoticesPageButton, _ => AIUsageButton };
+    // The clock stands in the middle of the panel. Where the page switch would reach it (seven pages on the narrowest panels), it
+    // stands in the middle of the room between the switch and the settings button instead.
+    private void PlaceClock()
+    {
+        double width = ContentCanvas.Width;
+        if (!double.IsFinite(width)) return;
+        double clock = ClockLabel.Text.Length > 0 ? TextWidth(ClockLabel.Text, 12, FontWeights.Normal) : 34;
+        double? left = ClockLeft(width, clock);
+        ClockLabel.HorizontalAlignment = left is null ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+        ClockLabel.Margin = new Thickness(left ?? 0, 0, 0, 0);
+    }
+    // The clock's left edge when it cannot stand in the middle; null when it can.
+    private double? ClockLeft(double width, double clock)
+    {
+        int pages = DeckPages.Visible(Settings).Count;
+        if (pages == 0 || PageSwitch.Visibility != Visibility.Visible) return null;
+        const double gap = 8;
+        double switchRight = _header.Side + 2 * PanelHeader.SwitchPadding + pages * 28 + (pages - 1);
+        if ((width - clock) / 2 >= switchRight + gap) return null;
+        double gear = width - _header.RightMargin - PanelHeader.SettingsWidth;
+        return Math.Round(switchRight + Math.Max(0, (gear - switchRight - clock) / 2));
+    }
+    // Where the clock ends on the right, wherever it stands.
+    private double ClockRight(double width, double clock) => ClockLeft(width, clock) is { } left ? left + clock : (width + clock) / 2;
+    private Button PageButton(DeckPage page) => page switch { DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, DeckPage.Clipboard => ShelfPageButton, DeckPage.Devices => DevicesPageButton, DeckPage.Notices => NoticesPageButton, DeckPage.Agenda => AgendaPageButton, _ => AIUsageButton };
 }

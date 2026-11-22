@@ -49,11 +49,12 @@ public partial class MainWindow
 
     // The details replace the page switch and the clock with their own header.
     internal bool ShelfHidesSwitch => _shelfDetail is not null;
-    // The panel stays open while a menu of the page is open, while the user types in it, and while files are dragged over it.
+    // The panel stays open while a menu of the page is open, while the user types in it, and while files are dragged over it; the
+    // planner page's typing and months hold it the same way (AgendaHolds).
     // Typing needs the foreground. Window.IsActive is false when Deactivated runs, but WPF clears the keyboard focus only on
     // WM_KILLFOCUS, which can come later: the search box still held it there and kept the panel open after a press elsewhere.
     internal bool ShelfHolds => _shelfMenu?.IsOpen == true || _shelfEdit is not null || _dropping || _draggingOut || _shareDrag is not null || _banding
-        || IsActive && _searchBox?.IsKeyboardFocusWithin == true;
+        || IsActive && _searchBox?.IsKeyboardFocusWithin == true || AgendaHolds;
     private ShelfData ShelfData => _app.Shelf.Data;
 
     private void InitializeShelf()
@@ -171,7 +172,7 @@ public partial class MainWindow
     private void RenderShelf(bool lazy = false)
     {
         RefreshStatus();
-        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Collapsed;
+        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; AgendaContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Collapsed;
         ShelfContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed;
         double width = ContentCanvas.Width, height = ContentCanvas.Height;
