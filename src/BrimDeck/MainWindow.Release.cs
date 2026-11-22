@@ -47,7 +47,7 @@ public partial class MainWindow
                 case DeckPage.Notices:
                     held |= _pageRows.Count > 0 || _pageEmpty is not null;
                     _noticeBatches?.Cancel(); _noticeBatches = null;
-                    _waitingPlates.Clear(); _liveRows.Clear(); _pageRows.Clear(); _pageEmpty = null; _pageScroll = null; _pageKey = ""; _noticeLayout = default;
+                    _waitingPlates.Clear(); _focusGlow = null; _liveRows.Clear(); _pageRows.Clear(); _pageEmpty = null; _pageScroll = null; _pageKey = ""; _noticeLayout = default;
                     break;
             }
             released |= held;

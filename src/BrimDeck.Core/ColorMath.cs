@@ -26,6 +26,38 @@ public static class ColorMath
 
     public static string ToHex(byte r, byte g, byte b) => $"#{r:X2}{g:X2}{b:X2}";
 
+    // The main color of a picture given as BGRA pixels: the hue that its colored pixels share most, as the mean of those pixels.
+    // An average of every pixel mixed the colors of a many-colored picture into a muddy one, and gave a gray picture a hue it does
+    // not have. Null when too little of the picture is colored (a white, gray or black icon, a transparent one).
+    public static (byte R, byte G, byte B)? Dominant(ReadOnlySpan<byte> bgra)
+    {
+        const int Bins = 24;
+        Span<double> weight = stackalloc double[Bins], red = stackalloc double[Bins], green = stackalloc double[Bins], blue = stackalloc double[Bins];
+        int opaque = 0, colored = 0;
+        for (int i = 0; i + 3 < bgra.Length; i += 4)
+        {
+            if (bgra[i + 3] < 128) continue;
+            opaque++;
+            var (h, s, v) = ToHsv(bgra[i + 2], bgra[i + 1], bgra[i]);
+            if (s < .25 || v < .25) continue;
+            colored++;
+            int bin = (int)(h / (360d / Bins)) % Bins;
+            double w = s * v;
+            weight[bin] += w; red[bin] += bgra[i + 2] * w; green[bin] += bgra[i + 1] * w; blue[bin] += bgra[i] * w;
+        }
+        if (opaque == 0 || colored < Math.Max(3, opaque * .08)) return null;
+        // The hue with the most weight together with its two neighbors, so that a color split across a bin's edge is one color.
+        int best = 0; double most = -1;
+        for (int b = 0; b < Bins; b++)
+        {
+            double sum = weight[(b + Bins - 1) % Bins] + weight[b] + weight[(b + 1) % Bins];
+            if (sum > most) { most = sum; best = b; }
+        }
+        double r = 0, g = 0, bl = 0, total = 0;
+        foreach (int b in new[] { (best + Bins - 1) % Bins, best, (best + 1) % Bins }) { r += red[b]; g += green[b]; bl += blue[b]; total += weight[b]; }
+        return ((byte)Math.Round(r / total), (byte)Math.Round(g / total), (byte)Math.Round(bl / total));
+    }
+
     // How far apart two #RRGGBB colors are, as the straight distance between them in RGB (0 to about 441).
     public static double Distance(string first, string second)
     {
