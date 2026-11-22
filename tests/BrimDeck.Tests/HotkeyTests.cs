@@ -58,6 +58,24 @@ internal static class HotkeyTests
             && Normalized(new DeckSettings { Style = CompactStyle.Line, ShapeStyle = CompactStyle.Capsule }).ShapeStyle == CompactStyle.Capsule
             && Normalized(new DeckSettings { Style = CompactStyle.Line, ShapeStyle = CompactStyle.Line }).ShapeStyle == CompactStyle.Notch
             && Normalized(new DeckSettings { Style = CompactStyle.Line }).ShapeStyle == CompactStyle.Notch);
+        // life-T2: the notices hotkey yields to the earlier ones, hide and expand among them.
+        check("The notices hotkey yields to the hide and expand hotkeys",
+            Plan(HotkeyKind.Notices, Key, (HotkeyKind.Hide, "Ctrl+Alt+K"), (HotkeyKind.Notices, "Ctrl+Alt+K")) == (HotkeyStatus.Duplicate, "Ctrl+Alt+K")
+            && Plan(HotkeyKind.Notices, Key, (HotkeyKind.Expand, "Ctrl+Alt+J"), (HotkeyKind.Notices, "Ctrl+Alt+J")) == (HotkeyStatus.Duplicate, "Ctrl+Alt+J")
+            && Plan(HotkeyKind.Notices, Key, (HotkeyKind.Hide, "Ctrl+Alt+K"), (HotkeyKind.Expand, "Ctrl+Alt+J"), (HotkeyKind.Notices, "alt+ctrl+K")) == (HotkeyStatus.Duplicate, "Ctrl+Alt+K")
+            && Plan(HotkeyKind.Notices, Key, (HotkeyKind.Hide, "Ctrl+Alt+K"), (HotkeyKind.Expand, "Ctrl+Alt+J"), (HotkeyKind.Notices, "Ctrl+Alt+N")) == (null, "Ctrl+Alt+N"));
+        check("When the hide, expand and notices hotkeys match, only the hide hotkey registers",
+            Plan(HotkeyKind.Hide, Key, (HotkeyKind.Hide, "Ctrl+Alt+K"), (HotkeyKind.Expand, "Ctrl+Alt+K"), (HotkeyKind.Notices, "Ctrl+Alt+K")) == (null, "Ctrl+Alt+K")
+            && Plan(HotkeyKind.Expand, Key, (HotkeyKind.Hide, "Ctrl+Alt+K"), (HotkeyKind.Expand, "Ctrl+Alt+K"), (HotkeyKind.Notices, "Ctrl+Alt+K")) == (HotkeyStatus.Duplicate, "Ctrl+Alt+K")
+            && Plan(HotkeyKind.Notices, Key, (HotkeyKind.Hide, "Ctrl+Alt+K"), (HotkeyKind.Expand, "Ctrl+Alt+K"), (HotkeyKind.Notices, "Ctrl+Alt+K")) == (HotkeyStatus.Duplicate, "Ctrl+Alt+K"));
+        check("The notices hotkey is unset or invalid on its own, and an invalid earlier hotkey does not take its combination",
+            Plan(HotkeyKind.Notices, Key, (HotkeyKind.Hide, "Ctrl+Alt+K"), (HotkeyKind.Notices, "")).Status == HotkeyStatus.Unset
+            && Plan(HotkeyKind.Notices, Key, (HotkeyKind.Hide, "Ctrl+Alt+K"), (HotkeyKind.Notices, null!)).Status == HotkeyStatus.Unset
+            && Plan(HotkeyKind.Notices, Key, (HotkeyKind.Notices, "Ctrl+5")).Status == HotkeyStatus.Invalid
+            && Plan(HotkeyKind.Notices, Key, (HotkeyKind.Hide, "Ctrl+5"), (HotkeyKind.Expand, "Ctrl+"), (HotkeyKind.Notices, "Ctrl+Alt+N")) == (null, "Ctrl+Alt+N")
+            && Plan(HotkeyKind.Expand, Key, (HotkeyKind.Hide, "Ctrl+Alt+K"), (HotkeyKind.Expand, "Ctrl+Alt+J"), (HotkeyKind.Notices, "Ctrl+Alt+J")) == (null, "Ctrl+Alt+J"));
+        // The audit group "win" keeps its tests in their own file; they run from here so that Program.cs stays untouched.
+        AuditWinTests.Run(check);
     }
 
     private static DeckSettings Normalized(DeckSettings settings) { settings.Normalize(); return settings; }

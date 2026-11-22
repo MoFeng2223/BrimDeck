@@ -11,7 +11,8 @@ namespace BrimDeck;
 // The global shortcuts, on a page of their own (HotkeysPage). Each is recorded by clicking its box and pressing the combination; leaving
 // the box cancels, and only the cross inside the box clears it. An arrow shortcut's row (resize, move) reads "Alt + [box] + arrow
 // keys": Alt and the arrows are fixed, so its box records only the other modifiers. While a box records, the app's registered
-// shortcuts are suspended so pressing the current combination records it instead of acting on the panel.
+// shortcuts are suspended so pressing the current combination records it instead of acting on the panel. The notices shortcut is
+// on the dynamic notices page instead (NoticesSettingsPage), shown with the rest of that page while notices are on.
 public sealed partial class SettingsWindow
 {
     // Stops the box that is recording, if any; only one records at a time.
@@ -53,6 +54,7 @@ public sealed partial class SettingsWindow
         HotkeyKind.CycleStyle => Loc.T("切换刘海、胶囊或指示条", "Switch notch, capsule or bar"),
         HotkeyKind.LineStyle => Loc.T("切换指示条与刘海或胶囊", "Switch between bar and notch or capsule"),
         HotkeyKind.NextProfile => Loc.T("切换到下一个配置", "Switch to the next profile"),
+        HotkeyKind.Notices => Loc.T("通知快捷键", "Notices shortcut"),
         _ => Loc.T($"展开/收起第 {PagePlace(kind) + 1} 个页面", $"Expand/collapse page {PagePlace(kind) + 1}")
     };
 
@@ -70,6 +72,8 @@ public sealed partial class SettingsWindow
         HotkeyKind.CycleStyle => Loc.T("按刘海、胶囊、指示条的顺序循环切换收起样式。", "Cycles the collapsed style: notch, capsule, bar."),
         HotkeyKind.LineStyle => Loc.T("刘海或胶囊切换为指示条，再按一次切换回原来的样式。", "Turns the notch or capsule into the bar; press again to turn it back."),
         HotkeyKind.NextProfile => Loc.T("按“显示器与配置”页的列表顺序，切换到下一个配置。", "Switches to the next profile, in the order of the Displays and profiles page."),
+        HotkeyKind.Notices => Loc.T("有提示时打开它的详情并可用键盘操作（Tab 切换、Enter 确认、Esc 关闭）；没有提示时打开通知历史。默认不设置，避免与其他程序冲突。",
+            "With a notice on screen, opens its details for the keyboard (Tab to move, Enter to choose, Esc to close); otherwise opens the notice history. Unset by default, to avoid clashing with other programs."),
         _ => null
     };
 
@@ -90,9 +94,10 @@ public sealed partial class SettingsWindow
             : Loc.T("请按下组合键…", "Press a combination…");
         string Saved() => S.Hotkey(kind);
         // The other shortcuts, with the names a clash message gives them. The arrow shortcuts yield to the single combinations
-        // (HotkeyText.Priority), so only an arrow row speaks of a clash with those.
+        // (HotkeyText.Priority), so only an arrow row speaks of a clash with those. The notices one counts only while notices are on,
+        // as only then is it registered (App.ApplyHotkeys) and its row shown to clear it.
         IEnumerable<(string Text, string Name)> Others() => Enum.GetValues<HotkeyKind>()
-            .Where(other => other != kind && (arrows || !HotkeyText.IsArrows(other)))
+            .Where(other => other != kind && (arrows || !HotkeyText.IsArrows(other)) && (other != HotkeyKind.Notices || S.NoticesEnabled))
             .Select(other => (S.Hotkey(other), HotkeyName(other)));
 
         // The box keeps one size and place in every state: the text on the left, trimmed before the clear button, which

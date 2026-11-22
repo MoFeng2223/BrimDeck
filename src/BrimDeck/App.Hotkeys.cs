@@ -36,9 +36,10 @@ public partial class App
 
     // Registers the hotkeys saved in the settings. Unchanged texts that are already active are left alone; any other one is
     // tried again, so a combination another program has since released becomes active on the next save.
+    // The notices hotkey is registered only while dynamic notices are on.
     public void ApplyHotkeys()
     {
-        var texts = Enum.GetValues<HotkeyKind>().ToDictionary(kind => kind, Settings.Hotkey);
+        var texts = Enum.GetValues<HotkeyKind>().ToDictionary(kind => kind, kind => kind == HotkeyKind.Notices && !Settings.NoticesEnabled ? "" : Settings.Hotkey(kind));
         bool unchanged = texts.All(pair => _hotkeyTexts.TryGetValue(pair.Key, out var text) && text == pair.Value)
             && _hotkeyStatus.Values.All(status => status is HotkeyStatus.Active or HotkeyStatus.Unset);
         _hotkeyTexts = texts;
@@ -144,6 +145,14 @@ public partial class App
         target.OpenFromHotkey(page);
     }
 
+    // A notice on screen opens its details for the keyboard; otherwise the panel under the pointer opens on the notice history.
+    private void NoticesFromHotkey()
+    {
+        if (!Settings.NoticesEnabled) return;
+        foreach (var deck in Decks) if (deck.NoticeKeyboard()) return;
+        DeckUnderPointer().OpenNoticesPage();
+    }
+
     // Resizes the open panel, or the collapsed surface on the monitor under the pointer (KeyboardResize).
     public void ResizeFromHotkey(int arrow)
     {
@@ -209,6 +218,7 @@ public partial class App
             case HotkeyKind.CycleStyle: CycleCompactStyle(); break;
             case HotkeyKind.LineStyle: ToggleLineStyle(); break;
             case HotkeyKind.NextProfile: NextProfile(); break;
+            case HotkeyKind.Notices: NoticesFromHotkey(); break;
         }
     }
 }

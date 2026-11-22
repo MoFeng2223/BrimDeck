@@ -150,6 +150,12 @@ For how to use it and its settings, see [Clipboard and file transfer](docs/en-US
 - **Scale**: The panel can be drawn at 100% or 150% for high-resolution displays.
 - **Resource use**: Saver, Balanced and Smooth (Settings › General › Startup and resources).
 
+### Live notices
+
+- When a notification arrives, the notch, capsule or indicator grows out of its place with the application's icon, title and summary; hover for the details, open the application or use the notice's buttons, and it returns to its shape. Notices take the panel theme.
+- Receives Windows app notifications, desktop notifications in WSL (off by default, per distribution) and notices sent with `brim-notify`, such as `brim-notify run -- dotnet test`, which reports the result when the command ends.
+- Never takes the focus or interrupts the open panel; nothing pops up while locked, in full screen, in a focus session or presenting, with one summary afterwards; notice history is kept encrypted on this PC for 24 hours, which can be switched off. Off by default; see [Live notices](docs/en-US/notices.md).
+
 ## Install
 
 Requires Windows 11 (x64). Windows 10 (version 2004 or later) has limited support.

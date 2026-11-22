@@ -29,6 +29,8 @@ public partial class App : Application
     public DoubaoQuotaAccount DoubaoQuota { get; private set; } = null!;
     public Pricing Prices { get; private set; } = null!;
     public AppUpdates Updates { get; internal set; } = null!;
+    // Dynamic notices (NoticeCenter): created before the panels, which take their turns on the island through it.
+    internal NoticeCenter Notices { get; private set; } = null!;
     // The main panel. It owns the tray icon, reads the usage data and takes the settings preview; every other chosen
     // monitor gets a panel that shows the same data.
     public MainWindow Deck { get; private set; } = null!;
@@ -137,6 +139,7 @@ public partial class App : Application
         Lyrics = new LyricsService(appleLyricsFile: Path.Combine(folder, "apple-music-lyrics.json"), kugouLyricFolder: LyricsService.KugouLyricFolder);
         Usage = new UsageService(new DesktopSources(MiMo, DoubaoQuota), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
             kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName), cursorPriceCache: Path.Combine(folder, CursorPrices.FileName));
+        Notices = new NoticeCenter(this);
         // A source read in the background (Qoder) that ended after its round asks for another round to show it; the first reading
         // of a source always does, a later one only while the panel syncs by itself.
         Usage.BackgroundReadFinished += first => Dispatcher.BeginInvoke(() =>
@@ -153,6 +156,7 @@ public partial class App : Application
         // From here each step is on its own (Step): the app keeps running after an error at the start, and one step failing
         // used to skip every later one, which left a panel with no tray icon, no saving and no answer to a second start.
         Step(Deck.Show);
+        Step(Notices.ApplySettings);
         Step(InitializeHotkeys);
         Step(() => _dataKey = DataKey());
         Step(ApplyProfileRules);
@@ -238,8 +242,14 @@ public partial class App : Application
     // Adds or removes the tray icon to match the settings.
     private void ApplyTray()
     {
-        if (Settings.ShowTrayIcon && _tray is null) _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden, ToggleClickThrough, () => Settings.ClickThrough,
-            () => Settings.Profiles.Count < 2 ? [] : Settings.Profiles.Select(profile => (Profiles.Name(profile), profile.Id == Settings.CurrentProfile, (Action)(() => ChooseProfile(profile.Id)))).ToList());
+        if (Settings.ShowTrayIcon && _tray is null)
+            _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden, ToggleClickThrough, () => Settings.ClickThrough,
+                () => Settings.Profiles.Count < 2 ? [] : Settings.Profiles.Select(profile => (Profiles.Name(profile), profile.Id == Settings.CurrentProfile, (Action)(() => ChooseProfile(profile.Id)))).ToList())
+            {
+                NoticeEntry = () => !Settings.NoticesEnabled ? null
+                    : Notices.Paused ? (Loc.T("恢复通知提醒", "Resume notices"), () => Notices.Pause(null))
+                    : (Loc.T("暂停通知提醒 1 小时", "Pause notices for 1 hour"), () => Notices.Pause(TimeSpan.FromHours(1)))
+            };
         else if (!Settings.ShowTrayIcon && _tray is not null) { _tray.Dispose(); _tray = null; }
     }
     // The panel ends a collapsed preview when the pointer reaches it. The settings window clears its own preview state; the
@@ -320,6 +330,7 @@ public partial class App : Application
         // A panel whose collapsed row changes asks again as it is built (PresentMonitor).
         UpdateMonitorExtras();
         ApplyToDecks(styles);
+        Notices.ApplySettings();
         var dataKey = DataKey(); bool dataChanged = dataKey != _dataKey; _dataKey = dataKey;
         QueueSave();
         CollapsedChanged();
@@ -670,7 +681,7 @@ public partial class App : Application
     public void ExitApplication()
     {
         if (Exiting) return;
-        Exiting = true; Lifetime.Cancel(); _settingsWindow?.RememberSize(); FlushSettings();
+        Exiting = true; Lifetime.Cancel(); _settingsWindow?.RememberSize(); FlushSettings(); Notices?.Flush();
         _settingsWindow?.Hide();
         var decks = Decks.ToList();
         int waiting = decks.Count;
@@ -688,7 +699,8 @@ public partial class App : Application
     }
     protected override void OnExit(ExitEventArgs e)
     {
-        Exiting = true; Lifetime.Cancel(); _save.Stop(); _trim?.Stop(); _release?.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        // The notices save their last state before the settings are written for the last time.
+        Exiting = true; Lifetime.Cancel(); Notices?.Dispose(); _save.Stop(); _trim?.Stop(); _release?.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
         ClipboardSync?.Dispose(); DropHelper?.Dispose();
         if (Shelf is not null) { Shelf.Exit(); Shelf.Dispose(); }
         Media?.Dispose(); _restingMedia?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Devices?.Dispose(); DeviceReadStore.Finish();

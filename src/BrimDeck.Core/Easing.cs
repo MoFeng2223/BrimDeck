@@ -161,4 +161,5 @@ public static class Curves
             return Bounce(x) - 1;
         }
     }
+
 }

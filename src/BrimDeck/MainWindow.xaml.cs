@@ -10,6 +10,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using BrimDeck.Core;
+using BrimDeck.Core.Notices;
 using BrimDeck.Native;
 
 namespace BrimDeck;
@@ -174,17 +175,15 @@ public partial class MainWindow : Window
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); else if (OffPeakChanged()) RenderCompact(); if (_lead is null) _app.CheckUpdatesIfDue(); };
         _seconds.Tick += (_, _) => { if (_compactClock is not null) _compactClock.Time = DateTime.Now; _seconds.Interval = SecondDelay(DateTime.Now); };
         _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false); };
-        // A new foreground context closes the panel directly (ApplySettings lays it out collapsed), so SetExpanded never sees the
-        // panel turn from open to closed: what follows a closing is done here (PanelClosed), as SetExpanded does.
+        // An open panel closes as a closing, after the new context is laid out, so the notices' coordinator and the hotkey hear
+        // of it (DeckExpanded, HotkeyPanelCollapsed) and what follows a closing is done (PanelClosed); clearing _expanded first
+        // made it a relayout in place.
         _host.ContextChanged += context =>
         {
             _context = context;
-            if (_expanded && !_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true && !ShelfHolds)
-            {
-                _expanded = false;
-                PanelClosed();
-            }
+            bool close = !_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true && !ShelfHolds;
             ApplySettings(true);
+            if (close && _expanded) SetExpanded(false);
         };
         // The app under the same context changed. Only the app rules' answer can differ, so only a changed answer is
         // re-applied: collapsed, the shape crosses to it with the same animation a context change uses; expanded, it is
@@ -205,6 +204,8 @@ public partial class MainWindow : Window
         Closed += (_, _) => WatchOutsidePress(false);
         // Esc also leaves move mode (MainWindow.Move.cs).
         SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this, Settings.WindowCapture); _escapeDismissal = new EscapeDismissal(this, () => { if (_moveArmed) CancelMove(); else if (!ShelfEscape()) SetExpanded(false, keyboard: true); }); };
+        // The user went to another window while a hotkey had given the panel the keyboard (MainWindow.Hotkeys.cs).
+        Deactivated += (_, _) => ReleaseKeyboard(giveBack: false);
         Loaded += async (_, _) =>
         {
             // Each step on its own (App.Step): an error in one used to end the handler there, and a panel that never came to
@@ -215,6 +216,7 @@ public partial class MainWindow : Window
             _app.Step(ApplySettings);
             _app.Step(Boot);
             _trackPointer = true; UpdatePointerTracking();
+            SubscribeNotices();
             ScheduleClock(); _clock.Start(); StartMusic();
             if (_lead is null) { _app.AssignDisplays(); RestoreLastSeen(); await RefreshAutomaticallyAsync(); }
         };
@@ -251,6 +253,7 @@ public partial class MainWindow : Window
             return IntPtr.Zero;
         });
         Closed += (_, _) => DisposeMusic();
+        Closed += (_, _) => CloseNotices();
     }
 
     private readonly TaskbarMirror _taskbarMirror;
@@ -413,6 +416,7 @@ public partial class MainWindow : Window
         ApplySurface();
         // A panel holding the keyboard stays one that can be active, whatever the setting (PanelKeyboard).
         WindowsHost.SetCapturable(this, Settings.WindowCapture || PanelKeys.Holding);
+        if (_noticeWindow is not null) WindowsHost.SetCapturable(_noticeWindow, Settings.WindowCapture);
         // Made ordinary, at startup too, the panel goes beneath the window in use like a closed one; so does an ordinary panel
         // whose indicator is no longer called for.
         if (Topmost != KeepsAbove) { Topmost = KeepsAbove; if (!Topmost && !_expanded) _host.Front(false); }
@@ -463,6 +467,10 @@ public partial class MainWindow : Window
         if (IsSuppressed)
         {
             _hover.Stop(); _leave.Stop(); _pointerInside = false;
+            // Nothing briefly shows on a hidden panel; what shows ends now, and arriving notices wait in the recent notices.
+            _app.Notices?.DeckHidden(this);
+            // Hiding is immediate, so the notice window goes at once too, rather than playing its return over a full-screen app.
+            _noticeWindow?.Vanish();
             // A boot cut short here never reaches its own reset: the dot's lift and squash would hold their last frame and
             // squash the whole surface once it shows again (without a boot).
             ++_boot; _bootWaiting = false; _bootEnds = 0; _bootDot = false;
@@ -483,6 +491,7 @@ public partial class MainWindow : Window
         }
         UpdatePointerTracking();
         RenderUsage();
+        NoticesLayoutChanged();
         CheckMoveOvertaken();
         ReportMoveShape();
     }
@@ -596,6 +605,7 @@ public partial class MainWindow : Window
         if (Collapsed.Surface.X < _windowOffset || Collapsed.Surface.X + Collapsed.Surface.Width > _windowOffset + FrameWidth || Collapsed.Surface.Bottom + 24 > FrameHeight) { ApplySettings(); return; }
         _contentResize = true;
         try { SetExpanded(false, _edgeArriving); } finally { _contentResize = false; }
+        _noticeWindow?.IslandChanged();
     }
     // SetExpanded runs for FitCompactToContent: the surface at rest takes the width its content asks for (ContentResize).
     private bool _contentResize;
@@ -725,6 +735,7 @@ public partial class MainWindow : Window
         UpdateShelfPageButton();
         System.Windows.Automation.AutomationProperties.SetName(DevicesPageButton, Loc.T("设备电量", "Device batteries"));
         System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("音乐", "Music"));
+        System.Windows.Automation.AutomationProperties.SetName(NoticesPageButton, Loc.T("通知历史", "Notice history"));
         System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));
     }
     public void Preview(bool enabled, bool expanded = true)
@@ -814,15 +825,35 @@ public partial class MainWindow : Window
 
     internal void ShowAlert(AppEntry entry, string label, double used, DateTimeOffset? resetAt)
         => ShowAlert(new CompactAlertInfo(entry, entry.Name, label + " ", used, resetAt));
-    internal void ClearAlert() { _alertTimer.Stop(); _alert = null; RenderCompact(); }
+    internal void ClearAlert()
+    {
+        if (_alert is { } alert) _app.Notices?.Withdraw(QuotaKey(alert));
+        _alert = null; RenderCompact();
+    }
     // No alert while the panel is suppressed (full-screen rule or hidden by the user): it would not be seen, and it must not
-    // appear later when the panel shows again.
+    // appear later when the panel shows again. The coordinator decides when it shows (NoticeCenter.SubmitQuota) and for how
+    // long; PresentAlert and EndAlert follow it.
     private void ShowAlert(CompactAlertInfo alert)
     {
         if (IsSuppressed) return;
-        _alert = alert; _alertTimer.Stop(); _alertTimer.Start();
+        _app.Notices.SubmitQuota(this, alert, QuotaKey(alert));
+    }
+    private static string QuotaKey(CompactAlertInfo alert) => "quota:" + alert.Entry.InstanceId + ":" + alert.Label;
+    private void PresentAlert(CompactAlertInfo alert)
+    {
+        // Switched off or hidden since it was submitted: it ends at once instead of holding the island unseen.
+        if (IsSuppressed || !Settings.QuotaAlerts) { _app.Notices.Withdraw(QuotaKey(alert)); return; }
+        _alert = alert;
         RenderCompact();
         if (!_expanded && !IsSuppressed) SetExpanded(false);
+    }
+    // By key: submitting the same alert again while it shows replaces its payload (AttentionUpdated), so the item that ends
+    // may carry a newer one than PresentAlert received.
+    private void EndAlert(CompactAlertInfo alert)
+    {
+        if (_alert is null || QuotaKey(_alert) != QuotaKey(alert)) return;
+        _alert = null; RenderCompact();
+        if (!_expanded) SetExpanded(false);
     }
 
     // The capsule while the line has opened into it (MainWindow.Peek.cs).
@@ -874,12 +905,19 @@ public partial class MainWindow : Window
         if (expanded && !_expanded && !_preview) ApplyDefaultMusicPage();
         // A hand-over cut short by closing the panel leaves nothing behind for the next opening.
         if (expanded && !_expanded) _handover.Drop();
+        // Opening over a notice: the notice goes in the same frame and the panel grows from the island, which kept its outline.
+        if (expanded && !_expanded && !instant && !_preview) _noticeWindow?.HandOver();
+        if (expanded) _noticeWindow?.Abort();
         bool wasExpanded = _expanded;
         // An ordinary panel comes in front of the other windows while it is open (DeckSettings.AlwaysOnTop). Compared with the
         // host's own state, as a new screen context closes the panel without passing here.
         if (expanded != _host.Open) _host.Front(expanded);
         _expanded = expanded;
         UpdateMotion();
+        // The coordinator hears of it after this call: it may start a waiting alert, which lays the island out again. A notice
+        // that arrives before it does already waits for the closing (DeckLeaving).
+        if (wasExpanded && !expanded && !_preview) _app.Notices?.DeckLeaving(this, true);
+        if (wasExpanded != expanded && !_preview) Dispatcher.BeginInvoke(() => _app.Notices?.DeckExpanded(this, _expanded));
         // The smooth memory mode holds off full collections while a panel is open (App.UpdateCollectionLatency).
         if (expanded && !wasExpanded) _app.UpdateCollectionLatency();
         _escapeDismissal?.SetEnabled(HoldsEscape);
@@ -935,6 +973,17 @@ public partial class MainWindow : Window
         // Lay out in device-independent pixels. Column typography adapts to its available space.
         ContentCanvas.Width = _pageWidth;
         ContentCanvas.Height = pageHeight;
+        // The recent notices page is drawn only while it shows (NoticesChanged), so notices that arrived while the panel was
+        // closed are not on it yet: it is drawn again before the panel opens, and what it lists counts as seen as on a page
+        // switch, the notices hotkey's opening too.
+        if (expanded && !wasExpanded && !_preview && CurrentPage == DeckPage.Notices && _app.Notices is not null)
+        {
+            // Marking the list seen raises Changed; the page is drawn here once, not again at background priority mid-opening.
+            bool queued = _noticesRenderQueued;
+            _noticesRenderQueued = true;
+            try { NoticesPageShown(); RenderNotices(fresh: true); }
+            finally { _noticesRenderQueued = queued; }
+        }
         // motion-review C1, C4: closing takes three quarters of the set time; a move the keyboard asked for takes 0.6 of it. The
         // open panel changing size in place (a page switch) keeps its own length whatever the setting (PanelMotion.Reshape).
         bool turning = wasExpanded != expanded;
@@ -984,6 +1033,10 @@ public partial class MainWindow : Window
         _booting = false; _morphingShape = false;
         if (booting) duration = (int)(duration * BootSwell);
         if (morphing) duration = (int)(duration * 1.3);
+        // How long the panel's closing runs: a notice that arrives meanwhile waits for it (MainWindow.Notices.cs). A closing
+        // carried on to a new collapsed width runs until the carried move ends.
+        if (expanded) _collapseEnds = 0;
+        else if (wasExpanded || carried > 0) _collapseEnds = duration > 0 ? now + duration : 0;
         if (turning || carried > 0) _turn.Started(now, duration, expanded, width, height);
         // The surface at rest taking the width its content asks for (a lyric line of another length with MusicLyricAutoWidth):
         // a change in place, not a closing, so it eases in and out from the first frame over the whole move. On the closing's
@@ -1202,6 +1255,9 @@ public partial class MainWindow : Window
             else if (!_pointerInside && inside && _leave.IsEnabled) PointerChanged(true);
             return;
         }
+        // A notice over the island takes the pointer itself (IslandNotice); the panel only keeps track, so that a notice ending
+        // under a resting pointer does not open the panel.
+        if (NoticeCovering) { _cursorInCompact = inCompact; if (_pointerInside) PointerChanged(false); return; }
         // A window dragged to the top of the screen for Snap Layouts passes the surface. Neither the drag nor the release
         // there counts as an entry: the panel opens only once the pointer has left the area and come back.
         _dragHold = _app.WindowDrags.Active || _dragHold && inCompact;
@@ -1223,6 +1279,8 @@ public partial class MainWindow : Window
     {
         // Dragging an edge may take the pointer outside; the panel stays open until the drag ends.
         if (!inside && Resizing) return;
+        // A pointer reaching the island means someone is at the screen: a notice is looked for briskly again (C-L8).
+        if (inside && !_pointerInside) BrimDeck.Native.WindowsNoticeSource.Interacted();
         // A pointer on the island means the display is on, whatever Windows last reported (DisplayPower).
         if (inside) DisplayPower.InputSeen();
         _pointerInside = inside; UpdateQuotaCarousel();
@@ -1231,7 +1289,9 @@ public partial class MainWindow : Window
         {
             WatchOutsidePress(false);
             _popupReturnArea = null;
-            _leave.Stop(); if (_expanded || IsSuppressed) return;
+            _leave.Stop();
+            if (_expanded && !_preview) _app.Notices?.DeckLeaving(this, false);
+            if (_expanded || IsSuppressed) return;
             // The capsule of the line opens the panel by a click only.
             _hover.Stop(); if (IslandFromLine || Settings.ClickToExpand) return;
             _hover.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay)); _hover.Start();
@@ -1245,6 +1305,8 @@ public partial class MainWindow : Window
             // A press outside closes the panel at once (MainWindow.OutsidePress.cs).
             int delay = _pressedOutside ? 1 : Math.Max(_popupReturnArea is null ? 1 : 50, Settings.CloseDelay);
             _leftAt = Environment.TickCount64;
+            // Notices arriving from now on show from the island once the panel has closed, not only on its page.
+            _app.Notices?.DeckLeaving(this, true);
             _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(delay); _leave.Start();
         }
     }

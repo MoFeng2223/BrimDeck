@@ -27,6 +27,11 @@
     <Compile Include="..\..\src\BrimDeck\Native\PointerPressObserver.cs" Link="PointerPressObserver.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\PanelKeyboard.cs" Link="PanelKeyboard.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\DisplayPower.cs" Link="DisplayPower.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\NoticeProtection.cs" Link="NoticeProtection.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\TaskbarFlashWatch.cs" Link="TaskbarFlashWatch.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\NoticeBannerRegistry.cs" Link="NoticeBannerRegistry.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\ProtocolLaunch.cs" Link="ProtocolLaunch.cs" />
+    <Compile Include="..\..\src\BrimDeck\NoticeBannerKeeper.cs" Link="NoticeBannerKeeper.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\FrameRates.cs" Link="FrameRates.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\ProcessSnapshot.cs" Link="ProcessSnapshot.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\Displays.cs" Link="Displays.cs" />
@@ -47,6 +52,7 @@
     <Compile Include="..\..\src\BrimDeck\Native\EncoDeckBatteries.cs" Link="EncoDeckBatteries.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\PhoneLinkBatteries.cs" Link="PhoneLinkBatteries.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\AppIdentity.cs" Link="AppIdentity.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\AppWindowSystem.cs" Link="AppWindowSystem.cs" />
     <Compile Include="..\..\src\BrimDeck\MainWindow.Shadow.cs" Link="MainWindow.Shadow.cs" />
     <Compile Include="..\..\src\BrimDeck\LayoutRetry.cs" Link="LayoutRetry.cs" />
     <Compile Include="..\..\src\BrimDeck\InkCentredLabel.cs" Link="InkCentredLabel.cs" />
@@ -77,5 +83,7 @@
     <Compile Include="..\..\src\BrimDeck\Feedback.cs" Link="Feedback.cs" />
     <Compile Include="..\..\src\BrimDeck\MusicControls.cs" Link="MusicControls.cs" />
     <Page Include="..\..\src\BrimDeck\MusicResources.xaml" Link="MusicResources.xaml" />
+    <!-- The notices page's header, row and fade panels (laid out by WPF in NoticePanelTests). -->
+    <Compile Include="..\..\src\BrimDeck\NoticePanels.cs" Link="NoticePanels.cs" />
   </ItemGroup>
 </Project>

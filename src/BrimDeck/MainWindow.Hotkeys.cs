@@ -10,9 +10,9 @@ namespace BrimDeck;
 // Opened by the expand hotkey, the panel stays open until the pointer has been inside it once; after that the usual leave
 // rules close it (under mouse pass-through, a panel that ignores the pointer stays open until a hotkey closes it). While
 // the panels are hidden, the expand hotkey still opens this panel; once it closes, it hides again.
-// Opened by a hotkey, the panel also takes the keyboard (Tab, arrows, Enter and Space work its pages) and gives it back to the
-// window that had it when it closes (PanelKeyboard); under mouse pass-through only with ClickThroughKeyboard on. Opened by the
-// pointer, it leaves the keyboard where it is.
+// Opened by a hotkey, the panel also takes the keyboard (Tab, arrows, Enter and Space work its pages, the recent notices among
+// them) and gives it back to the window that had it when it closes (PanelKeyboard); under mouse pass-through only with
+// ClickThroughKeyboard on. Opened by the pointer, it leaves the keyboard where it is.
 public partial class MainWindow
 {
     // Shown for the expand hotkey while the panels are hidden.
@@ -29,17 +29,18 @@ public partial class MainWindow
     internal bool IsOpenForHotkey => _expanded && !_preview;
     internal bool IsHotkeyPinned => _hotkeyPinned;
 
-    // page: the page to open on (a page hotkey), in place of the page chosen for opening (ApplyDefaultMusicPage).
-    internal void OpenFromHotkey(DeckPage? page = null)
+    // page: the page to open on (a page hotkey), in place of the page chosen for opening (ApplyDefaultMusicPage). byKey: the
+    // hotkey itself; false when a click asked for the same opening ("View all" on a notice), which leaves the keyboard where it is.
+    internal void OpenFromHotkey(DeckPage? page = null, bool byKey = true)
     {
         if (_expanded) return;
         _hotkeyPage = page;
-        try { Open(); } finally { _hotkeyPage = null; }
+        try { Open(byKey); } finally { _hotkeyPage = null; }
     }
 
     private DeckPage? _hotkeyPage;
 
-    private void Open()
+    private void Open(bool byKey)
     {
         // A collapsed preview of the settings ends as hovering would end it; a preview of the open panel is left alone.
         if (_preview) { if (_previewExpanded) return; _app.EndPreviewFromDeck(); }
@@ -50,10 +51,11 @@ public partial class MainWindow
         _hotkeyPinned = true;
         SetExpanded(true, keyboard: true);
         if (!_expanded) { _hotkeyPinned = false; if (_hotkeyOpened) { _hotkeyOpened = false; ApplySettings(); } }
-        else if (PanelTakesKeyboard) TakeKeyboard();
+        else if (byKey && PanelTakesKeyboard) TakeKeyboard();
     }
 
-    // The panel becomes a window that can be active, takes the foreground and puts the focus on the button of the page shown.
+    // The panel becomes a window that can be active, takes the foreground and puts the focus on its content: the first notice on
+    // the recent notices page, else the button of the page shown.
     private void TakeKeyboard()
     {
         if (!PanelKeys.Take()) return;
@@ -64,6 +66,7 @@ public partial class MainWindow
 
     private void FocusPanelStart()
     {
+        if (CurrentPage == DeckPage.Notices && _pageRows.Count > 0) { _pageRows[0].Row.Focus(); return; }
         Keyboard.Focus(PageButton(CurrentPage));
     }
 

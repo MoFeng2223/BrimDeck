@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using BrimDeck.Core.Notices;
 
 namespace BrimDeck.Core;
 
@@ -68,15 +69,19 @@ public sealed record IgnoredMediaApp(string AppId = "", string Name = "", string
 public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, OpenCode = 17, OpenCodeGo = 18, OpenRouter = 19, Pi = 20, CodeAgent = 21, CommandCode = 22, CommandCodeApi = 23, WorkBuddy = 24, WorkBuddyAi = 25, MiMo = 26, MiMoApi = 27, MiMoTokenPlan = 28, MiMoLinked = 29, KimiPlatform = 30, Qoder = 31, QoderCn = 32, Qianwen = 33, QwenCloud = 34, QwenWorkCn = 35, QwenWork = 36, Trae = 37, TraeCn = 38, Doubao = 39, Dola = 40, VolcengineArk = 41, BytePlusArk = 42 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckSettings.PageOrder.
-public enum DeckPage { Usage, Music, Monitor, Clipboard, Devices }
+public enum DeckPage { Usage, Music, Monitor, Clipboard, Devices, Notices }
 // Hover: the page of the collapsed part under the pointer (MainWindow.Hover.cs); over a part that names none, the last page.
-public enum DefaultDeckPage { Last, Usage, Music, Monitor, Clipboard, Devices, Hover }
+public enum DefaultDeckPage { Last, Usage, Music, Monitor, Clipboard, Devices, Hover, Notices }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
 // What a double click on an end of the collapsed notch or capsule does: turn its auto width on or off, or start moving it
 // (MainWindow.Move.cs); moving is the default. Off shows no handle at its ends at all. Saved as numbers, so new members go at the end.
 public enum GripDoubleClick { AutoWidth, Move, Off }
 public enum CompactMusicText { None, Title, Lyrics }
+// The monitor an arriving notice is shown on: the one with the foreground window, or always the main panel's.
+// Which panels show an arriving notice: the one on the screen in use (the foreground window's), the main panel, or every
+// panel that shows BrimDeck. All comes last, so the saved numbers of the others stay what they were.
+public enum NoticeScreen { Foreground, Main, All }
 // What the collapsed music hides while the song is paused: the title or lyric, the cover, or both. Saved as numbers, so new
 // members go at the end.
 public enum PausedMusicHide { None, Text, Cover, Both }
@@ -455,7 +460,8 @@ public sealed class DeckSettings
         HotkeyKind.Page5 => Page5Hotkey, HotkeyKind.Page6 => Page6Hotkey, HotkeyKind.Page7 => Page7Hotkey, HotkeyKind.Page8 => Page8Hotkey,
         HotkeyKind.Page9 => Page9Hotkey, HotkeyKind.Page10 => Page10Hotkey, HotkeyKind.Refresh => RefreshHotkey,
         HotkeyKind.CycleStyle => CycleStyleHotkey, HotkeyKind.LineStyle => LineStyleHotkey, HotkeyKind.NextProfile => NextProfileHotkey,
-        HotkeyKind.HoldClickThrough => HoldClickThroughHotkey, _ => ""
+        HotkeyKind.HoldClickThrough => HoldClickThroughHotkey,
+        HotkeyKind.Notices => NoticeHotkey, _ => ""
     }) ?? "";
     public void SetHotkey(HotkeyKind kind, string value)
     {
@@ -482,6 +488,7 @@ public sealed class DeckSettings
             case HotkeyKind.LineStyle: LineStyleHotkey = value; break;
             case HotkeyKind.NextProfile: NextProfileHotkey = value; break;
             case HotkeyKind.HoldClickThrough: HoldClickThroughHotkey = value; break;
+            case HotkeyKind.Notices: NoticeHotkey = value; break;
         }
     }
     // Mouse pass-through: hovering does not open the panel and every click goes to the window beneath; only the shortcuts open
@@ -532,6 +539,8 @@ public sealed class DeckSettings
     public bool ClockSeconds { get; set; }
     public CompactMusicText MusicText { get; set; }
     public bool MusicTrackNotice { get; set; } = true;
+    // The title of a track change takes the whole island, shown as a notice is (IslandNotice), instead of the music part alone.
+    public bool MusicTrackNoticeWide { get; set; } = true;
     // A song taken as instrumental (Lyrics.Instrumental) shows its title in the collapsed lyric's place instead of "♪".
     public bool MusicInstrumentalTitle { get; set; }
     // With auto width (CompactAutoWidth), the collapsed middle text's room follows the length of what it shows, within
@@ -802,6 +811,50 @@ public sealed class DeckSettings
     public bool QuotaAlerts { get; set; } = true;
     // Also reads the Claude Code and Codex CLI session records inside WSL distributions. Off by default: it starts stopped distributions.
     public bool IncludeWsl { get; set; }
+    // Dynamic notices (see Notices/). Off until the user switches them on; each source has its own switch.
+    public bool NoticesEnabled { get; set; }
+    public bool NoticeWindowsSource { get; set; } = true;
+    // Turns off other applications' own Windows banners while BrimDeck shows their notices (NoticeBanners); off by default.
+    public bool NoticeHideBanners { get; set; }
+    // Chat applications that only flash their taskbar button for a new message (WeChat): a notice that says so, nothing of the
+    // message is read (ChatFlash). Off by default.
+    public bool NoticeChatFlash { get; set; }
+    // A click on the WeChat notice of the taskbar flash source asks WeChat, through its own weixin:// address, to bring its main window
+    // forward (ChatRestore). Off by default.
+    public bool NoticeChatFlashRestore { get; set; }
+    // The WSL distributions whose notices are received (by name). None by default: not every PC has WSL, and the agent is
+    // copied into a distribution only once the user chooses it.
+    public List<string> NoticeWslDistros { get; set; } = [];
+    // Seconds an arriving notice stays; high priority notices stay NoticeHighDuration.
+    public int NoticeDuration { get; set; } = 6;
+    public int NoticeHighDuration { get; set; } = 8;
+    public NoticeScreen NoticeScreen { get; set; }
+    // The level of a notice nothing else decides (NoticeLevels.Resolve): Plain, Glow or Lively.
+    public NoticeLevel NoticeDefaultLevel { get; set; } = NoticeLevel.Glow;
+    // Where the icon and the words sit in the island when they fit; a sender's own choice (NoticeInput.Align) comes first.
+    public NoticeAlign NoticeAlign { get; set; } = NoticeAlign.Center;
+    public NoticePrivacy NoticePrivacy { get; set; }
+    // Recognises a verification code in a notice, hides it wherever the notice is shown and offers a button that copies it (see
+    // NoticeCodes). Off by default: it reads the notices' words and, on a click, writes the clipboard.
+    public bool NoticeCodes { get; set; }
+    // What a click on a notice shown on the collapsed island opens; the notices page unless changed.
+    public NoticeClickTarget NoticeClick { get; set; }
+    // Holds notices back during a Windows focus session or presentation mode.
+    public bool NoticeRespectFocus { get; set; } = true;
+    // Notices are held back until this time (BrimDeck's own pause); null when not paused.
+    public DateTimeOffset? NoticesPausedUntil { get; set; }
+    public bool NoticeHistory { get; set; } = true;
+    public int NoticeHistoryHours { get; set; } = 24;
+    // Where the encrypted recent notices are kept; empty for the default (a folder in BrimDeck's install folder).
+    public string NoticeHistoryFolder { get; set; } = "";
+    public NoticeAutoClear NoticeAutoClear { get; set; }
+    // When the schedule last cleared the list (or started counting); null before it ever has.
+    public DateTimeOffset? NoticeLastCleared { get; set; }
+    public string NoticeHotkey { get; set; } = "";
+    public bool NoticesPage { get; set; } = true;
+    public double NoticesWidth { get; set; } = 460;
+    public double NoticesHeight { get; set; } = 280;
+    public List<NoticeAppRule> NoticeApps { get; set; } = [];
     // The named profiles (DeckProfile, Profiles). The current one's settings are the ordinary members of this class; ReturnProfile is
     // the profile a rule replaced while it holds (ProfileRule), to come back to when it stops holding or BrimDeck starts again.
     public List<DeckProfile> Profiles { get; set; } = [];
@@ -916,6 +969,8 @@ public sealed class DeckSettings
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
         copy.FullscreenRules = FullscreenRules.Select(rule => rule with { }).ToList();
+        copy.NoticeWslDistros = [.. NoticeWslDistros ?? []];
+        copy.NoticeApps = (NoticeApps ?? []).Select(rule => rule.Copy()).ToList();
         copy.IgnoredMediaApps = [.. IgnoredMediaApps ?? []];
         copy.DeviceChoices = [.. (DeviceChoices ?? []).Select(device => device.Copy())];
         copy.Profiles = [.. (Profiles ?? []).Select(profile => profile.Copy())];
@@ -1087,8 +1142,34 @@ public sealed class DeckSettings
         DisplayMonitors = (DisplayMonitors ?? []).OfType<ChosenDisplay>().Where(d => !string.IsNullOrWhiteSpace(d.Id))
             .Select(d => d with { Id = d.Id.Trim(), Name = (d.Name ?? "").Trim() }).DistinctBy(d => d.Id).ToList();
         if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;
+        NoticeWslDistros = (NoticeWslDistros ?? []).Where(name => name is not null).Select(name => name.Trim()).Where(NoticeIntake.IsDistroName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (!Enum.IsDefined(NoticeScreen)) NoticeScreen = NoticeScreen.Foreground;
+        if (NoticeDefaultLevel is not (NoticeLevel.Plain or NoticeLevel.Glow or NoticeLevel.Lively)) NoticeDefaultLevel = NoticeLevel.Glow;
+        if (!Enum.IsDefined(NoticeAlign)) NoticeAlign = NoticeAlign.Center;
+        if (!Enum.IsDefined(NoticePrivacy)) NoticePrivacy = NoticePrivacy.Full;
+        if (!Enum.IsDefined(NoticeClick)) NoticeClick = NoticeClickTarget.Page;
+        if (!Enum.IsDefined(NoticeAutoClear)) NoticeAutoClear = NoticeAutoClear.Off;
+        NoticeDuration = Math.Clamp(NoticeDuration, 2, 30);
+        NoticeHighDuration = Math.Clamp(NoticeHighDuration, 2, 60);
+        NoticeHistoryHours = Math.Clamp(NoticeHistoryHours, 1, 24 * 7);
+        NoticeHistoryFolder = (NoticeHistoryFolder ?? "").Trim();
+        // A folder written out in full; a relative one would depend on BrimDeck's current directory.
+        if (NoticeHistoryFolder.Length > 0 && !Path.IsPathFullyQualified(NoticeHistoryFolder)) NoticeHistoryFolder = "";
+        NoticesWidth = double.IsFinite(NoticesWidth) ? Math.Clamp(NoticesWidth, 440, 1200) : 460;
+        NoticesHeight = double.IsFinite(NoticesHeight) ? Math.Clamp(NoticesHeight, 140, 400) : 280;
+        NoticeApps = (NoticeApps ?? []).Where(rule => rule is not null && !string.IsNullOrWhiteSpace(rule.Key)).DistinctBy(rule => rule.Key).Take(500).ToList();
+        foreach (var rule in NoticeApps)
+        {
+            rule.Name = (rule.Name ?? "").Trim();
+            rule.AccentColor = AppPresets.NormalizeColor(rule.AccentColor);
+            if (!Enum.IsDefined(rule.Priority)) rule.Priority = NoticePriority.Normal;
+            // Persistent is never the user's choice for an application: a notice stays only while something is left to handle.
+            if (rule.Level is not (NoticeLevel.Silent or NoticeLevel.Plain or NoticeLevel.Glow or NoticeLevel.Lively)) rule.Level = NoticeLevel.Auto;
+            if (rule.Privacy is { } privacy && !Enum.IsDefined(privacy)) rule.Privacy = null;
+        }
         Core.Profiles.Normalize(this);
     }
+    public NoticeAppRule? NoticeRule(string appKey) => NoticeApps.FirstOrDefault(rule => rule.Key == appKey);
 }
 
 // appVersion is the running application's version; it defaults to the entry assembly's version.

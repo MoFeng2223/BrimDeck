@@ -340,15 +340,16 @@ public partial class MainWindow
         _pageWidth = width;
         SetExpanded(true, instant: true);
         // The surface follows every frame. The monitor page, the usage page's columns and the model details are built again only
-        // where they cross a layout step (ModelDetailsFit) and stretch in between, so they follow too; the media page is built
-        // again whole, about 25 times a second during the drag. Each is built once more when the drag ends (FinishResize saves
-        // the size).
+        // where they cross a layout step (ModelDetailsFit) and stretch in between, so they follow too; the notices page stretches
+        // as it is, its header and margins following the size (FitNoticeLayout); the media page is built again whole, about 25
+        // times a second during the drag. Each is built once more when the drag ends (FinishResize saves the size).
+        bool stretched = _resizePage == DeckPage.Notices && NoticesContent.Visibility == Visibility.Visible && FitNoticeLayout();
         if (_resizePage == DeckPage.Monitor) RenderMonitor();
         else if (_resizePage == DeckPage.Devices) RenderDevices();
         // The clipboard page is built again only where its sizes step; in between its columns stretch (StretchShelf). It is built
         // once more when the size is saved (FinishResize).
         else if (_resizePage == DeckPage.Clipboard) StretchShelf();
-        else if (Environment.TickCount64 - _resizeRendered >= 40)
+        else if (!stretched && Environment.TickCount64 - _resizeRendered >= 40)
         {
             _resizeRendered = Environment.TickCount64;
             // Columns that stay within their size step stretch; nothing else in the panel changes meanwhile.
@@ -403,8 +404,11 @@ public partial class MainWindow
         bool compact = _resizeCompact, byKey = _resizeByKey;
         _resizeSettling = false; _resizeCompact = false; _resizeByKey = false; _keyEdges = ResizeEdges.None;
         // Saved like any change from the settings window, which applies it to every panel and fits the window again. A press that
-        // moved nothing only fits the window again.
-        if (_resizeChanged) _app.UpdateSettingsFor(Profile, Settings.Copy()); else ApplySettings();
+        // moved nothing only fits the window again. The notices page is not built anew for what is only a copy of the
+        // settings it was fitted to (FitNoticeLayout).
+        _noticeResizeSaved = !compact && _resizePage == DeckPage.Notices;
+        try { if (_resizeChanged) _app.UpdateSettingsFor(Profile, Settings.Copy()); else ApplySettings(); }
+        finally { _noticeResizeSaved = false; }
         // The collapsed row's windows ease from the room they followed to whole items (MainWindow.CompactFlow.cs).
         if (compact) SettleCompactFlow();
         _resizeChanged = false;

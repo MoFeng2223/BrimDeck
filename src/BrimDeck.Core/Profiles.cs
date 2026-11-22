@@ -5,7 +5,7 @@ namespace BrimDeck.Core;
 
 // A named set of the panel's own settings: its looks, pages and what the collapsed row shows. What belongs to the whole app
 // (startup, language, hotkeys, the applications and their keys, the players' full control, the clipboard's recording, the
-// displays and the profile rules) is shared by every profile (Profiles.GlobalKeys). Every profile keeps its settings in Values,
+// displays, the profile rules, and the dynamic notices apart from their page) is shared by every profile (Profiles.GlobalKeys). Every profile keeps its settings in Values,
 // written as settings.json writes them. The current profile's settings are also the ordinary ones in settings.json; every change
 // to them is the profile's at once (Profiles.Keep).
 public sealed class DeckProfile
@@ -75,7 +75,16 @@ public static class Profiles
         nameof(DeckSettings.SettingsWindowWidth), nameof(DeckSettings.SettingsWindowHeight), nameof(DeckSettings.SettingsWindowMaximized),
         nameof(DeckSettings.IncludeWsl), nameof(DeckSettings.Apps),
         nameof(DeckSettings.Profiles), nameof(DeckSettings.CurrentProfile), nameof(DeckSettings.ReturnProfile), nameof(DeckSettings.ProfileRules),
-        nameof(DeckSettings.FullscreenExceptions), nameof(DeckSettings.MouseWheelPages)
+        nameof(DeckSettings.FullscreenExceptions), nameof(DeckSettings.MouseWheelPages),
+        nameof(DeckSettings.NoticesEnabled), nameof(DeckSettings.NoticeWindowsSource), nameof(DeckSettings.NoticeHideBanners),
+        nameof(DeckSettings.NoticeChatFlash), nameof(DeckSettings.NoticeChatFlashRestore), nameof(DeckSettings.NoticeWslDistros),
+        nameof(DeckSettings.NoticeDuration), nameof(DeckSettings.NoticeHighDuration), nameof(DeckSettings.NoticeScreen),
+        nameof(DeckSettings.NoticeDefaultLevel), nameof(DeckSettings.NoticeAlign),
+        nameof(DeckSettings.NoticePrivacy), nameof(DeckSettings.NoticeCodes), nameof(DeckSettings.NoticeClick),
+        nameof(DeckSettings.NoticeRespectFocus), nameof(DeckSettings.NoticesPausedUntil), nameof(DeckSettings.NoticeHistory),
+        nameof(DeckSettings.NoticeHistoryHours), nameof(DeckSettings.NoticeHistoryFolder),
+        nameof(DeckSettings.NoticeAutoClear), nameof(DeckSettings.NoticeLastCleared), nameof(DeckSettings.NoticeHotkey),
+        nameof(DeckSettings.NoticeApps)
     };
 
     public static bool IsProfileKey(string key) => !GlobalKeys.Contains(key);
