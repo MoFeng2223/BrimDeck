@@ -215,94 +215,56 @@ internal static class WeatherAggregator
 {
     private static readonly TimeSpan SourceTimeout = TimeSpan.FromSeconds(15);
 
-    // 两段式：先取实况与预报让首屏立刻出数，历史（10 次请求）再单独补一轮。
-    // progress 在第一段结束时回调一次，界面可以先画不含历史的版本，历史到了再整体替换。
+    // 两段式：首屏先取实况/预报/空气/分钟；时光机（10 次请求）与和风 v7 重域（预警/指数）放到第二段。
+    // progress 在第一段结束后回调一次，界面先画不含历史的版本，历史到了再整体替换。
     public static async Task<WeatherSnapshot> FetchAsync(City city, WeatherSettings settings, CancellationToken token, Action<WeatherSnapshot>? progress = null)
     {
-        var chains = Enum.GetValues<WeatherDomain>().ToDictionary(domain => domain, domain => Chain(domain, city, settings));
+        // 每个域在本次刷新里的负责来源；null 表示这个域本次不取数（未选择、来源不支持或不能服务这座城）。
+        var owners = Enum.GetValues<WeatherDomain>().ToDictionary(domain => domain, domain => Owner(domain, city, settings));
         var parts = new Dictionary<string, WeatherPart>(StringComparer.Ordinal);
-        var tried = new HashSet<string>(StringComparer.Ordinal);
-        var served = new Dictionary<string, HashSet<WeatherDomain>>(StringComparer.Ordinal);
-        // 首屏只取轻量域；历史与和风 v7 重域（预警/指数）放到第二轮，避免拖慢首屏。
-        bool Deferred(WeatherDomain d) => d is WeatherDomain.History or WeatherDomain.Warning or WeatherDomain.Indices;
-        var domains = Enum.GetValues<WeatherDomain>();
-        var live = domains.Where(domain => !Deferred(domain)).ToArray();
-        var later = domains.Where(Deferred).ToArray();
-        await RoundsAsync(city, settings, chains, parts, tried, served, live, token);
-        // 没有任何来源给出数据时不再抛错：返回空快照，界面把缺项显示为 "-"。
-        // 第一段结果先交给界面；重域补上后返回的快照会覆盖它。
-        if (progress is not null && later.Any(d => chains[d].Count > 0)) progress(Merge(city, chains, parts));
-        await RoundsAsync(city, settings, chains, parts, tried, served, later, token);
-        return Merge(city, chains, parts);
+
+        await FetchRoundAsync(city, settings, owners, parts, deferred: false, token: token);
+        if (progress is not null && owners.Any(owner => owner.Value is not null && IsDeferred(owner.Key)))
+            progress(Merge(city, owners, parts));
+        await FetchRoundAsync(city, settings, owners, parts, deferred: true, token: token);
+        return Merge(city, owners, parts);
     }
 
-    // 每个域只用用户选定的那一家：不按区域下探、不跨源补缺。
-    // 指定来源不可用时返回空链，Merge 会给出一份全空的快照，界面按缺失显示 "-"。
-    private static List<IWeatherSource> Chain(WeatherDomain domain, City city, WeatherSettings settings)
+    // 时光机与 v7 重域推后到第二段：请求多、返回慢，不该拖住首屏。
+    private static bool IsDeferred(WeatherDomain domain)
+        => domain is WeatherDomain.History or WeatherDomain.Warning or WeatherDomain.Indices;
+
+    // 某个域由哪一家来源负责：用户选定且这家支持该域、能服务这座城市。
+    // 不按区域下探，也不跨源补缺——没配置或不可用时这个域就留空。
+    private static IWeatherSource? Owner(WeatherDomain domain, City city, WeatherSettings settings)
     {
         var source = WeatherSources.Find(settings.Choice(domain));
-        if (source is null || !source.Info.Domains.Contains(domain) || !source.CanServe(city, settings)) return [];
-        return [source];
+        return source is not null && source.Info.Domains.Contains(domain) && source.CanServe(city, settings) ? source : null;
     }
 
-    // 逐域取数：同一来源的多个域合并成一次请求；链里只有用户选定的那一家，不存在轮换来源的轮次。
-    private static async Task RoundsAsync(City city, WeatherSettings settings, Dictionary<WeatherDomain, List<IWeatherSource>> chains,
-        Dictionary<string, WeatherPart> parts, HashSet<string> tried, Dictionary<string, HashSet<WeatherDomain>> served,
-        IReadOnlyCollection<WeatherDomain> domains, CancellationToken token)
+    // 一段取数：把本段的域按负责来源归并，每个来源只发一次请求。
+    // 两段都落到同一来源时，后一段结果用 Absorb 按字段补齐，避免把前一段的逐时/空气覆盖掉。
+    private static async Task FetchRoundAsync(City city, WeatherSettings settings,
+        IReadOnlyDictionary<WeatherDomain, IWeatherSource?> owners, Dictionary<string, WeatherPart> parts,
+        bool deferred, CancellationToken token)
     {
-        var pending = domains.ToHashSet();
-        int max = chains.Values.Select(chain => chain.Count).DefaultIfEmpty(0).Max();
-        for (int round = 0; round < max && pending.Count > 0; round++)
+        var groups = new Dictionary<IWeatherSource, List<WeatherDomain>>();
+        foreach (var (domain, owner) in owners)
         {
-            var wanted = new Dictionary<IWeatherSource, List<WeatherDomain>>();
-            foreach (var domain in pending)
-            {
-                var chain = chains[domain];
-                int index = round;
-                // 跳过这条链上已经为同一域试过的来源，避免失败后在下一轮重复请求。
-                while (index < chain.Count && tried.Contains(chain[index].Info.Id + "|" + domain)) index++;
-                if (index >= chain.Count) continue;
-                var source = chain[index];
-                if (!wanted.TryGetValue(source, out var list)) wanted[source] = list = [];
-                list.Add(domain);
-                tried.Add(source.Info.Id + "|" + domain);
-            }
-            if (wanted.Count == 0) break;
-            // 该来源本轮要补的域；已经取过且确实覆盖这些域的来源不再请求，直接进入合并。
-            var calls = wanted.Where(pair => !Covers(served, pair.Key.Info.Id, pair.Value)).ToArray();
-            if (calls.Length > 0)
-            {
-                var results = await Task.WhenAll(calls.Select(async pair =>
-                {
-                    var part = await TryAsync(pair.Key, city, settings, pair.Value, token);
-                    return (Id: pair.Key.Info.Id, Domains: (IReadOnlyCollection<WeatherDomain>)pair.Value, Part: part);
-                }));
-                foreach (var (id, covered, part) in results)
-                {
-                    if (!served.TryGetValue(id, out var set)) served[id] = set = [];
-                    foreach (var domain in covered) set.Add(domain);
-                    if (part is null) continue;
-                    // 记下响应里实际带了哪些域：一个接口常顺带给多个域，下一轮就不必为这些域再请求一次。
-                    if (part.Current is not null) set.Add(WeatherDomain.Current);
-                    if (part.Hours is { Count: > 0 }) set.Add(WeatherDomain.Hourly);
-                    if (part.Air is not null) set.Add(WeatherDomain.Air);
-                    if (part.Minutes is { Count: > 0 }) set.Add(WeatherDomain.Minutely);
-                    if (part.Warnings is { Count: > 0 }) set.Add(WeatherDomain.Warning);
-                    if (part.Indices is { Count: > 0 }) set.Add(WeatherDomain.Indices);
-                    if (part.Days is { Count: > 0 }) set.Add(WeatherDomain.Daily);
-                    // 同一个来源可能在两段里各被请求一次（例如和风先给预报、第二轮单独补历史），
-                    // 后一段只拿到部分数据，直接覆盖会把前一段的逐时/空气弄丢，所以按字段补齐。
-                    if (parts.TryGetValue(id, out var existing)) Absorb(existing, part);
-                    else parts[id] = part;
-                }
-            }
-            var snapshot = Merge(city, chains, parts);
-            pending.RemoveWhere(domain => Satisfied(domain, snapshot));
+            if (owner is null || IsDeferred(domain) != deferred) continue;
+            if (!groups.TryGetValue(owner, out var list)) groups[owner] = list = [];
+            list.Add(domain);
+        }
+        if (groups.Count == 0) return;
+        var results = await Task.WhenAll(groups.Select(async pair =>
+            (Id: pair.Key.Info.Id, Part: await TryAsync(pair.Key, city, settings, pair.Value, token))));
+        foreach (var (id, part) in results)
+        {
+            if (part is null) continue;
+            if (parts.TryGetValue(id, out var existing)) Absorb(existing, part);
+            else parts[id] = part;
         }
     }
-
-    private static bool Covers(Dictionary<string, HashSet<WeatherDomain>> served, string id, IReadOnlyCollection<WeatherDomain> domains)
-        => served.TryGetValue(id, out var set) && domains.All(set.Contains);
 
     // 同一来源分多次返回时把结果并进同一份：能空位补齐的就补，日级数据按日期合并而不是互相覆盖。
     private static void Absorb(WeatherPart target, WeatherPart extra)
@@ -323,50 +285,6 @@ internal static class WeatherAggregator
         target.Days = merged;
     }
 
-    // 覆盖判定：只认界面真正要画的字段，够用就停手，不追求「所有字段都齐」。
-    private static bool Satisfied(WeatherDomain domain, WeatherSnapshot snapshot)
-    {
-        int today = Array.IndexOf(snapshot.DayDates, snapshot.Today);
-        if (today < 0) today = Math.Min(10, Math.Max(0, snapshot.DayDates.Length - 1));
-        bool Has(double[] values, int index) => index >= 0 && index < values.Length && !double.IsNaN(values[index]);
-        bool Day(int offset)
-        {
-            int index = today + offset;
-            return index >= 0 && index < snapshot.DayDates.Length && Has(snapshot.DayHighC, index) && Has(snapshot.DayLowC, index);
-        }
-        switch (domain)
-        {
-            case WeatherDomain.Current:
-                // 温度、湿度、风、气压到手就能画完今日天气；能见度、露点、紫外线不单独触发一轮请求。
-                return !double.IsNaN(snapshot.Temperature) && snapshot.HumidityPercent >= 0
-                    && !double.IsNaN(snapshot.WindKmh) && !double.IsNaN(snapshot.PressureHpa);
-            case WeatherDomain.Hourly:
-                // 逐时窗口是 24 小时，允许头部少量缺测。过去那一格来自本地历史、本地没有就留空，
-                // 所以不再要求锚点必须落在数据里——只看是否有足够的未来数据值得画图。
-                int hours = snapshot.HourTimes.Length, filled = 0;
-                for (int i = 0; i < hours; i++) if (!double.IsNaN(snapshot.HourTempsC[i])) filled++;
-                return hours >= 20 && filled >= 20;
-            case WeatherDomain.Daily:
-                // 今天起 13 天里至少 11 天有高低温。和风 v1 只给 10 天，剩余天数保持缺失、界面显示 "-"。
-                int days = 0; for (int offset = 0; offset <= 12; offset++) if (Day(offset)) days++;
-                return days >= 11;
-            case WeatherDomain.Air:
-                return snapshot.Aqi >= 0 || snapshot.Pm25 >= 0;
-            case WeatherDomain.History:
-                int past = 0; for (int offset = -10; offset <= -1; offset++) if (Day(offset)) past++;
-                return past >= 9;
-            // 扩展域：必须真的拿到数据才算满足；没有就留空，不再换源。
-            case WeatherDomain.Minutely:
-                return snapshot.MinuteTimes.Length >= 2;
-            case WeatherDomain.Warning:
-                return snapshot.Warnings.Length > 0;
-            case WeatherDomain.Indices:
-                return snapshot.Indices.Length > 0;
-            default:
-                return true;
-        }
-    }
-
     private static async Task<WeatherPart?> TryAsync(IWeatherSource source, City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -376,8 +294,8 @@ internal static class WeatherAggregator
         catch { return null; }
     }
 
-    // 合并：先建立以今天为中心的 24 天日期轴（历史 10 + 今天 + 未来 13），再按域把来源链的数据叠上去。
-    private static WeatherSnapshot Merge(City city, Dictionary<WeatherDomain, List<IWeatherSource>> chains, Dictionary<string, WeatherPart> parts)
+    // 合并：先建立以今天为中心的 24 天日期轴（历史 10 + 今天 + 未来 13），再按域把负责来源的数据叠上去。
+    private static WeatherSnapshot Merge(City city, IReadOnlyDictionary<WeatherDomain, IWeatherSource?> owners, Dictionary<string, WeatherPart> parts)
     {
         // 以城市当地日期为中心：查询国外城市时，“今天”不能按用户所在时区算。
         string? zone = parts.Values.Select(part => part.TimeZone).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
@@ -404,69 +322,67 @@ internal static class WeatherAggregator
 
         foreach (var domain in Enum.GetValues<WeatherDomain>())
         {
-            foreach (var source in chains[domain])
+            if (owners[domain] is not { } source) continue;
+            if (!parts.TryGetValue(source.Info.Id, out var part)) continue;
+            switch (domain)
             {
-                if (!parts.TryGetValue(source.Info.Id, out var part)) continue;
-                switch (domain)
-                {
-                    case WeatherDomain.Current:
-                        if (part.Current is { } c) { bool any = MergeCurrent(current, c, source.Info.Id, fieldSources); if (any) Use(domain, source); }
-                        break;
-                    case WeatherDomain.Air:
-                        // 空气质量按字段补齐：腾讯给 AQI，Open-Meteo 补 PM2.5/PM10，避免整块先到先得丢掉污染物浓度。
-                        if (part.Air is { } a && a.HasData)
+                case WeatherDomain.Current:
+                    if (part.Current is { } c) { bool any = MergeCurrent(current, c, source.Info.Id, fieldSources); if (any) Use(domain, source); }
+                    break;
+                case WeatherDomain.Air:
+                    // 空气质量按字段补齐：腾讯给 AQI，Open-Meteo 补 PM2.5/PM10，避免整块先到先得丢掉污染物浓度。
+                    if (part.Air is { } a && a.HasData)
+                    {
+                        air ??= new AirPart();
+                        bool any = false;
+                        if (air.Aqi is null && a.Aqi is not null) { air.Aqi = a.Aqi; fieldSources["aqi"] = source.Info.Id; any = true; }
+                        if (air.Pm25 is null && a.Pm25 is not null) { air.Pm25 = a.Pm25; fieldSources["pm25"] = source.Info.Id; any = true; }
+                        if (air.Pm10 is null && a.Pm10 is not null) { air.Pm10 = a.Pm10; fieldSources["pm10"] = source.Info.Id; any = true; }
+                        if (air.Level is null && a.Level is not null) { air.Level = a.Level; any = true; }
+                        if (air.Text is null && a.Text is not null) { air.Text = a.Text; any = true; }
+                        if (air.Primary is null && a.Primary is not null) { air.Primary = a.Primary; any = true; }
+                        if (air.PrimaryName is null && a.PrimaryName is not null) { air.PrimaryName = a.PrimaryName; any = true; }
+                        if (air.HealthEffect is null && a.HealthEffect is not null) { air.HealthEffect = a.HealthEffect; any = true; }
+                        if (air.HealthGeneral is null && a.HealthGeneral is not null) { air.HealthGeneral = a.HealthGeneral; any = true; }
+                        if (air.HealthSensitive is null && a.HealthSensitive is not null) { air.HealthSensitive = a.HealthSensitive; any = true; }
+                        // 污染物逐项补齐：排在前面的来源已经给出的项不再覆盖。
+                        foreach (var (code, value) in a.Pollutants)
                         {
-                            air ??= new AirPart();
-                            bool any = false;
-                            if (air.Aqi is null && a.Aqi is not null) { air.Aqi = a.Aqi; fieldSources["aqi"] = source.Info.Id; any = true; }
-                            if (air.Pm25 is null && a.Pm25 is not null) { air.Pm25 = a.Pm25; fieldSources["pm25"] = source.Info.Id; any = true; }
-                            if (air.Pm10 is null && a.Pm10 is not null) { air.Pm10 = a.Pm10; fieldSources["pm10"] = source.Info.Id; any = true; }
-                            if (air.Level is null && a.Level is not null) { air.Level = a.Level; any = true; }
-                            if (air.Text is null && a.Text is not null) { air.Text = a.Text; any = true; }
-                            if (air.Primary is null && a.Primary is not null) { air.Primary = a.Primary; any = true; }
-                            if (air.PrimaryName is null && a.PrimaryName is not null) { air.PrimaryName = a.PrimaryName; any = true; }
-                            if (air.HealthEffect is null && a.HealthEffect is not null) { air.HealthEffect = a.HealthEffect; any = true; }
-                            if (air.HealthGeneral is null && a.HealthGeneral is not null) { air.HealthGeneral = a.HealthGeneral; any = true; }
-                            if (air.HealthSensitive is null && a.HealthSensitive is not null) { air.HealthSensitive = a.HealthSensitive; any = true; }
-                            // 污染物逐项补齐：排在前面的来源已经给出的项不再覆盖。
-                            foreach (var (code, value) in a.Pollutants)
-                            {
-                                if (!air.Pollutants.TryAdd(code, value)) continue;
-                                if (a.Units.TryGetValue(code, out var unit)) air.Units[code] = unit;
-                                fieldSources["air:" + code] = source.Info.Id;
-                                any = true;
-                            }
-                            if (any) Use(domain, source);
+                            if (!air.Pollutants.TryAdd(code, value)) continue;
+                            if (a.Units.TryGetValue(code, out var unit)) air.Units[code] = unit;
+                            fieldSources["air:" + code] = source.Info.Id;
+                            any = true;
                         }
-                        break;
-                    case WeatherDomain.Hourly:
-                        if (part.Hours is { Count: > 0 } hs) { bool any = false; foreach (var hour in hs) if (!hours.ContainsKey(hour.Time)) { hours[hour.Time] = hour; fieldSources.TryAdd("h:" + hour.Time, source.Info.Id); any = true; } if (any) Use(domain, source); }
-                        break;
-                    case WeatherDomain.Minutely:
-                        if (part.Minutes is { Count: > 0 } mins) { minutes.AddRange(mins.Where(m => !minutes.Any(x => x.Time == m.Time))); Use(domain, source); }
-                        minuteSummary ??= part.MinuteSummary;
-                        break;
-                    case WeatherDomain.Warning:
-                        // 空列表也是一次有效回答（「当前无预警」），同样记来源，详情页预警区才能标出是谁在值守。
-                        if (part.Warnings is { } warns) { warnings.AddRange(warns); Use(domain, source); }
-                        break;
-                    case WeatherDomain.Indices:
-                        if (part.Indices is { Count: > 0 } idxs) { indices.AddRange(idxs); Use(domain, source); }
-                        break;
-                    case WeatherDomain.Daily:
-                    case WeatherDomain.History:
-                        if (part.Days is { Count: > 0 } ds)
+                        if (any) Use(domain, source);
+                    }
+                    break;
+                case WeatherDomain.Hourly:
+                    if (part.Hours is { Count: > 0 } hs) { bool any = false; foreach (var hour in hs) if (!hours.ContainsKey(hour.Time)) { hours[hour.Time] = hour; fieldSources.TryAdd("h:" + hour.Time, source.Info.Id); any = true; } if (any) Use(domain, source); }
+                    break;
+                case WeatherDomain.Minutely:
+                    if (part.Minutes is { Count: > 0 } mins) { minutes.AddRange(mins.Where(m => !minutes.Any(x => x.Time == m.Time))); Use(domain, source); }
+                    minuteSummary ??= part.MinuteSummary;
+                    break;
+                case WeatherDomain.Warning:
+                    // 空列表也是一次有效回答（「当前无预警」），同样记来源，详情页预警区才能标出是谁在值守。
+                    if (part.Warnings is { } warns) { warnings.AddRange(warns); Use(domain, source); }
+                    break;
+                case WeatherDomain.Indices:
+                    if (part.Indices is { Count: > 0 } idxs) { indices.AddRange(idxs); Use(domain, source); }
+                    break;
+                case WeatherDomain.Daily:
+                case WeatherDomain.History:
+                    if (part.Days is { Count: > 0 } ds)
+                    {
+                        bool any = false;
+                        foreach (var day in ds)
                         {
-                            bool any = false;
-                            foreach (var day in ds)
-                            {
-                                if (!dayMap.TryGetValue(day.Date, out var target)) continue;
-                                if (MergeDay(target, day, source.Info.Id, fieldSources)) any = true;
-                            }
-                            if (any) Use(domain, source);
+                            if (!dayMap.TryGetValue(day.Date, out var target)) continue;
+                            if (MergeDay(target, day, source.Info.Id, fieldSources)) any = true;
                         }
-                        break;
-                }
+                        if (any) Use(domain, source);
+                    }
+                    break;
             }
         }
 
