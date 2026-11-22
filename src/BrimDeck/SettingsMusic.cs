@@ -373,6 +373,9 @@ public sealed partial class SettingsWindow
         // QQ Music is read through its own pipe; it has nothing to set.
         SectionTitle(Loc.T("QQ 音乐", "QQ Music"));
         PlayerNote(Loc.T("无需任何设置。", "Needs no setup."), last: true);
+        // Soda Music reports its playback to the system media session by itself; it has nothing to set.
+        SectionTitle(Loc.T("汽水音乐", "Soda Music"));
+        PlayerNote(Loc.T("无需任何设置。", "Needs no setup."), last: true);
     }
     // Whether the ignored apps are shown under their row, kept while the row is rebuilt after an app is added or removed.
     private bool _ignoredOpen;
