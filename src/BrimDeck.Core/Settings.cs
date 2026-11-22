@@ -123,35 +123,26 @@ public enum WeatherDomain { Current, Hourly, Daily, Minutely, Warning, Indices, 
 // Per-domain source choices and the QWeather credentials, saved as one object in settings.json.
 public sealed class WeatherSettings
 {
-    private static readonly string[] ChinaDefault = ["hefeng", "weathercomcn", "tencent", "openmeteo"];
-    private static readonly string[] WorldDefault = ["hefeng", "openmeteo"];
-    public List<string> ChinaOrder { get; set; } = [.. ChinaDefault];
-    public List<string> WorldOrder { get; set; } = [.. WorldDefault];
     public Dictionary<string, string> Sources { get; set; } = [];
     public string HeFengKey { get; set; } = "";
     public string HeFengHost { get; set; } = "";
+    // 只返回用户明确选定的来源。Normalize 会为未选过的域写入一个具体默认值。
     public string Choice(WeatherDomain domain)
-        => Sources.TryGetValue(domain.ToString(), out var value) && value.Length > 0 ? value : "auto";
-    public List<string> Ranking(bool china)
-        => (china ? ChinaOrder : WorldOrder) is { Count: > 0 } list ? list : [.. (china ? ChinaDefault : WorldDefault)];
+        => Sources.TryGetValue(domain.ToString(), out var value) && value.Length > 0 ? value : "";
     public WeatherSettings Copy() => new()
     {
-        ChinaOrder = [.. ChinaOrder ?? []],
-        WorldOrder = [.. WorldOrder ?? []],
         Sources = new Dictionary<string, string>(Sources ?? []),
         HeFengKey = HeFengKey ?? "",
         HeFengHost = HeFengHost ?? ""
     };
     public void Normalize()
     {
-        ChinaOrder = [.. (ChinaOrder ?? []).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase)];
-        if (ChinaOrder.Count == 0) ChinaOrder = [.. ChinaDefault];
-        WorldOrder = [.. (WorldOrder ?? []).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase)];
-        if (WorldOrder.Count == 0) WorldOrder = [.. WorldDefault];
         Sources = (Sources ?? []).Where(pair => Enum.TryParse<WeatherDomain>(pair.Key, out _) && !string.IsNullOrWhiteSpace(pair.Value))
             .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
         HeFengKey = (HeFengKey ?? "").Trim();
         HeFengHost = (HeFengHost ?? "").Trim();
+        string initial = HeFengKey.Length > 0 && HeFengHost.Length > 0 ? "hefeng" : "openmeteo";
+        foreach (var domain in Enum.GetValues<WeatherDomain>()) Sources.TryAdd(domain.ToString(), initial);
     }
 }
 

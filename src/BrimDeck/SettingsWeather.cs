@@ -107,7 +107,7 @@ public sealed partial class SettingsWindow
         };
         var controlsRow=new StackPanel {Orientation=Orientation.Horizontal};controlsRow.Children.Add(inputHost);controlsRow.Children.Add(add);Group(Row(Loc.T("搜索城市","Search city"),controlsRow));
         // 数据来源：8 类数据能力逐一可配；区域切换放在明细表的正上方。
-        // 每行只列出「该区域能覆盖这一类」的来源，不支持的不进下拉；用户可逐类选择自动或指定来源。
+        // 每行只列出「该区域能覆盖这一类」的来源，不支持的不进下拉；每个域由用户明确指定一家，不再有自动回退。
         SectionTitle(Loc.T("数据来源","Data sources"));
         bool showChina=true;
         // 日出日落/月升月落/月相属于「每天预报」，不单列配置。
@@ -143,7 +143,7 @@ public sealed partial class SettingsWindow
             sourceTable.Children.Clear();
             var rows=new List<FrameworkElement>();
             var candidates=WeatherSources.Candidates(showChina).ToArray();
-            // 下拉展示顺序固定：和风 → 腾讯 → 中国天气网 → Open-Meteo（兜底恒最后），自动恒在首。
+            // 下拉展示顺序固定：和风 → 腾讯 → 中国天气网 → Open-Meteo。
             string[] displayOrder=["hefeng","tencent","weathercomcn","openmeteo"];
             foreach(var (domains,label,hint) in abilities)
             {
@@ -151,19 +151,15 @@ public sealed partial class SettingsWindow
                 var able=candidates.Where(s=>domains.All(d=>s.Info.Domains.Contains(d)))
                     .OrderBy(s=>{int i=Array.IndexOf(displayOrder,s.Info.Id);return i<0?int.MaxValue:i;})
                     .ToArray();
-                var ids=new List<string>{"auto"};
-                var labels=new List<string>{Loc.T("自动","Automatic")};
-                foreach(var s in able)
-                {
-                    ids.Add(s.Info.Id);labels.Add(s.Info.Name);
-                }
-                var chosen=domains.Select(state.Schedule.Choice).FirstOrDefault(c=>c!="auto")??"auto";
-                var picker=new ComboBox {Width=210,Style=(Style)FindResource("SettingsCombo"),ItemsSource=labels,SelectedIndex=Math.Max(0,ids.IndexOf(chosen))};
+                var ids=able.Select(s=>s.Info.Id).ToList();
+                var labels=able.Select(s=>s.Info.Name).ToList();
+                var chosen=domains.Select(state.Schedule.Choice).FirstOrDefault(c=>c.Length>0)??"";
+                var picker=new ComboBox {Width=210,Style=(Style)FindResource("SettingsCombo"),ItemsSource=labels,SelectedIndex=ids.Count>0?Math.Max(0,ids.IndexOf(chosen)):-1};
                 PopupMotion.Attach(picker);
                 picker.SelectionChanged+=(_,_)=>{
-                    if(loadingSources||picker.SelectedIndex<0)return;
+                    if(loadingSources||picker.SelectedIndex<0||picker.SelectedIndex>=ids.Count)return;
                     string id=ids[picker.SelectedIndex];
-                    foreach(var domain in domains){if(id=="auto")state.Schedule.Sources.Remove(domain.ToString());else state.Schedule.Sources[domain.ToString()]=id;}
+                    foreach(var domain in domains) state.Schedule.Sources[domain.ToString()]=id;
                     Save();preview.Content=new WeatherSettingsPreview(state);
                 };
                 string scope=able.Length==0?Loc.T("该区域暂无可用来源","No source in this region"):able.Length==candidates.Length?Loc.T("各家都能提供","from every source"):Loc.T($"仅 {able.Length} 家提供",$"from {able.Length} sources");
@@ -179,10 +175,10 @@ public sealed partial class SettingsWindow
         var hefengHost=KeyField(state.Schedule.HeFengHost,text=>{state.Schedule.HeFengHost=text;Save();});
         var hefengKey=KeyField(state.Schedule.HeFengKey,text=>{state.Schedule.HeFengKey=text;Save();});
         Group(Row(Loc.T("和风 API Host","QWeather host"),hefengHost,TextLine(Loc.T("必填：控制台分配的项目 Host，例如 abcxyz.re.qweatherapi.com；留空则不启用和风。","Required: the project host from your console, e.g. abcxyz.re.qweatherapi.com; blank disables QWeather."),11,TextSecondary)),
-              Row(Loc.T("和风天气 Key","QWeather key"),hefengKey,TextLine(Loc.T("和风需要 Key：填入后优先使用其全维度数据；其余来源免 Key。","QWeather needs a key: with one it is preferred for all domains; other sources need none."),11,TextSecondary)));
+              Row(Loc.T("和风天气 Key","QWeather key"),hefengKey,TextLine(Loc.T("和风需要 Key：填入后优先使用其全维度数据。","QWeather needs a key: with one it is preferred for all domains."),11,TextSecondary)));
         // 更新与请求状态放页尾：城市与来源才是高频改动项，运行状态看一眼就够。
         SectionTitle(Loc.T("更新与数据","Updates and data"));Group(Row(Loc.T("自动更新","Auto update"),TextLine(Loc.T("每 15 分钟","Every 15 minutes"),12,TextSecondary)),Row(Loc.T("离线时","Offline"),TextLine(Loc.T("自动使用本地缓存","Falls back to the local cache"),12,TextSecondary)));
-        // 请求与缓存：调度是「按需下探 + 分域缓存」，这里把当天的实际请求量和磁盘占用摆出来，配额一目了然。
+        // 请求与缓存：按用户指定来源请求 + 分域缓存，这里把当天的实际请求量和磁盘占用摆出来，配额一目了然。
         SectionTitle(Loc.T("请求与缓存","Requests and cache"));
         var usage=WeatherCache.Usage();
         var used=WeatherSources.All.Select(source=>(Name:source.Info.Id switch{"tencent"=>Loc.T("腾讯","Tencent"),"weathercomcn"=>Loc.T("中国天气网","ChinaWx"),"hefeng"=>Loc.T("和风","QWeather"),_=>source.Info.Name},Count:RequestGate.Today(source.Info.Id))).Where(item=>item.Count>0).ToArray();

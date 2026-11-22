@@ -190,9 +190,6 @@ internal static class WeatherSources
     ];
     public static IWeatherSource? Find(string id) => All.FirstOrDefault(s => s.Info.Id == id);
     public static string Name(string id) => Find(id)?.Info.Name ?? id;
-    // 某域可用的来源，按“是否可用”过滤（国内源需要中文城市名，key 源需要有 key）。
-    public static IEnumerable<IWeatherSource> For(WeatherDomain domain, City city, WeatherSettings settings)
-        => All.Where(s => s.Info.Domains.Contains(domain) && s.CanServe(city, settings));
     // 某个区域的候选来源：国内城市四家都能用（国内源只服务中国坐标），国外城市只有全球源。
     // 设置页按这个集合动态生成每个域的下拉选项，不写死名单。
     public static IEnumerable<IWeatherSource> Candidates(bool china)
@@ -207,9 +204,8 @@ internal interface IWeatherSource
     Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token);
 }
 
-// 多源调度：每个域一条来源链，逐轮按需下探——第 1 轮只请求各域的首选来源，
-// 合并后检查覆盖情况，只对仍缺口的数据域才去请求链上的下一家。
-// 这样既保留「先到先得、后续补缺」的合并语义，又不会为了一个字段把整条链全打一遍。
+// 单源聚合：每个域只请求用户选定的那一家；同一次刷新把多个域合并成尽量少的请求。
+// 指定来源缺的字段就留空，不再跨源补缺。
 internal static class WeatherAggregator
 {
     private static readonly TimeSpan SourceTimeout = TimeSpan.FromSeconds(15);
@@ -228,36 +224,23 @@ internal static class WeatherAggregator
         var live = domains.Where(domain => !Deferred(domain)).ToArray();
         var later = domains.Where(Deferred).ToArray();
         await RoundsAsync(city, settings, chains, parts, tried, served, live, token);
-        if (parts.Count == 0) throw new InvalidOperationException("没有可用的天气来源");
+        // 没有任何来源给出数据时不再抛错：返回空快照，界面把缺项显示为 "-"。
         // 第一段结果先交给界面；重域补上后返回的快照会覆盖它。
         if (progress is not null && later.Any(d => chains[d].Count > 0)) progress(Merge(city, chains, parts));
         await RoundsAsync(city, settings, chains, parts, tried, served, later, token);
         return Merge(city, chains, parts);
     }
 
-    // 来源链：显式选择优先，然后按该区域的下探顺序逐家补位；Open-Meteo 永远兜底。
+    // 每个域只用用户选定的那一家：不按区域下探、不跨源补缺。
+    // 指定来源不可用时返回空链，Merge 会给出一份全空的快照，界面按缺失显示 "-"。
     private static List<IWeatherSource> Chain(WeatherDomain domain, City city, WeatherSettings settings)
     {
-        var chain = new List<IWeatherSource>();
-        void Add(IWeatherSource? source)
-        {
-            if (source is not null && source.Info.Domains.Contains(domain) && source.CanServe(city, settings) && !chain.Contains(source)) chain.Add(source);
-        }
-        // 手动指定的来源放在最前；它失败时仍会走完整回退链。
-        string choice = settings.Choice(domain);
-        if (choice != "auto") Add(WeatherSources.Find(choice));
-        // 按区域顺序补位：国内走 4 家；国外只列全球源（国内源的服务范围本就不含国外坐标）。
-        // 不按域特判：某家能否补这个域由 Info.Domains 决定，Add() 直接跳过不支持的那几家。
-        foreach (string id in settings.Ranking(Geo.IsChina(city)))
-        {
-            Add(WeatherSources.Find(id));
-        }
-        // Open-Meteo 全球可用，任何域都排在最后兜底；即便用户把它从列表里关掉也不至于无源可用。
-        Add(WeatherSources.Find("openmeteo"));
-        return chain;
+        var source = WeatherSources.Find(settings.Choice(domain));
+        if (source is null || !source.Info.Domains.Contains(domain) || !source.CanServe(city, settings)) return [];
+        return [source];
     }
 
-    // 逐轮下探：每轮把「同一来源的多个域」合并成一次请求，取完再看缺口。
+    // 逐域取数：把同一来源的多个域合并成一次请求；每条链只有一家，不再逐轮换源。
     private static async Task RoundsAsync(City city, WeatherSettings settings, Dictionary<WeatherDomain, List<IWeatherSource>> chains,
         Dictionary<string, WeatherPart> parts, HashSet<string> tried, Dictionary<string, HashSet<WeatherDomain>> served,
         IReadOnlyCollection<WeatherDomain> domains, CancellationToken token)
@@ -367,7 +350,7 @@ internal static class WeatherAggregator
             case WeatherDomain.History:
                 int past = 0; for (int offset = -10; offset <= -1; offset++) if (Day(offset)) past++;
                 return past >= 9;
-            // 扩展域：必须真的拿到数据才算满足，否则继续下探到其它来源。
+            // 扩展域：必须真的拿到数据才算满足；没有就留空，不再换源。
             case WeatherDomain.Minutely:
                 return snapshot.MinuteTimes.Length >= 2;
             case WeatherDomain.Warning:
@@ -1204,7 +1187,7 @@ internal sealed class WeatherComCnSource : IWeatherSource
     }
 }
 
-// 和风天气：需要用户自己的 Key，走 v1 接口覆盖实况、逐时、每日、日月与空气，质量最高，因此在自动调度中优先。
+// 和风天气：需要用户自己的 Key，走 v1 接口覆盖实况、逐时、每日、日月与空气；选定它时只用它的返回。
 // 只用 v1：v7 城市天气 2027-06 停服，不再保留旧接口的退路。
 internal sealed class HeFengSource : IWeatherSource
 {
@@ -1314,7 +1297,10 @@ internal sealed class HeFengSource : IWeatherSource
 
     private static async Task<List<DayPoint>?> FetchHistory(Context context, CancellationToken token)
     {
-        string? id = await LocationId(context, token);
+        // 优先用城市自带的 LocationID：搜索/定位时 GeoAPI 已经返回并存在 City.LocationId 里，
+        // 不必再靠坐标反查——反查受限流冷却/网络影响，一次失败就会让整段历史为空。
+        // 只有城市没带 id 时才回退到坐标反查。
+        string? id = context.City.LocationId is { Length: > 0 } known ? known : await LocationId(context, token);
         if (id is null) return null;
         // 按城市当地日期回溯：跨时区时用本机日期会整体错一天。
         var today = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(Geo.UtcOffsetHours(context.City))).Date;
@@ -1668,7 +1654,7 @@ internal sealed class HeFengSource : IWeatherSource
         catch { return null; }
     }
 
-    // ---- v7 扩展域解析：非 200 或未订阅一律返回空，让调度器下探到其它来源 ----
+    // ---- v7 扩展域解析：非 200 或未订阅一律返回空，界面按缺失显示 "-" ----
     private static bool V7Ok(JsonElement root) => Json.Text(root, "code") is "200" or "0";
 
     private static List<MinutePoint>? ParseMinutelyV7(string? body)

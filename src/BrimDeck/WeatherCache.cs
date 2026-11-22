@@ -186,6 +186,9 @@ internal static class RequestGate
     private static readonly Dictionary<string, int> DailyLimit = new(StringComparer.Ordinal)
     {
         ["hefeng"] = 800,        // 免费订阅按 key 计日额度，留出余量
+        // 城市搜索单独计数：与天气共用一个闸门时，天气触发的 429/失败熔断会把搜索一起停掉，
+        // 新词全部搜不到。搜索有 1 天磁盘缓存，实际请求很少，独立 500 次足够。
+        ["hefeng-search"] = 500,
         ["tencent"] = 600,
         ["weathercomcn"] = 600,
         ["openmeteo"] = 1200

@@ -139,7 +139,9 @@ internal static class WeatherData
         string lang = Loc.IsEnglish ? "en" : "zh";
         string body = await WeatherCache.GetAsync<string>("hefeng", "search|" + lang + "|" + query, TimeSpan.FromDays(1), async ct =>
         {
-            var result = await WeatherHttp.GetAsync("hefeng", $"{host}/geo/v2/city/lookup?location={Uri.EscapeDataString(query)}&number=10&lang={lang}", ct,
+            // 搜索用独立闸门通道：天气取数（尤其时光机一轮 10 次请求）触发 429/失败熔断时，
+            // 不该把城市搜索一起停掉——否则用户搜新词会全部落空，看起来像搜索坏了。
+            var result = await WeatherHttp.GetAsync("hefeng-search", $"{host}/geo/v2/city/lookup?location={Uri.EscapeDataString(query)}&number=10&lang={lang}", ct,
                 request => request.Headers.TryAddWithoutValidation("X-QW-Api-Key", settings.HeFengKey.Trim()));
             return result.Body;
         }, token) ?? "";
@@ -196,7 +198,7 @@ internal static class WeatherData
             return new City(parts.Count>0?City.Compose([.. parts]):"当前位置",lat,lon);
         } catch { return null; }
     }
-    // 多源调度入口：当前、24 小时、24 天（历史 10 + 今天 + 未来 13）、日出日落与空气质量由 WeatherAggregator 统一拼装。
+    // 天气聚合入口：当前、24 小时、24 天（历史 10 + 今天 + 未来 13）、日出日落与空气质量由 WeatherAggregator 统一拼装。
     // 历史单独一轮，progress 让界面先画不含历史的版本，历史到了再用返回值整体替换。
     internal static async Task<WeatherSnapshot> CurrentAsync(City city, WeatherSettings schedule, CancellationToken token, Action<WeatherSnapshot>? progress = null)
         => await WeatherAggregator.FetchAsync(city, schedule, token, progress);
