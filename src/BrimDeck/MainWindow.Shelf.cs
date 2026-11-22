@@ -155,13 +155,7 @@ public partial class MainWindow
         return badge;
     }
     // Opened while the pointer is on the count, the panel opens on this page.
-    private bool PointerOnTransfer()
-    {
-        if (_compactTransfer is not { IsVisible: true } badge || PresentationSource.FromVisual(badge) is null) return false;
-        var rect = new Rect(badge.PointToScreen(new Point()), badge.PointToScreen(new Point(badge.ActualWidth, badge.ActualHeight)));
-        rect.Inflate(4, 6);
-        return rect.Contains(WindowsHost.Cursor());
-    }
+    private bool PointerOnTransfer() => PointerOnPart(_compactTransfer);
 
     // ---- The page ----
     // What the page's rows were last built for, besides the entries and what the page itself has chosen (the categories, the

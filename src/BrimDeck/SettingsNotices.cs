@@ -11,8 +11,8 @@ using BrimDeck.Native;
 
 namespace BrimDeck;
 
-// The two "灵动提示" pages. How notices show (NoticesSettingsPage): the default level, where they show, how each of the three
-// levels looks, the quiet times and the history. Apps (NoticeAppsSettingsPage): the Windows applications whose notices show and
+// The two "灵动提示" pages. How notices show (NoticesSettingsPage): whether they show on the island, the default level, where they
+// show, how each of the three levels looks, the collapsed count of unread notices, the quiet times and the history. Apps (NoticeAppsSettingsPage): the Windows applications whose notices show and
 // each one's level and banner, the command-line and WSL sources, and the WSL distributions. An application may have its own looks
 // for the levels, under its row, closed until asked for. Source states change while a page is open (access granted, an agent
 // started); their lines follow NoticeCenter.Changed without rebuilding the page.
@@ -43,7 +43,7 @@ public sealed partial class SettingsWindow
     {
         var center = _app.Notices;
         _noticeStatusLines.Clear();
-        NoticesOffRow();
+        NoticeIslandRow();
         SectionTitle(Loc.T("通用", "General"));
         Group(MusicChoice(Loc.T("默认等级", "Default level"), NoticeLevels.Default(S.NoticeDefaultLevel), [.. Levels.Select(level => (level, LevelName(level)))],
                 value => Change(s => s.NoticeDefaultLevel = value),
@@ -61,6 +61,7 @@ public sealed partial class SettingsWindow
             SectionTitle(LevelTitle(level), test, () => LevelHelp(level));
             Group([LevelPreview(level, S.NoticeStyles.For(level)), .. LevelRows(level, () => S.NoticeStyles, edit => EditNoticeStyles(s => edit(s.NoticeStyles)), level.ToString())]);
         }
+        NoticeStripSection();
         NoticeQuietSection(center);
         NoticeHistorySection(center);
         WatchNotices(center);
@@ -74,16 +75,38 @@ public sealed partial class SettingsWindow
         _ => Loc.T("在等级 1 的基础上，岛的边缘闪一下。辉光：边缘亮一下；灵动：辉光加液体波纹。", "As level 1, and the island's edge flashes. Glow: the edge lights up once. Lively: the glow and a liquid ripple.")
     };
 
-    // Both "灵动通知" switches are off: said at the top, with the pages where they are. The settings below can still be changed.
+    // Whether an arriving notice shows on the island (NoticeIsland), at the top of the page whose levels decide how. Off, notices
+    // only go to the notices page and its count on the island; with that page off as well, none are received, which the line under
+    // the switch says.
+    private void NoticeIslandRow()
+    {
+        string title = Loc.T("在岛上提示", "Show on the island");
+        var note = StatusLine(() => S.NoticesEnabled ? ("", false)
+            : (Loc.T("“展开外观”中的灵动通知也已关闭，目前不接收通知。", "Live notices are off under Expanded view as well, so no notices are received."), false));
+        var toggle = NoticeToggle(title, S.NoticesEnabled && S.NoticeIsland, value => { TurnNotices(true, value); foreach (var update in _noticeStatusLines) update(); });
+        Group(Row(title, toggle, note, () => Loc.T("收到通知时，按下面的等级在岛上显示文字和效果。关闭后，通知只进入通知页和岛上的通知条。",
+            "Shows an arriving notice's words and effect on the island, by the levels below. Off, notices only go to the notices page and the notice count on the island.")));
+    }
+
+    // Both switches are off, so no notices are received: said at the top of the apps page, with the pages where the switches are.
     private void NoticesOffRow()
     {
         if (S.NoticesEnabled) return;
         var controls = new StackPanel { Orientation = Orientation.Horizontal };
-        controls.Children.Add(ActionButton(Loc.T("收起外观", "Collapsed view"), () => ShowPage(1)));
+        controls.Children.Add(ActionButton(Loc.T("提示方式", "How notices show"), () => ShowPage(NoticesSettingsPage)));
         var expanded = ActionButton(Loc.T("展开外观", "Expanded view"), () => ShowPage(2)); expanded.Margin = new Thickness(6, 0, 0, 0);
         controls.Children.Add(expanded);
-        var note = TextLine(Loc.T("可在“收起外观”或“展开外观”中开启", "Turn it on under Collapsed view or Expanded view"), 11.5, TextSecondary);
+        var note = TextLine(Loc.T("可在“提示方式”或“展开外观”中开启", "Turn it on under How notices show or Expanded view"), 11.5, TextSecondary);
         Group(Row(Loc.T("灵动通知未开启", "Live notices are off"), controls, note));
+    }
+
+    // The collapsed count of unread notices: switched on for the notch and the capsule under 收起外观 › 显示内容, shown here.
+    private void NoticeStripSection()
+    {
+        SectionTitle(Loc.T("通知条", "Notice count"), ActionButton(Loc.T("收起外观", "Collapsed view"), () => ShowPage(1)),
+            () => Loc.T("显示未读通知的条数，在“收起外观”的显示内容中打开。打开通知页后清零。", "Shows how many notices are unread on the island; turn it on in Collapsed view's content. Opening the notices page clears it."));
+        Group(Toggle(Loc.T("显示应用图标", "Show app icons"), S.NoticeStripIcons, value => Change(s => s.NoticeStripIcons = value),
+            help: Loc.T("在条数前显示最近几条未读通知的应用图标，最多 3 个。关闭后显示铃铛。", "Shows the icons of up to 3 apps the latest unread notices came from before the count. Off, a bell shows.")));
     }
 
     // The settings' looks change and the page shows them (its previews follow).
@@ -855,22 +878,15 @@ public sealed partial class SettingsWindow
 
     // ----- The switches elsewhere -----
 
-    // The two "灵动通知" switches: on the collapsed island (island) and as the expanded page. Notices are received while either is
-    // on; turning one on while both were off leaves the other off.
+    // The two "灵动通知" switches: on the island as notices arrive (island, at the top of the 灵动提示 page) and as the expanded page.
+    // Notices are received while either is on. Each reads as on only while notices are received, so turning one on while both were
+    // off clears the other's saved value: it stays off, as it read.
     private void TurnNotices(bool island, bool on) => Change(s =>
     {
         if (on && !s.NoticesEnabled) { s.NoticeIsland = false; s.NoticesPage = false; }
         if (island) s.NoticeIsland = on; else s.NoticesPage = on;
         s.NoticesEnabled = s.NoticeIsland || s.NoticesPage;
     });
-
-    private void CompactNoticeSection()
-    {
-        SectionTitle(Loc.T("通知", "Notices"));
-        Group(Toggle(Loc.T("灵动通知", "Live notices"), S.NoticesEnabled && S.NoticeIsland, value => TurnNotices(true, value),
-            help: Loc.T("收到通知时在岛上显示图标、标题和摘要。提示方式与应用在“灵动提示”的设置页中设置。全部在本机处理。",
-                "Shows an arriving notice's icon, title and summary on the island. How notices show and which apps show them are set on the Live notices settings pages. Everything is processed on this PC.")));
-    }
 
     private void NoticeSizeControls()
     {

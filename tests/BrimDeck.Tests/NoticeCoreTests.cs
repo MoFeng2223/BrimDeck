@@ -470,6 +470,14 @@ internal static class NoticeCoreTests
         check("The notices page is saved as number 5, after the devices page; as the opening page, 7, after the part under the pointer", (int)DeckPage.Devices == 4 && (int)DeckPage.Notices == 5 && (int)DefaultDeckPage.Notices == 7);
         DeckPages.SetSize(settings, DeckPage.Notices, 100, 9999);
         check("Dragging the notices page keeps it within the page limits", settings.NoticesWidth == DeckPages.MinWidth && settings.NoticesHeight == DeckPages.MaxHeight);
+        var strip = new DeckSettings { CapsuleNotices = true };
+        check("The notices' count is off by default, shows the apps' icons and needs the notices page", !new DeckSettings().NotchNotices && !new DeckSettings().CapsuleNotices
+            && new DeckSettings().NoticeStripIcons && !strip.ShowsNotices(CompactStyle.Capsule));
+        strip.NoticesEnabled = true;
+        check("The notices' count shows on the style it is on for, never on the indicator", strip.ShowsNotices(CompactStyle.Capsule) && !strip.ShowsNotices(CompactStyle.Notch) && !strip.ShowsNotices(CompactStyle.Line));
+        strip.NoticesPage = false;
+        check("The notices' count hides with the notices page", !strip.ShowsNotices(CompactStyle.Capsule));
+        check("The notices' count is part 7, added at the end of an order saved without it", (int)CompactPart.Notices == 7 && CompactParts.Normalize([CompactPart.Rings]).Last() == CompactPart.Notices);
     }
 
     private static void SettingsValues(string root, Action<string, bool> check)

@@ -6,8 +6,12 @@ When a notification arrives, the notch, capsule or indicator grows out of its pl
 
 Live notices have two switches, both off by default; notices are received once either is on:
 
-- Settings › Collapsed view › Notices › Live notices: notices show on the island as they arrive.
+- Settings › Live notices › How notices show › Show on the island: notices show on the island as they arrive.
 - Settings › Expanded view › Show live notices: the open panel shows the notices page.
+
+The two switches are independent: with only the notices page on, notices do not interrupt you and only go to the page.
+
+The notch or the capsule can also keep a notice count that shows how many notices are unread: turn on "Notices" under Settings › Collapsed view › Content, and drag it among the other parts. It needs the notices page, shows nothing while no notice is unread, opens the notices page when clicked, and clears once that page has been opened. By default the icons of up to 3 apps the latest unread notices came from show before the number; switch off "Show app icons" under Settings › Live notices › How notices show › Notice count to show a bell instead. The indicator bar shows no count.
 
 Settings › Live notices has two pages: "How notices show" sets how each of the three levels looks, and "Apps" sets which apps show notices and at which level. Then:
 

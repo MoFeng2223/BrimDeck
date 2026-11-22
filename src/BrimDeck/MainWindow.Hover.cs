@@ -52,6 +52,7 @@ public partial class MainWindow
         CompactPart.Devices => new(DeckPage.Devices),
         CompactPart.Rings => new(DeckPage.Usage),
         CompactPart.Transfer => new(DeckPage.Clipboard, Files: true),
+        CompactPart.Notices => new(DeckPage.Notices),
         _ => new(null),
     };
 

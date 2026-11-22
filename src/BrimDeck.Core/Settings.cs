@@ -95,14 +95,15 @@ public enum EqualizerMode { Flow = 0, Spectrum = 1 }
 public enum QuotaRingStyle { Nested = 0, Single = 1 }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left; Music places
 // only the title or lyric. Saved as numbers, so new members go at the end.
-public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer, Devices }
+public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer, Devices, Notices }
 public static class CompactParts
 {
     // The order of new settings and of restoring the defaults: the equalizer and the clock come last.
-    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices, CompactPart.Equalizer, CompactPart.Clock];
+    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices, CompactPart.Notices, CompactPart.Equalizer, CompactPart.Clock];
     // The order in which parts missing from a saved file are added after its own. A file saved before the equalizer and the clock
-    // were put in order adds them after its parts, the clock last, where they stood; the devices' batteries (1.3.0) join last.
-    private static readonly IReadOnlyList<CompactPart> Missing = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices];
+    // were put in order adds them after its parts, the clock last, where they stood; the devices' batteries (1.3.0) and then the
+    // notices' count join last.
+    private static readonly IReadOnlyList<CompactPart> Missing = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices, CompactPart.Notices];
     // Each known part once, in the saved order; a part missing from the file takes its place after the others.
     public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Missing).Distinct()];
 }
@@ -755,6 +756,9 @@ public sealed class DeckSettings
     // The notch and the capsule each show the devices' batteries (CompactPart.Devices).
     public bool NotchDevices { get; set; }
     public bool CapsuleDevices { get; set; }
+    // The notch and the capsule each show how many notices are unread (CompactPart.Notices); shown only while some are.
+    public bool NotchNotices { get; set; }
+    public bool CapsuleNotices { get; set; }
     // The expanded page shows a line under memory and network with the frame rate of the program in front, its name and its display's
     // refresh rate (FrameRates). Off by default; read only while the page is open, and only where the user may read Windows' frame
     // events (the Performance Log Users group, or BrimDeck elevated).
@@ -812,7 +816,7 @@ public sealed class DeckSettings
     // Also reads the Claude Code and Codex CLI session records inside WSL distributions. Off by default: it starts stopped distributions.
     public bool IncludeWsl { get; set; }
     // Dynamic notices (see Notices/). Off until the user switches them on; each source has its own switch. They are received
-    // while either "灵动通知" switch is on: on the collapsed island (NoticeIsland, under 收起外观) or as the expanded page
+    // while either switch is on: on the island as they arrive (NoticeIsland, "在岛上提示" on the 灵动提示 page) or as the expanded page
     // (NoticesPage, under 展开外观). Each switch reads as on only while NoticesEnabled is.
     public bool NoticesEnabled { get; set; }
     public bool NoticeIsland { get; set; } = true;
@@ -824,6 +828,9 @@ public sealed class DeckSettings
     public NoticeLevel NoticeDefaultLevel { get; set; } = NoticeLevel.Glow;
     // How each level looks on the island (the settings' first notices page); an application may have its own (NoticeAppRule.Styles).
     public NoticeLevelStyles NoticeStyles { get; set; } = new();
+    // The collapsed count of unread notices (CompactPart.Notices) shows the icons of the applications they came from before the
+    // number; off, a bell.
+    public bool NoticeStripIcons { get; set; } = true;
     // Recognises a verification code in a notice, hides it wherever the notice is shown and offers a button that copies it (see
     // NoticeCodes). Off by default: it reads the notices' words and, on a click, writes the clipboard.
     public bool NoticeCodes { get; set; }
@@ -867,6 +874,8 @@ public sealed class DeckSettings
     // The indicator is too thin for readings, as for the clock.
     public bool ShowsMonitor(CompactStyle style) => style switch { CompactStyle.Notch => NotchMonitor, CompactStyle.Capsule => CapsuleMonitor, _ => false };
     public bool ShowsDevices(CompactStyle style) => style switch { CompactStyle.Notch => NotchDevices, CompactStyle.Capsule => CapsuleDevices, _ => false };
+    // The notices' count needs the notices page, which a click on it opens.
+    public bool ShowsNotices(CompactStyle style) => DeckPages.Shown(this, DeckPage.Notices) && style switch { CompactStyle.Notch => NotchNotices, CompactStyle.Capsule => CapsuleNotices, _ => false };
     // The file transfer's count needs the page and its column: with either hidden, nothing can be dropped there.
     public bool ShowsTransfer(CompactStyle style) => ClipboardPage && ShelfShown != ShelfShown.Clipboard && style switch { CompactStyle.Notch => NotchTransfer, CompactStyle.Capsule => CapsuleTransfer, _ => false };
     // The page's columns are stacked as cards only while it shows both.

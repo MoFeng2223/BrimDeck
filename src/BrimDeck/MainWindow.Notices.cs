@@ -262,6 +262,7 @@ public partial class MainWindow
     private void NoticesChanged()
     {
         UpdateNoticeBadge();
+        NoticeStripChanged();
         if (!_expanded || CurrentPage != DeckPage.Notices || _noticesRenderQueued) return;
         // Several changes in a row (a burst, icons arriving) are drawn once.
         _noticesRenderQueued = true;
@@ -1010,6 +1011,7 @@ public partial class MainWindow
 
     private void NoticeIconLoaded(string iconRef)
     {
+        NoticeStripIconLoaded(iconRef);
         if (!_waitingPlates.Remove(iconRef, out var plates)) return;
         foreach (var (plate, notice) in plates) FillPlate(plate, notice);
     }
