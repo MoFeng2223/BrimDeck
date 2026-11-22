@@ -390,7 +390,8 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         ShelfLayoutSettingsPage => "M 1,2.5 H 15 V 13.5 H 1 Z M 10,2.5 V 13.5",
         TransferSettingsPage => "M 1.5,9 L 3.5,3 H 12.5 L 14.5,9 V 13 A 1,1 0 0 1 13.5,14 H 2.5 A 1,1 0 0 1 1.5,13 Z M 1.5,9 H 5.5 L 6.5,10.5 H 9.5 L 10.5,9 H 14.5",
         ThemePage => "M 8,1 C 4,1 1,4 1,8 C 1,12 4,15 8,15 C 9.4,15 9.6,13.6 8.8,12.8 C 8,12 8.6,10.5 10,10.5 H 12 C 13.7,10.5 15,9.2 15,7.5 C 15,4 12,1 8,1 Z M 4.6,8 V 8.1 M 6,4.8 V 4.9 M 9.6,4.4 V 4.5 M 12,6.8 V 6.9",
-        NoticesSettingsPage => "M 8,1.5 C 5.6,1.5 4,3.4 4,5.7 V 8.4 L 2.8,10.6 H 13.2 L 12,8.4 V 5.7 C 12,3.4 10.4,1.5 8,1.5 Z M 6.3,12.6 A 1.7,1.7 0 0 0 9.7,12.6",
+        // The panel's notices bell (MainWindow.xaml, NoticesBell) in this list's strokes: a bar, a dome on two sides and a clapper.
+        NoticesSettingsPage => "M 2.3,12.3 H 13.7 M 3.5,12.3 V 6 A 4.5,4.5 0 0 1 12.5,6 V 12.3 M 6.4,13 A 1.6,1.6 0 0 0 9.6,13",
         // Three squares and a plus: the listed applications and one to add.
         NoticeAppsSettingsPage => "M 1.5,1.5 H 6.5 V 6.5 H 1.5 Z M 1.5,9.5 H 6.5 V 14.5 H 1.5 Z M 9.5,9.5 H 14.5 V 14.5 H 9.5 Z M 12,1 V 7 M 9,4 H 15",
         5 => "M 6,12.5 V 3 L 14,1.5 V 11 M 6,12.5 A 2,2 0 1 1 2,12.5 A 2,2 0 1 1 6,12.5 M 14,11 A 2,2 0 1 1 10,11 A 2,2 0 1 1 14,11",

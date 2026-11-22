@@ -267,6 +267,11 @@ internal sealed partial class Renderer(App app, string output, string language, 
         _settings.Animations = true;
         hub.Receive(new NoticeInput { Origin = NoticeOrigin.Cli, AppKey = "cli:Claude Code", AppName = "Claude Code", InstanceKey = "cli::cc:1", Title = Loc.T("等待批准", "Waiting for approval") }, _now.ToUniversalTime());
         hub.Receive(new NoticeInput { Origin = NoticeOrigin.Cli, AppKey = "cli:Ubuntu:nightly-build", AppName = "nightly-build", Distro = "Ubuntu", InstanceKey = "cli:Ubuntu:nb:1", Title = Loc.T("构建完成", "Build finished") }, _now.ToUniversalTime());
+        // The page switch's bell with the dot for the two notices not seen yet.
+        _deck.SetExpanded(true, true);
+        await Settle();
+        await Save("notices-badge", 3);
+        _deck.SetExpanded(false, true);
         await SettingsPage("notices-settings", 19, height: 2000, tips: true);
         await SettingsPage("notice-apps-settings", 20, height: 1100, tips: true);
         // One application's own looks open under its row.

@@ -373,12 +373,16 @@ public partial class MainWindow
         return _focusKey == FocusKey(FocusedNotice(center), now);
     }
 
+    // The bell's 16 DIP box without a circle 1 DIP wider than the unseen dot, so the bell keeps clear of the dot on any fill.
+    private static readonly Geometry NoticeBellCut = FrozenGeometry("M 0,0 H 16 V 16 H 0 Z M 11,2 A 3,3 0 1 0 17,2 A 3,3 0 1 0 11,2 Z");
+
     private void UpdateNoticeBadge()
     {
         if (_app.Notices is null) return;
         int count = _app.Notices.Hub.UnviewedCount;
-        NoticesBadge.Visibility = count > 0 && Settings.NoticesEnabled ? Visibility.Visible : Visibility.Collapsed;
-        NoticesBadge.Background = UI.Brush(PanelTheme.Hex("danger"));
+        bool unseen = count > 0 && Settings.NoticesEnabled;
+        NoticesBadge.Visibility = unseen ? Visibility.Visible : Visibility.Collapsed;
+        NoticesBell.Clip = unseen ? NoticeBellCut : null;
         AutomationProperties.SetName(NoticesPageButton, Loc.T("通知", "Notices") + (count > 0 ? " · " + NoticeText.Count(count) : ""));
     }
 
