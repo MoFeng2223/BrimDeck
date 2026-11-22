@@ -46,6 +46,7 @@ public partial class MainWindow
         if (_noticesSubscribed || _app.Notices is null) return;
         _noticesSubscribed = true;
         _app.Notices.Changed += NoticesChanged;
+        SubscribeAgenda();
         _app.Notices.Icons.Loaded += NoticeIconLoaded;
         PrepareNoticeWindow();
     }
@@ -68,6 +69,7 @@ public partial class MainWindow
     {
         if (_noticesSubscribed) { _app.Notices.Changed -= NoticesChanged; _app.Notices.Icons.Loaded -= NoticeIconLoaded; }
         _noticesSubscribed = false;
+        UnsubscribeAgenda();
         if (_app.Notices is not null) { _liveRows.Clear(); WatchPageLive(); }
         _noticeWindow?.Close(); _noticeWindow = null;
         _bootNotice?.Stop(); _noticeAfterBoot = null;
@@ -497,7 +499,7 @@ public partial class MainWindow
 
     // What the focus column shows apart from what RowKey covers: its relative time and its live words.
     private string FocusKey(Notice? notice, DateTimeOffset now) => notice is null ? "" : string.Join('\u0001', notice.Id, notice.Revision, NoticeText.Relative(notice.ReceivedAt, now),
-        notice.Progress, NoticeClock.IsLive(notice.Timing, now), _app.Notices.CanOpen(notice));
+        notice.Progress, NoticeClock.IsLive(notice.Timing, now), _app.Notices.CanOpen(notice), AgendaKey(notice));
 
     // ----- The focus column -----
 
@@ -565,6 +567,8 @@ public partial class MainWindow
         // The buttons, at the foot of the column.
         var buttons = FocusButtons(notice, center);
         DockPanel.SetDock(buttons, System.Windows.Controls.Dock.Bottom); stack.Children.Add(buttons);
+        // Above them, what BrimDeck read from the notice: a time to add to the planner, what was added, a verification code.
+        if (NoticeAgendaStrip(notice) is { } strip) { DockPanel.SetDock(strip, System.Windows.Controls.Dock.Bottom); stack.Children.Add(strip); }
 
         // The words, scrolling within the column when they are long; the other messages of the same conversation under them.
         var words = new StackPanel { Margin = new Thickness(0, 0, 0, WordsFadeHeight) };
@@ -659,6 +663,7 @@ public partial class MainWindow
             copyAll = GlyphPill("", copyName, () => SayCopied(copyAll!, CopyWords(text), copyName));
             flow.Add(copyAll);
         }
+        if (NoticeTodoButton(notice) is { } todo) flow.Add(todo);
         // The notice's own buttons that can still do something (NoticeCenter.Buttons): one that answers its sender while the sender
         // waits, one that copies or opens always. The sender's main button is the page's main one when no application can be opened.
         var own = center.Buttons(notice);
@@ -671,14 +676,6 @@ public partial class MainWindow
         }
         foreach (var action in center.TimeActions(notice).Take(2))
             flow.Add(PillButton(action.Label, action.Label, () => { center.TimeAction(notice, action.Key); RenderNotices(); }));
-        // Only a click puts the code on the clipboard; the name says what the button does, never the code.
-        if (NoticeCodes.Words(notice, Settings.NoticeCodes).Hit is { } code)
-        {
-            string copyLabel = Loc.T("复制验证码", "Copy code");
-            Button? copy = null;
-            copy = PillButton(copyLabel, copyLabel, () => CopyCode(copy!, code.CopyText, copyLabel));
-            flow.Add(copy);
-        }
         if (center.CanOpen(notice))
         {
             string open = OpenLabel(notice);
@@ -948,6 +945,7 @@ public partial class MainWindow
             : notice.Category == NoticeCategory.Warning ? (NoticeText.CategoryName(notice.Category), WaitColor) : ("", "");
         if (status.Length > 0) second.Inlines.Add(new System.Windows.Documents.Run(status + " · ") { Foreground = UI.Brush(color) });
         if (NoticeClock.Live(notice.Timing, now, TimeZoneInfo.Local) is { } live) second.Inlines.Add(new System.Windows.Documents.Run(live + " · ") { Foreground = UI.Brush(UI.Accent) });
+        AddNoticeAgendaMark(second, notice, now);
         second.Inlines.Add(new System.Windows.Documents.Run(preview));
         IslandNotice.Directed(second);
         if (codeWords.HasCode && notice.Body.Length > 0) AutomationProperties.SetName(second, (status.Length > 0 ? status + ", " : "") + NoticeText.Summary(codeWords.SpokenBody));
@@ -990,7 +988,7 @@ public partial class MainWindow
     // Everything a row shows.
     private string RowKey(Notice notice, DateTimeOffset now)
         => string.Join('\u0001', Settings.NoticeCodes, notice.Title, notice.Body, notice.AppName, notice.IconRef, notice.Picture, notice.SourcePresent, notice.Category, notice.Call,
-            NoticeClock.Live(notice.Timing, now, TimeZoneInfo.Local), NoticeText.Relative(notice.ReceivedAt, now), ConversationOf(notice));
+            NoticeClock.Live(notice.Timing, now, TimeZoneInfo.Local), NoticeText.Relative(notice.ReceivedAt, now), ConversationOf(notice), NoticeAgendaRowKey(notice, now));
 
     // The notice whose row last had the keyboard focus, to keep it there when the page is built again.
     private string? _focusedNotice;

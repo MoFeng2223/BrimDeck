@@ -31,6 +31,7 @@ try
     ModelUsageTests.Run(Check);
     await NoticeProtocolTests.Run(Check);
     NoticeMomentsTests.Run(Check);
+    NoticeAgendaTests.Run(Check);
     AuditWslTests.Run(Check);
     await AuditWsl2Tests.Run(Check);
     await NoticeWslOpsTests.Run(Check);
