@@ -121,8 +121,8 @@ internal sealed class DeviceBatteries : IDisposable
         var info = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
         if (!GetLastInputInfo(ref info)) return;
         uint idle = unchecked((uint)Environment.TickCount - info.dwTime);
-        if (idle >= Away.TotalMilliseconds) { _away = true; return; }
-        if (_away) { _away = false; ReadNow(input: true); }
+        if (idle >= Away.TotalMilliseconds) { _away = true; DevicePolling.Away = true; return; }
+        if (_away) { _away = false; DevicePolling.Away = false; ReadNow(input: true); }
     }
 
     private void PowerModeChanged(object? sender, PowerModeChangedEventArgs e)
@@ -145,7 +145,8 @@ internal sealed class DeviceBatteries : IDisposable
         if (demand == _running) return;
         var was = _running;
         _running = demand;
-        if (demand == DeviceDemand.Watch) { _away = false; _idle.Start(); } else _idle.Stop();
+        _away = false; DevicePolling.Away = false;
+        if (demand == DeviceDemand.Watch) _idle.Start(); else _idle.Stop();
         if (demand == DeviceDemand.None)
         {
             foreach (var source in _sources) source.Stop();
@@ -201,4 +202,12 @@ internal static class DevicePolling
 {
     public static readonly TimeSpan Ask = TimeSpan.FromSeconds(15), Logitech = TimeSpan.FromSeconds(30), Cached = TimeSpan.FromSeconds(5),
         Listen = TimeSpan.FromSeconds(5), Gatt = TimeSpan.FromSeconds(60), Slow = TimeSpan.FromSeconds(60);
+
+    // Set while no keyboard or mouse input has come for DeviceBatteries.Away (20 seconds). Meanwhile the reads that reach a
+    // device on a timer (Ask, Logitech, Gatt, Slow) are not sent: a keyboard or mouse may count a request from its receiver as
+    // use and never reach its own sleep (a LEOBOG Hi98C did). What reaches no device goes on (Windows' cached Bluetooth levels,
+    // the PlayStation controllers listened to, the receivers that push their battery), and so do the reads made at once (a
+    // device plugged in or linked again, the computer woken). Input again reads every device at once (DeviceBatteries.ReadNow).
+    private static volatile bool _away;
+    public static bool Away { get => _away; set => _away = value; }
 }

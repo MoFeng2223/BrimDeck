@@ -50,7 +50,8 @@ internal sealed class GamingBatteries(Dispatcher dispatcher, Action<DeviceSource
 
     public void Refresh() { if (_running) Read(); }
     public void ReadNow() => Refresh();
-    private void Tick(object? sender, EventArgs e) => Read();
+    // Not on the timer while the user is away (DevicePolling.Away).
+    private void Tick(object? sender, EventArgs e) { if (!DevicePolling.Away) Read(); }
     private void Changed(object? sender, RawGameController controller) => dispatcher.BeginInvoke(DispatcherPriority.Background, () => { if (_running) Read(); });
 
     private void Read()

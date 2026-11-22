@@ -54,7 +54,8 @@ internal sealed class CorsairReader(Action<string, DeviceBattery> received) : ID
             lock (_gate)
             {
                 if (_stopped) { _thread = null; _last.Clear(); return; }
-                bool due = _now || at < 0 || Environment.TickCount64 - at >= (long)DevicePolling.Slow.TotalMilliseconds;
+                // Not on the timer while the user is away (DevicePolling.Away).
+                bool due = _now || at < 0 || !DevicePolling.Away && Environment.TickCount64 - at >= (long)DevicePolling.Slow.TotalMilliseconds;
                 wanted = due ? _wanted : [];
                 if (due) _now = false;
             }

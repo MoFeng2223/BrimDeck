@@ -91,7 +91,8 @@ internal sealed class BluetoothBatteries(Dispatcher dispatcher, Action<DeviceSou
         if (_demand != DeviceDemand.Watch) return;
         int generation = _generation;
         foreach (var id in _endpoints.Keys.ToList()) RereadEndpoint(id, generation);
-        foreach (var gatt in _gatt.Values) gatt.Poll(force);
+        // A GATT read reaches the device: not on the timer while the user is away (DevicePolling.Away).
+        if (force || !DevicePolling.Away) foreach (var gatt in _gatt.Values) gatt.Poll(force);
         var connected = _endpoints.Values.Where(endpoint => endpoint.Connected).Select(endpoint => endpoint.Address).OfType<string>().ToHashSet();
         foreach (var (id, _) in _nodes.Where(node => connected.Contains(node.Value.Address) && ShouldRereadNode(node)).ToList())
             Reread(id, generation);

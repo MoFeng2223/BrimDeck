@@ -24,7 +24,8 @@ namespace BrimDeck.Native;
 // another, and the Corsair receivers, whose answer takes seconds, are read once a minute (CorsairReader); both hand their
 // readings back to the worker, which lists them at once. A device or a cable plugged in or pulled out has every device read
 // again within a moment, and twice more a few seconds later (a watcher over the HID collections); so do the computer waking
-// and the user coming back (ReadNow). On Bluetooth, only the collections a reader here speaks to are opened (Spoken).
+// and the user coming back (ReadNow). While the user is away (DevicePolling.Away) the brands and the Logitech devices are not
+// asked on the timer. On Bluetooth, only the collections a reader here speaks to are opened (Spoken).
 internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, IReadOnlyList<DeviceBattery>> report) : IDeviceSource
 {
     private static readonly DeviceSource[] Sources = [DeviceSource.Logitech, DeviceSource.Razer, DeviceSource.SteelSeries, DeviceSource.HyperX, DeviceSource.Sony, DeviceSource.Hid];
@@ -264,8 +265,10 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             // a device turned off and its entry loses its level now, not at the next interval.
             var off = DeviceReadSwitches.Off;
             bool switched = !ReferenceEquals(off, _offSeen); _offSeen = off;
-            bool logitech = all || linkUp || Due(_logitechAt, DevicePolling.Logitech);
-            bool ask = all || switched || Due(_askAt, DevicePolling.Ask);
+            // While the user is away, nothing is asked on the timer (DevicePolling.Away).
+            bool away = DevicePolling.Away;
+            bool logitech = all || linkUp || !away && Due(_logitechAt, DevicePolling.Logitech);
+            bool ask = all || switched || !away && Due(_askAt, DevicePolling.Ask);
             // Listened to only while a PlayStation controller is there; a new one is found by the next full pass.
             bool listen = all || _current.TryGetValue(DeviceSource.Sony, out var sony) && sony.Count > 0 && Due(_listenAt, DevicePolling.Listen);
             if (logitech || ask || listen)
@@ -315,7 +318,8 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     private TimeSpan NextWait()
     {
         if (_followUps > 0) return FollowUpDelay;
-        long wait = Math.Min(Left(_logitechAt, DevicePolling.Logitech), Left(_askAt, DevicePolling.Ask));
+        // Away, the worker waits for the user's return (ReadNow wakes it) or a device, checking again each interval.
+        long wait = DevicePolling.Away ? (long)DevicePolling.Ask.TotalMilliseconds : Math.Min(Left(_logitechAt, DevicePolling.Logitech), Left(_askAt, DevicePolling.Ask));
         if (_current.TryGetValue(DeviceSource.Sony, out var sony) && sony.Count > 0) wait = Math.Min(wait, Left(_listenAt, DevicePolling.Listen));
         return TimeSpan.FromMilliseconds(Math.Clamp(wait, 500, (long)DevicePolling.Ask.TotalMilliseconds));
     }
