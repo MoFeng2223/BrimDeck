@@ -45,20 +45,53 @@ internal sealed class WeatherMetaIcon : FrameworkElement
 }
 internal sealed class WeatherGlyph : FrameworkElement
 {
-    private readonly int code; private readonly bool day;
-    // 图标不再挂 WeatherMotion：以前鼠标划过任何一个图标它都会放大 1.035，
-    // 指针在卡片或预报列上挪动时一个个图标跟着抖，属于多余动效。图标只负责画，交互交给外层容器。
-    internal WeatherGlyph(int code,bool day) { this.code=code;this.day=day; }
+    private readonly int code; private readonly bool day; private readonly bool animated;
+    private System.Windows.Threading.DispatcherTimer? timer; private double phase;
+    // 只有左上角大图标传 animated=true：悬浮时播放天气动效；小图标保持静态，避免指针掠过预报列时成片抖动。
+    internal WeatherGlyph(int code,bool day,bool animated=false)
+    {
+        this.code=code;this.day=day;this.animated=animated;
+        if(!animated) return;
+        MouseEnter += (_, _) => { timer ??= new System.Windows.Threading.DispatcherTimer { Interval=System.TimeSpan.FromMilliseconds(28) }; timer.Tick += Tick; timer.Start(); };
+        MouseLeave += (_, _) => { if(timer is null) return; timer.Stop(); phase=0; InvalidateVisual(); };
+        Unloaded += (_, _) => timer?.Stop();
+    }
+    // 整个图标矩形都参与命中测试：雨滴/光线之间是透明的，不补这个重写点图标会有点不到的空隙。
+    protected override HitTestResult? HitTestCore(PointHitTestParameters p) => new PointHitTestResult(this,p.HitPoint);
+    private void Tick(object? sender,System.EventArgs e) { phase=(phase+0.02)%1; InvalidateVisual(); }
     protected override void OnRender(DrawingContext d)
     {
         base.OnRender(d); d.PushTransform(new ScaleTransform(ActualWidth/80,ActualHeight/80));
-        var sun=new SolidColorBrush(Color.FromRgb(255,196,72));var moon=new SolidColorBrush(Color.FromRgb(246,236,196));
-        if(code<=2) {
-            if(day) { d.DrawEllipse(sun,null,new Point(36,32),17,17);for(int i=0;i<8;i++) {double a=i*System.Math.PI/4;d.DrawLine(new Pen(sun,2.5),new Point(36+22*System.Math.Cos(a),32+22*System.Math.Sin(a)),new Point(36+28*System.Math.Cos(a),32+28*System.Math.Sin(a)));} }
-            else { var crescent=new CombinedGeometry(GeometryCombineMode.Exclude,new EllipseGeometry(new Point(35,33),24,24),new EllipseGeometry(new Point(46,26),23,23));d.DrawGeometry(moon,null,crescent);d.DrawEllipse(moon,null,new Point(65,18),2,2); }
+        double t = timer is { IsEnabled:true } ? phase : 0;
+        var sun=new SolidColorBrush(Color.FromRgb(255,196,72)); var moon=new SolidColorBrush(Color.FromRgb(246,236,196));
+        bool hasCloud = code>0;   // 晴(0)只有天体；多云(1/2)才画云，天体挪到云右上角被云遮住下部。
+        // 天体先画，云后画，云自然盖住天体下部。晴空天体居中，多云天体偏右上。
+        // 月牙两圆严格同 y，月牙关于水平轴对称，尖端一上一下。
+        if(code<=2)
+        {
+            if(day)
+            {
+                double cx=hasCloud?56:40, cy=hasCloud?29:34, r=hasCloud?12:17, spin=2*System.Math.PI*t*0.12;
+                for(int i=0;i<8;i++) { double a=i*System.Math.PI/4+spin;
+                    d.DrawLine(new Pen(sun,2.5),new Point(cx+(r+5)*System.Math.Cos(a),cy+(r+5)*System.Math.Sin(a)),new Point(cx+(r+10)*System.Math.Cos(a),cy+(r+10)*System.Math.Sin(a))); }
+                d.DrawEllipse(sun,null,new Point(cx,cy),r,r);
+            }
+            else
+            {
+                double cx=hasCloud?55:35, cy=hasCloud?29:33, r=hasCloud?14:24;
+                var crescent=new CombinedGeometry(GeometryCombineMode.Exclude,
+                    new EllipseGeometry(new Point(cx,cy),r,r),
+                    new EllipseGeometry(new Point(cx+r*0.46,cy),r*0.92,r*0.92));
+                d.DrawGeometry(moon,null,crescent);
+                d.DrawEllipse(moon,null,new Point(cx+r+6,cy-r+2),2,2);
+            }
         }
-        if(code>0) { var cloud=new SolidColorBrush(Color.FromRgb(238,242,250));d.DrawRoundedRectangle(cloud,null,new Rect(13,36,57,22),11,11);d.DrawEllipse(cloud,null,new Point(31,34),15,15);d.DrawEllipse(cloud,null,new Point(48,37),13,13); }
-        if(code>=51) for(int i=0;i<3;i++) d.DrawLine(new Pen(code>=71&&code<=77?Brushes.AliceBlue:Brushes.DodgerBlue,3),new Point(25+i*15,63),new Point(22+i*15,71));
+        // 云与降水整体轻微浮动，是唯一的位移动效（天体自转/月牙闪烁由上面的 spin 与相位完成）。
+        d.PushTransform(new TranslateTransform(0, animated ? 1.2*System.Math.Sin(2*System.Math.PI*t) : 0));
+        if(hasCloud) { var cloud=new SolidColorBrush(Color.FromRgb(238,242,250));d.DrawRoundedRectangle(cloud,null,new Rect(13,36,57,22),11,11);d.DrawEllipse(cloud,null,new Point(31,34),15,15);d.DrawEllipse(cloud,null,new Point(48,37),13,13); }
+        if(code>=51) for(int i=0;i<3;i++) { double p=(t*1.5+i*0.31)%1;
+            d.DrawLine(new Pen(code>=71&&code<=77?Brushes.AliceBlue:Brushes.DodgerBlue,3),new Point(25+i*15,63+p*7),new Point(22+i*15,71+p*7)); }
+        d.Pop();
         d.Pop();
     }
 }

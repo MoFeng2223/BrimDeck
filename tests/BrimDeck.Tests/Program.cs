@@ -13,6 +13,19 @@ var root = Path.Combine(Path.GetTempPath(), "BrimDeck-Tests-" + Guid.NewGuid().T
 Directory.CreateDirectory(root);
 try
 {
+    Check("One full name keeps every level as returned, including the country",
+        new City("洪山 · 武汉 · 湖北省 · 中国", 0, 0).Name == "洪山 · 武汉 · 湖北省 · 中国");
+    Check("Compose joins source levels in place and drops duplicate neighbours",
+        City.Compose("杭州", "杭州", "浙江省", "中国") == "杭州 · 浙江省 · 中国"
+        && City.Compose("伦敦", "伦敦", "安大略", "加拿大") == "伦敦 · 安大略 · 加拿大");
+    Check("Brief shows only the first two levels for the limited island",
+        new City("洪山 · 武汉 · 湖北省 · 中国", 0, 0).Brief == "洪山 · 武汉"
+        && City.BriefOf("杭州 · 浙江省 · 中国") == "杭州 · 浙江省");
+    Check("Geo parts peel the country and expose city plus province for weather APIs",
+        City.GeoPartsOf("洪山 · 武汉 · 湖北省 · 中国") == ("武汉", "湖北省")
+        && City.GeoPartsOf("杭州 · 浙江省 · 中国") == ("杭州", "浙江省")
+        && City.GeoPartsOf("伦敦 · 安大略 · 加拿大") == ("伦敦", "安大略"));
+
     ClipboardSyncTests.Run(Check);
     await PiUsageTests.Run(root, Check);
     await CodeAgentUsageTests.Run(root, Check);

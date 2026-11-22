@@ -79,15 +79,42 @@ public enum QuotaRingStyle { Nested = 0, Single = 1 }
 
 // Weather configuration lives with every other setting in settings.json. City is a saved value, so it belongs here rather
 // than in the UI project: the settings store serializes it as part of DeckSettings.
-// Name is the place itself ("洪山区"); the other fields are its hierarchy, so identically named districts stay distinct.
-public sealed record City(string Name, double Latitude, double Longitude, string Province = "", string CityName = "", string Country = "", string LocationId = "")
+// Name is the one and only place name: the full hierarchy as returned by the source ("洪山区 · 武汉市 · 湖北省 · 中国").
+// Nothing else stores province/city/country separately — every view slices the levels it needs out of this single string.
+public sealed record City(string Name, double Latitude, double Longitude, string LocationId = "")
 {
-    [JsonIgnore] public string Full => Name.Contains(" · ")
-        ? Name
-        : string.Join(" · ", new[] { Name, CityName, Province }
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .Distinct()
-            .Concat(Country is "" or "中国" or "China" or "中國" ? Array.Empty<string>() : new[] { Country }));
+    // 层级分隔符与接口返回顺序一致：区县 · 城市 · 省级 · 国家。
+    public const string Separator = " · ";
+    public static string[] SplitLevels(string full)
+        => full.Split(Separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    // 把接口返回的各层级原样拼成一份完整名称（空段跳过、重复段去重，如"杭州·杭州·浙江省·中国"→"杭州·浙江省·中国"）。
+    public static string Compose(params string?[] levels)
+        => string.Join(Separator, levels.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct());
+
+    // 灵动岛等窄位置只用前两级（洪山区 · 武汉市）；不足两级就原样返回。
+    [JsonIgnore] public string Brief => BriefOf(Name);
+    public static string BriefOf(string full)
+    {
+        var levels = SplitLevels(full);
+        return levels.Length <= 2 ? full : string.Join(Separator, levels[..2]);
+    }
+    // IP 定位只有城市精度：丢掉反查结果里的区县段，不冒充精确到区（洪山区·武汉市·湖北省·中国 → 武汉市·湖北省·中国）。
+    public static string WithoutDistrict(string full)
+    {
+        var levels = SplitLevels(full);
+        return string.Join(Separator, levels.Length >= 4 ? levels[1..] : levels);
+    }
+    // 城市级名称与省级名称：给只认城市级的天气接口用（区县用 LocationId 精确定位，国家不作为省份）。
+    [JsonIgnore] public (string City, string Province) GeoParts => GeoPartsOf(Name);
+    public static (string City, string Province) GeoPartsOf(string full)
+    {
+        var levels = SplitLevels(full);
+        // Compose 固定把国家拼在末段，丢掉它就是「区县 · 市 · 省」：末段省、倒数第二段市。
+        if (levels.Length >= 2) levels = levels[..^1];
+        string province = levels.Length >= 2 ? levels[^1] : "";
+        string city = levels.Length >= 3 ? levels[^2] : levels.Length > 0 ? levels[0] : "";
+        return (city, province);
+    }
 }
 
 // Weather's eight data domains, as offered in the settings page.
@@ -1112,11 +1139,7 @@ public sealed class DeckSettings
         {
             var city = cities[i];
             if (city is null || string.IsNullOrWhiteSpace(city.Name)) continue;
-            kept.Add((i, city with
-            {
-                Name = city.Name.Trim(), Province = (city.Province ?? "").Trim(), CityName = (city.CityName ?? "").Trim(),
-                Country = (city.Country ?? "").Trim(), LocationId = (city.LocationId ?? "").Trim()
-            }));
+            kept.Add((i, city with { Name = city.Name.Trim(), LocationId = (city.LocationId ?? "").Trim() }));
         }
         WeatherCities = kept.Take(MaxWeatherCities).Select(entry => entry.City).ToList();
         int selectedAt = selectedBefore >= 0 ? kept.FindIndex(entry => entry.Original == selectedBefore) : -1;

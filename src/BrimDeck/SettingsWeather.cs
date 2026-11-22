@@ -19,18 +19,20 @@ public sealed partial class SettingsWindow
             cityRows.Children.Clear();
             for(int i=-1;i<state.Cities.Count;i++) {
                 int index=i;bool selected=i==state.Selected;var city=i<0?null:state.Cities[i];
-                string? temperature=null;int code=3;bool day=true;string? full=null;
-                // 行标题取地名主体（新版 Name 即主体；旧格式 Name 内嵌「城市 · 省 · 国家」，取第一段）；
-                // 副行是完整层级（洪山区 · 武汉市 · 湖北省），同名区县一眼可辨。
-                string name=city is null?Loc.T("自动定位","Auto location"):city.Name.Split(" · ")[0],detail=city is null?Loc.T("自动定位","Auto location"):city.Full;
-                if(city is null&&autoName.Trim().Length>0&&!autoName.Contains("当前位置"))full=autoName;
-                if(state.Cache.TryGetValue(city?.ToString()??state.AutoKey,out var snap)){temperature=$"{snap.Temperature:0}°";code=snap.WeatherCode;day=snap.IsDay;if(city is null&&!snap.Name.Contains("当前位置"))full=snap.FullName.Length>0?snap.FullName:snap.Name;}
-                if(city is null&&full is not null)detail=full;
+                string? temperature=null;int code=3;bool day=true;
+                // 主标题只显示第一段（洪山），副标题显示完整层级（洪山 · 武汉 · 湖北省 · 中国）；
+                // 自动定位行主标题固定「自动定位」，副标题是定位到的完整路径。
+                string name=city is null?Loc.T("自动定位","Auto location"):City.SplitLevels(city.Name)[0];
+                string? subtitle=city is null?null:city.Name;
+                if(city is null){
+                    if(autoName.Trim().Length>0&&!autoName.Contains("当前位置"))subtitle=autoName;
+                    if(state.Cache.TryGetValue(state.AutoKey,out var snap)){temperature=$"{snap.Temperature:0}°";code=snap.WeatherCode;day=snap.IsDay;if(!snap.Name.Contains("当前位置"))subtitle=snap.Name;}
+                } else if(state.Cache.TryGetValue(city.ToString(),out var snap)){temperature=$"{snap.Temperature:0}°";code=snap.WeatherCode;day=snap.IsDay;}
                 var controls=new StackPanel {Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};if(temperature is not null)controls.Children.Add(TextLine(temperature,14,TextPrimary));
                 void Select(){state.Selected=index;Save();preview.Content=new WeatherSettingsPreview(state);Fill();}
                 var brush=(SolidColorBrush)FindResource("SettingsTextSecondary");
                 if(city is not null){var remove=new Button {Content=new WeatherMetaIcon(WeatherMetaKind.Close,brush.Color){Width=12,Height=12},Style=(Style)FindResource("SettingsGlyphButton"),ToolTip=Loc.T("删除城市","Remove city")};remove.Click+=(_,_)=>{state.Cities.RemoveAt(index);if(state.Selected==index)state.Selected=-1;else if(state.Selected>index)state.Selected--;Save();preview.Content=new WeatherSettingsPreview(state);Fill();UpdateAdd();};controls.Children.Add(remove);}
-                var row=Row(name,controls,TextLine(detail,11,TextSecondary));row.Margin=new Thickness(42,0,8,0);
+                var row=Row(name,controls,subtitle is null?null:TextLine(subtitle,11,TextSecondary));row.Margin=new Thickness(42,0,8,0);
                 var grid=new Grid();grid.Children.Add(row);grid.Children.Add(new WeatherGlyph(code,day) {Width=28,Height=28,HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(4,0,0,0),IsHitTestVisible=false});
                 if(selected){var indicator=new Border {Width=3,CornerRadius=new CornerRadius(0,2,2,0),Background=(Brush)FindResource("SettingsAccent"),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Stretch};grid.Children.Add(indicator);}
                 var border=new Border {Child=grid,Background=selected?(Brush)FindResource("SettingsAccentTint"):Brushes.Transparent,CornerRadius=new CornerRadius(6),Cursor=System.Windows.Input.Cursors.Hand};border.MouseLeftButtonUp+=(_,e)=>{if(e.OriginalSource is not Button)Select();};cityRows.Children.Add(border);
@@ -38,14 +40,37 @@ public sealed partial class SettingsWindow
         }
         Target.Children.Add(preview);SectionTitle(Loc.T("当前城市","Current city"));Group(cityRows);
         // 设置页打开即尝试定位：成功则刷新「自动定位」行展示当地城市名，不干扰其余行。
-        async Task DetectAsync() { if(!active)return;try {var local=await WeatherData.LocateAsync(state.Schedule,CancellationToken.None);if(active&&local is not null&&!local.Name.Contains("当前位置")){autoName=local.Full;Fill();}}catch{}}
+        async Task DetectAsync() { if(!active)return;try {var local=await WeatherData.LocateAsync(state.Schedule,CancellationToken.None);if(active&&local is not null&&!local.Name.Contains("当前位置")){autoName=local.Name;Fill();}}catch{}}
         SectionTitle(Loc.T("添加城市","Add city"));
         var input=new TextBox {Width=250,Height=31,Style=(Style)FindResource("SettingsField")};
         var placeholder=new TextBlock {Text=Loc.T("支持中英文","Chinese or English"),FontSize=13,Foreground=(Brush)FindResource("SettingsTextSecondary"),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(12,0,0,0),IsHitTestVisible=false};void UpdatePlaceholder()=>placeholder.Visibility=input.Text.Length==0?Visibility.Visible:Visibility.Collapsed;input.TextChanged+=(_,_)=>UpdatePlaceholder();
         var inputHost=new Grid {Width=250};inputHost.Children.Add(input);inputHost.Children.Add(placeholder);UpdatePlaceholder();
-        var options=new ListBox {MaxHeight=240,DisplayMemberPath="Full",Style=(Style)FindResource("SettingsSearchList")};
-        var popup=new Popup {PlacementTarget=input,Placement=PlacementMode.Bottom,StaysOpen=false,AllowsTransparency=true,Child=new Border {Width=250,Background=(Brush)FindResource("SettingsInput"),BorderBrush=(Brush)FindResource("SettingsBorder"),BorderThickness=new Thickness(1),Padding=new Thickness(4),Margin=new Thickness(0,4,0,0),CornerRadius=new CornerRadius(6),Child=options}};
+        // 搜索反馈：输入框右侧转圈 + 下拉里明确写「搜索中/未找到」，避免用户以为界面没反应。
+        var spinTransform=new RotateTransform();
+        var spinner=new System.Windows.Shapes.Path {
+            Data=Geometry.Parse("M 8,1.6 A 6.4,6.4 0 1 1 1.6,8"),
+            Stroke=(Brush)FindResource("SettingsAccent"),StrokeThickness=2,StrokeStartLineCap=PenLineCap.Round,
+            Width=16,Height=16,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Center,
+            Margin=new Thickness(0,0,10,0),IsHitTestVisible=false,Visibility=Visibility.Collapsed,
+            RenderTransformOrigin=new Point(.5,.5),RenderTransform=spinTransform
+        };
+        var spinAnimation=new System.Windows.Media.Animation.DoubleAnimation(0,360,TimeSpan.FromMilliseconds(750)) {RepeatBehavior=System.Windows.Media.Animation.RepeatBehavior.Forever};
+        inputHost.Children.Add(spinner);
+        var loading=TextLine(Loc.T("搜索中…","Searching…"),11,TextSecondary);loading.Margin=new Thickness(8,7,8,7);
+        var empty=TextLine(Loc.T("未找到匹配城市","No matching city"),11,TextSecondary);empty.Margin=new Thickness(8,7,8,7);empty.Visibility=Visibility.Collapsed;
+        // 绑定城市模型唯一的全称字段：用 nameof 让字段改名在编译期暴露，避免搜索结果再次显示为空。
+        var options=new ListBox {MaxHeight=240,DisplayMemberPath=nameof(City.Name),Style=(Style)FindResource("SettingsSearchList")};
+        var popupBody=new StackPanel();popupBody.Children.Add(loading);popupBody.Children.Add(options);popupBody.Children.Add(empty);
+        var popup=new Popup {PlacementTarget=input,Placement=PlacementMode.Bottom,StaysOpen=false,AllowsTransparency=true,Child=new Border {Width=250,Background=(Brush)FindResource("SettingsInput"),BorderBrush=(Brush)FindResource("SettingsBorder"),BorderThickness=new Thickness(1),Padding=new Thickness(4),Margin=new Thickness(0,4,0,0),CornerRadius=new CornerRadius(6),Child=popupBody}};
         PopupMotion.Attach(popup);
+        void ShowSearching(bool on)
+        {
+            spinner.Visibility=on?Visibility.Visible:Visibility.Collapsed;
+            if(on) spinTransform.BeginAnimation(RotateTransform.AngleProperty,spinAnimation);
+            else {spinTransform.BeginAnimation(RotateTransform.AngleProperty,null);spinTransform.Angle=0;}
+            loading.Visibility=on?Visibility.Visible:Visibility.Collapsed;
+            if(on) empty.Visibility=Visibility.Collapsed;
+        }
         City? picked=null;bool programmatic=false;CancellationTokenSource? pending=null;CancellationTokenSource? fetchCts=null;
         // 城市上限与 DeckSettings.Normalize 共用同一常量：满了就禁用添加并说明原因，不会出现「加了却被规范化丢掉」。
         bool CanAdd() => state.Cities.Count < DeckSettings.MaxWeatherCities;
@@ -54,11 +79,31 @@ public sealed partial class SettingsWindow
         void UpdateAdd(){add.IsEnabled=picked is not null&&!state.Cities.Contains(picked)&&CanAdd();System.Windows.Controls.ToolTipService.SetToolTip(add,CanAdd()?null:AtCapTip());}
         Fill();
         _ = DetectAsync();
-        options.SelectionChanged+=(_,_)=>{if(options.SelectedItem is City city){picked=city;popup.IsOpen=false;programmatic=true;input.Text=city.Name;programmatic=false;UpdateAdd();}};
+        void PickCity(City city){picked=city;popup.IsOpen=false;programmatic=true;input.Text=city.Name;programmatic=false;UpdateAdd();}
+        options.SelectionChanged+=(_,_)=>{if(options.SelectedItem is City city)PickCity(city);};
+        // Popup StaysOpen=false 时点列表项会先让输入框失焦、弹窗提前关闭，SelectionChanged 可能来不及触发；
+        // 在隧道阶段的 PreviewMouseLeftButtonDown 直接取命中项 DataContext 选中，保证一点就中。
+        options.PreviewMouseLeftButtonDown+=(_,e)=>{var fe=e.OriginalSource as FrameworkElement;if(fe?.DataContext is City city){PickCity(city);e.Handled=true;}};
         input.TextChanged+=async (_,_)=>{
             if(programmatic)return;
-            pending?.Cancel();pending?.Dispose();pending=new();var token=pending.Token;picked=null;add.IsEnabled=false;popup.IsOpen=false;var query=input.Text.Trim();if(query.Length<2)return;
-            try {await Task.Delay(350,token);var found=await WeatherData.Search(query,state.Schedule,token);if(token.IsCancellationRequested||!active)return;options.ItemsSource=found;popup.IsOpen=found.Count>0;}catch(OperationCanceledException){}catch{return;}
+            pending?.Cancel();pending?.Dispose();pending=new();var token=pending.Token;picked=null;add.IsEnabled=false;
+            options.SelectedIndex=-1;options.Visibility=Visibility.Visible;empty.Visibility=Visibility.Collapsed;
+            var query=input.Text.Trim();
+            if(query.Length<2){ShowSearching(false);popup.IsOpen=false;return;}
+            ShowSearching(true);popup.IsOpen=true;
+            try {
+                await Task.Delay(350,token);
+                var found=await WeatherData.Search(query,state.Schedule,token);
+                if(pending is null||token!=pending.Token||!active)return;
+                options.ItemsSource=found;
+                bool any=found.Count>0;
+                options.Visibility=any?Visibility.Visible:Visibility.Collapsed;
+                empty.Visibility=any?Visibility.Collapsed:Visibility.Visible;
+                popup.IsOpen=true;
+            }
+            catch(OperationCanceledException){ }
+            catch { if(pending is not null&&token==pending.Token){options.ItemsSource=null;options.Visibility=Visibility.Collapsed;empty.Visibility=Visibility.Visible;popup.IsOpen=true;} }
+            finally { if(pending is not null&&token==pending.Token)ShowSearching(false); }
         };
         var controlsRow=new StackPanel {Orientation=Orientation.Horizontal};controlsRow.Children.Add(inputHost);controlsRow.Children.Add(add);Group(Row(Loc.T("搜索城市","Search city"),controlsRow));
         // 数据来源：8 类数据能力逐一可配；区域切换放在明细表的正上方。
@@ -143,7 +188,7 @@ public sealed partial class SettingsWindow
         var used=WeatherSources.All.Select(source=>(Name:source.Info.Id switch{"tencent"=>Loc.T("腾讯","Tencent"),"weathercomcn"=>Loc.T("中国天气网","ChinaWx"),"hefeng"=>Loc.T("和风","QWeather"),_=>source.Info.Name},Count:RequestGate.Today(source.Info.Id))).Where(item=>item.Count>0).ToArray();
         Group(Row(Loc.T("今日请求","Requests today"),TextLine(used.Length==0?Loc.T("尚未发起请求","No requests yet"):string.Join(" · ",used.Select(item=>$"{item.Name} {item.Count}")),12,TextSecondary)),
               Row(Loc.T("本地缓存","Local cache"),TextLine(Loc.T($"{usage.Count} 项 · {usage.Bytes/1024.0:0} KB（14 天未用自动清理）",$"{usage.Count} entries · {usage.Bytes/1024.0:0} KB (unused entries purged after 14 days)"),12,TextSecondary)));
-        cityRows.Unloaded+=(_,_)=>{active=false;pending?.Cancel();pending?.Dispose();pending=null;fetchCts?.Cancel();fetchCts?.Dispose();fetchCts=null;popup.IsOpen=false;};
+        cityRows.Unloaded+=(_,_)=>{active=false;pending?.Cancel();pending?.Dispose();pending=null;fetchCts?.Cancel();fetchCts?.Dispose();fetchCts=null;popup.IsOpen=false;ShowSearching(false);};
 
         TextBox KeyField(string value,Action<string> save)
         {
@@ -172,7 +217,7 @@ internal sealed class WeatherSettingsPreview : Border
         WeatherSnapshot? snap=null;
         if(state.Cache.TryGetValue(key,out var cached)) snap=cached;
         int code=snap?.WeatherCode??0;bool day=snap?.IsDay??true;
-        string cityName=state.Selected>=0&&state.Selected<state.Cities.Count?state.Cities[state.Selected].Full:"当前位置";
+        string cityName=state.Selected>=0&&state.Selected<state.Cities.Count?state.Cities[state.Selected].Name:"当前位置";
         string Place(string n)=>n=="当前位置"?Loc.T("当前位置","Current location"):n;
         string Deg(double value)=>double.IsNaN(value)?"--":$"{value:0}°";
         string Num(double value,string suffix)=>double.IsNaN(value)?"--":value.ToString("0.#",System.Globalization.CultureInfo.InvariantCulture)+suffix;
@@ -183,7 +228,9 @@ internal sealed class WeatherSettingsPreview : Border
         head.ColumnDefinitions.Add(new ColumnDefinition());head.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
         var locIcon=new StackPanel {Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};
         locIcon.Children.Add(new WeatherMetaIcon(WeatherMetaKind.Location,Color.FromRgb(205,224,247)){Width=12,Height=12,VerticalAlignment=VerticalAlignment.Center});
-        locIcon.Children.Add(new TextBlock {Text=Place(snap is not null&&snap.FullName.Length>0?snap.FullName:(snap?.Name??cityName)),FontSize=12,FontWeight=FontWeights.SemiBold,Foreground=new SolidColorBrush(Color.FromRgb(234,242,255)),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(4,0,0,0),TextTrimming=TextTrimming.CharacterEllipsis});
+        // 城市名只有一份完整名称：选中城市取 City.Name，自动定位退回快照 Name（也是完整名称）。
+        string headerName=state.Selected>=0&&state.Selected<state.Cities.Count?cityName:(snap?.Name??cityName);
+        locIcon.Children.Add(new TextBlock {Text=Place(headerName),FontSize=12,FontWeight=FontWeights.SemiBold,Foreground=new SolidColorBrush(Color.FromRgb(234,242,255)),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(4,0,0,0),TextTrimming=TextTrimming.CharacterEllipsis});
         var headRight=new StackPanel {Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Center};
         var upd=new TextBlock {Text=snap is null?"":Loc.T($"更新于 {snap.FetchedAt:HH:mm}",$"Updated {snap.FetchedAt:HH:mm}"),FontSize=10.5,Foreground=new SolidColorBrush(Color.FromRgb(188,208,234)),VerticalAlignment=VerticalAlignment.Center};
         string source=snap is not null&&snap.Sources.TryGetValue("Daily",out var daily)&&daily.Length>0?daily:"Open-Meteo";

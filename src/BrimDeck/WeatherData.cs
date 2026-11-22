@@ -93,27 +93,39 @@ internal static class WeatherData
         if(state.AutoKey.Length>0)
             WeatherFiles.WriteAtomic(Path.Combine(WeatherFiles.Root,"weather","auto.json"),JsonSerializer.Serialize(new SnapshotFile{Key=state.AutoKey},WeatherJson));
     }
-    // 城市搜索：配置了和风 Key 时优先走和风 GeoAPI——能精确命中区县（搜「洪山区」得「洪山区 · 武汉市 · 湖北省」），
-    // 返回的 id 与中国天气网城市代码同源；未配置或查询失败时退回 Open-Meteo（全球地名库，中文覆盖一般）。
+    // 城市搜索：配置了和风 Key/Host 就只用和风 GeoAPI——能精确命中区县（搜「洪山区」得「洪山区 · 武汉市 · 湖北省」），
+    // 返回的 id 与中国天气网城市代码同源；和风请求失败也返回空，不再退回 Open-Meteo 混用另一套层级和精度。
+    // 未配置和风时才用 Open-Meteo（全球地名库，中文覆盖一般）。
+    // 拼音里的分隔撇号（chang'feng）会被和风当成分词符，先试去掉撇号的写法，失败再用原串。
     internal static async Task<List<City>> Search(string query, WeatherSettings settings, CancellationToken token)
     {
+        string raw = query.Trim();
+        var attempts = new List<string> { raw };
+        if (raw.Any(ch => ch is '\'' or '’') && raw.All(ch => char.IsAsciiLetter(ch) || ch is '\'' or '’' or '-'))
+        {
+            string plain = new(raw.Where(ch => ch is not ('\'' or '’')).ToArray());
+            if (plain.Length > 0 && plain != raw) attempts.Insert(0, plain);
+        }
         if (settings.HeFengKey.Trim().Length > 0 && settings.HeFengHost.Trim().Length > 0)
         {
-            try
+            foreach (var attempt in attempts)
             {
-                var found = await SearchHeFeng(query, settings, token);
-                if (found.Count > 0) return found;
+                try
+                {
+                    var found = await SearchHeFeng(attempt, settings, token);
+                    if (found.Count > 0) return found;
+                }
+                catch { /* 和风已配置：请求失败也不退回 Open-Meteo，避免来源混杂 */ }
             }
-            catch { /* 网络/额度失败不阻塞：退回 Open-Meteo 继续 */ }
+            return [];
         }
-        using var doc = JsonDocument.Parse(await Http.GetStringAsync("https://geocoding-api.open-meteo.com/v1/search?count=10&language=" + (Loc.IsEnglish ? "en" : "zh") + "&name=" + Uri.EscapeDataString(query), token));
+        using var doc = JsonDocument.Parse(await Http.GetStringAsync("https://geocoding-api.open-meteo.com/v1/search?count=10&language=" + (Loc.IsEnglish ? "en" : "zh") + "&name=" + Uri.EscapeDataString(raw), token));
         var cities = new List<City>();
         if (doc.RootElement.TryGetProperty("results", out var list))
             foreach (var c in list.EnumerateArray())
                 cities.Add(new City(
-                    Json.Text(c, "name") ?? "",
-                    c.GetProperty("latitude").GetDouble(), c.GetProperty("longitude").GetDouble(),
-                    Json.Text(c, "admin1") ?? "", Json.Text(c, "admin2") ?? "", Json.Text(c, "country") ?? ""));
+                    City.Compose(Json.Text(c, "name"), Json.Text(c, "admin2"), Json.Text(c, "admin1"), Json.Text(c, "country")),
+                    c.GetProperty("latitude").GetDouble(), c.GetProperty("longitude").GetDouble()));
         return cities;
     }
     // 和风 GeoAPI v2 city/lookup：按地名或「经度,纬度」坐标反查最多 10 个，结构化解析省/市/国家/城市 id。
@@ -139,7 +151,9 @@ internal static class WeatherData
         {
             double? lat = Json.Number(item, "lat"), lon = Json.Number(item, "lon");
             if (Json.Text(item, "name") is not { Length: > 0 } name || lat is null || lon is null) continue;
-            cities.Add(new City(name, lat.Value, lon.Value, Json.Text(item, "adm1") ?? "", Json.Text(item, "adm2") ?? "", Json.Text(item, "country") ?? "", Json.Text(item, "id") ?? ""));
+            cities.Add(new City(
+                City.Compose(name, Json.Text(item, "adm2"), Json.Text(item, "adm1"), Json.Text(item, "country")),
+                lat.Value, lon.Value, Json.Text(item, "id") ?? ""));
         }
         return cities;
     }
@@ -167,10 +181,8 @@ internal static class WeatherData
                 var found=await SearchHeFeng(Math.Round(lon,3)+","+Math.Round(lat,3),settings,token);
                 if(found.Count>0)
                 {
-                    // IP 坐标只有城市精度：只保留城市与省两级；区县名与区县 id 都不可信，一并不带。
-                    var city=found[0];
-                    string cityName=city.CityName.Length>0?city.CityName:city.Name;
-                    return new City(cityName,lat,lon,city.Province,cityName,city.Country,"");
+                    // IP 坐标只有城市精度：丢掉反查结果里的区县段与区县 id，不冒充精确到区。
+                    return new City(City.WithoutDistrict(found[0].Name), lat, lon);
                 }
             }
             if(root.TryGetProperty("city",out var name)&&name.ValueKind==JsonValueKind.String&&name.GetString() is {Length:>0} query) {
@@ -181,7 +193,7 @@ internal static class WeatherData
             if(root.TryGetProperty("city",out name)&&name.ValueKind==JsonValueKind.String&&name.GetString() is {Length:>0} s)parts.Add(s);
             if(root.TryGetProperty("region",out var region)&&region.ValueKind==JsonValueKind.String&&region.GetString() is {Length:>0} r)parts.Add(r);
             if(root.TryGetProperty("country",out var country)&&country.ValueKind==JsonValueKind.String&&country.GetString() is {Length:>0} c&&!parts.Contains(c))parts.Add(c);
-            return new City(parts.Count>0?string.Join(" · ",parts):"当前位置",lat,lon);
+            return new City(parts.Count>0?City.Compose([.. parts]):"当前位置",lat,lon);
         } catch { return null; }
     }
     // 多源调度入口：当前、24 小时、24 天（历史 10 + 今天 + 未来 13）、日出日落与空气质量由 WeatherAggregator 统一拼装。
@@ -285,11 +297,11 @@ internal static class WeatherHourHistory
 // 所有数组都以 DayDates / HourTimes 对齐；来源没有提供的数值用 NaN（数值）或 -1（整数）表示，界面自行隐藏。
 internal sealed class WeatherSnapshot
 {
-    public string Name {get;set;}=""; public string FullName {get;set;}=""; public DateTimeOffset FetchedAt {get;set;} public string Today {get;set;}="";
+    // Name 是城市的完整层级（洪山区 · 武汉市 · 湖北省 · 中国），与 City.Name 同源，详情页与设置页都用它。
+    public string Name {get;set;}=""; public DateTimeOffset FetchedAt {get;set;} public string Today {get;set;}="";
     // 快照实际归属城市的历史键（city.ToString()）。快照一律按真实城市键存（自动定位也一样，
     // "auto" 只是 State.AutoKey 指向最新定位结果的映射），逐时历史与快照同键，手动选同一城市可复用。
     public string CityKey {get;set;}="";
-    // FullName 是城市完整层级（洪山区 · 武汉市 · 湖北省），详情页标题与设置预览用它；空时退回 Name。
     // 城市所在地的 UTC 偏移（分钟）：逐时「现在」列要按城市时钟认，查国外城市时不能用本机时间。MinValue = 未知。
     public int UtcOffsetMinutes {get;set;} = int.MinValue;
     // 当前时刻

@@ -500,7 +500,6 @@ internal static class WeatherAggregator
         var snapshot = new WeatherSnapshot
         {
             Name = city.Name,
-            FullName = city.Full,
             // 快照一律按真实城市键存（自动定位也一样）：CityKey 供快照落盘与逐时历史使用，
             // 与下方 WeatherHourHistory.Read 的读取键严格一致；"auto" 只是 State.AutoKey 的映射。
             CityKey = cityKey,
@@ -743,22 +742,8 @@ internal static class Geo
     // 中国范围框（含港澳台与南海诸岛），用于决定“国内源优先”还是“全球源优先”。
     public static bool IsChina(City city) => city.Latitude is >= 17 and <= 54 && city.Longitude is >= 73 and <= 136;
     public static bool HasChinese(string text) => text.Any(ch => ch is >= '\u4e00' and <= '\u9fff');
-    // 城市级名称与省份：结构化字段优先（和风/新搜索写入，区县城市取其所属地级市，腾讯接口只认城市级）；
-    // 旧格式 Name「城市 · 省/州 · 国家」兜底拆段。
-    public static (string City, string Province) Parts(City city)
-    {
-        string name = city.CityName.Length > 0 ? city.CityName : "";
-        string province = city.Province;
-        if ((name.Length == 0 || province.Length == 0) && city.Name.Contains(" · "))
-        {
-            var parts = city.Name.Split(" · ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (name.Length == 0) name = parts.Length > 0 ? parts[0] : city.Name;
-            if (province.Length == 0 && parts.Length > 1) province = parts[1];
-        }
-        if (name.Length == 0) name = city.Name;
-        if (province is "中国" or "China" or "中國") province = "";
-        return (name, province);
-    }
+    // 城市级名称与省份：都从 City 唯一的完整名称里拆，区县城市取其所属地级市（腾讯等接口只认城市级）。
+    public static (string City, string Province) Parts(City city) => City.GeoPartsOf(city.Name);
     // 中国统一 UTC+8；其他地区按经度估算，仅用于本地日出日落推算的兜底。
     public static int UtcOffsetHours(City city) => IsChina(city) ? 8 : (int)Math.Round(city.Longitude / 15.0);
 }

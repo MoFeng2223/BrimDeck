@@ -1,6 +1,7 @@
 ﻿using System.Globalization;
 using System.Linq;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
@@ -50,7 +51,7 @@ internal sealed class WeatherView : UserControl
     private bool _redrawPending;
     private DispatcherTimer? _flush;
     private double _measuredAvail = -1;   // 上次做档位试探时的可用高度，高度没变就不用再测
-    private string _autoCityName = "";   // 最近一次自动定位到的城市名，工具栏按钮据此显示「自动定位 · 城市」
+    private string _autoCityName = "";   // 最近一次自动定位到的城市
     private int _columns = 7;
     private double _chartWidth;
     private int generation;
@@ -288,7 +289,17 @@ internal sealed class WeatherView : UserControl
         // 落在 36 + 2 = 38，和用量页第一行（页头 36 + ColumnTopInset 2）同一个基准，
         // 多出来的高度全部让给今日天气与底部预报条之间。
         var hero = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 2, 8, 2), VerticalAlignment = VerticalAlignment.Top };
-        hero.Children.Add(new WeatherGlyph(s.WeatherCode, s.IsDay) { Width = 56, Height = 56, Margin = new Thickness(0, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center });
+        // 左上角大图标是详情入口：悬浮播放天气动效，点击打开详情浮层（原「详情」文字按钮已移除）。
+        var heroGlyph = new WeatherGlyph(s.WeatherCode, s.IsDay, animated: true)
+        {
+            Width = 56, Height = 56, Margin = new Thickness(0, 0, 12, 0),
+            VerticalAlignment = VerticalAlignment.Center, Cursor = System.Windows.Input.Cursors.Hand,
+            ToolTip = Loc.T("点击查看天气详情", "Click for weather details")
+        };
+        AutomationProperties.SetName(heroGlyph, Loc.T("天气详情", "Weather details"));
+        WeatherMotion.Attach(heroGlyph);
+        heroGlyph.MouseLeftButtonUp += (_, e) => { e.Handled = true; ShowDetails(s); };
+        hero.Children.Add(heroGlyph);
         var side = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         side.Children.Add(new TextBlock { Text = Degree(s.Temperature), FontSize = 44, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center });
         var bottom = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(2, 2, 0, 0) };
@@ -299,12 +310,9 @@ internal sealed class WeatherView : UserControl
         string range = hasDay ? $"{Degree(s.DayHighC[today])} / {Degree(s.DayLowC[today])}" : "-- / --";
         bottom.Children.Add(new TextBlock { Text = range, FontSize = 13, Foreground = new SolidColorBrush(Color.FromRgb(205, 224, 247)), VerticalAlignment = VerticalAlignment.Center });
         side.Children.Add(bottom);
-        // 来源与详情：来源只显示主每日来源，完整分域来源在详情浮层里逐项列出。
+        // 来源只显示主每日来源，完整分域来源在详情浮层里逐项列出；详情入口已改到左上角大图标。
         var footer = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 3, 0, 0) };
         footer.Children.Add(new TextBlock { Text = SourceLabel(s), FontSize = 9.5, Foreground = new SolidColorBrush(Color.FromRgb(174, 196, 220)), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 190 });
-        var detail = new Button { Content = Loc.T("详情", "Details"), Background = Brushes.Transparent, Foreground = new SolidColorBrush(Color.FromRgb(143, 208, 255)), BorderThickness = new Thickness(0), Padding = new Thickness(6, 0, 0, 0), FontSize = 9.5, Cursor = System.Windows.Input.Cursors.Hand, VerticalAlignment = VerticalAlignment.Center };
-        WeatherMotion.Attach(detail); detail.Click += (_, e) => { e.Handled = true; ShowDetails(s); };
-        footer.Children.Add(detail);
         side.Children.Add(footer); hero.Children.Add(side);
         summary.Children.Add(hero);
         // 四张卡与左侧大图标同一基准顶对齐，两列的上沿才会齐平（居中的话只要两列高度不同就会错开）。
@@ -396,16 +404,14 @@ internal sealed class WeatherView : UserControl
         overlay.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) { Close(); e.Handled = true; } };
         overlay.Focusable = true; overlay.Focus();
 
-        // 标题行：城市完整层级（洪山区 · 武汉市 · 湖北省）、天气、更新时间、来源，右侧关闭。
+        // 标题行：城市完整名称（洪山区 · 武汉市 · 湖北省 · 中国）、天气、更新时间、来源，右侧关闭。
         var header = new Grid { Margin = new Thickness(0, 0, 0, 12) };
         header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var title = new StackPanel();
         string condition = s.ConditionText.Length > 0 ? s.ConditionText : WeatherCodes.Text(s.WeatherCode);
         title.Children.Add(new TextBlock
         {
-            Text = s.FullName.Length > 0
-                ? (s.FullName == "当前位置" ? Loc.T("当前位置", "Current location") : s.FullName)
-                : (s.Name == "当前位置" ? Loc.T("当前位置", "Current location") : DisplayName(s.Name)),
+            Text = s.Name == "当前位置" ? Loc.T("当前位置", "Current location") : s.Name,
             FontSize = 18, FontWeight = FontWeights.SemiBold, Foreground = Brushes.White
         });
         title.Children.Add(new TextBlock { Text = $"{condition} · {Num(s.Temperature, "°")} · " + Loc.T($"更新于 {s.FetchedAt:HH:mm}", $"Updated {s.FetchedAt:HH:mm}"), FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(158, 178, 200)), Margin = new Thickness(0, 3, 0, 0) });
@@ -1392,37 +1398,30 @@ internal sealed class WeatherView : UserControl
     // 工具栏只负责画一个和播放来源同款的按钮，不碰天气数据。
     internal sealed record CityChoice(string Label, bool Selected, int Index);
 
-    // 城市名展示：新版城市存的是结构化层级（Name 是区县/城市主体，Full 是「区县 · 市 · 省」完整名）。
-    // 工具栏按钮只放得下短名；下拉菜单用 Full，同名区县要靠省市区分。
-    internal static string DisplayName(string name)
-    {
-        var parts = name.Split(" · ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (parts.Length == 0) return name;
-        if (parts.Length >= 3) parts = parts[..^1];   // 三段以上，最后一段一定是国家
-        return parts.Length > 1 && parts[0] == parts[1] ? parts[0] : string.Join(Loc.T("·", " · "), parts);
-    }
-    // 只要最前面那一段城市名：下拉的自动定位行写「自动定位·武汉」，后面不再跟省份与国家。
-    private static string ShortName(string name)
-    {
-        int split = name.IndexOf(" · ", StringComparison.Ordinal);
-        return split > 0 ? name[..split] : name;
-    }
+    // 灵动岛空间有限：城市名只显示前两级（洪山区 · 武汉市），完整名称仍唯一地存在 City.Name 里。
+    // 设置页、详情页、预览卡显示完整名称；这里只截取，不加工。
+    internal static string BriefName(string full) => City.BriefOf(full);
     private bool AutoSelected => state.Selected < 0 || state.Selected >= state.Cities.Count;
     // 定位失败时快照名是「当前位置」这个占位（数据层写死的中文串，不随界面语言变），那不是城市名，按钮上不重复写。
     private string AutoCityName => _autoCityName == "当前位置" ? "" : _autoCityName;
-    // 按钮常态显示「城市·省份」（武汉·湖北 / 伦敦·安大略）：自动定位前缀只在菜单里，国家不显示。
-    // 工具栏是横条，再多一段就挤掉别的按钮。定位结果还没回来时退回「自动定位」。
-    internal string CityLabel =>
-        DisplayName(AutoSelected ? AutoCityName : state.Cities[state.Selected].Name) is { Length: > 0 } name
-            ? name : Loc.T("自动定位", "Auto location");
-    // 下拉第一行要和其它行区分开：写清这是自动定位，后面只跟城市名，不跟省份与国家。
+    internal string CityLabel
+    {
+        get
+        {
+            string brief = AutoSelected
+                ? BriefName(AutoCityName)
+                : state.Selected >= 0 && state.Selected < state.Cities.Count ? state.Cities[state.Selected].Brief : "";
+            return brief.Length > 0 ? brief : Loc.T("自动定位", "Auto location");
+        }
+    }
+    // 下拉第一行写清是自动定位，后面跟前两级城市名；其余选择项同样只显示前两级。
     internal string AutoMenuLabel => AutoCityName.Length > 0
-        ? Loc.T($"自动定位·{ShortName(AutoCityName)}", $"Auto · {ShortName(AutoCityName)}")
+        ? Loc.T($"自动定位·{BriefName(AutoCityName)}", $"Auto · {BriefName(AutoCityName)}")
         : Loc.T("自动定位", "Auto location");
     internal List<CityChoice> CityChoices()
     {
         var choices = new List<CityChoice> { new(AutoMenuLabel, AutoSelected, -1) };
-        for (int i = 0; i < state.Cities.Count; i++) choices.Add(new CityChoice(state.Cities[i].Full, !AutoSelected && state.Selected == i, i));
+        for (int i = 0; i < state.Cities.Count; i++) choices.Add(new CityChoice(state.Cities[i].Brief, !AutoSelected && state.Selected == i, i));
         return choices;
     }
     internal async Task ChooseCityAsync(int index)
