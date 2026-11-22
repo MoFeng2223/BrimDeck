@@ -491,6 +491,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     {
         SectionTitle(Loc.T("快捷操作", "Shortcuts"));
         Group(GripDoubleClickRow());
+        NoticeIslandSection();
         SectionTitle(Loc.T("收起样式", "Collapsed style"));
         // The grid clips at its own bounds, so each card keeps 3 DIP or more of its cell free on every side of the
         // keyboard focus ring: 6 DIP left and right (the grid overhangs the page by the same amount) and 3 DIP above.
@@ -546,7 +547,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         foreach (var page in S.PageOrder)
             pages.Children.Add(page switch
             {
-                DeckPage.Notices => SizeRow(Loc.T("显示灵动通知", "Show live notices"), Loc.T("灵动通知", "live notices"), page, S.NoticesEnabled && S.NoticesPage, value => { TurnNotices(false, value); FillStarts(); }, Collect(NoticeSizeControls), pages, FillStarts),
+                DeckPage.Notices => SizeRow(Loc.T("显示灵动通知", "Show live notices"), Loc.T("灵动通知", "live notices"), page, S.NoticesPage, value => { Change(s => s.NoticesPage = value); FillStarts(); }, Collect(NoticeSizeControls), pages, FillStarts),
                 DeckPage.Music => SizeRow(Loc.T("显示音乐", "Show music"), Loc.T("音乐", "music"), page, S.MusicPage, value => { Change(s => s.MusicPage = value); FillStarts(); }, Collect(MusicSizeControls), pages, FillStarts),
                 DeckPage.Monitor => SizeRow(Loc.T("显示系统监控", "Show system monitor"), Loc.T("系统监控", "system monitor"), page, S.MonitorPage, value => { Change(s => s.MonitorPage = value); FillStarts(); }, Collect(MonitorSizeControls), pages, FillStarts),
                 DeckPage.Clipboard => SizeRow(Loc.T("显示剪贴板与文件中转", "Show clipboard and file transfer"), Loc.T("剪贴板与文件中转", "clipboard and file transfer"), page, S.ClipboardPage, value => { Change(s => s.ClipboardPage = value); FillStarts(); }, Collect(ShelfSizeControls), pages, FillStarts),
@@ -700,7 +701,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                     s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=[.. palette.ClockGradients[0].Stops];
                     PanelThemes.ApplyMatching(palette,s);break;}
                 // The two switches (collapsed and expanded view) and the applications (the other page) stay as they are.
-                case NoticesSettingsPage:s.NoticeScreen=defaults.NoticeScreen;s.NoticeDefaultLevel=defaults.NoticeDefaultLevel;s.NoticeStyles=new();s.NoticeStripIcons=defaults.NoticeStripIcons;
+                case NoticesSettingsPage:s.NoticeDefaultLevel=defaults.NoticeDefaultLevel;s.NoticeStyles=new();s.NoticeStripIcons=defaults.NoticeStripIcons;
                     s.NoticeCodes=defaults.NoticeCodes;s.NoticeRespectFocus=defaults.NoticeRespectFocus;s.NoticesPausedUntil=null;s.NoticeHistory=defaults.NoticeHistory;s.NoticeHistoryHours=defaults.NoticeHistoryHours;break;
                 // The list goes back to the applications a new user has; the WSL distributions stay, as they are set up in them.
                 case NoticeAppsSettingsPage:s.NoticeApps=[.. DeckSettings.DefaultNoticeApps()];s.NoticeAppsListed=true;break;

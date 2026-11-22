@@ -8,8 +8,8 @@ public sealed class AttentionItem
 {
     public required string Lane { get; init; }
     public required AttentionKind Kind { get; init; }
-    // The same key names the same item: submitting it again updates it in place. The same notice shown on several panels
-    // (NoticeScreen.All) has one item per lane, all with its key.
+    // The same key names the same item: submitting it again updates it in place. The same notice shown on several panels has
+    // one item per lane, all with its key.
     public required string Key { get; set; }
     // Notices of one conversation share a group (AttentionCoordinator.GroupOf), so that its messages show as one notice
     // with a count.

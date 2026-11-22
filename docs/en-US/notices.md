@@ -4,14 +4,16 @@ When a notification arrives, the notch, capsule or indicator grows out of its pl
 
 ## Turning them on
 
-Live notices have two switches, both off by default; notices are received once either is on:
+Live notices have two switches, both on by default; notices are received while either is on, and no longer once both are off:
 
-- Settings › Live notices › How notices show › Show on the island: notices show on the island as they arrive.
+- Settings › Collapsed view › Live notices › Show new notices: arriving notices show on the notch, the capsule or the indicator.
 - Settings › Expanded view › Show live notices: the open panel shows the notices page.
 
-The two switches are independent: with only the notices page on, notices do not interrupt you and only go to the page.
+The two switches are independent: with only the notices page on, notices do not interrupt you and only go to the page; with only "Show new notices" on, notices show as usual and there is no notices page.
 
-The notch or the capsule can also keep a notice count that shows how many notices are unread: turn on "Notices" under Settings › Collapsed view › Content, and drag it among the other parts. It needs the notices page, shows nothing while no notice is unread, opens the notices page when clicked, and clears once that page has been opened. By default the icons of up to 3 apps the latest unread notices came from show before the number; switch off "Show app icons" under Settings › Live notices › How notices show › Notice count to show a bell instead. The indicator bar shows no count.
+Both switches belong to a profile. When screens use different profiles (Settings › Displays and profiles), each screen shows notices by its own profile's switch; screens that use the same profile with "Show new notices" on all show them.
+
+The notch and the capsule also show a notice count by default, with how many notices are unread: under Settings › Collapsed view › Content you can turn "Notices" off or drag it among the other parts. It needs the notices page, shows nothing while no notice is unread, opens the notices page when clicked, and clears once that page has been opened. By default the icons of up to 3 apps the latest unread notices came from show before the number; switch off "Show app icons" under Settings › Live notices › How notices show › Notice count to show a bell instead. The indicator bar shows no count.
 
 Settings › Live notices has two pages: "How notices show" sets how each of the three levels looks, and "Apps" sets which apps show notices and at which level. Then:
 
@@ -49,7 +51,7 @@ Each notice shows on the island at one level:
 
 There is also "List only": the notice only goes to the notice history and does not show on the island.
 
-How each level looks is set under Settings › Live notices › How notices show: the default position of level 1, whether the app icon shows, how long levels 1 and 2 show, the effect of levels 2 and 3 (Glow or Lively), and the default color of level 3. "Try it" beside each level sends a sample notice.
+How each level looks is set under Settings › Live notices › How notices show: whether the app icon shows, how long levels 1 and 2 show, the effect of levels 2 and 3 (Glow or Lively), and the default color of level 3. "Try it" beside each level sends a sample notice. Notices take the whole island; only a message that names a place with `--slot` replaces just one part.
 
 When an app needs a different look, click the arrow beside its name under Settings › Live notices › Apps to open "Own looks", and change it level by level. That app's notices then follow its own settings, which come before the "How notices show" page and the look a message asks for. "Own looks" is closed by default and is seldom needed.
 
@@ -176,7 +178,7 @@ Options of `brim notify send`:
 | `-l/--level LEVEL` | `silent`, `plain`, `flash`, `persistent`, or `0` to `3`. The level you chose for the source comes first; how each level looks is decided under Settings › Live notices › How notices show |
 | `-c/--category KIND` | `message`, `task`, `success`, `warning`, `error`, `info`. A notice that stays glows orange, red or green for `warning`, `error` and `success` |
 | `--glow "#RRGGBB"` | The backlight of a notice that stays; it comes before the category's color and the default color of the settings |
-| `--slot PLACE` | Where a level 1 notice shows: `island` (the whole island), `usage`, `music`, `monitor`, `clock`, `transfer`, `devices`. It comes before the default place of the settings; when the collapsed island has no such part, or is the indicator, the notice takes the whole island |
+| `--slot PLACE` | Where a level 1 notice shows: `island` (the whole island), `usage`, `music`, `monitor`, `clock`, `transfer`, `devices`. Not given, the notice takes the whole island; when the collapsed island has no such part, or is the indicator, the notice takes the whole island |
 | `--align SIDE` | `left`, `center`, `right`: where the icon and the words sit on the island |
 | `-i/--icon PATH` | A local icon file; `none` shows no icon. A relative path is from the current folder |
 | `--image PATH` | A picture in the icon's place (an avatar) |
@@ -191,7 +193,7 @@ Options of `brim notify send`:
 | `--no-history` | Only show it on the island; do not list it among the recent notices |
 | `--json FILE` | Read the whole message as JSON from a file, or from standard input with `-`; options given on the command line come over its values |
 
-Where you gave a source its own looks (Settings › Live notices › Apps, the arrow beside its name), those come first: `--slot`, `--glow`, the category's color and `--icon none` then change nothing for it.
+Where you gave a source its own looks (Settings › Live notices › Apps, the arrow beside its name), those come first: `--glow`, the category's color and `--icon none` then change nothing for it.
 
 Buttons:
 
@@ -314,7 +316,7 @@ brim-notify "New mail" --kind mail
 - A click on a notice on the island opens the notices page, with that notice at the top.
 - Order: what you are working with > high priority notices > other notices > quota alerts > track changes. Alarms, ended countdowns and event reminders are high priority (see "Time notices").
 - Nothing is shown while the session is locked or switched, while the panels are hidden or hidden by a full-screen rule. During a Windows focus session, presentation mode and BrimDeck's own pause nothing pops up; afterwards one summary shows how many arrived. Windows' separate "Do not disturb" switch has no public interface and is not detected; use BrimDeck's pause instead.
-- Several monitors: notices show on the screen in use (the one with the foreground window; the default), on the main panel's screen, or on every screen that shows BrimDeck. With the first two, a notice stays in the notice history if that screen's panel is hidden; it does not jump to another screen. With every screen, the same notice shows once on each and counts once toward the limit; handling it on one screen (a click, opening the notices page) ends it on the others too.
+- Several monitors: each screen shows notices when "Show new notices" is on in the profile it uses. If a screen's panel is hidden, the notice stays in the notice history; it does not jump to another screen. The same notice shows once on each screen that shows notices and counts once toward the limit; handling it on one screen (a click, opening the notices page) ends it on the others too.
 - Settings › Shortcuts › Open live notices (unset by default): with a notice on screen it opens the details for the keyboard (Tab to move, Enter to choose, Esc to close); otherwise it opens the notice history.
 
 ## Privacy

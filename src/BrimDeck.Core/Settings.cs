@@ -78,10 +78,6 @@ public enum MouseWheelAction { None, Pages, Volume }
 // (MainWindow.Move.cs); moving is the default. Off shows no handle at its ends at all. Saved as numbers, so new members go at the end.
 public enum GripDoubleClick { AutoWidth, Move, Off }
 public enum CompactMusicText { None, Title, Lyrics }
-// The monitor an arriving notice is shown on: the one with the foreground window, or always the main panel's.
-// Which panels show an arriving notice: the one on the screen in use (the foreground window's), the main panel, or every
-// panel that shows BrimDeck. All comes last, so the saved numbers of the others stay what they were.
-public enum NoticeScreen { Foreground, Main, All }
 // What the collapsed music hides while the song is paused: the title or lyric, the cover, or both. Saved as numbers, so new
 // members go at the end.
 public enum PausedMusicHide { None, Text, Cover, Both }
@@ -796,9 +792,9 @@ public sealed class DeckSettings
     // The notch and the capsule each show the devices' batteries (CompactPart.Devices).
     public bool NotchDevices { get; set; }
     public bool CapsuleDevices { get; set; }
-    // The notch and the capsule each show how many notices are unread (CompactPart.Notices); shown only while some are.
-    public bool NotchNotices { get; set; }
-    public bool CapsuleNotices { get; set; }
+    // The notch and the capsule each show how many notices are unread (CompactPart.Notices); shown only while some are. On by default.
+    public bool NotchNotices { get; set; } = true;
+    public bool CapsuleNotices { get; set; } = true;
     // The expanded page shows a line under memory and network with the frame rate of the program in front, its name and its display's
     // refresh rate (FrameRates). Off by default; read only while the page is open, and only where the user may read Windows' frame
     // events (the Performance Log Users group, or BrimDeck elevated).
@@ -855,18 +851,20 @@ public sealed class DeckSettings
     public bool QuotaAlerts { get; set; } = true;
     // Also reads the Claude Code and Codex CLI session records inside WSL distributions. Off by default: it starts stopped distributions.
     public bool IncludeWsl { get; set; }
-    // Dynamic notices (see Notices/). Off until the user switches them on; each source has its own switch. They are received
-    // while either switch is on: on the island as they arrive (NoticeIsland, "在岛上提示" on the 灵动提示 page) or as the expanded page
-    // (NoticesPage, under 展开外观). Each switch reads as on only while NoticesEnabled is.
-    public bool NoticesEnabled { get; set; }
+    // Dynamic notices (see Notices/). Each profile has two switches of its own, both on by default: arriving notices show on its
+    // collapsed island (NoticeIsland, "提示新通知" under 收起外观), and the expanded panel has the notices page (NoticesPage, under
+    // 展开外观). Each screen's panel follows the switches of the profile it shows. Notices are received while
+    // any switch of any profile is on (NoticesEnabled); each source has its own switch besides.
     public bool NoticeIsland { get; set; } = true;
+    [JsonIgnore] public bool NoticesEnabled => NoticeIsland || NoticesPage || (Profiles ?? []).Any(profile => profile.Id != CurrentProfile && profile.Values is { } values
+        && (Switched(values, nameof(NoticeIsland)) || Switched(values, nameof(NoticesPage))));
+    private static bool Switched(JsonObject values, string name) => values[name] is System.Text.Json.Nodes.JsonValue value && value.TryGetValue(out bool on) && on;
     // The WSL distributions whose notices are received (by name). None by default: not every PC has WSL, and the agent is
     // copied into a distribution only once the user chooses it.
     public List<string> NoticeWslDistros { get; set; } = [];
     // brim notify list and remove reach every notice, an application's notifications included, and remove takes a Windows one
     // out of Windows' notification center too. Off by default: any program of the user can run brim (NoticeEntries).
     public bool NoticeCommandAccess { get; set; }
-    public NoticeScreen NoticeScreen { get; set; }
     // The level of a notice nothing else decides (NoticeLevels.Resolve): Plain (level 1), Glow (level 2) or Persistent (level 3).
     public NoticeLevel NoticeDefaultLevel { get; set; } = NoticeLevel.Glow;
     // How each level looks on the island (the settings' first notices page); an application may have its own (NoticeAppRule.Styles).
@@ -1189,7 +1187,6 @@ public sealed class DeckSettings
             .Select(d => d with { Id = d.Id.Trim(), Name = (d.Name ?? "").Trim() }).DistinctBy(d => d.Id).ToList();
         if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;
         NoticeWslDistros = (NoticeWslDistros ?? []).Where(name => name is not null).Select(name => name.Trim()).Where(NoticeIntake.IsDistroName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        if (!Enum.IsDefined(NoticeScreen)) NoticeScreen = NoticeScreen.Foreground;
         NoticeDefaultLevel = NoticeLevels.Default(NoticeDefaultLevel);
         NoticeStyles ??= new();
         NoticeStyles.Normalize();

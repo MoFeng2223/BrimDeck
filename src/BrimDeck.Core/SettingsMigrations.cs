@@ -33,6 +33,7 @@ public static class SettingsMigrations
             if (version > saved && version <= running) { apply(root); foreach (var values in profiles) apply(values); }
         MemoryModeFromSwitch(root);
         DateFromTwoLineClock(root);
+        NoticeSwitchesPerProfile(root);
         var settings = root.Deserialize<DeckSettings>() ?? new();
         settings.Normalize();
         return settings;
@@ -143,6 +144,26 @@ public static class SettingsMigrations
             if (values["ThemeChoices"] is JsonObject choices)
                 foreach (var choice in choices.Select(pair => pair.Value).OfType<JsonObject>().Where(TwoLine)) choice["ClockStyle"] = (int)ClockStyle.Minimal;
         }
+    }
+
+    // The notice switches became each profile's own, independent of each other (DeckSettings.NoticeIsland, NoticesPage). Before, one
+    // switch every profile shared (NoticesEnabled) received notices, "在岛上提示" (NoticeIsland, on by default) was shared as well,
+    // and the expanded page (NoticesPage, on by default) was a profile's; each read as on only while notices were received. Every
+    // profile starts with the switches as they read, so each screen shows what it showed. The screens a notice showed on
+    // (NoticeScreen) are now the profiles' switches. Not a step: it changed after 1.3.3 was released, while the builds still count
+    // as 1.3.3. It runs on any file that has NoticesEnabled, which later versions no longer write.
+    private static void NoticeSwitchesPerProfile(JsonObject root)
+    {
+        if (root["NoticesEnabled"] is not NodeValue enabled) return;
+        bool received = enabled.TryGetValue(out bool on) && on;
+        bool island = received && Flag(root, "NoticeIsland");
+        var profiles = (root[nameof(DeckSettings.Profiles)] as JsonArray ?? []).OfType<JsonObject>().Select(profile => profile[nameof(DeckProfile.Values)]).OfType<JsonObject>();
+        foreach (var values in profiles.Prepend(root))
+        {
+            values["NoticeIsland"] = island;
+            values["NoticesPage"] = received && Flag(values, "NoticesPage");
+        }
+        root.Remove("NoticesEnabled"); root.Remove("NoticeScreen");
     }
 
     private static bool Flag(JsonObject root, string name) => root[name] is not NodeValue value || !value.TryGetValue(out bool flag) || flag;

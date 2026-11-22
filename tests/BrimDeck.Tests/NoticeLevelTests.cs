@@ -3,7 +3,7 @@ using BrimDeck.Core;
 using BrimDeck.Core.Notices;
 using BrimDeck.Protocol;
 
-// Notice levels, alignment, showing on every screen, and what the protocol and brim-notify carry of them.
+// Notice levels, alignment, and what the protocol and brim-notify carry of them.
 internal static class NoticeLevelTests
 {
     private static readonly DateTimeOffset T0 = new(2026, 11, 17, 12, 0, 0, TimeSpan.Zero);
@@ -12,7 +12,6 @@ internal static class NoticeLevelTests
     {
         Resolve(check);
         Hub(check);
-        Screens(check);
         Look(check);
         SettingsValues(root, check);
         Wire(check);
@@ -133,16 +132,6 @@ internal static class NoticeLevelTests
         check("Hub: a countdown of an application set to Silent does not ring when it is due", timers.FireDue(T0.AddMinutes(1)).Count == 0 && timers.Notices.Single().Timing!.Stage == 1);
     }
 
-    private static void Screens(Action<string, bool> check)
-    {
-        NoticeRouting.Candidate[] panels = [new("main", 1, true, true), new("second", 2, false, true), new("hidden", 3, false, false)];
-        check("Screens: All shows on every panel that can show notices", NoticeRouting.Lanes(panels, 2, NoticeScreen.All).SequenceEqual(["main", "second"])
-            && NoticeRouting.Lanes(panels, 3, NoticeScreen.All).SequenceEqual(["main", "second"]) && NoticeRouting.Lanes([], 1, NoticeScreen.All).Count == 0);
-        check("Screens: the screen in use and the main panel's each name one panel, or none", NoticeRouting.Lanes(panels, 2, NoticeScreen.Foreground).SequenceEqual(["second"])
-            && NoticeRouting.Lanes(panels, 3, NoticeScreen.Foreground).Count == 0 && NoticeRouting.Lanes(panels, 2, NoticeScreen.Main).SequenceEqual(["main"]));
-        check("Screens: All is saved after the choices there were", (int)NoticeScreen.Foreground == 0 && (int)NoticeScreen.Main == 1 && (int)NoticeScreen.All == 2);
-    }
-
     private static void Look(Action<string, bool> check)
     {
         IslandForm[] forms = [IslandForm.Capsule, IslandForm.Notch, IslandForm.Line];
@@ -179,15 +168,15 @@ internal static class NoticeLevelTests
     private static void SettingsValues(string root, Action<string, bool> check)
     {
         var defaults = new DeckSettings();
-        check("Settings: by default notices flash and show on the screen in use", defaults.NoticeDefaultLevel == NoticeLevel.Glow && defaults.NoticeScreen == NoticeScreen.Foreground);
+        check("Settings: by default notices flash", defaults.NoticeDefaultLevel == NoticeLevel.Glow);
         var odd = new DeckSettings
         {
-            NoticeDefaultLevel = NoticeLevel.Lively, NoticeScreen = NoticeScreen.All, NoticeAppsListed = true,
+            NoticeDefaultLevel = NoticeLevel.Lively, NoticeAppsListed = true,
             NoticeApps = [new() { Key = "a", Level = NoticeLevel.Persistent }, new() { Key = "b", Level = NoticeLevel.Silent }, new() { Key = "c", Level = (NoticeLevel)40 }, new() { Key = "d", Level = NoticeLevel.Lively }]
         };
         odd.Normalize();
         check("Settings: the default level is one of the three (Lively reads as level 2); an application's may also be Default or list only", odd.NoticeDefaultLevel == NoticeLevel.Glow
-            && odd.NoticeScreen == NoticeScreen.All && odd.NoticeApps.Select(rule => rule.Level).SequenceEqual([NoticeLevel.Persistent, NoticeLevel.Silent, NoticeLevel.Auto, NoticeLevel.Glow]));
+            && odd.NoticeApps.Select(rule => rule.Level).SequenceEqual([NoticeLevel.Persistent, NoticeLevel.Silent, NoticeLevel.Auto, NoticeLevel.Glow]));
         foreach (var level in new[] { NoticeLevel.Auto, NoticeLevel.Silent })
         {
             var other = new DeckSettings { NoticeDefaultLevel = level };
@@ -196,18 +185,18 @@ internal static class NoticeLevelTests
         }
         var copy = odd.Copy();
         copy.NoticeApps[1].Level = NoticeLevel.Plain;
-        check("Settings: a copy carries the level and shares no rule", copy.NoticeDefaultLevel == NoticeLevel.Glow && copy.NoticeScreen == NoticeScreen.All && odd.NoticeApps[1].Level == NoticeLevel.Silent);
+        check("Settings: a copy carries the level and shares no rule", copy.NoticeDefaultLevel == NoticeLevel.Glow && odd.NoticeApps[1].Level == NoticeLevel.Silent);
         var store = new SettingsStore(Path.Combine(root, "notice-level-settings"), "1.2.0");
-        store.Save(new DeckSettings { NoticeDefaultLevel = NoticeLevel.Persistent, NoticeScreen = NoticeScreen.All, NoticeApps = [new() { Key = "windows:X", Name = "X", Level = NoticeLevel.Plain }] });
+        store.Save(new DeckSettings { NoticeDefaultLevel = NoticeLevel.Persistent, NoticeApps = [new() { Key = "windows:X", Name = "X", Level = NoticeLevel.Plain }] });
         var back = store.Load();
-        check("Settings: the level, every screen and an application's level survive saving", back.NoticeDefaultLevel == NoticeLevel.Persistent && back.NoticeScreen == NoticeScreen.All
+        check("Settings: the level and an application's level survive saving", back.NoticeDefaultLevel == NoticeLevel.Persistent
             && back.NoticeRule("windows:X")?.Level == NoticeLevel.Plain);
         File.WriteAllText(store.FilePath, "{\"NoticesEnabled\":true,\"NoticeScreen\":1,\"NoticeApps\":[{\"Key\":\"windows:X\",\"Muted\":true}]}");
         var old = store.Load();
-        check("Settings: a file saved before they existed reads the defaults, keeps its screen choice and gains the default applications", old.NoticeDefaultLevel == NoticeLevel.Glow
-            && old.NoticeScreen == NoticeScreen.Main && old.NoticeRule("windows:X") is { Level: NoticeLevel.Auto } && old.NoticeRule("windows:QQ") is not null);
+        check("Settings: a file saved before they existed reads the defaults and gains the default applications", old.NoticeDefaultLevel == NoticeLevel.Glow
+            && old.NoticeRule("windows:X") is { Level: NoticeLevel.Auto } && old.NoticeRule("windows:QQ") is not null);
         check("Settings: the level and the looks are kept for all profiles, as the other notice settings are", !Profiles.IsProfileKey(nameof(DeckSettings.NoticeDefaultLevel))
-            && !Profiles.IsProfileKey(nameof(DeckSettings.NoticeStyles)) && !Profiles.IsProfileKey(nameof(DeckSettings.NoticeScreen)));
+            && !Profiles.IsProfileKey(nameof(DeckSettings.NoticeStyles)));
     }
 
     private static void Wire(Action<string, bool> check)

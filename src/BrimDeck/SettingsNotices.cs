@@ -11,8 +11,9 @@ using BrimDeck.Native;
 
 namespace BrimDeck;
 
-// The two "灵动提示" pages. How notices show (NoticesSettingsPage): whether they show on the island, the default level, where they
-// show, how each of the three levels looks, the collapsed count of unread notices, the quiet times and the history. Apps (NoticeAppsSettingsPage): the Windows applications whose notices show and
+// The two "灵动提示" pages. How notices show (NoticesSettingsPage): the default level, how each of the three levels looks, the
+// collapsed count of unread notices, the quiet times and the history; whether notices show at all is each profile's switch under
+// 收起外观 (NoticeIslandSection). Apps (NoticeAppsSettingsPage): the Windows applications whose notices show and
 // each one's level and banner, the command-line and WSL sources, and the WSL distributions. An application may have its own looks
 // for the levels, under its row, closed until asked for. Source states change while a page is open (access granted, an agent
 // started); their lines follow NoticeCenter.Changed without rebuilding the page.
@@ -43,14 +44,11 @@ public sealed partial class SettingsWindow
     {
         var center = _app.Notices;
         _noticeStatusLines.Clear();
-        NoticeIslandRow();
+        NoticeIslandOffRow();
         SectionTitle(Loc.T("通用", "General"));
         Group(MusicChoice(Loc.T("默认等级", "Default level"), NoticeLevels.Default(S.NoticeDefaultLevel), [.. Levels.Select(level => (level, LevelName(level)))],
                 value => Change(s => s.NoticeDefaultLevel = value),
                 help: Loc.T("应用的提示等级选“默认”时使用。", "Used for an app whose level is set to Default.")),
-            MusicChoice(Loc.T("显示在", "Show on"), S.NoticeScreen,
-                [(NoticeScreen.Foreground, Loc.T("正在使用的屏幕", "Screen in use")), (NoticeScreen.Main, Loc.T("主面板的屏幕", "Main panel's screen")), (NoticeScreen.All, Loc.T("所有屏幕", "All screens"))],
-                value => Change(s => s.NoticeScreen = value), width: 348),
             Toggle(Loc.T("遮住验证码", "Hide verification codes"), S.NoticeCodes, value => Change(s => s.NoticeCodes = value),
                 help: Loc.T("识别通知里的验证码，用圆点遮住，并在通知页提供“复制验证码”按钮。复制 60 秒后自动清除剪贴板。",
                     "Recognizes a verification code in a notice, hides it with dots and offers a \"Copy code\" button on the notices page. The clipboard is cleared 60 seconds after copying.")));
@@ -75,28 +73,34 @@ public sealed partial class SettingsWindow
         _ => Loc.T("在等级 1 的基础上，岛的边缘闪一下。辉光：边缘亮一下；灵动：辉光加液体波纹。", "As level 1, and the island's edge flashes. Glow: the edge lights up once. Lively: the glow and a liquid ripple.")
     };
 
-    // Whether an arriving notice shows on the island (NoticeIsland), at the top of the page whose levels decide how. Off, notices
-    // only go to the notices page and its count on the island; with that page off as well, none are received, which the line under
-    // the switch says.
-    private void NoticeIslandRow()
+    // Whether arriving notices show on the collapsed island: each profile's switch, under 收起外观 (Compact). Independent of the
+    // notices page under 展开外观; either one receives notices.
+    private void NoticeIslandSection()
     {
-        string title = Loc.T("在岛上提示", "Show on the island");
-        var note = StatusLine(() => S.NoticesEnabled ? ("", false)
-            : (Loc.T("“展开外观”中的灵动通知也已关闭，目前不接收通知。", "Live notices are off under Expanded view as well, so no notices are received."), false));
-        var toggle = NoticeToggle(title, S.NoticesEnabled && S.NoticeIsland, value => { TurnNotices(true, value); foreach (var update in _noticeStatusLines) update(); });
-        Group(Row(title, toggle, note, () => Loc.T("收到通知时，按下面的等级在岛上显示文字和效果。关闭后，通知只进入通知页和岛上的通知条。",
-            "Shows an arriving notice's words and effect on the island, by the levels below. Off, notices only go to the notices page and the notice count on the island.")));
+        SectionTitle(Loc.T("灵动提示", "Live notices"), ActionButton(Loc.T("提示方式", "How notices show"), () => ShowPage(NoticesSettingsPage)));
+        Group(Toggle(Loc.T("提示新通知", "Show new notices"), S.NoticeIsland, value => Change(s => s.NoticeIsland = value),
+            help: Loc.T("收到通知时，在刘海、胶囊或指示条上按“提示方式”中的等级显示。每块屏幕按自己使用的配置决定是否显示。与“展开外观”中的通知页互不影响。",
+                "Shows an arriving notice on the notch, capsule or indicator, by the levels under How notices show. Each screen follows the profile it uses. Independent of the notices page under Expanded view.")));
     }
 
-    // Both switches are off, so no notices are received: said at the top of the apps page, with the pages where the switches are.
+    // The profile in use shows no notices on its island: said at the top of the page whose levels decide how they look, with the
+    // page where the switch is.
+    private void NoticeIslandOffRow()
+    {
+        if (S.NoticeIsland) return;
+        var note = TextLine(Loc.T("使用这份配置的屏幕不显示提示，可在“收起外观”中开启", "Screens using this profile show no notices; turn it on under Collapsed view"), 11.5, TextSecondary);
+        Group(Row(Loc.T("当前配置未开启“提示新通知”", "\"Show new notices\" is off in this profile"), ActionButton(Loc.T("收起外观", "Collapsed view"), () => ShowPage(1)), note));
+    }
+
+    // No switch is on, so no notices are received: said at the top of the apps page, with the pages where the switches are.
     private void NoticesOffRow()
     {
         if (S.NoticesEnabled) return;
         var controls = new StackPanel { Orientation = Orientation.Horizontal };
-        controls.Children.Add(ActionButton(Loc.T("提示方式", "How notices show"), () => ShowPage(NoticesSettingsPage)));
+        controls.Children.Add(ActionButton(Loc.T("收起外观", "Collapsed view"), () => ShowPage(1)));
         var expanded = ActionButton(Loc.T("展开外观", "Expanded view"), () => ShowPage(2)); expanded.Margin = new Thickness(6, 0, 0, 0);
         controls.Children.Add(expanded);
-        var note = TextLine(Loc.T("可在“提示方式”或“展开外观”中开启", "Turn it on under How notices show or Expanded view"), 11.5, TextSecondary);
+        var note = TextLine(Loc.T("可在“收起外观”或“展开外观”中开启", "Turn it on under Collapsed view or Expanded view"), 11.5, TextSecondary);
         Group(Row(Loc.T("灵动通知未开启", "Live notices are off"), controls, note));
     }
 
@@ -112,15 +116,14 @@ public sealed partial class SettingsWindow
     // The settings' looks change and the page shows them (its previews follow).
     private void EditNoticeStyles(Action<DeckSettings> edit) { Change(edit); ShowPage(_page); }
 
-    // The rows of one level's look: where level 1 shows, the icon, how long levels 1 and 2 stay, the effect of levels 2 and 3 and
-    // level 3's color. styles reads the looks being edited (the settings' or an application's); edit changes them. name tells the
-    // rows of several groups on a page apart for screen readers and the segment groups.
+    // The rows of one level's look: the icon, how long levels 1 and 2 stay, the effect of levels 2 and 3 and level 3's color.
+    // styles reads the looks being edited (the settings' or an application's); edit changes them. name tells the rows of several
+    // groups on a page apart for screen readers and the segment groups.
     private List<FrameworkElement> LevelRows(NoticeLevel level, Func<NoticeLevelStyles> styles, Action<Action<NoticeLevelStyles>> edit, string name)
     {
         var style = styles().For(level);
         void Edit(Action<NoticeStyle> change) => edit(all => change(all.For(level)));
         var rows = new List<FrameworkElement>();
-        if (level == NoticeLevel.Plain) rows.Add(SlotRow(style, Edit));
         if (level != NoticeLevel.Plain)
             rows.Add(NoticeChoice(Loc.T("效果", "Effect"), "NoticeEffect" + name + level, style.Liquid, [(false, Loc.T("辉光", "Glow")), (true, Loc.T("灵动", "Lively"))],
                 value => Edit(s => s.Liquid = value), 150));
@@ -142,51 +145,6 @@ public sealed partial class SettingsWindow
             AutomationProperties.SetName(choice, title + " " + option.Label); choice.Checked += (_, _) => change(option.Value); strip.Children.Add(choice);
         }
         return Row(title, SegmentBorder(strip));
-    }
-
-    // Level 1's place: the whole island, or one of the parts the collapsed island shows now (the equalizer's bars are too narrow
-    // for words). A part not on the island when a notice arrives (no music playing) leaves the notice the whole island.
-    private FrameworkElement SlotRow(NoticeStyle style, Action<Action<NoticeStyle>> edit)
-    {
-        var parts = IslandParts();
-        var options = new List<(CompactPart? Part, string Label)> { (null, Loc.T("整个岛", "Whole island")) };
-        options.AddRange(parts.Select(part => ((CompactPart?)part, PartPlace(part))));
-        // A part chosen earlier that the island no longer shows stays listed, so the list says what is chosen.
-        if (style.Slot is { } chosen && !parts.Contains(chosen)) options.Add((chosen, PartPlace(chosen)));
-        var combo = new ComboBox { Width = 170, Style = (Style)FindResource("SettingsCombo"), ItemsSource = options.Select(option => option.Label).ToList(),
-            SelectedIndex = Math.Max(0, options.FindIndex(option => option.Part == style.Slot)) };
-        AutomationProperties.SetName(combo, Loc.T("默认位置", "Default position"));
-        combo.SelectionChanged += (_, _) => { if (combo.SelectedIndex >= 0) { var part = options[combo.SelectedIndex].Part; edit(s => s.Slot = part); } };
-        return Row(Loc.T("默认位置", "Default position"), combo, help: () => Loc.T("整个岛：提示占用整个岛。某个部件的位置：只替换这个部件，其他部件照常显示。消息自己指定了位置时以消息为准；该部件暂时不在岛上、或收起形态是指示条时，改用整个岛。",
-            "Whole island: the notice takes the whole island. A part's place: only that part is replaced and the others show as usual. A message that names its own place is shown there; when the part is not on the island, or the island is the indicator bar, the whole island is used."));
-    }
-
-    private static string PartPlace(CompactPart part) => part switch
-    {
-        CompactPart.Rings => Loc.T("配额环的位置", "Quota rings' place"), CompactPart.Music => Loc.T("音乐的位置", "Music's place"),
-        CompactPart.Monitor => Loc.T("系统监控的位置", "System monitor's place"), CompactPart.Clock => Loc.T("时钟的位置", "Clock's place"),
-        CompactPart.Transfer => Loc.T("文件中转的位置", "File transfer's place"), CompactPart.Devices => Loc.T("设备电量的位置", "Batteries' place"),
-        _ => Loc.T("律动条的位置", "Equalizer's place")
-    };
-
-    // The parts the collapsed island shows, in its order: the notch's or the capsule's, either for the indicator bar.
-    private List<CompactPart> IslandParts()
-    {
-        CompactStyle[] styles = S.Style == CompactStyle.Line ? [CompactStyle.Notch, CompactStyle.Capsule] : [S.Style];
-        var found = new List<CompactPart>();
-        foreach (var style in styles)
-            foreach (var part in S.CompactOrder(style))
-            {
-                bool shown = part switch
-                {
-                    CompactPart.Rings => S.ShowsSummary(style), CompactPart.Music => S.ShowsMusic(style), CompactPart.Monitor => S.ShowsMonitor(style),
-                    CompactPart.Clock => style == CompactStyle.Notch ? S.NotchClock : S.CapsuleClock,
-                    CompactPart.Transfer => style == CompactStyle.Notch ? S.NotchTransfer : S.CapsuleTransfer,
-                    CompactPart.Devices => S.ShowsDevices(style), _ => false
-                };
-                if (shown && !found.Contains(part)) found.Add(part);
-            }
-        return found;
     }
 
     // Level 3's backlight: white (the island's own), five colors, or the application's color.
@@ -885,18 +843,6 @@ public sealed partial class SettingsWindow
         if (!state.Conflict) return (text, warning);
         return (text + Loc.T("。~/.local/bin 中已有你自己的同名文件，未改动它", ". A file of your own of the same name in ~/.local/bin was left as it is"), true);
     }
-
-    // ----- The switches elsewhere -----
-
-    // The two "灵动通知" switches: on the island as notices arrive (island, at the top of the 灵动提示 page) and as the expanded page.
-    // Notices are received while either is on. Each reads as on only while notices are received, so turning one on while both were
-    // off clears the other's saved value: it stays off, as it read.
-    private void TurnNotices(bool island, bool on) => Change(s =>
-    {
-        if (on && !s.NoticesEnabled) { s.NoticeIsland = false; s.NoticesPage = false; }
-        if (island) s.NoticeIsland = on; else s.NoticesPage = on;
-        s.NoticesEnabled = s.NoticeIsland || s.NoticesPage;
-    });
 
     private void NoticeSizeControls()
     {

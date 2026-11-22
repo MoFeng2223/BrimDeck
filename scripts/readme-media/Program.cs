@@ -234,7 +234,7 @@ internal sealed partial class Renderer(App app, string output, string language, 
     // No notice source is started: the notice center is only made, and the notices go straight to its list.
     private async Task NoticesPageScene()
     {
-        _settings.Animations = false; _settings.NoticesEnabled = true;
+        _settings.Animations = false; _settings.NoticeIsland = true; _settings.NoticesPage = true;
         foreach (var listed in DeckSettings.DefaultNoticeApps()) if (_settings.NoticeRule(listed.Key) is null) _settings.NoticeApps.Add(listed);
         _settings.NoticeAppsListed = true;
         foreach (var listed in new[] { "Outlook", "Claude", "Backup Tool" })
@@ -303,9 +303,9 @@ internal sealed partial class Renderer(App app, string output, string language, 
             await Settle();
             var window = (Window)Activator.CreateInstance(type, Program.Any, null, [_deck, app], null)!;
             var shots = new List<(string Label, BitmapSource Picture, Size Size)>();
-            void Shot(string label, NoticeLevel level, double time, string body, NoticeAlign? asked = null, bool subdued = false, int count = 1, AttentionItem? given = null, NoticeStyle? look = null)
+            void Shot(string label, NoticeLevel level, double time, string body, NoticeAlign? asked = null, bool subdued = false, int count = 1, AttentionItem? given = null, NoticeStyle? look = null, NoticeSlot? slot = null)
             {
-                var notice = new Notice { AppKey = "windows:Chat", AppName = "QQ", Title = title, Body = body, Align = asked, ReceivedAt = _now, CreatedAt = _now };
+                var notice = new Notice { AppKey = "windows:Chat", AppName = "QQ", Title = title, Body = body, Align = asked, Slot = slot, ReceivedAt = _now, CreatedAt = _now };
                 var item = given ?? new AttentionItem { Lane = "main", Kind = AttentionKind.Notice, Key = notice.Id, Payload = notice, Level = level, Count = count, Duration = TimeSpan.FromSeconds(6),
                     Style = look ?? _settings.NoticeStyles.For(level) };
                 if (subdued) typeof(AttentionItem).GetProperty(nameof(AttentionItem.Subdued))!.SetValue(item, true);
@@ -335,11 +335,11 @@ internal sealed partial class Renderer(App app, string output, string language, 
             Shot("Level 2 beyond the rate limit: shown as level 1", NoticeLevel.Glow, second, reply, subdued: true, look: new NoticeStyle { Liquid = true });
             if (!line)
             {
-                // The scene's island shows the quota rings and the equalizer: the rings' place is a part's; a part the island does not
-                // show (the clock) leaves the notice the whole island.
-                Shot("Level 1 in the quota rings' place", NoticeLevel.Plain, first, reply, look: new NoticeStyle { Slot = CompactPart.Rings });
-                Shot("Level 1 in the rings' place, a long line scrolls there", NoticeLevel.Plain, first, longer, look: new NoticeStyle { Slot = CompactPart.Rings });
-                Shot("Level 1 in the clock's place, not shown: the whole island", NoticeLevel.Plain, first, reply, look: new NoticeStyle { Slot = CompactPart.Clock });
+                // The scene's island shows the quota rings and the equalizer: a sender may ask for the rings' place (--slot); a part the
+                // island does not show (the clock) leaves the notice the whole island.
+                Shot("Level 1 in the quota rings' place (--slot usage)", NoticeLevel.Plain, first, reply, slot: NoticeSlot.Usage);
+                Shot("Level 1 in the rings' place, a long line scrolls there", NoticeLevel.Plain, first, longer, slot: NoticeSlot.Usage);
+                Shot("Level 1 in the clock's place, not shown: the whole island", NoticeLevel.Plain, first, reply, slot: NoticeSlot.Clock);
                 Shot("Align left asked by the sender", NoticeLevel.Plain, first, reply, asked: NoticeAlign.Left);
                 Shot("Align right asked by the sender", NoticeLevel.Plain, first, reply, asked: NoticeAlign.Right);
                 Shot("Merged, count 3, center", NoticeLevel.Plain, first, reply, count: 3);
