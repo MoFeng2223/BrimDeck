@@ -317,9 +317,14 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
         return sample;
     }
 
-    // The icon's main color, made readable; null for icons without a clear color (white, grey or transparent ones).
-    private static Color? AccentOf(BitmapSource image)
-        => MusicVisuals.Accent(image) is SolidColorBrush { Color: var color } && !(color.R == color.G && color.G == color.B) ? color : null;
+    // The picture's main color (ColorMath.Dominant), made readable; null for pictures without a clear color (white, gray or
+    // transparent ones).
+    private static Color? AccentOf(BitmapSource sample)
+    {
+        var pixels = new byte[sample.PixelWidth * sample.PixelHeight * 4];
+        sample.CopyPixels(pixels, sample.PixelWidth * 4, 0);
+        return ColorMath.Dominant(pixels) is { } main ? MusicVisuals.Toned(main.R / 255d, main.G / 255d, main.B / 255d, PanelTheme.Main) : null;
+    }
 
     // A color for an application without one: the same application always gets the same color from the shared palette.
     public static Color Fallback(string appKey)
@@ -331,6 +336,19 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
         if (rule?.AccentColor is { Length: > 0 } chosen) return Remembered(chosen, text => (Color)ColorConverter.ConvertFromString(text));
         Get(notice.IconRef, out var accent);
         return accent ?? Fallback(notice.AppKey);
+    }
+
+    // The glow's color for a notice, as the music page takes its color from the cover: the color of the picture in front, which is
+    // the sender's avatar where the notice shows one (a chat's or a person's picture) and the application's icon otherwise. Null
+    // when that picture has no clear color (a gray, white or black one): the glow is then neutral, not a color the picture does not
+    // have. The letter shown while no picture has arrived gives its own color (AccentFor). A color the user chose for the
+    // application comes first.
+    public Color? GlowFor(Notice notice, NoticeAppRule? rule, bool showsPicture)
+    {
+        if (rule?.AccentColor is { Length: > 0 }) return AccentFor(notice, rule);
+        if (showsPicture && Get(notice.Picture, out var avatar) is not null) return avatar;
+        if (Get(notice.IconRef, out var icon) is not null) return icon;
+        return AccentFor(notice, rule);
     }
 
     private static Color Remembered(string key, Func<string, Color> make)

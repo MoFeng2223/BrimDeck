@@ -34,9 +34,10 @@ public partial class MainWindow
 
     // The coordinator's name for this panel: the main panel's stays the same when its monitor changes.
     internal string NoticeLane => _lead is null ? "main" : "display:" + (Display?.Id ?? "");
-    internal long NoticeMonitor => MonitorHandle.ToInt64();
     // ui-2: nothing starts while the panel powers off; it draws back into the dot in sight (PowerOff ends a shown notice).
     internal bool CanShowNotices => IsVisible && !IsSuppressed && !_preview && !_poweringOff;
+    // Arriving notices show on this panel: the switch of the profile it shows ("提示新通知" under 收起外观).
+    internal bool ShowsNewNotices => Settings.NoticeIsland;
     private bool NoticeCovering => _noticeWindow?.Covering == true;
 
     private void SubscribeNotices()
@@ -57,7 +58,7 @@ public partial class MainWindow
         timer.Tick += (_, _) =>
         {
             timer.Stop();
-            if (_noticesSubscribed && _noticeWindow is null && !_expanded && !_booting && !_bootWaiting && CanShowNotices && Settings.NoticesEnabled && Settings.NoticeIsland) (_noticeWindow = new IslandNotice(this, _app)).Prepare();
+            if (_noticesSubscribed && _noticeWindow is null && !_expanded && !_booting && !_bootWaiting && CanShowNotices && Settings.NoticeIsland) (_noticeWindow = new IslandNotice(this, _app)).Prepare();
         };
         timer.Start();
     }
@@ -462,7 +463,7 @@ public partial class MainWindow
         // Worked from the keyboard, the page keeps the focus on the same notice when it is built again.
         string? refocus = NoticesContent.IsKeyboardFocusWithin ? _focusedNotice : null;
         NoticesContent.Children.Clear(); NoticesContent.ColumnDefinitions.Clear();
-        _waitingPlates.Clear();
+        _waitingPlates.Clear(); _focusGlow = null;
         _liveRows.Clear();
         _pageRows.Clear(); _noticeBatches?.Cancel(); _noticeBatches = null; _pageEmpty = null; _pageScroll = null;
         NoticesContent.Margin = PageMargin;
@@ -503,14 +504,15 @@ public partial class MainWindow
     {
         var accent = PanelTheme.Readable(center.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)));
         var column = new Grid { Margin = new Thickness(0, 4, 20, 0), ClipToBounds = false };
-        // A faint glow in the application's color behind the column, as the music page takes its color from the cover.
-        // As wide as the column (and 60 beyond it to the left), not a fixed 420: a glow wider than its column is cut at the column's
-        // edge where it is still visible.
+        // A faint glow in the color of the picture in front (the sender's avatar, or the application's icon) behind the column, as
+        // the music page takes its color from the cover. As wide as the column (and 60 beyond it to the left), not a fixed 420: a glow
+        // wider than its column is cut at the column's edge where it is still visible.
         var glow = new Border
         {
-            Height = 300, Margin = new Thickness(-60, -64, 0, 0), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Top, IsHitTestVisible = false,
-            Background = new RadialGradientBrush(Color.FromArgb(NoticeLines.GlowAlpha, accent.R, accent.G, accent.B), Color.FromArgb(0, accent.R, accent.G, accent.B))
+            Height = 300, Margin = new Thickness(-60, -64, 0, 0), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Top, IsHitTestVisible = false
         };
+        PaintGlow(glow, notice);
+        _focusGlow = (glow, notice);
         column.Children.Add(glow);
         var stack = new DockPanel { LastChildFill = true };
         column.Children.Add(stack);
@@ -542,7 +544,6 @@ public partial class MainWindow
         if (center.CanOpen(notice))
         {
             hero.Background = Brushes.Transparent; hero.Cursor = Cursors.Hand;
-            hero.ToolTip = OpenLabel(notice);
             hero.MouseLeftButtonUp += (_, e) => { e.Handled = true; _ = OpenFromPage(notice); };
         }
         var who = new StackPanel { Margin = new Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
@@ -811,7 +812,7 @@ public partial class MainWindow
         tools.Children.Add(frame);
         head.Children.Add(tools);
 
-        var list = new StackPanel { Margin = new Thickness(-8, 8, 0, FadeHeight) };
+        var list = new StackPanel { Margin = new Thickness(0, 8, 0, FadeHeight) };
         KeyboardNavigation.SetDirectionalNavigation(list, KeyboardNavigationMode.Contained);
         var listed = Listed(center);
         // Keep the full extent when restoring a scroll offset. Build through the keyboard row
@@ -833,7 +834,9 @@ public partial class MainWindow
             more.HorizontalAlignment = HorizontalAlignment.Center; more.Margin = new Thickness(0, 6, 0, 12);
             list.Children.Add(more);
         }
-        var scroll = new ScrollViewer { Content = list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false, PanningMode = PanningMode.VerticalOnly };
+        // The rows' fill reaches 8 beyond the title on the left, so that their icons line up with it. The scroll viewer itself reaches
+        // out, not the list in it: the viewer clips what lies beyond its bounds, and cut the rows' rounded left edge flush to their icons.
+        var scroll = new ScrollViewer { Content = list, Margin = new Thickness(-8, 0, 0, 0), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false, PanningMode = PanningMode.VerticalOnly };
         _pageScroll = scroll;
         // The list fades out at its foot into the panel, by a mask that is the same on every material (NoticeFade); the free
         // space under the last row is as high as the fade.
@@ -1009,9 +1012,19 @@ public partial class MainWindow
     // page for it would ask again for icons the cache let go of, whose arrival would rebuild it again.
     private readonly Dictionary<string, List<(Grid Plate, Notice Notice)>> _waitingPlates = new(StringComparer.Ordinal);
 
+    // The focus column's glow and its notice: an avatar or icon that arrives after the page was drawn gives the glow its color.
+    private (Border Glow, Notice Notice)? _focusGlow;
+
+    private void PaintGlow(Border glow, Notice notice)
+    {
+        var color = PanelTheme.Readable(_app.Notices.Icons.GlowFor(notice, Settings.NoticeRule(notice.AppKey), NoticeLetter.ShowsPicture(notice, Settings)) ?? PanelTheme.ColorOf("textSecondary"));
+        glow.Background = new RadialGradientBrush(Color.FromArgb(NoticeLines.GlowAlpha, color.R, color.G, color.B), Color.FromArgb(0, color.R, color.G, color.B));
+    }
+
     private void NoticeIconLoaded(string iconRef)
     {
         NoticeStripIconLoaded(iconRef);
+        if (_focusGlow is var (glow, focused) && (iconRef == focused.Picture || iconRef == focused.IconRef)) PaintGlow(glow, focused);
         if (!_waitingPlates.Remove(iconRef, out var plates)) return;
         foreach (var (plate, notice) in plates) FillPlate(plate, notice);
     }
