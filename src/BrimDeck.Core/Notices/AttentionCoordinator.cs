@@ -26,9 +26,15 @@ public sealed class AttentionItem
     public bool Urgent { get; init; }
     // How strongly a notice shows (NoticeLevels.Resolve); an update in place brings the notice's level of then.
     public NoticeLevel Level { get; set; } = NoticeLevel.Lively;
+    // How a notice of its level looks (NoticeLevelStyles.Of: the application's own, else the settings'); null for an item that is
+    // not a notice (a quota alert, a track change), which plays as its level always did.
+    public NoticeStyle? Style { get; set; }
     // Stays until it is handled: it ends only when the user clicks or closes it, the panel opens, it is withdrawn (its
     // source no longer has it), or after PersistentLimit.
     public bool Persistent => Level == NoticeLevel.Persistent;
+    // How long it may stay until handled when its sender says so (Notice.Timeout); null takes PersistentLimit.
+    public TimeSpan? Limit { get; set; }
+    internal TimeSpan StaysFor => Limit ?? AttentionCoordinator.PersistentLimit;
     // Started beyond the rate limit: it shows at once all the same, but as a plain notice (no backlight, no ripples).
     public bool Subdued { get; internal set; }
     internal DateTimeOffset SubmittedAt { get; set; }
@@ -140,7 +146,7 @@ public sealed class AttentionCoordinator
         {
             bool persisted = current.Persistent;
             current.Payload = item.Payload;
-            if (item.IsNotice) current.Level = item.Level;
+            if (item.IsNotice) { current.Level = item.Level; current.Limit = item.Limit; }
             // The next song's title shows for its whole time, not what was left of the one before (the panel times it from now).
             if (item.Kind == AttentionKind.Track)
             {
@@ -149,7 +155,7 @@ public sealed class AttentionCoordinator
             // Now to stay until it is handled, or no longer: its time starts again from here.
             if (current.Persistent != persisted)
             {
-                var span = current.Persistent ? PersistentLimit : Positive(current.Duration);
+                var span = current.Persistent ? current.StaysFor : Positive(current.Duration);
                 if (lane.Held) current.Remaining = span; else lane.Ends = now + span;
             }
             // Progress keeps the island a little longer, at most twice the notice's duration like a merged burst: a long
@@ -453,7 +459,7 @@ public sealed class AttentionCoordinator
         lane.Current = item;
         item.StartedAt = now;
         lane.Yields = now + MinimumShown;
-        lane.Ends = now + (item.Persistent ? PersistentLimit : Positive(item.Remaining > TimeSpan.Zero ? item.Remaining : item.Duration));
+        lane.Ends = now + (item.Persistent ? item.StaysFor : Positive(item.Remaining > TimeSpan.Zero ? item.Remaining : item.Duration));
         if (item.IsNotice) Count(item, now);
         changes.Add(new(item.Lane, null, item, null));
     }

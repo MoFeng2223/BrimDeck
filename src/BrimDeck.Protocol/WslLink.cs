@@ -8,6 +8,8 @@ public static class WslLink
     // brim-notify waits longer, so that it hears the agent's "no-reply" rather than giving up first and sending the message
     // again another way (W3).
     public static readonly TimeSpan AgentReplyWait = TimeSpan.FromSeconds(8), CliReplyWait = TimeSpan.FromSeconds(12);
+    // After a waiting sender's reply, how long past the notice's own time its result is waited for before the wait is given up.
+    public static readonly TimeSpan ResultSlack = TimeSpan.FromSeconds(20);
     // How often the agent looks for its CLI socket's file, or for the runtime directory to put it in (W4).
     public static readonly TimeSpan SocketCheck = TimeSpan.FromSeconds(30);
     // How often the agent looks for a session bus while it has none: only a few file names, so a bus that appears (the user's

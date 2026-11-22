@@ -92,16 +92,15 @@ internal static class NoticeFlashTests
 
     private static void Setting(Action<string, bool> check)
     {
-        check("Flash: the switch is off by default", !new DeckSettings().NoticeChatFlash);
+        var defaults = new DeckSettings();
+        defaults.Normalize();
+        check("Flash: WeChat's taskbar flash is listed for a new user", defaults.NoticeRule("flash:wechat") is not null && defaults.NoticeReceives("flash:wechat"));
         string folder = Path.Combine(Path.GetTempPath(), "BrimDeck-FlashTests-" + Guid.NewGuid().ToString("N"));
         try
         {
             var store = new SettingsStore(folder);
-            store.Save(new DeckSettings { NoticesEnabled = true, NoticeChatFlash = true });
-            var loaded = store.Load();
-            check("Flash: the switch survives saving, loading and copying", loaded.NoticeChatFlash && loaded.Copy().NoticeChatFlash);
-            File.WriteAllText(store.FilePath, $$"""{"AppVersion":"{{ApplicationVersion.Parse(ApplicationVersion.Current).ToString(3)}}","NoticesEnabled":true}""");
-            check("Flash: an older settings file reads with the switch off", !store.Load().NoticeChatFlash);
+            store.Save(new DeckSettings { NoticesEnabled = true, NoticeAppsListed = true, NoticeApps = [] });
+            check("Flash: taken off the list, WeChat's flashes are not received", !store.Load().NoticeReceives("flash:wechat"));
         }
         finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
     }

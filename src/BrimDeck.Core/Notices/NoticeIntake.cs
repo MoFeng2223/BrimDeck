@@ -64,15 +64,103 @@ public static class NoticeIntake
         ReplaceKey = Blank(message.ReplaceId), EventId = Blank(message.EventId),
         Title = message.Title ?? "", Body = message.Body ?? "", IconRef = IconRef(message.Icon, origin, distro),
         CreatedAt = message.CreatedAt, Age = message.AgeMs is >= 0 and var age ? TimeSpan.FromMilliseconds(age) : null, Category = NoticeKeys.Category(message.Category), PriorityHint = NoticeKeys.Priority(message.Priority),
-        Progress = message.Progress, Capabilities = capabilities,
-        // Action labels show as buttons: cleaned as a title is (C-L11).
-        Actions = (capabilities & NoticeCapabilities.Actions) != 0 && message.Actions is { } actions ? actions.Select(a => new NoticeAction(a.Key, Name(a.Label, a.Key))).ToList() : [],
+        Progress = message.Progress,
+        // A sender that waits is told which button was chosen, as a WSL application is while the agent serves it.
+        Capabilities = capabilities | (origin == NoticeOrigin.Cli && Waits(message) ? NoticeCapabilities.Actions : 0),
+        Actions = origin == NoticeOrigin.Cli ? Buttons(message, distro) : DesktopActions(message, capabilities),
         ExitCode = message.ExitCode, DurationMs = message.DurationMs, Command = Blank(message.Command),
         Timing = NoticeTimeIntake.Resolve(message, now ?? DateTimeOffset.UtcNow, zone ?? TimeZoneInfo.Local),
         StopTiming = message.Stop == true,
         Transient = message.Transient == true,
-        Level = NoticeKeys.Level(message.Level), Align = NoticeKeys.Align(message.Align)
+        Level = NoticeKeys.Level(message.Level), Align = NoticeKeys.Align(message.Align),
+        Slot = NoticeKeys.Slot(message.Slot), Glow = NoticeKeys.Color(message.Glow),
+        Context = NoticeText.Clean(message.Context ?? "", singleLine: true).Trim(),
+        Picture = IconRef(message.Picture, origin, distro), HideIcon = message.HideIcon == true,
+        // A notice kept off the list cannot be answered from the notices page, so one that is waited for is always listed.
+        Unlisted = message.History == false && !Waits(message),
+        Awaited = Waits(message),
+        Timeout = message.TimeoutMs is { } limit ? TimeSpan.FromMilliseconds(Math.Clamp(limit, NoticeProtocol.MinTimeoutMs, NoticeProtocol.MaxTimeoutMs)) : null
     };
+
+    // Whether the sender waits for how its notice ends. Only a plain notice can be waited for: a timer, a stopwatch, an event
+    // or a stop are answered at once.
+    public static bool Waits(NoticeMessage message)
+        => message.Wait == true && message.Stop != true && message.Kind is not (NoticeTimes.Countdown or NoticeTimes.Stopwatch or NoticeTimes.Event);
+
+    // Buttons a command-line sender may give at most.
+    public const int MaxButtons = 4;
+
+    // A desktop notification's actions, offered while the agent can pass the choice back. Labels show as buttons: cleaned as a
+    // title is (C-L11).
+    private static List<NoticeAction> DesktopActions(NoticeMessage message, NoticeCapabilities capabilities)
+        => (capabilities & NoticeCapabilities.Actions) != 0 && message.Actions is { } actions ? actions.Select(a => new NoticeAction(a.Key, Name(a.Label, a.Key))).ToList() : [];
+
+    // A command-line sender's buttons. One whose key goes back to the sender is kept only while the sender waits for it; a
+    // copy needs its text and an open a target BrimDeck may open (OpenTarget), else the button is left out. At most one is
+    // the main button.
+    private static List<NoticeAction> Buttons(NoticeMessage message, string? distro)
+    {
+        var buttons = new List<NoticeAction>();
+        if (message.Actions is not { } actions) return buttons;
+        bool waits = Waits(message), main = false;
+        foreach (var action in actions)
+        {
+            if (buttons.Count >= MaxButtons) break;
+            if (action is null || Blank(action.Key) is not { } key) continue;
+            string label = Name(action.Label, key);
+            bool primary = !main && string.Equals(action.Style, NoticeActionTypes.Primary, StringComparison.OrdinalIgnoreCase);
+            NoticeAction? button = action.Type?.Trim().ToLowerInvariant() switch
+            {
+                null or "" or NoticeActionTypes.Reply => waits ? new(key, label, NoticeActionKind.Reply, null, primary) : null,
+                NoticeActionTypes.Copy => action.Value is { Length: > 0 } text ? new(key, label, NoticeActionKind.Copy, text, primary) : null,
+                NoticeActionTypes.Open => OpenTarget(action.Value, distro) is { } target ? new(key, label, NoticeActionKind.Open, target, primary) : null,
+                _ => null
+            };
+            if (button is null || buttons.Any(b => b.Key == button.Key)) continue;
+            main |= primary;
+            buttons.Add(button);
+        }
+        return buttons;
+    }
+
+    public const string AppTarget = "app:";
+
+    // Files that opening would run rather than show: programs, scripts, installers, shortcuts and the like, by their extension.
+    // An open button shows such a file in its folder instead of opening it.
+    private static readonly HashSet<string> Runnable = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".exe", ".com", ".bat", ".cmd", ".ps1", ".psm1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".msc", ".msi", ".msp", ".msix", ".appx", ".scr", ".pif", ".cpl",
+        ".lnk", ".url", ".reg", ".hta", ".jar", ".py", ".pyw", ".appref-ms", ".application", ".gadget", ".inf", ".scf", ".sh", ".dll", ".sys", ".appinstaller"
+    };
+
+    public static bool Runs(string path)
+    {
+        string extension;
+        try { extension = Path.GetExtension(path.TrimEnd(' ', '.')); }
+        catch (ArgumentException) { return true; }
+        // A name without an extension has no program for its type; whatever else PATHEXT names runs too.
+        return extension.Length == 0 || Runnable.Contains(extension)
+            || (Environment.GetEnvironmentVariable("PATHEXT") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Contains(extension, StringComparer.OrdinalIgnoreCase);
+    }
+
+    // What an open button may open, as given: a web address (http or https); from a Windows sender also a local file or folder
+    // written out in full (IsLocalWindowsPath) or "app:<application id>". Null for anything else. A sender inside a WSL
+    // distribution only opens web addresses: its paths are not Windows'.
+    public static string? OpenTarget(string? value, string? distro)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        value = value.Trim();
+        if (value.Length > NoticeProtocol.MaxActionValue || value.Any(char.IsControl)) return null;
+        if (Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https") return uri.IsWellFormedOriginalString() || uri.Host.Length > 0 ? uri.AbsoluteUri : null;
+        if (distro is not null) return null;
+        if (value.StartsWith(AppTarget, StringComparison.OrdinalIgnoreCase))
+        {
+            string id = value[AppTarget.Length..].Trim();
+            // An application user model id: a package family and application, or a name; never a path or a command line.
+            return id.Length is > 0 and <= 256 && id.IndexOfAny(['\\', '/', '"', ' ', '*', '?', '<', '>', '|']) < 0 ? AppTarget + id : null;
+        }
+        return IsLocalWindowsPath(value) ? value.Replace('/', '\\') : null;
+    }
 
     // Icons are local only: a Windows file path for the Windows link, a Linux path or icon name inside the distribution for
     // WSL. Anything that looks like a web address is ignored.

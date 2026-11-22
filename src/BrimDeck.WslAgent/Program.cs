@@ -13,6 +13,7 @@ namespace BrimDeck.WslAgent;
 // brimdeck-agent serve [--idle-minutes N]   started by BrimDeck through wsl.exe: receives this distribution's notices, and
 //                                           ends after N minutes (5 by default, 0 never) in which the user ran nothing there
 // brimdeck-agent [notify] ARGS...           brim-notify inside WSL (the brim-notify script runs this)
+// brimdeck-agent brim ARGS...               brim inside WSL (the brim script runs this): "brim notify send ..."
 internal static class Program
 {
     private static async Task<int> Main(string[] args)
@@ -24,18 +25,26 @@ internal static class Program
                 idle = TimeSpan.FromMinutes(n);
             return await AgentHost.RunAsync(idle);
         }
-        var command = NotifyCommandLine.Parse(args is ["notify", .. var rest] ? rest : args);
+        bool brim = args is ["brim", ..];
+        s_name = brim ? "brim" : "brim-notify";
+        var command = brim ? BrimCommandLine.Parse(args[1..], Environment.GetEnvironmentVariable(BrimCommandLine.SourceVariable)) : NotifyCommandLine.Parse(args is ["notify", .. var rest] ? rest : args);
         return await NotifyCli.RunAsync(command, new NotifySender(Version, SendAsync, Start,
             Unreachable: "BrimDeck could not be reached (is it running, with this distribution switched on under live notices?).",
-            NotReceiving: "BrimDeck is not receiving notices from this distribution."));
+            NotReceiving: "BrimDeck is not receiving notices from this distribution.")
+        {
+            Name = s_name, Usage = brim ? BrimCommandLine.Usage : NotifyCommandLine.Usage, SendWaiting = SendWaitingAsync
+        });
     }
+
+    // The command's name in what it prints: brim, or brim-notify.
+    private static string s_name = "brim-notify";
 
     internal static string Version => typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0";
 
     // "run"'s program as the shell finds it; 127 when it is not found or cannot start, as in the shell.
     private static (Process? Process, int Failure, bool Report) Start(IReadOnlyList<string> program)
     {
-        if (Native.FindProgram(program[0]) is not { } path) { Console.Error.WriteLine("brim-notify: " + program[0] + ": command not found"); return (null, 127, false); }
+        if (Native.FindProgram(program[0]) is not { } path) { Console.Error.WriteLine(s_name + ": " + program[0] + ": command not found"); return (null, 127, false); }
         var start = new ProcessStartInfo(path) { UseShellExecute = false };
         foreach (var argument in program.Skip(1)) start.ArgumentList.Add(argument);
         try { return (Process.Start(start), 127, false); }
@@ -56,6 +65,48 @@ internal static class Program
         return await ViaHelperAsync(message);
     }
 
+    // A notice that waits: its reply, and then on the same link how the notice ended. Through the agent's socket, or without
+    // the agent through BrimDeck.Notify.exe, which keeps its connection to BrimDeck until the result is there.
+    private static async Task<(NoticeMessage? Reply, NoticeMessage? Result)> SendWaitingAsync(NoticeMessage message)
+    {
+        message.EventId ??= Guid.NewGuid().ToString("N");
+        NoticeProtocol.Stamp(message, DateTimeOffset.UtcNow);
+        message.Distro ??= Environment.GetEnvironmentVariable("WSL_DISTRO_NAME");
+        var wait = TimeSpan.FromMilliseconds(message.TimeoutMs ?? NoticeProtocol.MaxTimeoutMs) + WslLink.ResultSlack + WslLink.ResultSlack;
+        var path = AgentPaths.Socket();
+        if (path is not null && File.Exists(path))
+        {
+            using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            bool written = false;
+            try
+            {
+                using (var connecting = new CancellationTokenSource(TimeSpan.FromSeconds(5))) await socket.ConnectAsync(new UnixDomainSocketEndPoint(path), connecting.Token);
+                await using var stream = new NetworkStream(socket);
+                (var reply, written) = await NoticeFrames.ExchangeAsync(stream, message, WslLink.CliReplyWait);
+                if (written)
+                {
+                    reply ??= NoticeProtocol.Reply(NoticeResults.Rejected, "no-reply", message.EventId);
+                    return (reply, reply.Waiting == true ? await ResultAsync(stream, wait) : null);
+                }
+            }
+            catch (Exception ex) when (ex is SocketException or IOException or OperationCanceledException) { if (written) return (NoticeProtocol.Reply(NoticeResults.Rejected, "no-reply", message.EventId), null); }
+        }
+        return await ViaHelperAsync(message, wait);
+    }
+
+    // The next "result" frame on the link, or null when the link ends or the time runs out first.
+    private static async Task<NoticeMessage?> ResultAsync(Stream stream, TimeSpan wait)
+    {
+        using var limit = new CancellationTokenSource(wait);
+        try
+        {
+            while (await NoticeFrames.ReadMessageAsync(stream, limit.Token) is { } next)
+                if (next.Type == NoticeTypes.Result) return next;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or OperationCanceledException or SocketException or ObjectDisposedException) { }
+        return null;
+    }
+
     private static async Task<(NoticeMessage? Reply, bool Written)> ViaSocketAsync(NoticeMessage message)
     {
         var path = AgentPaths.Socket();
@@ -71,10 +122,13 @@ internal static class Program
         catch (Exception ex) when (ex is SocketException or IOException or OperationCanceledException) { return (null, false); }
     }
 
-    private static async Task<NoticeMessage?> ViaHelperAsync(NoticeMessage message)
+    private static async Task<NoticeMessage?> ViaHelperAsync(NoticeMessage message) => (await ViaHelperAsync(message, null)).Reply;
+
+    // resultWait: for a notice that waits, how long the result may take after the reply; the helper writes it once it has it.
+    private static async Task<(NoticeMessage? Reply, NoticeMessage? Result)> ViaHelperAsync(NoticeMessage message, TimeSpan? resultWait)
     {
         string? helper = null;
-        if (AgentPaths.BridgeConfig is not { } config) return null;
+        if (AgentPaths.BridgeConfig is not { } config) return default;
         try
         {
             var json = await File.ReadAllBytesAsync(config);
@@ -82,29 +136,38 @@ internal static class Program
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }
         // BrimDeck writes the helper's full path (under /mnt); a bare name would be looked up in the current directory.
-        if (string.IsNullOrEmpty(helper) || !Path.IsPathRooted(helper) || !File.Exists(helper)) return null;
+        if (string.IsNullOrEmpty(helper) || !Path.IsPathRooted(helper) || !File.Exists(helper)) return default;
         var start = new ProcessStartInfo(helper) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true };
         start.ArgumentList.Add("--stdio");
         Process? process;
         try { process = Process.Start(start); }
-        catch (Win32Exception) { return null; }
-        if (process is null) return null;
+        catch (Win32Exception) { return default; }
+        if (process is null) return default;
         using (process)
         {
+            NoticeMessage? reply = null;
             try
             {
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                 await NoticeFrames.WriteAsync(process.StandardInput.BaseStream, message, timeout.Token);
                 process.StandardInput.Close();
-                var reply = await NoticeFrames.ReadMessageAsync(process.StandardOutput.BaseStream, timeout.Token);
+                reply = await NoticeFrames.ReadMessageAsync(process.StandardOutput.BaseStream, timeout.Token);
+                if (reply is { Result: NoticeResults.Rejected, Detail: "unreachable" }) reply = null;
+                NoticeMessage? result = null;
+                // The helper stays for the result of a notice that waits, and ends once it has passed it on.
+                if (reply?.Waiting == true && resultWait is { } wait)
+                {
+                    result = await ResultAsync(process.StandardOutput.BaseStream, wait);
+                    timeout.CancelAfter(TimeSpan.FromSeconds(10));
+                }
                 await process.WaitForExitAsync(timeout.Token);
-                return reply is { Result: NoticeResults.Rejected, Detail: "unreachable" } ? null : reply;
+                return (reply, result);
             }
             catch (Exception ex) when (ex is IOException or InvalidDataException or OperationCanceledException)
             {
                 // A helper that did not answer in time is ended, not left behind (life-L10).
                 try { if (!process.HasExited) process.Kill(true); } catch (Exception kill) when (kill is InvalidOperationException or Win32Exception) { }
-                return null;
+                return (reply, null);
             }
         }
     }

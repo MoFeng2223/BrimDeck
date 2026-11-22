@@ -12,7 +12,15 @@ public sealed record NotifySender(
     Func<NoticeMessage, Task<NoticeMessage?>> Send,
     Func<IReadOnlyList<string>, (Process? Process, int Failure, bool Report)> Start,
     string Unreachable,
-    string NotReceiving);
+    string NotReceiving)
+{
+    // The command's name in what it prints, and its help.
+    public string Name { get; init; } = "brim-notify";
+    public string Usage { get; init; } = NotifyCommandLine.Usage;
+    // Sends a notice whose sender waits (NoticeMessage.Wait) and keeps the link until BrimDeck says how it ended: the reply,
+    // and the "result" that follows a reply marked Waiting (null when the link ended first, or nothing was waited for).
+    public Func<NoticeMessage, Task<(NoticeMessage? Reply, NoticeMessage? Result)>>? SendWaiting { get; init; }
+}
 
 // brim-notify's commands, shared by the Windows sender (BrimDeck.Notify.exe) and the WSL agent (q-P1.5). Exit codes: 0
 // delivered (or filtered by the user's rules), 1 usage error (a message too large to send included), 2 refused by BrimDeck
@@ -20,18 +28,34 @@ public sealed record NotifySender(
 // the program's own code.
 public static class NotifyCli
 {
-    public const int Usage = 1, Refused = 2, Unreachable = 3;
+    // Dismissed and Expired are how a notice that was waited for ended without a button chosen.
+    public const int Usage = 1, Refused = 2, Unreachable = 3, Dismissed = 4, Expired = 5;
     // The reply brim-notify makes up itself for a message too large for a frame even with its texts cut (W7).
     public const string TooLarge = "too-large";
+    // A file given to --json at most; a message is at most a frame.
+    private const int MaxJson = NoticeProtocol.MaxFrame;
+
+    // The command's name in what is printed while a command runs (brim or brim-notify).
+    private static string? s_name;
+    private static string Name => s_name ?? "brim-notify";
 
     public static async Task<int> RunAsync(NotifyCommand command, NotifySender sender)
     {
+        s_name = sender.Name;
         switch (command.Kind)
         {
-            case NotifyCommandKind.Help: Console.WriteLine(NotifyCommandLine.Usage); return 0;
+            case NotifyCommandKind.Help: Console.WriteLine(sender.Usage); return 0;
             case NotifyCommandKind.Version: Console.WriteLine(sender.Version); return 0;
-            case NotifyCommandKind.Error: Console.Error.WriteLine("brim-notify: " + command.Error); Console.Error.WriteLine("Try brim-notify --help."); return Usage;
-            case NotifyCommandKind.Stdio: Console.Error.WriteLine("brim-notify: --stdio is for the Windows sender."); return Usage;
+            case NotifyCommandKind.Error: Console.Error.WriteLine(Name + ": " + command.Error); Console.Error.WriteLine("Try " + Name + " --help."); return Usage;
+            case NotifyCommandKind.Stdio: Console.Error.WriteLine(Name + ": --stdio is for the Windows sender."); return Usage;
+            case NotifyCommandKind.Status when command.JsonOutput:
+            {
+                var reply = await sender.Send(new NoticeMessage { Type = NoticeTypes.Status });
+                bool receiving = reply?.Result == NoticeResults.Accepted;
+                // Refused or unanswered, BrimDeck still runs; with no reply at all it could not be reached.
+                Console.WriteLine($"{{\"running\":{Word(reply is not null)},\"receiving\":{Word(receiving)},\"detail\":{System.Text.Json.JsonSerializer.Serialize(reply?.Detail ?? "", NoticeJson.Default.String)}}}");
+                return receiving ? 0 : Unreachable;
+            }
             case NotifyCommandKind.Status:
             {
                 var reply = await sender.Send(new NoticeMessage { Type = NoticeTypes.Status });
@@ -49,49 +73,130 @@ public static class NotifyCli
             case NotifyCommandKind.Run: return await RunProgramAsync(command, sender);
             default:
             {
-                int code = Report(await SendAsync(sender, command.Message!), sender.Unreachable, command.Message);
-                // A timer, stopwatch or event: its key, for "brim-notify stop KEY".
-                if (code == 0 && NotifyCommandLine.PrintsKey(command.Message!)) Console.WriteLine(command.Message!.ReplaceId);
+                var message = command.Message!;
+                if (command.JsonInput is { } file)
+                {
+                    if (ReadJson(file) is not { } read) return Usage;
+                    if (NotifyCommandLine.Combine(read, message, Environment.GetEnvironmentVariable(BrimCommandLine.SourceVariable) is { Length: > 0 } named ? named.Trim() : BrimCommandLine.DefaultSource) is not { } whole)
+                    {
+                        Console.Error.WriteLine(Name + ": a title or body is needed");
+                        return Usage;
+                    }
+                    message = whole;
+                }
+                if (message.Wait == true && message.Stop != true) return await WaitAsync(sender, message);
+                int code = Report(await SendAsync(sender, message), sender.Unreachable, message);
+                // A timer, stopwatch or event: its key, for stopping it later.
+                if (code == 0 && NotifyCommandLine.PrintsKey(message)) Console.WriteLine(message.ReplaceId);
                 return code;
             }
+        }
+    }
+
+    private static string Word(bool value) => value ? "true" : "false";
+
+    // The message of --json: a file, or standard input for "-". Null (said why) when it cannot be read or is not a message.
+    private static NoticeMessage? ReadJson(string file)
+    {
+        byte[] json;
+        try
+        {
+            if (file == "-")
+            {
+                using var input = Console.OpenStandardInput();
+                using var buffer = new MemoryStream();
+                var chunk = new byte[8192];
+                int n;
+                while ((n = input.Read(chunk, 0, chunk.Length)) > 0)
+                {
+                    buffer.Write(chunk, 0, n);
+                    if (buffer.Length > MaxJson) { Console.Error.WriteLine(Name + ": the JSON on standard input is larger than a message may be."); return null; }
+                }
+                json = buffer.ToArray();
+            }
+            else
+            {
+                if (new FileInfo(file) is { Exists: true, Length: > MaxJson }) { Console.Error.WriteLine(Name + ": " + file + " is larger than a message may be."); return null; }
+                json = File.ReadAllBytes(file);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            Console.Error.WriteLine(Name + ": could not read " + (file == "-" ? "standard input" : file) + ": " + ex.Message);
+            return null;
+        }
+        // A file saved with a byte order mark is still JSON.
+        ReadOnlySpan<byte> text = json;
+        if (text.StartsWith("﻿"u8)) text = text[3..];
+        if (NoticeProtocol.Deserialize(text) is { } message) return message;
+        Console.Error.WriteLine(Name + ": " + (file == "-" ? "standard input" : file) + " does not hold a message as JSON.");
+        return null;
+    }
+
+    // A notice that waits: the chosen button's key is printed, and the exit code says how it ended.
+    private static async Task<int> WaitAsync(NotifySender sender, NoticeMessage message)
+    {
+        if (sender.SendWaiting is null) { Console.Error.WriteLine(Name + ": this sender cannot wait for an answer."); return Usage; }
+        if (Prepare(message) is { } tooLarge) return Report(tooLarge, sender.Unreachable, message);
+        var (reply, result) = await sender.SendWaiting(message);
+        int code = Report(reply, sender.Unreachable, message);
+        if (code != 0) return code;
+        // The user's rules drop the source's notices: nothing shows, so nothing is answered.
+        if (reply!.Result == NoticeResults.Filtered) return Dismissed;
+        if (reply.Waiting != true)
+        {
+            Console.Error.WriteLine(Name + ": the notice is shown, but this BrimDeck does not wait for an answer.");
+            return 0;
+        }
+        if (result is null) { Console.Error.WriteLine(Name + ": the connection to BrimDeck ended before the notice was answered."); return Unreachable; }
+        switch (result.Result)
+        {
+            case NoticeWaits.Action: Console.WriteLine(result.ActionKey ?? ""); return 0;
+            case NoticeWaits.Expired: return Expired;
+            default: return Dismissed;
         }
     }
 
     // A notice cut to BrimDeck's limits and its icon given as a full path before it goes; one that still does not fit in a
     // frame is not sent, and gets TooLarge (W7).
     private static async Task<NoticeMessage?> SendAsync(NotifySender sender, NoticeMessage message)
+        => Prepare(message) ?? await sender.Send(message);
+
+    // Null when the message can go; else the reply made up for one too large.
+    private static NoticeMessage? Prepare(NoticeMessage message)
     {
         NoticeProtocol.ClipTexts(message);
-        message.Icon = NotifyCommandLine.ResolveIcon(message.Icon, OperatingSystem.IsWindows(), Path.GetFullPath, File.Exists);
+        bool windows = OperatingSystem.IsWindows();
+        message.Icon = NotifyCommandLine.ResolveIcon(message.Icon, windows, Path.GetFullPath, File.Exists);
+        message.Picture = NotifyCommandLine.ResolveIcon(message.Picture, windows, Path.GetFullPath, File.Exists);
         // Room for the id and times the sender still adds.
-        if (NoticeProtocol.Serialize(message).Length > NoticeProtocol.MaxFrame - 512) return NoticeProtocol.Reply(NoticeResults.Rejected, TooLarge);
-        return await sender.Send(message);
+        return NoticeProtocol.Serialize(message).Length > NoticeProtocol.MaxFrame - 512 ? NoticeProtocol.Reply(NoticeResults.Rejected, TooLarge) : null;
     }
 
     // sent: the message the reply is for, which names the key of a stop.
     public static int Report(NoticeMessage? reply, string unreachable, NoticeMessage? sent = null)
     {
-        if (reply is null) { Console.Error.WriteLine("brim-notify: " + unreachable); return Unreachable; }
+        if (reply is null) { Console.Error.WriteLine(Name + ": " + unreachable); return Unreachable; }
         if (reply is { Result: NoticeResults.Rejected, Detail: TooLarge })
         {
-            Console.Error.WriteLine("brim-notify: the message is too large to send, even with its texts cut to BrimDeck's limits.");
+            Console.Error.WriteLine(Name + ": the message is too large to send, even with its texts cut to BrimDeck's limits.");
             return Usage;
         }
         // The message went out, but no answer came in time (BrimDeck busy, starting or waking up): it may still show (W3).
         if (reply is { Result: NoticeResults.Rejected, Detail: "no-reply" })
         {
-            Console.Error.WriteLine("brim-notify: BrimDeck did not answer in time; the notice may still be shown.");
+            Console.Error.WriteLine(Name + ": BrimDeck did not answer in time; the notice may still be shown.");
             return Unreachable;
         }
-        if (reply.Result == NoticeResults.Rejected) { Console.Error.WriteLine("brim-notify: BrimDeck refused the notice: " + (reply.Detail ?? "unknown reason")); return Refused; }
+        if (reply.Result == NoticeResults.Rejected) { Console.Error.WriteLine(Name + ": " + "BrimDeck refused the notice: " + (reply.Detail ?? "unknown reason")); return Refused; }
         // A stop or close that found nothing: a mistyped key, or one sent with another -s (W8).
         if (reply is { Result: NoticeResults.Filtered, Detail: "no-timer" })
         {
-            Console.Error.WriteLine("brim-notify: no timer, stopwatch, event or open notice has the key " + (sent?.ReplaceId ?? "given")
+            Console.Error.WriteLine(Name + ": " + "no timer, stopwatch, event or open notice has the key " + (sent?.ReplaceId ?? "given")
                 + " (one sent with -s is stopped or closed with the same -s).");
             return Refused;
         }
-        if (reply.Result == NoticeResults.Filtered) Console.Error.WriteLine("brim-notify: received; BrimDeck's rules keep this source quiet.");
+        if (reply.Result == NoticeResults.Filtered) Console.Error.WriteLine(Name + ": received; BrimDeck's rules keep this source quiet.");
         return 0;
     }
 
@@ -112,7 +217,7 @@ public static class NotifyCli
     private static async Task<int> ReportRunAsync(NotifyCommand command, NotifySender sender, int code, TimeSpan elapsed)
     {
         if (await SendAsync(sender, NotifyCommandLine.RunResult(command.Message!, code, elapsed)) is null)
-            Console.Error.WriteLine("brim-notify: the program finished, but BrimDeck could not be reached.");
+            Console.Error.WriteLine(Name + ": the program finished, but BrimDeck could not be reached.");
         return code;
     }
 }

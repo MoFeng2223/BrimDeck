@@ -76,15 +76,11 @@ public static class Profiles
         nameof(DeckSettings.IncludeWsl), nameof(DeckSettings.Apps),
         nameof(DeckSettings.Profiles), nameof(DeckSettings.CurrentProfile), nameof(DeckSettings.ReturnProfile), nameof(DeckSettings.ProfileRules),
         nameof(DeckSettings.FullscreenExceptions), nameof(DeckSettings.MouseWheelPages),
-        nameof(DeckSettings.NoticesEnabled), nameof(DeckSettings.NoticeWindowsSource), nameof(DeckSettings.NoticeHideBanners),
-        nameof(DeckSettings.NoticeChatFlash), nameof(DeckSettings.NoticeChatFlashRestore), nameof(DeckSettings.NoticeWslDistros),
-        nameof(DeckSettings.NoticeDuration), nameof(DeckSettings.NoticeHighDuration), nameof(DeckSettings.NoticeScreen),
-        nameof(DeckSettings.NoticeDefaultLevel), nameof(DeckSettings.NoticeAlign),
-        nameof(DeckSettings.NoticePrivacy), nameof(DeckSettings.NoticeCodes), nameof(DeckSettings.NoticeClick),
-        nameof(DeckSettings.NoticeRespectFocus), nameof(DeckSettings.NoticesPausedUntil), nameof(DeckSettings.NoticeHistory),
-        nameof(DeckSettings.NoticeHistoryHours), nameof(DeckSettings.NoticeHistoryFolder),
-        nameof(DeckSettings.NoticeAutoClear), nameof(DeckSettings.NoticeLastCleared), nameof(DeckSettings.NoticeHotkey),
-        nameof(DeckSettings.NoticeApps)
+        nameof(DeckSettings.NoticesEnabled), nameof(DeckSettings.NoticeIsland), nameof(DeckSettings.NoticeWslDistros),
+        nameof(DeckSettings.NoticeScreen), nameof(DeckSettings.NoticeDefaultLevel), nameof(DeckSettings.NoticeStyles),
+        nameof(DeckSettings.NoticeCodes), nameof(DeckSettings.NoticeRespectFocus), nameof(DeckSettings.NoticesPausedUntil),
+        nameof(DeckSettings.NoticeHistory), nameof(DeckSettings.NoticeHistoryHours), nameof(DeckSettings.NoticeHotkey),
+        nameof(DeckSettings.NoticeApps), nameof(DeckSettings.NoticeAppsListed)
     };
 
     public static bool IsProfileKey(string key) => !GlobalKeys.Contains(key);

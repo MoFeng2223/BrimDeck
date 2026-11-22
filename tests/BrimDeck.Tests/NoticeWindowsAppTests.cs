@@ -121,8 +121,7 @@ internal static class NoticeWindowsAppTests
         check("A call is high priority and keeps its mark", call.Notice!.Priority == NoticePriority.High && call.Notice.Call && call.Present);
         var ended = hub.Receive(WinInput("c2", "windows:QQ", "Alice", "通话已结束") with { Replaces = "c1" }, WinT0.AddSeconds(20));
         check("A call that ends loses its mark", ended.Receipt == NoticeReceipt.Updated && !ended.Notice!.Call && ended.Notice.Priority == NoticePriority.Normal);
-        var low = new NoticeHub(key => key == "windows:QQ" ? new NoticeAppRule { Key = key, Priority = NoticePriority.Low } : null);
-        check("A call from an application set to low priority stays low", low.Receive(WinInput("c", "windows:QQ", "A") with { Call = true }, WinT0).Notice!.Priority == NoticePriority.Low);
+        check("A call its sender marked low priority stays low", new NoticeHub().Receive(WinInput("c", "windows:QQ", "A") with { Call = true, PriorityHint = NoticePriority.Low }, WinT0).Notice!.Priority == NoticePriority.Low);
         var copy = System.Text.Json.JsonSerializer.Deserialize<Notice>(System.Text.Json.JsonSerializer.Serialize(new Notice { Call = true }));
         check("The call mark is saved with the notice", copy!.Call);
     }

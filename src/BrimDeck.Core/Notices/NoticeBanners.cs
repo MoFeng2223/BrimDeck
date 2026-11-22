@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace BrimDeck.Core.Notices;
 
-// "Turn off other apps' notification banners": while BrimDeck shows Windows notifications on the island, Windows' own banner
+// "关闭系统横幅", per application: while BrimDeck shows an application's Windows notifications on the island, Windows' own banner
 // (the pop-up at the bottom right) would show each one a second time. Windows keeps that choice per application as the DWORD
 // ShowBanner under HKCU\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\<AppUserModelId>, the value
 // Settings › System › Notifications › <app> › "Show notification banners" writes: 0 is off; 1 or no value is on. Windows does
@@ -10,9 +10,10 @@ namespace BrimDeck.Core.Notices;
 // reads it.
 //
 // BrimDeck changes nothing else: only that value, only under HKCU. Before it writes, it records what was there (no key, no
-// value, 0, 1, or a value of another kind) in its own ledger (BannerLedger), and restores exactly that when the switch goes
-// off, an application is set to off or muted in BrimDeck, notices or the Windows source are switched off, Windows no longer
-// lets BrimDeck read notifications, BrimDeck exits, or BrimDeck is uninstalled (BrimDeck.exe --restore-banners). The ledger is
+// value, 0, 1, or a value of another kind) in its own ledger (BannerLedger), and restores exactly that when the application's
+// switch goes off, it is removed from the list or set to "只进通知页", notices are switched off, Windows no longer lets BrimDeck
+// read notifications, BrimDeck exits, or BrimDeck is uninstalled (BrimDeck.exe --restore-banners). A banner the user turns on
+// again in Windows is left on, and the application's switch goes off with it (NoticeCenter). The ledger is
 // written to the disk before the registry, with each new record marked pending until its value is written, so a crash between
 // the two never leaves a change BrimDeck does not know about, nor one it mistakes for the user's; the next start finishes the job.
 public readonly record struct BannerReading(bool KeyExists, int? ShowBanner, int? Enabled, BannerValue? Other = null)
@@ -148,21 +149,19 @@ public static class NoticeBanners
         return appId.Split('\\').All(part => part.Length > 0 && part.Trim().Length > 0 && part is not "." and not "..");
     }
 
-    // The applications whose banners BrimDeck should turn off now: every known one (candidates: the Start menu's applications,
-    // those Windows already keeps notification settings for, and those notices arrived from) while the switch, notices and the
-    // Windows source are on and Windows lets BrimDeck read notifications. Not BrimDeck itself (own), not one the user set to off
-    // or muted in BrimDeck (Muted, or the Silent level: its notices only show in Windows), and not one whose banner the user
-    // turned on again (Released).
-    public static HashSet<string> Wanted(DeckSettings settings, bool windowsReadable, IEnumerable<string> candidates, IEnumerable<string> own, BannerLedger ledger)
+    // The applications whose banners BrimDeck should turn off now: each Windows application on the "应用" page whose "关闭系统横幅"
+    // is on (NoticeAppRule.HideBanner), while notices are on and Windows lets BrimDeck read notifications. Not BrimDeck itself
+    // (own), and not one set to "只进通知页" (its notices only show in Windows).
+    public static HashSet<string> Wanted(DeckSettings settings, bool windowsReadable, IEnumerable<string> own)
     {
         var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (!settings.NoticesEnabled || !settings.NoticeWindowsSource || !settings.NoticeHideBanners || !windowsReadable) return wanted;
+        if (!settings.NoticesEnabled || !windowsReadable) return wanted;
         var skip = new HashSet<string>(own, StringComparer.OrdinalIgnoreCase);
-        foreach (var appId in candidates)
+        foreach (var rule in settings.NoticeApps)
         {
-            if (!Usable(appId) || skip.Contains(appId) || ledger.IsReleased(appId)) continue;
-            if (settings.NoticeRule(NoticeKeys.Windows(appId)) is { } rule && (!rule.Enabled || rule.Muted || rule.Level == NoticeLevel.Silent)) continue;
-            wanted.Add(appId);
+            if (!rule.HideBanner || !rule.Enabled || rule.Level == NoticeLevel.Silent || !rule.Key.StartsWith("windows:", StringComparison.Ordinal)) continue;
+            string appId = rule.Key["windows:".Length..];
+            if (Usable(appId) && !skip.Contains(appId)) wanted.Add(appId);
         }
         return wanted;
     }

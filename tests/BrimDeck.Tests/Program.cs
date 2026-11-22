@@ -37,6 +37,8 @@ try
     NoticeArchTests.Run(Check);
     NoticeCoreTests.Run(root, Check);
     NoticeLevelTests.Run(root, Check);
+    BrimCliTests.Run(Check);
+    CommandPathTests.Run(Check);
     NoticeCodeTests.Run(root, Check);
     RowBatchesTests.Run(Check);
     NoticeWindowsAppTests.Run(Check);

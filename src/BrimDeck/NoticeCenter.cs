@@ -75,11 +75,11 @@ internal sealed class NoticeCenter : IDisposable
 
     public NoticeHub Hub { get; }
     public AttentionCoordinator Attention { get; } = new();
-    // Other applications' Windows banners while the switch is on (NoticeBanners).
+    // Windows' own banners of the listed applications whose banner switch is on (NoticeBanners).
     public NoticeBannerKeeper Banners { get; }
     public NoticeIcons Icons { get; }
     public NoticeHistoryState HistoryState { get; private set; } = NoticeHistoryState.Empty;
-    public NoticeSourceState WindowsState => _enabled && Settings.NoticeWindowsSource ? _windows.State : NoticeSourceState.Off;
+    public NoticeSourceState WindowsState => _enabled ? _windows.State : NoticeSourceState.Off;
     // Why the Windows source failed (the exception's message, never a notice's words); empty while it does not fail.
     public string WindowsFailure => WindowsState == NoticeSourceState.Failed ? _windows.Detail : "";
     public string? PipeError => _pipe?.Error;
@@ -96,19 +96,19 @@ internal sealed class NoticeCenter : IDisposable
     public NoticeCenter(App app)
     {
         _app = app; _dispatcher = app.Dispatcher;
-        Hub = new NoticeHub(key => _app.Settings.NoticeRule(key));
+        Hub = new NoticeHub(key => _app.Settings.NoticeRule(key), key => _app.Settings.NoticeReceives(key));
         // Windows refusing access gives the banners back; the ledger lives in the data folder, next to settings.json.
         Banners = new NoticeBannerKeeper(() => _app.Settings, _dispatcher, NoticeBannerRegistry.LedgerPath(app.Store.DirectoryPath),
             () => _windows.State is not (NoticeSourceState.NeedsAccess or NoticeSourceState.Denied), new NoticeBannerRegistry(),
-            () => [.. NoticeBannerRegistry.StartMenu(), .. NoticeBannerRegistry.Configured()], [WindowsNoticeSource.OwnAppId], Log);
-        Banners.Changed += () => Changed?.Invoke();
+            [WindowsNoticeSource.OwnAppId], Log);
+        Banners.Changed += BannersChanged;
         Icons = new NoticeIcons(_dispatcher, _windows.LogoAsync, distro => _wsl.States.TryGetValue(distro, out var state) && state.State is WslAgentState.Server or WslAgentState.Monitor or WslAgentState.MonitorDenied);
         _quiet = new NoticeQuiet(_dispatcher);
         _quiet.Changed += UpdateQuiet;
         _attentionTimer = new PromptTimer(_dispatcher, () => { _attentionTimer!.Stop(); _attentionAt = null; Apply(Attention.Tick(DateTimeOffset.UtcNow)); });
         _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); _ = SaveAsync(); };
         // A file that could not be reached at start-up is read once it can be (core-M4).
-        _maintenance.Tick += (_, _) => { Hub.Prune(DateTimeOffset.UtcNow); if (_droppedPending > 0) LogDropped(); AutoClear(); UpdateQuiet(); if (HistoryState is NoticeHistoryState.Unavailable or NoticeHistoryState.Denied) LoadHistory(); };
+        _maintenance.Tick += (_, _) => { Hub.Prune(DateTimeOffset.UtcNow); if (_droppedPending > 0) LogDropped(); UpdateQuiet(); if (HistoryState is NoticeHistoryState.Unavailable or NoticeHistoryState.Denied) LoadHistory(); };
         _quietCheck.Tick += (_, _) => UpdateQuiet();
         _resumeLimit.Tick += (_, _) => FinishResume(int.MaxValue);
         _timeDue = new PromptTimer(_dispatcher, FireDue);
@@ -130,9 +130,8 @@ internal sealed class NoticeCenter : IDisposable
         // Notifications of Windows' Clock, Outlook, the calendars and Teams are sorted into time kinds here (NoticeTimeSources).
         _windows.Received += input => _dispatcher.BeginInvoke(() =>
         {
-            if (!_enabled || _disposed || !Settings.NoticeWindowsSource) return;
+            if (!_enabled || _disposed) return;
             Receive(NoticeTimeSources.Classify(input, TimeZoneInfo.Local));
-            if (input.AppId is { } appId) Banners.Arrived(appId);
         });
         _windows.Missed += input => _dispatcher.BeginInvoke(() => OnMissed(input));
         _windows.Removed += key => _dispatcher.BeginInvoke(() => { if (!_disposed) Hub.SourceRemoved(key); });
@@ -149,13 +148,15 @@ internal sealed class NoticeCenter : IDisposable
         if (_disposed) return;
         var settings = Settings;
         _enabled = settings.NoticesEnabled;
+        // BrimDeck's command line reaches it whenever it runs; with notices off only its notices are refused (HandlePipeAsync).
+        if (_pipe is null) { _pipe = new NoticePipeServer(HandlePipeAsync) { Failed = Log }; _pipe.Start(); }
         Hub.Retention = TimeSpan.FromHours(settings.NoticeHistoryHours);
         Hub.MaxCount = NoticeHub.DefaultMaxCount;
         UseHistoryFolder(settings);
         if (!_enabled)
         {
             _windows.Stop(); _wsl.Apply([]);
-            _pipe?.Dispose(); _pipe = null;
+            EndWaits();
             StopChatFlash();
             _maintenance.Stop(); _quietCheck.Stop();
             ScheduleDue();
@@ -169,11 +170,12 @@ internal sealed class NoticeCenter : IDisposable
             Changed?.Invoke();
             return;
         }
+        // Off on the island: what shows there ends and nothing waiting shows later; the notices still reach the page.
+        if (!settings.NoticeIsland) Apply(Attention.Remove(item => item.IsNotice, DateTimeOffset.UtcNow));
         LoadHistory();
-        AutoClear();
-        if (_pipe is null) { _pipe = new NoticePipeServer(HandlePipeAsync) { Failed = Log }; _pipe.Start(); }
-        if (settings.NoticeWindowsSource) _windows.Start(); else _windows.Stop();
-        if (settings.NoticeChatFlash) StartChatFlash(); else StopChatFlash();
+        _windows.Start();
+        // The taskbar flash source runs while a chat it watches is listed (WeChat is, for a new user).
+        if (ChatFlashApps.All.Any(app => app.Enabled && settings.NoticeRule("flash:" + app.Id) is not null)) StartChatFlash(); else StopChatFlash();
         _wsl.Apply(settings.NoticeWslDistros);
         _maintenance.Start();
         Hub.Prune(DateTimeOffset.UtcNow);
@@ -185,13 +187,13 @@ internal sealed class NoticeCenter : IDisposable
         Changed?.Invoke();
     }
 
-    // The taskbar flash source (ChatFlash): a hook window while the setting is on, nothing at all otherwise.
+    // The taskbar flash source (ChatFlash): a hook window while a chat it watches is listed, nothing at all otherwise.
     private void StartChatFlash()
     {
         if (_flash is not null) return;
         try
         {
-            _flash = new TaskbarFlashWatch(input => { if (_enabled && !_disposed && Settings.NoticeChatFlash) Receive(input); });
+            _flash = new TaskbarFlashWatch(input => { if (_enabled && !_disposed) Receive(input); });
             ChatFlashError = null;
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or EntryPointNotFoundException)
@@ -227,7 +229,7 @@ internal sealed class NoticeCenter : IDisposable
         var outcome = Hub.Receive(input, now);
         if (outcome.Notice is not { } notice) return outcome;
         // Closed by its sender (brim-notify close): it leaves the island too, whatever its level.
-        if (input.StopTiming && !notice.SourcePresent) Withdraw(notice.Id);
+        if (input.StopTiming && !notice.SourcePresent) { EndWait(notice.Id, NoticeWaits.Dismissed); Withdraw(notice.Id); }
         if (outcome.Present) Present(notice, refresh: outcome.Receipt == NoticeReceipt.Updated);
         // A task's progress moves the notice that shows; nothing new appears.
         else if (outcome.Receipt == NoticeReceipt.Updated) QueueRefresh(notice);
@@ -238,7 +240,7 @@ internal sealed class NoticeCenter : IDisposable
     // shown.
     private void OnMissed(NoticeInput input)
     {
-        if (_enabled && !_disposed && Settings.NoticeWindowsSource) Receive(NoticeTimeSources.Classify(input, TimeZoneInfo.Local) with { Missed = true });
+        if (_enabled && !_disposed) Receive(NoticeTimeSources.Classify(input, TimeZoneInfo.Local) with { Missed = true });
     }
 
     // The first update shows at once; those that follow within ChangeSpacing show together at its end, the latest of each.
@@ -261,6 +263,8 @@ internal sealed class NoticeCenter : IDisposable
     // ChangeSpacing, the first change at once.
     private void HubChanged()
     {
+        // A notice deleted or cleared away while its sender waits is not answered any more.
+        if (_waits.Count > 0) foreach (var id in _waits.Keys.Where(id => Hub.Find(id) is null).ToList()) EndWait(id, NoticeWaits.Dismissed);
         DropMissing(); ScheduleDue();
         if (_changeTimer.IsEnabled) { _changeWaiting = true; return; }
         Changed?.Invoke();
@@ -286,14 +290,16 @@ internal sealed class NoticeCenter : IDisposable
     private AttentionItem Item(string lane, Notice notice, bool refresh = false)
     {
         var now = DateTimeOffset.UtcNow;
+        var level = Level(notice, now);
+        var style = NoticeLevelStyles.Of(level, Settings.NoticeRule(notice.AppKey), Settings.NoticeStyles);
         return new()
         {
             // One conversation's messages (the application and the title) merge into one notice.
             Lane = lane, Kind = AttentionKind.Notice, Key = notice.Id, Group = AttentionCoordinator.GroupOf(notice.AppKey, notice.Title),
-            Priority = notice.Priority, Payload = notice, Refresh = refresh, Level = Level(notice, now),
+            Priority = notice.Priority, Payload = notice, Refresh = refresh, Level = level, Style = style, Limit = notice.Timeout,
             // A ringing call is as urgent as an alarm; the user can still make its application low priority (NoticeHub).
             Urgent = NoticeClock.Alerting(notice.Timing, now) || notice.Call && notice.Priority != NoticePriority.Low,
-            Duration = TimeSpan.FromSeconds(notice.Priority == NoticePriority.High ? Settings.NoticeHighDuration : Settings.NoticeDuration)
+            Duration = TimeSpan.FromSeconds(style.Seconds)
         };
     }
 
@@ -312,26 +318,154 @@ internal sealed class NoticeCenter : IDisposable
         foreach (var lane in Lanes()) Apply(Attention.Submit(Item(lane, notice, refresh), now));
     }
 
-    // The panels that show an arriving notice (NoticeRouting); none when the chosen panel cannot show one now.
+    // The panels that show an arriving notice (NoticeRouting); none when the chosen panel cannot show one now, or when notices
+    // are switched off on the island and kept for the expanded page only (NoticeIsland).
     private IReadOnlyList<string> Lanes()
     {
+        if (!Settings.NoticeIsland) return [];
         long? foreground = NoticeNative.ForegroundMonitor() is var monitor && monitor != IntPtr.Zero ? monitor.ToInt64() : null;
         var panels = _app.Decks.Select(deck => new NoticeRouting.Candidate(deck.NoticeLane, deck.NoticeMonitor, deck == _app.Deck, deck.CanShowNotices)).ToList();
         return NoticeRouting.Lanes(panels, foreground, Settings.NoticeScreen);
     }
 
-    private async Task<NoticeMessage> HandlePipeAsync(NoticeMessage message)
+    private async Task<NoticePipeServer.Answer> HandlePipeAsync(NoticeMessage message)
     {
-        if (NoticeProtocol.Validate(message) is { } problem) return NoticeProtocol.Reply(NoticeResults.Rejected, problem, message.EventId);
+        if (NoticeProtocol.Validate(message) is { } problem) return new(NoticeProtocol.Reply(NoticeResults.Rejected, problem, message.EventId));
         return await _dispatcher.InvokeAsync(() =>
         {
-            if (_disposed) return NoticeProtocol.Reply(NoticeResults.Rejected, "shutting-down", message.EventId);
-            if (!_enabled) return NoticeProtocol.Reply(NoticeResults.Rejected, "notices-off", message.EventId);
-            if (message.Type == NoticeTypes.Status) return NoticeProtocol.Reply(NoticeResults.Accepted, StatusLine(), message.EventId);
-            if (message.Type != NoticeTypes.Notify) return NoticeProtocol.Reply(NoticeResults.Rejected, "unknown-type", message.EventId);
-            if (!Admit("pipe")) return NoticeProtocol.Reply(NoticeResults.Rejected, "rate-limited", message.EventId);
-            return Reply(Receive(NoticeIntake.FromPipe(message)), message.EventId);
+            NoticePipeServer.Answer Refuse(string why) => new(NoticeProtocol.Reply(NoticeResults.Rejected, why, message.EventId));
+            if (_disposed) return Refuse("shutting-down");
+            if (!_enabled) return Refuse("notices-off");
+            if (message.Type == NoticeTypes.Status) return new(NoticeProtocol.Reply(NoticeResults.Accepted, StatusLine(), message.EventId));
+            if (message.Type != NoticeTypes.Notify) return Refuse("unknown-type");
+            if (!Admit("pipe")) return Refuse("rate-limited");
+            var input = NoticeIntake.FromPipe(message);
+            var outcome = Receive(input);
+            var reply = Reply(outcome, message.EventId);
+            // The sender waits for how its notice ends (NoticeMessage.Wait): the connection is kept, and gets the result.
+            if (!input.Awaited || outcome is not { Notice: { } notice, Receipt: NoticeReceipt.Accepted or NoticeReceipt.Updated }) return new(reply);
+            reply.Waiting = true;
+            var wait = BeginWait(notice);
+            return new NoticePipeServer.Answer(reply, wait.Task, () => _dispatcher.BeginInvoke(() => Abandon(notice.Id, wait)));
         });
+    }
+
+    // ----- Notices whose sender waits for an answer -----
+
+    // The senders that wait, by their notice's id: each is told once how the notice ended (NoticeWaits) and then waits no more.
+    private sealed record Waiter(TaskCompletionSource<NoticeMessage> Result, DispatcherTimer Timer);
+    private readonly Dictionary<string, Waiter> _waits = new(StringComparer.Ordinal);
+    // The waits of senders inside WSL distributions, by distribution and message id, for the agent's word that one went away.
+    private readonly Dictionary<string, (string Notice, TaskCompletionSource<NoticeMessage> Wait)> _agentWaits = new(StringComparer.Ordinal);
+
+    private TaskCompletionSource<NoticeMessage> BeginWait(Notice notice)
+    {
+        // The same notice sent again to be answered: the sender that waited before hears that another took its place.
+        if (_waits.Remove(notice.Id, out var before)) Tell(before, NoticeWaits.Replaced, null);
+        var result = new TaskCompletionSource<NoticeMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        // The notice's own time (--timeout), else as long as it may stay on the island; it runs whether or not the notice shows
+        // there (the panel may be open, or the island hidden), so a sender never waits without end.
+        var timer = new DispatcherTimer(DispatcherPriority.Normal, _dispatcher) { Interval = notice.Timeout ?? AttentionCoordinator.PersistentLimit };
+        string id = notice.Id;
+        timer.Tick += (_, _) => EndWait(id, NoticeWaits.Expired);
+        timer.Start();
+        _waits[id] = new Waiter(result, timer);
+        return result;
+    }
+
+    private static void Tell(Waiter waiter, string result, string? key)
+    {
+        waiter.Timer.Stop();
+        waiter.Result.TrySetResult(new NoticeMessage { Type = NoticeTypes.Result, Result = result, ActionKey = key });
+    }
+
+    // Whether a sender still waits for the notice's answer.
+    public bool Awaits(Notice notice) => _waits.ContainsKey(notice.Id);
+
+    // The wait ends: the sender hears how, the notice loses the buttons that answered it and leaves the island.
+    private void EndWait(string id, string result, string? key = null)
+    {
+        if (!_waits.Remove(id, out var waiter)) return;
+        Tell(waiter, result, key);
+        Hub.Answered(id);
+        Withdraw(id);
+    }
+
+    // The sender closed its connection before an answer (it ended, Ctrl+C): nothing is left to answer.
+    private void Abandon(string id, TaskCompletionSource<NoticeMessage> wait)
+    {
+        if (_disposed || !_waits.TryGetValue(id, out var waiter) || waiter.Result != wait) return;
+        EndWait(id, NoticeWaits.Dismissed);
+    }
+
+    private void EndWaits()
+    {
+        foreach (var id in _waits.Keys.ToList()) EndWait(id, NoticeWaits.Dismissed);
+    }
+
+    // ----- A notice's buttons -----
+
+    // The buttons its sender gave that can still do something: one that answers the sender only while the sender waits (or
+    // the WSL agent can pass it on), one that copies or opens always.
+    public IReadOnlyList<NoticeAction> Buttons(Notice notice)
+        => [.. notice.Actions.Where(action => action.Key != "default" && (action.Kind != NoticeActionKind.Reply || (notice.Capabilities & NoticeCapabilities.Actions) != 0))];
+
+    // Does what the button says. False when it could not (the clipboard was held, nothing opened the target); the notice then stays.
+    public async Task<bool> RunAsync(Notice notice, NoticeAction action)
+    {
+        Hub.MarkViewed(notice.Id);
+        bool done;
+        switch (action.Kind)
+        {
+            case NoticeActionKind.Copy: done = Copy(action.Value ?? ""); break;
+            case NoticeActionKind.Open: done = await OpenTargetAsync(action.Value ?? ""); break;
+            default:
+                if (_waits.ContainsKey(notice.Id)) { EndWait(notice.Id, NoticeWaits.Action, action.Key); return true; }
+                return Invoke(notice, action.Key);
+        }
+        if (!done) return false;
+        // Handled: a sender that waits hears which button, and the notice leaves the island either way.
+        if (_waits.ContainsKey(notice.Id)) EndWait(notice.Id, NoticeWaits.Action, action.Key); else Withdraw(notice.Id);
+        return true;
+    }
+
+    // True when the text is on the clipboard; another application may hold the clipboard for a moment.
+    internal static bool Copy(string text)
+    {
+        for (int attempt = 0; attempt < 5; attempt++)
+        {
+            try { System.Windows.Clipboard.SetDataObject(new System.Windows.DataObject(System.Windows.DataFormats.UnicodeText, text), true); return true; }
+            catch (System.Runtime.InteropServices.ExternalException) { Thread.Sleep(30); }
+        }
+        return false;
+    }
+
+    // Opens what an open button names (NoticeIntake.OpenTarget made sure of its form): an application by its id, a web address
+    // in the browser, a folder in Explorer, a file with the program for its type. A file that would run (a program, a script,
+    // a shortcut: NoticeIntake.Runs) is shown selected in its folder instead: BrimDeck starts nothing a sender names.
+    private async Task<bool> OpenTargetAsync(string target)
+    {
+        if (target.StartsWith(NoticeIntake.AppTarget, StringComparison.OrdinalIgnoreCase)) return await _windows.LaunchAsync(target[NoticeIntake.AppTarget.Length..], null);
+        try
+        {
+            bool web = Uri.TryCreate(target, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
+            System.Diagnostics.ProcessStartInfo start;
+            if (web || Directory.Exists(target)) start = new(target) { UseShellExecute = true };
+            else if (!File.Exists(target)) return false;
+            else if (NoticeIntake.Runs(target)) start = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), "/select,\"" + target + "\"") { UseShellExecute = false };
+            else start = new(target) { UseShellExecute = true };
+            using var process = System.Diagnostics.Process.Start(start);
+            return true;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or FileNotFoundException or UnauthorizedAccessException) { Log(ex); return false; }
+    }
+
+    // A notice of one of BrimDeck's own features (a track change, a quota alert): the same input and the same way in as every
+    // other notice, handed over inside the process. Its key is BrimDeck's own (NoticeKeys.Internal), which no sender can take.
+    public NoticeOutcome Post(NoticeInput input)
+    {
+        if (input.Origin != NoticeOrigin.Internal || !input.AppKey.StartsWith(NoticeKeys.InternalPrefix, StringComparison.Ordinal)) throw new ArgumentException("Not a notice of BrimDeck's own.", nameof(input));
+        return _enabled ? Receive(input) : new(NoticeReceipt.Filtered, null, false, "notices-off");
     }
 
     private static NoticeMessage Reply(NoticeOutcome outcome, string? eventId) => NoticeProtocol.Reply(outcome.Receipt switch
@@ -363,11 +497,37 @@ internal sealed class NoticeCenter : IDisposable
                     if (message.Origin == "cli" && message.EventId is { } refused) _wsl.Send(distro, NoticeProtocol.Reply(NoticeResults.Rejected, "rate-limited", refused));
                     break;
                 }
-                var outcome = Receive(NoticeIntake.FromAgent(message, distro, server));
+                var input = NoticeIntake.FromAgent(message, distro, server);
+                var outcome = Receive(input);
                 // brim-notify inside the distribution waits for this reply through the agent.
-                if (message.Origin == "cli" && message.EventId is { } id) _wsl.Send(distro, Reply(outcome, id));
+                if (message.Origin == "cli" && message.EventId is { } id)
+                {
+                    var reply = Reply(outcome, id);
+                    // It also waits for how the notice ends (NoticeMessage.Wait): the result follows through the agent, named by
+                    // the message's id.
+                    if (input.Awaited && outcome is { Notice: { } notice, Receipt: NoticeReceipt.Accepted or NoticeReceipt.Updated })
+                    {
+                        reply.Waiting = true;
+                        var wait = BeginWait(notice);
+                        string key = distro + "\n" + id;
+                        _agentWaits[key] = (notice.Id, wait);
+                        _ = wait.Task.ContinueWith(done => _dispatcher.BeginInvoke(() =>
+                        {
+                            if (_agentWaits.TryGetValue(key, out var kept) && kept.Wait == wait) _agentWaits.Remove(key);
+                            if (_disposed || !done.IsCompletedSuccessfully) return;
+                            var result = done.Result;
+                            result.EventId = id;
+                            _wsl.Send(distro, result);
+                        }), TaskScheduler.Default);
+                    }
+                    _wsl.Send(distro, reply);
+                }
                 break;
             }
+            // The sender inside the distribution went away before its notice was answered (the agent says so by the message's id).
+            case NoticeTypes.Close when message.Origin == "cli" && message.EventId is { } gone:
+                if (_agentWaits.TryGetValue(distro + "\n" + gone, out var waiting)) Abandon(waiting.Notice, waiting.Wait);
+                break;
             case NoticeTypes.Close when message.NativeId is { } native:
                 Hub.SourceRemoved($"wsl:{distro}:{message.Session ?? ""}:{native}");
                 break;
@@ -452,7 +612,7 @@ internal sealed class NoticeCenter : IDisposable
     private bool CanShow(AttentionItem item)
     {
         if (!item.IsNotice) return true;
-        if (!_enabled) return false;
+        if (!_enabled || !Settings.NoticeIsland) return false;
         if (item.Payload is Notice notice && Hub.Find(notice.Id) is null) return false;
         return _app.Decks.FirstOrDefault(d => d.NoticeLane == item.Lane) is { CanShowNotices: true };
     }
@@ -481,7 +641,7 @@ internal sealed class NoticeCenter : IDisposable
         var now = DateTimeOffset.UtcNow;
         var current = Attention.Current(deck.NoticeLane);
         if (current is { IsNotice: true }) Apply(Attention.Withdraw(current.Key, now)); else Apply(Attention.Dismiss(deck.NoticeLane, now));
-        if (reportToSource && current?.Payload is Notice notice) ReportDismissed(notice);
+        if (reportToSource && current?.Payload is Notice notice) { ReportDismissed(notice); EndWait(notice.Id, NoticeWaits.Dismissed); }
     }
 
     // The panel cannot show the item the coordinator gave it (hidden meanwhile, still opening): it ends there only, and the
@@ -494,23 +654,13 @@ internal sealed class NoticeCenter : IDisposable
         if (NoticeProtocol.ToAgent(NoticeTypes.Dismissed, notice.InstanceKey) is { } message) _wsl.Send(distro, message);
     }
 
-    // A notice of the taskbar flash source whose click may ask the chat application to come forward (the switch is on and the
-    // application has such an address); whether Windows has the scheme registered is read when the click happens.
-    public bool ClicksRestore(Notice? notice) => ChatRestore.Decide(notice, Settings.NoticeChatFlashRestore, true).Kind == ChatRestoreKind.Restore;
-
-    public bool CanOpen(Notice notice) => ClicksRestore(notice) || notice.Origin == NoticeOrigin.Windows && (notice.Capabilities & NoticeCapabilities.OpenApp) != 0
+    public bool CanOpen(Notice notice) => notice.Origin == NoticeOrigin.Windows && (notice.Capabilities & NoticeCapabilities.OpenApp) != 0
         || notice.Actions.Any(action => action.Key == "default") && (notice.Capabilities & NoticeCapabilities.Actions) != 0;
 
     // Opens the application the notice came from. False when that did not work; the caller keeps the details open and says so.
     public async Task<bool> OpenAsync(Notice notice)
     {
         Hub.MarkViewed(notice.Id);
-        if (ClicksRestore(notice))
-        {
-            // The one fixed address, handed to the program Windows has registered for it; the window is not touched here.
-            var setting = Settings.NoticeChatFlashRestore;
-            if (await Task.Run(() => ChatRestore.TryRestore(notice, setting, new ProtocolRegistry(), new ProtocolLauncher()))) return true;
-        }
         if (notice.Origin == NoticeOrigin.Windows)
         {
             if (notice.AppId.Length == 0) return false;
@@ -534,18 +684,23 @@ internal sealed class NoticeCenter : IDisposable
         return true;
     }
 
-    // The scheduled clearing (NoticeAutoClear): daily or weekly from the last time; choosing a schedule starts its count.
-    private void AutoClear()
+    // A banner the user turned on again in Windows (BannerState.Released) is theirs: that application's banner switch goes off, so
+    // the settings say what Windows does and switching it on again turns the banner off again.
+    private void BannersChanged()
     {
-        TimeSpan? every = Settings.NoticeAutoClear switch { NoticeAutoClear.Daily => TimeSpan.FromDays(1), NoticeAutoClear.Weekly => TimeSpan.FromDays(7), _ => null };
-        if (every is not { } span) return;
-        var now = DateTimeOffset.UtcNow;
-        if (Settings.NoticeLastCleared is not { } last || last > now) { _app.Settings.NoticeLastCleared = now; _app.QueueSave(); return; }
-        if (now - last < span) return;
-        _app.Settings.NoticeLastCleared = now; _app.QueueSave();
-        // A reminder still to come and a running stopwatch stay (core-L2); what goes no longer waits to show (HubChanged).
-        Hub.ClearDone(now);
+        var released = Banners.States.Where(pair => pair.Value == BannerState.Released).Select(pair => NoticeKeys.Windows(pair.Key)).ToHashSet(StringComparer.Ordinal);
+        var rules = Settings.NoticeApps.Where(rule => rule.HideBanner && released.Contains(rule.Key)).ToList();
+        if (rules.Count > 0)
+        {
+            foreach (var rule in rules) rule.HideBanner = false;
+            _app.QueueSave();
+            SettingsChangedHere?.Invoke();
+        }
+        Changed?.Invoke();
     }
+
+    // The settings changed here rather than in the settings window (a banner switch went off); an open settings window shows it.
+    public event Action? SettingsChangedHere;
 
     // Deleting and clearing touch BrimDeck's own records only: no source is told, so no application stops reminding because
     // its notice left BrimDeck's list (Windows' notification center and WSL applications keep theirs).
@@ -563,7 +718,7 @@ internal sealed class NoticeCenter : IDisposable
     // now (NoticeHub.SyncWindows). Notices of every other source (taskbar flashes, brim-notify, WSL) are not touched.
     public async Task<(WindowsSyncStatus Status, int Removed, int Added)> SyncWindowsAsync()
     {
-        bool On() => _enabled && !_disposed && Settings.NoticeWindowsSource;
+        bool On() => _enabled && !_disposed;
         if (!On()) return (WindowsSyncStatus.Off, 0, 0);
         IReadOnlyList<NoticeInput>? present;
         try { present = await _windows.ReadCenterAsync(); }
@@ -700,7 +855,7 @@ internal sealed class NoticeCenter : IDisposable
         if (quiet == Quiet) return;
         Quiet = quiet;
         if (quiet) { EndResume(); Apply(Attention.SetSuppressed(true, DateTimeOffset.UtcNow, out _)); }
-        else if (Settings.NoticeWindowsSource && _windows.State is NoticeSourceState.Polling or NoticeSourceState.EventLog)
+        else if (_windows.State is NoticeSourceState.Polling or NoticeSourceState.EventLog)
         {
             // Still held back until the Windows list has been read again (FinishResume).
             _resuming = true;
@@ -731,7 +886,7 @@ internal sealed class NoticeCenter : IDisposable
             Apply(Attention.Submit(new AttentionItem
             {
                 Lane = lane, Kind = AttentionKind.Summary, Key = "summary:" + now.Ticks, Payload = arrived, Level = Settings.NoticeDefaultLevel,
-                Duration = TimeSpan.FromSeconds(Settings.NoticeDuration)
+                Style = Settings.NoticeStyles.For(Settings.NoticeDefaultLevel), Duration = TimeSpan.FromSeconds(Settings.NoticeStyles.For(Settings.NoticeDefaultLevel).Seconds)
             }, now));
     }
 
@@ -765,8 +920,8 @@ internal sealed class NoticeCenter : IDisposable
 
     // ----- History -----
 
-    // The chosen folder, or the default one in BrimDeck's install folder (NoticeStorage).
-    public static string HistoryFolder(DeckSettings settings) => settings.NoticeHistoryFolder.Length > 0 ? settings.NoticeHistoryFolder : NoticeStorage.DefaultFolder;
+    // The folder the notices are kept in (NoticeStorage).
+    public static string HistoryFolder(DeckSettings settings) => NoticeStorage.DefaultFolder;
 
     // Follows the settings: where the notices are kept and whether (see NoticeHistoryPlan for what that does with the file).
     private void UseHistoryFolder(DeckSettings settings)
@@ -832,7 +987,7 @@ internal sealed class NoticeCenter : IDisposable
         if (_folderTrust is { } trust && trust is not (NoticeStorage.FolderTrust.Trusted or NoticeStorage.FolderTrust.Unreachable)) { HistoryState = NoticeHistoryState.Refused; return; }
         _loadingHistory = true;
         var moveFrom = _moveFrom;
-        _ = LoadHistoryAsync(history, Settings.NoticeHistoryFolder.Length == 0, moveFrom, check: _folderTrust != NoticeStorage.FolderTrust.Trusted);
+        _ = LoadHistoryAsync(history, true, moveFrom, check: _folderTrust != NoticeStorage.FolderTrust.Trusted);
     }
 
     // Read in the background (perf-9). Notices arriving meanwhile join the list, and nothing is written until the file has
@@ -972,15 +1127,11 @@ internal sealed class NoticeCenter : IDisposable
         _pipe?.Dispose(); _pipe = null;
         _flash?.Dispose(); _flash = null;
         _windows.Dispose(); _wsl.Dispose();
-        // "Clear on exit": the list is emptied before the last save, so nothing of it is left on disk.
-        if (_enabled && Settings.NoticeAutoClear == NoticeAutoClear.OnExit)
-        {
-            Hub.Clear();
-            // A file never read (unreachable, still reading) cannot be written over with the empty list; it goes instead, so it
-            // does not come back at the next start (C-L2).
-            if (!_historyLoaded && Settings.NoticeHistory && _folderTrust == NoticeStorage.FolderTrust.Trusted && _history is { } unread) unread.Delete();
-        }
         _disposed = true;
+        // BrimDeck exits: the senders that wait hear nothing more (their connections end with the pipe), and no timer of
+        // theirs fires afterwards.
+        foreach (var waiter in _waits.Values) { waiter.Timer.Stop(); waiter.Result.TrySetCanceled(); }
+        _waits.Clear(); _agentWaits.Clear();
         Flush();
         _attentionTimer.Stop(); _saveTimer.Stop(); _maintenance.Stop(); _quietCheck.Stop(); _resumeLimit.Stop(); _timeDue.Stop(); _liveTick.Stop();
         _changeTimer.Stop(); _refreshTimer.Stop();

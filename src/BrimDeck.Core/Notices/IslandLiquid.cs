@@ -6,8 +6,10 @@ public readonly record struct LiquidPoint(double X, double Y);
 
 // What the island does when a notice arrives: it stays its own size and moves once like a viscous liquid, then rests again.
 // The notch swells at its two lower corners and the capsule at its two round ends, and the bulges run round the outline within
-// 5 DIPs of it, adding up, until some reach the middle; the indicator beads along its length and drips small droplets from its
-// ends. The capsule and the notch flash a backlight twice behind them; the indicator breathes twice instead.
+// 5 DIPs of it, adding up, until some reach the middle; on a long island long, low swells carry the motion from its ends to its
+// middle instead (SpawnRipples), so that it moves as one body and comes to rest about as soon as a short one.
+// The indicator beads along its length and drips small droplets from its ends. The capsule and the notch flash a backlight twice
+// behind them; the indicator breathes twice instead.
 //
 // The notch's and the indicator's model, their constants and the order in which they draw random numbers are those of the
 // maintainer's prototype (https://claude.ai/artifact/JU9bvJp5PPNY85vpGgUX6C), so the same seed plays the prototype's motion; the
@@ -51,7 +53,8 @@ public sealed class IslandLiquid
     // The capsule's outline runs all round: distances along it wrap.
     private bool _closed;
 
-    private sealed record Ripple(double Corner, int Dir, double Born, double Amp, double Sigma, double Speed, double Life, double Bead);
+    // Reach: how far along the outline the ripple is carried on by after-ripples (Relay); 0 for one that fades where it does.
+    private sealed record Ripple(double Corner, int Dir, double Born, double Amp, double Sigma, double Speed, double Life, double Bead, double Reach = 0);
     private sealed record Drop(int Side, double Born, double R, double Take, double Life, double K, double V0, double Theta, double Omega, double Damp);
 
     // width, height: the island's size at the design's scale (for the indicator, its length and thickness). liquid: false keeps the
@@ -254,8 +257,19 @@ public sealed class IslandLiquid
         OutlineLength = s;
     }
 
+    // The prototype's ripples are carried on to the middle (Relay) of an island no longer than twice this. On a longer one, handed
+    // on many times and weaker each time, they left the middle barely moving long after the ends had come to rest (the user's
+    // 1340 DIP capsule, 2026-11-22), and started all along its edges instead they roughened it like a torn edge: there long
+    // swells take over, and the ripples fade where they do.
+    private const double RelayMost = 200;
+
     private void SpawnRipples(Func<double> rand)
     {
+        // From one end to the other along an edge; how much of the motion the swells carry, none on an island up to twice RelayMost
+        // long and all of it from three times; and how far the prototype's ripples are carried: to the middle without the swells,
+        // less as they come in.
+        double span = _closed ? OutlineLength / 2 : _cornerLeft - _cornerRight, swell = Smooth((span - 2 * RelayMost) / RelayMost);
+        double half = span / 2, reach = Math.Min(half, RelayMost) * (1 - swell);
         foreach (int side in (int[])[-1, 1])
         {
             double corner = side > 0 ? _cornerRight : _cornerLeft;
@@ -272,19 +286,38 @@ public sealed class IslandLiquid
                     int dir = rand() < .68 ? inward : -inward;
                     double born = s + i * (.02 + rand() * .05), amp = 1.6 + rand() * 2.8, sigma = 4.5 + rand() * 5, speed = 220 + rand() * 200, life = .6 + rand() * .45;
                     double bead = rand() < .4 ? 1.3 + rand() * 1.1 : 0;
-                    _ripples.Add(new Ripple(corner, dir, born, amp, sigma, speed, life, bead));
+                    // The notch's ripples that run up its walls fade there; the others are carried on.
+                    _ripples.Add(new Ripple(corner, dir, born, amp, sigma, speed, life, bead, _closed || dir == inward ? reach : 0));
                     // The capsule moves the same along its top and its bottom: each ripple has its mirror on the other edge.
-                    if (_closed) _ripples.Add(new Ripple(corner, -dir, born, amp, sigma, speed, life, bead));
+                    if (_closed) _ripples.Add(new Ripple(corner, -dir, born, amp, sigma, speed, life, bead, reach));
                 }
                 double p = s / Separation;
                 s += .03 + Exp(rand, Math.Max(.005, .2 - _fury * .03) * (p < .8 ? 1 : 1 + 4 * (p - .8)));
             }
         }
+        // A long island: beyond where the ripples are carried, three long, low swells from each end run to the middle, each a
+        // little later and lower than the one before. They reach it as they begin to fade, meet the other end's there and pass on.
+        // The whole island so moves as one body and rests about as soon as a short one, its ends as lively as the prototype's and
+        // its long edges smooth. They draw their random numbers last, so the ripples above stay the prototype's.
+        if (swell > 0)
+            foreach (int side in (int[])[-1, 1])
+            {
+                double corner = side > 0 ? _cornerRight : _cornerLeft;
+                for (int i = 0; i < 3; i++)
+                {
+                    double born = .05 + i * .17 + rand() * .04, life = .95 + rand() * .1, sigma = Math.Clamp(half * .05, 9, 120);
+                    // Its pace carries it half the island's length in the six tenths of its life before it fades.
+                    double speed = half * .6 / (1 - Math.Exp(-.6 * .6 * life));
+                    _ripples.Add(new Ripple(corner, side, born, (3.4 - i * .6) * swell, sigma, speed, life, 0));
+                    if (_closed) _ripples.Add(new Ripple(corner, -side, born, (3.4 - i * .6) * swell, sigma, speed, life, 0));
+                }
+            }
         Relay();
     }
 
-    // The prototype's ripples fade before they reach the middle of a wider island. Each that runs towards a middle and fades short
-    // of it hands on to an after-ripple where it is, a little weaker, which runs on at the same pace, until one reaches the middle.
+    // The prototype's ripples fade before they reach the middle of a wider island. Each that has a way to go (Ripple.Reach: to the
+    // middle, or as far as ripples are carried on a long island) and fades short of it hands on to an after-ripple where it is, a
+    // little weaker, which runs on at the same pace, until one has covered it.
     // The prototype's own ripples are left as they are, so near the corners the motion is exactly the prototype's.
     private void Relay()
     {
@@ -293,11 +326,8 @@ public sealed class IslandLiquid
         for (int i = 0; i < count; i++)
         {
             var w = _ripples[i];
-            if (w.Dir == 0) continue;
-            int inward = w.Corner == _cornerRight ? 1 : -1;
-            if (!_closed && w.Dir != inward) continue;
-            // The notch's run to the middle of its bottom; the capsule's, from the middle of an end, to the middle of the top or bottom.
-            double left = _closed ? OutlineLength / 4 : Math.Abs(OutlineLength / 2 - w.Corner);
+            if (w.Dir == 0 || w.Reach <= 0) continue;
+            double left = w.Reach;
             for (int hop = 0; hop < 12; hop++)
             {
                 double a = Hand * w.Life, run = w.Speed * (1 - Math.Exp(-.6 * a)) / .6;
@@ -340,6 +370,42 @@ public sealed class IslandLiquid
         // The notch keeps still where it meets the screen.
         double fromTop = _closed ? 6 : Math.Min(s, OutlineLength - s);
         return Band * Math.Tanh(sum / Band) * Smooth(fromTop / 6);
+    }
+
+    // EdgeOut at every point of the outline at once, into a list as long as the outline: each ripple alive at t adds to the points
+    // near it alone, so a long island with many ripples costs a frame no more than its length.
+    public void EdgeOuts(double t, double[] into)
+    {
+        int count = _outline.Count;
+        Array.Clear(into, 0, Math.Min(count, into.Length));
+        if (_ripples.Count == 0 || count == 0 || into.Length < count) return;
+        foreach (var w in _ripples)
+        {
+            double a = t - w.Born;
+            if (a <= 0 || a >= w.Life) continue;
+            double place = RipplePlace(w, a), reach = w.Sigma * 3.5, height = w.Amp * RippleEnvelope(w, a), spread = 2 * w.Sigma * w.Sigma;
+            void Add(double from, double to)
+            {
+                int low = 0, high = count;
+                while (low < high) { int mid = (low + high) / 2; if (_outline[mid].S < from) low = mid + 1; else high = mid; }
+                for (int i = low; i < count && _outline[i].S <= to; i++)
+                {
+                    double ds = Along(_outline[i].S, place);
+                    if (Math.Abs(ds) <= reach) into[i] += height * Math.Exp(-ds * ds / spread);
+                }
+            }
+            if (!_closed) { Add(place - reach, place + reach); continue; }
+            double length = OutlineLength, at = ((place % length) + length) % length;
+            if (2 * reach >= length) Add(0, length);
+            else if (at - reach < 0) { Add(at - reach + length, length); Add(0, at + reach); }
+            else if (at + reach > length) { Add(at - reach, length); Add(0, at + reach - length); }
+            else Add(at - reach, at + reach);
+        }
+        for (int i = 0; i < count; i++)
+        {
+            double s = _outline[i].S, fromTop = _closed ? 6 : Math.Min(s, OutlineLength - s);
+            into[i] = Band * Math.Tanh(into[i] / Band) * Smooth(fromTop / 6);
+        }
     }
 
     // The beads that trail some bulges, just clear of the edge and within the band.

@@ -86,6 +86,7 @@ public partial class MainWindow
         {
             element.HorizontalAlignment = HorizontalAlignment.Center; element.VerticalAlignment = VerticalAlignment.Center;
             var line = new Grid { Width = column, Height = height, Tag = HoverPartOf(part) };
+            line.SetValue(CompactPartOfProperty, part);
             line.Children.Add(element);
             lines.Add((line, height));
         }

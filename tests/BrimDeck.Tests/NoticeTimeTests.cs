@@ -203,9 +203,9 @@ internal static class NoticeTimeTests
         var late = hub.FireDue(TimeNow.AddMinutes(30));
         check("A reminder missed by more than ten minutes is only recorded", late.Count == 0 && tea.Timing!.Stage == 1 && hub.NextDue() is null);
 
-        rules["cli:quiet"] = new NoticeAppRule { Key = "cli:quiet", Muted = true };
+        rules["cli:quiet"] = new NoticeAppRule { Key = "cli:quiet", Level = NoticeLevel.Silent };
         hub.Receive(Timed(new NoticeMessage { Kind = "countdown", InMs = 1000 }, TimeNow, "quiet"), TimeNow);
-        check("A muted source's timer ends without showing", hub.FireDue(TimeNow.AddSeconds(1)).Count == 0);
+        check("A source set to list only: its timer ends without showing", hub.FireDue(TimeNow.AddSeconds(1)).Count == 0);
 
         var watch = hub.Receive(Timed(new NoticeMessage { Kind = "stopwatch", ReplaceId = "build", Title = "构建" }, TimeNow), TimeNow).Notice!;
         var stopped = hub.Receive(Timed(new NoticeMessage { Kind = "stopwatch", Stop = true, ReplaceId = "build" }, TimeNow.AddSeconds(90)), TimeNow.AddSeconds(90));

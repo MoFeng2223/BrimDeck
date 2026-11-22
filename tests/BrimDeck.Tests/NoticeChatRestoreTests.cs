@@ -21,7 +21,7 @@ internal static class NoticeChatRestoreTests
 
     public static void Run(Action<string, bool> check)
     {
-        Allow(check); Decisions(check); Calls(check); Setting(check);
+        Allow(check); Decisions(check); Calls(check);
     }
 
     private static void Allow(Action<string, bool> check)
@@ -87,22 +87,5 @@ internal static class NoticeChatRestoreTests
         check("Restore: a launch that failed is the ordinary click, and was tried once", !ChatRestore.TryRestore(Flash(), true, registry, launcher) && launcher.Launched.Count == 1);
         registry = new FakeRegistry(true); launcher = new FakeLauncher(throws: true);
         check("Restore: a launcher that throws is the ordinary click", !ChatRestore.TryRestore(Flash(), true, registry, launcher) && launcher.Launched.Count == 1);
-    }
-
-    private static void Setting(Action<string, bool> check)
-    {
-        check("Restore: the switch is off by default", !new DeckSettings().NoticeChatFlashRestore);
-        string folder = Path.Combine(Path.GetTempPath(), "BrimDeck-RestoreTests-" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            var store = new SettingsStore(folder);
-            store.Save(new DeckSettings { NoticesEnabled = true, NoticeChatFlash = true, NoticeChatFlashRestore = true });
-            var loaded = store.Load();
-            check("Restore: the switch survives saving, loading and copying", loaded.NoticeChatFlashRestore && loaded.Copy().NoticeChatFlashRestore);
-            File.WriteAllText(store.FilePath, $$"""{"AppVersion":"{{ApplicationVersion.Parse(ApplicationVersion.Current).ToString(3)}}","NoticesEnabled":true,"NoticeChatFlash":true}""");
-            var old = store.Load();
-            check("Restore: an older settings file reads with the switch off and the flash source as it was", !old.NoticeChatFlashRestore && old.NoticeChatFlash);
-        }
-        finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
     }
 }

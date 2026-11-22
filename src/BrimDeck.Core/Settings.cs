@@ -811,50 +811,37 @@ public sealed class DeckSettings
     public bool QuotaAlerts { get; set; } = true;
     // Also reads the Claude Code and Codex CLI session records inside WSL distributions. Off by default: it starts stopped distributions.
     public bool IncludeWsl { get; set; }
-    // Dynamic notices (see Notices/). Off until the user switches them on; each source has its own switch.
+    // Dynamic notices (see Notices/). Off until the user switches them on; each source has its own switch. They are received
+    // while either "灵动通知" switch is on: on the collapsed island (NoticeIsland, under 收起外观) or as the expanded page
+    // (NoticesPage, under 展开外观). Each switch reads as on only while NoticesEnabled is.
     public bool NoticesEnabled { get; set; }
-    public bool NoticeWindowsSource { get; set; } = true;
-    // Turns off other applications' own Windows banners while BrimDeck shows their notices (NoticeBanners); off by default.
-    public bool NoticeHideBanners { get; set; }
-    // Chat applications that only flash their taskbar button for a new message (WeChat): a notice that says so, nothing of the
-    // message is read (ChatFlash). Off by default.
-    public bool NoticeChatFlash { get; set; }
-    // A click on the WeChat notice of the taskbar flash source asks WeChat, through its own weixin:// address, to bring its main window
-    // forward (ChatRestore). Off by default.
-    public bool NoticeChatFlashRestore { get; set; }
+    public bool NoticeIsland { get; set; } = true;
     // The WSL distributions whose notices are received (by name). None by default: not every PC has WSL, and the agent is
     // copied into a distribution only once the user chooses it.
     public List<string> NoticeWslDistros { get; set; } = [];
-    // Seconds an arriving notice stays; high priority notices stay NoticeHighDuration.
-    public int NoticeDuration { get; set; } = 6;
-    public int NoticeHighDuration { get; set; } = 8;
     public NoticeScreen NoticeScreen { get; set; }
-    // The level of a notice nothing else decides (NoticeLevels.Resolve): Plain, Glow or Lively.
+    // The level of a notice nothing else decides (NoticeLevels.Resolve): Plain (level 1), Glow (level 2) or Persistent (level 3).
     public NoticeLevel NoticeDefaultLevel { get; set; } = NoticeLevel.Glow;
-    // Where the icon and the words sit in the island when they fit; a sender's own choice (NoticeInput.Align) comes first.
-    public NoticeAlign NoticeAlign { get; set; } = NoticeAlign.Center;
-    public NoticePrivacy NoticePrivacy { get; set; }
+    // How each level looks on the island (the settings' first notices page); an application may have its own (NoticeAppRule.Styles).
+    public NoticeLevelStyles NoticeStyles { get; set; } = new();
     // Recognises a verification code in a notice, hides it wherever the notice is shown and offers a button that copies it (see
     // NoticeCodes). Off by default: it reads the notices' words and, on a click, writes the clipboard.
     public bool NoticeCodes { get; set; }
-    // What a click on a notice shown on the collapsed island opens; the notices page unless changed.
-    public NoticeClickTarget NoticeClick { get; set; }
     // Holds notices back during a Windows focus session or presentation mode.
     public bool NoticeRespectFocus { get; set; } = true;
     // Notices are held back until this time (BrimDeck's own pause); null when not paused.
     public DateTimeOffset? NoticesPausedUntil { get; set; }
+    // The recent notices are saved for NoticeHistoryHours; with NoticeHistory off they are kept in memory only, until BrimDeck exits.
     public bool NoticeHistory { get; set; } = true;
     public int NoticeHistoryHours { get; set; } = 24;
-    // Where the encrypted recent notices are kept; empty for the default (a folder in BrimDeck's install folder).
-    public string NoticeHistoryFolder { get; set; } = "";
-    public NoticeAutoClear NoticeAutoClear { get; set; }
-    // When the schedule last cleared the list (or started counting); null before it ever has.
-    public DateTimeOffset? NoticeLastCleared { get; set; }
     public string NoticeHotkey { get; set; } = "";
     public bool NoticesPage { get; set; } = true;
     public double NoticesWidth { get; set; } = 460;
     public double NoticesHeight { get; set; } = 280;
     public List<NoticeAppRule> NoticeApps { get; set; } = [];
+    // The applications listed for a new user (DefaultNoticeApps) have been added: they are added once, so one the user removes
+    // stays removed. False in a file saved before the list existed, whose rules then gain them.
+    public bool NoticeAppsListed { get; set; }
     // The named profiles (DeckProfile, Profiles). The current one's settings are the ordinary members of this class; ReturnProfile is
     // the profile a rule replaced while it holds (ProfileRule), to come back to when it stops holding or BrimDeck starts again.
     public List<DeckProfile> Profiles { get; set; } = [];
@@ -971,6 +958,7 @@ public sealed class DeckSettings
         copy.FullscreenRules = FullscreenRules.Select(rule => rule with { }).ToList();
         copy.NoticeWslDistros = [.. NoticeWslDistros ?? []];
         copy.NoticeApps = (NoticeApps ?? []).Select(rule => rule.Copy()).ToList();
+        copy.NoticeStyles = (NoticeStyles ?? new()).Copy();
         copy.IgnoredMediaApps = [.. IgnoredMediaApps ?? []];
         copy.DeviceChoices = [.. (DeviceChoices ?? []).Select(device => device.Copy())];
         copy.Profiles = [.. (Profiles ?? []).Select(profile => profile.Copy())];
@@ -1144,32 +1132,41 @@ public sealed class DeckSettings
         if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;
         NoticeWslDistros = (NoticeWslDistros ?? []).Where(name => name is not null).Select(name => name.Trim()).Where(NoticeIntake.IsDistroName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (!Enum.IsDefined(NoticeScreen)) NoticeScreen = NoticeScreen.Foreground;
-        if (NoticeDefaultLevel is not (NoticeLevel.Plain or NoticeLevel.Glow or NoticeLevel.Lively)) NoticeDefaultLevel = NoticeLevel.Glow;
-        if (!Enum.IsDefined(NoticeAlign)) NoticeAlign = NoticeAlign.Center;
-        if (!Enum.IsDefined(NoticePrivacy)) NoticePrivacy = NoticePrivacy.Full;
-        if (!Enum.IsDefined(NoticeClick)) NoticeClick = NoticeClickTarget.Page;
-        if (!Enum.IsDefined(NoticeAutoClear)) NoticeAutoClear = NoticeAutoClear.Off;
-        NoticeDuration = Math.Clamp(NoticeDuration, 2, 30);
-        NoticeHighDuration = Math.Clamp(NoticeHighDuration, 2, 60);
+        NoticeDefaultLevel = NoticeLevels.Default(NoticeDefaultLevel);
+        NoticeStyles ??= new();
+        NoticeStyles.Normalize();
         NoticeHistoryHours = Math.Clamp(NoticeHistoryHours, 1, 24 * 7);
-        NoticeHistoryFolder = (NoticeHistoryFolder ?? "").Trim();
-        // A folder written out in full; a relative one would depend on BrimDeck's current directory.
-        if (NoticeHistoryFolder.Length > 0 && !Path.IsPathFullyQualified(NoticeHistoryFolder)) NoticeHistoryFolder = "";
         NoticesWidth = double.IsFinite(NoticesWidth) ? Math.Clamp(NoticesWidth, 440, 1200) : 460;
         NoticesHeight = double.IsFinite(NoticesHeight) ? Math.Clamp(NoticesHeight, 140, 400) : 280;
         NoticeApps = (NoticeApps ?? []).Where(rule => rule is not null && !string.IsNullOrWhiteSpace(rule.Key)).DistinctBy(rule => rule.Key).Take(500).ToList();
+        if (!NoticeAppsListed)
+        {
+            foreach (var listed in DefaultNoticeApps()) if (NoticeRule(listed.Key) is null) NoticeApps.Add(listed);
+            NoticeAppsListed = true;
+        }
         foreach (var rule in NoticeApps)
         {
             rule.Name = (rule.Name ?? "").Trim();
             rule.AccentColor = AppPresets.NormalizeColor(rule.AccentColor);
-            if (!Enum.IsDefined(rule.Priority)) rule.Priority = NoticePriority.Normal;
-            // Persistent is never the user's choice for an application: a notice stays only while something is left to handle.
-            if (rule.Level is not (NoticeLevel.Silent or NoticeLevel.Plain or NoticeLevel.Glow or NoticeLevel.Lively)) rule.Level = NoticeLevel.Auto;
-            if (rule.Privacy is { } privacy && !Enum.IsDefined(privacy)) rule.Privacy = null;
+            rule.Level = rule.Level switch { NoticeLevel.Lively => NoticeLevel.Glow, NoticeLevel.Silent or NoticeLevel.Plain or NoticeLevel.Glow or NoticeLevel.Persistent => rule.Level, _ => NoticeLevel.Auto };
+            // A Windows application is listed or not: switching a source off is for the sources that show without being listed.
+            if (NoticeKeys.ListedOnly(rule.Key)) rule.Enabled = true;
+            rule.Styles?.Normalize();
         }
         Core.Profiles.Normalize(this);
     }
     public NoticeAppRule? NoticeRule(string appKey) => NoticeApps.FirstOrDefault(rule => rule.Key == appKey);
+    // Whether a source's notices are received: a Windows application or a taskbar-flash chat while it is listed, any other source
+    // unless switched off.
+    public bool NoticeReceives(string appKey) => NoticeRule(appKey) is { } rule ? rule.Enabled : !NoticeKeys.ListedOnly(appKey);
+    // What a new user's list of applications holds: QQ (its notifications' application id is "QQ"), WeChat's taskbar flash
+    // (ChatFlash) and the Windows Clock's alarms and timers.
+    public static IReadOnlyList<NoticeAppRule> DefaultNoticeApps() =>
+    [
+        new() { Key = NoticeKeys.Windows("QQ"), Name = "QQ" },
+        new() { Key = "flash:wechat", Name = Loc.T("微信", "WeChat") },
+        new() { Key = NoticeKeys.Windows("Microsoft.WindowsAlarms_8wekyb3d8bbwe!App"), Name = Loc.T("时钟", "Clock") }
+    ];
 }
 
 // appVersion is the running application's version; it defaults to the entry assembly's version.

@@ -186,6 +186,12 @@ internal sealed partial class Renderer(App app, string output, string language, 
             if (scenes.Contains("transfer-settings")) { await DragHints(); await SettingsPage("transfer-settings", 14, tips: true); }
             // A notice on the island at each level and alignment, in each collapsed form; for checking, not for the README.
             if (scenes.Contains("notice-levels")) await NoticeLevelsScene();
+            // A notice's buttons on the island, by how the panel opens and by what the notice offers; for checking.
+            if (scenes.Contains("notice-buttons")) await NoticeButtonsScene();
+            // The row of the notices' "Apps" settings that says brim is not on PATH, in each of its states; for checking.
+            if (scenes.Contains("brim-path")) await BrimPathScene();
+            // The island's light when a notice arrives, in every theme on a light and a dark desktop, and a long island's motion; for checking.
+            if (scenes.Contains("notice-glow")) await NoticeGlowScene();
             // The notices page with conversations of several messages, and the notices settings page; for checking.
             if (scenes.Contains("notices-page")) await NoticesPageScene();
             // Memory and the drives showing what is in use and what is free, expanded and collapsed, and the option; for checking.
@@ -224,6 +230,13 @@ internal sealed partial class Renderer(App app, string output, string language, 
     private async Task NoticesPageScene()
     {
         _settings.Animations = false; _settings.NoticesEnabled = true;
+        foreach (var listed in DeckSettings.DefaultNoticeApps()) if (_settings.NoticeRule(listed.Key) is null) _settings.NoticeApps.Add(listed);
+        _settings.NoticeAppsListed = true;
+        foreach (var listed in new[] { "Outlook", "Claude", "Backup Tool" })
+            if (_settings.NoticeRule("windows:" + listed) is null) _settings.NoticeApps.Add(new NoticeAppRule { Key = "windows:" + listed, Name = listed });
+        _settings.NoticeRule("windows:QQ")!.HideBanner = true;
+        _settings.NoticeRule("windows:Outlook")!.Level = NoticeLevel.Silent;
+        _settings.NoticeApps.Add(new NoticeAppRule { Key = "windows:Claude Desktop With A Very Long Application Name (User Setup)", Name = "Claude Desktop With A Very Long Application Name (User Setup)", Level = NoticeLevel.Persistent, Styles = new() });
         var center = Activator.CreateInstance(Type.GetType("BrimDeck.NoticeCenter, BrimDeck")!, Program.Any, null, [app], null)!;
         Program.SetProperty(app, "Notices", center);
         var hub = (NoticeHub)center.GetType().GetProperty("Hub", Program.Any)!.GetValue(center)!;
@@ -252,7 +265,16 @@ internal sealed partial class Renderer(App app, string output, string language, 
         SelectPage(DeckPage.Usage);
         _deck.SetExpanded(false, true);
         _settings.Animations = true;
-        await SettingsPage("notices-settings", 19, height: 1500);
+        hub.Receive(new NoticeInput { Origin = NoticeOrigin.Cli, AppKey = "cli:Claude Code", AppName = "Claude Code", InstanceKey = "cli::cc:1", Title = Loc.T("等待批准", "Waiting for approval") }, _now.ToUniversalTime());
+        hub.Receive(new NoticeInput { Origin = NoticeOrigin.Cli, AppKey = "cli:Ubuntu:nightly-build", AppName = "nightly-build", Distro = "Ubuntu", InstanceKey = "cli:Ubuntu:nb:1", Title = Loc.T("构建完成", "Build finished") }, _now.ToUniversalTime());
+        await SettingsPage("notices-settings", 19, height: 2000, tips: true);
+        await SettingsPage("notice-apps-settings", 20, height: 1100, tips: true);
+        // One application's own looks open under its row.
+        await SettingsPage("notice-apps-own", 20, height: 1400, prepare: window =>
+        {
+            ((HashSet<string>)Program.Field(window, "_noticeAppsOpen")!).Add("windows:Claude Desktop With A Very Long Application Name (User Setup)");
+            ((HashSet<string>)Program.Field(window, "_noticeAppsOpen")!).Add("windows:QQ");
+        });
     }
 
     // The island with a notice on it (IslandNotice). Its window is never shown: it is laid out as it lays itself out, its motion
@@ -267,15 +289,15 @@ internal sealed partial class Renderer(App app, string output, string language, 
         string longer = Loc.T("小林：下午三点在三楼会议室开评审会，请带上上周的测试报告和改动清单", "Lin: the review is at three in the room on the third floor; bring last week's test report and the list of changes");
         foreach (var style in new[] { CompactStyle.Notch, CompactStyle.Capsule, CompactStyle.Line })
         {
-            _settings.Style = style; _settings.NoticeAlign = NoticeAlign.Center; Refresh();
+            _settings.Style = style; Refresh();
             await Settle();
             var window = (Window)Activator.CreateInstance(type, Program.Any, null, [_deck, app], null)!;
             var shots = new List<(string Label, BitmapSource Picture, Size Size)>();
-            void Shot(string label, NoticeLevel level, double time, string body, NoticeAlign setting = NoticeAlign.Center, NoticeAlign? asked = null, bool subdued = false, int count = 1, AttentionItem? given = null)
+            void Shot(string label, NoticeLevel level, double time, string body, NoticeAlign? asked = null, bool subdued = false, int count = 1, AttentionItem? given = null, NoticeStyle? look = null)
             {
-                _settings.NoticeAlign = setting;
                 var notice = new Notice { AppKey = "windows:Chat", AppName = "QQ", Title = title, Body = body, Align = asked, ReceivedAt = _now, CreatedAt = _now };
-                var item = given ?? new AttentionItem { Lane = "main", Kind = AttentionKind.Notice, Key = notice.Id, Payload = notice, Level = level, Count = count, Duration = TimeSpan.FromSeconds(6) };
+                var item = given ?? new AttentionItem { Lane = "main", Kind = AttentionKind.Notice, Key = notice.Id, Payload = notice, Level = level, Count = count, Duration = TimeSpan.FromSeconds(6),
+                    Style = look ?? _settings.NoticeStyles.For(level) };
                 if (subdued) typeof(AttentionItem).GetProperty(nameof(AttentionItem.Subdued))!.SetValue(item, true);
                 Program.SetField(window, "_item", item);
                 Program.Call(window, "Layout", []); Program.Call(window, "Dress", []); Program.Call(window, "BuildContent", []);
@@ -293,31 +315,35 @@ internal sealed partial class Renderer(App app, string output, string language, 
             // The moments: the backlight's first and second flash; the indicator's breath at its brightest.
             bool line = style == CompactStyle.Line;
             double first = line ? IslandLiquid.Breath / 2 : .12, second = line ? IslandLiquid.Breath / 2 : .42;
-            Shot("Plain", NoticeLevel.Plain, first, reply);
-            Shot("Glow", NoticeLevel.Glow, first, reply);
-            Shot("Lively", NoticeLevel.Lively, second, reply);
-            Shot("Persistent", NoticeLevel.Persistent, second, reply);
-            Shot("Lively beyond the rate limit: shown as Plain", NoticeLevel.Lively, second, reply, subdued: true);
+            Shot("Level 1 (text)", NoticeLevel.Plain, first, reply);
+            Shot("Level 1 without the icon", NoticeLevel.Plain, first, reply, look: new NoticeStyle { Icon = false });
+            Shot("Level 2, glow", NoticeLevel.Glow, first, reply);
+            Shot("Level 2, lively", NoticeLevel.Glow, second, reply, look: new NoticeStyle { Liquid = true });
+            Shot("Level 3, lively, white", NoticeLevel.Persistent, second, reply);
+            Shot("Level 3, glow, amber", NoticeLevel.Persistent, first, reply, look: new NoticeStyle { Color = "#F0A35E" });
+            Shot("Level 3, lively, red", NoticeLevel.Persistent, second, reply, look: new NoticeStyle { Liquid = true, Color = "#EF6A6A" });
+            Shot("Level 2 beyond the rate limit: shown as level 1", NoticeLevel.Glow, second, reply, subdued: true, look: new NoticeStyle { Liquid = true });
             if (!line)
             {
-                Shot("Align left (setting)", NoticeLevel.Plain, first, reply, NoticeAlign.Left);
-                Shot("Align center (setting)", NoticeLevel.Plain, first, reply, NoticeAlign.Center);
-                Shot("Align right (setting)", NoticeLevel.Plain, first, reply, NoticeAlign.Right);
-                Shot("Align right asked by the sender, setting left", NoticeLevel.Plain, first, reply, NoticeAlign.Left, asked: NoticeAlign.Right);
+                // The scene's island shows the quota rings and the equalizer: the rings' place is a part's; a part the island does not
+                // show (the clock) leaves the notice the whole island.
+                Shot("Level 1 in the quota rings' place", NoticeLevel.Plain, first, reply, look: new NoticeStyle { Slot = CompactPart.Rings });
+                Shot("Level 1 in the rings' place, a long line scrolls there", NoticeLevel.Plain, first, longer, look: new NoticeStyle { Slot = CompactPart.Rings });
+                Shot("Level 1 in the clock's place, not shown: the whole island", NoticeLevel.Plain, first, reply, look: new NoticeStyle { Slot = CompactPart.Clock });
+                Shot("Align left asked by the sender", NoticeLevel.Plain, first, reply, asked: NoticeAlign.Left);
+                Shot("Align right asked by the sender", NoticeLevel.Plain, first, reply, asked: NoticeAlign.Right);
                 Shot("Merged, count 3, center", NoticeLevel.Plain, first, reply, count: 3);
-                Shot("Longer than the island: starts at the left and scrolls (setting right)", NoticeLevel.Plain, first, longer, NoticeAlign.Right);
+                Shot("Longer than the island: starts at the left and scrolls", NoticeLevel.Plain, first, longer, asked: NoticeAlign.Right);
                 // A track change on the whole island (MusicTrackNoticeWide): the title and the artist, no cover in this picture.
                 AttentionItem Song() => new()
                 {
                     Lane = "main", Kind = AttentionKind.Track, Key = "track", Level = NoticeLevel.Plain, Duration = TimeSpan.FromSeconds(4),
                     Payload = Activator.CreateInstance(Type.GetType("BrimDeck.TrackNoticeContent, BrimDeck")!, Program.Any, null, [Loc.T("海边的午后", "Afternoon by the Sea"), Loc.T("林夏", "Lin Xia"), null], null)
                 };
-                Shot("Track change, center", NoticeLevel.Plain, first, "", given: Song());
-                Shot("Track change, left", NoticeLevel.Plain, first, "", NoticeAlign.Left, given: Song());
+                Shot("Track change", NoticeLevel.Plain, first, "", given: Song());
             }
             Program.SetField(window, "_item", null);
             window.Close();
-            _settings.NoticeAlign = NoticeAlign.Center;
             double width = Math.Max(360, shots.Max(shot => shot.Size.Width)) + 2 * pad, height = shots.Sum(shot => shot.Size.Height + labelHeight + pad) + pad;
             var sheet = new DrawingVisual();
             using (var context = sheet.RenderOpen())
@@ -2006,11 +2032,12 @@ internal sealed partial class Renderer(App app, string output, string language, 
         }
     }
 
-    private async Task SettingsPage(string name, int page, double height = 640, bool tips = false)
+    private async Task SettingsPage(string name, int page, double height = 640, bool tips = false, Action<SettingsWindow>? prepare = null)
     {
         const double scale = 1.5, width = 960;
         _settings.Theme = SettingsTheme.Dark;
         var window = new SettingsWindow(app);
+        prepare?.Invoke(window);
         window.ShowPage(page);
         var root = window.RootVisual;
         var resources = window.Resources;

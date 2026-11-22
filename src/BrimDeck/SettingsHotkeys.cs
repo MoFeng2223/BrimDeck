@@ -11,8 +11,7 @@ namespace BrimDeck;
 // The global shortcuts, on a page of their own (HotkeysPage). Each is recorded by clicking its box and pressing the combination; leaving
 // the box cancels, and only the cross inside the box clears it. An arrow shortcut's row (resize, move) reads "Alt + [box] + arrow
 // keys": Alt and the arrows are fixed, so its box records only the other modifiers. While a box records, the app's registered
-// shortcuts are suspended so pressing the current combination records it instead of acting on the panel. The notices shortcut is
-// on the dynamic notices page instead (NoticesSettingsPage), shown with the rest of that page while notices are on.
+// shortcuts are suspended so pressing the current combination records it instead of acting on the panel.
 public sealed partial class SettingsWindow
 {
     // Stops the box that is recording, if any; only one records at a time.
@@ -38,7 +37,7 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("位置与大小", "Position and size"));
         Group([.. new[] { HotkeyKind.Move, HotkeyKind.Resize }.Select(HotkeyRow)]);
         SectionTitle(Loc.T("其他", "Other"));
-        Group([.. new[] { HotkeyKind.ClickThrough, HotkeyKind.HoldClickThrough, HotkeyKind.OpenSettings, HotkeyKind.Refresh, HotkeyKind.NextProfile }.Select(HotkeyRow)]);
+        Group([.. new[] { HotkeyKind.ClickThrough, HotkeyKind.HoldClickThrough, HotkeyKind.OpenSettings, HotkeyKind.Refresh, HotkeyKind.NextProfile, HotkeyKind.Notices }.Select(HotkeyRow)]);
     }
 
     private static string HotkeyTitle(HotkeyKind kind) => kind switch
@@ -54,7 +53,7 @@ public sealed partial class SettingsWindow
         HotkeyKind.CycleStyle => Loc.T("切换刘海、胶囊或指示条", "Switch notch, capsule or bar"),
         HotkeyKind.LineStyle => Loc.T("切换指示条与刘海或胶囊", "Switch between bar and notch or capsule"),
         HotkeyKind.NextProfile => Loc.T("切换到下一个配置", "Switch to the next profile"),
-        HotkeyKind.Notices => Loc.T("通知快捷键", "Notices shortcut"),
+        HotkeyKind.Notices => Loc.T("打开灵动提示", "Open live notices"),
         _ => Loc.T($"展开/收起第 {PagePlace(kind) + 1} 个页面", $"Expand/collapse page {PagePlace(kind) + 1}")
     };
 

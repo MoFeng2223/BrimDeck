@@ -26,12 +26,19 @@ public sealed class NoticeHub
     private readonly Dictionary<string, NoticeKnownApp> _apps = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> _events = new(StringComparer.Ordinal);
     private readonly Func<string, NoticeAppRule?> _rule;
+    // Whether a source's notices are received at all (DeckSettings.NoticeReceives): a Windows application the user has not listed,
+    // or a source set to "不提示", is not. Its name is still remembered, for the settings to offer it.
+    private readonly Func<string, bool> _receives;
     // What was deleted or cleared before the saved file was read in (C-L2): a file read later must not bring it back.
     private readonly HashSet<string> _deleted = new(StringComparer.Ordinal);
     private DateTimeOffset? _clearedAt, _doneClearedAt;
     private bool _trackRemovals;
 
-    public NoticeHub(Func<string, NoticeAppRule?>? rule = null) => _rule = rule ?? (_ => null);
+    public NoticeHub(Func<string, NoticeAppRule?>? rule = null, Func<string, bool>? receives = null)
+    {
+        _rule = rule ?? (_ => null);
+        _receives = receives ?? (key => _rule(key) is not { Enabled: false });
+    }
 
     public TimeSpan Retention { get; set; } = TimeSpan.FromHours(24);
     public int MaxCount { get; set; } = DefaultMaxCount;
@@ -59,6 +66,11 @@ public sealed class NoticeHub
         }
     }
 
+    // Notices shown on the island only (NoticeInput.Unlisted: a track change, a sender's --no-history): found by their id while
+    // they show, never listed, counted or saved. The oldest go beyond MaxUnlisted.
+    private readonly List<Notice> _unlisted = [];
+    public const int MaxUnlisted = 32;
+
     public Notice? Find(string id) => _byId.GetValueOrDefault(id);
     public Notice? FindInstance(string instanceKey) => _notices.FirstOrDefault(n => n.InstanceKey == instanceKey);
 
@@ -81,22 +93,21 @@ public sealed class NoticeHub
             ?? (input.Distro is null || NoticeIntake.ViaPipe(input.InstanceKey) ? null
                 : _notices.FirstOrDefault(n => n.AppKey == input.AppKey && n.ReplaceKey == key && NoticeIntake.ViaPipe(n.InstanceKey)));
 
-    public static NoticePriority EffectivePriority(NoticeAppRule? rule, NoticePriority hint)
-    {
-        var chosen = rule?.Priority ?? NoticePriority.Normal;
-        // A sender can lower its own notice, never raise it: only the user's rule makes an application high priority.
-        return chosen == NoticePriority.High ? NoticePriority.High : hint == NoticePriority.Low ? NoticePriority.Low : chosen;
-    }
+    // A sender can lower its own notice, never raise it.
+    public static NoticePriority EffectivePriority(NoticePriority hint) => hint == NoticePriority.Low ? NoticePriority.Low : NoticePriority.Normal;
 
-    // An alarm ringing, a countdown that ended, an event's reminder (NoticeClock.Alerting) is high priority by its nature,
-    // unless the sender lowered it or the user set the application to low priority.
-    public static NoticePriority AlertPriority(NoticeAppRule? rule, NoticePriority hint)
-        => hint == NoticePriority.Low || rule?.Priority == NoticePriority.Low ? NoticePriority.Low : NoticePriority.High;
+    // An alarm ringing, a countdown that ended, an event's reminder (NoticeClock.Alerting) or a call is high priority by its
+    // nature, unless the sender lowered it.
+    public static NoticePriority AlertPriority(NoticePriority hint) => hint == NoticePriority.Low ? NoticePriority.Low : NoticePriority.High;
 
     public NoticeOutcome Receive(NoticeInput input, DateTimeOffset now)
     {
         var rule = _rule(input.AppKey);
-        if (rule is { Enabled: false }) return new(NoticeReceipt.Filtered, null, false, "disabled");
+        if (!_receives(input.AppKey))
+        {
+            if (!input.StopTiming && !input.Redelivery) RememberApp(input, now);
+            return new(NoticeReceipt.Filtered, null, false, "disabled");
+        }
         if (input.EventId is { Length: > 0 } eventId)
         {
             ForgetEvents(now);
@@ -109,11 +120,30 @@ public sealed class NoticeHub
         if (input.StopTiming) return StopByKey(input, now);
         RememberApp(input, now);
         var (title, body) = Words(input);
-        var priority = NoticeClock.Alerting(input.Timing, now) || input.Call ? AlertPriority(rule, input.PriorityHint) : EffectivePriority(rule, input.PriorityHint);
-        // Kept in the recent notices without showing as it arrives: a muted application, a low priority notice, or the Silent
-        // level (the user's for the application, or the sender's own).
-        bool Quiet(Notice kept) => rule?.Muted == true || kept.Priority == NoticePriority.Low || NoticeLevels.Resolve(kept, rule, NoticeLevel.Glow, now) == NoticeLevel.Silent;
+        var priority = NoticeClock.Alerting(input.Timing, now) || input.Call ? AlertPriority(input.PriorityHint) : EffectivePriority(input.PriorityHint);
+        // Kept in the recent notices without showing as it arrives: a low priority notice, or the Silent level (the user's for the
+        // application, or the sender's own).
+        bool Quiet(Notice kept) => kept.Priority == NoticePriority.Low || NoticeLevels.Resolve(kept, rule, NoticeLevel.Glow, now) == NoticeLevel.Silent;
         bool late = Late(input, priority, now);
+        if (input.Unlisted)
+        {
+            // Kept apart from the list: the same key updates the one that shows, and nothing about the list changes.
+            var shown = input.ReplaceKey is { Length: > 0 } unlistedKey ? _unlisted.FirstOrDefault(n => n.AppKey == input.AppKey && n.ReplaceKey == unlistedKey) : null;
+            bool fresh = shown is null;
+            shown ??= new Notice { Unlisted = true, Viewed = true, AppKey = input.AppKey, Origin = input.Origin, Distro = input.Distro, ReplaceKey = input.ReplaceKey, CreatedAt = input.CreatedAt ?? now, ReceivedAt = now };
+            bool differs = fresh || shown.Title != title || shown.Body != body || shown.Category != input.Category || !shown.SourcePresent;
+            shown.InstanceKey = input.InstanceKey; shown.AppName = input.AppName; shown.AppId = input.AppId; shown.EventId = input.EventId ?? shown.EventId;
+            shown.Title = title; shown.Body = body; shown.IconRef = input.IconRef ?? shown.IconRef; shown.Picture = input.Picture ?? shown.Picture;
+            shown.Category = input.Category; shown.Priority = priority; shown.Progress = input.Progress; shown.Actions = [.. input.Actions]; shown.Capabilities = input.Capabilities;
+            shown.Level = input.Level; shown.Align = input.Align; shown.UpdatedAt = now; shown.SourcePresent = true; shown.Revision++;
+            Extras(shown, input);
+            if (fresh)
+            {
+                _unlisted.Add(shown); _byId[shown.Id] = shown;
+                while (_unlisted.Count > MaxUnlisted) { _byId.Remove(_unlisted[0].Id); _unlisted.RemoveAt(0); }
+            }
+            return new(fresh ? NoticeReceipt.Accepted : NoticeReceipt.Updated, shown, differs && !Quiet(shown) && !late, late ? "late" : null);
+        }
         var sameInstance = SameInstance(input.InstanceKey, input);
         var replaced = input.Replaces is { Length: > 0 } replacedKey ? SameInstance(replacedKey, input) : null;
         if (input.Redelivery && sameInstance is null)
@@ -139,13 +169,16 @@ public sealed class NoticeHub
             // Asked to stay until handled from now on, it shows again even with the same words.
             bool significant = existing.Title != title || existing.Category != input.Category || existing.Call != input.Call || existing.TimeKind != (input.Timing?.Kind ?? NoticeTimeKind.None)
                 || existing.Progress is not null && (input.Progress is null || input.Progress >= 1) || existing.Body != body && input.Progress is null
-                || input.Level == NoticeLevel.Persistent && (existing.Level != NoticeLevel.Persistent || !existing.SourcePresent);
+                || input.Level == NoticeLevel.Persistent && (existing.Level != NoticeLevel.Persistent || !existing.SourcePresent)
+                // Sent again to be answered: it shows again, as a new question would.
+                || input.Awaited;
             existing.InstanceKey = input.InstanceKey;
             existing.AppName = input.AppName; existing.Title = title; existing.Body = body;
             existing.IconRef = input.IconRef ?? existing.IconRef; existing.Picture = input.Picture ?? existing.Picture; existing.Category = input.Category; existing.Priority = priority;
             existing.Progress = input.Progress; existing.Actions = [.. input.Actions]; existing.Capabilities = input.Capabilities;
             existing.Timing = input.Timing?.Copy(); existing.Call = input.Call; existing.Transient = input.Transient;
             existing.Level = input.Level; existing.Align = input.Align;
+            Extras(existing, input);
             existing.EventId = input.EventId ?? existing.EventId;
             // The notice now says what the latest message said, so it is as old as that message: an update shown as it arrives
             // must not read "38 min ago" from the first notice it replaced. It also keeps the list's order after a restart.
@@ -170,6 +203,7 @@ public sealed class NoticeHub
             Progress = input.Progress, Actions = [.. input.Actions], Capabilities = input.Capabilities, Timing = input.Timing?.Copy(), Call = input.Call,
             Transient = input.Transient, Level = input.Level, Align = input.Align
         };
+        Extras(notice, input);
         _notices.Insert(0, notice); _byId[notice.Id] = notice;
         Prune(now, notify: false, keep: notice);
         Recount(); Changed?.Invoke(); Persist?.Invoke(false);
@@ -203,6 +237,13 @@ public sealed class NoticeHub
     // shows.
     private NoticeOutcome StopByKey(NoticeInput input, DateTimeOffset now)
     {
+        // One shown on the island only is simply gone: it was never listed.
+        if (input.ReplaceKey is { Length: > 0 } unlistedKey && _unlisted.FirstOrDefault(n => n.AppKey == input.AppKey && n.ReplaceKey == unlistedKey) is { } shown)
+        {
+            _unlisted.Remove(shown); _byId.Remove(shown.Id);
+            shown.SourcePresent = false; shown.Awaited = false;
+            return new(NoticeReceipt.Updated, shown, false);
+        }
         var target = input.ReplaceKey is { Length: > 0 } key ? Replacing(input, key) : null;
         if (target is null) return new(NoticeReceipt.Filtered, null, false, "no-timer");
         if (target.Timing is null && target.SourcePresent) Gone(target);
@@ -232,7 +273,7 @@ public sealed class NoticeHub
             if (notice.Timing is not { } timing || NoticeClock.Advance(timing, now) is not { } due) continue;
             changed = true;
             var rule = _rule(notice.AppKey);
-            if (notice.Priority != NoticePriority.Low) notice.Priority = AlertPriority(rule, NoticePriority.Normal);
+            if (notice.Priority != NoticePriority.Low) notice.Priority = AlertPriority(NoticePriority.Normal);
             notice.UpdatedAt = now; notice.Revision++;
             if (now - due > NoticeClock.MissedLimit) continue;
             notice.Viewed = false;
@@ -240,7 +281,7 @@ public sealed class NoticeHub
             // retention from now, not from when the timer was set (core-H1).
             notice.ReceivedAt = now;
             _notices.Remove(notice); _notices.Insert(0, notice);
-            if (rule is not { Enabled: false } && rule?.Muted != true && notice.Priority != NoticePriority.Low
+            if (_receives(notice.AppKey) && notice.Priority != NoticePriority.Low
                 && NoticeLevels.Resolve(notice, rule, NoticeLevel.Glow, now) != NoticeLevel.Silent) shown.Add(notice);
         }
         if (changed) { Recount(); Changed?.Invoke(); Persist?.Invoke(false); }
@@ -275,8 +316,26 @@ public sealed class NoticeHub
         if (_notices.FirstOrDefault(n => n.InstanceKey == instanceKey && n.SourcePresent) is { } notice) Gone(notice);
     }
 
+    // What a sender gave beside the words (NoticeInput.Slot and the fields after it), taken with every message.
+    private static void Extras(Notice notice, NoticeInput input)
+    {
+        notice.Slot = input.Slot; notice.Glow = input.Glow; notice.Context = input.Context; notice.HideIcon = input.HideIcon;
+        notice.Awaited = input.Awaited; notice.Timeout = input.Timeout;
+    }
+
+    // The sender of a notice that waited for an answer no longer waits (answered, closed, timed out, gone): the notice stays
+    // listed without its buttons that answered the sender, and no longer stays on the island.
+    public void Answered(string id)
+    {
+        if (Find(id) is not { Awaited: true } notice) return;
+        notice.Awaited = false;
+        if (notice.Unlisted) { _unlisted.Remove(notice); _byId.Remove(notice.Id); notice.SourcePresent = false; return; }
+        if (notice.SourcePresent) Gone(notice);
+    }
+
     private void Gone(Notice notice)
     {
+        notice.Awaited = false;
         notice.SourcePresent = false; notice.Capabilities &= ~(NoticeCapabilities.Actions | NoticeCapabilities.ReportDismissal); notice.Revision++;
         Changed?.Invoke(); Persist?.Invoke(true);
     }
@@ -295,7 +354,12 @@ public sealed class NoticeHub
     public bool Delete(string id)
     {
         int index = _notices.FindIndex(n => n.Id == id);
-        if (index < 0) return false;
+        if (index < 0)
+        {
+            if (_unlisted.FirstOrDefault(n => n.Id == id) is not { } shown) return false;
+            _unlisted.Remove(shown); _byId.Remove(id);
+            return true;
+        }
         if (_trackRemovals) _deleted.Add(id);
         _byId.Remove(id); _notices.RemoveAt(index); Recount(); Changed?.Invoke(); Persist?.Invoke(false);
         return true;
@@ -339,10 +403,9 @@ public sealed class NoticeHub
         int added = 0;
         foreach (var input in keys.Values)
         {
-            if (_rule(input.AppKey) is { Enabled: false }) continue;
             RememberApp(input, now);
+            if (!_receives(input.AppKey)) continue;
             var (title, body) = Words(input);
-            var rule = _rule(input.AppKey);
             var created = input.CreatedAt is { } at && at < now ? at : now;
             var notice = new Notice
             {
@@ -350,7 +413,7 @@ public sealed class NoticeHub
                 Title = title, Body = body, IconRef = input.IconRef, Picture = input.Picture,
                 // Listed by when Windows received it, among the others; kept for the retention from now, as a notice just received is.
                 CreatedAt = created, ReceivedAt = created, UpdatedAt = now, Category = input.Category,
-                Priority = input.Call ? AlertPriority(rule, input.PriorityHint) : EffectivePriority(rule, input.PriorityHint),
+                Priority = input.Call ? AlertPriority(input.PriorityHint) : EffectivePriority(input.PriorityHint),
                 Progress = input.Progress, Actions = [.. input.Actions], Capabilities = input.Capabilities, Timing = input.Timing?.Copy(), Call = input.Call,
                 Transient = input.Transient
             };

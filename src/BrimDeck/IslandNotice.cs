@@ -25,10 +25,13 @@ namespace BrimDeck;
 //
 // The window lies over the island with room around it for the bubbles and the backlight, and is shown only while a notice is.
 // While it shows, the island underneath is hidden (MainWindow.SetIslandCovered) and drawn here in the same outline and material.
-// It never takes focus.
+// A level-1 notice whose style takes a collapsed part's place (NoticeStyle.Slot) leaves the island as it is and draws over that
+// part alone, in the island's material, with the words inside it. It never takes focus.
 internal sealed class IslandNotice : Window
 {
     private static readonly Color LineFlash = Color.FromRgb(0xF5, 0xF5, 0xF7), GlowColor = Color.FromRgb(0xF0, 0xF3, 0xF8);
+    // The backlight's own color (white), as the settings show it for level 3.
+    internal static Color DefaultLight => GlowColor;
     // The prototype's pace and intensity (the user's call, 2026-10-30: faster looked worse than the prototype).
     private const double Pace = 1, Fury = 5;
     // The words leave quickly and arrive a little slower: the island's own content and the notice's take turns, by opacity alone.
@@ -36,15 +39,21 @@ internal sealed class IslandNotice : Window
     private readonly MainWindow _deck;
     private readonly App _app;
     private readonly Canvas _stage = new() { Background = null };
-    private readonly Layer _shadow = new(), _glowWide = new(), _glowCore = new(), _bloomWide = new(), _bloomMiddle = new(), _bloomSmall = new(), _body = new(), _parts = new();
+    private readonly Layer _shadow = new(), _shade = new(), _glowWide = new(), _glowCore = new(), _bloomWide = new(), _bloomMiddle = new(), _bloomSmall = new(), _body = new(), _parts = new();
     private readonly Border _hit = new() { Background = Brushes.Transparent, Cursor = Cursors.Hand };
     private readonly Canvas _content = new() { IsHitTestVisible = false, ClipToBounds = true };
+    // The notice's buttons (BuildButtons), inside the pointer's area: the pointer on one is still on the notice.
+    private readonly Canvas _buttons = new();
     private readonly PromptTimer _hoverOpen, _replay;
     private AttentionItem? _item;
     private CollapsedShape _shape = null!;
     private NoticeLook _look = NoticeLook.Current();
     private Rect _stageRect, _island;
-    private bool _leaving, _arrivedUnderPointer, _held, _opening;
+    // In a part's place: the part's area in the stage, within _island; null while the notice takes the whole island.
+    private Rect? _part;
+    // The backlight's color of the shown item (NoticeStyle.Color for level 3), white otherwise.
+    private Color _light = GlowColor;
+    private bool _leaving, _arrivedUnderPointer, _held;
     private int _generation;
 
     // The motion: its model, what of it plays and for how long, when it started, the factor from its design size to DIPs, and the
@@ -63,9 +72,9 @@ internal sealed class IslandNotice : Window
         Topmost = true; ShowActivated = false; ShowInTaskbar = false; Title = "BrimDeck notices"; UseLayoutRounding = true;
         TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
         Content = _stage;
-        // Back to front: the shadow, the backlight (or the indicator's bloom) behind the island, the island, the beads that trail its
-        // ripples, the content and the area that takes the pointer.
-        foreach (var layer in new[] { _shadow, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _body, _parts })
+        // Back to front: the shadow, the shade and over it the backlight (or the indicator's bloom) behind the island, the island with
+        // the light along its edge, the beads that trail its ripples, the content and the area that takes the pointer.
+        foreach (var layer in new[] { _shadow, _shade, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _body, _parts })
         {
             // Nothing is drawn before the island has been laid out (Layout sets _shape): Prepare shows the window once, far off screen,
             // before any notice, and the layers' first render then asked for the island's form (a NullReferenceException on every start
@@ -74,7 +83,8 @@ internal sealed class IslandNotice : Window
             _stage.Children.Add(layer);
         }
         _stage.Children.Add(_content); _stage.Children.Add(_hit);
-        _shadow.Draw = DrawShadow; _glowWide.Draw = d => DrawGlow(d, wide: true); _glowCore.Draw = d => DrawGlow(d, wide: false);
+        _hit.Child = _buttons;
+        _shadow.Draw = DrawShadow; _shade.Draw = DrawShade; _shade.Opacity = 0; _glowWide.Draw = d => DrawGlow(d, wide: true); _glowCore.Draw = d => DrawGlow(d, wide: false);
         _bloomWide.Draw = d => DrawBloom(d, 3, 4, .55); _bloomMiddle.Draw = d => DrawBloom(d, 1.5, 1.5, .6); _bloomSmall.Draw = d => DrawBloom(d, .5, 0, .8);
         _body.Draw = DrawBody; _parts.Draw = DrawParts;
         RenderOptions.SetClearTypeHint(_content, ClearTypeHint.Enabled);
@@ -122,12 +132,32 @@ internal sealed class IslandNotice : Window
 
     public void Present(AttentionItem item)
     {
-        bool continuing = IsVisible && !_leaving && _item is not null;
+        bool part = PartOf(item) is not null;
+        bool continuing = IsVisible && !_leaving && _item is not null && part == (_part is not null);
+        // Another notice in place that takes the island where the one shown took a part, or the other way round: the shown one goes
+        // at once and the new one starts as a new one.
+        if (IsVisible && !continuing && _item is not null && !_leaving) { StopMotion(); _content.Children.Clear(); _deck.SetIslandCovered(false); }
         _item = item; _leaving = false;
         int generation = ++_generation;
-        // Another notice in place: the words that show leave first. A new one: the island's own words leave first.
+        // Another notice in place: the words that show leave first. A new one: the island's own words leave first, unless the notice
+        // only takes a part's place, which it covers.
         if (continuing) _content.BeginAnimation(OpacityProperty, Fade(0, Soft.Enabled ? FadeOut : 0, () => { if (generation == _generation && _item is not null) Begin(true, generation); }));
+        else if (part) Begin(false, generation);
         else _deck.FadeIslandContent(() => { if (generation == _generation && _item is not null) Begin(false, generation); });
+    }
+
+    // Where a level-1 notice whose style asks for a part shows (NoticeStyle.Slot): the part's area on the monitor, or null for the
+    // whole island (another level, no part chosen, the indicator, or a part not on the island now).
+    // The notice's application has its own looks (NoticeAppRule.Styles): they decide over what its message asks for.
+    private bool OwnLooks(AttentionItem? item) => item?.Payload is Notice notice && Settings.NoticeRule(notice.AppKey)?.Styles is not null;
+
+    private Rect? PartOf(AttentionItem? item)
+    {
+        if (item is not { Level: NoticeLevel.Plain }) return null;
+        // The sender's own choice for this notice (Notice.Slot; the island is no part) comes before the level's style, unless the
+        // application has its own looks, which come first of all.
+        var slot = !OwnLooks(item) && (item.Payload as Notice)?.Slot is { } asked ? NoticeKeys.Part(asked) : item.Style?.Slot;
+        return slot is { } part ? _deck.CompactPartBounds(part) : null;
     }
 
     private void Begin(bool continuing, int generation)
@@ -143,10 +173,10 @@ internal sealed class IslandNotice : Window
             Dress();
             NoticeNative.BringToTop(new WindowInteropHelper(this).Handle);
             // The two windows reach the screen on frames of their own: the island underneath is hidden only once this window has
-            // drawn the same island over it, so no frame shows neither.
-            AfterFrames(HandFrames, () => { if (generation == _generation && _item is not null) _deck.SetIslandCovered(true); });
+            // drawn the same island over it, so no frame shows neither. In a part's place the island stays.
+            if (_part is null) AfterFrames(HandFrames, () => { if (generation == _generation && _item is not null && _part is null) _deck.SetIslandCovered(true); });
         }
-        _arrivedUnderPointer = _island.Contains(CursorInStage());
+        _arrivedUnderPointer = (_part ?? _island).Contains(CursorInStage());
         NameHit();
         BuildContent();
         _content.BeginAnimation(OpacityProperty, null);
@@ -163,6 +193,8 @@ internal sealed class IslandNotice : Window
     public void Update(AttentionItem item)
     {
         if (_item is null) return;
+        // Its look changed so that it now takes the island instead of a part, or the other way round: shown again as a new one.
+        if ((PartOf(item) is not null) != (_part is not null)) { Present(item); return; }
         _item = item;
         NameHit();
         BuildContent();
@@ -266,29 +298,13 @@ internal sealed class IslandNotice : Window
         CompositionTarget.Rendering += step;
     }
 
-    // A click or the hotkey: the notices page, or with NoticeClick set to the source application, that application. A notice with no
-    // application to open (WSL, brim-notify), or one that could not be opened, opens the page instead. The launch is the one the
-    // details use (NoticeCenter.OpenAsync); no window is activated here.
-    private async void Activate(bool byKey)
-    {
-        var notice = Notice;
-        if (notice is null || _opening || NoticeClick.Decide(notice, Settings.NoticeClick) != NoticeClickAction.OpenApp && !Center.ClicksRestore(notice)) { OpenPage(byKey, acted: true); return; }
-        _opening = true;
-        bool opened = false;
-        try { opened = await Center.OpenAsync(notice); }
-        catch (Exception) { opened = false; }
-        finally { _opening = false; }
-        // The notice may have ended or been replaced while the application started.
-        if (_item is null || _leaving || !ReferenceEquals(Notice, notice) && Notice?.Id != notice.Id) return;
-        if (opened) Center.Dismiss(_deck, reportToSource: false); else OpenPage(byKey, acted: true);
-    }
+    // A click or the hotkey opens the notices page with the notice in front.
+    private void Activate(bool byKey) => OpenPage(byKey, acted: true);
 
-    // The screen reader's name for the click area says what a click does.
     private void NameHit()
     {
         if (Track is { } track) { AutomationProperties.SetName(_hit, Loc.T("正在播放：", "Now playing: ") + track.Title); return; }
-        bool app = NoticeClick.Decide(Notice, Settings.NoticeClick) == NoticeClickAction.OpenApp || Center.ClicksRestore(Notice);
-        AutomationProperties.SetName(_hit, app ? Loc.T("灵动提示，点击打开来源应用", "Live notice, click to open the source app") : Loc.T("灵动提示", "Live notice"));
+        AutomationProperties.SetName(_hit, Loc.T("灵动提示", "Live notice"));
     }
 
     // acted: a click or the hotkey, rather than the pointer resting on the notice. With the notices page switched off there is
@@ -309,9 +325,14 @@ internal sealed class IslandNotice : Window
         if (_item is null || _leaving) return;
         Hold();
         // A notice that arrives under a resting pointer does not open the panel by itself: the pointer leaves and comes back, or clicks.
-        // With the panel set to open on a click (ClickToExpand), resting on the notice does not open it either; nor when a click on the
-        // notice opens its application (NoticeClick), or the page would open under the pointer before the click could.
-        if (_arrivedUnderPointer || Settings.ClickToExpand || Track is null && (Settings.NoticeClick == NoticeClickTarget.SourceApp || Center.ClicksRestore(Notice))) return;
+        RestHover();
+    }
+
+    // The pointer rests on the notice (not on one of its buttons): the panel opens after its delay.
+    private void RestHover()
+    {
+        // With the panel set to open on a click (ClickToExpand), resting on the notice does not open it either.
+        if (_item is null || _leaving || _arrivedUnderPointer || Settings.ClickToExpand) return;
         _hoverOpen.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay));
         _hoverOpen.Start();
     }
@@ -351,13 +372,18 @@ internal sealed class IslandNotice : Window
         _stageRect = stage;
         _island = new Rect(island.X - stage.X, island.Y - stage.Y, island.Width, island.Height);
         Place();
-        foreach (var layer in new[] { _shadow, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _body, _parts }) { layer.Width = stage.Width; layer.Height = stage.Height; }
-        // The pointer's area: the island, and for the thin indicator the band round it the island's own hover area takes.
-        var hit = Form == IslandForm.Line ? new Rect(_island.X - 12, 0, _island.Width + 24, _island.Bottom + 10) : _island;
+        foreach (var layer in new[] { _shadow, _shade, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _body, _parts }) { layer.Width = stage.Width; layer.Height = stage.Height; }
+        _part = PartOf(_item) is { } part ? new Rect(part.X - stage.X, part.Y - stage.Y, part.Width, part.Height) : null;
+        // The pointer's area: the island (a part's place), and for the thin indicator the band round it the island's own hover area takes.
+        var hit = _part ?? (Form == IslandForm.Line ? new Rect(_island.X - 12, 0, _island.Width + 24, _island.Bottom + 10) : _island);
         Canvas.SetLeft(_hit, hit.X); Canvas.SetTop(_hit, hit.Y); _hit.Width = hit.Width; _hit.Height = hit.Height;
+        // The content lies over the whole island and is clipped to its outline, and in a part's place to the part as well.
         Canvas.SetLeft(_content, _island.X); Canvas.SetTop(_content, _island.Y); _content.Width = _island.Width; _content.Height = _island.Height;
-        _content.Clip = IslandBorder.BuildOutline(_island.Width, _island.Height, _shape.Shoulder, new CornerRadius(_shape.TopRadius, _shape.TopRadius, _shape.BottomRadius, _shape.BottomRadius));
+        var outline = IslandBorder.BuildOutline(_island.Width, _island.Height, _shape.Shoulder, new CornerRadius(_shape.TopRadius, _shape.TopRadius, _shape.BottomRadius, _shape.BottomRadius));
+        _content.Clip = _part is { } area ? Geometry.Combine(outline, new RectangleGeometry(new Rect(area.X - _island.X, area.Y - _island.Y, area.Width, area.Height)), GeometryCombineMode.Intersect, null) : outline;
         _notchGlowCore = _notchGlowWide = null;
+        _rest = _frameBody = _frameInner = _frameEdge = null; _edgePens = null;
+        _shade.InvalidateVisual();
     }
 
     private void Place()
@@ -375,7 +401,7 @@ internal sealed class IslandNotice : Window
     {
         double dpi = PresentationSource.FromVisual(this) is null ? (WindowsHost.MonitorScreen(_deck.HotkeyMonitor) ?? WindowsHost.PrimaryScreen()).Scale : VisualTreeHelper.GetDpi(this).DpiScaleX;
         _look = NoticeLook.Current(dpi);
-        _fill = null; _rim = null;
+        _fill = null; _rim = null; _edgePens = null;
         // The island's shadow, from a copy of its body behind it; a see-through surface would show that copy, so it has none.
         _shadow.Effect = _look.ShadowOpacity <= 0 || _look.HighContrast || _look.Surface.A < 255 ? null : new DropShadowEffect
         {
@@ -384,6 +410,9 @@ internal sealed class IslandNotice : Window
         };
         // The backlight's wide layer and the indicator's bloom are the prototype's blurred copies (σ 3.2; 1.6, 4 and 9), as kernel radii of 3σ.
         _glowWide.Effect = new BlurEffect { Radius = 3.2 * 3 * _k, RenderingBias = RenderingBias.Performance };
+        // The shade under the backlight is softer (σ 5.5; the indicator's, under its bloom, 7).
+        _shade.Effect = new BlurEffect { Radius = (_shape is not null && Form == IslandForm.Line ? 7 : 5.5) * 3 * _k, RenderingBias = RenderingBias.Performance };
+        _shade.InvalidateVisual();
         _bloomSmall.Effect = new BlurEffect { Radius = 1.6 * 3 * _k, RenderingBias = RenderingBias.Performance };
         _bloomMiddle.Effect = new BlurEffect { Radius = 4 * 3 * _k, RenderingBias = RenderingBias.Performance };
         _bloomWide.Effect = new BlurEffect { Radius = 9 * 3 * _k, RenderingBias = RenderingBias.Performance };
@@ -396,7 +425,19 @@ internal sealed class IslandNotice : Window
     private bool MotionAllowed => Soft.Enabled && !_look.HighContrast;
 
     // What the shown item plays on this island (NoticeLevels.Effect): a notice that shows beyond the rate limit plays as a plain one.
-    private NoticeEffect Played => _item is { } item ? NoticeLevels.Effect(item.Level, item.Subdued, Form) : NoticeEffect.Still;
+    private NoticeEffect Played => _item is { } item ? NoticeLevels.Effect(item.Level, item.Subdued, Form, item.Style?.Liquid) : NoticeEffect.Still;
+
+    // The backlight's color: level 3's chosen one (white, the application's or a swatch), white for every other.
+    private Color Light()
+    {
+        if (_item is not { Level: NoticeLevel.Persistent }) return GlowColor;
+        // The notice's own (its sender's color, or the one of a warning, an error or a success) comes before the level's style.
+        if (!OwnLooks(_item) && Notice is { } own && NoticeTones.Glow(own) is { } tone && ColorConverter.ConvertFromString(tone) is Color toned) return toned;
+        if (_item is not { Style.Color: { Length: > 0 } chosen }) return GlowColor;
+        if (chosen == NoticeStyle.AppColor)
+            return Notice is { } notice ? _look.AppColor(Center.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey))) : GlowColor;
+        return ColorConverter.ConvertFromString(chosen) is Color color ? color : GlowColor;
+    }
 
     private void StartMotion()
     {
@@ -414,6 +455,7 @@ internal sealed class IslandNotice : Window
             _ => new IslandLiquid(form, width, height, liquid: liquid, fury: Fury)
         };
         _effect = effect;
+        _light = Light(); _edgePens = null;
         _length = liquid ? _liquid.Total : NoticeLevels.EffectLength(effect, form) + .05;
         _start = Eased.Now; _t = 0;
         Motion.Start(_body, Step);
@@ -440,6 +482,21 @@ internal sealed class IslandNotice : Window
     private void RedrawAll()
     {
         foreach (var layer in new[] { _shadow, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _body, _parts }) layer.InvalidateVisual();
+        Shade();
+    }
+
+    // How strong the shade is at its darkest, under the backlight and under the indicator's bloom.
+    private const double ShadeMost = .55, LineShadeMost = .65;
+
+    // The shade's strength at this frame. It keeps its drawing (DrawShade) and only changes its opacity: it rises and falls with the
+    // light, and is as strong as the light is bright, since a white light is lost on a light desktop while a deep color shows there
+    // by itself and would only be dulled.
+    private void Shade()
+    {
+        if (_shape is null || _liquid is null || _part is not null) { _shade.Opacity = 0; return; }
+        bool line = Form == IslandForm.Line;
+        double light = line ? (_effect == NoticeEffect.Brighten ? 0 : IslandLiquid.BreathAt(_t)) : IslandLiquid.GlowAt(_t);
+        _shade.Opacity = light * (line ? LineShadeMost : ShadeMost) * new ThemeColor(255, _light.R, _light.G, _light.B).Luminance;
     }
 
     // ----- Drawing -----
@@ -448,44 +505,74 @@ internal sealed class IslandNotice : Window
 
     private Brush Fill => _fill ??= Freeze(new SolidColorBrush(_look.Surface));
 
+    // The island at rest, and the body and the line of the light along its edge for the frame they were last made for, kept until
+    // the island or the frame changes.
+    private Geometry? _rest, _frameBody, _frameInner, _frameEdge;
+    private IslandLiquid? _frameLiquid;
+    private double _frameTime;
+    private double[] _outs = [];
+
     // The island at rest, exactly as IslandBorder draws it.
     private Geometry RestOutline()
     {
+        if (_rest is not null) return _rest;
         if (Form == IslandForm.Line)
         {
             double r = _island.Height / 2;
-            return new RectangleGeometry(_island, r, r);
+            return _rest = Freeze(new RectangleGeometry(_island, r, r));
         }
         var outline = IslandBorder.BuildOutline(_island.Width, _island.Height, _shape.Shoulder, new CornerRadius(_shape.TopRadius, _shape.TopRadius, _shape.BottomRadius, _shape.BottomRadius)).Clone();
         outline.Transform = new TranslateTransform(_island.X, _island.Y);
-        return outline;
+        return _rest = Freeze(outline);
     }
 
     // The island's body at this frame: its outline pushed out by the ripples (the notch's top edge stays against the screen).
     // Without the liquid it is the island at rest, to the pixel.
     private Geometry BodyOutline()
     {
-        if (_liquid is not { Liquid: true } liquid || Form == IslandForm.Line) return RestOutline();
-        var geometry = new StreamGeometry();
-        using (var g = geometry.Open())
+        if (_liquid is not { Liquid: true } || Form == IslandForm.Line) return RestOutline();
+        Frame();
+        return _frameBody!;
+    }
+
+    // How far inside the island's edge its light begins. The strip left between them keeps the island's own color, so the light
+    // has the island on both sides of it and shows as a line of light on any desktop; right at the edge, a white light met a
+    // light desktop and only made the edge look soft.
+    private const double EdgeInset = 1.25;
+
+    // The frame's outline, made once for the layers that draw it: the body; the same outline EdgeInset further in, along which
+    // the edge lights up; and for the notch that line left open, without its top edge, which lies against the screen.
+    private void Frame()
+    {
+        if (_liquid is not { } liquid || _frameBody is not null && ReferenceEquals(_frameLiquid, liquid) && (_frameTime == _t || !liquid.Liquid)) return;
+        var outline = liquid.Outline;
+        if (_outs.Length < outline.Count) _outs = new double[outline.Count];
+        liquid.EdgeOuts(_t, _outs);
+        bool notch = Form == IslandForm.Notch;
+        StreamGeometry body = new(), inner = new() { FillRule = FillRule.Nonzero }, edge = new();
+        using (StreamGeometryContext g = body.Open(), n = inner.Open(), e = edge.Open())
         {
-            bool started = false;
-            if (Form == IslandForm.Notch) { g.BeginFigure(new Point(_island.X, _island.Y), true, true); started = true; }
-            foreach (var p in liquid.Outline)
+            if (notch) { g.BeginFigure(new Point(_island.X, _island.Y), true, true); n.BeginFigure(new Point(_island.X, _island.Y), true, true); }
+            for (int i = 0; i < outline.Count; i++)
             {
-                double o = liquid.EdgeOut(p.S, _t);
-                var point = new Point(_island.X + (p.X + p.Nx * o) * _k, _island.Y + (p.Y + p.Ny * o) * _k);
-                if (!started) { g.BeginFigure(point, true, true); started = true; }
-                else g.LineTo(point, true, false);
+                var p = outline[i];
+                double o = _outs[i], d = o - EdgeInset;
+                Point point = new(_island.X + (p.X + p.Nx * o) * _k, _island.Y + (p.Y + p.Ny * o) * _k), within = new(_island.X + (p.X + p.Nx * d) * _k, _island.Y + (p.Y + p.Ny * d) * _k);
+                if (i == 0 && !notch) { g.BeginFigure(point, true, true); n.BeginFigure(within, true, true); }
+                else { g.LineTo(point, true, false); n.LineTo(within, true, false); }
+                if (!notch) continue;
+                if (i == 0) e.BeginFigure(within, false, false); else e.LineTo(within, true, false);
             }
         }
-        geometry.Freeze();
-        return geometry;
+        body.Freeze(); inner.Freeze(); edge.Freeze();
+        // Without the liquid the body is the island at rest, to the pixel; only the light's line is taken from the model.
+        _frameBody = liquid.Liquid ? body : RestOutline();
+        _frameInner = inner; _frameEdge = notch ? edge : inner; _frameLiquid = liquid; _frameTime = _t;
     }
 
     private void DrawShadow(DrawingContext drawing)
     {
-        if (_shadow.Effect is null || Form == IslandForm.Line) return;
+        if (_shadow.Effect is null || Form == IslandForm.Line || _part is not null) return;
         drawing.DrawGeometry(Fill, null, BodyOutline());
     }
 
@@ -493,6 +580,8 @@ internal sealed class IslandNotice : Window
     {
         if (Form == IslandForm.Line) { DrawLine(drawing); return; }
         var body = BodyOutline();
+        // In a part's place only that part of the island is drawn, over the part the island shows there.
+        if (_part is { } part) drawing.PushClip(new RectangleGeometry(part));
         drawing.DrawGeometry(Fill, null, body);
         if (_look.Gradient is { } gradient) drawing.DrawGeometry(gradient, null, body);
         if (_look.Pattern is { } pattern) drawing.DrawGeometry(pattern, null, body);
@@ -504,6 +593,86 @@ internal sealed class IslandNotice : Window
             drawing.DrawGeometry(null, new Pen(_rim, _look.RimWidth * 2), body);
             drawing.Pop();
         }
+        DrawEdgeLight(drawing, body);
+        if (_part is not null) drawing.Pop();
+    }
+
+    // The shade behind the island, under the backlight: the island's own shape at rest, a little larger, in black, blurred by its
+    // layer. On a light desktop the white backlight cannot be seen; there the shade is what shows, and the backlight reads as light
+    // against it. On a dark desktop the shade is lost and the backlight shows as before. Drawn once; Shade sets how strong it is.
+    private void DrawShade(DrawingContext drawing)
+    {
+        if (_part is not null) return;
+        if (Form == IslandForm.Line)
+        {
+            // The indicator's: its shape grown by 4 and moved down by 3, under its bloom.
+            double grow = 4 * _k, half = _island.Height / 2 + grow;
+            drawing.DrawRoundedRectangle(Brushes.Black, null, new Rect(_island.X - grow, _island.Y - grow + 3 * _k, _island.Width + 2 * grow, 2 * half), half, half);
+            return;
+        }
+        // Grown by 2: the fill, and a stroke of that width round it. The notch's is not carried on above the screen's edge, so it
+        // thins out towards the shoulders as the backlight does.
+        drawing.DrawGeometry(Brushes.Black, new Pen(Brushes.Black, 4 * _k) { LineJoin = PenLineJoin.Round }, RestOutline());
+    }
+
+    // The light along the island's edge, on its own surface: strongest where it begins (EdgeInset from the edge) and gone 6 DIPs
+    // further in, EdgeMost · exp(−(d / 2.2)^1.3) at the distance d from there, as strokes of growing width whose strengths add up to that.
+    private const double EdgeMost = .9;
+    private static readonly (double Depth, double Alpha)[] EdgeSteps = MakeEdgeSteps();
+    private Pen[]? _edgePens;
+
+    private static (double Depth, double Alpha)[] MakeEdgeSteps()
+    {
+        double[] depths = [6, 5, 4.1, 3.3, 2.6, 2, 1.5, 1, .6];
+        var steps = new (double, double)[depths.Length];
+        double outer = 0;
+        for (int i = 0; i < depths.Length; i++)
+        {
+            double target = EdgeMost * Math.Exp(-Math.Pow(depths[i] / 2.2, 1.3));
+            steps[i] = (depths[i], 1 - (1 - target) / (1 - outer));
+            outer = target;
+        }
+        return steps;
+    }
+
+    // The light's color on the surface and how strong it is drawn. The backlight's white is the theme's own text color there, which
+    // always stands out from the surface; on a light surface that is a dark line, drawn weaker so that it does not read as a border.
+    // A chosen color (level 3) is drawn as the theme draws colors chosen outside it.
+    private (Color Color, double Strength) EdgeLight()
+    {
+        if (_light != GlowColor) return (_look.AppColor(_light), 1);
+        var text = ColorConverter.ConvertFromString(_look.Primary) is Color primary ? Color.FromRgb(primary.R, primary.G, primary.B) : GlowColor;
+        bool darker = new ThemeColor(255, text.R, text.G, text.B).Luminance < new ThemeColor(255, _look.Surface.R, _look.Surface.G, _look.Surface.B).Luminance;
+        return (text, darker ? .55 : 1);
+    }
+
+    // The light along the edge, flashing with the backlight and following the liquid's outline. It is drawn on the island, which
+    // BrimDeck colors itself, so it shows whatever the desktop behind is; under the content, which stays as it is.
+    private void DrawEdgeLight(DrawingContext drawing, Geometry body)
+    {
+        if (_liquid is null || _part is not null || Form == IslandForm.Line) return;
+        double g = IslandLiquid.GlowAt(_t);
+        if (g <= .004) return;
+        var (color, strength) = EdgeLight();
+        bool notch = Form == IslandForm.Notch;
+        if (_edgePens is null)
+        {
+            // Brightest over the middle and dimmer towards the ends, as the backlight.
+            (double, double)[] stops = notch ? [(0, .6), (.06, .72), (.28, 1), (.72, 1), (.94, .72), (1, .6)] : [(0, .6), (.12, .78), (.32, 1), (.68, 1), (.88, .78), (1, .6)];
+            _edgePens = [.. EdgeSteps.Select(step => Freeze(new Pen(Fade(_island.X, _island.Right, stops, color, step.Alpha), 2 * step.Depth * _k) { LineJoin = PenLineJoin.Round }))];
+        }
+        Frame();
+        drawing.PushClip(body);
+        drawing.PushClip(_frameInner);
+        drawing.PushOpacity(g * strength);
+        // The notch's fades out up its shoulders to nothing where they meet the screen.
+        if (notch) drawing.PushOpacityMask(Freeze(new LinearGradientBrush(Colors.Transparent, Colors.Black, new Point(0, _island.Y + _k), new Point(0, _island.Y + Math.Max(2 * _k, _shape.Shoulder * 7 / 16)))
+            { MappingMode = BrushMappingMode.Absolute }));
+        foreach (var pen in _edgePens) drawing.DrawGeometry(null, pen, _frameEdge);
+        if (notch) drawing.Pop();
+        drawing.Pop();
+        drawing.Pop();
+        drawing.Pop();
     }
 
     // The beads that trail some ripples, in the island's own color.
@@ -528,8 +697,9 @@ internal sealed class IslandNotice : Window
         var color = PanelTheme.ColorOf("indicator");
         if (_liquid is not { } liquid) { drawing.DrawGeometry(Freeze(new SolidColorBrush(color)), null, RestOutline()); return; }
         double b = LineLight * .85;
-        var lit = Color.FromArgb((byte)Math.Round(color.A + (LineFlash.A - color.A) * b), (byte)Math.Round(color.R + (LineFlash.R - color.R) * b),
-            (byte)Math.Round(color.G + (LineFlash.G - color.G) * b), (byte)Math.Round(color.B + (LineFlash.B - color.B) * b));
+        var flash = _light == GlowColor ? LineFlash : _light;
+        var lit = Color.FromArgb((byte)Math.Round(color.A + (flash.A - color.A) * b), (byte)Math.Round(color.R + (flash.R - color.R) * b),
+            (byte)Math.Round(color.G + (flash.G - color.G) * b), (byte)Math.Round(color.B + (flash.B - color.B) * b));
         double cx = _island.X + _island.Width / 2, cy = _island.Y + _island.Height / 2, h0 = liquid.Height / 2;
         double left = -liquid.LineEnd(_t, -1) + h0, right = liquid.LineEnd(_t, 1) - h0;
         var geometry = new StreamGeometry { FillRule = FillRule.Nonzero };
@@ -597,14 +767,16 @@ internal sealed class IslandNotice : Window
         double cx = _island.X + _island.Width / 2, cy = _island.Y + _island.Height / 2;
         double half = (liquid.Height / 2 + grow) * _k, left = cx - (liquid.LineEnd(_t, -1) + grow) * _k, right = cx + (liquid.LineEnd(_t, 1) + grow) * _k;
         drawing.PushOpacity(b * opacity);
-        drawing.DrawRoundedRectangle(Freeze(new SolidColorBrush(GlowColor)), null, new Rect(left, cy + drop * _k - half, Math.Max(0, right - left), 2 * half), half, half);
+        drawing.DrawRoundedRectangle(Freeze(new SolidColorBrush(_light)), null, new Rect(left, cy + drop * _k - half, Math.Max(0, right - left), 2 * half), half, half);
         drawing.Pop();
     }
 
-    private LinearGradientBrush Fade(double from, double to, (double Offset, double Alpha)[] stops)
+    private LinearGradientBrush Fade(double from, double to, (double Offset, double Alpha)[] stops) => Fade(from, to, stops, _light, 1);
+
+    private static LinearGradientBrush Fade(double from, double to, (double Offset, double Alpha)[] stops, Color color, double strength)
     {
         var brush = new LinearGradientBrush { MappingMode = BrushMappingMode.Absolute, StartPoint = new Point(from, 0), EndPoint = new Point(Math.Max(from + 1, to), 0) };
-        foreach (var (offset, alpha) in stops) brush.GradientStops.Add(new GradientStop(Color.FromArgb((byte)Math.Round(alpha * 255), GlowColor.R, GlowColor.G, GlowColor.B), offset));
+        foreach (var (offset, alpha) in stops) brush.GradientStops.Add(new GradientStop(Color.FromArgb((byte)Math.Round(alpha * strength * 255), color.R, color.G, color.B), offset));
         brush.Freeze();
         return brush;
     }
@@ -641,8 +813,6 @@ internal sealed class IslandNotice : Window
     // The song of a track change shown on the island (MainWindow.AttentionStarted); null for a notice.
     private TrackNoticeContent? Track => _item is { Kind: AttentionKind.Track } ? _item.Payload as TrackNoticeContent : null;
 
-    private NoticePrivacy Privacy(Notice notice) => Settings.NoticeRule(notice.AppKey)?.Privacy ?? Settings.NoticePrivacy;
-
     // spoken: the words for a screen reader, in which a verification code is not dots but a note that it is hidden.
     private (string Title, string Summary) Texts(bool spoken = false)
     {
@@ -650,7 +820,7 @@ internal sealed class IslandNotice : Window
             return (NoticeText.Count(count), Loc.T("在 BrimDeck 安静期间收到", "Arrived while BrimDeck kept quiet"));
         if (Track is { } track) return (track.Title, track.Artist);
         if (Notice is not { } notice) return ("", "");
-        var (title, summary) = NoticeText.Presented(notice, Privacy(notice), !Settings.NoticeCodes ? CodeMask.Off : spoken ? CodeMask.Spoken : CodeMask.Dots);
+        var (title, summary) = NoticeText.Presented(notice, !Settings.NoticeCodes ? CodeMask.Off : spoken ? CodeMask.Spoken : CodeMask.Dots);
         if (NoticeClock.Live(notice.Timing, DateTimeOffset.UtcNow, TimeZoneInfo.Local) is { } live) summary = live;
         if (title.Length == 0) title = notice.AppName;
         if (_item is { Count: > 1 } item) summary = (summary.Length > 0 ? summary + " · " : "") + NoticeText.Count(item.Count);
@@ -659,8 +829,8 @@ internal sealed class IslandNotice : Window
 
     private TextBlock? _announced;
 
-    // Where the icon and the words sit when they fit: the sender's choice for this notice, else the setting.
-    private NoticeAlign Align => Notice?.Align ?? Settings.NoticeAlign;
+    // Where the icon and the words sit when they fit: the sender's choice for this notice, else in the middle.
+    private NoticeAlign Align => Notice?.Align ?? NoticeAlign.Center;
 
     // The icon and the words, laid out inside the island's content area at the island's scale: together at the left, in the middle
     // or at the right of it (Align) when they fit. Words longer than the area start at the left and scroll through once they have
@@ -668,12 +838,26 @@ internal sealed class IslandNotice : Window
     private void BuildContent()
     {
         _content.Children.Clear();
+        _buttons.Children.Clear();
         _announced = null;
         if (_item is null || Form == IslandForm.Line) return;
         double scale = _shape.Scale, inset = _shape.Inset, available = Math.Max(0, _island.Width - 2 * inset);
+        // In a part's place the words have the part's width, from its left; a part narrower than the icon and a few words leaves
+        // the icon out.
+        double origin = 0;
+        if (_part is { } part)
+        {
+            inset = Math.Round(4 * scale);
+            origin = part.X - _island.X;
+            available = Math.Max(0, part.Width - 2 * inset);
+        }
         double plate = Math.Round(20 * scale), gap = Math.Round(8 * scale);
+        // The buttons take their room at the right; the words have what is left.
+        available = Math.Max(0, available - BuildButtons(scale, inset, available));
+        bool withIcon = _item.Style?.Icon != false && (OwnLooks(_item) || Notice?.HideIcon != true) && available >= plate + gap + 48 * scale;
+        if (!withIcon) plate = gap = 0;
         var (title, summary) = Texts();
-        var icon = Plate(plate);
+        var icon = withIcon ? Plate(plate) : new Canvas();
         Canvas.SetTop(icon, (_island.Height - plate) / 2);
         _content.Children.Add(icon);
         var line = new TextBlock { FontFamily = UI.PanelFont, FontSize = 12.5 * scale, TextWrapping = TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center };
@@ -690,9 +874,9 @@ internal sealed class IslandNotice : Window
         double width = line.DesiredSize.Width;
         // The room left over goes before the group: none of it, half, or all.
         double shift = NoticeAligns.Shift(viewport, width, Align);
-        Canvas.SetLeft(icon, inset + shift);
+        Canvas.SetLeft(icon, origin + inset + shift);
         var window = new Canvas { Width = viewport - shift, Height = _island.Height, ClipToBounds = true };
-        Canvas.SetLeft(window, inset + shift + plate + gap);
+        Canvas.SetLeft(window, origin + inset + shift + plate + gap);
         _content.Children.Add(window);
         Canvas.SetTop(line, (_island.Height - line.DesiredSize.Height) / 2);
         window.Children.Add(line);
@@ -709,6 +893,103 @@ internal sealed class IslandNotice : Window
         scroll.KeyFrames.Add(new LinearDoubleKeyFrame(-travel, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(1.2 + seconds + 1.2))));
         move.BeginAnimation(TranslateTransform.XProperty, scroll);
     }
+
+    // The notice's buttons at the right of the island, when the island shows any (NoticeActions.OnIsland: the panel opens on a click,
+    // or on hover after a delay long enough to reach a button): its sender's, copying a verification code, opening the source
+    // application, as many of the first two as leave the words their room (NoticeActions.Fit). Returns the width they take with
+    // the gap before them. A click on a button does what it says; anywhere else on the notice opens the notices page as before.
+    private double BuildButtons(double scale, double inset, double available)
+    {
+        if (_item is not { Kind: AttentionKind.Notice } || Notice is not { } notice || !NoticeActions.OnIsland(Settings.ClickToExpand, Settings.OpenDelay, Form, _part is not null)) return 0;
+        bool hasCode = NoticeCodes.Words(notice, Settings.NoticeCodes).Hit is not null;
+        var picked = NoticeActions.Pick(Center.Buttons(notice), hasCode, Center.CanOpen(notice));
+        if (picked.Count == 0) return 0;
+        double height = Math.Round(Math.Min(22 * scale, Math.Max(12, _island.Height - 8 * scale))), gap = Math.Round(6 * scale), side = Math.Round(9 * scale);
+        // A label is cut so that one button always leaves the words their room, on a narrow island too.
+        double labelRoom = Math.Clamp(available - NoticeActions.WordsRoom * scale - 2 * side - gap, 28 * scale, NoticeActions.LabelRoom * scale);
+        var faces = new List<Border>();
+        foreach (var button in picked)
+        {
+            var label = new TextBlock
+            {
+                Text = button.Label, FontFamily = UI.PanelFont, FontSize = 11.5 * scale, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis,
+                MaxWidth = labelRoom, VerticalAlignment = VerticalAlignment.Center, Foreground = button.Primary ? Freeze(new SolidColorBrush(Color.FromRgb(_look.Surface.R, _look.Surface.G, _look.Surface.B))) : UI.Brush(_look.Primary)
+            };
+            // Where the whole label has no room, its shorter form says it rather than an ellipsis.
+            if (button.Short is { } brief)
+            {
+                label.MaxWidth = double.PositiveInfinity;
+                label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                if (label.DesiredSize.Width > labelRoom) label.Text = brief;
+                label.MaxWidth = labelRoom;
+            }
+            var face = new Border
+            {
+                Height = height, CornerRadius = new CornerRadius(height / 2), Padding = new Thickness(side, 0, side, 0), Child = label,
+                Background = UI.Brush(button.Primary ? _look.Primary : _look.Fill), Cursor = Cursors.Hand, SnapsToDevicePixels = true
+            };
+            AutomationProperties.SetName(face, button.Label);
+            if (!button.Primary)
+            {
+                face.MouseEnter += (_, _) => face.Background = UI.Brush(_look.Hover);
+                face.MouseLeave += (_, _) => face.Background = UI.Brush(_look.Fill);
+            }
+            else
+            {
+                face.MouseEnter += (_, _) => face.Opacity = .86;
+                face.MouseLeave += (_, _) => face.Opacity = 1;
+            }
+            // On a button the pointer is about to click, not resting on the notice: the panel does not open under it meanwhile.
+            face.MouseEnter += (_, _) => _hoverOpen.Stop();
+            face.MouseLeave += (_, _) => { if (_hit.IsMouseOver) RestHover(); };
+            face.MouseLeftButtonDown += (_, e) => e.Handled = true;
+            face.MouseLeftButtonUp += (_, e) => { e.Handled = true; if (_item is not null && !_leaving) Press(notice, button); };
+            face.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            faces.Add(face);
+        }
+        int shown = NoticeActions.Fit([.. faces.Select(face => face.DesiredSize.Width)], gap, available, NoticeActions.WordsRoom * scale);
+        if (shown == 0) return 0;
+        double total = faces.Take(shown).Sum(face => face.DesiredSize.Width) + gap * (shown - 1);
+        // From the right edge of the content's room, the first button leftmost.
+        double x = inset + available - total;
+        foreach (var face in faces.Take(shown))
+        {
+            Canvas.SetLeft(face, x); Canvas.SetTop(face, (_island.Height - height) / 2);
+            _buttons.Children.Add(face);
+            x += face.DesiredSize.Width + gap;
+        }
+        return total + gap;
+    }
+
+    // What a button of the island does. One that could not do it (the clipboard was held, nothing opened) leaves the notice as it is.
+    private async void Press(Notice notice, NoticeActions.Button button)
+    {
+        if (_pressing) return;
+        _pressing = true;
+        try
+        {
+            switch (button.Kind)
+            {
+                case NoticeActions.ButtonKind.Sender when button.Action is { } action:
+                    await Center.RunAsync(notice, action);
+                    break;
+                case NoticeActions.ButtonKind.CopyCode:
+                    // Only this click puts the code on the clipboard, as the notices page's button does.
+                    if (NoticeCodes.Words(notice, Settings.NoticeCodes).Hit is { } code && NoticeCodeClipboard.Copy(code.CopyText)) { Center.Hub.MarkViewed(notice.Id); Center.Withdraw(notice.Id); }
+                    break;
+                case NoticeActions.ButtonKind.OpenApp:
+                    bool opened = await Center.OpenAsync(notice);
+                    // The notice may have ended or been replaced while the application started.
+                    if (_item is null || _leaving || Notice?.Id != notice.Id) break;
+                    if (opened) Center.Dismiss(_deck, reportToSource: false); else OpenPage(byKey: false, acted: true);
+                    break;
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or System.ComponentModel.Win32Exception) { }
+        finally { _pressing = false; }
+    }
+
+    private bool _pressing;
 
     // The notice's picture (a contact's avatar) round; else the application's own icon; without one, its first letter in its color
     // on a plate tinted with it (a bell for a summary).

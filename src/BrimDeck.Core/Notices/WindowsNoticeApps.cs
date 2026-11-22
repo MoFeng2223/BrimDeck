@@ -54,6 +54,10 @@ public static partial class WindowsNoticeApps
         ("Microsoft.Office.lync.exe.16", "Skype for Business", null), ("Lenovo.PcManager.MainWnd", "联想电脑管家", "Lenovo PC Manager"), ("Kingsoft.Office.WPSUFD", "WPS", null)
     ];
 
+    // The name of an application id Windows often gives no display name for (KnownApps), in the interface's language; null for others.
+    public static string? KnownName(string appId) => KnownApps.FirstOrDefault(app => string.Equals(app.Id, appId, StringComparison.OrdinalIgnoreCase)) is { Id: not null } known
+        ? Loc.IsEnglish && known.English is { } english ? english : known.Name : null;
+
     // The status a notice from these applications gets: Windows notifications carry no category of their own. Matched by
     // the start of the application id; anything not listed (chat, mail, browsers) stays a message.
     private static readonly (string Prefix, NoticeCategory Category)[] Categories =

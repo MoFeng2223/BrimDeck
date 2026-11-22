@@ -20,6 +20,14 @@ $mutexPrefix = "BrimDeck.UpdateTest.$testId."
 $runValue = "BrimDeck.UpdateTest.$testId"
 $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{$appId}_is1"
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+# The installer adds its folder to PATH. The test has it use a value of its own under the same key, with entries of the kind
+# a real PATH has (a variable, folders with Chinese and Thai names, a folder with a space and a ; in quotes), which must come
+# through every step as they were written: the installer's script functions that go through the code page would damage them.
+$pathKey = 'HKCU:\Environment'
+$pathValue = "BrimDeckUpdateTestPath$($testId.Substring(0, 8))"
+$pathBefore = '%BRIMDECK_UPDATE_TEST_KEEP%\bin;D:\工具 目录\bin;D:\เครื่องมือ\bin;"C:\Some;Folder\tools"'
+# The value as the registry holds it, its variables not read out.
+function TestPath { (Get-Item $pathKey).GetValue($pathValue, $null, 'DoNotExpandEnvironmentNames') }
 $startMenuShortcut = Join-Path ([Environment]::GetFolderPath('Programs')) "$appName.lnk"
 $desktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) "$appName.lnk"
 $staleFile = Join-Path $installPath 'only-in-0.1.0.txt'
@@ -93,7 +101,7 @@ try {
         Set-Content -LiteralPath (Join-Path $publish 'in-both-versions.txt') -Value $version
         & $iscc -q -nc "-dAppVersion=$version" "-dSourceDir=$publish" "-o$output" "-dAppId=$appId" "-dAppName=$appName" `
             '-dMainExe=BrimDeck.UpdateHarness.exe' "-dDataDir=$dataPath" "-dMutexPrefix=$mutexPrefix" "-dRunValue=$runValue" `
-            "-dAppUserModelId=BrimDeck.UpdateTest.$testId" installer/BrimDeck.iss
+            "-dAppUserModelId=BrimDeck.UpdateTest.$testId" "-dPathValue=$pathValue" installer/BrimDeck.iss
         if ($LASTEXITCODE -ne 0) { throw 'Test installer compilation failed.' }
         $setups[$version] = Join-Path $output "$appName-$version-Setup.exe"
     }
@@ -102,7 +110,10 @@ try {
         sha256 = (Get-FileHash -LiteralPath $next.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
     [IO.File]::WriteAllText((Join-Path $testRoot 'feed/update.json'), ($manifest | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
 
+    New-ItemProperty -Path $pathKey -Name $pathValue -Value $pathBefore -PropertyType ExpandString -Force | Out-Null
     Install $setups['0.1.0'] (Join-Path $testRoot 'install-0.1.0.log')
+    Assert ((TestPath) -eq "$pathBefore;$installPath") 'installing adds the app folder to PATH as its last entry and leaves the other entries as written'
+    Assert ((Get-Item $pathKey).GetValueKind($pathValue) -eq 'ExpandString') 'PATH stays a value whose variables Windows reads out'
     $entry = Get-ItemProperty $uninstallKey
     Assert ($entry.DisplayName -eq $appName -and $entry.DisplayVersion -eq '0.1.0') 'installer registers the app for Settings > Apps and Control Panel'
     Assert (InstalledAt) 'a folder with Chinese characters, a space and a trailing \ gets the app folder name appended'
@@ -135,6 +146,7 @@ try {
         (Get-Content -LiteralPath "$installPath\in-both-versions.txt") -eq '0.1.0' -and !(Test-Path -LiteralPath "$installPath\.brimdeck-previous")) `
         'a failed update puts the old version''s files back and leaves no copy of them behind'
     Assert ((Test-Path -LiteralPath $desktopShortcut) -and (Test-Path -LiteralPath $startMenuShortcut)) 'a failed update puts both shortcuts back'
+    Assert ((TestPath) -eq "$pathBefore;$installPath") 'a failed update leaves the app folder in PATH'
     Assert (ExpectedRights) "after a failed update, $rightsCase"
 
     # The user deletes both shortcuts after installing.
@@ -156,6 +168,7 @@ try {
     Assert (!(Test-Path -LiteralPath $staleFile)) 'update removes the old version before installing the new one'
     Assert ((Test-Path -LiteralPath $startMenuShortcut) -and !(Test-Path -LiteralPath $desktopShortcut)) 'update restores the Start menu shortcut and keeps a deleted desktop shortcut deleted'
     Assert ($null -ne (Get-ItemProperty -Path $runKey -Name $runValue -ErrorAction SilentlyContinue)) 'update keeps the startup entry'
+    Assert ((TestPath) -eq "$pathBefore;$installPath") 'update keeps the app folder in PATH once'
     Assert (ExpectedRights) "after an in-app update without administrator rights, $rightsCase"
 
     Uninstall @()
@@ -163,9 +176,16 @@ try {
     Assert (!(Test-Path -LiteralPath $startMenuShortcut)) 'uninstall removes the shortcut'
     Assert (Test-Path -LiteralPath (Join-Path $dataPath 'settings.json')) 'a silent uninstall keeps settings and data'
     Assert ($null -eq (Get-ItemProperty -Path $runKey -Name $runValue -ErrorAction SilentlyContinue)) 'uninstall removes the startup entry that pointed to the program'
+    Assert ((TestPath) -eq $pathBefore) 'uninstall takes the app folder out of PATH and leaves the other entries as written'
 
     Install $setups['0.1.1'] (Join-Path $testRoot 'install-again.log')
     Assert ((Get-ItemProperty $uninstallKey).DisplayVersion -eq '0.1.1') 'reinstall after uninstall succeeds'
+    # The user wrote the folder into PATH by hand, with a trailing \ and in other letters: it is not added a second time.
+    Assert ((TestPath) -eq "$pathBefore;$installPath") 'reinstall adds the app folder to PATH again'
+    $byHand = "$($installPath.ToUpperInvariant())\;$pathBefore"
+    New-ItemProperty -Path $pathKey -Name $pathValue -Value $byHand -PropertyType ExpandString -Force | Out-Null
+    Install $setups['0.1.1'] (Join-Path $testRoot 'install-over.log')
+    Assert ((TestPath) -eq $byHand) 'installing over a version whose folder is already in PATH, however it is written, leaves PATH as it is'
     Uninstall @('/DELETEUSERDATA')
     Assert (!(Test-Path -LiteralPath $dataPath)) 'uninstall with /DELETEUSERDATA deletes settings and data'
     Write-Output "Evidence: $testRoot"
@@ -176,5 +196,6 @@ finally {
         try { Uninstall @() } catch { Write-Warning $_ }
     }
     Remove-ItemProperty -Path $runKey -Name $runValue -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path $pathKey -Name $pathValue -ErrorAction SilentlyContinue
     Pop-Location
 }

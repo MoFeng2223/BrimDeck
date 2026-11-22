@@ -30,12 +30,12 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     private ScrollViewer _scroll = null!;
     private static string[] _pages => [Loc.T("常规", "General"), Loc.T("收起外观", "Collapsed view"), Loc.T("展开外观", "Expanded view"),
         Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck"), Loc.T("面板主题", "Panel theme"), Loc.T("显示与读数", "Display and readings"), Loc.T("增强传感器", "Enhanced sensors"), Loc.T("快捷键", "Shortcuts"), Loc.T("显示与设备", "Display and devices"),
-        Loc.T("剪贴板", "Clipboard"), Loc.T("文件中转", "File transfer"), Loc.T("快捷操作", "Quick actions"), Loc.T("显示器与配置", "Displays and profiles"), Loc.T("页面布局", "Page layout"), Loc.T("剪贴板同步", "Clipboard sync"), Loc.T("灵动提示", "Live notices")];
+        Loc.T("剪贴板", "Clipboard"), Loc.T("文件中转", "File transfer"), Loc.T("快捷操作", "Quick actions"), Loc.T("显示器与配置", "Displays and profiles"), Loc.T("页面布局", "Page layout"), Loc.T("剪贴板同步", "Clipboard sync"), Loc.T("提示方式", "How notices show"), Loc.T("应用", "Apps")];
     // The order of the pages in the navigation; the theme page (ThemePage) and the shortcuts (HotkeysPage) are listed with the
     // basic pages, and the system monitor's page (MonitorSettingsPage) has its own group after music, then the clipboard's
-    // pages (the layout first), the devices' page and the notices page (NoticesSettingsPage), before About. The profiles page
+    // pages (the layout first), the devices' page and the two notices pages (NoticesSettingsPage, NoticeAppsSettingsPage), before About. The profiles page
     // (ProfilesPage) closes the basic pages.
-    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, HotkeysPage, ProfilesPage, 3, 4, 5, 6, MusicGesturesPage, MonitorSettingsPage, SensorsPage, ShelfLayoutSettingsPage, ClipboardSettingsPage, TransferSettingsPage, ClipboardSyncSettingsPage, DevicesSettingsPage, NoticesSettingsPage, 7];
+    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, HotkeysPage, ProfilesPage, 3, 4, 5, 6, MusicGesturesPage, MonitorSettingsPage, SensorsPage, ShelfLayoutSettingsPage, ClipboardSettingsPage, TransferSettingsPage, ClipboardSyncSettingsPage, DevicesSettingsPage, NoticesSettingsPage, NoticeAppsSettingsPage, 7];
     private int _page;
     private bool _preview;
     private StackPanel? _appRows;
@@ -355,13 +355,13 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         }
         // The About page is titled by the wordmark itself, so the name does not appear twice.
         var head = new DockPanel { Margin = new Thickness(0,0,0,page == 7 ? 10 : 20) };
-        if (page is < 4 or 5 or 6 or ThemePage or MonitorSettingsPage or HotkeysPage or DevicesSettingsPage or ClipboardSettingsPage or ShelfLayoutSettingsPage or MusicGesturesPage or NoticesSettingsPage)
+        if (page is < 4 or 5 or 6 or ThemePage or MonitorSettingsPage or HotkeysPage or DevicesSettingsPage or ClipboardSettingsPage or ShelfLayoutSettingsPage or MusicGesturesPage or NoticesSettingsPage or NoticeAppsSettingsPage)
         {
             // Resets every setting on the page, so it asks first (SW-09, S-03); it keeps the look of the other "restore defaults" links.
             var reset=ActionButton(Loc.T("恢复默认", "Restore defaults"),()=>{ if(Confirm(Loc.T("恢复默认", "Restore defaults"),ResetConfirmText(page),Loc.T("恢复默认", "Restore defaults")))ResetPage(); }); reset.FontSize=11; DockPanel.SetDock(reset,Dock.Right); head.Children.Add(reset);
         }
         head.Children.Add(page == 7 ? Wordmark(28) : TextLine(_pages[page],24,TextPrimary,FontWeights.SemiBold)); _content.Children.Add(head);
-        switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; case ThemePage: ThemesPage(); break; case MonitorSettingsPage: MonitorSettings(); break; case SensorsPage: SensorsSettings(); break; case HotkeysPage: HotkeysSettings(); break; case DevicesSettingsPage: DevicesSettings(); break; case ClipboardSettingsPage: ClipboardSettings(); break; case TransferSettingsPage: TransferSettings(); break; case ClipboardSyncSettingsPage: ClipboardSyncSettings(); break; case ShelfLayoutSettingsPage: ShelfLayoutSettings(); break; case MusicGesturesPage: MusicGesturesSettings(); break; case ProfilesPage: ProfilesSettings(); break; case NoticesSettingsPage: NoticesPage(); break; }
+        switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; case ThemePage: ThemesPage(); break; case MonitorSettingsPage: MonitorSettings(); break; case SensorsPage: SensorsSettings(); break; case HotkeysPage: HotkeysSettings(); break; case DevicesSettingsPage: DevicesSettings(); break; case ClipboardSettingsPage: ClipboardSettings(); break; case TransferSettingsPage: TransferSettings(); break; case ClipboardSyncSettingsPage: ClipboardSyncSettings(); break; case ShelfLayoutSettingsPage: ShelfLayoutSettings(); break; case MusicGesturesPage: MusicGesturesSettings(); break; case ProfilesPage: ProfilesSettings(); break; case NoticesSettingsPage: NoticesPage(); break; case NoticeAppsSettingsPage: NoticeAppsPage(); break; }
         if (_content.Children[^1] is Border lastGroup) lastGroup.Margin = new Thickness(lastGroup.Margin.Left, lastGroup.Margin.Top, lastGroup.Margin.Right, 0);
         // Apply the offset before the frame is drawn, so the rebuilt page never shows its top for a frame.
         if (keep > 0) { _scroll.UpdateLayout(); _scroll.ScrollToVerticalOffset(keep); _scroll.UpdateLayout(); }
@@ -391,6 +391,8 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         TransferSettingsPage => "M 1.5,9 L 3.5,3 H 12.5 L 14.5,9 V 13 A 1,1 0 0 1 13.5,14 H 2.5 A 1,1 0 0 1 1.5,13 Z M 1.5,9 H 5.5 L 6.5,10.5 H 9.5 L 10.5,9 H 14.5",
         ThemePage => "M 8,1 C 4,1 1,4 1,8 C 1,12 4,15 8,15 C 9.4,15 9.6,13.6 8.8,12.8 C 8,12 8.6,10.5 10,10.5 H 12 C 13.7,10.5 15,9.2 15,7.5 C 15,4 12,1 8,1 Z M 4.6,8 V 8.1 M 6,4.8 V 4.9 M 9.6,4.4 V 4.5 M 12,6.8 V 6.9",
         NoticesSettingsPage => "M 8,1.5 C 5.6,1.5 4,3.4 4,5.7 V 8.4 L 2.8,10.6 H 13.2 L 12,8.4 V 5.7 C 12,3.4 10.4,1.5 8,1.5 Z M 6.3,12.6 A 1.7,1.7 0 0 0 9.7,12.6",
+        // Three squares and a plus: the listed applications and one to add.
+        NoticeAppsSettingsPage => "M 1.5,1.5 H 6.5 V 6.5 H 1.5 Z M 1.5,9.5 H 6.5 V 14.5 H 1.5 Z M 9.5,9.5 H 14.5 V 14.5 H 9.5 Z M 12,1 V 7 M 9,4 H 15",
         5 => "M 6,12.5 V 3 L 14,1.5 V 11 M 6,12.5 A 2,2 0 1 1 2,12.5 A 2,2 0 1 1 6,12.5 M 14,11 A 2,2 0 1 1 10,11 A 2,2 0 1 1 14,11",
         _ => "M 8,1 A 7,7 0 1 1 7.99,1 M 8,7 V 12 M 8,4 V 4.2"
     },16,16,color);
@@ -501,6 +503,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         }
         _styleOptions=new Grid();
         _content.Children.Add(styles); _content.Children.Add(_styleOptions); ShowStyleOptions(S.Style,null);
+        CompactNoticeSection();
     }
     // One row per expanded page: its switch at the right, and its sizes under the row while the row is open, set in
     // from the row's title. A row opens and closes only by its own arrow or a click on it, whether or not its page is shown.
@@ -540,11 +543,10 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         // The rows are in the order of the page switch; dragging one by its handle moves its page there at once.
         var pages = new StackPanel();
         _pageRows.Clear();
-        // The notice history has a row only while live notices are on.
-        foreach (var page in S.PageOrder.Where(page => page != DeckPage.Notices || S.NoticesEnabled))
+        foreach (var page in S.PageOrder)
             pages.Children.Add(page switch
             {
-                DeckPage.Notices => SizeRow(Loc.T("显示通知历史", "Show notice history"), Loc.T("通知历史", "notice history"), page, S.NoticesPage, value => { Change(s => s.NoticesPage = value); FillStarts(); }, Collect(NoticeSizeControls), pages, FillStarts),
+                DeckPage.Notices => SizeRow(Loc.T("显示灵动通知", "Show live notices"), Loc.T("灵动通知", "live notices"), page, S.NoticesEnabled && S.NoticesPage, value => { TurnNotices(false, value); FillStarts(); }, Collect(NoticeSizeControls), pages, FillStarts),
                 DeckPage.Music => SizeRow(Loc.T("显示音乐", "Show music"), Loc.T("音乐", "music"), page, S.MusicPage, value => { Change(s => s.MusicPage = value); FillStarts(); }, Collect(MusicSizeControls), pages, FillStarts),
                 DeckPage.Monitor => SizeRow(Loc.T("显示系统监控", "Show system monitor"), Loc.T("系统监控", "system monitor"), page, S.MonitorPage, value => { Change(s => s.MonitorPage = value); FillStarts(); }, Collect(MonitorSizeControls), pages, FillStarts),
                 DeckPage.Clipboard => SizeRow(Loc.T("显示剪贴板与文件中转", "Show clipboard and file transfer"), Loc.T("剪贴板与文件中转", "clipboard and file transfer"), page, S.ClipboardPage, value => { Change(s => s.ClipboardPage = value); FillStarts(); }, Collect(ShelfSizeControls), pages, FillStarts),
@@ -648,7 +650,8 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     // What the "restore defaults" confirmation says. The quota page also puts the application list back (ResetPage, case 3), which removes the applications
     // the user added and their quota sources, the largest loss of any page, so it says so.
     private string ResetConfirmText(int page) => Loc.T($"将把“{_pages[page]}”页的全部设置恢复为默认值。", $"This puts every setting on the {_pages[page]} page back to its default.")
-        + (page == 3 ? Loc.T("\n\n应用列表也会换回默认：你添加的应用、各应用的额度来源与自定义设置都会消失。", "\n\nThe application list also goes back to the default: the applications you added, and each one's quota source and custom settings, are removed.") : "");
+        + (page == 3 ? Loc.T("\n\n应用列表也会换回默认：你添加的应用、各应用的额度来源与自定义设置都会消失。", "\n\nThe application list also goes back to the default: the applications you added, and each one's quota source and custom settings, are removed.") : "")
+        + (page == NoticeAppsSettingsPage ? Loc.T("\n\n列表换回 QQ、微信和时钟：你添加的应用、各应用的等级、横幅开关与单独设置的样子都会消失。", "\n\nThe list goes back to QQ, WeChat and Clock: the applications you added, and each one's level, banner switch and own looks, are removed.") : "");
     private void ResetPage()
     {
         var defaults=new DeckSettings();
@@ -664,8 +667,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
             {
                 case 0:s.LaunchAtStartup=false;s.ShowTrayIcon=defaults.ShowTrayIcon;s.MemoryMode=defaults.MemoryMode;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.ClickToExpand=defaults.ClickToExpand;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.AlwaysOnTop=defaults.AlwaysOnTop;s.ForceTopmost=defaults.ForceTopmost;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.Occupied=defaults.Occupied;s.FullscreenRules=[];s.PanelScale=defaults.PanelScale;s.SurfaceTransparency=defaults.SurfaceTransparency;s.UiFont=defaults.UiFont;s.SettingsFollowsFont=defaults.SettingsFollowsFont;
                     s.ClickThrough=defaults.ClickThrough;s.ClickThroughPanel=defaults.ClickThroughPanel;s.ClickThroughKeyboard=defaults.ClickThroughKeyboard;s.WindowCapture=defaults.WindowCapture;break;
-                // The notices shortcut is on the notices page and restored there.
-                case HotkeysPage:foreach(var kind in Enum.GetValues<HotkeyKind>().Where(kind=>kind!=HotkeyKind.Notices))s.SetHotkey(kind,defaults.Hotkey(kind));break;
+                case HotkeysPage:foreach(var kind in Enum.GetValues<HotkeyKind>())s.SetHotkey(kind,defaults.Hotkey(kind));break;
                 case 1:s.Style=defaults.Style;s.LineOpens=defaults.LineOpens;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;
                     s.NotchEqualizer=defaults.NotchEqualizer;s.CapsuleEqualizer=defaults.CapsuleEqualizer;s.NotchClock=defaults.NotchClock;s.CapsuleClock=defaults.CapsuleClock;s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=[.. PanelTheme.Current.ClockGradients[0].Stops];s.Clock24Hour=defaults.Clock24Hour;s.ClockSeconds=defaults.ClockSeconds;CopyCollapsedSize(s,defaults);s.GripDoubleClick=defaults.GripDoubleClick;
                     s.NotchMonitor=defaults.NotchMonitor;s.CapsuleMonitor=defaults.CapsuleMonitor;s.NotchDevices=defaults.NotchDevices;s.CapsuleDevices=defaults.CapsuleDevices;s.NotchOrder=defaults.NotchOrder;s.CapsuleOrder=defaults.CapsuleOrder;s.NotchTransfer=defaults.NotchTransfer;s.CapsuleTransfer=defaults.CapsuleTransfer;
@@ -697,10 +699,11 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                 case ThemePage:{ChooseTheme(s,defaults.PanelTheme);var palette=PanelThemes.Resolve(PanelTheme.Find(defaults.PanelTheme));
                     s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=[.. palette.ClockGradients[0].Stops];
                     PanelThemes.ApplyMatching(palette,s);break;}
-                // The switch itself, the chosen sources, the rules per application and where notices are kept stay as they are.
-                case NoticesSettingsPage:s.NoticeDuration=defaults.NoticeDuration;s.NoticeHighDuration=defaults.NoticeHighDuration;s.NoticeScreen=defaults.NoticeScreen;s.NoticeDefaultLevel=defaults.NoticeDefaultLevel;s.NoticeAlign=defaults.NoticeAlign;s.NoticeClick=defaults.NoticeClick;
-                    s.NoticePrivacy=defaults.NoticePrivacy;s.NoticeCodes=defaults.NoticeCodes;s.NoticeRespectFocus=defaults.NoticeRespectFocus;s.NoticesPausedUntil=null;s.NoticeHistory=defaults.NoticeHistory;s.NoticeHistoryHours=defaults.NoticeHistoryHours;
-                    s.NoticeHotkey=defaults.NoticeHotkey;s.NoticesPage=defaults.NoticesPage;s.NoticesWidth=defaults.NoticesWidth;s.NoticesHeight=defaults.NoticesHeight;break;
+                // The two switches (collapsed and expanded view) and the applications (the other page) stay as they are.
+                case NoticesSettingsPage:s.NoticeScreen=defaults.NoticeScreen;s.NoticeDefaultLevel=defaults.NoticeDefaultLevel;s.NoticeStyles=new();
+                    s.NoticeCodes=defaults.NoticeCodes;s.NoticeRespectFocus=defaults.NoticeRespectFocus;s.NoticesPausedUntil=null;s.NoticeHistory=defaults.NoticeHistory;s.NoticeHistoryHours=defaults.NoticeHistoryHours;break;
+                // The list goes back to the applications a new user has; the WSL distributions stay, as they are set up in them.
+                case NoticeAppsSettingsPage:s.NoticeApps=[.. DeckSettings.DefaultNoticeApps()];s.NoticeAppsListed=true;break;
             }
         });
         if(_page==0)RebuildTheme();else ShowPage(_page);

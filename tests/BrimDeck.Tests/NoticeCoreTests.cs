@@ -14,7 +14,6 @@ internal static class NoticeCoreTests
         Coordinator(check);
         History(root, check);
         Routing(check);
-        ClickTarget(check);
         Intake(check);
         Pages(check);
         SettingsValues(root, check);
@@ -54,18 +53,19 @@ internal static class NoticeCoreTests
         check("The same replace key from another application is a different notice", hub.Receive(Input("t4", app: "cli:other", replace: "build"), T0).Receipt == NoticeReceipt.Accepted);
         check("The same title and body are not taken for duplicates", hub.Receive(Input("x1"), T0).Receipt == NoticeReceipt.Accepted && hub.Receive(Input("x2"), T0).Receipt == NoticeReceipt.Accepted);
 
-        rules["windows:Muted"] = new NoticeAppRule { Key = "windows:Muted", Muted = true };
+        rules["windows:Muted"] = new NoticeAppRule { Key = "windows:Muted", Level = NoticeLevel.Silent };
         rules["windows:Off"] = new NoticeAppRule { Key = "windows:Off", Enabled = false };
-        rules["windows:Vip"] = new NoticeAppRule { Key = "windows:Vip", Priority = NoticePriority.High };
         var muted = hub.Receive(Input("m", app: "windows:Muted"), T0);
-        check("A muted application's notice is kept but not shown", muted.Receipt == NoticeReceipt.Accepted && !muted.Present);
+        check("An application set to list only: its notice is kept but not shown", muted.Receipt == NoticeReceipt.Accepted && !muted.Present);
         int before = hub.Notices.Count;
         check("A disabled application's notice is filtered out entirely", hub.Receive(Input("o", app: "windows:Off"), T0).Receipt == NoticeReceipt.Filtered && hub.Notices.Count == before);
-        check("Only the user's rule makes a notice high priority", hub.Receive(Input("v", app: "windows:Vip"), T0).Notice!.Priority == NoticePriority.High
-            && hub.Receive(Input("h", hint: NoticePriority.High), T0).Notice!.Priority == NoticePriority.Normal);
+        check("A sender cannot raise its own notice's priority", hub.Receive(Input("h", hint: NoticePriority.High), T0).Notice!.Priority == NoticePriority.Normal);
         var low = hub.Receive(Input("l", hint: NoticePriority.Low), T0);
         check("A low priority hint keeps the notice quiet", low.Notice!.Priority == NoticePriority.Low && !low.Present);
-        check("A high priority rule ignores a low hint", NoticeHub.EffectivePriority(rules["windows:Vip"], NoticePriority.Low) == NoticePriority.High);
+        check("An alert is high priority unless its sender lowered it", NoticeHub.AlertPriority(NoticePriority.Normal) == NoticePriority.High && NoticeHub.AlertPriority(NoticePriority.Low) == NoticePriority.Low);
+        var listed = new NoticeHub(key => null, key => key != "windows:Unlisted");
+        check("A source that is not received is filtered and still remembered, for the settings to offer it",
+            listed.Receive(Input("u", app: "windows:Unlisted"), T0).Receipt == NoticeReceipt.Filtered && listed.Notices.Count == 0 && listed.KnownApps.Any(app => app.Key == "windows:Unlisted"));
 
         hub.SourceRemoved("a");
         var gone = hub.FindInstance("a")!;
@@ -428,22 +428,6 @@ internal static class NoticeCoreTests
         history.Delete();
     }
 
-    private static void ClickTarget(Action<string, bool> check)
-    {
-        static Notice Made(NoticeOrigin origin, string appId, NoticeCapabilities caps) => new() { Origin = origin, AppId = appId, Capabilities = caps };
-        var windows = Made(NoticeOrigin.Windows, "Chat.App!App", NoticeCapabilities.OpenApp);
-        check("Click: by default a notice on the island opens the notices page", new DeckSettings().NoticeClick == NoticeClickTarget.Page
-            && NoticeClick.Decide(windows, new DeckSettings().NoticeClick) == NoticeClickAction.OpenPage);
-        check("Click: set to the source app, a Windows notice with an application opens it", NoticeClick.Decide(windows, NoticeClickTarget.SourceApp) == NoticeClickAction.OpenApp);
-        check("Click: a Windows notice without an application id opens the page", NoticeClick.Decide(Made(NoticeOrigin.Windows, "", NoticeCapabilities.OpenApp), NoticeClickTarget.SourceApp) == NoticeClickAction.OpenPage);
-        check("Click: a Windows notice that cannot be opened opens the page", NoticeClick.Decide(Made(NoticeOrigin.Windows, "Chat.App!App", NoticeCapabilities.None), NoticeClickTarget.SourceApp) == NoticeClickAction.OpenPage);
-        check("Click: a WSL notice opens the page, even with an open capability or actions", NoticeClick.Decide(Made(NoticeOrigin.Wsl, "", NoticeCapabilities.Actions), NoticeClickTarget.SourceApp) == NoticeClickAction.OpenPage
-            && NoticeClick.Decide(Made(NoticeOrigin.Wsl, "x", NoticeCapabilities.OpenApp | NoticeCapabilities.Actions), NoticeClickTarget.SourceApp) == NoticeClickAction.OpenPage);
-        check("Click: a brim-notify notice opens the page", NoticeClick.Decide(Made(NoticeOrigin.Cli, "", NoticeCapabilities.None), NoticeClickTarget.SourceApp) == NoticeClickAction.OpenPage);
-        check("Click: no notice opens the page", NoticeClick.Decide(null, NoticeClickTarget.SourceApp) == NoticeClickAction.OpenPage);
-        check("Click: with the page chosen, every kind opens the page", NoticeClick.Decide(windows, NoticeClickTarget.Page) == NoticeClickAction.OpenPage);
-    }
-
     private static void Routing(Action<string, bool> check)
     {
         NoticeRouting.Candidate[] panels = [new("main", 1, true, true), new("second", 2, false, true), new("hidden", 3, false, false)];
@@ -491,36 +475,44 @@ internal static class NoticeCoreTests
     private static void SettingsValues(string root, Action<string, bool> check)
     {
         var defaults = new DeckSettings();
-        check("Notices are off by default, with no WSL distribution", !defaults.NoticesEnabled && defaults.NoticeWslDistros.Count == 0 && defaults.NoticeWindowsSource
-            && defaults.NoticeHistory && defaults.NoticeHistoryHours == 24 && defaults.NoticeHotkey == "" && defaults.NoticeDuration == 6 && defaults.NoticeHighDuration == 8);
+        defaults.Normalize();
+        check("Notices are off by default, with no WSL distribution, flashing, and QQ, WeChat and the Clock listed", !defaults.NoticesEnabled && defaults.NoticeWslDistros.Count == 0
+            && defaults.NoticeHistory && defaults.NoticeHistoryHours == 24 && defaults.NoticeHotkey == "" && defaults.NoticeDefaultLevel == NoticeLevel.Glow
+            && defaults.NoticeStyles.Text.Seconds == 6 && defaults.NoticeStyles.Text.Slot is null && !defaults.NoticeStyles.Flash.Liquid && defaults.NoticeStyles.Stay.Liquid && defaults.NoticeStyles.Stay.Color == ""
+            && defaults.NoticeApps.Select(rule => rule.Key).SequenceEqual(["windows:QQ", "flash:wechat", "windows:Microsoft.WindowsAlarms_8wekyb3d8bbwe!App"]) && defaults.NoticeAppsListed);
+        check("Only listed Windows applications are received; other sources unless switched off", defaults.NoticeReceives("windows:QQ") && !defaults.NoticeReceives("windows:Other")
+            && defaults.NoticeReceives("cli:make") && defaults.NoticeReceives("wsl:Ubuntu:app") && !defaults.NoticeReceives("flash:wecom"));
         var odd = new DeckSettings
         {
-            NoticeScreen = (NoticeScreen)42, NoticeDuration = 0, NoticeHistoryHours = 100_000, NoticesWidth = double.PositiveInfinity,
-            NoticeWslDistros = ["Ubuntu", " ubuntu ", "", "Debian", @"..\..\server\share", "a b"], NoticeHistoryFolder = @"relative\notices",
-            NoticeApps = [new() { Key = "a", AccentColor = "ff0000", Priority = (NoticePriority)9, Privacy = (NoticePrivacy)9 }, new() { Key = "a" }, new() { Key = " " }]
+            NoticeScreen = (NoticeScreen)42, NoticeDefaultLevel = NoticeLevel.Lively, NoticeHistoryHours = 100_000, NoticesWidth = double.PositiveInfinity, NoticeAppsListed = true,
+            NoticeStyles = new() { Text = new() { Seconds = 0, Slot = (CompactPart)42 }, Flash = new() { Color = "nonsense" }, Stay = new() { Color = "ff0000" } },
+            NoticeWslDistros = ["Ubuntu", " ubuntu ", "", "Debian", @"..\..\server\share", "a b"],
+            NoticeApps = [new() { Key = "a", AccentColor = "ff0000", Level = NoticeLevel.Lively }, new() { Key = "a" }, new() { Key = " " }, new() { Key = "windows:Off", Enabled = false, Level = (NoticeLevel)9 }]
         };
         odd.Normalize();
-        check("Notice settings are normalized", odd.NoticeScreen == NoticeScreen.Foreground && odd.NoticeDuration == 2 && odd.NoticeHistoryHours == 168
-            && odd.NoticesWidth == 460 && odd.NoticeWslDistros.SequenceEqual(["Ubuntu", "Debian"]) && odd.NoticeHistoryFolder == "" && odd.NoticeApps.Count == 1 && odd.NoticeApps[0].AccentColor == "#FF0000"
-            && odd.NoticeApps[0].Priority == NoticePriority.Normal && odd.NoticeApps[0].Privacy is null);
-        var strange = new DeckSettings { NoticeClick = (NoticeClickTarget)7 };
-        strange.Normalize();
-        check("An unknown click choice goes back to the notices page", strange.NoticeClick == NoticeClickTarget.Page);
+        check("Notice settings are normalized", odd.NoticeScreen == NoticeScreen.Foreground && odd.NoticeDefaultLevel == NoticeLevel.Glow && odd.NoticeStyles.Text.Seconds == 2
+            && odd.NoticeStyles.Text.Slot is null && odd.NoticeStyles.Flash.Color == "" && odd.NoticeStyles.Stay.Color == "#FF0000" && odd.NoticeHistoryHours == 168 && odd.NoticesWidth == 460
+            && odd.NoticeWslDistros.SequenceEqual(["Ubuntu", "Debian"]) && odd.NoticeApps.Count == 2 && odd.NoticeApps[0].AccentColor == "#FF0000" && odd.NoticeApps[0].Level == NoticeLevel.Glow
+            && odd.NoticeApps[1].Enabled && odd.NoticeApps[1].Level == NoticeLevel.Auto);
+        var older = new DeckSettings { NoticeApps = [new() { Key = "windows:QQ", Level = NoticeLevel.Plain }, new() { Key = "windows:Mail" }] };
+        older.Normalize();
+        check("A list saved before the default applications existed gains them once, keeping its own rules", older.NoticeApps.Count == 4 && older.NoticeRule("windows:QQ")!.Level == NoticeLevel.Plain && older.NoticeAppsListed);
+        older.NoticeApps.RemoveAll(rule => rule.Key == "windows:QQ");
+        older.Normalize();
+        check("A default application the user removed stays removed", older.NoticeRule("windows:QQ") is null);
         var copy = odd.Copy();
-        copy.NoticeApps[0].Muted = true; copy.NoticeWslDistros.Add("Arch");
-        check("Copies do not share notice rules or distributions", !odd.NoticeApps[0].Muted && odd.NoticeWslDistros.Count == 2);
+        copy.NoticeApps[0].Styles = new(); copy.NoticeStyles.Text.Icon = false; copy.NoticeWslDistros.Add("Arch");
+        check("Copies do not share notice rules, looks or distributions", odd.NoticeApps[0].Styles is null && odd.NoticeStyles.Text.Icon && odd.NoticeWslDistros.Count == 2);
         var store = new SettingsStore(Path.Combine(root, "notice-settings"), "1.2.0");
-        var saved = new DeckSettings { NoticesEnabled = true, NoticePrivacy = NoticePrivacy.TitleOnly, LastPage = DeckPage.Notices, NoticesPausedUntil = T0, NoticeApps = [new() { Key = "windows:X", Name = "X", Priority = NoticePriority.High }] };
+        var saved = new DeckSettings
+        {
+            NoticesEnabled = true, LastPage = DeckPage.Notices, NoticesPausedUntil = T0,
+            NoticeApps = [new() { Key = "windows:X", Name = "X", Level = NoticeLevel.Persistent, HideBanner = true, Styles = new() { Text = new() { Slot = CompactPart.Music } } }]
+        };
         store.Save(saved);
         var json = File.ReadAllText(store.FilePath);
         var back = store.Load();
-        var chosen = new DeckSettings { NoticeClick = NoticeClickTarget.SourceApp };
-        store.Save(chosen);
-        check("The click choice survives saving", store.Load().NoticeClick == NoticeClickTarget.SourceApp);
-        File.WriteAllText(store.FilePath, "{\"NoticesEnabled\":true}");
-        check("Settings saved before the click choice existed open the notices page", store.Load().NoticeClick == NoticeClickTarget.Page);
-        store.Save(saved);
-        check("Notice settings survive saving", back.NoticesEnabled && back.NoticePrivacy == NoticePrivacy.TitleOnly && back.LastPage == DeckPage.Notices && back.NoticesPausedUntil == T0
-            && back.NoticeRule("windows:X")?.Priority == NoticePriority.High && JsonDocument.Parse(json).RootElement.GetProperty("LastPage").GetInt32() == 5);
+        check("Notice settings survive saving", back.NoticesEnabled && back.LastPage == DeckPage.Notices && back.NoticesPausedUntil == T0
+            && back.NoticeRule("windows:X") is { Level: NoticeLevel.Persistent, HideBanner: true, Styles.Text.Slot: CompactPart.Music } && JsonDocument.Parse(json).RootElement.GetProperty("LastPage").GetInt32() == 5);
     }
 }

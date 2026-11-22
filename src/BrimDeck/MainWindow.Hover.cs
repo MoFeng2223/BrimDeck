@@ -116,6 +116,33 @@ public partial class MainWindow
         return ([.. parts.Where(part => part.Part == chosen).Select(part => part.Elements)], chosen);
     }
 
+    // Which collapsed part an element of the row or the column shows (CompactPart, or "cover"), for a notice that takes a part's place
+    // (CompactPartBounds); HoverPart only says what the part opens.
+    private static readonly DependencyProperty CompactPartOfProperty = DependencyProperty.RegisterAttached("CompactPartOf", typeof(object), typeof(MainWindow));
+
+    // Where a collapsed part is on the island now, in DIPs from the monitor's top-left corner (as Collapsed.Surface): in the row, its
+    // stretch of the island from top to bottom; in the column, its lines. Null when the part is not shown, or the island has no
+    // parts (the indicator, an open panel, a quota notice in the row's place).
+    internal Rect? CompactPartBounds(CompactPart part)
+    {
+        if (_expanded || Collapsed.Style == CompactStyle.Line || !CompactRings.IsVisible || PresentationSource.FromVisual(Stage) is null) return null;
+        var surface = new Rect(Collapsed.Surface.X, Collapsed.Surface.Y, Math.Max(0, Collapsed.Surface.Width), Math.Max(0, Collapsed.Surface.Height));
+        Rect found = Rect.Empty;
+        foreach (var element in HoverPartElements(CompactRings))
+        {
+            if (!Equals(element.GetValue(CompactPartOfProperty), part) || !element.IsVisible || element.ActualWidth <= 0 || element.ActualHeight <= 0) continue;
+            Rect box;
+            try { box = element.TransformToAncestor(Stage).TransformBounds(new Rect(0, 0, element.ActualWidth, element.ActualHeight)); }
+            catch (InvalidOperationException) { continue; }
+            box.Offset(_windowOffset, 0);
+            if (VisualTreeHelper.GetParent(element) is Grid row && ReferenceEquals(VisualTreeHelper.GetParent(row), CompactRings)) box = new Rect(box.X, surface.Y, box.Width, surface.Height);
+            found.Union(box);
+        }
+        if (found.IsEmpty) return null;
+        found.Intersect(surface);
+        return found.IsEmpty || found.Width < 1 ? null : found;
+    }
+
     // The tagged parts of the collapsed content, however deep; a tagged part's own children are not parts.
     private static IEnumerable<FrameworkElement> HoverPartElements(DependencyObject root)
     {

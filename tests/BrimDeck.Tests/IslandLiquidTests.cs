@@ -57,6 +57,36 @@ internal static class IslandLiquidTests
             check($"Island capsule: on a capsule {width} wide some ripples reach the middles of its top and bottom", peakTop > 1 && peakBottom > 1);
         }
         check("Island capsule: at its end it is still again", outline.All(p => capsule.EdgeOut(p.S, capsule.Total) < .01));
+        // A long capsule: long swells run from its ends to its middle, so its middle moves while the backlight flashes and the whole
+        // comes to rest as soon as the design's size does, instead of waiting for ripples handed on from its ends.
+        var longer = new IslandLiquid(IslandForm.Capsule, 1340, 32);
+        var middle = longer.Outline.MinBy(p => Math.Abs(p.S - longer.OutlineLength / 2));
+        double early = 0;
+        for (double t = 0; t <= .75; t += 1 / 120d) early = Math.Max(early, longer.EdgeOut(middle.S, t));
+        check("Island capsule: the middle of a capsule 1340 wide moves within the backlight's 0.75 s", early > 1);
+        check("Island capsule: a capsule 1340 wide plays for 1.75 s, as the design's size does", Math.Abs(longer.Total - 1.75) < 1e-9 && longer.Outline.All(p => longer.EdgeOut(p.S, longer.Total) < .01));
+        // Between its ends and its middle the long capsule's edge is smooth: no more than two swells show there at a time.
+        int crests = 0;
+        var edge = longer.Outline.Where(p => p.Y == 32 && p.X > 420 && p.X < 920).OrderBy(p => p.X).Select(p => longer.EdgeOut(p.S, .6)).ToList();
+        for (int i = 1; i + 1 < edge.Count; i++) if (edge[i] > .5 && edge[i] > edge[i - 1] && edge[i] >= edge[i + 1]) crests++;
+        check("Island capsule: the middle stretch of a capsule 1340 wide carries long swells, not many small ripples", crests is >= 1 and <= 3);
+        bool everywhere = true;
+        for (double x = 40; x <= 1300; x += 60)
+        {
+            var at = longer.Outline.Where(p => p.Y == 32).MinBy(p => Math.Abs(p.X - x));
+            double peak = 0;
+            for (double t = 0; t <= longer.Total; t += 1 / 120d) peak = Math.Max(peak, longer.EdgeOut(at.S, t));
+            everywhere &= peak > 1;
+        }
+        check("Island capsule: every stretch of a capsule 1340 wide moves", everywhere);
+        var outs = new double[longer.Outline.Count];
+        bool same = true;
+        foreach (double t in new[] { .1, .42, .9, 1.6 })
+        {
+            longer.EdgeOuts(t, outs);
+            for (int i = 0; i < outs.Length; i++) same &= Math.Abs(outs[i] - longer.EdgeOut(longer.Outline[i].S, t)) < 1e-9;
+        }
+        check("Island capsule: the outline's offsets taken all at once are those taken one by one", same);
         var mirrored = new IslandLiquid(IslandForm.Capsule, 376, 32);
         bool symmetric = true;
         for (double t = 0; t <= mirrored.Total; t += 1 / 60d)
@@ -101,6 +131,15 @@ internal static class IslandLiquidTests
             for (double t = 0; t <= wide.Total; t += 1 / 120d) peak = Math.Max(peak, wide.EdgeOut(middle.S, t));
             check($"Island notch: on a notch {width} wide some ripples reach the middle of the bottom", peak > 1);
         }
+        var longer = new IslandLiquid(IslandForm.Notch, 1340, 32);
+        var outs = new double[longer.Outline.Count];
+        bool same = true;
+        foreach (double t in new[] { .1, .42, .9, 1.6 })
+        {
+            longer.EdgeOuts(t, outs);
+            for (int i = 0; i < outs.Length; i++) same &= Math.Abs(outs[i] - longer.EdgeOut(longer.Outline[i].S, t)) < 1e-9;
+        }
+        check("Island notch: a notch 1340 wide plays for 1.75 s, and its offsets taken all at once are those taken one by one", Math.Abs(longer.Total - 1.75) < 1e-9 && same);
         var still = new IslandLiquid(IslandForm.Notch, 238, 32, liquid: false);
         check("Island notch: without the liquid effect its edge keeps still", outline.All(p => still.EdgeOut(p.S, .3) == 0));
     }

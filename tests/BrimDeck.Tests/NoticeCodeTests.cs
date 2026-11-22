@@ -174,12 +174,11 @@ internal static class NoticeCodeTests
         check("A notice read back from the history has no code left to copy", NoticeCodes.Words(saved, true) is { HasCode: false });
 
         var window = Note("银行", "您的验证码是：482913");
-        check("The island line hides the code at every level that shows words",
-            NoticeText.Presented(window, NoticePrivacy.Full, CodeMask.Dots).Summary == "您的验证码是：••••••"
-            && NoticeText.Presented(window, NoticePrivacy.Full).Summary == "您的验证码是：482913"
-            && NoticeText.Presented(Note("验证码 482913", ""), NoticePrivacy.TitleOnly, CodeMask.Dots).Title == "验证码 ••••••"
-            && NoticeText.Presented(window, NoticePrivacy.AppOnly, CodeMask.Dots) == NoticeText.Presented(window, NoticePrivacy.AppOnly));
-        check("The spoken line has no dots", !NoticeText.Presented(window, NoticePrivacy.Full, CodeMask.Spoken).Summary.Contains('•') && !NoticeText.Presented(window, NoticePrivacy.Full, CodeMask.Spoken).Summary.Contains("482913"));
+        check("The island line hides the code in the title and the summary",
+            NoticeText.Presented(window, CodeMask.Dots).Summary == "您的验证码是：••••••"
+            && NoticeText.Presented(window).Summary == "您的验证码是：482913"
+            && NoticeText.Presented(Note("验证码 482913", ""), CodeMask.Dots).Title == "验证码 ••••••");
+        check("The spoken line has no dots", !NoticeText.Presented(window, CodeMask.Spoken).Summary.Contains('•') && !NoticeText.Presented(window, CodeMask.Spoken).Summary.Contains("482913"));
     }
 
     private static void Adversarial(Action<string, bool> check)

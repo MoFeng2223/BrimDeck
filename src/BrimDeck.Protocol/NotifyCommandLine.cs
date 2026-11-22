@@ -5,7 +5,10 @@ namespace BrimDeck.Protocol;
 public enum NotifyCommandKind { Send, Run, Status, Stdio, Help, Version, Error }
 
 // A parsed brim-notify command line. Send carries the notice; Run carries the notice options and the program to run.
-public sealed record NotifyCommand(NotifyCommandKind Kind, NoticeMessage? Message = null, IReadOnlyList<string>? Program = null, string? Error = null);
+// JsonInput: a file ("-" for standard input) holding a whole message, which the options given then change. JsonOutput: the
+// answer is written as JSON (status).
+public sealed record NotifyCommand(NotifyCommandKind Kind, NoticeMessage? Message = null, IReadOnlyList<string>? Program = null, string? Error = null,
+    string? JsonInput = null, bool JsonOutput = false);
 
 // The command line shared by the Windows sender (BrimDeck.Notify.exe) and the WSL agent's brim-notify.
 public static class NotifyCommandLine
@@ -45,7 +48,9 @@ public static class NotifyCommandLine
 
     private static readonly HashSet<string> Categories = ["message", "task", "success", "warning", "error", "info"];
     private static readonly HashSet<string> Priorities = ["low", "normal", "high"];
-    private static readonly HashSet<string> Levels = ["silent", "plain", "glow", "lively", "persistent"];
+    // flash is the level between plain and persistent; glow and lively are its earlier names. 0 to 3 name the four in order.
+    private static readonly HashSet<string> Levels = ["silent", "plain", "flash", "glow", "lively", "persistent"];
+    private static readonly string[] LevelNumbers = ["silent", "plain", "flash", "persistent"];
     private static readonly HashSet<string> Sides = ["left", "center", "right"];
     private static readonly HashSet<string> PlainKinds = [NoticeTimes.Alarm, NoticeTimes.Mail];
 
@@ -70,9 +75,19 @@ public static class NotifyCommandLine
             case "-h" or "--help" or "help": return new(NotifyCommandKind.Help);
             case "--version": return new(NotifyCommandKind.Version);
         }
+        return ParseOptions(kind, timeKind, args, index, "brim-notify", "brim-notify " + (timeKind ?? "run"));
+    }
+
+    // The options and what follows a command, for brim-notify and for brim (BrimCommandLine), which differ only in how a
+    // command is named. source: the name a notice comes from when -s gives none. said: the command as its user typed it, for
+    // the messages about it.
+    internal static NotifyCommand ParseOptions(NotifyCommandKind kind, string? timeKind, IReadOnlyList<string> args, int index, string source, string said)
+    {
         var message = new NoticeMessage { Origin = "cli" };
         var positional = new List<string>();
         List<string>? program = null;
+        string? jsonInput = null;
+        int replies = 0, extras = 0;
         for (; index < args.Count; index++)
         {
             string arg = args[index];
@@ -81,6 +96,9 @@ public static class NotifyCommandLine
                 if (kind == NotifyCommandKind.Run) { program = args.Skip(index + 1).ToList(); break; }
                 positional.AddRange(args.Skip(index + 1)); break;
             }
+            // The options that take no value.
+            if (arg == "--wait") { message.Wait = true; continue; }
+            if (arg == "--no-history") { message.History = false; continue; }
             if (arg.Length > 1 && arg[0] == '-' && !IsNumber(arg))
             {
                 string name = arg, value;
@@ -93,7 +111,7 @@ public static class NotifyCommandLine
                     // A forgotten value must not take the next option as its own (brim-notify x -s -r build): only a title or
                     // body may start with "-"; another value that does is given as --name=value.
                     string next = args[index + 1];
-                    if (name is not ("-b" or "--body" or "-t" or "--title") && next.Length > 1 && next[0] == '-' && !IsNumber(next))
+                    if (name is not ("-b" or "--body" or "-t" or "--title" or "--action" or "--copy" or "--open") && next.Length > 1 && next[0] == '-' && !IsNumber(next))
                         return Fail(arg + " needs a value");
                     value = args[++index];
                 }
@@ -101,9 +119,40 @@ public static class NotifyCommandLine
                 {
                     case "-b" or "--body": message.Body = value; break;
                     case "-s" or "--source": message.AppName = value; break;
-                    case "-i" or "--icon": message.Icon = value; break;
+                    case "-i" or "--icon":
+                        if (value.Equals("none", StringComparison.OrdinalIgnoreCase)) { message.HideIcon = true; message.Icon = null; }
+                        else message.Icon = value;
+                        break;
                     case "-t" or "--title": message.Title = value; break;
-                    case "-r" or "--replace": message.ReplaceId = value; break;
+                    case "-r" or "--replace" or "-k" or "--key": message.ReplaceId = value; break;
+                    case "--context": message.Context = value; break;
+                    case "--image": message.Picture = value; break;
+                    case "--json": jsonInput = value; break;
+                    case "--slot":
+                        if (!NoticeSlots.All.Contains(value.ToLowerInvariant())) return Fail("--slot takes island, usage, music, monitor, clock, transfer or devices");
+                        message.Slot = value.ToLowerInvariant(); break;
+                    case "--glow":
+                        if (!IsColor(value)) return Fail("--glow takes a color as #RRGGBB");
+                        message.Glow = value.ToUpperInvariant(); break;
+                    case "--timeout":
+                        if (NoticeTimes.ParseDuration(value) is not { } limit || limit.TotalMilliseconds < NoticeProtocol.MinTimeoutMs || limit.TotalMilliseconds > NoticeProtocol.MaxTimeoutMs)
+                            return Fail("--timeout takes a duration from 1s to 30m, for example 5m");
+                        message.TimeoutMs = (long)limit.TotalMilliseconds; break;
+                    // A button whose key goes back to the sender, which waits for it. The first one is the main button.
+                    case "--action":
+                    {
+                        if (Pair(value) is not var (key, label)) return Fail("--action takes KEY=LABEL, for example allow=Allow");
+                        (message.Actions ??= []).Add(new NoticeActionInfo { Key = key, Label = label, Style = replies++ == 0 ? NoticeActionTypes.Primary : null });
+                        message.Wait = true; break;
+                    }
+                    // Buttons BrimDeck itself answers: the text goes to the clipboard, the address or file is opened.
+                    case "--copy" or "--open":
+                    {
+                        if (Pair(value) is not var (label, text)) return Fail(name + " takes LABEL=" + (name == "--copy" ? "TEXT" : "TARGET"));
+                        string type = name == "--copy" ? NoticeActionTypes.Copy : NoticeActionTypes.Open;
+                        (message.Actions ??= []).Add(new NoticeActionInfo { Key = type + "-" + ++extras, Label = label, Type = type, Value = text });
+                        break;
+                    }
                     case "--id": message.EventId = value; break;
                     case "-c" or "--category":
                         if (!Categories.Contains(value.ToLowerInvariant())) return Fail("unknown category: " + value);
@@ -112,6 +161,7 @@ public static class NotifyCommandLine
                         if (!Priorities.Contains(value.ToLowerInvariant())) return Fail("unknown priority: " + value);
                         message.Priority = value.ToLowerInvariant(); break;
                     case "-l" or "--level":
+                        if (value.Length == 1 && value[0] is >= '0' and <= '3') value = LevelNumbers[value[0] - '0'];
                         if (!Levels.Contains(value.ToLowerInvariant())) return Fail("unknown level: " + value);
                         message.Level = value.ToLowerInvariant(); break;
                     case "--align":
@@ -141,15 +191,21 @@ public static class NotifyCommandLine
             if (kind == NotifyCommandKind.Run) { program = args.Skip(index).ToList(); break; }
             positional.Add(arg);
         }
+        bool waits = message.Wait == true || message.TimeoutMs is not null || message.Actions is not null || jsonInput is not null;
         if (kind == NotifyCommandKind.Run)
         {
-            if (program is not { Count: > 0 }) return Fail("run needs a program, for example: brim-notify run -- make test");
+            if (program is not { Count: > 0 }) return Fail("run needs a program, for example: " + said + " -- make test");
             if (positional.Count > 0) return Fail("unexpected argument: " + positional[0]);
+            if (waits) return Fail("--wait, --timeout, --json and buttons are for a notice, not for run");
             message.Command = Path.GetFileName(program[0]);
             message.Category ??= "task";
             return new(NotifyCommandKind.Run, message, program);
         }
-        if (timeKind is not null) return TimeCommand(timeKind, message, positional);
+        if (timeKind is not null)
+        {
+            if (waits || message.Slot is not null || message.History is not null) return Fail("--wait, --timeout, --json, --slot, --no-history and buttons are for a plain notice");
+            return TimeCommand(timeKind, message, positional, source, said);
+        }
         if (message.At is not null || message.Until is not null || message.InMs is not null || message.LeadMs is not null)
             return Fail("--at, --in, --ends and --remind are for timer and event");
         if (positional.Count > 2) return Fail("unexpected argument: " + positional[2] + " (quote a title or body with spaces)");
@@ -163,22 +219,55 @@ public static class NotifyCommandLine
             if (message.Body is not null) return Fail("the body is given twice");
             message.Body = positional[1];
         }
+        // With --json the words may come from the file; NotifyCli checks once the two are put together, and names the source.
+        if (jsonInput is not null) return new(NotifyCommandKind.Send, message, JsonInput: jsonInput);
         if (string.IsNullOrWhiteSpace(message.Title) && string.IsNullOrWhiteSpace(message.Body)) return Fail("a title or body is needed");
-        message.AppName ??= "brim-notify";
+        message.AppName ??= source;
         return new(NotifyCommandKind.Send, message);
     }
 
+    // "KEY=TEXT" at its first "=", both parts needed.
+    private static (string, string)? Pair(string value)
+    {
+        int at = value.IndexOf('=');
+        return at > 0 && at < value.Length - 1 ? (value[..at].Trim(), value[(at + 1)..]) : null;
+    }
+
+    public static bool IsColor(string text) => text.Length == 7 && text[0] == '#' && text.AsSpan(1).IndexOfAnyExcept("0123456789abcdefABCDEF") < 0;
+
+    // A message read from --json with the options given on the command line put over it; the source's name falls back to
+    // source. Null when the two together still have no words.
+    public static NoticeMessage? Combine(NoticeMessage file, NoticeMessage options, string source)
+    {
+        file.Version = NoticeProtocol.Version; file.Type = NoticeTypes.Notify; file.Origin = "cli";
+        // Only what a sender may say: the rest is BrimDeck's or the agent's to fill in.
+        file.NativeId = null; file.Distro = null; file.Session = null; file.AppId = null; file.Result = null; file.Waiting = null; file.State = null; file.Detail = null;
+        file.Reason = null; file.ActionKey = null; file.Transient = null; file.Stop = null; file.Kind = null; file.At = null; file.InMs = null; file.Until = null; file.LeadMs = null;
+        file.ExitCode = null; file.DurationMs = null; file.Command = null; file.CreatedAt = null; file.AgeMs = null;
+        file.Title = options.Title ?? file.Title; file.Body = options.Body ?? file.Body; file.AppName = options.AppName ?? file.AppName ?? source;
+        file.Icon = options.Icon ?? file.Icon; file.Picture = options.Picture ?? file.Picture; file.HideIcon = options.HideIcon ?? file.HideIcon;
+        if (options.HideIcon == true) file.Icon = null;
+        file.Category = options.Category ?? file.Category; file.Priority = options.Priority ?? file.Priority; file.Level = options.Level ?? file.Level;
+        file.Align = options.Align ?? file.Align; file.Slot = options.Slot ?? file.Slot; file.Glow = options.Glow ?? file.Glow; file.Context = options.Context ?? file.Context;
+        file.ReplaceId = options.ReplaceId ?? file.ReplaceId; file.EventId = options.EventId ?? file.EventId; file.Progress = options.Progress ?? file.Progress;
+        file.History = options.History ?? file.History; file.TimeoutMs = options.TimeoutMs ?? file.TimeoutMs;
+        if (options.Actions is { Count: > 0 } added) file.Actions = [.. file.Actions ?? [], .. added];
+        // A button that answers the sender means waiting for it.
+        file.Wait = options.Wait ?? file.Wait ?? (file.Actions?.Any(action => action is not null && action.Type is null or NoticeActionTypes.Reply) == true ? true : null);
+        return string.IsNullOrWhiteSpace(file.Title) && string.IsNullOrWhiteSpace(file.Body) ? null : file;
+    }
+
     // timer, stopwatch, event, stop and close. Each running one needs a key for stop; without -r one is made up (and printed).
-    private static NotifyCommand TimeCommand(string timeKind, NoticeMessage message, List<string> positional)
+    private static NotifyCommand TimeCommand(string timeKind, NoticeMessage message, List<string> positional, string source, string said)
     {
         bool timed = message.At is not null || message.Until is not null || message.InMs is not null || message.LeadMs is not null;
         if (timeKind is "stop" or "close")
         {
-            if (positional.Count != 1 || message.ReplaceId is not null) return Fail($"{timeKind} takes one key: brim-notify {timeKind} KEY");
+            if (positional.Count != 1 || message.ReplaceId is not null) return Fail($"{timeKind} takes one key: {said} KEY");
             if (timed || message.Title is not null || message.Body is not null || message.Kind is not null || message.Level is not null || message.Align is not null)
                 return Fail(timeKind + " takes only a key and --source");
             message.ReplaceId = positional[0]; message.Stop = true; message.Kind = NoticeTimes.Stopwatch;
-            message.AppName ??= "brim-notify";
+            message.AppName ??= source;
             return new(NotifyCommandKind.Send, message);
         }
         if (message.Kind is not null) return Fail("--kind is for a plain notice");
@@ -201,7 +290,7 @@ public static class NotifyCommandLine
         if (positional.Count > 1) { if (message.Body is not null) return Fail("the body is given twice"); message.Body = positional[1]; }
         if (timeKind == NoticeTimes.Event && string.IsNullOrWhiteSpace(message.Title)) return Fail("event needs a title");
         message.ReplaceId ??= timeKind + "-" + Guid.NewGuid().ToString("N")[..8];
-        message.AppName ??= "brim-notify";
+        message.AppName ??= source;
         return new(NotifyCommandKind.Send, message);
     }
 
@@ -232,6 +321,7 @@ public static class NotifyCommandLine
         var message = new NoticeMessage
         {
             Origin = options.Origin, AppName = options.AppName ?? "brim-notify", Icon = options.Icon, Title = options.Title, Body = options.Body,
+            Picture = options.Picture, HideIcon = options.HideIcon, Context = options.Context, Glow = options.Glow,
             ReplaceId = options.ReplaceId, EventId = options.EventId, Priority = options.Priority, Level = options.Level, Align = options.Align, Command = options.Command,
             ExitCode = exitCode, DurationMs = (long)Math.Max(0, duration.TotalMilliseconds),
             Category = exitCode == 0 ? "success" : "error"

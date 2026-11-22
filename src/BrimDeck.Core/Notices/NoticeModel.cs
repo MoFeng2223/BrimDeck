@@ -3,24 +3,23 @@ using System.Text.Json.Serialization;
 namespace BrimDeck.Core.Notices;
 
 // Where a notice came from: the Windows notification center, a WSL desktop notification, brim-notify (from Windows or WSL),
-// or BrimDeck's own test notice.
-public enum NoticeOrigin { Windows, Wsl, Cli, Test }
+// BrimDeck's own test notice, or one of BrimDeck's own features (Internal: a track change, a quota alert), which hand their
+// notices over inside the process (NoticeCenter.Post).
+public enum NoticeOrigin { Windows, Wsl, Cli, Test, Internal }
 // Shown as a small status mark beside the application's icon; never as the application's color.
 public enum NoticeCategory { Message, Task, Success, Warning, Error, Info }
 public enum NoticePriority { Low, Normal, High }
-// How much an arriving notice shows: icon, title and summary; icon and title; or the application's icon and name only.
-public enum NoticePrivacy { Full, TitleOnly, AppOnly }
-// What a click on a notice shown on the collapsed island does: open the notices page (the default), or open the source application.
-public enum NoticeClickTarget { Page, SourceApp }
-// How strongly a notice shows on the collapsed island. Silent: only in the recent notices. Plain: the island keeps still and
-// only shows the words. Glow: the backlight flashes as well. Lively: the backlight and the liquid ripples. Persistent: as
-// Lively, and it stays until it is handled, playing again every few seconds. Auto: not chosen; NoticeLevels.Resolve decides.
+// How strongly a notice shows on the collapsed island: the three levels of the settings, and Silent (only in the recent notices).
+// Plain is level 1 (文字): the island keeps still and only shows the words. Glow is level 2 (闪动): it flashes as well, with the
+// backlight alone or with the liquid as NoticeStyle.Liquid says. Persistent is level 3 (常驻): as level 2, and it stays until it is
+// handled, playing again every few seconds. Lively is an older name of level 2 that a sender may still use; for an item without a
+// style (a quota alert) it plays the liquid. Auto: not chosen; NoticeLevels.Resolve decides.
 public enum NoticeLevel { Auto, Silent, Plain, Glow, Lively, Persistent }
+// Where a sender asks its plain notice to show (NoticeMessage.Slot): the whole island, or the place of one part of the collapsed
+// content. Not given, the level's style decides (NoticeStyle.Slot).
+public enum NoticeSlot { Island, Usage, Music, Monitor, Clock, Transfer, Devices }
 // Where the icon and the words sit in the island when they fit; longer words start at the left and scroll.
 public enum NoticeAlign { Left, Center, Right }
-
-// Clears the whole recent list on a schedule, besides dropping each notice once it is older than the retention.
-public enum NoticeAutoClear { Off, OnExit, Daily, Weekly }
 
 // What BrimDeck can do with a notice's source, by what the source offers. Nothing is shown that cannot be done.
 [Flags]
@@ -35,7 +34,11 @@ public enum NoticeCapabilities
     ReportDismissal = 4
 }
 
-public sealed record NoticeAction(string Key, string Label);
+// What a notice's button does. Reply: its key goes back to the source (a WSL application, or a sender that waits). Copy: Value
+// goes to the clipboard. Open: Value is opened (a web address, a local file, "app:<application id>"). BrimDeck runs nothing.
+public enum NoticeActionKind { Reply, Copy, Open }
+
+public sealed record NoticeAction(string Key, string Label, NoticeActionKind Kind = NoticeActionKind.Reply, string? Value = null, bool Primary = false);
 
 // A notice as a source delivers it, before BrimDeck's rules. AppKey identifies the application across notices
 // ("windows:<AUMID>", "windows:<browser AUMID>|<site>" for a site's notice in a browser, "wsl:<distro>:<name>", "cli:<name>"). InstanceKey identifies this notice at its source; an existing
@@ -86,6 +89,19 @@ public sealed record NoticeInput
     // The level and the alignment the sender asked for (NoticeMessage.Level, Align); Auto and null leave them to BrimDeck.
     public NoticeLevel Level { get; init; }
     public NoticeAlign? Align { get; init; }
+    // Where a plain notice shows (NoticeMessage.Slot); null leaves it to the setting.
+    public NoticeSlot? Slot { get; init; }
+    // "#RRGGBB" for the backlight of a notice that stays until handled; null takes the category's or the setting's.
+    public string? Glow { get; init; }
+    // A second line beside the source's name.
+    public string Context { get; init; } = "";
+    public bool HideIcon { get; init; }
+    // Shown on the island only: not listed among the recent notices and never saved.
+    public bool Unlisted { get; init; }
+    // Its sender waits for how it ends (NoticeMessage.Wait): it stays until handled, and its Reply buttons answer the sender.
+    public bool Awaited { get; init; }
+    // How long it may stay until handled; null takes AttentionCoordinator.PersistentLimit.
+    public TimeSpan? Timeout { get; init; }
 }
 
 // A notice BrimDeck keeps. Id is BrimDeck's own; Revision counts updates, so a view can tell a changed notice apart.
@@ -130,27 +146,37 @@ public sealed class Notice
     // What the sender asked for (NoticeInput.Level, Align); Auto and null leave them to BrimDeck's rules and settings.
     public NoticeLevel Level { get; set; }
     public NoticeAlign? Align { get; set; }
+    public NoticeSlot? Slot { get; set; }
+    public string? Glow { get; set; }
+    public string Context { get; set; } = "";
+    public bool HideIcon { get; set; }
+    // NoticeInput.Unlisted, Awaited and Timeout. None of them outlives BrimDeck: an unlisted notice is never saved, and after a
+    // restart no sender waits any more.
+    [JsonIgnore] public bool Unlisted { get; set; }
+    [JsonIgnore] public bool Awaited { get; set; }
+    [JsonIgnore] public TimeSpan? Timeout { get; set; }
     [JsonIgnore] public bool HasProgress => Progress is not null;
     [JsonIgnore] public NoticeTimeKind TimeKind => Timing?.Kind ?? NoticeTimeKind.None;
     public Notice Copy() { var copy = (Notice)MemberwiseClone(); copy.Actions = [.. Actions]; copy.Timing = Timing?.Copy(); return copy; }
 }
 
-// The user's choices for one application. Disabled drops its notices entirely; Muted keeps them in the recent notices
-// without showing them as they arrive. Privacy null follows the default.
+// The user's choices for one application or source (the "应用" settings page). A Windows application or a taskbar-flash chat
+// shows only while it has a rule (NoticeKeys.ListedOnly); a command-line or WSL source shows without one, and Enabled false
+// drops its notices ("不提示"). Level Auto follows the default level (a source: the level its message asks for); Silent keeps
+// its notices in the recent notices without showing them as they arrive ("只进通知页").
 public sealed class NoticeAppRule
 {
     public string Key { get; set; } = "";
     public string Name { get; set; } = "";
     public bool Enabled { get; set; } = true;
-    public bool Muted { get; set; }
-    public NoticePriority Priority { get; set; } = NoticePriority.Normal;
-    // The level the user chose for the application's notices: Silent, Plain, Glow or Lively. Auto follows the rules
-    // (NoticeLevels.Resolve); Silent shows as Muted does.
     public NoticeLevel Level { get; set; }
-    public NoticePrivacy? Privacy { get; set; }
+    // Windows' own banner of this application is turned off while BrimDeck shows its notices (NoticeBanners).
+    public bool HideBanner { get; set; }
+    // The application's own looks ("单独设置样子"), used in place of the settings' NoticeStyles while not null.
+    public NoticeLevelStyles? Styles { get; set; }
     // "#RRGGBB" chosen by hand; empty takes the color read from the icon.
     public string AccentColor { get; set; } = "";
-    public NoticeAppRule Copy() => (NoticeAppRule)MemberwiseClone();
+    public NoticeAppRule Copy() { var copy = (NoticeAppRule)MemberwiseClone(); copy.Styles = Styles?.Copy(); return copy; }
 }
 
 // An application BrimDeck has received notices from, so that the settings can list it before the user has made any rule.
@@ -168,18 +194,41 @@ public static class NoticeKeys
     public static string Windows(string appUserModelId) => "windows:" + appUserModelId;
     public static string Wsl(string distro, string appName) => "wsl:" + distro + ":" + appName;
     public static string Cli(string? distro, string appName) => distro is null ? "cli:" + appName : "cli:" + distro + ":" + appName;
+    // The sources that show only once the user lists them on the "应用" page: Windows applications and the chats whose taskbar
+    // button flashes (ChatFlash). Command-line and WSL sources, which the user set up to send, show without a rule.
+    public static bool ListedOnly(string appKey) => appKey.StartsWith("windows:", StringComparison.Ordinal) || appKey.StartsWith("flash:", StringComparison.Ordinal);
     public static NoticeCategory Category(string? text) => text switch
     {
         "task" => NoticeCategory.Task, "success" => NoticeCategory.Success, "warning" => NoticeCategory.Warning,
         "error" => NoticeCategory.Error, "info" => NoticeCategory.Info, _ => NoticeCategory.Message
     };
     public static NoticePriority Priority(string? text) => text switch { "low" => NoticePriority.Low, "high" => NoticePriority.High, _ => NoticePriority.Normal };
-    // A level or an alignment BrimDeck does not know (a later version's) reads as not given.
+    // BrimDeck's own features (NoticeOrigin.Internal): "brimdeck:music", "brimdeck:usage". No sender can name itself so, since
+    // the link a message arrives on decides its key's prefix (NoticeIntake).
+    public const string InternalPrefix = "brimdeck:";
+    public static string Internal(string module) => InternalPrefix + module;
+    // A level or an alignment BrimDeck does not know (a later version's) reads as not given. A sender names three levels and
+    // silent, also by number; flash is level 2 (NoticeLevel.Glow), and glow and lively are its earlier names: which effect it
+    // plays is the user's setting (NoticeStyle.Liquid).
     public static NoticeLevel Level(string? text) => text?.Trim().ToLowerInvariant() switch
     {
-        "silent" => NoticeLevel.Silent, "plain" => NoticeLevel.Plain, "glow" => NoticeLevel.Glow, "lively" => NoticeLevel.Lively,
-        "persistent" => NoticeLevel.Persistent, _ => NoticeLevel.Auto
+        "silent" or "0" => NoticeLevel.Silent, "plain" or "1" => NoticeLevel.Plain, "flash" or "glow" or "lively" or "2" => NoticeLevel.Glow,
+        "persistent" or "3" => NoticeLevel.Persistent, _ => NoticeLevel.Auto
     };
+    // The collapsed part a slot names; null for the whole island.
+    public static CompactPart? Part(NoticeSlot slot) => slot switch
+    {
+        NoticeSlot.Usage => CompactPart.Rings, NoticeSlot.Music => CompactPart.Music, NoticeSlot.Monitor => CompactPart.Monitor,
+        NoticeSlot.Clock => CompactPart.Clock, NoticeSlot.Transfer => CompactPart.Transfer, NoticeSlot.Devices => CompactPart.Devices, _ => null
+    };
+    public static NoticeSlot? Slot(string? text) => text?.Trim().ToLowerInvariant() switch
+    {
+        "island" => NoticeSlot.Island, "usage" => NoticeSlot.Usage, "music" => NoticeSlot.Music, "monitor" => NoticeSlot.Monitor,
+        "clock" => NoticeSlot.Clock, "transfer" => NoticeSlot.Transfer, "devices" => NoticeSlot.Devices, _ => null
+    };
+    // "#RRGGBB" in capitals, or null for anything else.
+    public static string? Color(string? text)
+        => text?.Trim() is { Length: 7 } hex && hex[0] == '#' && hex.AsSpan(1).IndexOfAnyExcept("0123456789abcdefABCDEF") < 0 ? hex.ToUpperInvariant() : null;
     public static NoticeAlign? Align(string? text) => text?.Trim().ToLowerInvariant() switch
     {
         "left" => NoticeAlign.Left, "center" => NoticeAlign.Center, "right" => NoticeAlign.Right, _ => null

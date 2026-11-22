@@ -73,19 +73,67 @@ public sealed class NoticeMessage
     public string? Detail { get; set; }
     // Type "close": why the source closed the notice (the freedesktop reason codes).
     public int? Reason { get; set; }
-    // Type "reply": the result for the message just received.
+    // Type "reply": the result for the message just received. Type "result": how a notice that was waited for ended
+    // (NoticeWaits), with ActionKey for a chosen button.
     public string? Result { get; set; }
+    // Where a plain notice shows (NoticeSlots): the whole island, or the place of one part of the collapsed content.
+    public string? Slot { get; set; }
+    // "#RRGGBB": the backlight's color for a notice that stays until handled.
+    public string? Glow { get; set; }
+    // A second line beside the source's name: a project, a branch, a session.
+    public string? Context { get; set; }
+    // A picture of who or what the notice is from, shown in the icon's place; a local file, as Icon is.
+    public string? Picture { get; set; }
+    // True: no icon is shown.
+    public bool? HideIcon { get; set; }
+    // False: the notice only shows on the island and is not listed among the recent notices.
+    public bool? History { get; set; }
+    // The sender keeps its connection and waits for how the notice ends: a button chosen, dismissed, or run out of time.
+    public bool? Wait { get; set; }
+    // How long a notice that stays until handled may stay, and with it how long the sender waits.
+    public long? TimeoutMs { get; set; }
+    // In a reply: BrimDeck will send a "result" on the same connection. A BrimDeck that does not know Wait leaves it out.
+    public bool? Waiting { get; set; }
 }
 
 public sealed class NoticeActionInfo
 {
     public string Key { get; set; } = "";
     public string Label { get; set; } = "";
+    // reply (the key goes back to the sender; the default), copy (Value is put on the clipboard) or open (Value is a web
+    // address, a local file or "app:<application id>").
+    public string? Type { get; set; }
+    public string? Value { get; set; }
+    // primary: the main button.
+    public string? Style { get; set; }
+}
+
+public static class NoticeActionTypes
+{
+    public const string Reply = "reply", Copy = "copy", Open = "open";
+    public const string Primary = "primary";
+}
+
+// How a notice that was waited for ended (NoticeMessage.Result of a "result").
+public static class NoticeWaits
+{
+    // Action: a button was chosen (ActionKey). Dismissed: the user closed or deleted the notice, or its sender closed it.
+    // Expired: it ran out of time. Replaced: the same key was sent again with a wait of its own.
+    public const string Action = "action", Dismissed = "dismissed", Expired = "expired", Replaced = "replaced";
+}
+
+// Where a plain notice shows on the collapsed island.
+public static class NoticeSlots
+{
+    public const string Island = "island", Usage = "usage", Music = "music", Monitor = "monitor", Clock = "clock", Transfer = "transfer", Devices = "devices";
+    public static readonly IReadOnlySet<string> All = new HashSet<string> { Island, Usage, Music, Monitor, Clock, Transfer, Devices };
 }
 
 public static class NoticeTypes
 {
     public const string Notify = "notify", Close = "close", Status = "status", Action = "action", Dismissed = "dismissed", Reply = "reply";
+    // BrimDeck to a sender that waits (NoticeMessage.Wait): how its notice ended.
+    public const string Result = "result";
 }
 
 public static class NoticeResults
@@ -107,6 +155,7 @@ public static class AgentStates
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(NoticeMessage))]
 [JsonSerializable(typeof(AgentBridgeConfig))]
+[JsonSerializable(typeof(string))]
 public sealed partial class NoticeJson : JsonSerializerContext;
 
 // Written by BrimDeck into a WSL distribution next to the agent, so that brim-notify can reach Windows through the
@@ -122,7 +171,9 @@ public static class NoticeProtocol
     public const int Version = 1;
     // One frame's payload at most; a longer frame is refused and the connection closed.
     public const int MaxFrame = 64 * 1024;
-    public const int MaxTitle = 256, MaxBody = 4000, MaxActions = 8, MaxField = 256;
+    public const int MaxTitle = 256, MaxBody = 4000, MaxActions = 8, MaxField = 256, MaxActionValue = 2048;
+    // How long a sender may ask a notice to stay (and wait for it) at most, and at least.
+    public const long MaxTimeoutMs = 30L * 60 * 1000, MinTimeoutMs = 1000;
     // A run's duration at most (about 100 years): larger values cannot be turned into a time span.
     public const long MaxDurationMs = 36500L * 24 * 60 * 60 * 1000;
 
@@ -164,7 +215,7 @@ public static class NoticeProtocol
     public static string? Validate(NoticeMessage message)
     {
         if (message.Version < 1 || message.Version > Version) return "unsupported-version";
-        if (message.Type is not (NoticeTypes.Notify or NoticeTypes.Close or NoticeTypes.Status or NoticeTypes.Action or NoticeTypes.Dismissed or NoticeTypes.Reply))
+        if (message.Type is not (NoticeTypes.Notify or NoticeTypes.Close or NoticeTypes.Status or NoticeTypes.Action or NoticeTypes.Dismissed or NoticeTypes.Reply or NoticeTypes.Result))
             return "unknown-type";
         // A time-kind notice may come without text: BrimDeck names it by its kind ("Timer", "Stopwatch").
         if (message.Type == NoticeTypes.Notify && string.IsNullOrWhiteSpace(message.Title) && string.IsNullOrWhiteSpace(message.Body) && message.ExitCode is null
@@ -176,6 +227,7 @@ public static class NoticeProtocol
         if (message.Progress is { } progress && !(double.IsFinite(progress) && progress >= 0 && progress <= 1)) return "bad-progress";
         if (message.DurationMs is < 0 or > MaxDurationMs) return "bad-duration";
         if (message.AgeMs is < 0 or > MaxDurationMs) return "bad-age";
+        if (message.TimeoutMs is < MinTimeoutMs or > MaxTimeoutMs) return "bad-timeout";
         ClipTexts(message);
         return null;
     }
@@ -198,9 +250,17 @@ public static class NoticeProtocol
         message.Detail = Clip(message.Detail, 1024);
         message.Level = Clip(message.Level, NoticeTimes.MaxText);
         message.Align = Clip(message.Align, NoticeTimes.MaxText);
+        message.Slot = Clip(message.Slot, NoticeTimes.MaxText);
+        message.Glow = Clip(message.Glow, NoticeTimes.MaxText);
+        message.Context = Clip(message.Context, MaxField);
+        message.Picture = Clip(message.Picture, 1024);
+        message.ActionKey = Clip(message.ActionKey, 64);
         if (message.Actions is { } actions)
             message.Actions = actions.Where(a => a is not null && !string.IsNullOrWhiteSpace(a.Key) && !string.IsNullOrWhiteSpace(a.Label))
-                .Take(MaxActions).Select(a => new NoticeActionInfo { Key = Clip(a.Key, 64)!, Label = Clip(a.Label, 64)! }).ToList();
+                .Take(MaxActions).Select(a => new NoticeActionInfo
+                {
+                    Key = Clip(a.Key, 64)!, Label = Clip(a.Label, 64)!, Type = Clip(a.Type, NoticeTimes.MaxText), Value = Clip(a.Value, MaxActionValue), Style = Clip(a.Style, NoticeTimes.MaxText)
+                }).ToList();
     }
 
     // Whether the message fits in one frame.

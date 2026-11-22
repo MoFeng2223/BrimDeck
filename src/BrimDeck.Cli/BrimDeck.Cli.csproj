@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- brim.exe: BrimDeck's command line for Windows ("brim notify send ..."). It is BrimDeck.Notify's program built under
+       another name, which tells it to read its arguments as brim's commands; it is published into the BrimDeck folder and
+       shares the self-contained runtime there. -->
+  <ItemGroup>
+    <ProjectReference Include="..\BrimDeck.Protocol\BrimDeck.Protocol.csproj" />
+    <Compile Include="..\BrimDeck.Notify\Program.cs" Link="Program.cs" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>brim</AssemblyName>
+    <RootNamespace>BrimDeck.Notify</RootNamespace>
+    <ApplicationIcon>..\BrimDeck\Assets\BrimDeck.ico</ApplicationIcon>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <Import Project="..\BrimDeck\ReleaseVersion.targets" />
+
+</Project>

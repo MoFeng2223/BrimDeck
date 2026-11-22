@@ -250,6 +250,10 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
     // brim-notify in ~/.local/bin. BrimDeck treats the file as its own only while it is exactly this text: a file of that name
     // with anything else in it, or a link, belongs to the user and is left alone (reported as a conflict).
     private const string WrapperLines = "'#!/bin/sh' '# brim-notify, installed by BrimDeck: shows a notice in BrimDeck on Windows. BrimDeck replaces this file only while it is unchanged.' 'exec \"$HOME/.local/share/brimdeck/brimdeck-agent\" notify \"$@\"'";
+    // brim in ~/.local/bin, BrimDeck's command line (brim notify send ...); brim-notify stays beside it under its earlier name.
+    // It is written while no file of that name is there or the file is exactly this text; anything else is the user's and is
+    // left alone without a word (brim-notify's state is what the settings show).
+    private const string BrimWrapperLines = "'#!/bin/sh' '# brim, installed by BrimDeck: the command line of BrimDeck on Windows. BrimDeck replaces this file only while it is unchanged.' 'exec \"$HOME/.local/share/brimdeck/brimdeck-agent\" brim \"$@\"'";
     // What earlier test versions wrote, exactly: still BrimDeck's own, and replaced by the current text.
     private const string EarlierWrapperLines = "'#!/bin/sh' '# Installed by BrimDeck: shows a notice in BrimDeck on Windows.' 'exec \"$HOME/.local/share/brimdeck/brimdeck-agent\" notify \"$@\"'";
     // Copies the agent from Windows (path as $1, converted by wslpath), records how brim-notify reaches Windows without the
@@ -301,6 +305,10 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
         else
           printf '%s\n' {{WrapperLines}} | put "$b" 755
           echo ok
+        fi
+        c="$bin/brim"
+        if [ ! -L "$c" ] && { [ ! -e "$c" ] || printf '%s\n' {{BrimWrapperLines}} | cmp -s - "$c"; }; then
+          printf '%s\n' {{BrimWrapperLines}} | put "$c" 755
         fi
         printf '%s' "$3" | put "$dir/agent.version" 644
         """.ReplaceLineEndings("\n");

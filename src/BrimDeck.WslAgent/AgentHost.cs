@@ -111,6 +111,9 @@ internal sealed class AgentHost
             {
                 case NoticeTypes.Reply when message.EventId is { } id && _replies.TryRemove(id, out var waiter):
                     waiter.TrySetResult(message); break;
+                // How a notice ended whose sender waits on the socket (ServeClientAsync).
+                case NoticeTypes.Result when message.EventId is { } answered && _results.TryRemove(answered, out var result):
+                    result.TrySetResult(message); break;
                 case NoticeTypes.Action when ForThisRun(message) && uint.TryParse(message.NativeId, NumberStyles.None, CultureInfo.InvariantCulture, out var actionId) && message.ActionKey is { } key:
                     await EmitAsync(() => _server.ActionInvoked(actionId, key)); break;
                 case NoticeTypes.Dismissed when ForThisRun(message) && uint.TryParse(message.NativeId, NumberStyles.None, CultureInfo.InvariantCulture, out var dismissedId):
@@ -462,9 +465,41 @@ internal sealed class AgentHost
                     else if (message.Type != NoticeTypes.Notify) reply = NoticeProtocol.Reply(NoticeResults.Rejected, "unknown-type");
                     else reply = await RelayAsync(message);
                     await NoticeFrames.WriteAsync(stream, reply, idle.Token);
+                    // The sender waits for how its notice ends: the connection stays for the result, and nothing more is read.
+                    if (reply.Waiting == true && message.EventId is { } id) { await WaitResultAsync(stream, id, message.TimeoutMs); return; }
                 }
             }
             catch (Exception ex) when (ex is IOException or InvalidDataException or OperationCanceledException or SocketException) { }
+        }
+    }
+
+    // The results still to come for senders that wait, by their message's id.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, TaskCompletionSource<NoticeMessage>> _results = new(StringComparer.Ordinal);
+
+    // The result of a notice that is waited for goes to its sender as one more frame. A sender that closes the connection
+    // first (it ended, Ctrl+C), or a result that does not come in the notice's time, ends the wait; BrimDeck is told, so the
+    // notice does not stay for an answer nobody takes.
+    private async Task WaitResultAsync(NetworkStream stream, string id, long? timeoutMs)
+    {
+        if (!_results.TryGetValue(id, out var result)) return;
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+        limit.CancelAfter(TimeSpan.FromMilliseconds(timeoutMs ?? NoticeProtocol.MaxTimeoutMs) + WslLink.ResultSlack);
+        bool told = false;
+        try
+        {
+            var gone = stream.ReadAsync(new byte[1], limit.Token).AsTask();
+            _ = gone.ContinueWith(task => _ = task.Exception, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+            if (await Task.WhenAny(result.Task, gone) == result.Task)
+            {
+                await NoticeFrames.WriteAsync(stream, await result.Task, limit.Token);
+                told = true;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or OperationCanceledException or SocketException or ObjectDisposedException) { }
+        finally
+        {
+            _results.TryRemove(id, out _);
+            if (!told && !_stop.IsCancellationRequested) await SendAsync(new NoticeMessage { Type = NoticeTypes.Close, Origin = "cli", EventId = id });
         }
     }
 
@@ -479,10 +514,17 @@ internal sealed class AgentHost
         var waiter = new TaskCompletionSource<NoticeMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         // A retry with the same id while the first is still on its way is the same notice; it must not take the first's reply.
         if (!_replies.TryAdd(message.EventId, waiter)) return NoticeProtocol.Reply(NoticeResults.Duplicate, null, message.EventId);
+        // Before the message goes: the result of a notice that is answered at once must find its place.
+        bool waits = message.Wait == true && _results.TryAdd(message.EventId, new TaskCompletionSource<NoticeMessage>(TaskCreationOptions.RunContinuationsAsynchronously));
         await SendAsync(message);
+        NoticeMessage reply;
         // Shorter than brim-notify's own wait, so that it hears "no-reply" instead of sending the notice again (W3).
-        try { return await waiter.Task.WaitAsync(WslLink.AgentReplyWait, _stop.Token); }
-        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException) { return NoticeProtocol.Reply(NoticeResults.Rejected, "no-reply"); }
+        try { reply = await waiter.Task.WaitAsync(WslLink.AgentReplyWait, _stop.Token); }
+        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException) { reply = NoticeProtocol.Reply(NoticeResults.Rejected, "no-reply"); }
         finally { _replies.TryRemove(message.EventId, out _); }
+        if (waits && reply.Waiting != true) _results.TryRemove(message.EventId, out _);
+        // Only a result this agent keeps a place for is promised to the sender.
+        if (!waits) reply.Waiting = null;
+        return reply;
     }
 }

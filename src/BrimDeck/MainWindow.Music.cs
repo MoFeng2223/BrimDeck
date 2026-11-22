@@ -1483,6 +1483,7 @@ public partial class MainWindow
             }
             // What the part opens the panel on when the pointer is at it (HoverPartAt, MainWindow.Hover.cs).
             element.Tag = HoverPartOf(shown[i].Part);
+            element.SetValue(CompactPartOfProperty, shown[i].Part);
             // The carousels' fades lie outside their window (a negative margin); the margin puts the window at its place.
             element.Margin = new Thickness(element.Margin.Left + left, 0, element.Margin.Right, 0);
             element.HorizontalAlignment = HorizontalAlignment.Left; element.VerticalAlignment = VerticalAlignment.Center;

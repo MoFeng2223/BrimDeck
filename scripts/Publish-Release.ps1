@@ -28,6 +28,9 @@ try {
     # own publish (precompiled, ReadyToRun) writes the shared files last.
     dotnet publish src/BrimDeck.Notify/BrimDeck.Notify.csproj -c Release -r win-x64 --self-contained true -p:Version=$Version -o $publishPath
     if ($LASTEXITCODE -ne 0) { throw 'brim-notify publish failed.' }
+    # brim.exe, BrimDeck's command line: the same program under the name that makes it read brim's commands.
+    dotnet publish src/BrimDeck.Cli/BrimDeck.Cli.csproj -c Release -r win-x64 --self-contained true -p:Version=$Version -o $publishPath
+    if ($LASTEXITCODE -ne 0) { throw 'brim publish failed.' }
     dotnet publish src/BrimDeck/BrimDeck.csproj -c Release -r win-x64 --self-contained true -p:Version=$Version -p:PublishSingleFile=false -p:SensorsSha256=$sensorsSha256 -o $publishPath
     if ($LASTEXITCODE -ne 0) { throw 'Application publish failed.' }
     # The WSL agent: one trimmed Linux file per processor and C library, copied into a distribution only when the user switches

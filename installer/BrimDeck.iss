@@ -6,6 +6,9 @@
 ; Update:    the installed version is saved and uninstalled (keeping data), then the new one is installed. When the
 ;            new one cannot be installed, the saved version is put back and, after an in-app update, started again.
 ; Uninstall: one dialog with an unchecked "delete user data" box -> uninstall -> "uninstalled" message.
+; PATH:      installing adds the application folder to PATH (the user's, or the machine's when installing for all users),
+;            uninstalling takes it out; an update leaves PATH alone unless the folder changed. BrimDeck's settings say
+;            when the folder is not in PATH and offer to add it.
 
 #ifndef AppVersion
   #error Define AppVersion, for example /DAppVersion=0.2.0
@@ -43,6 +46,11 @@
 #endif
 #ifndef AppUserModelId
   #define AppUserModelId "BrimDeck.Desktop"
+#endif
+; The value of the Environment key that holds PATH: the application folder is added to it, so that a terminal finds
+; brim.exe (SetCommandPath). The installer test names another value and so never touches the real PATH.
+#ifndef PathValue
+  #define PathValue "Path"
 #endif
 #ifndef Compression
   #define Compression "lzma2/max"
@@ -162,6 +170,8 @@ var
   // The installed version as PrepareToInstall found and saved it: its folder, the copy of it, and the values of its
   // uninstall entry. DeinitializeSetup puts it back unless Installed.
   PreviousDir, BackupDir: String;
+  // PATH was written (SetCommandPath): running programs are told once Setup or the uninstaller has done everything else.
+  PathChanged: Boolean;
   TextNames, TextValues, NumberNames: TArrayOfString;
   NumberValues: array of Cardinal;
   Installed: Boolean;
@@ -437,6 +447,151 @@ begin
   List[GetArrayLength(List) - 1] := Value;
 end;
 
+// ----- PATH -----
+// brim.exe, BrimDeck's command line, lies in the application folder; with that folder in PATH a terminal finds "brim".
+// An install for all users changes the machine's PATH, any other the current user's. Only the folder's own entry is added
+// or taken out: every other entry stays as it is written, in its place. A change that fails is logged and not shown:
+// BrimDeck's settings say when its folder is not in PATH and offer to add it (BrimCommand, CommandPath).
+// An update's uninstall (/UPGRADE) leaves PATH alone, so an update into the same folder writes nothing; one into another
+// folder takes the earlier folder out as it adds the new one.
+function SendEnvironmentChange(Window: HWND; Msg: UINT; WParam: UINT_PTR; LParam: String; Flags, Timeout: UINT; var MsgResult: DWORD_PTR): INT_PTR;
+  external 'SendMessageTimeoutW@user32.dll stdcall';
+
+// Tells running programs (Explorer, and so every terminal opened from now on) to read their environment again. A window
+// that does not answer is passed over (SMTO_ABORTIFHUNG), each within a second.
+procedure TellEnvironmentChanged;
+var
+  MsgResult: DWORD_PTR;
+begin
+  if not PathChanged then
+    Exit;
+  PathChanged := False;
+  // HWND_BROADCAST, WM_SETTINGCHANGE.
+  SendEnvironmentChange($FFFF, $001A, 0, 'Environment', $0002, 1000, MsgResult);
+end;
+
+function PathRoot: Integer;
+begin
+  if IsAdminInstallMode then
+    Result := HKLM
+  else
+    Result := HKCU;
+end;
+
+function PathKey: String;
+begin
+  if IsAdminInstallMode then
+    Result := 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment'
+  else
+    Result := 'Environment';
+end;
+
+// PATH is taken apart with Length, Copy and indexing only. Pos, Trim, Uppercase and Lowercase of this Inno Setup (7.1) go
+// through the system's code page: Pos counts a Chinese character twice, so that it names a place four characters late in
+// a PATH with a folder such as "D:\工具 目录", and Trim turns characters outside the code page into "?". Either would
+// write a damaged PATH back. CompareText, RemoveQuotes and RemoveBackslashUnlessRoot keep every character (all measured
+// with Thai and Chinese folders; the installer test has such entries in its PATH).
+
+// Text without the spaces at its ends.
+function Unspaced(const Text: String): String;
+var
+  First, Last: Integer;
+  Again: Boolean;
+begin
+  First := 1;
+  Last := Length(Text);
+  repeat
+    Again := False;
+    if First <= Last then
+      if Text[First] = ' ' then
+      begin
+        First := First + 1;
+        Again := True;
+      end;
+  until not Again;
+  repeat
+    Again := False;
+    if Last >= First then
+      if Text[Last] = ' ' then
+      begin
+        Last := Last - 1;
+        Again := True;
+      end;
+  until not Again;
+  Result := Copy(Text, First, Last - First + 1);
+end;
+
+function SameFolder(const Entry, Folder: String): Boolean;
+begin
+  Result := CompareText(RemoveBackslashUnlessRoot(RemoveQuotes(Unspaced(Entry))), RemoveBackslashUnlessRoot(Folder)) = 0;
+end;
+
+// Value without the entries that name Folder (and without empty entries); Found says whether there was one. A ";" inside
+// quotes belongs to its entry.
+function PathWithout(const Value, Folder: String; var Found: Boolean): String;
+var
+  Entry: String;
+  I, Start: Integer;
+  Quoted, Ends: Boolean;
+begin
+  Result := '';
+  Found := False;
+  Quoted := False;
+  Start := 1;
+  for I := 1 to Length(Value) + 1 do
+  begin
+    Ends := I > Length(Value);
+    if not Ends then
+    begin
+      if Value[I] = '"' then
+        Quoted := not Quoted;
+      if not Quoted then
+        Ends := Value[I] = ';';
+    end;
+    if Ends then
+    begin
+      Entry := Copy(Value, Start, I - Start);
+      Start := I + 1;
+      if Unspaced(Entry) <> '' then
+      begin
+        if SameFolder(Entry, Folder) then
+          Found := True
+        else if Result = '' then
+          Result := Entry
+        else
+          Result := Result + ';' + Entry;
+      end;
+    end;
+  end;
+end;
+
+// Adds Folder to PATH as its last entry, or takes it out. A PATH that is already as wanted is not written at all.
+procedure SetCommandPath(const Folder: String; Add: Boolean);
+var
+  Value, Others: String;
+  Found: Boolean;
+begin
+  if not RegQueryStringValue(PathRoot, PathKey, '{#PathValue}', Value) then
+    Value := '';
+  Others := PathWithout(Value, Folder, Found);
+  if Add = Found then
+    Exit;
+  if Add then
+  begin
+    if Others = '' then
+      Others := Folder
+    else
+      Others := Others + ';' + Folder;
+  end;
+  if RegWriteExpandStringValue(PathRoot, PathKey, '{#PathValue}', Others) then
+  begin
+    PathChanged := True;
+    Log('PATH: ' + Folder + ' added: ' + IntToStr(Ord(Add)));
+  end
+  else
+    Log('PATH could not be changed for ' + Folder + '; BrimDeck''s settings will say that brim is not in PATH.');
+end;
+
 // Saves the version installed in Dir. False when a file could not be copied; nothing is kept then.
 function SaveInstalledVersion(const Dir: String): Boolean;
 var
@@ -587,9 +742,17 @@ begin
     if BackupDir <> '' then
       DelTree(BackupDir, True, True, True);
     RegWriteStringValue(HKA, '{#UninstallKey}', 'UninstallString', '"' + ExpandConstant('{uninstallexe}') + '" /SILENT /UI');
+    // A terminal finds brim.exe from now on (one opened earlier keeps the PATH it started with). The folder of the version
+    // this one replaced goes when it is another one.
+    if (PreviousDir <> '') and not SameFolder(PreviousDir, ExpandConstant('{app}')) then
+      SetCommandPath(PreviousDir, False);
+    SetCommandPath(ExpandConstant('{app}'), True);
   end
   else if CurStep = ssDone then
+  begin
     FinishShortcuts;
+    TellEnvironmentChanged;
+  end;
 end;
 
 // ----- Uninstall -----
@@ -759,6 +922,8 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if (CurUninstallStep = usUninstall) and not HasParam('/UPGRADE') then
   begin
+    // An update's uninstall leaves PATH alone: the new version looks after it (CurStepChanged).
+    SetCommandPath(ExpandConstant('{app}'), False);
     RemoveStartupEntry;
     RestoreNoticeBanners;
     RemoveSensorService;
@@ -769,6 +934,10 @@ begin
     // The recent notices are kept in the install folder by default (NoticeStorage); they are user data too.
     DelTree(ExpandConstant('{app}\notices'), True, True, True);
   end
-  else if (CurUninstallStep = usDone) and HasParam('/UI') then
-    MsgBox(CustomMessage('Uninstalled'), mbInformation, MB_OK);
+  else if CurUninstallStep = usDone then
+  begin
+    TellEnvironmentChanged;
+    if HasParam('/UI') then
+      MsgBox(CustomMessage('Uninstalled'), mbInformation, MB_OK);
+  end;
 end;
