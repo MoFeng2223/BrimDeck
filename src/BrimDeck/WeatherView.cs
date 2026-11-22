@@ -221,8 +221,11 @@ internal sealed class WeatherView : UserControl
         var cts = new CancellationTokenSource();
         _token = cts;
         var token = cts.Token;
-        int request = ++generation; var selected = state.Selected; string key = selected >= 0 && selected < state.Cities.Count ? state.Cities[selected].ToString() : "auto";
-        if (state.Cache.TryGetValue(key, out var cached)) Render(cached);
+        int request = ++generation; var selected = state.Selected;
+        // 缓存键一律是实际城市键：手动选城市用所选城市的键，自动定位用 AutoKey 指向的键；
+        // "auto" 只在 AutoKey 里做映射，不是数据键。AutoKey 为空（首启动）时跳过缓存预渲染。
+        string key = selected >= 0 && selected < state.Cities.Count ? state.Cities[selected].ToString() : state.AutoKey;
+        if (key.Length > 0 && state.Cache.TryGetValue(key, out var cached)) Render(cached);
         fetching = true; RaiseState();
         try {
             City city;
@@ -232,7 +235,12 @@ internal sealed class WeatherView : UserControl
             var snapshot = await WeatherData.CurrentAsync(city, state.Schedule, token, partial => { if (request == generation) Render(partial); });
             if (request != generation) return;
             if (token.IsCancellationRequested) return;
-            Render(snapshot); state.Cache[key] = snapshot; WeatherData.Save(state); _cycleStart = DateTime.UtcNow;
+            Render(snapshot);
+            // 定位/选择出的实际城市即缓存键：自动定位的快照也按位置存，AutoKey 记下映射。
+            key = city.ToString();
+            state.Cache[key] = snapshot;
+            if (AutoSelected) state.AutoKey = key;
+            WeatherData.Save(state); _cycleStart = DateTime.UtcNow;
         } catch (OperationCanceledException) {
             if (request != generation) return;
         } catch { if (request == generation) { summary.Children.Clear(); summary.Children.Add(new TextBlock { Text = Loc.T("天气数据不可用", "Weather data unavailable"), FontSize = 20, VerticalAlignment = VerticalAlignment.Center }); } }

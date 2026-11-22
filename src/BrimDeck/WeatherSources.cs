@@ -501,6 +501,9 @@ internal static class WeatherAggregator
         {
             Name = city.Name,
             FullName = city.Full,
+            // 快照一律按真实城市键存（自动定位也一样）：CityKey 供快照落盘与逐时历史使用，
+            // 与下方 WeatherHourHistory.Read 的读取键严格一致；"auto" 只是 State.AutoKey 的映射。
+            CityKey = cityKey,
             Today = today.ToString("yyyy-MM-dd"),
             FetchedAt = DateTimeOffset.Now,
             // 城市时钟偏移：界面靠它把「现在」认到正确的整点列上（国外城市与本机不在同一时区）。

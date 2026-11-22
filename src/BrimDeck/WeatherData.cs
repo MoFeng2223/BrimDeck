@@ -19,6 +19,9 @@ internal static class WeatherData
         public int Selected { get => _settings().WeatherSelected; set => _settings().WeatherSelected = value; }
         public WeatherSettings Schedule { get => _settings().Weather; set => _settings().Weather = value; }
         public Dictionary<string, WeatherSnapshot> Cache { get; set; } = [];
+        // 自动定位指针：最近一次定位到的实际城市键。快照一律按真实城市键存（定位映射选择的城市/区），
+        // "auto" 不再是数据键，只保留这个指向，供重启后免定位直接命中缓存、设置页「当前位置」行取数。
+        public string AutoKey { get; set; } = "";
     }
     private sealed class SnapshotFile { public string Key {get;set;}=""; public WeatherSnapshot? Value {get;set;} }
     private static readonly HttpClient Http=new() {Timeout=TimeSpan.FromSeconds(20)};
@@ -41,6 +44,14 @@ internal static class WeatherData
         Start();
         var state=new State(settings);
         foreach(var (key,snapshot) in ReadSnapshots())state.Cache[key]=snapshot;
+        // 自动定位指针（weather/auto.json，与快照分开放，避免混进快照枚举）：
+        // 快照都按真实城市键存，"auto" 只是映射，重启后靠它免定位命中缓存。
+        try
+        {
+            string pointer=Path.Combine(WeatherFiles.Root,"weather","auto.json");
+            if(File.Exists(pointer)&&JsonSerializer.Deserialize<SnapshotFile>(File.ReadAllText(pointer),WeatherJson) is { Key.Length:>0 } entry)state.AutoKey=entry.Key;
+        }
+        catch { }
         return state;
     }
     private static IEnumerable<(string Key,WeatherSnapshot Value)> ReadSnapshots()
@@ -69,14 +80,18 @@ internal static class WeatherData
         lock(SnapLock)
             foreach(var (key,snapshot) in state.Cache)
             {
-                // 每次新快照都把其中的整点数据并入本地历史，供下次窗口的过去小时使用（失败不影响快照写入）。
-                WeatherHourHistory.Record(key,snapshot);
+                // 版本检查在前：设置页驻留的旧快照（A）不得因配置保存把已被天气页新快照（B）覆盖的历史写回去。
                 if(Written.TryGetValue(key,out var at)&&snapshot.FetchedAt<=at)continue;
                 if(!WeatherFiles.WriteAtomic(Path.Combine(WeatherFiles.Snapshots,WeatherFiles.Name(key,".json")),JsonSerializer.Serialize(new SnapshotFile{Key=key,Value=snapshot},WeatherJson)))continue;
                 Written[key]=snapshot.FetchedAt;
+                // 快照确实被接受后才并入本地历史；历史键=快照的真实城市键（CityKey，Merge 时写入）。
+                WeatherHourHistory.Record(snapshot.CityKey,snapshot);
             }
         // 请求计数随保存一起落盘：重启后不会把当天额度重新算满。
         RequestGate.Flush();
+        // 自动定位指针随快照一起落盘："auto" 只是映射，重启后靠它免定位命中缓存。
+        if(state.AutoKey.Length>0)
+            WeatherFiles.WriteAtomic(Path.Combine(WeatherFiles.Root,"weather","auto.json"),JsonSerializer.Serialize(new SnapshotFile{Key=state.AutoKey},WeatherJson));
     }
     // 城市搜索：配置了和风 Key 时优先走和风 GeoAPI——能精确命中区县（搜「洪山区」得「洪山区 · 武汉市 · 湖北省」），
     // 返回的 id 与中国天气网城市代码同源；未配置或查询失败时退回 Open-Meteo（全球地名库，中文覆盖一般）。
@@ -271,6 +286,9 @@ internal static class WeatherHourHistory
 internal sealed class WeatherSnapshot
 {
     public string Name {get;set;}=""; public string FullName {get;set;}=""; public DateTimeOffset FetchedAt {get;set;} public string Today {get;set;}="";
+    // 快照实际归属城市的历史键（city.ToString()）。快照一律按真实城市键存（自动定位也一样，
+    // "auto" 只是 State.AutoKey 指向最新定位结果的映射），逐时历史与快照同键，手动选同一城市可复用。
+    public string CityKey {get;set;}="";
     // FullName 是城市完整层级（洪山区 · 武汉市 · 湖北省），详情页标题与设置预览用它；空时退回 Name。
     // 城市所在地的 UTC 偏移（分钟）：逐时「现在」列要按城市时钟认，查国外城市时不能用本机时间。MinValue = 未知。
     public int UtcOffsetMinutes {get;set;} = int.MinValue;

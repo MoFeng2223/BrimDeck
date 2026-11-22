@@ -10,7 +10,7 @@ public sealed partial class SettingsWindow
     private void WeatherSettings()
     {
         var state=WeatherData.Load(() => S);var cityRows=new StackPanel();bool active=true;
-        string autoName="当前位置";if(state.Cache.TryGetValue("auto",out var autoSnap))autoName=autoSnap.Name;
+        string autoName="当前位置";if(state.AutoKey.Length>0&&state.Cache.TryGetValue(state.AutoKey,out var autoSnap))autoName=autoSnap.Name;
         var preview=new ContentControl {Content=new WeatherSettingsPreview(state)};
         // 天气配置现在就是 DeckSettings 的一部分：改动后走与其他设置页相同的保存队列写 settings.json。
         void Save() {try {_app.QueueSave(); WeatherData.Save(state);}catch {}}
@@ -24,7 +24,7 @@ public sealed partial class SettingsWindow
                 // 副行是完整层级（洪山区 · 武汉市 · 湖北省），同名区县一眼可辨。
                 string name=city is null?Loc.T("自动定位","Auto location"):city.Name.Split(" · ")[0],detail=city is null?Loc.T("自动定位","Auto location"):city.Full;
                 if(city is null&&autoName.Trim().Length>0&&!autoName.Contains("当前位置"))full=autoName;
-                if(state.Cache.TryGetValue(city?.ToString()??"auto",out var snap)){temperature=$"{snap.Temperature:0}°";code=snap.WeatherCode;day=snap.IsDay;if(city is null&&!snap.Name.Contains("当前位置"))full=snap.FullName.Length>0?snap.FullName:snap.Name;}
+                if(state.Cache.TryGetValue(city?.ToString()??state.AutoKey,out var snap)){temperature=$"{snap.Temperature:0}°";code=snap.WeatherCode;day=snap.IsDay;if(city is null&&!snap.Name.Contains("当前位置"))full=snap.FullName.Length>0?snap.FullName:snap.Name;}
                 if(city is null&&full is not null)detail=full;
                 var controls=new StackPanel {Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};if(temperature is not null)controls.Children.Add(TextLine(temperature,14,TextPrimary));
                 void Select(){state.Selected=index;Save();preview.Content=new WeatherSettingsPreview(state);Fill();}
@@ -168,7 +168,7 @@ internal sealed class WeatherSettingsPreview : Border
     internal WeatherSettingsPreview(WeatherData.State state)
     {
         CornerRadius=new CornerRadius(14);Margin=new Thickness(0,0,0,18);ClipToBounds=true;
-        var key=state.Selected>=0&&state.Selected<state.Cities.Count?state.Cities[state.Selected].ToString():"auto";
+        var key=state.Selected>=0&&state.Selected<state.Cities.Count?state.Cities[state.Selected].ToString():state.AutoKey;
         WeatherSnapshot? snap=null;
         if(state.Cache.TryGetValue(key,out var cached)) snap=cached;
         int code=snap?.WeatherCode??0;bool day=snap?.IsDay??true;
