@@ -16,7 +16,7 @@ internal sealed class PhoneLinkBatteries(Dispatcher dispatcher, Action<DeviceSou
     [
         "LocalState", "StartMenu", "StartMenuCompanion.json"
     ];
-    private readonly DispatcherTimer _poll = new(DispatcherPriority.Background, dispatcher) { Interval = DevicePolling.Ask };
+    private readonly DispatcherTimer _poll = new(DispatcherPriority.Background, dispatcher) { Interval = DevicePolling.Local };
     private DeviceDemand _demand;
     private string? _path;
     private bool _listed;

@@ -197,17 +197,42 @@ internal sealed class DeviceBatteries : IDisposable
 // levels, read from its cache without reaching the device (BlueGauge). Listen: the PlayStation controllers, which send their
 // state all the time and are only listened to. Gatt: a Bluetooth LE level whose device sends no notices (the Battery Service
 // specification asks not to poll it often). Slow: the receivers whose answer takes seconds (Corsair's, read on a thread of their
-// own). The receivers that send their battery unasked have no interval: they are listened to all the time (PushEvents).
+// own). Local: a file on this computer (Phone Link's card). The receivers that send their battery unasked have no interval:
+// they are listened to all the time (PushEvents).
+//
+// THE RULE FOR EVERY READ THAT REACHES A DEVICE ON A TIMER: its interval is a DeviceAsk, and it is timed only through the
+// DeviceAsk's Due, Left or Timer, which send nothing while the user is away (Away). A keyboard or mouse may count a request
+// from its receiver as use and never reach its own sleep (a LEOBOG Hi98C did). A plain TimeSpan here is for what reaches no
+// device. A brand added to the brand readers (BrandFamilies, Dongles) is asked in HidBatteries' pass and keeps the rule with
+// nothing more; a new source (IDeviceSource) has to be entered in DevicePollingTests, which checks it.
 internal static class DevicePolling
 {
-    public static readonly TimeSpan Ask = TimeSpan.FromSeconds(15), Logitech = TimeSpan.FromSeconds(30), Cached = TimeSpan.FromSeconds(5),
-        Listen = TimeSpan.FromSeconds(5), Gatt = TimeSpan.FromSeconds(60), Slow = TimeSpan.FromSeconds(60);
+    public static readonly DeviceAsk Ask = new(TimeSpan.FromSeconds(15)), Logitech = new(TimeSpan.FromSeconds(30)),
+        Gatt = new(TimeSpan.FromSeconds(60)), Slow = new(TimeSpan.FromSeconds(60));
+    public static readonly TimeSpan Cached = TimeSpan.FromSeconds(5), Listen = TimeSpan.FromSeconds(5), Local = TimeSpan.FromSeconds(15);
 
-    // Set while no keyboard or mouse input has come for DeviceBatteries.Away (20 seconds). Meanwhile the reads that reach a
-    // device on a timer (Ask, Logitech, Gatt, Slow) are not sent: a keyboard or mouse may count a request from its receiver as
-    // use and never reach its own sleep (a LEOBOG Hi98C did). What reaches no device goes on (Windows' cached Bluetooth levels,
-    // the PlayStation controllers listened to, the receivers that push their battery), and so do the reads made at once (a
-    // device plugged in or linked again, the computer woken). Input again reads every device at once (DeviceBatteries.ReadNow).
+    // Set while no keyboard or mouse input has come for DeviceBatteries.Away (20 seconds). What reaches no device goes on
+    // meanwhile (Windows' cached Bluetooth levels, the PlayStation controllers listened to, the receivers that push their
+    // battery), and so do the reads made at once (a device plugged in or linked again, the computer woken). Input again reads
+    // every device at once (DeviceBatteries.ReadNow).
     private static volatile bool _away;
     public static bool Away { get => _away; set => _away = value; }
+}
+
+// The interval of a read that reaches a device (DevicePolling's rule): never due on the timer while the user is away.
+internal readonly record struct DeviceAsk(TimeSpan Interval)
+{
+    public const long Never = -1;
+    public long Milliseconds => (long)Interval.TotalMilliseconds;
+    // Whether the read is due, from when it was last made (Environment.TickCount64, or Never: due at once, as a first read is).
+    public bool Due(long lastAt) => lastAt == Never || !DevicePolling.Away && Environment.TickCount64 - lastAt >= Milliseconds - 50;
+    // How long until it is due, in milliseconds; while the user is away, a whole interval (input wakes the sources at once).
+    public long Left(long lastAt) => lastAt == Never ? 0 : DevicePolling.Away ? Milliseconds : Milliseconds - (Environment.TickCount64 - lastAt);
+    // A timer on the UI thread that reads each interval while the user is present.
+    public DispatcherTimer Timer(Dispatcher dispatcher, Action read)
+    {
+        var timer = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = Interval };
+        timer.Tick += (_, _) => { if (!DevicePolling.Away) read(); };
+        return timer;
+    }
 }

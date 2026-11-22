@@ -107,6 +107,7 @@ try
     EncoDeckBatteryTests.Run(Check);
     DeviceProtocolTests.Run(Check);
     DeviceSafetyTests.Run(Check);
+    DevicePollingTests.Run(Check);
     DeviceReadTests.Run(Check);
     BrandFamilyTests.Run(Check);
     BrandsControllerTests.Run(Check);

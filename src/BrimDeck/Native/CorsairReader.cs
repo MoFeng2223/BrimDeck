@@ -47,15 +47,14 @@ internal sealed class CorsairReader(Action<string, DeviceBattery> received) : ID
 
     private void Run()
     {
-        long at = -1;
+        long at = DeviceAsk.Never;
         while (true)
         {
             IReadOnlyList<HidInfo> wanted;
             lock (_gate)
             {
                 if (_stopped) { _thread = null; _last.Clear(); return; }
-                // Not on the timer while the user is away (DevicePolling.Away).
-                bool due = _now || at < 0 || !DevicePolling.Away && Environment.TickCount64 - at >= (long)DevicePolling.Slow.TotalMilliseconds;
+                bool due = _now || DevicePolling.Slow.Due(at);
                 wanted = due ? _wanted : [];
                 if (due) _now = false;
             }

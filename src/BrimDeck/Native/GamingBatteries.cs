@@ -29,8 +29,8 @@ internal sealed class GamingBatteries(Dispatcher dispatcher, Action<DeviceSource
             RawGameController.RawGameControllerRemoved += Changed;
         }
         catch { }
-        _poll ??= new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = DevicePolling.Ask };
-        _poll.Tick -= Tick; _poll.Tick += Tick; _poll.Start();
+        _poll ??= DevicePolling.Ask.Timer(dispatcher, Read);
+        _poll.Start();
         Read();
     }
 
@@ -50,8 +50,6 @@ internal sealed class GamingBatteries(Dispatcher dispatcher, Action<DeviceSource
 
     public void Refresh() { if (_running) Read(); }
     public void ReadNow() => Refresh();
-    // Not on the timer while the user is away (DevicePolling.Away).
-    private void Tick(object? sender, EventArgs e) { if (!DevicePolling.Away) Read(); }
     private void Changed(object? sender, RawGameController controller) => dispatcher.BeginInvoke(DispatcherPriority.Background, () => { if (_running) Read(); });
 
     private void Read()

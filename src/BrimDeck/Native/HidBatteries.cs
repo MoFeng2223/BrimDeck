@@ -90,7 +90,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     // The worker's event lives as long as the process: set from the UI thread and the watcher's threads, it is never disposed
     // under them.
     private void Wake() => _wake.Set();
-    private const long Never = -1;
+    private const long Never = DeviceAsk.Never;
     // When each kind of reading was last taken (Environment.TickCount64), the worker's own: the Logitech devices, those only
     // asked (every other brand and the standard usages) and those only listened to (the PlayStation controllers).
     private long _logitechAt = Never, _askAt = Never, _listenAt = Never;
@@ -235,7 +235,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         while (!_disposed)
         {
             try { if (!Pass()) return; }
-            catch { _wake.WaitOne(DevicePolling.Ask); }
+            catch { _wake.WaitOne(DevicePolling.Ask.Interval); }
         }
     }
 
@@ -265,10 +265,8 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             // a device turned off and its entry loses its level now, not at the next interval.
             var off = DeviceReadSwitches.Off;
             bool switched = !ReferenceEquals(off, _offSeen); _offSeen = off;
-            // While the user is away, nothing is asked on the timer (DevicePolling.Away).
-            bool away = DevicePolling.Away;
-            bool logitech = all || linkUp || !away && Due(_logitechAt, DevicePolling.Logitech);
-            bool ask = all || switched || !away && Due(_askAt, DevicePolling.Ask);
+            bool logitech = all || linkUp || DevicePolling.Logitech.Due(_logitechAt);
+            bool ask = all || switched || DevicePolling.Ask.Due(_askAt);
             // Listened to only while a PlayStation controller is there; a new one is found by the next full pass.
             bool listen = all || _current.TryGetValue(DeviceSource.Sony, out var sony) && sony.Count > 0 && Due(_listenAt, DevicePolling.Listen);
             if (logitech || ask || listen)
@@ -313,15 +311,17 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     private static readonly TimeSpan FollowUpDelay = TimeSpan.FromSeconds(2);
     private int _followUps;
 
+    // The waits that are no DeviceAsk: the follow-ups after a device came or went (reads made at once, which the rule lets
+    // through) and the PlayStation listening (which sends nothing). The asked kinds are timed by their DeviceAsk (DevicePolling).
     private static bool Due(long at, TimeSpan interval) => at == Never || Environment.TickCount64 - at >= (long)interval.TotalMilliseconds - 50;
     private static long Left(long at, TimeSpan interval) => at == Never ? 0 : (long)interval.TotalMilliseconds - (Environment.TickCount64 - at);
     private TimeSpan NextWait()
     {
         if (_followUps > 0) return FollowUpDelay;
-        // Away, the worker waits for the user's return (ReadNow wakes it) or a device, checking again each interval.
-        long wait = DevicePolling.Away ? (long)DevicePolling.Ask.TotalMilliseconds : Math.Min(Left(_logitechAt, DevicePolling.Logitech), Left(_askAt, DevicePolling.Ask));
+        // While the user is away an asked kind is a whole interval off (DeviceAsk.Left); input wakes the worker (ReadNow).
+        long wait = Math.Min(DevicePolling.Logitech.Left(_logitechAt), DevicePolling.Ask.Left(_askAt));
         if (_current.TryGetValue(DeviceSource.Sony, out var sony) && sony.Count > 0) wait = Math.Min(wait, Left(_listenAt, DevicePolling.Listen));
-        return TimeSpan.FromMilliseconds(Math.Clamp(wait, 500, (long)DevicePolling.Ask.TotalMilliseconds));
+        return TimeSpan.FromMilliseconds(Math.Clamp(wait, 500, DevicePolling.Ask.Milliseconds));
     }
 
     // Every source's current list, to the UI thread.
@@ -634,7 +634,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     // How long a device behind a receiver that is still here may be silent before its kept level reads asleep (Scan): two
     // intervals of asking, so the third pass in a row without an answer, however many passes a device plugged in or pulled
     // out adds in between.
-    private static readonly long SilentAsleepMs = 2 * (long)DevicePolling.Ask.TotalMilliseconds - 1000;
+    private static readonly long SilentAsleepMs = 2 * DevicePolling.Ask.Milliseconds - 1000;
     // The worker's own: when each kept level's device was first found silent, and the device (GroupKey) each key was last
     // read through by its brand's reader.
     private readonly Dictionary<string, long> _silentAt = [];
