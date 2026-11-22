@@ -80,7 +80,7 @@ static class BrandsGapTests
     {
         check("MCHOSE: the headsets' and speakers' kinds, and the keys made before them keep their prefix",
             Dongles.MchoseKind(0x6011, "") == DeviceKind.Headphones && Dongles.MchoseKind(0x6009, "") == DeviceKind.Headphones && Dongles.MchoseKind(0x60C4, "") == DeviceKind.Speaker
-            && Dongles.MchoseKind(0x6011, "", legacy: true) is null && Dongles.MchoseKind(0x6008, "", legacy: true) == DeviceKind.Headphones
+            && Dongles.MchoseKind(0x6011, "", legacy: true) is null && Dongles.MchoseKind(0x600A, "", legacy: true) == DeviceKind.Headphones
             && Dongles.MchoseReads(0x6011, "", 0xFF00, 1, 0, 64).SequenceEqual([Dongles.MchoseRead.Audio, Dongles.MchoseRead.Status]));
         check("MCHOSE G7 on its cable (A8A4:2255): the Gmouse query only to a collection named so, as EWEADN's mice share the id",
             Dongles.Find(0xA8A4, 0x2255, 0xFF01, "MCHOSE G7", 0, 1, 0x0010, 65, 65) == Dongles.Protocol.Gmouse
@@ -124,9 +124,9 @@ static class BrandsGapTests
             && BrandFamilies.Find(Shape(0x38A6, 0x001D, 0xFF90, 1, 64, 64, [0x41], "AULA-A9") with { InputIds = input55 }) is { Ways.Count: 0 }
             && BrandFamilies.Find(Shape(0x38A6, 0x001D, 0xFF90, 1, 64, 64, [], "AULA-A9")) is { Ways.Count: 0 }
             && BrandFamilies.Find(Shape(0x0D8C, 0x0334, 0xFF90, 1, 64, 64, [0x41]) with { InputIds = input55 }) is null
-            && Dongles.MchoseReads(0x6008, "V9 Turbo", 0xFF00, 1, 0, 64, new HashSet<byte>(), new HashSet<byte>(), input55).SequenceEqual([Dongles.MchoseRead.Audio, Dongles.MchoseRead.Status])
-            && Dongles.MchoseReads(0x6008, "V9 Turbo", 0xFF00, 1, 0, 64, new HashSet<byte>(), new HashSet<byte>(), new HashSet<byte>()).Count == 0
-            && Dongles.MchoseReads(0x6008, "V9 Turbo", 0xFF00, 1, 0, 64, new HashSet<byte> { 0x41 }, new HashSet<byte>(), input55).Count == 0);
+            && Dongles.MchoseReads(0x600A, "V9 Turbo", 0xFF00, 1, 0, 64, new HashSet<byte>(), new HashSet<byte>(), input55).SequenceEqual([Dongles.MchoseRead.Audio, Dongles.MchoseRead.Status])
+            && Dongles.MchoseReads(0x600A, "V9 Turbo", 0xFF00, 1, 0, 64, new HashSet<byte>(), new HashSet<byte>(), new HashSet<byte>()).Count == 0
+            && Dongles.MchoseReads(0x600A, "V9 Turbo", 0xFF00, 1, 0, 64, new HashSet<byte> { 0x41 }, new HashSet<byte>(), input55).Count == 0);
         check("MCHOSE 3837: report 0x55 listed as input alone opens the status read to headsets only, never to a mouse or a keyboard",
             Dongles.MchoseReads(0x4011, "MCHOSE K99 Keyboard", 0xFF70, 0x71, 0, 64, new HashSet<byte>(), new HashSet<byte>(), input55).Count == 0
             && Dongles.MchoseReads(0x100B, "MCHOSE A7 V2 Ultra Mouse", 0xFF01, 1, 0, 64, new HashSet<byte>(), new HashSet<byte>(), input55).Count == 0

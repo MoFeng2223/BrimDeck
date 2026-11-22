@@ -51,18 +51,42 @@ public static class RongyuanStatus
 
     public static bool Collection(HidShape shape) => shape.UsagePage == 0xFFFF && shape.Usage == 0x0002 && shape.FeatureLength == 65;
 
+    // The Veekos Shine 60 on 3151:5026 ("Veekos 2.4G Wireless Keyboard"), whose collection lists feature report 0x83 and not 0:
+    // nothing is set; the status page is got back as report 0x83, 83 00 <percent> 64 (100 at 3), the requested id echoed. A
+    // user's 61 % and 48 % in myfinder-device-battery #914 (its veekos_shine60.py; AGPL, facts only). Where the collection
+    // lists report 0, the F7 read stands (MonsGeek's FUN60 Pro on the same id, measured).
+    public static BatteryRead? Page83(byte[] r) => r.Length >= 4 && r[0] == 0x83 && r[1] == 0x00 && r[3] == 100 && r[2] is > 0 and <= 100 ? new(r[2]) : null;
+    // AJAZZ's AJ159 APEX (and the AM Infinity 8K) on 3151:5007: the receiver copies the mouse's level into feature report 0x05
+    // only after a status poll, 00 F7 and zeros set as report 0; about 30 ms later report 0x05 is got back, 05 00 00 <percent>
+    // (bytes 1 and 2 not 0 a leftover after a reconnect; 0 the link not up yet). No charging state. Aiacos/ajazz-control-center
+    // (GPL; facts only: 05 00 00 64 01 01 01 02 on its own AJ159 APEX on Windows), as myfinder-device-battery's am_infinity.py
+    // gives it (AGPL; facts only). The read of report 0 is MonsGeek's driver's, not measured on this receiver.
+    public static BatteryRead? Report05(byte[] r) => r.Length >= 4 && r[0] == 0x05 && r[1] == 0x00 && r[2] == 0x00 && r[3] is > 0 and <= 100 ? new(r[3]) : null;
+    private static IEnumerable<BrandWay> Extra(string prefix, HidShape shape) => (shape.Vendor, shape.Product) switch
+    {
+        (0x3151, 0x5026) => [new BrandWay(prefix + ".page83", WayTransport.FeatureGet, [0x83], Page83) { FeatureLength = 65 }],
+        (0x3151, 0x5007) => [new BrandWay(prefix + ".report05", WayTransport.FeatureGet, [0x05], Report05)
+            { Before = [Request(false)], GapMs = 30, FeatureLength = 65 }],
+        _ => []
+    };
+    // The F7 read, unless the receiver's own read replaces it (5007).
+    private static IEnumerable<BrandWay> StatusWay(string prefix, bool checksum, HidShape shape) => (shape.Vendor, shape.Product) == (0x3151, 0x5007) ? []
+        : [new BrandWay(prefix + ".status", WayTransport.Feature, Request(checksum),
+            MouseReceivers.Contains((shape.Vendor, shape.Product)) ? MouseBattery : Battery) { GapMs = 100, FeatureLength = 65 }];
+
     // The receivers of mice (VGN's Dragonfly receivers in VGN HUB's table; MonsGeek's mouse receivers), listed as mice when
     // their product string does not say.
     // (VGN HUB's "vgn-ry-mouse" receivers; MonsGeek's own table's mouse receivers: AJAZZ AJ159 APEX and Havit M5 Pro on 5007,
-    // AJ179P, AJ159P and MS955WB on 5020 and 504B, VK M5 PRO on 374A:A329; 391D:1A0E, VGN's id block of mouse receivers.)
+    // AJ179P, AJ159P and MS955WB on 5020 and 504B, VK M5 PRO on 374A:A329; 391D:1A0E, VGN's id block of mouse receivers. The
+    // Dragonfly3 Pro Max on its cable, 391D:1004, is in VGN HUB's table on the same collection as its receiver 1A04, as
+    // myfinder-device-battery's research/families-2026-11.md reads it (AGPL; facts only; whether it answers is not known).)
     private static readonly HashSet<(int, int)> MouseReceivers =
-        [(0x391D, 0x1A04), (0x391D, 0x1A08), (0x391D, 0x1A0E), (0x391D, 0x1A13), (0x391D, 0x1A25), (0x391D, 0x1A2B), (0x391D, 0x1A41),
+        [(0x391D, 0x1004), (0x391D, 0x1A04), (0x391D, 0x1A08), (0x391D, 0x1A0E), (0x391D, 0x1A13), (0x391D, 0x1A25), (0x391D, 0x1A2B), (0x391D, 0x1A41),
          (0x3151, 0x5007), (0x3151, 0x5020), (0x3151, 0x504B), (0x374A, 0xA329)];
 
     private static BrandFamily Family(string brand, string prefix, bool checksum, params (int Vendor, int Product, string Name)[] models)
         => new(brand, shape => Collection(shape) && models.Any(model => model.Vendor == shape.Vendor && model.Product == shape.Product),
-            shape => [new BrandWay(prefix + ".status", WayTransport.Feature, Request(checksum),
-                MouseReceivers.Contains((shape.Vendor, shape.Product)) ? MouseBattery : Battery) { GapMs = 100, FeatureLength = 65 }])
+            shape => [.. StatusWay(prefix, checksum, shape), .. Extra(prefix, shape)])
         {
             Kind = shape => MouseReceivers.Contains((shape.Vendor, shape.Product)) ? DeviceKind.Mouse : DeviceKind.Keyboard, Prefix = prefix,
             DisplayName = shape => shape.Name.Length > 0 ? null : models.FirstOrDefault(model => model.Vendor == shape.Vendor && model.Product == shape.Product).Name,
@@ -90,7 +114,7 @@ public static class RongyuanStatus
         Family("CAROTMAS", "carotmas", true, (0x3151, 0x502B, "CAROTMAS Mars68")),
         Family("MonsGeek", "monsgeek", false, (0x3151, 0x5026, "MonsGeek FUN60 Pro"), (0x3151, 0x5038, "MonsGeek M2 V5 HE")),
         Family("VGN", "vgn", true, (0x391D, 0x2A05, "VGN Neon75 Air"), (0x391D, 0x2A07, "VGN Neon75 Turbo"), (0x3151, 0x5055, "VGN Neon75 Extreme"),
-            (0x391D, 0x1A04, "VGN Dragonfly3 Pro Max"), (0x391D, 0x1A08, "VGN Dragonfly Y2 V2 Pro Max"),
+            (0x391D, 0x1A04, "VGN Dragonfly3 Pro Max"), (0x391D, 0x1004, "VGN Dragonfly3 Pro Max"), (0x391D, 0x1A08, "VGN Dragonfly Y2 V2 Pro Max"),
             (0x391D, 0x1A13, "VGN Dragonfly F1 V2 Pro Max"), (0x391D, 0x1A25, "VGN Dragonfly 3 Ultra"), (0x391D, 0x1A2B, "VGN Dragonfly F1 V5 Ultra"),
             (0x391D, 0x1A41, "VGN Dragonfly F2 V2 Ultra")),
         Family("Rongyuan receiver", "rongyuan", false, Shared),

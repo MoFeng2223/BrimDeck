@@ -50,7 +50,11 @@ public enum BatteryAccuracy { Exact, Steps, Voltage }
 // One battery reading from a protocol: the percentage (null: the device answered without one), whether it charges, how the
 // level was come by, and whether the mouse is asleep / not answering (Asleep): the last percent still stands; never invent
 // 0 % for that case.
-public readonly record struct BatteryRead(int? Percent, bool Charging = false, BatteryAccuracy Accuracy = BatteryAccuracy.Exact, bool Asleep = false);
+public readonly record struct BatteryRead(int? Percent, bool Charging = false, BatteryAccuracy Accuracy = BatteryAccuracy.Exact, bool Asleep = false)
+{
+    // Earbuds' own parts (left, right, case) where a read gives them; null for a device of one battery.
+    public IReadOnlyList<PartBattery>? Parts { get; init; }
+}
 
 // Windows reports some vendor pages with their two bytes swapped (a descriptor's 0xFF00 read back as 0x00FF), so a page a
 // source gives without saying it was read on Windows is taken in either order. Vendor: any vendor-defined page (0xFF00 and
@@ -293,6 +297,10 @@ public static class Razer
         // HaloBattery's razer.py (MIT): the Mouse Dock Pro (0x1F, OpenRazer's id), and the Pro Type Ultra's receiver (0x9F, its
         // level measured in #196). Neither's interface is documented: any (-1), the device's own collection first.
         new(0x00A4, "Razer Mouse Dock Pro", 0x1F, -1, 31_000, true), new(0x027B, "Razer Pro Type Ultra", 0x9F, -1, 31_000, true, DeviceKind.Keyboard),
+        // The BlackShark V2 Pro 2023's third id, with the transaction OpenRazer gives the model, as myfinder-device-battery's
+        // razer_profiles.py lists it (AGPL; facts only; not measured). Its 0555 and 0556 are read with the PA protocol
+        // (RazerHeadsets), which switches the headset's remote mode on and off: not sent to an id nothing has been seen on.
+        new(0x0557, "Razer BlackShark V2 Pro", 0x3F, -1, 31_000, false, DeviceKind.Headphones),
     ];
     public static Model? Find(int product) => Catalog.FirstOrDefault(model => model.Product == product);
 }
@@ -339,6 +347,16 @@ public static class Dongles
         ([0x03, 0x00, 0x00, 0x00, 0x03, 0x3C], "LEOBOG A98"), ([0x03, 0x00, 0x00, 0x00, 0x00, 0xCA], "LEOBOG Hi8"),
         ([0x03, 0x00, 0x00, 0x00, 0x01, 0x3F], "LEOBOG Hi8SE"), ([0x03, 0x00, 0x00, 0x00, 0x01, 0x8D], "LEOBOG Hi86"),
         ([0x03, 0x00, 0x00, 0x00, 0x01, 0x21], "LEOBOG Hi98"), ([0x03, 0x00, 0x00, 0x00, 0x01, 0xAD], "LANGTU L18"),
+        // The rest of M HUB's keyboardPwds table, as myfinder-device-battery's mchose_by_keyboard.py lists it (AGPL; facts
+        // only, names only: not each measured).
+        ([0x03, 0x00, 0x00, 0x00, 0x02, 0x1C], "MCHOSE G87"), ([0x03, 0x00, 0x00, 0x00, 0x00, 0x77], "MCHOSE K99"),
+        ([0x03, 0x00, 0x00, 0x00, 0x01, 0xDF], "MCHOSE K99 V2"), ([0x03, 0x00, 0x00, 0x00, 0x01, 0x32], "MCHOSE G98"),
+        ([0x03, 0x00, 0x00, 0x00, 0x00, 0xD6], "MCHOSE X75"), ([0x0A, 0x00, 0x00, 0x00, 0x00, 0x03], "MCHOSE G98 Pro"),
+        ([0x03, 0x00, 0x00, 0x00, 0x01, 0xC6], "MCHOSE X75 V2"), ([0x0A, 0x00, 0x00, 0x00, 0x00, 0x18], "MCHOSE G98 V2"),
+        ([0x0A, 0x00, 0x00, 0x00, 0x00, 0x2B], "MCHOSE UT98"), ([0x0A, 0x00, 0x00, 0x00, 0x00, 0x01], "MCHOSE Z75"),
+        ([0x0A, 0x00, 0x00, 0x00, 0x00, 0x09], "MCHOSE Z75S"), ([0x03, 0x00, 0x00, 0x00, 0x01, 0x74], "MCHOSE GX87"),
+        ([0x03, 0x00, 0x00, 0x00, 0x01, 0xED], "MCHOSE GX87 V2"), ([0x03, 0x00, 0x00, 0x00, 0x01, 0x35], "MCHOSE K87"),
+        ([0x03, 0x00, 0x00, 0x00, 0x03, 0x35], "MCHOSE G75 V2"), ([0x0A, 0x00, 0x00, 0x00, 0x00, 0x34], "MCHOSE G87 V2"),
     ];
     private static bool AulaChecked(byte[] r)
     {
@@ -403,10 +421,15 @@ public static class Dongles
         => reply.Length >= 8 && reply[0] == 0x08 && reply[1] == 0x04 && reply[6] <= 100 ? new(reply[6], reply[7] == 1) : null;
 
     // VGN 2.4 GHz keyboards (320F:5088, usage page 0xFF1C, report 0x04, 64 bytes): command 0x1A; the reply echoes it at byte 3,
-    // the percentage at 8 and charging at 9.
+    // the percentage at 8 and charging at 9. With the keyboard asleep or away the receiver answers 04 00 00 FF 06 ... instead
+    // (myfinder-device-battery's maintainer, fifteen times on a 5088: its upstream-protocols.md, AGPL; facts only).
     public const int VgnVendor = 0x320F;
     public static byte[] VgnRequest() { var frame = new byte[64]; frame[0] = 0x04; frame[3] = 0x1A; frame[4] = 0x06; return frame; }
-    public static BatteryRead? VgnBattery(byte[] reply) => reply.Length >= 10 && reply[0] == 0x04 && reply[3] == 0x1A && reply[8] <= 100 ? new(reply[8], reply[9] != 0) : null;
+    public static BatteryRead? VgnBattery(byte[] reply)
+    {
+        if (reply.Length >= 10 && reply[0] == 0x04 && reply[1] == 0x00 && reply[2] == 0x00 && reply[3] == 0xFF && reply[4] == 0x06) return new(null, Asleep: true);
+        return reply.Length >= 10 && reply[0] == 0x04 && reply[3] == 0x1A && reply[8] <= 100 ? new(reply[8], reply[9] != 0) : null;
+    }
 
     // ATK's keyboards answer that same frame on the same page: the Z87 Pro's dongle (373B:1012, "ATK Z87 Dongle", usage page
     // 0xFF1C, usage 0x0092, 64-byte reports) answered 04 00 00 1A 06 00 00 00 5C ... to it on a keyboard at 92 %, which is what
@@ -823,19 +846,20 @@ public static class Dongles
     // that answers is kept for the device (HidBatteries), and the others are no longer sent to it. 0x3837 is
     // MCHOSE's alone, so every firmware behind it is MCHOSE's; the chip makers' and shared ids keep their lists (Gmouse's
     // 0xA8A5, the A5 Pro Max's 0x2023, the 41E4 keyboards), and 0x5253 gets the RealTek exchange only.
-    public enum MchoseRead { Realtek, Status, Audio, Frame4D, Gmouse, Config, Qhw, By }
+    public enum MchoseRead { Realtek, Status, Audio, Frame4D, Gmouse, Config, Qhw, By, Battery03 }
     // The kind by the name, else for the products whose name does not say it: the V9 Turbo's dongle and headset and the X9
     // headset, the G98 V3 keyboard (which does not answer the RealTek exchange, HaloBattery #362) and the keyboards' 3033
     // receiver and their cables, whose names do not say it, and M HUB's BY keyboard on 201B. The MagDock (1012) and the ids M
-    // HUB lists in firmware-update mode (MchoseUpdateProducts) are sent nothing.
+    // HUB lists in firmware-update mode (MchoseUpdateProducts) are sent nothing; nor is 6008, the V9 Turbo's light control
+    // (a WCH chip, "wch.cn", by a user's capture in myfinder-device-battery #61), which has no battery.
     // The V9 Turbo headset's dock (6009), V9 Turbo (600D), V9 Pro 2 (6011) and R9 (6013) are headsets and the K20 Pro (6003),
     // K20 (60C4) and K20 GT (60C6) speakers, by wzk112/MchoseHub's device catalog (no license; the ids only).
     // Legacy: without those hints, as the device keys were made before them (a key keeps its prefix).
     public static DeviceKind? MchoseKind(int product, string name, bool legacy = false) => product switch
     {
-        0x1012 => DeviceKind.Other,
+        0x1012 or 0x6008 => DeviceKind.Other,
         _ when Devices.Named(name) is { } named => named,
-        0x6008 or 0x600A or 0x6045 => DeviceKind.Headphones,
+        0x600A or 0x6045 => DeviceKind.Headphones,
         0x6009 or 0x600D or 0x6011 or 0x6013 when !legacy => DeviceKind.Headphones,
         0x6003 or 0x60C4 or 0x60C6 when !legacy => DeviceKind.Speaker,
         0x1015 or 0x2023 or 0x2025 or 0x201B => DeviceKind.Keyboard,
@@ -851,6 +875,7 @@ public static class Dongles
         // updates (the cables' 0xFF00) or unknown, and are sent nothing. The G98 V3 and K87 V3 keep the status read they were
         // asked before, after it.
         MchoseRead[] order = MchoseUpdateProducts.Contains(product) ? []
+            : product == MchoseConfigReceiver && IsK99V3(name) ? [MchoseRead.Battery03]
             : MchoseConfigProducts.Contains(product) ? [MchoseRead.Config]
             : MchoseQhwProducts.Contains(product) ? [MchoseRead.Qhw, MchoseRead.Status]
             : product == 0x201B ? [MchoseRead.By]
@@ -876,6 +901,7 @@ public static class Dongles
             MchoseRead.Frame4D => usagePage is 0xFF01 or 0xFF0B && usage != 0x0010 && Output(0x4D),
             MchoseRead.Gmouse => usagePage == 0xFF01 && usage == 0x0010 && outputLength >= 65 && Output(0x00),
             MchoseRead.Config => MchoseConfigProducts.Contains(product) && usagePage == 0x0001 && usage == 0x0000 && outputLength >= 65 && Output(0x00),
+            MchoseRead.Battery03 => product == MchoseConfigReceiver && usagePage == 0x0001 && usage == 0x0000 && outputLength >= 65 && Output(0x00),
             MchoseRead.Qhw => MchoseQhwProducts.Contains(product) && !name.Contains("CH585", StringComparison.OrdinalIgnoreCase)
                 && usagePage == 0xFF80 && usage == 0x0001 && outputLength >= 9 && Output(0x4D),
             MchoseRead.By => product == 0x201B && usagePage == 0xFF02 && outputLength >= 20 && Output(0x13),
@@ -908,6 +934,13 @@ public static class Dongles
         new byte[] { 0x00, 0x55, 0x05, 0x00, 0x38, 0x38, 0x00, 0x00, 0x00 }.CopyTo(frame, 0);
         return frame;
     }
+    // The K99 V3 behind the same receiver (its product string "MCHOSE K99 V3 2.4G") answers command 03 instead: 00 55 03 00 38 38,
+    // answered AA 03 ... with the percent at 8 (without the zero report id); no charging state is known. arutkowski00's
+    // mchose-hid-bridge, from a capture of the keyboard (its fixture at 40 %, its README at 100 %), as myfinder-device-battery's
+    // mchose_k99v3.py gives it (AGPL; facts only). The K87S's command 05 above is measured on the K87S alone.
+    public static bool IsK99V3(string name) => name.Trim().Equals("MCHOSE K99 V3 2.4G", StringComparison.OrdinalIgnoreCase);
+    public static byte[] MchoseBattery03Request() => BrandFamilies.Frame(65, 0x00, 0x55, 0x03, 0x00, 0x38, 0x38);
+    public static BatteryRead? MchoseBattery03(byte[] r) => r.Length >= 9 && r[0] == 0xAA && r[1] == 0x03 && r[8] is > 0 and <= 100 ? new(r[8]) : null;
     public static BatteryRead? MchoseConfig(byte[] r)
     {
         if (r.Length < 41 || r[0] != 0xAA || r[1] != 0x05 || r[5] != 0x00 || r[6] != 0x00) return null;
@@ -1110,6 +1143,13 @@ public static class Dongles
         Pair(NordicVendor, 0xAE1C, 0xAE11);
         foreach (var cable in CompxSplit.Where(model => model.Receiver >= 0)) Pair(cable.Vendor, cable.Receiver, cable.Product);
         Pair(0x1E71, 0x2101, 0x2129);
+        // myfinder-device-battery (AGPL; facts only): its users' diagnostics show both entries of these mice while they charge,
+        // the receiver timing out and the cable reading (the ATK A9 Air+'s 1278 / 1293, its t61-a9-charging.md: 95 %
+        // charging), and EWEADN's receiver 089D:062F with the mouse on its cable 088D:062E (server.py's CHARGING_TWINS).
+        Pair(AtkVendor, 0x1278, 0x1293);
+        twins.Add((Devices.Hardware(0x089D, 0x062F), Devices.Hardware(0x088D, 0x062E)));
+        // VGN's Dragonfly3 Pro Max: its receiver and the mouse on its cable (RongyuanStatus).
+        Pair(0x391D, 0x1A04, 0x1004);
         foreach (var (receiver, cable) in Asus.Pairs) Pair(Asus.Vendor, receiver, cable);
         foreach (var (receiver, cable) in SteelSeriesMice.Pairs) Pair(Headsets.SteelSeries, receiver, cable);
         foreach (var cable in F83Models.Where(model => model.Vendor == WlmouseVendor && model.Cable))
@@ -1140,6 +1180,9 @@ public static class Dongles
             (Devices.Hardware(RazerHeadsets.Vendor, 0x0568), Devices.Hardware(RazerHeadsets.Vendor, 0x0567)),
             (Devices.Hardware(RazerHeadsets.Vendor, 0x0588), Devices.Hardware(RazerHeadsets.Vendor, 0x0587)),
             (Devices.Hardware(NuPhy.Vendor, 0x8F01), Devices.Hardware(NuPhy.Vendor, 0xA011)),
+            // The HyperX Cloud II Core Wireless: its dongle 0995 and its second id 0795 both answer, with the same level, while
+            // it charges (HaloBattery's hyperx_cloud3.py, from the reporter's diagnostics, #155).
+            (Devices.Hardware(Headsets.HyperXHp, 0x0995), Devices.Hardware(Headsets.HyperXHp, 0x0795)),
         };
         foreach (var product in NuPhy.KnownNames.Keys)
             if (product is >= 0x1026 and <= 0x10FF)
@@ -1280,8 +1323,12 @@ public static class Dongles
     // USB-cable PIDs on vendor 0x248A (5C2E / 5D2E / 5E2E — from aj179-linux PROTOCOL.md; the reporter's Zero PC verified the
     // wireless 249A:5C2F / device id M041 only). Framing is a 32-byte vendor report on interrupt IN/OUT (Windows WriteFile
     // buffer length = OutputReportByteLength with a leading report-id 0). Command 0x10 is answered by the receiver even while
-    // the mouse sleeps: battery at byte 13, charging at 12, connected at 14; unsolicited 0xC0 carries online at 1 and battery
-    // at 2. Sleep must keep the last percent (Asleep), never a false 0 %.
+    // the mouse sleeps: battery at byte 13, charging at 12, connected at 14; unsolicited 0xC0 carries online at 1, battery at 2
+    // and a charging flag at 3 (non-zero charging; that byte from Inphic's web driver's parser alone, AJAZZ's own notes do not
+    // agree on the push's flags). Sleep must keep the last percent (Asleep), never a false 0 %.
+    // Inphic's IN9 Gaming Mouse speaks the same protocol (XICHEN's "protocol 5" in Inphic's web driver, its hardware id M910),
+    // with its 2.4 GHz receiver also on 248A:5C2F beside 249A:5C2F: myfinder-device-battery's docs/inphic-in9-xichen.md (AGPL;
+    // facts only, from that page's device table and its C0 parser; not measured).
     public const int AjazzWirelessVendor = 0x249A, AjazzReceiverProduct = 0x5C2F;
     public const int AjazzWiredVendor = 0x248A;
     public static readonly int[] AjazzWiredProducts = [0x5C2E, 0x5D2E, 0x5E2E];
@@ -1291,7 +1338,7 @@ public static class Dongles
     public static bool IsAjazzReceiver(int product) => product == AjazzReceiverProduct;
     public static bool IsAjazzWired(int product) => Array.IndexOf(AjazzWiredProducts, product) >= 0;
     public static bool IsAjazz(int vendor, int product)
-        => vendor == AjazzWirelessVendor && IsAjazzReceiver(product)
+        => vendor is AjazzWirelessVendor or AjazzWiredVendor && IsAjazzReceiver(product)
         || vendor == AjazzWiredVendor && IsAjazzWired(product);
 
     // The config collection: MI_02 (UsagePage 0x0001 / Usage 0x0000), In/Out report length 33 with report-id 0 on Windows.
@@ -1328,13 +1375,15 @@ public static class Dongles
         return new(bat, reply[o + 12] != 0, connected, AjazzDeviceId(reply, o + 4));
     }
 
-    public static (bool Online, int? Percent)? AjazzParseStatus(byte[] reply)
+    public static (bool Online, int? Percent, bool Charging)? AjazzParseStatus(byte[] reply)
     {
         int o = reply.Length > 2 && reply[0] == 0 && reply[1] == AjazzStatus ? 1 : 0;
         if (reply.Length < o + 3 || reply[o] != AjazzStatus) return null;
         int bat = reply[o + 2];
-        return (reply[o + 1] == 1, bat <= 100 ? bat : null);
+        return (reply[o + 1] == 1, bat <= 100 ? bat : null, reply.Length > o + 3 && reply[o + 3] != 0);
     }
+    // The name a device id stands for, where it is not the model's own (Inphic's web driver's M910: its IN9 Gaming Mouse).
+    public static string? AjazzModel(string deviceId) => deviceId == "M910" ? "Inphic IN9" : null;
 
     // cable: read on the mouse's own cable. There the mouse answers for itself and has no idle or asleep status (aj179-linux
     // PROTOCOL.md), so it is never asleep, whatever byte 14 says.
@@ -1345,7 +1394,7 @@ public static class Dongles
     // reports it not connected (aj179-linux PROTOCOL.md), so asleep. The receiver's entry is left out when the cable read the
     // mouse of the same id in the same pass.
     public static bool AjazzShadowed(DeviceBattery device, IEnumerable<DeviceBattery> devices)
-        => device.Asleep && device.Hardware == Devices.Hardware(AjazzWirelessVendor, AjazzReceiverProduct)
+        => device.Asleep && (device.Hardware == Devices.Hardware(AjazzWirelessVendor, AjazzReceiverProduct) || device.Hardware == Devices.Hardware(AjazzWiredVendor, AjazzReceiverProduct))
         && devices.Any(other => other.Hardware is { } hardware && IsAjazzCable(hardware) && !other.Asleep && other.Percent is not null && other.Name == device.Name);
     private static bool IsAjazzCable(string hardware) => AjazzWiredProducts.Any(product => hardware == Devices.Hardware(AjazzWiredVendor, product));
 
@@ -1530,6 +1579,8 @@ public static class Asus
         }
         return model.Family switch
         {
+            // 0 off the cable is the mouse in standby (G-Helper publishes no level for a mouse at 0): its last level stands.
+            Family.Mouse when raw == 0 && r[10] == 0 => new BatteryRead(null, Asleep: true),
             Family.Mouse when model.Steps => raw <= 4 ? new BatteryRead(raw * 25, r[10] != 0, Accuracy: BatteryAccuracy.Steps) : Refused,
             Family.Mouse => raw <= 100 ? new BatteryRead(raw, r[10] != 0) : Refused,
             Family.Keyboard => raw <= 100 ? new BatteryRead(raw, r[9] == 1) : Refused,
@@ -1746,6 +1797,17 @@ public static class Pushes
         [0xEA] = "ATTACK SHARK V3",
         [0x30] = "DELUX M900 Pro", [0x41] = "Inphic IN6", [0x42] = "Inphic IN9", [0x90] = "Inphic IN9 Ultra", [0x92] = "Inphic IN6 SE",
         [0x93] = "Inphic IN10", [0x99] = "Inphic INX",
+        // Inphic's web driver's product table for FA60 (76/79 ZHEN, 78 IN10, 77 IN9 PRO V2, 07/E8 X11 SE), and the AULA SC650 (8E,
+        // a user's frames 03 8E 40 01 5B at 91 %, 31 at 49 %): myfinder-device-battery's upstream-protocols.md and
+        // fa6x_passive.py (AGPL; facts only). Inphic's model bytes are its web driver's (the native program's IN10 is 93).
+        [0x76] = "Inphic ZHEN", [0x79] = "Inphic ZHEN", [0x78] = "Inphic IN10", [0x77] = "Inphic IN9 PRO V2", [0xE8] = "ATTACK SHARK X11 SE",
+        [0x8E] = "AULA SC650",
+    };
+    // The same web table's models on FA65's vendor collection (InphicZhen), its events 40 and 41 alike (the page takes 41 as 40).
+    private static readonly Dictionary<int, string> InphicFa65Names = new()
+    {
+        [0x71] = "Inphic IN10 Pro", [0x90] = "Inphic IN9 Ultra", [0x76] = "Inphic ZHEN", [0x79] = "Inphic ZHEN", [0x78] = "Inphic IN10",
+        [0x77] = "Inphic IN9 PRO V2",
     };
     // The device ids whose level counts 1 to 10.
     private static readonly HashSet<int> BekenTenths = [0x10, 0x85];
@@ -1762,7 +1824,12 @@ public static class Pushes
                 return level <= 100 ? new(level, r[3] is 0x02 or 0x03 or 0x80, Accuracy: tenths ? BatteryAccuracy.Steps : BatteryAccuracy.Exact) : null;
             case Kind.Delux when r.Length >= 5 && r[0] == 0x03 && r[1] == 0x30 && r[2] == 0x40 && r[4] <= 100:
                 return new(r[3] == 0x02 ? 100 : r[4], r[3] == 0x03);
-            case Kind.InphicZhen when r.Length >= 5 && r[0] == 0x03 && r[1] == 0x76 && r[2] == 0x41 && r[4] <= 100:
+            // The older Inphic IN10 on the same collection, 03 93 40 <state> <percent>: Inphic's native program shows state 2 as
+            // 100 % and state 3 as a charging animation, so neither is a reading (myfinder-device-battery's fa6x_passive.py and
+            // upstream-protocols.md, from that program; AGPL, facts only; not measured).
+            case Kind.Delux when r.Length >= 5 && r[0] == 0x03 && r[1] == 0x93 && r[2] == 0x40 && r[3] is not (0x02 or 0x03) && r[4] is > 0 and <= 100:
+                return new(r[4]);
+            case Kind.InphicZhen when r.Length >= 5 && r[0] == 0x03 && InphicFa65Names.ContainsKey(r[1]) && r[2] is 0x40 or 0x41 && r[4] is > 0 and <= 100:
                 return new(r[4], r[3] == 0x03);
             case Kind.Rapoo or Kind.RapooKeyboard when r.Length >= 19 && r[0] == 0x07:
                 if ((r[1] & 0x0F) == 0 && (r[18] & 0x80) == 0) return (last ?? new(null)) with { Charging = false, Asleep = true };
@@ -1803,12 +1870,14 @@ public static class Pushes
     {
         Kind.Beken => report is { Length: > 1 } && BekenNames.TryGetValue(report[1], out var name) ? name : "ATTACK SHARK",
         Kind.Rapoo => RapooMice.GetValueOrDefault(product, "Rapoo Mouse"),
-        Kind.Delux => "DELUX M900 Pro", Kind.InphicZhen => "Inphic ZHEN", Kind.AulaG9 => "AULA G9",
+        Kind.Delux => report is { Length: > 1 } && report[1] == 0x93 ? "Inphic IN10" : "DELUX M900 Pro",
+        Kind.InphicZhen => report is { Length: > 1 } && InphicFa65Names.TryGetValue(report[1], out var inphic) ? inphic : "Inphic ZHEN",
+        Kind.AulaG9 => "AULA G9",
         Kind.Jbl => "JBL Quantum 910 Wireless", Kind.Pulse3D => "PULSE 3D Wireless Headset", Kind.CloudFlight2 => "HyperX Cloud Flight 2",
         Kind.RapooKeyboard => "Rapoo V700DIY-98", _ => "Steam Controller"
     };
-    // Whether a report names the device (a Beken report carries its mouse's id).
-    public static bool Names(Kind kind) => kind == Kind.Beken;
+    // Whether a report names the device (a Beken or Inphic report carries its mouse's id).
+    public static bool Names(Kind kind) => kind is Kind.Beken or Kind.InphicZhen or Kind.Delux;
     public static DeviceKind KindOf(Kind kind) => kind switch
     {
         Kind.AulaG9 or Kind.Jbl or Kind.Pulse3D or Kind.CloudFlight2 => DeviceKind.Headphones, Kind.SteamPuck => DeviceKind.Controller,
@@ -1928,8 +1997,9 @@ public static class Headsets
         // on the reporter's dongle, #192): its own 62-byte exchange on 0xFF13, answered under report id 0x0B.
         (HyperXKingston, 0x1718) => Kind.CloudIIKingston,
         // HaloBattery's hyperx_cloud3.py (the Cloud III Wireless, and the Cloud II Core Wireless on 0995 and 0795 from a
-        // capture of NGENUITY), hyperx_cloud3s.py and hyperx_alpha2.py (captures of NGENUITY).
-        (HyperXHp, 0x05B7 or 0x0C9D or 0x0995 or 0x0795) => Kind.CloudIII,
+        // capture of NGENUITY), hyperx_cloud3s.py and hyperx_alpha2.py (captures of NGENUITY). The Cloud III Wireless on 0FCC:
+        // myfinder-device-battery's hyperx_cloud3.py (AGPL; facts only), read by a user there (#186): 66 89 answered 90 %.
+        (HyperXHp, 0x05B7 or 0x0C9D or 0x0FCC or 0x0995 or 0x0795) => Kind.CloudIII,
         (HyperXHp, 0x02CC or 0x06BE) => Kind.CloudIIIS,
         (HyperXHp, 0x08BE) => Kind.CloudAlpha2,
         _ => null
@@ -2000,6 +2070,9 @@ public static class Headsets
         // The offsets count the report id at 0, so a report of another id (a button, padded with zeros) is passed over.
         Kind.Arctis7 when r.Length >= 3 && r[0] == 0x06 && r[2] <= 100 => new(r[2]),
         Kind.Arctis9 when r.Length >= 5 && r[3] is >= 0x64 and <= 0x9A => new(Devices.Clamp((int)Math.Round((r[3] - 0x64) * 100.0 / (0x9A - 0x64))), r[4] == 0x01),
+        // The Nova 7's link byte at 1: 02 the headset not connected, when the dongle repeats the last level it had (seen on a 22A1,
+        // myfinder-device-battery's steelseries.py; AGPL, facts only).
+        Kind.Nova7Percent or Kind.Nova7Steps when r.Length >= 4 && r[1] == 0x02 => new(null, Asleep: true),
         Kind.Nova7Percent when r.Length >= 4 && r[3] != 0 && r[2] <= 100 => new(r[2], r[3] is 0x01 or 0x02),
         Kind.Nova7Steps when r.Length >= 4 && r[3] != 0 && r[2] <= 4 => new(r[2] * 25, r[3] is 0x01 or 0x02, Accuracy: BatteryAccuracy.Steps),
         Kind.NovaPro when r.Length >= 16 && r[0] == 0x06 && r[15] != 0x01 && r[6] <= 8 => new((int)Math.Round(r[6] * 12.5), r[15] == 0x02, Accuracy: BatteryAccuracy.Steps),
@@ -2107,7 +2180,9 @@ public static class PlayStation
 // Battery System page's state of charge (0x85/0x65 absolute, 0x66 remaining). The value is scaled by its logical range.
 public static class HidBattery
 {
-    public static bool IsBattery(int page, int usage) => (page, usage) is (0x06, 0x20) or (0x0D, 0x3B) or (0x85, 0x65) or (0x85, 0x66);
+    // 0x85/0x64 is the Battery System page's RelativeStateOfCharge (a percent), which myfinder-device-battery's standardhid.py
+    // also reads.
+    public static bool IsBattery(int page, int usage) => (page, usage) is (0x06, 0x20) or (0x0D, 0x3B) or (0x85, 0x64) or (0x85, 0x65) or (0x85, 0x66);
     public static int? Percent(int value, int logicalMin, int logicalMax)
     {
         if (logicalMax <= logicalMin) logicalMax = logicalMin + 100;

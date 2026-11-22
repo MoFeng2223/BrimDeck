@@ -56,7 +56,10 @@ public static class SteelSeriesHeadsets
             : r[1] == 0x02 ? new(null, Asleep: true) : r[3] is > 0 and <= 100 ? new(r[3], r[4] == 0x01) : null,
         Exchange.GameBuds => GameBudsBattery,
         Exchange.Elite => r => r.Length < 16 || r[0] != 0x01 || r[1] != 0xB0 ? null
-            : r[14] == 0x01 ? new(null, Asleep: true) : r[6] is > 0 and <= 100 ? new(r[6], r[15] == 0x02 || r[14] == 0x02) : null,
+            // 0 with a power code is the headset switched off: the station does not say it with power code 01, and GG shows
+            // 0 % then (myfinder-device-battery's steelseries_elite.py, its user's station, #138; AGPL, facts only). The request
+            // read back has no power code.
+            : r[14] == 0x01 || r[6] == 0 && r[14] != 0 ? new(null, Asleep: true) : r[6] is > 0 and <= 100 ? new(r[6], r[15] == 0x02 || r[14] == 0x02) : null,
         _ => r => r.Length < 16 || r[0] != 0x01 || r[1] != 0xB0 ? null
             : r[15] == 0x01 ? new(null, Asleep: true) : r[15] is 0x02 or 0x08 && r[6] is > 0 and <= 100 ? new(r[6], r[15] == 0x02) : null,
     };

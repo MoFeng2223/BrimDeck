@@ -173,7 +173,8 @@ static class BrandFamilyTests
     private static byte[] Bytes(string hex) => Convert.FromHexString(hex.Replace(" ", ""));
 
     // What every family must keep: unique brands and read names (they are kept on disk), names under the brand's prefix, and
-    // never a standard collection (mouse, keyboard, consumer, system control) asked.
+    // never a standard collection (mouse, keyboard, consumer, system control) asked. The one exception is MOONDROP's GM01 Pro
+    // (35D8:0133), whose battery report 0x4B is on a consumer collection that declares it both ways (Moondrop).
     private static void Rules(Action<string, bool> check)
     {
         var all = BrandFamilies.All;

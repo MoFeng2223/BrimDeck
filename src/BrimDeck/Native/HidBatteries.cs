@@ -749,7 +749,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
                 charging |= Hid.Transact<object>(listeners, () => Send(second), r => Headsets.Charging(kind, r) is { } state ? state : null, wait) is true;
             claimed.Add(info.Path);
             return [new DeviceBattery(Key("headset", info), NameOf(info, Headsets.Name(kind)), DeviceKind.Headphones, Headsets.Source(kind), battery.Percent)
-                { Charging = charging, Accuracy = battery.Accuracy, Hardware = Devices.Hardware(info.Vendor, info.Product), Address = AddressOf(info) }];
+                { Charging = charging, Accuracy = battery.Accuracy, Asleep = battery.Asleep, Hardware = Devices.Hardware(info.Vendor, info.Product), Address = AddressOf(info) }];
         }
         finally { foreach (var other in listeners.Skip(1)) other.Dispose(); }
     }
@@ -814,7 +814,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     private static DeviceBattery Mouse(string prefix, HidInfo info, string fallback, BatteryRead battery, DeviceKind kind = DeviceKind.Mouse, string? preferredName = null)
         => new(Key(prefix, info), preferredName is { Length: > 0 } ? preferredName : NameOf(info, fallback),
             Devices.Named(info.ProductName) is { } named and not DeviceKind.Other ? named : kind, DeviceSource.Hid, battery.Percent)
-        { Charging = battery.Charging, Accuracy = battery.Accuracy, Asleep = battery.Asleep, Hardware = Devices.Hardware(info.Vendor, info.Product) };
+        { Charging = battery.Charging, Accuracy = battery.Accuracy, Asleep = battery.Asleep, Hardware = Devices.Hardware(info.Vendor, info.Product), Parts = battery.Parts ?? [] };
 
     private static IEnumerable<DeviceBattery> BitMouse(HidInfo info, HashSet<string> claimed)
     {
@@ -1212,18 +1212,22 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             default:
             {
                 // Status, Audio, the keyboards' configuration read and the Qhw command: twice, 400 ms each (HaloBattery's budget);
-                // the BY keyboards' 13 4A read once, for 1500 ms (the time mchose-battery-tray gives it); the 0x4D frame three
-                // times, 30 ms apart. The configuration read is on reports without an id, so the id is dropped from its answers.
+                // the BY keyboards' 13 4A read once, for 1500 ms (the time mchose-battery-tray gives it); the 0x4D frame once, for
+                // 1500 ms. The configuration read is on reports without an id, so the id is dropped from its answers.
                 var (request, parse, attempts, timeout) = read switch
                 {
                     Dongles.MchoseRead.Status => (Dongles.MchoseStatusRequest(), (Func<byte[], BatteryRead?>)Dongles.MchoseStatus, 2, 400),
                     Dongles.MchoseRead.Audio => (Dongles.MchoseAudioRequest(), Dongles.MchoseAudio, 2, 400),
                     Dongles.MchoseRead.Config => (Dongles.MchoseConfigRequest(), Dongles.MchoseConfig, 2, 400),
+                    Dongles.MchoseRead.Battery03 => (Dongles.MchoseBattery03Request(), Dongles.MchoseBattery03, 2, 400),
                     Dongles.MchoseRead.Qhw => (Dongles.MchoseQhwRequest(), Dongles.MchoseQhw, 2, 400),
                     Dongles.MchoseRead.By => (Dongles.MchoseKeyboardRequest(), Dongles.MchoseKeyboardBattery, 1, 1500),
-                    _ => (Dongles.MchoseRequest(), Dongles.MchoseBattery, 3, 400)
+                    // Asked once and waited on for 1.5 s: the receiver answers about a second later (measured upstream, as
+                    // myfinder-device-battery's upstream-protocols.md gives it; AGPL, facts only), and asking again would flush
+                    // that answer before it came.
+                    _ => (Dongles.MchoseRequest(), Dongles.MchoseBattery, 1, 1500)
                 };
-                using var device = new HidDevice(info) { StripZero = read == Dongles.MchoseRead.Config };
+                using var device = new HidDevice(info) { StripZero = read is Dongles.MchoseRead.Config or Dongles.MchoseRead.Battery03 };
                 for (int attempt = 0; attempt < attempts; attempt++)
                 {
                     if (attempt > 0) Thread.Sleep(30);
@@ -1243,14 +1247,14 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         {
             if (Dongles.AjazzParseInfo(r) is { } infoReply) return infoReply;
             // A passive 0xC0 while waiting: only take it when the mouse is online and the battery byte is valid.
-            if (Dongles.AjazzParseStatus(r) is { Online: true, Percent: { } percent })
-                return new Dongles.AjazzInfo(percent, Charging: false, Connected: true, DeviceId: "");
+            if (Dongles.AjazzParseStatus(r) is { Online: true, Percent: { } percent } status)
+                return new Dongles.AjazzInfo(percent, status.Charging, Connected: true, DeviceId: "");
             return null;
         }, 1500);
         bool cable = info.Vendor == Dongles.AjazzWiredVendor && Dongles.IsAjazzWired(info.Product);
         if (reading is not Dongles.AjazzInfo parsed || Dongles.AjazzBattery(parsed, cable) is not { } battery) return [];
         claimed.Add(info.Path);
-        string name = parsed.DeviceId.Length > 0 ? parsed.DeviceId : NameOf(info, "AJAZZ");
+        string name = Dongles.AjazzModel(parsed.DeviceId) ?? (parsed.DeviceId.Length > 0 ? parsed.DeviceId : NameOf(info, "AJAZZ"));
         return [Mouse("ajazz", info, "AJAZZ", battery, preferredName: name)];
     }
 
@@ -1500,7 +1504,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
                 using var device = new HidDevice(info);
                 if (AskAsus(device, model) is not { } battery) continue;
                 found.Add(new DeviceBattery(Key("asus", info) + $":{model.Product:X4}", model.Name, Asus.Kind(model), DeviceSource.Hid, battery.Percent)
-                    { Charging = battery.Charging, Accuracy = battery.Accuracy, Hardware = Devices.Hardware(info.Vendor, info.Product) });
+                    { Charging = battery.Charging, Accuracy = battery.Accuracy, Asleep = battery.Asleep, Hardware = Devices.Hardware(info.Vendor, info.Product) });
             }
             catch (Exception error) when (error is System.ComponentModel.Win32Exception or TimeoutException or IOException) { }
         }

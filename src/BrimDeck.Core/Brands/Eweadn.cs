@@ -77,8 +77,9 @@ public static class EweadnMice
     public static BatteryRead? Beiyin(byte[] r)
     {
         // 0B 02 01 after the command's echo: the BASICS answer (MCHOSE's driver checks the 02; another command's answer, such as
-        // the wireless-online one another program asks, is not this).
-        if (r.Length < 7 || r[0] != 0x03 || r[1] != 0x50 || r[2] != 0x00 || r[3] != 0x0B || r[4] != 0x02 || r[5] != 0x01) return null;
+        // the wireless-online one another program asks, is not this). 0B 00 01 too: a user's receiver answered so in
+        // myfinder-device-battery #315 (03 50 00 0B 00 01 <percent> 21 07 01 90 65 04 A5 5A 00, 23 % to 98 %; AGPL, facts only).
+        if (r.Length < 7 || r[0] != 0x03 || r[1] != 0x50 || r[2] != 0x00 || r[3] != 0x0B || r[4] is not (0x02 or 0x00) || r[5] != 0x01) return null;
         int level = r[6] & 0x7F;
         if (r[6] == 0) return new(null, Asleep: true);
         return level is > 0 and <= 100 ? new(level, (r[6] & 0x80) != 0) : null;

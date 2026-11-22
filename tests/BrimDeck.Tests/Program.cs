@@ -115,6 +115,7 @@ try
     BrandsHeadsetTests.Run(Check);
     BrandsMouseTests.Run(Check);
     BrandsGapTests.Run(Check);
+    BrandsReferenceTests.Run(Check);
     BrandsMoreTests.Run(Check);
     BrandsZhuaudioGravaStarTests.Run(Check);
     OfficialDriverTests.Run(Check);

@@ -12,11 +12,13 @@ namespace BrimDeck.Core;
 // - L9 Ultra on its receiver 38A6:28FD (not AULA G9's 38A6:0030, which Pushes listens to), its 0xFFA8 usage 2 collection:
 //   output report 0x0B with the status command 0x81, answered on input report 0x0A: 0A 81 ..., 1 at 17 while charging, the
 //   percent at 18. From vigil-watt's AulaL9Codec (MIT; reported by a contributor; only the 0xFFA8 collection answers) and,
-//   for the usage, MouseDock's AULA FFA8 family (MIT).
+//   for the usage, MouseDock's AULA FFA8 family (MIT). The SC800 Max on its receiver 38A6:28E9 takes the same read: AULA's
+//   hub lists it on the same 0xFFA8 usage 2 collection with the same SDK's 0x81 command (myfinder-device-battery's
+//   upstream-protocols.md, AGPL; facts only; not measured). Its boot id 28ED is never sent to.
 [BrandFamilies]
 public static class AulaMice
 {
-    public const int Sc380Vendor = 0x258A, Sc380Receiver = 0x0138, L9Vendor = 0x38A6, L9Receiver = 0x28FD;
+    public const int Sc380Vendor = 0x258A, Sc380Receiver = 0x0138, L9Vendor = 0x38A6, L9Receiver = 0x28FD, Sc800MaxReceiver = 0x28E9;
 
     public static byte[] Sc380Request()
     {
@@ -43,7 +45,7 @@ public static class AulaMice
 
     private static bool Sc380Collection(HidShape shape) => shape.Vendor == Sc380Vendor && shape.Product == Sc380Receiver
         && MouseShapes.Collection(shape, 0xFF02, 0x02) && shape.FeatureLength >= 9;
-    private static bool L9Collection(HidShape shape) => shape.Vendor == L9Vendor && shape.Product == L9Receiver
+    private static bool L9Collection(HidShape shape) => shape.Vendor == L9Vendor && shape.Product is L9Receiver or Sc800MaxReceiver
         && MouseShapes.Collection(shape, 0xFFA8, 0x02) && shape.InputLength >= 19 && shape.OutputLength >= 3;
 
     public static IEnumerable<BrandFamily> Families =>
@@ -53,7 +55,7 @@ public static class AulaMice
             : [new BrandWay("aula.l9", WayTransport.Output, L9Request(), L9) { TimeoutMs = 600 }])
         {
             Kind = _ => DeviceKind.Mouse, Prefix = "aula-mouse",
-            DisplayName = shape => shape.Product == Sc380Receiver ? "AULA SC380 Pro" : "AULA L9 Ultra",
+            DisplayName = shape => shape.Product switch { Sc380Receiver => "AULA SC380 Pro", Sc800MaxReceiver => "AULA SC800 Max", _ => "AULA L9 Ultra" },
         },
         // The AULA A9 headset's base (38A6:001D, named "AULA-A9" or "AULA-A9 PC"): AULA's web driver asks it with output report
         // 0x55, 55 65 00 and zeros to 64 bytes, on usage page 0xFF90, usage 1, and reads 55 65 <percent> <state>, the state

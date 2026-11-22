@@ -195,14 +195,14 @@ static class DeviceProtocolTests
             && Dongles.MchoseReads(0x4245, "Mouse", 0xFF01, 0x10, 0, 65).SequenceEqual([Dongles.MchoseRead.Gmouse, Dongles.MchoseRead.Status])
             && Dongles.MchoseReads(0x4011, "MCHOSE K99 Keyboard", 0xFF70, 0x71, 0, 64).SequenceEqual([Dongles.MchoseRead.Status])
             && Dongles.MchoseReads(0x1015, "", 0xFF01, 1, 65, 65).SequenceEqual([Dongles.MchoseRead.Status])
-            && Dongles.MchoseReads(0x6008, "V9 Turbo", 0xFF00, 1, 0, 64).SequenceEqual([Dongles.MchoseRead.Audio, Dongles.MchoseRead.Status])
+            && Dongles.MchoseReads(0x600A, "V9 Turbo", 0xFF00, 1, 0, 64).SequenceEqual([Dongles.MchoseRead.Audio, Dongles.MchoseRead.Status])
             && Dongles.MchoseReads(0x6045, "X9", 0xFF90, 1, 0, 64).SequenceEqual([Dongles.MchoseRead.Audio, Dongles.MchoseRead.Status])
             && Dongles.MchoseReads(0x1012, "MCHOSE MagDock Mouse", 0xFF01, 1, 65, 65).Count == 0
-            && Dongles.MchoseReads(0x6008, "V9 Turbo", 0x000C, 1, 0, 64).Count == 0 && Dongles.MchoseReads(0x1016, "MCHOSE V7", 0xFF02, 1, 0, 8).Count == 0);
+            && Dongles.MchoseReads(0x600A, "V9 Turbo", 0x000C, 1, 0, 64).Count == 0 && Dongles.MchoseReads(0x1016, "MCHOSE V7", 0xFF02, 1, 0, 8).Count == 0);
         check("MCHOSE 0x3837: a read goes only where the collection declares its report id",
             Dongles.MchoseReads(0x1014, "", 0xFF01, 1, 0, 64, new HashSet<byte> { 0x4D }, new HashSet<byte>()).SequenceEqual([Dongles.MchoseRead.Frame4D])
             && Dongles.MchoseReads(0x100B, "", 0xFF01, 1, 21, 64, new HashSet<byte>(), new HashSet<byte> { 0x11, 0x12 }).SequenceEqual([Dongles.MchoseRead.Realtek])
-            && Dongles.MchoseReads(0x6008, "V9 Turbo", 0xFF00, 1, 0, 64, new HashSet<byte> { 0x55 }, new HashSet<byte>()).SequenceEqual([Dongles.MchoseRead.Audio, Dongles.MchoseRead.Status])
+            && Dongles.MchoseReads(0x600A, "V9 Turbo", 0xFF00, 1, 0, 64, new HashSet<byte> { 0x55 }, new HashSet<byte>()).SequenceEqual([Dongles.MchoseRead.Audio, Dongles.MchoseRead.Status])
             && Dongles.MchoseReads(0x4245, "Mouse", 0xFF01, 0x10, 0, 65, new HashSet<byte> { 0x00 }, new HashSet<byte>()).SequenceEqual([Dongles.MchoseRead.Gmouse])
             && Dongles.MchoseReads(0x1014, "", 0xFF01, 1, 65, 64, new HashSet<byte> { 0x06 }, new HashSet<byte> { 0x06 }).Count == 0
             && Dongles.MchoseReads(0x1014, "", 0xFF01, 1, 65, 64, new HashSet<byte>(), new HashSet<byte>()).Count == 0);
@@ -231,8 +231,8 @@ static class DeviceProtocolTests
             Dongles.Find(0x41E4, 0x1101, 0xFF01, "", 21) == Dongles.Protocol.MchoseRealtek && Dongles.Find(0x41E4, 0x1101, 0xFF02, "", 21, -1, 1, 20, 20) is null
             && Dongles.MchoseRealtekBattery(Inverted(0x11, [0xE4, 0x41, 0x11, 0x01, 1, 0, 0, 0, 0x08, 64, 0])) == (new BatteryRead(64), 0x0111));
         check("MCHOSE 0x3837: Find sends a collection that takes one of the reads to them, and the rest to none",
-            Dongles.Find(0x3837, 0x100B, 0xFF01, "2.4G Receiver", 65) == Dongles.Protocol.Mchose && Dongles.Find(0x3837, 0x6008, 0xFF00, "V9 Turbo", 0, -1, 1, 64, 64) == Dongles.Protocol.Mchose
-            && Dongles.Find(0x3837, 0x1012, 0xFF01, "MCHOSE MagDock Mouse", 65) is null && Dongles.Find(0x3837, 0x6008, 0x000C, "V9 Turbo", 0, -1, 1, 8, 8) is null);
+            Dongles.Find(0x3837, 0x100B, 0xFF01, "2.4G Receiver", 65) == Dongles.Protocol.Mchose && Dongles.Find(0x3837, 0x600A, 0xFF00, "V9 Turbo", 0, -1, 1, 64, 64) == Dongles.Protocol.Mchose
+            && Dongles.Find(0x3837, 0x1012, 0xFF01, "MCHOSE MagDock Mouse", 65) is null && Dongles.Find(0x3837, 0x600A, 0x000C, "V9 Turbo", 0, -1, 1, 8, 8) is null);
         check("MCHOSE status read on 0x55: the request, a level, charging, full, asleep, and another report is none",
             Dongles.MchoseStatusRequest().Length == 64 && Dongles.MchoseStatusRequest()[..4].SequenceEqual(new byte[] { 0x55, 0x65, 0x01, 0x00 })
             && Dongles.MchoseStatus([0x55, 0x65, 40, 2]) == new BatteryRead(40) && Dongles.MchoseStatus([0x55, 0x65, 40, 3]) == new BatteryRead(40, true)
@@ -596,9 +596,9 @@ static class DeviceProtocolTests
             && Dongles.AjazzBattery(Dongles.AjazzParseInfo(awake)!.Value) == new BatteryRead(92)
             && Dongles.AjazzParseInfo([0x10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]) is null
             && Dongles.AjazzParseInfo([0x10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 101, 1]) is null);
-        check("AJAZZ: passive 0xC0 online/offline", Dongles.AjazzParseStatus([0xC0, 1, 55]) == (true, 55)
-            && Dongles.AjazzParseStatus([0x00, 0xC0, 0, 40]) == (false, 40)
-            && Dongles.AjazzParseStatus([0xC0, 1, 200]) == (true, null));
+        check("AJAZZ: passive 0xC0 online/offline", Dongles.AjazzParseStatus([0xC0, 1, 55]) == (true, 55, false)
+            && Dongles.AjazzParseStatus([0x00, 0xC0, 0, 40]) == (false, 40, false)
+            && Dongles.AjazzParseStatus([0xC0, 1, 200]) == (true, null, false));
         check("AJAZZ: on its cable a mouse is never asleep, whatever the connected byte says",
             Dongles.AjazzBattery(Dongles.AjazzParseInfo(asleep)!.Value, cable: true) == new BatteryRead(82));
         // The mouse on its cable, with its receiver plugged in too: the receiver reports it not connected.

@@ -252,12 +252,13 @@ static class BrandsHeadsetTests
     private static void Sony(Action<string, bool> check)
     {
         const string brand = "Sony INZONE";
-        check("Sony INZONE: the H5 on 0xFF04 usage 2, the H9 II on usage 1 interface 5, with 64-byte reports; a DualSense, the H9 (serial), the Buds (they only push), the PULSE Explore and the PULSE 3D are not taken",
+        check("Sony INZONE: the H5 on 0xFF04 usage 2 or 1, the H9 II on usage 1 interface 5, with 64-byte reports; a DualSense, the H9 (serial), the PULSE Explore and the PULSE 3D are not taken",
             Names(Shape(0x054C, 0x0EBF, 0xFF04, 2, 0, outputIds: [0x02]), brand).SequenceEqual(["inzone.battery"])
+            && Names(Shape(0x054C, 0x0EBF, 0xFF04, 1, 0, outputIds: [0x02]), brand).SequenceEqual(["inzone.battery"])
             && Names(Shape(0x054C, 0x0FA8, 0x04FF, 1, 5, outputIds: [0x02]), brand).SequenceEqual(["inzone.battery"])
-            && Untaken(Shape(0x054C, 0x0FA8, 0xFF04, 1, 4, outputIds: [0x02]), brand) && Untaken(Shape(0x054C, 0x0EBF, 0xFF04, 1, 0, outputIds: [0x02]), brand)
+            && Untaken(Shape(0x054C, 0x0FA8, 0xFF04, 1, 4, outputIds: [0x02]), brand) && Untaken(Shape(0x054C, 0x0EBF, 0xFF04, 3, 0, outputIds: [0x02]), brand)
             && Untaken(Shape(0x054C, 0x0EBF, 0xFF04, 2, 0, input: 32, outputIds: [0x02]), brand)
-            && new[] { 0x0CE6, 0x0E53, 0x0EC2, 0x0ECC, 0x0ED0, 0x0D5E }.All(product => Untaken(Shape(0x054C, product, 0xFF04, 1, outputIds: [0x02]), brand)));
+            && new[] { 0x0CE6, 0x0E53, 0x0ECC, 0x0ED0, 0x0D5E }.All(product => Untaken(Shape(0x054C, product, 0xFF04, 1, outputIds: [0x02]), brand)));
         var request = SonyInzone.Request();
         // The answer laid out as HeadsetControl parses it (no answer is quoted there): length 14, the sum of 5..14 at 15.
         static byte[] Event(byte charger, byte percent, byte type = 0x10, byte transaction = 0x02)
