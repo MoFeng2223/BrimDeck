@@ -19,7 +19,8 @@ internal sealed partial class Renderer
         bool animations = _settings.Animations, codes = _settings.NoticeCodes;
         string theme = _settings.PanelTheme, daylight = _settings.ThemeDaylight, language = Loc.IsEnglish ? Loc.English : Loc.Chinese;
         double width = _settings.NoticesWidth, height = _settings.NoticesHeight;
-        _settings.Animations = false; _settings.NoticesEnabled = true; _settings.NoticeCodes = true;
+        bool agendaPage = _settings.AgendaPage;
+        _settings.Animations = false; _settings.NoticesPage = true; _settings.NoticeCodes = true; _settings.AgendaPage = true;
         foreach (var listed in new[] { "Outlook", "QQ", "Claude" })
             if (_settings.NoticeRule("windows:" + listed) is null) _settings.NoticeApps.Add(new NoticeAppRule { Key = "windows:" + listed, Name = listed });
         _settings.NoticeAppsListed = true;
@@ -61,6 +62,24 @@ internal sealed partial class Renderer
             await Settle();
             await Save("notice-agenda-" + name, scale);
         }
+        // The form, opened as the strip's pencil or "修改" opens it but without taking the keyboard.
+        async Task FormShot(string name, Notice focus, Action open, double w = 760, double h = 330)
+        {
+            _settings.NoticesWidth = w; _settings.NoticesHeight = h; Refresh();
+            Program.SetField(_deck, "_noticeFocus", focus.Id);
+            _deck.SetExpanded(true, true);
+            Program.Call(_deck, "RenderNotices", [typeof(bool)], true);
+            open();
+            await Settle();
+            await Save("notice-agenda-" + name, scale);
+            Program.Call(_deck, "CloseNoticeForm", []);
+        }
+        void TimeForm(Notice notice) => Program.Call(_deck, "OpenNoticeForm", [typeof(Notice), typeof(NoticeAgendaTime), typeof(bool)], notice, NoticeAgenda.Read(notice, TimeZoneInfo.Local).Times[0], false);
+        void AddedForm(Notice notice)
+        {
+            var added = book.FromNotice(notice.Id);
+            Program.Call(_deck, "OpenNoticeForm", [typeof(Notice), typeof(AgendaEvent), typeof(AgendaTodo), typeof(bool)], notice, added.Events.LastOrDefault(), added.Todos.LastOrDefault(), false);
+        }
         void AddEvent(Notice notice, int index = 0)
         {
             var time = NoticeAgenda.Read(notice, TimeZoneInfo.Local).Times[index];
@@ -75,11 +94,17 @@ internal sealed partial class Renderer
             await Shot("4-long-two-times", longer);
             await Shot("5-narrow-two-times", longer, 460, 280);
             await Shot("6-narrow-code", code, 460, 280);
+            await FormShot("form-1-event", meeting, () => TimeForm(meeting));
+            await FormShot("form-2-event-narrow", meeting, () => TimeForm(meeting), 460, 280);
             AddEvent(meeting);
             book.AddTodo(NoticeAgenda.TodoText(chat), DateOnly.FromDateTime(DateTime.Today), DateTime.Now, source: AgendaSource.From(chat));
             await Shot("7-added-event", meeting);
             await Shot("8-added-todo", chat);
             await Shot("9-narrow-added-event", meeting, 460, 280);
+            await Shot("9b-narrow-added-todo", chat, 460, 280);
+            await FormShot("form-3-edit-event", meeting, () => AddedForm(meeting));
+            await FormShot("form-4-edit-todo", chat, () => AddedForm(chat));
+            await FormShot("form-5-edit-todo-narrow", chat, () => AddedForm(chat), 460, 280);
             AddEvent(longer, 1);
             await Shot("10-one-of-two-added", longer);
             AddEvent(longer, 0);
@@ -88,19 +113,21 @@ internal sealed partial class Renderer
             await Shot("12-english-times", english);
             await Shot("13-english-added-event", meeting);
             await Shot("14-english-narrow-code", code, 460, 280);
+            await FormShot("form-6-english-event-narrow", english, () => TimeForm(english), 460, 280);
             Loc.Use(language);
             _settings.PanelTheme = PanelThemes.Light; _settings.ThemeDaylight = "";
             theme2.Invoke(null, [_settings, false, false]);
             await Shot("15-light-times", english);
             await Shot("16-light-added-todo", chat);
             await Shot("17-light-code", code);
+            await FormShot("form-7-light-edit-event", meeting, () => AddedForm(meeting));
         }
         finally
         {
             Loc.Use(language);
             _settings.PanelTheme = theme; _settings.ThemeDaylight = daylight;
             theme2.Invoke(null, [_settings, false, false]);
-            _settings.NoticesWidth = width; _settings.NoticesHeight = height; _settings.Animations = animations; _settings.NoticeCodes = codes;
+            _settings.NoticesWidth = width; _settings.NoticesHeight = height; _settings.Animations = animations; _settings.NoticeCodes = codes; _settings.AgendaPage = agendaPage;
             SelectPage(DeckPage.Usage);
             _deck.SetExpanded(false, true);
             Refresh();

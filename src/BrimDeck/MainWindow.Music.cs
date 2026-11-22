@@ -151,7 +151,7 @@ public partial class MainWindow
     {
         if (!DeckPages.Shown(Settings, page)) return;
         bool changed = CurrentPage != page;
-        if (changed) { CloseSourceMenu(); PageToolTips.CloseWithin(PageContent(CurrentPage)); if (CurrentPage == DeckPage.Agenda) LeaveAgenda(); }
+        if (changed) { CloseSourceMenu(); PageToolTips.CloseWithin(PageContent(CurrentPage)); if (CurrentPage == DeckPage.Agenda) LeaveAgenda(); if (CurrentPage == DeckPage.Notices) CloseNoticeForm(); }
         if (changed && _expanded && !_preview)
         {
             // Start before resizing: the shrinking surface can immediately fire MouseLeave.

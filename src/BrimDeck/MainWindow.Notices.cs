@@ -361,6 +361,7 @@ public partial class MainWindow
     private bool UpdateNoticeRows()
     {
         var center = _app.Notices;
+        if (NoticeFormKeepsPage(center)) return true;
         if (_pageKey != NoticePageKey(center)) return false;
         var listed = Listed(center);
         if (_noticeBatches is { Pending: true } batches)
@@ -473,6 +474,7 @@ public partial class MainWindow
         var now = DateTimeOffset.UtcNow;
         _pageKey = NoticePageKey(center); _noticeLayout = NoticeLayout();
         var focus = FocusedNotice(center);
+        KeepNoticeForm(focus);
         _focusKey = FocusKey(focus, now);
         if (focus is null) { NoticesContent.Children.Add(_pageEmpty = Empty(center)); WatchPageLive(); return; }
         // The columns share the width by proportion, but the list never gets less than ListMinimum: at the narrowest page (440) the
@@ -560,12 +562,14 @@ public partial class MainWindow
         title.TextTrimming = TextTrimming.CharacterEllipsis; title.Margin = new Thickness(0, 2, 0, 0);
         if (shown.HasCode && notice.Title.Length > 0) AutomationProperties.SetName(title, shown.SpokenTitle);
         who.Children.Add(title);
-        string context = notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? NoticeText.CategoryName(notice.Category) : Loc.T("来源已关闭这条通知", "Closed at the source");
+        string context = NoticeFormOpen(notice) && NoticeText.Summary(shown.Body) is { Length: > 0 } summary ? summary : notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? NoticeText.CategoryName(notice.Category) : Loc.T("来源已关闭这条通知", "Closed at the source");
         if (context.Length > 0) { var ctx = UI.Fixed(context, 12, 17, UI.Tertiary); ctx.TextTrimming = TextTrimming.CharacterEllipsis; ctx.Margin = new Thickness(0, 2, 0, 0); who.Children.Add(ctx); }
 
         // The buttons, at the foot of the column.
         var buttons = FocusButtons(notice, center);
         DockPanel.SetDock(buttons, System.Windows.Controls.Dock.Bottom); stack.Children.Add(buttons);
+        // The form adding the notice to the planner, or changing what it added, takes the place of the strip and the words.
+        if (NoticeFormFor(notice, meta, hero) is { } form) { stack.Children.Add(form); return column; }
         // Above them, what BrimDeck read from the notice: a time to add to the planner, what was added, a verification code.
         if (NoticeAgendaStrip(notice) is { } strip) { DockPanel.SetDock(strip, System.Windows.Controls.Dock.Bottom); stack.Children.Add(strip); }
 

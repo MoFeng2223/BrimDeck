@@ -16,9 +16,9 @@ namespace BrimDeck;
 // makes a notice of plain words today's to-do; and the colored words at the start of a row's second line in the list.
 public partial class MainWindow
 {
-    // Whether the page offers to add notices to the planner. The verification code does not depend on it.
-    // TODO(merge): 合并计划页分支时改为“计划页是否开启”（设置里关掉计划页时不提供这些入口）。
-    private bool AgendaOffered => _app.Agenda is not null;
+    // Whether the page offers to add notices to the planner: only while the planner page is on (a planner switched off in the
+    // settings offers no way into it). The verification code does not depend on it.
+    private bool AgendaOffered => _app.Agenda is not null && DeckPages.Shown(Settings, DeckPage.Agenda);
 
     // Below this width the strip takes its short form: the time in a few words, "加入" for "加入日程", no second line.
     private const double CompactStripWidth = 300;
@@ -133,10 +133,16 @@ public partial class MainWindow
         texts.Children.Add(detail);
         string full = Loc.T("加入日程", "Add event"), shortName = Loc.T("加入", "Add");
         var add = StripButton(full, Loc.T($"加入日程：{label}", $"Add event: {label}"), () => AddTime(notice, time));
+        // The pencil opens the form with this time, to correct it or to add the notice as a to-do instead (MainWindow.NoticeForm.cs).
+        var edit = AgendaDraw.IconButton(Look, PencilIcon, Loc.T("修改日期和时间", "Change the date and time"), () => OpenNoticeForm(notice, time));
+        edit.Margin = new Thickness(0, 0, 6, 0); edit.VerticalAlignment = VerticalAlignment.Center;
+        actions.Children.Add(edit);
         actions.Children.Add(add);
         FitStrip(frame, compact =>
         {
             words.Text = compact ? brief : label;
+            // Narrow, as the design's narrowest page: the time and "加入" only.
+            edit.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
             detail.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
             SetStripButtonText(add, compact ? shortName : full, compact);
         });
@@ -147,7 +153,8 @@ public partial class MainWindow
     // "撤销" removes it (and the strip then shows the one added before it, or the times again).
     private FrameworkElement AddedStrip(Notice notice, NoticeOffer offer, AgendaFromNotice added, DateTime now)
     {
-        var (frame, texts, actions) = StripFrame(StripGlyph(CheckIcon, 16, CallColor));
+        var check = StripGlyph(CheckIcon, 16, CallColor);
+        var (frame, texts, actions) = StripFrame(check);
         var today = DateOnly.FromDateTime(now);
         var (item, todo) = NoticeAgenda.Latest(added);
         string title;
@@ -176,13 +183,21 @@ public partial class MainWindow
         if (second is not null) texts.Children.Add(detail = StripDetail(second));
         string id = item?.Id ?? todo!.Id;
         var view = item is not null ? AgendaView.Events : AgendaView.Todos;
-        actions.Children.Add(StripLink(Loc.T("查看", "View"), Loc.T("在计划页查看", "View in the planner"), () => _app.Agenda.Reveal(day, view, id, this)));
-        actions.Children.Add(StripLink(Loc.T("撤销", "Undo"), item is not null ? Loc.T("撤销加入日程", "Remove the added event") : Loc.T("撤销加入待办", "Remove the added to-do"), undo));
-        // Narrow, "已加入" alone leaves room for both words that act.
+        Button[] links =
+        [
+            StripLink(Loc.T("查看", "View"), Loc.T("在计划页查看", "View in the planner"), () => _app.Agenda.Reveal(day, view, id, this)),
+            // The form with what was added: its words, its day and times, or made the other kind (MainWindow.NoticeForm.cs).
+            StripLink(Loc.T("修改", "Edit"), item is not null ? Loc.T("修改日程", "Change the event") : Loc.T("修改待办", "Change the to-do"), () => OpenNoticeForm(notice, item, todo)),
+            StripLink(Loc.T("撤销", "Undo"), item is not null ? Loc.T("撤销加入日程", "Remove the added event") : Loc.T("撤销加入待办", "Remove the added to-do"), undo)
+        ];
+        foreach (var link in links) actions.Children.Add(link);
+        // Narrow, "已加入" alone, without the tick, and the three words closer together leave room for all three.
         FitStrip(frame, compact =>
         {
             words.Text = compact ? Loc.T("已加入", "Added") : title;
             detail?.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+            check.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+            foreach (var link in links) { ((Border)link.Content).Padding = new Thickness(compact ? 4 : 6, 2, compact ? 4 : 6, 2); link.Margin = new Thickness(compact ? 2 : 4, 0, 0, 0); }
         });
         return frame;
     }
@@ -396,6 +411,7 @@ public partial class MainWindow
     private const string CalendarIcon = "M 8,2 V 6 M 16,2 V 6 M 5,4 H 19 A 2,2 0 0 1 21,6 V 20 A 2,2 0 0 1 19,22 H 5 A 2,2 0 0 1 3,20 V 6 A 2,2 0 0 1 5,4 Z M 3,10 H 21";
     private const string CalendarAddIcon = "M 8,2 V 6 M 16,2 V 6 M 21,13 V 6 A 2,2 0 0 0 19,4 H 5 A 2,2 0 0 0 3,6 V 20 A 2,2 0 0 0 5,22 H 13 M 3,10 H 21 M 16,19 H 22 M 19,16 V 22";
     private const string CheckIcon = "M 20,6 L 9,17 L 4,12";
+    private const string PencilIcon = "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5zM15 5l4 4";
     private const string KeyIcon = "M 2.586,17.414 A 2,2 0 0 0 2,18.828 V 21 A 1,1 0 0 0 3,22 H 6 A 1,1 0 0 0 7,21 V 20 A 1,1 0 0 1 8,19 H 9 A 1,1 0 0 0 10,18 V 17 A 1,1 0 0 1 11,16 H 11.172 A 2,2 0 0 0 12.586,15.414 L 13.4,14.6 A 6.5,6.5 0 1 0 9.4,10.6 Z";
 
     // The icon drawn at its place in the 24 box and the box scaled to size, so it is centred by the box, never by its own bounds.

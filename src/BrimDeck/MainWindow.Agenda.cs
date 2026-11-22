@@ -38,7 +38,12 @@ public partial class MainWindow
         if (_app.Notices?.Icons is { } icons) icons.Loaded += AgendaIconLoaded;
         // A press elsewhere on the panel lets go of a box of the page (PlannerPage.PressedAt); going to another window keeps what
         // was typed.
-        PreviewMouseLeftButtonDown += (_, e) => { if (CurrentPage == DeckPage.Agenda && !PanelKeys.Holding) _agenda?.PressedAt(e.OriginalSource); };
+        PreviewMouseLeftButtonDown += (_, e) =>
+        {
+            if (PanelKeys.Holding) return;
+            if (CurrentPage == DeckPage.Agenda) _agenda?.PressedAt(e.OriginalSource);
+            else if (CurrentPage == DeckPage.Notices) NoticeFormPressedAt(e.OriginalSource);
+        };
         Deactivated += (_, _) => _agenda?.Flush();
         Closed += (_, _) =>
         {
@@ -105,14 +110,15 @@ public partial class MainWindow
     }
 
     // The page holds the panel open while a month of it is open, and while the user types in it.
-    private bool AgendaHolds => _agenda is { } page && page.Holds(IsActive);
+    // The notices page's form for adding to the planner holds it the same way (NoticeFormHolds).
+    private bool AgendaHolds => _agenda is { } page && page.Holds(IsActive) || NoticeFormHolds;
 
     // Esc on the planner page: a month, the form, a to-do's words and the typing go first (PlannerPage.Escape).
-    private bool AgendaEscape() => _expanded && CurrentPage == DeckPage.Agenda && _agenda?.Escape() == true;
+    private bool AgendaEscape() => _expanded && (CurrentPage == DeckPage.Agenda && _agenda?.Escape() == true || CurrentPage == DeckPage.Notices && NoticeFormEscape());
 
     // The page is left for another, or the panel closes.
     private void LeaveAgenda() => _agenda?.Flush();
-    private void AgendaPanelClosed() => _agenda?.Closed();
+    private void AgendaPanelClosed() { _agenda?.Closed(); CloseNoticeForm(); }
 
     private void ReleaseAgenda()
     {
