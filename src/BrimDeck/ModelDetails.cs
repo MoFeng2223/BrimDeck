@@ -21,6 +21,11 @@ public partial class MainWindow
     private bool _popupAtOnce;
     // Model-details usage trend: Cost when true, Tokens when false (session only).
     private bool _trendCost;
+    // Model-details usage trend: a bar per hour when true, per day when false. Choosing a period sets it again: by hour for a single
+    // day (today, or a range of one day), by day for more.
+    private bool _trendHourly;
+    // The model details show the usage trend chart in place of the table (the toolbar's chart button; session only).
+    private bool _modelChart;
     internal UsageDateRange ModelRange => _customRange ?? UsageDateRange.Recent(_days, DateTime.Today);
 
     private Button DetailLink(UIElement content, string name, Action click)
@@ -46,7 +51,7 @@ public partial class MainWindow
         _modelApps.Clear(); _modelApps.Add(provider);
         _knownModelApps.Clear(); _knownModelApps.UnionWith(Settings.StatisticsProviders);
         _usageHandover = _details ? Handover.Dissolve : Handover.Forward;
-        _customRange = null; _historyStart = null; _days = days; _details = true;
+        _customRange = null; _historyStart = null; _days = days; _details = true; _trendHourly = days == 1;
         ResetModelScroll(); RenderUsage();
     }
 
@@ -60,12 +65,12 @@ public partial class MainWindow
     internal void SelectModelPeriod(int days)
     {
         _ = UsageDateRange.Recent(days, DateTime.Today);
-        _days = days; _customRange = null; _historyStart = null; _usageHandover = Handover.Dissolve; ResetModelScroll(); RenderUsage();
+        _days = days; _customRange = null; _historyStart = null; _trendHourly = days == 1; _usageHandover = Handover.Dissolve; ResetModelScroll(); RenderUsage();
     }
     internal void SelectModelRange(UsageDateRange range)
     {
         if (range.End > DateTime.Today) throw new ArgumentException(Loc.T("结束日期不能晚于今天。", "The end date cannot be later than today."));
-        _customRange = range; _usageHandover = Handover.Dissolve; ResetModelScroll();
+        _customRange = range; _trendHourly = range.Start == range.End; _usageHandover = Handover.Dissolve; ResetModelScroll();
         // The logs are read back only as far as the range shown needs: a later range lets the next refresh drop what is before it.
         var earliest = _historyStart ?? DateTime.Today.AddDays(-29);
         _historyStart = range.Start < DateTime.Today.AddDays(-29) ? range.Start : null;
@@ -159,6 +164,10 @@ public partial class MainWindow
         ModelToolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
         ModelToolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) });
         ModelToolbar.ColumnDefinitions.Add(new ColumnDefinition());
+        // The chart button beside the sync button names what a click shows next, and is bright while the chart shows.
+        string chartName = _modelChart ? Loc.T("显示明细", "Show details") : Loc.T("显示图表", "Show chart");
+        ModelChartButton.ToolTip = chartName; AutomationProperties.SetName(ModelChartButton, chartName);
+        if (_modelChart) ModelChartButton.SetResourceReference(ForegroundProperty, "PanelPrimary"); else ModelChartButton.ClearValue(ForegroundProperty);
         var back = ModelAction("\uE76B", Loc.T("返回用量", "Back to usage"), () => ShowModelDetails(false), icon: true);
         _backToolTip ??= UI.LeftwardToolTip(null!);
         _backToolTip.Content = back.ToolTip; back.ToolTip = _backToolTip;
@@ -190,6 +199,11 @@ public partial class MainWindow
         Grid.SetColumn(periods, 2); Grid.SetColumn(dates, 4);
         filters.Children.Add(applications); filters.Children.Add(periods); filters.Children.Add(dates);
         Grid.SetColumn(filters, 2); ModelToolbar.Children.Add(filters);
+    }
+
+    private void ModelChart_Click(object sender, RoutedEventArgs e)
+    {
+        _modelChart = !_modelChart; _usageHandover = Handover.Dissolve; RenderUsage();
     }
 
     private void OpenModelDates(FrameworkElement anchor)
@@ -376,6 +390,22 @@ public partial class MainWindow
         double font = tiny ? 11.5 : 12.5, rowHeight = tiny ? 22 : 27, headerHeight = tiny ? 18 : 22, totalHeight = tiny ? 24 : 29;
         double inset = tiny ? 14 : 20, gap = expanded ? 8 : 12;
         UsageContent.Margin = new Thickness(inset, 0, inset, tiny ? 8 : 10);
+        bool incomplete = result.IncompleteProviders.Count > 0;
+        TextBlock? Empty()
+        {
+            if (result.Rows.Count > 0) return null;
+            var message = UI.Centered(incomplete ? Refreshing ? Loc.T("正在读取所选时段…", "Reading the selected period…") : Loc.T("所选应用的用量明细暂不可用", "Usage details for the selected apps are not available yet")
+                : Loc.T("所选时段暂无用量记录", "No usage records in the selected period"), 12, Look.Tertiary);
+            message.HorizontalAlignment = HorizontalAlignment.Center; message.VerticalAlignment = VerticalAlignment.Center; Grid.SetRow(message, 1);
+            return message;
+        }
+        if (_modelChart)
+        {
+            var chart = ModelTrendChart(result, ModelRange);
+            if (Empty() is { } none) chart.Children.Add(none);
+            UsageContent.Children.Add(chart);
+            return;
+        }
         string[] Values(IEnumerable<TokenEntry> source)
         {
             var entries = source.ToList();
@@ -394,7 +424,6 @@ public partial class MainWindow
                 : [TokenBreakdown(entries), cost];
         }
         var totals = Values(result.Entries);
-        bool incomplete = result.IncompleteProviders.Count > 0;
         // The selected applications whose totals are the previous run's (UsageLastSeen): their rows and the total are dimmed, and the
         // total's label says when they were read, until the new ones replace them.
         var restored = snapshots.Where(snapshot => snapshot.LastSeenAt is not null && snapshot.UsageAvailable && _modelApps.Contains(snapshot.Id)).ToList();
@@ -456,15 +485,7 @@ public partial class MainWindow
             return (row, cells);
         }
         panel.Children.Add(new Border { Child = Row(Loc.T("应用", "App"), Loc.T("模型", "Model"), headings, true, false).Row, BorderBrush = UI.Brush(Look.Hairline), BorderThickness = new Thickness(0, 0, 0, 1) });
-        // Chart sits in the scroll content so the model rows stay reachable; pinning it above the table left no room to scroll.
-        // RowsInView only lays out children with an explicit Height.
         var list = new RowsInView();
-        if (!tiny)
-        {
-            var chart = ModelTrendChart(result.Entries, ModelRange);
-            chart.Height = 128;
-            list.Children.Add(chart);
-        }
         for (int i = 0; i < result.Rows.Count; i++)
         {
             var record = result.Rows[i];
@@ -488,12 +509,7 @@ public partial class MainWindow
         var offset = _modelScrollOffset;
         scroll.Loaded += (_, _) => scroll.ScrollToVerticalOffset(offset);
         Grid.SetRow(scroll, 1); panel.Children.Add(scroll);
-        if (result.Rows.Count == 0)
-        {
-            var message = UI.Centered(incomplete ? Refreshing ? Loc.T("正在读取所选时段…", "Reading the selected period…") : Loc.T("所选应用的用量明细暂不可用", "Usage details for the selected apps are not available yet")
-                : Loc.T("所选时段暂无用量记录", "No usage records in the selected period"), 12, Look.Tertiary);
-            message.HorizontalAlignment = HorizontalAlignment.Center; message.VerticalAlignment = VerticalAlignment.Center; Grid.SetRow(message, 1); panel.Children.Add(message);
-        }
+        if (Empty() is { } empty) panel.Children.Add(empty);
         string selected = _modelApps.SetEquals(Settings.StatisticsProviders) ? Loc.T("全部", "All") : _modelApps.Count == 1 ? AppPresets.Name(_modelApps.Single()) : Loc.T($"{_modelApps.Count} 个应用", Loc.Count(_modelApps.Count, "app", "apps"));
         string summary = $"{selected} · {ModelPeriodLabel} · " + Loc.T($"{result.Rows.Count} 项", Loc.Count(result.Rows.Count, "item", "items"));
         var (totalRow, totalCells) = Row(incomplete ? Loc.T("已知合计", "Known total") : Loc.T("合计", "Total"), summary, totals, false, true);
@@ -513,10 +529,13 @@ public partial class MainWindow
         UsageContent.Children.Add(panel);
     }
 
-    private FrameworkElement ModelTrendChart(IReadOnlyList<TokenEntry> entries, UsageDateRange range)
+    // The usage trend in place of the table: a head with the peak and the day/hour and Tokens/Cost switches, and the bars filling the rest. Each
+    // selected application is a part of every bar, in its own colour, in the order of the statistics settings from the bottom.
+    private Grid ModelTrendChart(ModelUsageResult result, UsageDateRange range)
     {
-        var days = UsageTrend.Days(entries, range, list => _app.Prices.Summarize(list));
-        var (peakTokens, peakCost, unpriced) = UsageTrend.Peak(days);
+        var series = Settings.StatisticsProviders.Where(_modelApps.Contains).Select(id => new UsageTrendSeries(AppPresets.Name(id), StatisticsTheme(id),
+            UsageTrend.Points(result.Rows.Where(row => row.Provider == id).SelectMany(row => row.Entries), range, _trendHourly, list => _app.Prices.Summarize(list)))).ToList();
+        var (peakTokens, peakCost, unpriced) = UsageTrend.Peak(UsageTrend.Sum([.. series.Select(s => s.Points)]));
         // Peak figure changes with the toggle so Tokens vs Cost is obvious even when daily shapes look alike.
         // A cost peak is only a confirmed amount when every record in the range could be priced.
         string amount = UI.Amount(new CostSummary(peakCost, peakCost > 0 ? 1 : 0, 0, 0));
@@ -525,9 +544,11 @@ public partial class MainWindow
                 : peakCost > 0 ? Loc.T($"已知峰值 {amount}", $"Known peak {amount}")
                 : Loc.T("峰值未知", "Peak unknown")
             : Loc.T($"峰值 {UI.Number(peakTokens)}", $"Peak {UI.Number(peakTokens)}");
-        var head = new Grid { Margin = new Thickness(0, 2, 0, 4) };
+        var head = new Grid { Margin = new Thickness(0, 2, 0, 6) };
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.ColumnDefinitions.Add(new ColumnDefinition());
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var title = UI.Centered(Loc.T("用量趋势", "Usage trend"), 11, Look.Tertiary);
         title.VerticalAlignment = VerticalAlignment.Center; head.Children.Add(title);
@@ -539,13 +560,19 @@ public partial class MainWindow
             new(Loc.T("Token", "Tokens"), Loc.T("按 Token", "By tokens"), !_trendCost, () => { _trendCost = false; _usageHandover = Handover.Dissolve; RenderUsage(); }),
             new(Loc.T("费用", "Cost"), Loc.T("按费用", "By cost"), _trendCost, () => { _trendCost = true; _usageHandover = Handover.Dissolve; RenderUsage(); }),
         ], 11, 20, 8, centerText: true, glide: "trend");
-        Grid.SetColumn(toggle, 2); head.Children.Add(toggle);
+        Grid.SetColumn(toggle, 4); head.Children.Add(toggle);
+        var step = Segmented(
+        [
+            new(Loc.T("天", "Day"), Loc.T("按天", "By day"), !_trendHourly, () => { _trendHourly = false; _usageHandover = Handover.Dissolve; RenderUsage(); }),
+            new(Loc.T("小时", "Hour"), Loc.T("按小时", "By hour"), _trendHourly, () => { _trendHourly = true; _usageHandover = Handover.Dissolve; RenderUsage(); }),
+        ], 11, 20, 8, centerText: true, glide: "trend-step");
+        Grid.SetColumn(step, 2); head.Children.Add(step);
         var graph = new UsageTrendGraph();
-        string color = _modelApps.Count == 1
-            ? Settings.EnabledApps.FirstOrDefault(app => app.UsageSource == _modelApps.Single()) is { } app ? Look.AppTheme(app) : Look.DefaultAppColor(_modelApps.Single())
-            : Look.Primary;
-        graph.Set(days, _trendCost, color);
-        var block = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
+        graph.Set(series, _trendCost, _trendHourly);
+        Grid.SetRow(graph, 1);
+        var block = new Grid { Name = "ModelChart" };
+        block.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        block.RowDefinitions.Add(new RowDefinition());
         block.Children.Add(head);
         block.Children.Add(graph);
         return block;

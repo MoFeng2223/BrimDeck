@@ -203,6 +203,8 @@ internal sealed partial class Renderer(App app, string output, string language, 
             if (scenes.Contains("devices-earlier")) await DevicesEarlier();
             // The frame around the part under the pointer, on each form and edge; for checking.
             if (scenes.Contains("hover-frame")) await HoverFrames();
+            // The model details' usage trend chart and its button; for checking.
+            if (scenes.Contains("usage-trend")) await UsageTrendScene();
             if (scenes.Contains("line-capsule")) { await LineCapsule(); _settings.Style = CompactStyle.Line; await SettingsPage("line-capsule-settings", 1, 1300, tips: true); }
         }
         finally { Directory.Delete(folder, true); }
