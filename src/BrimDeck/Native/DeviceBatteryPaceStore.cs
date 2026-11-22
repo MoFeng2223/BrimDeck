@@ -4,7 +4,8 @@ using BrimDeck.Core;
 namespace BrimDeck.Native;
 
 // The kept charge readings for time estimates (DeviceBatteryPace) on disk, in the app's data folder
-// (device-battery-pace.json). Written only while the setting is on; erased when it is turned off.
+// (device-battery-pace.json), one file for every profile. Written only while the setting is on; turning it off or switching
+// profiles keeps it, and only Clear readings in the settings erases it.
 internal static class DeviceBatteryPaceStore
 {
     private const string FileName = "device-battery-pace.json";
@@ -45,18 +46,18 @@ internal static class DeviceBatteryPaceStore
         }
     }
 
-    // The setting was turned off: forget every kept reading.
+    // Clear readings in the settings: the file, and the temporary file a failed save left behind (Save does not try again).
     public static void Erase()
     {
         lock (Gate)
         {
             if (_folder is null) return;
-            try
+            var path = Path.Combine(_folder, FileName);
+            foreach (var file in new[] { path, path + ".tmp" })
             {
-                var path = Path.Combine(_folder, FileName);
-                if (File.Exists(path)) File.Delete(path);
+                try { if (File.Exists(file)) File.Delete(file); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
             }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
         }
     }
 

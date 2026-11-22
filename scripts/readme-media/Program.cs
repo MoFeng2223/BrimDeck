@@ -206,6 +206,9 @@ internal sealed partial class Renderer(App app, string output, string language, 
             // The last time's readings, faded, while the devices are read again: the page as tiles, as one device and as a list,
             // and the collapsed row. For checking, not for the README.
             if (scenes.Contains("devices-earlier")) await DevicesEarlier();
+            // Battery time estimates on the detail line (time left, time to full, in days, still collecting) on the page as tiles and at
+            // two smaller sizes, and the switch with Clear readings on the settings page. For checking, not for the README.
+            if (scenes.Contains("devices-estimates")) await DevicesEstimates();
             // The frame around the part under the pointer, on each form and edge; for checking.
             if (scenes.Contains("hover-frame")) await HoverFrames();
             // The model details' usage trend chart and its button; for checking.
@@ -1077,6 +1080,45 @@ internal sealed partial class Renderer(App app, string output, string language, 
         }
         _settings.DeviceFigures = true;
         ShowDevices(all);
+        Program.SetProperty(app, "Exiting", false);
+        _settings.Animations = true;
+        await Settle();
+    }
+
+    // Readings three hours ago and a minute ago for every device but the last, which is left with none and so shows that readings
+    // are collected; the first loses only 1 % in that time, so its estimate runs to days.
+    private async Task DevicesEstimates()
+    {
+        const double scale = 2;
+        Program.SetProperty(app, "Exiting", true);
+        _settings.Animations = false;
+        _settings.DeviceBatteryEstimates = true;
+        var pace = (DeviceBatteryPace)Program.GetProperty(app, "DevicePace")!;
+        var all = _roster.All;
+        var now = DateTimeOffset.UtcNow;
+        var before = all.Take(all.Count - 1).Select((device, i) => device.Percent is not { } percent ? device
+            : device with { Percent = device.Charging ? Math.Max(0, percent - 30) : Math.Min(100, percent + (i == 0 ? 1 : 10)) }).ToList();
+        pace.Observe(before, now.AddHours(-3));
+        pace.Observe(all, now.AddMinutes(-1));
+        _settings.DevicesWidth = 760; _settings.DevicesHeight = 240;
+        SelectPage(DeckPage.Devices);
+        _deck.SetExpanded(true, true);
+        ShowDevices(all);
+        await Settle();
+        await Save("devices-estimates-tiles", scale);
+        foreach (var (width, height) in new[] { (440, 150), (380, 140) })
+        {
+            _settings.DevicesWidth = width; _settings.DevicesHeight = height;
+            SelectPage(DeckPage.Usage); SelectPage(DeckPage.Devices);
+            ShowDevices(all);
+            await Settle();
+            await Save($"devices-estimates-{width}x{height}", scale);
+        }
+        SelectPage(DeckPage.Usage);
+        _deck.SetExpanded(false, true);
+        await SettingsPage("devices-estimates-settings", 12, 1000, tips: true);
+        pace.Clear();
+        _settings.DeviceBatteryEstimates = false;
         Program.SetProperty(app, "Exiting", false);
         _settings.Animations = true;
         await Settle();
