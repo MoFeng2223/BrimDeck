@@ -85,7 +85,7 @@ One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl 移植�
 "clock": { "style": "segment", "color": "default", "custom": "#B9A8FF", "gradient": ["#FF79C6", "#BD93F9", "#8BE9FD"] }
 ```
 
-`style` 取 `minimal`、`stacked`、`digits`、`dots`、`segment`、`neon`、`serif`、`wide`、`condensed`、`pixel`（方块点阵，像素方块主题推荐）、`rounded`（圆润的 Fredoka 字体，海岛假日 2 主题推荐）；`color` 取 `default`（即上面的 `clock` 颜色）、`amber`、`cyan`、`pink`、`lime`、`custom`、`gradient`、`cover`。`palette` 给出本主题下“琥珀、青色、粉色、柠檬绿”四个色块的颜色，`gradients` 给出本主题提供的预设渐变（一到八组，每组正好三个颜色），二者都需在底色上达到 4.5:1。切换主题时，正在使用的预设渐变会换成新主题同一位置的那一组。`custom` 在 `color` 为 `custom` 时使用；`gradient` 必须正好三个颜色，在 `color` 为 `gradient` 时使用。浅色主题下霓虹与数码管的辉光会自动减弱，避免数字发虚。
+`style` 取 `minimal`、`digits`、`dots`、`segment`、`neon`、`serif`、`wide`、`condensed`、`pixel`（方块点阵，像素方块主题推荐）、`rounded`（圆润的 Fredoka 字体，海岛假日 2 主题推荐），早期主题文件中的 `stacked`（双行）按 `minimal` 读取；日期不属于主题，在“收起外观”的时间设置中开启；`color` 取 `default`（即上面的 `clock` 颜色）、`amber`、`cyan`、`pink`、`lime`、`custom`、`gradient`、`cover`。`palette` 给出本主题下“琥珀、青色、粉色、柠檬绿”四个色块的颜色，`gradients` 给出本主题提供的预设渐变（一到八组，每组正好三个颜色），二者都需在底色上达到 4.5:1。切换主题时，正在使用的预设渐变会换成新主题同一位置的那一组。`custom` 在 `color` 为 `custom` 时使用；`gradient` 必须正好三个颜色，在 `color` 为 `gradient` 时使用。浅色主题下霓虹与数码管的辉光会自动减弱，避免数字发虚。
 
 ### 颜色选择器预设色（swatches）
 

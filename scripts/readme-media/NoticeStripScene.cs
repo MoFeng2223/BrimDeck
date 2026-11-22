@@ -19,7 +19,7 @@ internal sealed partial class Renderer
         const double scale = 3;
         Program.SetProperty(app, "Exiting", true);
         bool animations = _settings.Animations;
-        _settings.Animations = false; _settings.NoticesEnabled = true; _settings.NoticeIsland = true; _settings.NoticesPage = true;
+        _settings.Animations = false; _settings.NoticeIsland = true; _settings.NoticesPage = true;
         var occupied = _settings.Occupied; _settings.Occupied = WindowBehavior.Normal;
         var center = Activator.CreateInstance(Type.GetType("BrimDeck.NoticeCenter, BrimDeck")!, Program.Any, null, [app], null)!;
         Program.SetProperty(app, "Notices", center);
@@ -70,9 +70,9 @@ internal sealed partial class Renderer
         await Shots("none");
 
         await SettingsPage("notice-strip-settings", 19, height: 2200, tips: true);
-        _settings.NoticeIsland = false; _settings.NoticesPage = false; _settings.NoticesEnabled = false;
+        _settings.NoticeIsland = false; _settings.NoticesPage = false;
         await SettingsPage("notice-strip-settings-off", 19, height: 400, tips: false);
-        _settings.NoticeIsland = true; _settings.NoticesPage = true; _settings.NoticesEnabled = true;
+        _settings.NoticeIsland = true; _settings.NoticesPage = true;
         await SettingsPage("notice-strip-collapsed", 1, height: 1300, tips: true);
 
         _settings.NotchNotices = false; _settings.CapsuleNotices = false;

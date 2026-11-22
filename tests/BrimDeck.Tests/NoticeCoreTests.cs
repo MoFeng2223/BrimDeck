@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using BrimDeck.Core;
 using BrimDeck.Core.Notices;
 using BrimDeck.Protocol;
@@ -13,7 +14,7 @@ internal static class NoticeCoreTests
         LateAndRestart(root, check);
         Coordinator(check);
         History(root, check);
-        Routing(check);
+        Switches(check);
         Intake(check);
         Pages(check);
         SettingsValues(root, check);
@@ -428,14 +429,40 @@ internal static class NoticeCoreTests
         history.Delete();
     }
 
-    private static void Routing(Action<string, bool> check)
+    // The two switches of each profile (DeckSettings.NoticeIsland, NoticesPage) and the files saved while one switch every profile
+    // shared received notices (SettingsMigrations.NoticeSwitchesPerProfile).
+    private static void Switches(Action<string, bool> check)
     {
-        NoticeRouting.Candidate[] panels = [new("main", 1, true, true), new("second", 2, false, true), new("hidden", 3, false, false)];
-        check("A notice shows on the foreground window's monitor", NoticeRouting.Choose(panels, 2, NoticeScreen.Foreground) == "second");
-        check("Without a panel there, the main panel shows it", NoticeRouting.Choose(panels, 9, NoticeScreen.Foreground) == "main" && NoticeRouting.Choose(panels, null, NoticeScreen.Foreground) == "main");
-        check("A hidden panel on the foreground monitor keeps the notice back", NoticeRouting.Choose(panels, 3, NoticeScreen.Foreground) is null);
-        check("The main-monitor choice ignores the foreground", NoticeRouting.Choose(panels, 2, NoticeScreen.Main) == "main");
-        check("No panels, no lane", NoticeRouting.Choose([], 1, NoticeScreen.Foreground) is null);
+        var fresh = new DeckSettings();
+        check("Switches: both are on for a new user, so notices are received", fresh.NoticeIsland && fresh.NoticesPage && fresh.NoticesEnabled);
+        check("Switches: either one alone receives notices", new DeckSettings { NoticesPage = false }.NoticesEnabled && new DeckSettings { NoticeIsland = false }.NoticesEnabled
+            && !new DeckSettings { NoticeIsland = false, NoticesPage = false }.NoticesEnabled);
+        var current = Guid.NewGuid();
+        var shared = new DeckSettings { NoticeIsland = false, NoticesPage = false, CurrentProfile = current,
+            Profiles = [new() { Id = current, Name = "A" }, new() { Name = "B", Values = new JsonObject { ["NoticeIsland"] = true, ["NoticesPage"] = false } }] };
+        check("Switches: a profile not in use that shows notices keeps them received", shared.NoticesEnabled && !shared.NoticeIsland);
+        shared.Profiles[1].Values = new JsonObject { ["NoticeIsland"] = false, ["NoticesPage"] = false };
+        check("Switches: with every switch of every profile off, none is received", !shared.NoticesEnabled);
+        check("Switches: both belong to each profile, and whether notices are received is not saved", Profiles.IsProfileKey(nameof(DeckSettings.NoticeIsland))
+            && Profiles.IsProfileKey(nameof(DeckSettings.NoticesPage)) && !JsonSerializer.SerializeToNode(new DeckSettings { NoticeIsland = true })!.AsObject().ContainsKey("NoticesEnabled"));
+
+        Guid a = Guid.NewGuid(), b = Guid.NewGuid(), c = Guid.NewGuid();
+        string Old(bool received, bool island) => $$$"""
+            {"AppVersion":"1.3.3","NoticesEnabled":{{{(received ? "true" : "false")}}},"NoticeIsland":{{{(island ? "true" : "false")}}},"NoticeScreen":2,"NoticesPage":true,
+             "CurrentProfile":"{{{a}}}","Profiles":[{"Id":"{{{a}}}","Name":"A","Values":{"NoticesPage":true}},{"Id":"{{{b}}}","Name":"B","Values":{"NoticesPage":false}},
+             {"Id":"{{{c}}}","Name":"C","Values":{}}]}
+            """;
+        DeckSettings Read(string json) => SettingsMigrations.Read(json, new Version(1, 3, 3), out _);
+        var on = Read(Old(true, true));
+        check("Migration: with notices on, every profile shows them on the island and keeps its page", on.NoticeIsland && on.NoticesPage && on.NoticesEnabled
+            && Profiles.For(on, b) is { NoticeIsland: true, NoticesPage: false } && Profiles.For(on, c) is { NoticeIsland: true, NoticesPage: true });
+        var pageOnly = Read(Old(true, false));
+        check("Migration: the shared island switch off is off in every profile", !pageOnly.NoticeIsland && pageOnly.NoticesPage && Profiles.For(pageOnly, b) is { NoticeIsland: false, NoticesPage: false });
+        var never = Read(Old(false, true));
+        check("Migration: with notices off, both switches of every profile are off, as they read", !never.NoticeIsland && !never.NoticesPage && !never.NoticesEnabled
+            && Profiles.For(never, b) is { NoticeIsland: false, NoticesPage: false } && Profiles.For(never, c) is { NoticeIsland: false, NoticesPage: false });
+        var later = Read("""{"AppVersion":"1.3.3","NoticeIsland":false,"NoticesPage":true}""");
+        check("Migration: a file written without the shared switch is left as it is", later.NoticesPage && !later.NoticeIsland && later.NoticesEnabled);
     }
 
     private static void Intake(Action<string, bool> check)
@@ -460,20 +487,21 @@ internal static class NoticeCoreTests
 
     private static void Pages(Action<string, bool> check)
     {
-        var settings = new DeckSettings();
-        check("The notices page is hidden while notices are off", !DeckPages.Shown(settings, DeckPage.Notices) && DeckPages.Resolve(settings, DeckPage.Notices) == DeckPage.Usage);
-        settings.NoticesEnabled = true;
-        check("The notices page shows once notices are on, last in the switch", DeckPages.Visible(settings).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Clipboard, DeckPage.Devices, DeckPage.Notices, DeckPage.Agenda]));
+        check("The notices page shows by default", DeckPages.Shown(new DeckSettings(), DeckPage.Notices));
+        var settings = new DeckSettings { NoticesPage = false };
+        check("The notices page is hidden while its switch is off", !DeckPages.Shown(settings, DeckPage.Notices) && DeckPages.Resolve(settings, DeckPage.Notices) == DeckPage.Usage);
+        settings.NoticesPage = true;
+        check("The notices page shows once its switch is on, last in the switch", DeckPages.Visible(settings).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Clipboard, DeckPage.Devices, DeckPage.Notices, DeckPage.Agenda]));
         settings.UsagePage = false; settings.MusicPage = false; settings.MonitorPage = false; settings.ClipboardPage = false; settings.DevicesPage = false; settings.AgendaPage = false;
         check("With only the notices page it is the one shown", DeckPages.Resolve(settings, DeckPage.Usage) == DeckPage.Notices && DeckPages.Largest(settings) == (settings.NoticesWidth, settings.NoticesHeight));
         check("The notices page opens by choice", DeckPages.Opening(DefaultDeckPage.Notices) == DeckPage.Notices && DeckPages.Opening(DefaultDeckPage.Last) is null);
         check("The notices page is saved as number 5, after the devices page; as the opening page, 7, after the part under the pointer", (int)DeckPage.Devices == 4 && (int)DeckPage.Notices == 5 && (int)DefaultDeckPage.Notices == 7);
         DeckPages.SetSize(settings, DeckPage.Notices, 100, 9999);
         check("Dragging the notices page keeps it within the page limits", settings.NoticesWidth == DeckPages.MinWidth && settings.NoticesHeight == DeckPages.MaxHeight);
-        var strip = new DeckSettings { CapsuleNotices = true };
-        check("The notices' count is off by default, shows the apps' icons and needs the notices page", !new DeckSettings().NotchNotices && !new DeckSettings().CapsuleNotices
+        var strip = new DeckSettings { NotchNotices = false, NoticesPage = false };
+        check("The notices' count is on by default, shows the apps' icons and needs the notices page", new DeckSettings().NotchNotices && new DeckSettings().CapsuleNotices
             && new DeckSettings().NoticeStripIcons && !strip.ShowsNotices(CompactStyle.Capsule));
-        strip.NoticesEnabled = true;
+        strip.NoticesPage = true;
         check("The notices' count shows on the style it is on for, never on the indicator", strip.ShowsNotices(CompactStyle.Capsule) && !strip.ShowsNotices(CompactStyle.Notch) && !strip.ShowsNotices(CompactStyle.Line));
         strip.NoticesPage = false;
         check("The notices' count hides with the notices page", !strip.ShowsNotices(CompactStyle.Capsule));
@@ -484,22 +512,22 @@ internal static class NoticeCoreTests
     {
         var defaults = new DeckSettings();
         defaults.Normalize();
-        check("Notices are off by default, with no WSL distribution, flashing, and QQ, WeChat and the Clock listed", !defaults.NoticesEnabled && defaults.NoticeWslDistros.Count == 0
+        check("Notices are on by default, with no WSL distribution, flashing, and QQ, WeChat and the Clock listed", defaults.NoticesEnabled && defaults.NoticeWslDistros.Count == 0
             && defaults.NoticeHistory && defaults.NoticeHistoryHours == 24 && defaults.NoticeHotkey == "" && defaults.NoticeDefaultLevel == NoticeLevel.Glow
-            && defaults.NoticeStyles.Text.Seconds == 6 && defaults.NoticeStyles.Text.Slot is null && !defaults.NoticeStyles.Flash.Liquid && defaults.NoticeStyles.Stay.Liquid && defaults.NoticeStyles.Stay.Color == ""
+            && defaults.NoticeStyles.Text.Seconds == 6 && !defaults.NoticeStyles.Flash.Liquid && defaults.NoticeStyles.Stay.Liquid && defaults.NoticeStyles.Stay.Color == ""
             && defaults.NoticeApps.Select(rule => rule.Key).SequenceEqual(["windows:QQ", "flash:wechat", "windows:Microsoft.WindowsAlarms_8wekyb3d8bbwe!App"]) && defaults.NoticeAppsListed);
         check("Only listed Windows applications are received; other sources unless switched off", defaults.NoticeReceives("windows:QQ") && !defaults.NoticeReceives("windows:Other")
             && defaults.NoticeReceives("cli:make") && defaults.NoticeReceives("wsl:Ubuntu:app") && !defaults.NoticeReceives("flash:wecom"));
         var odd = new DeckSettings
         {
-            NoticeScreen = (NoticeScreen)42, NoticeDefaultLevel = NoticeLevel.Lively, NoticeHistoryHours = 100_000, NoticesWidth = double.PositiveInfinity, NoticeAppsListed = true,
-            NoticeStyles = new() { Text = new() { Seconds = 0, Slot = (CompactPart)42 }, Flash = new() { Color = "nonsense" }, Stay = new() { Color = "ff0000" } },
+            NoticeDefaultLevel = NoticeLevel.Lively, NoticeHistoryHours = 100_000, NoticesWidth = double.PositiveInfinity, NoticeAppsListed = true,
+            NoticeStyles = new() { Text = new() { Seconds = 0 }, Flash = new() { Color = "nonsense" }, Stay = new() { Color = "ff0000" } },
             NoticeWslDistros = ["Ubuntu", " ubuntu ", "", "Debian", @"..\..\server\share", "a b"],
             NoticeApps = [new() { Key = "a", AccentColor = "ff0000", Level = NoticeLevel.Lively }, new() { Key = "a" }, new() { Key = " " }, new() { Key = "windows:Off", Enabled = false, Level = (NoticeLevel)9 }]
         };
         odd.Normalize();
-        check("Notice settings are normalized", odd.NoticeScreen == NoticeScreen.Foreground && odd.NoticeDefaultLevel == NoticeLevel.Glow && odd.NoticeStyles.Text.Seconds == 2
-            && odd.NoticeStyles.Text.Slot is null && odd.NoticeStyles.Flash.Color == "" && odd.NoticeStyles.Stay.Color == "#FF0000" && odd.NoticeHistoryHours == 168 && odd.NoticesWidth == 460
+        check("Notice settings are normalized", odd.NoticeDefaultLevel == NoticeLevel.Glow && odd.NoticeStyles.Text.Seconds == 2
+            && odd.NoticeStyles.Flash.Color == "" && odd.NoticeStyles.Stay.Color == "#FF0000" && odd.NoticeHistoryHours == 168 && odd.NoticesWidth == 460
             && odd.NoticeWslDistros.SequenceEqual(["Ubuntu", "Debian"]) && odd.NoticeApps.Count == 2 && odd.NoticeApps[0].AccentColor == "#FF0000" && odd.NoticeApps[0].Level == NoticeLevel.Glow
             && odd.NoticeApps[1].Enabled && odd.NoticeApps[1].Level == NoticeLevel.Auto);
         var older = new DeckSettings { NoticeApps = [new() { Key = "windows:QQ", Level = NoticeLevel.Plain }, new() { Key = "windows:Mail" }] };
@@ -514,13 +542,13 @@ internal static class NoticeCoreTests
         var store = new SettingsStore(Path.Combine(root, "notice-settings"), "1.2.0");
         var saved = new DeckSettings
         {
-            NoticesEnabled = true, LastPage = DeckPage.Notices, NoticesPausedUntil = T0,
-            NoticeApps = [new() { Key = "windows:X", Name = "X", Level = NoticeLevel.Persistent, HideBanner = true, Styles = new() { Text = new() { Slot = CompactPart.Music } } }]
+            NoticeIsland = true, LastPage = DeckPage.Notices, NoticesPausedUntil = T0,
+            NoticeApps = [new() { Key = "windows:X", Name = "X", Level = NoticeLevel.Persistent, HideBanner = true, Styles = new() { Text = new() { Seconds = 9 } } }]
         };
         store.Save(saved);
         var json = File.ReadAllText(store.FilePath);
         var back = store.Load();
-        check("Notice settings survive saving", back.NoticesEnabled && back.LastPage == DeckPage.Notices && back.NoticesPausedUntil == T0
-            && back.NoticeRule("windows:X") is { Level: NoticeLevel.Persistent, HideBanner: true, Styles.Text.Slot: CompactPart.Music } && JsonDocument.Parse(json).RootElement.GetProperty("LastPage").GetInt32() == 5);
+        check("Notice settings survive saving", back.NoticeIsland && back.LastPage == DeckPage.Notices && back.NoticesPausedUntil == T0
+            && back.NoticeRule("windows:X") is { Level: NoticeLevel.Persistent, HideBanner: true, Styles.Text.Seconds: 9 } && JsonDocument.Parse(json).RootElement.GetProperty("LastPage").GetInt32() == 5);
     }
 }

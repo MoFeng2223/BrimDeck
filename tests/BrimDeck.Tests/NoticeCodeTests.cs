@@ -217,10 +217,10 @@ internal static class NoticeCodeTests
         check("Recognising codes is off by default", !new DeckSettings().NoticeCodes);
         var store = new SettingsStore(Path.Combine(root, "notice-code-settings"), "1.2.0");
         check("An older settings file reads with codes off", !store.Load().NoticeCodes);
-        store.Save(new DeckSettings { NoticesEnabled = true, NoticeCodes = true });
+        store.Save(new DeckSettings { NoticeIsland = true, NoticeCodes = true });
         var back = store.Load();
         check("The setting survives saving and loading and copying", back.NoticeCodes && back.Copy().NoticeCodes && System.Text.Json.JsonDocument.Parse(File.ReadAllText(store.FilePath)).RootElement.GetProperty("NoticeCodes").GetBoolean());
-        store.Save(new DeckSettings { NoticesEnabled = true, NoticeCodes = false });
+        store.Save(new DeckSettings { NoticeIsland = true, NoticeCodes = false });
         check("Switched off again, it stays off", !store.Load().NoticeCodes);
     }
 

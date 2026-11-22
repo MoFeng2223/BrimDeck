@@ -79,22 +79,27 @@ internal static class MusicVisuals
                 b += pixels[i] * w; g += pixels[i + 1] * w; r += pixels[i + 2] * w; weight += w;
             }
             if (weight == 0) return UI.Brush(Look.Hex("equalizer"));
-            r /= weight * 255; g /= weight * 255; b /= weight * 255;
-            double maxChannel = Math.Max(r, Math.Max(g, b)), minChannel = Math.Min(r, Math.Min(g, b));
-            double light = (maxChannel + minChannel) / 2, delta = maxChannel - minChannel;
-            double saturation = delta == 0 ? 0 : delta / (1 - Math.Abs(2 * light - 1));
-            double hue = delta == 0 ? 0 : maxChannel == r ? ((g - b) / delta + (g < b ? 6 : 0)) / 6
-                : maxChannel == g ? ((b - r) / delta + 2) / 6 : ((r - g) / delta + 4) / 6;
-            bool dark = Look.Current.IsDark;
-            saturation = Math.Max(.35, saturation); light = dark ? Math.Clamp(light, .62, .78) : Math.Clamp(light, .30, .42);
-            double chroma = (1 - Math.Abs(2 * light - 1)) * saturation, x = chroma * (1 - Math.Abs(hue * 6 % 2 - 1)), m = light - chroma / 2;
-            (r, g, b) = (hue * 6) switch
-            { < 1 => (chroma, x, 0d), < 2 => (x, chroma, 0d), < 3 => (0d, chroma, x), < 4 => (0d, x, chroma), < 5 => (x, 0d, chroma), _ => (chroma, 0d, x) };
-            r += m; g += m; b += m;
-            var accent = Look.Readable(Color.FromRgb((byte)(r * 255), (byte)(g * 255), (byte)(b * 255)));
+            var accent = Toned(r / (weight * 255), g / (weight * 255), b / (weight * 255), Look);
             var brush = new SolidColorBrush(accent); brush.Freeze(); cover = accent; return brush;
         }
         catch (Exception) { return UI.Brush(Look.Hex("equalizer")); }
+    }
+    // A picture's color (channels 0 to 1) made an accent of the panel: its hue kept, with enough saturation, and light enough on a
+    // dark panel or dark enough on a light one.
+    internal static Color Toned(double r, double g, double b, PanelLook Look)
+    {
+        double maxChannel = Math.Max(r, Math.Max(g, b)), minChannel = Math.Min(r, Math.Min(g, b));
+        double light = (maxChannel + minChannel) / 2, delta = maxChannel - minChannel;
+        double saturation = delta == 0 ? 0 : delta / (1 - Math.Abs(2 * light - 1));
+        double hue = delta == 0 ? 0 : maxChannel == r ? ((g - b) / delta + (g < b ? 6 : 0)) / 6
+            : maxChannel == g ? ((b - r) / delta + 2) / 6 : ((r - g) / delta + 4) / 6;
+        bool dark = Look.Current.IsDark;
+        saturation = Math.Max(.35, saturation); light = dark ? Math.Clamp(light, .62, .78) : Math.Clamp(light, .30, .42);
+        double chroma = (1 - Math.Abs(2 * light - 1)) * saturation, x = chroma * (1 - Math.Abs(hue * 6 % 2 - 1)), m = light - chroma / 2;
+        (r, g, b) = (hue * 6) switch
+        { < 1 => (chroma, x, 0d), < 2 => (x, chroma, 0d), < 3 => (0d, chroma, x), < 4 => (0d, x, chroma), < 5 => (x, 0d, chroma), _ => (chroma, 0d, x) };
+        r += m; g += m; b += m;
+        return Look.Readable(Color.FromRgb((byte)(r * 255), (byte)(g * 255), (byte)(b * 255)));
     }
     // The state of a move's clock as the scrolling regions plan their turns with it (CycleTurn).
     internal static MoveClock MoveClockOf(Clock clock) => clock.CurrentState switch

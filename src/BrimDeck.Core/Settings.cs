@@ -79,10 +79,6 @@ public enum MouseWheelAction { None, Pages, Volume }
 // (MainWindow.Move.cs); moving is the default. Off shows no handle at its ends at all. Saved as numbers, so new members go at the end.
 public enum GripDoubleClick { AutoWidth, Move, Off }
 public enum CompactMusicText { None, Title, Lyrics }
-// The monitor an arriving notice is shown on: the one with the foreground window, or always the main panel's.
-// Which panels show an arriving notice: the one on the screen in use (the foreground window's), the main panel, or every
-// panel that shows BrimDeck. All comes last, so the saved numbers of the others stay what they were.
-public enum NoticeScreen { Foreground, Main, All }
 // What the collapsed music hides while the song is paused: the title or lyric, the cover, or both. Saved as numbers, so new
 // members go at the end.
 public enum PausedMusicHide { None, Text, Cover, Both }
@@ -108,8 +104,43 @@ public static class CompactParts
     // Each known part once, in the saved order; a part missing from the file takes its place after the others.
     public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Missing).Distinct()];
 }
-// Saved settings keep the number, so a new style goes at the end.
-public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed, Pixel, Rounded }
+// Saved settings keep the number, so a new style goes at the end. 1 was the two-line style, the time over the date; the date is
+// now a setting of its own (ClockDate), and SettingsMigrations turns that style into the minimal one with the date below.
+public enum ClockStyle { Minimal = 0, Digits = 2, Dots, Segment, Neon, Serif, Wide, Condensed, Pixel, Rounded }
+public static class ClockStyles
+{
+    // A style named in a theme file. "stacked", the two-line style of earlier theme files, reads as the minimal style.
+    public static bool TryParse(string? name, out ClockStyle style)
+    {
+        style = ClockStyle.Minimal;
+        if (string.Equals(name, "stacked", StringComparison.OrdinalIgnoreCase)) return true;
+        return !string.IsNullOrEmpty(name) && char.IsAsciiLetter(name[0]) && Enum.TryParse(name, true, out style) && Enum.IsDefined(style);
+    }
+}
+// The date beside the time (DeckSettings.ClockDate). Above and below put it on a line of its own and set the time smaller.
+// Saved as numbers, so new members go at the end.
+public enum ClockDatePosition { Right, Left, Above, Below }
+public enum ClockDateFormat { MonthDaySlash, MonthDayDash, MonthDayWords, YearSlash, YearDash, YearWords }
+public enum ClockWeekday { After, Before, Hidden }
+public static class ClockDates
+{
+    // The date as the clock shows it. The dash formats keep two digits for the month and the day, as ISO dates do.
+    public static string Text(DateTime date, ClockDateFormat format, ClockWeekday weekday, bool english)
+    {
+        var invariant = System.Globalization.CultureInfo.InvariantCulture;
+        string day = format switch
+        {
+            ClockDateFormat.MonthDayDash => date.ToString("MM-dd", invariant),
+            ClockDateFormat.MonthDayWords => english ? date.ToString("MMM d", invariant) : $"{date.Month}月{date.Day}日",
+            ClockDateFormat.YearSlash => english ? date.ToString("M/d/yyyy", invariant) : date.ToString("yyyy/M/d", invariant),
+            ClockDateFormat.YearDash => date.ToString("yyyy-MM-dd", invariant),
+            ClockDateFormat.YearWords => english ? date.ToString("MMM d, yyyy", invariant) : $"{date.Year}年{date.Month}月{date.Day}日",
+            _ => date.ToString("M/d", invariant)
+        };
+        string name = english ? date.ToString("ddd", invariant) : "周" + "日一二三四五六"[(int)date.DayOfWeek];
+        return weekday switch { ClockWeekday.Before => name + " " + day, ClockWeekday.Hidden => day, _ => day + " " + name };
+    }
+}
 // Every clock style takes this one color. Gradient spreads ClockGradient across the digits, Custom is ClockCustomColor,
 // and Cover follows the color picked from the playing song's cover. Saved as numbers, so new members go at the end.
 public enum ClockColor { White, Amber, Cyan, Pink, Lime, Gradient, Cover, Custom }
@@ -539,6 +570,11 @@ public sealed class DeckSettings
     public List<string> ClockGradient { get; set; } = [.. ClockColors.Sunset];
     public bool Clock24Hour { get; set; } = true;
     public bool ClockSeconds { get; set; }
+    // The date beside the clock, in the clock's style (ClockDates).
+    public bool ClockDate { get; set; }
+    public ClockDatePosition ClockDatePosition { get; set; }
+    public ClockDateFormat ClockDateFormat { get; set; }
+    public ClockWeekday ClockWeekday { get; set; }
     public CompactMusicText MusicText { get; set; }
     public bool MusicTrackNotice { get; set; } = true;
     // The title of a track change takes the whole island, shown as a notice is (IslandNotice), instead of the music part alone.
@@ -764,9 +800,9 @@ public sealed class DeckSettings
     // The notch and the capsule each show the devices' batteries (CompactPart.Devices).
     public bool NotchDevices { get; set; }
     public bool CapsuleDevices { get; set; }
-    // The notch and the capsule each show how many notices are unread (CompactPart.Notices); shown only while some are.
-    public bool NotchNotices { get; set; }
-    public bool CapsuleNotices { get; set; }
+    // The notch and the capsule each show how many notices are unread (CompactPart.Notices); shown only while some are. On by default.
+    public bool NotchNotices { get; set; } = true;
+    public bool CapsuleNotices { get; set; } = true;
     // The expanded page shows a line under memory and network with the frame rate of the program in front, its name and its display's
     // refresh rate (FrameRates). Off by default; read only while the page is open, and only where the user may read Windows' frame
     // events (the Performance Log Users group, or BrimDeck elevated).
@@ -823,15 +859,20 @@ public sealed class DeckSettings
     public bool QuotaAlerts { get; set; } = true;
     // Also reads the Claude Code and Codex CLI session records inside WSL distributions. Off by default: it starts stopped distributions.
     public bool IncludeWsl { get; set; }
-    // Dynamic notices (see Notices/). Off until the user switches them on; each source has its own switch. They are received
-    // while either switch is on: on the island as they arrive (NoticeIsland, "在岛上提示" on the 灵动提示 page) or as the expanded page
-    // (NoticesPage, under 展开外观). Each switch reads as on only while NoticesEnabled is.
-    public bool NoticesEnabled { get; set; }
+    // Dynamic notices (see Notices/). Each profile has two switches of its own, both on by default: arriving notices show on its
+    // collapsed island (NoticeIsland, "提示新通知" under 收起外观), and the expanded panel has the notices page (NoticesPage, under
+    // 展开外观). Each screen's panel follows the switches of the profile it shows. Notices are received while
+    // any switch of any profile is on (NoticesEnabled); each source has its own switch besides.
     public bool NoticeIsland { get; set; } = true;
+    [JsonIgnore] public bool NoticesEnabled => NoticeIsland || NoticesPage || (Profiles ?? []).Any(profile => profile.Id != CurrentProfile && profile.Values is { } values
+        && (Switched(values, nameof(NoticeIsland)) || Switched(values, nameof(NoticesPage))));
+    private static bool Switched(JsonObject values, string name) => values[name] is System.Text.Json.Nodes.JsonValue value && value.TryGetValue(out bool on) && on;
     // The WSL distributions whose notices are received (by name). None by default: not every PC has WSL, and the agent is
     // copied into a distribution only once the user chooses it.
     public List<string> NoticeWslDistros { get; set; } = [];
-    public NoticeScreen NoticeScreen { get; set; }
+    // brim notify list and remove reach every notice, an application's notifications included, and remove takes a Windows one
+    // out of Windows' notification center too. Off by default: any program of the user can run brim (NoticeEntries).
+    public bool NoticeCommandAccess { get; set; }
     // The level of a notice nothing else decides (NoticeLevels.Resolve): Plain (level 1), Glow (level 2) or Persistent (level 3).
     public NoticeLevel NoticeDefaultLevel { get; set; } = NoticeLevel.Glow;
     // How each level looks on the island (the settings' first notices page); an application may have its own (NoticeAppRule.Styles).
@@ -992,6 +1033,7 @@ public sealed class DeckSettings
             {
                 var choices = group.Last().Value;
                 choices.Apps ??= []; choices.ClockGradient ??= []; choices.ClockCustomColor ??= ClockColors.DefaultCustom;
+                if (!Enum.IsDefined(choices.ClockStyle)) choices.ClockStyle = ClockStyle.Minimal;
                 return choices;
             });
         var seen = new HashSet<Guid>();
@@ -1080,6 +1122,9 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(MusicLyricsAlign)) MusicLyricsAlign = MusicLyricsAlign.Left;
         if (!Enum.IsDefined(ClockStyle)) ClockStyle = ClockStyle.Minimal;
         if (!Enum.IsDefined(ClockColor)) ClockColor = ClockColor.White;
+        if (!Enum.IsDefined(ClockDatePosition)) ClockDatePosition = ClockDatePosition.Right;
+        if (!Enum.IsDefined(ClockDateFormat)) ClockDateFormat = ClockDateFormat.MonthDaySlash;
+        if (!Enum.IsDefined(ClockWeekday)) ClockWeekday = ClockWeekday.After;
         ClockCustomColor = AppPresets.NormalizeColor(ClockCustomColor) is { Length: > 0 } custom ? custom : ClockColors.DefaultCustom;
         var stops = (ClockGradient ?? []).Select(AppPresets.NormalizeColor).ToList();
         ClockGradient = stops.Count == 3 && stops.All(stop => stop.Length > 0) ? stops : [.. ClockColors.Sunset];
@@ -1153,7 +1198,6 @@ public sealed class DeckSettings
             .Select(d => d with { Id = d.Id.Trim(), Name = (d.Name ?? "").Trim() }).DistinctBy(d => d.Id).ToList();
         if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;
         NoticeWslDistros = (NoticeWslDistros ?? []).Where(name => name is not null).Select(name => name.Trim()).Where(NoticeIntake.IsDistroName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        if (!Enum.IsDefined(NoticeScreen)) NoticeScreen = NoticeScreen.Foreground;
         NoticeDefaultLevel = NoticeLevels.Default(NoticeDefaultLevel);
         NoticeStyles ??= new();
         NoticeStyles.Normalize();

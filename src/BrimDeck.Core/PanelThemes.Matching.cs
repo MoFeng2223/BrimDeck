@@ -38,7 +38,7 @@ public static partial class PanelThemes
     public static void ApplyClock(PanelPalette palette, DeckSettings settings)
     {
         if (palette.Clock is not { } clock) return;
-        if (Enum.TryParse<ClockStyle>(clock.Style, true, out var style)) settings.ClockStyle = style;
+        if (ClockStyles.TryParse(clock.Style, out var style)) settings.ClockStyle = style;
         var chosen = ParseClockColor(clock.Color);
         if (chosen is { } color) settings.ClockColor = color;
         if (chosen == ClockColor.Custom && clock.Custom.Length > 0) settings.ClockCustomColor = clock.Custom;

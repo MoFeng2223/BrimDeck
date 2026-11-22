@@ -13,6 +13,9 @@ public static class BrimCommandLine
     public static readonly string Usage = """
         brim notify send TITLE [BODY] [options]   Show a notice in BrimDeck, or update one
         brim notify close KEY                     Close the notice sent with -k KEY
+        brim notify list [--json] [-s SOURCE]     List the notices on the notices page, with their ids
+        brim notify remove KEY                    Remove the notice sent with -k KEY from the notices page
+        brim notify close|remove --notice ID      Close or remove a notice by the id list gives
         brim run [options] -- PROGRAM ...         Run a program, then show its result
         brim timer start DURATION [TITLE]         Count down (25m, 1h30m, 90s), then remind
         brim timer start --at TIME [TITLE]        Count down to a time (15:30)
@@ -44,6 +47,10 @@ public static class BrimCommandLine
               --timeout DURATION How long a persistent notice stays at most (default 3m, up to 30m)
               --no-history       Only show it on the island; do not list it among the recent notices
               --json FILE        Read the whole message as JSON from a file, or from standard input with "-"
+
+        Without "Let brim list and remove all notices" in BrimDeck's settings (Notices › Apps › Compatibility), list and
+        remove reach only the notices of brim and other programs. With it, they reach every notice, and remove also takes a
+        Windows notice out of Windows' notification center.
 
         Options of timer, stopwatch and event:
               --at TIME          When: 15:30, YYYY-MM-DD 15:30, or ISO 8601 with offset
@@ -80,7 +87,10 @@ public static class BrimCommandLine
                 {
                     "send" => NotifyCommandLine.ParseOptions(NotifyCommandKind.Send, null, args, 2, source, "brim notify send"),
                     "close" => NotifyCommandLine.ParseOptions(NotifyCommandKind.Send, "close", args, 2, source, "brim notify close"),
-                    _ => Verbs("notify", verb, "send", "close")
+                    "remove" => NotifyCommandLine.ParseOptions(NotifyCommandKind.Send, "remove", args, 2, source, "brim notify remove"),
+                    "list" => List(args),
+                    _ => Fail(verb is null or "-h" or "--help" ? "notify takes send, close, list or remove: brim notify send ..."
+                        : $"unknown command: notify {verb} (notify takes send, close, list or remove)")
                 };
             case "timer":
                 return verb switch
@@ -105,6 +115,27 @@ public static class BrimCommandLine
                 };
             default: return Fail("unknown command: " + args[0]);
         }
+    }
+
+    // brim notify list [--json] [-s SOURCE]: only the notices of that source when -s names one; BRIM_SOURCE does not filter.
+    private static NotifyCommand List(IReadOnlyList<string> args)
+    {
+        var message = new NoticeMessage { Type = NoticeTypes.List };
+        bool json = false;
+        for (int i = 2; i < args.Count; i++)
+        {
+            string arg = args[i];
+            if (arg == "--json") json = true;
+            else if (arg is "-h" or "--help") return new(NotifyCommandKind.Help);
+            else if (arg is "-s" or "--source")
+            {
+                if (i + 1 >= args.Count || string.IsNullOrWhiteSpace(args[i + 1])) return Fail(arg + " needs a value");
+                message.AppName = args[++i];
+            }
+            else if (arg.StartsWith("--source=", StringComparison.Ordinal) && arg.Length > "--source=".Length) message.AppName = arg["--source=".Length..];
+            else return Fail("list takes only --json and --source: unexpected " + arg);
+        }
+        return new(NotifyCommandKind.List, message, JsonOutput: json);
     }
 
     private static NotifyCommand Verbs(string group, string? given, string first, string second)

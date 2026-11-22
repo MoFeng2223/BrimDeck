@@ -462,7 +462,8 @@ internal sealed class AgentHost
                         lock (_gate) { state = _state; detail = _detail; }
                         reply = NoticeProtocol.Reply(NoticeResults.Accepted, "agent " + state + (detail.Length > 0 ? " (" + detail + ")" : ""));
                     }
-                    else if (message.Type != NoticeTypes.Notify) reply = NoticeProtocol.Reply(NoticeResults.Rejected, "unknown-type");
+                    // brim notify list and remove go to BrimDeck and are answered by their id, as a notice is.
+                    else if (message.Type is not (NoticeTypes.Notify or NoticeTypes.List or NoticeTypes.Remove)) reply = NoticeProtocol.Reply(NoticeResults.Rejected, "unknown-type");
                     else reply = await RelayAsync(message);
                     await NoticeFrames.WriteAsync(stream, reply, idle.Token);
                     // The sender waits for how its notice ends: the connection stays for the result, and nothing more is read.

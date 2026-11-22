@@ -16,7 +16,7 @@ internal sealed partial class Renderer
 {
     private async Task BrimPathScene()
     {
-        _settings.Animations = false; _settings.NoticesEnabled = true;
+        _settings.Animations = false; _settings.NoticeIsland = true; _settings.NoticesPage = true;
         var center = Activator.CreateInstance(Type.GetType("BrimDeck.NoticeCenter, BrimDeck")!, Program.Any, null, [app], null)!;
         Program.SetProperty(app, "Notices", center);
         string brim = Path.Combine(AppContext.BaseDirectory, "brim.exe");

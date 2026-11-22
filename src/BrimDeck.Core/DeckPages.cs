@@ -10,11 +10,11 @@ public static class DeckPages
     // Each known page once, in the saved order; a page missing from the file takes its default place after the others.
     public static List<DeckPage> Normalize(IEnumerable<DeckPage>? order) => [.. (order ?? []).Where(page => Enum.IsDefined(page)).Concat(Order).Distinct()];
 
-    // The recent notices page exists while dynamic notices are on.
+    // The notices page shows while the profile's switch for it is on.
     public static bool Shown(DeckSettings settings, DeckPage page) => page switch
     {
         DeckPage.Usage => settings.UsagePage, DeckPage.Music => settings.MusicPage, DeckPage.Monitor => settings.MonitorPage, DeckPage.Devices => settings.DevicesPage,
-        DeckPage.Clipboard => settings.ClipboardPage, DeckPage.Notices => settings.NoticesEnabled && settings.NoticesPage, DeckPage.Agenda => settings.AgendaPage, _ => false
+        DeckPage.Clipboard => settings.ClipboardPage, DeckPage.Notices => settings.NoticesPage, DeckPage.Agenda => settings.AgendaPage, _ => false
     };
 
     public static IReadOnlyList<DeckPage> Visible(DeckSettings settings) => settings.PageOrder.Where(page => Shown(settings, page)).ToList();

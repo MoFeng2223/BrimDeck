@@ -129,7 +129,7 @@ public static partial class PanelThemes
 
     private static string FillClock(string text, PanelPalette start, PanelThemeClock clock)
     {
-        if (Enum.TryParse<ClockStyle>(clock.Style, true, out var style)) text = Regex.Replace(text, @"""style"": ""\w+""", $"\"style\": \"{style.ToString().ToLowerInvariant()}\"");
+        if (ClockStyles.TryParse(clock.Style, out var style)) text = Regex.Replace(text, @"""style"": ""\w+""", $"\"style\": \"{style.ToString().ToLowerInvariant()}\"");
         if (ParseClockColor(clock.Color) is { } color) text = Regex.Replace(text, @"""color"": ""\w+""", $"\"color\": \"{ClockColorKey(color)}\"");
         if (clock.Custom.Length > 0) text = Regex.Replace(text, @"""custom"": ""#[0-9A-Fa-f]{6}""", $"\"custom\": \"{clock.Custom}\"");
         if (clock.Gradient is { Count: 3 } gradient) text = Regex.Replace(text, @"""gradient"": \[[^\]]*\]", "\"gradient\": " + ColorList(gradient));

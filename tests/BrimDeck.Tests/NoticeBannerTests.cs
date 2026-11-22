@@ -65,7 +65,7 @@ internal static class NoticeBannerTests
             && !NoticeBanners.Usable(@"\a") && !NoticeBanners.Usable("a\nb") && !NoticeBanners.Usable("") && !NoticeBanners.Usable(new string('a', 257)));
     }
 
-    private static DeckSettings Settings(params NoticeAppRule[] rules) => new() { NoticesEnabled = true, NoticeAppsListed = true, NoticeApps = [.. rules] };
+    private static DeckSettings Settings(params NoticeAppRule[] rules) => new() { NoticeIsland = true, NoticeAppsListed = true, NoticeApps = [.. rules] };
     private static NoticeAppRule Hide(string appId, NoticeLevel level = NoticeLevel.Auto) => new() { Key = NoticeKeys.Windows(appId), HideBanner = true, Level = level };
 
     private static void Wanted(Action<string, bool> check)
@@ -76,9 +76,9 @@ internal static class NoticeBannerTests
         check("Banners: the listed Windows apps whose switch is on are wanted", Wanted().SetEquals(["A"]));
         check("Banners: not one left on, one set to list only, BrimDeck itself, a path or another kind of source", !Wanted().Overlaps(["Shown", "Quiet", "BrimDeck.Desktop", @"C:\tool.exe", "make", "wechat"]));
         check("Banners: application ids match without regard to case", Wanted().Contains("a"));
-        settings.NoticesEnabled = false;
+        settings.NoticeIsland = false; settings.NoticesPage = false;
         check("Banners: nothing is wanted with notices off", Wanted().Count == 0);
-        settings.NoticesEnabled = true;
+        settings.NoticeIsland = true;
         check("Banners: nothing is wanted while Windows refuses access", Wanted(readable: false).Count == 0);
         var defaults = new DeckSettings();
         defaults.Normalize();
@@ -320,7 +320,7 @@ internal static class NoticeBannerTests
     private static void SettingsRoundTrip(string root, Action<string, bool> check)
     {
         var store = new SettingsStore(Path.Combine(root, "banner-settings"));
-        store.Save(new DeckSettings { NoticesEnabled = true, NoticeApps = [new() { Key = "windows:App", HideBanner = true }] });
+        store.Save(new DeckSettings { NoticeIsland = true, NoticeApps = [new() { Key = "windows:App", HideBanner = true }] });
         var loaded = store.Load();
         check("Banners: an app's switch survives saving and loading", loaded.NoticeRule("windows:App")?.HideBanner == true && loaded.Copy().NoticeRule("windows:App")?.HideBanner == true);
         // A settings file saved before the switches existed reads with every one off.

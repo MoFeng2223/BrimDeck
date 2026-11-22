@@ -29,10 +29,10 @@ internal sealed partial class Renderer
         var now = new DateTime(2026, 11, 22, 14, 20, 0);
         Program.SetProperty(_deck, "AgendaClock", (Func<DateTime>)(() => now));
         var ids = FillAgenda(book, now);
-        bool animations = _settings.Animations, notices = _settings.NoticesEnabled;
+        bool animations = _settings.Animations, notices = _settings.NoticesPage;
         string theme = _settings.PanelTheme;
         int panelScale = _settings.PanelScale;
-        _settings.Animations = false; _settings.NoticesEnabled = true; _settings.AgendaPage = true;
+        _settings.Animations = false; _settings.NoticesPage = true; _settings.AgendaPage = true;
         _settings.AgendaView = AgendaView.Events; _settings.AgendaBlocks = false;
         var use = Type.GetType("BrimDeck.PanelTheme, BrimDeck")!.GetMethod("Use", Program.Any)!;
 
@@ -138,7 +138,7 @@ internal sealed partial class Renderer
 
         SelectPage(DeckPage.Usage);
         _deck.SetExpanded(false, true);
-        _settings.Animations = animations; _settings.NoticesEnabled = notices; _settings.AgendaView = AgendaView.Events; _settings.AgendaBlocks = false;
+        _settings.Animations = animations; _settings.NoticesPage = notices; _settings.AgendaView = AgendaView.Events; _settings.AgendaBlocks = false;
         Refresh(); await Settle();
         try { Directory.Delete(folder, true); } catch (IOException) { }
 

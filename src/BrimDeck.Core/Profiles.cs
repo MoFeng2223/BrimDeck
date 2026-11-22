@@ -76,8 +76,7 @@ public static class Profiles
         nameof(DeckSettings.IncludeWsl), nameof(DeckSettings.Apps),
         nameof(DeckSettings.Profiles), nameof(DeckSettings.CurrentProfile), nameof(DeckSettings.ReturnProfile), nameof(DeckSettings.ProfileRules),
         nameof(DeckSettings.FullscreenExceptions), nameof(DeckSettings.MouseWheelPages),
-        nameof(DeckSettings.NoticesEnabled), nameof(DeckSettings.NoticeIsland), nameof(DeckSettings.NoticeWslDistros),
-        nameof(DeckSettings.NoticeScreen), nameof(DeckSettings.NoticeDefaultLevel), nameof(DeckSettings.NoticeStyles), nameof(DeckSettings.NoticeStripIcons),
+        nameof(DeckSettings.NoticeWslDistros), nameof(DeckSettings.NoticeCommandAccess), nameof(DeckSettings.NoticeDefaultLevel), nameof(DeckSettings.NoticeStyles), nameof(DeckSettings.NoticeStripIcons),
         nameof(DeckSettings.NoticeCodes), nameof(DeckSettings.NoticeRespectFocus), nameof(DeckSettings.NoticesPausedUntil),
         nameof(DeckSettings.NoticeHistory), nameof(DeckSettings.NoticeHistoryHours), nameof(DeckSettings.NoticeHotkey),
         nameof(DeckSettings.NoticeApps), nameof(DeckSettings.NoticeAppsListed)

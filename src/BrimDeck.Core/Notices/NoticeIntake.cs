@@ -43,11 +43,11 @@ public static class NoticeIntake
     // The WSL link's own count of notices, on the bridge's reading thread before anything reaches the UI thread, as the pipe
     // counts its messages (W5): a program in the distribution calling Notify in a loop must not fill the UI thread's queue.
     // Whether the message goes on; refusal is the reply for a brim-notify waiting through the agent, null when nobody waits.
-    // Only notices count: status reports and closes are few and bounded by the agent.
+    // Only what a sender asks counts (a notice, a list, a removal): status reports and closes are few and bounded by the agent.
     public static bool AdmitFromAgent(IntakeGate gate, NoticeMessage message, long nowMilliseconds, out NoticeMessage? refusal)
     {
         refusal = null;
-        if (message.Type != NoticeTypes.Notify || gate.Admit(nowMilliseconds)) return true;
+        if (message.Type is not (NoticeTypes.Notify or NoticeTypes.List or NoticeTypes.Remove) || gate.Admit(nowMilliseconds)) return true;
         if (message.Origin == "cli" && message.EventId is { } id) refusal = NoticeProtocol.Reply(NoticeResults.Rejected, "rate-limited", id);
         return false;
     }
@@ -70,7 +70,7 @@ public static class NoticeIntake
         Actions = origin == NoticeOrigin.Cli ? Buttons(message, distro) : DesktopActions(message, capabilities),
         ExitCode = message.ExitCode, DurationMs = message.DurationMs, Command = Blank(message.Command),
         Timing = NoticeTimeIntake.Resolve(message, now ?? DateTimeOffset.UtcNow, zone ?? TimeZoneInfo.Local),
-        StopTiming = message.Stop == true,
+        StopTiming = message.Stop == true, TargetId = Blank(message.NoticeId),
         Transient = message.Transient == true,
         Level = NoticeKeys.Level(message.Level), Align = NoticeKeys.Align(message.Align),
         Slot = NoticeKeys.Slot(message.Slot), Glow = NoticeKeys.Color(message.Glow),

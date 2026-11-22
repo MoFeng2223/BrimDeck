@@ -13,7 +13,6 @@ public sealed class NoticeStyle
     // The level-3 backlights offered next to white and the application's color.
     public static readonly string[] Swatches = ["#6E9CF0", "#5DC98C", "#F0A35E", "#EF6A6A", "#B58CF0"];
 
-    public CompactPart? Slot { get; set; }
     public bool Icon { get; set; } = true;
     public int Seconds { get; set; } = 6;
     public bool Liquid { get; set; }
@@ -23,7 +22,6 @@ public sealed class NoticeStyle
 
     internal void Normalize()
     {
-        if (Slot is { } slot && !Enum.IsDefined(slot)) Slot = null;
         Seconds = Math.Clamp(Seconds, MinSeconds, MaxSeconds);
         var color = (Color ?? "").Trim();
         Color = color == AppColor ? AppColor : AppPresets.NormalizeColor(color);

@@ -79,6 +79,36 @@ public sealed partial class SettingsWindow
         panel.Children.Add(Toggle(Loc.T("24 小时制", "24-hour clock"), S.Clock24Hour, value => { Change(s => s.Clock24Hour = value); RefreshClockTiles(); }));
         panel.Children.Add(new Border { Height = 1, Background = UI.Brush(Divider) });
         panel.Children.Add(Toggle(Loc.T("显示秒数", "Show seconds"), S.ClockSeconds, value => { Change(s => s.ClockSeconds = value); RefreshClockTiles(); }));
+        panel.Children.Add(new Border { Height = 1, Background = UI.Brush(Divider) });
+        var date = DateOptions(compact);
+        date.Visibility = S.ClockDate ? Visibility.Visible : Visibility.Collapsed;
+        panel.Children.Add(Toggle(Loc.T("显示日期", "Show date"), S.ClockDate, value =>
+        {
+            Change(s => s.ClockDate = value);
+            date.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+        }));
+        panel.Children.Add(date);
+        return panel;
+    }
+
+    // Where the date stands, how it is written and where the weekday goes; shown while the date is on.
+    private StackPanel DateOptions(CompactStyle compact)
+    {
+        var panel = new StackPanel();
+        void Add(FrameworkElement row) { panel.Children.Add(new Border { Height = 1, Background = UI.Brush(Divider) }); panel.Children.Add(row); }
+        Add(MusicChoice(Loc.T("日期位置", "Date position"), S.ClockDatePosition,
+            [(ClockDatePosition.Left, Loc.T("左侧", "Left")), (ClockDatePosition.Right, Loc.T("右侧", "Right")), (ClockDatePosition.Above, Loc.T("上方", "Above")), (ClockDatePosition.Below, Loc.T("下方", "Below"))],
+            value => Change(s => s.ClockDatePosition = value), group: "ClockDatePosition" + compact));
+        // Each format is shown as today's date in it.
+        var formats = Enum.GetValues<ClockDateFormat>();
+        var format = new ComboBox { Width = 150, Style = (Style)FindResource("SettingsCombo"),
+            ItemsSource = formats.Select(f => ClockDates.Text(DateTime.Today, f, ClockWeekday.Hidden, Loc.IsEnglish)).ToList(), SelectedIndex = Array.IndexOf(formats, S.ClockDateFormat) };
+        AutomationProperties.SetName(format, Loc.T("日期格式", "Date format")); PopupMotion.Attach(format);
+        format.SelectionChanged += (_, _) => { if (format.SelectedIndex >= 0) Change(s => s.ClockDateFormat = formats[format.SelectedIndex]); };
+        Add(Row(Loc.T("日期格式", "Date format"), format));
+        Add(MusicChoice(Loc.T("星期", "Weekday"), S.ClockWeekday,
+            [(ClockWeekday.Hidden, Loc.T("不显示", "Hidden")), (ClockWeekday.Before, Loc.T("在日期前", "Before")), (ClockWeekday.After, Loc.T("在日期后", "After"))],
+            value => Change(s => s.ClockWeekday = value), group: "ClockWeekday" + compact));
         return panel;
     }
 

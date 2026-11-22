@@ -40,6 +40,39 @@ internal static class SettingsMigrationTests
         var edited = colors.Copy(); edited.ClockGradient[0] = "#000000";
         check("a settings copy has its own gradient", colors.ClockGradient[0] == ClockColors.Sunset[0]);
 
+        // The two-line clock style (1) became the minimal style with the date below, in the file, its profiles and its theme choices.
+        var twoLine = SettingsMigrations.Read("""
+            {"AppVersion":"1.3.3","ClockStyle":1,"ThemeChoices":{"dark":{"ClockStyle":1},"light":{"ClockStyle":5}},
+             "Profiles":[{"Name":"work","Values":{"ClockStyle":1}},{"Name":"home","Values":{"ClockStyle":3}}]}
+            """, new Version(1, 3, 3), out _);
+        var workValues = twoLine.Profiles.Single(profile => profile.Name == "work").Values!;
+        var homeValues = twoLine.Profiles.Single(profile => profile.Name == "home").Values!;
+        check("the two-line clock becomes the minimal clock with the date below it", twoLine.ClockStyle == ClockStyle.Minimal && twoLine.ClockDate
+            && twoLine.ClockDatePosition == ClockDatePosition.Below && twoLine.ClockDateFormat == ClockDateFormat.MonthDaySlash && twoLine.ClockWeekday == ClockWeekday.After
+            && twoLine.ThemeChoices["dark"].ClockStyle == ClockStyle.Minimal && twoLine.ThemeChoices["light"].ClockStyle == ClockStyle.Neon
+            && (int)workValues["ClockStyle"]! == 0 && (bool)workValues["ClockDate"]! && (int)homeValues["ClockStyle"]! == 3 && homeValues["ClockDate"] is null);
+        var noDate = SettingsMigrations.Read("""{"AppVersion":"1.3.3","ClockStyle":2}""", new Version(1, 3, 3), out _);
+        check("the other clock styles keep their numbers and the date stays off", noDate.ClockStyle == ClockStyle.Digits && !noDate.ClockDate
+            && (int)ClockStyle.Digits == 2 && (int)ClockStyle.Rounded == 10);
+        var badDate = SettingsMigrations.Read("""{"AppVersion":"1.3.3","ClockDatePosition":9,"ClockDateFormat":-1,"ClockWeekday":7}""", new Version(1, 3, 3), out _);
+        check("unknown date places and formats fall back to the defaults", badDate.ClockDatePosition == ClockDatePosition.Right
+            && badDate.ClockDateFormat == ClockDateFormat.MonthDaySlash && badDate.ClockWeekday == ClockWeekday.After);
+
+        var sunday = new DateTime(2026, 3, 1);
+        check("the date is written in each format, the weekday before, after or not at all",
+            ClockDates.Text(sunday, ClockDateFormat.MonthDaySlash, ClockWeekday.After, false) == "3/1 周日"
+            && ClockDates.Text(sunday, ClockDateFormat.MonthDayDash, ClockWeekday.Before, false) == "周日 03-01"
+            && ClockDates.Text(sunday, ClockDateFormat.MonthDayWords, ClockWeekday.Hidden, false) == "3月1日"
+            && ClockDates.Text(sunday, ClockDateFormat.YearSlash, ClockWeekday.Hidden, false) == "2026/3/1"
+            && ClockDates.Text(sunday, ClockDateFormat.YearDash, ClockWeekday.Hidden, false) == "2026-03-01"
+            && ClockDates.Text(sunday, ClockDateFormat.YearWords, ClockWeekday.After, false) == "2026年3月1日 周日"
+            && ClockDates.Text(sunday, ClockDateFormat.MonthDayWords, ClockWeekday.Before, true) == "Sun Mar 1"
+            && ClockDates.Text(sunday, ClockDateFormat.YearSlash, ClockWeekday.Hidden, true) == "3/1/2026"
+            && ClockDates.Text(sunday, ClockDateFormat.YearWords, ClockWeekday.After, true) == "Mar 1, 2026 Sun");
+        check("a theme file's two-line clock reads as the minimal clock, and numbers are not style names",
+            ClockStyles.TryParse("stacked", out var stacked) && stacked == ClockStyle.Minimal && ClockStyles.TryParse("Pixel", out var pixel) && pixel == ClockStyle.Pixel
+            && !ClockStyles.TryParse("1", out _) && !ClockStyles.TryParse("11", out _) && !ClockStyles.TryParse("", out _) && !ClockStyles.TryParse("sparkle", out _));
+
         // Upgrade 0.1.0 -> 0.2.0, change a setting, return to 0.1.0, then go back to 0.2.0.
         var path = Path.Combine(root, "version-switch");
         Directory.CreateDirectory(path);
