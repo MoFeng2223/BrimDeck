@@ -337,7 +337,17 @@ public sealed partial class SettingsWindow
         WindowsAppsSection(center);
         ProgramSourcesSection(center);
         WslSection(center);
+        NoticeCompatibilitySection();
         WatchNotices(center);
+    }
+
+    // What brim notify list and remove may reach (NoticeEntries): without this, the notices of the command line and programs only.
+    private void NoticeCompatibilitySection()
+    {
+        SectionTitle(Loc.T("兼容性", "Compatibility"));
+        Group(Toggle(Loc.T("允许 brim 读取和删除所有通知", "Let brim list and remove all notices"), S.NoticeCommandAccess, value => Change(s => s.NoticeCommandAccess = value),
+            help: Loc.T("开启后，brim notify list 和 remove 可以读取、删除所有来源的通知，删除 Windows 应用的通知时同时从 Windows 通知中心删除。本机运行的任何程序都能使用 brim。",
+                "When on, brim notify list and remove reach the notices of every source, and removing a Windows app's notice also removes it from Windows' notification center. Any program on this PC can run brim.")));
     }
 
     // The status lines follow the sources while the page is shown; a banner switch that went off by itself (the user turned the

@@ -2,7 +2,7 @@ using System.Globalization;
 
 namespace BrimDeck.Protocol;
 
-public enum NotifyCommandKind { Send, Run, Status, Stdio, Help, Version, Error }
+public enum NotifyCommandKind { Send, Run, Status, Stdio, Help, Version, Error, List }
 
 // A parsed brim-notify command line. Send carries the notice; Run carries the notice options and the program to run.
 // JsonInput: a file ("-" for standard input) holding a whole message, which the options given then change. JsonOutput: the
@@ -154,6 +154,9 @@ public static class NotifyCommandLine
                         break;
                     }
                     case "--id": message.EventId = value; break;
+                    case "--notice":
+                        if (timeKind is not ("stop" or "close" or "remove")) return Fail("--notice is for close and remove");
+                        message.NoticeId = value; break;
                     case "-c" or "--category":
                         if (!Categories.Contains(value.ToLowerInvariant())) return Fail("unknown category: " + value);
                         message.Category = value.ToLowerInvariant(); break;
@@ -257,16 +260,20 @@ public static class NotifyCommandLine
         return string.IsNullOrWhiteSpace(file.Title) && string.IsNullOrWhiteSpace(file.Body) ? null : file;
     }
 
-    // timer, stopwatch, event, stop and close. Each running one needs a key for stop; without -r one is made up (and printed).
+    // timer, stopwatch, event, stop, close and remove. Each running one needs a key for stop; without -r one is made up (and
+    // printed). stop, close and remove name the notice by its key, or by its id with --notice (brim notify list gives it).
     private static NotifyCommand TimeCommand(string timeKind, NoticeMessage message, List<string> positional, string source, string said)
     {
         bool timed = message.At is not null || message.Until is not null || message.InMs is not null || message.LeadMs is not null;
-        if (timeKind is "stop" or "close")
+        if (timeKind is "stop" or "close" or "remove")
         {
-            if (positional.Count != 1 || message.ReplaceId is not null) return Fail($"{timeKind} takes one key: {said} KEY");
+            if (message.NoticeId is not null ? positional.Count != 0 || message.ReplaceId is not null : positional.Count != 1 || message.ReplaceId is not null)
+                return Fail($"{timeKind} takes one key or --notice ID: {said} KEY");
             if (timed || message.Title is not null || message.Body is not null || message.Kind is not null || message.Level is not null || message.Align is not null)
-                return Fail(timeKind + " takes only a key and --source");
-            message.ReplaceId = positional[0]; message.Stop = true; message.Kind = NoticeTimes.Stopwatch;
+                return Fail(timeKind + " takes only a key and --source, or --notice ID");
+            message.ReplaceId = positional.Count == 1 ? positional[0] : null;
+            if (timeKind == "remove") message.Type = NoticeTypes.Remove;
+            else { message.Stop = true; message.Kind = NoticeTimes.Stopwatch; }
             message.AppName ??= source;
             return new(NotifyCommandKind.Send, message);
         }

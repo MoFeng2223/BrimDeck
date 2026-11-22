@@ -154,6 +154,40 @@ internal sealed class WindowsNoticeSource : IDisposable
         catch (Exception ex) when (ex is COMException or UnauthorizedAccessException or InvalidOperationException) { return UserNotificationListenerAccessStatus.Denied; }
     }
 
+    // How long taking a notification out of the notification center may take; the sender waits for the answer.
+    private static readonly TimeSpan RemoveLimit = TimeSpan.FromSeconds(3);
+
+    // Takes the notification a notice was read from ("windows:<AUMID>:<id>:<created ticks>", Read) out of Windows' notification
+    // center (brim notify remove, with the user's leave). Only while the notification with that id is still the one read: the
+    // same creation time and, where Windows names it, the same application, so that an id Windows gives again later never
+    // removes another notification. True once it is gone, including when it was gone already; false when it is another one,
+    // access is not allowed or Windows failed. Measured 2026-11-23 on Windows 11 26200: RemoveNotification works for BrimDeck
+    // running without package identity.
+    public async Task<bool> RemoveAsync(string instanceKey)
+    {
+        var parts = instanceKey.Split(':');
+        if (parts.Length < 4 || parts[0] != "windows" || !uint.TryParse(parts[^2], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out uint id)
+            || !long.TryParse(parts[^1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long ticks)) return false;
+        string appId = string.Join(':', parts[1..^2]);
+        try
+        {
+            return await Task.Run(() =>
+            {
+                var listener = UserNotificationListener.Current;
+                if (listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed) return false;
+                var notification = listener.GetNotification(id);
+                if (notification is null) return true;
+                if (Safe(() => (DateTimeOffset?)notification.CreationTime)?.UtcTicks != ticks) return false;
+                var app = Safe(() => notification.AppInfo);
+                string? named = app is null ? null : Safe(() => app.AppUserModelId) ?? Safe(() => app.Id);
+                if (!string.IsNullOrEmpty(named) && !string.Equals(named, appId, StringComparison.OrdinalIgnoreCase)) return false;
+                listener.RemoveNotification(id);
+                return true;
+            }).WaitAsync(RemoveLimit);
+        }
+        catch (Exception ex) when (ex is TimeoutException or UnauthorizedAccessException || WindowsNoticeSnapshot.Unreadable(ex)) { return false; }
+    }
+
     public void Start()
     {
         if (_run is not null) return;

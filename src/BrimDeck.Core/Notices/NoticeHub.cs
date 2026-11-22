@@ -93,6 +93,12 @@ public sealed class NoticeHub
             ?? (input.Distro is null || NoticeIntake.ViaPipe(input.InstanceKey) ? null
                 : _notices.FirstOrDefault(n => n.AppKey == input.AppKey && n.ReplaceKey == key && NoticeIntake.ViaPipe(n.InstanceKey)));
 
+    // The listed notice a removal names (brim notify remove): by BrimDeck's id, or by the sender's key as -k and close find it.
+    // Whether the sender may reach it is the caller's to decide (NoticeEntries.Reachable).
+    public Notice? Target(NoticeInput input)
+        => input.TargetId is { Length: > 0 } id ? _notices.FirstOrDefault(n => n.Id == id)
+            : input.ReplaceKey is { Length: > 0 } key ? Replacing(input, key) : null;
+
     // A sender can lower its own notice, never raise it.
     public static NoticePriority EffectivePriority(NoticePriority hint) => hint == NoticePriority.Low ? NoticePriority.Low : NoticePriority.Normal;
 
@@ -244,7 +250,9 @@ public sealed class NoticeHub
             shown.SourcePresent = false; shown.Awaited = false;
             return new(NoticeReceipt.Updated, shown, false);
         }
-        var target = input.ReplaceKey is { Length: > 0 } key ? Replacing(input, key) : null;
+        // By id only a command-line notice: closing is what its sender does; one of another source is removed (Target).
+        var target = input.TargetId is { Length: > 0 } id ? (_notices.FirstOrDefault(n => n.Id == id) is { Origin: NoticeOrigin.Cli } byId ? byId : null)
+            : input.ReplaceKey is { Length: > 0 } key ? Replacing(input, key) : null;
         if (target is null) return new(NoticeReceipt.Filtered, null, false, "no-timer");
         if (target.Timing is null && target.SourcePresent) Gone(target);
         else if (!StopTimer(target.Id, now)) return new(NoticeReceipt.Filtered, null, false, "no-timer");

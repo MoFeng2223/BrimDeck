@@ -73,7 +73,7 @@ While it shows, other notices go to the notice history and wait as usual; a norm
 
 | Source | What it is | Default |
 |---|---|---|
-| Windows app notifications | The current user's notifications in Windows' notification center: source, icon, time and text. Only the apps in the list under Settings › Live notices › Apps show; other apps' notifications are not shown and do not go to the notice history. The list holds QQ and Clock by default; "Add app" adds apps that sent notifications recently or are registered for notifications in Windows. Messages inside applications are not read, and the notification center is never cleared or changed. | On |
+| Windows app notifications | The current user's notifications in Windows' notification center: source, icon, time and text. Only the apps in the list under Settings › Live notices › Apps show; other apps' notifications are not shown and do not go to the notice history. The list holds QQ and Clock by default; "Add app" adds apps that sent notifications recently or are registered for notifications in Windows. Messages inside applications are not read, and the notification center is not cleared or changed, unless "Let brim list and remove all notices" is on and `brim notify remove` removes a notice. | On |
 | WeChat new messages | WeChat for PC does not send Windows notifications. While WeChat is in the "Apps" list, its flashing taskbar icon shows "WeChat has new messages"; the messages and their senders are not read. | In the list |
 | brim-notify | `BrimDeck.Notify.exe` on Windows and `brim-notify` in WSL send notices directly. | On |
 | WSL desktop notifications | Standard desktop notifications (freedesktop D-Bus, such as `notify-send`) in the chosen distributions. | Off, per distribution |
@@ -212,7 +212,7 @@ Exit codes:
 |---|---|
 | 0 | Delivered (or kept quiet by your rules); when waiting, a button was chosen and its key is on standard output |
 | 1 | Usage error (a message over 64 KB even with its texts cut to BrimDeck's limits included) |
-| 2 | Refused by BrimDeck (a `close` or `stop` that found no such key included) |
+| 2 | Refused by BrimDeck (a `close`, `stop` or `remove` that found no such key or id included) |
 | 3 | BrimDeck is not running, live notices are off, or no answer came in time (the notice may still show) |
 | 4 | When waiting: the notice was closed or deleted without a choice, or its source is set to "Don't show" |
 | 5 | When waiting: it ran out of time |
@@ -234,6 +234,28 @@ The JSON fields of a message match the options, for example:
   "timeoutMs": 300000
 }
 ```
+
+### Listing and removing notices
+
+`brim notify list` lists the notices on the notices page, each with an id; `brim notify close` and `brim notify remove` find a notice by that id (`--notice`) or by the key it was sent with (`-k`).
+
+```text
+# List the notices (-s for one source only, --json for JSON)
+brim notify list
+brim notify list --json -s deploy-script
+# Close: the notice ends on the island and stays on the notices page
+brim notify close --notice 5112c23c8fcd4de886842687835782fa
+# Remove: take it off the notices page, as deleting it there does
+brim notify remove deploy -s deploy-script
+brim notify remove --notice 5112c23c8fcd4de886842687835782fa
+```
+
+- Which notices: by default only those sent by `brim` and other programs. With "Let brim list and remove all notices" on under Settings › Live notices › Apps › Compatibility (off by default), every notice is listed and can be removed, Windows apps' and WSL desktop notifications included. Any program on this PC can run `brim`, so turn it on only if they may read these notices.
+- Removing a Windows app's notice also removes it from Windows' notification center. When that notification has changed in Windows or cannot be removed, only BrimDeck's record goes; `brim` says so and still exits with 0. A WSL desktop notification is removed from BrimDeck only.
+- By key, the source must be the one the notice was sent with; by id, the source does not matter. `close` by id closes only notices of the command line and programs.
+- Removing a notice whose sender waits for an answer (`--wait` or `--action`) ends that command as closed without a choice, with exit code 4.
+- With "Hide verification codes" on, codes in the listed titles and bodies are hidden with dots too.
+- `list --json` prints `{"scope": ..., "notices": [...]}`: `scope` is `cli` (only the notices of the command line and programs) or `all`; each notice has `id`, `origin` (`windows`, `taskbar`, `wsl`, `cli`, `brimdeck`), `source`, `key`, `title`, `body`, `context`, `category`, `kind`, `receivedAt`, and `unread`, `shown` (on the island now), `waiting` (its sender waits for an answer) and `closed` (its source closed or cleared it).
 
 ### The earlier name, brim-notify
 
@@ -299,7 +321,7 @@ brim-notify "New mail" --kind mail
 
 - Notice history is kept for 24 hours by default, at most 500, encrypted with Windows' per-user data protection (DPAPI) in the `notices` folder of BrimDeck's install folder (opened to the current user only; `%LOCALAPPDATA%\BrimDeck\notices` when the install folder cannot be written to). "Keep for" can be set to Until exit (memory only: then no application icons are kept on disk either), 1 hour, 1 day, 3 days or 7 days, and the list can be cleared at any time. A reminder that rang or a stopwatch that stopped is kept for the retention from that moment.
 - The folder the notices are saved in is neither read nor written when it is a link, belongs to another account, or lets other accounts change its files, and the settings say why; for the last, "Make it mine only" in the settings opens the folder to the current user and the system only. Before every read and write BrimDeck checks that neither the folder nor `notices.dat` is a link, and a `notices.dat` that is a link is never read. When the saved file cannot be reached for now (in use, its drive or network location not available), BrimDeck tries again later and writes nothing until then, so the full list is never overwritten; notices deleted or cleared meanwhile do not come back once the file is read. A file that is actually damaged offers to be cleared; one this account may not read (made by BrimDeck running as administrator, say) offers both trying again and clearing. Every save is on the disk itself before it replaces the old file, so a power cut does not leave a damaged file.
-- Deleting or clearing removes BrimDeck's own records only and tells no source. Only closing a notice (its close button or Esc) reports a WSL desktop notification as dismissed by the user, as closing a desktop notification bubble does. Switching notices off or clearing also cancels what shows and everything waiting to show.
+- Deleting or clearing removes BrimDeck's own records only and tells no source (the exception: with "Let brim list and remove all notices" on, `brim notify remove` also removes a Windows app's notice from Windows' notification center). Only closing a notice (its close button or Esc) reports a WSL desktop notification as dismissed by the user, as closing a desktop notification bubble does. Switching notices off or clearing also cancels what shows and everything waiting to show.
 - Raw notification content, attachments and pictures are never saved. Icons come only from Windows or local files; nothing is downloaded. Network paths, links and shortcuts as icons are refused.
 - The diagnostic log `notices.log` holds only error types, codes and code locations, never titles or bodies.
 - The local channel accepts only the current user on this PC (a named pipe that refuses network access). A notice's content is only ever shown as text: it is never run and its links are never opened.

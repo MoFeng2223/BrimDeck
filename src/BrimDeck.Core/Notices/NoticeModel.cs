@@ -76,6 +76,8 @@ public sealed record NoticeInput
     public NoticeTiming? Timing { get; init; }
     // Ends the timing of the earlier notice with the same AppKey and ReplaceKey (brim-notify stop) instead of adding one.
     public bool StopTiming { get; init; }
+    // A stop or a removal that names the notice by BrimDeck's own id (NoticeMessage.NoticeId) instead of by ReplaceKey.
+    public string? TargetId { get; init; }
     // Arrived while BrimDeck could not read its source (the PC slept): recorded, unviewed, but not shown as it arrives (core-M5).
     public bool Missed { get; init; }
     // Handed over already as it arrived (WindowsNoticeList.Observe) and sent again only so the hub merges the notice it took the

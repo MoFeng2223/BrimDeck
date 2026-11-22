@@ -71,6 +71,7 @@ public static class NotifyCli
                 return 0;
             }
             case NotifyCommandKind.Run: return await RunProgramAsync(command, sender);
+            case NotifyCommandKind.List: return await ListAsync(command, sender);
             default:
             {
                 var message = command.Message!;
@@ -94,6 +95,49 @@ public static class NotifyCli
     }
 
     private static string Word(bool value) => value ? "true" : "false";
+
+    // What list --json prints: the words as they are rather than as \u escapes, for a reader as much as for a script.
+    private static readonly NoticeJson Readable = new(new System.Text.Json.JsonSerializerOptions(NoticeJson.Default.Options) { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+
+    // A page more than the notices page can hold (NoticeHub keeps at most 500, a page holds at least one) ends the listing.
+    private const int MaxPages = 600;
+
+    // brim notify list: the pages one after another, then every notice printed at once, as JSON or one line each.
+    private static async Task<int> ListAsync(NotifyCommand command, NotifySender sender)
+    {
+        var listing = new NoticeListing();
+        string? cursor = null;
+        for (int page = 0; page < MaxPages; page++)
+        {
+            var request = new NoticeMessage { Type = NoticeTypes.List, AppName = command.Message?.AppName, Cursor = cursor };
+            var reply = await sender.Send(request);
+            if (reply?.Result != NoticeResults.Accepted) return Report(reply, sender.Unreachable, request);
+            listing.Scope = reply.Scope ?? NoticeScopes.Cli;
+            listing.Notices.AddRange(reply.Notices ?? []);
+            cursor = reply.Cursor;
+            if (cursor is null) break;
+        }
+        if (command.JsonOutput) { Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(listing, Readable.NoticeListing)); return 0; }
+        if (listing.Scope != NoticeScopes.All)
+            Console.Error.WriteLine("Only the notices of brim and other programs are listed. To list every notice, turn on \"Let brim list and remove all notices\" in BrimDeck's settings (Notices › Apps › Compatibility).");
+        if (listing.Notices.Count == 0) { Console.Error.WriteLine("No notices."); return 0; }
+        foreach (var notice in listing.Notices) Console.WriteLine(Line(notice));
+        return 0;
+    }
+
+    // One notice on one line: its id, when it came, where from, its key and state, and its words.
+    private static string Line(NoticeEntry notice)
+    {
+        var line = new StringBuilder(notice.Id).Append("  ").Append(notice.ReceivedAt.ToLocalTime().ToString("MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture))
+            .Append("  ").Append(notice.Source);
+        if (notice.Origin != "cli") line.Append(" (").Append(notice.Origin).Append(')');
+        if (notice.Key is { Length: > 0 } key) line.Append("  key=").Append(key);
+        foreach (var (on, word) in new[] { (notice.Unread, "unread"), (notice.Shown, "shown"), (notice.Waiting, "waiting"), (notice.Closed, "closed") })
+            if (on) line.Append("  ").Append(word);
+        string words = notice.Body.Length > 0 ? (notice.Title.Length > 0 ? notice.Title + " — " + notice.Body : notice.Body) : notice.Title;
+        line.Append("  ").Append(words.ReplaceLineEndings(" "));
+        return line.ToString();
+    }
 
     // The message of --json: a file, or standard input for "-". Null (said why) when it cannot be read or is not a message.
     private static NoticeMessage? ReadJson(string file)
@@ -188,15 +232,25 @@ public static class NotifyCli
             Console.Error.WriteLine(Name + ": BrimDeck did not answer in time; the notice may still be shown.");
             return Unreachable;
         }
-        if (reply.Result == NoticeResults.Rejected) { Console.Error.WriteLine(Name + ": " + "BrimDeck refused the notice: " + (reply.Detail ?? "unknown reason")); return Refused; }
-        // A stop or close that found nothing: a mistyped key, or one sent with another -s (W8).
-        if (reply is { Result: NoticeResults.Filtered, Detail: "no-timer" })
+        // A BrimDeck from before list and remove.
+        if (reply is { Result: NoticeResults.Rejected, Detail: "unknown-type" } && sent?.Type is NoticeTypes.List or NoticeTypes.Remove)
         {
-            Console.Error.WriteLine(Name + ": " + "no timer, stopwatch, event or open notice has the key " + (sent?.ReplaceId ?? "given")
-                + " (one sent with -s is stopped or closed with the same -s).");
+            Console.Error.WriteLine(Name + ": this BrimDeck cannot " + sent.Type + " notices; update BrimDeck.");
+            return Refused;
+        }
+        if (reply.Result == NoticeResults.Rejected) { Console.Error.WriteLine(Name + ": " + "BrimDeck refused the notice: " + (reply.Detail ?? "unknown reason")); return Refused; }
+        // A stop, close or remove that found nothing: a mistyped key or id, one sent with another -s (W8), or one the settings
+        // keep from the command line.
+        if (reply is { Result: NoticeResults.Filtered, Detail: "no-timer" or "not-found" })
+        {
+            Console.Error.WriteLine(Name + ": " + (sent?.NoticeId is { } id ? "no notice brim can reach has the id " + id + " (brim notify list gives the ids)."
+                : (sent?.Type == NoticeTypes.Remove ? "no notice has the key " : "no timer, stopwatch, event or open notice has the key ") + (sent?.ReplaceId ?? "given")
+                    + " (one sent with -s is " + (sent?.Type == NoticeTypes.Remove ? "removed" : "stopped or closed") + " with the same -s)."));
             return Refused;
         }
         if (reply.Result == NoticeResults.Filtered) Console.Error.WriteLine(Name + ": received; BrimDeck's rules keep this source quiet.");
+        if (reply is { Result: NoticeResults.Accepted, Detail: "windows-kept" })
+            Console.Error.WriteLine(Name + ": removed from BrimDeck; Windows' notification center still has it (Windows did not allow removing it, or it changed meanwhile).");
         return 0;
     }
 

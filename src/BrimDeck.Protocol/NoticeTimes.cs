@@ -112,7 +112,8 @@ public static class NoticeTimes
         if (message.At is not null && message.InMs is not null) return "time-twice";
         if (message.At is { } at && Within(ParseTime(at, now, zone), now) is null) return "bad-time";
         if (message.Until is { } until && Within(ParseTime(until, now, zone), now) is null) return "bad-time";
-        if (message.Stop == true) return string.IsNullOrWhiteSpace(message.ReplaceId) ? "no-key" : null;
+        // A stop names the notice by its key, or by BrimDeck's id (brim notify close --notice).
+        if (message.Stop == true) return string.IsNullOrWhiteSpace(message.ReplaceId) && string.IsNullOrWhiteSpace(message.NoticeId) ? "no-key" : null;
         if (message.Kind is Countdown or Event && message.At is null && message.InMs is null) return "no-time";
         // A countdown to a moment already past would ring at once.
         if (message.Kind == Countdown && message.At is { } end && ParseTime(end, now, zone) <= now) return "bad-time";

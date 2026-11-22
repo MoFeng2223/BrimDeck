@@ -823,6 +823,9 @@ public sealed class DeckSettings
     // The WSL distributions whose notices are received (by name). None by default: not every PC has WSL, and the agent is
     // copied into a distribution only once the user chooses it.
     public List<string> NoticeWslDistros { get; set; } = [];
+    // brim notify list and remove reach every notice, an application's notifications included, and remove takes a Windows one
+    // out of Windows' notification center too. Off by default: any program of the user can run brim (NoticeEntries).
+    public bool NoticeCommandAccess { get; set; }
     public NoticeScreen NoticeScreen { get; set; }
     // The level of a notice nothing else decides (NoticeLevels.Resolve): Plain (level 1), Glow (level 2) or Persistent (level 3).
     public NoticeLevel NoticeDefaultLevel { get; set; } = NoticeLevel.Glow;
