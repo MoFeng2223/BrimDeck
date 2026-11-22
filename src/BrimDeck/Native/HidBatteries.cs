@@ -1557,7 +1557,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             if (reply is not null && Dongles.RapooGen1Status(reply) == true && Dongles.RapooGen1Battery(reply) is { } battery)
             {
                 claimed.Add(info.Path);
-                return [Mouse("rapoo", info, "Rapoo Mouse", battery)];
+                return [Mouse("rapoo", info, "Rapoo Mouse", battery, preferredName: Pushes.RapooMice.GetValueOrDefault(info.Product))];
             }
         }
         return [];
