@@ -130,7 +130,7 @@ public static class VerificationCode
 
     // Full-width characters become ordinary ones, zero-width characters are dropped and the ideographic space becomes a space;
     // map[i] is where character i of the result stands in the text that came in.
-    private static void Normalize(string text, out string result, out int[] map)
+    internal static void Normalize(string text, out string result, out int[] map)
     {
         var builder = new StringBuilder(text.Length);
         var positions = new List<int>(text.Length);

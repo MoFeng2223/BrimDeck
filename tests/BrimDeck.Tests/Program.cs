@@ -30,6 +30,7 @@ try
     SeedPricingTests.Run(root, Check);
     ModelUsageTests.Run(Check);
     await NoticeProtocolTests.Run(Check);
+    NoticeMomentsTests.Run(Check);
     AuditWslTests.Run(Check);
     await AuditWsl2Tests.Run(Check);
     await NoticeWslOpsTests.Run(Check);
