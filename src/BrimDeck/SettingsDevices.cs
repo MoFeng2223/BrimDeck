@@ -349,6 +349,14 @@ public partial class SettingsWindow
         Target.Children.Add(dimensions);
     }
 
+    private void AgendaSizeControls()
+    {
+        var dimensions = new Grid { Margin = new Thickness(0, 8, 0, 0) }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
+        var width = Dimension(Loc.T("宽度", "Width"), S.AgendaWidth, 440, 1200, value => Resize(s => s.AgendaWidth = value, DeckPage.Agenda)); width.Margin = new Thickness(0, 0, 20, 0); dimensions.Children.Add(width);
+        var height = Dimension(Loc.T("高度", "Height"), S.AgendaHeight, 140, 400, value => Resize(s => s.AgendaHeight = value, DeckPage.Agenda)); height.Margin = new Thickness(20, 0, 0, 0); Grid.SetColumn(height, 1); dimensions.Children.Add(height);
+        Target.Children.Add(dimensions);
+    }
+
     // A device's ring in the settings' colors: the charge as an arc on a track, the device's icon inside.
     internal sealed class DeviceRing(string ink, string faint, string track) : FrameworkElement
     {

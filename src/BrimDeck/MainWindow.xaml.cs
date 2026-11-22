@@ -165,6 +165,7 @@ public partial class MainWindow : Window
         InitializeShelf();
         InitializeDropHelper();
         InitializeDevices();
+        InitializeAgenda();
         InitializeResize();
         InitializeScale();
         InitializeShadow();
@@ -203,7 +204,7 @@ public partial class MainWindow : Window
         Deactivated += (_, _) => ReleaseKeyboard(giveBack: false);
         Closed += (_, _) => WatchOutsidePress(false);
         // Esc also leaves move mode (MainWindow.Move.cs).
-        SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this, Settings.WindowCapture); _escapeDismissal = new EscapeDismissal(this, () => { if (_moveArmed) CancelMove(); else if (!ShelfEscape()) SetExpanded(false, keyboard: true); }); };
+        SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this, Settings.WindowCapture); _escapeDismissal = new EscapeDismissal(this, () => { if (_moveArmed) CancelMove(); else if (!ShelfEscape() && !AgendaEscape()) SetExpanded(false, keyboard: true); }); };
         // The user went to another window while a hotkey had given the panel the keyboard (MainWindow.Hotkeys.cs).
         Deactivated += (_, _) => ReleaseKeyboard(giveBack: false);
         Loaded += async (_, _) =>
@@ -736,6 +737,7 @@ public partial class MainWindow : Window
         System.Windows.Automation.AutomationProperties.SetName(DevicesPageButton, Loc.T("设备电量", "Device batteries"));
         System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("音乐", "Music"));
         System.Windows.Automation.AutomationProperties.SetName(NoticesPageButton, Loc.T("通知历史", "Notice history"));
+        System.Windows.Automation.AutomationProperties.SetName(AgendaPageButton, Loc.T("计划", "Planner"));
         System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));
     }
     public void Preview(bool enabled, bool expanded = true)
@@ -887,6 +889,7 @@ public partial class MainWindow : Window
         PeekPanelClosed();
         WatchOutsidePress(false);
         ResetShelf();
+        AgendaPanelClosed();
         HotkeyPanelCollapsed();
         ReplayCompactTitle();
         _app.RequestTrim();

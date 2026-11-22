@@ -28,6 +28,8 @@ static class AgendaTests
             Files(Path.Combine(root, "agenda"), check);
             Words(check);
             English(check);
+            Calendar(check);
+            Page(check);
         }
         finally { Loc.Use(Loc.Chinese); }
     }
@@ -441,6 +443,12 @@ static class AgendaTests
             S(duty, "2026-11-24", T("2026-11-24 01:00")) == "进行中 · 还剩 1 小时 · 从昨天 22:00 开始"
             && S(duty, "2026-11-23", T("2026-11-23 14:00")) == "8 小时后 · 到明天 02:00"
             && S(trip, "2026-11-23", T("2026-11-23 21:00")) == "进行中 · 第 1 天，共 3 天 · 11月23日 20:00 – 11月25日 12:00");
+        check("Agenda: a block's times and the time left beside them",
+            AgendaText.Times(AgendaQuery.Segment(now, Today)!) == "14:00–15:00" && AgendaText.Times(AgendaQuery.Segment(duty, D("2026-11-23"))!) == "22:00–24:00"
+            && AgendaText.Left(AgendaQuery.Segment(now, Today)!, Now) == "还剩 40 分钟" && AgendaText.Left(AgendaQuery.Segment(soon, Today)!, Now) is null
+            && AgendaText.Left(AgendaQuery.Segment(ended, Today)!, Now) is null && AgendaText.Left(AgendaQuery.Segment(duty, D("2026-11-23"))!, T("2026-11-23 23:00")) is null
+            && AgendaText.Left(AgendaQuery.Segment(duty, D("2026-11-24"))!, T("2026-11-24 01:00")) == "还剩 1 小时");
+        check("Agenda: an all-day chip names its day", AgendaText.DayOf(AgendaQuery.Segment(trip, D("2026-11-24"))!) == "第 2 天，共 3 天");
         var newYear = Event(book, "跨年", "2026-12-31 20:00", "2027-01-02 10:00");
         var camping = Event(book, "露营", "2026-11-28", "2026-11-29", allDay: true);
         check("Agenda: a range over a year's end writes both years; an all-day range only dates",
@@ -452,6 +460,49 @@ static class AgendaTests
             && AgendaText.Due(D("2026-11-30"), Today, done: true) == "11月30日截止" && AgendaText.Due(D("2027-01-03"), Today) == "2027年1月3日截止 · 还有 42 天");
         check("Agenda: a source without a sender shows the application alone, one without a name says notice",
             AgendaText.Source(new AgendaSource { NoticeId = "x", AppName = "QQ" }) == "QQ" && AgendaText.Source(new AgendaSource { NoticeId = "x", Sender = "王敏" }) == "通知 · 王敏");
+    }
+
+    private static void Page(Action<string, bool> check)
+    {
+        var defaults = new DeckSettings();
+        check("Agenda page: on by default, 760 x 330, events as a list, after the notices in the switch",
+            defaults.AgendaPage && DeckPages.Size(defaults, DeckPage.Agenda) == (760, 330) && defaults.AgendaView == AgendaView.Events && !defaults.AgendaBlocks
+            && DeckPages.Shown(defaults, DeckPage.Agenda) && DeckPages.Order[^1] == DeckPage.Agenda && DeckPages.Order[^2] == DeckPage.Notices);
+        check("Agenda page: saved as number 6, its opening choice as 8", (int)DeckPage.Agenda == 6 && (int)DefaultDeckPage.Agenda == 8 && DeckPages.Opening(DefaultDeckPage.Agenda) == DeckPage.Agenda);
+        var sized = new DeckSettings();
+        DeckPages.SetSize(sized, DeckPage.Agenda, 5000, 10);
+        check("Agenda page: a drag sizes it alone, within the limits", DeckPages.Size(sized, DeckPage.Agenda) == (DeckPages.MaxWidth, DeckPages.MinHeight) && sized.NoticesWidth == defaults.NoticesWidth);
+        var odd = new DeckSettings { AgendaWidth = double.NaN, AgendaHeight = 9999, AgendaView = (AgendaView)7 };
+        odd.Normalize();
+        check("Agenda page: settings put in shape", odd.AgendaWidth == 760 && odd.AgendaHeight == DeckPages.MaxHeight && odd.AgendaView == AgendaView.Events);
+        var back = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>(System.Text.Json.JsonSerializer.Serialize(new DeckSettings { AgendaPage = false, AgendaWidth = 900, AgendaView = AgendaView.Note, AgendaBlocks = true, LastPage = DeckPage.Agenda }))!;
+        check("Agenda page: settings survive saving and copying", !back.AgendaPage && back.AgendaWidth == 900 && back.AgendaView == AgendaView.Note && back.AgendaBlocks && back.LastPage == DeckPage.Agenda
+            && back.Copy().AgendaView == AgendaView.Note);
+        var older = SettingsMigrations.Read("""{"AppVersion":"1.3.0","PageOrder":[5,0,1,2,3,4]}""");
+        check("Agenda page: a file from before the page has it on, last in the switch", older.AgendaPage && older.PageOrder[^1] == DeckPage.Agenda && older.PageOrder[0] == DeckPage.Notices);
+    }
+
+    private static void Calendar(Action<string, bool> check)
+    {
+        check("Agenda: weeks begin on Monday", AgendaCalendar.WeekStart(Today) == D("2026-11-16") && AgendaCalendar.WeekStart(D("2026-11-16")) == D("2026-11-16")
+            && AgendaCalendar.FirstShown(2026, 11) == D("2026-10-26") && AgendaCalendar.FirstShown(2026, 12) == D("2026-11-30"));
+        check("Agenda: a month runs over five or six weeks, a February from a Monday over four",
+            AgendaCalendar.Rows(2026, 11) == 6 && AgendaCalendar.Rows(2026, 12) == 5 && AgendaCalendar.Rows(2027, 2) == 4);
+        check("Agenda: the month beside the day from 600 wide and six rows high; the week below; the day alone when lower still",
+            AgendaCalendar.LayoutFor(760, 276) == AgendaLayout.Wide && AgendaCalendar.LayoutFor(599, 276) == AgendaLayout.Narrow
+            && AgendaCalendar.LayoutFor(760, 261) == AgendaLayout.Narrow && AgendaCalendar.LayoutFor(460, 230) == AgendaLayout.Narrow
+            && AgendaCalendar.LayoutFor(760, 98) == AgendaLayout.Short && AgendaCalendar.LayoutFor(440, 155) == AgendaLayout.Short);
+        check("Agenda: the month's cells fill a taller page, within their limits",
+            AgendaCalendar.CellHeightFor(276) == 38 && AgendaCalendar.CellHeightFor(262) == 36 && AgendaCalendar.CellHeightFor(200) == 36 && AgendaCalendar.CellHeightFor(400) == 50);
+        check("Agenda: a new event starts at the next half hour today, at nine on another day",
+            AgendaCalendar.NewEventStart(Today, Now) == T("2026-11-22 14:30") && AgendaCalendar.NewEventStart(Today, T("2026-11-22 14:30")) == T("2026-11-22 14:30")
+            && AgendaCalendar.NewEventStart(Today, T("2026-11-22 23:40")) == T("2026-11-22 23:00") && AgendaCalendar.NewEventStart(D("2026-11-25"), Now) == T("2026-11-25 09:00"));
+        var book = new AgendaBook();
+        Event(book, "站会", "2026-11-24 09:00", "2026-11-24 09:30");
+        Event(book, "出差", "2026-11-23 20:00", "2026-11-25 12:00");
+        check("Agenda: the time line opens an hour before now today, before the first event on another day, at 7:30 on an empty day",
+            AgendaCalendar.OpeningMinute(Today, Now, book.Segments(Today)) == 13 * 60 + 20 && AgendaCalendar.OpeningMinute(D("2026-11-24"), Now, book.Segments(D("2026-11-24"))) == 8.5 * 60
+            && AgendaCalendar.OpeningMinute(D("2026-11-30"), Now, book.Segments(D("2026-11-30"))) == 7.5 * 60 && AgendaCalendar.OpeningMinute(Today, T("2026-11-22 00:20"), []) == 0);
     }
 
     private static void English(Action<string, bool> check)
@@ -478,6 +529,8 @@ static class AgendaTests
             AgendaText.Due(D("2026-11-30"), Today) == "Due Nov 30 · 8 days left" && AgendaText.Due(D("2026-11-21"), Today) == "Due Nov 21 · 1 day overdue"
             && AgendaText.Due(Today, Today) == "Due today" && AgendaText.CarryOver(new AgendaCarryOver(2, true)) == "2 unfinished to-dos from yesterday"
             && AgendaText.CarryOver(new AgendaCarryOver(1, false)) == "1 unfinished to-do from earlier days");
+        check("Agenda (English): a block's time left and a chip's day", AgendaText.Left(AgendaQuery.Segment(now, Today)!, Now) == "40 minutes left"
+            && AgendaText.DayOf(AgendaQuery.Segment(trip, D("2026-11-24"))!) == "Day 2 of 3");
         check("Agenda (English): a source without a name", AgendaText.Source(new AgendaSource { NoticeId = "x" }) == "Notice");
     }
 }

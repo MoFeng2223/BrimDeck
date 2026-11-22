@@ -529,6 +529,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                     DeckPage.Clipboard => (DefaultDeckPage.Clipboard, Loc.T("剪贴板与文件中转", "Clipboard and file transfer")),
                     DeckPage.Devices => (DefaultDeckPage.Devices, Loc.T("设备电量", "Device batteries")),
                     DeckPage.Notices => (DefaultDeckPage.Notices, Loc.T("通知历史", "Notice history")),
+                    DeckPage.Agenda => (DefaultDeckPage.Agenda, Loc.T("计划", "Planner")),
                     _ => (DefaultDeckPage.Usage, Loc.T("AI 用量", "AI usage"))
                 });
             filling = true;
@@ -551,6 +552,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                 DeckPage.Monitor => SizeRow(Loc.T("显示系统监控", "Show system monitor"), Loc.T("系统监控", "system monitor"), page, S.MonitorPage, value => { Change(s => s.MonitorPage = value); FillStarts(); }, Collect(MonitorSizeControls), pages, FillStarts),
                 DeckPage.Clipboard => SizeRow(Loc.T("显示剪贴板与文件中转", "Show clipboard and file transfer"), Loc.T("剪贴板与文件中转", "clipboard and file transfer"), page, S.ClipboardPage, value => { Change(s => s.ClipboardPage = value); FillStarts(); }, Collect(ShelfSizeControls), pages, FillStarts),
                 DeckPage.Devices => SizeRow(Loc.T("显示设备电量", "Show device batteries"), Loc.T("设备电量", "device batteries"), page, S.DevicesPage, value => { Change(s => s.DevicesPage = value); FillStarts(); }, Collect(DeviceSizeControls), pages, FillStarts),
+                DeckPage.Agenda => SizeRow(Loc.T("显示计划", "Show planner"), Loc.T("计划", "planner"), page, S.AgendaPage, value => { Change(s => s.AgendaPage = value); FillStarts(); }, Collect(AgendaSizeControls), pages, FillStarts),
                 _ => SizeRow(Loc.T("显示 AI 用量", "Show AI usage"), Loc.T("AI 用量", "AI usage"), page, S.UsagePage, value => { Change(s => s.UsagePage = value); FillStarts(); }, Collect(UsageSizes), pages, FillStarts)
             });
         UpdateDividers(pages);
@@ -677,6 +679,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                     s.MonitorPage=defaults.MonitorPage;s.MonitorWidth=defaults.MonitorWidth;s.MonitorHeight=defaults.MonitorHeight;s.PageOrder=defaults.PageOrder;
                     s.ClipboardPage=defaults.ClipboardPage;s.ClipboardWidth=defaults.ClipboardWidth;s.ClipboardHeight=defaults.ClipboardHeight;
                     s.DevicesPage=defaults.DevicesPage;s.DevicesWidth=defaults.DevicesWidth;s.DevicesHeight=defaults.DevicesHeight;
+                    s.AgendaPage=defaults.AgendaPage;s.AgendaWidth=defaults.AgendaWidth;s.AgendaHeight=defaults.AgendaHeight;
                     s.NoticesPage=defaults.NoticesPage;s.NoticesWidth=defaults.NoticesWidth;s.NoticesHeight=defaults.NoticesHeight;break;
                 case MonitorSettingsPage:s.MonitorPalette=defaults.MonitorPalette;s.MonitorCustomColors=defaults.MonitorCustomColors;s.CompactWarningColor=null;s.CompactCriticalColor=null;s.CompactSmoothing=defaults.CompactSmoothing;s.CoreDisplay=defaults.CoreDisplay;s.CoreMatrixColumns=defaults.CoreMatrixColumns;s.ExpandedCustomCards=defaults.ExpandedCustomCards;s.ExpandedCardOrder=[];s.MonitorInterval=defaults.MonitorInterval;s.MonitorProcesses=defaults.MonitorProcesses;s.MonitorSort=defaults.MonitorSort;s.MonitorMain=defaults.MonitorMain;s.MonitorProcessView=defaults.MonitorProcessView;
                     s.ExpandedGridTiles=null;
