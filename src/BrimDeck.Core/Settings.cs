@@ -107,8 +107,43 @@ public static class CompactParts
     // Each known part once, in the saved order; a part missing from the file takes its place after the others.
     public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Missing).Distinct()];
 }
-// Saved settings keep the number, so a new style goes at the end.
-public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed, Pixel, Rounded }
+// Saved settings keep the number, so a new style goes at the end. 1 was the two-line style, the time over the date; the date is
+// now a setting of its own (ClockDate), and SettingsMigrations turns that style into the minimal one with the date below.
+public enum ClockStyle { Minimal = 0, Digits = 2, Dots, Segment, Neon, Serif, Wide, Condensed, Pixel, Rounded }
+public static class ClockStyles
+{
+    // A style named in a theme file. "stacked", the two-line style of earlier theme files, reads as the minimal style.
+    public static bool TryParse(string? name, out ClockStyle style)
+    {
+        style = ClockStyle.Minimal;
+        if (string.Equals(name, "stacked", StringComparison.OrdinalIgnoreCase)) return true;
+        return !string.IsNullOrEmpty(name) && char.IsAsciiLetter(name[0]) && Enum.TryParse(name, true, out style) && Enum.IsDefined(style);
+    }
+}
+// The date beside the time (DeckSettings.ClockDate). Above and below put it on a line of its own and set the time smaller.
+// Saved as numbers, so new members go at the end.
+public enum ClockDatePosition { Right, Left, Above, Below }
+public enum ClockDateFormat { MonthDaySlash, MonthDayDash, MonthDayWords, YearSlash, YearDash, YearWords }
+public enum ClockWeekday { After, Before, Hidden }
+public static class ClockDates
+{
+    // The date as the clock shows it. The dash formats keep two digits for the month and the day, as ISO dates do.
+    public static string Text(DateTime date, ClockDateFormat format, ClockWeekday weekday, bool english)
+    {
+        var invariant = System.Globalization.CultureInfo.InvariantCulture;
+        string day = format switch
+        {
+            ClockDateFormat.MonthDayDash => date.ToString("MM-dd", invariant),
+            ClockDateFormat.MonthDayWords => english ? date.ToString("MMM d", invariant) : $"{date.Month}月{date.Day}日",
+            ClockDateFormat.YearSlash => english ? date.ToString("M/d/yyyy", invariant) : date.ToString("yyyy/M/d", invariant),
+            ClockDateFormat.YearDash => date.ToString("yyyy-MM-dd", invariant),
+            ClockDateFormat.YearWords => english ? date.ToString("MMM d, yyyy", invariant) : $"{date.Year}年{date.Month}月{date.Day}日",
+            _ => date.ToString("M/d", invariant)
+        };
+        string name = english ? date.ToString("ddd", invariant) : "周" + "日一二三四五六"[(int)date.DayOfWeek];
+        return weekday switch { ClockWeekday.Before => name + " " + day, ClockWeekday.Hidden => day, _ => day + " " + name };
+    }
+}
 // Every clock style takes this one color. Gradient spreads ClockGradient across the digits, Custom is ClockCustomColor,
 // and Cover follows the color picked from the playing song's cover. Saved as numbers, so new members go at the end.
 public enum ClockColor { White, Amber, Cyan, Pink, Lime, Gradient, Cover, Custom }
@@ -538,6 +573,11 @@ public sealed class DeckSettings
     public List<string> ClockGradient { get; set; } = [.. ClockColors.Sunset];
     public bool Clock24Hour { get; set; } = true;
     public bool ClockSeconds { get; set; }
+    // The date beside the clock, in the clock's style (ClockDates).
+    public bool ClockDate { get; set; }
+    public ClockDatePosition ClockDatePosition { get; set; }
+    public ClockDateFormat ClockDateFormat { get; set; }
+    public ClockWeekday ClockWeekday { get; set; }
     public CompactMusicText MusicText { get; set; }
     public bool MusicTrackNotice { get; set; } = true;
     // The title of a track change takes the whole island, shown as a notice is (IslandNotice), instead of the music part alone.
@@ -987,6 +1027,7 @@ public sealed class DeckSettings
             {
                 var choices = group.Last().Value;
                 choices.Apps ??= []; choices.ClockGradient ??= []; choices.ClockCustomColor ??= ClockColors.DefaultCustom;
+                if (!Enum.IsDefined(choices.ClockStyle)) choices.ClockStyle = ClockStyle.Minimal;
                 return choices;
             });
         var seen = new HashSet<Guid>();
@@ -1072,6 +1113,9 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(MusicLyricsAlign)) MusicLyricsAlign = MusicLyricsAlign.Left;
         if (!Enum.IsDefined(ClockStyle)) ClockStyle = ClockStyle.Minimal;
         if (!Enum.IsDefined(ClockColor)) ClockColor = ClockColor.White;
+        if (!Enum.IsDefined(ClockDatePosition)) ClockDatePosition = ClockDatePosition.Right;
+        if (!Enum.IsDefined(ClockDateFormat)) ClockDateFormat = ClockDateFormat.MonthDaySlash;
+        if (!Enum.IsDefined(ClockWeekday)) ClockWeekday = ClockWeekday.After;
         ClockCustomColor = AppPresets.NormalizeColor(ClockCustomColor) is { Length: > 0 } custom ? custom : ClockColors.DefaultCustom;
         var stops = (ClockGradient ?? []).Select(AppPresets.NormalizeColor).ToList();
         ClockGradient = stops.Count == 3 && stops.All(stop => stop.Length > 0) ? stops : [.. ClockColors.Sunset];

@@ -123,7 +123,7 @@ public static partial class PanelThemes
 
     private static string? ClockProblem(PanelThemeClock clock)
     {
-        if (clock.Style.Length > 0 && !Enum.TryParse<ClockStyle>(clock.Style, true, out _)) return Loc.T($"未知的时间样式“{clock.Style}”", $"Unknown clock style \"{clock.Style}\"");
+        if (clock.Style.Length > 0 && !ClockStyles.TryParse(clock.Style, out _)) return Loc.T($"未知的时间样式“{clock.Style}”", $"Unknown clock style \"{clock.Style}\"");
         if (clock.Color.Length > 0 && ParseClockColor(clock.Color) is null) return Loc.T($"未知的时间颜色“{clock.Color}”", $"Unknown clock color \"{clock.Color}\"");
         if (clock.Custom.Length > 0 && !ThemeColor.TryParse(clock.Custom, out _)) return Loc.T($"时间自定义颜色“{clock.Custom}”无效", $"The custom clock color \"{clock.Custom}\" is invalid");
         if (clock.Gradient is { } stops && (stops.Count != 3 || stops.Any(stop => !ThemeColor.TryParse(stop, out _))))
