@@ -44,6 +44,8 @@ public partial class App : Application
     internal LyricsService Lyrics { get; private set; } = null!;
     // The clipboard history and the file transfer, shared by every panel (ShelfService).
     internal ShelfService Shelf { get; private set; } = null!;
+    // Only while BrimDeck runs as administrator and the shell does not (DropHelper).
+    internal Native.DropHelper? DropHelper { get; private set; }
     internal ClipboardSyncService ClipboardSync { get; private set; } = null!;
     // A window being dragged by its title bar or edge; the panels do not open on it (see MainWindow.TrackPointer).
     internal WindowDrags WindowDrags { get; private set; } = null!;
@@ -162,6 +164,12 @@ public partial class App : Application
         });
         _save.Tick += (_, _) => FlushSettings();
         Step(ApplyTray);
+        // Run as administrator, BrimDeck takes files dragged from the shell through a helper with the shell's rights (DropHelper).
+        Step(() =>
+        {
+            DropHelper = Native.DropHelper.StartIfNeeded(Dispatcher);
+            if (DropHelper is not null) DropHelper.Message += message => (DropHelper.Owner as BrimDeck.MainWindow)?.HelperDrag(message);
+        });
         Step(() =>
         {
             _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
@@ -665,7 +673,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         Exiting = true; Lifetime.Cancel(); _save.Stop(); _trim?.Stop(); _release?.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
-        ClipboardSync?.Dispose();
+        ClipboardSync?.Dispose(); DropHelper?.Dispose();
         if (Shelf is not null) { Shelf.Exit(); Shelf.Dispose(); }
         Media?.Dispose(); _restingMedia?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Devices?.Dispose(); DeviceReadStore.Finish(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }

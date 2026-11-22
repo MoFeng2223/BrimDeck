@@ -38,6 +38,8 @@ internal static class Program
             // says something about the machine, not the code. Without the flag every check runs.
             if (args is ["--only", "rightdrag"]) { RightDragChecks.Run(Check); return Finish(); }
             if (args is ["--only", "droprelay"]) { DropRelayChecks.Run(Check); return Finish(); }
+            // Starts cmd.exe through the shell (hidden) to write a file in the given folder; not part of the full run.
+            if (args is ["--only", "shelllaunch", var folder]) { ShellLaunchChecks.Run(Check, folder); return Finish(); }
             bool hosted = args is ["--hosted"];
             Console.WriteLine($"Windows native smoke tests{(hosted ? " (hosted subset)" : "")}: {Environment.OSVersion.Version}");
             CheckWindowChrome();

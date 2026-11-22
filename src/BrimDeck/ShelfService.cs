@@ -516,12 +516,17 @@ internal sealed class ShelfService : IDisposable
     // The paste is always tried first. A window of a program run as administrator does not take it: Windows drops the keys an
     // ordinary program sends there, and says nothing of it, SendInput reporting them sent all the same. So once the paste has
     // been tried, whether it seemed to go or not, the window's program is looked at: with more rights than BrimDeck it cannot
-    // have had the paste, and done is Elevated.
+    // have had the paste. Such a window is pasted into by the paste helper instead (PasteHelper), once it is in front; done is
+    // Elevated only when the helper could not do it (the UAC prompt declined).
     public void Paste(DataObject data, Action<PasteResult> done)
     {
         if (!Put(data)) { done(PasteResult.Copied); return; }
         var target = PasteInput.IsOther(PasteInput.Foreground) ? PasteInput.Foreground : TypingTarget;
+        // A click on a capturable panel can leave no window, or the panel itself, in front (WindowsHost.ForegroundForRules): the paste
+        // goes to the window that was in front before.
+        if (!PasteInput.IsOther(target)) target = WindowsHost.LastForeground;
         if (!PasteInput.IsOther(target)) { done(PasteResult.Copied); return; }
+        bool helped = PasteInput.HasMoreRights(target);
         void Tried(bool sent) => done(PasteInput.HasMoreRights(target) ? PasteResult.Elevated : sent ? PasteResult.Pasted : PasteResult.Copied);
         long started = Environment.TickCount64;
         bool asked = false;
@@ -537,10 +542,19 @@ internal sealed class ShelfService : IDisposable
             }
             if (PasteInput.ModifiersDown) { if (late) { wait.Stop(); Tried(false); } return; }
             wait.Stop();
-            Tried(PasteInput.SendPaste());
+            if (helped) PasteThroughHelper(target, done);
+            else Tried(PasteInput.SendPaste());
         };
         wait.Start();
     }
 
-    public void Dispose() { _expire.Stop(); _watch?.Dispose(); _watch = null; }
+    private PasteHelper? _pasteHelper;
+    private async void PasteThroughHelper(IntPtr target, Action<PasteResult> done)
+    {
+        _pasteHelper ??= new PasteHelper();
+        bool pasted = await _pasteHelper.PasteAsync(target);
+        _ = _dispatcher.BeginInvoke(() => done(pasted ? PasteResult.Pasted : PasteResult.Elevated));
+    }
+
+    public void Dispose() { _expire.Stop(); _watch?.Dispose(); _watch = null; _pasteHelper?.Dispose(); _pasteHelper = null; }
 }

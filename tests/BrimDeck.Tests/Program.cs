@@ -40,6 +40,7 @@ try
     EqualizerModeTests.Run(root, Check);
     ColorMathTests.Run(Check);
     ShelfTests.Run(Check);
+    HelperLineTests.Run(Check);
     CompactSpacingTests.Run(Check);
     CompactDragTests.Run(Check);
     RingLetterTests.Run(root, Check);

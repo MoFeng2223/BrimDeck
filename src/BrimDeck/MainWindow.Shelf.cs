@@ -1250,8 +1250,7 @@ public partial class MainWindow
     // with the file transfer in front, not on the page of the part under the pointer, so no other page shows first; the drag that
     // follows finds the page ready and builds nothing again while the panel is still opening. A press that began on the island is no
     // drag coming in; a drag that never reaches the window (not files) leaves the drop after a moment, as a drag taken away does.
-    private bool DragArriving => !_islandPressed && (PasteInput.KeyDown(0x01) || PasteInput.KeyDown(0x02))
-        && DeckPages.Shown(Settings, DeckPage.Clipboard) && Settings.ShelfShown != ShelfShown.Clipboard;
+    private bool DragArriving => !_islandPressed && (PasteInput.KeyDown(0x01) || PasteInput.KeyDown(0x02)) && TakesDrops;
     private void OpenForDrag()
     {
         _hoverPart = null;

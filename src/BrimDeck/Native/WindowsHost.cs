@@ -81,7 +81,7 @@ public sealed class WindowsHost : IDisposable
         // for carets or cursors.
         if (winEvent == 0x8004 ? window != DesktopWindow : idObject != 0 || idChild != 0) return;
         // A window coming to the front may be a program just started: the players' shared process list is taken anew.
-        if (winEvent == 0x0003) { ProcessSnapshot.Expire(); _foregroundPending = true; }
+        if (winEvent == 0x0003) { ProcessSnapshot.Expire(); _foregroundPending = true; LastForeground = window; }
         if (_orderCheckPending) return;
         _orderCheckPending = true;
         _timer.Dispatcher.BeginInvoke(() =>
@@ -91,6 +91,9 @@ public sealed class WindowsHost : IDisposable
         });
     }
     private bool _foregroundPending;
+    // The last window of another program that came to the front (the hooks skip this process): where a paste from the panel goes
+    // when a click on a capturable panel (DeckSettings.WindowCapture) left no window, or the panel itself, in front.
+    internal static IntPtr LastForeground;
     // After every check of the panel's order, and when another window has taken the foreground (TaskbarMirror).
     public event Action? OrderChecked;
     public event Action? ForegroundSwitched;
@@ -458,10 +461,14 @@ public sealed class WindowsHost : IDisposable
         SetWindowPos(handle, new IntPtr(topmost ? -1 : 0), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
     }
     // Whether the window under a point, in screen physical pixels, belongs to this app.
+    // The drop helper's window (DropHelper), laid over a panel during a drag while BrimDeck runs as administrator: it belongs to
+    // another process but stands for the panel, so it neither covers the panel nor counts as another app's window.
+    internal static IntPtr RelayWindow;
     public static bool OwnWindowAt(Point point)
     {
         var hit = WindowFromPoint(new POINT { X = (int)point.X, Y = (int)point.Y });
         if (hit == IntPtr.Zero) return false;
+        if (hit == RelayWindow) return true;
         GetWindowThreadProcessId(hit, out var pid);
         return pid == Environment.ProcessId;
     }
@@ -474,7 +481,7 @@ public sealed class WindowsHost : IDisposable
         var hit = WindowFromPoint(new POINT { X = (int)point.X, Y = (int)point.Y });
         if (handle == IntPtr.Zero || hit == IntPtr.Zero) return false;
         hit = GetAncestor(hit, 2); // GA_ROOT
-        if (hit == handle) return false;
+        if (hit == handle || hit == RelayWindow) return false;
         GetWindowThreadProcessId(hit, out var pid);
         if (pid == Environment.ProcessId) return false;
         for (var above = GetWindow(handle, 3); above != IntPtr.Zero; above = GetWindow(above, 3))

@@ -53,6 +53,24 @@ internal static class DropRelayChecks
 
             DropRelay.Revoke(lens);
             check("drop relay: revoking ends the registration", DropRelay.Register(lens, panel));
+
+            // The drop helper's drag (DropHelper), raised on the window by its point on screen (DropRelay.Forward).
+            var forward = DropRelay.Forward.For(panel);
+            check("drop relay: a drag from the drop helper can be raised on the window", forward is not null);
+            if (forward is null) return;
+            entered = 0; dropped = 0; files = null;
+            int over = 0, left = 0;
+            target.DragOver += (_, e) => { over++; e.Effects = DragDropEffects.Copy; e.Handled = true; };
+            target.DragLeave += (_, _) => left++;
+            var helped = new DataObject(DataFormats.FileDrop, new[] { @"C:\nowhere\序号" });
+            check("drop relay: the helper's drag enters the element under its point, which answers",
+                forward.Enter(helped, 1, point, (int)DragDropEffects.Copy) == (int)DragDropEffects.Copy && entered == 1);
+            check("drop relay: the helper's moves reach the element", forward.Over(1, point, (int)DragDropEffects.Copy) == (int)DragDropEffects.Copy && over == 1);
+            forward.Leave();
+            check("drop relay: the helper's leave reaches the element", left == 1);
+            forward.Enter(helped, 1, point, (int)DragDropEffects.Copy);
+            forward.Drop(helped, 0, point, (int)DragDropEffects.Copy);
+            check("drop relay: the helper's drop gives the element the files", dropped == 1 && files is [@"C:\nowhere\序号"]);
         }
         finally
         {

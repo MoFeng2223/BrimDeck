@@ -52,6 +52,44 @@ internal static class DropRelay
         if (window != IntPtr.Zero) RevokeDragDrop(window);
     }
 
+    // A drag that reached another process's window (DropHelper) raised on this window as OLE would raise it here: WPF's drop target
+    // for the window is called directly with the point on screen and the data, and returns what the element there would do.
+    internal sealed class Forward
+    {
+        private readonly object _target;
+        private readonly System.Reflection.MethodInfo _enter, _over, _leave, _drop;
+
+        private Forward(object target, Type calls)
+        {
+            _target = target;
+            _enter = calls.GetMethod("OleDragEnter")!; _over = calls.GetMethod("OleDragOver")!;
+            _leave = calls.GetMethod("OleDragLeave")!; _drop = calls.GetMethod("OleDrop")!;
+        }
+
+        // Null where WPF's drop target or one of its calls is not found.
+        public static Forward? For(IntPtr window)
+        {
+            if (Make(window) is not { } made || made.GetType().GetInterfaces().FirstOrDefault(type => type.GUID == DropTargetId) is not { } calls) return null;
+            return calls.GetMethod("OleDragEnter") is null || calls.GetMethod("OleDragOver") is null || calls.GetMethod("OleDragLeave") is null
+                || calls.GetMethod("OleDrop") is null ? null : new Forward(made, calls);
+        }
+
+        public int Enter(IDataObject data, int keys, long point, int allowed) => Call(_enter, [data, keys, point, allowed], 3);
+        public int Over(int keys, long point, int allowed) => Call(_over, [keys, point, allowed], 2);
+        public void Leave() => Call(_leave, [], -1);
+        public int Drop(IDataObject data, int keys, long point, int allowed) => Call(_drop, [data, keys, point, allowed], 3);
+
+        private int Call(System.Reflection.MethodInfo method, object[] arguments, int effect)
+        {
+            try
+            {
+                method.Invoke(_target, arguments);
+                return effect >= 0 && arguments[effect] is int answer ? answer : 0;
+            }
+            catch (Exception error) when (error is TargetInvocationException or MemberAccessException or ArgumentException) { return 0; }
+        }
+    }
+
     [DllImport("ole32")] private static extern int RegisterDragDrop(IntPtr window, IntPtr target);
     [DllImport("ole32")] private static extern int RevokeDragDrop(IntPtr window);
 }

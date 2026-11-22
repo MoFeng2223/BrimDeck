@@ -162,6 +162,7 @@ public partial class MainWindow : Window
         InitializeMusic();
         InitializeMonitor();
         InitializeShelf();
+        InitializeDropHelper();
         InitializeDevices();
         InitializeResize();
         InitializeScale();
@@ -1147,8 +1148,10 @@ public partial class MainWindow : Window
     internal void TrackPointer()
     {
         CheckMoveOvertaken();
-        if (_preview && _previewExpanded || IsSuppressed || !IsVisible || PresentationSource.FromVisual(Stage) is null || Resizing || BootHoldsPointer) { HideHoverFrame(); return; }
+        if (_preview && _previewExpanded || IsSuppressed || !IsVisible || PresentationSource.FromVisual(Stage) is null || Resizing || BootHoldsPointer) { HideHoverFrame(); TrackDropHelper(default, tracking: false); return; }
         var cursor = WindowsHost.Cursor();
+        // While BrimDeck runs as administrator, files dragged in arrive through the drop helper (MainWindow.DropHelper.cs).
+        TrackDropHelper(cursor);
         // Move mode: the panel does not open (MainWindow.Move.cs).
         if (_moveArmed) { HideHoverFrame(); PassAroundSurface(false); TrackMove(cursor); return; }
         // Mouse pass-through: hovering does nothing (MainWindow.ClickThrough.cs).
