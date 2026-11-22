@@ -349,11 +349,20 @@ internal sealed class MusicMarquee : FrameworkElement
     private const double SoftEdge = .35;
     // The left edge of each character of Text as the line is laid out, and the line's end (Edges).
     private double[]? _edges;
-    // The share of the line's color the words still to come are drawn in (KaraokeFaded).
+    // The share of the line's color the words still to come are drawn in.
     private const double FadedShare = .35;
-    // The faded color the words still to come are drawn in (KaraokeFaded), cached for the line's color.
-    private Brush? _karaokeFaded;
-    private Color? _karaokeColor;
+    // The sweep's edge (SweepBrush): a gradient from the line's color to the faded color, one SoftEdge wide, that pads both ways,
+    // so it lights everything behind it and fades everything ahead. It is drawn on the characters from the first one the edge
+    // touches to the line's end, and moved along the line by _sweepShift. Moving a brush the drawing already holds is passed
+    // to the compositor alone: the text is not laid out or drawn again on each frame, only when the first lit-up character
+    // changes, and only over a fading surface (InkFade), whose lit part keeps the ink brush with its fading ends.
+    private LinearGradientBrush? _sweepBrush;
+    private readonly TranslateTransform _sweepShift = new();
+    private Color? _sweepColor;
+    private double _sweepSoft = double.NaN;
+    // Where the line starts in the drawing and the first character drawn with the sweep's brush, as the last draw left them.
+    private double _drawnOrigin, _drawnScale = 1;
+    private int _drawnFirst = -1;
     // Every frame the window samples the player's continuous position and hands the target here. The drawn position eases
     // toward it with a first-order low-pass (KaraokeTracker in the reference): the time constant is a quarter of the word
     // being sung, bounded to 40-200 ms, so a coarse or jittering player report never jerks the highlight. A seek or a new
@@ -376,8 +385,45 @@ internal sealed class MusicMarquee : FrameworkElement
         double tau = sweep.Rate > 0 ? Math.Clamp(.25 / sweep.Rate, .04, .2) : .08;
         double eased = _sweep + (sweep.Sung - _sweep) * (1 - Math.Exp(-dt / tau));
         if (Math.Abs(eased - sweep.Sung) < .002) eased = sweep.Sung;
-        if (changed || eased != _sweep) { _sweep = eased; Painter.InvalidateVisual(); }
+        if (changed || eased != _sweep) { _sweep = eased; MoveSweep(); }
     }
+    // Carries the drawn sweep to _sweep: by moving its brush while the same characters take it, by drawing the line again otherwise.
+    private void MoveSweep()
+    {
+        int total = Text.Length;
+        if (!_faded || _formatted is null || _edges is not { } edges || edges.Length != total + 1 || _drawnFirst < 0) { Painter.InvalidateVisual(); return; }
+        var (first, from) = SweepAt(edges);
+        if (LitByInk && first != _drawnFirst) { Painter.InvalidateVisual(); return; }
+        PlaceSweep(from);
+    }
+    // The first character the sweep's edge touches (the line's length once it has passed the end) and where the edge starts,
+    // from the start of the line.
+    private (int First, double From) SweepAt(double[] edges)
+    {
+        int total = edges.Length - 1;
+        double sung = Math.Clamp(_sweep, 0, total), soft = SweepSoft;
+        int front = Math.Min((int)Math.Floor(sung), total - 1);
+        // Where the sweep stands: as far into the character being sung as it is sung. Over the line the edge moves a little
+        // further, from wholly before the first character to wholly past the last, so the line starts all faded and ends all lit.
+        double at = edges[front] + (sung - front) * (edges[front + 1] - edges[front]) + soft * (sung / total - .5);
+        double from = at - soft / 2;
+        int first = 0;
+        while (first < total && edges[first + 1] <= from) first++;
+        // A range may not cut a surrogate pair in two, or the pair is drawn as two broken halves.
+        if (first > 0 && first < total && char.IsLowSurrogate(Text[first])) first--;
+        return (first, from);
+    }
+    private double SweepSoft => Math.Max(1, FontSize * SoftEdge);
+    // Moves the edge to start at from, on whole device pixels: a smaller step is not seen and would only make the compositor
+    // draw the line again.
+    private void PlaceSweep(double from)
+    {
+        double x = Math.Round((_drawnOrigin + from) * _drawnScale) / _drawnScale;
+        if (_sweepShift.X != x) _sweepShift.X = x;
+    }
+    // Whether the part behind the edge is drawn in a brush of its own rather than the sweep's: the line must then be drawn
+    // again whenever the edge reaches another character.
+    private bool LitByInk => _ink is not null || Foreground is not SolidColorBrush;
     // origin: where the line starts in the drawing, which the sweep's gradient is placed by.
     private void ApplyKaraoke(FormattedText text, double origin)
     {
@@ -387,34 +433,24 @@ internal sealed class MusicMarquee : FrameworkElement
         {
             // The words went away (another line, or a preview that has none): the line takes its own color back, as the draw
             // before it left the fades of its sweep on the text the cache holds.
+            _drawnFirst = -1;
             if (!_faded) return;
             text.SetForegroundBrush(_ink ?? Foreground, 0, total); _faded = false;
             return;
         }
         _faded = true;
-        // How far the line is drawn sung, and how much of the character the sweep is on: the characters it has passed keep the
-        // line's color, those ahead of it are faded, so the line is legible in full while each lights up as it is sung. The base
-        // is re-applied first: the text held back by the cache still carries the fades of the draw before this one.
-        double sung = Math.Clamp(_sweep, 0, total);
+        // How far the line is drawn sung: the characters the sweep has passed keep the line's color, those ahead of it are
+        // faded, so the line is legible in full while each lights up as it is sung. The base is re-applied first: the text held
+        // back by the cache still carries the brushes of the draw before this one.
+        var (first, from) = SweepAt(Edges(text));
+        // With one brush for the whole line, the sweep's brush lights the part behind the edge too, so it covers the line from
+        // its start and the line is never drawn again while the sweep crosses it. The ink brush of a fading surface (or a
+        // foreground of more than one color) lights the characters before the edge instead.
+        if (!LitByInk) first = 0;
         text.SetForegroundBrush(_ink ?? Foreground, 0, total);
-        if (sung >= total) return;
-        var edges = Edges(text);
-        int front = Math.Min((int)Math.Floor(sung), total - 1);
-        double soft = Math.Max(1, FontSize * SoftEdge);
-        // Where the sweep stands: as far into the character being sung as it is sung. Over the line the edge moves a little
-        // further, from wholly before the first character to wholly past the last, so the line starts all faded and ends all lit.
-        double at = edges[front] + (sung - front) * (edges[front + 1] - edges[front]) + soft * (sung / total - .5);
-        double from = at - soft / 2, to = at + soft / 2;
-        // Only the characters under the edge take its gradient: behind them the line is lit, ahead of them faded. A range may
-        // not cut a surrogate pair in two, or the pair is drawn as two broken halves.
-        int first = 0;
-        while (first < total - 1 && edges[first + 1] <= from) first++;
-        int last = first;
-        while (last < total && edges[last] < to) last++;
-        if (first > 0 && char.IsLowSurrogate(Text[first])) first--;
-        if (last < total && char.IsLowSurrogate(Text[last])) last++;
-        if (last < total) text.SetForegroundBrush(KaraokeFaded, last, total - last);
-        if (last > first) text.SetForegroundBrush(SweepEdge(origin + from, origin + to), first, last - first);
+        if (first < total) text.SetForegroundBrush(SweepBrush, first, total - first);
+        _drawnOrigin = origin; _drawnFirst = first; _drawnScale = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        PlaceSweep(from);
     }
     // The left edge of each character of Text in the laid-out line (and the line's end last), from the start of the line. A
     // surrogate pair's halves split its width, as the sweep counts them as two characters. Kept until the text is laid out again.
@@ -440,24 +476,19 @@ internal sealed class MusicMarquee : FrameworkElement
     // The line's own color, which the lit part is drawn in: the ink brush's where it fades at the ends (InkFade), the
     // foreground's otherwise.
     private Color InkColor => (_ink as SolidColorBrush)?.Color ?? (Foreground as SolidColorBrush)?.Color ?? Colors.White;
-    // The sweep's edge from from to to in the drawing: the line's color before it, the faded color after it.
-    private Brush SweepEdge(double from, double to)
-    {
-        var color = InkColor;
-        var brush = new LinearGradientBrush(new GradientStopCollection { new(color, 0), new(Color.FromArgb((byte)(255 * FadedShare), color.R, color.G, color.B), 1) },
-            new Point(from, 0), new Point(to, 0)) { MappingMode = BrushMappingMode.Absolute };
-        brush.Freeze();
-        return brush;
-    }
-    private Brush KaraokeFaded
+    // The sweep's edge, one SoftEdge wide from where _sweepShift puts it: the line's color before it, the faded color after it.
+    // It is left unfrozen, so moving it reaches the drawing that holds it; made again for another color or font size.
+    private Brush SweepBrush
     {
         get
         {
             Color color = InkColor;
-            if (_karaokeColor == color && _karaokeFaded is not null) return _karaokeFaded;
-            var faded = new SolidColorBrush(Color.FromArgb((byte)(255 * FadedShare), color.R, color.G, color.B)); faded.Freeze();
-            _karaokeFaded = faded; _karaokeColor = color;
-            return faded;
+            double soft = SweepSoft;
+            if (_sweepBrush is not null && _sweepColor == color && _sweepSoft == soft) return _sweepBrush;
+            _sweepBrush = new LinearGradientBrush(new GradientStopCollection { new(color, 0), new(Color.FromArgb((byte)(255 * FadedShare), color.R, color.G, color.B), 1) },
+                new Point(0, 0), new Point(soft, 0)) { MappingMode = BrushMappingMode.Absolute, Transform = _sweepShift };
+            _sweepColor = color; _sweepSoft = soft;
+            return _sweepBrush;
         }
     }
     private FormattedText Formatted
@@ -485,7 +516,7 @@ internal sealed class MusicMarquee : FrameworkElement
         return text;
     }
     public void SetScrolling(bool enabled) { _scrolling = enabled; UpdateAnimation(); }
-    private void ResetText() { _formatted = null; _faded = false; _sweepReady = false; _rested = false; ResetAnimation(); Painter.InvalidateVisual(); }
+    private void ResetText() { _formatted = null; _faded = false; _drawnFirst = -1; _sweepReady = false; _rested = false; ResetAnimation(); Painter.InvalidateVisual(); }
     // Scrolls the laps again from the start (the panel closed and the row shows again).
     public void Replay()
     {
