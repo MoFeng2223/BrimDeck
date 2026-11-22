@@ -860,6 +860,8 @@ public sealed class DeckSettings
     public bool ShowsMusic(CompactStyle style) => style switch { CompactStyle.Notch => NotchMusic, CompactStyle.Capsule => CapsuleMusic, _ => false };
     // The indicator shows neither the equalizer nor the clock.
     public bool ShowsEqualizer(CompactStyle style) => style switch { CompactStyle.Notch => NotchEqualizer, CompactStyle.Capsule => CapsuleEqualizer, _ => false };
+    // Bars shown at all times are chosen for the style, or for the one a window rule turns the indicator into.
+    [JsonIgnore] public bool EqualizerAlwaysShown => EqualizerAlways && (ShowsEqualizer(Style) || IslandFromIndicator is { } island && ShowsEqualizer(island));
     // The indicator is too thin for text, so it never shows the clock.
     public bool ShowsClock(CompactStyle style) => style switch { CompactStyle.Notch => NotchClock, CompactStyle.Capsule => CapsuleClock, _ => false };
     // The indicator is too thin for readings, as for the clock.

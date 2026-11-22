@@ -9,7 +9,8 @@ namespace BrimDeck.Native;
 // object is created, read, and released on this single worker thread.
 // The level bars prefer the player's captured audio; when process capture is not
 // available they fall back to the session peak meter. Bars shown at all times read the
-// whole system's sound (every process but BrimDeck) and fall back to the devices' peak meters.
+// whole system's sound (every process but BrimDeck) and fall back to the devices' peak meters. While such bars are
+// chosen, the system's sound also stands in for a playing player whose own sound is not found.
 internal sealed class AudioLevelMeter : IDisposable
 {
     private readonly AutoResetEvent _wake = new(false);
@@ -18,6 +19,8 @@ internal sealed class AudioLevelMeter : IDisposable
     private readonly List<MMDevice> _devices = [];
     private Thread? _thread;
     private MediaAppOwner? _requested;
+    // The whole system's sound may stand in for the requested player's while that is not found.
+    private bool _standIn;
     private int _revision;
     private bool _disposed;
     private float _peak;
@@ -31,9 +34,11 @@ internal sealed class AudioLevelMeter : IDisposable
     // the system and shows flat bars meanwhile.
     public TimeSpan Linger { get; set; }
     private Timer? _release;
-    public void SetSource(MediaAppOwner? owner, bool enabled, bool system = false)
+    // standIn: bars shown at all times are chosen, so they move with the system's sound while the player's own is not found.
+    public void SetSource(MediaAppOwner? owner, bool enabled, bool system = false, bool standIn = false)
     {
         var target = enabled ? owner : system ? Everything : null;
+        standIn &= enabled && owner is not null;
         lock (_gate)
         {
             if (_disposed) return;
@@ -43,8 +48,8 @@ internal sealed class AudioLevelMeter : IDisposable
                 _release ??= new Timer(_ => Release(), null, Linger, Timeout.InfiniteTimeSpan);
                 return;
             }
-            if (_requested == target) return;
-            _requested = target; _revision++;
+            if (_requested == target && _standIn == standIn) return;
+            _requested = target; _standIn = standIn; _revision++;
             if (_thread is null)
             {
                 _thread = new Thread(Run) { IsBackground = true, Name = "BrimDeck audio level" };
@@ -76,11 +81,19 @@ internal sealed class AudioLevelMeter : IDisposable
     {
         int revision = -1;
         MediaAppOwner? target = null;
-        bool retried = false;
-        double nextPeak = 0;
+        // allowed: the system's sound may stand in for the player's; standsIn: it does, the player's not being found.
+        bool retried = false, allowed = false, standsIn = false;
+        double nextPeak = 0, nextSearch = 0;
         // A player may create its audio session after it reports playback; look again with growing pauses.
         int searchDelay = 1000;
         WaitHandle[]? waits = null;
+        void Look()
+        {
+            Clear(); standsIn = false;
+            if (target is null) return;
+            Enumerate(target);
+            if (allowed && target != Everything && _sessions.Count == 0) { Clear(); EnumerateEverything(); standsIn = true; }
+        }
         try
         {
             while (true)
@@ -90,12 +103,19 @@ internal sealed class AudioLevelMeter : IDisposable
                 {
                     if (_disposed) break;
                     changed = revision != _revision;
-                    if (changed) { revision = _revision; target = _requested; }
+                    if (changed) { revision = _revision; target = _requested; allowed = _standIn; }
                 }
                 // Starting a capture waits for the system; do it outside the lock SetSource takes on the UI thread.
-                if (changed) { Clear(); if (target is not null) Enumerate(target); retried = false; searchDelay = 1000; }
-                var capture = _capture;
+                if (changed) { Look(); retried = false; searchDelay = 1000; nextSearch = Now + 1; }
                 double now = Now;
+                // While the system's sound stands in, the player is looked for with the same growing pauses; the capture
+                // that runs is left alone until the player's sessions are there.
+                if (standsIn && now >= nextSearch)
+                {
+                    if (Sounds(target!)) Look();
+                    searchDelay = Math.Min(searchDelay * 2, 30_000); nextSearch = now + searchDelay / 1000d;
+                }
+                var capture = _capture;
                 if (capture is not null && !capture.Drain(now)) { StopCapture(); capture = null; }
                 // Captured audio drives the bars whenever a capture runs, so session peaks are only read without one.
                 if (capture is null && now >= nextPeak)
@@ -104,13 +124,12 @@ internal sealed class AudioLevelMeter : IDisposable
                     float peak = 0;
                     try
                     {
-                        if (target == Everything) foreach (var device in _devices) peak = Math.Max(peak, device.AudioMeterInformation.MasterPeakValue);
+                        if (target == Everything || standsIn) foreach (var device in _devices) peak = Math.Max(peak, device.AudioMeterInformation.MasterPeakValue);
                         else foreach (var session in _sessions) peak = Math.Max(peak, session.AudioMeterInformation.MasterPeakValue);
                     }
                     catch
                     {
-                        Clear();
-                        if (!retried && target is not null) { Enumerate(target); retried = true; }
+                        if (!retried && target is not null) { Look(); retried = true; } else { Clear(); standsIn = false; }
                     }
                     Volatile.Write(ref _peak, peak);
                 }
@@ -119,12 +138,12 @@ internal sealed class AudioLevelMeter : IDisposable
                     if (waits?[1] != capture.Ready) waits = [_wake, capture.Ready];
                     WaitHandle.WaitAny(waits, 20);
                 }
-                else if (_sessions.Count > 0 || target == Everything && _devices.Count > 0) _wake.WaitOne(33);
+                else if (_sessions.Count > 0 || (target == Everything || standsIn) && _devices.Count > 0) _wake.WaitOne(33);
                 else if (target is null) _wake.WaitOne();
                 else if (!_wake.WaitOne(searchDelay))
                 {
                     searchDelay = Math.Min(searchDelay * 2, 30_000);
-                    Clear(); Enumerate(target);
+                    Look();
                 }
             }
         }
@@ -146,7 +165,7 @@ internal sealed class AudioLevelMeter : IDisposable
                     var session = sessions[i]; bool keep = false;
                     try
                     {
-                        if (MediaAppTarget.Plays(target, AppIdentity.Describe((int)session.GetProcessID))) { _sessions.Add(session); keep = true; }
+                        if (AppIdentity.Plays(target, (int)session.GetProcessID)) { _sessions.Add(session); keep = true; }
                     }
                     catch { }
                     finally { if (!keep) session.Dispose(); }
@@ -169,6 +188,28 @@ internal sealed class AudioLevelMeter : IDisposable
         }
         catch { Clear(); return; }
         _capture = ProcessLoopbackCapture.TryStart((uint)Environment.ProcessId, exclude: true);
+    }
+    // Whether the player has an audio session on one of the devices held (those of the system's sound standing in for it).
+    private bool Sounds(MediaAppOwner target)
+    {
+        bool found = false;
+        try
+        {
+            foreach (var device in _devices)
+            {
+                var manager = device.AudioSessionManager; manager.RefreshSessions();
+                var sessions = manager.Sessions;
+                for (int i = 0; i < sessions.Count; i++)
+                {
+                    var session = sessions[i];
+                    try { found = found || AppIdentity.Plays(target, (int)session.GetProcessID); }
+                    catch { }
+                    finally { session.Dispose(); }
+                }
+            }
+        }
+        catch { }
+        return found;
     }
     private void StopCapture()
     {

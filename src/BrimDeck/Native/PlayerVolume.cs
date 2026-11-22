@@ -12,7 +12,7 @@ internal interface IVolumeLevel : IDisposable
 }
 
 // The current player's own volume, as the system's volume mixer shows it: the volume of every audio session its processes have, on
-// every playback device, matched to the player as the level bars match it (MediaAppTarget.Plays). The system volume is left alone.
+// every playback device, matched to the player as the level bars match it (AppIdentity.Plays). The system volume is left alone.
 // A player that has not opened an audio session yet, as one that has not played since it started, has none to adjust.
 internal sealed class PlayerVolume : IVolumeLevel
 {
@@ -36,7 +36,7 @@ internal sealed class PlayerVolume : IVolumeLevel
                 for (int i = 0; i < listed.Count; i++)
                 {
                     var session = listed[i]; bool keep = false;
-                    try { keep = !session.IsSystemSoundsSession && MediaAppTarget.Plays(owner, AppIdentity.Describe((int)session.GetProcessID)); }
+                    try { keep = !session.IsSystemSoundsSession && AppIdentity.Plays(owner, (int)session.GetProcessID); }
                     catch { }
                     if (keep) sessions.Add(session); else session.Dispose();
                 }

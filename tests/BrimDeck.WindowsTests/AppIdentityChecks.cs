@@ -19,6 +19,21 @@ internal static class AppIdentityChecks
             MediaAppTarget.Plays(new(null, MediaAppTarget.ProcessName(id), id), self)
             && !MediaAppTarget.Plays(new(null, MediaAppTarget.ProcessName("BrimDeck.Tests.Other"), "BrimDeck.Tests.Other"), self));
         check("app identity: an application Windows does not list has no registered name", AppIdentity.RegisteredName(id) is null);
+        // A process the application starts does not have the id the application set for itself (Soda Music's audio process):
+        // it plays for the application as the process the application started.
+        using (var child = Process.Start(new ProcessStartInfo(System.IO.Path.Combine(Environment.SystemDirectory, "ping.exe"), "-n 30 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false })!)
+        {
+            try
+            {
+                var started = AppIdentity.Describe(child.Id);
+                check($"app identity: a process this one starts does not have the id this one set (it has \"{started.AppId}\"), and this one is its starter",
+                    started.AppId != id && AppIdentity.Parent(child.Id) == Environment.ProcessId);
+                check("app identity: the started process plays for a media session of this process's id, and not for one of another",
+                    !MediaAppTarget.Plays(new(null, MediaAppTarget.ProcessName(id), id), started) && AppIdentity.Plays(new(null, MediaAppTarget.ProcessName(id), id), child.Id)
+                    && !AppIdentity.Plays(new(null, MediaAppTarget.ProcessName("BrimDeck.Tests.Other"), "BrimDeck.Tests.Other"), child.Id));
+            }
+            finally { try { child.Kill(); } catch (InvalidOperationException) { } }
+        }
 
         // The name read from a process's handle (NameAndPath) is compared with saved window rules and clipboard exclusions, which
         // were written with Process.ProcessName: the two must be the same for every process that can be opened.

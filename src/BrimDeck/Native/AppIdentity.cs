@@ -40,6 +40,34 @@ internal static class AppIdentity
         return new(pid, name ?? "", family, appId ?? Resolve(pid));
     }
 
+    // Whether a process with an audio session plays for the application: it is one of the application's own processes
+    // (MediaAppTarget.Plays), or the application started it. An application that chooses its id sets it for its main
+    // process only, and the process it starts to play its sound has the id Windows derives from the executable's path.
+    // Soda Music 3.7.0 (Electron) reports the id "汽水音乐", which is the id of its main process, while its sound comes from a
+    // SodaMusic.exe audio process whose id is that path (measured): neither the id nor a process name finds that one.
+    public static bool Plays(MediaAppOwner owner, int pid) =>
+        MediaAppTarget.Plays(owner, Describe(pid)) || Parent(pid) is { } parent && MediaAppTarget.Plays(owner, Describe(parent));
+
+    // The process that started this one, null when it has ended or cannot be read. Windows keeps only the starter's
+    // number, which another process may have taken since: one that started later than this process is not its starter.
+    public static int? Parent(int pid)
+    {
+        var handle = OpenProcess(ProcessQueryLimitedInformation, false, (uint)pid);
+        if (handle == 0) return null;
+        try
+        {
+            var basic = new ProcessBasicInformation();
+            if (NtQueryInformationProcess(handle, 0, ref basic, Marshal.SizeOf<ProcessBasicInformation>(), out _) != 0) return null;
+            int parent = (int)basic.InheritedFromUniqueProcessId;
+            if (parent <= 0 || !GetProcessTimes(handle, out long started, out _, out _, out _)) return null;
+            var starter = OpenProcess(ProcessQueryLimitedInformation, false, (uint)parent);
+            if (starter == 0) return null;
+            try { return GetProcessTimes(starter, out long before, out _, out _, out _) && before <= started ? parent : null; }
+            finally { CloseHandle(starter); }
+        }
+        finally { CloseHandle(handle); }
+    }
+
     // The executable's full path, "" when the process cannot be opened.
     public static string ImagePath(int pid)
     {
@@ -166,6 +194,14 @@ internal static class AppIdentity
     }
     [DllImport("kernel32.dll")] private static extern nint OpenProcess(uint access, bool inherit, uint processId);
     [DllImport("kernel32.dll")] private static extern bool CloseHandle(nint handle);
+    // The times are FILETIMEs, 100 ns counts in 8 bytes.
+    [DllImport("kernel32.dll")] private static extern bool GetProcessTimes(nint process, out long created, out long exited, out long kernel, out long user);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ProcessBasicInformation
+    {
+        public nint ExitStatus, PebBaseAddress, AffinityMask, BasePriority, UniqueProcessId, InheritedFromUniqueProcessId;
+    }
+    [DllImport("ntdll.dll")] private static extern int NtQueryInformationProcess(nint process, int information, ref ProcessBasicInformation result, int length, out int returned);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "QueryFullProcessImageNameW")]
     private static extern bool QueryFullProcessImageName(nint process, uint flags, StringBuilder path, ref int length);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern int GetPackageFamilyName(nint process, ref uint length, StringBuilder? name);

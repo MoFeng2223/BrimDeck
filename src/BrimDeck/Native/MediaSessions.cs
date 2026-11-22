@@ -893,11 +893,15 @@ internal sealed class MediaSessions : IDisposable
     public TimeSpan MeterLinger { set => _meter.Linger = value; }
     // The bars' levels from the player's captured audio, flowing along the bars or as the spectrum, one band for each of the levels.Length bars; false when only the peak meter is available.
     public bool FlowLevels(Span<double> levels, EqualizerMode mode) => _meter.TryFill(levels, mode);
+    // Bars shown at all times are chosen (DeckSettings.EqualizerAlwaysShown): they are to move with whatever sounds, so the
+    // whole system's sound stands in for a playing player whose own sound is not found.
+    public bool SystemStandIn { set { if (_standIn == value) return; _standIn = value; UpdateMeter(); } }
+    private bool _standIn;
     // The playing player's sound while its bars are seen; otherwise the whole system's, while bars shown at all times ask for it.
     private void UpdateMeter()
     {
         bool player = _visible && Current?.State == MediaState.Playing;
-        _meter.SetSource(CurrentOwner, player, !player && _systemVisible);
+        _meter.SetSource(CurrentOwner, player, !player && _systemVisible, _standIn);
     }
 
     // The application playing the current song, for bringing its window forward and for the bars' sound.
