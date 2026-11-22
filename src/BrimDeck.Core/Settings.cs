@@ -444,6 +444,8 @@ public sealed class DeckSettings
     public string CycleStyleHotkey { get; set; } = "";
     public string LineStyleHotkey { get; set; } = "";
     public string NextProfileHotkey { get; set; } = "";
+    // Held: clicks pass through only while it is down (App.HoldPassThrough). It may be a single key such as Esc or CapsLock.
+    public string HoldClickThroughHotkey { get; set; } = "";
     public string Hotkey(HotkeyKind kind) => (kind switch
     {
         HotkeyKind.Hide => HideHotkey, HotkeyKind.Expand => ExpandHotkey, HotkeyKind.Resize => ResizeHotkey, HotkeyKind.Move => MoveHotkey,
@@ -451,7 +453,8 @@ public sealed class DeckSettings
         HotkeyKind.Page2 => Page2Hotkey, HotkeyKind.Page3 => Page3Hotkey, HotkeyKind.Page4 => Page4Hotkey,
         HotkeyKind.Page5 => Page5Hotkey, HotkeyKind.Page6 => Page6Hotkey, HotkeyKind.Page7 => Page7Hotkey, HotkeyKind.Page8 => Page8Hotkey,
         HotkeyKind.Page9 => Page9Hotkey, HotkeyKind.Page10 => Page10Hotkey, HotkeyKind.Refresh => RefreshHotkey,
-        HotkeyKind.CycleStyle => CycleStyleHotkey, HotkeyKind.LineStyle => LineStyleHotkey, HotkeyKind.NextProfile => NextProfileHotkey, _ => ""
+        HotkeyKind.CycleStyle => CycleStyleHotkey, HotkeyKind.LineStyle => LineStyleHotkey, HotkeyKind.NextProfile => NextProfileHotkey,
+        HotkeyKind.HoldClickThrough => HoldClickThroughHotkey, _ => ""
     }) ?? "";
     public void SetHotkey(HotkeyKind kind, string value)
     {
@@ -477,16 +480,15 @@ public sealed class DeckSettings
             case HotkeyKind.CycleStyle: CycleStyleHotkey = value; break;
             case HotkeyKind.LineStyle: LineStyleHotkey = value; break;
             case HotkeyKind.NextProfile: NextProfileHotkey = value; break;
+            case HotkeyKind.HoldClickThrough: HoldClickThroughHotkey = value; break;
         }
     }
     // Mouse pass-through: hovering does not open the panel and every click goes to the window beneath; only the shortcuts open
     // it. ClickThroughPanel lets the open panel take clicks as usual; ClickThroughKeyboard lets a panel opened by a shortcut take
-    // the keyboard and Esc, which it otherwise leaves to the window in use (a game). ClickThroughHold makes the pass-through
-    // hotkey momentary (held) instead of toggling sticky ClickThrough; the switch and tray menu still toggle sticky mode.
+    // the keyboard and Esc, which it otherwise leaves to the window in use (a game).
     public bool ClickThrough { get; set; }
     public bool ClickThroughPanel { get; set; }
     public bool ClickThroughKeyboard { get; set; }
-    public bool ClickThroughHold { get; set; }
     public bool MusicPage { get; set; } = true;
     public double MusicWidth { get; set; } = 440;
     public double MusicHeight { get; set; } = 200;

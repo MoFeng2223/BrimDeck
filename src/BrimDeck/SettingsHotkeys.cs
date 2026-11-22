@@ -37,7 +37,7 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("位置与大小", "Position and size"));
         Group([.. new[] { HotkeyKind.Move, HotkeyKind.Resize }.Select(HotkeyRow)]);
         SectionTitle(Loc.T("其他", "Other"));
-        Group([.. new[] { HotkeyKind.ClickThrough, HotkeyKind.OpenSettings, HotkeyKind.Refresh, HotkeyKind.NextProfile }.Select(HotkeyRow)]);
+        Group([.. new[] { HotkeyKind.ClickThrough, HotkeyKind.HoldClickThrough, HotkeyKind.OpenSettings, HotkeyKind.Refresh, HotkeyKind.NextProfile }.Select(HotkeyRow)]);
     }
 
     private static string HotkeyTitle(HotkeyKind kind) => kind switch
@@ -46,7 +46,8 @@ public sealed partial class SettingsWindow
         HotkeyKind.Expand => Loc.T("展开/收起面板", "Expand/collapse panel"),
         HotkeyKind.Resize => Loc.T("调整面板大小", "Resize panel"),
         HotkeyKind.Move => Loc.T("移动刘海、胶囊或指示条", "Move notch, capsule or bar"),
-        HotkeyKind.ClickThrough => Loc.T("鼠标穿透", "Mouse pass-through"),
+        HotkeyKind.ClickThrough => Loc.T("开启/关闭鼠标穿透", "Mouse pass-through on/off"),
+        HotkeyKind.HoldClickThrough => Loc.T("临时鼠标穿透", "Temporary mouse pass-through"),
         HotkeyKind.OpenSettings => Loc.T("打开/关闭设置", "Open/close settings"),
         HotkeyKind.Refresh => Loc.T("立即同步用量", "Sync usage now"),
         HotkeyKind.CycleStyle => Loc.T("切换刘海、胶囊或指示条", "Switch notch, capsule or bar"),
@@ -61,8 +62,9 @@ public sealed partial class SettingsWindow
         HotkeyKind.Resize => Loc.T("展开时调整当前页面的宽度和高度，收起时调整刘海、胶囊或指示条的长度。",
             "When expanded, changes the current page's width and height; when collapsed, the length of the notch, capsule or indicator bar."),
         HotkeyKind.Move => Loc.T("刘海和指示条沿屏幕边缘移动，胶囊可以上下左右移动。", "The notch and the bar move along their screen edge, the capsule in any direction."),
-        HotkeyKind.ClickThrough => Loc.T("开启或关闭鼠标穿透模式；在“通用 › 兼容”中开启“按住快捷键穿透”后，按住期间临时穿透。修饰键可选，可用 Esc、CapsLock 等单键（字母和数字仍需搭配 Ctrl、Alt 或 Win）；Esc、CapsLock 等非功能单键不会独占，其它程序仍可收到。单独的 F1–F24 仍按普通热键注册。",
-            "Turns sticky mouse pass-through on or off; with Hold hotkey while pressed in General › Compatibility, passes through only while held. Modifiers are optional, and a single key such as Esc or CapsLock works (letters and digits still need Ctrl, Alt or Win). A bare non-function key such as Esc or CapsLock is not reserved, so other programs still receive it. Bare F1–F24 still use ordinary hotkey registration."),
+        HotkeyKind.ClickThrough => Loc.T("开启或关闭鼠标穿透模式。", "Turns mouse pass-through on or off."),
+        HotkeyKind.HoldClickThrough => Loc.T("按住时点击穿过面板，松开后恢复。可以只用一个键，例如 Esc 或 CapsLock，当前程序仍会收到这个键。",
+            "Clicks go through the panel while held and stop when released. A single key such as Esc or CapsLock works, and the program in use still receives it."),
         HotkeyKind.OpenSettings => Loc.T("打开设置窗口，再按一次关闭。", "Opens the settings window; press again to close it."),
         HotkeyKind.Refresh => Loc.T("立即读取一次 AI 用量与模型消耗。", "Reads AI usage and model consumption once, now."),
         HotkeyKind.CycleStyle => Loc.T("按刘海、胶囊、指示条的顺序循环切换收起样式。", "Cycles the collapsed style: notch, capsule, bar."),

@@ -21,7 +21,7 @@ public partial class MainWindow
     private bool PanelTakesKeyboard => !ClickThrough || (Settings.ClickThroughKeyboard && !_app.HoldPassThrough);
     // Esc is held while the panel is open and takes the keyboard, and in move mode.
     private bool HoldsEscape => _expanded && !_preview && PanelTakesKeyboard || _moveArmed;
-    // Bare ClickThrough observe skips the key while EscapeDismissal has reserved it.
+    // A watched Esc for temporary pass-through (App.HoldKeyDown) is left to the panel while EscapeDismissal holds it.
     internal bool ReservesEscape => HoldsEscape;
 
     // From TrackPointer: true while the pointer is to be ignored. Whatever hovering had started is dropped, and the checks slow

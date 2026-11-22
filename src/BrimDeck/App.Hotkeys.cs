@@ -30,7 +30,7 @@ public partial class App
     {
         if (_hotkeys is not null) return;
         _hotkeys = new GlobalHotkeys();
-        _hotkeys.Pressed += HotkeyPressed;
+        _hotkeys.Pressed += HotkeyPressed; _hotkeys.WatchedKeyDown += HoldKeyDown;
         ApplyHotkeys();
     }
 
@@ -52,7 +52,7 @@ public partial class App
     {
         if (_hotkeySuspensions++ > 0 || _hotkeys is null) return;
         foreach (var kind in Enum.GetValues<HotkeyKind>()) _hotkeys.Unregister(kind);
-        StopClickThroughObserver();
+        StopHoldClickThrough();
     }
 
     public void ResumeHotkeys()
@@ -63,9 +63,9 @@ public partial class App
 
     internal void DisposeHotkeys()
     {
-        StopClickThroughObserver();
+        StopHoldClickThrough();
         if (_hotkeys is null) return;
-        _hotkeys.Pressed -= HotkeyPressed; _hotkeys.Dispose(); _hotkeys = null;
+        _hotkeys.Pressed -= HotkeyPressed; _hotkeys.WatchedKeyDown -= HoldKeyDown; _hotkeys.Dispose(); _hotkeys = null;
     }
 
     // Hides every panel, or shows them again. An open panel closes first.
@@ -155,7 +155,7 @@ public partial class App
     {
         // Everything is released first, so a combination one hotkey gives up is free for another this time round.
         foreach (var kind in Enum.GetValues<HotkeyKind>()) _hotkeys?.Unregister(kind);
-        StopClickThroughObserver();
+        StopHoldClickThrough(); _holdVk = 0;
         var plans = HotkeyText.Plan(kind => _hotkeyTexts.GetValueOrDefault(kind), HotkeyGesture.IsKeyName);
         foreach (var kind in HotkeyText.Priority)
         {
@@ -171,9 +171,12 @@ public partial class App
         if (!HotkeyGesture.TryParse(text, out var modifiers, out var key, bare)
             || !HotkeyGesture.ToNative(modifiers, key, out uint fs, out uint vk, repeat, bare))
             return HotkeyStatus.Invalid;
-        // Bare Escape/CapsLock/etc. for pass-through: watch without RegisterHotKey so other apps still get the key.
-        if (kind == HotkeyKind.ClickThrough && ObservesClickThrough(modifiers, key))
-            return ObserveClickThrough((int)vk);
+        if (kind == HotkeyKind.HoldClickThrough)
+        {
+            _holdVk = (int)vk;
+            // A single key such as Esc or CapsLock is watched, so the program in use still receives it.
+            if (WatchesKey(modifiers, key)) return WatchHoldKey((int)vk);
+        }
         return _hotkeys is null || _hotkeySuspensions > 0 ? HotkeyStatus.Active : _hotkeys.Register(kind, fs, vk, slot);
     }
 
@@ -198,7 +201,8 @@ public partial class App
             case HotkeyKind.Expand: ToggleExpandFromHotkey(); break;
             case HotkeyKind.Resize: ResizeFromHotkey(slot); break;
             case HotkeyKind.Move: DeckUnderPointer().MoveFromKeyboard(slot); break;
-            case HotkeyKind.ClickThrough: ClickThroughFromHotkey(); break;
+            case HotkeyKind.ClickThrough: ToggleClickThrough(); break;
+            case HotkeyKind.HoldClickThrough: BeginHoldPassThrough(); break;
             case HotkeyKind.OpenSettings: ToggleSettingsFromHotkey(); break;
             case >= HotkeyKind.Page1 and <= HotkeyKind.Page10: OpenPageFromHotkey(kind - HotkeyKind.Page1); break;
             case HotkeyKind.Refresh: Deck.SyncNow(); break;

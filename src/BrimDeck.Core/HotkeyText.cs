@@ -3,7 +3,7 @@ namespace BrimDeck.Core;
 // Resize and Move are each one setting for four registrations: their modifiers with each arrow key (see Arrows). Page1 to Page10
 // open the shown pages in the order of the page switch. CycleStyle turns the collapsed style to the next one: notch, capsule, line,
 // then the notch again. LineStyle switches between the line and the notch or capsule last used (DeckSettings.ShapeStyle).
-public enum HotkeyKind { Hide, Expand, Resize, Move, ClickThrough, OpenSettings, Page1, Page2, Page3, Page4, Page5, Page6, Page7, Page8, Page9, Page10, Refresh, CycleStyle, LineStyle, NextProfile }
+public enum HotkeyKind { Hide, Expand, Resize, Move, ClickThrough, OpenSettings, Page1, Page2, Page3, Page4, Page5, Page6, Page7, Page8, Page9, Page10, Refresh, CycleStyle, LineStyle, NextProfile, HoldClickThrough }
 
 // Unset: no combination saved. Active: registered. InUse: another program holds the combination. Invalid: the text is not
 // an allowed combination. Duplicate: a combination another hotkey has, which keeps it (see Plan and PlanArrows).
@@ -13,8 +13,8 @@ public enum HotkeyStatus { Unset, Active, InUse, Invalid, Duplicate }
 public enum HotkeyModifiers { None = 0, Ctrl = 1, Alt = 2, Shift = 4, Win = 8 }
 
 // The saved text of a global hotkey: modifiers in the fixed order Ctrl+Alt+Shift+Win, then the main key's name (a WPF Key
-// name such as "K", "D1" or "F9"), joined by "+". Only F1 to F24 may stand without a modifier, except ClickThrough, which
-// may also use a bare non-typing key (see AllowsBareKey). Left and right modifiers are not told apart. Whether the key name
+// name such as "K", "D1" or "F9"), joined by "+". Only F1 to F24 may stand without a modifier, except HoldClickThrough,
+// which may also use a bare non-typing key (see AllowsBareKey). Left and right modifiers are not told apart. Whether the key name
 // names a real key is decided by the caller (HotkeyGesture in the app).
 public static class HotkeyText
 {
@@ -23,7 +23,7 @@ public static class HotkeyText
 
     // Accepts the modifiers in any order and letter case, and the aliases Control and Windows; rejects repeated modifiers,
     // a missing or repeated main key and spaces inside a part. An empty text is not a hotkey (see IsUnset). bareKeyOk lets a
-    // non-function main key stand alone (ClickThrough).
+    // non-function main key stand alone (HoldClickThrough).
     public static bool TryParse(string? text, out HotkeyModifiers modifiers, out string key, bool bareKeyOk = false)
     {
         modifiers = HotkeyModifiers.None; key = "";
@@ -48,8 +48,8 @@ public static class HotkeyText
         return IsAllowed(modifiers, key, bareKeyOk);
     }
 
-    // Mouse pass-through may be a single key (modifiers optional); other shortcuts still need a modifier except F1–F24.
-    public static bool AllowsBareKey(HotkeyKind kind) => kind == HotkeyKind.ClickThrough;
+    // Temporary mouse pass-through may be a single key (modifiers optional); other shortcuts still need a modifier except F1–F24.
+    public static bool AllowsBareKey(HotkeyKind kind) => kind == HotkeyKind.HoldClickThrough;
 
     public static string Format(HotkeyModifiers modifiers, string key)
         => string.Join("+", Order.Where(o => modifiers.HasFlag(o.Flag)).Select(o => o.Name).Append(key));
@@ -79,11 +79,11 @@ public static class HotkeyText
            || key is ("Space" or "Add" or "Subtract" or "Multiply" or "Divide" or "Decimal");
 
     // Whether two saved texts name the same combination, whatever their spelling. Two unset or invalid texts are not the same.
-    // Bare keys (ClickThrough) still compare equal when both sides name the same main key.
+    // Bare keys (HoldClickThrough) still compare equal when both sides name the same main key.
     public static bool Same(string? first, string? second)
         => Canonical(first) is { Length: > 0 } a && string.Equals(a, Canonical(second), StringComparison.OrdinalIgnoreCase);
 
-    // Normalize that also accepts a bare main key, so clash checks see ClickThrough's single-key shortcuts.
+    // Normalize that also accepts a bare main key, so clash checks see HoldClickThrough's single-key shortcuts.
     private static string Canonical(string? text)
         => Normalize(text) is { Length: > 0 } usual ? usual : Normalize(text, bareKeyOk: true);
 

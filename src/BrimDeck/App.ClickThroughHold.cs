@@ -4,102 +4,60 @@ using BrimDeck.Native;
 
 namespace BrimDeck;
 
-// Momentary mouse pass-through while the ClickThrough hotkey is held (DeckSettings.ClickThroughHold). Does not flip the sticky
-// ClickThrough setting; tray and the Compatibility switch still do that.
+// Temporary mouse pass-through while its hotkey is held (HotkeyKind.HoldClickThrough). It leaves the ClickThrough setting alone,
+// which its own hotkey, the tray menu and the Compatibility switch turn on and off.
 //
-// Bare non-function keys (Escape, CapsLock, …) are watched with GetAsyncKeyState instead of RegisterHotKey, so other programs
-// still receive them. Combinations with modifiers, and bare F1–F24, keep using RegisterHotKey.
+// A single key other than F1 to F24 (Esc, CapsLock, …) is not registered as a hotkey, so the program in use still receives it:
+// GlobalHotkeys.WatchKey reports each press, and a press with a modifier held is left alone. Combinations, and F1 to F24 alone, are registered as usual. Either way the key is
+// checked for its release only while the pass-through lasts; nothing is read between presses.
 public partial class App
 {
-    private PromptTimer? _holdPassThroughPoll;
-    private PromptTimer? _clickThroughObserve;
-    private int _holdPassThroughVk;
-    private int _observeVk;
-    private bool _observeDown;
+    private const int VkEscape = 0x1B;
+    // VK_SHIFT, VK_CONTROL, VK_MENU (Alt), VK_LWIN, VK_RWIN.
+    private static readonly int[] ModifierKeysDown = [0x10, 0x11, 0x12, 0x5B, 0x5C];
+    private PromptTimer? _holdRelease;
+    // The hotkey's main key, from the last registration; 0 while it is unset or invalid.
+    private int _holdVk;
 
-    // True while the hold hotkey is down. MainWindow.ClickThrough ORs this into its pass-through math.
+    // True while the hotkey is held. MainWindow.ClickThrough counts it as pass-through.
     internal bool HoldPassThrough { get; private set; }
 
-    // Bare ClickThrough keys that would steal Esc (and similar) system-wide if registered with RegisterHotKey.
-    internal static bool ObservesClickThrough(ModifierKeys modifiers, Key key)
+    // A single key that is watched rather than registered.
+    private static bool WatchesKey(ModifierKeys modifiers, Key key)
         => modifiers == ModifierKeys.None && !HotkeyText.IsFunctionKey(key.ToString());
 
-    private void ClickThroughFromHotkey()
-    {
-        if (Settings.ClickThroughHold) BeginHoldPassThrough();
-        else ToggleClickThrough();
-    }
+    // Called instead of registering the hotkey.
+    private HotkeyStatus WatchHoldKey(int vk)
+        => _hotkeys is null || _hotkeySuspensions > 0 ? HotkeyStatus.Active : _hotkeys.WatchKey(vk) ? HotkeyStatus.Active : HotkeyStatus.Invalid;
 
-    // Starts the non-consuming watcher for a bare ClickThrough key. Called instead of RegisterHotKey.
-    internal HotkeyStatus ObserveClickThrough(int vk)
+    private void StopHoldClickThrough()
     {
-        if (vk == 0) return HotkeyStatus.Invalid;
-        if (_hotkeySuspensions > 0) return HotkeyStatus.Active;
-        _observeVk = vk;
-        _observeDown = PasteInput.KeyDown(vk);
-        _clickThroughObserve ??= new PromptTimer(Dispatcher, PollClickThroughObserve) { Interval = TimeSpan.FromMilliseconds(30) };
-        _clickThroughObserve.Start();
-        return HotkeyStatus.Active;
-    }
-
-    internal void StopClickThroughObserver()
-    {
-        _clickThroughObserve?.Stop();
-        _observeVk = 0;
-        _observeDown = false;
+        _hotkeys?.StopWatching();
         EndHoldPassThrough();
     }
 
-    private void PollClickThroughObserve()
+    private void HoldKeyDown()
     {
-        if (_observeVk == 0 || Exiting) return;
-        bool down = PasteInput.KeyDown(_observeVk);
-        if (down == _observeDown) return;
-        _observeDown = down;
-        if (down)
-        {
-            // Panel dismiss / move mode already reserved Escape via RegisterHotKey; do not also treat Escape as pass-through.
-            // CapsLock and other observed keys still start hold pass-through while a panel is open.
-            if (_observeVk == KeyInterop.VirtualKeyFromKey(Key.Escape) && Decks.Any(deck => deck.ReservesEscape))
-                return;
-            if (Settings.ClickThroughHold) BeginHoldPassThrough();
-            else ToggleClickThrough();
-        }
-        else EndHoldPassThrough();
+        if (Exiting) return;
+        // Pressed with Ctrl, Alt, Shift or Win it belongs to a combination (Ctrl+Shift+Esc, Shift+CapsLock), not to this hotkey.
+        if (ModifierKeysDown.Any(PasteInput.KeyDown)) return;
+        // The open panel or move mode has Esc for itself (MainWindow.ReservesEscape).
+        if (_holdVk == VkEscape && Decks.Any(deck => deck.ReservesEscape)) return;
+        BeginHoldPassThrough();
     }
 
     private void BeginHoldPassThrough()
     {
-        if (HoldPassThrough) return;
-        if (!HotkeyGesture.TryParse(Settings.ClickThroughHotkey, out _, out var key, bareKeyOk: true))
-        {
-            ToggleClickThrough();
-            return;
-        }
-        int vk = KeyInterop.VirtualKeyFromKey(key);
-        if (vk == 0)
-        {
-            ToggleClickThrough();
-            return;
-        }
+        if (HoldPassThrough || _holdVk == 0) return;
         HoldPassThrough = true;
-        _holdPassThroughVk = vk;
         ApplyHoldPassThrough();
-        // Observer path already watches release; RegisterHotKey path needs a release poll.
-        if (_observeVk == vk) return;
-        _holdPassThroughPoll ??= new PromptTimer(Dispatcher, PollHoldPassThrough) { Interval = TimeSpan.FromMilliseconds(30) };
-        _holdPassThroughPoll.Start();
-    }
-
-    private void PollHoldPassThrough()
-    {
-        if (PasteInput.KeyDown(_holdPassThroughVk)) return;
-        EndHoldPassThrough();
+        _holdRelease ??= new PromptTimer(Dispatcher, () => { if (!PasteInput.KeyDown(_holdVk)) EndHoldPassThrough(); }) { Interval = TimeSpan.FromMilliseconds(30) };
+        _holdRelease.Start();
     }
 
     private void EndHoldPassThrough()
     {
-        _holdPassThroughPoll?.Stop();
+        _holdRelease?.Stop();
         if (!HoldPassThrough) return;
         HoldPassThrough = false;
         ApplyHoldPassThrough();
@@ -107,7 +65,6 @@ public partial class App
 
     private void ApplyHoldPassThrough()
     {
-        foreach (var deck in Decks.ToList())
-            if (deck is not null) deck.RefreshHoldPassThrough();
+        foreach (var deck in Decks.ToList()) deck.RefreshHoldPassThrough();
     }
 }
