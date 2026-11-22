@@ -1,0 +1,140 @@
+﻿using System.Globalization;
+using System.Text.Json;
+using BrimDeck.Core;
+
+namespace BrimDeck;
+
+internal sealed class OpenMeteoSource : IWeatherSource
+{
+    public WeatherSourceInfo Info { get; } = new("openmeteo", "Open-Meteo", Loc.T("全球数值预报 · CC BY 4.0", "Global forecast · CC BY 4.0"),
+        [WeatherDomain.Current, WeatherDomain.Hourly, WeatherDomain.Daily, WeatherDomain.Air, WeatherDomain.History, WeatherDomain.Minutely], WeatherRegion.Global);
+    public bool CanServe(City city, WeatherSettings settings) => true;
+
+    public async Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
+    {
+        bool Want(WeatherDomain domain) => need.Contains(domain);
+        // 一份 forecast 响应同时覆盖实况、每日（含天文）与过去 10 天，三者共用一次请求。
+        bool wantForecast = Want(WeatherDomain.Current) || Want(WeatherDomain.Daily) || Want(WeatherDomain.History);
+        string location = FormattableString.Invariant($"latitude={city.Latitude.ToString(CultureInfo.InvariantCulture)}&longitude={city.Longitude.ToString(CultureInfo.InvariantCulture)}&timezone=auto");
+        string site = FormattableString.Invariant($"{city.Latitude:0.00},{city.Longitude:0.00}");
+        var forecast = wantForecast ? Body("forecast|" + site, TimeSpan.FromMinutes(15), $"https://api.open-meteo.com/v1/forecast?{location}&current=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,weather_code,pressure_msl,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,sunrise,sunset,moonrise,moonset,uv_index_max,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,relative_humidity_2m_mean,pressure_msl_mean&past_days=10&forecast_days=14", token) : Task.FromResult("");
+        // 逐时只要未来窗口：过去那一格由本地历史提供，不再向 Open-Meteo 请求 past_hours。
+        // forecast_hours=24 给当前起 24 小时，窗口切片取锚点起 24 条；缓存键去掉 |p2 以区分旧响应。
+        var hourly = Want(WeatherDomain.Hourly) ? Body("hourly|" + site, TimeSpan.FromMinutes(30), $"https://api.open-meteo.com/v1/forecast?{location}&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,precipitation_probability,weather_code,pressure_msl,cloud_cover,visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index&forecast_hours=24", token) : Task.FromResult("");
+        var air = Want(WeatherDomain.Air) ? Body("air|" + site, TimeSpan.FromMinutes(30), $"https://air-quality-api.open-meteo.com/v1/air-quality?{location}&current=pm2_5,pm10,us_aqi,european_aqi", token) : Task.FromResult("");
+        // 分钟降水（未来 2 小时的 15 分钟级）独立缓存。
+        var minute = Want(WeatherDomain.Minutely) ? Body("minute|" + site, TimeSpan.FromMinutes(15), $"https://api.open-meteo.com/v1/forecast?{location}&minutely_15=precipitation&forecast_minutely_15=8", token) : Task.FromResult("");
+        await Task.WhenAll(forecast, hourly, air, minute);
+        var part = new WeatherPart();
+        try
+        {
+            using var doc = JsonDocument.Parse(forecast.Result);
+            var root = doc.RootElement;
+            part.TimeZone = Json.Text(root, "timezone");
+            if (Json.Get(root, "current") is { } current)
+                part.Current = new CurrentPart
+                {
+                    Temperature = Json.Number(current, "temperature_2m"), FeelsLike = Json.Number(current, "apparent_temperature"),
+                    Humidity = Json.Integer(current, "relative_humidity_2m"), DewPointC = Json.Number(current, "dew_point_2m"),
+                    PrecipMm = Json.Number(current, "precipitation"), Code = Json.Integer(current, "weather_code"),
+                    PressureHpa = Json.Number(current, "pressure_msl"), CloudPercent = Json.Number(current, "cloud_cover"),
+                    WindKmh = Json.Number(current, "wind_speed_10m"), WindDirDeg = Json.Number(current, "wind_direction_10m"),
+                    WindGustKmh = Json.Number(current, "wind_gusts_10m"), VisibilityKm = Json.Number(current, "visibility") is { } visibility ? visibility / 1000 : null,
+                    IsDay = Json.Integer(current, "is_day") is { } day ? day != 0 : null
+                };
+            if (Json.Get(root, "daily") is { } daily && Json.Get(daily, "time") is { } dates)
+            {
+                int count = dates.GetArrayLength();
+                string[] names = ["weather_code", "temperature_2m_max", "temperature_2m_min", "apparent_temperature_max", "apparent_temperature_min", "sunrise", "sunset", "moonrise", "moonset", "uv_index_max", "precipitation_sum", "precipitation_probability_max", "wind_speed_10m_max", "wind_gusts_10m_max", "wind_direction_10m_dominant", "relative_humidity_2m_mean", "pressure_msl_mean"];
+                var arrays = names.ToDictionary(name => name, name => Json.Get(daily, name));
+                double? At(string name, int index) => arrays[name] is { } array && index < array.GetArrayLength() && array[index].ValueKind == JsonValueKind.Number ? array[index].GetDouble() : null;
+                string? TextAt(string name, int index) => arrays[name] is { } array && index < array.GetArrayLength() && array[index].ValueKind == JsonValueKind.String ? array[index].GetString() : null;
+                string? DateAt(int index) => index < count && dates[index].ValueKind == JsonValueKind.String ? dates[index].GetString() : null;
+                part.Days = [];
+                for (int i = 0; i < count; i++)
+                {
+                    string? date = DateAt(i); if (date is null) continue;
+                    part.Days.Add(new DayPoint
+                    {
+                        Date = date[..10], Code = (int?)(At("weather_code", i)), HighC = At("temperature_2m_max", i), LowC = At("temperature_2m_min", i),
+                        FeelsHighC = At("apparent_temperature_max", i), FeelsLowC = At("apparent_temperature_min", i),
+                        Sunrise = TextAt("sunrise", i), Sunset = TextAt("sunset", i),
+                        // 月出/月落：Open-Meteo 返回 ISO 时刻；某天月不升/不落时该日为 null，合并层自然跳过。
+                        Moonrise = TextAt("moonrise", i), Moonset = TextAt("moonset", i), UvMax = At("uv_index_max", i),
+                        PrecipMm = At("precipitation_sum", i), RainProb = (int?)At("precipitation_probability_max", i),
+                        WindMaxKmh = At("wind_speed_10m_max", i), GustMaxKmh = At("wind_gusts_10m_max", i),
+                        WindDirDeg = At("wind_direction_10m_dominant", i), Humidity = (int?)At("relative_humidity_2m_mean", i),
+                        PressureHpa = At("pressure_msl_mean", i)
+                    });
+                }
+            }
+        }
+        catch { }
+        try
+        {
+            using var doc = JsonDocument.Parse(hourly.Result);
+            if (Json.Get(doc.RootElement, "hourly") is { } h && Json.Get(h, "time") is { } times)
+            {
+                int count = times.GetArrayLength();
+                string[] names = ["temperature_2m", "apparent_temperature", "relative_humidity_2m", "dew_point_2m", "precipitation", "precipitation_probability", "weather_code", "pressure_msl", "cloud_cover", "visibility", "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m", "uv_index"];
+                var arrays = names.ToDictionary(name => name, name => Json.Get(h, name));
+                double? At(string name, int index) => arrays[name] is { } array && index < array.GetArrayLength() && array[index].ValueKind == JsonValueKind.Number ? array[index].GetDouble() : null;
+                string? TextAt(int index) => index < count && times[index].ValueKind == JsonValueKind.String ? times[index].GetString() : null;
+                part.Hours = [];
+                for (int i = 0; i < count; i++)
+                {
+                    string? time = TextAt(i); if (time is null) continue;
+                    part.Hours.Add(new HourPoint
+                    {
+                        Time = time, Temperature = At("temperature_2m", i), FeelsLike = At("apparent_temperature", i),
+                        Humidity = (int?)At("relative_humidity_2m", i), DewPointC = At("dew_point_2m", i), PrecipMm = At("precipitation", i),
+                        RainProb = (int?)At("precipitation_probability", i), Code = (int?)At("weather_code", i), PressureHpa = At("pressure_msl", i),
+                        CloudPercent = At("cloud_cover", i), VisibilityKm = At("visibility", i) is { } visibility ? visibility / 1000 : null,
+                        WindKmh = At("wind_speed_10m", i), WindDirDeg = At("wind_direction_10m", i), WindGustKmh = At("wind_gusts_10m", i), Uv = At("uv_index", i)
+                    });
+                }
+                // 当前 UV 从小时序列补齐：current 接口不返回 uv_index。
+                if (part.Current is { Uv: null } && part.Hours.FirstOrDefault(hour => hour.Temperature is not null) is { Uv: { } uv }) part.Current.Uv = uv;
+            }
+        }
+        catch { }
+        try
+        {
+            using var doc = JsonDocument.Parse(air.Result);
+            if (Json.Get(doc.RootElement, "current") is { } current
+                && (Json.Integer(current, "us_aqi") is not null || Json.Integer(current, "pm2_5") is not null || Json.Integer(current, "pm10") is not null))
+                part.Air = new AirPart
+                {
+                    Aqi = Json.Integer(current, "us_aqi"), Pm25 = Json.Integer(current, "pm2_5"), Pm10 = Json.Integer(current, "pm10"),
+                    Level = Json.Integer(current, "us_aqi") is { } aqi ? AqiLevel(aqi) : null,
+                    Text = Json.Integer(current, "us_aqi") is { } value ? WeatherCodes.AqiText(value) : null
+                };
+        }
+        catch { }
+        // 分钟降水：minutely_15.precipitation
+        try
+        {
+            using var doc = JsonDocument.Parse(minute.Result);
+            if (Json.Get(doc.RootElement, "minutely_15") is { } m && Json.Get(m, "time") is { } times)
+            {
+                int count = times.GetArrayLength();
+                part.Minutes = [];
+                for (int i = 0; i < count; i++)
+                {
+                    string? time = times[i].ValueKind == JsonValueKind.String ? times[i].GetString() : null;
+                    if (time is null) continue;
+                    double? precip = Json.Get(m, "precipitation") is { } arr && i < arr.GetArrayLength() && arr[i].ValueKind == JsonValueKind.Number ? arr[i].GetDouble() : null;
+                    part.Minutes.Add(new MinutePoint { Time = time, Precip = precip });
+                }
+            }
+        }
+        catch { }
+        return part.Current is null && part.Days is null && part.Hours is null && part.Air is null
+            && part.Minutes is not { Count: > 0 } ? null : part;
+    }
+
+    // 响应体落盘：三份数据各自过期，未过期直接读盘，重启后同样能复用，断网时退回上一份。
+    private static async Task<string> Body(string key, TimeSpan ttl, string url, CancellationToken token)
+        => await WeatherCache.GetAsync<string>("openmeteo", key, ttl, async ct => (await WeatherHttp.GetAsync("openmeteo", url, ct)).Body, token) ?? "";
+    private static int AqiLevel(int aqi) => aqi <= 50 ? 1 : aqi <= 100 ? 2 : aqi <= 150 ? 3 : aqi <= 200 ? 4 : aqi <= 300 ? 5 : 6;
+}

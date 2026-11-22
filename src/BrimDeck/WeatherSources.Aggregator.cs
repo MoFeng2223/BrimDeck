@@ -1,0 +1,440 @@
+﻿using System.Globalization;
+using System.Text.Json;
+using BrimDeck.Core;
+
+namespace BrimDeck;
+
+// 单源聚合：每个域只请求用户选定的那一家；同一次刷新把多个域合并成尽量少的请求。
+// 指定来源缺的字段就留空，不再跨源补缺。
+internal static class WeatherAggregator
+{
+    private static readonly TimeSpan SourceTimeout = TimeSpan.FromSeconds(15);
+
+    // 两段式：首屏先取实况/预报/空气/分钟；时光机（10 次请求）与和风 v7 重域（预警/指数）放到第二段。
+    // progress 在第一段结束后回调一次，界面先画不含历史的版本，历史到了再整体替换。
+    public static async Task<WeatherSnapshot> FetchAsync(City city, WeatherSettings settings, CancellationToken token, Action<WeatherSnapshot>? progress = null)
+    {
+        // 每个域在本次刷新里的负责来源；null 表示这个域本次不取数（未选择、来源不支持或不能服务这座城）。
+        var owners = Enum.GetValues<WeatherDomain>().ToDictionary(domain => domain, domain => Owner(domain, city, settings));
+        var parts = new Dictionary<string, WeatherPart>(StringComparer.Ordinal);
+
+        await FetchRoundAsync(city, settings, owners, parts, deferred: false, token: token);
+        if (progress is not null && owners.Any(owner => owner.Value is not null && IsDeferred(owner.Key)))
+            progress(Merge(city, owners, parts));
+        await FetchRoundAsync(city, settings, owners, parts, deferred: true, token: token);
+        return Merge(city, owners, parts);
+    }
+
+    // 时光机与 v7 重域推后到第二段：请求多、返回慢，不该拖住首屏。
+    private static bool IsDeferred(WeatherDomain domain)
+        => domain is WeatherDomain.History or WeatherDomain.Warning or WeatherDomain.Indices;
+
+    // 某个域由哪一家来源负责：用户选定且这家支持该域、能服务这座城市。
+    // 不按区域下探，也不跨源补缺——没配置或不可用时这个域就留空。
+    private static IWeatherSource? Owner(WeatherDomain domain, City city, WeatherSettings settings)
+    {
+        var source = WeatherSources.Find(settings.Choice(domain));
+        return source is not null && source.Info.Domains.Contains(domain) && source.CanServe(city, settings) ? source : null;
+    }
+
+    // 一段取数：把本段的域按负责来源归并，每个来源只发一次请求。
+    // 两段都落到同一来源时，后一段结果用 Absorb 按字段补齐，避免把前一段的逐时/空气覆盖掉。
+    private static async Task FetchRoundAsync(City city, WeatherSettings settings,
+        IReadOnlyDictionary<WeatherDomain, IWeatherSource?> owners, Dictionary<string, WeatherPart> parts,
+        bool deferred, CancellationToken token)
+    {
+        var groups = new Dictionary<IWeatherSource, List<WeatherDomain>>();
+        foreach (var (domain, owner) in owners)
+        {
+            if (owner is null || IsDeferred(domain) != deferred) continue;
+            if (!groups.TryGetValue(owner, out var list)) groups[owner] = list = [];
+            list.Add(domain);
+        }
+        if (groups.Count == 0) return;
+        var results = await Task.WhenAll(groups.Select(async pair =>
+            (Id: pair.Key.Info.Id, Part: await TryAsync(pair.Key, city, settings, pair.Value, token))));
+        foreach (var (id, part) in results)
+        {
+            if (part is null) continue;
+            if (parts.TryGetValue(id, out var existing)) Absorb(existing, part);
+            else parts[id] = part;
+        }
+    }
+
+    // 同一来源分多次返回时把结果并进同一份：能空位补齐的就补，日级数据按日期合并而不是互相覆盖。
+    private static void Absorb(WeatherPart target, WeatherPart extra)
+    {
+        target.TimeZone ??= extra.TimeZone;
+        target.Current ??= extra.Current;
+        target.Air ??= extra.Air;
+        target.Hours ??= extra.Hours;
+        target.Minutes ??= extra.Minutes;
+        target.MinuteSummary ??= extra.MinuteSummary;
+        target.Warnings ??= extra.Warnings;
+        target.Indices ??= extra.Indices;
+        if (extra.Days is not { Count: > 0 } incoming) return;
+        if (target.Days is not { Count: > 0 }) { target.Days = incoming; return; }
+        var known = target.Days.Select(day => day.Date).ToHashSet(StringComparer.Ordinal);
+        var merged = new List<DayPoint>(target.Days);
+        merged.AddRange(incoming.Where(day => known.Add(day.Date)));
+        target.Days = merged;
+    }
+
+    private static async Task<WeatherPart?> TryAsync(IWeatherSource source, City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+        cts.CancelAfter(SourceTimeout);
+        try { return await source.FetchAsync(city, settings, need, cts.Token); }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch { return null; }
+    }
+
+    // 合并：先建立以今天为中心的 24 天日期轴（历史 10 + 今天 + 未来 13），再按域把负责来源的数据叠上去。
+    private static WeatherSnapshot Merge(City city, IReadOnlyDictionary<WeatherDomain, IWeatherSource?> owners, Dictionary<string, WeatherPart> parts)
+    {
+        // 以城市当地日期为中心：查询国外城市时，“今天”不能按用户所在时区算。
+        string? zone = parts.Values.Select(part => part.TimeZone).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+        var today = LocalToday(zone, city);
+        var dates = Enumerable.Range(-10, 24).Select(offset => today.AddDays(offset)).ToArray();
+        var dayMap = dates.ToDictionary(date => date.ToString("yyyy-MM-dd"), _ => new DayPoint());
+        foreach (var (date, point) in dayMap) point.Date = date;
+        var hours = new SortedDictionary<string, HourPoint>(StringComparer.Ordinal);
+        var current = new CurrentPart();
+        AirPart? air = null;
+        var minutes = new List<MinutePoint>();
+        var warnings = new List<WarningItem>();
+        var indices = new List<IndexItem>();
+        string? minuteSummary = null;
+        var used = new Dictionary<WeatherDomain, List<string>>();
+        var provided = new Dictionary<string, bool>();
+        var fieldSources = new Dictionary<string, string>();
+        void Use(WeatherDomain domain, IWeatherSource source)
+        {
+            provided[source.Info.Id] = true;
+            if (!used.TryGetValue(domain, out var list)) used[domain] = list = [];
+            if (!list.Contains(source.Info.Name)) list.Add(source.Info.Name);
+        }
+
+        foreach (var domain in Enum.GetValues<WeatherDomain>())
+        {
+            if (owners[domain] is not { } source) continue;
+            if (!parts.TryGetValue(source.Info.Id, out var part)) continue;
+            switch (domain)
+            {
+                case WeatherDomain.Current:
+                    if (part.Current is { } c) { bool any = MergeCurrent(current, c, source.Info.Id, fieldSources); if (any) Use(domain, source); }
+                    break;
+                case WeatherDomain.Air:
+                    // 空气质量按字段补齐：腾讯给 AQI，Open-Meteo 补 PM2.5/PM10，避免整块先到先得丢掉污染物浓度。
+                    if (part.Air is { } a && a.HasData)
+                    {
+                        air ??= new AirPart();
+                        bool any = false;
+                        if (air.Aqi is null && a.Aqi is not null) { air.Aqi = a.Aqi; fieldSources["aqi"] = source.Info.Id; any = true; }
+                        if (air.Pm25 is null && a.Pm25 is not null) { air.Pm25 = a.Pm25; fieldSources["pm25"] = source.Info.Id; any = true; }
+                        if (air.Pm10 is null && a.Pm10 is not null) { air.Pm10 = a.Pm10; fieldSources["pm10"] = source.Info.Id; any = true; }
+                        if (air.Level is null && a.Level is not null) { air.Level = a.Level; any = true; }
+                        if (air.Text is null && a.Text is not null) { air.Text = a.Text; any = true; }
+                        if (air.Primary is null && a.Primary is not null) { air.Primary = a.Primary; any = true; }
+                        if (air.PrimaryName is null && a.PrimaryName is not null) { air.PrimaryName = a.PrimaryName; any = true; }
+                        if (air.HealthEffect is null && a.HealthEffect is not null) { air.HealthEffect = a.HealthEffect; any = true; }
+                        if (air.HealthGeneral is null && a.HealthGeneral is not null) { air.HealthGeneral = a.HealthGeneral; any = true; }
+                        if (air.HealthSensitive is null && a.HealthSensitive is not null) { air.HealthSensitive = a.HealthSensitive; any = true; }
+                        // 污染物逐项补齐：排在前面的来源已经给出的项不再覆盖。
+                        foreach (var (code, value) in a.Pollutants)
+                        {
+                            if (!air.Pollutants.TryAdd(code, value)) continue;
+                            if (a.Units.TryGetValue(code, out var unit)) air.Units[code] = unit;
+                            fieldSources["air:" + code] = source.Info.Id;
+                            any = true;
+                        }
+                        if (any) Use(domain, source);
+                    }
+                    break;
+                case WeatherDomain.Hourly:
+                    if (part.Hours is { Count: > 0 } hs) { bool any = false; foreach (var hour in hs) if (!hours.ContainsKey(hour.Time)) { hours[hour.Time] = hour; fieldSources.TryAdd("h:" + hour.Time, source.Info.Id); any = true; } if (any) Use(domain, source); }
+                    break;
+                case WeatherDomain.Minutely:
+                    if (part.Minutes is { Count: > 0 } mins) { minutes.AddRange(mins.Where(m => !minutes.Any(x => x.Time == m.Time))); Use(domain, source); }
+                    minuteSummary ??= part.MinuteSummary;
+                    break;
+                case WeatherDomain.Warning:
+                    // 空列表也是一次有效回答（「当前无预警」），同样记来源，详情页预警区才能标出是谁在值守。
+                    if (part.Warnings is { } warns) { warnings.AddRange(warns); Use(domain, source); }
+                    break;
+                case WeatherDomain.Indices:
+                    if (part.Indices is { Count: > 0 } idxs) { indices.AddRange(idxs); Use(domain, source); }
+                    break;
+                case WeatherDomain.Daily:
+                case WeatherDomain.History:
+                    if (part.Days is { Count: > 0 } ds)
+                    {
+                        bool any = false;
+                        foreach (var day in ds)
+                        {
+                            if (!dayMap.TryGetValue(day.Date, out var target)) continue;
+                            if (MergeDay(target, day, source.Info.Id, fieldSources)) any = true;
+                        }
+                        if (any) Use(domain, source);
+                    }
+                    break;
+            }
+        }
+
+        // 逐时窗口固定以「当前整点前 1 小时」为起点、共 24 条：过去 1 小时 + 当前 + 未来 22 小时。
+        // 过去那 1 小时和风/各预报源都拿不到（和风从下一整点起、时光机不含今天），改由本地历史补：
+        // 每次成功刷新都把当时的整点数据存进 weather/hour-history，下一小时它就成了「过去」那一格。
+        // 本地也没有就留空（NaN / -1），界面隐藏数值，不联网补、不冒充预报。
+        var cityKey = city.ToString();
+        var local = WeatherHourHistory.Read(cityKey);
+        foreach (var (time, point) in local)
+            if (!hours.ContainsKey(time)) { hours[time] = point; fieldSources.TryAdd("h:" + time, "local"); }
+        // 字典合并后顺序不保证有序（本地历史与预报源交错插入），先按整点键排好序再找锚点，窗口切片才可靠。
+        var ordered = hours.Values.OrderBy(p => p.Time, StringComparer.Ordinal).ToList();
+        int start = 0;
+        string anchor = HourKey(DateTimeOffset.Now.ToOffset(ClockOffset(zone, city)).AddHours(-1));
+        for (int index = 0; index < ordered.Count; index++)
+            if (string.CompareOrdinal(ordered[index].Time, anchor) >= 0) { start = index; break; }
+        var hourList = ordered.Skip(start).Take(24).ToArray();
+        var snapshot = new WeatherSnapshot
+        {
+            Name = city.Name,
+            // 快照一律按真实城市键存（自动定位也一样）：CityKey 供快照落盘与逐时历史使用，
+            // 与下方 WeatherHourHistory.Read 的读取键严格一致；"auto" 只是 State.AutoKey 的映射。
+            CityKey = cityKey,
+            Today = today.ToString("yyyy-MM-dd"),
+            FetchedAt = DateTimeOffset.Now,
+            // 城市时钟偏移：界面靠它把「现在」认到正确的整点列上（国外城市与本机不在同一时区）。
+            UtcOffsetMinutes = (int)ClockOffset(zone, city).TotalMinutes,
+            Temperature = current.Temperature ?? double.NaN,
+            FeelsLike = current.FeelsLike ?? current.Temperature ?? double.NaN,
+            HumidityPercent = current.Humidity ?? -1,
+            WindKmh = current.WindKmh ?? double.NaN,
+            WindGustKmh = current.WindGustKmh ?? double.NaN,
+            WindDirectionDeg = current.WindDirDeg ?? double.NaN,
+            WindDirection = current.WindDir ?? "",
+            PressureHpa = current.PressureHpa ?? double.NaN,
+            VisibilityKm = current.VisibilityKm ?? double.NaN,
+            DewPointC = current.DewPointC ?? double.NaN,
+            UvIndex = current.Uv ?? double.NaN,
+            CloudPercent = current.CloudPercent ?? double.NaN,
+            PrecipitationMm = current.PrecipMm ?? double.NaN,
+            WindScale = current.WindScale ?? -1,
+            PrecipRateMmH = current.PrecipRateMmH ?? double.NaN,
+            PrecipType = current.PrecipType ?? "",
+            WeatherCode = current.Code ?? 0,
+            IsDay = current.IsDay ?? (DateTime.Now.Hour is >= 6 and < 18),
+            ConditionText = current.Condition ?? "",
+            Aqi = air?.Aqi ?? -1,
+            AqiGlobal = air?.AqiGlobal ?? -1,
+            Pm25 = air?.Pm25 ?? -1,
+            Pm10 = air?.Pm10 ?? -1,
+            AqiLevel = air?.Level ?? -1,
+            AqiText = air?.Text ?? "",
+            AirPrimary = air?.PrimaryName ?? air?.Primary ?? "",
+            AirEffect = air?.HealthEffect ?? "",
+            AirAdvice = air?.HealthGeneral ?? "",
+            AirAdviceSensitive = air?.HealthSensitive ?? "",
+            AirPollutants = air is null ? [] : AirLines(air),
+            DayDates = dates.Select(date => date.ToString("yyyy-MM-dd")).ToArray(),
+            DayCodes = datePoints(dayMap, dates, point => point.Code ?? -1),
+            DayConditions = datePoints(dayMap, dates, point => point.Condition ?? ""),
+            DayHighC = datePoints(dayMap, dates, point => point.HighC ?? double.NaN),
+            DayLowC = datePoints(dayMap, dates, point => point.LowC ?? double.NaN),
+            DayFeelsHighC = datePoints(dayMap, dates, point => point.FeelsHighC ?? double.NaN),
+            DayFeelsLowC = datePoints(dayMap, dates, point => point.FeelsLowC ?? double.NaN),
+            SunriseTimes = datePoints(dayMap, dates, point => point.Sunrise ?? ""),
+            SunsetTimes = datePoints(dayMap, dates, point => point.Sunset ?? ""),
+            DayRainProb = datePoints(dayMap, dates, point => point.RainProb ?? -1),
+            DayPrecipMm = datePoints(dayMap, dates, point => point.PrecipMm ?? double.NaN),
+            DayUvMax = datePoints(dayMap, dates, point => point.UvMax ?? double.NaN),
+            DayWindMaxKmh = datePoints(dayMap, dates, point => point.WindMaxKmh ?? double.NaN),
+            DayGustMaxKmh = datePoints(dayMap, dates, point => point.GustMaxKmh ?? double.NaN),
+            DayWindDirDeg = datePoints(dayMap, dates, point => point.WindDirDeg ?? double.NaN),
+            DayWindDir = datePoints(dayMap, dates, point => point.WindDir ?? ""),
+            DayHumidity = datePoints(dayMap, dates, point => point.Humidity ?? -1),
+            DayPressureHpa = datePoints(dayMap, dates, point => point.PressureHpa ?? double.NaN),
+            DayMoonPhase = datePoints(dayMap, dates, point => point.MoonPhase ?? ""),
+            MoonriseTimes = datePoints(dayMap, dates, point => point.Moonrise ?? ""),
+            MoonsetTimes = datePoints(dayMap, dates, point => point.Moonset ?? ""),
+            DayAvgC = datePoints(dayMap, dates, point => point.AvgTempC ?? double.NaN),
+            DayCloudPercent = datePoints(dayMap, dates, point => point.CloudPercent ?? double.NaN),
+            DayNightCodes = datePoints(dayMap, dates, point => point.NightCode ?? -1),
+            DayNightConditions = datePoints(dayMap, dates, point => point.NightCondition ?? ""),
+            DayNightHumidity = datePoints(dayMap, dates, point => point.NightHumidity ?? -1),
+            DayNightWindMaxKmh = datePoints(dayMap, dates, point => point.NightWindMaxKmh ?? double.NaN),
+            DayNightGustMaxKmh = datePoints(dayMap, dates, point => point.NightGustMaxKmh ?? double.NaN),
+            DayNightWindDirDeg = datePoints(dayMap, dates, point => point.NightWindDirDeg ?? double.NaN),
+            DayNightWindDir = datePoints(dayMap, dates, point => point.NightWindDir ?? ""),
+            DayNightPrecipMm = datePoints(dayMap, dates, point => point.NightPrecipMm ?? double.NaN),
+            DayNightRainProb = datePoints(dayMap, dates, point => point.NightRainProb ?? -1),
+            DayNightCloudPercent = datePoints(dayMap, dates, point => point.NightCloudPercent ?? double.NaN),
+            AstronomicalDawnTimes = datePoints(dayMap, dates, point => point.AstronomicalDawn ?? ""),
+            NauticalDawnTimes = datePoints(dayMap, dates, point => point.NauticalDawn ?? ""),
+            CivilDawnTimes = datePoints(dayMap, dates, point => point.CivilDawn ?? ""),
+            CivilDuskTimes = datePoints(dayMap, dates, point => point.CivilDusk ?? ""),
+            NauticalDuskTimes = datePoints(dayMap, dates, point => point.NauticalDusk ?? ""),
+            AstronomicalDuskTimes = datePoints(dayMap, dates, point => point.AstronomicalDusk ?? ""),
+            SolarNoonTimes = datePoints(dayMap, dates, point => point.SolarNoon ?? ""),
+            SolarMidnightTimes = datePoints(dayMap, dates, point => point.SolarMidnight ?? ""),
+            MoonTransitTimes = datePoints(dayMap, dates, point => point.MoonTransit ?? ""),
+            MoonUnderfootTimes = datePoints(dayMap, dates, point => point.MoonUnderfoot ?? ""),
+            MinuteTimes = minutes.OrderBy(m => m.Time, StringComparer.Ordinal).Select(m => m.Time).ToArray(),
+            MinutePrecip = minutes.OrderBy(m => m.Time, StringComparer.Ordinal).Select(m => m.Precip ?? double.NaN).ToArray(),
+            MinuteSummary = minuteSummary ?? "",
+            Warnings = [.. warnings],
+            Indices = [.. indices],
+            HourTimes = hourList.Select(hour => hour.Time).ToArray(),
+            HourTempsC = hourList.Select(hour => hour.Temperature ?? double.NaN).ToArray(),
+            HourFeelsLikeC = hourList.Select(hour => hour.FeelsLike ?? double.NaN).ToArray(),
+            HourHumidity = hourList.Select(hour => hour.Humidity ?? -1).ToArray(),
+            HourCodes = hourList.Select(hour => hour.Code ?? -1).ToArray(),
+            HourRainProb = hourList.Select(hour => hour.RainProb ?? -1).ToArray(),
+            HourPrecipMm = hourList.Select(hour => hour.PrecipMm ?? double.NaN).ToArray(),
+            HourWindKmh = hourList.Select(hour => hour.WindKmh ?? double.NaN).ToArray(),
+            HourWindGustKmh = hourList.Select(hour => hour.WindGustKmh ?? double.NaN).ToArray(),
+            HourWindDirDeg = hourList.Select(hour => hour.WindDirDeg ?? double.NaN).ToArray(),
+            HourPressureHpa = hourList.Select(hour => hour.PressureHpa ?? double.NaN).ToArray(),
+            HourUv = hourList.Select(hour => hour.Uv ?? double.NaN).ToArray(),
+            HourDewPointC = hourList.Select(hour => hour.DewPointC ?? double.NaN).ToArray(),
+            HourCloudPercent = hourList.Select(hour => hour.CloudPercent ?? double.NaN).ToArray(),
+            HourVisibilityKm = hourList.Select(hour => hour.VisibilityKm ?? double.NaN).ToArray(),
+            Sources = used.ToDictionary(pair => pair.Key.ToString(), pair => string.Join(" + ", pair.Value)),
+            FieldSources = fieldSources,
+            // 每域列出所有声明支持的来源（含未提供数据的），保序去重；图例中未提供的以灰色圆点标注。
+            DomainSources = Enum.GetValues<WeatherDomain>().ToDictionary(
+                domain => domain.ToString(),
+                domain => WeatherSources.All.Where(source => source.Info.Domains.Contains(domain)).Select(source => source.Info.Id).Distinct().ToArray()),
+            SourceProvided = provided
+        };
+        return snapshot;
+    }
+
+    private static T[] datePoints<T>(Dictionary<string, DayPoint> map, DateTime[] dates, Func<DayPoint, T> select)
+        => dates.Select(date => select(map[date.ToString("yyyy-MM-dd")])).ToArray();
+
+    // 污染物按固定顺序输出为「名称 → 值 单位」，界面照着列即可，不必再关心代码与单位换算。
+    private static readonly string[] PollutantOrder = ["pm2p5", "pm10", "o3", "no2", "so2", "co", "no", "nmhc"];
+    private static Dictionary<string, string> AirLines(AirPart air)
+    {
+        var lines = new Dictionary<string, string>();
+        // 痕量气体（O₃、CO）常在 1 以下，用两位小数，避免被舍成 0。
+        void Add(string code, double value)
+            => lines[PollutantName(code)] = $"{(value is > 0 and < 1 ? value.ToString("0.00", CultureInfo.InvariantCulture) : value.ToString("0.#", CultureInfo.InvariantCulture))} {PrettyUnit(air.Units.GetValueOrDefault(code) ?? "")}".Trim();
+        foreach (var code in PollutantOrder) if (air.Pollutants.TryGetValue(code, out var value)) Add(code, value);
+        foreach (var (code, value) in air.Pollutants) if (!PollutantOrder.Contains(code)) Add(code, value);
+        return lines;
+    }
+    private static string PollutantName(string code) => code switch
+    {
+        "pm2p5" => "PM2.5", "pm10" => "PM10", "o3" => "O₃", "no2" => "NO₂",
+        "so2" => "SO₂", "co" => "CO", "no" => "NO", "nmhc" => "NMHC", _ => code.ToUpperInvariant()
+    };
+    private static string PrettyUnit(string unit) => unit.Replace("m3", "m³");
+
+    // 空位才写入：来源链靠前的那份数据优先，后面的来源只补空缺。
+    private static bool Set<T>(ref T? field, T? value) where T : struct
+    {
+        if (field is null && value is not null) { field = value; return true; }
+        return false;
+    }
+
+    private static bool MergeCurrent(CurrentPart target, CurrentPart source, string sourceId, Dictionary<string, string> fieldSources)
+    {
+        bool any = false;
+        bool Mark(bool ok, string field) { if (ok) { fieldSources[field] = sourceId; return true; } return false; }
+        any |= Mark(Set(ref target.Temperature, source.Temperature), "temp");
+        any |= Mark(Set(ref target.FeelsLike, source.FeelsLike), "feels");
+        any |= Mark(Set(ref target.Humidity, source.Humidity), "humidity");
+        any |= Mark(Set(ref target.WindKmh, source.WindKmh), "wind");
+        any |= Mark(Set(ref target.WindGustKmh, source.WindGustKmh), "gust");
+        any |= Mark(Set(ref target.WindDirDeg, source.WindDirDeg), "wind_dir");
+        any |= Mark(Set(ref target.PressureHpa, source.PressureHpa), "pressure");
+        any |= Mark(Set(ref target.VisibilityKm, source.VisibilityKm), "visibility");
+        any |= Mark(Set(ref target.DewPointC, source.DewPointC), "dew");
+        any |= Mark(Set(ref target.Uv, source.Uv), "uv");
+        any |= Mark(Set(ref target.CloudPercent, source.CloudPercent), "cloud");
+        any |= Mark(Set(ref target.PrecipMm, source.PrecipMm), "precip");
+        any |= Mark(Set(ref target.Code, source.Code), "code");
+        any |= Mark(Set(ref target.IsDay, source.IsDay), "is_day");
+        any |= Mark(Set<int>(ref target.WindScale, source.WindScale), "wind_scale");
+        any |= Mark(Set(ref target.PrecipRateMmH, source.PrecipRateMmH), "precip_rate");
+        if (target.WindDir is null && source.WindDir is not null) { target.WindDir = source.WindDir; fieldSources["wind_dir_text"] = sourceId; any = true; }
+        if (target.Condition is null && source.Condition is not null) { target.Condition = source.Condition; fieldSources["condition"] = sourceId; any = true; }
+        if (target.PrecipType is null && source.PrecipType is not null) { target.PrecipType = source.PrecipType; any = true; }
+        return any;
+    }
+
+    private static bool MergeDay(DayPoint target, DayPoint source, string sourceId, Dictionary<string, string> fieldSources)
+    {
+        string key = "d:" + target.Date;
+        bool Mark(bool ok, string field) { if (ok) { fieldSources.TryAdd(field + ":" + target.Date, sourceId); fieldSources.TryAdd(key, sourceId); return true; } return false; }
+        bool any = false;
+        // 注意：这里所有字段必须用非短路的 `|` 串联。`Set`/`FillString` 只在目标为空时填入并返回 true，
+        // 用 `||` 会在第一个成功字段处短路，导致同一来源后续字段（如 solarNoon）永远补不进来。
+        any |= Mark(Set<int>(ref target.Code, source.Code) | (target.Condition is null && source.Condition is not null), "d_cond");
+        if (target.Condition is null && source.Condition is not null) { target.Condition = source.Condition; }
+        any |= Mark(Set<double>(ref target.HighC, source.HighC) | Set<double>(ref target.FeelsHighC, source.FeelsHighC), "d_high");
+        any |= Mark(Set<double>(ref target.LowC, source.LowC) | Set<double>(ref target.FeelsLowC, source.FeelsLowC), "d_low");
+        any |= Mark(Set<int>(ref target.RainProb, source.RainProb) | Set<double>(ref target.PrecipMm, source.PrecipMm), "d_rain");
+        any |= Mark(Set<double>(ref target.UvMax, source.UvMax), "d_uv");
+        any |= Mark(Set<double>(ref target.WindMaxKmh, source.WindMaxKmh) | Set<double>(ref target.GustMaxKmh, source.GustMaxKmh)
+            | Set<double>(ref target.WindDirDeg, source.WindDirDeg) | (target.WindDir is null && source.WindDir is not null), "d_wind");
+        if (target.WindDir is null && source.WindDir is not null) { target.WindDir = source.WindDir; }
+        any |= Mark(Set<int>(ref target.Humidity, source.Humidity), "d_humidity");
+        any |= Mark(Set<double>(ref target.PressureHpa, source.PressureHpa), "d_pressure");
+        // 天文（日出日落、月升月落、月相）随每日预报一起返回，是 Daily 的普通字段。
+        bool FillString(ref string? field, string? value) { if (field is not null || value is null) return false; field = value; return true; }
+        any |= Mark(FillString(ref target.Sunrise, source.Sunrise) | FillString(ref target.Sunset, source.Sunset), "d_sun");
+        // 晨昏蒙影与太阳正午/午夜、月过中天/月下点：和风 astro 独有的扩展时刻，同为 Daily 字段。
+        any |= Mark(FillString(ref target.AstronomicalDawn, source.AstronomicalDawn) | FillString(ref target.NauticalDawn, source.NauticalDawn)
+            | FillString(ref target.CivilDawn, source.CivilDawn) | FillString(ref target.CivilDusk, source.CivilDusk)
+            | FillString(ref target.NauticalDusk, source.NauticalDusk) | FillString(ref target.AstronomicalDusk, source.AstronomicalDusk)
+            | FillString(ref target.SolarNoon, source.SolarNoon) | FillString(ref target.SolarMidnight, source.SolarMidnight), "d_astro");
+        any |= Mark(FillString(ref target.MoonTransit, source.MoonTransit) | FillString(ref target.MoonUnderfoot, source.MoonUnderfoot), "d_moon");
+        any |= Mark(FillString(ref target.Moonrise, source.Moonrise) | FillString(ref target.Moonset, source.Moonset)
+            | FillString(ref target.MoonPhase, source.MoonPhase), "d_moon");
+        // 日均温与白天云量：和风独有（Open-Meteo daily 不返回这两项）。
+        any |= Mark(Set<double>(ref target.AvgTempC, source.AvgTempC), "d_avg");
+        any |= Mark(Set<double>(ref target.CloudPercent, source.CloudPercent), "d_cloud");
+        // 夜间分段：夜间天气/湿度/风/降水/云量，缺哪项补哪项。
+        any |= Mark(Set<int>(ref target.NightCode, source.NightCode) | (target.NightCondition is null && source.NightCondition is not null), "d_night");
+        if (target.NightCondition is null && source.NightCondition is not null) { target.NightCondition = source.NightCondition; }
+        any |= Mark(Set<int>(ref target.NightHumidity, source.NightHumidity), "d_night");
+        any |= Mark(Set<double>(ref target.NightWindMaxKmh, source.NightWindMaxKmh) | Set<double>(ref target.NightGustMaxKmh, source.NightGustMaxKmh)
+            | Set<double>(ref target.NightWindDirDeg, source.NightWindDirDeg) | (target.NightWindDir is null && source.NightWindDir is not null), "d_night");
+        any |= Mark(Set<double>(ref target.NightPrecipMm, source.NightPrecipMm) | Set<int>(ref target.NightRainProb, source.NightRainProb), "d_night");
+        any |= Mark(Set<double>(ref target.NightCloudPercent, source.NightCloudPercent), "d_night");
+        return any;
+    }
+
+    // 「当地今天」：优先用来源给的 IANA 时区（能带夏令时）；和风不提供时区，退回按经度估算的固定偏移。
+    // 否则查询跨日期的国外城市（例如洛杉矶清晨、北京已是次日）会把日期轴与时光机返回的日期错开一天。
+    private static DateTime LocalToday(string? zone, City city)
+    {
+        if (!string.IsNullOrWhiteSpace(zone))
+        {
+            try { return TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(zone)).Date; }
+            catch { }
+        }
+        return DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(Geo.UtcOffsetHours(city))).Date;
+    }
+    // 城市当地的「现在」：逐时窗口锚点按当地时钟算，查询国外城市时不能用用户本地时间。
+    private static DateTimeOffset LocalNow(string? zone)
+    {
+        if (string.IsNullOrWhiteSpace(zone)) return DateTimeOffset.Now;
+        try { return TimeZoneInfo.ConvertTime(DateTimeOffset.Now, TimeZoneInfo.FindSystemTimeZoneById(zone)); }
+        catch { return DateTimeOffset.Now; }
+    }
+    // 城市时钟偏移（分钟）：优先用来源给的时区名（能带夏令时），拿不到就按经纬度估算，国内固定 +8。
+    private static TimeSpan ClockOffset(string? zone, City city)
+        => TimeSpan.FromMinutes(string.IsNullOrWhiteSpace(zone) ? Geo.UtcOffsetHours(city) * 60 : LocalNow(zone).Offset.TotalMinutes);
+    // 按快照自带的偏移还原城市时钟：界面与覆盖判定用同一份，不会两边算出不同的「现在」。
+    private static DateTimeOffset SnapshotClock(WeatherSnapshot snapshot)
+        => snapshot.UtcOffsetMinutes is > -1440 and < 1440
+            ? DateTimeOffset.Now.ToOffset(TimeSpan.FromMinutes(snapshot.UtcOffsetMinutes))
+            : DateTimeOffset.Now;
+    // 整点键：与 HourPoint.Time 同一格式（yyyy-MM-ddTHH:mm，当地时钟），可直接做字符串比较。
+    private static string HourKey(DateTimeOffset at)
+        => new DateTimeOffset(at.Year, at.Month, at.Day, at.Hour, 0, 0, at.Offset).ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+}
