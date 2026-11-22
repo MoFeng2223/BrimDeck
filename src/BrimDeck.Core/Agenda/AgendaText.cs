@@ -81,6 +81,21 @@ public static class AgendaText
         return parts.Count == 0 ? null : string.Join(" · ", parts);
     }
 
+    // A block's times: "09:30–11:30", the segment's own (a part running past midnight ends "24:00").
+    public static string Times(AgendaSegment segment) => $"{Clock(segment.Start, segment.Day)}–{Clock(segment.End, segment.Day)}";
+
+    // Beside a block's times: "还剩 40 分钟" / "40 minutes left" while it is under way on now's day and ends that day; null otherwise.
+    public static string? Left(AgendaSegment segment, DateTime now)
+    {
+        var item = segment.Event;
+        var today = DateOnly.FromDateTime(now);
+        if (segment.AllDay || segment.Day != today || item.LastDay != today || AgendaQuery.Phase(item, now) != AgendaPhase.Ongoing) return null;
+        return Loc.T($"还剩 {Length(item.End - now)}", $"{Length(item.End - now)} left");
+    }
+
+    // "第 2 天，共 3 天" / "Day 2 of 3": an all-day chip of an event over several days.
+    public static string DayOf(AgendaSegment segment) => Loc.T($"第 {segment.DayIndex} 天，共 {segment.DayCount} 天", $"Day {segment.DayIndex} of {segment.DayCount}");
+
     private static string Span(AgendaSegment segment, DateOnly today)
     {
         var item = segment.Event;
@@ -95,7 +110,7 @@ public static class AgendaText
             var to = Clock(item.End, item.LastDay);
             return isToday ? Loc.T($"到明天 {to}", $"Until tomorrow at {to}") : Loc.T($"到次日 {to}", $"Until the next day at {to}");
         }
-        return $"{Loc.T($"第 {segment.DayIndex} 天，共 {segment.DayCount} 天", $"Day {segment.DayIndex} of {segment.DayCount}")} · {Range(item)}";
+        return $"{DayOf(segment)} · {Range(item)}";
     }
 
     // The whole of an event: "11月23日 20:00 – 11月25日 12:00", all day "11月23日 – 11月25日"; the year is written on both ends

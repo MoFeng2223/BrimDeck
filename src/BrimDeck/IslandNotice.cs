@@ -25,7 +25,7 @@ namespace BrimDeck;
 //
 // The window lies over the island with room around it for the bubbles and the backlight, and is shown only while a notice is.
 // While it shows, the island underneath is hidden (MainWindow.SetIslandCovered) and drawn here in the same outline and material.
-// A level-1 notice whose style takes a collapsed part's place (NoticeStyle.Slot) leaves the island as it is and draws over that
+// A level-1 notice whose sender asks for a collapsed part's place (Notice.Slot) leaves the island as it is and draws over that
 // part alone, in the island's material, with the words inside it. It never takes focus.
 internal sealed class IslandNotice : Window
 {
@@ -146,17 +146,16 @@ internal sealed class IslandNotice : Window
         else _deck.FadeIslandContent(() => { if (generation == _generation && _item is not null) Begin(false, generation); });
     }
 
-    // Where a level-1 notice whose style asks for a part shows (NoticeStyle.Slot): the part's area on the monitor, or null for the
-    // whole island (another level, no part chosen, the indicator, or a part not on the island now).
+    // Where a level-1 notice whose sender asks for a part shows (Notice.Slot): the part's area on the monitor, or null for the
+    // whole island (another level, no part asked for or the island asked for, the indicator, or a part not on the island now).
+    // The settings offer no place: notices of every level take the whole island unless their sender asks.
     // The notice's application has its own looks (NoticeAppRule.Styles): they decide over what its message asks for.
     private bool OwnLooks(AttentionItem? item) => item?.Payload is Notice notice && Settings.NoticeRule(notice.AppKey)?.Styles is not null;
 
     private Rect? PartOf(AttentionItem? item)
     {
         if (item is not { Level: NoticeLevel.Plain }) return null;
-        // The sender's own choice for this notice (Notice.Slot; the island is no part) comes before the level's style, unless the
-        // application has its own looks, which come first of all.
-        var slot = !OwnLooks(item) && (item.Payload as Notice)?.Slot is { } asked ? NoticeKeys.Part(asked) : item.Style?.Slot;
+        var slot = (item.Payload as Notice)?.Slot is { } asked ? NoticeKeys.Part(asked) : null;
         return slot is { } part ? _deck.CompactPartBounds(part) : null;
     }
 

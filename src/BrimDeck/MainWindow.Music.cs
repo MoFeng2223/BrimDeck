@@ -151,7 +151,7 @@ public partial class MainWindow
     {
         if (!DeckPages.Shown(Settings, page)) return;
         bool changed = CurrentPage != page;
-        if (changed) { CloseSourceMenu(); PageToolTips.CloseWithin(PageContent(CurrentPage)); }
+        if (changed) { CloseSourceMenu(); PageToolTips.CloseWithin(PageContent(CurrentPage)); if (CurrentPage == DeckPage.Agenda) LeaveAgenda(); }
         if (changed && _expanded && !_preview)
         {
             // Start before resizing: the shrinking surface can immediately fire MouseLeave.
@@ -175,7 +175,7 @@ public partial class MainWindow
     }
     // The page chosen on another display's panel (App.PageChosen).
     internal void FollowPage(DeckPage page) { if (CurrentPage != page) SelectPage(page, remember: false); }
-    private FrameworkElement PageContent(DeckPage page) => page switch { DeckPage.Music => MusicContent, DeckPage.Monitor => MonitorContent, DeckPage.Clipboard => ShelfContent, DeckPage.Devices => DevicesContent, DeckPage.Notices => NoticesContent, _ => UsageContent };
+    private FrameworkElement PageContent(DeckPage page) => page switch { DeckPage.Music => MusicContent, DeckPage.Monitor => MonitorContent, DeckPage.Clipboard => ShelfContent, DeckPage.Devices => DevicesContent, DeckPage.Notices => NoticesContent, DeckPage.Agenda => AgendaContent, _ => UsageContent };
     private void ShowPage(DeckPage page, bool animatePage)
     {
         // The music page keeps what it built while another page shows (RenderMusic's key), so switching back does not build it again.
@@ -222,6 +222,7 @@ public partial class MainWindow
         SelectPage(DeckPage.Clipboard);
     }
     private void DevicesPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Devices);
+    private void AgendaPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Agenda);
     // Where the usage page's application tabs start: after the page switch, which holds one 28 DIP button per shown page.
     private double ApplicationPagesLeft(double side) { int pages = DeckPages.Visible(Settings).Count; return side + (pages <= 1 ? 36 : 72 + 29 * (pages - 2)); }
     private PanelHeader _header = PanelHeader.For(36, 20);
@@ -238,7 +239,7 @@ public partial class MainWindow
         Toolbar.Height = header.Height;
         PageSwitch.Margin = new Thickness(header.Side, 0, 0, 0);
         FitPageButtons(header);
-        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton, NoticesPageButton })
+        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton, NoticesPageButton, AgendaPageButton })
         {
             // A local corner for these two buttons only; PanelIconButton keeps its 5 DIP corner elsewhere.
             button.ApplyTemplate();
@@ -248,18 +249,19 @@ public partial class MainWindow
         SettingsButton.Height = header.SettingsHeight;
         ToolbarActions.Margin = new Thickness(0, 0, header.RightMargin, 0);
         ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(header.Side), 0, 0, 0);
+        PlaceClock();
         // Refresh the grip boundary when the shared toolbar changes without resizing the island.
         if (gripBoundaryChanged) UpdateGrips();
     }
     private void RenderPageSwitch()
     {
         SetValue(SuppressMusicToolTipsProperty, IsMusicPage);
-        foreach (var control in new FrameworkElement[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton, NoticesPageButton, MediaSourceButton, ClockLabel })
+        foreach (var control in new FrameworkElement[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton, NoticesPageButton, AgendaPageButton, MediaSourceButton, ClockLabel })
             ToolTipService.SetIsEnabled(control, !IsMusicPage);
         PageSwitch.Visibility = _details && IsUsagePage || IsShelfPage && ShelfHidesSwitch ? Visibility.Collapsed : Visibility.Visible;
         OrderPageButtons();
         if (!IsShelfPage) { ShelfToolbar.Visibility = Visibility.Collapsed; ShelfSearchButton.Visibility = Visibility.Collapsed; }
-        foreach (var (button, page) in new[] { (AIUsageButton, DeckPage.Usage), (MusicPageButton, DeckPage.Music), (MonitorPageButton, DeckPage.Monitor), (ShelfPageButton, DeckPage.Clipboard), (DevicesPageButton, DeckPage.Devices), (NoticesPageButton, DeckPage.Notices) })
+        foreach (var (button, page) in new[] { (AIUsageButton, DeckPage.Usage), (MusicPageButton, DeckPage.Music), (MonitorPageButton, DeckPage.Monitor), (ShelfPageButton, DeckPage.Clipboard), (DevicesPageButton, DeckPage.Devices), (NoticesPageButton, DeckPage.Notices), (AgendaPageButton, DeckPage.Agenda) })
         {
             bool current = CurrentPage == page;
             button.Visibility = DeckPages.Shown(Settings, page) ? Visibility.Visible : Visibility.Collapsed;
@@ -268,6 +270,7 @@ public partial class MainWindow
         PlacePageCapsule();
         UpdateShelfPageButton();
         UpdateNoticeBadge();
+        PlaceClock();
         ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(_header.Side), 0, 0, 0);
         // With the entry switched on the source menu has one more row. Without a source that row stands alone in the button.
         bool entry = FullControlEntryShown, alone = entry && _mediaTrack is null;
@@ -546,7 +549,7 @@ public partial class MainWindow
         // Only a page that was on screen hands over; one that arrives by the page switch or with the panel opening comes in whole.
         bool shown = MusicContent.IsVisible && _expanded && !_preview;
         RefreshStatus();
-        UsageContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Visible;
+        UsageContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; AgendaContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         double h = ContentCanvas.Height, w = ContentCanvas.Width;
         var track = _mediaTrack;
@@ -1350,7 +1353,7 @@ public partial class MainWindow
         var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
         var steadyItems = Settings.ShowsSummary(EffectiveStyle) ? QuotaRings(Settings.EnabledApps) : [];
         // The clock keeps its own width; shown alone, it is centred.
-        var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor, Look), DateTime.Now, scale, Look) : null;
+        var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor, Look), DateTime.Now, scale, Look, ClockDate.Of(Settings)) : null;
         // The file transfer's count keeps one width, as the clock does; with both, they are counted as one fixed part with a gap between.
         var transfer = TransferBadge(scale);
         double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;

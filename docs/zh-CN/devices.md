@@ -79,7 +79,7 @@ BrimDeck 只读取电量：不配对、不断开，也不改动任何设备与 W
 - [aj179-linux](https://github.com/Rockeyxx/aj179-linux)（黑爵）
 - [HaloBattery](https://github.com/HeyOkay/HaloBattery)、[vigil-watt](https://github.com/evren-oct/vigil-watt)、[mousedock](https://github.com/late-autumn-gif/mousedock)、[Voltide](https://github.com/sdparklab/Voltide)（多个品牌的鼠标、键盘、耳机与手柄）
 - [mouse-battery-tray](https://github.com/incconutwo/mouse-battery-tray)（incconutwo）、[mouse-battery-tray](https://github.com/misaka310/mouse-battery-tray)（misaka310）
-- [rapoo-tray](https://github.com/Iris-0109/rapoo-tray)、[mousectl](https://github.com/D3m0nZOnFire/mousectl)（雷柏）
+- [rapoo-tray](https://github.com/Iris-0109/rapoo-tray)、[mousectl](https://github.com/D3m0nZOnFire/mousectl)、[rapoo-software-linux](https://github.com/pedro3z0/rapoo-software-linux)（雷柏）
 - [rivalcfg](https://github.com/flozz/rivalcfg)（赛睿鼠标）
 - [SDL](https://github.com/libsdl-org/SDL)（飞智、8BitDo、NVIDIA SHIELD、Xbox 360 手柄）
 - [betop-battery](https://github.com/oitsukiii/betop-battery)（北通）

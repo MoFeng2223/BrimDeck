@@ -16,7 +16,7 @@ public enum NoticePriority { Low, Normal, High }
 // style (a quota alert) it plays the liquid. Auto: not chosen; NoticeLevels.Resolve decides.
 public enum NoticeLevel { Auto, Silent, Plain, Glow, Lively, Persistent }
 // Where a sender asks its plain notice to show (NoticeMessage.Slot): the whole island, or the place of one part of the collapsed
-// content. Not given, the level's style decides (NoticeStyle.Slot).
+// content. Not given, the whole island.
 public enum NoticeSlot { Island, Usage, Music, Monitor, Clock, Transfer, Devices }
 // Where the icon and the words sit in the island when they fit; longer words start at the left and scroll.
 public enum NoticeAlign { Left, Center, Right }
@@ -76,6 +76,8 @@ public sealed record NoticeInput
     public NoticeTiming? Timing { get; init; }
     // Ends the timing of the earlier notice with the same AppKey and ReplaceKey (brim-notify stop) instead of adding one.
     public bool StopTiming { get; init; }
+    // A stop or a removal that names the notice by BrimDeck's own id (NoticeMessage.NoticeId) instead of by ReplaceKey.
+    public string? TargetId { get; init; }
     // Arrived while BrimDeck could not read its source (the PC slept): recorded, unviewed, but not shown as it arrives (core-M5).
     public bool Missed { get; init; }
     // Handed over already as it arrived (WindowsNoticeList.Observe) and sent again only so the hub merges the notice it took the
@@ -89,7 +91,7 @@ public sealed record NoticeInput
     // The level and the alignment the sender asked for (NoticeMessage.Level, Align); Auto and null leave them to BrimDeck.
     public NoticeLevel Level { get; init; }
     public NoticeAlign? Align { get; init; }
-    // Where a plain notice shows (NoticeMessage.Slot); null leaves it to the setting.
+    // Where a plain notice shows (NoticeMessage.Slot); null is the whole island.
     public NoticeSlot? Slot { get; init; }
     // "#RRGGBB" for the backlight of a notice that stays until handled; null takes the category's or the setting's.
     public string? Glow { get; init; }

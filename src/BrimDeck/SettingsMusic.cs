@@ -12,13 +12,13 @@ namespace BrimDeck;
 public sealed partial class SettingsWindow
 {
     // keepPreview marks the segments alone as preview controls, so a press on the rest of the row still ends the preview.
-    private FrameworkElement MusicChoice<T>(string title, T selected, (T Value, string Label)[] options, Action<T> change, bool enabled = true, bool keepPreview = false, string? help = null, double width = 292) where T : notnull
+    private FrameworkElement MusicChoice<T>(string title, T selected, (T Value, string Label)[] options, Action<T> change, bool enabled = true, bool keepPreview = false, string? help = null, double width = 292, string? group = null) where T : notnull
     {
         var strip = new UniformGrid { Columns = options.Length, Width = width, IsEnabled = enabled };
         if (keepPreview) KeepPreview(strip);
         foreach (var option in options)
         {
-            var choice = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = option.Label, GroupName = title, IsChecked = EqualityComparer<T>.Default.Equals(option.Value, selected) };
+            var choice = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = option.Label, GroupName = group ?? title, IsChecked = EqualityComparer<T>.Default.Equals(option.Value, selected) };
             AutomationProperties.SetName(choice, title + " " + option.Label); choice.Checked += (_, _) => change(option.Value); strip.Children.Add(choice);
         }
         // Only the options are turned off: the row's info mark still shows its description on hover.

@@ -44,7 +44,7 @@ internal static class NoticeBannerKeeperTests
         string ledger = Path.Combine(root, BannerLedger.FileName);
         var apps = Enumerable.Range(0, 300).Select(i => "Test.App" + i).ToList();
         static NoticeAppRule Hide(string appId) => new() { Key = NoticeKeys.Windows(appId), HideBanner = true };
-        var settings = new DeckSettings { NoticesEnabled = true, NoticeAppsListed = true, NoticeApps = [.. apps.Select(Hide), Hide("BrimDeck.Desktop")] };
+        var settings = new DeckSettings { NoticeIsland = true, NoticeAppsListed = true, NoticeApps = [.. apps.Select(Hide), Hide("BrimDeck.Desktop")] };
         var registry = new Registry();
         var failures = new List<Exception>();
         var keeper = new NoticeBannerKeeper(() => settings, Dispatcher.CurrentDispatcher, ledger, () => true, registry, ["BrimDeck.Desktop"], failures.Add, watch: false);
@@ -106,7 +106,7 @@ internal static class NoticeBannerKeeperTests
         // Watching Windows' notification settings: a change there (here a made-up application's key) asks for a pass by itself.
         File.Delete(ledger); File.Delete(ledger + BannerLedger.BackupSuffix);
         var watched = new Registry();
-        var watchedSettings = new DeckSettings { NoticesEnabled = true, NoticeAppsListed = true, NoticeApps = [Hide("Test.Watched")] };
+        var watchedSettings = new DeckSettings { NoticeIsland = true, NoticeAppsListed = true, NoticeApps = [Hide("Test.Watched")] };
         var watcher = new NoticeBannerKeeper(() => watchedSettings, Dispatcher.CurrentDispatcher, ledger, () => true, watched, [], failures.Add);
         string probe = NoticeBanners.SettingsKey + @"\BrimDeck.Tests.Watch." + Guid.NewGuid().ToString("N");
         try

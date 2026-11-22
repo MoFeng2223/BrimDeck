@@ -34,7 +34,6 @@ public partial class MainWindow
 
     // The coordinator's name for this panel: the main panel's stays the same when its monitor changes.
     internal string NoticeLane => _lead is null ? "main" : "display:" + (Display?.Id ?? "");
-    internal long NoticeMonitor => MonitorHandle.ToInt64();
     // ui-2: nothing starts while the panel powers off; it draws back into the dot in sight (PowerOff ends a shown notice).
     internal bool CanShowNotices => IsVisible && !IsSuppressed && !_preview && !_poweringOff;
     // Arriving notices show on this panel: the switch of the profile it shows ("提示新通知" under 收起外观).
@@ -459,7 +458,7 @@ public partial class MainWindow
         fresh |= NoticesContent.Visibility != Visibility.Visible;
         SubscribeNotices();
         RefreshStatus();
-        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Visible;
+        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; AgendaContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         ApplyPageHeader(PanelHeader.ForPanel(ContentCanvas.Height));
         double offset = fresh ? 0 : _pageScroll?.VerticalOffset ?? 0;

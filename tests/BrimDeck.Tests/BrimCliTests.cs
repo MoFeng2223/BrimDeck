@@ -19,6 +19,58 @@ internal static class BrimCliTests
         Hub(check);
         Buttons(check);
         Coordinator(check);
+        ListAndRemove(check);
+    }
+
+    // brim notify list, remove, and close or remove by the id list gives.
+    private static void ListAndRemove(Action<string, bool> check)
+    {
+        check("List: list takes --json and -s, and nothing else", Brim("notify", "list") is { Kind: NotifyCommandKind.List, JsonOutput: false, Message: { Type: NoticeTypes.List, AppName: null } }
+            && Brim("notify", "list", "--json", "-s", "ci") is { Kind: NotifyCommandKind.List, JsonOutput: true, Message.AppName: "ci" }
+            && Brim("notify", "list", "--source=ci").Message?.AppName == "ci" && Brim("notify", "list", "x").Kind == NotifyCommandKind.Error && Brim("notify", "list", "-s").Kind == NotifyCommandKind.Error);
+        check("List: BRIM_SOURCE names a sender, so it does not narrow what list shows", BrimCommandLine.Parse(["notify", "list"], "Claude Code").Message?.AppName is null);
+        check("Remove: remove takes a key and the source, or --notice", Brim("notify", "remove", "deploy", "-s", "ci") is { Kind: NotifyCommandKind.Send, Message: { Type: NoticeTypes.Remove, ReplaceId: "deploy", AppName: "ci", Stop: null } }
+            && Brim("notify", "remove", "--notice", "abc") is { Message: { Type: NoticeTypes.Remove, NoticeId: "abc", ReplaceId: null } }
+            && Brim("notify", "close", "--notice", "abc") is { Message: { Type: NoticeTypes.Notify, Stop: true, NoticeId: "abc", ReplaceId: null } }
+            && Brim("notify", "remove").Kind == NotifyCommandKind.Error && Brim("notify", "remove", "k", "--notice", "abc").Kind == NotifyCommandKind.Error
+            && Brim("notify", "send", "x", "--notice", "abc").Kind == NotifyCommandKind.Error && Brim("notify", "pause") is { Kind: NotifyCommandKind.Error, Error: { } verb } && verb.Contains("list"));
+        check("Remove: a removal names a notice, or it is refused", NoticeProtocol.Validate(new NoticeMessage { Type = NoticeTypes.Remove }) == "no-target"
+            && NoticeProtocol.Validate(new NoticeMessage { Type = NoticeTypes.Remove, NoticeId = "a" }) is null && NoticeProtocol.Validate(new NoticeMessage { Type = NoticeTypes.List }) is null
+            && NoticeProtocol.Validate(Brim("notify", "close", "--notice", "abc").Message!) is null && NoticeProtocol.Validate(new NoticeMessage { Stop = true, Kind = NoticeTimes.Stopwatch }) == "no-key");
+
+        var hub = new NoticeHub();
+        var mine = hub.Receive(Input("Deploying", "-k", "deploy", "-s", "ci", "--context", "main"), T0).Notice!;
+        var other = hub.Receive(Input("Tests passed", "-s", "ci"), T0.AddSeconds(1)).Notice!;
+        var app = hub.Receive(new NoticeInput { Origin = NoticeOrigin.Windows, AppKey = "windows:QQ", AppName = "QQ", InstanceKey = "windows:QQ:7:1", Title = "Alice", Body = "Code 482913 is your verification code" }, T0.AddSeconds(2)).Notice!;
+        var unlisted = hub.Receive(Input("Switched", "--no-history"), T0.AddSeconds(3)).Notice!;
+        var cli = NoticeEntries.Of(hub.Notices, all: false, null, codes: false, _ => false, n => n == other);
+        check("List: without the user's leave only the command line's notices, newest first", cli is [{ Title: "Tests passed", Waiting: true, Origin: "cli" }, { Title: "Deploying", Key: "deploy", Context: "main", Source: "ci", Unread: true }]
+            && !cli.Any(e => e.Id == unlisted.Id));
+        var all = NoticeEntries.Of(hub.Notices, all: true, null, codes: true, n => n == app, _ => false);
+        check("List: with it every source, and a verification code stays hidden as the notices page hides it", all.Count == 3 && all[0] is { Origin: "windows", Source: "QQ", Shown: true } first
+            && !first.Body.Contains("482913") && NoticeEntries.Of(hub.Notices, true, "qq", false, _ => false, _ => false) is [{ Body: var body }] && body.Contains("482913"));
+        check("List: a notice of another source is out of reach without the leave", !NoticeEntries.Reachable(app, false) && NoticeEntries.Reachable(app, true) && NoticeEntries.Reachable(mine, false));
+
+        var big = Enumerable.Range(0, 40).Select(i => new NoticeEntry { Id = "n" + i.ToString("D2"), Title = "t", Body = new string('x', 3000), ReceivedAt = T0.AddSeconds(-i) }).ToList();
+        var pages = new List<NoticeMessage>();
+        string? cursor = null;
+        do { var page = NoticeProtocol.ListPage(big, cursor, NoticeScopes.Cli, "e"); pages.Add(page); cursor = page.Cursor; } while (cursor is not null && pages.Count < 50);
+        check("List: pages fit in a frame and give every notice once, in order", pages.Count > 1 && pages.All(p => NoticeProtocol.Fits(p) && p is { EventId: "e", Scope: NoticeScopes.Cli })
+            && pages.SelectMany(p => p.Notices!).Select(e => e.Id).SequenceEqual(big.Select(e => e.Id)));
+        var firstPage = NoticeProtocol.ListPage(big, null, NoticeScopes.Cli, null);
+        big.RemoveAt(1);
+        var resumed = NoticeProtocol.ListPage(big, firstPage.Cursor, NoticeScopes.Cli, null);
+        check("List: a page starts after the last one shown even when notices were removed meanwhile", resumed.Notices![0].Id == "n" + firstPage.Notices!.Count.ToString("D2")
+            && NoticeProtocol.ListPage(big, "garbage", NoticeScopes.Cli, null).Notices![0].Id == "n00");
+
+        var byOtherSource = NoticeIntake.FromPipe(Brim("notify", "remove", "deploy").Message!, T0);
+        check("Remove: by key only the sender's own source, by id any notice", hub.Target(byOtherSource) is null
+            && hub.Target(NoticeIntake.FromPipe(Brim("notify", "remove", "deploy", "-s", "ci").Message!, T0)) == mine
+            && hub.Target(NoticeIntake.FromPipe(Brim("notify", "remove", "--notice", app.Id).Message!, T0)) == app);
+        var closeApp = hub.Receive(NoticeIntake.FromPipe(Brim("notify", "close", "--notice", app.Id).Message!, T0), T0.AddSeconds(4));
+        var closeMine = hub.Receive(NoticeIntake.FromPipe(Brim("notify", "close", "--notice", mine.Id).Message!, T0), T0.AddSeconds(5));
+        check("Close: by id it closes a command-line notice and leaves an application's alone", closeApp is { Receipt: NoticeReceipt.Filtered, Reason: "no-timer" } && app.SourcePresent
+            && closeMine is { Receipt: NoticeReceipt.Updated } && closeMine.Notice == mine && !mine.SourcePresent && hub.Notices.Contains(mine));
     }
 
     private static NotifyCommand Brim(params string[] args) => BrimCommandLine.Parse(args);

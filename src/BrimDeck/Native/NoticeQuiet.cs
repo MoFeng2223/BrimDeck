@@ -114,13 +114,6 @@ internal sealed class NoticeQuiet : IDisposable
 // Window and monitor calls the notices need besides WindowsHost's.
 internal static class NoticeNative
 {
-    // The monitor of the foreground window, or zero when there is none.
-    public static IntPtr ForegroundMonitor()
-    {
-        var window = GetForegroundWindow();
-        return window == IntPtr.Zero ? IntPtr.Zero : MonitorFromWindow(window, 0);
-    }
-
     // Puts a window above the other always-on-top windows (the panel among them) without activating it.
     public static void BringToTop(IntPtr window) => SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
 
@@ -145,7 +138,6 @@ internal static class NoticeNative
     [DllImport("user32")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32")] private static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32")] private static extern bool IsWindow(IntPtr window);
-    [DllImport("user32")] private static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
     [DllImport("user32")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
     [DllImport("user32", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
     [DllImport("user32", EntryPoint = "SetWindowLongPtrW")] private static extern IntPtr SetWindowLongPtr(IntPtr window, int index, IntPtr value);

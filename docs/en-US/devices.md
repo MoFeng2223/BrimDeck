@@ -79,7 +79,7 @@ Parts of the protocols are ported from or follow these open-source projects; the
 - [aj179-linux](https://github.com/Rockeyxx/aj179-linux) (AJAZZ)
 - [HaloBattery](https://github.com/HeyOkay/HaloBattery), [vigil-watt](https://github.com/evren-oct/vigil-watt), [mousedock](https://github.com/late-autumn-gif/mousedock), [Voltide](https://github.com/sdparklab/Voltide) (mice, keyboards, headsets and controllers of many brands)
 - [mouse-battery-tray](https://github.com/incconutwo/mouse-battery-tray) (incconutwo), [mouse-battery-tray](https://github.com/misaka310/mouse-battery-tray) (misaka310)
-- [rapoo-tray](https://github.com/Iris-0109/rapoo-tray), [mousectl](https://github.com/D3m0nZOnFire/mousectl) (Rapoo)
+- [rapoo-tray](https://github.com/Iris-0109/rapoo-tray), [mousectl](https://github.com/D3m0nZOnFire/mousectl), [rapoo-software-linux](https://github.com/pedro3z0/rapoo-software-linux) (Rapoo)
 - [rivalcfg](https://github.com/flozz/rivalcfg) (SteelSeries mice)
 - [SDL](https://github.com/libsdl-org/SDL) (Flydigi, 8BitDo, NVIDIA SHIELD, Xbox 360 controllers)
 - [betop-battery](https://github.com/oitsukiii/betop-battery) (BETOP)

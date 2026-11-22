@@ -4,14 +4,16 @@ When a notification arrives, the notch, capsule or indicator grows out of its pl
 
 ## Turning them on
 
-Live notices have two switches, both off by default; notices are received once either is on:
+Live notices have two switches, both on by default; notices are received while either is on, and no longer once both are off:
 
-- Settings › Live notices › How notices show › Show on the island: notices show on the island as they arrive.
+- Settings › Collapsed view › Live notices › Show new notices: arriving notices show on the notch, the capsule or the indicator.
 - Settings › Expanded view › Show live notices: the open panel shows the notices page.
 
-The two switches are independent: with only the notices page on, notices do not interrupt you and only go to the page.
+The two switches are independent: with only the notices page on, notices do not interrupt you and only go to the page; with only "Show new notices" on, notices show as usual and there is no notices page.
 
-The notch or the capsule can also keep a notice count that shows how many notices are unread: turn on "Notices" under Settings › Collapsed view › Content, and drag it among the other parts. It needs the notices page, shows nothing while no notice is unread, opens the notices page when clicked, and clears once that page has been opened. By default the icons of up to 3 apps the latest unread notices came from show before the number; switch off "Show app icons" under Settings › Live notices › How notices show › Notice count to show a bell instead. The indicator bar shows no count.
+Both switches belong to a profile. When screens use different profiles (Settings › Displays and profiles), each screen shows notices by its own profile's switch; screens that use the same profile with "Show new notices" on all show them.
+
+The notch and the capsule also show a notice count by default, with how many notices are unread: under Settings › Collapsed view › Content you can turn "Notices" off or drag it among the other parts. It needs the notices page, shows nothing while no notice is unread, opens the notices page when clicked, and clears once that page has been opened. By default the icons of up to 3 apps the latest unread notices came from show before the number; switch off "Show app icons" under Settings › Live notices › How notices show › Notice count to show a bell instead. The indicator bar shows no count.
 
 Settings › Live notices has two pages: "How notices show" sets how each of the three levels looks, and "Apps" sets which apps show notices and at which level. Then:
 
@@ -49,7 +51,7 @@ Each notice shows on the island at one level:
 
 There is also "List only": the notice only goes to the notice history and does not show on the island.
 
-How each level looks is set under Settings › Live notices › How notices show: the default position of level 1, whether the app icon shows, how long levels 1 and 2 show, the effect of levels 2 and 3 (Glow or Lively), and the default color of level 3. "Try it" beside each level sends a sample notice.
+How each level looks is set under Settings › Live notices › How notices show: whether the app icon shows, how long levels 1 and 2 show, the effect of levels 2 and 3 (Glow or Lively), and the default color of level 3. "Try it" beside each level sends a sample notice. Notices take the whole island; only a message that names a place with `--slot` replaces just one part.
 
 When an app needs a different look, click the arrow beside its name under Settings › Live notices › Apps to open "Own looks", and change it level by level. That app's notices then follow its own settings, which come before the "How notices show" page and the look a message asks for. "Own looks" is closed by default and is seldom needed.
 
@@ -73,7 +75,7 @@ While it shows, other notices go to the notice history and wait as usual; a norm
 
 | Source | What it is | Default |
 |---|---|---|
-| Windows app notifications | The current user's notifications in Windows' notification center: source, icon, time and text. Only the apps in the list under Settings › Live notices › Apps show; other apps' notifications are not shown and do not go to the notice history. The list holds QQ and Clock by default; "Add app" adds apps that sent notifications recently or are registered for notifications in Windows. Messages inside applications are not read, and the notification center is never cleared or changed. | On |
+| Windows app notifications | The current user's notifications in Windows' notification center: source, icon, time and text. Only the apps in the list under Settings › Live notices › Apps show; other apps' notifications are not shown and do not go to the notice history. The list holds QQ and Clock by default; "Add app" adds apps that sent notifications recently or are registered for notifications in Windows. Messages inside applications are not read, and the notification center is not cleared or changed, unless "Let brim list and remove all notices" is on and `brim notify remove` removes a notice. | On |
 | WeChat new messages | WeChat for PC does not send Windows notifications. While WeChat is in the "Apps" list, its flashing taskbar icon shows "WeChat has new messages"; the messages and their senders are not read. | In the list |
 | brim-notify | `BrimDeck.Notify.exe` on Windows and `brim-notify` in WSL send notices directly. | On |
 | WSL desktop notifications | Standard desktop notifications (freedesktop D-Bus, such as `notify-send`) in the chosen distributions. | Off, per distribution |
@@ -176,7 +178,7 @@ Options of `brim notify send`:
 | `-l/--level LEVEL` | `silent`, `plain`, `flash`, `persistent`, or `0` to `3`. The level you chose for the source comes first; how each level looks is decided under Settings › Live notices › How notices show |
 | `-c/--category KIND` | `message`, `task`, `success`, `warning`, `error`, `info`. A notice that stays glows orange, red or green for `warning`, `error` and `success` |
 | `--glow "#RRGGBB"` | The backlight of a notice that stays; it comes before the category's color and the default color of the settings |
-| `--slot PLACE` | Where a level 1 notice shows: `island` (the whole island), `usage`, `music`, `monitor`, `clock`, `transfer`, `devices`. It comes before the default place of the settings; when the collapsed island has no such part, or is the indicator, the notice takes the whole island |
+| `--slot PLACE` | Where a level 1 notice shows: `island` (the whole island), `usage`, `music`, `monitor`, `clock`, `transfer`, `devices`. Not given, the notice takes the whole island; when the collapsed island has no such part, or is the indicator, the notice takes the whole island |
 | `--align SIDE` | `left`, `center`, `right`: where the icon and the words sit on the island |
 | `-i/--icon PATH` | A local icon file; `none` shows no icon. A relative path is from the current folder |
 | `--image PATH` | A picture in the icon's place (an avatar) |
@@ -191,7 +193,7 @@ Options of `brim notify send`:
 | `--no-history` | Only show it on the island; do not list it among the recent notices |
 | `--json FILE` | Read the whole message as JSON from a file, or from standard input with `-`; options given on the command line come over its values |
 
-Where you gave a source its own looks (Settings › Live notices › Apps, the arrow beside its name), those come first: `--slot`, `--glow`, the category's color and `--icon none` then change nothing for it.
+Where you gave a source its own looks (Settings › Live notices › Apps, the arrow beside its name), those come first: `--glow`, the category's color and `--icon none` then change nothing for it.
 
 Buttons:
 
@@ -212,7 +214,7 @@ Exit codes:
 |---|---|
 | 0 | Delivered (or kept quiet by your rules); when waiting, a button was chosen and its key is on standard output |
 | 1 | Usage error (a message over 64 KB even with its texts cut to BrimDeck's limits included) |
-| 2 | Refused by BrimDeck (a `close` or `stop` that found no such key included) |
+| 2 | Refused by BrimDeck (a `close`, `stop` or `remove` that found no such key or id included) |
 | 3 | BrimDeck is not running, live notices are off, or no answer came in time (the notice may still show) |
 | 4 | When waiting: the notice was closed or deleted without a choice, or its source is set to "Don't show" |
 | 5 | When waiting: it ran out of time |
@@ -234,6 +236,28 @@ The JSON fields of a message match the options, for example:
   "timeoutMs": 300000
 }
 ```
+
+### Listing and removing notices
+
+`brim notify list` lists the notices on the notices page, each with an id; `brim notify close` and `brim notify remove` find a notice by that id (`--notice`) or by the key it was sent with (`-k`).
+
+```text
+# List the notices (-s for one source only, --json for JSON)
+brim notify list
+brim notify list --json -s deploy-script
+# Close: the notice ends on the island and stays on the notices page
+brim notify close --notice 5112c23c8fcd4de886842687835782fa
+# Remove: take it off the notices page, as deleting it there does
+brim notify remove deploy -s deploy-script
+brim notify remove --notice 5112c23c8fcd4de886842687835782fa
+```
+
+- Which notices: by default only those sent by `brim` and other programs. With "Let brim list and remove all notices" on under Settings › Live notices › Apps › Compatibility (off by default), every notice is listed and can be removed, Windows apps' and WSL desktop notifications included. Any program on this PC can run `brim`, so turn it on only if they may read these notices.
+- Removing a Windows app's notice also removes it from Windows' notification center. When that notification has changed in Windows or cannot be removed, only BrimDeck's record goes; `brim` says so and still exits with 0. A WSL desktop notification is removed from BrimDeck only.
+- By key, the source must be the one the notice was sent with; by id, the source does not matter. `close` by id closes only notices of the command line and programs.
+- Removing a notice whose sender waits for an answer (`--wait` or `--action`) ends that command as closed without a choice, with exit code 4.
+- With "Hide verification codes" on, codes in the listed titles and bodies are hidden with dots too.
+- `list --json` prints `{"scope": ..., "notices": [...]}`: `scope` is `cli` (only the notices of the command line and programs) or `all`; each notice has `id`, `origin` (`windows`, `taskbar`, `wsl`, `cli`, `brimdeck`), `source`, `key`, `title`, `body`, `context`, `category`, `kind`, `receivedAt`, and `unread`, `shown` (on the island now), `waiting` (its sender waits for an answer) and `closed` (its source closed or cleared it).
 
 ### The earlier name, brim-notify
 
@@ -292,14 +316,14 @@ brim-notify "New mail" --kind mail
 - A click on a notice on the island opens the notices page, with that notice at the top.
 - Order: what you are working with > high priority notices > other notices > quota alerts > track changes. Alarms, ended countdowns and event reminders are high priority (see "Time notices").
 - Nothing is shown while the session is locked or switched, while the panels are hidden or hidden by a full-screen rule. During a Windows focus session, presentation mode and BrimDeck's own pause nothing pops up; afterwards one summary shows how many arrived. Windows' separate "Do not disturb" switch has no public interface and is not detected; use BrimDeck's pause instead.
-- Several monitors: notices show on the screen in use (the one with the foreground window; the default), on the main panel's screen, or on every screen that shows BrimDeck. With the first two, a notice stays in the notice history if that screen's panel is hidden; it does not jump to another screen. With every screen, the same notice shows once on each and counts once toward the limit; handling it on one screen (a click, opening the notices page) ends it on the others too.
+- Several monitors: each screen shows notices when "Show new notices" is on in the profile it uses. If a screen's panel is hidden, the notice stays in the notice history; it does not jump to another screen. The same notice shows once on each screen that shows notices and counts once toward the limit; handling it on one screen (a click, opening the notices page) ends it on the others too.
 - Settings › Shortcuts › Open live notices (unset by default): with a notice on screen it opens the details for the keyboard (Tab to move, Enter to choose, Esc to close); otherwise it opens the notice history.
 
 ## Privacy
 
 - Notice history is kept for 24 hours by default, at most 500, encrypted with Windows' per-user data protection (DPAPI) in the `notices` folder of BrimDeck's install folder (opened to the current user only; `%LOCALAPPDATA%\BrimDeck\notices` when the install folder cannot be written to). "Keep for" can be set to Until exit (memory only: then no application icons are kept on disk either), 1 hour, 1 day, 3 days or 7 days, and the list can be cleared at any time. A reminder that rang or a stopwatch that stopped is kept for the retention from that moment.
 - The folder the notices are saved in is neither read nor written when it is a link, belongs to another account, or lets other accounts change its files, and the settings say why; for the last, "Make it mine only" in the settings opens the folder to the current user and the system only. Before every read and write BrimDeck checks that neither the folder nor `notices.dat` is a link, and a `notices.dat` that is a link is never read. When the saved file cannot be reached for now (in use, its drive or network location not available), BrimDeck tries again later and writes nothing until then, so the full list is never overwritten; notices deleted or cleared meanwhile do not come back once the file is read. A file that is actually damaged offers to be cleared; one this account may not read (made by BrimDeck running as administrator, say) offers both trying again and clearing. Every save is on the disk itself before it replaces the old file, so a power cut does not leave a damaged file.
-- Deleting or clearing removes BrimDeck's own records only and tells no source. Only closing a notice (its close button or Esc) reports a WSL desktop notification as dismissed by the user, as closing a desktop notification bubble does. Switching notices off or clearing also cancels what shows and everything waiting to show.
+- Deleting or clearing removes BrimDeck's own records only and tells no source (the exception: with "Let brim list and remove all notices" on, `brim notify remove` also removes a Windows app's notice from Windows' notification center). Only closing a notice (its close button or Esc) reports a WSL desktop notification as dismissed by the user, as closing a desktop notification bubble does. Switching notices off or clearing also cancels what shows and everything waiting to show.
 - Raw notification content, attachments and pictures are never saved. Icons come only from Windows or local files; nothing is downloaded. Network paths, links and shortcuts as icons are refused.
 - The diagnostic log `notices.log` holds only error types, codes and code locations, never titles or bodies.
 - The local channel accepts only the current user on this PC (a named pipe that refuses network access). A notice's content is only ever shown as text: it is never run and its links are never opened.

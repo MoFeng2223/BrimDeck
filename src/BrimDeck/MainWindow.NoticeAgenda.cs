@@ -43,19 +43,19 @@ public partial class MainWindow
     {
         if (_agendaSubscribed || _app.Agenda is null) return;
         _agendaSubscribed = true;
-        _app.Agenda.Changed += AgendaChanged;
+        _app.Agenda.Changed += NoticeAgendaChanged;
     }
 
     private void UnsubscribeAgenda()
     {
-        if (_agendaSubscribed) _app.Agenda.Changed -= AgendaChanged;
+        if (_agendaSubscribed) _app.Agenda.Changed -= NoticeAgendaChanged;
         _agendaSubscribed = false;
         _agendaReads.Clear(); _agendaAdded = null;
     }
 
     // An item added or removed here, on another panel or on the planner page: the page on screen follows (a strip goes back to
     // "加入日程" once its event is deleted elsewhere). Several changes in a row are drawn once.
-    private void AgendaChanged()
+    private void NoticeAgendaChanged()
     {
         if (!_expanded || CurrentPage != DeckPage.Notices || _agendaRenderQueued) return;
         _agendaRenderQueued = true;

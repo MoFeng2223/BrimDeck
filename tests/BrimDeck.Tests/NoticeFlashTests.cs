@@ -99,7 +99,7 @@ internal static class NoticeFlashTests
         try
         {
             var store = new SettingsStore(folder);
-            store.Save(new DeckSettings { NoticesEnabled = true, NoticeAppsListed = true, NoticeApps = [] });
+            store.Save(new DeckSettings { NoticeIsland = true, NoticeAppsListed = true, NoticeApps = [] });
             check("Flash: taken off the list, WeChat's flashes are not received", !store.Load().NoticeReceives("flash:wechat"));
         }
         finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }

@@ -170,8 +170,9 @@ internal sealed class NoticeCenter : IDisposable
             Changed?.Invoke();
             return;
         }
-        // Off on the island: what shows there ends and nothing waiting shows later; the notices still reach the page.
-        if (!settings.NoticeIsland) Apply(Attention.Remove(item => item.IsNotice, DateTimeOffset.UtcNow));
+        // Off for a panel's profile: what shows there ends and nothing waiting shows later; the notices still reach the list.
+        var silent = _app.Decks.Where(deck => !deck.ShowsNewNotices).Select(deck => deck.NoticeLane).ToHashSet(StringComparer.Ordinal);
+        if (silent.Count > 0) Apply(Attention.Remove(item => item.IsNotice && silent.Contains(item.Lane), DateTimeOffset.UtcNow));
         LoadHistory();
         _windows.Start();
         // The taskbar flash source runs while a chat it watches is listed (WeChat is, for a new user).
@@ -307,8 +308,8 @@ internal sealed class NoticeCenter : IDisposable
     // is, what its sender asked and the default level of the settings.
     internal NoticeLevel Level(Notice notice, DateTimeOffset now) => NoticeLevels.Resolve(notice, Settings.NoticeRule(notice.AppKey), Settings.NoticeDefaultLevel, now);
 
-    // Shows the notice on every panel NoticeScreen names. Each panel has its own item with the notice's key, so that handling
-    // it on one screen ends it on all (Withdraw).
+    // Shows the notice on every panel whose profile shows notices. Each panel has its own item with the notice's key, so that
+    // handling it on one screen ends it on all (Withdraw).
     private void Present(Notice notice, bool refresh)
     {
         var now = DateTimeOffset.UtcNow;
@@ -318,25 +319,32 @@ internal sealed class NoticeCenter : IDisposable
         foreach (var lane in Lanes()) Apply(Attention.Submit(Item(lane, notice, refresh), now));
     }
 
-    // The panels that show an arriving notice (NoticeRouting); none when the chosen panel cannot show one now, or when notices
-    // are switched off on the island and kept for the expanded page only (NoticeIsland).
-    private IReadOnlyList<string> Lanes()
-    {
-        if (!Settings.NoticeIsland) return [];
-        long? foreground = NoticeNative.ForegroundMonitor() is var monitor && monitor != IntPtr.Zero ? monitor.ToInt64() : null;
-        var panels = _app.Decks.Select(deck => new NoticeRouting.Candidate(deck.NoticeLane, deck.NoticeMonitor, deck == _app.Deck, deck.CanShowNotices)).ToList();
-        return NoticeRouting.Lanes(panels, foreground, Settings.NoticeScreen);
-    }
+    // The panels that show an arriving notice: each one whose profile shows notices (NoticeIsland) and that can show one now. A
+    // panel hidden at the moment (by a full-screen rule, or by the user) does not show it later; the notice stays in the list.
+    private IReadOnlyList<string> Lanes() =>
+        _app.Decks.Where(deck => deck.ShowsNewNotices && deck.CanShowNotices).Select(deck => deck.NoticeLane).Distinct(StringComparer.Ordinal).ToList();
 
     private async Task<NoticePipeServer.Answer> HandlePipeAsync(NoticeMessage message)
     {
         if (NoticeProtocol.Validate(message) is { } problem) return new(NoticeProtocol.Reply(NoticeResults.Rejected, problem, message.EventId));
+        // A removal that takes a notice out of Windows' notification center too is answered once Windows has done it.
+        if (message.Type == NoticeTypes.Remove)
+        {
+            var (reply, windows) = await _dispatcher.InvokeAsync(() =>
+                _disposed ? (NoticeProtocol.Reply(NoticeResults.Rejected, "shutting-down", message.EventId), null)
+                : !_enabled ? (NoticeProtocol.Reply(NoticeResults.Rejected, "notices-off", message.EventId), null)
+                : !Admit("pipe") ? (NoticeProtocol.Reply(NoticeResults.Rejected, "rate-limited", message.EventId), null)
+                : Remove(NoticeIntake.FromPipe(message), message.EventId));
+            if (windows is not null && !await windows) reply.Detail = WindowsKept;
+            return new(reply);
+        }
         return await _dispatcher.InvokeAsync(() =>
         {
             NoticePipeServer.Answer Refuse(string why) => new(NoticeProtocol.Reply(NoticeResults.Rejected, why, message.EventId));
             if (_disposed) return Refuse("shutting-down");
             if (!_enabled) return Refuse("notices-off");
             if (message.Type == NoticeTypes.Status) return new(NoticeProtocol.Reply(NoticeResults.Accepted, StatusLine(), message.EventId));
+            if (message.Type == NoticeTypes.List) return Admit("pipe") ? new(ListReply(message)) : Refuse("rate-limited");
             if (message.Type != NoticeTypes.Notify) return Refuse("unknown-type");
             if (!Admit("pipe")) return Refuse("rate-limited");
             var input = NoticeIntake.FromPipe(message);
@@ -348,6 +356,37 @@ internal sealed class NoticeCenter : IDisposable
             var wait = BeginWait(notice);
             return new NoticePipeServer.Answer(reply, wait.Task, () => _dispatcher.BeginInvoke(() => Abandon(notice.Id, wait)));
         });
+    }
+
+    // ----- brim notify list and remove -----
+
+    // The detail of a removal whose notice left BrimDeck but stayed in Windows' notification center.
+    private const string WindowsKept = "windows-kept";
+
+    // One page of the notices a sender may reach (NoticeEntries): only the command line's and programs', unless the user allows
+    // every source.
+    private NoticeMessage ListReply(NoticeMessage message)
+    {
+        bool all = Settings.NoticeCommandAccess;
+        var entries = NoticeEntries.Of(Hub.Notices, all, message.AppName, Settings.NoticeCodes, Shown, Awaits);
+        return NoticeProtocol.ListPage(entries, message.Cursor, all ? NoticeScopes.All : NoticeScopes.Cli, message.EventId);
+    }
+
+    // Whether the notice is on an island now.
+    private bool Shown(Notice notice) => _app.Decks.Any(deck => Attention.Current(deck.NoticeLane) is { IsNotice: true } item && item.Key == notice.Id);
+
+    // Removes the notice the sender names, as deleting it on the notices page does; a sender that waits for it hears it was
+    // dismissed. A Windows notice, which a sender reaches only with the user's leave, is taken out of the notification center
+    // too: Windows is that task, true once the notification is gone there. A notice the sender may not reach is answered as one
+    // that is not there.
+    private (NoticeMessage Reply, Task<bool>? Windows) Remove(NoticeInput input, string? eventId)
+    {
+        if (Hub.Target(input) is not { } notice || !NoticeEntries.Reachable(notice, Settings.NoticeCommandAccess))
+            return (NoticeProtocol.Reply(NoticeResults.Filtered, "not-found", eventId), null);
+        EndWait(notice.Id, NoticeWaits.Dismissed);
+        Delete(notice);
+        var windows = notice.Origin == NoticeOrigin.Windows && notice.InstanceKey.StartsWith("windows:", StringComparison.Ordinal) ? _windows.RemoveAsync(notice.InstanceKey) : null;
+        return (NoticeProtocol.Reply(NoticeResults.Accepted, null, eventId), windows);
     }
 
     // ----- Notices whose sender waits for an answer -----
@@ -484,7 +523,8 @@ internal sealed class NoticeCenter : IDisposable
         if (refusal is not null)
         {
             // brim-notify inside the distribution waits for a reply through the agent: it hears why at once (core-M2).
-            if (message.Type == NoticeTypes.Notify && message.Origin == "cli" && message.EventId is { } id) _wsl.Send(distro, NoticeProtocol.Reply(NoticeResults.Rejected, refusal, id));
+            if (message.Type is NoticeTypes.Notify or NoticeTypes.List or NoticeTypes.Remove && message.Origin == "cli" && message.EventId is { } id)
+                _wsl.Send(distro, NoticeProtocol.Reply(NoticeResults.Rejected, refusal, id));
             return;
         }
         bool server = _wsl.States.TryGetValue(distro, out var state) && state.State == WslAgentState.Server;
@@ -522,6 +562,22 @@ internal sealed class NoticeCenter : IDisposable
                     }
                     _wsl.Send(distro, reply);
                 }
+                break;
+            }
+            // brim notify list and remove inside the distribution, answered through the agent by the message's id.
+            case NoticeTypes.List when message.EventId is { } listed:
+                _wsl.Send(distro, Admit("wsl:" + distro) ? ListReply(message) : NoticeProtocol.Reply(NoticeResults.Rejected, "rate-limited", listed));
+                break;
+            case NoticeTypes.Remove when message.EventId is { } removing:
+            {
+                if (!Admit("wsl:" + distro)) { _wsl.Send(distro, NoticeProtocol.Reply(NoticeResults.Rejected, "rate-limited", removing)); break; }
+                var (reply, windows) = Remove(NoticeIntake.FromAgent(message, distro, server), removing);
+                if (windows is null) { _wsl.Send(distro, reply); break; }
+                _ = windows.ContinueWith(done => _dispatcher.BeginInvoke(() =>
+                {
+                    if (!done.IsCompletedSuccessfully || !done.Result) reply.Detail = WindowsKept;
+                    if (!_disposed) _wsl.Send(distro, reply);
+                }), TaskScheduler.Default);
                 break;
             }
             // The sender inside the distribution went away before its notice was answered (the agent says so by the message's id).
@@ -612,9 +668,9 @@ internal sealed class NoticeCenter : IDisposable
     private bool CanShow(AttentionItem item)
     {
         if (!item.IsNotice) return true;
-        if (!_enabled || !Settings.NoticeIsland) return false;
+        if (!_enabled) return false;
         if (item.Payload is Notice notice && Hub.Find(notice.Id) is null) return false;
-        return _app.Decks.FirstOrDefault(d => d.NoticeLane == item.Lane) is { CanShowNotices: true };
+        return _app.Decks.FirstOrDefault(d => d.NoticeLane == item.Lane) is { CanShowNotices: true, ShowsNewNotices: true };
     }
 
     // What the recent notices lost no longer shows or waits. Neither does a notice that stayed on the island until handled

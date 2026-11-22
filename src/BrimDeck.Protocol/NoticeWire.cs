@@ -94,6 +94,57 @@ public sealed class NoticeMessage
     public long? TimeoutMs { get; set; }
     // In a reply: BrimDeck will send a "result" on the same connection. A BrimDeck that does not know Wait leaves it out.
     public bool? Waiting { get; set; }
+    // Type "remove", and a close (Stop): the notice by BrimDeck's own id, as "list" gives it, instead of by ReplaceId.
+    public string? NoticeId { get; set; }
+    // Type "list": where the page starts, the Cursor of the reply before; in the reply, where the next page starts, null after
+    // the last page.
+    public string? Cursor { get; set; }
+    // The reply to "list": one page of the notices, newest first, and which notices BrimDeck lists (NoticeScopes).
+    public List<NoticeEntry>? Notices { get; set; }
+    public string? Scope { get; set; }
+}
+
+// One notice as "list" gives it: what a script needs to find it and to close or remove it by Id.
+public sealed class NoticeEntry
+{
+    public string Id { get; set; } = "";
+    // windows (an application's notification, read from Windows' notification center), taskbar (a chat whose taskbar button
+    // flashes), wsl (a WSL desktop notification), cli (brim, brim-notify, a program), brimdeck (BrimDeck's own) or test.
+    public string Origin { get; set; } = "";
+    // The name the notice comes from: an application's, or the sender's -s.
+    public string Source { get; set; } = "";
+    public string? Distro { get; set; }
+    // The sender's -k, which close and remove take as well.
+    public string? Key { get; set; }
+    public string Title { get; set; } = "";
+    public string Body { get; set; } = "";
+    public string? Context { get; set; }
+    public string Category { get; set; } = "";
+    // alarm, stopwatch, countdown, mail or event; null for a plain notice.
+    public string? Kind { get; set; }
+    public DateTimeOffset ReceivedAt { get; set; }
+    // Not yet seen on the notices page.
+    public bool Unread { get; set; }
+    // On the island now.
+    public bool Shown { get; set; }
+    // Its sender waits for an answer (--wait or --action).
+    public bool Waiting { get; set; }
+    // Its source no longer has it: closed by its sender, cleared from Windows' notification center, a timer stopped.
+    public bool Closed { get; set; }
+}
+
+// Which notices "list" gives and "remove" reaches (NoticeMessage.Scope): those of the command line and programs only, or,
+// once the user allows it in the settings, those of every source.
+public static class NoticeScopes
+{
+    public const string Cli = "cli", All = "all";
+}
+
+// What brim notify list --json prints: every page put together.
+public sealed class NoticeListing
+{
+    public string Scope { get; set; } = NoticeScopes.Cli;
+    public List<NoticeEntry> Notices { get; set; } = [];
 }
 
 public sealed class NoticeActionInfo
@@ -134,6 +185,8 @@ public static class NoticeTypes
     public const string Notify = "notify", Close = "close", Status = "status", Action = "action", Dismissed = "dismissed", Reply = "reply";
     // BrimDeck to a sender that waits (NoticeMessage.Wait): how its notice ended.
     public const string Result = "result";
+    // A sender asks for the notices (a page at a time), or for one to be removed from the notices page.
+    public const string List = "list", Remove = "remove";
 }
 
 public static class NoticeResults
@@ -155,6 +208,7 @@ public static class AgentStates
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(NoticeMessage))]
 [JsonSerializable(typeof(AgentBridgeConfig))]
+[JsonSerializable(typeof(NoticeListing))]
 [JsonSerializable(typeof(string))]
 public sealed partial class NoticeJson : JsonSerializerContext;
 
@@ -199,6 +253,46 @@ public static class NoticeProtocol
     public static NoticeMessage Reply(string result, string? reason = null, string? id = null)
         => new() { Type = NoticeTypes.Reply, Result = result, Detail = reason, EventId = id };
 
+    // What one page of a "list" reply may hold, below a frame so that the WSL agent can pass it on as it is.
+    public const int PageBudget = 48 * 1024;
+
+    // The reply to "list": the notices after cursor that fit in a page, with the cursor of the next page. entries are in the
+    // order ListOrder gives (newest first); a cursor names the last notice a page held by its time and id, so a page still
+    // starts in the right place when notices were added or removed meanwhile. A cursor that cannot be read starts over.
+    public static NoticeMessage ListPage(IReadOnlyList<NoticeEntry> entries, string? cursor, string scope, string? id)
+    {
+        int start = 0;
+        if (ReadCursor(cursor) is var (ticks, after))
+            while (start < entries.Count && ListOrder(entries[start], ticks, after) <= 0) start++;
+        var page = new List<NoticeEntry>();
+        int size = 512;
+        for (int i = start; i < entries.Count; i++)
+        {
+            int length = JsonSerializer.SerializeToUtf8Bytes(entries[i], NoticeJson.Default.NoticeEntry).Length + 1;
+            if (page.Count > 0 && size + length > PageBudget) break;
+            page.Add(entries[i]);
+            size += length;
+        }
+        bool more = start + page.Count < entries.Count;
+        string? next = more ? page[^1].ReceivedAt.UtcTicks.ToString(CultureInfo.InvariantCulture) + ":" + page[^1].Id : null;
+        return new() { Type = NoticeTypes.Reply, Result = NoticeResults.Accepted, EventId = id, Scope = scope, Notices = page, Cursor = next };
+    }
+
+    // The order of "list": newest first, and by id among notices received at the same moment.
+    public static int ListOrder(NoticeEntry a, NoticeEntry b) => ListOrder(a, b.ReceivedAt.UtcTicks, b.Id);
+
+    private static int ListOrder(NoticeEntry entry, long ticks, string id)
+    {
+        int byTime = ticks.CompareTo(entry.ReceivedAt.UtcTicks);
+        return byTime != 0 ? byTime : string.CompareOrdinal(entry.Id, id);
+    }
+
+    private static (long Ticks, string Id)? ReadCursor(string? cursor)
+    {
+        int at = cursor?.IndexOf(':') ?? -1;
+        return at > 0 && long.TryParse(cursor.AsSpan(0, at), NumberStyles.None, CultureInfo.InvariantCulture, out long ticks) ? (ticks, cursor![(at + 1)..]) : null;
+    }
+
     // BrimDeck's request to a WSL agent about one of its desktop notices (type Action or Dismissed), addressed by both the
     // session and the id of the notice's "wsl:<distribution>:<session>:<id>" key. The agent acts only on its current run's
     // session, so an earlier run's notice never acts on the new run's notice with the same id (C-L5). Null when the key names
@@ -215,8 +309,10 @@ public static class NoticeProtocol
     public static string? Validate(NoticeMessage message)
     {
         if (message.Version < 1 || message.Version > Version) return "unsupported-version";
-        if (message.Type is not (NoticeTypes.Notify or NoticeTypes.Close or NoticeTypes.Status or NoticeTypes.Action or NoticeTypes.Dismissed or NoticeTypes.Reply or NoticeTypes.Result))
+        if (message.Type is not (NoticeTypes.Notify or NoticeTypes.Close or NoticeTypes.Status or NoticeTypes.Action or NoticeTypes.Dismissed or NoticeTypes.Reply or NoticeTypes.Result
+            or NoticeTypes.List or NoticeTypes.Remove))
             return "unknown-type";
+        if (message.Type == NoticeTypes.Remove && string.IsNullOrWhiteSpace(message.NoticeId) && string.IsNullOrWhiteSpace(message.ReplaceId)) return "no-target";
         // A time-kind notice may come without text: BrimDeck names it by its kind ("Timer", "Stopwatch").
         if (message.Type == NoticeTypes.Notify && string.IsNullOrWhiteSpace(message.Title) && string.IsNullOrWhiteSpace(message.Body) && message.ExitCode is null
             && message.Kind is not (NoticeTimes.Countdown or NoticeTimes.Stopwatch or NoticeTimes.Event) && message.Stop != true)
@@ -255,6 +351,8 @@ public static class NoticeProtocol
         message.Context = Clip(message.Context, MaxField);
         message.Picture = Clip(message.Picture, 1024);
         message.ActionKey = Clip(message.ActionKey, 64);
+        message.NoticeId = Clip(message.NoticeId, MaxField);
+        message.Cursor = Clip(message.Cursor, MaxField);
         if (message.Actions is { } actions)
             message.Actions = actions.Where(a => a is not null && !string.IsNullOrWhiteSpace(a.Key) && !string.IsNullOrWhiteSpace(a.Label))
                 .Take(MaxActions).Select(a => new NoticeActionInfo

@@ -373,8 +373,14 @@ static class DeviceProtocolTests
             Pushes.Find(0x24AE, 0x1413, 0xFF00, 0x0002, 1, vt7.Length) == Pushes.Kind.Rapoo
             && Pushes.Battery(Pushes.Kind.Rapoo, vt7) == new BatteryRead(44)
             && Pushes.Name(Pushes.Kind.Rapoo, null, 0x1413) == "Rapoo VT7"
-            && Pushes.Name(Pushes.Kind.Rapoo, null, 0x4613) == "Rapoo VT7"
-            && Pushes.Name(Pushes.Kind.Rapoo, null, 0x1B13) == "Rapoo Mouse");
+            && Pushes.Name(Pushes.Kind.Rapoo, null, 0x4613) == "Rapoo VT7");
+        check("Rapoo: every mouse of the web driver's table named on its receiver and on its cable; another id, or none, the brand's mouse",
+            Pushes.RapooMice.Count == 148 && Pushes.Name(Pushes.Kind.Rapoo, null, 0x1B13) == "Rapoo VT2S Air MAX V2"
+            && Pushes.Name(Pushes.Kind.Rapoo, null, 0x4B13) == "Rapoo VT2S Air MAX V2" && Pushes.Name(Pushes.Kind.Rapoo, null, 0x1460) == "Rapoo VT7 V2"
+            && Pushes.Name(Pushes.Kind.Rapoo, null, 0x46A9) == "Rapoo VT9 PRO V2" && Pushes.Name(Pushes.Kind.Rapoo, null, 0x1A00) == "Rapoo VT7 SE"
+            && Pushes.Name(Pushes.Kind.Rapoo, null, 0x1406) == "Rapoo Mouse" && Pushes.Name(Pushes.Kind.Rapoo, null) == "Rapoo Mouse"
+            && Pushes.RapooMice.Keys.All(id => id is >= 0x1400 and < 0x1C00 or >= 0x4600 and < 0x4C00) && !Pushes.RapooMice.Keys.Intersect(Pushes.RapooKeyboards).Any()
+            && Pushes.Name(Pushes.Kind.RapooKeyboard, null, 0x1924) == "Rapoo V700DIY-98");
         check("AULA G9: the percent and charging; 0 and 0 is none", Pushes.Battery(Pushes.Kind.AulaG9, Bytes("AB 47 4D 86 00 00 50 02")) == new BatteryRead(80, true)
             && Pushes.Battery(Pushes.Kind.AulaG9, Bytes("AB 47 4D 86 00 00 00 00")) is null && Pushes.KindOf(Pushes.Kind.AulaG9) == DeviceKind.Headphones);
         var steam = new byte[15]; steam[0] = 0x43; steam[1] = 2; steam[2] = 55;

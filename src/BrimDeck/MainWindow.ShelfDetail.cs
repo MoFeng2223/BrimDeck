@@ -49,7 +49,7 @@ public partial class MainWindow
             // The box takes the room right of the clock, up to its usual width (ShelfLayout.SearchWidth); only when that room is under
             // 140 does it keep 140 and cover the clock.
             double clock = ClockLabel.Text.Length > 0 ? TextWidth(ClockLabel.Text, 12, FontWeights.Normal) : 34;
-            double room = width - right - (width + clock) / 2 - 12;
+            double room = width - right - ClockRight(width, clock) - 12;
             double boxWidth = Math.Min(ShelfLayout.SearchWidth(width), Math.Max(room, 140)), height = _header.SwitchHeight;
             var box = _searchBox ??= NewSearchBox();
             (box.Parent as Panel)?.Children.Remove(box);

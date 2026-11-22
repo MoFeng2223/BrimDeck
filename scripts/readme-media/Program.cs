@@ -197,6 +197,10 @@ internal sealed partial class Renderer(App app, string output, string language, 
             // The collapsed count of unread notices on each form, and where it is set; for checking.
             if (scenes.Contains("notice-strip")) await NoticeStripScene();
             if (scenes.Contains("notice-agenda")) await NoticeAgendaScene();
+            // Every clock style with the date in each place and format, alone on the notch and beside the rings, and the clock's
+            // settings with the date on; for checking.
+            if (scenes.Contains("clock-dates")) await ClockDatesScene();
+            if (scenes.Contains("agenda")) await AgendaScene();
             // Memory and the drives showing what is in use and what is free, expanded and collapsed, and the option; for checking.
             // The expanded monitor's grid editor on its settings page, the saved grid and the readings waiting above it; for checking.
             if (scenes.Contains("monitor-grid"))
@@ -232,7 +236,7 @@ internal sealed partial class Renderer(App app, string output, string language, 
     // No notice source is started: the notice center is only made, and the notices go straight to its list.
     private async Task NoticesPageScene()
     {
-        _settings.Animations = false; _settings.NoticesEnabled = true;
+        _settings.Animations = false; _settings.NoticeIsland = true; _settings.NoticesPage = true;
         foreach (var listed in DeckSettings.DefaultNoticeApps()) if (_settings.NoticeRule(listed.Key) is null) _settings.NoticeApps.Add(listed);
         _settings.NoticeAppsListed = true;
         foreach (var listed in new[] { "Outlook", "Claude", "Backup Tool" })
@@ -301,9 +305,9 @@ internal sealed partial class Renderer(App app, string output, string language, 
             await Settle();
             var window = (Window)Activator.CreateInstance(type, Program.Any, null, [_deck, app], null)!;
             var shots = new List<(string Label, BitmapSource Picture, Size Size)>();
-            void Shot(string label, NoticeLevel level, double time, string body, NoticeAlign? asked = null, bool subdued = false, int count = 1, AttentionItem? given = null, NoticeStyle? look = null)
+            void Shot(string label, NoticeLevel level, double time, string body, NoticeAlign? asked = null, bool subdued = false, int count = 1, AttentionItem? given = null, NoticeStyle? look = null, NoticeSlot? slot = null)
             {
-                var notice = new Notice { AppKey = "windows:Chat", AppName = "QQ", Title = title, Body = body, Align = asked, ReceivedAt = _now, CreatedAt = _now };
+                var notice = new Notice { AppKey = "windows:Chat", AppName = "QQ", Title = title, Body = body, Align = asked, Slot = slot, ReceivedAt = _now, CreatedAt = _now };
                 var item = given ?? new AttentionItem { Lane = "main", Kind = AttentionKind.Notice, Key = notice.Id, Payload = notice, Level = level, Count = count, Duration = TimeSpan.FromSeconds(6),
                     Style = look ?? _settings.NoticeStyles.For(level) };
                 if (subdued) typeof(AttentionItem).GetProperty(nameof(AttentionItem.Subdued))!.SetValue(item, true);
@@ -333,11 +337,11 @@ internal sealed partial class Renderer(App app, string output, string language, 
             Shot("Level 2 beyond the rate limit: shown as level 1", NoticeLevel.Glow, second, reply, subdued: true, look: new NoticeStyle { Liquid = true });
             if (!line)
             {
-                // The scene's island shows the quota rings and the equalizer: the rings' place is a part's; a part the island does not
-                // show (the clock) leaves the notice the whole island.
-                Shot("Level 1 in the quota rings' place", NoticeLevel.Plain, first, reply, look: new NoticeStyle { Slot = CompactPart.Rings });
-                Shot("Level 1 in the rings' place, a long line scrolls there", NoticeLevel.Plain, first, longer, look: new NoticeStyle { Slot = CompactPart.Rings });
-                Shot("Level 1 in the clock's place, not shown: the whole island", NoticeLevel.Plain, first, reply, look: new NoticeStyle { Slot = CompactPart.Clock });
+                // The scene's island shows the quota rings and the equalizer: a sender may ask for the rings' place (--slot); a part the
+                // island does not show (the clock) leaves the notice the whole island.
+                Shot("Level 1 in the quota rings' place (--slot usage)", NoticeLevel.Plain, first, reply, slot: NoticeSlot.Usage);
+                Shot("Level 1 in the rings' place, a long line scrolls there", NoticeLevel.Plain, first, longer, slot: NoticeSlot.Usage);
+                Shot("Level 1 in the clock's place, not shown: the whole island", NoticeLevel.Plain, first, reply, slot: NoticeSlot.Clock);
                 Shot("Align left asked by the sender", NoticeLevel.Plain, first, reply, asked: NoticeAlign.Left);
                 Shot("Align right asked by the sender", NoticeLevel.Plain, first, reply, asked: NoticeAlign.Right);
                 Shot("Merged, count 3, center", NoticeLevel.Plain, first, reply, count: 3);
@@ -843,6 +847,83 @@ internal sealed partial class Renderer(App app, string output, string language, 
         _settings.NotchClock = false; _settings.NotchMusic = true; _settings.NotchSummary = true;
         _settings.ClockStyle = default; _settings.ClockColor = ClockColor.White; Refresh();
         await Settle();
+    }
+
+    // The collapsed clock at 2026-11-22 14:32:08 (a Sunday) with the date: every style in each place, the formats and weekday
+    // places in three styles, the 12-hour clock, a gradient and a larger collapsed row. Each is drawn on its own on the notch's
+    // black, at 3× (clock-date-<case>.png) and at the size it has on a 150 % screen (clock-date-<case>-real.png); clock-dates.json
+    // lists the cases. The clock's settings with the date on follow.
+    private async Task ClockDatesScene()
+    {
+        var time = new DateTime(2026, 11, 22, 14, 32, 8);
+        var faceType = Type.GetType("BrimDeck.ClockFace, BrimDeck")!;
+        var dateType = Type.GetType("BrimDeck.ClockDate, BrimDeck")!;
+        var list = new List<object>();
+        _settings.ClockSeconds = true; _settings.ClockDate = true; _settings.ClockColor = ClockColor.White; _settings.Clock24Hour = true;
+        void Render(FrameworkElement element, double scale, string path)
+        {
+            element.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity)); element.Arrange(new Rect(element.DesiredSize)); element.UpdateLayout();
+            var bitmap = new RenderTargetBitmap((int)Math.Ceiling(element.ActualWidth * scale), (int)Math.Ceiling(element.ActualHeight * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+            bitmap.Render(element); bitmap.Freeze();
+            Write(bitmap, path);
+        }
+        async Task Shot(string name, double rowScale = 1)
+        {
+            object? date = _settings.ClockDate ? Activator.CreateInstance(dateType, _settings.ClockDatePosition, _settings.ClockDateFormat, _settings.ClockWeekday) : null;
+            var colors = (Color[])faceType.GetMethod("Palette")!.Invoke(null, [_settings, null, null])!;
+            var face = (FrameworkElement)Activator.CreateInstance(faceType, BindingFlags.Instance | BindingFlags.Public, null,
+                [_settings.ClockStyle, _settings.Clock24Hour, _settings.ClockSeconds, colors, time, rowScale, null, date], null)!;
+            var card = new System.Windows.Controls.Border { Background = Brushes.Black, CornerRadius = new CornerRadius(8 * rowScale), Padding = new Thickness(12 * rowScale, 5 * rowScale, 12 * rowScale, 5 * rowScale), Child = face };
+            await Settle();
+            Render(card, 3, Path.Combine(output, $"clock-date-{name}.png"));
+            Render(card, 1.5, Path.Combine(output, $"clock-date-{name}-real.png"));
+            list.Add(new { name, style = _settings.ClockStyle.ToString(), position = _settings.ClockDatePosition.ToString(), format = _settings.ClockDateFormat.ToString(),
+                weekday = _settings.ClockWeekday.ToString(), h24 = _settings.Clock24Hour, date = _settings.ClockDate });
+        }
+        foreach (var style in Enum.GetValues<ClockStyle>())
+        {
+            _settings.ClockStyle = style;
+            _settings.ClockDate = false; await Shot($"{style}-off".ToLowerInvariant()); _settings.ClockDate = true;
+            foreach (var position in Enum.GetValues<ClockDatePosition>())
+            {
+                _settings.ClockDatePosition = position;
+                await Shot($"{style}-{position}".ToLowerInvariant());
+            }
+        }
+        foreach (var style in new[] { ClockStyle.Minimal, ClockStyle.Pixel, ClockStyle.Serif })
+            foreach (var format in Enum.GetValues<ClockDateFormat>())
+                foreach (var position in new[] { ClockDatePosition.Right, ClockDatePosition.Below })
+                {
+                    _settings.ClockStyle = style; _settings.ClockDateFormat = format; _settings.ClockDatePosition = position;
+                    _settings.ClockWeekday = format == ClockDateFormat.YearWords ? ClockWeekday.Before : format == ClockDateFormat.YearDash ? ClockWeekday.Hidden : ClockWeekday.After;
+                    await Shot($"format-{style}-{format}-{position}".ToLowerInvariant());
+                }
+        _settings.ClockDateFormat = ClockDateFormat.MonthDaySlash; _settings.ClockWeekday = ClockWeekday.After;
+        _settings.Clock24Hour = false; _settings.ClockSeconds = false;
+        foreach (var style in new[] { ClockStyle.Minimal, ClockStyle.Neon, ClockStyle.Segment, ClockStyle.Digits })
+            foreach (var position in new[] { ClockDatePosition.Left, ClockDatePosition.Above })
+            {
+                _settings.ClockStyle = style; _settings.ClockDatePosition = position;
+                await Shot($"h12-{style}-{position}".ToLowerInvariant());
+            }
+        _settings.Clock24Hour = true; _settings.ClockSeconds = true; _settings.ClockColor = ClockColor.Gradient;
+        foreach (var style in new[] { ClockStyle.Dots, ClockStyle.Pixel, ClockStyle.Segment, ClockStyle.Rounded })
+        {
+            _settings.ClockStyle = style; _settings.ClockDatePosition = ClockDatePosition.Right;
+            await Shot($"gradient-{style}".ToLowerInvariant());
+        }
+        _settings.ClockColor = ClockColor.White;
+        foreach (var style in new[] { ClockStyle.Minimal, ClockStyle.Pixel, ClockStyle.Dots })
+            foreach (var position in new[] { ClockDatePosition.Right, ClockDatePosition.Below })
+            {
+                _settings.ClockStyle = style; _settings.ClockDatePosition = position;
+                await Shot($"large-{style}-{position}".ToLowerInvariant(), 1.5);
+            }
+        File.WriteAllText(Path.Combine(output, "clock-dates.json"), JsonSerializer.Serialize(list, new JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine("clock-dates");
+        _settings.ClockStyle = ClockStyle.Minimal; _settings.ClockDatePosition = ClockDatePosition.Below; _settings.NotchClock = true;
+        await SettingsPage("clock-date-settings", 1, 2400, prepare: window => ((HashSet<CompactPart>)Program.Field(window, "_openParts")!).Add(CompactPart.Clock));
+        _settings.ClockDate = false; _settings.NotchClock = false; _settings.ClockSeconds = false; _settings.ClockStyle = default;
     }
 
     // The usage page in built-in panel themes that look clearly different, and in an invented custom theme. compose.py

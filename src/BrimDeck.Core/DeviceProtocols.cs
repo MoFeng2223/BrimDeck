@@ -1688,6 +1688,35 @@ public static class Pushes
     public static readonly int[] RapooProducts = [0x1412, 0x4612, 0x1B13, 0x4B13, 0x1460, 0x4660, 0x1406, 0x4606, 0x1410, 0x1411, 0x1417,
         0x14A1, 0x14A5, 0x1413, 0x4613, 0x14A9, 0x1453];
     public static readonly int[] RapooKeyboards = [0x1924, 0x4824];
+    // Rapoo's mice by the id they show up under: each model's receiver and the mouse itself on its cable (VT7: 1413, 4613), from
+    // the device table of Rapoo's web driver (hub.rapoo.cn) as pedro3z0's rapoo-software-linux extracted it (MIT; MyFinder's
+    // Rapoo list names the same receivers alike). Its keyboards, docks and wired-only mice are left out. Another id: "Rapoo Mouse".
+    public static readonly IReadOnlyDictionary<int, string> RapooMice = new (int Receiver, int Cable, string Model)[]
+    {
+        (0x1410, 0x4610, "VT0"), (0x1411, 0x4611, "VT3S"), (0x1412, 0x4612, "VT3"), (0x1413, 0x4613, "VT7"),
+        (0x1414, 0x4614, "VT9"), (0x1415, 0x4615, "VT1"), (0x1416, 0x4616, "VT7 MAX"), (0x1417, 0x4617, "VT3 MAX"),
+        (0x1418, 0x4618, "VT9 MAX"), (0x1420, 0x4620, "VT0 MAX"), (0x1421, 0x4621, "VT3S MAX"), (0x1422, 0x4622, "VT2"),
+        (0x1423, 0x4623, "VT2 MAX"), (0x1444, 0x4644, "VT1 MAX"), (0x144A, 0x464A, "VT0 MAX MASTER"),
+        (0x144B, 0x464B, "VT3S MAX MASTER"), (0x1451, 0x4651, "VT6"), (0x1452, 0x4652, "VT6 MAX"), (0x1453, 0x4653, "VT9S V2"),
+        (0x1459, 0x4659, "VT7S V2"), (0x145B, 0x465B, "VT4 V2"), (0x145D, 0x465D, "VT2S V2"), (0x1460, 0x4660, "VT7 V2"),
+        (0x1462, 0x4662, "VT3 V2"), (0x1464, 0x4664, "VT3S V2"), (0x1466, 0x4666, "VT9 V2"), (0x1468, 0x4668, "VT2 V2"),
+        (0x146A, 0x466A, "VT1S V2"), (0x146C, 0x466C, "VT8 V2"), (0x146D, 0x466D, "VT3 MAX MASTER V2"),
+        (0x146E, 0x466E, "VT3S MAX MASTER V2"), (0x1470, 0x4670, "VT7 MAX MASTER V2"), (0x1471, 0x4671, "VT7S MAX MASTER V2"),
+        (0x1472, 0x4672, "VT2 ULTRA V2"), (0x1473, 0x4673, "VT9 MAX MASTER V2"), (0x1474, 0x4674, "VT9S MAX MASTER V2"),
+        (0x1475, 0x4675, "VT2 MAX MASTER V2"), (0x1476, 0x4676, "VT2S MAX MASTER V2"), (0x1477, 0x4677, "VT4 MAX MASTER V2"),
+        (0x1478, 0x4678, "VT8 MAX MASTER V2"), (0x14A1, 0x46A1, "VT0 Air MAX"), (0x14A2, 0x46A2, "VT3S Air MAX"),
+        (0x14A4, 0x46A4, "VT2K MAX"), (0x14A5, 0x46A5, "VT3 PRO V2"), (0x14A6, 0x46A6, "VT3S PRO V2"),
+        (0x14A7, 0x46A7, "VT7 PRO V2"), (0x14A8, 0x46A8, "VT7S PRO V2"), (0x14A9, 0x46A9, "VT9 PRO V2"),
+        (0x14AA, 0x46AA, "VT9S PRO V2"), (0x1A00, 0x4A00, "VT7 SE"), (0x1A11, 0x4A11, "VT1 SE"), (0x1B01, 0x4B01, "VT9S MAX V2"),
+        (0x1B02, 0x4B02, "VT7S MAX V2"), (0x1B03, 0x4B03, "VT4 MAX V2"), (0x1B04, 0x4B04, "VT2S MAX V2"),
+        (0x1B05, 0x4B05, "VT7 MAX V2"), (0x1B06, 0x4B06, "VT3 MAX V2"), (0x1B07, 0x4B07, "VT3S MAX V2"),
+        (0x1B08, 0x4B08, "VT9 MAX V2"), (0x1B09, 0x4B09, "VT2 MAX V2"), (0x1B0A, 0x4B0A, "VT1S MAX V2"),
+        (0x1B0B, 0x4B0B, "VT8 MAX V2"), (0x1B0C, 0x4B0C, "VT3 Air MAX V2"), (0x1B0D, 0x4B0D, "VT3S Air MAX V2"),
+        (0x1B0E, 0x4B0E, "VT7 Air MAX V2"), (0x1B0F, 0x4B0F, "VT7S Air MAX V2"), (0x1B10, 0x4B10, "VT9 Air MAX V2"),
+        (0x1B11, 0x4B11, "VT9S Air MAX V2"), (0x1B12, 0x4B12, "VT2 Air MAX V2"), (0x1B13, 0x4B13, "VT2S Air MAX V2"),
+        (0x1B14, 0x4B14, "VT4 Air MAX V2"), (0x1B15, 0x4B15, "VT8 Air MAX V2"), (0x1B20, 0x4B20, "VT2 RT V2"),
+        (0x1B21, 0x4B21, "VT2 RT MASTER V2")
+    }.SelectMany(mouse => new[] { (Id: mouse.Receiver, mouse.Model), (Id: mouse.Cable, mouse.Model) }).ToDictionary(each => each.Id, each => "Rapoo " + each.Model);
     // The collection Rapoo's status report comes on, for a product of its vendor id.
     public static bool RapooStatus(int product, int usagePage, int usage, int inputLength)
         => !Dongles.RapooGen1Products.Contains(product)
@@ -1769,12 +1798,12 @@ public static class Pushes
     }
     public static BatteryRead? Battery(Kind kind, byte[] r) => Apply(kind, null, r);
 
-    // A Beken report names its mouse. Rapoo's VT7 can be identified by its receiver or cable PID.
+    // The device's name: a Beken report names its mouse, a Rapoo mouse is named by its product id (RapooMice); the rest are fixed.
     public static string Name(Kind kind, byte[]? report, int product = 0) => kind switch
     {
         Kind.Beken => report is { Length: > 1 } && BekenNames.TryGetValue(report[1], out var name) ? name : "ATTACK SHARK",
-        Kind.Rapoo when product is 0x1413 or 0x4613 => "Rapoo VT7",
-        Kind.Delux => "DELUX M900 Pro", Kind.InphicZhen => "Inphic ZHEN", Kind.Rapoo => "Rapoo Mouse", Kind.AulaG9 => "AULA G9",
+        Kind.Rapoo => RapooMice.GetValueOrDefault(product, "Rapoo Mouse"),
+        Kind.Delux => "DELUX M900 Pro", Kind.InphicZhen => "Inphic ZHEN", Kind.AulaG9 => "AULA G9",
         Kind.Jbl => "JBL Quantum 910 Wireless", Kind.Pulse3D => "PULSE 3D Wireless Headset", Kind.CloudFlight2 => "HyperX Cloud Flight 2",
         Kind.RapooKeyboard => "Rapoo V700DIY-98", _ => "Steam Controller"
     };

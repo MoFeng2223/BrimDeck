@@ -491,6 +491,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     {
         SectionTitle(Loc.T("快捷操作", "Shortcuts"));
         Group(GripDoubleClickRow());
+        NoticeIslandSection();
         SectionTitle(Loc.T("收起样式", "Collapsed style"));
         // The grid clips at its own bounds, so each card keeps 3 DIP or more of its cell free on every side of the
         // keyboard focus ring: 6 DIP left and right (the grid overhangs the page by the same amount) and 3 DIP above.
@@ -529,6 +530,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                     DeckPage.Clipboard => (DefaultDeckPage.Clipboard, Loc.T("剪贴板与文件中转", "Clipboard and file transfer")),
                     DeckPage.Devices => (DefaultDeckPage.Devices, Loc.T("设备电量", "Device batteries")),
                     DeckPage.Notices => (DefaultDeckPage.Notices, Loc.T("通知历史", "Notice history")),
+                    DeckPage.Agenda => (DefaultDeckPage.Agenda, Loc.T("计划", "Planner")),
                     _ => (DefaultDeckPage.Usage, Loc.T("AI 用量", "AI usage"))
                 });
             filling = true;
@@ -546,11 +548,12 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         foreach (var page in S.PageOrder)
             pages.Children.Add(page switch
             {
-                DeckPage.Notices => SizeRow(Loc.T("显示灵动通知", "Show live notices"), Loc.T("灵动通知", "live notices"), page, S.NoticesEnabled && S.NoticesPage, value => { TurnNotices(false, value); FillStarts(); }, Collect(NoticeSizeControls), pages, FillStarts),
+                DeckPage.Notices => SizeRow(Loc.T("显示灵动通知", "Show live notices"), Loc.T("灵动通知", "live notices"), page, S.NoticesPage, value => { Change(s => s.NoticesPage = value); FillStarts(); }, Collect(NoticeSizeControls), pages, FillStarts),
                 DeckPage.Music => SizeRow(Loc.T("显示音乐", "Show music"), Loc.T("音乐", "music"), page, S.MusicPage, value => { Change(s => s.MusicPage = value); FillStarts(); }, Collect(MusicSizeControls), pages, FillStarts),
                 DeckPage.Monitor => SizeRow(Loc.T("显示系统监控", "Show system monitor"), Loc.T("系统监控", "system monitor"), page, S.MonitorPage, value => { Change(s => s.MonitorPage = value); FillStarts(); }, Collect(MonitorSizeControls), pages, FillStarts),
                 DeckPage.Clipboard => SizeRow(Loc.T("显示剪贴板与文件中转", "Show clipboard and file transfer"), Loc.T("剪贴板与文件中转", "clipboard and file transfer"), page, S.ClipboardPage, value => { Change(s => s.ClipboardPage = value); FillStarts(); }, Collect(ShelfSizeControls), pages, FillStarts),
                 DeckPage.Devices => SizeRow(Loc.T("显示设备电量", "Show device batteries"), Loc.T("设备电量", "device batteries"), page, S.DevicesPage, value => { Change(s => s.DevicesPage = value); FillStarts(); }, Collect(DeviceSizeControls), pages, FillStarts),
+                DeckPage.Agenda => SizeRow(Loc.T("显示计划", "Show planner"), Loc.T("计划", "planner"), page, S.AgendaPage, value => { Change(s => s.AgendaPage = value); FillStarts(); }, Collect(AgendaSizeControls), pages, FillStarts),
                 _ => SizeRow(Loc.T("显示 AI 用量", "Show AI usage"), Loc.T("AI 用量", "AI usage"), page, S.UsagePage, value => { Change(s => s.UsagePage = value); FillStarts(); }, Collect(UsageSizes), pages, FillStarts)
             });
         UpdateDividers(pages);
@@ -669,7 +672,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                     s.ClickThrough=defaults.ClickThrough;s.ClickThroughPanel=defaults.ClickThroughPanel;s.ClickThroughKeyboard=defaults.ClickThroughKeyboard;s.WindowCapture=defaults.WindowCapture;break;
                 case HotkeysPage:foreach(var kind in Enum.GetValues<HotkeyKind>())s.SetHotkey(kind,defaults.Hotkey(kind));break;
                 case 1:s.Style=defaults.Style;s.LineOpens=defaults.LineOpens;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;
-                    s.NotchEqualizer=defaults.NotchEqualizer;s.CapsuleEqualizer=defaults.CapsuleEqualizer;s.NotchClock=defaults.NotchClock;s.CapsuleClock=defaults.CapsuleClock;s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=[.. PanelTheme.Current.ClockGradients[0].Stops];s.Clock24Hour=defaults.Clock24Hour;s.ClockSeconds=defaults.ClockSeconds;CopyCollapsedSize(s,defaults);s.GripDoubleClick=defaults.GripDoubleClick;
+                    s.NotchEqualizer=defaults.NotchEqualizer;s.CapsuleEqualizer=defaults.CapsuleEqualizer;s.NotchClock=defaults.NotchClock;s.CapsuleClock=defaults.CapsuleClock;s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=[.. PanelTheme.Current.ClockGradients[0].Stops];s.Clock24Hour=defaults.Clock24Hour;s.ClockSeconds=defaults.ClockSeconds;s.ClockDate=defaults.ClockDate;s.ClockDatePosition=defaults.ClockDatePosition;s.ClockDateFormat=defaults.ClockDateFormat;s.ClockWeekday=defaults.ClockWeekday;CopyCollapsedSize(s,defaults);s.GripDoubleClick=defaults.GripDoubleClick;
                     s.NotchMonitor=defaults.NotchMonitor;s.CapsuleMonitor=defaults.CapsuleMonitor;s.NotchDevices=defaults.NotchDevices;s.CapsuleDevices=defaults.CapsuleDevices;s.NotchOrder=defaults.NotchOrder;s.CapsuleOrder=defaults.CapsuleOrder;s.NotchTransfer=defaults.NotchTransfer;s.CapsuleTransfer=defaults.CapsuleTransfer;s.NotchNotices=defaults.NotchNotices;s.CapsuleNotices=defaults.CapsuleNotices;
                     // The clock goes back to the one the panel theme suggests, as choosing the theme gives.
                     PanelThemes.ApplyClock(PanelTheme.Current,s);break;
@@ -677,6 +680,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                     s.MonitorPage=defaults.MonitorPage;s.MonitorWidth=defaults.MonitorWidth;s.MonitorHeight=defaults.MonitorHeight;s.PageOrder=defaults.PageOrder;
                     s.ClipboardPage=defaults.ClipboardPage;s.ClipboardWidth=defaults.ClipboardWidth;s.ClipboardHeight=defaults.ClipboardHeight;
                     s.DevicesPage=defaults.DevicesPage;s.DevicesWidth=defaults.DevicesWidth;s.DevicesHeight=defaults.DevicesHeight;
+                    s.AgendaPage=defaults.AgendaPage;s.AgendaWidth=defaults.AgendaWidth;s.AgendaHeight=defaults.AgendaHeight;
                     s.NoticesPage=defaults.NoticesPage;s.NoticesWidth=defaults.NoticesWidth;s.NoticesHeight=defaults.NoticesHeight;break;
                 case MonitorSettingsPage:s.MonitorPalette=defaults.MonitorPalette;s.MonitorCustomColors=defaults.MonitorCustomColors;s.CompactWarningColor=null;s.CompactCriticalColor=null;s.CompactSmoothing=defaults.CompactSmoothing;s.CoreDisplay=defaults.CoreDisplay;s.CoreMatrixColumns=defaults.CoreMatrixColumns;s.ExpandedCustomCards=defaults.ExpandedCustomCards;s.ExpandedCardOrder=[];s.MonitorInterval=defaults.MonitorInterval;s.MonitorProcesses=defaults.MonitorProcesses;s.MonitorSort=defaults.MonitorSort;s.MonitorMain=defaults.MonitorMain;s.MonitorProcessView=defaults.MonitorProcessView;
                     s.ExpandedGridTiles=null;
@@ -700,7 +704,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                     s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=[.. palette.ClockGradients[0].Stops];
                     PanelThemes.ApplyMatching(palette,s);break;}
                 // The two switches (collapsed and expanded view) and the applications (the other page) stay as they are.
-                case NoticesSettingsPage:s.NoticeScreen=defaults.NoticeScreen;s.NoticeDefaultLevel=defaults.NoticeDefaultLevel;s.NoticeStyles=new();s.NoticeStripIcons=defaults.NoticeStripIcons;
+                case NoticesSettingsPage:s.NoticeDefaultLevel=defaults.NoticeDefaultLevel;s.NoticeStyles=new();s.NoticeStripIcons=defaults.NoticeStripIcons;
                     s.NoticeCodes=defaults.NoticeCodes;s.NoticeRespectFocus=defaults.NoticeRespectFocus;s.NoticesPausedUntil=null;s.NoticeHistory=defaults.NoticeHistory;s.NoticeHistoryHours=defaults.NoticeHistoryHours;break;
                 // The list goes back to the applications a new user has; the WSL distributions stay, as they are set up in them.
                 case NoticeAppsSettingsPage:s.NoticeApps=[.. DeckSettings.DefaultNoticeApps()];s.NoticeAppsListed=true;break;
