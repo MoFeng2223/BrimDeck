@@ -14,9 +14,10 @@ public static class CollapsedLimits
     public const double NotchHeightDefault = 32, NotchHeightMin = 24, NotchHeightMax = 64;
     public const double CapsuleWidthDefault = 196, CapsuleWidthMin = 48, CapsuleWidthMax = 8000;
     public const double CapsuleHeightDefault = 32, CapsuleHeightMin = 24, CapsuleHeightMax = 64;
-    // CapsuleTopMax is only the limit for saved values; on a monitor the capsule may go down until its bottom edge meets the
-    // bottom of the monitor, over a bottom taskbar (CapsuleTopRange).
-    public const double CapsuleTopDefault = 5, CapsuleTopMin = 0, CapsuleTopMax = 4000;
+    // CapsuleTopMin and CapsuleTopMax are only the limits for saved values (a negative top lies above the work area, over a top
+    // taskbar); on a monitor the capsule may go from the monitor's top down until its bottom edge meets the monitor's bottom, over a
+    // taskbar at either (CapsuleTopRange).
+    public const double CapsuleTopDefault = 5, CapsuleTopMin = -4000, CapsuleTopMax = 4000;
     public const double LineLengthDefault = 56, LineLengthMin = 24, LineLengthMax = 600;
     // The thickness is chosen in half-DIP steps.
     public const double LineThicknessDefault = 4, LineThicknessMin = 2, LineThicknessMax = 8, LineThicknessStep = 0.5;
@@ -63,9 +64,9 @@ public readonly record struct PanelPlacement(double Top, double HeaderExtra);
 // is too small for them only narrows what is drawn on it.
 // monitor: the monitor's bounds in DIPs; only its width and height are used.
 // work: the monitor's work area in DIPs, relative to the monitor's top-left corner.
-// The notch is placed against the top of the monitor, over a top taskbar as before. The line stays within the work area; so
-// does the capsule, except that it may go down past the work area's bottom, over a bottom taskbar. Every result lies on the
-// monitor, with a width and height of at least 0, for any input.
+// The notch is placed against the top of the monitor, over a top taskbar as before. The line stays within the work area. The
+// capsule is placed from the work area (centred across it, its top measured from the work area's top) but may go anywhere on the
+// monitor, over a taskbar on any side. Every result lies on the monitor, with a width and height of at least 0, for any input.
 public static class CollapsedGeometry
 {
     // contentWanted: with auto width, the width the notch's or capsule's content asks for (0 for none); null keeps the saved
@@ -99,10 +100,12 @@ public static class CollapsedGeometry
                 double saved = Value(settings.CapsuleWidth, CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax, CollapsedLimits.CapsuleWidthDefault) * s;
                 double fit = Math.Max(CollapsedLimits.CapsuleWidthMin * s, SurfaceWidth(style, height, wanted, s));
                 double width = Math.Min(Math.Max(auto ? fit : saved, SurfaceWidth(style, height, required, s)), area.Width);
-                var (topMin, topMax) = TopRange(height, screen.Height - area.Y, double.PositiveInfinity);
+                var (topMin, topMax) = CapsuleTops(height, screen, area);
                 double top = Math.Clamp(Value(settings.CapsuleTop, CollapsedLimits.CapsuleTopMin, CollapsedLimits.CapsuleTopMax, CollapsedLimits.CapsuleTopDefault), topMin, topMax);
                 double scale = height / CollapsedLimits.BaseHeight, inset = CollapsedLimits.CapsuleInset * scale;
-                var surface = new DipRect(area.X + Place(area.Width, width, settings.CapsuleOffsetX), area.Y + top, width, height);
+                var (offsetMin, offsetMax) = CapsuleOffsets(width, screen, area);
+                double offset = double.IsFinite(settings.CapsuleOffsetX) ? Math.Clamp(settings.CapsuleOffsetX, offsetMin, offsetMax) : 0;
+                var surface = new DipRect(CapsuleCentredX(width, area) + offset, area.Y + top, width, height);
                 return new(style, surface, scale, inset, Math.Max(0, width - 2 * inset), height / 2, height / 2, 0);
             }
             case CompactStyle.Line:
@@ -159,9 +162,16 @@ public static class CollapsedGeometry
         };
     }
 
-    // The horizontal offsets that move a surface of this width on this monitor; larger saved offsets act as these limits.
+    // The horizontal offsets that move a surface of this width on this monitor; larger saved offsets act as these limits. The
+    // capsule's are measured from the work area's middle and reach the monitor's sides, so they differ on a monitor with a taskbar
+    // on one side.
     public static (double Min, double Max) OffsetXRange(CompactStyle style, double width, DipRect monitor, DipRect work)
     {
+        if (style == CompactStyle.Capsule)
+        {
+            var (screen, area) = Sanitize(monitor, work);
+            return CapsuleOffsets(double.IsFinite(width) ? Math.Clamp(width, 0, area.Width) : area.Width, screen, area);
+        }
         double span = Span(style, monitor, work);
         double half = double.IsFinite(width) ? Math.Max(0, (span - Math.Clamp(width, 0, span)) / 2) : 0;
         return (-half, half);
@@ -183,12 +193,26 @@ public static class CollapsedGeometry
 
     private static double ValidScale(double scale) => scale > 0 && double.IsFinite(scale) ? scale : 1;
 
-    // The distances from the top of the work area at which a capsule of this height stays on the monitor: 0 to
-    // monitorH - workY - H, so it may cover a bottom taskbar.
+    // The distances from the top of the work area at which a capsule of this height stays on the monitor: -workY to
+    // monitorH - workY - H, so it may cover a top or a bottom taskbar.
     public static (double Min, double Max) CapsuleTopRange(double height, DipRect monitor, DipRect work)
     {
         var (screen, area) = Sanitize(monitor, work);
-        return TopRange(Finite(height), screen.Height - area.Y, double.PositiveInfinity);
+        return CapsuleTops(Finite(height), screen, area);
+    }
+
+    private static (double Min, double Max) CapsuleTops(double height, DipRect screen, DipRect area)
+        => (-area.Y, Math.Max(-area.Y, screen.Height - area.Y - Math.Max(0, height)));
+
+    // The capsule's left edge at offset 0: centred across the work area.
+    private static double CapsuleCentredX(double width, DipRect area) => area.X + Math.Max(0, (area.Width - width) / 2);
+
+    // The offsets from there that keep a capsule of this width on the monitor, over a taskbar on either side.
+    private static (double Min, double Max) CapsuleOffsets(double width, DipRect screen, DipRect area)
+    {
+        double centred = CapsuleCentredX(width, area);
+        double min = Math.Max(-CollapsedLimits.OffsetLimit, -centred), max = Math.Min(CollapsedLimits.OffsetLimit, screen.Width - width - centred);
+        return (Math.Min(min, 0), Math.Max(max, 0));
     }
 
     // Where the open panel starts, in DIPs from the top of the monitor (work is relative to the monitor), and how much taller
@@ -203,6 +227,9 @@ public static class CollapsedGeometry
     public static PanelPlacement Panel(CollapsedShape shape, DipRect work, double pageHeight, double bottomLimit = double.PositiveInfinity)
     {
         if (shape.Style != CompactStyle.Capsule || !double.IsFinite(work.Y) || !double.IsFinite(work.Height)) return new(0, 0);
+        // A capsule over a top taskbar hangs its panel from the screen's top, covering the taskbar, as one over a bottom taskbar
+        // does from the screen's bottom (MainWindow.Edge.cs).
+        if (shape.Surface.Y < work.Y - .5) return new(0, 0);
         double top = Math.Max(0, work.Y), bottom = top + Finite(work.Height);
         if (!double.IsNaN(bottomLimit)) bottom = Math.Min(bottom, bottomLimit);
         if (CollapsedHover.HasBridge(CompactStyle.Capsule, shape.Surface, work.Y)) return new(top, 0);

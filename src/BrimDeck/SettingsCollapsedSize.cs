@@ -87,7 +87,7 @@ public sealed partial class SettingsWindow
                 var auto = AutoWidthRow(style);
                 var width = SizeRow(Loc.T("宽度", "Width"), S.CapsuleWidth, CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax, 1, v => ChangeCollapsed(s => { s.CapsuleWidth = v; s.CapsuleAutoWidth = false; }));
                 var height = SizeRow(Loc.T("高度", "Height"), S.CapsuleHeight, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, 1, v => ChangeCollapsed(s => s.CapsuleHeight = v));
-                var top = SizeRow(Loc.T("垂直偏移", "Vertical offset"), S.CapsuleTop, CollapsedLimits.CapsuleTopMin, Math.Max(CollapsedLimits.CapsuleTopMin, S.CapsuleTop), 1, v => ChangeCollapsed(s => s.CapsuleTop = v),
+                var top = SizeRow(Loc.T("垂直偏移", "Vertical offset"), S.CapsuleTop, Math.Min(0, S.CapsuleTop), Math.Max(0, S.CapsuleTop), 1, v => ChangeCollapsed(s => s.CapsuleTop = v),
                     help: Loc.T("胶囊距屏幕顶部的距离。不超过 10 DIP 时，展开后的面板将会吸附在屏幕顶端。", "Distance between the capsule and the top of the screen. At 10 DIP or less, the expanded panel snaps to the top of the screen."));
                 var offset = SizeRow(Loc.T("水平偏移", "Horizontal offset"), S.CapsuleOffsetX, 0, 0, 1, v => ChangeCollapsed(s => s.CapsuleOffsetX = v), centered: true);
                 _refreshCollapsedRanges = () =>
@@ -96,9 +96,10 @@ public sealed partial class SettingsWindow
                     var limits = _app.PreviewDeck.CurrentCollapsedRanges(style, shown, S.CapsuleHeight);
                     SetCollapsedRange(width, limits.WidthMin, limits.WidthMax, shown);
                     SetAutoWidth(auto, width, S.CapsuleAutoWidth);
-                    // The capsule can move down to the bottom of the monitor, over a bottom taskbar; the limit follows its height and the display.
-                    SetCollapsedRange(top, CollapsedLimits.CapsuleTopMin, Whole(limits.TopMax), S.CapsuleTop);
-                    SetCollapsedRange(offset, -Whole(limits.OffsetMax), Whole(limits.OffsetMax), S.CapsuleOffsetX);
+                    // The capsule can move over a taskbar on any side of the monitor; the limits follow its size and the display. Measured
+                    // from the work area, they go below zero over a top taskbar and differ left and right with a side taskbar.
+                    SetCollapsedRange(top, -Whole(-limits.TopMin), Whole(limits.TopMax), S.CapsuleTop);
+                    SetCollapsedRange(offset, -Whole(-limits.OffsetMin), Whole(limits.OffsetMax), S.CapsuleOffsetX);
                 };
                 Group(auto, width.Row, height.Row, top.Row, offset.Row);
                 _builtDock = null;

@@ -617,14 +617,15 @@ public partial class MainWindow : Window
         // At the height the surface takes, which a short screen or work area can lower below the saved one (as Resolve does).
         double surfaceHeight = CollapsedGeometry.SurfaceHeight(style, height, monitor, work, _scale);
         widthMin = Math.Min(widthMax, Math.Max(widthMin, CollapsedGeometry.SurfaceWidth(style, surfaceHeight, _compactRequired, _scale)));
-        var (_, offsetMax) = CollapsedGeometry.OffsetXRange(style, width * _scale, monitor, work);
+        // The capsule's offsets reach the monitor's sides from the work area's middle, so they differ on a monitor with a side taskbar.
+        var (offsetMin, offsetMax) = CollapsedGeometry.OffsetXRange(style, width * _scale, monitor, work);
         var (topMin, topMax) = style switch
         {
             CompactStyle.Capsule => CollapsedGeometry.CapsuleTopRange(surfaceHeight, monitor, work),
             CompactStyle.Line => CollapsedGeometry.LineTopRange(CollapsedGeometry.SnapToDevicePixels(CollapsedGeometry.RoundLineThickness(height) * _scale, _pixelsPerDip), work),
             _ => (0d, 0d)
         };
-        return (-offsetMax, offsetMax, topMin, topMax, widthMin / _scale, widthMax / _scale);
+        return (offsetMin, offsetMax, topMin, topMax, widthMin / _scale, widthMax / _scale);
     }
     // Where an open panel for a page of the given height starts, in DIPs from the top of the monitor, and the space a floating
     // panel adds above its header; see CollapsedGeometry.Panel.

@@ -411,7 +411,8 @@ public sealed class DeckSettings
     public double CapsuleWidth { get; set; } = CollapsedLimits.CapsuleWidthDefault;
     public double CapsuleHeight { get; set; } = CollapsedLimits.CapsuleHeightDefault;
     public double CapsuleOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
-    // Distance from the top of the work area. Saved up to 4000; each monitor stops the capsule at the bottom of its work area.
+    // Distance from the top of the work area, negative over a top taskbar. Saved from -4000 to 4000; each monitor keeps the capsule
+    // between its own top and bottom (CollapsedGeometry.CapsuleTopRange).
     public double CapsuleTop { get; set; } = CollapsedLimits.CapsuleTopDefault;
     public double LineLength { get; set; } = CollapsedLimits.LineLengthDefault;
     // In half-DIP steps.

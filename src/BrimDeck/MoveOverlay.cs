@@ -199,7 +199,7 @@ internal sealed class MoveGhost : FrameworkElement
         {
             if (!_dropping)
             {
-                var (x, y, guideX, guideY) = CollapsedMove.Capsule(_pointer.X + _grabX, _pointer.Y + _grabY, _start.Surface.Width, _start.Surface.Height, _start.ScreenHeight, _start.Work);
+                var (x, y, guideX, guideY) = CollapsedMove.Capsule(_pointer.X + _grabX, _pointer.Y + _grabY, _start.Surface.Width, _start.Surface.Height, _start.ScreenWidth, _start.ScreenHeight, _start.Work);
                 _tx = x; _ty = y;
                 Guide(ref _guideA, ref _guideAAt, guideX, now);
                 Guide(ref _guideB, ref _guideBAt, guideY, now);

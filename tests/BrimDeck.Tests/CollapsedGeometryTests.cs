@@ -30,13 +30,13 @@ internal static class CollapsedGeometryTests
 
         var settings = new DeckSettings
         {
-            NotchWidth = 9000, NotchHeight = 1, NotchOffsetX = double.NaN, CapsuleWidth = 10, CapsuleHeight = 100, CapsuleTop = -3,
+            NotchWidth = 9000, NotchHeight = 1, NotchOffsetX = double.NaN, CapsuleWidth = 10, CapsuleHeight = 100, CapsuleTop = -5000,
             CapsuleOffsetX = 9999, LineLength = 1000, LineThickness = 3.3, LineTop = 50, LineOffsetX = double.NegativeInfinity
         };
         settings.Normalize();
         check("Normalize clamps every collapsed value to its range",
             settings.NotchWidth == 8000 && settings.NotchHeight == 24 && settings.NotchOffsetX == 0 && settings.CapsuleWidth == 48
-            && settings.CapsuleHeight == 64 && settings.CapsuleTop == 0 && settings.CapsuleOffsetX == 4000 && settings.LineLength == 600
+            && settings.CapsuleHeight == 64 && settings.CapsuleTop == -4000 && settings.CapsuleOffsetX == 4000 && settings.LineLength == 600
             && settings.LineThickness == 3.5 && settings.LineTop == 16 && settings.LineOffsetX == 0);
         var halves = new DeckSettings { LineThickness = 2.24 }; halves.Normalize();
         var halfUp = new DeckSettings { LineThickness = 2.25 }; halfUp.Normalize();
@@ -56,8 +56,12 @@ internal static class CollapsedGeometryTests
         var leftBar = new DipRect(60, 40, 1860, 1040);
         var capsuleInWork = CollapsedGeometry.Resolve(new DeckSettings { CapsuleOffsetX = -3000 }, CompactStyle.Capsule, monitor, leftBar);
         var lineInWork = CollapsedGeometry.Resolve(defaults, CompactStyle.Line, monitor, leftBar);
-        check("The capsule and the line stay within the work area", Near(capsuleInWork.Surface.X, 60) && Near(capsuleInWork.Surface.Y, 45)
-            && Near(lineInWork.Surface.Y, 44) && Near(lineInWork.Surface.X, 60 + (1860 - 56) / 2.0));
+        var capsuleOverTop = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = -3000 }, CompactStyle.Capsule, monitor, leftBar);
+        check("The line stays within the work area; the capsule may go over a side or a top taskbar up to the monitor's edges",
+            Near(capsuleInWork.Surface.X, 0) && Near(capsuleInWork.Surface.Y, 45) && Near(capsuleOverTop.Surface.Y, 0)
+            && Near(lineInWork.Surface.Y, 44) && Near(lineInWork.Surface.X, 60 + (1860 - 56) / 2.0)
+            && CollapsedGeometry.OffsetXRange(CompactStyle.Capsule, 196, monitor, leftBar) == (-(60 + (1860 - 196) / 2.0), 1920 - 196 - (60 + (1860 - 196) / 2.0))
+            && CollapsedGeometry.CapsuleTopRange(32, monitor, leftBar) == (-40, 1080 - 40 - 32));
 
         var low = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 200, CapsuleHeight = 64 }, CompactStyle.Capsule, new DipRect(0, 0, 800, 240), new DipRect(0, 0, 800, 220));
         check("A capsule too low for the monitor stops at its bottom, over the taskbar", Near(low.Surface.Y, 240 - 64) && Near(low.Surface.Bottom, 240));
@@ -73,7 +77,7 @@ internal static class CollapsedGeometryTests
         check("The capsule goes down to the bottom of the monitor; saved values stop at 4000 and are not rewritten per monitor",
             deep.CapsuleTop == 4000 && Near(bottom.Surface.Y, 1048) && Near(bottom.Surface.Bottom, 1080) && Near(tinyBottom.Surface.Bottom, 300)
             && unchanged.CapsuleTop == 3000 && CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 600 }, CompactStyle.Capsule, monitor, work).Surface.Y == 600
-            && CollapsedGeometry.CapsuleTopRange(48, monitor, new DipRect(0, 40, 1920, 1000)) == (0, 992));
+            && CollapsedGeometry.CapsuleTopRange(48, monitor, new DipRect(0, 40, 1920, 1000)) == (-40, 992));
 
         var topBar = new DipRect(0, 48, 1920, 1032);
         var near = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 10 }, CompactStyle.Capsule, monitor, topBar);
@@ -82,6 +86,13 @@ internal static class CollapsedGeometryTests
         check("The open panel hangs from the screen edge unless the capsule is lowered beyond the bridge",
             CollapsedGeometry.PanelTop(notch, work, 200) == 0 && CollapsedGeometry.PanelTop(line, work, 200) == 0 && CollapsedGeometry.PanelTop(capsule, work, 200) == 0
             && CollapsedGeometry.PanelTop(near, topBar, 200) == 48 && CollapsedGeometry.PanelTop(lowered, work, 200) == 34);
+        var overTopBar = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = -40 }, CompactStyle.Capsule, monitor, topBar);
+        var highOverTopBar = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = -45 }, CompactStyle.Capsule, monitor, topBar);
+        check("A capsule over a top taskbar hangs its panel from the screen's top and bridges to it when near it",
+            overTopBar.Surface.Y == 8 && CollapsedGeometry.Panel(overTopBar, topBar, 200) == new PanelPlacement(0, 0)
+            && CollapsedHover.HasBridge(CompactStyle.Capsule, overTopBar.Surface, topBar.Y) && CollapsedHover.Zone(CompactStyle.Capsule, overTopBar.Surface, topBar.Y).Y == 0
+            && highOverTopBar.Surface.Y == 3 && CollapsedHover.Zone(CompactStyle.Capsule, highOverTopBar.Surface, topBar.Y).Y == 0
+            && !CollapsedHover.HasBridge(CompactStyle.Capsule, CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = -20 }, CompactStyle.Capsule, monitor, topBar).Surface, topBar.Y));
         var topBarNear = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 5 }, CompactStyle.Capsule, monitor, topBar);
         var topBarLowered = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 52 }, CompactStyle.Capsule, monitor, topBar);
         check("Top taskbar: a capsule at y 53 opens at the work-area top (48); one at y 100 floats 6 DIPs above it (94)",
@@ -164,7 +175,7 @@ internal static class CollapsedGeometryTests
 
         check("Ranges: offsets for a width, widths for a monitor",
             CollapsedGeometry.OffsetXRange(CompactStyle.Notch, 238, monitor, work) == (-841, 841)
-            && CollapsedGeometry.OffsetXRange(CompactStyle.Capsule, 196, monitor, leftBar) == (-832, 832)
+            && CollapsedGeometry.OffsetXRange(CompactStyle.Capsule, 196, monitor, leftBar) == (-892, 832)
             && CollapsedGeometry.OffsetXRange(CompactStyle.Notch, 5000, monitor, work) == (0, 0)
             && CollapsedGeometry.WidthRange(CompactStyle.Notch, monitor, work) == (72, 1920)
             && CollapsedGeometry.WidthRange(CompactStyle.Capsule, monitor, leftBar) == (48, leftBar.Width)
