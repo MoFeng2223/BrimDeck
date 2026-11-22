@@ -186,9 +186,7 @@ internal static class RequestGate
     private static readonly Dictionary<string, int> DailyLimit = new(StringComparer.Ordinal)
     {
         ["hefeng"] = 800,        // 免费订阅按 key 计日额度，留出余量
-        // 城市搜索单独计数：与天气共用一个闸门时，天气触发的 429/失败熔断会把搜索一起停掉，
-        // 新词全部搜不到。搜索有 1 天磁盘缓存，实际请求很少，独立 500 次足够。
-        ["hefeng-search"] = 500,
+        ["hefeng-search"] = 500, // 城市搜索有 1 天磁盘缓存，实际请求很少，单独计数即可
         ["tencent"] = 600,
         ["weathercomcn"] = 600,
         ["openmeteo"] = 1200
@@ -219,9 +217,11 @@ internal static class RequestGate
         lock (Sync)
         {
             var now = DateTimeOffset.Now;
-            if (status is 200) { state.Failures = 0; state.Until = default; return; }
+            if (status is >= 200 and < 300) { state.Failures = 0; state.Until = default; return; }
             _dirty = true;
-            // 认证失败不会自己好，直接停半小时，别把 key 打到被冻结。
+            // 4xx 里只有认证与限流代表「这个来源整体不可用」：
+            // 401/403 认证失败不会自己好，停半小时，别把 key 打到被冻结；
+            // 429 按指数退避（和风限流按分钟窗口恢复）。
             if (status is 401 or 403) { state.Until = now + TimeSpan.FromMinutes(30); return; }
             if (status is 429)
             {
@@ -229,6 +229,13 @@ internal static class RequestGate
                 state.Until = now + TimeSpan.FromMinutes(Math.Min(60, 5 * Math.Pow(2, Math.Max(0, state.Failures - 1))));
                 return;
             }
+            // 400/404/422 是「这一个请求」的语义错误：参数不支持、地点不存在、坐标超出接口范围。
+            // 它们不代表来源不可用，也绝不能参与失败计数——否则一次 400 会把后续 429 的
+            // 指数退避直接推到最长，把来源冷却一小时。实际踩过的坑：
+            // 和风分钟降水对国外坐标固定返回 400，按失败处理后闸门停 2 分钟，
+            // 紧随其后的时光机/预警/指数请求全部被拒，国外城市的「时光机」于是永远空白；
+            // 城市搜索遇到无结果或特殊字符同样会收到 400，熔断后几分钟内所有搜索都落空。
+            if (status is 400 or 404 or 422) return;
             // 超时和网络异常只计数：单个慢响应不该让整个来源冷却（中国天气网实况常年 4 秒级）。
             if (status is 408 or -1)
             {
@@ -236,6 +243,7 @@ internal static class RequestGate
                 if (state.Failures >= 3) state.Until = now + TimeSpan.FromMinutes(1);
                 return;
             }
+            // 5xx 才是服务端故障：短冷却，等下一轮刷新再试。
             state.Failures++;
             state.Until = now + TimeSpan.FromMinutes(2);
         }
@@ -285,7 +293,7 @@ internal static class RequestGate
     }
 }
 
-// 一次请求的结果：Body 为空时 Status 说明原因（0 = 被闸门拦下，408 = 超时，-1 = 网络异常）。
+// 一次请求的结果：Body 为空时 Status 说明原因（0 = 被闸门拦下；非 2xx 时为 HTTP 状态码；408 = 超时；-1 = 网络异常）。
 internal readonly record struct HttpResult(string? Body, int Status);
 
 // 统一的网络入口：显式解压、固定 UA、超时、闸门与计数都在这里，来源只关心 URL 和解析。

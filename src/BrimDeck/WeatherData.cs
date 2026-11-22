@@ -5,9 +5,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using BrimDeck.Core;
 namespace BrimDeck;
-// Data layer: weather fetching, city search, location, JSON parsing and snapshot persistence. No WPF controls or view lifetime.
-// City and WeatherSettings live in BrimDeck.Core because they are saved in settings.json; this file keeps only downloaded
-// snapshots in weather/snapshot/.
+// 数据层：天气取数入口、城市搜索、自动定位、快照落盘与逐时本地历史，不包含任何 WPF 控件或视图生命周期。
+// City 与 WeatherSettings 由于要存进 settings.json，定义在 BrimDeck.Core；本文件只把下载到的快照放在 weather/snapshot/。
 internal static class WeatherData
 {
     // 配置全部来自 settings.json；本类只把其中的天气字段投影成视图使用的 State，并另存下载的快照。
@@ -94,7 +93,7 @@ internal static class WeatherData
             WeatherFiles.WriteAtomic(Path.Combine(WeatherFiles.Root,"weather","auto.json"),JsonSerializer.Serialize(new SnapshotFile{Key=state.AutoKey},WeatherJson));
     }
     // 城市搜索：配置了和风 Key/Host 就只用和风 GeoAPI——能精确命中区县（搜「洪山区」得「洪山区 · 武汉市 · 湖北省」），
-    // 返回的 id 与中国天气网城市代码同源；和风请求失败也返回空，不再退回 Open-Meteo 混用另一套层级和精度。
+    // 返回的 LocationID 与和风时光机同源。请求失败不退回 Open-Meteo，避免同一次搜索混用两套层级和精度。
     // 未配置和风时才用 Open-Meteo（全球地名库，中文覆盖一般）。
     // 拼音里的分隔撇号（chang'feng）会被和风当成分词符，先试去掉撇号的写法，失败再用原串。
     internal static async Task<List<City>> Search(string query, WeatherSettings settings, CancellationToken token)
@@ -108,6 +107,7 @@ internal static class WeatherData
         }
         if (settings.HeFengKey.Trim().Length > 0 && settings.HeFengHost.Trim().Length > 0)
         {
+            bool failed = false;
             foreach (var attempt in attempts)
             {
                 try
@@ -115,8 +115,12 @@ internal static class WeatherData
                     var found = await SearchHeFeng(attempt, settings, token);
                     if (found.Count > 0) return found;
                 }
-                catch { /* 和风已配置：请求失败也不退回 Open-Meteo，避免来源混杂 */ }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+                catch { failed = true; }
             }
+            // 区分「确实没有这个城市」与「这次请求失败」：两者都返回空列表会让界面把超时/限流
+            // 显示成「未找到」，看起来就是搜索偶尔失灵。失败交给界面提示重试。
+            if (failed) throw new HttpRequestException("QWeather search unavailable");
             return [];
         }
         using var doc = JsonDocument.Parse(await Http.GetStringAsync("https://geocoding-api.open-meteo.com/v1/search?count=10&language=" + (Loc.IsEnglish ? "en" : "zh") + "&name=" + Uri.EscapeDataString(raw), token));
@@ -129,7 +133,7 @@ internal static class WeatherData
         return cities;
     }
     // 和风 GeoAPI v2 city/lookup：按地名或「经度,纬度」坐标反查最多 10 个，结构化解析省/市/国家/城市 id。
-    // 结果落盘一天：输入框防抖后的每一次查询不重复烧免费额度。
+    // 结果落盘一天：输入框防抖后的每一次查询不重复烧免费额度。错误响应不落盘。
     private static async Task<List<City>> SearchHeFeng(string query, WeatherSettings settings, CancellationToken token)
     {
         string host = settings.HeFengHost.Trim().TrimEnd('/');
@@ -141,9 +145,14 @@ internal static class WeatherData
         {
             // 搜索用独立闸门通道：天气取数（尤其时光机一轮 10 次请求）触发 429/失败熔断时，
             // 不该把城市搜索一起停掉——否则用户搜新词会全部落空，看起来像搜索坏了。
+            // 超时 8 秒：搜索是交互操作，不该让输入框等满 20 秒。
             var result = await WeatherHttp.GetAsync("hefeng-search", $"{host}/geo/v2/city/lookup?location={Uri.EscapeDataString(query)}&number=10&lang={lang}", ct,
-                request => request.Headers.TryAddWithoutValidation("X-QW-Api-Key", settings.HeFengKey.Trim()));
-            return result.Body;
+                request => request.Headers.TryAddWithoutValidation("X-QW-Api-Key", settings.HeFengKey.Trim()), 8);
+            if (result.Body is not { Length: > 0 } raw) return null;
+            // 只缓存成功响应：否则一次 401/429 或参数错误会把「查不到」钉在这一天，
+            // 用户重新输入同样的词永远搜不出来。
+            using var probe = JsonDocument.Parse(raw);
+            return Json.Text(probe.RootElement, "code") is { Length: > 0 } code && code != "200" ? null : raw;
         }, token) ?? "";
         var cities = new List<City>();
         if (body.Length == 0) return cities;

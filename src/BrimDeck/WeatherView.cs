@@ -289,7 +289,7 @@ internal sealed class WeatherView : UserControl
         // 落在 36 + 2 = 38，和用量页第一行（页头 36 + ColumnTopInset 2）同一个基准，
         // 多出来的高度全部让给今日天气与底部预报条之间。
         var hero = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 2, 8, 2), VerticalAlignment = VerticalAlignment.Top };
-        // 左上角大图标是详情入口：悬浮播放天气动效，点击打开详情浮层（原「详情」文字按钮已移除）。
+        // 左上角大图标是详情入口：悬浮播放天气动效，点击打开详情浮层。
         var heroGlyph = new WeatherGlyph(s.WeatherCode, s.IsDay, animated: true)
         {
             Width = 56, Height = 56, Margin = new Thickness(0, 0, 12, 0),

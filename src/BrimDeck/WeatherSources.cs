@@ -5,6 +5,11 @@ using BrimDeck.Core;
 namespace BrimDeck;
 
 // ---- 各域各自的传输数据，字段全部可空/可空串，来源只填自己知道的部分 ----
+// 文件结构：
+//   1. 传输模型（CurrentPart / AirPart / HourPoint / DayPoint / WeatherPart）——来源与聚合层之间的数据契约；
+//   2. WeatherAggregator——按域取数、合并成 WeatherSnapshot（每个域只请求用户指定的那一家来源）；
+//   3. 四家来源的请求与解析（Open-Meteo / 腾讯 / 中国天气网 / 和风）；
+//   4. WeatherCodes / Geo / Json 等纯函数工具。
 // WeatherDomain 与 WeatherSettings 定义在 BrimDeck.Core：它们是 settings.json 的一部分，与别的设置项同处一层。
 
 // 分钟降水：每 5 分钟一个点（和风 /v7/minutely/5m、Open-Meteo minutely_15 折算）
@@ -240,7 +245,7 @@ internal static class WeatherAggregator
         return [source];
     }
 
-    // 逐域取数：把同一来源的多个域合并成一次请求；每条链只有一家，不再逐轮换源。
+    // 逐域取数：同一来源的多个域合并成一次请求；链里只有用户选定的那一家，不存在轮换来源的轮次。
     private static async Task RoundsAsync(City city, WeatherSettings settings, Dictionary<WeatherDomain, List<IWeatherSource>> chains,
         Dictionary<string, WeatherPart> parts, HashSet<string> tried, Dictionary<string, HashSet<WeatherDomain>> served,
         IReadOnlyCollection<WeatherDomain> domains, CancellationToken token)
@@ -342,7 +347,7 @@ internal static class WeatherAggregator
                 for (int i = 0; i < hours; i++) if (!double.IsNaN(snapshot.HourTempsC[i])) filled++;
                 return hours >= 20 && filled >= 20;
             case WeatherDomain.Daily:
-                // 今天起 13 天里至少 11 天有高低温；和风 v1 只有 10 天，最后 3 天由下一家补。
+                // 今天起 13 天里至少 11 天有高低温。和风 v1 只给 10 天，剩余天数保持缺失、界面显示 "-"。
                 int days = 0; for (int offset = 0; offset <= 12; offset++) if (Day(offset)) days++;
                 return days >= 11;
             case WeatherDomain.Air:
@@ -376,7 +381,7 @@ internal static class WeatherAggregator
     {
         // 以城市当地日期为中心：查询国外城市时，“今天”不能按用户所在时区算。
         string? zone = parts.Values.Select(part => part.TimeZone).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
-        var today = LocalToday(zone);
+        var today = LocalToday(zone, city);
         var dates = Enumerable.Range(-10, 24).Select(offset => today.AddDays(offset)).ToArray();
         var dayMap = dates.ToDictionary(date => date.ToString("yyyy-MM-dd"), _ => new DayPoint());
         foreach (var (date, point) in dayMap) point.Date = date;
@@ -692,12 +697,16 @@ internal static class WeatherAggregator
         return any;
     }
 
-    // 时区缺失或系统不认识时回退到用户本地日期。
-    private static DateTime LocalToday(string? zone)
+    // 「当地今天」：优先用来源给的 IANA 时区（能带夏令时）；和风不提供时区，退回按经度估算的固定偏移。
+    // 否则查询跨日期的国外城市（例如洛杉矶清晨、北京已是次日）会把日期轴与时光机返回的日期错开一天。
+    private static DateTime LocalToday(string? zone, City city)
     {
-        if (string.IsNullOrWhiteSpace(zone)) return DateTime.Today;
-        try { return TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(zone)).Date; }
-        catch { return DateTime.Today; }
+        if (!string.IsNullOrWhiteSpace(zone))
+        {
+            try { return TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(zone)).Date; }
+            catch { }
+        }
+        return DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(Geo.UtcOffsetHours(city))).Date;
     }
     // 城市当地的「现在」：逐时窗口锚点按当地时钟算，查询国外城市时不能用用户本地时间。
     private static DateTimeOffset LocalNow(string? zone)
@@ -722,7 +731,8 @@ internal static class WeatherAggregator
 // 国内/国外判断与统一的城市名拆分。
 internal static class Geo
 {
-    // 中国范围框（含港澳台与南海诸岛），用于决定“国内源优先”还是“全球源优先”。
+    // 中国范围框（含港澳台与南海诸岛）：决定国内来源能否服务这座城市，
+    // 也用于判断和风分钟降水这类「仅中国坐标」的接口是否值得请求。
     public static bool IsChina(City city) => city.Latitude is >= 17 and <= 54 && city.Longitude is >= 73 and <= 136;
     public static bool HasChinese(string text) => text.Any(ch => ch is >= '\u4e00' and <= '\u9fff');
     // 城市级名称与省份：都从 City 唯一的完整名称里拆，区县城市取其所属地级市（腾讯等接口只认城市级）。
@@ -745,7 +755,7 @@ internal static class WeatherCodes
         "30" => 45, "31" => 45, "53" => 45, _ => 3
     };
 
-    // 中文天气文本（中国天气网/高德/腾讯文本）→ WMO。取“转”之前的第一种天气作为当日主天气。
+    // 中文天气文本（中国天气网/腾讯文本）→ WMO。取“转”之前的第一种天气作为当日主天气。
     public static int FromText(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return 3;
@@ -1000,7 +1010,8 @@ internal sealed class TencentSource : IWeatherSource
     public bool CanServe(City city, WeatherSettings settings)
     {
         var (name, _) = Geo.Parts(city);
-        // 接口只认中文城市名；英文环境下搜索出的城市改用 Open-Meteo。
+        // 接口只认中文城市名：英文环境下搜出的城市名不含汉字，这家来源不可用，
+        // 由设置页/调度层直接显示为空，不做自动换源。
         return Geo.IsChina(city) && name.Length > 0 && (Geo.HasChinese(name) || name.All(char.IsLetter));
     }
 
@@ -1057,7 +1068,7 @@ internal sealed class TencentSource : IWeatherSource
 
 internal sealed class WeatherComCnSource : IWeatherSource
 {
-    public WeatherSourceInfo Info { get; } = new("weathercomcn", Loc.T("中国天气网", "China Weather"), Loc.T("国内实况、15 天预报与历史降水", "China current, 15-day & history"),
+    public WeatherSourceInfo Info { get; } = new("weathercomcn", Loc.T("中国天气网", "China Weather"), Loc.T("国内实况、月历与历史降水", "China current, calendar & history"),
         [WeatherDomain.Current, WeatherDomain.Daily, WeatherDomain.History, WeatherDomain.Air], WeatherRegion.China);
 
     public bool CanServe(City city, WeatherSettings settings)
@@ -1187,8 +1198,8 @@ internal sealed class WeatherComCnSource : IWeatherSource
     }
 }
 
-// 和风天气：需要用户自己的 Key，走 v1 接口覆盖实况、逐时、每日、日月与空气；选定它时只用它的返回。
-// 只用 v1：v7 城市天气 2027-06 停服，不再保留旧接口的退路。
+// 和风天气：需要用户自己的 Key/Host。v1 覆盖实况、逐时、每日（含日月与晨昏蒙影）与空气；
+// v7 补充分钟降水、官方预警与生活指数；时光机补过去 10 天。选定它时只读它的返回，缺项显示 "-"。
 internal sealed class HeFengSource : IWeatherSource
 {
     public WeatherSourceInfo Info { get; } = new("hefeng", Loc.T("和风天气", "QWeather"), Loc.T("实况/预报/分钟/预警/指数/空气/历史", "Now/forecast/minute/alert/indices/air/history"),
@@ -1227,7 +1238,6 @@ internal sealed class HeFengSource : IWeatherSource
                 : past;
         }
         // v7 扩展域：分钟/预警/指数，按本轮真正缺的域请求，逐域并入同一份 part。
-        // 台风来袭由「预警」域的官方台风预警类型覆盖，不再单独请求台风/辐照/海洋。
         var extraNeed = need.Where(d => d is WeatherDomain.Minutely or WeatherDomain.Warning or WeatherDomain.Indices).ToArray();
         if (extraNeed.Length > 0)
         {
@@ -1246,10 +1256,14 @@ internal sealed class HeFengSource : IWeatherSource
     {
         bool Want(WeatherDomain domain) => need.Contains(domain);
         string host = context.Host, loc = $"{context.Lon},{context.Lat}", lang = $"lang={context.Lang}";
-        // 端点均以 2026-11-20 官方文档 + 本地实测为准：
-        // 分钟降水 /v7/minutely/5m（仅中国）；预警旧 /v7/warning/now 已弃用(403)，改用 /weatheralert/v1/current/{lat}/{lon}（预警事件含 1001 台风、1604 热带气旋等）；
-        // 指数 /v7/indices/1d。
-        var minute = Want(WeatherDomain.Minutely) ? Body(context, "v7m|" + context.Site, TimeSpan.FromMinutes(10), $"{host}/v7/minutely/5m?location={loc}&{lang}", token) : Task.FromResult<string?>(null);
+        // 端点以 2026-11 官方文档 + 本地实测为准：
+        // 分钟降水 /v7/minutely/5m —— 只覆盖中国行政区，国外坐标固定 400（伦敦/华盛顿实测）；
+        // 预警 /weatheralert/v1/current/{lat}/{lon} —— 旧 /v7/warning/now 已弃用(403)，全球可用，无预警时返回空数组；
+        // 指数 /v7/indices/1d —— 全球可用。
+        // 分钟降水必须在国外直接跳过：400 虽已不会熔断来源，但每次刷新白发一个必失败的请求。
+        var minute = Want(WeatherDomain.Minutely) && Geo.IsChina(context.City)
+            ? Body(context, "v7m|" + context.Site, TimeSpan.FromMinutes(10), $"{host}/v7/minutely/5m?location={loc}&{lang}", token)
+            : Task.FromResult<string?>(null);
         var warning = Want(WeatherDomain.Warning) ? Body(context, "v7w|" + context.Site, TimeSpan.FromMinutes(10), $"{host}/weatheralert/v1/current/{context.Lat}/{context.Lon}?{lang}", token) : Task.FromResult<string?>(null);
         var indices = Want(WeatherDomain.Indices) ? Body(context, "v7i|" + context.Site + "|" + context.Day, TimeSpan.FromHours(2), $"{host}/v7/indices/1d?location={loc}&type=0&{lang}", token) : Task.FromResult<string?>(null);
         await Task.WhenAll(minute, warning, indices);
@@ -1315,9 +1329,12 @@ internal sealed class HeFengSource : IWeatherSource
             await gate.WaitAsync(token);
             try
             {
-                var body = await Body(context, $"history|{id}|{stamp}", ttl, $"{context.Host}/v7/historical/weather?location={id}&date={stamp.Replace("-", "")}", token);
+                var body = await Body(context, $"history|{id}|{context.Lang}|{stamp}", ttl, $"{context.Host}/v7/historical/weather?location={id}&date={stamp.Replace("-", "")}&lang={context.Lang}", token);
                 return ParseHistory(body, stamp);
             }
+            // 单日失败只丢这一天：历史是一天一条请求，不能因为某天超时/被限流就把整段 10 天清空。
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+            catch { return null; }
             finally { gate.Release(); }
         }));
         return [.. days.Where(day => day is not null).Select(day => day!).OrderBy(day => day.Date, StringComparer.Ordinal)];
@@ -1337,6 +1354,7 @@ internal sealed class HeFengSource : IWeatherSource
         }, token);
 
     // 时光机返回 weatherDaily（高低温、降水、气压、日月相）+ weatherHourly（没有日级天气现象）。
+    // 全球坐标都支持；lang 决定 hourly 的天气文本语言，不传会固定返回英文。
     // 天气现象与风取当地 12 点那一小时，风速取全天最大值，和每日预报的口径保持一致。
     private static DayPoint? ParseHistory(string? body, string date)
     {
@@ -1514,7 +1532,7 @@ internal sealed class HeFengSource : IWeatherSource
         catch { return null; }
     }
 
-    // v1 每日最多 10 天，第 11 天以后由调度链上的下一家来源补齐。
+    // v1 每日最多 10 天；第 11 天以后没有数据，界面显示 "-"。
     private static List<DayPoint>? ParseDaysV1(string? body, City city)
     {
         if (body is null) return null;

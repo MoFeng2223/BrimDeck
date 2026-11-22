@@ -57,7 +57,10 @@ public sealed partial class SettingsWindow
         var spinAnimation=new System.Windows.Media.Animation.DoubleAnimation(0,360,TimeSpan.FromMilliseconds(750)) {RepeatBehavior=System.Windows.Media.Animation.RepeatBehavior.Forever};
         inputHost.Children.Add(spinner);
         var loading=TextLine(Loc.T("搜索中…","Searching…"),11,TextSecondary);loading.Margin=new Thickness(8,7,8,7);
-        var empty=TextLine(Loc.T("未找到匹配城市","No matching city"),11,TextSecondary);empty.Margin=new Thickness(8,7,8,7);empty.Visibility=Visibility.Collapsed;
+        // 「空结果」与「请求失败」分开提示：超时/限流不是「没有这个城市」，文案必须说清楚。
+        string noResultText=Loc.T("未找到匹配城市","No matching city");
+        string failedText=Loc.T("搜索失败，请稍后重试","Search failed, try again later");
+        var empty=TextLine(noResultText,11,TextSecondary);empty.Margin=new Thickness(8,7,8,7);empty.Visibility=Visibility.Collapsed;
         // 绑定城市模型唯一的全称字段：用 nameof 让字段改名在编译期暴露，避免搜索结果再次显示为空。
         var options=new ListBox {MaxHeight=240,DisplayMemberPath=nameof(City.Name),Style=(Style)FindResource("SettingsSearchList")};
         var popupBody=new StackPanel();popupBody.Children.Add(loading);popupBody.Children.Add(options);popupBody.Children.Add(empty);
@@ -87,7 +90,7 @@ public sealed partial class SettingsWindow
         input.TextChanged+=async (_,_)=>{
             if(programmatic)return;
             pending?.Cancel();pending?.Dispose();pending=new();var token=pending.Token;picked=null;add.IsEnabled=false;
-            options.SelectedIndex=-1;options.Visibility=Visibility.Visible;empty.Visibility=Visibility.Collapsed;
+            options.SelectedIndex=-1;options.Visibility=Visibility.Visible;empty.Text=noResultText;empty.Visibility=Visibility.Collapsed;
             var query=input.Text.Trim();
             if(query.Length<2){ShowSearching(false);popup.IsOpen=false;return;}
             ShowSearching(true);popup.IsOpen=true;
@@ -98,11 +101,12 @@ public sealed partial class SettingsWindow
                 options.ItemsSource=found;
                 bool any=found.Count>0;
                 options.Visibility=any?Visibility.Visible:Visibility.Collapsed;
+                empty.Text=noResultText;
                 empty.Visibility=any?Visibility.Collapsed:Visibility.Visible;
                 popup.IsOpen=true;
             }
             catch(OperationCanceledException){ }
-            catch { if(pending is not null&&token==pending.Token){options.ItemsSource=null;options.Visibility=Visibility.Collapsed;empty.Visibility=Visibility.Visible;popup.IsOpen=true;} }
+            catch { if(pending is not null&&token==pending.Token){options.ItemsSource=null;options.Visibility=Visibility.Collapsed;empty.Text=failedText;empty.Visibility=Visibility.Visible;popup.IsOpen=true;} }
             finally { if(pending is not null&&token==pending.Token)ShowSearching(false); }
         };
         var controlsRow=new StackPanel {Orientation=Orientation.Horizontal};controlsRow.Children.Add(inputHost);controlsRow.Children.Add(add);Group(Row(Loc.T("搜索城市","Search city"),controlsRow));
