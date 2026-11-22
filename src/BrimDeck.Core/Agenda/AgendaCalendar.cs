@@ -44,12 +44,14 @@ public static class AgendaCalendar
         return midnight.AddMinutes(Math.Min(minutes, 23 * 60));
     }
 
-    // The minute of the day the block view's time line opens at (its top edge): on today an hour before now; on another day half an
-    // hour before the first timed event; with none, half past seven, so 8:00 shows near the top.
+    // The minute of the day the block view's time line opens at (its top edge), always on a whole hour so its name shows whole: on
+    // today the hour before now; on another day the hour of the first timed event that starts on the day (one from the evening before
+    // only when there is none); with none, 8:00.
     public static double OpeningMinute(DateOnly day, DateTime now, IEnumerable<AgendaSegment> segments)
     {
-        if (day == DateOnly.FromDateTime(now)) return Math.Max(0, now.TimeOfDay.TotalMinutes - 60);
-        var first = segments.Where(segment => !segment.AllDay).Select(segment => (DateTime?)segment.Start).Min();
-        return first is { } start ? Math.Max(0, (start - AgendaTime.Midnight(day)).TotalMinutes - 30) : 7.5 * 60;
+        if (day == DateOnly.FromDateTime(now)) return Math.Max(0, now.Hour - 1) * 60;
+        var timed = segments.Where(segment => !segment.AllDay).ToList();
+        var first = (timed.Where(segment => !segment.FromEarlier).Select(segment => (DateTime?)segment.Start).Min()) ?? timed.Select(segment => (DateTime?)segment.Start).Min();
+        return first is { } start ? start.Hour * 60 : 8 * 60;
     }
 }

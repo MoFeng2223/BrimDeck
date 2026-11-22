@@ -103,10 +103,10 @@ internal static class AgendaDraw
         return button;
     }
 
-    // A capsule button of the forms (24 high): the input's fill, or the text color for the main one.
+    // A capsule button of the forms (24 high): the fill (over the form's own), or the text color for the main one.
     public static Button Pill(PanelLook look, string text, Action click, bool main = false, bool danger = false)
     {
-        string fill = main ? look.Primary : look.Hex("input");
+        string fill = main ? look.Primary : look.Fill;
         var label = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = 12, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
             Foreground = UI.Brush(main ? look.Hex("surface") : danger ? look.Hex("danger") : look.Primary) };
         var face = new Border { Height = 24, CornerRadius = new CornerRadius(look.Corner(12)), Padding = new Thickness(12, 0, 12, 0), Background = UI.Brush(fill), Child = label };
@@ -156,7 +156,7 @@ internal static class AgendaFields
         return box;
     }
 
-    // A one-line field with a grey hint (28 high, the input's fill): the event's title.
+    // A one-line field with a grey hint (28 high, the fill over the form's own fill): the event's title.
     public static AgendaTextField Text(PanelLook look, Action<TextBox> keyboard, string hint) => new(look, keyboard, hint);
 
     // A time ("17:30"), typed or stepped by a quarter hour with the arrow keys or the wheel.
@@ -180,7 +180,7 @@ internal static class AgendaFields
         {
             bool on = toggle.IsChecked == true;
             string edge = over ? look.Secondary : look.Tertiary;
-            box.BorderBrush = on ? Brushes.Transparent : UI.Brush(edge);
+            box.BorderBrush = UI.Brush(edge);
             box.Background = on ? UI.Brush(edge) : Brushes.Transparent;
             tick.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
         }
@@ -204,7 +204,7 @@ internal sealed class AgendaTextField : Grid
     {
         Height = 28;
         Box = AgendaFields.Box(look, keyboard);
-        Box.Background = UI.Brush(look.Hex("input"));
+        Box.Background = UI.Brush(look.Fill);
         Box.Padding = new Thickness(7, 0, 7, 0);
         AutomationProperties.SetName(Box, hint);
         _hint = AgendaDraw.Words(hint, 12.5, 18, look.Tertiary);
@@ -229,7 +229,7 @@ internal sealed class AgendaTimeField : Grid
         _look = look; _endOfDay = endOfDay;
         Width = 58; Height = 28;
         Box = AgendaFields.Box(look, keyboard);
-        Box.Background = UI.Brush(look.Hex("input"));
+        Box.Background = UI.Brush(look.Fill);
         Box.TextAlignment = TextAlignment.Center; Box.MaxLength = 5;
         Typography.SetNumeralAlignment(Box, FontNumeralAlignment.Tabular);
         InputMethod.SetIsInputMethodEnabled(Box, false);
@@ -317,7 +317,7 @@ internal sealed class AgendaDateField : ContentControl
         var chevron = AgendaDraw.Icon(AgendaDraw.Chevron, 11, look.Tertiary);
         chevron.Margin = new Thickness(6, 0, 0, 0); chevron.VerticalAlignment = VerticalAlignment.Center;
         var row = new StackPanel { Orientation = Orientation.Horizontal, Children = { _label, chevron } };
-        string rest = look.Hex("input");
+        string rest = look.Fill;
         _face = new Border { Height = 28, CornerRadius = new CornerRadius(look.Corner(8)), Padding = new Thickness(10, 0, 8, 0), Background = UI.Brush(rest), Child = row };
         Popup = new AgendaDatePopup(look);
         var button = AgendaDraw.Bare(_face, name, () => Popup.Show(this, _date, Today(), day => { Date = day; }), (over, down) =>
@@ -482,7 +482,7 @@ internal sealed class AgendaEventForm : Border
     public AgendaEventForm(PanelLook look, Action<TextBox> keyboard, string submit, bool delete = false, bool showStartDay = false)
     {
         _look = look;
-        Background = UI.Brush(look.Fill); CornerRadius = new CornerRadius(look.Corner(8)); Padding = new Thickness(8);
+        Background = UI.Brush(look.Fill); CornerRadius = new CornerRadius(look.Corner(8)); Padding = new Thickness(8); VerticalAlignment = VerticalAlignment.Top;
         Title = AgendaFields.Text(look, keyboard, Loc.T("标题", "Title"));
         StartDay = AgendaFields.Date(look, Loc.T("开始日期", "Start date"));
         StartTime = AgendaFields.Time(look, keyboard, Loc.T("开始时间", "Start time"));

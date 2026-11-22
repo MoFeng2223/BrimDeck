@@ -151,7 +151,10 @@ public partial class MainWindow
             return plate;
         }
         if (source.Icon is { Length: > 0 } waiting) _agendaIcons.Add(waiting);
-        plate.Children.Add(NoticeLetter.Plate(source.AppName, size, Look.Readable(accent ?? NoticeIcons.Fallback(source.AppKey))));
+        var letter = NoticeLetter.Plate(source.AppName, size, Look.Readable(accent ?? NoticeIcons.Fallback(source.AppKey)));
+        // At a line's height the plate's letter is set larger than its usual share, so it can still be read.
+        if (size < 20 && letter is Panel parts && parts.Children.OfType<TextBlock>().FirstOrDefault() is { } initial) initial.FontSize = Math.Round(size * .6);
+        plate.Children.Add(letter);
         return plate;
     }
 }

@@ -113,6 +113,22 @@ internal sealed partial class PlannerPage
         }
     }
 
+    // Another theme or language: the kept parts drew their colors and words from the old one, so they are made anew, with what was
+    // typed in them kept (the note saved, a to-do's words kept, the to-do box's words carried over). An open form closes.
+    private void Restyle()
+    {
+        SaveNote();
+        CommitTodo();
+        _duePopup?.Close(); _duePopup = null;
+        if (_form is not null) CloseForm();
+        string typed = _todoInput?.Text ?? "";
+        Detach(_todoBar); Detach(_noteHost);
+        _todoBar = null; _todoInput = null; _todoScope = null;
+        _noteHost = null; _noteBox = null; _noteDay = null;
+        if (typed.Length > 0) { TodoBar(); _todoInput!.Text = typed; }
+        _eventScroll = _todoScroll = _blockScroll = null;
+    }
+
     // The frame is built again: the kept parts leave the old one.
     private void DetachTyping()
     {
@@ -136,9 +152,24 @@ internal sealed partial class PlannerPage
     private void ShowFooter()
     {
         FrameworkElement? foot = _form ?? (_view switch { AgendaView.Events => AddRow(), AgendaView.Todos => TodoBar(), _ => null });
+        // On a page too low for the day's head, its list and the form together, the form takes the page alone (with the start's day
+        // in it), scrolling where even it does not fit.
+        bool alone = _layout == AgendaLayout.Short && _form is not null;
+        _dayHead.Visibility = alone ? Visibility.Collapsed : Visibility.Visible;
+        _body.Visibility = alone ? Visibility.Collapsed : Visibility.Visible;
+        Grid.SetRow(_footer, alone ? 3 : 4);
+        _footer.Margin = new Thickness(0, alone ? 0 : 6, 0, 0);
+        if (alone)
+        {
+            _formScroll ??= new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false, Background = Brushes.Transparent };
+            if (!ReferenceEquals(_formScroll.Content, foot)) { _rebuilding = true; try { Detach(foot); _formScroll.Content = foot; } finally { _rebuilding = false; } }
+            foot = _formScroll;
+        }
+        else if (_formScroll is not null && _formScroll.Content is not null) { _rebuilding = true; try { _formScroll.Content = null; } finally { _rebuilding = false; } }
         _footer.Visibility = foot is null ? Visibility.Collapsed : Visibility.Visible;
         if (!ReferenceEquals(_footer.Child, foot)) { _rebuilding = true; try { Detach(foot); _footer.Child = foot; } finally { _rebuilding = false; } }
     }
+    private ScrollViewer? _formScroll;
 
     private ScrollViewer NewScroll(Action<double> remember)
     {
@@ -318,9 +349,10 @@ internal sealed partial class PlannerPage
         }
         foreach (var placement in AgendaQuery.Columns(segments, TimeSpan.FromMinutes(30))) line.Add(Block(placement.Segment, now), Slot(placement));
         _blockMinute ??= AgendaCalendar.OpeningMinute(_day, now, segments);
-        Fill(scroll, line, _blockMinute.Value * HourHeight / 60);
         Grid.SetRow(scroll, 1);
-        grid.Children.Add(scroll);
+        _rebuilding = true;
+        try { Detach(scroll); grid.Children.Add(scroll); } finally { _rebuilding = false; }
+        Fill(scroll, line, _blockMinute.Value * HourHeight / 60);
         return grid;
     }
 
@@ -411,7 +443,7 @@ internal sealed partial class PlannerPage
     {
         CommitTodo();
         if (_form is not null) { _form.ClosePopups(); Detach(_form); _form = null; }
-        bool elsewhere = item is not null && item.FirstDay != _day;
+        bool elsewhere = item is not null && item.FirstDay != _day || _layout == AgendaLayout.Short;
         string submit = item is null && todo is null ? Loc.T("添加", "Add") : Loc.T("保存", "Save");
         var form = new AgendaEventForm(Look, _deck.AgendaKeyboard, submit, delete: item is not null, showStartDay: elsewhere) { Today = () => Today };
         if (item is not null) form.Fill(item.Title, item.Start, item.End, item.AllDay);

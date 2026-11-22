@@ -196,6 +196,7 @@ internal sealed partial class Renderer(App app, string output, string language, 
             if (scenes.Contains("notices-page")) await NoticesPageScene();
             // The collapsed count of unread notices on each form, and where it is set; for checking.
             if (scenes.Contains("notice-strip")) await NoticeStripScene();
+            if (scenes.Contains("agenda")) await AgendaScene();
             // Memory and the drives showing what is in use and what is free, expanded and collapsed, and the option; for checking.
             // The expanded monitor's grid editor on its settings page, the saved grid and the readings waiting above it; for checking.
             if (scenes.Contains("monitor-grid"))

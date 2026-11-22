@@ -34,7 +34,7 @@ internal sealed partial class PlannerPage : Grid
     private bool _started;
     // How the page is laid out now, and what its frame was built for.
     private AgendaLayout _layout;
-    private string _frameKey = "", _shownKey = "";
+    private string _frameKey = "", _shownKey = "", _lookKey = "";
     private double _width, _height, _cell = AgendaCalendar.CellHeight;
 
     // The frame's parts; their contents are set by Show.
@@ -73,7 +73,9 @@ internal sealed partial class PlannerPage : Grid
         _width = width; _height = height;
         _layout = AgendaCalendar.LayoutFor(panelWidth, height);
         _cell = _layout == AgendaLayout.Wide ? AgendaCalendar.CellHeightFor(height) : AgendaCalendar.CellHeight;
-        string frame = string.Join('|', _layout, _cell, Look.Generation, Loc.Language, SystemParameters.HighContrast);
+        string look = string.Join('|', Look.Generation, Loc.Language, SystemParameters.HighContrast);
+        if (look != _lookKey) { _lookKey = look; Restyle(); }
+        string frame = string.Join('|', _layout, _cell, look);
         if (frame != _frameKey) { _frameKey = frame; BuildFrame(); _shownKey = ""; }
         Show();
     }
@@ -113,7 +115,7 @@ internal sealed partial class PlannerPage : Grid
         _body = new Border { ClipToBounds = true };
         _footer = new Border { Margin = new Thickness(0, 6, 0, 0) };
         // The lists are made anew for the new frame; what is being typed is kept (the boxes move into it).
-        _eventScroll = null; _todoScroll = null; _blockScroll = null;
+        _eventScroll = null; _todoScroll = null; _blockScroll = null; _formScroll = null;
         DetachTyping();
         switch (_layout)
         {
@@ -206,19 +208,16 @@ internal sealed partial class PlannerPage : Grid
         return title;
     }
 
-    // The day's title and how far it is from today: "11月22日 周日  今天".
+    // The day's title and how far it is from today: "11月22日 周日  今天", one line that ends in an ellipsis where the head is short of room.
     private FrameworkElement DayTitle()
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         var title = Title(AgendaText.DayTitle(_day, Today));
-        row.Children.Add(title);
         if (AgendaText.Relative(_day, Today) is { } relative)
         {
-            var near = AgendaDraw.Words(relative, 11.5, 16, Look.Tertiary);
-            near.VerticalAlignment = VerticalAlignment.Center; near.Margin = new Thickness(8, 1, 0, 0);
-            row.Children.Add(near);
+            title.Inlines.Add(new System.Windows.Documents.Run(" "));
+            title.Inlines.Add(new System.Windows.Documents.Run(relative) { FontSize = 11.5, FontWeight = FontWeights.Normal, Foreground = UI.Brush(Look.Tertiary) });
         }
-        return row;
+        return title;
     }
 
     // A head row: its title on the left; on the right "今天" when away from today, the two arrows (when step is not 0) and the switches.

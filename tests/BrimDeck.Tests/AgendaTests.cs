@@ -500,9 +500,12 @@ static class AgendaTests
         var book = new AgendaBook();
         Event(book, "站会", "2026-11-24 09:00", "2026-11-24 09:30");
         Event(book, "出差", "2026-11-23 20:00", "2026-11-25 12:00");
-        check("Agenda: the time line opens an hour before now today, before the first event on another day, at 7:30 on an empty day",
-            AgendaCalendar.OpeningMinute(Today, Now, book.Segments(Today)) == 13 * 60 + 20 && AgendaCalendar.OpeningMinute(D("2026-11-24"), Now, book.Segments(D("2026-11-24"))) == 8.5 * 60
-            && AgendaCalendar.OpeningMinute(D("2026-11-30"), Now, book.Segments(D("2026-11-30"))) == 7.5 * 60 && AgendaCalendar.OpeningMinute(Today, T("2026-11-22 00:20"), []) == 0);
+        Event(book, "值守", "2026-11-23 22:00", "2026-11-24 02:00");
+        Event(book, "夜里", "2026-11-26 22:00", "2026-11-27 02:00");
+        check("Agenda: the time line opens on the hour before now today, at the first event starting on another day, at 8:00 on an empty day",
+            AgendaCalendar.OpeningMinute(Today, Now, book.Segments(Today)) == 13 * 60 && AgendaCalendar.OpeningMinute(D("2026-11-24"), Now, book.Segments(D("2026-11-24"))) == 9 * 60
+            && AgendaCalendar.OpeningMinute(D("2026-11-30"), Now, book.Segments(D("2026-11-30"))) == 8 * 60 && AgendaCalendar.OpeningMinute(Today, T("2026-11-22 00:20"), []) == 0
+            && AgendaCalendar.OpeningMinute(D("2026-11-27"), Now, book.Segments(D("2026-11-27"))) == 0);
     }
 
     private static void English(Action<string, bool> check)
