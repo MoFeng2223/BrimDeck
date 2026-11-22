@@ -73,21 +73,7 @@ public partial class SettingsWindow
         };
         Group(Row(Loc.T("预警阈值", "Warning threshold"), warning, help: () => Loc.T("电量不高于此值时显示为偏低，使用预警颜色。", "At or under this level a battery shows as getting low, in its warning color.")),
             Row(Loc.T("告警阈值", "Critical threshold"), low, help: () => Loc.T("电量不高于此值时显示为低电量，使用告警颜色。", "At or under this level a battery shows as low, in its critical color.")));
-        Group(Toggle(Loc.T("电量时间估计", "Battery time estimates"), S.DeviceBatteryEstimates, value =>
-        {
-            Change(s => s.DeviceBatteryEstimates = value);
-            if (value)
-            {
-                if (_app.Devices is { } devices)
-                {
-                    _app.DevicePace.Observe(devices.Showing, DateTimeOffset.UtcNow);
-                    if (_app.DevicePace.Dirty) DeviceBatteryPaceStore.Save(_app.DevicePace);
-                }
-            }
-            else _app.ForgetDevicePace();
-        }, help:
-            Loc.T("开启后，BrimDeck 会在本机保存设备的近期电量读数（%LocalAppData%\\BrimDeck，关闭此选项或恢复默认时清除），用来估计还能用多久、充满还需多久，并显示在展开的设备页上。不会上传任何数据。默认关闭。",
-                "When on, BrimDeck keeps recent battery readings on this PC (%LocalAppData%\\BrimDeck; cleared when this is turned off or defaults are restored) to estimate how long a device will last or take to charge, shown on the expanded devices page. Nothing is sent anywhere. Off by default.")));
+        Group(EstimatesRow());
 
         SectionTitle(Loc.T("设备", "Devices"));
         var headings = DeviceColumns(); headings.Height = 34;
@@ -109,6 +95,36 @@ public partial class SettingsWindow
         Target.Children.Add(new Border { Child = table, BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(0, 1, 0, 0), Margin = new Thickness(0, 0, 0, 28) });
         _deviceRowsKey = "";
         FillDeviceRows(_deviceRows);
+    }
+
+    // Battery time estimates: the switch, with Clear readings to its left. Turning the switch off keeps the readings; only Clear
+    // erases them, for every profile (they are one file for all).
+    private Grid EstimatesRow()
+    {
+        string title = Loc.T("电量时间估计", "Battery time estimates");
+        var estimates = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.DeviceBatteryEstimates, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetName(estimates, title);
+        estimates.Checked += (_, _) =>
+        {
+            Change(s => s.DeviceBatteryEstimates = true);
+            if (_app.Devices is not { } devices) return;
+            _app.DevicePace.Observe(devices.Showing, DateTimeOffset.UtcNow);
+            DeviceBatteryPaceStore.Save(_app.DevicePace);
+        };
+        estimates.Unchecked += (_, _) => Change(s => s.DeviceBatteryEstimates = false);
+        var clear = ActionButton(Loc.T("清除历史读数", "Clear readings"), () =>
+        {
+            if (Confirm(Loc.T("清除历史读数", "Clear readings"),
+                Loc.T("将删除已保存的电量读数，之后需要重新收集一段时间才会显示估计。", "This deletes the saved battery readings. Estimates show again after a new period of collecting."),
+                Loc.T("清除", "Clear")))
+                _app.ClearDevicePace();
+        });
+        clear.FontSize = 11; clear.VerticalAlignment = VerticalAlignment.Center; clear.Margin = new Thickness(0, 0, 12, 0);
+        var controls = new StackPanel { Orientation = Orientation.Horizontal };
+        controls.Children.Add(clear); controls.Children.Add(estimates);
+        return Row(title, controls, help: () => Loc.T(
+            "估计设备还能用多久、充满还需多久，显示在展开的设备页上。开启后需要先收集一段时间的电量读数才会显示估计。读数保存在本机 %LocalAppData%\\BrimDeck。",
+            "Estimates how long a device will last or take to charge, on the expanded devices page. Once it is on, battery readings are collected for a while before an estimate shows. The readings are kept on this PC in %LocalAppData%\\BrimDeck."));
     }
     private StackPanel? _deviceRows;
     private Border? _devicePreview;

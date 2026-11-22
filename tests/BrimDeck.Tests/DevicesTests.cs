@@ -151,5 +151,46 @@ static class DevicesTests
             roundTrip.Of(mouse with { Percent = 60 }, start.AddMinutes(10)).TimeLeft == TimeSpan.FromMinutes(30)
             && !roundTrip.Dirty);
         check("Devices settings: time estimates are off by default", !new DeckSettings().DeviceBatteryEstimates);
+
+        // Earbuds put back in their case at 70 %, taken out again at 95 %: the charge in the case was never seen, so the slope
+        // starts again at 95 %. 5 % in 30 minutes → 10 %/h → 90 / 10 = 9 h.
+        var buds = new DeviceBatteryPace();
+        var earbuds = Bt("BB", 70, "Buds", DeviceKind.Earbuds);
+        buds.Observe([earbuds], start);
+        buds.Observe([earbuds with { Percent = 95 }], start.AddHours(3));
+        buds.Observe([earbuds with { Percent = 90 }], start.AddHours(3.5));
+        check("Devices pace: a rise while not charging starts the slope again",
+            buds.Of(earbuds with { Percent = 90 }, start.AddHours(3.5)).TimeLeft == TimeSpan.FromHours(9));
+
+        // A mouse whose source reports no charging state, charged on its cable from 20 % to 100 %, then 5 % in an hour → 19 h.
+        var cable = new DeviceBatteryPace();
+        cable.Observe([mouse with { Percent = 20 }], start);
+        cable.Observe([mouse with { Percent = 100 }], start.AddHours(1));
+        cable.Observe([mouse with { Percent = 95 }], start.AddHours(2));
+        check("Devices pace: a charge without a charging state does not stop estimates",
+            cable.Of(mouse with { Percent = 95 }, start.AddHours(2)).TimeLeft == TimeSpan.FromHours(19));
+
+        // A keyboard that loses 1 % every 2 hours: 70 / 0.5 = 140 h, shown in days.
+        var keyboard = new DeviceBatteryPace();
+        for (int i = 0; i <= 10; i++) keyboard.Observe([mouse with { Percent = 80 - i }], start.AddHours(2 * i));
+        var week = keyboard.Of(mouse with { Percent = 70 }, start.AddHours(20));
+        check("Devices pace: a device that lasts for days is estimated", week.TimeLeft == TimeSpan.FromHours(140)
+            && keyboard.Status(mouse with { Percent = 70 }, start.AddHours(20)) == Loc.T("约 5 天 20 小时 可用", "~5 d 20 h left"));
+
+        var plugged = new DeviceBatteryPace();
+        var full100 = mouse with { Percent = 100, Charging = true };
+        plugged.Observe([full100], start);
+        check("Devices pace: a full battery on its charger is not collecting", plugged.Status(full100, start.AddHours(1)) is null);
+        check("Devices pace: a device not seen yet is collecting",
+            new DeviceBatteryPace().Status(mouse with { Percent = 50 }, start) == Loc.T("正在收集电量数据…", "Collecting battery data…"));
+        // 1 % in 30 hours is slower than any estimate (over 60 days).
+        var slow = new DeviceBatteryPace();
+        slow.Observe([mouse with { Percent = 51 }], start);
+        slow.Observe([mouse with { Percent = 50 }], start.AddHours(30));
+        check("Devices pace: a slope too slow to estimate is not collecting either", slow.Status(mouse with { Percent = 50 }, start.AddHours(30)) is null);
+
+        var nulls = DeviceBatteryPace.FromFile("[null, {\"key\":\"bt:AA\",\"samples\":[null,{\"at\":\"2026-03-01T12:00:00+00:00\",\"percent\":80,\"charging\":false}]}]", start);
+        check("Devices pace: null samples in the file are skipped", nulls.Serialize().Contains("\"percent\": 80", StringComparison.Ordinal)
+            && nulls.Status(mouse, start) == Loc.T("正在收集电量数据…", "Collecting battery data…"));
     }
 }
