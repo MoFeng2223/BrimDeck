@@ -223,8 +223,6 @@ public partial class MainWindow
     }
     private void DevicesPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Devices);
     private void AgendaPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Agenda);
-    // Where the usage page's application tabs start: after the page switch, which holds one 28 DIP button per shown page.
-    private double ApplicationPagesLeft(double side) { int pages = DeckPages.Visible(Settings).Count; return side + (pages <= 1 ? 36 : 72 + 29 * (pages - 2)); }
     private PanelHeader _header = PanelHeader.For(36, 20);
     private void ApplyPageHeader(PanelHeader page)
     {
@@ -239,7 +237,7 @@ public partial class MainWindow
         Toolbar.Height = header.Height;
         PageSwitch.Margin = new Thickness(header.Side, 0, 0, 0);
         FitPageButtons(header);
-        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton, NoticesPageButton, AgendaPageButton })
+        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton, NoticesPageButton, AgendaPageButton, PageMoreButton })
         {
             // A local corner for these two buttons only; PanelIconButton keeps its 5 DIP corner elsewhere.
             button.ApplyTemplate();
@@ -248,7 +246,6 @@ public partial class MainWindow
         PageCapsule.CornerRadius = new CornerRadius(Look.Corner(PanelHeader.ButtonRadius));
         SettingsButton.Height = header.SettingsHeight;
         ToolbarActions.Margin = new Thickness(0, 0, header.RightMargin, 0);
-        ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(header.Side), 0, 0, 0);
         PlaceClock();
         // Refresh the grip boundary when the shared toolbar changes without resizing the island.
         if (gripBoundaryChanged) UpdateGrips();
@@ -256,22 +253,18 @@ public partial class MainWindow
     private void RenderPageSwitch()
     {
         SetValue(SuppressMusicToolTipsProperty, IsMusicPage);
-        foreach (var control in new FrameworkElement[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton, NoticesPageButton, AgendaPageButton, MediaSourceButton, ClockLabel })
+        foreach (var control in new FrameworkElement[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton, NoticesPageButton, AgendaPageButton, PageMoreButton, MediaSourceButton, ClockLabel })
             ToolTipService.SetIsEnabled(control, !IsMusicPage);
         PageSwitch.Visibility = _details && IsUsagePage || IsShelfPage && ShelfHidesSwitch ? Visibility.Collapsed : Visibility.Visible;
         OrderPageButtons();
         if (!IsShelfPage) { ShelfToolbar.Visibility = Visibility.Collapsed; ShelfSearchButton.Visibility = Visibility.Collapsed; }
         foreach (var (button, page) in new[] { (AIUsageButton, DeckPage.Usage), (MusicPageButton, DeckPage.Music), (MonitorPageButton, DeckPage.Monitor), (ShelfPageButton, DeckPage.Clipboard), (DevicesPageButton, DeckPage.Devices), (NoticesPageButton, DeckPage.Notices), (AgendaPageButton, DeckPage.Agenda) })
-        {
-            bool current = CurrentPage == page;
-            button.Visibility = DeckPages.Shown(Settings, page) ? Visibility.Visible : Visibility.Collapsed;
-            button.Foreground = UI.Brush(current ? Look.Primary : Look.Secondary);
-        }
-        PlacePageCapsule();
+            button.Foreground = UI.Brush(CurrentPage == page ? Look.Primary : Look.Secondary);
         UpdateShelfPageButton();
         UpdateNoticeBadge();
+        // Which pages stand in the switch follows the room left of the clock (FitPageSwitch); the capsule goes under the chosen one.
         PlaceClock();
-        ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(_header.Side), 0, 0, 0);
+        PlacePageCapsule();
         // With the entry switched on the source menu has one more row. Without a source that row stands alone in the button.
         bool entry = FullControlEntryShown, alone = entry && _mediaTrack is null;
         MediaSourceButton.Visibility = IsMusicPage && (_mediaTrack is not null || entry) ? Visibility.Visible : Visibility.Collapsed;

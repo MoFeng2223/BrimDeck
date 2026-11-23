@@ -117,6 +117,20 @@
                 <Button x:Name="AgendaPageButton" Style="{StaticResource PanelIconButton}" Width="28" Height="24" Margin="1,0,0,0" Click="AgendaPage_Click">
                   <Viewbox Width="16" Height="16"><Canvas Width="24" Height="24"><Path Data="M8 2.5V6M16 2.5V6M5 4.5h14a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2zM3 10h18M9 15.5l2 2 4-4" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.65" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox>
                 </Button>
+                <!-- The pages the switch has no room for, listed one per row (MainWindow.PageSwitch.cs). It shows three dots, or the chosen
+                     page's icon while that page is one of them, and a chevron. -->
+                <Button x:Name="PageMoreButton" Style="{StaticResource PanelIconButton}" Width="40" Height="24" Margin="1,0,0,0" Click="PageMore_Click" Visibility="Collapsed">
+                  <StackPanel Orientation="Horizontal">
+                    <Grid Width="16" Height="16">
+                      <ContentControl x:Name="PageMoreGlyph" Focusable="False" IsTabStop="False"/>
+                      <Path x:Name="PageMoreBadge" Fill="{DynamicResource PanelAccent}" Visibility="Collapsed" IsHitTestVisible="False">
+                        <Path.Data><EllipseGeometry Center="14,2" RadiusX="2" RadiusY="2"/></Path.Data>
+                      </Path>
+                    </Grid>
+                    <Path Data="M 0.5,0.5 L 3.5,3.5 L 6.5,0.5" Width="7" Height="4" Margin="3,1,0,0" VerticalAlignment="Center"
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                  </StackPanel>
+                </Button>
                  </StackPanel>
                  </Grid>
                 </Border>

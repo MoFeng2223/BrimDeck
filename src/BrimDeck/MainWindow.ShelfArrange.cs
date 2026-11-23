@@ -225,6 +225,7 @@ public partial class MainWindow
             string label = filesFront ? Loc.T("切换到剪贴板", "Switch to clipboard") : Loc.T("切换到文件中转", "Switch to file transfer");
             AutomationProperties.SetName(ShelfPageButton, label);
             ShelfPageButton.ToolTip = label;
+            UpdateMoreButton();
             return;
         }
         // Showing the file transfer alone, the page's button is its tray.
@@ -236,6 +237,7 @@ public partial class MainWindow
             _ => Loc.T("剪贴板与文件中转", "Clipboard and file transfer")
         });
         ShelfPageButton.ToolTip = null;
+        UpdateMoreButton();
     }
 
     private string ShelfSearchName => Settings.ShelfShown switch

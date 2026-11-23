@@ -67,7 +67,7 @@ public partial class MainWindow
     private void FocusPanelStart()
     {
         if (CurrentPage == DeckPage.Notices && _pageRows.Count > 0) { _pageRows[0].Row.Focus(); return; }
-        Keyboard.Focus(PageButton(CurrentPage));
+        Keyboard.Focus(SwitchButton(CurrentPage));
     }
 
     // The panel closed or was hidden: it cannot be active again until the next hotkey, and the window that had the keyboard gets

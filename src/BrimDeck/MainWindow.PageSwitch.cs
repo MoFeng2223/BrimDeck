@@ -1,6 +1,9 @@
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Media;
+using System.Windows.Shapes;
 using BrimDeck.Core;
 
 namespace BrimDeck;
@@ -11,12 +14,13 @@ public partial class MainWindow
     // does; otherwise it is set in place. A switch whose buttons are not laid out yet places it once they are.
     private void PlacePageCapsule()
     {
-        var button = PageButton(CurrentPage);
+        var button = SwitchButton(CurrentPage);
+        _capsuleOn = button;
         if (!LayoutRetry.Laid(button))
         {
             // Retried after a layout pass, never by posting itself again: the switch is collapsed while the usage details show, its
             // buttons then keep an invalid measure and their old width, and a retry that posted itself spun the UI thread at 90%.
-            if (!_capsulePending) { _capsulePending = true; LayoutRetry.WhenReady(this, () => LayoutRetry.Laid(PageButton(CurrentPage)), () => { _capsulePending = false; PlacePageCapsule(); }); }
+            if (!_capsulePending) { _capsulePending = true; LayoutRetry.WhenReady(this, () => LayoutRetry.Laid(SwitchButton(CurrentPage)), () => { _capsulePending = false; PlacePageCapsule(); }); }
             return;
         }
         // The button's set height, not ActualHeight: a height ApplyHeader just set shows in ActualHeight only after the next layout pass.
@@ -38,48 +42,176 @@ public partial class MainWindow
         { EasingFunction = Soft.Follow, FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop });
     }
     private bool _capsulePending;
+    // The button the capsule was last placed under.
+    private Button? _capsuleOn;
     // The page buttons take the header's button height, and the capsule under the chosen one takes it in the same step: PlacePageCapsule,
     // which RefreshStatus runs before ApplyHeader, would otherwise leave it at the size tier left behind until the next refresh.
     private void FitPageButtons(PanelHeader header)
     {
-        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton, NoticesPageButton, AgendaPageButton }) button.Height = header.ButtonHeight;
+        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton, NoticesPageButton, AgendaPageButton, PageMoreButton }) button.Height = header.ButtonHeight;
         PageCapsule.Height = header.ButtonHeight;
     }
-    // The buttons stand in the order chosen in the settings; the first has no gap before it.
+    // The buttons stand in the order chosen in the settings, the more button after them; FitPageSwitch shows those that fit.
     private void OrderPageButtons()
     {
         if (AIUsageButton.Parent is not Panel buttons) return;
-        var order = Settings.PageOrder.Select(PageButton).ToList();
+        var order = Settings.PageOrder.Select(PageButton).Append(PageMoreButton).ToList();
         if (!buttons.Children.Cast<UIElement>().SequenceEqual(order))
         {
             buttons.Children.Clear();
             foreach (var button in order) buttons.Children.Add(button);
         }
-        for (int i = 0; i < order.Count; i++) order[i].Margin = new Thickness(i == 0 ? 0 : 1, 0, 0, 0);
     }
-    // The clock stands in the middle of the panel. Where the page switch would reach it (seven pages on the narrowest panels), it
-    // stands in the middle of the room between the switch and the settings button instead.
+
+    // The clock always stands in the middle of the panel. The page switch keeps to the room left of it; FitPageSwitch moves the
+    // pages that do not fit there into the more button's list.
     private void PlaceClock()
     {
-        double width = ContentCanvas.Width;
-        if (!double.IsFinite(width)) return;
-        double clock = ClockLabel.Text.Length > 0 ? TextWidth(ClockLabel.Text, 12, FontWeights.Normal) : 34;
-        double? left = ClockLeft(width, clock);
-        ClockLabel.HorizontalAlignment = left is null ? HorizontalAlignment.Center : HorizontalAlignment.Left;
-        ClockLabel.Margin = new Thickness(left ?? 0, 0, 0, 0);
+        ClockLabel.HorizontalAlignment = HorizontalAlignment.Center;
+        ClockLabel.Margin = new Thickness(0);
+        FitPageSwitch();
     }
-    // The clock's left edge when it cannot stand in the middle; null when it can.
-    private double? ClockLeft(double width, double clock)
+
+    // Each page button is 28 DIP wide with 1 DIP between buttons, inside the switch's 2 DIP padding; the more button is 40 DIP.
+    private const double SwitchButtonWidth = 28, SwitchMoreWidth = 40, ClockGap = 8, PagerGap = 11;
+    // The shown pages that do not fit in the switch, in switch order; the more button lists them.
+    private List<DeckPage> _pagesInMenu = [];
+
+    // Shows as many page buttons as fit between the switch's left inset and the clock (less the usage page's application pager,
+    // which stands right after the switch), and the more button for the rest.
+    private void FitPageSwitch()
     {
-        int pages = DeckPages.Visible(Settings).Count;
-        if (pages == 0 || PageSwitch.Visibility != Visibility.Visible) return null;
-        const double gap = 8;
-        double switchRight = _header.Side + 2 * PanelHeader.SwitchPadding + pages * 28 + (pages - 1);
-        if ((width - clock) / 2 >= switchRight + gap) return null;
-        double gear = width - _header.RightMargin - PanelHeader.SettingsWidth;
-        return Math.Round(switchRight + Math.Max(0, (gear - switchRight - clock) / 2));
+        var shown = DeckPages.Visible(Settings).ToList();
+        int direct = shown.Count;
+        double width = ContentCanvas.Width;
+        if (double.IsFinite(width) && direct > 0)
+        {
+            double clock = ClockLabel.Text.Length > 0 ? TextWidth(ClockLabel.Text, 12, FontWeights.Normal) : 34;
+            double pager = PagerWidth();
+            double room = (width - clock) / 2 - ClockGap - _header.Side - (pager > 0 ? pager + PagerGap : 0);
+            direct = PageSwitchFit.Direct(shown.Count, room, SwitchButtonWidth, SwitchMoreWidth, 2 * PanelHeader.SwitchPadding);
+        }
+        _pagesInMenu = shown.Skip(direct).ToList();
+        bool first = true;
+        foreach (var page in DeckPages.Order)
+        {
+            var button = PageButton(page);
+            int at = shown.IndexOf(page);
+            bool visible = at >= 0 && at < direct;
+            button.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+            if (visible) { button.Margin = new Thickness(first ? 0 : 1, 0, 0, 0); first = false; }
+        }
+        PageMoreButton.Visibility = _pagesInMenu.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        PageMoreButton.Margin = new Thickness(first ? 0 : 1, 0, 0, 0);
+        UpdateMoreButton();
+        double switchWidth = PageSwitchFit.Width(direct, _pagesInMenu.Count > 0, SwitchButtonWidth, SwitchMoreWidth, 2 * PanelHeader.SwitchPadding);
+        ApplicationPages.Margin = new Thickness(_header.Side + switchWidth + (shown.Count <= 1 ? 4 : PagerGap), 0, 0, 0);
+        // A capsule under a button that has just been shown or hidden moves to the chosen page's button.
+        if (_capsuleOn is { } on && !ReferenceEquals(on, SwitchButton(CurrentPage))) PlacePageCapsule();
     }
-    // Where the clock ends on the right, wherever it stands.
-    private double ClockRight(double width, double clock) => ClockLeft(width, clock) is { } left ? left + clock : (width + clock) / 2;
+    // The usage page's application pager (‹ 1/2 ›) while the usage page shows it; 0 otherwise.
+    private double PagerWidth()
+    {
+        if (!IsUsagePage || _details || ApplicationPages.Children.Count == 0) return 0;
+        double width = 0;
+        foreach (UIElement child in ApplicationPages.Children) { child.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity)); width += child.DesiredSize.Width; }
+        return width;
+    }
+
+    // The button that stands for a page: its own button, or the more button while the page is in the more button's list.
+    private Button SwitchButton(DeckPage page) => _pagesInMenu.Contains(page) ? PageMoreButton : PageButton(page);
+    // What the more button's icon was last made for.
+    private object? _moreGlyphKey;
+
+    // Three dots, or the chosen page's icon while the chosen page is in the list; a dot while the notices page is in the list and
+    // has notices not seen yet, unless the button already shows the bell with its own dot.
+    private void UpdateMoreButton()
+    {
+        bool chosenInside = _pagesInMenu.Contains(CurrentPage);
+        PageMoreButton.Foreground = UI.Brush(chosenInside ? Look.Primary : Look.Secondary);
+        // Made again only when what it shows changed: this runs several times on every step of a resize.
+        object glyph = chosenInside ? (CurrentPage, ShelfPageIcon.Data, NoticesBadge.Visibility, NoticesBadge.Fill) : "dots";
+        if (!Equals(glyph, _moreGlyphKey))
+        {
+            _moreGlyphKey = glyph;
+            PageMoreGlyph.Content = chosenInside ? PageGlyph(CurrentPage, PageMoreButton) : MoreDots(PageMoreButton);
+        }
+        PageMoreBadge.Visibility = _pagesInMenu.Contains(DeckPage.Notices) && CurrentPage != DeckPage.Notices && NoticesBadge.Visibility == Visibility.Visible
+            ? Visibility.Visible : Visibility.Collapsed;
+        AutomationProperties.SetName(PageMoreButton, chosenInside ? Loc.T("更多页面：", "More pages: ") + PageTitle(CurrentPage) : Loc.T("更多页面", "More pages"));
+    }
+
+    // One row per page in the list, each with its icon and name; the chosen page's row is checked.
+    private void PageMore_Click(object sender, RoutedEventArgs e)
+    {
+        if (_shelfMenu is { IsOpen: true } open && ReferenceEquals(open.PlacementTarget, PageMoreButton)) { CloseMenu(); return; }
+        if (_pagesInMenu.Count == 0) return;
+        var menu = NewMenu();
+        foreach (var page in _pagesInMenu)
+        {
+            var glyph = new Viewbox { Width = 14, Height = 14, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center, Child = PageGlyph(page, null) };
+            menu.Items.Add(Item(PageTitle(page), () => SelectPage(page), check: page == CurrentPage, glyph: glyph));
+        }
+        OpenMenu(menu, PageMoreButton);
+    }
+
+    // The page's names, as the settings' list of pages gives them.
+    private string PageTitle(DeckPage page) => page switch
+    {
+        DeckPage.Music => Loc.T("音乐", "Music"),
+        DeckPage.Monitor => Loc.T("系统监控", "System monitor"),
+        DeckPage.Clipboard => Settings.ShelfShown switch
+        {
+            ShelfShown.Clipboard => Loc.T("剪贴板", "Clipboard"),
+            ShelfShown.Files => Loc.T("文件中转", "File transfer"),
+            _ => Loc.T("剪贴板与文件中转", "Clipboard and file transfer")
+        },
+        DeckPage.Devices => Loc.T("设备电量", "Device batteries"),
+        DeckPage.Notices => Loc.T("通知历史", "Notice history"),
+        DeckPage.Agenda => Loc.T("计划", "Planner"),
+        _ => Loc.T("AI 用量", "AI usage")
+    };
+
+    // A copy of the page button's icon as it is drawn now (the clipboard page's icon and the bell's dot change). Its lines take
+    // the foreground of the given button, or the menu's secondary color without one.
+    private FrameworkElement PageGlyph(DeckPage page, Button? owner)
+        => PageButton(page).Content is UIElement icon && CopyGlyph(icon, owner) is FrameworkElement copy ? copy : MoreDots(owner);
+    private UIElement? CopyGlyph(UIElement part, Button? owner)
+    {
+        switch (part)
+        {
+            case Path path:
+                var copy = new Path
+                {
+                    Data = path.Data?.CloneCurrentValue(), Fill = path.Fill, StrokeThickness = path.StrokeThickness, Stretch = path.Stretch,
+                    StrokeStartLineCap = path.StrokeStartLineCap, StrokeEndLineCap = path.StrokeEndLineCap, StrokeLineJoin = path.StrokeLineJoin,
+                    Clip = path.Clip?.CloneCurrentValue(), Visibility = path.Visibility, IsHitTestVisible = false
+                };
+                if (path.Stroke is not null) Paint(copy, owner);
+                return copy;
+            case Viewbox box:
+                return new Viewbox { Width = box.Width, Height = box.Height, Child = box.Child is { } inner ? CopyGlyph(inner, owner) : null };
+            case Panel panel:
+                Panel copied = panel is Canvas ? new Canvas() : new Grid();
+                copied.Width = panel.Width; copied.Height = panel.Height;
+                foreach (UIElement child in panel.Children) if (CopyGlyph(child, owner) is { } c) copied.Children.Add(c);
+                return copied;
+            default:
+                return null;
+        }
+    }
+    // Three dots across a 16 DIP box, drawn like the page icons: a 24 unit drawing at 16.
+    private FrameworkElement MoreDots(Button? owner)
+    {
+        var dots = new Path { Data = Geometry.Parse("M 5,12 L 5,12 M 12,12 L 12,12 M 19,12 L 19,12"), StrokeThickness = 2.6, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
+        Paint(dots, owner);
+        return new Viewbox { Width = 16, Height = 16, Child = new Canvas { Width = 24, Height = 24, Children = { dots } } };
+    }
+    private void Paint(Shape shape, Button? owner)
+    {
+        if (owner is null) shape.Stroke = UI.Brush(Look.Secondary);
+        else shape.SetBinding(Shape.StrokeProperty, new Binding(nameof(Button.Foreground)) { Source = owner });
+    }
+
     private Button PageButton(DeckPage page) => page switch { DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, DeckPage.Clipboard => ShelfPageButton, DeckPage.Devices => DevicesPageButton, DeckPage.Notices => NoticesPageButton, DeckPage.Agenda => AgendaPageButton, _ => AIUsageButton };
 }

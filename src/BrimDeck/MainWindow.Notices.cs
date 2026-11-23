@@ -389,6 +389,7 @@ public partial class MainWindow
         NoticesBadge.Visibility = unseen ? Visibility.Visible : Visibility.Collapsed;
         NoticesBell.Clip = unseen ? NoticeBellCut : null;
         AutomationProperties.SetName(NoticesPageButton, Loc.T("通知", "Notices") + (count > 0 ? " · " + NoticeText.Count(count) : ""));
+        UpdateMoreButton();
     }
 
     // ----- The notices page -----

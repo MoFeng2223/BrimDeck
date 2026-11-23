@@ -91,6 +91,7 @@ try
     KeyboardResizeTests.Run(Check);
     CollapsedGeometryTests.Run(root, Check);
     PanelHeaderTests.Run(Check);
+    PageSwitchFitTests.Run(Check);
     SystemMonitorTests.Run(Check);
     ExpandedMonitorTests.Run(Check);
     MonitorSpeechTests.Run(Check);

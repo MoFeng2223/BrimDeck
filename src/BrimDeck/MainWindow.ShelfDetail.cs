@@ -49,7 +49,7 @@ public partial class MainWindow
             // The box takes the room right of the clock, up to its usual width (ShelfLayout.SearchWidth); only when that room is under
             // 140 does it keep 140 and cover the clock.
             double clock = ClockLabel.Text.Length > 0 ? TextWidth(ClockLabel.Text, 12, FontWeights.Normal) : 34;
-            double room = width - right - ClockRight(width, clock) - 12;
+            double room = width - right - (width + clock) / 2 - 12;
             double boxWidth = Math.Min(ShelfLayout.SearchWidth(width), Math.Max(room, 140)), height = _header.SwitchHeight;
             var box = _searchBox ??= NewSearchBox();
             (box.Parent as Panel)?.Children.Remove(box);
@@ -194,7 +194,7 @@ public partial class MainWindow
         // button, or to the page's button, instead of the keyboard going back to the window it came from.
         if (PanelKeys.Holding)
         {
-            Dispatcher.BeginInvoke(() => { if (PanelKeys.Holding && _expanded) Keyboard.Focus(ShelfSearchButton.IsVisible ? ShelfSearchButton : PageButton(CurrentPage)); },
+            Dispatcher.BeginInvoke(() => { if (PanelKeys.Holding && _expanded) Keyboard.Focus(ShelfSearchButton.IsVisible ? ShelfSearchButton : SwitchButton(CurrentPage)); },
                 System.Windows.Threading.DispatcherPriority.Input);
             return;
         }
@@ -595,7 +595,8 @@ public partial class MainWindow
     }
     private ContextMenu NewMenu() => new() { Style = (Style)FindResource("ShelfMenu") };
     // check: null for an action; false or true for a choice, whose check column shows the one chosen.
-    private MenuItem Item(string label, Action act, string? icon = null, string? hint = null, bool danger = false, bool? check = null, bool enabled = true, string? dot = null, bool star = false)
+    private MenuItem Item(string label, Action act, string? icon = null, string? hint = null, bool danger = false, bool? check = null, bool enabled = true, string? dot = null, bool star = false,
+        FrameworkElement? glyph = null)
     {
         string color = danger ? Look.Hex("danger") : Look.Primary;
         var header = new DockPanel { LastChildFill = true };
@@ -604,6 +605,7 @@ public partial class MainWindow
             Lead(new Path { Data = Geometry.Parse("M 1.5,5.2 L 4,7.7 L 8.5,2.5"), Stroke = UI.Brush(Look.Primary), StrokeThickness = 1.6, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
                 StrokeLineJoin = PenLineJoin.Round, Width = 10, Height = 10, Margin = new Thickness(1, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center, Visibility = chosen ? Visibility.Visible : Visibility.Hidden });
         if (icon is not null) Lead(MenuGlyph(icon, danger ? color : Look.Secondary));
+        if (glyph is not null) Lead(glyph);
         if (star) { var mark = StarGlyph(10, Look.Secondary, filled: false); mark.Margin = new Thickness(0, 0, 7, 0); mark.VerticalAlignment = VerticalAlignment.Center; Lead(mark); }
         if (dot is not null) Lead(new Ellipse { Width = 7, Height = 7, Fill = UI.Brush(dot), Margin = new Thickness(1, 0, 7, 0), VerticalAlignment = VerticalAlignment.Center });
         var text = new TextBlock { Text = label, Foreground = UI.Brush(color), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
