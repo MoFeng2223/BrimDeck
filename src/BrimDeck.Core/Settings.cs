@@ -1215,15 +1215,13 @@ public sealed class DeckSettings
             rule.Name = (rule.Name ?? "").Trim();
             rule.AccentColor = AppPresets.NormalizeColor(rule.AccentColor);
             rule.Level = rule.Level switch { NoticeLevel.Lively => NoticeLevel.Glow, NoticeLevel.Silent or NoticeLevel.Plain or NoticeLevel.Glow or NoticeLevel.Persistent => rule.Level, _ => NoticeLevel.Auto };
-            // A Windows application is listed or not: switching a source off is for the sources that show without being listed.
-            if (NoticeKeys.ListedOnly(rule.Key)) rule.Enabled = true;
             rule.Styles?.Normalize();
         }
         Core.Profiles.Normalize(this);
     }
     public NoticeAppRule? NoticeRule(string appKey) => NoticeApps.FirstOrDefault(rule => rule.Key == appKey);
-    // Whether a source's notices are received: a Windows application or a taskbar-flash chat while it is listed, any other source
-    // unless switched off.
+    // Whether a source's notices are received: a taskbar-flash chat while it is listed, any other source (a Windows application
+    // included) unless switched off.
     public bool NoticeReceives(string appKey) => NoticeRule(appKey) is { } rule ? rule.Enabled : !NoticeKeys.ListedOnly(appKey);
     // What a new user's list of applications holds: QQ (its notifications' application id is "QQ"), WeChat's taskbar flash
     // (ChatFlash) and the Windows Clock's alarms and timers.

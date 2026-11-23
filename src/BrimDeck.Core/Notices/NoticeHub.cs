@@ -26,8 +26,8 @@ public sealed class NoticeHub
     private readonly Dictionary<string, NoticeKnownApp> _apps = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> _events = new(StringComparer.Ordinal);
     private readonly Func<string, NoticeAppRule?> _rule;
-    // Whether a source's notices are received at all (DeckSettings.NoticeReceives): a Windows application the user has not listed,
-    // or a source set to "不提示", is not. Its name is still remembered, for the settings to offer it.
+    // Whether a source's notices are received at all (DeckSettings.NoticeReceives): a source switched off, or a taskbar-flash chat
+    // the user has not listed, is not. Its name is still remembered, for the settings to offer it.
     private readonly Func<string, bool> _receives;
     // What was deleted or cleared before the saved file was read in (C-L2): a file read later must not bring it back.
     private readonly HashSet<string> _deleted = new(StringComparer.Ordinal);

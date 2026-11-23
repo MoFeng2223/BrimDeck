@@ -93,16 +93,7 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
             }
             return stored is not null ? ReadImageFile(stored) : null;
         }
-        if (iconRef.StartsWith("file:", StringComparison.Ordinal))
-        {
-            // Checked again here, also for references from saved notices, and the drive must be a local one: a mapped
-            // network drive would reach a server as well.
-            string path = iconRef[5..];
-            if (!NoticeIntake.IsLocalWindowsPath(path)) return null;
-            try { if (new DriveInfo(path[..1]).DriveType is not (DriveType.Fixed or DriveType.Removable)) return null; }
-            catch (ArgumentException) { return null; }
-            return ThroughLinks(path) ? null : ReadImageFile(path);
-        }
+        if (iconRef.StartsWith("file:", StringComparison.Ordinal)) return ReadLocal(iconRef[5..]);
         if (WslDistribution(iconRef) is { } distro)
         {
             string icon = iconRef[(5 + distro.Length)..];
@@ -118,6 +109,17 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
             }
         }
         return null;
+    }
+
+    // An icon file on a local drive ("file:" references, and the icon an application id is registered with). Checked again
+    // here, also for references from saved notices, and the drive must be a local one: a mapped network drive would reach a
+    // server as well.
+    internal static byte[]? ReadLocal(string path)
+    {
+        if (!NoticeIntake.IsLocalWindowsPath(path)) return null;
+        try { if (new DriveInfo(path[..1]).DriveType is not (DriveType.Fixed or DriveType.Removable)) return null; }
+        catch (ArgumentException) { return null; }
+        return ThroughLinks(path) ? null : ReadImageFile(path);
     }
 
     // The distribution of a "wsl:<distribution>:<icon>" reference, if it names one by a valid distribution name: the name

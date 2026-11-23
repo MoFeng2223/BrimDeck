@@ -162,9 +162,9 @@ public sealed class Notice
     public Notice Copy() { var copy = (Notice)MemberwiseClone(); copy.Actions = [.. Actions]; copy.Timing = Timing?.Copy(); return copy; }
 }
 
-// The user's choices for one application or source (the "应用" settings page). A Windows application or a taskbar-flash chat
-// shows only while it has a rule (NoticeKeys.ListedOnly); a command-line or WSL source shows without one, and Enabled false
-// drops its notices ("不提示"). Level Auto follows the default level (a source: the level its message asks for); Silent keeps
+// The user's choices for one application or source (the "应用" settings page). A taskbar-flash chat shows only while it has a
+// rule (NoticeKeys.ListedOnly); a Windows application, a command-line or a WSL source shows without one. Enabled false drops
+// its notices (the "接收" switch of a Windows application, "不提示" of a source). Level Auto follows the default level (a source: the level its message asks for); Silent keeps
 // its notices in the recent notices without showing them as they arrive ("只进通知页").
 public sealed class NoticeAppRule
 {
@@ -172,8 +172,6 @@ public sealed class NoticeAppRule
     public string Name { get; set; } = "";
     public bool Enabled { get; set; } = true;
     public NoticeLevel Level { get; set; }
-    // Windows' own banner of this application is turned off while BrimDeck shows its notices (NoticeBanners).
-    public bool HideBanner { get; set; }
     // The application's own looks ("单独设置样子"), used in place of the settings' NoticeStyles while not null.
     public NoticeLevelStyles? Styles { get; set; }
     // "#RRGGBB" chosen by hand; empty takes the color read from the icon.
@@ -196,9 +194,14 @@ public static class NoticeKeys
     public static string Windows(string appUserModelId) => "windows:" + appUserModelId;
     public static string Wsl(string distro, string appName) => "wsl:" + distro + ":" + appName;
     public static string Cli(string? distro, string appName) => distro is null ? "cli:" + appName : "cli:" + distro + ":" + appName;
-    // The sources that show only once the user lists them on the "应用" page: Windows applications and the chats whose taskbar
-    // button flashes (ChatFlash). Command-line and WSL sources, which the user set up to send, show without a rule.
-    public static bool ListedOnly(string appKey) => appKey.StartsWith("windows:", StringComparison.Ordinal) || appKey.StartsWith("flash:", StringComparison.Ordinal);
+    // The sources that show only once the user lists them on the "应用" page: the chats whose taskbar button flashes (ChatFlash),
+    // since watching the taskbar is the user's choice. Windows applications, command-line and WSL sources show without a rule.
+    public static bool ListedOnly(string appKey) => appKey.StartsWith("flash:", StringComparison.Ordinal);
+    // The rows of the "Windows 应用" list on the "应用" page: Windows applications and the taskbar-flash chats. Not the notices of
+    // a sender Windows does not name (UnknownWindowsApp): they cannot be set apart by application.
+    public static bool OnAppList(string appKey) => appKey.StartsWith("windows:", StringComparison.Ordinal) && appKey != UnknownWindowsApp || ListedOnly(appKey);
+    // The key of a Windows notice whose application cannot be told (WindowsNoticeSource.Read).
+    public const string UnknownWindowsApp = "windows:";
     public static NoticeCategory Category(string? text) => text switch
     {
         "task" => NoticeCategory.Task, "success" => NoticeCategory.Success, "warning" => NoticeCategory.Warning,

@@ -8,7 +8,8 @@ namespace BrimDeck.Native;
 // The picture a Windows notification shows beside its text (QQ puts the contact's or the group's avatar there, as
 // placement="appLogoOverride"). UserNotificationListener gives a notification's text only; Windows keeps the notification's whole
 // toast in the user's notification database, which is read here, read only, for that one notification. Only a picture on a
-// local drive is taken (NoticeIntake.IconRef); NoticeIcons checks it again when reading it.
+// local drive is taken (NoticeIntake.IconRef); NoticeIcons checks it again when reading it. The same database also says which
+// application a notification was filed under, for a sender Windows does not name otherwise (Sender).
 internal static class WindowsToastPicture
 {
     private static readonly DesktopSources Sqlite = new();
@@ -17,6 +18,20 @@ internal static class WindowsToastPicture
 
     // The picture's reference for the notification with this id from this application, or null.
     public static string? Find(uint id, string appUserModelId) => Payload(id, appUserModelId) is { } payload ? FromToast(payload) : null;
+
+    // The application id Windows filed this notification under (its handler's PrimaryId), for a notification whose AppInfo Windows
+    // does not give; Windows' notification center names such a sender by this id. Null when the database has no notification
+    // with this id, or one that arrived at another time than the one read (created; ArrivalTime is a FILETIME, measured
+    // 2026-11-23 to equal UserNotification.CreationTime).
+    public static string? Sender(uint id, DateTimeOffset? created)
+    {
+        var rows = Sqlite.QueryDatabase(Database,
+            $"SELECT h.PrimaryId, n.ArrivalTime FROM Notification n JOIN NotificationHandler h ON n.HandlerId = h.RecordId WHERE n.Id = {id} LIMIT 1");
+        if (rows is not [{ } row, ..] || row[0] is not { Length: > 0 } sender || sender.Any(char.IsControl)) return null;
+        if (created is { } at && long.TryParse(row[1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long arrival)
+            && arrival > 0 && (DateTimeOffset.FromFileTime(arrival) - at).Duration() > TimeSpan.FromMinutes(2)) return null;
+        return sender;
+    }
 
     // The toast's XML as Windows keeps it, or null. Also read, once, when the user opens the application from the notice and
     // has chosen to replay the toast's launch string (ToastActivation); nothing is read for it before that.

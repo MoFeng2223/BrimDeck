@@ -34,6 +34,11 @@ internal static class NoticeWindowsAppTests
         check("A tray balloon source with a display name keeps it", Who("NotifyIconGeneratedAumid_1", "Tailscale", "t").AppName == "Tailscale");
         check("An unregistered desktop program is named by its file", Who(@"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe", null, "t").AppName == "powershell");
         check("An application without any name keeps its id", Who("Some.Unknown.App", "", "t").AppName == "Some.Unknown.App");
+        check("A sender Windows names only by its id (as YaluDevAgent) is named by it, and can be set apart", Who("YaluDevAgent", null, "Question", "Agent is asking a question")
+            is { AppName: "YaluDevAgent", AppKey: "windows:YaluDevAgent", Title: "Question" } && NoticeKeys.OnAppList("windows:YaluDevAgent"));
+        check("A notice whose application cannot be told is an unknown app, kept off the app list", Who("", null, "Question", "Body")
+            is { AppName: "未知应用", AppKey: NoticeKeys.UnknownWindowsApp, Title: "Question", Body: "Body" } && !NoticeKeys.OnAppList(NoticeKeys.UnknownWindowsApp)
+            && new DeckSettings().NoticeReceives(NoticeKeys.UnknownWindowsApp));
         check("Desktop programs Windows gives no name for are named from BrimDeck's list", Who("BiliBiliPC", "", "t").AppName == "哔哩哔哩"
             && Who("ali.dingtalk.release", null, "t").AppName == "钉钉" && Who("com.google.gemini.windows", null, "t").AppName == "Gemini"
             && Who("Microsoft.Office.OUTLOOK.EXE.15", null, "t").AppName == "Outlook");

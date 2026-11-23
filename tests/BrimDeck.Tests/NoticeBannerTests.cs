@@ -1,9 +1,10 @@
 using BrimDeck.Core;
 using BrimDeck.Core.Notices;
 
-// "Turn off other apps' notification banners" (NoticeBanners): which applications are wanted, what is recorded before Windows
-// is changed, that exactly what was there comes back, and that a banner the user turns on again is left alone. The registry is
-// a dictionary here; the real one is checked in the Windows tests, and Windows' own reading of the value by hand.
+// Windows' banner switch of an application (NoticeBanners): read and switched as Windows Settings does, and the ledger of earlier
+// versions (what was recorded before Windows was changed, that exactly what was there comes back, and that a banner the user
+// turned on again is left alone). The registry is a dictionary here; the real one is checked in the Windows tests, and Windows'
+// own reading of the value by hand.
 internal static class NoticeBannerTests
 {
     private sealed class FakeRegistry : IBannerRegistry
@@ -44,7 +45,7 @@ internal static class NoticeBannerTests
     internal static void Run(string root, Action<string, bool> check)
     {
         Ids(check);
-        Wanted(check);
+        Switch(check);
         Reconcile(check);
         Released(check);
         Pending(check);
@@ -65,24 +66,27 @@ internal static class NoticeBannerTests
             && !NoticeBanners.Usable(@"\a") && !NoticeBanners.Usable("a\nb") && !NoticeBanners.Usable("") && !NoticeBanners.Usable(new string('a', 257)));
     }
 
-    private static DeckSettings Settings(params NoticeAppRule[] rules) => new() { NoticeIsland = true, NoticeAppsListed = true, NoticeApps = [.. rules] };
-    private static NoticeAppRule Hide(string appId, NoticeLevel level = NoticeLevel.Auto) => new() { Key = NoticeKeys.Windows(appId), HideBanner = true, Level = level };
-
-    private static void Wanted(Action<string, bool> check)
+    // The "系统横幅" switch of the "应用" page: what Windows has now, written as Windows Settings writes it.
+    private static void Switch(Action<string, bool> check)
     {
-        var settings = Settings(Hide("A"), Hide("Quiet", NoticeLevel.Silent), new NoticeAppRule { Key = "windows:Shown" }, Hide("BrimDeck.Desktop"), Hide(@"C:\tool.exe"),
-            new NoticeAppRule { Key = "cli:make", HideBanner = true }, new NoticeAppRule { Key = "flash:wechat", HideBanner = true });
-        HashSet<string> Wanted(bool readable = true) => NoticeBanners.Wanted(settings, readable, ["BrimDeck.Desktop"]);
-        check("Banners: the listed Windows apps whose switch is on are wanted", Wanted().SetEquals(["A"]));
-        check("Banners: not one left on, one set to list only, BrimDeck itself, a path or another kind of source", !Wanted().Overlaps(["Shown", "Quiet", "BrimDeck.Desktop", @"C:\tool.exe", "make", "wechat"]));
-        check("Banners: application ids match without regard to case", Wanted().Contains("a"));
-        settings.NoticeIsland = false; settings.NoticesPage = false;
-        check("Banners: nothing is wanted with notices off", Wanted().Count == 0);
-        settings.NoticeIsland = true;
-        check("Banners: nothing is wanted while Windows refuses access", Wanted(readable: false).Count == 0);
-        var defaults = new DeckSettings();
-        defaults.Normalize();
-        check("Banners: every app's switch is off by default", defaults.NoticeApps.All(rule => !rule.HideBanner));
+        var registry = new FakeRegistry();
+        registry.Keys["Off"] = new() { ["ShowBanner"] = 0 };
+        registry.Keys["One"] = new() { ["ShowBanner"] = 1 };
+        registry.Keys["Muted"] = new() { ["Enabled"] = 0 };
+        check("Banners: no key, no value or 1 reads as shown, 0 as hidden", NoticeBanners.Shown(registry, "NoKey") == true
+            && NoticeBanners.Shown(registry, "One") == true && NoticeBanners.Shown(registry, "Off") == false);
+        check("Banners: an app whose notifications are off in Windows has no banner to switch", NoticeBanners.Shown(registry, "Muted") is null
+            && !NoticeBanners.SetShown(registry, "Muted", false) && registry.Writes == 0);
+        check("Banners: switching off writes 0", NoticeBanners.SetShown(registry, "One", false) && registry.Keys["One"]["ShowBanner"] == 0);
+        check("Banners: switching on deletes the value, as Windows reads no value as on", NoticeBanners.SetShown(registry, "Off", true)
+            && !registry.Keys["Off"].ContainsKey("ShowBanner") && NoticeBanners.Shown(registry, "Off") == true);
+        int writes = registry.Writes;
+        check("Banners: a switch already as asked writes nothing", NoticeBanners.SetShown(registry, "NoKey", true) && registry.Writes == writes && !registry.Keys.ContainsKey("NoKey"));
+        check("Banners: an id that cannot name a key is not written", !NoticeBanners.SetShown(registry, @"C:\tool.exe", false) && registry.Writes == writes);
+        var denied = new FakeRegistry { FailWrites = true };
+        check("Banners: a refused write is reported", !NoticeBanners.SetShown(denied, "App", false));
+        var ignored = new FakeRegistry { Ignore = true };
+        check("Banners: a value Windows does not keep is reported as failed", !NoticeBanners.SetShown(ignored, "App", false));
     }
 
     private static Dictionary<string, BannerState> Apply(HashSet<string> wanted, BannerLedger ledger, FakeRegistry registry, Func<bool>? save = null, bool? holding = null)
@@ -182,37 +186,33 @@ internal static class NoticeBannerTests
     private static void Released(Action<string, bool> check)
     {
         var registry = new FakeRegistry(); var ledger = new BannerLedger();
-        var settings = Settings(Hide("Rewrites"), Hide("Other"));
-        HashSet<string> Wanted() => NoticeBanners.Wanted(settings, true, []);
-        Apply(Wanted(), ledger, registry, holding: true);
+        var wanted = new HashSet<string>(["Rewrites", "Other"], StringComparer.OrdinalIgnoreCase);
+        Apply(wanted, ledger, registry, holding: true);
         registry.Keys["Rewrites"]["ShowBanner"] = 1;
-        var states = Apply(Wanted(), ledger, registry, holding: true);
+        var states = Apply(wanted, ledger, registry, holding: true);
         check("Banners: a banner turned on again in Windows is released", states["Rewrites"] == BannerState.Released && ledger.IsReleased("Rewrites")
             && ledger.Find("Rewrites") is null && registry.Keys["Rewrites"]["ShowBanner"] == 1);
-        // NoticeCenter then turns that application's switch off.
-        settings.NoticeRule("windows:Rewrites")!.HideBanner = false;
+        wanted.Remove("Rewrites");
         int writes = registry.Writes;
-        Apply(Wanted(), ledger, registry, holding: true);
+        Apply(wanted, ledger, registry, holding: true);
         check("Banners: a released app is not turned off again while the switch stays on", registry.Writes == writes && registry.Keys["Rewrites"]["ShowBanner"] == 1
-            && !Wanted().Contains("Rewrites") && registry.Keys["Other"]["ShowBanner"] == 0);
+            && registry.Keys["Other"]["ShowBanner"] == 0);
         // Quitting gives the others back but remembers the choice; switching off forgets it.
         Apply([], ledger, registry, holding: true);
         check("Banners: quitting restores the rest and keeps the released list", ledger.Records.Count == 0 && ledger.IsReleased("Rewrites") && !registry.Keys.ContainsKey("Other"));
-        foreach (var rule in settings.NoticeApps) rule.HideBanner = false;
-        Apply(Wanted(), ledger, registry, holding: false);
+        Apply([], ledger, registry, holding: false);
         check("Banners: switching off forgets released apps", ledger.Released.Count == 0 && registry.Keys["Rewrites"]["ShowBanner"] == 1);
 
         // Turned on again in Windows and then BrimDeck quit before it looked again: still the user's at the next start.
         var quit = new FakeRegistry(); var quitLedger = new BannerLedger();
-        var quitSettings = Settings(Hide("Mine"), Hide("Other"));
-        HashSet<string> Again() => NoticeBanners.Wanted(quitSettings, true, []);
-        Apply(Again(), quitLedger, quit, holding: true);
+        var again = new HashSet<string>(["Mine", "Other"], StringComparer.OrdinalIgnoreCase);
+        Apply(again, quitLedger, quit, holding: true);
         quit.Keys["Mine"]["ShowBanner"] = 1;
         Apply([], quitLedger, quit, holding: true);
         check("Banners: a banner turned on again before quitting is remembered", quitLedger.IsReleased("Mine") && !quitLedger.IsReleased("Other")
             && quit.Keys["Mine"]["ShowBanner"] == 1 && !quit.Keys.ContainsKey("Other"));
-        quitSettings.NoticeRule("windows:Mine")!.HideBanner = false;
-        Apply(Again(), quitLedger, quit, holding: true);
+        again.Remove("Mine");
+        Apply(again, quitLedger, quit, holding: true);
         check("Banners: at the next start it is left alone and the others are turned off again", quit.Keys["Mine"]["ShowBanner"] == 1 && quit.Keys["Other"]["ShowBanner"] == 0);
         // Switched off, a restoration that finds the user's own value remembers nothing.
         var off = new FakeRegistry(); var offLedger = new BannerLedger();
@@ -320,11 +320,12 @@ internal static class NoticeBannerTests
     private static void SettingsRoundTrip(string root, Action<string, bool> check)
     {
         var store = new SettingsStore(Path.Combine(root, "banner-settings"));
-        store.Save(new DeckSettings { NoticeIsland = true, NoticeApps = [new() { Key = "windows:App", HideBanner = true }] });
+        store.Save(new DeckSettings { NoticeIsland = true, NoticeAppsListed = true, NoticeApps = [new() { Key = "windows:App", Enabled = false }] });
         var loaded = store.Load();
-        check("Banners: an app's switch survives saving and loading", loaded.NoticeRule("windows:App")?.HideBanner == true && loaded.Copy().NoticeRule("windows:App")?.HideBanner == true);
-        // A settings file saved before the switches existed reads with every one off.
-        File.WriteAllText(store.FilePath, $$"""{"AppVersion":"{{ApplicationVersion.Parse(ApplicationVersion.Current).ToString(3)}}","NoticesEnabled":true}""");
-        check("Banners: an older settings file reads with every switch off", store.Load().NoticeApps.All(rule => !rule.HideBanner));
+        check("Banners: an app's receive switch survives saving and loading", loaded.NoticeRule("windows:App")?.Enabled == false && loaded.Copy().NoticeRule("windows:App")?.Enabled == false
+            && !loaded.NoticeReceives("windows:App") && loaded.NoticeReceives("windows:Other"));
+        // A settings file of an earlier version, with its banner switch (HideBanner, gone since), still reads with the app listed.
+        File.WriteAllText(store.FilePath, $$"""{"AppVersion":"{{ApplicationVersion.Parse(ApplicationVersion.Current).ToString(3)}}","NoticesEnabled":true,"NoticeAppsListed":true,"NoticeApps":[{"Key":"windows:App","Name":"App","Enabled":true,"Level":0,"HideBanner":true}]}""");
+        check("Banners: an earlier settings file with a banner switch still reads", store.Load().NoticeRule("windows:App") is { Enabled: true, Name: "App" });
     }
 }

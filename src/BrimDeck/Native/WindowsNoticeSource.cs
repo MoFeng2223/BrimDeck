@@ -333,8 +333,9 @@ internal sealed class WindowsNoticeSource : IDisposable
         if (notification is null) return WindowsNoticeNotificationRead.Missing;
         if (notification.Id != id) throw new InvalidOperationException("The event id did not match the returned notification.");
         var input = Read(notification, id);
-        // The application Windows will not name (AppInfo is E_NOTIMPL for some senders) leaves no id to check against the log
-        // entry: the loop then reads the whole list, which leaves this one out (Read).
+        // The application Windows will not name (no AppInfo for some senders) is taken from the notification database (Read); one
+        // that still cannot be told leaves no id to check against the log entry, and the loop reads the whole list, which hands
+        // it over as an unknown application.
         var app = Safe(() => notification.AppInfo);
         var appUserModelId = input?.AppId;
         if (app is not null && string.IsNullOrWhiteSpace(appUserModelId)) appUserModelId = Safe(() => app.AppUserModelId);
@@ -391,42 +392,48 @@ internal sealed class WindowsNoticeSource : IDisposable
         foreach (var key in changes.Removed) Removed?.Invoke(key);
     }
 
-    // Null for a notification that is BrimDeck's own, whose application cannot be told, or that cannot be read. Windows answers
-    // AppInfo with E_NOTIMPL (NotImplementedException) for some senders, such as a toast sent by an unpackaged program under an
-    // unusual application id. Such a notice is left out like one with no application id: without the application its own
-    // toasts cannot be told apart (BrimDeck would show its own toast again), its banner cannot be turned off, it cannot be
-    // muted per application or opened, so a notice with a made-up application would behave unlike every other. What matters
-    // is that it is skipped alone: the rest of the list is read as usual (WindowsNoticeSnapshot).
+    // Null for a notification that is BrimDeck's own or that cannot be read. Windows gives no AppInfo (null, or E_NOTIMPL as
+    // NotImplementedException) for some senders, such as a toast sent by an unpackaged program under an id it never registered
+    // ("YaluDevAgent", measured 2026-11-23). The id is then taken from Windows' notification database (WindowsToastPicture.Sender),
+    // as Windows' notification center does, which names such a sender by its id. A notice whose application still cannot be told
+    // is shown all the same, as an unknown application (NoticeKeys.UnknownWindowsApp): with its letter for an icon, and without
+    // what needs the application (opening it, muting it on its own, its banner switch).
     private NoticeInput? Read(UserNotification notification, uint id)
     {
         try
         {
             var app = Safe(() => notification.AppInfo);
-            if (app is null) return null;
-            string appId = Safe(() => app.AppUserModelId) ?? Safe(() => app.Id) ?? "";
-            if (appId.Length == 0 || string.Equals(appId, OwnAppId, StringComparison.OrdinalIgnoreCase)) return null;
-            lock (_apps) _apps[appId] = app;
-            var registered = Registered(appId);
+            string appId = (app is null ? null : Safe(() => app.AppUserModelId) ?? Safe(() => app.Id)) ?? "";
+            var created = Safe(() => (DateTimeOffset?)notification.CreationTime);
+            if (appId.Length == 0) appId = WindowsToastPicture.Sender(id, created) ?? "";
+            if (string.Equals(appId, OwnAppId, StringComparison.OrdinalIgnoreCase)) return null;
+            bool known = appId.Length > 0;
+            if (known && app is not null) lock (_apps) _apps[appId] = app;
+            var registered = known ? Registered(appId) : (null, null);
             var visual = notification.Notification?.Visual;
             var binding = visual?.GetBinding(KnownNotificationBindings.ToastGeneric) ?? visual?.Bindings.FirstOrDefault();
             var texts = binding?.GetTextElements().Select(text => text.Text?.Trim() ?? "").Where(text => text.Length > 0).ToList() ?? [];
-            var who = WindowsNoticeApps.Identify(new(appId, Safe(() => app.DisplayInfo.DisplayName), registered.Name, texts), BrimDeck.Protocol.NoticeProtocol.MaxField);
-            var created = Safe(() => (DateTimeOffset?)notification.CreationTime) ?? DateTimeOffset.UtcNow;
+            var who = WindowsNoticeApps.Identify(new(appId, app is null ? null : Safe(() => app.DisplayInfo.DisplayName), registered.Name, texts), BrimDeck.Protocol.NoticeProtocol.MaxField);
+            var at = created ?? DateTimeOffset.UtcNow;
             return new NoticeInput
             {
                 Origin = NoticeOrigin.Windows, AppKey = who.AppKey, AppName = who.AppName, AppId = appId,
-                InstanceKey = $"windows:{appId}:{id}:{created.UtcTicks}",
+                InstanceKey = $"windows:{appId}:{id}:{at.UtcTicks}",
                 Title = BrimDeck.Protocol.NoticeProtocol.Clip(who.Title, BrimDeck.Protocol.NoticeProtocol.MaxTitle)!,
                 Body = BrimDeck.Protocol.NoticeProtocol.Clip(who.Body, BrimDeck.Protocol.NoticeProtocol.MaxBody)!,
-                IconRef = registered.Icon ?? "aumid:" + appId, Picture = WindowsToastPicture.Find(id, appId), CreatedAt = created, Category = who.Category, Call = who.Call, Capabilities = NoticeCapabilities.OpenApp
+                IconRef = known ? registered.Icon ?? "aumid:" + appId : null, Picture = known ? WindowsToastPicture.Find(id, appId) : null,
+                CreatedAt = at, Category = who.Category, Call = who.Call, Capabilities = known ? NoticeCapabilities.OpenApp : NoticeCapabilities.None
             };
         }
         catch (Exception ex) when (WindowsNoticeSnapshot.Unreadable(ex)) { return null; }
     }
 
     // A desktop program that sends notifications without a Start menu shortcut registers its name and icon under
-    // HKCU\Software\Classes\AppUserModelId (as ToastNotificationManagerCompat does); Windows' display information may have
-    // neither for it. Only an icon on a local drive is taken (NoticeIntake.IconRef); NoticeIcons checks it again when reading.
+    // Software\Classes\AppUserModelId (as ToastNotificationManagerCompat does), for the current user or, as Windows' own
+    // senders do (Windows.Defender.SecurityCenter: IconUri C:\Windows\system32\WindowsSecurityIcon.png), for the whole
+    // computer; Windows' display information may have neither for it. The user's value comes first. A name Windows keeps as a
+    // resource ("@C:\...dll,-12001") is not a name to show and is left out. Only an icon on a local drive is taken
+    // (NoticeIntake.IconRef); NoticeIcons checks it again when reading.
     private (string? Name, string? Icon) Registered(string appId)
     {
         lock (_registered) if (_registered.TryGetValue(appId, out var known)) return known;
@@ -434,13 +441,17 @@ internal sealed class WindowsNoticeSource : IDisposable
         // The id becomes part of a registry path: one that could climb out of the key is not looked up.
         if (appId.Length <= 256 && !appId.Contains("..", StringComparison.Ordinal) && !appId.Contains('/') && !appId.Any(char.IsControl))
         {
-            try
+            foreach (var root in new[] { Registry.CurrentUser, Registry.LocalMachine })
             {
-                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Classes\AppUserModelId\" + appId);
-                if (key is not null)
-                    found = (key.GetValue("DisplayName") as string, NoticeIntake.IconRef(key.GetValue("IconUri") as string, NoticeOrigin.Windows, null));
+                try
+                {
+                    using var key = root.OpenSubKey(@"Software\Classes\AppUserModelId\" + appId);
+                    if (key is null) continue;
+                    if (found.Name is null && key.GetValue("DisplayName") is string name && !name.StartsWith('@')) found.Name = name;
+                    found.Icon ??= NoticeIntake.IconRef(key.GetValue("IconUri") as string, NoticeOrigin.Windows, null);
+                }
+                catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or System.IO.IOException or ArgumentException) { }
             }
-            catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or System.IO.IOException or ArgumentException) { }
         }
         lock (_registered) { if (_registered.Count >= 256) _registered.Clear(); _registered[appId] = found; }
         return found;
@@ -453,8 +464,10 @@ internal sealed class WindowsNoticeSource : IDisposable
     }
 
     // The application's logo as Windows provides it for its notifications, as PNG (or other image) bytes. Desktop applications
-    // often give none; their icon then comes from the Apps folder, as the Start menu shows it (ShellAppIcon).
-    public async Task<byte[]?> LogoAsync(string appId) => await NotificationLogoAsync(appId) ?? await ShellAppIcon.PngAsync(appId);
+    // often give none; their icon then comes from the Apps folder, as the Start menu shows it (ShellAppIcon), and else from the
+    // icon registered for the id (Registered), for a notice saved before that was looked for.
+    public async Task<byte[]?> LogoAsync(string appId) => await NotificationLogoAsync(appId) ?? await ShellAppIcon.PngAsync(appId)
+        ?? (Registered(appId).Icon is { } icon && icon.StartsWith("file:", StringComparison.Ordinal) ? await Task.Run(() => NoticeIcons.ReadLocal(icon[5..])) : null);
 
     private async Task<byte[]?> NotificationLogoAsync(string appId)
     {

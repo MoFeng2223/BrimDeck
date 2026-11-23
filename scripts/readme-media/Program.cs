@@ -241,7 +241,7 @@ internal sealed partial class Renderer(App app, string output, string language, 
         _settings.NoticeAppsListed = true;
         foreach (var listed in new[] { "Outlook", "Claude", "Backup Tool" })
             if (_settings.NoticeRule("windows:" + listed) is null) _settings.NoticeApps.Add(new NoticeAppRule { Key = "windows:" + listed, Name = listed });
-        _settings.NoticeRule("windows:QQ")!.HideBanner = true;
+        _settings.NoticeRule("windows:Backup Tool")!.Enabled = false;
         _settings.NoticeRule("windows:Outlook")!.Level = NoticeLevel.Silent;
         _settings.NoticeApps.Add(new NoticeAppRule { Key = "windows:Claude Desktop With A Very Long Application Name (User Setup)", Name = "Claude Desktop With A Very Long Application Name (User Setup)", Level = NoticeLevel.Persistent, Styles = new() });
         var center = Activator.CreateInstance(Type.GetType("BrimDeck.NoticeCenter, BrimDeck")!, Program.Any, null, [app], null)!;

@@ -31,7 +31,6 @@
     <Compile Include="..\..\src\BrimDeck\Native\TaskbarFlashWatch.cs" Link="TaskbarFlashWatch.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\NoticeBannerRegistry.cs" Link="NoticeBannerRegistry.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\ProtocolLaunch.cs" Link="ProtocolLaunch.cs" />
-    <Compile Include="..\..\src\BrimDeck\NoticeBannerKeeper.cs" Link="NoticeBannerKeeper.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\FrameRates.cs" Link="FrameRates.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\ProcessSnapshot.cs" Link="ProcessSnapshot.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\Displays.cs" Link="Displays.cs" />

@@ -516,8 +516,8 @@ internal static class NoticeCoreTests
             && defaults.NoticeHistory && defaults.NoticeHistoryHours == 24 && defaults.NoticeHotkey == "" && defaults.NoticeDefaultLevel == NoticeLevel.Glow
             && defaults.NoticeStyles.Text.Seconds == 6 && !defaults.NoticeStyles.Flash.Liquid && defaults.NoticeStyles.Stay.Liquid && defaults.NoticeStyles.Stay.Color == ""
             && defaults.NoticeApps.Select(rule => rule.Key).SequenceEqual(["windows:QQ", "flash:wechat", "windows:Microsoft.WindowsAlarms_8wekyb3d8bbwe!App"]) && defaults.NoticeAppsListed);
-        check("Only listed Windows applications are received; other sources unless switched off", defaults.NoticeReceives("windows:QQ") && !defaults.NoticeReceives("windows:Other")
-            && defaults.NoticeReceives("cli:make") && defaults.NoticeReceives("wsl:Ubuntu:app") && !defaults.NoticeReceives("flash:wecom"));
+        check("Every Windows application and source is received unless switched off; a taskbar-flash chat only once listed", defaults.NoticeReceives("windows:QQ")
+            && defaults.NoticeReceives("windows:Other") && defaults.NoticeReceives("cli:make") && defaults.NoticeReceives("wsl:Ubuntu:app") && !defaults.NoticeReceives("flash:wecom"));
         var odd = new DeckSettings
         {
             NoticeDefaultLevel = NoticeLevel.Lively, NoticeHistoryHours = 100_000, NoticesWidth = double.PositiveInfinity, NoticeAppsListed = true,
@@ -529,7 +529,7 @@ internal static class NoticeCoreTests
         check("Notice settings are normalized", odd.NoticeDefaultLevel == NoticeLevel.Glow && odd.NoticeStyles.Text.Seconds == 2
             && odd.NoticeStyles.Flash.Color == "" && odd.NoticeStyles.Stay.Color == "#FF0000" && odd.NoticeHistoryHours == 168 && odd.NoticesWidth == 460
             && odd.NoticeWslDistros.SequenceEqual(["Ubuntu", "Debian"]) && odd.NoticeApps.Count == 2 && odd.NoticeApps[0].AccentColor == "#FF0000" && odd.NoticeApps[0].Level == NoticeLevel.Glow
-            && odd.NoticeApps[1].Enabled && odd.NoticeApps[1].Level == NoticeLevel.Auto);
+            && !odd.NoticeApps[1].Enabled && odd.NoticeApps[1].Level == NoticeLevel.Auto && !odd.NoticeReceives("windows:Off"));
         var older = new DeckSettings { NoticeApps = [new() { Key = "windows:QQ", Level = NoticeLevel.Plain }, new() { Key = "windows:Mail" }] };
         older.Normalize();
         check("A list saved before the default applications existed gains them once, keeping its own rules", older.NoticeApps.Count == 4 && older.NoticeRule("windows:QQ")!.Level == NoticeLevel.Plain && older.NoticeAppsListed);
@@ -543,12 +543,12 @@ internal static class NoticeCoreTests
         var saved = new DeckSettings
         {
             NoticeIsland = true, LastPage = DeckPage.Notices, NoticesPausedUntil = T0,
-            NoticeApps = [new() { Key = "windows:X", Name = "X", Level = NoticeLevel.Persistent, HideBanner = true, Styles = new() { Text = new() { Seconds = 9 } } }]
+            NoticeApps = [new() { Key = "windows:X", Name = "X", Level = NoticeLevel.Persistent, Styles = new() { Text = new() { Seconds = 9 } } }]
         };
         store.Save(saved);
         var json = File.ReadAllText(store.FilePath);
         var back = store.Load();
         check("Notice settings survive saving", back.NoticeIsland && back.LastPage == DeckPage.Notices && back.NoticesPausedUntil == T0
-            && back.NoticeRule("windows:X") is { Level: NoticeLevel.Persistent, HideBanner: true, Styles.Text.Seconds: 9 } && JsonDocument.Parse(json).RootElement.GetProperty("LastPage").GetInt32() == 5);
+            && back.NoticeRule("windows:X") is { Level: NoticeLevel.Persistent, Styles.Text.Seconds: 9 } && JsonDocument.Parse(json).RootElement.GetProperty("LastPage").GetInt32() == 5);
     }
 }

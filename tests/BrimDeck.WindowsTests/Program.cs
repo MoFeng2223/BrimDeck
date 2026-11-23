@@ -53,7 +53,7 @@ internal static class Program
             NoticeFlashWatchTests.Run(Check);
             NoticeChatRestoreWindowsTests.Run(Check);
             var bannerRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BrimDeck-WindowsTests-" + Guid.NewGuid().ToString("N"));
-            try { NoticeBannerRegistryTests.Run(bannerRoot, Check); NoticeBannerKeeperTests.Run(System.IO.Path.Combine(bannerRoot, "keeper"), Check); }
+            try { NoticeBannerRegistryTests.Run(bannerRoot, Check); }
             finally { if (System.IO.Directory.Exists(bannerRoot)) System.IO.Directory.Delete(bannerRoot, true); }
             LayoutRetryTests.Run(Check);
             InkLabelSettleTests.Run(Check);
@@ -105,7 +105,7 @@ internal static class Program
         NoticeFlashWatchTests.Run(Check);
         NoticeChatRestoreWindowsTests.Run(Check);
         var bannerRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BrimDeck-WindowsTests-" + Guid.NewGuid().ToString("N"));
-        try { NoticeBannerRegistryTests.Run(bannerRoot, Check); NoticeBannerKeeperTests.Run(System.IO.Path.Combine(bannerRoot, "keeper"), Check); }
+        try { NoticeBannerRegistryTests.Run(bannerRoot, Check); }
         finally { if (System.IO.Directory.Exists(bannerRoot)) System.IO.Directory.Delete(bannerRoot, true); }
         NoticePanelTests.Run(Check);
         NoticeRowBatchTests.Run(Check);

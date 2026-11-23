@@ -118,7 +118,9 @@ public static partial class WindowsNoticeApps
         // A desktop program without a registered id is named by its path, "{known folder GUID}\folder\app.exe".
         int slash = appId.LastIndexOf('\\');
         if (slash >= 0 && slash < appId.Length - 1 && appId.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return appId[(slash + 1)..^4];
-        return appId;
+        // Windows' notification center names a sender it knows nothing more about by its id, as here; one whose id cannot be
+        // told at all is an unknown application.
+        return appId.Length > 0 ? appId : Loc.T("未知应用", "Unknown app");
     }
 
     private static string? Usable(string? name, string appId)

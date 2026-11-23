@@ -884,8 +884,12 @@ public partial class MainWindow
         var empty = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = EmptyWidth, Margin = new Thickness(0, 0, 0, 14) };
         var bell = new Grid { Width = 36, Height = 36, HorizontalAlignment = HorizontalAlignment.Center };
         bell.Children.Add(new Border { CornerRadius = new CornerRadius(10), Background = UI.Brush(UI.Fill) });
-        var glyph = NoticeBadges.Glyph(NoticeGlyph.Bell, 20, PanelTheme.ColorOf("textSecondary"));
-        glyph.HorizontalAlignment = HorizontalAlignment.Center; glyph.VerticalAlignment = VerticalAlignment.Center;
+        // The notices tab's bell (MainWindow.xaml, NoticesBell), drawn at 20 DIP.
+        var glyph = new Viewbox
+        {
+            Width = 20, Height = 20, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false,
+            Child = new Grid { Width = 16, Height = 16, Children = { new Path { Data = NoticesBell.Data, Stretch = Stretch.None, Stroke = UI.Brush(UI.Secondary), StrokeThickness = 1 } } }
+        };
         bell.Children.Add(glyph);
         empty.Children.Add(bell);
         var title = UI.Fixed(Loc.T("今天还没有通知", "No notices today"), 19, 26, UI.Primary, FontWeights.SemiBold); title.HorizontalAlignment = HorizontalAlignment.Center; title.Margin = new Thickness(0, 16, 0, 0);
@@ -909,7 +913,7 @@ public partial class MainWindow
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 18, 0, 0) };
         if (center.WindowsState != NoticeSourceState.Off)
             buttons.Children.Add(PillButton(Loc.T("同步 Windows 通知", "Sync Windows notifications"), Loc.T("同步 Windows 通知", "Sync Windows notifications"), () => _ = SyncWindowsNotices()));
-        buttons.Children.Add(PillButton(Loc.T("通知设置", "Notice settings"), Loc.T("通知设置", "Notice settings"), () => _app.OpenSettings()));
+        buttons.Children.Add(PillButton(Loc.T("通知设置", "Notice settings"), Loc.T("通知设置", "Notice settings"), () => _app.OpenSettingsPage(SettingsWindow.NoticesSettingsPage)));
         empty.Children.Add(buttons);
         return empty;
     }

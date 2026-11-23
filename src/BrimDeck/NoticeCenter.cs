@@ -75,8 +75,8 @@ internal sealed class NoticeCenter : IDisposable
 
     public NoticeHub Hub { get; }
     public AttentionCoordinator Attention { get; } = new();
-    // Windows' own banners of the listed applications whose banner switch is on (NoticeBanners).
-    public NoticeBannerKeeper Banners { get; }
+    // Windows' own banner switch of each application (NoticeBanners), read and written by the "应用" settings page.
+    internal IBannerRegistry BannerRegistry { get; } = new NoticeBannerRegistry();
     public NoticeIcons Icons { get; }
     public NoticeHistoryState HistoryState { get; private set; } = NoticeHistoryState.Empty;
     public NoticeSourceState WindowsState => _enabled ? _windows.State : NoticeSourceState.Off;
@@ -97,11 +97,14 @@ internal sealed class NoticeCenter : IDisposable
     {
         _app = app; _dispatcher = app.Dispatcher;
         Hub = new NoticeHub(key => _app.Settings.NoticeRule(key), key => _app.Settings.NoticeReceives(key));
-        // Windows refusing access gives the banners back; the ledger lives in the data folder, next to settings.json.
-        Banners = new NoticeBannerKeeper(() => _app.Settings, _dispatcher, NoticeBannerRegistry.LedgerPath(app.Store.DirectoryPath),
-            () => _windows.State is not (NoticeSourceState.NeedsAccess or NoticeSourceState.Denied), new NoticeBannerRegistry(),
-            [WindowsNoticeSource.OwnAppId], Log);
-        Banners.Changed += BannersChanged;
+        // Banners an earlier version turned off and could not give back before it stopped (NoticeBanners); the ledger lives in the
+        // data folder, next to settings.json, and is gone once everything in it is restored.
+        string dataFolder = app.Store.DirectoryPath;
+        _ = Task.Run(() =>
+        {
+            try { NoticeBannerRegistry.RestoreAll(dataFolder); }
+            catch (Exception ex) { Log(ex); }
+        });
         Icons = new NoticeIcons(_dispatcher, _windows.LogoAsync, distro => _wsl.States.TryGetValue(distro, out var state) && state.State is WslAgentState.Server or WslAgentState.Monitor or WslAgentState.MonitorDenied);
         _quiet = new NoticeQuiet(_dispatcher);
         _quiet.Changed += UpdateQuiet;
@@ -135,7 +138,7 @@ internal sealed class NoticeCenter : IDisposable
         });
         _windows.Missed += input => _dispatcher.BeginInvoke(() => OnMissed(input));
         _windows.Removed += key => _dispatcher.BeginInvoke(() => { if (!_disposed) Hub.SourceRemoved(key); });
-        _windows.StateChanged += () => _dispatcher.BeginInvoke(() => { if (!_disposed) Banners.Update(); Changed?.Invoke(); });
+        _windows.StateChanged += () => _dispatcher.BeginInvoke(() => Changed?.Invoke());
         // Raised after the notices of a reading were handed over, so they are queued on the dispatcher before this.
         _windows.Synced += covers => _dispatcher.BeginInvoke(() => FinishResume(covers));
         _wsl.Received += (distro, message) => _dispatcher.BeginInvoke(() => FromAgent(distro, message));
@@ -166,7 +169,6 @@ internal sealed class NoticeCenter : IDisposable
             if (Attention.Suppressed) Apply(Attention.SetSuppressed(false, DateTimeOffset.UtcNow, out _));
             Apply(Attention.Remove(item => item.IsNotice, DateTimeOffset.UtcNow));
             Quiet = false;
-            Banners.Update();
             Changed?.Invoke();
             return;
         }
@@ -175,8 +177,8 @@ internal sealed class NoticeCenter : IDisposable
         if (silent.Count > 0) Apply(Attention.Remove(item => item.IsNotice && silent.Contains(item.Lane), DateTimeOffset.UtcNow));
         LoadHistory();
         _windows.Start();
-        // The taskbar flash source runs while a chat it watches is listed (WeChat is, for a new user).
-        if (ChatFlashApps.All.Any(app => app.Enabled && settings.NoticeRule("flash:" + app.Id) is not null)) StartChatFlash(); else StopChatFlash();
+        // The taskbar flash source runs while a chat it watches is listed and received (WeChat is, for a new user).
+        if (ChatFlashApps.All.Any(app => app.Enabled && settings.NoticeRule("flash:" + app.Id) is { Enabled: true })) StartChatFlash(); else StopChatFlash();
         _wsl.Apply(settings.NoticeWslDistros);
         _maintenance.Start();
         Hub.Prune(DateTimeOffset.UtcNow);
@@ -184,7 +186,6 @@ internal sealed class NoticeCenter : IDisposable
         DropMissing();
         UpdateQuiet();
         ScheduleDue();
-        Banners.Update();
         Changed?.Invoke();
     }
 
@@ -740,24 +741,6 @@ internal sealed class NoticeCenter : IDisposable
         return true;
     }
 
-    // A banner the user turned on again in Windows (BannerState.Released) is theirs: that application's banner switch goes off, so
-    // the settings say what Windows does and switching it on again turns the banner off again.
-    private void BannersChanged()
-    {
-        var released = Banners.States.Where(pair => pair.Value == BannerState.Released).Select(pair => NoticeKeys.Windows(pair.Key)).ToHashSet(StringComparer.Ordinal);
-        var rules = Settings.NoticeApps.Where(rule => rule.HideBanner && released.Contains(rule.Key)).ToList();
-        if (rules.Count > 0)
-        {
-            foreach (var rule in rules) rule.HideBanner = false;
-            _app.QueueSave();
-            SettingsChangedHere?.Invoke();
-        }
-        Changed?.Invoke();
-    }
-
-    // The settings changed here rather than in the settings window (a banner switch went off); an open settings window shows it.
-    public event Action? SettingsChangedHere;
-
     // Deleting and clearing touch BrimDeck's own records only: no source is told, so no application stops reminding because
     // its notice left BrimDeck's list (Windows' notification center and WSL applications keep theirs).
     public void Delete(Notice notice) { Withdraw(notice.Id); Hub.Delete(notice.Id); }
@@ -1194,7 +1177,5 @@ internal sealed class NoticeCenter : IDisposable
         Microsoft.Win32.SystemEvents.TimeChanged -= ClockMoved;
         Microsoft.Win32.SystemEvents.PowerModeChanged -= PowerChanged;
         _quiet.Dispose();
-        // Windows shows its own banners again while BrimDeck is not running.
-        Banners.ReleaseAll();
     }
 }
