@@ -47,7 +47,11 @@ public partial class App
 
     private void NetworkAvailabilityChanged(object? sender, NetworkAvailabilityEventArgs e)
     {
-        if (e.IsAvailable) Dispatcher.BeginInvoke(CheckUpdatesIfDue);
+        if (e.IsAvailable)
+        {
+            Usage.NotifyNetworkAvailable();
+            Dispatcher.BeginInvoke(CheckUpdatesIfDue);
+        }
     }
 
     private void PowerModeChanged(object? sender, PowerModeChangedEventArgs e)

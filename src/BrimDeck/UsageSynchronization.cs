@@ -39,6 +39,7 @@ public partial class MainWindow
     // automatic sync off, so the request shows. A read already under way counts as the one asked for.
     internal void SyncNow()
     {
+        _app.Usage.ResetAntigravityCliBackoff();
         Lead._syncAsked = true;
         foreach (var deck in _app.Decks) deck.RenderSyncButton();
         _ = RefreshAsync(queueIfBusy: false);
@@ -52,6 +53,7 @@ public partial class MainWindow
     {
         if (_details)
         {
+            _app.Usage.ResetAntigravityCliBackoff();
             // A second click during the same read does not request another pass.
             await RefreshAsync(queueIfBusy: false);
             return;
