@@ -318,7 +318,7 @@ internal sealed class NoticeAgendaForm : StackPanel
         _textLabel.Text = todo ? Loc.T("内容", "Text") : Loc.T("标题", "Title");
         _dayLabel.Text = todo ? Loc.T("日期", "Date") : Loc.T("时间", "Time");
         string submit = _existing ? Loc.T("保存", "Save") : todo ? Loc.T("加入待办", "Add to-do") : Loc.T("加入日程", "Add event");
-        if (((Border)_submit.Content).Child is TextBlock label) label.Text = submit;
+        if (((Border)_submit.Content).Child is InkCentredText label) { label.Text.Text = submit; label.InvalidateMeasure(); label.InvalidateArrange(); }
         AutomationProperties.SetName(_submit, submit);
         var row = new StackPanel { Orientation = Orientation.Horizontal };
         row.Children.Add(Segment(Loc.T("待办", "To-do"), todo, () => Kind(true)));

@@ -22,7 +22,7 @@ namespace BrimDeck;
 // when its words change.
 internal sealed class InkCentredText : FrameworkElement
 {
-    private static readonly Dictionary<(string Text, string Font, double Size, int Weight, bool Italic, TextFormattingMode Mode, double Pixels), (double Top, double Bottom)> Spans = [];
+    private static readonly Dictionary<(string Text, string Font, double Size, int Weight, bool Italic, TextFormattingMode Mode, double Pixels, double Line), (double Top, double Bottom)> Spans = [];
     private readonly TextBlock _text;
     private FrameworkElement? _box;
     private double _boxHeight;
@@ -90,19 +90,32 @@ internal sealed class InkCentredText : FrameworkElement
 
     // Where word's letters start and end below the top of its line when drawn in text's font at pixels device pixels per DIP,
     // in DIP. Each row of the drawing weighs its ink against the usual row's (the median of the rows with ink), at most fully;
-    // the rows at either end that weigh less than fully are counted as that much of a row.
-    internal static (double Top, double Bottom) InkSpan(TextBlock text, string word, double pixels)
+    // the rows at either end that weigh less than fully are counted as that much of a row. ownLine: in text's own line height
+    // (LineHeight with its stacking), for text set at a fixed line height; otherwise in the font's.
+    internal static (double Top, double Bottom) InkSpan(TextBlock text, string word, double pixels, bool ownLine = false)
     {
         string probeText = word.Any(IsChinese) ? word : "H";
         var mode = TextOptions.GetTextFormattingMode(text);
-        var key = (probeText, text.FontFamily.Source, text.FontSize, text.FontWeight.ToOpenTypeWeight(), text.FontStyle != FontStyles.Normal, mode, pixels);
+        double line = ownLine && text.LineStackingStrategy == LineStackingStrategy.BlockLineHeight && double.IsFinite(text.LineHeight) ? text.LineHeight : double.NaN;
+        var key = (probeText, text.FontFamily.Source, text.FontSize, text.FontWeight.ToOpenTypeWeight(), text.FontStyle != FontStyles.Normal, mode, pixels, line);
         if (Spans.TryGetValue(key, out var span)) return span;
         var probe = new TextBlock { Text = probeText, FontFamily = text.FontFamily, FontSize = text.FontSize, FontWeight = text.FontWeight, FontStyle = text.FontStyle,
             Foreground = Brushes.White, UseLayoutRounding = true };
+        if (double.IsFinite(line)) { probe.LineHeight = line; probe.LineStackingStrategy = LineStackingStrategy.BlockLineHeight; }
         TextOptions.SetTextFormattingMode(probe, mode);
         VisualTreeHelper.SetRootDpi(probe, new DpiScale(pixels, pixels));
         probe.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         probe.Arrange(new Rect(probe.DesiredSize));
+        span = Ink(probe, pixels);
+        if (Spans.Count > 64) Spans.Clear();
+        Spans[key] = span;
+        return span;
+    }
+
+    // Where the ink of an element laid out at pixels device pixels per DIP starts and ends below its top, in DIP, its rows weighed
+    // as InkSpan says. Also for a text box's own line (LetterBox), which is laid out unlike a TextBlock's.
+    internal static (double Top, double Bottom) Ink(FrameworkElement probe, double pixels)
+    {
         int width = Math.Max(1, (int)Math.Ceiling(probe.ActualWidth * pixels)), height = Math.Max(1, (int)Math.Ceiling(probe.ActualHeight * pixels));
         var bitmap = new RenderTargetBitmap(width, height, 96 * pixels, 96 * pixels, PixelFormats.Pbgra32);
         bitmap.Render(probe);
@@ -112,20 +125,14 @@ internal sealed class InkCentredText : FrameworkElement
         for (int y = 0; y < height; y++)
             for (int x = 0; x < width; x++) rows[y] += bytes[(y * width + x) * 4 + 3];
         var inked = rows.Where(row => row > 0).Order().ToArray();
-        if (inked.Length == 0) span = (probe.ActualHeight / 2, probe.ActualHeight / 2);
-        else
-        {
-            double usual = inked[inked.Length / 2];
-            double Weight(int y) => Math.Min(1, rows[y] / usual);
-            int first = Array.FindIndex(rows, row => row > 0), last = Array.FindLastIndex(rows, row => row > 0);
-            double top = first, bottom = last + 1;
-            for (int y = first; y <= last && Weight(y) < 1; y++) top += 1 - Weight(y);
-            for (int y = last; y >= first && Weight(y) < 1; y--) bottom -= 1 - Weight(y);
-            span = top < bottom ? (top / pixels, bottom / pixels) : ((first + last + 1) / 2.0 / pixels, (first + last + 1) / 2.0 / pixels);
-        }
-        if (Spans.Count > 64) Spans.Clear();
-        Spans[key] = span;
-        return span;
+        if (inked.Length == 0) return (probe.ActualHeight / 2, probe.ActualHeight / 2);
+        double usual = inked[inked.Length / 2];
+        double Weight(int y) => Math.Min(1, rows[y] / usual);
+        int first = Array.FindIndex(rows, row => row > 0), last = Array.FindLastIndex(rows, row => row > 0);
+        double top = first, bottom = last + 1;
+        for (int y = first; y <= last && Weight(y) < 1; y++) top += 1 - Weight(y);
+        for (int y = last; y >= first && Weight(y) < 1; y--) bottom -= 1 - Weight(y);
+        return top < bottom ? (top / pixels, bottom / pixels) : ((first + last + 1) / 2.0 / pixels, (first + last + 1) / 2.0 / pixels);
     }
 
     // CJK radicals, symbols and punctuation, kana, the unified ideographs, compatibility ideographs and full-width forms.

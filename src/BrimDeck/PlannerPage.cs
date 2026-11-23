@@ -76,8 +76,11 @@ internal sealed partial class PlannerPage : Grid
         string look = string.Join('|', Look.Generation, Loc.Language, SystemParameters.HighContrast);
         if (look != _lookKey) { _lookKey = look; Restyle(); }
         string frame = string.Join('|', _layout, _cell, look);
-        if (frame != _frameKey) { _frameKey = frame; BuildFrame(); _shownKey = ""; }
-        Show();
+        // A new frame is empty, so it is filled at once, even while a press holds the contents back (a drag of the panel's edge
+        // across the width or height where the layout changes is such a press).
+        bool rebuilt = frame != _frameKey;
+        if (rebuilt) { _frameKey = frame; BuildFrame(); _shownKey = ""; }
+        Show(force: rebuilt);
     }
 
     // What the page shows besides its frame; a change of any of it draws the page's contents again.
@@ -96,6 +99,8 @@ internal sealed partial class PlannerPage : Grid
         if (_marked is not null && _markedDay != _day) { _marked = null; _markTimer.Stop(); }
         string key = ShownKey();
         if (!force && key == _shownKey) return;
+        // While a press is under way (the button down, or a pressed button holding the mouse), changed contents wait for its end.
+        if (!force && _pressing && (Mouse.LeftButton == MouseButtonState.Pressed || Mouse.Captured is not null)) { _showAfterPress = true; return; }
         _shownKey = key;
         if (_view != AgendaView.Note) SaveNote();
         ShowHeads();
@@ -201,12 +206,8 @@ internal sealed partial class PlannerPage : Grid
         }
     }
 
-    private TextBlock Title(string text)
-    {
-        var title = AgendaDraw.Words(text, 15, 24, Look.Primary, FontWeights.SemiBold);
-        title.VerticalAlignment = VerticalAlignment.Center;
-        return title;
-    }
+    // A head's title, centred in the head's height by its letters as drawn (InkCentredText), as the switches' words beside it are.
+    private InkCentredText Title(string text) => AgendaDraw.Label(text, 15, Look.Primary, FontWeights.SemiBold);
 
     // The day's title and how far it is from today: "11月22日 周日  今天", one line that ends in an ellipsis where the head is short of room.
     private FrameworkElement DayTitle()
@@ -214,8 +215,10 @@ internal sealed partial class PlannerPage : Grid
         var title = Title(AgendaText.DayTitle(_day, Today));
         if (AgendaText.Relative(_day, Today) is { } relative)
         {
-            title.Inlines.Add(new System.Windows.Documents.Run(" "));
-            title.Inlines.Add(new System.Windows.Documents.Run(relative) { FontSize = 11.5, FontWeight = FontWeights.Normal, Foreground = UI.Brush(Look.Tertiary) });
+            // The letters centred are the title's (InkCentredText measures its text in the title's size); the smaller words follow
+            // on the same baseline.
+            title.Text.Inlines.Add(new System.Windows.Documents.Run(" "));
+            title.Text.Inlines.Add(new System.Windows.Documents.Run(relative) { FontSize = 11.5, FontWeight = FontWeights.Normal, Foreground = UI.Brush(Look.Tertiary) });
         }
         return title;
     }
@@ -228,13 +231,14 @@ internal sealed partial class PlannerPage : Grid
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 40 });
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         if (title is TextBlock text) text.TextTrimming = TextTrimming.CharacterEllipsis;
+        else if (title is InkCentredText inked) inked.Text.TextTrimming = TextTrimming.CharacterEllipsis;
         head.Children.Add(title);
         var tools = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         if (away)
         {
-            var label = AgendaDraw.Words(Loc.T("今天", "Today"), 11.5, 16, Look.Secondary);
-            label.VerticalAlignment = VerticalAlignment.Center;
+            var label = AgendaDraw.Label(Loc.T("今天", "Today"), 11.5, Look.Secondary);
             var today = AgendaDraw.Face(Look, label, Loc.T("回到今天", "Go to today"), GoToday, 20, 6, new Thickness(8, 0, 8, 0), Look.Fill);
+            AgendaDraw.Fit(today, label, 20);
             today.Margin = new Thickness(0, 0, 4, 0);
             tools.Children.Add(today);
         }
@@ -252,39 +256,55 @@ internal sealed partial class PlannerPage : Grid
         head.Children.Add(tools);
     }
 
-    // The three switches: 日程 with the day's events, 待办 with its open to-dos, 便签 with a dot when it has a note.
+    // The three switches: 日程 with the day's events, 待办 with its open to-dos, 便签 with a dot when it has a note. One segmented
+    // control (AgendaDraw.Segments): the chosen one has the fill, the others brighten under the pointer.
     private FrameworkElement Switches()
     {
         var counts = Book.Counts(_day, Today);
-        var row = new StackPanel { Orientation = Orientation.Horizontal };
-        foreach (var (view, name) in new[] { (AgendaView.Events, Loc.T("日程", "Events")), (AgendaView.Todos, Loc.T("待办", "To-dos")), (AgendaView.Note, Loc.T("便签", "Note")) })
+        var views = new[] { (AgendaView.Events, Loc.T("日程", "Events")), (AgendaView.Todos, Loc.T("待办", "To-dos")), (AgendaView.Note, Loc.T("便签", "Note")) };
+        var names = views.Select(view => view.Item2).ToArray();
+        var segments = new List<Button>();
+        foreach (var (view, name) in views)
         {
             bool on = view == _view;
-            var label = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-            var words = AgendaDraw.Words(name, 12, 16, on ? Look.Primary : Look.Secondary);
-            words.VerticalAlignment = VerticalAlignment.Center;
+            var label = new StackPanel { Orientation = Orientation.Horizontal };
+            var words = AgendaDraw.Label(name, 12, on ? Look.Primary : Look.Secondary);
             label.Children.Add(words);
             int count = view switch { AgendaView.Events => counts.Events, AgendaView.Todos => counts.OpenTodos, _ => 0 };
             string spoken = name;
+            InkCentredText? figure = null;
+            Ellipse? dot = null;
             if (count > 0)
             {
-                var figure = AgendaDraw.Words(count.ToString(CultureInfo.InvariantCulture), 12, 16, on ? Look.Secondary : Look.Tertiary);
-                figure.VerticalAlignment = VerticalAlignment.Center; figure.Margin = new Thickness(5, 0, 0, 0);
+                figure = AgendaDraw.Label(count.ToString(CultureInfo.InvariantCulture), 12, on ? Look.Secondary : Look.Tertiary);
+                figure.Margin = new Thickness(5, 0, 0, 0);
                 label.Children.Add(figure);
                 spoken += " " + count.ToString(CultureInfo.InvariantCulture);
             }
             else if (view == AgendaView.Note && counts.Note)
             {
-                label.Children.Add(new Ellipse { Width = 4, Height = 4, Fill = UI.Brush(on ? Look.Secondary : Look.Tertiary), Margin = new Thickness(5, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
+                dot = new Ellipse { Width = 4, Height = 4, Fill = UI.Brush(on ? Look.Secondary : Look.Tertiary), Margin = new Thickness(5, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center, UseLayoutRounding = false };
+                label.Children.Add(dot);
                 spoken += Loc.T("，已写", ", written");
             }
             var chosen = view;
-            var button = AgendaDraw.Face(Look, label, spoken, () => SetView(chosen), 22, 7, new Thickness(11, 0, 11, 0), on ? Look.FillSelected : null, on ? Look.FillSelected : null);
-            if (row.Children.Count > 0) button.Margin = new Thickness(1, 0, 0, 0);
-            row.Children.Add(button);
+            var button = AgendaDraw.Segment(Look, label, spoken, on, () => SetView(chosen), bright =>
+            {
+                words.Text.Foreground = UI.Brush(bright ? Look.Primary : Look.Secondary);
+                if (figure is not null) figure.Text.Foreground = UI.Brush(bright ? Look.Secondary : Look.Tertiary);
+                if (dot is not null) dot.Fill = UI.Brush(bright ? Look.Secondary : Look.Tertiary);
+            }, SwitchHeight, new Thickness(10, 0, 10, 0));
+            AgendaDraw.Fit(button, words, SwitchHeight, names);
+            segments.Add(button);
         }
-        return new Border { Background = UI.Brush(Look.Fill), CornerRadius = new CornerRadius(Look.Corner(8)), Padding = new Thickness(1), Child = row, VerticalAlignment = VerticalAlignment.Center };
+        int chosenAt = Array.FindIndex(views, view => view.Item1 == _view);
+        int? from = _switchDrawn is { } drawn && drawn != _view ? Array.FindIndex(views, view => view.Item1 == drawn) : null;
+        _switchDrawn = _view;
+        return AgendaDraw.Segments(Look, segments, chosenAt, from, Soft.For(_deck.PanelSettings));
     }
+    private const double SwitchHeight = 20;
+    // The view the switches were last drawn for: drawn for another, their fill glides from it.
+    private AgendaView? _switchDrawn;
 
     // ---- Moving about ----
 

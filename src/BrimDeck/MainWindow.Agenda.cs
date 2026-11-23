@@ -44,6 +44,10 @@ public partial class MainWindow
             if (CurrentPage == DeckPage.Agenda) _agenda?.PressedAt(e.OriginalSource);
             else if (CurrentPage == DeckPage.Notices) NoticeFormPressedAt(e.OriginalSource);
         };
+        // The page draws what changed during a press once it ends (PlannerPage.Released). A pressed button holds the mouse, so its
+        // release comes here wherever it happens; a press on nothing that holds it ends when the pointer leaves the panel.
+        PreviewMouseLeftButtonUp += (_, _) => _agenda?.Released();
+        MouseLeave += (_, _) => { if (Mouse.Captured is null) _agenda?.Released(); };
         Deactivated += (_, _) => _agenda?.Flush();
         Closed += (_, _) =>
         {

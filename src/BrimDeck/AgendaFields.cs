@@ -97,6 +97,8 @@ internal static class AgendaDraw
     {
         var glyph = Icon(data, icon, look.Secondary);
         glyph.HorizontalAlignment = HorizontalAlignment.Center; glyph.VerticalAlignment = VerticalAlignment.Center;
+        // In the exact middle, not moved to a whole pixel (CentredIcon).
+        glyph.UseLayoutRounding = false;
         var grid = new Grid { Width = width, Children = { glyph } };
         var button = Face(look, grid, name, click, height, 6, new Thickness(0));
         button.ToolTip = name;
@@ -107,9 +109,10 @@ internal static class AgendaDraw
     public static Button Pill(PanelLook look, string text, Action click, bool main = false, bool danger = false)
     {
         string fill = main ? look.Primary : look.Fill;
-        var label = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = 12, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
-            Foreground = UI.Brush(main ? look.Hex("surface") : danger ? look.Hex("danger") : look.Primary) };
+        var label = Label(text, 12, main ? look.Hex("surface") : danger ? look.Hex("danger") : look.Primary, FontWeights.SemiBold);
+        label.HorizontalAlignment = HorizontalAlignment.Center;
         var face = new Border { Height = 24, CornerRadius = new CornerRadius(look.Corner(12)), Padding = new Thickness(12, 0, 12, 0), Background = UI.Brush(fill), Child = label };
+        label.FitHeight(face, 24);
         var button = Bare(face, text, click, (over, down) =>
         {
             if (main) face.Opacity = down ? .76 : over ? .88 : 1;
@@ -118,6 +121,86 @@ internal static class AgendaDraw
         button.IsEnabledChanged += (_, _) => { button.Opacity = button.IsEnabled ? 1 : .4; button.Cursor = button.IsEnabled ? Cursors.Hand : Cursors.Arrow; };
         return button;
     }
+
+    // A button's words, centred top to bottom in the height they are given by their letters as drawn (InkCentredText), whatever
+    // the font and display scale. Words centres its line box instead, and the panel font's Chinese sits about 1 DIP low in it.
+    // The text keeps the font's own line height: InkCentredText measures the letters in that line.
+    public static InkCentredText Label(string text, double size, string color, FontWeight? weight = null)
+    {
+        var block = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = size, Foreground = UI.Brush(color), FontWeight = weight ?? FontWeights.Normal, TextTrimming = TextTrimming.CharacterEllipsis };
+        Typography.SetNumeralAlignment(block, FontNumeralAlignment.Tabular);
+        return new InkCentredText(block) { VerticalAlignment = VerticalAlignment.Stretch };
+    }
+
+    // An icon beside a Label: centred top to bottom exactly, not moved to a whole device pixel, so that its middle meets the
+    // middle of the label's letters at any display scale. The icons are drawn centred in their 24 unit box.
+    public static Viewbox CentredIcon(string data, double size, string color)
+    {
+        var icon = Icon(data, size, color);
+        icon.VerticalAlignment = VerticalAlignment.Center;
+        icon.UseLayoutRounding = false;
+        return icon;
+    }
+
+    // A label's box is height tall, or one device pixel taller where that leaves the letters exactly in its middle
+    // (InkCentredText.FitHeight); words: everything the label may show.
+    public static void Fit(Button button, InkCentredText label, double height, params string[] words)
+    {
+        if (button.Content is FrameworkElement face) label.FitHeight(face, height, words);
+    }
+
+    // A segmented switch: a track, and on it the chosen segment's fill. The other segments take no fill under the pointer; their
+    // content turns brighter (brighten), so the switch reads as one control. The segments are equally wide.
+    //
+    // The fill lies under the segments and is placed on the chosen one once they are laid out. from: the segment chosen before,
+    // when the switch is drawn anew for another choice (the page draws its head again on each choice); the fill then glides from
+    // it to the chosen one, as the panel's page switch does (Soft.Choose, Soft.Follow), unless animate is false.
+    public static Border Segments(PanelLook look, IReadOnlyList<Button> segments, int chosen, int? from, bool animate)
+    {
+        var row = new UniformGrid { Rows = 1 };
+        foreach (var segment in segments) row.Children.Add(segment);
+        var shift = new TranslateTransform();
+        var fill = new Border { Background = UI.Brush(look.FillSelected), CornerRadius = new CornerRadius(look.Corner(SegmentRadius)), HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Stretch, RenderTransform = shift, IsHitTestVisible = false, Visibility = Visibility.Hidden };
+        bool placed = false;
+        row.SizeChanged += (_, _) => Place();
+        foreach (var segment in segments) segment.SizeChanged += (_, _) => Place();
+        return new Border { Background = UI.Brush(look.Hex("switchFill")), CornerRadius = new CornerRadius(look.Corner(SegmentRadius + SegmentInset)), Padding = new Thickness(SegmentInset),
+            Child = new Grid { Children = { fill, row } }, VerticalAlignment = VerticalAlignment.Center };
+
+        // When the segments are laid out or change size (their words change with the counts): the fill takes the chosen one's place.
+        void Place()
+        {
+            if (chosen < 0 || chosen >= segments.Count || segments[chosen] is not { ActualWidth: > 0 } target) return;
+            double x = target.TranslatePoint(new Point(), row).X;
+            if (placed && Math.Abs(shift.X - x) < .01 && Math.Abs(fill.Width - target.ActualWidth) < .01) return;
+            fill.Width = target.ActualWidth;
+            if (!placed && from is int was && was != chosen && was >= 0 && was < segments.Count && animate)
+            {
+                shift.X = segments[was].TranslatePoint(new Point(), row).X;
+                Soft.Glide(shift, TranslateTransform.XProperty, x, true, Soft.Choose);
+            }
+            else if (!placed || shift.HasAnimatedProperties == false) shift.X = x;
+            placed = true;
+            fill.Visibility = Visibility.Visible;
+        }
+    }
+
+    public static Button Segment(PanelLook look, FrameworkElement content, string name, bool on, Action click, Action<bool> brighten, double height, Thickness padding)
+    {
+        content.HorizontalAlignment = HorizontalAlignment.Center;
+        var face = new Border { Height = height, CornerRadius = new CornerRadius(look.Corner(SegmentRadius)), Padding = padding, Child = content, Background = Brushes.Transparent };
+        var button = Bare(face, name, on ? () => { } : click, (over, down) =>
+        {
+            if (on) return;
+            brighten(over);
+            face.Opacity = down ? .6 : 1;
+        });
+        if (on) button.Cursor = Cursors.Arrow;
+        return button;
+    }
+
+    private const double SegmentRadius = 6, SegmentInset = 2;
 
     public const string Chevron = "m6 9 6 6 6-6", Left = "m15 18-6-6 6-6", Right = "m9 18 6-6-6-6", Plus = "M5 12h14M12 5v14";
 }
@@ -139,7 +222,7 @@ internal static class AgendaFields
         host.SetValue(FrameworkElement.VerticalAlignmentProperty, new TemplateBindingExtension(Control.VerticalContentAlignmentProperty));
         host.SetValue(ScrollViewer.FocusableProperty, false);
         frame.AppendChild(host);
-        var box = new TextBox
+        var box = new LetterBox
         {
             Template = new ControlTemplate(typeof(TextBox)) { VisualTree = frame }, FontFamily = UI.PanelFont, FontSize = size, Foreground = UI.Brush(look.Primary),
             CaretBrush = UI.Brush(look.Primary), SelectionBrush = UI.Brush(look.Accent), Background = Brushes.Transparent, BorderBrush = Brushes.Transparent,
@@ -154,6 +237,20 @@ internal static class AgendaFields
         }
         keyboard(box);
         return box;
+    }
+
+    // A hint for box, laid over it: a box like it (LetterBox, its template, font, padding and frame) that only shows the words, so
+    // they are where the typed words will be to the pixel at any display scale. It takes no pointer, focus or keyboard.
+    public static TextBox Hint(TextBox box, string text, string color)
+    {
+        var hint = new LetterBox
+        {
+            Silent = true, Template = box.Template, Text = text, FontFamily = box.FontFamily, FontSize = box.FontSize, FontWeight = box.FontWeight, Foreground = UI.Brush(color),
+            Background = Brushes.Transparent, BorderBrush = Brushes.Transparent, BorderThickness = box.BorderThickness, Padding = box.Padding, Margin = box.Margin,
+            VerticalContentAlignment = box.VerticalContentAlignment, TextAlignment = box.TextAlignment, IsReadOnly = true, Focusable = false, IsTabStop = false,
+            IsHitTestVisible = false, IsUndoEnabled = false, Sample = (box as LetterBox)?.Sample
+        };
+        return hint;
     }
 
     // A one-line field with a grey hint (28 high, the fill over the form's own fill): the event's title.
@@ -192,11 +289,132 @@ internal static class AgendaFields
     }
 }
 
+// A text box whose one line of letters sits in the middle of its height as drawn, the way the panel's button labels do
+// (InkCentredText): a TextBox centres its line box, in which the panel font's Chinese sits about 1 DIP low (2 to 4 device pixels
+// at 150% and more). Sample: the letters it centres ("中" for Chinese words, anything else for figures); null leaves the box as
+// it is. Its hint takes the same Sample (InkCentredText.Sample), so the hint is where the typed words go.
+//
+// A text box lays its line out unlike a TextBlock (at 100% its letters came 0.7 pixel lower than a TextBlock's in the same font),
+// so the letters are measured in a box like this one: Sample drawn once in it for each font, size and display scale, against the
+// top of its line (WPF's TextBoxView). After each layout, as InkCentredLabel does for the settings buttons, this box's line is
+// found where it was laid out and moved by whole device pixels to put the letters' middle at the box's.
+internal sealed class LetterBox : TextBox
+{
+    private static readonly Dictionary<(string, string, double, int, TextFormattingMode, double), (double Top, double Bottom)> Spans = [];
+    private string? _sample;
+    private FrameworkElement? _host, _line;
+    private readonly TranslateTransform _shift = new();
+
+    public LetterBox()
+    {
+        Loaded += (_, _) => { LayoutUpdated -= Recentre; LayoutUpdated += Recentre; };
+        Unloaded += (_, _) => LayoutUpdated -= Recentre;
+        SizeChanged += Recentre;
+    }
+
+    public string? Sample { get => _sample; set { _sample = value; Recentre(null, EventArgs.Empty); } }
+
+    // A box that only shows words (a hint, AgendaFields.Hint): not offered to screen readers, which read the hint as the real box's name.
+    public bool Silent { get; init; }
+
+    protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer() => Silent ? null! : base.OnCreateAutomationPeer();
+
+    public override void OnApplyTemplate()
+    {
+        base.OnApplyTemplate();
+        _host = GetTemplateChild("PART_ContentHost") as FrameworkElement;
+        _line = null;
+        if (_host is not null) _host.RenderTransform = _shift;
+    }
+
+    private void Recentre(object? sender, EventArgs e)
+    {
+        if (_host is null || ActualHeight <= 0) return;
+        if (_sample is null) { _shift.Y = 0; return; }
+        double pixels = UI.PixelsPerDip(this);
+        if (pixels <= 0 || (_line ??= Line(_host)) is not { } line || Template is null) return;
+        var (top, bottom) = Span(pixels);
+        // Where the line's top is in the box without the shift, and the whole pixels that bring the letters' middle to the box's.
+        double at = line.TransformToAncestor(this).Transform(new Point()).Y - _shift.Y;
+        double shift = Math.Round((ActualHeight / 2 - (at + (top + bottom) / 2)) * pixels) / pixels;
+        if (Math.Abs(shift - _shift.Y) > 1e-6) _shift.Y = shift;
+    }
+
+    // Where Sample's letters start and end below the top of the line, in DIP, drawn in a box with this one's template and font.
+    private (double Top, double Bottom) Span(double pixels)
+    {
+        var mode = TextOptions.GetTextFormattingMode(this);
+        // The boxes' templates differ only in their corners (AgendaFields.Box), which do not move the line.
+        var key = (_sample!, FontFamily.Source, FontSize, FontWeight.ToOpenTypeWeight(), mode, pixels);
+        if (Spans.TryGetValue(key, out var span)) return span;
+        var probe = new TextBox { Template = Template, Text = _sample, FontFamily = FontFamily, FontSize = FontSize, FontWeight = FontWeight, FontStyle = FontStyle,
+            Foreground = Brushes.White, Background = Brushes.Transparent, BorderBrush = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(0),
+            UseLayoutRounding = true };
+        TextOptions.SetTextFormattingMode(probe, mode);
+        VisualTreeHelper.SetRootDpi(probe, new DpiScale(pixels, pixels));
+        probe.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        probe.Arrange(new Rect(probe.DesiredSize));
+        var (top, bottom) = InkCentredText.Ink(probe, pixels);
+        double lineTop = Line(probe) is { } line ? line.TransformToAncestor(probe).Transform(new Point()).Y : 0;
+        span = (top - lineTop, bottom - lineTop);
+        if (Spans.Count > 32) Spans.Clear();
+        Spans[key] = span;
+        return span;
+    }
+
+    // The element the box draws its lines in (WPF's TextBoxView), whose top is the first line's.
+    private static FrameworkElement? Line(DependencyObject node)
+    {
+        for (int i = 0, count = VisualTreeHelper.GetChildrenCount(node); i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(node, i);
+            if (child is FrameworkElement element && child.GetType().Name == "TextBoxView") return element;
+            if (Line(child) is { } found) return found;
+        }
+        return null;
+    }
+}
+
+// A child (a check box, a due day) set beside the first line of a text of fixed line height (Reference, a TextBlock with
+// LineHeight), its middle level with the middle of that line's letters as drawn at the display scale in use, on whole device
+// pixels. Laid out from the top of the text's first line. The reference need not be shown: only its font and line are read.
+internal sealed class InkLineAligned : Decorator
+{
+    public InkLineAligned(TextBlock reference, UIElement child) { Reference = reference; Child = child; VerticalAlignment = VerticalAlignment.Top; }
+
+    public TextBlock Reference { get; }
+
+    protected override Size MeasureOverride(Size constraint)
+    {
+        Child?.Measure(constraint);
+        double line = double.IsFinite(Reference.LineHeight) ? Reference.LineHeight : 0;
+        return Child is null ? new Size() : new Size(Child.DesiredSize.Width, Math.Max(line, Top() + Child.DesiredSize.Height));
+    }
+
+    protected override Size ArrangeOverride(Size size)
+    {
+        Child?.Arrange(new Rect(0, Top(), size.Width, Child.DesiredSize.Height));
+        return size;
+    }
+
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi) => InvalidateMeasure();
+
+    // The child's top: its middle at the letters' middle (Chinese letters for Chinese text, capitals otherwise), on a whole pixel.
+    private double Top()
+    {
+        if (Child is null) return 0;
+        double pixels = UI.PixelsPerDip(this);
+        if (pixels <= 0) return 0;
+        var (top, bottom) = InkCentredText.InkSpan(Reference, Reference.Text, pixels, ownLine: true);
+        return Math.Max(0, Math.Round(((top + bottom) / 2 - Child.DesiredSize.Height / 2) * pixels) / pixels);
+    }
+}
+
 // A one-line text field with a hint: AgendaFields.Text.
 internal sealed class AgendaTextField : Grid
 {
     public TextBox Box { get; }
-    private readonly TextBlock _hint;
+    private readonly TextBox _hint;
     public event Action? Changed;
     public string Text { get => Box.Text; set => Box.Text = value; }
 
@@ -205,10 +423,11 @@ internal sealed class AgendaTextField : Grid
         Height = 28;
         Box = AgendaFields.Box(look, keyboard);
         Box.Background = UI.Brush(look.Fill);
+        // The typed words centred by their letters (LetterBox); the hint drawn in a box like it, so it is where they go.
         Box.Padding = new Thickness(7, 0, 7, 0);
+        ((LetterBox)Box).Sample = "中";
         AutomationProperties.SetName(Box, hint);
-        _hint = AgendaDraw.Words(hint, 12.5, 18, look.Tertiary);
-        _hint.Margin = new Thickness(10.5, 0, 10, 0); _hint.VerticalAlignment = VerticalAlignment.Center; _hint.IsHitTestVisible = false;
+        _hint = AgendaFields.Hint(Box, hint, look.Tertiary);
         Children.Add(Box); Children.Add(_hint);
         Box.TextChanged += (_, _) => { _hint.Visibility = Box.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed; Changed?.Invoke(); };
     }
@@ -231,6 +450,8 @@ internal sealed class AgendaTimeField : Grid
         Box = AgendaFields.Box(look, keyboard);
         Box.Background = UI.Brush(look.Fill);
         Box.TextAlignment = TextAlignment.Center; Box.MaxLength = 5;
+        // The figures in the middle of the field by their height as drawn (LetterBox).
+        ((LetterBox)Box).Sample = "0";
         Typography.SetNumeralAlignment(Box, FontNumeralAlignment.Tabular);
         InputMethod.SetIsInputMethodEnabled(Box, false);
         AutomationProperties.SetName(Box, name);
@@ -300,7 +521,7 @@ internal sealed class AgendaTimeField : Grid
 internal sealed class AgendaDateField : ContentControl
 {
     private readonly PanelLook _look;
-    private readonly TextBlock _label;
+    private readonly InkCentredText _label;
     private readonly Border _face;
     private DateOnly _date;
     public event Action? Changed;
@@ -312,13 +533,14 @@ internal sealed class AgendaDateField : ContentControl
     public AgendaDateField(PanelLook look, string name)
     {
         _look = look;
-        _label = AgendaDraw.Words("", 12.5, 18, look.Primary);
-        _label.VerticalAlignment = VerticalAlignment.Center;
-        var chevron = AgendaDraw.Icon(AgendaDraw.Chevron, 11, look.Tertiary);
-        chevron.Margin = new Thickness(6, 0, 0, 0); chevron.VerticalAlignment = VerticalAlignment.Center;
+        // The day and the chevron in the middle of the field, by the day's letters as drawn and the chevron's own middle.
+        _label = AgendaDraw.Label("", 12.5, look.Primary);
+        var chevron = AgendaDraw.CentredIcon(AgendaDraw.Chevron, 11, look.Tertiary);
+        chevron.Margin = new Thickness(6, 0, 0, 0);
         var row = new StackPanel { Orientation = Orientation.Horizontal, Children = { _label, chevron } };
         string rest = look.Fill;
         _face = new Border { Height = 28, CornerRadius = new CornerRadius(look.Corner(8)), Padding = new Thickness(10, 0, 8, 0), Background = UI.Brush(rest), Child = row };
+        _label.FitHeight(_face, 28);
         Popup = new AgendaDatePopup(look);
         var button = AgendaDraw.Bare(_face, name, () => Popup.Show(this, _date, Today(), day => { Date = day; }), (over, down) =>
             _face.Background = UI.Brush(down ? look.Hex("pressed") : over ? look.FillSelected : rest));
@@ -328,7 +550,7 @@ internal sealed class AgendaDateField : ContentControl
     public DateOnly Date
     {
         get => _date;
-        set { bool changed = value != _date; _date = value; _label.Text = AgendaText.Date(value, Today().Year); if (changed) Changed?.Invoke(); }
+        set { bool changed = value != _date; _date = value; _label.Text.Text = AgendaText.Date(value, Today().Year); _label.InvalidateMeasure(); _label.InvalidateArrange(); if (changed) Changed?.Invoke(); }
     }
 
     public bool IsEnabledField { set { IsEnabled = value; Opacity = value ? 1 : .4; } }
@@ -379,8 +601,8 @@ internal sealed class AgendaDatePopup
         var previous = AgendaDraw.IconButton(look, AgendaDraw.Left, Loc.T("上个月", "Previous month"), () => { _month = _month.AddMonths(-1); Build(); });
         DockPanel.SetDock(next, Dock.Right); DockPanel.SetDock(previous, Dock.Right);
         head.Children.Add(next); head.Children.Add(previous);
-        var title = AgendaDraw.Words(AgendaText.Month(_month.Year, _month.Month), 12.5, 18, look.Primary, FontWeights.SemiBold);
-        title.VerticalAlignment = VerticalAlignment.Center; title.Margin = new Thickness(4, 0, 0, 0);
+        var title = AgendaDraw.Label(AgendaText.Month(_month.Year, _month.Month), 12.5, look.Primary, FontWeights.SemiBold);
+        title.Margin = new Thickness(4, 0, 0, 0);
         head.Children.Add(title);
         stack.Children.Add(head);
         var days = new UniformGrid { Columns = 7, Margin = new Thickness(0, 4, 0, 0) };
@@ -395,19 +617,20 @@ internal sealed class AgendaDatePopup
         {
             var day = first.AddDays(i);
             bool chosen = day == _chosen, inMonth = day.Month == _month.Month, isToday = day == _today;
-            var label = AgendaDraw.Words(day.Day.ToString(CultureInfo.InvariantCulture), 12, 16,
+            var label = AgendaDraw.Label(day.Day.ToString(CultureInfo.InvariantCulture), 12,
                 chosen ? look.Hex("onAccent") : isToday ? look.Accent : inMonth ? look.Primary : look.Tertiary, chosen || isToday ? FontWeights.SemiBold : null);
-            label.TextAlignment = TextAlignment.Center; label.VerticalAlignment = VerticalAlignment.Center;
+            label.HorizontalAlignment = HorizontalAlignment.Center;
             var picked = day;
             var cell = AgendaDraw.Face(look, label, AgendaText.Date(day, _today.Year), () => Pick(picked), 26, 6, new Thickness(0), chosen ? look.Accent : null, chosen ? look.Accent : null);
+            AgendaDraw.Fit(cell, label, 26);
             days.Children.Add(cell);
         }
         stack.Children.Add(days);
         if (_clear is not null)
         {
-            var clear = AgendaDraw.Words(_clear, 12, 18, look.Secondary);
-            clear.VerticalAlignment = VerticalAlignment.Center;
+            var clear = AgendaDraw.Label(_clear, 12, look.Secondary);
             var button = AgendaDraw.Face(look, clear, _clear, () => Pick(null), 26, 6, new Thickness(6, 0, 6, 0));
+            AgendaDraw.Fit(button, clear, 26);
             button.Margin = new Thickness(0, 4, 0, 0); button.HorizontalAlignment = HorizontalAlignment.Left;
             stack.Children.Add(button);
         }
@@ -475,7 +698,7 @@ internal sealed class AgendaEventForm : Border
     public AgendaTimeField EndTime { get; }
     public ToggleButton AllDay { get; }
     private readonly Button _submit, _cancel, _delete;
-    private readonly TextBlock _dash;
+    private readonly FrameworkElement _dash;
     public event Action? Submitted, Cancelled, Deleted;
 
     // submit: the main button's words ("添加", "保存", "加入日程"); delete: offer "删除".
@@ -490,17 +713,18 @@ internal sealed class AgendaEventForm : Border
         EndTime = AgendaFields.Time(look, keyboard, Loc.T("结束时间", "End time"), endOfDay: true);
         AllDay = AgendaFields.Check(look, false, Loc.T("全天", "All day"));
         AllDay.VerticalAlignment = VerticalAlignment.Center;
-        _dash = AgendaDraw.Words("–", 12.5, 18, look.Tertiary);
-        _dash.VerticalAlignment = VerticalAlignment.Center; _dash.Margin = new Thickness(6, 0, 6, 0);
+        // The dash between the times, drawn as a short line in the middle of the fields' height, where their figures' middle is.
+        _dash = new Rectangle { Width = 6, Height = 1.25, Fill = UI.Brush(look.Tertiary), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 6, 0) };
 
         var times = new StackPanel { Orientation = Orientation.Horizontal };
         if (showStartDay) { StartDay.Margin = new Thickness(0, 0, 6, 0); times.Children.Add(StartDay); }
         times.Children.Add(StartTime); times.Children.Add(_dash);
         EndDay.Margin = new Thickness(0, 0, 6, 0);
         times.Children.Add(EndDay); times.Children.Add(EndTime);
-        var allDayLabel = AgendaDraw.Words(Loc.T("全天", "All day"), 11.5, 16, look.Secondary);
-        allDayLabel.VerticalAlignment = VerticalAlignment.Center; allDayLabel.Margin = new Thickness(6, 0, 0, 0);
-        var allDayRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(12, 0, 0, 0), Background = Brushes.Transparent, Cursor = Cursors.Hand, Children = { AllDay, allDayLabel } };
+        // As tall as the fields, the box and "全天" in its middle: the box by its own, the words by their letters as drawn.
+        var allDayLabel = AgendaDraw.Label(Loc.T("全天", "All day"), 11.5, look.Secondary);
+        allDayLabel.Margin = new Thickness(6, 0, 0, 0);
+        var allDayRow = new StackPanel { Orientation = Orientation.Horizontal, Height = 28, Margin = new Thickness(12, 0, 0, 0), Background = Brushes.Transparent, Cursor = Cursors.Hand, Children = { AllDay, allDayLabel } };
         allDayRow.MouseLeftButtonUp += (_, e) => { if (e.OriginalSource is DependencyObject source && IsWithin(source, AllDay)) return; AllDay.IsChecked = AllDay.IsChecked != true; e.Handled = true; };
         times.Children.Add(allDayRow);
 

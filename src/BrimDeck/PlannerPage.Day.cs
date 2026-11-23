@@ -22,6 +22,12 @@ internal sealed partial class PlannerPage
     private double? _blockMinute;
     // While the page puts its rows back, moves of its scroll positions and focus are its own.
     private bool _rebuilding;
+    // A press on the panel is under way (PressedAt to Released), and contents changed meanwhile wait for its end (Show). Drawn
+    // during the press, they replaced the button pressed, and its release clicked nothing: a press on "待办" after typing in the
+    // note saved the note, the saved note drew the page again, and the switch took a second press.
+    private bool _pressing, _showAfterPress;
+    // The list or blocks choice the add row's switch was last drawn for: drawn for the other, its fill glides over.
+    private bool? _blocksDrawn;
 
     // The event form, and what it is for: "new", "event:<id>" or "todo:<id>" (giving a to-do a time).
     private AgendaEventForm? _form;
@@ -32,7 +38,7 @@ internal sealed partial class PlannerPage
     // The to-do bar, and whether what is typed there goes to the day or to "长期".
     private Border? _todoBar;
     private TextBox? _todoInput;
-    private TextBlock? _todoScope;
+    private InkCentredText? _todoScope;
     private bool _todoLongTerm;
     // The due day's month, and the to-do it is open for.
     private AgendaDatePopup? _duePopup;
@@ -74,6 +80,7 @@ internal sealed partial class PlannerPage
     // A press in the form, or in another of the page's boxes, is the typing's own.
     public void PressedAt(object? source)
     {
+        _pressing = true;
         if (!IsKeyboardFocusWithin || source is not DependencyObject pressed) return;
         if (_form is { } form && Within(pressed, form)) return;
         for (var node = pressed; node is not null; node = node is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node))
@@ -82,6 +89,16 @@ internal sealed partial class PlannerPage
         CommitTodo();
         _deck.AgendaEndTyping();
         Keyboard.ClearFocus();
+    }
+
+    // The press is over (released on the panel, or the pointer left it with nothing held): contents that waited for it are drawn,
+    // after the release has clicked what was pressed.
+    public void Released()
+    {
+        _pressing = false;
+        if (!_showAfterPress) return;
+        _showAfterPress = false;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () => { if (IsVisible) Show(); });
     }
 
     // The panel leaves the page or closes, or the user goes to another window: what was typed is kept.
@@ -413,26 +430,31 @@ internal sealed partial class PlannerPage
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition());
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var plus = AgendaDraw.Icon(AgendaDraw.Plus, 13, Look.Tertiary);
-        plus.VerticalAlignment = VerticalAlignment.Center;
-        var words = AgendaDraw.Words(Loc.T("添加日程", "Add event"), 12, 18, Look.Tertiary);
-        words.VerticalAlignment = VerticalAlignment.Center; words.Margin = new Thickness(8, 0, 0, 0);
+        var plus = AgendaDraw.CentredIcon(AgendaDraw.Plus, 13, Look.Tertiary);
+        var words = AgendaDraw.Label(Loc.T("添加日程", "Add event"), 12, Look.Tertiary);
+        words.Margin = new Thickness(8, 0, 0, 0);
         var add = AgendaDraw.Face(Look, new StackPanel { Orientation = Orientation.Horizontal, Children = { plus, words } }, Loc.T("添加日程", "Add event"), () => OpenEventForm(null), 28, 8, new Thickness(8, 0, 8, 0), Look.Fill);
+        AgendaDraw.Fit(add, words, 28);
         add.HorizontalContentAlignment = HorizontalAlignment.Stretch;
         ((Border)add.Content).HorizontalAlignment = HorizontalAlignment.Stretch;
         grid.Children.Add(add);
-        var views = new StackPanel { Orientation = Orientation.Horizontal };
+        var segments = new List<Button>();
         foreach (var (blocks, data, name) in new[] { (false, "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", Loc.T("列表", "List")), (true, "M4 4h6v7H4zM14 8h6v9h-6zM4 15h6v5H4z", Loc.T("方块", "Blocks")) })
         {
             bool on = blocks == _blocks;
-            var icon = AgendaDraw.Icon(data, 13, on ? Look.Primary : Look.Secondary);
-            icon.HorizontalAlignment = HorizontalAlignment.Center; icon.VerticalAlignment = VerticalAlignment.Center;
+            var icon = AgendaDraw.CentredIcon(data, 13, on ? Look.Primary : Look.Secondary);
             bool choice = blocks;
-            var button = AgendaDraw.Face(Look, new Grid { Width = 28, Children = { icon } }, name, () => SetBlocks(choice), 26, 7, new Thickness(0), on ? Look.FillSelected : null, on ? Look.FillSelected : null);
+            var button = AgendaDraw.Segment(Look, icon, name, on, () => SetBlocks(choice), bright => ((Path)((Canvas)icon.Child).Children[0]).Stroke = UI.Brush(bright ? Look.Primary : Look.Secondary),
+                24, new Thickness(7, 0, 7, 0));
             button.ToolTip = name;
-            views.Children.Add(button);
+            segments.Add(button);
         }
-        var group = new Border { Background = UI.Brush(Look.Fill), CornerRadius = new CornerRadius(Look.Corner(8)), Padding = new Thickness(1), Child = views, Margin = new Thickness(8, 0, 0, 0) };
+        // Two pixels of track around 24 high segments: as tall as the add bar beside it. Drawn for the other choice than last
+        // time, the fill glides over.
+        int? from = _blocksDrawn is { } drawn && drawn != _blocks ? (drawn ? 1 : 0) : null;
+        _blocksDrawn = _blocks;
+        var group = AgendaDraw.Segments(Look, segments, _blocks ? 1 : 0, from, Soft.For(_deck.PanelSettings));
+        group.Margin = new Thickness(8, 0, 0, 0);
         Grid.SetColumn(group, 1);
         grid.Children.Add(group);
         return grid;
@@ -505,12 +527,14 @@ internal sealed partial class PlannerPage
         if (todos.CarryOver is { } carry)
         {
             var row = new Grid { Height = 22 };
-            var said = AgendaDraw.Words(AgendaText.CarryOver(carry), 11.5, 16, Look.Tertiary);
-            said.VerticalAlignment = VerticalAlignment.Center;
+            // Both words centred in the row by their letters as drawn, so they sit on one line.
+            var said = AgendaDraw.Label(AgendaText.CarryOver(carry), 11.5, Look.Tertiary);
+            said.HorizontalAlignment = HorizontalAlignment.Left;
             row.Children.Add(said);
-            var words = AgendaDraw.Words(Loc.T("移到今天", "Move to today"), 11.5, 16, Look.Accent);
-            words.VerticalAlignment = VerticalAlignment.Center;
+            var words = AgendaDraw.Label(Loc.T("移到今天", "Move to today"), 11.5, Look.Accent);
             var move = AgendaDraw.Face(Look, words, Loc.T("移到今天", "Move to today"), () => Book.MoveToToday(Today), 20, 6, new Thickness(6, 0, 6, 0));
+            AgendaDraw.Fit(move, words, 20);
+            move.VerticalAlignment = VerticalAlignment.Center;
             move.HorizontalAlignment = HorizontalAlignment.Right; move.Margin = new Thickness(0, 0, -6, 0);
             row.Children.Add(move);
             list.Children.Add(row);
@@ -541,11 +565,12 @@ internal sealed partial class PlannerPage
         grid.ColumnDefinitions.Add(new ColumnDefinition());
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var check = AgendaFields.Check(Look, todo.Done, Loc.T("完成：", "Done: ") + todo.Text);
-        check.Margin = new Thickness(0, 2, 0, 0);
         string id = todo.Id;
         check.Checked += (_, _) => Book.SetDone(id, true, Now);
         check.Unchecked += (_, _) => Book.SetDone(id, false, Now);
-        grid.Children.Add(check);
+        // The box and the due day level with the middle of the first line's letters (InkLineAligned), at any display scale.
+        var firstLine = AgendaDraw.Words(todo.Text, 12.5, 18, Look.Primary);
+        grid.Children.Add(new InkLineAligned(firstLine, check));
         var text = new StackPanel();
         if (_editingTodo == todo.Id && _todoEdit is { } edit) { Detach(edit); text.Children.Add(edit); }
         else
@@ -558,11 +583,12 @@ internal sealed partial class PlannerPage
         }
         if (Second(todo.Source, [], null, false, marked, 11, 15, Look.Tertiary) is { } second) { second.Margin = new Thickness(0, 1, 0, 0); text.Children.Add(second); }
         Grid.SetColumn(text, 2); grid.Children.Add(text);
-        TextBlock? due = null;
+        FrameworkElement? due = null;
         if (todo.Due is { } day)
         {
-            due = AgendaDraw.Words(AgendaText.Due(day, today, todo.Done), 11.5, 18, AgendaQuery.Overdue(todo, today) ? Look.Hex("danger") : Look.Tertiary);
-            due.Margin = new Thickness(8, 0, 0, 0); due.TextTrimming = TextTrimming.None;
+            var dueWords = AgendaDraw.Label(AgendaText.Due(day, today, todo.Done), 11.5, AgendaQuery.Overdue(todo, today) ? Look.Hex("danger") : Look.Tertiary);
+            dueWords.Text.TextTrimming = TextTrimming.None; dueWords.Height = 18;
+            due = new InkLineAligned(firstLine, dueWords) { Margin = new Thickness(8, 0, 0, 0) };
             Grid.SetColumn(due, 3); grid.Children.Add(due);
         }
         // The actions lie over the end of the row, on the row's own hover fill over the surface, so the words under them are hidden.
@@ -631,7 +657,8 @@ internal sealed partial class PlannerPage
         if (_editingTodo is not { } id || _todoEdit is not { } box) return;
         bool typing = box.IsKeyboardFocusWithin;
         _editingTodo = null; _todoEdit = null;
-        Detach(box);
+        // During a press the page is drawn again only after it (Show): the box stays in its row until then, not a blank row.
+        if (!_pressing) Detach(box);
         if (box.Text.Trim().Length > 0) Book.SetTodoText(id, box.Text.Trim());
         if (typing && endTyping) _deck.AgendaEndTyping();
         Show();
@@ -642,13 +669,14 @@ internal sealed partial class PlannerPage
     {
         if (_todoBar is null)
         {
-            var plus = AgendaDraw.Icon(AgendaDraw.Plus, 13, Look.Tertiary);
-            plus.VerticalAlignment = VerticalAlignment.Center;
+            // The plus in the middle of the bar, and the typed words and the hint centred by their letters (LetterBox, Label), as the
+            // add bar of the events is.
+            var plus = AgendaDraw.CentredIcon(AgendaDraw.Plus, 13, Look.Tertiary);
             var input = AgendaFields.Box(Look, _deck.AgendaKeyboard, 12, ring: false);
+            ((LetterBox)input).Sample = "中";
             input.Margin = new Thickness(6, 0, 0, 0);
             AutomationProperties.SetName(input, Loc.T("添加待办", "Add to-do"));
-            var hint = AgendaDraw.Words(Loc.T("添加待办", "Add to-do"), 12, 18, Look.Tertiary);
-            hint.VerticalAlignment = VerticalAlignment.Center; hint.Margin = new Thickness(8, 0, 0, 0); hint.IsHitTestVisible = false;
+            var hint = AgendaFields.Hint(input, Loc.T("添加待办", "Add to-do"), Look.Tertiary);
             input.TextChanged += (_, _) => hint.Visibility = input.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
             input.PreviewKeyDown += (_, e) =>
             {
@@ -659,13 +687,14 @@ internal sealed partial class PlannerPage
                 input.Text = "";
                 Book.AddTodo(text, _todoLongTerm ? null : _day, Now);
             };
-            _todoScope = AgendaDraw.Words("", 11.5, 16, Look.Secondary);
-            _todoScope.VerticalAlignment = VerticalAlignment.Center;
-            var chevron = AgendaDraw.Icon(AgendaDraw.Chevron, 11, Look.Tertiary);
-            chevron.VerticalAlignment = VerticalAlignment.Center; chevron.Margin = new Thickness(2, 0, 0, 0);
+            _todoScope = AgendaDraw.Label("", 11.5, Look.Secondary);
+            var chevron = AgendaDraw.CentredIcon(AgendaDraw.Chevron, 11, Look.Tertiary);
+            chevron.Margin = new Thickness(2, 0, 0, 0);
             var scope = AgendaDraw.Face(Look, new StackPanel { Orientation = Orientation.Horizontal, Children = { _todoScope, chevron } }, Loc.T("加到哪里", "Add to"),
                 () => { _todoLongTerm = !_todoLongTerm; Show(); }, 20, 6, new Thickness(6, 0, 6, 0));
+            AgendaDraw.Fit(scope, _todoScope, 20, Loc.T("长期", "Anytime"), Loc.T("这一天", "This day"));
             scope.Margin = new Thickness(0, 0, -4, 0);
+            scope.VerticalAlignment = VerticalAlignment.Center;
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition());
@@ -681,7 +710,8 @@ internal sealed partial class PlannerPage
             bar.Padding = new Thickness(6.5, 0, 6.5, 0);
             _todoBar = bar; _todoInput = input;
         }
-        _todoScope!.Text = _todoLongTerm ? Loc.T("长期", "Anytime") : Loc.T("这一天", "This day");
+        _todoScope!.Text.Text = _todoLongTerm ? Loc.T("长期", "Anytime") : Loc.T("这一天", "This day");
+        _todoScope.InvalidateMeasure(); _todoScope.InvalidateArrange();
         return _todoBar;
     }
 
