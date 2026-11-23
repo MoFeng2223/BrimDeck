@@ -488,12 +488,18 @@ static class AgendaTests
             && AgendaCalendar.FirstShown(2026, 11) == D("2026-10-26") && AgendaCalendar.FirstShown(2026, 12) == D("2026-11-30"));
         check("Agenda: a month runs over five or six weeks, a February from a Monday over four",
             AgendaCalendar.Rows(2026, 11) == 6 && AgendaCalendar.Rows(2026, 12) == 5 && AgendaCalendar.Rows(2027, 2) == 4);
-        check("Agenda: the month beside the day from 600 wide and six rows high; the week below; the day alone when lower still",
-            AgendaCalendar.LayoutFor(760, 276) == AgendaLayout.Wide && AgendaCalendar.LayoutFor(599, 276) == AgendaLayout.Narrow
-            && AgendaCalendar.LayoutFor(760, 261) == AgendaLayout.Narrow && AgendaCalendar.LayoutFor(460, 230) == AgendaLayout.Narrow
+        check("Agenda: the month beside the day from 540 wide and six rows high; the week below; the day alone when lower still",
+            AgendaCalendar.LayoutFor(760, 276) == AgendaLayout.Wide && AgendaCalendar.LayoutFor(540, 276) == AgendaLayout.Wide && AgendaCalendar.LayoutFor(539, 276) == AgendaLayout.Narrow
+            // A 661 x 293 panel leaves 239 under its 40 DIP header and the page's 14 DIP foot.
+            && AgendaCalendar.LayoutFor(661, 239) == AgendaLayout.Wide && AgendaCalendar.LayoutFor(760, 230) == AgendaLayout.Wide
+            && AgendaCalendar.LayoutFor(760, 229) == AgendaLayout.Narrow && AgendaCalendar.LayoutFor(460, 230) == AgendaLayout.Narrow
             && AgendaCalendar.LayoutFor(760, 98) == AgendaLayout.Short && AgendaCalendar.LayoutFor(440, 155) == AgendaLayout.Short);
+        check("Agenda: the month and the gap after it narrow from 600 to 540 wide",
+            AgendaCalendar.WideColumns(760) == (238, 29) && AgendaCalendar.WideColumns(600) == (238, 29) && AgendaCalendar.WideColumns(570) == (224, 25)
+            && AgendaCalendar.WideColumns(540) == (210, 21));
         check("Agenda: the month's cells fill a taller page, within their limits",
-            AgendaCalendar.CellHeightFor(276) == 38 && AgendaCalendar.CellHeightFor(262) == 36 && AgendaCalendar.CellHeightFor(200) == 36 && AgendaCalendar.CellHeightFor(400) == 50);
+            AgendaCalendar.CellHeightFor(278) == 38 && AgendaCalendar.CellHeightFor(266) == 36 && AgendaCalendar.CellHeightFor(239) == 31
+            && AgendaCalendar.CellHeightFor(200) == 30 && AgendaCalendar.CellHeightFor(400) == 50);
         check("Agenda: a new event starts at the next half hour today, at nine on another day",
             AgendaCalendar.NewEventStart(Today, Now) == T("2026-11-22 14:30") && AgendaCalendar.NewEventStart(Today, T("2026-11-22 14:30")) == T("2026-11-22 14:30")
             && AgendaCalendar.NewEventStart(Today, T("2026-11-22 23:40")) == T("2026-11-22 23:00") && AgendaCalendar.NewEventStart(D("2026-11-25"), Now) == T("2026-11-25 09:00"));

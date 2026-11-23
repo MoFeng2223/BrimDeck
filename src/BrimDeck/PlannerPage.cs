@@ -72,14 +72,24 @@ internal sealed partial class PlannerPage : Grid
         }
         _width = width; _height = height;
         _layout = AgendaCalendar.LayoutFor(panelWidth, height);
-        _cell = _layout == AgendaLayout.Wide ? AgendaCalendar.CellHeightFor(height) : AgendaCalendar.CellHeight;
+        double cell = _layout == AgendaLayout.Wide ? AgendaCalendar.CellHeightFor(height) : AgendaCalendar.CellHeight;
+        bool cellChanged = cell != _cell;
+        _cell = cell;
         string look = string.Join('|', Look.Generation, Loc.Language, SystemParameters.HighContrast);
         if (look != _lookKey) { _lookKey = look; Restyle(); }
-        string frame = string.Join('|', _layout, _cell, look);
-        // A new frame is empty, so it is filled at once, even while a press holds the contents back (a drag of the panel's edge
-        // across the width or height where the layout changes is such a press).
+        // A resize keeps the frame and the contents: the cells' height redraws the month alone, the width only sets the columns.
+        string frame = string.Join('|', _layout, look);
+        // A new frame is empty, so it is filled at once, even while a press holds the contents (a drag of the panel's edge across
+        // the width or height where the layout changes is such a press).
         bool rebuilt = frame != _frameKey;
         if (rebuilt) { _frameKey = frame; BuildFrame(); _shownKey = ""; }
+        else if (cellChanged && _layout == AgendaLayout.Wide && _shownKey.Length > 0) ShowMonth();
+        if (_layout == AgendaLayout.Wide && ColumnDefinitions.Count == 3)
+        {
+            var (month, divider) = AgendaCalendar.WideColumns(panelWidth);
+            if (ColumnDefinitions[0].Width.Value != month) ColumnDefinitions[0].Width = new GridLength(month);
+            if (ColumnDefinitions[1].Width.Value != divider) ColumnDefinitions[1].Width = new GridLength(divider);
+        }
         Show(force: rebuilt);
     }
 
@@ -88,7 +98,8 @@ internal sealed partial class PlannerPage : Grid
     {
         var now = Now;
         bool timed = _view == AgendaView.Events && _day == Today;
-        return string.Join('|', Book.Revision, _day, _month, _view, _blocks, Today, timed ? now.Ticks : 0, Center.ReadState, Center.SaveFailed, _marked,
+        // Today's events follow the time by the minute; a finer key drew the whole page again on every step of a resize.
+        return string.Join('|', Book.Revision, _day, _month, _view, _blocks, Today, timed ? now.Ticks / TimeSpan.TicksPerMinute : 0, Center.ReadState, Center.SaveFailed, _marked,
             _formFor, _editingTodo, _todoLongTerm);
     }
 
@@ -126,8 +137,9 @@ internal sealed partial class PlannerPage : Grid
         {
             case AgendaLayout.Wide:
             {
+                // Render sets the month's and the gap's widths for the page's width (AgendaCalendar.WideColumns).
                 ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(AgendaCalendar.MonthWidth) });
-                ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(29) });
+                ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(AgendaCalendar.Divider) });
                 ColumnDefinitions.Add(new ColumnDefinition());
                 var month = new Grid();
                 month.RowDefinitions.Add(new RowDefinition { Height = new GridLength(24) });
@@ -135,6 +147,7 @@ internal sealed partial class PlannerPage : Grid
                 month.RowDefinitions.Add(new RowDefinition());
                 month.Children.Add(_monthHead);
                 var weekdays = Weekdays(); weekdays.Margin = new Thickness(0, 4, 0, 0); Grid.SetRow(weekdays, 1); month.Children.Add(weekdays);
+                _monthGrid.Margin = new Thickness(0, AgendaCalendar.MonthGap, 0, 0);
                 Grid.SetRow(_monthGrid, 2); month.Children.Add(_monthGrid);
                 Children.Add(month);
                 var line = new Border { Width = 1, Background = UI.Brush(Look.Hairline), HorizontalAlignment = HorizontalAlignment.Center };
@@ -245,8 +258,12 @@ internal sealed partial class PlannerPage : Grid
         if (step != 0)
         {
             bool weeks = step == -7;
-            tools.Children.Add(AgendaDraw.IconButton(Look, AgendaDraw.Left, back!, () => Step(-1, weeks, days)));
+            // The arrows keep their names for screen readers but show no tooltip.
+            var previous = AgendaDraw.IconButton(Look, AgendaDraw.Left, back!, () => Step(-1, weeks, days));
+            previous.ToolTip = null;
+            tools.Children.Add(previous);
             var next = AgendaDraw.IconButton(Look, AgendaDraw.Right, forward!, () => Step(1, weeks, days));
+            next.ToolTip = null;
             next.Margin = new Thickness(2, 0, 0, 0);
             tools.Children.Add(next);
         }
@@ -424,9 +441,9 @@ internal sealed partial class PlannerPage : Grid
             var name = AgendaDraw.Words(Weekday(((int)day.DayOfWeek + 6) % 7), 10.5, 14, Look.Tertiary);
             name.TextAlignment = TextAlignment.Center;
             stack.Children.Add(name);
-            stack.Margin = new Thickness(0, 3, 0, 0);
+            stack.Margin = new Thickness(0, 3 - DayInset.Top, 0, 0);
         }
-        else stack.Margin = new Thickness(0, 6 + Math.Floor((height - AgendaCalendar.CellHeight) / 2), 0, 0);
+        else stack.Margin = new Thickness(0, 6 - DayInset.Top + Math.Floor((height - AgendaCalendar.CellHeight) / 2), 0, 0);
         var figure = AgendaDraw.Words(day.Day.ToString(CultureInfo.InvariantCulture), 12.5, 17, today ? Look.Accent : inMonth ? Look.Primary : Look.Tertiary, today ? FontWeights.Bold : null);
         figure.TextAlignment = TextAlignment.Center;
         stack.Children.Add(figure);
@@ -436,18 +453,27 @@ internal sealed partial class PlannerPage : Grid
         if (mark.OpenTodos) Add(new Ellipse { Width = 5, Height = 5, Stroke = UI.Brush(AgendaDraw.Tint(Look.Primary, .8)), StrokeThickness = 1.2 });
         if (mark.Note) Add(new Border { Width = 6, Height = 1.5, CornerRadius = new CornerRadius(1), Background = UI.Brush(AgendaDraw.Tint(Look.Primary, .7)), VerticalAlignment = VerticalAlignment.Center });
         stack.Children.Add(marks);
-        var cell = new Grid { Height = height };
+        double faceHeight = height - DayInset.Top - DayInset.Bottom;
+        var cell = new Grid { Height = faceHeight };
         cell.Children.Add(stack);
+        string name2 = AgendaText.DayTitle(day, Today) + (today ? Loc.T("，今天", ", today") : "");
+        // The chosen day's fill and the hover's keep DayInset from the cell's edges, so two fills side by side or one under the other
+        // never touch, and a week's wide cell keeps its fill to MaxDayFill.
+        var button = AgendaDraw.Face(Look, cell, name2, () => Choose(day), faceHeight, 8, new Thickness(0), chosen ? Look.FillSelected : null, chosen ? Look.FillSelected : null);
+        button.Margin = DayInset;
+        if (week) button.MaxWidth = MaxDayFill;
+        var slot = new Grid { Height = height, Children = { button } };
+        // A longer event's line runs along the cells' feet outside the fills, unbroken from one day to the next.
         if (mark.InSpan)
-            cell.Children.Add(new Border
+            slot.Children.Add(new Border
             {
                 Height = 2, VerticalAlignment = VerticalAlignment.Bottom, Background = UI.Brush(Look.Accent), IsHitTestVisible = false,
                 Margin = new Thickness(mark.SpanStart ? 9 : 0, 0, mark.SpanEnd ? 9 : 0, 0), CornerRadius = new CornerRadius(mark.SpanStart ? 1 : 0, mark.SpanEnd ? 1 : 0, mark.SpanEnd ? 1 : 0, mark.SpanStart ? 1 : 0)
             });
-        string name2 = AgendaText.DayTitle(day, Today) + (today ? Loc.T("，今天", ", today") : "");
-        var button = AgendaDraw.Face(Look, cell, name2, () => Choose(day), height, 8, new Thickness(0), chosen ? Look.FillSelected : null, chosen ? Look.FillSelected : null);
-        return button;
+        return slot;
     }
+    private static readonly Thickness DayInset = new(3, 1, 3, 1);
+    private const double MaxDayFill = 64;
 
     // ---- The line about the file ----
 
