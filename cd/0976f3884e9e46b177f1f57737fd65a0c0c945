@@ -1,0 +1,60 @@
+src/BrimDeck/PlannerPage.Day.cs
+  h_dc4d9c798f1bc1 25-30,41,83,94-103,433-435,437,441,445,447-448,450,452-457,530-532,534,536-537,571-573,586,589-591,660-661,672-674,676,679,690-692,695,697,713-714
+src/BrimDeck/InkCentredText.cs
+  h_dc4d9c798f1bc1 25,93-95,99-100,104,109,114-118,128,135
+  s_52383b0b5a029e::t_6b3f7b829774f6 110-113,129-134
+src/BrimDeck/MainWindow.Agenda.cs
+  h_dc4d9c798f1bc1 47-50
+src/BrimDeck/AgendaFields.cs
+  h_dc4d9c798f1bc1 100-101,112-113,115,125-204,225,242-255,292-412,417,426,428,430,453-454,524,536-539,543,553,604-605,620,622,625,631,633,701,716-717,724-727
+src/BrimDeck/MainWindow.NoticeForm.cs
+  h_dc4d9c798f1bc1 321
+src/BrimDeck/PlannerPage.cs
+  h_dc4d9c798f1bc1 79-83,102-103,209-210,218-221,234,239,241,259-260,264-267,270-271,275-276,279,286-287,291-298,300-303,305-307
+  s_b87150cf1b72bd::t_d9abeedf0e0dbf 280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cd0976f3884e9e46b177f1f57737fd65a0c0c945",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_206fb7f7c37c76": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b585e3df-aa02-4e76-8733-79f450456a8d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_52383b0b5a029e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ad236793-1493-4439-895a-2f7c6e26736b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_7d56c2a5394d5c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3e2213b0-21d4-4154-99e8-ff15a96bb62f",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_b87150cf1b72bd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4bbc92c3-afeb-4b68-9001-ce4060ce2020",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
