@@ -1,0 +1,51 @@
+src/BrimDeck/MainWindow.xaml
+  s_52383b0b5a029e::t_7c1c280512949d 120-132
+  s_52383b0b5a029e::t_7503c078710e74 119
+tests/BrimDeck.Tests/PageSwitchFitTests.cs
+  s_52383b0b5a029e::t_98b43b651064a8 1-22
+src/BrimDeck.Core/PageSwitchFit.cs
+  s_52383b0b5a029e::t_5b798c58c63426 1-21
+src/BrimDeck/MainWindow.Notices.cs
+  s_52383b0b5a029e::t_11208c066f3149 392
+src/BrimDeck/MainWindow.ShelfArrange.cs
+  s_52383b0b5a029e::t_11208c066f3149 228,240
+src/BrimDeck/MainWindow.ShelfDetail.cs
+  s_52383b0b5a029e::t_d1646b2351c1a4 197
+  s_52383b0b5a029e::t_c40f0a2876e481 608
+  s_52383b0b5a029e::t_5de064f936e9f8 598-599
+  s_52383b0b5a029e::t_005485f4d37fd3 52
+src/BrimDeck/MainWindow.Hotkeys.cs
+  s_52383b0b5a029e::t_443a9a6e201810 70
+src/BrimDeck/MainWindow.PageSwitch.cs
+  s_52383b0b5a029e::t_89c98ad4cca2b4 132-138
+  s_52383b0b5a029e::t_2cd3b60b5c81b4 123-124
+  s_52383b0b5a029e::t_41c669436eb7bc 2,4,6,17-18,23,45-46,51,54,58,65-67,70-85,87-110,112-113,115-118,127-131,139-214
+  s_52383b0b5a029e::t_023991ef961e16 120-122
+  s_52383b0b5a029e::t_fe6b2fe00d7de7 125-126
+  s_52383b0b5a029e::t_35c4a5bb7afefb 215
+tests/BrimDeck.Tests/Program.cs
+  s_52383b0b5a029e::t_ddf72e8584c6fe 94
+src/BrimDeck/MainWindow.Music.cs
+  s_52383b0b5a029e::t_2c8f64ccecce49 240,256,262,265,267
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0248276271cb84e25cfb45cba42a4cf8c4a42436",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_52383b0b5a029e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ad236793-1493-4439-895a-2f7c6e26736b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
