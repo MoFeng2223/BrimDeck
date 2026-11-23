@@ -1,11 +1,11 @@
-﻿using BrimDeck.Core;
+﻿﻿using BrimDeck.Core;
 
 namespace BrimDeck;
 
 // 来源注册表与能力接口。实现按主题拆分在同目录：
 //   WeatherSources.Models.cs     传输模型（来源与聚合层的数据契约）
 //   WeatherSources.Aggregator.cs 按域取数并合并成 WeatherSnapshot
-//   WeatherSources.OpenMeteo.cs / WeatherSources.Tencent.cs / WeatherSources.ComCn.cs / WeatherSources.HeFeng.cs
+//   WeatherSources.OpenMeteo.cs / WeatherSources.ComCn.cs / WeatherSources.HeFeng.cs
 //   WeatherSources.Tools.cs      Geo / WeatherCodes / Json 纯函数
 // WeatherDomain 与 WeatherSettings 定义在 BrimDeck.Core：它们是 settings.json 的一部分。
 
@@ -28,11 +28,11 @@ internal static class WeatherSources
 {
     public static readonly IWeatherSource[] All =
     [
-        new OpenMeteoSource(), new TencentSource(), new WeatherComCnSource(), new HeFengSource()
+        new OpenMeteoSource(), new WeatherComCnSource(), new HeFengSource()
     ];
     public static IWeatherSource? Find(string id) => All.FirstOrDefault(s => s.Info.Id == id);
     public static string Name(string id) => Find(id)?.Info.Name ?? id;
-    // 某个区域的候选来源：国内城市四家都能用（国内源只服务中国坐标），国外城市只有全球源。
+    // 某个区域的候选来源：国内城市三家都能用（国内源只服务中国坐标），国外城市只有全球源。
     // 设置页按这个集合动态生成每个域的下拉选项，不写死名单。
     public static IEnumerable<IWeatherSource> Candidates(bool china)
         => All.Where(s => china || s.Info.Region == WeatherRegion.Global);

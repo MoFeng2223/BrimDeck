@@ -11,7 +11,7 @@ internal static class Geo
     // 也用于判断和风分钟降水这类「仅中国坐标」的接口是否值得请求。
     public static bool IsChina(City city) => city.Latitude is >= 17 and <= 54 && city.Longitude is >= 73 and <= 136;
     public static bool HasChinese(string text) => text.Any(ch => ch is >= '\u4e00' and <= '\u9fff');
-    // 城市级名称与省份：都从 City 唯一的完整名称里拆，区县城市取其所属地级市（腾讯等接口只认城市级）。
+    // 城市级名称与省份：都从 City 唯一的完整名称里拆，区县城市取其所属地级市（国内源接口只认城市级）。
     public static (string City, string Province) Parts(City city) => City.GeoPartsOf(city.Name);
     // 中国统一 UTC+8；其他地区按经度估算，仅用于本地日出日落推算的兜底。
     public static int UtcOffsetHours(City city) => IsChina(city) ? 8 : (int)Math.Round(city.Longitude / 15.0);
@@ -20,18 +20,7 @@ internal static class Geo
 // 各来源的天气代码统一成 Open-Meteo 使用的 WMO code，界面图标与配色只认这一套。
 internal static class WeatherCodes
 {
-    public static int FromTencent(string? code) => code switch
-    {
-        "00" => 0, "01" => 2, "02" => 3,
-        "03" => 80, "04" => 95, "05" => 96, "06" => 68,
-        "07" => 61, "08" => 63, "09" => 65, "10" => 65, "11" => 65, "12" => 65,
-        "13" => 85, "14" => 71, "15" => 73, "16" => 75, "17" => 75,
-        "18" => 45, "19" => 66, "20" => 45, "21" => 61, "22" => 63, "23" => 65,
-        "24" => 65, "25" => 65, "26" => 71, "27" => 73, "28" => 75, "29" => 45,
-        "30" => 45, "31" => 45, "53" => 45, _ => 3
-    };
-
-    // 中文天气文本（中国天气网/腾讯文本）→ WMO。取“转”之前的第一种天气作为当日主天气。
+    // 中文天气文本（中国天气网）→ WMO。取“转”之前的第一种天气作为当日主天气。
     public static int FromText(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return 3;

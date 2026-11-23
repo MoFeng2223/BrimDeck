@@ -845,7 +845,6 @@ internal sealed class WeatherView : UserControl
     private static Color SourceColor(string id) => id switch
     {
         "openmeteo" => Color.FromRgb(102, 194, 255),   // 天蓝
-        "tencent" => Color.FromRgb(87, 199, 133),      // 腾讯绿
         "weathercomcn" => Color.FromRgb(255, 163, 72), // 中国天气网橙
         "hefeng" => Color.FromRgb(188, 139, 255),      // 和风紫
         "local" => Color.FromRgb(158, 178, 200),       // 本地历史：灰，区别于任何在线来源
@@ -853,7 +852,7 @@ internal sealed class WeatherView : UserControl
     };
     private static string SourceName(string id) => id switch
     {
-        "openmeteo" => "Open-Meteo", "tencent" => Loc.T("腾讯天气", "Tencent"), "weathercomcn" => Loc.T("中国天气网", "China Weather"),
+        "openmeteo" => "Open-Meteo", "weathercomcn" => Loc.T("中国天气网", "China Weather"),
         "hefeng" => Loc.T("和风天气", "QWeather"),
         "local" => Loc.T("本地记录", "Local history"), _ => id
     };

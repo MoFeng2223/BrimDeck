@@ -125,7 +125,7 @@ internal static class WeatherAggregator
                     if (part.Current is { } c) { bool any = MergeCurrent(current, c, source.Info.Id, fieldSources); if (any) Use(domain, source); }
                     break;
                 case WeatherDomain.Air:
-                    // 空气质量按字段补齐：腾讯给 AQI，Open-Meteo 补 PM2.5/PM10，避免整块先到先得丢掉污染物浓度。
+                    // 空气质量按字段补齐：中国天气网给 AQI，Open-Meteo 补 PM2.5/PM10，避免整块先到先得丢掉污染物浓度。
                     if (part.Air is { } a && a.HasData)
                     {
                         air ??= new AirPart();
@@ -170,8 +170,12 @@ internal static class WeatherAggregator
                     if (part.Days is { Count: > 0 } ds)
                     {
                         bool any = false;
+                        string todayKey = today.ToString("yyyy-MM-dd");
                         foreach (var day in ds)
                         {
+                            // 按日期归属：今天及以后算预报，之前算历史。
+                            // 否则先遍历的 Daily 会把历史一起合并掉，History 永远标不出来源。
+                            if ((string.CompareOrdinal(day.Date, todayKey) < 0) != (domain == WeatherDomain.History)) continue;
                             if (!dayMap.TryGetValue(day.Date, out var target)) continue;
                             if (MergeDay(target, day, source.Info.Id, fieldSources)) any = true;
                         }

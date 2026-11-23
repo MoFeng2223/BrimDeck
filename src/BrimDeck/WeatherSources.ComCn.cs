@@ -6,8 +6,8 @@ namespace BrimDeck;
 
 internal sealed class WeatherComCnSource : IWeatherSource
 {
-    public WeatherSourceInfo Info { get; } = new("weathercomcn", Loc.T("中国天气网", "China Weather"), Loc.T("国内实况、月历与历史降水", "China current, calendar & history"),
-        [WeatherDomain.Current, WeatherDomain.Daily, WeatherDomain.History, WeatherDomain.Air], WeatherRegion.China);
+    public WeatherSourceInfo Info { get; } = new("weathercomcn", Loc.T("中国天气网", "China Weather"), Loc.T("国内实况、月历、历史降水、预警与生活指数", "China current, calendar, history, alerts & indices"),
+        [WeatherDomain.Current, WeatherDomain.Daily, WeatherDomain.History, WeatherDomain.Air, WeatherDomain.Warning, WeatherDomain.Indices], WeatherRegion.China);
 
     public bool CanServe(City city, WeatherSettings settings)
     {
@@ -27,8 +27,11 @@ internal sealed class WeatherComCnSource : IWeatherSource
         var part = new WeatherPart();
         bool wantCurrent = need.Contains(WeatherDomain.Current) || need.Contains(WeatherDomain.Air);
         bool wantDays = need.Contains(WeatherDomain.Daily) || need.Contains(WeatherDomain.History);
+        bool wantExtras = need.Contains(WeatherDomain.Warning) || need.Contains(WeatherDomain.Indices);
         // 实况偶尔很慢，单独限时 4 秒并落盘 5 分钟：它拖不住已经拿到的每日预报。
         var currentTask = wantCurrent ? Body($"{id}|current", TimeSpan.FromMinutes(5), $"http://d1.weather.com.cn/sk_2d/{id}.html", token, 4) : Task.FromResult<string?>(null);
+        // 预警与生活指数同在一个 weather_index 页面里；预警要尽量新，所以只缓存 10 分钟。
+        var extrasTask = wantExtras ? Body($"{id}|index", TimeSpan.FromMinutes(10), $"http://d1.weather.com.cn/weather_index/{id}.html", token, 6) : Task.FromResult<string?>(null);
         // 24 天窗口可能跨月，按起止日期枚举涉及的每个月份；月历一个月只变一次，缓存 6 小时。
         var months = new List<Task<string?>>();
         if (wantDays)
@@ -60,6 +63,7 @@ internal sealed class WeatherComCnSource : IWeatherSource
                 part.Air = new AirPart { Aqi = aqi, Pm25 = Json.Integer(root, "aqi_pm25"), Level = aqi <= 50 ? 1 : aqi <= 100 ? 2 : aqi <= 150 ? 3 : 4, Text = WeatherCodes.AqiText(aqi) };
         }
         var bodies = await Task.WhenAll(months);
+        if (await extrasTask is { } extras) ParseExtras(extras, part);
         var days = new Dictionary<string, DayPoint>();
         foreach (var body in bodies)
         {
@@ -114,6 +118,88 @@ internal sealed class WeatherComCnSource : IWeatherSource
     private static Task<string?> Body(string key, TimeSpan ttl, string url, CancellationToken token, int seconds)
         => WeatherCache.GetAsync<string>("weathercomcn", key, ttl, async ct =>
             (await WeatherHttp.GetAsync("weathercomcn", url, ct, request => request.Headers.Referrer = new Uri("http://www.weather.com.cn/"), seconds)).Body, token);
+
+    // weather_index 页面里内嵌两段 JS：
+    //   alarmDZ.w[] 每项是数组式对象：w5 类型、w7 等级、w8 发布时间、w9 正文、w13 标题、w15 失效时间、w14=Cancel 表示已解除；
+    //   dataZS.zs 里以「两字母前缀_xxx」成对给出生活指数：lk/cl/gj/pl/co/pj/hc/gl…，分别有 _name/_hint/_des_s。
+    private static void ParseExtras(string body, WeatherPart part)
+    {
+        if (ExtractJsObject(body, "alarmDZ") is { } alarm)
+        {
+            using var doc = JsonDocument.Parse(alarm);
+            if (Json.Get(doc.RootElement, "w") is { ValueKind: JsonValueKind.Array } list)
+            {
+                var warnings = new List<WarningItem>();
+                foreach (var item in list.EnumerateArray())
+                {
+                    if (string.Equals(Json.Text(item, "w14"), "Cancel", StringComparison.OrdinalIgnoreCase)) continue;
+                    string? type = Json.Text(item, "w5"), level = Json.Text(item, "w7");
+                    warnings.Add(new WarningItem
+                    {
+                        Title = Json.Text(item, "w13") ?? $"{type}{level}预警",
+                        Text = Json.Text(item, "w9") ?? "",
+                        Type = type ?? "",
+                        Level = level ?? "",
+                        Start = Json.Text(item, "w8") ?? "",
+                        End = Json.Text(item, "w15") ?? ""
+                    });
+                }
+                // 空列表也是一次有效回答（「当前无预警」），要让聚合层标出来源。
+                part.Warnings = warnings;
+            }
+        }
+        if (ExtractJsObject(body, "dataZS") is { } zsBody)
+        {
+            using var doc = JsonDocument.Parse(zsBody);
+            if (Json.Get(doc.RootElement, "zs") is { ValueKind: JsonValueKind.Object } zs)
+            {
+                string raw = Json.Text(zs, "date") ?? "";
+                string date = raw.Length >= 8 ? $"{raw[..4]}-{raw[4..6]}-{raw[6..8]}" : DateTime.Today.ToString("yyyy-MM-dd");
+                var indices = new List<IndexItem>();
+                foreach (var prop in zs.EnumerateObject())
+                {
+                    if (!prop.Name.EndsWith("_name", StringComparison.Ordinal)) continue;
+                    string prefix = prop.Name[..^5];
+                    if (prefix.Length == 0) continue;
+                    indices.Add(new IndexItem
+                    {
+                        Date = date,
+                        Name = prop.Value.GetString() ?? "",
+                        Category = prefix,
+                        Level = Json.Text(zs, prefix + "_hint") ?? "",
+                        Text = Json.Text(zs, prefix + "_des_s") ?? ""
+                    });
+                }
+                if (indices.Count > 0) part.Indices = indices;
+            }
+        }
+    }
+
+    // 页面里的数据是 `var name = {...};` 形式，不是纯 JSON；按花括号配平截出对象，跳过字符串里的括号。
+    private static string? ExtractJsObject(string body, string name)
+    {
+        int at = body.IndexOf("var " + name, StringComparison.Ordinal);
+        if (at < 0) return null;
+        int start = body.IndexOf('{', at);
+        if (start < 0) return null;
+        int depth = 0;
+        bool inString = false, escaped = false;
+        for (int i = start; i < body.Length; i++)
+        {
+            char ch = body[i];
+            if (inString)
+            {
+                if (escaped) escaped = false;
+                else if (ch == '\\') escaped = true;
+                else if (ch == '"') inString = false;
+                continue;
+            }
+            if (ch == '"') { inString = true; continue; }
+            if (ch == '{') depth++;
+            else if (ch == '}' && --depth == 0) return body[start..(i + 1)];
+        }
+        return null;
+    }
 
     private static string? ExtractObject(string body)
     {

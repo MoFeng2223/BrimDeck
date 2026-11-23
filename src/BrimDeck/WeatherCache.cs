@@ -187,7 +187,6 @@ internal static class RequestGate
     {
         ["hefeng"] = 800,        // 免费订阅按 key 计日额度，留出余量
         ["hefeng-search"] = 500, // 城市搜索有 1 天磁盘缓存，实际请求很少，单独计数即可
-        ["tencent"] = 600,
         ["weathercomcn"] = 600,
         ["openmeteo"] = 1200
     };

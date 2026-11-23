@@ -1,4 +1,4 @@
-﻿using System.Windows;
+﻿﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
@@ -147,8 +147,8 @@ public sealed partial class SettingsWindow
             sourceTable.Children.Clear();
             var rows=new List<FrameworkElement>();
             var candidates=WeatherSources.Candidates(showChina).ToArray();
-            // 下拉展示顺序固定：和风 → 腾讯 → 中国天气网 → Open-Meteo。
-            string[] displayOrder=["hefeng","tencent","weathercomcn","openmeteo"];
+            // 下拉展示顺序固定：和风 → 中国天气网 → Open-Meteo。
+            string[] displayOrder=["hefeng","weathercomcn","openmeteo"];
             foreach(var (domains,label,hint) in abilities)
             {
                 // 只列能覆盖整行所有域的来源；缺任一项就不放入下拉，按 displayOrder 排列。
@@ -185,7 +185,7 @@ public sealed partial class SettingsWindow
         // 请求与缓存：按用户指定来源请求 + 分域缓存，这里把当天的实际请求量和磁盘占用摆出来，配额一目了然。
         SectionTitle(Loc.T("请求与缓存","Requests and cache"));
         var usage=WeatherCache.Usage();
-        var used=WeatherSources.All.Select(source=>(Name:source.Info.Id switch{"tencent"=>Loc.T("腾讯","Tencent"),"weathercomcn"=>Loc.T("中国天气网","ChinaWx"),"hefeng"=>Loc.T("和风","QWeather"),_=>source.Info.Name},Count:RequestGate.Today(source.Info.Id))).Where(item=>item.Count>0).ToArray();
+        var used=WeatherSources.All.Select(source=>(Name:source.Info.Id switch{"weathercomcn"=>Loc.T("中国天气网","ChinaWx"),"hefeng"=>Loc.T("和风","QWeather"),_=>source.Info.Name},Count:RequestGate.Today(source.Info.Id))).Where(item=>item.Count>0).ToArray();
         Group(Row(Loc.T("今日请求","Requests today"),TextLine(used.Length==0?Loc.T("尚未发起请求","No requests yet"):string.Join(" · ",used.Select(item=>$"{item.Name} {item.Count}")),12,TextSecondary)),
               Row(Loc.T("本地缓存","Local cache"),TextLine(Loc.T($"{usage.Count} 项 · {usage.Bytes/1024.0:0} KB（14 天未用自动清理）",$"{usage.Count} entries · {usage.Bytes/1024.0:0} KB (unused entries purged after 14 days)"),12,TextSecondary)));
         cityRows.Unloaded+=(_,_)=>{active=false;pending?.Cancel();pending?.Dispose();pending=null;fetchCts?.Cancel();fetchCts?.Dispose();fetchCts=null;popup.IsOpen=false;ShowSearching(false);};
