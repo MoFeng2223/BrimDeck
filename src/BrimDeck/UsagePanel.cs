@@ -580,8 +580,9 @@ public partial class MainWindow
     // slot is the quota's place in its column: a bar keeps its place's last share (QuotaBar), so a new reading eases the same bar
     // and a quota page flip eases each bar from the quota it replaces, as the monitor page's values move.
     // remaining (DeckSettings.QuotaRingRemaining): a quota with a share shows what is left: the bar's length, a percentage as the big
-    // number ("58% 剩余") and the share at the label's right; an amount (a balance, an amount spent) keeps its figure. The colors
-    // still follow the used share, so warning and critical mean the same either way.
+    // number ("58% 剩余") and the share at the label's right; a count (credits, tool calls) counts what is left of its grant
+    // ("1,800 / 3,000") rather than what is spent, and the tooltips lead with what is left; an amount (a balance, an amount spent)
+    // keeps its figure. The colors still follow the used share, so warning and critical mean the same either way.
     private Grid QuotaBlock(AppEntry entry, UsageMetric quota, Layout layout, int slot, bool remaining = false)
     {
         double used = Math.Clamp(quota.UsedPercent ?? 100, 0, 100);
@@ -612,13 +613,13 @@ public partial class MainWindow
                     : Loc.T(" · 总额 " + quota.AmountText(total), " · " + quota.AmountText(total) + " total") : ""),
             MetricKind.Spend => Loc.T("已用 " + quota.ValueText, quota.ValueText + " used") + (quota.Unlimited ? Loc.T(" · 无上限", " · no limit") : "")
                 + (quota.Total is { } goal && quota.TotalIsTarget ? Loc.T(" · 目标金额 " + quota.AmountText(goal), " · target " + quota.AmountText(goal)) : ""),
-            MetricKind.Count => CountTooltip(quota),
-            _ => MetricPercentTooltip(quota)
+            MetricKind.Count => CountTooltip(quota, left),
+            _ => MetricPercentTooltip(quota, left)
         };
         numbers.Children.Add(number);
         var resetText = UI.ShortReset(quota.ResetAt);
         var expiryText = quota.ExpiresAt is { } expiry ? (expiry <= DateTimeOffset.Now ? Loc.T("已到期", "Expired") : Loc.T(UI.ShortReset(expiry) + "到期", "expires " + UI.ShortReset(expiry))) : "";
-        var countText = CountLabel(quota);
+        var countText = CountLabel(quota, left);
         var sideText = countText.Length > 0 ? countText : quota.Kind is MetricKind.Balance or MetricKind.Spend && quota.UsedPercent is { } percent
             ? left ? Loc.T($"{100 - used:0.#}% 剩余", $"{100 - used:0.#}% left") : Loc.T($"{Math.Max(0, percent):0.#}% 已用", $"{Math.Max(0, percent):0.#}% used") : quota.Unlimited ? Loc.T("无上限", "No limit") : "";
         // Times sit beside the number, next to the track; shares, counts and "无上限" sit at the label's right.
@@ -637,7 +638,7 @@ public partial class MainWindow
             var reset = UI.Fixed(upperText, layout.Reset, layout.LabelRow, Look.Tertiary);
             reset.HorizontalAlignment = HorizontalAlignment.Right; reset.Margin = new Thickness(6, 0, 0, 0);
             reset.ToolTip = text ? null : offPeak ? OffPeakTooltip(entry) : expiryAbove ? quota.ExpiresAt!.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")
-                : countText.Length > 0 ? CountTooltip(quota) : MetricPercentTooltip(quota);
+                : countText.Length > 0 ? CountTooltip(quota, left) : MetricPercentTooltip(quota, left);
             Grid.SetColumn(reset, 1); labelRow.Children.Add(reset);
         }
         // A quota spent only in busy or idle hours (CodeAgent) shows when its hours next start, or end while they are on, in place of
@@ -689,21 +690,30 @@ public partial class MainWindow
     private static string OffPeakTooltip(AppEntry entry) => Loc.T("低峰时间：", "Off-peak time: ") + string.Join(Loc.T("、", ", "), entry.OffPeak.Select(period =>
         OffPeakPeriod.Format(period.Start) + " – " + (period.End <= period.Start ? Loc.T("次日 ", "next day ") : "") + OffPeakPeriod.Format(period.End)));
 
-    // A rounded share hides small usage of a large grant, so counts show the exact amounts.
-    private static string? CountTooltip(UsageMetric metric)
+    // A rounded share hides small usage of a large grant, so counts show the exact amounts. With what is left chosen the figure
+    // that comes first is what is left, as the number and the bar show it.
+    private static string? CountTooltip(UsageMetric metric, bool left = false)
     {
-        if (metric is not { Used: { } used, Total: { } total }) return MetricPercentTooltip(metric);
+        if (metric is not { Used: { } used, Total: { } total }) return MetricPercentTooltip(metric, left);
         var unit = metric.Unit.Length > 0 ? " " + Loc.Label(metric.Unit) : "";
-        return Loc.T($"已用 {used:N0}{unit} · 剩余 {Math.Max(0, total - used):N0}{unit}\n总额 {total:N0}{unit}",
-            $"{used:N0}{unit} used · {Math.Max(0, total - used):N0}{unit} left\n{total:N0}{unit} total");
+        string usedText = $"{used:N0}{unit}", leftText = $"{Math.Max(0, total - used):N0}{unit}", totalText = $"{total:N0}{unit}";
+        return left
+            ? Loc.T($"剩余 {leftText} · 已用 {usedText}\n总额 {totalText}", $"{leftText} left · {usedText} used\n{totalText} total")
+            : Loc.T($"已用 {usedText} · 剩余 {leftText}\n总额 {totalText}", $"{usedText} used · {leftText} left\n{totalText} total");
     }
 
-    // Counts in the hundreds of thousands, such as token grants, are abbreviated so the title keeps its room.
-    private static string CountLabel(UsageMetric metric) => metric is { Kind: MetricKind.Count, Used: { } used, Total: { } total }
-        ? total >= 100_000 ? $"{UI.Number((long)used)} / {UI.Number((long)total)}" : metric.CountText : "";
+    // Counts in the hundreds of thousands, such as token grants, are abbreviated so the title keeps its room. remaining: the figure
+    // counts what is left of the grant, as the big number ("58% 剩余") does.
+    private static string CountLabel(UsageMetric metric, bool left) => metric is { Kind: MetricKind.Count, Total: { } total }
+        ? total >= 100_000
+            ? $"{UI.Number((long)(left ? metric.CountLeft : metric.Used ?? 0))} / {UI.Number((long)total)}"
+            : metric.CountFigure(left)
+        : "";
 
-    private static string? MetricPercentTooltip(UsageMetric metric) => metric.UsedPercent is { } percent
-        ? Loc.T($"已用 {Math.Max(0, percent):0.#}% · 剩余 {Math.Max(0, 100 - percent):0.#}%", $"{Math.Max(0, percent):0.#}% used · {Math.Max(0, 100 - percent):0.#}% left") : null;
+    private static string? MetricPercentTooltip(UsageMetric metric, bool left = false) => metric.UsedPercent is { } percent
+        ? left
+            ? Loc.T($"剩余 {Math.Max(0, 100 - percent):0.#}% · 已用 {Math.Max(0, percent):0.#}%", $"{Math.Max(0, 100 - percent):0.#}% left · {Math.Max(0, percent):0.#}% used")
+            : Loc.T($"已用 {Math.Max(0, percent):0.#}% · 剩余 {Math.Max(0, 100 - percent):0.#}%", $"{Math.Max(0, percent):0.#}% used · {Math.Max(0, 100 - percent):0.#}% left") : null;
 
     private static string? QuotaTooltip(ProviderSnapshot snapshot)
     {
