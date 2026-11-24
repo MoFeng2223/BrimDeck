@@ -146,5 +146,141 @@ internal static class QuotaRingTests
         check("Quota ring settings: an unknown style, or a file without one, reads as single", odd.QuotaRingStyle == QuotaRingStyle.Single && !odd.QuotaRingRemaining);
         var copy = read.Apps[0].Copy(); copy.RingQuotas.Add("z");
         check("Quota ring settings: a copied application keeps its own list", read.Apps[0].RingQuotas.Count == 2);
+
+        // Collapsed quota details: primary figure, compact reset countdown, detail text composition, layout width and settings persistence.
+        var detailSnap = new ProviderSnapshot(ProviderId.Claude)
+        {
+            Quotas =
+            [
+                new("5 小时额度", 35, new DateTimeOffset(2026, 11, 17, 12, 30, 0, TimeSpan.Zero)),
+                new("每周额度", 70, new DateTimeOffset(2026, 11, 20, 10, 0, 0, TimeSpan.Zero))
+            ]
+        };
+        check("Quota ring detail: primary figure follows used/remaining setting and single-ring choice",
+            QuotaRing.PrimaryFigure(detailSnap, null, false) == "70%"
+            && QuotaRing.PrimaryFigure(detailSnap, null, true) == "30%"
+            && QuotaRing.PrimaryFigure(detailSnap, new AppEntry { SingleRingQuota = "5 小时额度" }, false) == "35%"
+            && QuotaRing.PrimaryFigure(new ProviderSnapshot(ProviderId.Claude), null, false) == "");
+        var now = new DateTimeOffset(2026, 11, 17, 10, 0, 0, TimeSpan.Zero);
+        check("Quota ring detail: compact reset countdown formats minutes, hours, days and due",
+            QuotaRing.CompactReset(null, now) == ""
+            && QuotaRing.CompactReset(now.AddMinutes(-1), now) == Loc.T("待重置", "Reset due")
+            && QuotaRing.CompactReset(now.AddMinutes(45), now) == Loc.T("45分", "45m")
+            && QuotaRing.CompactReset(now.AddHours(2).AddMinutes(30), now) == Loc.T("2时30分", "2h 30m")
+            && QuotaRing.CompactReset(now.AddDays(1).AddHours(3), now) == Loc.T("1天3时", "1d 3h"));
+        check("Quota ring detail: compact metric label formats window and group",
+            QuotaRing.CompactMetricLabel(new UsageMetric(MetricKind.Percent, "5 小时额度") { Window = 300 }) == "5h"
+            && QuotaRing.CompactMetricLabel(new UsageMetric(MetricKind.Percent, "每周额度") { Window = 10080 }) == Loc.T("周", "1w")
+            && QuotaRing.CompactMetricLabel(new UsageMetric(MetricKind.Percent, "双周额度") { Window = 20160 }) == Loc.T("2周", "2w")
+            && QuotaRing.CompactMetricLabel(new UsageMetric(MetricKind.Percent, "Gemini · 5 小时") { Window = 300 }) == "Gemini 5h"
+            && QuotaRing.CompactMetricLabel(new UsageMetric(MetricKind.Percent, "Gemini · 每周") { Window = 10080 }, omitGroup: true) == Loc.T("周", "1w")
+            && QuotaRing.CompactMetricLabel(new UsageMetric(MetricKind.Percent, "Pro · 每周额度") { Window = 10080 }) != QuotaRing.CompactMetricLabel(new UsageMetric(MetricKind.Percent, "Pro · Fable 每周") { Window = 10080 })
+            && QuotaRing.CompactMetricLabel(new UsageMetric(MetricKind.Balance, "账户余额")) == Loc.Label("账户余额")
+            && QuotaRing.CompactMetricLabel(null) == "");
+        check("Quota ring detail: detail text joins only enabled non-empty parts",
+            QuotaRing.DetailText("Claude", "5h", "35%", "2h 30m", true, true, true, true) == "Claude 5h 35% 2h 30m"
+            && QuotaRing.DetailText("Claude", "5h", "35%", "", true, false, true, true) == "Claude 35%"
+            && QuotaRing.DetailText("Claude", "5h", "35%", "2h 30m", false, true, true, false) == "5h 35%"
+            && QuotaRing.DetailText("Claude", "5h", "35%", "2h 30m", false, false, false, false) == "");
+        check("Quota ring detail: NaturalWidth accepts custom ringsWidth for detail labels",
+            CompactMusicLayout.NaturalWidth(1, false, 2, false, 0, 0, ringsWidth: 180) == 180);
+        // A wide detail strip beside a short lyric and monitor readings must fit all three at their measured widths.
+        foreach (double measured in new[] { 9.5, 127.2, 840.5 })
+        {
+            double lyric = CompactMusicLayout.MeasuredTextSlot(measured);
+            double width = CompactMusicLayout.NaturalWidth(1, false, 2, true, 0, 160, textSlot: lyric, ringsWidth: 500);
+            var (quotas, readings) = CompactSpacing.Share([230, 258], 12, [160], 0, width - lyric - 16);
+            var row = CompactSpacing.Arrange([new(quotas.Window), new(0), new(readings.Window)], 1, lyric, 18, width, 8, 1, 1, lyric);
+            check($"Quota details and a {measured}-DIP lyric fit with one gap on each side",
+                lyric == Math.Ceiling(measured) + 1 && width == 500 + 8 + lyric + 8 + 160
+                && quotas.Travel == 0 && row.Room.SequenceEqual([500d, lyric, 160d]) && row.Gap == 8 && row.Left[0] == 0);
+        }
+        check("Quota ring detail settings: default off and persist",
+            !fresh.QuotaRingNames && !fresh.QuotaRingLabels && !fresh.QuotaRingFigures && !fresh.QuotaRingResets && !fresh.ShowsQuotaDetails);
+        fresh.QuotaRingNames = true; fresh.QuotaRingLabels = true; fresh.QuotaRingFigures = true; fresh.QuotaRingResets = true;
+        store.Save(fresh);
+        var readDetails = new SettingsStore(store.DirectoryPath, "0.1.0").Load();
+        check("Quota ring detail settings: read back enabled flags",
+            readDetails.QuotaRingNames && readDetails.QuotaRingLabels && readDetails.QuotaRingFigures && readDetails.QuotaRingResets && readDetails.ShowsQuotaDetails);
+
+        var pickedEntry = new AppEntry { CompactQuotas = ["5 小时额度", "missing-id"] };
+        check("Quota ring detail metrics: primary, selected and all modes",
+            QuotaRing.DetailMetrics(detailSnap, null, false).Select(m => m.Id).SequenceEqual(["每周额度"])
+            && QuotaRing.DetailMetrics(detailSnap, pickedEntry, false).Select(m => m.Id).SequenceEqual(["5 小时额度"])
+            && QuotaRing.DetailMetrics(detailSnap, null, true).Select(m => m.Id).SequenceEqual(["5 小时额度", "每周额度"]));
+        var copiedEntry = pickedEntry.Copy(); copiedEntry.CompactQuotas.Add("每周额度");
+        check("Quota ring detail settings: copied app keeps its own CompactQuotas", pickedEntry.CompactQuotas.Count == 2 && copiedEntry.CompactQuotas.Count == 3);
+        check("Quota ring detail: single ring follows lone CompactQuotas choice when SingleRingQuota is empty and respects explicit override",
+            QuotaRing.PrimaryFigure(detailSnap, new AppEntry { CompactQuotas = ["5 小时额度"] }, false) == "35%"
+            && QuotaRing.For(detailSnap, new AppEntry { CompactQuotas = ["5 小时额度"] }, QuotaRingStyle.Single, false).Shares.SequenceEqual([35d])
+            && QuotaRing.For(detailSnap, new AppEntry { SingleRingQuota = "每周额度", CompactQuotas = ["5 小时额度"] }, QuotaRingStyle.Single, false).Shares.SequenceEqual([70d]));
+
+        // Explicit account balance selection overrides lone CompactQuotas choice.
+        var accountSnap = new ProviderSnapshot(ProviderId.NewApi)
+        {
+            Metrics =
+            [
+                new(MetricKind.Balance, "账户余额") { Id = "账户余额", Amount = 20m, Total = 100m, TotalIsTarget = true },
+                new(MetricKind.Percent, "5 小时额度") { Id = "5 小时额度", Percent = 35, Window = 300 }
+            ]
+        };
+        check("Quota ring detail: explicit account balance overrides automatic single-ring selection",
+            QuotaRing.For(accountSnap, new AppEntry { CompactQuotas = ["5 小时额度"] }, QuotaRingStyle.Single, false).Shares.SequenceEqual([35d])
+            && QuotaRing.For(accountSnap, new AppEntry { SingleRingQuota = "账户余额", CompactQuotas = ["5 小时额度"] }, QuotaRingStyle.Single, false).Shares.SequenceEqual([80d]));
+
+        // Custom text metrics without percent appear in detail choices/metrics without altering ring choices.
+        var textOnlySnap = new ProviderSnapshot(ProviderId.Custom)
+        {
+            Metrics = [new(MetricKind.Text, "Monthly") { Id = "monthly", Value = "$12.50" }]
+        };
+        check("Quota ring detail: label-bearing text metrics without percent stay in detail choices while ring choices stay unchanged",
+            QuotaRing.Choices(textOnlySnap).Count == 0
+            && QuotaRing.DetailChoices(textOnlySnap).Select(m => m.Id).SequenceEqual(["monthly"])
+            && QuotaRing.DetailMetrics(textOnlySnap, null, true).Select(m => m.Id).SequenceEqual(["monthly"]));
+
+        // Non-generic labels and group prefixes localize in English while keeping the raw GroupName matching key.
+        string savedLang = Loc.Language;
+        try
+        {
+            Loc.Use(Loc.English);
+            var busyMetric = new UsageMetric(MetricKind.Percent, "外部模型 · 忙时每日额度") { Id = "busy", Percent = 40, Window = 1440 };
+            check("Quota ring detail: non-generic labels translate original term and group prefix in English",
+                QuotaRing.GroupName(busyMetric.Label) == "外部模型"
+                && QuotaRing.CompactMetricLabel(busyMetric) == "Outside models Daily busy-hour limit"
+                && QuotaRing.CompactMetricLabel(busyMetric, omitGroup: true) == "Daily busy-hour limit");
+        }
+        finally { Loc.Use(savedLang); }
+
+        // CompactQuotas supports up to 100 metrics (matching parser cap) and QuotaRingAll enables ShowsQuotaDetails.
+        var manyEntry = new AppEntry { CompactQuotas = [.. Enumerable.Range(1, 105).Select(i => $"m{i}")] };
+        manyEntry.Normalize();
+        var allOnlySettings = new DeckSettings { QuotaRingAll = true };
+        check("Quota ring detail settings: CompactQuotas keeps up to 100 items and QuotaRingAll enables details",
+            manyEntry.CompactQuotas.Count == 100 && manyEntry.CompactQuotas[39] == "m40"
+            && allOnlySettings.ShowsQuotaDetails && !new DeckSettings().ShowsQuotaDetails);
+
+        // Discrete GlideCycle with Step covers middle stops when animations are disabled.
+        var discreteMulti = new GlideCycle(200, Discrete: true, Step: 100);
+        check("GlideCycle discrete multi-stop: visits start, middle and end stops",
+            discreteMulti.DiscreteStops == 3
+            && discreteMulti.Shift(0) == 0
+            && discreteMulti.Shift(GlideCycle.StartHold + .1) == -100
+            && discreteMulti.Shift(GlideCycle.StartHold + GlideCycle.EndHold + .1) == -200);
+
+        var groupedMetrics = new[]
+        {
+            new UsageMetric(MetricKind.Percent, "Claude · 每周") { Window = 10080 },
+            new UsageMetric(MetricKind.Percent, "GPT OSS · 5 小时") { Window = 300 },
+            new UsageMetric(MetricKind.Percent, "Gemini · 5 小时") { Window = 300 },
+            new UsageMetric(MetricKind.Percent, "Argon · 每周") { Window = 10080 }
+        };
+        check("Quota group order: defaults to Gemini, Argon, then shortest-window named groups for Antigravity and follows custom priority",
+            QuotaRing.OrderGroups(groupedMetrics, m => m.Label, null, ProviderId.Antigravity, m => m.Window).Select(g => QuotaRing.GroupName(g[0].Label)).SequenceEqual(["Gemini", "Argon", "GPT OSS", "Claude"])
+            && QuotaRing.OrderGroups(groupedMetrics, m => m.Label, ["Claude", "Argon"], ProviderId.Antigravity, m => m.Window).Select(g => QuotaRing.GroupName(g[0].Label)).SequenceEqual(["Claude", "Argon", "Gemini", "GPT OSS"]));
+
+        // Swapping visible groups preserves missing groups in the saved order.
+        check("Quota group order: SwapGroupOrder preserves absent groups when swapping visible neighbors",
+            QuotaRing.SwapGroupOrder(["A", "B", "C", "D"], ["A", "C", "D"], 1, 2).SequenceEqual(["A", "B", "D", "C"])
+            && QuotaRing.SwapGroupOrder([], ["A", "B", "C"], 0, 1).SequenceEqual(["B", "A", "C"]));
     }
 }

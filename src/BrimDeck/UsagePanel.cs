@@ -279,7 +279,6 @@ public partial class MainWindow
     private QuotaView Quotas(AppEntry entry, ProviderSnapshot snapshot)
     {
         const int capacity = 2;
-        var quotas = snapshot.Metrics.OrderBy(x => x.Window is > 0 ? x.Window.Value : int.MaxValue).ToList();
         // Antigravity labels its quotas "Gemini · 5 小时", "Claude · 每周" and so on. Each group starts its own page, Gemini first,
         // so the first page shows rows 1 and 2 (Gemini) and a click on the column shows rows 3 and 4 (Claude), the same rows and
         // click-to-page as any other app with more than two quotas. Google AI Pro's weekly Argon quota follows Gemini; labels
@@ -287,13 +286,12 @@ public partial class MainWindow
         // Claude groups by organization when an account reads several ("Pro · 5 小时额度", "Team · 每周额度"): each organization
         // starts its own page, in the order the service gave them, so Pro's 5-hour and weekly quotas come first, then its Fable
         // quota, then Team's.
-        string Group(UsageMetric metric) => UI.QuotaGroup(new Quota(metric.Label, 0, null));
-        var order = snapshot.Metrics.Select(Group).Distinct().ToList();
         var sets = snapshot.Id switch
         {
-            ProviderId.Antigravity => quotas.GroupBy(Group).OrderBy(x => x.Key switch { "Gemini" => 0, "Argon" => 1, { Length: > 0 } => 2, _ => 3 }).Select(x => x.ToList()).ToList(),
-            ProviderId.Claude => quotas.GroupBy(Group).OrderBy(x => order.IndexOf(x.Key)).Select(x => x.ToList()).ToList(),
-            _ => [quotas]
+            ProviderId.Antigravity or ProviderId.Claude => QuotaRing.OrderGroups(snapshot.Metrics, m => m.Label, entry.QuotaGroupOrder, snapshot.Id, m => m.Window)
+                .Select(group => group.OrderBy(x => x.Window is > 0 ? x.Window.Value : int.MaxValue).ToList())
+                .ToList(),
+            _ => [snapshot.Metrics.OrderBy(x => x.Window is > 0 ? x.Window.Value : int.MaxValue).ToList()]
         };
         var pages = sets.SelectMany(set => set.Chunk(capacity)).Select(x => x.ToList()).ToList();
         if (pages.Count == 0) pages.Add([]);

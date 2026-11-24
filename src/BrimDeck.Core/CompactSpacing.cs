@@ -115,6 +115,13 @@ public static class CompactSpacing
         return 0;
     }
 
+    // Long quota labels can exceed the whole row. Keep at least the ring visible and scroll the text through the available width.
+    public static IReadOnlyList<double> DetailSlots(IReadOnlyList<double> widths, double gap, double ringSize, double room, double readingMinimum)
+    {
+        double available = Math.Max(ringSize, room - readingMinimum);
+        return Minimum(widths, gap) <= available ? widths : [available];
+    }
+
     // Two carousels in one row (the quota rings and the system readings) share the room left for them, which holds neither
     // their gap to each other nor to their neighbours. Each first takes its narrowest window (Minimum), so both always show;
     // then they widen by turns, a step of whole items at a time, the one showing fewer items first, until the next step does

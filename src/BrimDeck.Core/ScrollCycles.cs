@@ -48,29 +48,51 @@ public enum MoveClock { None, Waiting, Active, Filling }
 
 // The quota rings and the system readings (GlideCarousel): rest at the start for StartHold, glide by Travel on the (.4, 0, .6, 1)
 // spline at Speed DIP a second, rest at the end for EndHold, then fade out over Fade, jump back to the start and fade in over
-// Fade. Without animations (Discrete) the strip jumps to the end when the glide would have ended and back when the last rest
-// does, with no fade.
-public readonly record struct GlideCycle(double Travel, bool Discrete = false)
+// Fade. Without animations (Discrete) the strip jumps through stops covering the whole travel (by Step when given, else start
+// and end) and back, with no fade.
+public readonly record struct GlideCycle(double Travel, bool Discrete = false, double Step = 0)
 {
     public const double StartHold = 2.5, EndHold = 2, Speed = 12, Fade = .25;
     public const double CurveX1 = .4, CurveY1 = 0, CurveX2 = .6, CurveY2 = 1;
 
+    private bool MultiStop => Discrete && Step > 0 && Travel > Step;
+    public int DiscreteStops => MultiStop ? (int)Math.Ceiling(Travel / Step) + 1 : 2;
+
     public double GlideEnd => StartHold + Travel / Speed;
     public double ResetStart => GlideEnd + EndHold;
-    public double Period => ResetStart + (Discrete ? 0 : 2 * Fade);
+    public double Period => MultiStop ? StartHold + (DiscreteStops - 1) * EndHold : ResetStart + (Discrete ? 0 : 2 * Fade);
 
     // A time in seconds from any start, within one cycle.
     public double Wrap(double seconds) => Period > 0 && double.IsFinite(seconds) ? (seconds % Period + Period) % Period : 0;
 
     // The strip's shift (0 at the start, -Travel at the end) and its opacity at a time within the cycle.
-    public double Shift(double at) => at < StartHold ? 0
-        : at < GlideEnd ? Discrete ? 0 : -Travel * Curves.Bezier(CurveX1, CurveY1, CurveX2, CurveY2, (at - StartHold) / (GlideEnd - StartHold))
-        : at < ResetStart + (Discrete ? 0 : Fade) ? -Travel : 0;
+    public double Shift(double at)
+    {
+        if (MultiStop)
+        {
+            if (at < StartHold) return 0;
+            int stops = DiscreteStops;
+            int index = Math.Min(stops - 1, 1 + (int)((at - StartHold) / EndHold));
+            return index >= stops - 1 ? -Travel : -index * Step;
+        }
+        return at < StartHold ? 0
+            : at < GlideEnd ? Discrete ? 0 : -Travel * Curves.Bezier(CurveX1, CurveY1, CurveX2, CurveY2, (at - StartHold) / (GlideEnd - StartHold))
+            : at < ResetStart + (Discrete ? 0 : Fade) ? -Travel : 0;
+    }
     public double Opacity(double at) => Discrete || at < ResetStart ? 1
         : at < ResetStart + Fade ? 1 - (at - ResetStart) / Fade : Math.Min(1, (at - ResetStart - Fade) / Fade);
 
     public CycleStretch StretchAt(double at)
     {
+        if (MultiStop)
+        {
+            if (at < StartHold) return new(false, 0, StartHold);
+            int stops = DiscreteStops;
+            int index = Math.Min(stops - 1, 1 + (int)((at - StartHold) / EndHold));
+            double start = StartHold + (index - 1) * EndHold;
+            double end = index >= stops - 1 ? Period : start + EndHold;
+            return new(false, start, end);
+        }
         if (Discrete) return at < GlideEnd ? new(false, 0, GlideEnd) : new(false, GlideEnd, Period);
         return at < StartHold ? new(false, 0, StartHold) : at < GlideEnd ? new(true, StartHold, GlideEnd)
             : at < ResetStart ? new(false, GlideEnd, ResetStart) : new(true, ResetStart, Period);
