@@ -26,6 +26,9 @@ public partial class MainWindow
     private readonly Button ShelfPageButton = new() { Content = "Clipboard", Width = 60, Height = 24 };
     private readonly Button DevicesPageButton = new() { Content = "Devices", Width = 60, Height = 24 };
     private readonly Button NoticesPageButton = new() { Content = "Notices", Width = 60, Height = 24 };
+    private readonly Button AgendaPageButton = new() { Content = "Planner", Width = 60, Height = 24 };
+    // Collapsed as in MainWindow.xaml: it shows only while some pages do not fit (MainWindow.PageMore.cs, not linked here).
+    private readonly Button PageMoreButton = new() { Content = "More", Width = 40, Height = 24, Visibility = Visibility.Collapsed };
     private readonly Grid PageSwitch = new();
     private readonly Border PageCapsule = new() { Width = 60, Height = 24 };
     private readonly TranslateTransform PageCapsuleShift = new();
