@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -59,6 +60,7 @@ public sealed partial class SettingsWindow
             var style = S.NoticeStyles.For(level);
             Group([LevelPreview(level, style), .. LevelRows(level, style, change => EditNoticeStyles(s => change(s.NoticeStyles.For(level))), level.ToString(), own: false)]);
         }
+        NoticeSoundSection(center);
         NoticeStripSection();
         NoticeQuietSection(center);
         NoticeHistorySection(center);
@@ -130,7 +132,108 @@ public sealed partial class SettingsWindow
         rows.Add(Toggle(Loc.T("显示应用图标", "Show app icon"), style.Icon, value => edit(s => s.Icon = value)));
         if (level != NoticeLevel.Persistent)
             rows.Add(SliderRow(Loc.T("停留时间", "Shown for"), style.Seconds, NoticeStyle.MinSeconds, NoticeStyle.MaxSeconds, 1, Loc.T(" 秒", " s"), value => edit(s => s.Seconds = (int)Math.Round(value))));
+        if (level != NoticeLevel.Plain) rows.Add(SoundRow(level, style, edit, name));
         return rows;
+    }
+
+    // The sound of level 2 (played once) or level 3 (a loop): none, a built-in sound of the level's kind, a file in the sounds
+    // folder, or a file to import into it. Choosing one plays it once.
+    private FrameworkElement SoundRow(NoticeLevel level, NoticeStyle style, Action<Action<NoticeStyle>> edit, string name)
+    {
+        var center = _app.Notices;
+        var kind = NoticeSounds.KindOf(level) ?? NoticeSoundKind.Short;
+        string chosen = NoticeSounds.Of(style.Sound, level);
+        var choices = new List<(string Sound, string Label)> { (NoticeSounds.None, Loc.T("无", "None")) };
+        choices.AddRange(NoticeSounds.BuiltIn.Where(sound => sound.Kind == kind).Select(sound => (sound.Id, sound.Name)));
+        var files = NoticeSounds.Files(center.SoundFolder);
+        choices.AddRange(files.Select(file => (NoticeSounds.ForFile(file), file)));
+        // A chosen file that has left the folder stays listed, so that the row shows what is saved (the default plays meanwhile).
+        if (NoticeSounds.FileName(chosen) is { } gone && !files.Contains(gone, StringComparer.OrdinalIgnoreCase)) choices.Add((chosen, gone + Loc.T("（文件不存在）", " (missing)")));
+        int shown = Math.Max(0, choices.FindIndex(choice => string.Equals(choice.Sound, chosen, StringComparison.OrdinalIgnoreCase)));
+        var labels = choices.Select(choice => choice.Label).ToList();
+        labels.Add(Loc.T("导入文件…", "Import a file…"));
+        var combo = new ComboBox { Width = 200, Style = (Style)FindResource("SettingsCombo"), ItemsSource = labels, SelectedIndex = shown };
+        AutomationProperties.SetName(combo, Loc.T("提示音", "Sound") + " " + name + " " + LevelTitle(level));
+        combo.SelectionChanged += async (_, _) =>
+        {
+            int picked = combo.SelectedIndex;
+            if (picked < 0 || picked == shown) return;
+            if (picked < choices.Count)
+            {
+                string sound = choices[picked].Sound;
+                center.Sounds.Once(sound);
+                edit(s => s.Sound = sound);
+                return;
+            }
+            // "Import a file…" is not a choice to keep: the row shows the saved sound again while the file is picked.
+            combo.SelectedIndex = shown;
+            if (await ImportSoundAsync(center) is not { } imported) return;
+            center.Sounds.Once(imported);
+            edit(s => s.Sound = imported);
+        };
+        return Row(Loc.T("提示音", "Sound"), combo);
+    }
+
+    // Lets the user pick an audio file and copies it into the sounds folder; the sound that names the copy, or null when nothing
+    // was imported (the status line says why). A file that is in the folder already, or was imported before, is not copied again.
+    private async Task<string?> ImportSoundAsync(NoticeCenter center)
+    {
+        string kinds = string.Join(';', NoticeSounds.FileExtensions.Select(extension => "*" + extension));
+        var dialog = new Microsoft.Win32.OpenFileDialog { Title = Loc.T("导入提示音", "Import a sound"), Filter = Loc.T("音频文件", "Audio files") + $" ({kinds})|{kinds}", CheckFileExists = true };
+        if (dialog.ShowDialog(this) != true) return null;
+        string source = dialog.FileName, folder = center.SoundFolder;
+        try
+        {
+            long length = new FileInfo(source).Length;
+            if (length > NoticeSounds.MaxFileBytes) { SaveStatus(Loc.T("文件超过 50 MB，无法导入。", "The file is larger than 50 MB and cannot be imported."), true); return null; }
+            if (!NoticeSounds.FileExtensions.Contains(Path.GetExtension(source).ToLowerInvariant()) || !await NoticeSoundPlayer.PlayableAsync(source))
+            {
+                SaveStatus(Loc.T("无法播放这个文件。支持 WAV、MP3、M4A、AAC、FLAC、WMA。", "This file cannot be played. WAV, MP3, M4A, AAC, FLAC and WMA are supported."), true);
+                return null;
+            }
+            SaveStatus("");
+            string name = NoticeSounds.ImportName(source, []), target = Path.Combine(folder, name);
+            bool inFolder = string.Equals(Path.GetFullPath(source), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase);
+            if (inFolder || File.Exists(target) && new FileInfo(target).Length == length) return NoticeSounds.ForFile(name);
+            Directory.CreateDirectory(folder);
+            name = NoticeSounds.ImportName(source, NoticeSounds.Files(folder));
+            target = Path.Combine(folder, name);
+            await Task.Run(() => File.Copy(source, target));
+            return NoticeSounds.ForFile(name);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            SaveStatus(Loc.T("无法导入这个文件。", "The file could not be imported."), true);
+            return null;
+        }
+    }
+
+    // The sounds' volume, whether Windows applications' notices play them too, and the folder of imported files. Which sound a
+    // level plays is chosen with the level's other looks.
+    private System.Windows.Threading.DispatcherTimer? _soundTry;
+    private void NoticeSoundSection(NoticeCenter center)
+    {
+        SectionTitle(Loc.T("提示音", "Sounds"), ActionButton(Loc.T("打开文件夹", "Open folder"), () => OpenFolder(center.SoundFolder)),
+            () => Loc.T("等级 2 的提示音响一次，等级 3 的提示音循环播放到提示消失，在上面各等级中选择。导入的文件保存在这个文件夹中，删除文件即可移除。",
+                "Level 2's sound plays once; level 3's loops until the notice goes. Choose them under the levels above. Imported files are kept in this folder; delete a file there to remove it."));
+        // The volume is heard once the slider rests: the sound of level 2, or the default while that level has none.
+        void Try()
+        {
+            if (_soundTry is null)
+            {
+                _soundTry = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
+                _soundTry.Tick += (_, _) =>
+                {
+                    _soundTry.Stop();
+                    center.Sounds.Once(NoticeSounds.Of(S.NoticeStyles.Flash.Sound, NoticeLevel.Glow) is { Length: > 0 } sound ? sound : NoticeSounds.DefaultShort);
+                };
+            }
+            _soundTry.Stop(); _soundTry.Start();
+        }
+        Group(SliderRow(Loc.T("音量", "Volume"), S.NoticeSoundVolume, 0, 100, 5, "%", value => { Change(s => s.NoticeSoundVolume = (int)Math.Round(value)); Try(); }),
+            Toggle(Loc.T("Windows 应用的通知也播放", "Play for Windows apps' notices too"), S.NoticeSoundWindows, value => Change(s => s.NoticeSoundWindows = value),
+                help: Loc.T("这些应用大多自带提示音，开启后可能同时响两次。单独设置了样子的应用按它自己的提示音播放，不受这个开关影响。",
+                    "Most of these apps play their own sound, so you may hear two. An app with its own looks plays the sound chosen there, whatever this switch says.")));
     }
 
     // A row of segments, as MusicChoice, whose group is named apart from its title: the same title (Effect) shows in several groups

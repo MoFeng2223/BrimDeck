@@ -39,6 +39,7 @@ try
     NoticeArchTests.Run(Check);
     NoticeCoreTests.Run(root, Check);
     NoticeLevelTests.Run(root, Check);
+    NoticeSoundTests.Run(Check);
     BrimCliTests.Run(Check);
     AgentHookTests.Run(Check);
     await MailTests.Run(Check);

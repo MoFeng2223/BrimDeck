@@ -84,5 +84,7 @@
     <Page Include="..\..\src\BrimDeck\MusicResources.xaml" Link="MusicResources.xaml" />
     <!-- The notices page's header, row and fade panels (laid out by WPF in NoticePanelTests). -->
     <Compile Include="..\..\src\BrimDeck\NoticePanels.cs" Link="NoticePanels.cs" />
+    <!-- The notices' sounds: how a clip and a file are read, and on a machine with an output device, that one plays. -->
+    <Compile Include="..\..\src\BrimDeck\Native\NoticeSoundPlayer.cs" Link="NoticeSoundPlayer.cs" />
   </ItemGroup>
 </Project>

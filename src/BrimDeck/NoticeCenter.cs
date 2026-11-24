@@ -75,6 +75,12 @@ internal sealed partial class NoticeCenter : IDisposable
 
     public NoticeHub Hub { get; }
     public AttentionCoordinator Attention { get; } = new();
+    // The notices' sounds (NoticeSounds): a notice of level 2 plays its sound once as an island starts to show it, one of level 3
+    // loops for as long as an island shows it. The settings try a chosen sound through it.
+    public NoticeSoundPlayer Sounds { get; }
+    private readonly NoticeSoundPace _soundPace = new();
+    // Where the imported sounds are: "sounds" in the data folder.
+    public string SoundFolder => Path.Combine(_app.Store.DirectoryPath, NoticeSounds.Folder);
     // Windows' own banner switch of each application (NoticeBanners), read and written by the "应用" settings page.
     internal IBannerRegistry BannerRegistry { get; } = new NoticeBannerRegistry();
     public NoticeIcons Icons { get; }
@@ -97,6 +103,7 @@ internal sealed partial class NoticeCenter : IDisposable
     {
         _app = app; _dispatcher = app.Dispatcher;
         Hub = new NoticeHub(key => _app.Settings.NoticeRule(key), key => _app.Settings.NoticeReceives(key));
+        Sounds = new NoticeSoundPlayer(() => SoundFolder, () => _app.Settings.NoticeSoundVolume, Log);
         // Banners an earlier version turned off and could not give back before it stopped (NoticeBanners); the ledger lives in the
         // data folder, next to settings.json, and is gone once everything in it is restored.
         string dataFolder = app.Store.DirectoryPath;
@@ -187,6 +194,7 @@ internal sealed partial class NoticeCenter : IDisposable
         DropMissing();
         UpdateQuiet();
         ScheduleDue();
+        SyncLoop();
         Changed?.Invoke();
     }
 
@@ -318,7 +326,11 @@ internal sealed partial class NoticeCenter : IDisposable
         UpdateQuiet();
         if (Level(notice, now) == NoticeLevel.Silent) return;
         if (Attention.Suppressed) { Attention.Submit(Item("", notice), now); return; }
-        foreach (var lane in Lanes()) Apply(Attention.Submit(Item(lane, notice, refresh), now));
+        var lanes = Lanes();
+        foreach (var lane in lanes) Apply(Attention.Submit(Item(lane, notice, refresh), now));
+        // Every panel that would show it is open and staying open: the notice shows on their notices page instead of an island,
+        // and its sound plays once there, a loop too (nothing ends it on the page).
+        if (!refresh && lanes.Count > 0 && lanes.All(Attention.Open)) PlayOnce(Item(lanes[0], notice));
     }
 
     // The panels that show an arriving notice: each one whose profile shows notices (NoticeIsland) and that can show one now. A
@@ -640,11 +652,37 @@ internal sealed partial class NoticeCenter : IDisposable
             if (change.Ended is { } ended) deck.AttentionEnded(ended);
             // Shown is not seen: a notice counts as viewed only once its details open, the pointer rests on it or its page
             // lists it (the user may be away while it shows).
-            if (change.Started is { } started) deck.AttentionStarted(started);
+            if (change.Started is { } started) { deck.AttentionStarted(started); if (!started.Persistent) PlayOnce(started); }
             if (change.Updated is { } updated) deck.AttentionUpdated(updated);
         }
+        SyncLoop();
         Schedule();
     }
+
+    // The sound of a notice that starts to show, played once: at most one a second, once for a notice whatever the number of
+    // islands that show it, and never over a loop (NoticeSoundPace).
+    private void PlayOnce(AttentionItem item)
+    {
+        if (SoundOf(item) is not { Length: > 0 } sound) return;
+        if (_soundPace.Admit(item.Key + ":" + item.Level, Sounds.Looping, DateTimeOffset.UtcNow)) Sounds.Once(sound);
+    }
+
+    // The loop follows what the islands show, not the steps that led there: it plays while an island shows a notice that stays
+    // until handled and has a sound (the first panel's, when two show different ones), and stops when none does, however that
+    // notice ended.
+    private void SyncLoop()
+    {
+        string? loop = null;
+        if (!_disposed)
+            foreach (var deck in _app.Decks)
+                if (Attention.Current(deck.NoticeLane) is { Persistent: true } item && SoundOf(item) is { Length: > 0 } sound) { loop = sound; break; }
+        Sounds.Loop(loop);
+    }
+
+    // The sound an item plays (NoticeSounds.For). A Windows application's notice plays one when the settings say so, or when the
+    // user gave that application its own looks: a sound chosen for it there is meant to be heard.
+    private string SoundOf(AttentionItem item)
+        => NoticeSounds.For(item, Settings.NoticeSoundWindows || item.Payload is Notice notice && Settings.NoticeRule(notice.AppKey)?.Styles is not null);
 
     private void Schedule()
     {
@@ -683,7 +721,7 @@ internal sealed partial class NoticeCenter : IDisposable
     }
     // The pointer left the open panel, or came back to it (AttentionCoordinator.SetLeaving).
     public void DeckLeaving(MainWindow deck, bool leaving) => Attention.SetLeaving(deck.NoticeLane, leaving);
-    public void DeckRetired(MainWindow deck) { Attention.RemoveLane(deck.NoticeLane); Schedule(); }
+    public void DeckRetired(MainWindow deck) { Attention.RemoveLane(deck.NoticeLane); SyncLoop(); Schedule(); }
     // A panel stopped being able to show anything (hidden by the user or a full-screen rule): what it shows ends, and its
     // waiting notices are not shown later (they stay in the recent list; CanShow refuses them while the panel is hidden).
     public void DeckHidden(MainWindow deck)
@@ -1204,6 +1242,7 @@ internal sealed partial class NoticeCenter : IDisposable
         Flush();
         _attentionTimer.Stop(); _saveTimer.Stop(); _maintenance.Stop(); _quietCheck.Stop(); _resumeLimit.Stop(); _timeDue.Stop(); _liveTick.Stop();
         _changeTimer.Stop(); _refreshTimer.Stop();
+        Sounds.Dispose();
         Microsoft.Win32.SystemEvents.TimeChanged -= ClockMoved;
         Microsoft.Win32.SystemEvents.PowerModeChanged -= PowerChanged;
         _quiet.Dispose();

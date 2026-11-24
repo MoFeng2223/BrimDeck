@@ -885,6 +885,11 @@ public sealed class DeckSettings
     public NoticeLevel NoticeDefaultLevel { get; set; } = NoticeLevel.Glow;
     // How each level looks on the island (the settings' first notices page); an application may have its own (NoticeAppRule.Styles).
     public NoticeLevelStyles NoticeStyles { get; set; } = new();
+    // How loud the notices' sounds play, 0 to 100 (NoticeSounds.Gain); 0 plays none.
+    public int NoticeSoundVolume { get; set; } = NoticeSounds.DefaultVolume;
+    // The notices of Windows applications play BrimDeck's sound too. Off by default: most of them bring their own sound, which
+    // Windows plays whether or not their banner shows.
+    public bool NoticeSoundWindows { get; set; }
     // The collapsed count of unread notices (CompactPart.Notices) shows the icons of the applications they came from before the
     // number; off, a bell.
     public bool NoticeStripIcons { get; set; } = true;
@@ -1217,6 +1222,7 @@ public sealed class DeckSettings
         NoticeDefaultLevel = NoticeLevels.Default(NoticeDefaultLevel);
         NoticeStyles ??= new();
         NoticeStyles.Normalize();
+        NoticeSoundVolume = Math.Clamp(NoticeSoundVolume, 0, 100);
         NoticeHistoryHours = Math.Clamp(NoticeHistoryHours, 1, 24 * 7);
         NoticesWidth = double.IsFinite(NoticesWidth) ? Math.Clamp(NoticesWidth, 440, 1200) : 460;
         NoticesHeight = double.IsFinite(NoticesHeight) ? Math.Clamp(NoticesHeight, 140, 400) : 280;

@@ -6,7 +6,8 @@ namespace BrimDeck.Core.Notices;
 // whole island. Icon: the application's icon beside the words. Seconds: how long levels 1 and 2 stay; level 3 stays until
 // handled. Liquid: levels 2 and 3 play the liquid as well as the backlight. Color: the backlight of levels 2 and 3, "" white (the
 // island's own light), AppColor the application's color, else "#RRGGBB". The settings page offers it for level 3 only; an
-// application's own looks offer it for level 2 as well.
+// application's own looks offer it for level 2 as well. Sound: what levels 2 and 3 play (NoticeSounds): null the level's own
+// default, "" nothing, a built-in sound's id, or "file:" and an imported file's name.
 public sealed class NoticeStyle
 {
     public const string AppColor = "app";
@@ -18,6 +19,7 @@ public sealed class NoticeStyle
     public int Seconds { get; set; } = 6;
     public bool Liquid { get; set; }
     public string Color { get; set; } = "";
+    public string? Sound { get; set; }
 
     public NoticeStyle Copy() => (NoticeStyle)MemberwiseClone();
 

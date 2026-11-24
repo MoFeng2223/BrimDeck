@@ -51,7 +51,7 @@ Each notice shows on the island at one level:
 
 There is also "List only": the notice only goes to the notice history and does not show on the island.
 
-How each level looks is set under Settings › Live notices › How notices show: whether the app icon shows, how long levels 1 and 2 show, the effect of levels 2 and 3 (Glow or Lively), and the default color of level 3. "Try it" beside each level sends a sample notice. Notices take the whole island; only a message that names a place with `--slot` replaces just one part.
+How each level looks is set under Settings › Live notices › How notices show: whether the app icon shows, how long levels 1 and 2 show, the effect (Glow or Lively) and the sound of levels 2 and 3, and the default color of level 3. "Try it" beside each level sends a sample notice. Notices take the whole island; only a message that names a place with `--slot` replaces just one part.
 
 When an app needs a different look, click the arrow beside its name under Settings › Live notices › Apps to open "Own looks". That app's notices then follow its own settings, which come before the "How notices show" page and the look a message asks for. It shows the look of the level the app uses now (a program set to "As sent" lists all three levels): levels 2 and 3 have a glow color and an effect, levels 1 and 2 a display time, and every level the app icon switch. When you change the app's level, the look of the new level shows here. Besides:
 
@@ -59,6 +59,20 @@ When an app needs a different look, click the arrow beside its name under Settin
 - Clock, calendar and reminder apps and command-line programs whose level is not 3 have a group for their alarms, event reminders or "Waiting on you" notices, which always stay.
 
 "Own looks" is closed by default and is seldom needed.
+
+### Sounds
+
+Levels 2 and 3 can each have a sound; level 1 has none:
+
+- Level 2's sound plays once as the notice shows. A notice plays it once, two sounds are at least a second apart, and a notice that no longer flashes because more than 3 arrived within 10 seconds plays none.
+- Level 3's sound loops, its end joining its start without a pause, until the notice ends (the panel is opened, it is handled or closed, or after 3 minutes unless its sender says otherwise). No other sound plays over a loop.
+- A notice that arrives while the panel is open only shows on the notices page; its sound plays once, a level 3 sound a single round.
+
+The built-in sounds are made by BrimDeck as they play: Drop, Ding, Two notes, Arpeggio, Knock and Chord for level 2, and Marimba, Chimes, Morning, Phone and Beeps for level 3. Choosing one in the list plays it once.
+
+You can use your own audio files: choose "Import a file…" in the list. WAV, MP3, M4A, AAC, FLAC and WMA are supported, up to 50 MB each. The file is copied to `sounds` in the data folder and can be chosen for either level; "Open folder" in the Sounds section opens it, and deleting a file there removes it. At level 2 a file plays for at most 10 seconds; at level 3 the whole file loops. A WAV file loops without a seam, while MP3 and other compressed formats may leave a very short gap. When the chosen file is missing, the level's default sound plays.
+
+Notices of Windows apps do not play BrimDeck's sound by default: most of those apps bring their own, which Windows still plays with their banner off. Turn on "Play for Windows apps' notices too" when you want it; an app with its own looks plays the sound chosen there, whatever this switch says. No sound plays during focus, presentations, the lock screen or a pause. The volume is set in the Sounds section; 0 mutes them all.
 
 The level is the first of these that applies:
 

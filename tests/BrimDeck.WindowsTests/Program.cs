@@ -35,6 +35,8 @@ internal static class Program
             // "--only notices": the notice checks alone. They lay out panels and call Windows; none sends input or captures the screen.
             if (args is ["--only", "notices"]) { NoticeChecks(); return Finish(); }
             if (args is ["--only", "inklabel"]) { InkLabelSettleTests.Run(Check); return Finish(); }
+            // "--only sounds": the notice sounds alone. What it plays through the output device is 80 dB down, too quiet to hear.
+            if (args is ["--only", "sounds"]) { NoticeSoundChecks.Run(Check, device: true); return Finish(); }
             // "--hosted": only the checks that hold on a CI runner (a virtual machine with a session but no display output, GPU,
             // battery or devices, and no promise about speed). Everything left out reads this machine's hardware, so its outcome
             // says something about the machine, not the code. Without the flag every check runs.
@@ -60,6 +62,8 @@ internal static class Program
             RightDragChecks.Run(Check);
             NoticePanelTests.Run(Check);
             NoticeRowBatchTests.Run(Check);
+            if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: playing a notice sound (it has no audio output device).");
+            NoticeSoundChecks.Run(Check, device: !hosted);
             DropRelayChecks.Run(Check);
             DrawnAutomationTests.Run(Check);
             RingLetterChecks.Run(Check);

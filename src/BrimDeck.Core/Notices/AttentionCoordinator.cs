@@ -121,6 +121,8 @@ public sealed class AttentionCoordinator
 
     public AttentionItem? Current(string lane) => _lanes.TryGetValue(lane, out var state) ? state.Current : null;
     public IReadOnlyList<AttentionItem> Queued(string lane) => _lanes.TryGetValue(lane, out var state) ? state.Queue : [];
+    // The lane's panel is open and staying open: a notice that arrives shows on its notices page, not on the island.
+    public bool Open(string lane) => _lanes.TryGetValue(lane, out var state) && state.Busy && !state.Leaving;
 
     // The group of a notice: its application and, when it has one, its title (a chat's notifications are titled with the
     // conversation), so that one conversation's messages merge and another's take the island over.
