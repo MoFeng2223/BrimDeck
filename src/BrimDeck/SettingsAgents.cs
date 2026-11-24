@@ -90,7 +90,9 @@ public sealed partial class SettingsWindow
     {
         string file = harness.SettingsFile(paths);
         string can = harness.Approvals && harness.Questions ? Loc.T("可在岛上审批、回答提问", "Approvals and questions on the island")
-            : harness.Approvals ? Loc.T("可在岛上审批", "Approvals on the island") : Loc.T("显示状态与完成通知", "State and finished notices");
+            : harness.Approvals ? Loc.T("可在岛上审批", "Approvals on the island")
+            : harness.Tells ? Loc.T("显示状态；完成、待审批、待回答时提醒", "State, and a notice when it finishes or waits for you")
+            : Loc.T("显示状态与完成通知", "State and finished notices");
         string status = state switch
         {
             HookState.Installed => Loc.T("已安装钩子 · ", "Hooks installed · ") + can,
@@ -99,8 +101,7 @@ public sealed partial class SettingsWindow
             HookState.Unsupported => harness.Unsupported?.Invoke() ?? "",
             _ => Loc.T("未安装钩子 · 安装后", "No hooks · Once installed: ") + can
         };
-        if (state == HookState.Installed && harness.AfterInstall == "codex-review")
-            status += Loc.T("。在 Codex 中输入 /hooks，审阅并信任新钩子后才会生效", ". In Codex, enter /hooks and trust the new hooks before they run");
+        if (state == HookState.Installed && harness.AfterInstall is { } after) status += Loc.T("。", ". ") + after();
         if (_agentProblems.TryGetValue(harness.Id, out var problem)) status = problem;
         var detail = TextLine(status, 11.5, state is HookState.Unreadable or HookState.Outdated || problem is not null ? _palette.Negative : TextSecondary);
         detail.TextWrapping = TextWrapping.Wrap; detail.Margin = new Thickness(0, 2, 0, 0);

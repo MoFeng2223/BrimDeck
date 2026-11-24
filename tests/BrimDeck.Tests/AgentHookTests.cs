@@ -18,6 +18,121 @@ internal static class AgentHookTests
         Wire(check);
         Sessions(check);
         Settings(check);
+        Watched(check);
+        MoreTools(check);
+    }
+
+    private static AgentHookPlan Kimi(string json) => AgentHook.Plan(AgentHookFormats.Kimi, "kimi", "Kimi Code", Input(json), chinese: true);
+    private static AgentHookPlan Trae(string json) => AgentHook.Plan(AgentHookFormats.Trae, "trae", "TRAE", Input(json), chinese: true);
+
+    // Kimi Code and TRAE: approvals and questions are answered in the tool; the hook tells of them and never waits.
+    private static void Watched(Action<string, bool> check)
+    {
+        var approval = Kimi("""{"hook_event_name":"PermissionRequest","session_id":"session_1","cwd":"D:\\w\\app","id":"approval_1","tool_name":"Bash","tool_input":{"command":"npm test"}}""");
+        check("Kimi: an approval is told with a notice that stays, and nothing waits for it",
+            approval.Ask is null && approval.Report is { State: "approval", Title: "请求运行命令", AppId: "kimi", Context: "app" }
+            && approval.Notice is { Level: "persistent", ReplaceId: "agent:kimi:session_1", Code: "npm test", Category: "warning", Wait: null, Actions: null, Body: "请在 Kimi Code 中处理" });
+        var result = Kimi("""{"hook_event_name":"PermissionResult","session_id":"session_1","decision":"approved"}""");
+        check("Kimi: the approval answered in Kimi Code closes the notice and the session works again",
+            result.Report?.State == "working" && result.Close is { ReplaceId: "agent:kimi:session_1", Stop: true, AppName: "Kimi Code" } && result.Notice is null);
+        var question = Kimi("""{"hook_event_name":"PreToolUse","session_id":"session_1","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which one?","options":[{"label":"A"}]}]}}""");
+        check("Kimi: a question is told, and its answer closes the notice",
+            question.Ask is null && question.Report?.State == "question" && question.Notice is { Body: "Which one?", Category: "info", Level: "persistent" }
+            && Kimi("""{"hook_event_name":"PostToolUse","session_id":"session_1","tool_name":"AskUserQuestion"}""").Close is not null
+            && Kimi("""{"hook_event_name":"PostToolUse","session_id":"session_1","tool_name":"Bash"}""") is { Close: null, Report.State: "working" }
+            && Kimi("""{"hook_event_name":"PreToolUse","session_id":"session_1","tool_name":"Bash"}""").Report is null);
+        check("Kimi: a prompt given as parts is read, and the turn's ends are told apart",
+            Kimi("""{"hook_event_name":"UserPromptSubmit","session_id":"s","prompt":[{"type":"text","text":"fix"},{"type":"image"},{"type":"text","text":"it"}]}""").Report is { State: "working", Title: "fix it" }
+            && Kimi("""{"hook_event_name":"Stop","session_id":"s","stop_hook_active":false}""") is { Report.State: "done", Notice: { Category: "success", Body: null }, Close: not null }
+            && Kimi("""{"hook_event_name":"StopFailure","session_id":"s","error_message":"quota"}""").Notice is { Category: "error", Body: "quota" }
+            && Kimi("""{"hook_event_name":"Interrupt","session_id":"s"}""") is { Report.State: "idle", Notice: null }
+            && Kimi("""{"hook_event_name":"SessionEnd","session_id":"s"}""").Report?.State == "ended");
+        var waits = Trae("""{"hook_event_name":"Notification","session_id":"t1","workspace_roots":["D:/w/site"],"notification_type":"permission_prompt","message":"Run npm install?"}""");
+        check("TRAE: a notification tells of an approval or a question, and the next tool result closes it",
+            waits.Ask is null && waits.Report is { State: "approval", Context: "site" } && waits.Notice is { Title: "等待审批", Body: "Run npm install?", Level: "persistent", ReplaceId: "agent:trae:t1" }
+            && Trae("""{"hook_event_name":"Notification","session_id":"t1","notification_type":"ask_user_question"}""") is { Report.State: "question", Notice.Body: "请在 TRAE 中处理" }
+            && Trae("""{"hook_event_name":"Notification","session_id":"t1","notification_type":"idle_prompt"}""") is { Report.State: "idle", Notice: null }
+            && Trae("""{"hook_event_name":"PostToolUse","session_id":"t1","tool_name":"RunCommand"}""") is { Report.State: "working", Close: not null }
+            && Trae("""{"hook_event_name":"Stop","session_id":"t1","last_assistant_message":"Done."}""") is { Report: { State: "done", Body: "Done." }, Notice.Body: "Done." });
+        var paths = new AgentPaths(@"C:\Users\me", @"C:\Users\me\AppData\Roaming", @"C:\Users\me\AppData\Local", name => name == "KIMI_CODE_HOME" ? @"D:\kimi" : null);
+        var kimi = AgentHarnesses.Find("kimi")!;
+        const string brim = @"C:\Program Files\BrimDeck\brim.exe";
+        string config = "default_model = \"kimi\"\r\n\r\n[[hooks]]\r\nevent = \"Stop\"\r\ncommand = \"mine.exe\"\r\n\r\n[mcp]\r\nenabled = true\r\n";
+        string installed = AgentHarnesses.Installed(kimi, config, brim)!;
+        check("Kimi: hooks are [[hooks]] tables added to the end of config.toml, with only the four keys Kimi Code reads",
+            kimi.SettingsFile(paths) == @"D:\kimi\config.toml" && installed.StartsWith(config.TrimEnd(), StringComparison.Ordinal) && installed.Contains("\r\n\r\n[[hooks]]\r\nevent = \"SessionStart\"\r\ncommand = \"\\\"C:\\\\Program Files\\\\BrimDeck\\\\brim.exe\\\" hook kimi\"\r\ntimeout = 10\r\n")
+            && installed.Contains("event = \"PreToolUse\"\r\nmatcher = \"^AskUserQuestion$\"\r\ncommand = ") && installed.Contains("event = \"PermissionResult\"") && !installed.Contains("async")
+            && installed.Split("[[hooks]]").Length - 1 == kimi.Hooks.Count + 1);
+        check("Kimi: installed reads as installed, installing again changes nothing, and a moved BrimDeck needs an update",
+            AgentHarnesses.State(kimi, installed, brim) == HookState.Installed && AgentHarnesses.Installed(kimi, installed, brim) == installed
+            && AgentHarnesses.State(kimi, config, brim) == HookState.Missing && AgentHarnesses.State(kimi, null, brim) == HookState.Missing
+            && AgentHarnesses.State(kimi, installed, @"D:\B\brim.exe") == HookState.Outdated
+            && AgentHarnesses.Installed(kimi, installed, @"D:\B\brim.exe")!.Split("[[hooks]]").Length - 1 == kimi.Hooks.Count + 1);
+        check("Kimi: removing takes only BrimDeck's tables and leaves the user's file as it was",
+            AgentHarnesses.Removed(kimi, installed) == config && AgentHarnesses.Removed(kimi, config) == config
+            && AgentHarnesses.Removed(kimi, AgentHarnesses.Installed(kimi, null, brim)) == "");
+        check("Kimi: hooks kept as one inline array cannot take tables, and the file is left as it is",
+            AgentHarnesses.Installed(kimi, "hooks = []\n", brim) is null && AgentHarnesses.Installed(kimi, "[plugin]\nhooks = []\n", brim) is not null);
+        var trae = AgentHarnesses.Find("trae")!;
+        var traeFile = JsonNode.Parse(AgentHarnesses.Installed(trae, null, brim)!)!;
+        check("TRAE: each edition has its own hooks.json, in Claude Code's nesting with a version and a PowerShell command line",
+            trae.SettingsFile(paths) == @"C:\Users\me\.trae\hooks.json" && AgentHarnesses.Find("trae-cn")!.SettingsFile(paths) == @"C:\Users\me\.trae-cn\hooks.json"
+            && (int?)traeFile["version"] == 1 && (string?)traeFile["hooks"]!["Notification"]![0]!["hooks"]![0]!["command"] == "& 'C:\\Program Files\\BrimDeck\\brim.exe' hook trae"
+            && (string?)traeFile["hooks"]!["Stop"]![0]!["hooks"]![0]!["type"] == "command" && traeFile["hooks"]!["Stop"]![0]!["hooks"]![0]!["async"] is null
+            && traeFile["hooks"]!["PreToolUse"] is null && traeFile["hooks"]!["SessionEnd"] is null
+            && AgentHarnesses.CommandLine(AgentHarnesses.Find("trae-cn")!, @"C:\B\brim.exe") == "C:\\B\\brim.exe hook trae --name \"TRAE CN\" --id trae-cn"
+            && AgentHarnesses.State(trae, traeFile.ToJsonString(), brim) == HookState.Installed && trae.Tells && trae.AfterInstall is not null);
+    }
+
+    // WorkBuddy AI, Command Code, MiMo Code, and what the tools' own code showed of the earlier ones.
+    private static void MoreTools(Action<string, bool> check)
+    {
+        var paths = new AgentPaths(@"C:\Users\me", @"C:\Users\me\AppData\Roaming", @"C:\Users\me\AppData\Local", _ => null);
+        const string brim = @"C:\B\brim.exe";
+        var buddy = AgentHarnesses.Find("workbuddy")!;
+        var buddyAi = AgentHarnesses.Find("workbuddy-ai")!;
+        var buddyHooks = JsonNode.Parse(AgentHarnesses.Installed(buddyAi, null, brim)!)!["hooks"]!;
+        check("WorkBuddy: each edition has its own settings file, and no hook waits for a question",
+            buddy.SettingsFile(paths) == @"C:\Users\me\.workbuddy\settings.json" && buddyAi.SettingsFile(paths) == @"C:\Users\me\.workbuddy-ai\settings.json"
+            && buddyHooks["PreToolUse"] is null && buddyHooks["PermissionRequest"] is not null && !buddy.Questions && buddy.Approvals
+            && (string?)buddyHooks["Stop"]![0]!["hooks"]![0]!["command"] == "C:/B/brim.exe hook codebuddy --name \"WorkBuddy AI\" --id workbuddy-ai"
+            && (string?)JsonNode.Parse(AgentHarnesses.Installed(buddy, null, brim)!)!["hooks"]!["Stop"]![0]!["hooks"]![0]!["command"] == "C:/B/brim.exe hook codebuddy --name WorkBuddy --id workbuddy");
+        var asked = AgentHook.Plan(AgentHookFormats.CodeBuddy, "workbuddy", "WorkBuddy", Input("""
+            {"hook_event_name":"PermissionRequest","session_id":"s","tool_name":"Bash","tool_input":{"command":"ls"},"permission_suggestions":[{"rule":{"toolName":"Bash"},"behavior":"allow"}]}
+            """), true);
+        check("WorkBuddy: an approval offers no always allow, which its hooks cannot give, and a question is left to WorkBuddy",
+            asked.Ask is { Wait: true } a && !a.Actions!.Any(x => x.Key == AgentHook.AlwaysAllow)
+            && JsonNode.Parse(asked.Reply(Chosen(AgentHook.Allow))!)!["hookSpecificOutput"]!["decision"]!["behavior"]!.ToString() == "allow"
+            && AgentHook.Plan(AgentHookFormats.CodeBuddy, "workbuddy", "WorkBuddy", Input("""{"hook_event_name":"PreToolUse","session_id":"s","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Q"}]}}"""), true).Ask is null);
+        var command = AgentHarnesses.Find("commandcode")!;
+        string mod = AgentHarnesses.Installed(command, null, @"C:\B b\brim.exe")!;
+        check("Command Code: BrimDeck's own mod file in the mods folder answers approvals and questions in Claude Code's words",
+            command.SettingsFile(paths) == @"C:\Users\me\.commandcode\mods\brimdeck.ts" && mod.StartsWith(CommandCodeMod.Marker, StringComparison.Ordinal)
+            && mod.Contains("""const BRIM = "C:\\B b\\brim.exe" """.TrimEnd()) && mod.Contains("""["hook", "claude", "--name", "Command Code", "--id", "commandcode"]""")
+            && mod.Contains("onPermissionRequest") && mod.Contains("export default function (cmd)") && !mod.Contains('\r')
+            && AgentHarnesses.State(command, mod, @"C:\B b\brim.exe") == HookState.Installed && AgentHarnesses.State(command, mod, brim) == HookState.Outdated
+            && AgentHarnesses.State(command, "export default () => {}", brim) == HookState.Unreadable && AgentHarnesses.Removed(command, mod) == "");
+        var mimo = AgentHarnesses.Find("mimo")!;
+        string mimoPlugin = AgentHarnesses.Installed(mimo, null, brim)!;
+        string openPlugin = AgentHarnesses.Installed(AgentHarnesses.Find("opencode")!, null, brim)!;
+        check("MiMo Code: the plugin goes to its own folder under its own name, as a named export",
+            mimo.SettingsFile(paths) == @"C:\Users\me\.config\mimocode\plugins\brimdeck.js" && mimoPlugin.Contains("""["hook","opencode","--name","MiMo Code","--id","mimo"]""")
+            && mimoPlugin.TrimEnd().EndsWith("export const BrimDeck = legacy", StringComparison.Ordinal) && !mimoPlugin.Contains("export default")
+            && mimo.SettingsFile(new AgentPaths(@"C:\Users\me", "", "", name => name == "MIMOCODE_HOME" ? @"D:\mimo" : null)) == @"D:\mimo\config\plugins\brimdeck.js");
+        check("OpenCode: one default export serves both generations, a plain object with an id, setup and server",
+            openPlugin.TrimEnd().EndsWith("export default { id: \"brimdeck\", setup, server: legacy }", StringComparison.Ordinal)
+            && openPlugin.Contains("ctx.permission.reply({ sessionID: d.sessionID, requestID: d.id, decision: reply.reply })") && openPlugin.Contains("session.execution.succeeded"));
+        check("Cursor: Claude Code's hooks run by Cursor report nothing, so a Cursor session shows once",
+            Claude("""{"hook_event_name":"Stop","session_id":"s1","cursor_version":"3.27.22"}""") is { Report: null, Notice: null }
+            && AgentHook.Plan(AgentHookFormats.Cursor, "cursor", "Cursor", Input("""{"hook_event_name":"stop","conversation_id":"c1","status":"completed","cursor_version":"3.27.22"}"""), true).Report?.State == "done");
+        check("Antigravity: the workspace's folder, a lower-case reason and a loop that goes on are read",
+            Antigravity("""{"hookEventName":"SessionStart","conversationId":"c1","workspacePaths":["C:\\w\\site"]}""").Report?.Context == "site"
+            && Antigravity("""{"hookEventName":"Stop","conversationId":"c1","terminationReason":"error","error":"quota"}""").Notice?.Category == "error"
+            && Antigravity("""{"hookEventName":"Stop","conversationId":"c1","terminationReason":"user_canceled"}""") is { Report.State: "idle", Notice: null }
+            && Antigravity("""{"hookEventName":"Stop","conversationId":"c1","terminationReason":"NO_TOOL_CALL","fullyIdle":false}""") is { Report.State: "working", Notice: null, Quiet: """{"decision":"stop"}""" });
+        check("Codex: a patch is a file change, though it comes as a command",
+            AgentHook.Plan(AgentHookFormats.Codex, "codex", "Codex", Input("""{"hook_event_name":"PermissionRequest","session_id":"t","tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch"}}"""), true).Ask?.Title == "请求修改文件");
+        check("ZCode: a tool that failed is reported too", AgentHarnesses.Find("zcode")!.Hooks.Any(h => h.Event == "PostToolUseFailure"));
     }
 
     private static JsonElement Input(string json) { using var document = JsonDocument.Parse(json); return document.RootElement.Clone(); }
@@ -243,7 +358,7 @@ internal static class AgentHookTests
         var plugin = AgentHarnesses.Installed(opencode, null, @"C:\B b\brim.exe")!;
         check("Hook settings: OpenCode gets BrimDeck's own plugin file, which runs brim by its full path",
             opencode.SettingsFile(paths0) == @"C:\Users\me\.config\opencode\plugins\brimdeck.js" && OpenCodePlugin.Ours(plugin) && plugin.Contains("""const BRIM = "C:\\B b\\brim.exe" """.TrimEnd())
-            && plugin.Contains("\"hook\", \"opencode\"") && plugin.Contains("/permission/{requestID}/reply") && plugin.Contains("/question/{requestID}/reply")
+            && plugin.Contains("""const ARGS = ["hook","opencode"]""") && plugin.Contains("/permission/{requestID}/reply") && plugin.Contains("/question/{requestID}/reply")
             && AgentHarnesses.State(opencode, plugin, @"C:\B b\brim.exe") == HookState.Installed && AgentHarnesses.State(opencode, plugin, @"D:\brim.exe") == HookState.Outdated
             && AgentHarnesses.State(opencode, null, "b") == HookState.Missing);
         check("Hook settings: a plugin file of the same name that is not BrimDeck's is never written or removed",

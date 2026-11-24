@@ -133,6 +133,7 @@ public static class NotifyCli
         var quick = sender.SendQuick ?? sender.Send;
         // BrimDeck is not running: nothing more is tried, so the tool waits for nothing.
         if (plan.Report is { } report && await quick(report) is null) return Print(plan.Quiet);
+        if (plan.Close is { } close && Prepare(close) is null) await quick(close);
         if (plan.Notice is { } notice && Prepare(notice) is null) await quick(notice);
         if (plan.Ask is not { } ask || sender.SendWaiting is null) return Print(plan.Quiet);
         // A long command or file is cut until the message fits a frame.

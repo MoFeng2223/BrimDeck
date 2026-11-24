@@ -123,7 +123,9 @@ public partial class MainWindow
         var provider = harness switch
         {
             "claude" => ProviderId.Claude, "codex" => ProviderId.Codex, "cursor" => ProviderId.Cursor, "antigravity" => ProviderId.Antigravity, "codeagent" => ProviderId.CodeAgent,
-            "qoder" => ProviderId.Qoder, "qoder-cn" => ProviderId.QoderCn, "workbuddy" => ProviderId.WorkBuddy, "zcode" => ProviderId.ZCode, "opencode" => ProviderId.OpenCode, _ => (ProviderId?)null
+            "qoder" => ProviderId.Qoder, "qoder-cn" => ProviderId.QoderCn, "workbuddy" => ProviderId.WorkBuddy, "workbuddy-ai" => ProviderId.WorkBuddyAi, "zcode" => ProviderId.ZCode,
+            "opencode" => ProviderId.OpenCode, "kimi" => ProviderId.Kimi, "commandcode" => ProviderId.CommandCode, "mimo" => ProviderId.MiMo, "trae" => ProviderId.Trae, "trae-cn" => ProviderId.TraeCn,
+            _ => (ProviderId?)null
         };
         try { return (Color)ColorConverter.ConvertFromString(provider is { } id ? AppPresets.ThemeColor(id) : "#8E8E93"); }
         catch (FormatException) { return Colors.Gray; }

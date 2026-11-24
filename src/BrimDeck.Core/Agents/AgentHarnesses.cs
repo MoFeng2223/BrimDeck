@@ -10,7 +10,8 @@ public enum HookCommandStyle
 {
     // The program and its arguments apart, run without a shell (Claude Code's "command" with "args").
     Exec,
-    // One command line run by cmd /C (Codex, Antigravity).
+    // One command line run by cmd /C (Antigravity, Kimi Code), or by PowerShell or cmd as the tool finds them (Codex): a path
+    // without spaces reads as a program in both, so AgentHookFiles gives a path with spaces in its short form.
     Cmd,
     // One command line run by PowerShell (Cursor).
     PowerShell,
@@ -35,8 +36,17 @@ public enum HookFileShape
     // {"hooks": {"enabled": true, "events": {"Event": [{"matcher": "...", "hooks": [...]}]}}} (ZCode's own agent): its file hooks run
     // only with "enabled", and the file is read strictly, so only the events it knows may be listed.
     Events,
-    // A plugin file of BrimDeck's own, which the tool loads from its plugin folder (OpenCode): the whole file is BrimDeck's.
-    PluginFile
+    // A plugin file of BrimDeck's own, which the tool loads from its plugin folder (OpenCode, Command Code): the whole file is
+    // BrimDeck's (AgentPlugin).
+    PluginFile,
+    // [[hooks]] tables in a TOML settings file, each with event, matcher, command and timeout and nothing else (Kimi Code).
+    Toml
+}
+
+// A plugin file BrimDeck writes whole: its text for a brim.exe, and the first line BrimDeck knows its own file by.
+public sealed record AgentPlugin(string Marker, Func<string, string> Text)
+{
+    public bool Ours(string? text) => text is not null && text.StartsWith(Marker, StringComparison.Ordinal);
 }
 
 // One hook BrimDeck adds: the event, its matcher (null: every one), and whether the tool waits for it (an approval, a question)
@@ -56,10 +66,16 @@ public sealed record AgentHarness(
     // What the island can do for its sessions: answer approvals, answer questions.
     bool Approvals, bool Questions,
     // What the user must still do after installing, shown beside the row (Codex reviews new hooks before it runs them).
-    string? AfterInstall = null,
+    Func<string>? AfterInstall = null,
     Func<string>? Unsupported = null,
     // Whether the tool reads "async" (runs a hook in the background); one that does not gets none.
-    bool Async = true);
+    bool Async = true,
+    // The plugin file of a tool without command hooks (HookFileShape.PluginFile).
+    AgentPlugin? Plugin = null,
+    // Whether the hooks file carries "version": 1 (Cursor, TRAE).
+    bool Versioned = false,
+    // Approvals and questions are answered in the tool only; the island tells of them with a notice until they are.
+    bool Tells = false);
 
 // The folders the harnesses' settings are found from; the tests give their own.
 public sealed record AgentPaths(string Home, string Roaming, string Local, Func<string, string?> Variable)
@@ -105,11 +121,34 @@ public static class AgentHarnesses
         new("sessionStart", null, false), new("beforeSubmitPrompt", null, false), new("postToolUse", null, false), new("stop", null, false), new("sessionEnd", null, false)
     ];
 
-    // ZCode's own agent knows seven events (no Notification, no SessionEnd); its hooks always run inline.
+    // ZCode's own agent knows seven events (no Notification, no SessionEnd); its hooks always run inline. A tool that failed
+    // says so with its own event, without which an approval's state would stay.
     private static readonly HookEntry[] ZCodeHooks =
     [
-        new("SessionStart", null, false), new("UserPromptSubmit", null, false), new("PostToolUse", null, false), new("Stop", null, false),
+        new("SessionStart", null, false), new("UserPromptSubmit", null, false), new("PostToolUse", null, false), new("PostToolUseFailure", null, false), new("Stop", null, false),
         new("PermissionRequest", null, true), new("PreToolUse", "AskUserQuestion", true)
+    ];
+
+    // CodeBuddy Code (inside WorkBuddy) asks its question before the question's PreToolUse hook runs, so no hook waits for one.
+    private static readonly HookEntry[] CodeBuddyHooks =
+    [
+        new("SessionStart", null, false), new("UserPromptSubmit", null, false), new("PostToolUse", "*", false), new("Stop", null, false),
+        new("Notification", null, false), new("SessionEnd", null, false), new("PermissionRequest", "*", true)
+    ];
+
+    // Kimi Code's hooks decide nothing (its approval shows while PermissionRequest runs, and PermissionResult tells the answer);
+    // the matcher is a regular expression that may match anywhere in the tool's name.
+    private static readonly HookEntry[] KimiHooks =
+    [
+        new("SessionStart", null, false), new("UserPromptSubmit", null, false), new("PostToolUse", null, false), new("PostToolUseFailure", null, false),
+        new("PermissionRequest", null, false), new("PermissionResult", null, false), new("PreToolUse", "^AskUserQuestion$", false),
+        new("Stop", null, false), new("StopFailure", null, false), new("Interrupt", null, false), new("SessionEnd", null, false)
+    ];
+
+    // TRAE has six events; Notification says when it waits for an approval or an answer.
+    private static readonly HookEntry[] TraeHooks =
+    [
+        new("SessionStart", null, false), new("UserPromptSubmit", null, false), new("PostToolUse", null, false), new("Stop", null, false), new("Notification", null, false)
     ];
 
     // Antigravity's hooks block its loop, and it has no event for an approval or a question: the session's start, each call of the
@@ -120,6 +159,21 @@ public static class AgentHarnesses
     private static AgentHarness ClaudeLike(string id, string name, Func<string> components, string folder, string? variable, Func<AgentPaths, IEnumerable<string>> evidence)
         => new(id, name, AgentHookFormats.Claude, components, p => Path.Combine(p.Under(variable, folder), "settings.json"), evidence,
             HookFileShape.Nested, HookCommandStyle.Shell, ClaudeHooks, Approvals: true, Questions: true, Async: false);
+
+    // WorkBuddy and WorkBuddy AI: the CodeBuddy Code inside reads its hooks from the app's own folder and runs them through
+    // Git Bash, one at a time.
+    private static AgentHarness WorkBuddy(string id, string name, Func<string> components, string folder)
+        => new(id, name, AgentHookFormats.CodeBuddy, components, p => Path.Combine(p.Home, folder, "settings.json"),
+            p => [Path.Combine(p.Home, folder, "settings.json"), Path.Combine(p.Home, folder, "projects")],
+            HookFileShape.Nested, HookCommandStyle.Shell, CodeBuddyHooks, Approvals: true, Questions: false, Async: false);
+
+    // TRAE and TRAE CN: each reads hooks.json of its own folder, in Claude Code's nesting with a version, and runs a command
+    // through PowerShell. Its global hooks run only once the user switched them on in TRAE's settings.
+    private static AgentHarness Trae(string id, string name, Func<string> components, string folder, string data)
+        => new(id, name, AgentHookFormats.Trae, components, p => Path.Combine(p.Home, folder, "hooks.json"),
+            p => [Path.Combine(p.Roaming, data), Path.Combine(p.Home, folder, "argv.json")],
+            HookFileShape.Nested, HookCommandStyle.PowerShell, TraeHooks, Approvals: false, Questions: false, Async: false, Versioned: true, Tells: true,
+            AfterInstall: () => Loc.T($"在 {name} 的“设置 › Hooks”中打开全局钩子后才会运行", $"They run once global hooks are turned on in {name}'s Settings › Hooks"));
 
     // A tool found whose sessions cannot be connected with a command hook.
     private static AgentHarness Unconnectable(string id, string name, Func<string> components, Func<AgentPaths, IEnumerable<string>> evidence, Func<string> why)
@@ -135,36 +189,53 @@ public static class AgentHarnesses
             p => Path.Combine(p.Under("CODEX_HOME", ".codex"), "hooks.json"),
             p => [Path.Combine(p.Under("CODEX_HOME", ".codex"), "config.toml"), Path.Combine(p.Under("CODEX_HOME", ".codex"), "sessions")],
             HookFileShape.Nested, HookCommandStyle.Cmd, CodexHooks, Approvals: true, Questions: false,
-            AfterInstall: "codex-review"),
+            AfterInstall: () => Loc.T("在 Codex 中输入 /hooks，审阅并信任新钩子后才会生效", "In Codex, enter /hooks and trust the new hooks before they run")),
         new("antigravity", "Antigravity", AgentHookFormats.Antigravity, () => Loc.T("Antigravity 桌面版、Antigravity IDE 与 Antigravity CLI", "Antigravity desktop app, Antigravity IDE and Antigravity CLI"),
             p => Path.Combine(p.Home, ".gemini", "config", "hooks.json"),
             p => [Path.Combine(p.Local, "agy", "bin", "agy.exe"), Path.Combine(p.Local, "Programs", "antigravity", "Antigravity.exe"), Path.Combine(p.Home, ".gemini", "antigravity"), Path.Combine(p.Home, ".gemini", "antigravity-ide"), Path.Combine(p.Home, ".gemini", "antigravity-cli")],
             HookFileShape.Named, HookCommandStyle.Cmd, AntigravityHooks, Approvals: false, Questions: false),
         new("cursor", "Cursor", AgentHookFormats.Cursor, () => Loc.T("Cursor 编辑器与 Cursor CLI", "Cursor editor and Cursor CLI"),
             p => Path.Combine(p.Home, ".cursor", "hooks.json"),
-            p => [Path.Combine(p.Local, "Programs", "cursor", "Cursor.exe"), .. p.OnPath("cursor-agent.exe"), .. p.OnPath("cursor.cmd")],
-            HookFileShape.Flat, HookCommandStyle.PowerShell, CursorHooks, Approvals: false, Questions: false),
+            p => [Path.Combine(p.Local, "Programs", "cursor", "Cursor.exe"), Path.Combine(p.Home, ".cursor", "cli-config.json"), .. p.OnPath("cursor-agent.cmd"), .. p.OnPath("cursor-agent.exe"), .. p.OnPath("cursor.cmd")],
+            HookFileShape.Flat, HookCommandStyle.PowerShell, CursorHooks, Approvals: false, Questions: false, Versioned: true),
         ClaudeLike("codeagent", "CodeAgent", () => Loc.T("CodeAgent CLI", "CodeAgent CLI"), ".cac", "CODEAGENT3_CONFIG_DIR",
             p => [Path.Combine(p.Under("CODEAGENT3_CONFIG_DIR", ".cac"), "settings.json"), Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "CodeAgentCLI"), .. p.OnPath("codeagent.exe")]),
         ClaudeLike("qoder", "Qoder", () => Loc.T("Qoder CLI 与 Qoder 桌面版", "Qoder CLI and Qoder desktop app"), ".qoder", "QODER_CONFIG_DIR",
             p => [Path.Combine(p.Under("QODER_CONFIG_DIR", ".qoder"), "bin", "qodercli"), Path.Combine(p.Under("QODER_CONFIG_DIR", ".qoder"), "settings.json")]),
         ClaudeLike("qoder-cn", "Qoder CN", () => Loc.T("Qoder CN CLI 与 Qoder CN 桌面版", "Qoder CN CLI and Qoder CN desktop app"), ".qoder-cn", "QODERCN_CONFIG_DIR",
             p => [Path.Combine(p.Under("QODERCN_CONFIG_DIR", ".qoder-cn"), "bin"), Path.Combine(p.Under("QODERCN_CONFIG_DIR", ".qoder-cn"), "settings.json")]),
-        ClaudeLike("workbuddy", "WorkBuddy", () => Loc.T("WorkBuddy 桌面版（内置 CodeBuddy Code）", "WorkBuddy desktop app (with CodeBuddy Code)"), ".workbuddy", null,
-            p => [Path.Combine(p.Home, ".workbuddy", "settings.json"), Path.Combine(p.Home, ".workbuddy", "projects")]),
+        WorkBuddy("workbuddy", "WorkBuddy", () => Loc.T("WorkBuddy 桌面版（内置 CodeBuddy Code）", "WorkBuddy desktop app (with CodeBuddy Code)"), ".workbuddy"),
+        WorkBuddy("workbuddy-ai", "WorkBuddy AI", () => Loc.T("WorkBuddy AI 桌面版（内置 CodeBuddy Code）", "WorkBuddy AI desktop app (with CodeBuddy Code)"), ".workbuddy-ai"),
         new("opencode", "OpenCode", AgentHookFormats.OpenCode, () => Loc.T("OpenCode CLI 与 OpenCode 桌面版（通过插件）", "OpenCode CLI and OpenCode desktop app (through a plugin)"),
             p => Path.Combine(p.Under("XDG_CONFIG_HOME", ".config", "opencode", "plugins"), OpenCodePlugin.FileName),
             p => [p.Under("XDG_CONFIG_HOME", ".config", "opencode"), Path.Combine(p.Home, ".local", "share", "opencode", "opencode.db"), .. p.OnPath("opencode.cmd"), .. p.OnPath("opencode.exe")],
-            HookFileShape.PluginFile, HookCommandStyle.Exec, [], Approvals: true, Questions: true),
+            HookFileShape.PluginFile, HookCommandStyle.Exec, [], Approvals: true, Questions: true, Plugin: OpenCodePlugin.Plugin),
+        new("kimi", "Kimi Code", AgentHookFormats.Kimi, () => Loc.T("Kimi Code 桌面版与 Kimi Code CLI", "Kimi Code desktop app and Kimi Code CLI"),
+            p => Path.Combine(p.Under("KIMI_CODE_HOME", ".kimi-code"), "config.toml"),
+            p => [Path.Combine(p.Under("KIMI_CODE_HOME", ".kimi-code"), "config.toml"), Path.Combine(p.Under("KIMI_CODE_HOME", ".kimi-code"), "sessions")],
+            HookFileShape.Toml, HookCommandStyle.Cmd, KimiHooks, Approvals: false, Questions: false, Async: false, Tells: true,
+            AfterInstall: () => Loc.T("重新启动 Kimi Code 后生效", "They run once Kimi Code is restarted")),
+        new("commandcode", "Command Code", AgentHookFormats.Claude, () => Loc.T("Command Code 桌面版与 Command Code CLI（通过插件）", "Command Code desktop app and Command Code CLI (through a mod)"),
+            p => Path.Combine(p.Home, ".commandcode", "mods", CommandCodeMod.FileName),
+            p => [Path.Combine(p.Home, ".commandcode", "auth.json"), Path.Combine(p.Home, ".commandcode", "projects")],
+            HookFileShape.PluginFile, HookCommandStyle.Exec, [], Approvals: true, Questions: true, Plugin: CommandCodeMod.Plugin,
+            AfterInstall: () => Loc.T("在新的会话中生效", "They run in new sessions")),
+        new("mimo", "MiMo Code", AgentHookFormats.OpenCode, () => Loc.T("MiMo Code CLI（通过插件）。Xiaomi MiMo 桌面版不加载用户插件", "MiMo Code CLI (through a plugin). The Xiaomi MiMo desktop app loads no user plugins"),
+            p => Path.Combine(p.Variable("MIMOCODE_HOME") is { Length: > 0 } home ? Path.Combine(home, "config") : p.Under("XDG_CONFIG_HOME", ".config", "mimocode"), "plugins", OpenCodePlugin.FileName),
+            p => [Path.Combine(p.Home, ".mimocode", "bin", "mimo.exe"), .. p.OnPath("mimo.exe")],
+            HookFileShape.PluginFile, HookCommandStyle.Exec, [], Approvals: true, Questions: true, Plugin: OpenCodePlugin.MiMo,
+            AfterInstall: () => Loc.T("重新启动 MiMo Code 后生效", "They run once MiMo Code is restarted")),
+        Trae("trae", "TRAE",() => Loc.T("TRAE 与 TRAE SOLO", "TRAE and TRAE SOLO"), ".trae", "Trae"),
+        Trae("trae-cn", "TRAE CN", () => Loc.T("TRAE CN 与 TRAE SOLO CN", "TRAE CN and TRAE SOLO CN"), ".trae-cn", "Trae CN"),
         Unconnectable("dsh", "DeepSeek Harness", () => Loc.T("DeepSeek Harness 桌面版与 dsh", "DeepSeek Harness desktop app and dsh"),
             p => [Path.Combine(p.Home, ".dsh")],
-            () => Loc.T("DeepSeek Harness 没有命令钩子，只能通过插件接入，暂不支持自动安装", "DeepSeek Harness has no command hooks, only plugins; installing is not supported yet")),
+            () => Loc.T("DeepSeek Harness 没有命令钩子，只能通过插件和启动配置接入，暂不支持自动安装", "DeepSeek Harness has no command hooks, only plugins added to its startup configuration; installing is not supported yet")),
         Unconnectable("qwenwork", "QwenWork", () => Loc.T("QwenWork 桌面版", "QwenWork desktop app"),
             p => [Path.Combine(p.Home, ".qwenwork")],
-            () => Loc.T("QwenWork 每次启动生成临时配置，没有固定的钩子文件，暂不支持", "QwenWork builds a new configuration at each start and has no lasting hooks file; not supported yet")),
+            () => Loc.T("QwenWork 只在部分对话引擎下运行用户钩子，且钩子不能回答审批，暂不支持", "QwenWork runs user hooks only with some of its engines, and a hook cannot answer an approval; not supported yet")),
         Unconnectable("qwenwork-cn", "QwenWork CN", () => Loc.T("千问办公桌面版", "QwenWork CN desktop app"),
             p => [Path.Combine(p.Home, ".qwenworkcn")],
-            () => Loc.T("QwenWork CN 每次启动生成临时配置，没有固定的钩子文件，暂不支持", "QwenWork CN builds a new configuration at each start and has no lasting hooks file; not supported yet")),
+            () => Loc.T("千问办公只在部分对话引擎下运行用户钩子，且钩子不能回答审批，暂不支持", "QwenWork CN runs user hooks only with some of its engines, and a hook cannot answer an approval; not supported yet")),
         new("zcode", "ZCode", AgentHookFormats.Claude, () => Loc.T("ZCode 桌面版自带的代理", "The ZCode desktop app's own agent"),
             p => Path.Combine(p.Home, ".zcode", "cli", "config.json"),
             p => [Path.Combine(p.Home, ".zcode", "cli", "config.json"), Path.Combine(p.Home, ".zcode", "cli")],
@@ -203,6 +274,12 @@ public static class AgentHarnesses
         string command = handler["command"] is JValue value && value.TryGetValue(out string? text) ? text : "";
         if (handler["args"] is JsonArray args)
             return Path.GetFileName(command.Trim().Trim('"').Replace('/', '\\')).Equals("brim.exe", StringComparison.OrdinalIgnoreCase) && args.Count > 0 && args[0] is JValue first && first.TryGetValue(out string? word) && word == "hook";
+        return Ours(command);
+    }
+
+    // Whether a command line is one of BrimDeck's hooks.
+    public static bool Ours(string command)
+    {
         int at = command.IndexOf("brim.exe", StringComparison.OrdinalIgnoreCase);
         return at >= 0 && command[(at + "brim.exe".Length)..].TrimStart('"', '\'', ' ').StartsWith("hook ", StringComparison.Ordinal);
     }
@@ -224,8 +301,9 @@ public static class AgentHarnesses
     public static HookState State(AgentHarness harness, string? text, string brim)
     {
         if (harness.Unsupported is not null) return HookState.Unsupported;
-        if (harness.Shape == HookFileShape.PluginFile)
-            return text is null ? HookState.Missing : text == OpenCodePlugin.Text(brim) ? HookState.Installed : OpenCodePlugin.Ours(text) ? HookState.Outdated : HookState.Unreadable;
+        if (harness.Plugin is { } plugin)
+            return text is null ? HookState.Missing : text == plugin.Text(brim) ? HookState.Installed : plugin.Ours(text) ? HookState.Outdated : HookState.Unreadable;
+        if (harness.Shape == HookFileShape.Toml) return TomlHooks.State(harness, text, brim);
         if (Parse(text, out bool unreadable) is not { } root) return unreadable ? HookState.Unreadable : HookState.Missing;
         var expected = Install(harness, root.DeepClone().AsObject(), brim);
         var found = Ours(harness, root);
@@ -236,12 +314,17 @@ public static class AgentHarnesses
 
     // The text with BrimDeck's hooks in place (any of its earlier ones replaced), or null when the file cannot be read as JSON.
     public static string? Installed(AgentHarness harness, string? text, string brim)
-        => harness.Shape == HookFileShape.PluginFile ? (text is null || OpenCodePlugin.Ours(text) ? OpenCodePlugin.Text(brim) : null) : harness.Unsupported is null && Parse(text, out _) is { } root ? Write(Install(harness, root, brim)) : null;
+        => harness.Unsupported is not null ? null
+            : harness.Plugin is { } plugin ? (text is null || plugin.Ours(text) ? plugin.Text(brim) : null)
+            : harness.Shape == HookFileShape.Toml ? TomlHooks.Installed(harness, text, brim)
+            : Parse(text, out _) is { } root ? Write(Install(harness, root, brim)) : null;
 
     // The text without BrimDeck's hooks, or null when the file cannot be read as JSON. Groups and events left empty go too.
     // A plugin file of BrimDeck's own is removed whole: the text is then empty, and the file is deleted.
     public static string? Removed(AgentHarness harness, string? text)
-        => harness.Shape == HookFileShape.PluginFile ? (text is null || OpenCodePlugin.Ours(text) ? "" : null) : Parse(text, out _) is { } root ? Write(Remove(harness, root)) : null;
+        => harness.Plugin is { } plugin ? (text is null || plugin.Ours(text) ? "" : null)
+            : harness.Shape == HookFileShape.Toml ? TomlHooks.Removed(text ?? "")
+            : Parse(text, out _) is { } root ? Write(Remove(harness, root)) : null;
 
     private static string Write(JsonObject root) => root.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }) + Environment.NewLine;
 
@@ -263,7 +346,7 @@ public static class AgentHarnesses
     private static JsonObject Install(AgentHarness harness, JsonObject root, string brim)
     {
         Remove(harness, root);
-        if (harness.Shape == HookFileShape.Flat) root["version"] ??= 1;
+        if (harness.Versioned) root["version"] ??= 1;
         var hooks = Events(harness, root);
         foreach (var entry in harness.Hooks)
         {
@@ -369,16 +452,121 @@ public static class AgentHarnesses
     }
 }
 
+// Hooks kept as [[hooks]] tables of a TOML file (Kimi Code's config.toml). The file is changed as text, so that the user's
+// comments and layout stay: BrimDeck's tables are added at the end, and found again by their command. Kimi Code reads a table
+// strictly (event, matcher, command, timeout and nothing else), so nothing marks them but the command itself.
+internal static class TomlHooks
+{
+    private static readonly string[] Keys = ["event", "matcher", "command", "timeout"];
+
+    public static HookState State(AgentHarness harness, string? text, string brim)
+    {
+        if (text is null) return HookState.Missing;
+        var lines = Lines(text);
+        var ours = Ours(lines);
+        if (ours.Count == 0) return HookState.Missing;
+        var expected = Tables(harness, brim);
+        var found = ours.Select(range => lines[range.Start..range.End].Select(line => line.Trim()).ToArray()).ToList();
+        return found.Count == expected.Count && found.Zip(expected).All(pair => pair.First.SequenceEqual(pair.Second)) ? HookState.Installed : HookState.Outdated;
+    }
+
+    // Null when the file holds its hooks as one inline array, which tables cannot be added to.
+    public static string? Installed(AgentHarness harness, string? text, string brim)
+    {
+        string kept = Removed(text ?? "");
+        if (Lines(kept).TakeWhile(line => !line.TrimStart().StartsWith('[')).Any(line => Key(line) == "hooks")) return null;
+        string newline = Newline(text);
+        var builder = new System.Text.StringBuilder(kept.TrimEnd());
+        foreach (var table in Tables(harness, brim))
+        {
+            if (builder.Length > 0) builder.Append(newline).Append(newline);
+            builder.Append(string.Join(newline, table));
+        }
+        return builder.Append(newline).ToString();
+    }
+
+    public static string Removed(string text)
+    {
+        var lines = Lines(text);
+        var ours = Ours(lines);
+        if (ours.Count == 0) return text;
+        var keep = new List<string>();
+        int at = 0;
+        foreach (var (start, end) in ours)
+        {
+            keep.AddRange(lines[at..start]);
+            // The blank lines around a table go with it; one stays between what was before and what comes after.
+            while (keep.Count > 0 && keep[^1].Trim().Length == 0) keep.RemoveAt(keep.Count - 1);
+            at = end;
+            while (at < lines.Length && lines[at].Trim().Length == 0) at++;
+            if (at < lines.Length && keep.Count > 0) keep.Add("");
+        }
+        keep.AddRange(lines[at..]);
+        while (keep.Count > 0 && keep[^1].Trim().Length == 0) keep.RemoveAt(keep.Count - 1);
+        string newline = Newline(text);
+        return keep.Count == 0 ? "" : string.Join(newline, keep) + newline;
+    }
+
+    private static string Newline(string? text) => text is { Length: > 0 } ? (text.Contains("\r\n") ? "\r\n" : "\n") : Environment.NewLine;
+
+    private static string[] Lines(string text) => [.. text.Split('\n').Select(line => line.TrimEnd('\r'))];
+
+    // The tables BrimDeck writes, one for each hook, as their lines.
+    private static List<string[]> Tables(AgentHarness harness, string brim) => [.. harness.Hooks.Select(entry => (string[])
+    [
+        "[[hooks]]", "event = " + Basic(entry.Event), .. entry.Matcher is { } matcher ? new[] { "matcher = " + Basic(matcher) } : [],
+        "command = " + Basic(AgentHarnesses.CommandLine(harness, brim)), "timeout = " + (entry.Waits ? Math.Min(600, AgentHarnesses.WaitingTimeoutSeconds) : 10)
+    ])];
+
+    // The [[hooks]] tables whose command is BrimDeck's, as ranges of lines: the header and the keys that follow it.
+    private static List<(int Start, int End)> Ours(string[] lines)
+    {
+        var found = new List<(int, int)>();
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (lines[i].Trim() != "[[hooks]]") continue;
+            int end = i + 1;
+            bool ours = false;
+            for (; end < lines.Length && Key(lines[end]) is { } key && Keys.Contains(key); end++)
+                if (key == "command" && AgentHarnesses.Ours(Value(lines[end]))) ours = true;
+            if (ours) found.Add((i, end));
+            i = end - 1;
+        }
+        return found;
+    }
+
+    // The bare key of a "key = value" line.
+    private static string? Key(string line)
+    {
+        int equals = line.IndexOf('=');
+        string key = equals > 0 ? line[..equals].Trim() : "";
+        return key.Length > 0 && key.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-') ? key : null;
+    }
+
+    // A line's value: a basic string without its escapes, a literal string, or the words as they are.
+    private static string Value(string line)
+    {
+        string value = line[(line.IndexOf('=') + 1)..].Trim();
+        if (value.Length >= 2 && value[0] == '\'' && value[^1] == '\'') return value[1..^1];
+        if (value.Length < 2 || value[0] != '"') return value;
+        var text = new System.Text.StringBuilder();
+        for (int i = 1; i < value.Length && value[i] != '"'; i++) text.Append(value[i] == '\\' && i + 1 < value.Length ? value[++i] : value[i]);
+        return text.ToString();
+    }
+
+    private static string Basic(string value) => "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+}
+
 // Reads and writes the harnesses' settings files. Before BrimDeck first changes a file, a copy is kept beside it
 // (<file>.brimdeck-backup); a file that is not JSON is left as it is.
 public static class AgentHookFiles
 {
     public const string BackupSuffix = ".brimdeck-backup";
 
-    // brim as a tool that runs its hooks through a shell is given it: a path with spaces in its short form where the volume has
-    // short names, which no shell needs to quote.
+    // brim as a tool that runs its hooks through Git Bash or cmd is given it: a path with spaces in its short form where the
+    // volume has short names, which no shell needs to quote (a tool may hand cmd the quotes escaped, which cmd does not read).
     public static string Program(AgentHarness harness, string brim)
-        => harness.Style == HookCommandStyle.Shell && brim.Contains(' ') && Short(brim) is { } shortened && !shortened.Contains(' ') ? shortened : brim;
+        => harness.Style is HookCommandStyle.Shell or HookCommandStyle.Cmd && brim.Contains(' ') && Short(brim) is { } shortened && !shortened.Contains(' ') ? shortened : brim;
 
     public static HookState State(AgentHarness harness, AgentPaths paths, string brim)
     {

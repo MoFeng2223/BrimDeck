@@ -25,7 +25,7 @@ public static class BrimCommandLine
         brim event add TITLE --at TIME            An event; reminds before it starts
         brim event remove KEY                     Cancel an event
         brim status [--json]                      Check that BrimDeck is running and receives notices
-        brim hook FORMAT [--name N] [--id ID]     What a coding agent's hook runs (claude, codex or cursor); reads its input
+        brim hook FORMAT [--name N] [--id ID]     What a coding agent's hook runs (claude, codex, cursor, ...); reads its input
                                                   on standard input, and prints an approval or an answer chosen in BrimDeck
         brim agent report --tool NAME --session ID --state STATE [--project P] [--title T] [--message M]
                                                   Report a coding agent's state: started, working, approval, question,

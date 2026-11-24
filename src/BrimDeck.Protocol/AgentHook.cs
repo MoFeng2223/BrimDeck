@@ -12,10 +12,21 @@ public static class AgentHookFormats
     // OpenCode's BrimDeck plugin hands its events over in Claude Code's words and posts back what the hook prints, which is in
     // OpenCode's own: {"reply":"once|always|reject"} for an approval, {"answers":[["label", ...], ...]} for questions.
     public const string OpenCode = "opencode";
-    public static readonly IReadOnlySet<string> All = new HashSet<string> { Claude, Codex, Cursor, Antigravity, OpenCode };
+    // CodeBuddy Code (inside WorkBuddy): Claude Code's input and its approval decision, but a hook can neither add an "always
+    // allow" rule nor answer a question (the question's hook runs only after the user answered in the app).
+    public const string CodeBuddy = "codebuddy";
+    // Kimi Code: Claude Code's field names, but its hooks decide nothing. An approval and a question show in Kimi Code at once,
+    // so the hook only tells BrimDeck, and PermissionResult says when the approval was answered there.
+    public const string Kimi = "kimi";
+    // TRAE: Claude Code's field names; a Notification says when TRAE waits for an approval or an answer, which no hook can give.
+    public const string Trae = "trae";
+    public static readonly IReadOnlySet<string> All = new HashSet<string> { Claude, Codex, Cursor, Antigravity, OpenCode, CodeBuddy, Kimi, Trae };
 
     // The name a format's sessions show by when --name gives none.
-    public static string DefaultName(string format) => format switch { Codex => "Codex", Cursor => "Cursor", Antigravity => "Antigravity", OpenCode => "OpenCode", _ => "Claude Code" };
+    public static string DefaultName(string format) => format switch
+    {
+        Codex => "Codex", Cursor => "Cursor", Antigravity => "Antigravity", OpenCode => "OpenCode", CodeBuddy => "WorkBuddy", Kimi => "Kimi Code", Trae => "TRAE", _ => "Claude Code"
+    };
 }
 
 // What one hook call does: a report of the session's state, a notice (a finished turn), a question or an approval the hook
@@ -24,6 +35,9 @@ public sealed class AgentHookPlan
 {
     public NoticeMessage? Report { get; init; }
     public NoticeMessage? Notice { get; init; }
+    // Closes the notice that told of an approval or a question the tool asks in its own window (Watched), once the session
+    // moved on.
+    public NoticeMessage? Close { get; init; }
     public NoticeMessage? Ask { get; init; }
     // The hook's output for how Ask ended (null: the user did not answer here); null output leaves the tool to its own flow.
     public Func<NoticeMessage?, string?> Reply { get; init; } = _ => null;
@@ -53,7 +67,11 @@ public static class AgentHook
         string? session = Text(input, "session_id") ?? Text(input, "conversation_id") ?? Text(input, "conversationId") ?? Text(input, "sessionId") ?? Text(input, "thread_id");
         if (session is null || evt.Length == 0) return new() { Quiet = Quiet(format, evt) };
         if (format == AgentHookFormats.Antigravity) return Antigravity(id, name, session, Project(input), evt, input, T);
+        // Cursor runs the hooks of Claude Code's settings too (its "third-party hooks"), in Claude Code's words: with Cursor's own
+        // hooks installed the session would show twice, so only those report it.
+        if (format != AgentHookFormats.Cursor && input.TryGetProperty("cursor_version", out _)) return new();
         string project = Project(input);
+        if (format is AgentHookFormats.Kimi or AgentHookFormats.Trae) return Watched(format, id, name, session, project, evt, input, T);
         NoticeMessage State(string state, string? title = null, string? body = null) => new()
         {
             Type = NoticeTypes.Agent, AppId = id, AppName = name, Session = session, State = state, Context = project.Length > 0 ? project : null,
@@ -112,9 +130,12 @@ public static class AgentHook
             case "preinvocation": return new() { Report = State(AgentSessionStates.Working, Text(input, "lastUserInput") is { } words ? OneLine(words, 200) : null), Quiet = quiet };
             case "stop":
             {
-                string reason = Text(input, "terminationReason") ?? "";
-                if (reason == "USER_CANCELED") return new() { Report = State(AgentSessionStates.Idle), Quiet = quiet };
-                bool failed = reason == "ERROR" || Text(input, "error") is { Length: > 0 };
+                // The reason comes as an enum's name ("USER_CANCELED") or in lower case ("error"), by the version.
+                string reason = Normalize(Text(input, "terminationReason") ?? "");
+                if (reason == "usercanceled") return new() { Report = State(AgentSessionStates.Idle), Quiet = quiet };
+                // The loop ended but work goes on: background tasks still run, or the loop is about to be continued.
+                if (Flag(input, "fullyIdle") == false || Flag(input, "continuationActive") == true) return new() { Report = State(AgentSessionStates.Working), Quiet = quiet };
+                bool failed = reason == "error" || Text(input, "error") is { Length: > 0 };
                 return new()
                 {
                     Report = State(AgentSessionStates.Done), Quiet = quiet,
@@ -129,16 +150,103 @@ public static class AgentHook
         }
     }
 
+    // A tool that asks for approvals and answers in its own window only (Kimi Code, TRAE): the hook tells BrimDeck that the
+    // session waits, with a notice that stays on the island until the session moves on, and never holds the tool up.
+    private static AgentHookPlan Watched(string format, string id, string name, string session, string project, string evt, JsonElement input, Func<string, string, string> T)
+    {
+        string? context = project.Length > 0 ? project : null;
+        string key = AgentKeysWire.For(id, session);
+        NoticeMessage State(string state, string? title = null, string? body = null) => new()
+        {
+            Type = NoticeTypes.Agent, AppId = id, AppName = name, Session = session, State = state, Context = context, Title = title, Body = body is null ? null : Cut(body, MessageLimit)
+        };
+        // A stop with the notice's key closes it, as "brim notify close" does.
+        NoticeMessage Close() => new() { AppName = name, ReplaceId = key, Stop = true, Kind = NoticeTimes.Stopwatch };
+        AgentHookPlan Told(string state, string title, string? body, string? code) => new()
+        {
+            Report = State(state, title),
+            Notice = new NoticeMessage
+            {
+                AppName = name, Context = context, ReplaceId = key, Category = state == AgentSessionStates.Approval ? "warning" : "info", Level = "persistent",
+                Title = title, Body = body is { Length: > 0 } ? Cut(body, MessageLimit) : T($"请在 {name} 中处理", $"Answer it in {name}"),
+                Code = code is { Length: > 0 } ? Cut(code, NoticeProtocol.MaxCode) : null
+            }
+        };
+        AgentHookPlan Done(bool failed, string? last) => new()
+        {
+            Report = State(AgentSessionStates.Done, body: last), Close = Close(),
+            Notice = new NoticeMessage
+            {
+                AppName = name, Context = context, ReplaceId = "agent-done:" + id + ":" + session, Category = failed ? "error" : "success",
+                Title = failed ? T("出错停止", "Stopped with an error") : T("已完成", "Done"), Body = last is { Length: > 0 } ? Cut(last, MessageLimit) : null
+            }
+        };
+        string? tool = Text(input, "tool_name");
+        input.TryGetProperty("tool_input", out var args);
+        switch (evt)
+        {
+            case "sessionstart": return new() { Report = State(AgentSessionStates.Started) };
+            case "sessionend": return new() { Report = State(AgentSessionStates.Ended), Close = Close() };
+            case "userpromptsubmit": return new() { Report = State(AgentSessionStates.Working, OneLine(Words(input, "prompt"), 200)), Close = Close() };
+            // Kimi Code: the approval was answered in its window.
+            case "permissionresult": return new() { Report = State(AgentSessionStates.Working), Close = Close() };
+            // TRAE says nothing when its prompt is answered: the tool's result is the first word of it.
+            case "posttooluse" or "posttoolusefailure":
+                return new() { Report = State(AgentSessionStates.Working), Close = format == AgentHookFormats.Trae || tool == "AskUserQuestion" ? Close() : null };
+            case "stop": return Done(false, Text(input, "last_assistant_message"));
+            case "stopfailure": return Done(true, Text(input, "error_message"));
+            case "interrupt": return new() { Report = State(AgentSessionStates.Idle), Close = Close() };
+            case "permissionrequest" when format == AgentHookFormats.Kimi:
+            {
+                var (title, code) = Wanted(tool ?? "", args, T);
+                return Told(AgentSessionStates.Approval, title, Text(args, "description"), code);
+            }
+            case "pretooluse" when format == AgentHookFormats.Kimi && tool == "AskUserQuestion":
+                return Told(AgentSessionStates.Question, T("需要你选择", "Needs your choice"), FirstQuestion(args), null);
+            case "notification" when format == AgentHookFormats.Trae:
+                return Text(input, "notification_type") switch
+                {
+                    "idle_prompt" => new() { Report = State(AgentSessionStates.Idle) },
+                    "permission_prompt" => Told(AgentSessionStates.Approval, T("等待审批", "Waiting for approval"), Text(input, "message"), null),
+                    "ask_user_question" => Told(AgentSessionStates.Question, T("需要你选择", "Needs your choice"), Text(input, "message"), null),
+                    "document_review" or "browser_interaction" => Told(AgentSessionStates.Question, T("等待你处理", "Waiting for you"), Text(input, "message"), null),
+                    _ => new()
+                };
+            default: return new();
+        }
+    }
+
+    // The first question a question tool asks, to show under the notice's title.
+    private static string? FirstQuestion(JsonElement args)
+        => args.ValueKind == JsonValueKind.Object && args.TryGetProperty("questions", out var list) && list.ValueKind == JsonValueKind.Array && list.GetArrayLength() > 0 ? Text(list[0], "question") : null;
+
+    // A field that is words, or a list of parts of which some are words ({"type":"text","text":"..."}), as Kimi Code gives a prompt.
+    private static string Words(JsonElement input, string name)
+    {
+        if (!input.TryGetProperty(name, out var value)) return "";
+        if (value.ValueKind == JsonValueKind.String) return value.GetString() ?? "";
+        if (value.ValueKind != JsonValueKind.Array) return "";
+        return string.Join(' ', value.EnumerateArray().Select(part => part.ValueKind == JsonValueKind.String ? part.GetString() : Text(part, "text")).Where(text => text is { Length: > 0 }));
+    }
+
+    // What an approval is for, and the command, file or address it names.
+    private static (string Title, string Code) Wanted(string tool, JsonElement args, Func<string, string, string> T)
+    {
+        string? command = Text(args, "command"), file = Text(args, "file_path") ?? Text(args, "path") ?? Text(args, "notebook_path"), url = Text(args, "url");
+        // Codex gives a patch as the "command" of apply_patch.
+        string title = tool == "apply_patch" ? T("请求修改文件", "Wants to change a file")
+            : command is not null ? T("请求运行命令", "Wants to run a command")
+            : file is not null ? T("请求修改文件", "Wants to change a file")
+            : url is not null ? T("请求访问网页", "Wants to open a web page")
+            : T($"请求使用 {tool}", $"Wants to use {tool}");
+        return (title, command ?? file ?? url ?? (args.ValueKind == JsonValueKind.Object ? args.GetRawText() : ""));
+    }
+
     private static AgentHookPlan Approval(string format, string id, string name, string session, string project, JsonElement input, string tool,
         Func<string, string?, string?, NoticeMessage> state, Func<string, string, string> T)
     {
         input.TryGetProperty("tool_input", out var args);
-        string? command = Text(args, "command"), file = Text(args, "file_path") ?? Text(args, "path") ?? Text(args, "notebook_path"), url = Text(args, "url");
-        string title = command is not null ? T("请求运行命令", "Wants to run a command")
-            : file is not null ? T("请求修改文件", "Wants to change a file")
-            : url is not null ? T("请求访问网页", "Wants to open a web page")
-            : T($"请求使用 {tool}", $"Wants to use {tool}");
-        string code = command ?? file ?? url ?? (args.ValueKind == JsonValueKind.Object ? args.GetRawText() : "");
+        var (title, code) = Wanted(tool, args, T);
         // Claude Code offers what "always allow" would add; the hook gives one back to apply it (Codex takes none).
         JsonElement? always = format is AgentHookFormats.Claude or AgentHookFormats.OpenCode && input.TryGetProperty("permission_suggestions", out var suggestions)
             && suggestions.ValueKind == JsonValueKind.Array && suggestions.GetArrayLength() > 0 ? suggestions[0].Clone() : null;
@@ -307,7 +415,9 @@ public static class AgentHook
     private static string Project(JsonElement input)
     {
         string? folder = Text(input, "cwd");
-        if (folder is null && input.TryGetProperty("workspace_roots", out var roots) && roots.ValueKind == JsonValueKind.Array && roots.GetArrayLength() > 0) folder = roots[0].ValueKind == JsonValueKind.String ? roots[0].GetString() : null;
+        // Cursor and TRAE name the workspace's folders workspace_roots, Antigravity workspacePaths.
+        if (folder is null && (input.TryGetProperty("workspace_roots", out var roots) || input.TryGetProperty("workspacePaths", out roots)) && roots.ValueKind == JsonValueKind.Array && roots.GetArrayLength() > 0)
+            folder = roots[0].ValueKind == JsonValueKind.String ? roots[0].GetString() : null;
         if (string.IsNullOrWhiteSpace(folder)) return "";
         string trimmed = folder.Trim().TrimEnd('/', '\\');
         int cut = trimmed.LastIndexOfAny(['/', '\\']);
@@ -316,6 +426,9 @@ public static class AgentHook
 
     private static string? Text(JsonElement element, string name)
         => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String && value.GetString() is { Length: > 0 } text ? text : null;
+
+    private static bool? Flag(JsonElement element, string name)
+        => element.TryGetProperty(name, out var value) ? value.ValueKind switch { JsonValueKind.True => true, JsonValueKind.False => false, _ => null } : null;
 
     private static string OneLine(string text, int limit) => Cut(string.Join(' ', text.Split(['\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries)).Trim(), limit);
 
