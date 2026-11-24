@@ -144,12 +144,11 @@ public partial class App : Application
             kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName), cursorPriceCache: Path.Combine(folder, CursorPrices.FileName));
         Notices = new NoticeCenter(this);
         Agenda = new AgendaCenter(Store.DirectoryPath, Dispatcher);
-        // A source read in the background (Qoder) that ended after its round asks for another round to show it; the first reading
-        // of a source always does, a later one only while the panel syncs by itself.
-        Usage.BackgroundReadFinished += first => Dispatcher.BeginInvoke(() =>
+        // Publish a pending background result even when the user requested the round with automatic sync off.
+        Usage.BackgroundReadFinished += completed => Dispatcher.BeginInvoke(() =>
         {
             if (Exiting || Deck is not { } deck) return;
-            _ = first ? deck.RefreshAsync() : deck.RefreshAutomaticallyAsync(queueIfBusy: true);
+            _ = deck.RefreshAsync(backgroundCompletion: true);
         });
         LastSeen = new UsageLastSeen(Path.Combine(folder, UsageLastSeen.FileName));
         WindowDrags = new WindowDrags();
