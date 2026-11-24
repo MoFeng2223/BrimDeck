@@ -38,7 +38,7 @@ internal static class Program
                 Unreachable: "BrimDeck is not running, or live notices are switched off in its settings.",
                 NotReceiving: "BrimDeck is not receiving notices (not running, or live notices are off).")
             {
-                Name = Name, Usage = Brim ? BrimCommandLine.Usage : NotifyCommandLine.Usage, SendWaiting = SendWaitingAsync
+                Name = Name, Usage = Brim ? BrimCommandLine.Usage : NotifyCommandLine.Usage, SendWaiting = SendWaitingAsync, SendQuick = SendQuickAsync
             });
         }
         finally
@@ -54,11 +54,12 @@ internal static class Program
     internal static string PipeName()
         => NoticeProtocol.PipeName(Process.GetCurrentProcess().SessionId, WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName);
 
-    private static async Task<NamedPipeClientStream?> ConnectAsync()
+    // wait: how long to wait for the pipe; it is not there while BrimDeck is closed.
+    private static async Task<NamedPipeClientStream?> ConnectAsync(int wait = 2000)
     {
         // CurrentUserOnly also checks that the pipe's owner is this user, so a pipe another account created under the same name is refused.
         var pipe = new NamedPipeClientStream(".", PipeName(), PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-        try { await pipe.ConnectAsync(2000); return pipe; }
+        try { await pipe.ConnectAsync(wait); return pipe; }
         catch (Exception ex) when (ex is TimeoutException or IOException or UnauthorizedAccessException) { await pipe.DisposeAsync(); return null; }
     }
 
@@ -69,6 +70,17 @@ internal static class Program
         await using var pipe = await ConnectAsync();
         if (pipe is null) return null;
         return (await NoticeFrames.ExchangeAsync(pipe, message, ReplyWait)).Reply;
+    }
+
+    // A hook's report: the pipe is waited for only briefly, and the reply for a few seconds, so that a closed or busy BrimDeck
+    // holds up the coding agent's every prompt and tool by little.
+    private static async Task<NoticeMessage?> SendQuickAsync(NoticeMessage message)
+    {
+        message.EventId ??= Guid.NewGuid().ToString("N");
+        NoticeProtocol.Stamp(message, DateTimeOffset.UtcNow);
+        await using var pipe = await ConnectAsync(400);
+        if (pipe is null) return null;
+        return (await NoticeFrames.ExchangeAsync(pipe, message, TimeSpan.FromSeconds(3))).Reply;
     }
 
     // A notice that waits: the reply, then on the same connection how the notice ended. Ending this process (Ctrl+C) closes

@@ -79,6 +79,9 @@ public static class NoticeIntake
         // A notice kept off the list cannot be answered from the notices page, so one that is waited for is always listed.
         Unlisted = message.History == false && !Waits(message),
         Awaited = Waits(message),
+        // Questions can only be answered while their sender waits.
+        Questions = Waits(message) && origin == NoticeOrigin.Cli ? Questions(message) : [],
+        Code = message.Code is { Length: > 0 } code ? NoticeText.Clean(code).Trim() : "",
         Timeout = message.TimeoutMs is { } limit ? TimeSpan.FromMilliseconds(Math.Clamp(limit, NoticeProtocol.MinTimeoutMs, NoticeProtocol.MaxTimeoutMs)) : null
     };
 
@@ -86,6 +89,15 @@ public static class NoticeIntake
     // or a stop are answered at once.
     public static bool Waits(NoticeMessage message)
         => message.Wait == true && message.Stop != true && message.Kind is not (NoticeTimes.Countdown or NoticeTimes.Stopwatch or NoticeTimes.Event);
+
+    // A sender's questions with their words cleaned as a title is; a question without options can only be answered in words.
+    private static List<NoticeQuestion> Questions(NoticeMessage message)
+        => message.Questions is not { } questions ? [] : [.. questions.Where(q => q is not null && !string.IsNullOrWhiteSpace(q.Question)).Select(q => new NoticeQuestion
+        {
+            Id = q.Id, Header = q.Header is { Length: > 0 } header ? NoticeText.Clean(header, singleLine: true).Trim() : null, Question = NoticeText.Clean(q.Question).Trim(),
+            MultiSelect = q.MultiSelect == true, AllowOther = q.AllowOther == true || q.Options is not { Count: > 0 },
+            Options = [.. (q.Options ?? []).Select(o => new NoticeOption { Key = o.Key, Label = NoticeText.Clean(o.Label, singleLine: true).Trim(), Description = o.Description is { Length: > 0 } d ? NoticeText.Clean(d).Trim() : null })]
+        })];
 
     // Buttons a command-line sender may give at most.
     public const int MaxButtons = 4;

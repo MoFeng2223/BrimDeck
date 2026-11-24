@@ -139,7 +139,7 @@ public partial class MainWindow
         // Opened from the file transfer's count on the island, the panel opens on the clipboard and file transfer page; from the
         // unread notices' count, on the notices page.
         var wanted = _hotkeyPage ?? hover ?? (DeckPages.Shown(Settings, DeckPage.Clipboard) && OpensOnTransfer() ? DeckPage.Clipboard : (DeckPage?)null)
-            ?? (DeckPages.Shown(Settings, DeckPage.Notices) && PointerOnNotices() ? DeckPage.Notices : (DeckPage?)null) ?? DeckPages.Opening(Settings.DefaultPage) ?? _page;
+            ?? (DeckPages.Shown(Settings, DeckPage.Notices) && (PointerOnNotices() || PointerOnAgents()) ? DeckPage.Notices : (DeckPage?)null) ?? DeckPages.Opening(Settings.DefaultPage) ?? _page;
         if (wanted != _page && DeckPages.Shown(Settings, wanted)) SelectPage(wanted, remember: _hotkeyPage is not null);
         // The clipboard page builds nothing while the panel is closed (RenderShelf), the page switch just above included: it is
         // built now, as the panel opens on it.
@@ -1356,10 +1356,13 @@ public partial class MainWindow
         // The unread notices' count, as the file transfer's: a fixed part whose width follows its icons and digits.
         var notices = NoticeStrip(scale);
         double noticesWidth = notices?.Width ?? 0;
-        double transferWidth = transfer?.Width ?? 0, fixedFace = FixedFace(scale, clock?.ReservedWidth ?? 0, transferWidth, devicesWidth, noticesWidth);
+        // The coding agents' sessions, the same kind of fixed part.
+        var agents = AgentStrip(scale);
+        double agentsWidth = agents?.Width ?? 0;
+        double transferWidth = transfer?.Width ?? 0, fixedFace = FixedFace(scale, clock?.ReservedWidth ?? 0, transferWidth, devicesWidth, noticesWidth, agentsWidth);
         // The system readings ask for the width of everything chosen, on whole device pixels; the whole ones that fit their region show.
         var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings, Look), scale,
-            !(media && showCover) && !equalizer && apps.Count == 0 && text.Length == 0 && clock is null && transfer is null && devices is null && notices is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden, _stripAdmission, coreDisplay: Settings.CoreDisplay, free: Settings.MonitorShowFree, matrixColumns: Settings.CoreMatrixColumns,
+            !(media && showCover) && !equalizer && apps.Count == 0 && text.Length == 0 && clock is null && transfer is null && devices is null && notices is null && agents is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden, _stripAdmission, coreDisplay: Settings.CoreDisplay, free: Settings.MonitorShowFree, matrixColumns: Settings.CoreMatrixColumns,
                 coreCount: _app.Monitor?.Latest?.Cpu.OrDefault?.Cores.Count ?? 0) : null;
         _stripLayout = _stripAdmission.Layout;
         // Readings that do not fit scroll through a window of whole readings, as the rings do (CompactSpacing.Window).
@@ -1398,7 +1401,7 @@ public partial class MainWindow
         // before the row is centred (CompactSpacing.Arrange).
         bool hasCover = media && showCover && layout.CoverWidth >= layout.CoverSize - .001, hasEqualizer = equalizer && layout.EqualizerWidth >= layout.EqualizerSize - .001;
         bool hasFixed = fixedFace > 0 && layout.ClockWidth >= fixedFace - .001;
-        bool hasClock = clock is not null && hasFixed, hasTransfer = transfer is not null && hasFixed, hasDevices = devices is not null && hasFixed, hasNotices = notices is not null && hasFixed, hasText = layout.TextWidth > 0 && text.Length > 0;
+        bool hasClock = clock is not null && hasFixed, hasTransfer = transfer is not null && hasFixed, hasDevices = devices is not null && hasFixed, hasNotices = notices is not null && hasFixed, hasAgents = agents is not null && hasFixed, hasText = layout.TextWidth > 0 && text.Length > 0;
         double titleWanted = hasText ? layout.TextWidth : 0;
         double shortest = CompactMusicLayout.Whole(CompactMusicLayout.MinimumText * scale);
         // The title's first room: the room its text asked for when it follows its length, else TitleMax.
@@ -1407,8 +1410,8 @@ public partial class MainWindow
         double titleFloor = hasText ? Math.Min(shortest, titleWanted) : 0;
         var ringWidths = apps.Select(_ => layout.RingSize).ToList();
         bool hasRings = ringWidths.Count > 0, hasReadings = readingWidths.Count > 0;
-        int parts = (hasCover ? 1 : 0) + (hasEqualizer ? 1 : 0) + (hasClock ? 1 : 0) + (hasTransfer ? 1 : 0) + (hasDevices ? 1 : 0) + (hasNotices ? 1 : 0) + (hasText ? 1 : 0) + (hasRings ? 1 : 0) + (hasReadings ? 1 : 0);
-        double others = (hasCover ? layout.CoverSize : 0) + (hasEqualizer ? layout.EqualizerSize : 0) + (hasClock ? clock!.ReservedWidth : 0) + (hasTransfer ? transferWidth : 0) + (hasDevices ? devicesWidth : 0) + (hasNotices ? noticesWidth : 0) + Math.Max(0, parts - 1) * unit;
+        int parts = (hasCover ? 1 : 0) + (hasEqualizer ? 1 : 0) + (hasClock ? 1 : 0) + (hasTransfer ? 1 : 0) + (hasDevices ? 1 : 0) + (hasNotices ? 1 : 0) + (hasAgents ? 1 : 0) + (hasText ? 1 : 0) + (hasRings ? 1 : 0) + (hasReadings ? 1 : 0);
+        double others = (hasCover ? layout.CoverSize : 0) + (hasEqualizer ? layout.EqualizerSize : 0) + (hasClock ? clock!.ReservedWidth : 0) + (hasTransfer ? transferWidth : 0) + (hasDevices ? devicesWidth : 0) + (hasNotices ? noticesWidth : 0) + (hasAgents ? agentsWidth : 0) + Math.Max(0, parts - 1) * unit;
         double pool = SnapDown(contentWidth, dpi) - others - titleShare;
         // Too short for both narrowest windows, the title gives way down to its shortest.
         double needed = CompactSpacing.Minimum(ringWidths, layout.RingGap) + CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0);
@@ -1444,6 +1447,7 @@ public partial class MainWindow
             else if (part == CompactPart.Transfer && hasTransfer) shown.Add((part, new(transferWidth)));
             else if (part == CompactPart.Devices && hasDevices) shown.Add((part, new(devicesWidth)));
             else if (part == CompactPart.Notices && hasNotices) shown.Add((part, new(noticesWidth)));
+            else if (part == CompactPart.Agents && hasAgents) shown.Add((part, new(agentsWidth)));
         }
         int title = shown.FindIndex(entry => entry.Part is CompactPart.Music);
         // One gap between every two parts; what is left widens them evenly and then centres the row.
@@ -1468,6 +1472,8 @@ public partial class MainWindow
                 case CompactPart.Devices:
                     devices!.Width = devicesWidth;
                     element = CompactRegion(devices, room, devicesWidth, devices.Height, row, RegionAnchor.Left, dpi); break;
+                case CompactPart.Agents:
+                    element = CompactRegion(agents!, room, agentsWidth, agents!.Height, row, RegionAnchor.Left, dpi); break;
                 case CompactPart.Notices:
                     element = CompactRegion(notices!, room, noticesWidth, notices!.Height, row, RegionAnchor.Left, dpi); break;
                 case CompactPart.Rings:

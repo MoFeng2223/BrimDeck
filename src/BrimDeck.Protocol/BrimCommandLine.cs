@@ -25,6 +25,11 @@ public static class BrimCommandLine
         brim event add TITLE --at TIME            An event; reminds before it starts
         brim event remove KEY                     Cancel an event
         brim status [--json]                      Check that BrimDeck is running and receives notices
+        brim hook FORMAT [--name N] [--id ID]     What a coding agent's hook runs (claude, codex or cursor); reads its input
+                                                  on standard input, and prints an approval or an answer chosen in BrimDeck
+        brim agent report --tool NAME --session ID --state STATE [--project P] [--title T] [--message M]
+                                                  Report a coding agent's state: started, working, approval, question,
+                                                  done, idle or ended
 
         Options of notify send:
           -b, --body TEXT        Body text
@@ -113,8 +118,63 @@ public static class BrimCommandLine
                     "remove" => NotifyCommandLine.ParseOptions(NotifyCommandKind.Send, "stop", args, 2, source, "brim event remove"),
                     _ => Verbs("event", verb, "add", "remove")
                 };
+            case "hook": return Hook(args);
+            case "agent": return verb == "report" ? AgentReport(args) : Fail(verb is null or "-h" or "--help" ? "agent takes report: brim agent report --tool NAME --session ID --state STATE" : "unknown command: agent " + verb + " (agent takes report)");
             default: return Fail("unknown command: " + args[0]);
         }
+    }
+
+    // brim hook FORMAT [--name NAME] [--id ID]: what a coding agent's hook runs; its input comes on standard input.
+    private static NotifyCommand Hook(IReadOnlyList<string> args)
+    {
+        if (args.Count < 2 || args[1] is "-h" or "--help") return Fail("hook takes a format: brim hook " + string.Join('|', AgentHookFormats.All.Order()) + " [--name NAME] [--id ID]");
+        string format = args[1].Trim().ToLowerInvariant();
+        if (!AgentHookFormats.All.Contains(format)) return Fail("unknown hook format: " + args[1] + " (" + string.Join(", ", AgentHookFormats.All.Order()) + ")");
+        string? name = null, id = null;
+        for (int i = 2; i < args.Count; i++)
+        {
+            if (args[i] is not ("--name" or "--id")) return Fail("hook takes only --name and --id: unexpected " + args[i]);
+            if (i + 1 >= args.Count || string.IsNullOrWhiteSpace(args[i + 1])) return Fail(args[i] + " needs a value");
+            if (args[i] == "--name") name = args[++i].Trim(); else id = args[++i].Trim();
+        }
+        // Without a name the sessions are the format's own tool, told apart by the format; a named tool by its name.
+        id ??= name is null ? format : ToolId(name);
+        return new(NotifyCommandKind.Hook, Hook: new AgentHookCommand(format, name ?? AgentHookFormats.DefaultName(format), id));
+    }
+
+    // brim agent report --tool NAME --session ID --state STATE [--project P] [--title T] [--message M]: a session's state for a
+    // tool without hooks BrimDeck knows, from the user's own script.
+    private static NotifyCommand AgentReport(IReadOnlyList<string> args)
+    {
+        var message = new NoticeMessage { Type = NoticeTypes.Agent };
+        for (int i = 2; i < args.Count; i++)
+        {
+            string arg = args[i];
+            if (arg is "-h" or "--help") return new(NotifyCommandKind.Help);
+            if (arg is not ("--tool" or "--session" or "--state" or "--project" or "--title" or "--message")) return Fail("agent report takes --tool, --session, --state, --project, --title and --message: unexpected " + arg);
+            if (i + 1 >= args.Count) return Fail(arg + " needs a value");
+            string value = args[++i];
+            switch (arg)
+            {
+                case "--tool": message.AppName = value.Trim(); message.AppId = ToolId(value); break;
+                case "--session": message.Session = value.Trim(); break;
+                case "--state": message.State = value.Trim().ToLowerInvariant(); break;
+                case "--project": message.Context = value; break;
+                case "--title": message.Title = value; break;
+                default: message.Body = value; break;
+            }
+        }
+        if (string.IsNullOrWhiteSpace(message.AppName) || string.IsNullOrWhiteSpace(message.Session) || string.IsNullOrWhiteSpace(message.State))
+            return Fail("agent report needs --tool, --session and --state");
+        if (!AgentSessionStates.All.Contains(message.State)) return Fail("unknown state: " + message.State + " (" + string.Join(", ", AgentSessionStates.All) + ")");
+        return new(NotifyCommandKind.Send, message);
+    }
+
+    // A tool's id from its name: lower case letters and digits, other characters as "-".
+    public static string ToolId(string name)
+    {
+        var id = new string([.. name.Trim().ToLowerInvariant().Select(c => char.IsAsciiLetterOrDigit(c) ? c : '-')]).Trim('-');
+        return id.Length > 0 ? (id.Length > 48 ? id[..48] : id) : "tool";
     }
 
     // brim notify list [--json] [-s SOURCE]: only the notices of that source when -s names one; BRIM_SOURCE does not filter.

@@ -2,13 +2,17 @@ using System.Globalization;
 
 namespace BrimDeck.Protocol;
 
-public enum NotifyCommandKind { Send, Run, Status, Stdio, Help, Version, Error, List }
+public enum NotifyCommandKind { Send, Run, Status, Stdio, Help, Version, Error, List, Hook }
 
 // A parsed brim-notify command line. Send carries the notice; Run carries the notice options and the program to run.
 // JsonInput: a file ("-" for standard input) holding a whole message, which the options given then change. JsonOutput: the
 // answer is written as JSON (status).
 public sealed record NotifyCommand(NotifyCommandKind Kind, NoticeMessage? Message = null, IReadOnlyList<string>? Program = null, string? Error = null,
-    string? JsonInput = null, bool JsonOutput = false);
+    string? JsonInput = null, bool JsonOutput = false, AgentHookCommand? Hook = null);
+
+// "brim hook FORMAT [--name NAME] [--id ID]": the hook input on standard input is read in FORMAT (AgentHookFormats); its sessions show
+// as NAME and are told apart by ID (the tool's id in BrimDeck's settings), both the format's own when not given.
+public sealed record AgentHookCommand(string Format, string Name, string Id);
 
 // The command line shared by the Windows sender (BrimDeck.Notify.exe) and the WSL agent's brim-notify.
 public static class NotifyCommandLine

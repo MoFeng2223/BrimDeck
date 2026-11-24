@@ -329,6 +329,7 @@ public sealed class NoticeHub
     {
         notice.Slot = input.Slot; notice.Glow = input.Glow; notice.Context = input.Context; notice.HideIcon = input.HideIcon;
         notice.Awaited = input.Awaited; notice.Timeout = input.Timeout;
+        notice.Questions = input.Questions; notice.Code = input.Code;
     }
 
     // The sender of a notice that waited for an answer no longer waits (answered, closed, timed out, gone): the notice stays
@@ -352,6 +353,11 @@ public sealed class NoticeHub
     {
         if (Find(id) is not { Viewed: false } notice) return;
         notice.Viewed = true; Recount(); Changed?.Invoke(); Persist?.Invoke(true);
+    }
+    public void DismissAgenda(string id)
+    {
+        if (Find(id) is not { AgendaDismissed: false } notice) return;
+        notice.AgendaDismissed = true; Changed?.Invoke(); Persist?.Invoke(true);
     }
     public void MarkAllViewed()
     {

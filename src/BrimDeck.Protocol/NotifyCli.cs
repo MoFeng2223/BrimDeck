@@ -20,6 +20,11 @@ public sealed record NotifySender(
     // Sends a notice whose sender waits (NoticeMessage.Wait) and keeps the link until BrimDeck says how it ended: the reply,
     // and the "result" that follows a reply marked Waiting (null when the link ended first, or nothing was waited for).
     public Func<NoticeMessage, Task<(NoticeMessage? Reply, NoticeMessage? Result)>>? SendWaiting { get; init; }
+    // Sends as Send does, but gives up sooner when BrimDeck is not there: a hook runs with every prompt and tool, and must not
+    // hold the tool up while BrimDeck is closed.
+    public Func<NoticeMessage, Task<NoticeMessage?>>? SendQuick { get; init; }
+    // Where a hook's input is read from; standard input when null (tests give their own).
+    public Func<Stream>? Input { get; init; }
 }
 
 // brim-notify's commands, shared by the Windows sender (BrimDeck.Notify.exe) and the WSL agent (q-P1.5). Exit codes: 0
@@ -72,6 +77,7 @@ public static class NotifyCli
             }
             case NotifyCommandKind.Run: return await RunProgramAsync(command, sender);
             case NotifyCommandKind.List: return await ListAsync(command, sender);
+            case NotifyCommandKind.Hook: return await HookAsync(command.Hook!, sender);
             default:
             {
                 var message = command.Message!;
@@ -95,6 +101,58 @@ public static class NotifyCli
     }
 
     private static string Word(bool value) => value ? "true" : "false";
+
+    // A hook's input at most (a file write's whole text comes with its approval).
+    private const int MaxHookInput = 8 * 1024 * 1024;
+
+    // brim hook: the tool's hook input from standard input, planned by AgentHook. It always exits with 0 and prints only an
+    // answer given in BrimDeck (or, for a tool that reads an object from every hook, an empty one): unreadable input, BrimDeck not
+    // running, a question dismissed, timed out or sent back to the terminal all leave the tool to its own flow.
+    private static async Task<int> HookAsync(AgentHookCommand hook, NotifySender sender)
+    {
+        System.Text.Json.JsonElement input;
+        try
+        {
+            using var stream = sender.Input?.Invoke() ?? Console.OpenStandardInput();
+            using var buffer = new MemoryStream();
+            var chunk = new byte[16384];
+            int n;
+            while ((n = await stream.ReadAsync(chunk)) > 0)
+            {
+                buffer.Write(chunk, 0, n);
+                if (buffer.Length > MaxHookInput) return Print(AgentHook.Quiet(hook.Format, ""));
+            }
+            ReadOnlySpan<byte> json = buffer.ToArray();
+            if (json.StartsWith("\uFEFF"u8)) json = json[3..];
+            using var document = System.Text.Json.JsonDocument.Parse(json.ToArray());
+            input = document.RootElement.Clone();
+        }
+        catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException or UnauthorizedAccessException) { return Print(AgentHook.Quiet(hook.Format, "")); }
+        bool chinese = System.Globalization.CultureInfo.CurrentUICulture.Name.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
+        var plan = AgentHook.Plan(hook.Format, hook.Id, hook.Name, input, chinese);
+        var quick = sender.SendQuick ?? sender.Send;
+        // BrimDeck is not running: nothing more is tried, so the tool waits for nothing.
+        if (plan.Report is { } report && await quick(report) is null) return Print(plan.Quiet);
+        if (plan.Notice is { } notice && Prepare(notice) is null) await quick(notice);
+        if (plan.Ask is not { } ask || sender.SendWaiting is null) return Print(plan.Quiet);
+        // A long command or file is cut until the message fits a frame.
+        while (Prepare(ask) is not null && ask.Code is { Length: > 256 } code) ask.Code = code[..(code.Length / 2)] + "…";
+        if (Prepare(ask) is not null) return Print(plan.Quiet);
+        var (reply, result) = await sender.SendWaiting(ask);
+        if (reply?.Waiting != true || plan.Reply(result) is not { } output) return Print(plan.Quiet);
+        Print(output);
+        if (plan.Answered is { } answered) await quick(answered);
+        return 0;
+    }
+
+    // Writes a hook's output, if any; a hook exits with 0 either way.
+    private static int Print(string? output)
+    {
+        if (output is null) return 0;
+        Console.Out.Write(output);
+        Console.Out.Flush();
+        return 0;
+    }
 
     // What list --json prints: the words as they are rather than as \u escapes, for a reader as much as for a script.
     private static readonly NoticeJson Readable = new(new System.Text.Json.JsonSerializerOptions(NoticeJson.Default.Options) { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });

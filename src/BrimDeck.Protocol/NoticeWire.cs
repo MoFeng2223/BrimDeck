@@ -102,6 +102,52 @@ public sealed class NoticeMessage
     // The reply to "list": one page of the notices, newest first, and which notices BrimDeck lists (NoticeScopes).
     public List<NoticeEntry>? Notices { get; set; }
     public string? Scope { get; set; }
+    // Questions the sender asks and waits for (an AI agent's multiple-choice question): the user picks options or, where a
+    // question allows it, types an answer of their own. Only with Wait.
+    public List<NoticeQuestion>? Questions { get; set; }
+    // A command or a path the notice is about (what an approval would run), shown as code; never run.
+    public string? Code { get; set; }
+    // Type "result": the answers to Questions, one per question answered.
+    public List<NoticeAnswer>? Answers { get; set; }
+    // Type "agent": a coding agent's session (AgentWire). AppName names the tool, AppId its id (AgentHarnessIds), Session the
+    // session, State its state (AgentSessionStates), Context the project, Title what it was asked, Body what it said last.
+}
+
+// One question of NoticeMessage.Questions.
+public sealed class NoticeQuestion
+{
+    public string Id { get; set; } = "";
+    // A short label over the question (a chip: "Auth method").
+    public string? Header { get; set; }
+    public string Question { get; set; } = "";
+    public bool? MultiSelect { get; set; }
+    // The user may type an answer instead of picking an option.
+    public bool? AllowOther { get; set; }
+    public List<NoticeOption>? Options { get; set; }
+}
+
+public sealed class NoticeOption
+{
+    public string Key { get; set; } = "";
+    public string Label { get; set; } = "";
+    public string? Description { get; set; }
+}
+
+// The answer to one question: the keys of the options picked, and the words typed (AllowOther).
+public sealed class NoticeAnswer
+{
+    public string Id { get; set; } = "";
+    public List<string>? Keys { get; set; }
+    public string? Text { get; set; }
+}
+
+// The states of a coding agent's session (NoticeMessage.State of type "agent").
+public static class AgentSessionStates
+{
+    // Started: the session began. Working: it works on a prompt. Approval: it waits for a permission. Question: it asks the
+    // user a question. Done: it finished its turn. Idle: it waits for the next prompt. Ended: the session closed.
+    public const string Started = "started", Working = "working", Approval = "approval", Question = "question", Done = "done", Idle = "idle", Ended = "ended";
+    public static readonly IReadOnlySet<string> All = new HashSet<string> { Started, Working, Approval, Question, Done, Idle, Ended };
 }
 
 // One notice as "list" gives it: what a script needs to find it and to close or remove it by Id.
@@ -187,6 +233,8 @@ public static class NoticeTypes
     public const string Result = "result";
     // A sender asks for the notices (a page at a time), or for one to be removed from the notices page.
     public const string List = "list", Remove = "remove";
+    // A coding agent's hook reports its session's state (no notice of its own).
+    public const string Agent = "agent";
 }
 
 public static class NoticeResults
@@ -226,6 +274,8 @@ public static class NoticeProtocol
     // One frame's payload at most; a longer frame is refused and the connection closed.
     public const int MaxFrame = 64 * 1024;
     public const int MaxTitle = 256, MaxBody = 4000, MaxActions = 8, MaxField = 256, MaxActionValue = 2048;
+    // An agent's question: questions in one notice, options in one question, the words of an option, of a typed answer, of a code block.
+    public const int MaxQuestions = 4, MaxOptions = 12, MaxOptionText = 512, MaxAnswerText = 4000, MaxCode = 4000;
     // How long a sender may ask a notice to stay (and wait for it) at most, and at least.
     public const long MaxTimeoutMs = 30L * 60 * 1000, MinTimeoutMs = 1000;
     // A run's duration at most (about 100 years): larger values cannot be turned into a time span.
@@ -310,8 +360,10 @@ public static class NoticeProtocol
     {
         if (message.Version < 1 || message.Version > Version) return "unsupported-version";
         if (message.Type is not (NoticeTypes.Notify or NoticeTypes.Close or NoticeTypes.Status or NoticeTypes.Action or NoticeTypes.Dismissed or NoticeTypes.Reply or NoticeTypes.Result
-            or NoticeTypes.List or NoticeTypes.Remove))
+            or NoticeTypes.List or NoticeTypes.Remove or NoticeTypes.Agent))
             return "unknown-type";
+        if (message.Type == NoticeTypes.Agent && (string.IsNullOrWhiteSpace(message.AppId) || string.IsNullOrWhiteSpace(message.Session) || message.State is null || !AgentSessionStates.All.Contains(message.State)))
+            return "bad-agent";
         if (message.Type == NoticeTypes.Remove && string.IsNullOrWhiteSpace(message.NoticeId) && string.IsNullOrWhiteSpace(message.ReplaceId)) return "no-target";
         // A time-kind notice may come without text: BrimDeck names it by its kind ("Timer", "Stopwatch").
         if (message.Type == NoticeTypes.Notify && string.IsNullOrWhiteSpace(message.Title) && string.IsNullOrWhiteSpace(message.Body) && message.ExitCode is null
@@ -353,6 +405,22 @@ public static class NoticeProtocol
         message.ActionKey = Clip(message.ActionKey, 64);
         message.NoticeId = Clip(message.NoticeId, MaxField);
         message.Cursor = Clip(message.Cursor, MaxField);
+        message.Code = Clip(message.Code, MaxCode);
+        if (message.Questions is { } questions)
+            message.Questions = questions.Where(q => q is not null && !string.IsNullOrWhiteSpace(q.Question)).Take(MaxQuestions).Select((q, i) => new NoticeQuestion
+            {
+                Id = Clip(string.IsNullOrWhiteSpace(q.Id) ? i.ToString(CultureInfo.InvariantCulture) : q.Id, 64)!, Header = Clip(q.Header, 64), Question = Clip(q.Question, MaxOptionText)!,
+                MultiSelect = q.MultiSelect, AllowOther = q.AllowOther,
+                Options = q.Options?.Where(o => o is not null && !string.IsNullOrWhiteSpace(o.Label)).Take(MaxOptions).Select((o, j) => new NoticeOption
+                {
+                    Key = Clip(string.IsNullOrWhiteSpace(o.Key) ? j.ToString(CultureInfo.InvariantCulture) : o.Key, 64)!, Label = Clip(o.Label, MaxOptionText)!, Description = Clip(o.Description, MaxOptionText)
+                }).ToList()
+            }).ToList();
+        if (message.Answers is { } answers)
+            message.Answers = answers.Where(a => a is not null && !string.IsNullOrWhiteSpace(a.Id)).Take(MaxQuestions).Select(a => new NoticeAnswer
+            {
+                Id = Clip(a.Id, 64)!, Keys = a.Keys?.Where(k => !string.IsNullOrWhiteSpace(k)).Take(MaxOptions).Select(k => Clip(k, 64)!).ToList(), Text = Clip(a.Text, MaxAnswerText)
+            }).ToList();
         if (message.Actions is { } actions)
             message.Actions = actions.Where(a => a is not null && !string.IsNullOrWhiteSpace(a.Key) && !string.IsNullOrWhiteSpace(a.Label))
                 .Take(MaxActions).Select(a => new NoticeActionInfo

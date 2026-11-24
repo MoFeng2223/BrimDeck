@@ -53,6 +53,7 @@ public partial class MainWindow
         CompactPart.Rings => new(DeckPage.Usage),
         CompactPart.Transfer => new(DeckPage.Clipboard, Files: true),
         CompactPart.Notices => new(DeckPage.Notices),
+        CompactPart.Agents => new(DeckPage.Notices),
         _ => new(null),
     };
 

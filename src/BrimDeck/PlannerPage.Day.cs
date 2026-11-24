@@ -77,14 +77,15 @@ internal sealed partial class PlannerPage
     }
 
     // A press on the panel outside the box being typed in: what was typed is kept and the keyboard goes back to where it came from.
-    // A press in the form, or in another of the page's boxes, is the typing's own.
+    // A press in another of the page's boxes is the typing's own. A press elsewhere in the form takes the keyboard from its box but
+    // leaves it with the panel, so the form and the panel stay open.
     public void PressedAt(object? source)
     {
         _pressing = true;
         if (!IsKeyboardFocusWithin || source is not DependencyObject pressed) return;
-        if (_form is { } form && Within(pressed, form)) return;
         for (var node = pressed; node is not null; node = node is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node))
             if (node is TextBoxBase && Within(node, this)) return;
+        if (_form is { } form && Within(pressed, form)) { Keyboard.ClearFocus(); return; }
         SaveNote();
         CommitTodo();
         _deck.AgendaEndTyping();
@@ -446,7 +447,6 @@ internal sealed partial class PlannerPage
             bool choice = blocks;
             var button = AgendaDraw.Segment(Look, icon, name, on, () => SetBlocks(choice), bright => ((Path)((Canvas)icon.Child).Children[0]).Stroke = UI.Brush(bright ? Look.Primary : Look.Secondary),
                 24, new Thickness(7, 0, 7, 0));
-            button.ToolTip = name;
             segments.Add(button);
         }
         // Two pixels of track around 24 high segments: as tall as the add bar beside it. Drawn for the other choice than last

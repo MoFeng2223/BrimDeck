@@ -343,11 +343,16 @@ internal sealed class NoticeCenter : IDisposable
         {
             NoticePipeServer.Answer Refuse(string why) => new(NoticeProtocol.Reply(NoticeResults.Rejected, why, message.EventId));
             if (_disposed) return Refuse("shutting-down");
+            // An agent's session state shows on the collapsed row whether or not live notices are on.
+            if (message.Type == NoticeTypes.Agent)
+                return AgentReport is { } report ? (Admit("agent") ? new(report(message)) : Refuse("rate-limited")) : Refuse("unknown-type");
             if (!_enabled) return Refuse("notices-off");
             if (message.Type == NoticeTypes.Status) return new(NoticeProtocol.Reply(NoticeResults.Accepted, StatusLine(), message.EventId));
             if (message.Type == NoticeTypes.List) return Admit("pipe") ? new(ListReply(message)) : Refuse("rate-limited");
             if (message.Type != NoticeTypes.Notify) return Refuse("unknown-type");
             if (!Admit("pipe")) return Refuse("rate-limited");
+            // A coding agent's approval or question waits as long as the user chose in the settings (the hook asks no time of its own).
+            if (message.Wait == true && BrimDeck.Core.Agents.AgentKeys.Ask(message.ReplaceId) is not null) message.TimeoutMs = Settings.AgentWaitMinutes * 60_000L;
             var input = NoticeIntake.FromPipe(message);
             var outcome = Receive(input);
             var reply = Reply(outcome, message.EventId);
@@ -413,11 +418,33 @@ internal sealed class NoticeCenter : IDisposable
         return result;
     }
 
-    private static void Tell(Waiter waiter, string result, string? key)
+    private static void Tell(Waiter waiter, string result, string? key, List<NoticeAnswer>? answers = null)
     {
         waiter.Timer.Stop();
-        waiter.Result.TrySetResult(new NoticeMessage { Type = NoticeTypes.Result, Result = result, ActionKey = key });
+        waiter.Result.TrySetResult(new NoticeMessage { Type = NoticeTypes.Result, Result = result, ActionKey = key, Answers = answers });
     }
+
+    // The key of the "action" a sender receives with the answers to its questions.
+    public const string AnswerKey = "answer";
+
+    // The user answered the notice's questions: the sender hears the answers (one per question) and the notice leaves the island.
+    // False when nobody waits for them any more.
+    public bool Answer(Notice notice, List<NoticeAnswer> answers)
+    {
+        Hub.MarkViewed(notice.Id);
+        if (!_waits.Remove(notice.Id, out var waiter)) return false;
+        Tell(waiter, NoticeWaits.Action, AnswerKey, answers);
+        Hub.Answered(notice.Id);
+        Withdraw(notice.Id);
+        Answered?.Invoke(notice);
+        return true;
+    }
+
+    // Takes a coding agent's report of its session (AgentCenter) and gives the reply; set once at start.
+    public Func<NoticeMessage, NoticeMessage>? AgentReport { get; set; }
+
+    // A notice its sender waited for was answered here (a button or the questions): the agents' sessions work again.
+    public event Action<Notice>? Answered;
 
     // Whether a sender still waits for the notice's answer.
     public bool Awaits(Notice notice) => _waits.ContainsKey(notice.Id);
@@ -460,7 +487,7 @@ internal sealed class NoticeCenter : IDisposable
             case NoticeActionKind.Copy: done = Copy(action.Value ?? ""); break;
             case NoticeActionKind.Open: done = await OpenTargetAsync(action.Value ?? ""); break;
             default:
-                if (_waits.ContainsKey(notice.Id)) { EndWait(notice.Id, NoticeWaits.Action, action.Key); return true; }
+                if (_waits.ContainsKey(notice.Id)) { EndWait(notice.Id, NoticeWaits.Action, action.Key); Answered?.Invoke(notice); return true; }
                 return Invoke(notice, action.Key);
         }
         if (!done) return false;

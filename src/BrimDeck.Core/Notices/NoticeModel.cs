@@ -104,6 +104,10 @@ public sealed record NoticeInput
     public bool Awaited { get; init; }
     // How long it may stay until handled; null takes AttentionCoordinator.PersistentLimit.
     public TimeSpan? Timeout { get; init; }
+    // Questions its sender waits to have answered (NoticeMessage.Questions); empty for every other notice.
+    public IReadOnlyList<BrimDeck.Protocol.NoticeQuestion> Questions { get; init; } = [];
+    // A command or a path it is about (NoticeMessage.Code), shown as code.
+    public string Code { get; init; } = "";
 }
 
 // A notice BrimDeck keeps. Id is BrimDeck's own; Revision counts updates, so a view can tell a changed notice apart.
@@ -137,6 +141,9 @@ public sealed class Notice
     // Seen in BrimDeck: its details were opened or it was listed on the recent notices page. Says nothing about the source
     // application's own read state.
     public bool Viewed { get; set; }
+    // The strip offering to add the notice to the planner (or showing what it added) was closed: the page no longer offers it,
+    // in the focus or in the list. A plain flag, as Call is, so that an older BrimDeck still reads the saved notices.
+    public bool AgendaDismissed { get; set; }
     public int Revision { get; set; }
     public NoticeTiming? Timing { get; set; }
     // An incoming call (NoticeInput.Call): shown with the call mark and as urgent as a ringing alarm. A plain flag, so that
@@ -157,6 +164,9 @@ public sealed class Notice
     [JsonIgnore] public bool Unlisted { get; set; }
     [JsonIgnore] public bool Awaited { get; set; }
     [JsonIgnore] public TimeSpan? Timeout { get; set; }
+    // NoticeInput.Questions: answered only while the sender waits, so not saved either.
+    [JsonIgnore] public IReadOnlyList<BrimDeck.Protocol.NoticeQuestion> Questions { get; set; } = [];
+    public string Code { get; set; } = "";
     [JsonIgnore] public bool HasProgress => Progress is not null;
     [JsonIgnore] public NoticeTimeKind TimeKind => Timing?.Kind ?? NoticeTimeKind.None;
     public Notice Copy() { var copy = (Notice)MemberwiseClone(); copy.Actions = [.. Actions]; copy.Timing = Timing?.Copy(); return copy; }

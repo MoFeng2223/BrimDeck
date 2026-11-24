@@ -106,6 +106,8 @@ public sealed partial class SettingsWindow
                 Loc.T("显示哪些设备、是否显示数字，在“设备电量”设置页中选择。", "Which devices show, and whether with figures, is chosen on the device batteries settings page.")),
             CompactPart.Notices => (Loc.T("通知", "Notices"), style == CompactStyle.Notch ? S.NotchNotices : S.CapsuleNotices,
                 Loc.T("显示未读通知的条数，没有时不显示，单击打开通知页。需要在“展开外观”中打开灵动通知。", "Shows how many notices are unread, and nothing when none are; clicking it opens the notices page. Needs live notices on under Expanded view.")),
+            CompactPart.Agents => (Loc.T("AI 编程工具", "AI coding tools"), S.ShowsAgents(style),
+                Loc.T("显示正在运行、等待审批或回答、刚刚完成的会话，没有时不显示，单击打开通知页。需要先在“AI 编程工具”设置页中为工具安装钩子。", "Shows the sessions that are working, waiting for approval or an answer, or just finished, and nothing when there are none; clicking it opens the notices page. Install the tools' hooks on the AI coding tools settings page first.")),
             _ => (Loc.T("系统监控", "System monitor"), S.ShowsMonitor(style), null)
         };
         void Show(bool on) => Change(s =>
@@ -118,6 +120,7 @@ public sealed partial class SettingsWindow
                 case CompactPart.Transfer: if (notch) s.NotchTransfer = on; else s.CapsuleTransfer = on; break;
                 case CompactPart.Devices: if (notch) s.NotchDevices = on; else s.CapsuleDevices = on; break;
                 case CompactPart.Notices: if (notch) s.NotchNotices = on; else s.CapsuleNotices = on; break;
+                case CompactPart.Agents: if (notch) s.NotchAgents = on; else s.CapsuleAgents = on; break;
                 default: if (notch) s.NotchMonitor = on; else s.CapsuleMonitor = on; break;
             }
         });

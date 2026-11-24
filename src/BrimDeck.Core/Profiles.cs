@@ -79,7 +79,7 @@ public static class Profiles
         nameof(DeckSettings.NoticeWslDistros), nameof(DeckSettings.NoticeCommandAccess), nameof(DeckSettings.NoticeDefaultLevel), nameof(DeckSettings.NoticeStyles), nameof(DeckSettings.NoticeStripIcons),
         nameof(DeckSettings.NoticeCodes), nameof(DeckSettings.NoticeRespectFocus), nameof(DeckSettings.NoticesPausedUntil),
         nameof(DeckSettings.NoticeHistory), nameof(DeckSettings.NoticeHistoryHours), nameof(DeckSettings.NoticeHotkey),
-        nameof(DeckSettings.NoticeApps), nameof(DeckSettings.NoticeAppsListed)
+        nameof(DeckSettings.NoticeApps), nameof(DeckSettings.NoticeAppsListed), nameof(DeckSettings.AgentWaitMinutes), nameof(DeckSettings.AgentHarnessesFound)
     };
 
     public static bool IsProfileKey(string key) => !GlobalKeys.Contains(key);

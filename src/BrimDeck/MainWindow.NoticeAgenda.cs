@@ -93,7 +93,8 @@ public partial class MainWindow
     {
         var code = NoticeCodes.Words(notice, Settings.NoticeCodes).Hit;
         var read = AgendaRead(notice);
-        if (!AgendaOffered || read.Kind is NoticeAgendaKind.None or NoticeAgendaKind.Code) return new(NoticeAgendaRead.None, [], null, code);
+        // A strip the user closed is not offered again (StripClose); the verification code still is.
+        if (!AgendaOffered || notice.AgendaDismissed || read.Kind is NoticeAgendaKind.None or NoticeAgendaKind.Code) return new(NoticeAgendaRead.None, [], null, code);
         var open = NoticeAgenda.Open(read, now);
         var added = AddedFrom(notice.Id);
         return new(open, open.Kind == NoticeAgendaKind.Times ? NoticeAgenda.NotAdded(open.Times, added) : [], added, code);
@@ -138,6 +139,7 @@ public partial class MainWindow
         edit.Margin = new Thickness(0, 0, 6, 0); edit.VerticalAlignment = VerticalAlignment.Center;
         actions.Children.Add(edit);
         actions.Children.Add(add);
+        actions.Children.Add(StripClose(notice));
         FitStrip(frame, compact =>
         {
             words.Text = compact ? brief : label;
@@ -191,6 +193,7 @@ public partial class MainWindow
             StripLink(Loc.T("撤销", "Undo"), item is not null ? Loc.T("撤销加入日程", "Remove the added event") : Loc.T("撤销加入待办", "Remove the added to-do"), undo)
         ];
         foreach (var link in links) actions.Children.Add(link);
+        actions.Children.Add(StripClose(notice));
         // Narrow, "已加入" alone, without the tick, and the three words closer together leave room for all three.
         FitStrip(frame, compact =>
         {
@@ -385,6 +388,15 @@ public partial class MainWindow
         if (face.Child is TextBlock block) block.Text = text;
     }
 
+    // "×" at the strip's right end: closes the strip for this notice, which then offers nothing more for the planner (kept with
+    // the notice, NoticeHub.DismissAgenda). What it added stays in the planner.
+    private Button StripClose(Notice notice)
+    {
+        var close = AgendaDraw.IconButton(Look, CloseIcon, Loc.T("关闭", "Close"), () => _app.Notices.Hub.DismissAgenda(notice.Id));
+        close.Margin = new Thickness(4, 0, 0, 0); close.VerticalAlignment = VerticalAlignment.Center;
+        return close;
+    }
+
     // A word on the strip that acts ("查看", "撤销"): no fill until the pointer is on it.
     private static Button StripLink(string text, string name, Action click)
     {
@@ -411,6 +423,7 @@ public partial class MainWindow
     private const string CalendarIcon = "M 8,2 V 6 M 16,2 V 6 M 5,4 H 19 A 2,2 0 0 1 21,6 V 20 A 2,2 0 0 1 19,22 H 5 A 2,2 0 0 1 3,20 V 6 A 2,2 0 0 1 5,4 Z M 3,10 H 21";
     private const string CalendarAddIcon = "M 8,2 V 6 M 16,2 V 6 M 21,13 V 6 A 2,2 0 0 0 19,4 H 5 A 2,2 0 0 0 3,6 V 20 A 2,2 0 0 0 5,22 H 13 M 3,10 H 21 M 16,19 H 22 M 19,16 V 22";
     private const string CheckIcon = "M 20,6 L 9,17 L 4,12";
+    private const string CloseIcon = "M 18,6 L 6,18 M 6,6 L 18,18";
     private const string PencilIcon = "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5zM15 5l4 4";
     private const string KeyIcon = "M 2.586,17.414 A 2,2 0 0 0 2,18.828 V 21 A 1,1 0 0 0 3,22 H 6 A 1,1 0 0 0 7,21 V 20 A 1,1 0 0 1 8,19 H 9 A 1,1 0 0 0 10,18 V 17 A 1,1 0 0 1 11,16 H 11.172 A 2,2 0 0 0 12.586,15.414 L 13.4,14.6 A 6.5,6.5 0 1 0 9.4,10.6 Z";
 

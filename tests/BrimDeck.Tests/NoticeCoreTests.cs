@@ -76,6 +76,11 @@ internal static class NoticeCoreTests
         check("Marking viewed lowers the count", gone.Viewed && unviewed == hub.Notices.Count(n => !n.Viewed));
         hub.MarkAllViewed();
         check("Marking all viewed clears the count", hub.UnviewedCount == 0);
+        int persisted = 0;
+        hub.Persist += _ => persisted++;
+        hub.DismissAgenda(gone.Id);
+        hub.DismissAgenda(gone.Id);
+        check("Closing a notice's planner strip marks it once and saves it", gone.AgendaDismissed && persisted == 1);
         check("Deleting removes one notice", hub.Delete(gone.Id) && hub.Find(gone.Id) is null && !hub.Delete("missing"));
         check("Known applications are remembered", hub.KnownApps.Any(app => app.Key == "cli:make"));
 
@@ -396,13 +401,13 @@ internal static class NoticeCoreTests
         var history = new NoticeHistory(folder, new NoticeHistory.PlainProtector());
         check("A missing history file is empty", history.Load(out var none, out _) == NoticeHistoryState.Empty && none.Count == 0);
         var notice = new Notice { InstanceKey = "k", AppKey = "wsl:Ubuntu:make", AppName = "make", Title = "构建", Body = "完成", ReceivedAt = T0, Category = NoticeCategory.Success, Progress = .5,
-            Actions = [new("open", "Open")], Viewed = true };
+            Actions = [new("open", "Open")], Viewed = true, AgendaDismissed = true };
         history.Save([notice], [new NoticeKnownApp { Key = "wsl:Ubuntu:make", Name = "make", LastSeen = T0 }]);
         var raw = File.ReadAllBytes(history.FilePath);
         check("The history file is written through the protector", raw.AsSpan(0, 4).SequenceEqual("BDN1"u8) && raw.AsSpan(4, 5).SequenceEqual("PLAIN"u8) && !File.Exists(history.FilePath + ".tmp"));
         var state = history.Load(out var notices, out var apps);
         check("Saved notices load back", state == NoticeHistoryState.Loaded && notices.Single().Title == "构建" && notices[0].Category == NoticeCategory.Success
-            && notices[0].Actions.Single().Key == "open" && notices[0].Viewed && apps.Single().Name == "make");
+            && notices[0].Actions.Single().Key == "open" && notices[0].Viewed && notices[0].AgendaDismissed && apps.Single().Name == "make");
         File.WriteAllBytes(history.FilePath, [.. "BDN1"u8, 1, 2, 3]);
         check("A file that cannot be decrypted is reported, not thrown", history.Load(out _, out _) == NoticeHistoryState.Unreadable);
         File.WriteAllBytes(history.FilePath, "garbage"u8.ToArray());
@@ -505,7 +510,8 @@ internal static class NoticeCoreTests
         check("The notices' count shows on the style it is on for, never on the indicator", strip.ShowsNotices(CompactStyle.Capsule) && !strip.ShowsNotices(CompactStyle.Notch) && !strip.ShowsNotices(CompactStyle.Line));
         strip.NoticesPage = false;
         check("The notices' count hides with the notices page", !strip.ShowsNotices(CompactStyle.Capsule));
-        check("The notices' count is part 7, added at the end of an order saved without it", (int)CompactPart.Notices == 7 && CompactParts.Normalize([CompactPart.Rings]).Last() == CompactPart.Notices);
+        check("The notices' count is part 7, added at the end of an order saved without it, before the coding agents (part 8)", (int)CompactPart.Notices == 7 && (int)CompactPart.Agents == 8
+            && CompactParts.Normalize([CompactPart.Rings]).TakeLast(2).SequenceEqual([CompactPart.Notices, CompactPart.Agents]));
     }
 
     private static void SettingsValues(string root, Action<string, bool> check)

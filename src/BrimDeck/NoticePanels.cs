@@ -112,6 +112,11 @@ internal sealed class NoticeButtons : Panel
 {
     public const double LineGap = 8;
     public bool MainLast { get; set; }
+    // Turns the main button, last, into a round icon (true) or back into its words (false). Where the row does not fit one line
+    // with the words, the main button shows the icon, so the row stays on one line; it wraps only where even that does not fit.
+    public Action<bool>? CompactMain { get; set; }
+    private bool _compact;
+    private double _fullMain;
     private readonly List<Point> _at = [];
 
     protected override Size MeasureOverride(Size available)
@@ -119,10 +124,20 @@ internal sealed class NoticeButtons : Panel
         _at.Clear();
         double x = 0, y = 0, line = 0, widest = 0;
         var open = new Size(double.PositiveInfinity, double.PositiveInfinity);
+        foreach (UIElement child in Children) child.Measure(open);
+        if (MainLast && CompactMain is { } compactMain && Children.Count > 1 && !double.IsInfinity(available.Width))
+        {
+            var main = Children[^1];
+            // The width with the words, kept from when they showed: the icon's would always fit.
+            if (!_compact) _fullMain = main.DesiredSize.Width;
+            double others = 0;
+            for (int i = 0; i < Children.Count - 1; i++) others += Children[i].DesiredSize.Width;
+            bool compact = others + _fullMain > available.Width;
+            if (compact != _compact) { _compact = compact; compactMain(compact); main.Measure(open); }
+        }
         for (int i = 0; i < Children.Count; i++)
         {
             var child = Children[i];
-            child.Measure(open);
             var (w, h) = (child.DesiredSize.Width, child.DesiredSize.Height);
             if (x > 0 && x + w > available.Width) { y += line + LineGap; x = 0; line = 0; }
             // The main button, last, goes to the right end of its line (or, on a line of its own, of the row).

@@ -141,12 +141,18 @@ public partial class MainWindow
         return true;
     }
 
-    // A press on the panel outside the form while typing in it: the form stays, the keyboard goes back.
+    // A press on the panel outside the form while typing in it: the form stays, the keyboard goes back. A press in the form but not
+    // in one of its boxes takes the keyboard from the box and leaves it with the panel, so the form and the panel stay open.
     private void NoticeFormPressedAt(object? source)
     {
         if (_noticeForm is not { } state || !state.Form.IsKeyboardFocusWithin || source is not DependencyObject pressed) return;
+        bool inForm = false;
         for (var node = pressed; node is not null; node = node is Visual ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node))
-            if (ReferenceEquals(node, state.Form)) return;
+        {
+            if (node is TextBoxBase) return;
+            if (ReferenceEquals(node, state.Form)) { inForm = true; break; }
+        }
+        if (inForm) { Keyboard.ClearFocus(); return; }
         AgendaEndTyping();
         Keyboard.ClearFocus();
     }

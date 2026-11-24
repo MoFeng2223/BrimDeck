@@ -46,6 +46,7 @@ public partial class MainWindow
         _noticesSubscribed = true;
         _app.Notices.Changed += NoticesChanged;
         SubscribeAgenda();
+        SubscribeAgents();
         _app.Notices.Icons.Loaded += NoticeIconLoaded;
         PrepareNoticeWindow();
     }
@@ -69,6 +70,7 @@ public partial class MainWindow
         if (_noticesSubscribed) { _app.Notices.Changed -= NoticesChanged; _app.Notices.Icons.Loaded -= NoticeIconLoaded; }
         _noticesSubscribed = false;
         UnsubscribeAgenda();
+        UnsubscribeAgents();
         if (_app.Notices is not null) { _liveRows.Clear(); WatchPageLive(); }
         _noticeWindow?.Close(); _noticeWindow = null;
         _bootNotice?.Stop(); _noticeAfterBoot = null;
@@ -361,7 +363,7 @@ public partial class MainWindow
     private bool UpdateNoticeRows()
     {
         var center = _app.Notices;
-        if (NoticeFormKeepsPage(center)) return true;
+        if (NoticeFormKeepsPage(center) || QuestionFormKeepsPage(center)) return true;
         if (_pageKey != NoticePageKey(center)) return false;
         var listed = Listed(center);
         if (_noticeBatches is { Pending: true } batches)
@@ -451,6 +453,8 @@ public partial class MainWindow
         var now = DateTimeOffset.UtcNow;
         if (notices.FirstOrDefault(n => n.Call && n.SourcePresent && now - n.ReceivedAt < CallFocus) is { } call) return call;
         if (_noticeFocus is not null && notices.FirstOrDefault(n => n.Id == _noticeFocus) is { } picked) return picked;
+        // A sender that waits for an answer (an approval, a question) comes before the newest notice, the newest of them first.
+        if (notices.FirstOrDefault(n => n.Awaited && center.Awaits(n)) is { } waiting) return waiting;
         return notices[0];
     }
 
@@ -543,9 +547,10 @@ public partial class MainWindow
         hero.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         hero.ColumnDefinitions.Add(new ColumnDefinition());
         DockPanel.SetDock(hero, System.Windows.Controls.Dock.Top); stack.Children.Add(hero);
+        // The cover is drawn at 56 and shown smaller on a narrow column (HeroNarrow), leaving the words more room.
         var plate = NoticePlate(notice, 56);
-        plate.VerticalAlignment = VerticalAlignment.Center;
-        hero.Children.Add(plate);
+        var cover = new Viewbox { Width = 56, Height = 56, Stretch = Stretch.Uniform, Child = plate, VerticalAlignment = VerticalAlignment.Center };
+        hero.Children.Add(cover);
         // The icon, the title and the lines beside them open the application, as the main button does.
         if (center.CanOpen(notice))
         {
@@ -557,21 +562,42 @@ public partial class MainWindow
         Grid.SetColumn(who, 1); hero.Children.Add(who);
         // The sender's second line (a project, a branch, a session) stands between the source and the time.
         var source = SelectableWords(notice.AppName + (notice.Context.Length > 0 ? " · " + notice.Context : "") + " · " + NoticeText.Relative(notice.ReceivedAt, now), 12, 17, UI.Secondary, line: true);
-        who.Children.Add(source);
+        who.Children.Add(TrimmedLine(source));
         // A verification code is hidden wherever the notice shows its words, and a screen reader is told so instead of hearing dots.
         var shown = NoticeCodes.Words(notice, Settings.NoticeCodes);
         var title = SelectableWords(shown.Title.Length > 0 ? shown.Title : notice.AppName, 19, 25, UI.Primary, line: true, FontWeights.SemiBold);
         title.Margin = new Thickness(0, 2, 0, 0);
         if (shown.HasCode && notice.Title.Length > 0) AutomationProperties.SetName(title, shown.SpokenTitle);
-        who.Children.Add(title);
+        who.Children.Add(TrimmedLine(title));
         string context = NoticeFormOpen(notice) && NoticeText.Summary(shown.Body) is { Length: > 0 } summary ? summary : notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? NoticeText.CategoryName(notice.Category) : Loc.T("来源已关闭这条通知", "Closed at the source");
-        if (context.Length > 0) { var ctx = SelectableWords(context, 12, 17, UI.Tertiary, line: true); ctx.Margin = new Thickness(0, 2, 0, 0); who.Children.Add(ctx); }
+        Grid? contextLine = null;
+        if (context.Length > 0) { var ctx = SelectableWords(context, 12, 17, UI.Tertiary, line: true); ctx.Margin = new Thickness(0, 2, 0, 0); contextLine = TrimmedLine(ctx); who.Children.Add(contextLine); }
+        // On a narrow column the cover is smaller, and the third line is left out where it does not fit whole: cut, it says too
+        // little to keep. The title and the line above it end in "…" (TrimmedLine).
+        hero.SizeChanged += (_, e) =>
+        {
+            if (!e.WidthChanged) return;
+            bool narrow = e.NewSize.Width < HeroNarrow;
+            cover.Width = cover.Height = narrow ? 40 : 56;
+            who.Margin = new Thickness(narrow ? 10 : 14, 0, 0, 0);
+        };
+        if (contextLine is not null)
+            who.SizeChanged += (_, e) =>
+            {
+                if (!e.WidthChanged || contextLine.Children[1] is not TextBlock words) return;
+                words.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                double whole = words.DesiredSize.Width;
+                words.InvalidateMeasure();
+                contextLine.Visibility = whole <= e.NewSize.Width ? Visibility.Visible : Visibility.Collapsed;
+            };
 
         // The buttons, at the foot of the column.
         var buttons = FocusButtons(notice, center);
         DockPanel.SetDock(buttons, System.Windows.Controls.Dock.Bottom); stack.Children.Add(buttons);
         // The form adding the notice to the planner, or changing what it added, takes the place of the strip and the words.
         if (NoticeFormFor(notice, meta, hero) is { } form) { stack.Children.Add(form); return column; }
+        // A sender's questions take the place of the strip and the words: the questions are the words.
+        if (QuestionFormFor(notice, center) is { } questions) { stack.Children.Add(questions); return column; }
         // Above them, what BrimDeck read from the notice: a time to add to the planner, what was added, a verification code.
         if (NoticeAgendaStrip(notice) is { } strip) { DockPanel.SetDock(strip, System.Windows.Controls.Dock.Bottom); stack.Children.Add(strip); }
 
@@ -584,6 +610,7 @@ public partial class MainWindow
             if (shown.HasCode) AutomationProperties.SetName(body, shown.SpokenBody);
             words.Children.Add(body);
         }
+        if (notice.Code.Length > 0) words.Children.Add(NoticeCodeBlock(notice.Code));
         if (notice.Progress is { } progress) words.Children.Add(ProgressTrack(progress, accent));
         if (group.Count > 1)
         {
@@ -627,7 +654,7 @@ public partial class MainWindow
     }
 
     // Words of the focus that the pointer can select (PanelSelectableText), drawn as the text they replace. line: one line of the
-    // given height, cut at the column's edge (a text box has no ellipsis; a drag along it brings the rest into view); otherwise
+    // given height, cut at the column's edge (TrimmedLine gives it an ellipsis; a drag along it brings the rest into view); otherwise
     // wrapped. A press on them gives the panel the keyboard, so Ctrl+C copies the selection.
     private TextBox SelectableWords(string text, double size, double lineHeight, string color, bool line, FontWeight? weight = null)
     {
@@ -648,6 +675,42 @@ public partial class MainWindow
         };
         _focusWords.Add(box);
         return box;
+    }
+
+    // Below this width (DIP) the hero shows its cover at 40 instead of 56.
+    private const double HeroNarrow = 260;
+
+    // A line of SelectableWords that ends in "…" where the column cuts it. A text box has no ellipsis, so while its words are cut
+    // and nothing in them is selected or pressed, the same words in a TextBlock that trims them are shown in its place. The box
+    // stays under the pointer (it is only made transparent), so a press shows it again, and a drag selects and brings the rest into view.
+    private static Grid TrimmedLine(TextBox box)
+    {
+        var shown = new TextBlock
+        {
+            Text = box.Text, FontFamily = box.FontFamily, FontSize = box.FontSize, FontWeight = box.FontWeight, Foreground = box.Foreground, FlowDirection = box.FlowDirection,
+            TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, IsHitTestVisible = false, VerticalAlignment = VerticalAlignment.Top,
+            LineHeight = TextBlock.GetLineHeight(box), LineStackingStrategy = LineStackingStrategy.BlockLineHeight, Opacity = 0
+        };
+        var host = new Grid { Margin = box.Margin, Children = { box, shown } };
+        box.Margin = new Thickness(0);
+        bool pressed = false;
+        void Update()
+        {
+            // The trimmed words start where the box's first letter does, which a text box sets in from its edge by itself.
+            if (box.IsLoaded && box.Text.Length > 0 && box.GetRectFromCharacterIndex(0) is { IsEmpty: false } first && double.IsFinite(first.Left) && double.IsFinite(first.Top))
+                shown.Margin = new Thickness(first.Left, first.Top, first.Left, -first.Top);
+            bool trimmed = !pressed && box.SelectionLength == 0 && !box.IsKeyboardFocusWithin && UI.IsCut(shown);
+            if (trimmed && shown.Opacity == 0) box.ScrollToHome();
+            shown.Opacity = trimmed ? 1 : 0;
+            box.Opacity = trimmed ? 0 : 1;
+        }
+        host.SizeChanged += (_, _) => host.Dispatcher.BeginInvoke(Update, System.Windows.Threading.DispatcherPriority.Loaded);
+        box.PreviewMouseLeftButtonDown += (_, _) => { pressed = true; Update(); };
+        box.PreviewMouseLeftButtonUp += (_, _) => { pressed = false; Update(); };
+        box.LostMouseCapture += (_, _) => { pressed = false; Update(); };
+        box.SelectionChanged += (_, _) => { if (!pressed) Update(); };
+        box.LostKeyboardFocus += (_, _) => Update();
+        return host;
     }
 
     // The focus column's selectable words (SelectableWords), from the column built last.
@@ -674,6 +737,7 @@ public partial class MainWindow
     private static (string Text, string? Color) StatusOf(Notice notice, NoticeCenter center)
     {
         if (notice.Call) return (Loc.T("来电", "Incoming call"), CallColor);
+        if (WaitingStatus(notice) is { } waiting) return waiting;
         if (notice.Category == NoticeCategory.Error) return (NoticeText.CategoryName(notice.Category), PanelTheme.Hex("danger"));
         if (notice.Category == NoticeCategory.Warning) return (NoticeText.CategoryName(notice.Category), WaitColor);
         bool latest = center.Hub.Notices.Count > 0 && ReferenceEquals(center.Hub.Notices[0], notice);
@@ -700,8 +764,8 @@ public partial class MainWindow
     // Delete, the notice's own and BrimDeck's actions, and opening the application as the main one on the right.
     private FrameworkElement FocusButtons(Notice notice, NoticeCenter center)
     {
-        // Delete and the notice's own actions, then the main button, which stays at the right; they wrap to a second line where
-        // they do not fit one (at the narrowest page, with two actions), instead of being cut off (NoticeButtons).
+        // Delete and the notice's own actions, then the main button, which stays at the right. Where they do not fit one line, "打开应用"
+        // becomes a round icon like the others; they wrap to a second line only where even that does not fit (NoticeButtons).
         var row = new NoticeButtons { Margin = new Thickness(0, 12, 0, 0) };
         var flow = row.Children;
         // Delete takes the whole conversation the focus shows: left behind, its earlier messages would take the row again.
@@ -736,10 +800,24 @@ public partial class MainWindow
             string open = OpenLabel(notice);
             var main = PillButton(open, open, () => _ = OpenFromPage(notice), primary: true);
             row.MainLast = true;
+            var face = (Border)main.Content;
+            var words = face.Child;
+            var icon = AgendaDraw.Icon(OpenIcon, 14, PanelTheme.Hex("surface"));
+            icon.HorizontalAlignment = HorizontalAlignment.Center; icon.VerticalAlignment = VerticalAlignment.Center;
+            row.CompactMain = compact =>
+            {
+                face.Child = compact ? icon : words;
+                face.Padding = compact ? new Thickness(0) : new Thickness(16, 0, 16, 0);
+                main.Width = compact ? 32 : double.NaN;
+                main.ToolTip = compact ? open : null;
+            };
             flow.Add(main);
         }
         return row;
     }
+
+    // A box with an arrow leaving it at the top right, in the 24 unit box of AgendaDraw.Icon: "打开应用" where its words do not fit.
+    private const string OpenIcon = "M14 4h6v6M20 4l-8.5 8.5M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10";
 
     private static string OpenLabel(Notice notice) => notice.Call ? Loc.T($"打开 {notice.AppName} 接听", $"Answer in {notice.AppName}") : Loc.T("打开应用", "Open app");
 

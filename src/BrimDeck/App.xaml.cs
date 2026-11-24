@@ -31,6 +31,7 @@ public partial class App : Application
     public AppUpdates Updates { get; internal set; } = null!;
     // Dynamic notices (NoticeCenter): created before the panels, which take their turns on the island through it.
     internal NoticeCenter Notices { get; private set; } = null!;
+    internal AgentCenter Agents { get; private set; } = null!;
     // The planner's events, to-dos and notes (agenda.json), shared by every panel.
     internal AgendaCenter Agenda { get; private set; } = null!;
     // The main panel. It owns the tray icon, reads the usage data and takes the settings preview; every other chosen
@@ -143,6 +144,7 @@ public partial class App : Application
         Usage = new UsageService(new DesktopSources(MiMo, DoubaoQuota), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
             kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName), cursorPriceCache: Path.Combine(folder, CursorPrices.FileName));
         Notices = new NoticeCenter(this);
+        Agents = new AgentCenter(Notices);
         Agenda = new AgendaCenter(Store.DirectoryPath, Dispatcher);
         // A source read in the background (Qoder) that ended after its round asks for another round to show it; the first reading
         // of a source always does, a later one only while the panel syncs by itself. That round only shows the result: it does

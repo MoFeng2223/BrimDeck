@@ -16,11 +16,11 @@ public partial class MainWindow
     {
         var button = SwitchButton(CurrentPage);
         _capsuleOn = button;
-        if (!LayoutRetry.Laid(button))
+        if (!CapsuleReady(button))
         {
             // Retried after a layout pass, never by posting itself again: the switch is collapsed while the usage details show, its
             // buttons then keep an invalid measure and their old width, and a retry that posted itself spun the UI thread at 90%.
-            if (!_capsulePending) { _capsulePending = true; LayoutRetry.WhenReady(this, () => LayoutRetry.Laid(SwitchButton(CurrentPage)), () => { _capsulePending = false; PlacePageCapsule(); }); }
+            if (!_capsulePending) { _capsulePending = true; LayoutRetry.WhenReady(this, () => CapsuleReady(SwitchButton(CurrentPage)), () => { _capsulePending = false; PlacePageCapsule(); }); }
             return;
         }
         // The button's set height, not ActualHeight: a height ApplyHeader just set shows in ActualHeight only after the next layout pass.
@@ -42,6 +42,10 @@ public partial class MainWindow
         { EasingFunction = Soft.Follow, FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop });
     }
     private bool _capsulePending;
+    // The button is laid out, and so is the row it stands in: a button shown, hidden or moved before it leaves the button's own
+    // measure valid while its place in the row is still the old one until the next layout pass.
+    private static bool CapsuleReady(Button button)
+        => LayoutRetry.Laid(button) && (VisualTreeHelper.GetParent(button) is not UIElement row || row.IsMeasureValid && row.IsArrangeValid);
     // The button the capsule was last placed under.
     private Button? _capsuleOn;
     // The page buttons take the header's button height, and the capsule under the chosen one takes it in the same step: PlacePageCapsule,
@@ -106,9 +110,15 @@ public partial class MainWindow
         UpdateMoreButton();
         double switchWidth = PageSwitchFit.Width(direct, _pagesInMenu.Count > 0, SwitchButtonWidth, SwitchMoreWidth, 2 * PanelHeader.SwitchPadding);
         ApplicationPages.Margin = new Thickness(_header.Side + switchWidth + (shown.Count <= 1 ? 4 : PagerGap), 0, 0, 0);
-        // A capsule under a button that has just been shown or hidden moves to the chosen page's button.
-        if (_capsuleOn is { } on && !ReferenceEquals(on, SwitchButton(CurrentPage))) PlacePageCapsule();
+        // The capsule moves when the chosen page's button changes, and also when the same button moves: the more button stands one
+        // place further left or right when a page leaves or joins the switch (the clock's text or the pager can change the room).
+        var fit = (direct, _pagesInMenu.Count > 0);
+        bool moved = fit != _switchFit;
+        _switchFit = fit;
+        if (_capsuleOn is { } on && (moved || !ReferenceEquals(on, SwitchButton(CurrentPage)))) PlacePageCapsule();
     }
+    // The number of page buttons in the switch, and whether the more button shows, as FitPageSwitch last set them.
+    private (int Direct, bool More) _switchFit;
     // The usage page's application pager (‹ 1/2 ›) while the usage page shows it; 0 otherwise.
     private double PagerWidth()
     {
