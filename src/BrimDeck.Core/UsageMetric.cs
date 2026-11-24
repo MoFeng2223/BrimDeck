@@ -44,7 +44,13 @@ public sealed record UsageMetric(MetricKind Kind, string Label)
     };
     public string ValueText => Kind == MetricKind.Text ? Value : Kind is MetricKind.Balance or MetricKind.Spend ? (AtLeast ? "≥" : "") + (Currency.Length == 0 && Unit.Length > 0 ? Number(Amount!.Value) : Money(Amount!.Value, Currency)) : UsedPercent is { } p ? $"{p:0.#}%" : "—";
     public string ValueSuffix => Kind switch { MetricKind.Text => Value.Length > 0 ? Suffix : "", MetricKind.Balance => Loc.T("可用", "left"), _ => Loc.T("已用", "used") };
-    public string CountText => Kind == MetricKind.Count ? $"{Used:N0} / {Total:N0}" : "";
+    // What a count quota has left of its grant, never below zero.
+    public decimal CountLeft => Math.Max(0, (Total ?? 0) - (Used ?? 0));
+    public string CountText => CountFigure(false);
+    // A count quota's figure: what is used, or with what is left chosen (DeckSettings.QuotaRingRemaining), what is left of the grant,
+    // so the number beside a "left" share is not the amount already spent.
+    public string CountFigure(bool remaining) => Kind == MetricKind.Count && Total is not null
+        ? $"{(remaining ? CountLeft : Used ?? 0):N0} / {Total:N0}" : "";
     public string Description => string.Join("\n", new[] { Kind == MetricKind.Text ? Label : Loc.Label(Label), (ValueText + " " + ValueSuffix).Trim(), Note, ResetText,
         Total is { } total ? (TotalIsTarget ? Kind == MetricKind.Spend ? Loc.T("目标金额：", "Target: ") : Loc.T("目标余额：", "Target balance: ") : Loc.T("总额：", "Total: ")) + (Kind == MetricKind.Count ? total.ToString("N0") + " " + Loc.Label(Unit) : AmountText(total)) : "",
         CountText, Unlimited ? Loc.T("无上限", "No limit") : "", ResetAt is { } reset ? Loc.T("重置时间：", "Resets: ") + $"{reset.LocalDateTime:yyyy-MM-dd HH:mm:ss}" : "",

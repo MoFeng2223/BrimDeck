@@ -44,6 +44,7 @@ try
     CompactDragTests.Run(Check);
     RingLetterTests.Run(root, Check);
     QuotaRingTests.Run(root, Check);
+    QuotaCountTextTests.Run(Check);
     PanelThemeTests.Run(root, Check);
     DaylightTests.Run(root, Check);
     PanelThemeEditorTests.Run(root, Check);
