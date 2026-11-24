@@ -48,9 +48,15 @@ internal static class SettingsMaximizeChecks
                 bool fits = rect.Left == work.Left && rect.Top == work.Top && rect.Right == work.Right && rect.Bottom == work.Bottom;
                 if (!fits) Console.WriteLine($"  window {rect.Left},{rect.Top} {rect.Right - rect.Left}x{rect.Bottom - rect.Top}");
                 check($"A maximized settings window fills the work area of its screen ({name})", fits);
-                var scale = VisualTreeHelperDpi(window);
+                // The scale WPF draws this window at. VisualTreeHelper.GetDpi is not used: WPF decides once, at the process's first
+                // window, whether the process is per-monitor aware, and the checks before this one make windows that are not.
+                var toDevice = PresentationSource.FromVisual(window)!.CompositionTarget!.TransformToDevice;
+                // The window's own DPI (GetDpiForWindow), which holds for a per-monitor aware window wherever the process stands.
+                double expected = GetDpiForWindow(handle) / 96.0;
+                check($"It is drawn at its screen's scale ({name})",
+                    Math.Abs(toDevice.M11 - expected) < 0.001 && Math.Abs(toDevice.M22 - expected) < 0.001);
                 check($"Its content is laid out for the work area, not for the whole screen ({name})",
-                    Math.Abs(window.ActualHeight * scale - (work.Bottom - work.Top)) <= 1 && Math.Abs(window.ActualWidth * scale - (work.Right - work.Left)) <= 1);
+                    Math.Abs(window.ActualHeight * toDevice.M22 - (work.Bottom - work.Top)) <= 1 && Math.Abs(window.ActualWidth * toDevice.M11 - (work.Right - work.Left)) <= 1);
                 window.WindowState = WindowState.Normal;
                 GetWindowRect(handle, out rect);
                 check($"Restored, it goes back to its normal size ({name})", rect.Right - rect.Left < work.Right - work.Left);
@@ -59,8 +65,6 @@ internal static class SettingsMaximizeChecks
         }
     }
 
-    private static double VisualTreeHelperDpi(Window window) => System.Windows.Media.VisualTreeHelper.GetDpi(window).DpiScaleY;
-
     [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct MONITORINFO { public int Size; public RECT Monitor, Work; public uint Flags; }
     private delegate bool MonitorEnum(IntPtr monitor, IntPtr dc, IntPtr rect, IntPtr data);
@@ -68,6 +72,7 @@ internal static class SettingsMaximizeChecks
     [DllImport("user32")] private static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
     [DllImport("shcore")] private static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint x, out uint y);
     [DllImport("user32")] private static extern bool GetWindowRect(IntPtr window, out RECT rect);
+    [DllImport("user32")] private static extern uint GetDpiForWindow(IntPtr window);
     [DllImport("user32", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong(IntPtr window, int index);
     [DllImport("user32", EntryPoint = "SetWindowLongW")] private static extern int SetWindowLong(IntPtr window, int index, int value);
     [DllImport("user32")] private static extern bool SetLayeredWindowAttributes(IntPtr window, uint key, byte alpha, uint flags);
