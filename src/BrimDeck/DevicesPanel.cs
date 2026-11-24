@@ -82,6 +82,7 @@ public partial class MainWindow
 
     private void DevicesChanged()
     {
+        DetectDeviceAlerts();
         if (!_expanded)
         {
             if (!Settings.ShowsDevices(EffectiveStyle) || _alert is not null) return;
@@ -92,6 +93,8 @@ public partial class MainWindow
         if (DevicesKey() != _devicesKey) { RenderDevices(); return; }
         _devicesView.Update(ShownDevices, DevicesSettled, Animates);
     }
+
+    partial void DetectDeviceAlerts();
 
     // The devices the collapsed row shows (DeviceLists.Collapsed), with their colors.
     private StripDevices CurrentStripDevices()

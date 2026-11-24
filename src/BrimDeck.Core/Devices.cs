@@ -228,7 +228,7 @@ public static class DeviceLists
 
 public static class Devices
 {
-    public const int DefaultLowPercent = 15, DefaultWarningPercent = 25;
+    public const int DefaultLowPercent = 15, DefaultWarningPercent = 25, DefaultChargeAlertPercent = 80;
     // The low battery threshold the settings offer.
     public static readonly IReadOnlyList<int> LowChoices = [5, 10, 15, 20, 25, 30];
     // The getting-low threshold the settings offer; it stays above the low one (DeckSettings.Normalize).
@@ -237,6 +237,10 @@ public static class Devices
     // A reading's level: critical at or under the low threshold, elevated at or under the warning one. Charging is never low.
     public static MemoryLevel Level(int? percent, bool charging, int warning, int low)
         => percent is not { } p || charging ? MemoryLevel.Normal : p <= low ? MemoryLevel.Critical : p <= warning ? MemoryLevel.Elevated : MemoryLevel.Normal;
+
+    // True while a device is charging at or above the charge-notice threshold (DeckSettings.DeviceChargeAlertPercent).
+    public static bool ChargeReady(int? percent, bool charging, int threshold = DefaultChargeAlertPercent)
+        => charging && percent is { } p && p >= threshold;
 
     public static int Clamp(int percent) => Math.Clamp(percent, 0, 100);
 

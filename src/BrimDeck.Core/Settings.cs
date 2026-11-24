@@ -737,6 +737,10 @@ public sealed class DeckSettings
     // At or under these charges a battery shows as low and as getting low (Devices.Level).
     public int DeviceLowPercent { get; set; } = Devices.DefaultLowPercent;
     public int DeviceWarningPercent { get; set; } = Devices.DefaultWarningPercent;
+    // Shows the compact notice when a charging device rises to DeviceChargeAlertPercent.
+    public bool DeviceChargeAlerts { get; set; } = true;
+    // At or above this charge while charging, a device can raise a charge notice (DeviceLevels).
+    public int DeviceChargeAlertPercent { get; set; } = Devices.DefaultChargeAlertPercent;
     // Remembers recent battery readings on this PC (DeviceBatteryPace / device-battery-pace.json) to estimate time left and
     // time to full on the devices page. Off by default; collects and keeps no readings while off.
     public bool DeviceBatteryEstimates { get; set; }
@@ -964,6 +968,7 @@ public sealed class DeckSettings
         // Getting low starts above low: a warning at or under the low threshold takes the next choice above it.
         DeviceWarningPercent = Devices.WarningChoices.Contains(DeviceWarningPercent) ? DeviceWarningPercent : Devices.DefaultWarningPercent;
         if (DeviceWarningPercent <= DeviceLowPercent) DeviceWarningPercent = Devices.WarningChoices.First(percent => percent > DeviceLowPercent);
+        DeviceChargeAlertPercent = DeviceChargeAlertPercent is >= 50 and <= 100 ? DeviceChargeAlertPercent : Devices.DefaultChargeAlertPercent;
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
         ClipboardWidth = double.IsFinite(ClipboardWidth) ? Math.Clamp(ClipboardWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : ShelfSizes.Default.Width;
         ClipboardHeight = double.IsFinite(ClipboardHeight) ? Math.Clamp(ClipboardHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ShelfSizes.Default.Height;

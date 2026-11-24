@@ -11,6 +11,7 @@ static class DevicesTests
         Roster(check);
         Earlier(check);
         Levels(check);
+        ChargeAlerts(check);
         Pace(check);
     }
 
@@ -110,8 +111,38 @@ static class DevicesTests
         check("Devices: levels at the low and the warning thresholds", Devices.Level(15, false, 25, 15) == MemoryLevel.Critical && Devices.Level(16, false, 25, 15) == MemoryLevel.Elevated
             && Devices.Level(25, false, 25, 15) == MemoryLevel.Elevated && Devices.Level(26, false, 25, 15) == MemoryLevel.Normal);
         check("Devices: a charging or unreported battery is never low", Devices.Level(3, true, 25, 15) == MemoryLevel.Normal && Devices.Level(null, false, 25, 15) == MemoryLevel.Normal);
+        check("Devices: charge-ready at the threshold while charging", Devices.ChargeReady(80, true) && !Devices.ChargeReady(79, true) && !Devices.ChargeReady(80, false) && !Devices.ChargeReady(null, true));
         check("Devices: figures", Devices.Figure(42) == "42%" && Devices.Figure(null) == "—" && Devices.Figure(130) == "100%");
     }
+
+    private static void ChargeAlerts(Action<string, bool> check)
+    {
+        var levels = new DeviceLevels();
+        var charging = Bt("AA", 70) with { Charging = true };
+        var other = Bt("BB", 70, "Buds", DeviceKind.Earbuds) with { Charging = true };
+        check("Devices: the first charge reading only seeds", levels.Update([charging], 80).Count == 0);
+        check("Devices: still below the threshold raises none", levels.Update([charging with { Percent = 79 }], 80).Count == 0);
+        check("Devices: rising to the threshold while charging raises a notice",
+            levels.Update([charging with { Percent = 80 }], 80) is [{ Device.Key: "bt:AA", Warning: not null }]);
+        check("Devices: staying at or above the threshold raises none again",
+            levels.Update([charging with { Percent = 90 }], 80).Count == 0);
+        check("Devices: unplugging then charging past the threshold raises again",
+            levels.Update([charging with { Percent = 90, Charging = false }], 80).Count == 0
+            && levels.Update([charging with { Percent = 90, Charging = true }], 80) is [{ Device.Key: "bt:AA" }]);
+        check("Devices: already charged on a fresh tracker raises none",
+            new DeviceLevels().Update([charging with { Percent = 85, Charging = true }], 80).Count == 0);
+        var batch = new DeviceLevels();
+        check("Devices: the first look at two devices only seeds both",
+            batch.Update([charging with { Percent = 79 }, other with { Percent = 79 }], 80).Count == 0);
+        var both = batch.Update([charging with { Percent = 80 }, other with { Percent = 80 }], 80);
+        check("Devices: two devices crossing the threshold in one batch both raise",
+            both.Count == 2 && both[0].Device.Key == "bt:AA" && both[1].Device.Key == "bt:BB");
+        var late = new DeviceLevels();
+        check("Devices: a later device's first reading only seeds, even after another was already tracked",
+            late.Update([charging], 80).Count == 0
+            && late.Update([charging, other with { Percent = 90 }], 80).Count == 0);
+    }
+
     private static void Pace(Action<string, bool> check)
     {
         var pace = new DeviceBatteryPace();

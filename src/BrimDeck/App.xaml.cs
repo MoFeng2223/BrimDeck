@@ -520,8 +520,11 @@ public partial class App : Application
     }
     private void UpdateDeviceDemand()
     {
-        // The settings page is not read for with the display off, as a panel is not (its own demand drops then).
-        var demand = _devicePages.Count + _deviceStrips.Count > 0 || _deviceSettings && !DisplayPower.Off ? DeviceDemand.Watch : DeviceDemand.None;
+        // The settings page is not read for with the display off, as a panel is not (its own demand drops then). Charge notices keep
+        // devices watched while the display is on so a rise into the threshold can be seen without the page or strip open, including
+        // a notice enabled only on a shown panel's profile.
+        var demand = _devicePages.Count + _deviceStrips.Count > 0 || (_deviceSettings || Settings.DeviceChargeAlerts || ShownSettings.Any(settings => settings.DeviceChargeAlerts)) && !DisplayPower.Off
+            ? DeviceDemand.Watch : DeviceDemand.None;
         if (Exiting || Devices is null && demand == DeviceDemand.None) return;
         if (Devices is null) { Devices = new DeviceBatteries(Dispatcher); Devices.UsePlan(MemoryPlan); Devices.Changed += DeviceBatteriesChanged; }
         Devices.SetDemand(demand);

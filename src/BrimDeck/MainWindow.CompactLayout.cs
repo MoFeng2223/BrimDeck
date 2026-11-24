@@ -90,11 +90,15 @@ public partial class MainWindow
         var name = UI.Fixed(alert.Name, font, line, Look.Primary, FontWeights.SemiBold); name.ToolTip = alert.Name;
         // The name keeps its 76 DIP cap with an ellipsis; below that, its region cuts it.
         name.MaxWidth = CompactMusicLayout.Whole(76 * scale);
-        // With what is left chosen (DeckSettings.QuotaRingRemaining), the notice and its ring say what is left, as the rings and bars do.
-        bool left = Settings.QuotaRingRemaining;
+        // Device notices show the charge and the warning wording; quotas follow "配额显示" for used vs left.
+        bool device = alert.Device is not null;
+        bool left = !device && Settings.QuotaRingRemaining;
         double share = left ? 100 - Math.Clamp(alert.Used, 0, 100) : alert.Used;
-        var used = UI.Fixed(left ? Loc.T($"{alert.Label}剩余 {share:0}%", $"{alert.Label}{share:0}% left") : Loc.T($"{alert.Label}已用 {alert.Used:0}%", $"{alert.Label}{alert.Used:0}% used"), font, line, Look.Secondary);
-        string shortReset = UI.ShortReset(alert.ResetAt);
+        string detail = device
+            ? (alert.Detail ?? alert.Label.Trim()) + " " + Devices.Figure(alert.Device!.Lowest)
+            : left ? Loc.T($"{alert.Label}剩余 {share:0}%", $"{alert.Label}{share:0}% left") : Loc.T($"{alert.Label}已用 {alert.Used:0}%", $"{alert.Label}{alert.Used:0}% used");
+        var used = UI.Fixed(detail, font, line, Look.Secondary);
+        string shortReset = device ? "" : UI.ShortReset(alert.ResetAt);
         var reset = shortReset.Length > 0 ? UI.Fixed(Loc.T(shortReset + "重置", shortReset.StartsWith("in ", StringComparison.Ordinal) ? "resets " + shortReset : shortReset), font, line, Look.Tertiary) : null;
         double Natural(FrameworkElement element)
         {
@@ -103,12 +107,15 @@ public partial class MainWindow
         }
         double nameWidth = Natural(name), usedWidth = Natural(used), resetWidth = reset is null ? 0 : Natural(reset);
         var layout = CompactAlertLayout.Calculate(double.MaxValue, scale, nameWidth, usedWidth, resetWidth);
+        string ringColor = device
+            ? new DeviceInks(MonitorThemeColors.For(Settings, Look), Settings.DeviceChoices, Settings.DeviceWarningPercent, Settings.DeviceLowPercent, Look).Ring(alert.Device!)
+            : Look.QuotaTheme(alert.Entry);
         if (ColumnFor(shape.Style))
         {
             // A notch on a side edge: the ring, then each text on its own line, cut with an ellipsis to the column.
             double column = SnapDown(ColumnWidth(shape), dpi);
             var stack = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Width = column, Tag = AlertRegionTag };
-            var mark = UI.Ring(share, Look.QuotaTheme(alert.Entry), layout.RingSize, layout.RingThickness, look: Look);
+            var mark = UI.Ring(share, ringColor, layout.RingSize, layout.RingThickness, look: Look);
             mark.HorizontalAlignment = HorizontalAlignment.Center; mark.Margin = new Thickness(0, 0, 0, layout.Gap / 2);
             stack.Children.Add(mark);
             name.MaxWidth = column;
@@ -123,7 +130,7 @@ public partial class MainWindow
             return;
         }
         double row = Math.Max(layout.RingSize, layout.LineHeight);
-        var ring = UI.Ring(share, Look.QuotaTheme(alert.Entry), layout.RingSize, layout.RingThickness, look: Look);
+        var ring = UI.Ring(share, ringColor, layout.RingSize, layout.RingThickness, look: Look);
         var parts = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         if (layout.RingWidth > 0) parts.Children.Add(CompactRegion(ring, layout.RingWidth, layout.RingSize, layout.RingSize, row, RegionAnchor.Left, dpi));
         if (layout.NameWidth > 0) parts.Children.Add(CompactRegion(name, layout.NameWidth, Math.Min(nameWidth, name.MaxWidth), line, row, RegionAnchor.Left, dpi));

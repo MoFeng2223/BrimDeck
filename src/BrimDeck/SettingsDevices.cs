@@ -73,6 +73,9 @@ public partial class SettingsWindow
         };
         Group(Row(Loc.T("预警阈值", "Warning threshold"), warning, help: () => Loc.T("电量不高于此值时显示为偏低，使用预警颜色。", "At or under this level a battery shows as getting low, in its warning color.")),
             Row(Loc.T("告警阈值", "Critical threshold"), low, help: () => Loc.T("电量不高于此值时显示为低电量，使用告警颜色。", "At or under this level a battery shows as low, in its critical color.")));
+        Group(Toggle(Loc.T("充电充足提示", "Charge notices"), S.DeviceChargeAlerts, value => Change(s => s.DeviceChargeAlerts = value), help:
+            Loc.T($"开启后，设备充电到 {S.DeviceChargeAlertPercent}% 及以上时，收起的刘海或胶囊会短暂显示设备名称和电量，约 5 秒后恢复。",
+                $"When on, and a device charges to {S.DeviceChargeAlertPercent}% or more, the collapsed notch or capsule briefly shows its name and charge, then returns after about 5 seconds.")));
         Group(Toggle(Loc.T("电量时间估计", "Battery time estimates"), S.DeviceBatteryEstimates, value =>
         {
             Change(s => s.DeviceBatteryEstimates = value);

@@ -41,15 +41,17 @@ static class DevicesPageTests
     private static void Settings(Action<string, bool> check)
     {
         var defaults = new DeckSettings();
-        check("Devices settings: the page is on, low at 15 % and getting low at 25 %, every device everywhere with its figure, time estimates off, the part off",
-            defaults.DevicesPage && defaults.DeviceLowPercent == 15 && defaults.DeviceWarningPercent == 25 && defaults.DeviceChoices.Count == 0 && defaults.DeviceFigures
+        check("Devices settings: the page is on, low at 15 % and getting low at 25 %, charge notices on at 80 %, every device everywhere with its figure, time estimates off, the part off",
+            defaults.DevicesPage && defaults.DeviceLowPercent == 15 && defaults.DeviceWarningPercent == 25 && defaults.DeviceChargeAlerts
+            && defaults.DeviceChargeAlertPercent == 80 && defaults.DeviceChoices.Count == 0 && defaults.DeviceFigures
             && !defaults.DeviceBatteryEstimates && !defaults.NotchDevices && !defaults.CapsuleDevices && defaults.NotchOrder.Contains(CompactPart.Devices));
-        var saved = new DeckSettings { DevicesWidth = 9999, DevicesHeight = double.NaN, DeviceLowPercent = 7, DeviceWarningPercent = 33,
+        var saved = new DeckSettings { DevicesWidth = 9999, DevicesHeight = double.NaN, DeviceLowPercent = 7, DeviceWarningPercent = 33, DeviceChargeAlertPercent = 12,
             DeviceChoices = [new() { Key = "bt:AA", Name = "Mouse", Label = "  ", Color = "#12345G" }, new() { Key = "bt:AA" }, new() { Key = " " },
                 new() { Key = "bt:BB", Label = new string('x', 80), Kind = (DeviceKind)40, ChargeColor = "#00ff00" }] };
         saved.Normalize();
         check("Devices settings: normalized", saved.DevicesWidth == 1200 && saved.DevicesHeight == 200 && saved.DeviceLowPercent == Devices.DefaultLowPercent
-            && saved.DeviceWarningPercent == Devices.DefaultWarningPercent && saved.DeviceChoices.Count == 2 && saved.DeviceChoices[0] is { Label: null, Color: null }
+            && saved.DeviceWarningPercent == Devices.DefaultWarningPercent && saved.DeviceChargeAlertPercent == Devices.DefaultChargeAlertPercent
+            && saved.DeviceChoices.Count == 2 && saved.DeviceChoices[0] is { Label: null, Color: null }
             && saved.DeviceChoices[1].Label!.Length == DeviceLists.MaximumLabel && saved.DeviceChoices[1].Kind == DeviceKind.Other && saved.DeviceChoices[1].ChargeColor == "#00FF00");
         var crossed = new DeckSettings { DeviceLowPercent = 30, DeviceWarningPercent = 20 };
         crossed.Normalize();
