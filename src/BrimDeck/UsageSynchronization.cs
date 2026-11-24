@@ -32,8 +32,8 @@ public partial class MainWindow
         _syncCycleStart = DateTime.UtcNow;
     }
 
-    internal Task RefreshAutomaticallyAsync(bool queueIfBusy = false)
-        => AutomaticSyncEnabled ? RefreshAsync(queueIfBusy) : Task.CompletedTask;
+    internal Task RefreshAutomaticallyAsync(bool queueIfBusy = false, bool backgroundCompletion = false)
+        => AutomaticSyncEnabled ? RefreshAsync(queueIfBusy, backgroundCompletion) : Task.CompletedTask;
 
     // A read asked for by hand (the sync-now shortcut, a column's sync button): the arrows spin until it ends, also with the
     // automatic sync off, so the request shows. A read already under way counts as the one asked for.

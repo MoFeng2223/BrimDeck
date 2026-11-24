@@ -42,8 +42,8 @@ public static class ProviderCatalog
     // and can optionally fall back to the CLI in Settings when neither is running.
     public static string QuotaDescription(ProviderId id) => id switch
     {
-        ProviderId.Antigravity => Loc.T("优先读取正在运行的 Antigravity 桌面版或 IDE；关闭后保留上次有效读数，也可在设置中开启通过 CLI 读取",
-            "Reads from the running Antigravity desktop app or IDE first; keeps the last valid reading after closing, or optionally reads via the CLI in Settings"),
+        ProviderId.Antigravity => Loc.T("读取正在运行的 Antigravity 桌面版或 IDE，关闭后显示上次读数；两者都未运行时，可在设置中开启“通过 CLI 读取”",
+            "Read from the running Antigravity desktop app or IDE, showing the last reading after it closes; while neither runs, \"Read via CLI\" can be turned on in Settings"),
         ProviderId.Dsh => Loc.T("DeepSeek Harness 桌面版或本地 Web 版登录的 DeepSeek 账户余额；未登录账户时使用其中保存的 API 密钥",
             "The balance of the DeepSeek account that the DeepSeek Harness desktop app or local web app signed in with; without a signed-in account, the API key saved there is used"),
         ProviderId.GrokBot => Loc.T("只显示 Grok Bot 桌面版登录账户的每周额度",

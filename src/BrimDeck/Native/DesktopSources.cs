@@ -69,7 +69,7 @@ public sealed class DesktopSources(MiMoAccount? mimo = null, DoubaoQuotaAccount?
             .Select(folder => Path.Combine(folder, "agy.exe")).FirstOrDefault(File.Exists);
         if (cli is null) return new(AntigravityCliStatus.NotInstalled);
 
-        // Layer 2: Restrict browser launcher lookup and monitor stdout/stderr
+        // Restrict browser launcher lookup and monitor stdout/stderr
         // so any OAuth URL or sign-in prompt aborts immediately instead of hanging or opening Chrome.
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         timeout.CancelAfter(TimeSpan.FromSeconds(30));

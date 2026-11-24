@@ -1368,7 +1368,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
         }
         ct.ThrowIfCancellationRequested();
 
-        // Layer 4: Only fall back to the CLI when no local Antigravity app or IDE endpoint is running.
+        // Only fall back to the CLI when no local Antigravity app or IDE endpoint is running.
         // When a local endpoint exists but temporarily fails (e.g. poor network), keep the last reading instead of spawning agy.exe.
         if (endpoints.Count > 0)
         {
@@ -2278,7 +2278,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
         lock (kept)
         {
             // The round a finished read asks for only shows it, without starting the next read at once.
-            if (!_backgroundCompletion && kept.Pending is not { IsCompleted: false } && now - kept.Started >= QoderGap)
+            if (kept.Pending is not { IsCompleted: false } && now - kept.Started >= QoderGap)
             {
                 kept.Started = now;
                 kept.Unshown = false;

@@ -144,11 +144,13 @@ public partial class App : Application
             kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName), cursorPriceCache: Path.Combine(folder, CursorPrices.FileName));
         Notices = new NoticeCenter(this);
         Agenda = new AgendaCenter(Store.DirectoryPath, Dispatcher);
-        // Publish a pending background result even when the user requested the round with automatic sync off.
-        Usage.BackgroundReadFinished += completed => Dispatcher.BeginInvoke(() =>
+        // A source read in the background (Qoder) that ended after its round asks for another round to show it; the first reading
+        // of a source always does, a later one only while the panel syncs by itself. That round only shows the result: it does
+        // not start the Antigravity CLI again.
+        Usage.BackgroundReadFinished += first => Dispatcher.BeginInvoke(() =>
         {
             if (Exiting || Deck is not { } deck) return;
-            _ = deck.RefreshAsync(backgroundCompletion: true);
+            _ = first ? deck.RefreshAsync(backgroundCompletion: true) : deck.RefreshAutomaticallyAsync(queueIfBusy: true, backgroundCompletion: true);
         });
         LastSeen = new UsageLastSeen(Path.Combine(folder, UsageLastSeen.FileName));
         WindowDrags = new WindowDrags();
