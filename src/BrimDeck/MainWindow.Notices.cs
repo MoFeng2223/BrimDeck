@@ -363,7 +363,7 @@ public partial class MainWindow
     private bool UpdateNoticeRows()
     {
         var center = _app.Notices;
-        if (NoticeFormKeepsPage(center) || QuestionFormKeepsPage(center)) return true;
+        if (NoticeFormKeepsPage(center) || QuestionFormKeepsPage(center) || ReplyKeepsPage(center)) return true;
         if (_pageKey != NoticePageKey(center)) return false;
         var listed = Listed(center);
         if (_noticeBatches is { Pending: true } batches)
@@ -599,6 +599,8 @@ public partial class MainWindow
         // A sender's questions take the place of the strip and the words: the questions are the words.
         if (QuestionFormFor(notice, center) is { } questions) { stack.Children.Add(questions); return column; }
         // Above them, what BrimDeck read from the notice: a time to add to the planner, what was added, a verification code.
+        // A WeChat chat can be answered here, right above the buttons.
+        if (NoticeReplyStrip(notice, center) is { } reply) { DockPanel.SetDock(reply, System.Windows.Controls.Dock.Bottom); stack.Children.Add(reply); }
         if (NoticeAgendaStrip(notice) is { } strip) { DockPanel.SetDock(strip, System.Windows.Controls.Dock.Bottom); stack.Children.Add(strip); }
 
         // The words, scrolling within the column when they are long; the other messages of the same conversation under them.

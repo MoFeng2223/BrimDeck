@@ -49,6 +49,7 @@ try
     NoticeFocusTests.Run(Check);
     NoticeFlashTests.Run(Check);
     NoticeChatRestoreTests.Run(Check);
+    WeChatTests.Run(Check);
     NoticeWindowsSyncTests.Run(Check);
     NoticeTimeTests.Run(Check);
     AuditFollowupTests.Run(Check);

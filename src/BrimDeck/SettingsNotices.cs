@@ -568,14 +568,18 @@ public sealed partial class SettingsWindow
             var cross = RemoveButton(name, () => { Change(s => s.NoticeApps.RemoveAll(r => r.Key == key)); _noticeAppsOpen.Remove(key); ShowPage(_page); });
             Grid.SetColumn(cross, 5); row.Children.Add(cross);
         }
-        if (!open) return row;
-        var stack = new StackPanel(); stack.Children.Add(row); stack.Children.Add(OwnLooks(key, name, rule));
+        bool wechat = key == WeChatRows.AppKey && receives;
+        if (!open && !wechat) return row;
+        var stack = new StackPanel(); stack.Children.Add(row);
+        if (wechat) stack.Children.Add(WeChatOptions(rule, name));
+        if (open) stack.Children.Add(OwnLooks(key, name, rule));
         return stack;
     }
 
     // What to know about a row: what WeChat's and the Clock's notices are, and what went wrong (the taskbar watch, the banner).
     private (string, bool) AppNote(NoticeCenter center, string key, NoticeAppRule? rule)
     {
+        if (key == WeChatRows.AppKey && rule is { Enabled: true, ReadContent: true } && center.ChatFlashError is null) return WeChatNote(center);
         if (key.StartsWith("flash:", StringComparison.Ordinal))
             return center.ChatFlashError is { } error ? (Loc.T("无法监视任务栏：", "Could not watch the taskbar: ") + error, true) : (Loc.T("任务栏图标闪烁时提示“有新消息”", "\"New message\" when its taskbar button flashes"), false);
         if (key.StartsWith("windows:", StringComparison.Ordinal))

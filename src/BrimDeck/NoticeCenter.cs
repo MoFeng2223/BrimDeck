@@ -11,7 +11,7 @@ namespace BrimDeck;
 // brim-notify's pipe, the WSL agents), keeps the recent notices (NoticeHub, saved by NoticeHistory), and decides with the
 // AttentionCoordinator which panel briefly shows what. Quota alerts and track changes go through the same coordinator, so
 // the three never cover each other. Everything here runs on the UI thread; the sources hand over to it.
-internal sealed class NoticeCenter : IDisposable
+internal sealed partial class NoticeCenter : IDisposable
 {
     public const string TestAppKey = "brimdeck:test";
     private readonly App _app;
@@ -160,7 +160,7 @@ internal sealed class NoticeCenter : IDisposable
         {
             _windows.Stop(); _wsl.Apply([]);
             EndWaits();
-            StopChatFlash();
+            StopChatFlash(); ApplyWeChat(false);
             _maintenance.Stop(); _quietCheck.Stop();
             ScheduleDue();
             // Whatever shows ends and nothing waiting shows later; quota alerts and track changes keep working through the
@@ -179,6 +179,7 @@ internal sealed class NoticeCenter : IDisposable
         _windows.Start();
         // The taskbar flash source runs while a chat it watches is listed and received (WeChat is, for a new user).
         if (ChatFlashApps.All.Any(app => app.Enabled && settings.NoticeRule("flash:" + app.Id) is { Enabled: true })) StartChatFlash(); else StopChatFlash();
+        ApplyWeChat(settings.NoticeRule(WeChatRows.AppKey) is { Enabled: true, ReadContent: true });
         _wsl.Apply(settings.NoticeWslDistros);
         _maintenance.Start();
         Hub.Prune(DateTimeOffset.UtcNow);
@@ -195,7 +196,7 @@ internal sealed class NoticeCenter : IDisposable
         if (_flash is not null) return;
         try
         {
-            _flash = new TaskbarFlashWatch(input => { if (_enabled && !_disposed) Receive(input); });
+            _flash = new TaskbarFlashWatch(OnFlash);
             ChatFlashError = null;
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or EntryPointNotFoundException)
@@ -738,13 +739,14 @@ internal sealed class NoticeCenter : IDisposable
         if (NoticeProtocol.ToAgent(NoticeTypes.Dismissed, notice.InstanceKey) is { } message) _wsl.Send(distro, message);
     }
 
-    public bool CanOpen(Notice notice) => notice.Origin == NoticeOrigin.Windows && (notice.Capabilities & NoticeCapabilities.OpenApp) != 0
+    public bool CanOpen(Notice notice) => notice.AppKey == WeChatRows.AppKey || notice.Origin == NoticeOrigin.Windows && (notice.Capabilities & NoticeCapabilities.OpenApp) != 0
         || notice.Actions.Any(action => action.Key == "default") && (notice.Capabilities & NoticeCapabilities.Actions) != 0;
 
     // Opens the application the notice came from. False when that did not work; the caller keeps the details open and says so.
     public async Task<bool> OpenAsync(Notice notice)
     {
         Hub.MarkViewed(notice.Id);
+        if (notice.AppKey == WeChatRows.AppKey) return await OpenWeChatAsync(notice);
         if (notice.Origin == NoticeOrigin.Windows)
         {
             if (notice.AppId.Length == 0) return false;
@@ -1192,6 +1194,7 @@ internal sealed class NoticeCenter : IDisposable
         // The sources stop first, so nothing arrives after the last save (core-L3).
         _pipe?.Dispose(); _pipe = null;
         _flash?.Dispose(); _flash = null;
+        _wechat?.Dispose(); _wechat = null;
         _windows.Dispose(); _wsl.Dispose();
         _disposed = true;
         // BrimDeck exits: the senders that wait hear nothing more (their connections end with the pipe), and no timer of
