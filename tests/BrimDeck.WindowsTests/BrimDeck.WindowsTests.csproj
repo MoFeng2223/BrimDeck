@@ -3,6 +3,7 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <UseWPF>true</UseWPF>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <PlatformTarget>x64</PlatformTarget>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -11,6 +12,12 @@
     <ProjectReference Include="..\..\src\BrimDeck.Core\BrimDeck.Core.csproj" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
     <PackageReference Include="System.IO.Ports" Version="10.0.0" />
+    <Compile Include="..\..\src\BrimDeck\GlassComposition.cs" Link="GlassComposition.cs" />
+    <Compile Include="..\..\src\BrimDeck\GlassEffect.cs" Link="GlassEffect.cs" />
+    <Compile Include="..\..\src\BrimDeck\GlassSurface.cs" Link="GlassSurface.cs" />
+    <Compile Include="..\..\src\BrimDeck\GlassPath.cs" Link="GlassPath.cs" />
+    <Compile Include="..\..\src\BrimDeck\LiquidGlass\AcrylicProbe.cs" Link="AcrylicProbe.cs" />
+    <Compile Include="..\..\src\BrimDeck\LiquidGlass\GlassHintBroker.cs" Link="GlassHintBroker.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\PdhQuery.cs" Link="PdhQuery.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\CpuProvider.cs" Link="CpuProvider.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\MonitorLog.cs" Link="MonitorLog.cs" />

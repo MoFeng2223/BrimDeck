@@ -603,6 +603,7 @@ public sealed class DeckSettings
     // surface and its theme layers are see-through; text, icons and the rim are drawn as before.
     public int SurfaceTransparency { get; set; }
     public const int MaxSurfaceTransparency = 90;
+    public int GlassTransparency { get; set; } = GlassMaterial.DefaultTransparency;
     public int OpenDelay { get; set; } = 0;
     // The collapsed panel opens on a click instead of on hover; OpenDelay then does not apply.
     public bool ClickToExpand { get; set; }
@@ -977,6 +978,7 @@ public sealed class DeckSettings
         ClipboardExcluded = ClipboardExclusions.Normalize(ClipboardExcluded);
         PanelScale = PanelScales.Fit(PanelScale);
         SurfaceTransparency = Math.Clamp(SurfaceTransparency, 0, MaxSurfaceTransparency);
+        GlassTransparency = GlassMaterial.NormalizeTransparency(GlassTransparency);
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
         MonitorCustomColors ??= new();
         MonitorCustomColors.Normalize();
@@ -1021,7 +1023,16 @@ public sealed class DeckSettings
         CloseDelay = Math.Clamp(CloseDelay, 0, 2000);
         AnimationDuration = Math.Clamp(AnimationDuration, 100, 1000);
         if (!Enum.IsDefined(Theme)) Theme = SettingsTheme.System;
-        PanelTheme = PanelThemes.NormalizeId(PanelTheme) is { Length: > 0 } panelTheme ? panelTheme : PanelThemes.Dark;
+        var previousTheme = PanelThemes.NormalizeId(PanelTheme);
+        PanelTheme = previousTheme switch
+        {
+            PanelThemes.GlassLight or PanelThemes.GlassDark => PanelThemes.GlassAuto,
+            "" => PanelThemes.Dark,
+            _ => previousTheme
+        };
+        if (PanelTheme != previousTheme && PanelTheme == PanelThemes.GlassAuto
+            && !ThemeChoices.ContainsKey(PanelTheme) && ThemeChoices.TryGetValue(previousTheme, out var legacyGlass))
+            ThemeChoices[PanelTheme] = legacyGlass.Copy();
         // "system" or two valid, different times; anything else keeps the theme's own choice.
         ThemeDaylight = PanelThemes.NormalizeDaylightSetting(ThemeDaylight);
         Language = Loc.Normalize(Language);
