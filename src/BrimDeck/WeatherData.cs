@@ -283,7 +283,8 @@ internal static class WeatherHourHistory
                     Humidity = Int(snapshot.HourHumidity, i), Code = Int(snapshot.HourCodes, i), RainProb = Int(snapshot.HourRainProb, i),
                     PrecipMm = At(snapshot.HourPrecipMm, i), WindKmh = At(snapshot.HourWindKmh, i), WindGustKmh = At(snapshot.HourWindGustKmh, i),
                     WindDirDeg = At(snapshot.HourWindDirDeg, i), PressureHpa = At(snapshot.HourPressureHpa, i), Uv = At(snapshot.HourUv, i),
-                    DewPointC = At(snapshot.HourDewPointC, i), CloudPercent = At(snapshot.HourCloudPercent, i), VisibilityKm = At(snapshot.HourVisibilityKm, i)
+                    DewPointC = At(snapshot.HourDewPointC, i), CloudPercent = At(snapshot.HourCloudPercent, i), VisibilityKm = At(snapshot.HourVisibilityKm, i),
+                    Aqi = Int(snapshot.HourAqi, i)
                 };
             }
             if (dict.Count == 0) return;
@@ -331,6 +332,7 @@ internal sealed class WeatherSnapshot
     public Dictionary<string,string> AirPollutants {get;set;}=[];
     // 当日各时段（24 个）
     public string[] HourTimes {get;set;}=[]; public double[] HourTempsC {get;set;}=[]; public int[] HourHumidity {get;set;}=[]; public int[] HourCodes {get;set;}=[]; public int[] HourRainProb {get;set;}=[];
+    public int[] HourAqi {get;set;}=[];   // 和风空气质量逐时预报，-1 表示该小时无数据；与 HourTimes 对齐
     public double[] HourFeelsLikeC {get;set;}=[]; public double[] HourPrecipMm {get;set;}=[]; public double[] HourWindKmh {get;set;}=[]; public double[] HourWindGustKmh {get;set;}=[];
     public double[] HourWindDirDeg {get;set;}=[]; public double[] HourPressureHpa {get;set;}=[]; public double[] HourUv {get;set;}=[]; public double[] HourDewPointC {get;set;}=[];
     public double[] HourCloudPercent {get;set;}=[]; public double[] HourVisibilityKm {get;set;}=[];

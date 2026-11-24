@@ -74,7 +74,9 @@ internal sealed class AirPart
     public string? HealthSensitive { get; set; }  // 敏感人群建议
     public Dictionary<string, double> Pollutants { get; set; } = [];
     public Dictionary<string, string> Units { get; set; } = [];
-    public bool HasData => Aqi is not null || Pm25 is not null || Pm10 is not null || Pollutants.Count > 0;
+    // 和风空气质量逐时预报：整点键（yyyy-MM-ddTHH:mm）→ 该小时 AQI，供快照按逐时时刻对齐。
+    public Dictionary<string, int> HourAqi { get; set; } = [];
+    public bool HasData => Aqi is not null || Pm25 is not null || Pm10 is not null || Pollutants.Count > 0 || HourAqi.Count > 0;
 }
 
 // 一个小时的观测/预报，时间统一为 yyyy-MM-ddTHH:mm。
@@ -98,6 +100,8 @@ internal sealed class HourPoint
     public int? WindScale { get; set; }
     public double? PrecipRateMmH { get; set; }
     public string? PrecipType { get; set; }
+    // 该小时的 AQI，来自和风空气质量逐时预报；与天气逐时数据按时刻键合并。
+    public int? Aqi { get; set; }
 }
 
 // 一天的预报/历史，日期统一为 yyyy-MM-dd。用字段而不是属性，合并时可以 ref 写入。

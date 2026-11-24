@@ -148,6 +148,13 @@ internal static class WeatherAggregator
                             fieldSources["air:" + code] = source.Info.Id;
                             any = true;
                         }
+                        // 空气质量逐时预报按整点键补齐；目前只有和风提供。
+                        if (air.HourAqi.Count == 0 && a.HourAqi.Count > 0)
+                        {
+                            air.HourAqi = a.HourAqi;
+                            fieldSources["air:hourly"] = source.Info.Id;
+                            any = true;
+                        }
                         if (any) Use(domain, source);
                     }
                     break;
@@ -200,6 +207,19 @@ internal static class WeatherAggregator
         for (int index = 0; index < ordered.Count; index++)
             if (string.CompareOrdinal(ordered[index].Time, anchor) >= 0) { start = index; break; }
         var hourList = ordered.Skip(start).Take(24).ToArray();
+        // 空气质量逐时预报按整点键落到天气逐时窗口；缺哪个小时就留 -1，界面隐藏该点。
+        if (air is not null && air.HourAqi.Count > 0)
+            foreach (var hour in hourList)
+                if (air.HourAqi.TryGetValue(hour.Time, out var aqi)) hour.Aqi = aqi;
+        // 没有夜间分段的来源（Open-Meteo 等）从逐时窗口当晚 18–23 点补一个夜间天气码，
+        // 让逐日列同样能出「转」；补不到就维持缺失，界面按白天单图标兜底。
+        foreach (var (date, point) in dayMap)
+        {
+            if (point.NightCode is not null) continue;
+            var night = hourList.FirstOrDefault(hour => hour.Time.StartsWith(date, StringComparison.Ordinal)
+                && int.TryParse(hour.Time.Length >= 13 ? hour.Time.Substring(11, 2) : "", out int hourOfDay) && hourOfDay >= 18);
+            if (night?.Code is { } code) point.NightCode = code;
+        }
         var snapshot = new WeatherSnapshot
         {
             Name = city.Name,
@@ -294,6 +314,7 @@ internal static class WeatherAggregator
             HourHumidity = hourList.Select(hour => hour.Humidity ?? -1).ToArray(),
             HourCodes = hourList.Select(hour => hour.Code ?? -1).ToArray(),
             HourRainProb = hourList.Select(hour => hour.RainProb ?? -1).ToArray(),
+            HourAqi = hourList.Select(hour => hour.Aqi ?? -1).ToArray(),
             HourPrecipMm = hourList.Select(hour => hour.PrecipMm ?? double.NaN).ToArray(),
             HourWindKmh = hourList.Select(hour => hour.WindKmh ?? double.NaN).ToArray(),
             HourWindGustKmh = hourList.Select(hour => hour.WindGustKmh ?? double.NaN).ToArray(),

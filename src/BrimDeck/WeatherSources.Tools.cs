@@ -87,6 +87,14 @@ internal static class WeatherCodes
         return Math.Round(d / 45, MidpointRounding.AwayFromZero) * 45 % 360;
     }
 
+    // 风向文字优先的 8 方位角度：来源给了 compass/中文方位时按文字画箭头，缺失时才按度数分档。
+    // 这样「西南风」一定指向左下，不会被 198° 这种 16 方位边界值重新量化成南。
+    public static double Wind8Angle(string? text, double deg)
+    {
+        double fromText = DegreesFromText(text);
+        return double.IsNaN(fromText) ? Compass8Angle(deg) : Compass8Angle(fromText);
+    }
+
     // 风向度数 → 8 方位文字（仅 tooltip 等紧凑展示用）。
     public static string DegreeToCompass(double deg)
     {
@@ -116,14 +124,19 @@ internal static class WeatherCodes
         < 0 => "#9B9BA3", <= 50 => "#5CC85C", <= 100 => "#F2C94C", <= 150 => "#F2994A", <= 200 => "#EB5757", <= 300 => "#9B51E0", _ => "#B12E3A"
     };
 
-    // 中文风向 → 角度，供详情页画风向箭头。
+    // 中文/英文风向 → 角度，供箭头与文字保持同一档。
     public static double DegreesFromText(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return double.NaN;
-        if (text.Contains("东北")) return 45; if (text.Contains("东南")) return 135;
-        if (text.Contains("西南")) return 225; if (text.Contains("西北")) return 315;
-        if (text.Contains('北')) return 0; if (text.Contains('东')) return 90;
-        if (text.Contains('南')) return 180; if (text.Contains('西')) return 270;
+        string lower = text.ToLowerInvariant();
+        if (text.Contains("东北") || lower.Contains("ne")) return 45;
+        if (text.Contains("东南") || lower.Contains("se")) return 135;
+        if (text.Contains("西南") || lower.Contains("sw")) return 225;
+        if (text.Contains("西北") || lower.Contains("nw")) return 315;
+        if (text.Contains('北') || lower is "n" or "north") return 0;
+        if (text.Contains('东') || lower is "e" or "east") return 90;
+        if (text.Contains('南') || lower is "s" or "south") return 180;
+        if (text.Contains('西') || lower is "w" or "west") return 270;
         return double.NaN;
     }
 }

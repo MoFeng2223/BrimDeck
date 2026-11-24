@@ -79,18 +79,47 @@ internal sealed class WeatherComCnSource : IWeatherSource
                     double? high = Json.Number(item, "max");
                     double? low = Json.Number(item, "min");
                     double? rain = Json.Number(item, "rainobs");
-                    string? windDir = Json.Text(item, "wd1");
+                    string? windRaw = Json.Text(item, "wd1");
+                    string? windPower = Json.Text(item, "ws1");
                     if (!days.TryGetValue(date, out var day)) days[date] = day = new DayPoint { Date = date };
                     if (high is not null) { day.HighC ??= high; day.LowC ??= low; }
-                    if (!string.IsNullOrWhiteSpace(condition) && day.Condition is null) { day.Condition = condition; day.Code = WeatherCodes.FromText(condition); }
+                    // w1/wd1 都是「白天转夜间」合成串：拆开后分别落到白天与夜间字段，供逐日双图标和底部风行使用。
+                    string[] weatherParts = string.IsNullOrWhiteSpace(condition) ? [] : condition.Split('转', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    if (weatherParts.Length > 0 && day.Condition is null) { day.Condition = weatherParts[0]; day.Code = WeatherCodes.FromText(weatherParts[0]); }
+                    if (weatherParts.Length > 1 && day.NightCondition is null) { day.NightCondition = weatherParts[1]; day.NightCode = WeatherCodes.FromText(weatherParts[1]); }
                     if (rain is not null) day.PrecipMm ??= rain;
-                    if (!string.IsNullOrWhiteSpace(windDir) && !windDir.Contains("微风")) { day.WindDir ??= windDir; day.WindDirDeg ??= WeatherCodes.DegreesFromText(windDir); }
+                    string[] windParts = string.IsNullOrWhiteSpace(windRaw) ? [] : windRaw.Split('转', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    if (windParts.Length > 0 && day.WindDir is null)
+                    {
+                        day.WindDir = windParts[0];
+                        day.WindDirDeg = WeatherCodes.DegreesFromText(windParts[0]);
+                        day.WindMaxKmh = WindPowerKmh(windParts[0], windPower);
+                    }
+                    if (windParts.Length > 1 && day.NightWindDir is null)
+                    {
+                        day.NightWindDir = windParts[1];
+                        day.NightWindDirDeg = WeatherCodes.DegreesFromText(windParts[1]);
+                        day.NightWindMaxKmh = WindPowerKmh(windParts[1], null);
+                    }
                 }
             }
             catch { }
         }
         if (days.Count > 0) part.Days = [.. days.Values];
         return part;
+    }
+
+    // 中国天气网的风级在风向串里（如「西北风3-4级」），ws1 偶尔单独给出；微风按 0 级处理。
+    private static double WindPowerKmh(string? text, string? fallback)
+    {
+        foreach (var part in new[] { text, fallback })
+        {
+            if (string.IsNullOrWhiteSpace(part)) continue;
+            if (part.Contains("微风")) return 0;
+            double kmh = WeatherCodes.FromWindPower(part);
+            if (!double.IsNaN(kmh)) return kmh;
+        }
+        return double.NaN;
     }
 
     private static async Task<string?> ResolveIdAsync(string name, CancellationToken token)

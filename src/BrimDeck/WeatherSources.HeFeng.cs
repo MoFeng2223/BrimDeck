@@ -94,12 +94,19 @@ internal sealed class HeFengSource : IWeatherSource
         var hours = Want(WeatherDomain.Hourly) ? Body(context, "hourly|" + context.Site + "|" + context.Day, TimeSpan.FromMinutes(30), $"{host}/weather/v1/hourly/{context.Lat}/{context.Lon}?hours=24&{query}", token) : Task.FromResult<string?>(null);
         var days = Want(WeatherDomain.Daily) ? Body(context, "daily|" + context.Site + "|" + context.Day, TimeSpan.FromHours(2), $"{host}/weather/v1/daily/{context.Lat}/{context.Lon}?days=10&{query}", token) : Task.FromResult<string?>(null);
         var air = Want(WeatherDomain.Air) ? Body(context, "air|" + context.Site, TimeSpan.FromMinutes(30), $"{host}/airquality/v1/current/{context.Lat}/{context.Lon}?lang={context.Lang}", token) : Task.FromResult<string?>(null);
-        await Task.WhenAll(current, hours, days, air);
+        // 空气质量预报与实况分开缓存：实况 30 分钟、未来 24 小时逐时同样 30 分钟，缓存键带当地日期。
+        var airHours = Want(WeatherDomain.Air) ? Body(context, "airhours|" + context.Site + "|" + context.Day, TimeSpan.FromMinutes(30), $"{host}/airquality/v1/hourly/{context.Lat}/{context.Lon}?localTime=true&lang={context.Lang}", token) : Task.FromResult<string?>(null);
+        await Task.WhenAll(current, hours, days, air, airHours);
         var part = new WeatherPart();
         if (ParseCurrentV1(current.Result, context.City) is { } now) part.Current = now;
         if (ParseHoursV1(hours.Result, context.City) is { Count: > 0 } list) part.Hours = list;
         if (ParseDaysV1(days.Result, context.City) is { Count: > 0 } forecast) part.Days = forecast;
         if (ParseAirV1(air.Result) is { } quality) part.Air = quality;
+        if (ParseAirHoursV1(airHours.Result, context.City) is { Count: > 0 } hourAqi)
+        {
+            part.Air ??= new AirPart();
+            part.Air.HourAqi = hourAqi;
+        }
         return part.Current is null && part.Hours is null && part.Days is null && part.Air is null ? null : part;
     }
 
@@ -465,6 +472,17 @@ internal sealed class HeFengSource : IWeatherSource
         catch { return null; }
     }
 
+    // 实况与逐时预报共用同一套 AQI 标准优先级：中国城市取 cn-mee（QAQI 不适用于中国），其他地区退回 qaqi。
+    private static JsonElement ChooseAirIndex(JsonElement[] indexes)
+    {
+        foreach (string code in new[] { "cn-mee", "cn-mee-1h", "qaqi" })
+        {
+            var found = indexes.FirstOrDefault(item => Json.Text(item, "code") == code);
+            if (found.ValueKind == JsonValueKind.Object) return found;
+        }
+        return indexes.FirstOrDefault(item => item.ValueKind == JsonValueKind.Object);
+    }
+
     // 一次返回当地标准与通用两套 AQI：中国城市取 cn-mee（QAQI 不适用于中国），其他地区退回 qaqi。
     private static AirPart? ParseAirV1(string? body)
     {
@@ -475,10 +493,7 @@ internal sealed class HeFengSource : IWeatherSource
             var root = doc.RootElement;
             if (Json.Get(root, "indexes") is not { } indexesBox || indexesBox.ValueKind != JsonValueKind.Array) return null;
             var indexes = indexesBox.EnumerateArray().ToArray();
-            var chosen = new[] { "cn-mee", "cn-mee-1h", "qaqi" }
-                .Select(code => indexes.FirstOrDefault(item => Json.Text(item, "code") == code))
-                .FirstOrDefault(item => item.ValueKind == JsonValueKind.Object);
-            if (chosen.ValueKind != JsonValueKind.Object && indexes.Length > 0) chosen = indexes[0];
+            var chosen = ChooseAirIndex(indexes);
             if (chosen.ValueKind != JsonValueKind.Object) return null;
             int? aqi = Json.Number(chosen, "aqi") is { } value ? (int)Math.Round(value) : null;
             string? level = Json.Text(chosen, "level");
@@ -512,6 +527,29 @@ internal sealed class HeFengSource : IWeatherSource
             if (air.Pollutants.TryGetValue("pm2p5", out var pm25)) air.Pm25 = (int)Math.Round(pm25);
             if (air.Pollutants.TryGetValue("pm10", out var pm10)) air.Pm10 = (int)Math.Round(pm10);
             return air.HasData ? air : null;
+        }
+        catch { return null; }
+    }
+
+    // 未来 24 小时逐时 AQI：按整点键存，稍后与天气逐时窗口对齐；只取 AQI，等级/颜色/污染物不在本模型里。
+    private static Dictionary<string, int>? ParseAirHoursV1(string? body, City city)
+    {
+        if (body is null) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (Json.Get(doc.RootElement, "hours") is not { } hoursBox || hoursBox.ValueKind != JsonValueKind.Array) return null;
+            int offset = Geo.UtcOffsetHours(city);
+            var values = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var item in hoursBox.EnumerateArray())
+            {
+                if (Stamp(Json.Text(item, "forecastTime"), offset) is not { } stamp) continue;
+                if (Json.Get(item, "indexes") is not { } indexesBox || indexesBox.ValueKind != JsonValueKind.Array) continue;
+                var chosen = ChooseAirIndex(indexesBox.EnumerateArray().ToArray());
+                if (chosen.ValueKind != JsonValueKind.Object || Json.Number(chosen, "aqi") is not { } aqi) continue;
+                values[stamp.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture)] = (int)Math.Round(aqi);
+            }
+            return values.Count > 0 ? values : null;
         }
         catch { return null; }
     }
