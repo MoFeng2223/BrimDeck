@@ -73,6 +73,18 @@ internal static class WeatherCache
 
     private static readonly ConcurrentDictionary<string, Entry> Memory = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new(StringComparer.Ordinal);
+    // 手动刷新要绕过的只是「还没过期就直用缓存」这一层：AsyncLocal 随执行流进入并行的每个来源请求，
+    // 自动刷新与其它调用看不到它；读取仍会写回缓存，失败照旧退回过期副本。
+    private static readonly AsyncLocal<int> Bypass = new();
+    public static IDisposable Fresh()
+    {
+        Bypass.Value++;
+        return new FreshScope();
+    }
+    private sealed class FreshScope : IDisposable
+    {
+        public void Dispose() { if (Bypass.Value > 0) Bypass.Value--; }
+    }
     private static readonly JsonSerializerOptions Json = new()
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
@@ -84,13 +96,14 @@ internal static class WeatherCache
     public static async Task<T?> GetAsync<T>(string ns, string key, TimeSpan ttl, Func<CancellationToken, Task<T?>> fetch, CancellationToken token, bool allowStale = true) where T : class
     {
         string id = ns + "/" + key;
-        if (TryLookup<T>(id, ns, key, out var value, out var at) && DateTimeOffset.Now - at < ttl) return value;
+        bool freshOnly = Bypass.Value > 0;
+        if (!freshOnly && TryLookup<T>(id, ns, key, out var value, out var at) && DateTimeOffset.Now - at < ttl) return value;
         var gate = Gates.GetOrAdd(id, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(token);
         try
         {
             // 排队期间前一个请求可能已经写好，命中就不必再发一次。
-            if (TryLookup<T>(id, ns, key, out value, out at) && DateTimeOffset.Now - at < ttl) return value;
+            if (!freshOnly && TryLookup<T>(id, ns, key, out value, out at) && DateTimeOffset.Now - at < ttl) return value;
             var fresh = await fetch(token);
             if (fresh is not null) { Store(id, ns, key, fresh); return fresh; }
             return allowStale && TryLookup<T>(id, ns, key, out var stale, out _) ? stale : null;

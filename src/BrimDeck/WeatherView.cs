@@ -296,10 +296,12 @@ internal sealed class WeatherView : UserControl
     internal Task ManualRefresh()
     {
         if (fetching) { Cancel(); return Task.CompletedTask; }
-        return Refresh();
+        return Refresh(force: true);
     }
     internal void Cancel() => _token?.Cancel();
-    private async Task Refresh()
+    // force：手动刷新要真的发请求。自动轮询照常吃缓存（实况 10 分钟、逐时 30 分钟、逐日 2 小时各自过期），
+    // 否则点下去只是在 TTL 内再把同一份缓存画一遍，看起来就是「刷新没反应」。
+    private async Task Refresh(bool force = false)
     {
         _token?.Cancel();
         var cts = new CancellationTokenSource();
@@ -312,6 +314,7 @@ internal sealed class WeatherView : UserControl
         if (key.Length > 0 && state.Cache.TryGetValue(key, out var cached)) Render(cached);
         fetching = true; RaiseState();
         try {
+            using var fresh = force ? WeatherCache.Fresh() : null;
             City city;
             if (selected >= 0 && selected < state.Cities.Count) city = state.Cities[selected];
             else city = await WeatherData.LocateAsync(state.Schedule, token) ?? new City("当前位置", 0, 0);
