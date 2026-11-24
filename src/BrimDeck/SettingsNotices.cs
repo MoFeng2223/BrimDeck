@@ -21,9 +21,8 @@ public sealed partial class SettingsWindow
 {
     internal const int NoticesSettingsPage = 19, NoticeAppsSettingsPage = 20;
     private readonly List<Action> _noticeStatusLines = [];
-    // The applications whose own looks are open under their row, and the level each shows there.
+    // The applications whose own looks are open under their row.
     private readonly HashSet<string> _noticeAppsOpen = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, NoticeLevel> _noticeAppLevel = new(StringComparer.Ordinal);
 
     private static string LevelName(NoticeLevel level) => level switch
     {
@@ -57,7 +56,8 @@ public sealed partial class SettingsWindow
             var test = ActionButton(Loc.T("试一下", "Try it"), () => center.SendTest(level));
             AutomationProperties.SetName(test, Loc.T("试一下", "Try it") + " " + LevelTitle(level));
             SectionTitle(LevelTitle(level), test, () => LevelHelp(level));
-            Group([LevelPreview(level, S.NoticeStyles.For(level)), .. LevelRows(level, () => S.NoticeStyles, edit => EditNoticeStyles(s => edit(s.NoticeStyles)), level.ToString())]);
+            var style = S.NoticeStyles.For(level);
+            Group([LevelPreview(level, style), .. LevelRows(level, style, change => EditNoticeStyles(s => change(s.NoticeStyles.For(level))), level.ToString(), own: false)]);
         }
         NoticeStripSection();
         NoticeQuietSection(center);
@@ -116,21 +116,20 @@ public sealed partial class SettingsWindow
     // The settings' looks change and the page shows them (its previews follow).
     private void EditNoticeStyles(Action<DeckSettings> edit) { Change(edit); ShowPage(_page); }
 
-    // The rows of one level's look: the icon, how long levels 1 and 2 stay, the effect of levels 2 and 3 and level 3's color.
-    // styles reads the looks being edited (the settings' or an application's); edit changes them. name tells the rows of several
+    // The rows of one look (style, shown as a notice of level shows): the effect of levels 2 and 3, the backlight's color, the icon,
+    // and how long levels 1 and 2 stay. The "提示方式" page offers the color for level 3 only, as the one of a message that names
+    // none; an application's own looks (own) offer it for level 2 as well. edit changes the look. name tells the rows of several
     // groups on a page apart for screen readers and the segment groups.
-    private List<FrameworkElement> LevelRows(NoticeLevel level, Func<NoticeLevelStyles> styles, Action<Action<NoticeLevelStyles>> edit, string name)
+    private List<FrameworkElement> LevelRows(NoticeLevel level, NoticeStyle style, Action<Action<NoticeStyle>> edit, string name, bool own)
     {
-        var style = styles().For(level);
-        void Edit(Action<NoticeStyle> change) => edit(all => change(all.For(level)));
         var rows = new List<FrameworkElement>();
         if (level != NoticeLevel.Plain)
-            rows.Add(NoticeChoice(Loc.T("效果", "Effect"), "NoticeEffect" + name + level, style.Liquid, [(false, Loc.T("辉光", "Glow")), (true, Loc.T("灵动", "Lively"))],
-                value => Edit(s => s.Liquid = value), 150));
-        if (level == NoticeLevel.Persistent) rows.Add(LightRow(style, Edit, name));
-        rows.Add(Toggle(Loc.T("显示应用图标", "Show app icon"), style.Icon, value => Edit(s => s.Icon = value)));
+            rows.Add(NoticeChoice(Loc.T("效果", "Effect"), "NoticeEffect" + name, style.Liquid, [(false, Loc.T("辉光", "Glow")), (true, Loc.T("灵动", "Lively"))],
+                value => edit(s => s.Liquid = value), 150));
+        if (level == NoticeLevel.Persistent || own && level == NoticeLevel.Glow) rows.Add(LightRow(style, edit, name, own));
+        rows.Add(Toggle(Loc.T("显示应用图标", "Show app icon"), style.Icon, value => edit(s => s.Icon = value)));
         if (level != NoticeLevel.Persistent)
-            rows.Add(SliderRow(Loc.T("停留时间", "Shown for"), style.Seconds, NoticeStyle.MinSeconds, NoticeStyle.MaxSeconds, 1, Loc.T(" 秒", " s"), value => Edit(s => s.Seconds = (int)Math.Round(value))));
+            rows.Add(SliderRow(Loc.T("停留时间", "Shown for"), style.Seconds, NoticeStyle.MinSeconds, NoticeStyle.MaxSeconds, 1, Loc.T(" 秒", " s"), value => edit(s => s.Seconds = (int)Math.Round(value))));
         return rows;
     }
 
@@ -147,9 +146,11 @@ public sealed partial class SettingsWindow
         return Row(title, SegmentBorder(strip));
     }
 
-    // Level 3's backlight: white (the island's own), five colors, or the application's color.
-    private FrameworkElement LightRow(NoticeStyle style, Action<Action<NoticeStyle>> edit, string name)
+    // The backlight: white (the island's own), five colors, or the application's color. On the "提示方式" page it is level 3's
+    // default color; in an application's own looks (own) the color its notices glow in.
+    private FrameworkElement LightRow(NoticeStyle style, Action<Action<NoticeStyle>> edit, string name, bool own)
     {
+        string title = own ? Loc.T("辉光颜色", "Glow color") : Loc.T("默认颜色", "Default color");
         var swatches = new StackPanel { Orientation = Orientation.Horizontal };
         var choices = new List<(string Value, string Label)> { ("", Loc.T("白色", "White")) };
         choices.AddRange(NoticeStyle.Swatches.Select(color => (color, ColorWord(color))));
@@ -165,12 +166,13 @@ public sealed partial class SettingsWindow
                 _ => UI.Brush(value)
             };
             if (value == NoticeStyle.AppColor) swatch.Content = Stroke("M 1,1 H 5 V 5 H 1 Z M 7,1 H 11 V 5 H 7 Z M 1,7 H 5 V 11 H 1 Z M 7,7 H 11 V 11 H 7 Z", 12, 12, TextPrimary);
-            AutomationProperties.SetName(swatch, Loc.T("默认颜色 ", "Default color ") + label);
+            AutomationProperties.SetName(swatch, title + " " + label);
             string chosen = value;
             swatch.Checked += (_, _) => edit(s => s.Color = chosen);
             swatches.Children.Add(swatch);
         }
-        return Row(Loc.T("默认颜色", "Default color"), swatches, help: () => Loc.T("消息没有指定颜色、也不属于警告或错误时使用。", "Used when a message names no color and is not a warning or an error."));
+        return own ? Row(title, swatches)
+            : Row(title, swatches, help: () => Loc.T("消息没有指定颜色、也不属于警告或错误时使用。", "Used when a message names no color and is not a warning or an error."));
     }
 
     // The swatches' names, in NoticeStyle.Swatches' order.
@@ -180,29 +182,32 @@ public sealed partial class SettingsWindow
     };
 
     // A still picture of a notice of this level on a capsule in the panel theme's colors: the words, the icon while it shows, and
-    // the backlight of levels 2 and 3 in the color level 3 takes.
-    private FrameworkElement LevelPreview(NoticeLevel level, NoticeStyle style)
+    // the backlight of levels 2 and 3 in the style's color. sample: the application, title and words shown; by default a chat's
+    // message, and an alarm for level 3.
+    private FrameworkElement LevelPreview(NoticeLevel level, NoticeStyle style, (string App, string Title, string Body)? sample = null)
     {
         bool alarm = level == NoticeLevel.Persistent;
+        var (app, heading, body) = sample ?? (alarm ? (Loc.T("时钟", "Clock"), Loc.T("闹钟", "Alarm"), Loc.T("07:30 起床", "07:30 Wake up"))
+            : ("QQ", Loc.T("产品群", "Product team"), Loc.T("小周：今天的版本什么时候发？", "Zhou: when does today's build go out?")));
         var look = NoticeLook.Current();
         var accent = (Color)ColorConverter.ConvertFromString(_palette.Accent);
         var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         if (style.Icon)
         {
-            var plate = NoticeLetter.Plate(alarm ? Loc.T("时钟", "Clock") : "QQ", 16, accent);
+            var plate = NoticeLetter.Plate(app, 16, accent);
             plate.Margin = new Thickness(0, 0, 7, 0); plate.VerticalAlignment = VerticalAlignment.Center; row.Children.Add(plate);
         }
         var words = new TextBlock { FontFamily = UI.PanelFont, FontSize = 11.5, Foreground = UI.Brush(look.Primary), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
-        words.Inlines.Add(new System.Windows.Documents.Run(alarm ? Loc.T("闹钟", "Alarm") : Loc.T("产品群", "Product team")) { FontWeight = FontWeights.SemiBold });
-        words.Inlines.Add(new System.Windows.Documents.Run("  " + (alarm ? Loc.T("07:30 起床", "07:30 Wake up") : Loc.T("小周：今天的版本什么时候发？", "Zhou: when does today's build go out?"))) { Foreground = UI.Brush(look.Secondary) });
+        words.Inlines.Add(new System.Windows.Documents.Run(heading) { FontWeight = FontWeights.SemiBold });
+        words.Inlines.Add(new System.Windows.Documents.Run("  " + body) { Foreground = UI.Brush(look.Secondary) });
         row.Children.Add(words);
         var island = new Border { Height = 28, Width = 236, CornerRadius = new CornerRadius(14), Background = new SolidColorBrush(look.Surface), Padding = new Thickness(style.Icon ? 7 : 14, 0, 14, 0),
             BorderBrush = UI.Brush(_palette.Divider), BorderThickness = new Thickness(1), Child = row, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         if (level != NoticeLevel.Plain)
         {
             // White on a light settings window would not show, so there the island's own light is drawn in the tertiary text.
-            var color = alarm && style.Color.Length > 0 && style.Color != NoticeStyle.AppColor ? (Color)ColorConverter.ConvertFromString(style.Color)
-                : alarm && style.Color == NoticeStyle.AppColor ? accent : _palette.Dark ? IslandNotice.DefaultLight : (Color)ColorConverter.ConvertFromString(TextTertiary);
+            var color = style.Color.Length > 0 && style.Color != NoticeStyle.AppColor ? (Color)ColorConverter.ConvertFromString(style.Color)
+                : style.Color == NoticeStyle.AppColor ? accent : _palette.Dark ? IslandNotice.DefaultLight : (Color)ColorConverter.ConvertFromString(TextTertiary);
             island.BorderBrush = new SolidColorBrush(color);
             island.Effect = new DropShadowEffect { Color = color, BlurRadius = 16, ShadowDepth = 0, Opacity = .75 };
         }
@@ -341,8 +346,8 @@ public sealed partial class SettingsWindow
     private void WindowsAppsSection(NoticeCenter center)
     {
         var add = AddAppButton(Loc.T("添加应用", "Add app"), AddNoticeAppMenu);
-        SectionTitle(Loc.T("Windows 应用", "Windows apps"), add, () => Loc.T("所有 Windows 应用的通知默认都会接收。把应用添加到这里，可以单独关闭接收、调整提示等级，或开关它的系统横幅。移除后恢复默认。",
-            "Every Windows app's notices are received by default. Add an app here to stop receiving it, change its level, or switch its system banner. Removing it goes back to the default."));
+        SectionTitle(Loc.T("Windows 应用", "Windows apps"), add, () => Loc.T("所有 Windows 应用的通知默认都会接收。把应用添加到这里，可以单独关闭接收、调整提示等级，或开关它的系统横幅。移除后恢复默认。\nBrimDeck 读取的是应用发给 Windows 的通知：钉钉、飞书需要在各自的设置中打开桌面通知；微信不发送 Windows 通知，只能在任务栏图标闪烁时提示有新消息。",
+            "Every Windows app's notices are received by default. Add an app here to stop receiving it, change its level, or switch its system banner. Removing it goes back to the default.\nBrimDeck reads the notifications apps send to Windows: DingTalk and Feishu need desktop notifications turned on in their own settings; WeChat sends none, so only its flashing taskbar button tells of a new message."));
         _bannerSwitches.Clear();
         var rows = new List<FrameworkElement>();
         var access = AccessRow(center);
@@ -558,7 +563,11 @@ public sealed partial class SettingsWindow
         Grid.SetColumn(level, 2); row.Children.Add(level);
         if (windows)
         {
-            var receive = NoticeToggle(name + " · " + Loc.T("接收", "Receive"), receives, value => { EditRule(key, name, r => r.Enabled = value); level.IsEnabled = value; });
+            var receive = NoticeToggle(name + " · " + Loc.T("接收", "Receive"), receives, value =>
+            {
+                EditRule(key, name, r => r.Enabled = value); level.IsEnabled = value;
+                if (_noticeAppsOpen.Contains(key)) ShowPage(_page);
+            });
             receive.HorizontalAlignment = HorizontalAlignment.Center;
             Grid.SetColumn(receive, 3); row.Children.Add(receive);
             if (key.StartsWith("windows:", StringComparison.Ordinal) && BannerSwitch(center, key["windows:".Length..], name) is { } banner)
@@ -588,9 +597,32 @@ public sealed partial class SettingsWindow
             if (_bannerNotes.TryGetValue(appId, out var problem)) return (problem, true);
             if (NoticeTimeSources.ForApp(appId) is { Role: NoticeTimeRole.Clock }) return (Loc.T("闹钟、计时器结束", "Alarms and finished timers"), false);
         }
+        // A common chat none of whose notices has arrived yet: what to turn on in it. Gone with its first notice.
+        if (ChatSetup(key) is { } setup && center.Hub.KnownApps.All(app => app.Key != key)) return (setup, false);
         if (rule?.Styles is not null) return (Loc.T("已单独设置样子", "Has its own looks"), false);
         return ("", false);
     }
+
+    // The common chats offered first under "添加应用", whether or not they have sent a notice yet, by the application ids their
+    // notices carry (QQ's, DingTalk's and Feishu's are the ids their Start menu entries register); WeChat sends no Windows
+    // notifications and is known by its taskbar flash (ChatFlash).
+    private static (string Key, string Name)[] CommonChats() =>
+    [
+        (NoticeKeys.Windows("QQ"), "QQ"), (NoticeKeys.Windows("ali.dingtalk.release"), Loc.T("钉钉", "DingTalk")),
+        (NoticeKeys.Windows("com.electron.Feishu"), Loc.T("飞书", "Feishu")), ("flash:wechat", Loc.T("微信", "WeChat"))
+    ];
+
+    // What to turn on in a common chat for its messages to reach Windows' notifications, in the chat's own words (DingTalk's from
+    // its installed interface text, Feishu's from its help center).
+    private static string? ChatSetup(string key) => key switch
+    {
+        "windows:QQ" => Loc.T("还没有收到通知：确认 QQ 设置中已开启消息通知", "No notice yet: check that message notifications are on in QQ's settings"),
+        "windows:ali.dingtalk.release" => Loc.T("还没有收到通知：在钉钉“设置与隐私 › 通知”中打开“消息桌面通知”",
+            "No notice yet: in DingTalk, turn on \"Message Desktop Notifications\" under \"Settings and Privacy › Notifications\""),
+        "windows:com.electron.Feishu" => Loc.T("还没有收到通知：在飞书“设置 › 通知”中勾选“横幅消息通知”，并选择显示消息内容",
+            "No notice yet: in Feishu, select \"Banner notification\" under \"Settings › Notifications\" and choose to show the message content"),
+        _ => null
+    };
 
     // Windows' own banner switch of an application, as Windows has it now (NoticeBanners.Shown), read again when the settings window
     // comes forward. Switching it writes Windows' setting at once; one that does not stay is put back and said under the name. Off
@@ -650,6 +682,8 @@ public sealed partial class SettingsWindow
             if (combo.SelectedIndex < 0) return;
             var (level, enabled, _) = options[combo.SelectedIndex];
             EditRule(key, name, r => { r.Level = level; r.Enabled = enabled; });
+            // The own looks open under the row show the chosen level's.
+            if (_noticeAppsOpen.Contains(key)) ShowPage(_page);
         };
         return combo;
     }
@@ -664,30 +698,73 @@ public sealed partial class SettingsWindow
         if (!NoticeKeys.OnAppList(key) && rule.Enabled && rule.Level == NoticeLevel.Auto && rule.Styles is null) s.NoticeApps.Remove(rule);
     });
 
-    // An application's own looks: off follows the "提示方式" page; on, a copy of it to change, one level at a time.
+    // An application's own looks: off follows the "提示方式" page; on, a copy of it to change. Shown is the look of the level its
+    // notices show at (the three levels for a program whose level its messages decide), and the look of the notices that stay
+    // until handled whatever the level: a chat's calls (their own look, NoticeLevelStyles.Call), and a clock's, a calendar's or a
+    // program's that ring or wait (level 3's, while the level shown is not 3).
     private FrameworkElement OwnLooks(string key, string name, NoticeAppRule? rule)
     {
         var panel = Collect(() =>
         {
-            var rows = new List<FrameworkElement>
+            var toggle = Toggle(Loc.T("单独设置样子", "Own looks"), rule?.Styles is not null, value => { EditRule(key, name, r => r.Styles = value ? S.NoticeStyles.Copy() : null); ShowPage(_page); },
+                help: Loc.T("打开后，这个应用的提示按这里设置的样子显示，优先于“提示方式”页和消息自己指定的样子；关闭后恢复跟随“提示方式”页。",
+                    "When on, this app's notices look as set here, before the How notices show page and what a message asks for; when off, they follow that page again."));
+            if (rule?.Styles is not { } styles) { Group(toggle); return; }
+            if (!rule.Enabled || rule.Level == NoticeLevel.Silent)
             {
-                Toggle(Loc.T("单独设置样子", "Own looks"), rule?.Styles is not null, value => { EditRule(key, name, r => r.Styles = value ? S.NoticeStyles.Copy() : null); ShowPage(_page); },
-                    help: Loc.T("打开后，这个应用的提示按这里设置的样子显示，优先于“提示方式”页和消息自己指定的样子；关闭后恢复跟随“提示方式”页。",
-                        "When on, this app's notices look as set here, before the How notices show page and what a message asks for; when off, they follow that page again."))
-            };
-            if (rule?.Styles is not null)
-            {
-                var level = _noticeAppLevel.TryGetValue(key, out var chosen) ? chosen : NoticeLevels.Default(rule.Level is NoticeLevel.Auto or NoticeLevel.Silent ? S.NoticeDefaultLevel : rule.Level);
-                rows.Add(NoticeChoice(Loc.T("等级", "Level"), "NoticeOwnLevel" + key, level, [.. Levels.Select(l => (l, (l == NoticeLevel.Plain ? "1 · " : l == NoticeLevel.Glow ? "2 · " : "3 · ") + LevelName(l)))],
-                    value => { _noticeAppLevel[key] = value; ShowPage(_page); }, 260));
-                rows.AddRange(LevelRows(level, () => S.NoticeRule(key)?.Styles ?? S.NoticeStyles,
-                    edit => { EditRule(key, name, r => { r.Styles ??= S.NoticeStyles.Copy(); edit(r.Styles); }); ShowPage(_page); }, key));
+                var none = TextLine(Loc.T("这个应用的通知不在岛上显示。", "This app's notices do not show on the island."), 12, TextSecondary);
+                Group(toggle, new Border { Child = none, Padding = new Thickness(0, 13, 0, 13) });
+                return;
             }
-            Group([.. rows]);
+            Group(toggle);
+            void Edit(Func<NoticeLevelStyles, NoticeStyle> pick, Action<NoticeStyle> change) { EditRule(key, name, r => { r.Styles ??= S.NoticeStyles.Copy(); change(pick(r.Styles)); }); ShowPage(_page); }
+            var sample = (name, name, Loc.T("一条新通知", "A new notice"));
+            NoticeLevel[] levels = rule.Level == NoticeLevel.Auto
+                ? ProgramSource(key) ? Levels : [NoticeLevels.Default(S.NoticeDefaultLevel)]
+                : [NoticeLevels.Default(rule.Level)];
+            foreach (var level in levels)
+            {
+                SectionTitle(levels.Length > 1 ? LevelTitle(level) : Loc.T("通知 · ", "Notices · ") + LevelTitle(level));
+                Group([LevelPreview(level, styles.For(level), sample), .. LevelRows(level, styles.For(level), change => Edit(s => s.For(level), change), key + level, own: true)]);
+            }
+            if (TakesCalls(key, name))
+            {
+                SectionTitle(Loc.T("来电", "Calls"), help: () => Loc.T("语音和视频来电一直留在岛上并定时闪动，直到接听、挂断或展开面板。", "Voice and video calls stay on the island and flash now and then until answered, declined or the panel is opened."));
+                Group([LevelPreview(NoticeLevel.Persistent, styles.ForCall(), (name, Loc.T("小周", "Zhou"), Loc.T("邀请你语音通话", "Incoming voice call"))),
+                    .. LevelRows(NoticeLevel.Persistent, styles.ForCall(), change => Edit(s => s.Call ??= s.Stay.Copy(), change), key + "Call", own: true)]);
+            }
+            if (!levels.Contains(NoticeLevel.Persistent) && StayKind(key) is { } stay)
+            {
+                SectionTitle(stay.Title, help: () => stay.Help);
+                Group([LevelPreview(NoticeLevel.Persistent, styles.Stay, (name, name, stay.Sample)), .. LevelRows(NoticeLevel.Persistent, styles.Stay, change => Edit(s => s.Stay, change), key + "Stay", own: true)]);
+            }
         });
         if (panel.Children.Count > 0 && panel.Children[^1] is Border last) last.Margin = new Thickness(0, 0, 0, 8);
         panel.Margin = new Thickness(32, 0, 0, 0);
         return panel;
+    }
+
+    // A source of the command line or WSL, whose messages may ask for any level.
+    private static bool ProgramSource(string key) => key.StartsWith("cli:", StringComparison.Ordinal) || key.StartsWith("wsl:", StringComparison.Ordinal);
+
+    // A Windows application whose notices BrimDeck may read as calls (WindowsNoticeApps.ReadsAsCall): a chat or a phone. A chat
+    // known by its taskbar flash only (WeChat) gives no words to read a call from.
+    private static bool TakesCalls(string key, string name)
+        => key.StartsWith("windows:", StringComparison.Ordinal) && NoticeGlyphs.App(key, name) is NoticeGlyph.Chat or NoticeGlyph.Phone;
+
+    // The notices of a source that stay until handled whatever its level: a clock's alarms, a calendar's or a to-do list's
+    // reminders, and what a program waits on (an approval, a question). Null for any other source.
+    private static (string Title, string Help, string Sample)? StayKind(string key)
+    {
+        if (ProgramSource(key))
+            return (Loc.T("等待处理", "Waiting on you"), Loc.T("需要批准或回答的提示一直留在岛上，直到处理。", "A notice that asks for an approval or an answer stays on the island until it is handled."), Loc.T("等待批准", "Waiting for approval"));
+        if (!key.StartsWith("windows:", StringComparison.Ordinal) || NoticeTimeSources.ForApp(key["windows:".Length..]) is not { } source) return null;
+        return source.Role switch
+        {
+            NoticeTimeRole.Clock => (Loc.T("闹钟与计时器", "Alarms and timers"), Loc.T("响铃的闹钟和结束的计时器一直留在岛上，直到处理。", "A ringing alarm or a finished timer stays on the island until it is handled."), Loc.T("07:30 起床", "07:30 Wake up")),
+            NoticeTimeRole.Reminders => (Loc.T("提醒", "Reminders"), Loc.T("到时的提醒一直留在岛上，直到处理。", "A reminder that is due stays on the island until it is handled."), Loc.T("交周报", "Send the weekly report")),
+            _ => (Loc.T("日程提醒", "Event reminders"), Loc.T("日程开始前的提醒一直留在岛上，直到处理。", "A reminder of an event about to start stays on the island until it is handled."), Loc.T("周会 15:00", "Weekly meeting 15:00"))
+        };
     }
 
     // The icon a row shows: the application's own, read from its notices, else its first letter on a plate.
@@ -717,9 +794,11 @@ public sealed partial class SettingsWindow
         var body = new StackPanel(); body.Children.Add(search); body.Children.Add(list);
         popup.Child = new Border { Child = body, Background = UI.Brush(_palette.Popup), BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(5) };
         var now = DateTimeOffset.UtcNow;
-        var recent = center.Hub.KnownApps.Where(app => NoticeKeys.OnAppList(app.Key) && S.NoticeRule(app.Key) is null)
+        var chats = CommonChats().Where(chat => S.NoticeRule(chat.Key) is null).ToList();
+        bool Chat(string key) => chats.Any(chat => chat.Key == key);
+        var recent = center.Hub.KnownApps.Where(app => NoticeKeys.OnAppList(app.Key) && S.NoticeRule(app.Key) is null && !Chat(app.Key))
             .Select(app => (app.Key, app.Name, app.IconRef, When: NoticeText.Relative(app.LastSeen, now))).ToList();
-        var others = ChatFlashApps.All.Where(app => app.Enabled && S.NoticeRule("flash:" + app.Id) is null && recent.All(r => r.Key != "flash:" + app.Id))
+        var others = ChatFlashApps.All.Where(app => app.Enabled && S.NoticeRule("flash:" + app.Id) is null && !Chat("flash:" + app.Id) && recent.All(r => r.Key != "flash:" + app.Id))
             .Select(app => ("flash:" + app.Id, app.Name + Loc.T("（任务栏闪烁）", " (taskbar flash)"))).ToList();
         void Add(string key, string name)
         {
@@ -751,9 +830,21 @@ public sealed partial class SettingsWindow
                 item.Click += (_, _) => Add(key, name);
                 items.Children.Add(item);
             }
+            // The common chats, each with what it is known by: when it last sent a notice, or for WeChat its taskbar flash.
+            var shownChats = chats.Where(chat => Match(chat.Name)).ToList();
+            if (shownChats.Count > 0)
+            {
+                Header(Loc.T("常用聊天应用", "Common chats"));
+                foreach (var (key, name) in shownChats)
+                {
+                    var known = center.Hub.KnownApps.FirstOrDefault(app => app.Key == key);
+                    string note = key.StartsWith("flash:", StringComparison.Ordinal) ? Loc.T("任务栏闪烁", "Taskbar flash") : known is null ? "" : NoticeText.Relative(known.LastSeen, now);
+                    Entry(key, name, known?.IconRef, note);
+                }
+            }
             var shownRecent = recent.Where(app => Match(app.Name)).ToList();
             if (shownRecent.Count > 0) { Header(Loc.T("最近发过通知", "Sent notices lately")); foreach (var app in shownRecent) Entry(app.Key, app.Name, app.IconRef, app.When); }
-            var shownOthers = others.Concat(_registeredApps.Where(app => S.NoticeRule(app.Key) is null && recent.All(r => r.Key != app.Key)))
+            var shownOthers = others.Concat(_registeredApps.Where(app => S.NoticeRule(app.Key) is null && !Chat(app.Key) && recent.All(r => r.Key != app.Key)))
                 .Where(app => Match(app.Item2)).ToList();
             if (shownOthers.Count > 0) { Header(Loc.T("其他应用", "Other apps")); foreach (var (key, name) in shownOthers) Entry(key, name, null, ""); }
             if (items.Children.Count == 0)
@@ -808,9 +899,8 @@ public sealed partial class SettingsWindow
         copy.ToolTip = helper;
         SectionTitle(Loc.T("命令行与程序", "Command line and programs"), copy, () => Loc.T("通过命令行或程序发来的提示，按发送方给出的名称列在这里，第一次发送后自动出现。“按发送方”使用消息里指定的等级。用法见使用说明。",
             "Notices sent through the command line or by a program are listed here under the name their sender gives, once the first one arrives. As sent uses the level the message asks for. See the documentation for how to send them."));
-        static bool Program(string key) => key.StartsWith("cli:", StringComparison.Ordinal) || key.StartsWith("wsl:", StringComparison.Ordinal);
-        var sources = center.Hub.KnownApps.Where(app => Program(app.Key)).Select(app => (app.Key, app.Name))
-            .Concat(S.NoticeApps.Where(rule => Program(rule.Key) && center.Hub.KnownApps.All(app => app.Key != rule.Key)).Select(rule => (rule.Key, Name: rule.Name.Length > 0 ? rule.Name : rule.Key)))
+        var sources = center.Hub.KnownApps.Where(app => ProgramSource(app.Key)).Select(app => (app.Key, app.Name))
+            .Concat(S.NoticeApps.Where(rule => ProgramSource(rule.Key) && center.Hub.KnownApps.All(app => app.Key != rule.Key)).Select(rule => (rule.Key, Name: rule.Name.Length > 0 ? rule.Name : rule.Key)))
             .Take(60).ToList();
         var rows = new List<FrameworkElement>();
         var pipe = StatusLine(() => center.PipeError is { } error ? (Loc.T("本地通道不可用：", "The local channel is unavailable: ") + error, true) : ("", false));

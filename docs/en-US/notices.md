@@ -53,7 +53,12 @@ There is also "List only": the notice only goes to the notice history and does n
 
 How each level looks is set under Settings › Live notices › How notices show: whether the app icon shows, how long levels 1 and 2 show, the effect of levels 2 and 3 (Glow or Lively), and the default color of level 3. "Try it" beside each level sends a sample notice. Notices take the whole island; only a message that names a place with `--slot` replaces just one part.
 
-When an app needs a different look, click the arrow beside its name under Settings › Live notices › Apps to open "Own looks", and change it level by level. That app's notices then follow its own settings, which come before the "How notices show" page and the look a message asks for. "Own looks" is closed by default and is seldom needed.
+When an app needs a different look, click the arrow beside its name under Settings › Live notices › Apps to open "Own looks". That app's notices then follow its own settings, which come before the "How notices show" page and the look a message asks for. It shows the look of the level the app uses now (a program set to "As sent" lists all three levels): levels 2 and 3 have a glow color and an effect, levels 1 and 2 a display time, and every level the app icon switch. When you change the app's level, the look of the new level shows here. Besides:
+
+- Chat apps (QQ, DingTalk, Feishu and others) have a "Calls" group with its own color, effect and icon for voice and video calls; a call stays on the island until answered, declined or the panel is opened.
+- Clock, calendar and reminder apps and command-line programs whose level is not 3 have a group for their alarms, event reminders or "Waiting on you" notices, which always stay.
+
+"Own looks" is closed by default and is seldom needed.
 
 The level is the first of these that applies:
 
@@ -80,6 +85,19 @@ While it shows, other notices go to the notice history and wait as usual; a norm
 | brim-notify | `BrimDeck.Notify.exe` on Windows and `brim-notify` in WSL send notices directly. | On |
 | WSL desktop notifications | Standard desktop notifications (freedesktop D-Bus, such as `notify-send`) in the chosen distributions. | Off, per distribution |
 | Mailboxes | New mail in the mailboxes you connect: the sender, the subject and the start of the text. Added under Settings › Live notices › Mailboxes; see [Mailboxes](mail.md). | None connected |
+
+### Common chat apps
+
+BrimDeck reads the notifications apps send to Windows, so a chat app's messages reach the island only while its desktop notifications are on. Under "Add app" on the "Apps" page, "Common chats" adds them directly; until one has sent a notice, its row says what to turn on.
+
+| App | What to turn on |
+|---|---|
+| QQ | Sends Windows notifications by default. If nothing shows, check that message notifications are on in QQ's settings and that Windows allows QQ's notifications under Settings › System › Notifications. |
+| DingTalk | Click your profile photo in the upper-left corner, open "Settings and Privacy › Notifications" and turn on "Message Desktop Notifications" under "Desktop Notifications"; for calls, also "Display call/meeting invitation notifications". |
+| Feishu | Click your profile photo in the upper-left corner, open "Settings › Notifications", select "Message notifications" and "Banner notification", and choose to show the message content in the banner; without it the island only shows a line such as "new message". |
+| WeChat | WeChat for PC sends no Windows notifications. Only its flashing taskbar button tells of a new message; the sender and the text cannot be read. |
+
+Each of them also needs its notifications allowed under Windows Settings › System › Notifications, with Do not disturb off. When an app's "System banner" is off on the "Apps" page, Windows no longer pops up its banners, but its notifications still go to the notification center and BrimDeck reads them as before.
 
 ### WeChat: reading message content
 

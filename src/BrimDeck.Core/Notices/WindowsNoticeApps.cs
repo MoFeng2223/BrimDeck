@@ -46,7 +46,7 @@ public static partial class WindowsNoticeApps
     // a Start menu shortcut Windows can read. Only used when neither Windows nor the registry names the application.
     private static readonly (string Id, string Name, string? English)[] KnownApps =
     [
-        ("BiliBiliPC", "哔哩哔哩", "Bilibili"), ("ali.dingtalk.release", "钉钉", "DingTalk"), ("Weixin", "微信", "WeChat"), ("WeChat", "微信", "WeChat"),
+        ("BiliBiliPC", "哔哩哔哩", "Bilibili"), ("ali.dingtalk.release", "钉钉", "DingTalk"), ("com.electron.Feishu", "飞书", "Feishu"), ("Weixin", "微信", "WeChat"), ("WeChat", "微信", "WeChat"),
         ("com.google.gemini.windows", "Gemini", null), ("Microsoft.VisualStudioCode", "Visual Studio Code", null), ("Anysphere.Cursor", "Cursor", null),
         ("QuarkCloudDrive", "夸克网盘", "Quark Drive"), ("md.obsidian", "Obsidian", null), ("party.mihomo.app", "Clash Party", null),
         ("io.github.clash-verge-rev.clash-verge-rev", "Clash Verge", null), ("com.nvidia.nvapp", "NVIDIA App", null), ("Adobe.CreativeCloud", "Adobe Creative Cloud", null),

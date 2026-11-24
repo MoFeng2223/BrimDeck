@@ -294,7 +294,7 @@ internal sealed partial class NoticeCenter : IDisposable
     {
         var now = DateTimeOffset.UtcNow;
         var level = Level(notice, now);
-        var style = NoticeLevelStyles.Of(level, Settings.NoticeRule(notice.AppKey), Settings.NoticeStyles);
+        var style = NoticeLevelStyles.Of(level, Settings.NoticeRule(notice.AppKey), Settings.NoticeStyles, notice.Call);
         return new()
         {
             // One conversation's messages (the application and the title) merge into one notice.

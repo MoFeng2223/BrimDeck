@@ -245,6 +245,9 @@ internal sealed partial class Renderer(App app, string output, string language, 
             if (_settings.NoticeRule("windows:" + listed) is null) _settings.NoticeApps.Add(new NoticeAppRule { Key = "windows:" + listed, Name = listed });
         _settings.NoticeRule("windows:Backup Tool")!.Enabled = false;
         _settings.NoticeRule("windows:Outlook")!.Level = NoticeLevel.Silent;
+        // Two common chats that have sent nothing yet: their rows say what to turn on.
+        _settings.NoticeApps.Add(new NoticeAppRule { Key = "windows:ali.dingtalk.release", Name = Loc.T("钉钉", "DingTalk") });
+        _settings.NoticeApps.Add(new NoticeAppRule { Key = "windows:com.electron.Feishu", Name = Loc.T("飞书", "Feishu") });
         _settings.NoticeApps.Add(new NoticeAppRule { Key = "windows:Claude Desktop With A Very Long Application Name (User Setup)", Name = "Claude Desktop With A Very Long Application Name (User Setup)", Level = NoticeLevel.Persistent, Styles = new() });
         var center = Activator.CreateInstance(Type.GetType("BrimDeck.NoticeCenter, BrimDeck")!, Program.Any, null, [app], null)!;
         Program.SetProperty(app, "Notices", center);
@@ -283,11 +286,17 @@ internal sealed partial class Renderer(App app, string output, string language, 
         _deck.SetExpanded(false, true);
         await SettingsPage("notices-settings", 19, height: 2000, tips: true);
         await SettingsPage("notice-apps-settings", 20, height: 1100, tips: true);
-        // One application's own looks open under its row.
-        await SettingsPage("notice-apps-own", 20, height: 1400, prepare: window =>
+        // Applications' own looks open under their rows: a level-3 application, a chat at level 2 with its glow color and its
+        // calls' look, and the Clock, whose alarms stay whatever its level.
+        _settings.NoticeRule("windows:QQ")!.Styles = new() { Flash = new() { Color = "#6E9CF0", Seconds = 8 }, Call = new() { Color = "#5DC98C", Liquid = true } };
+        string clock = NoticeKeys.Windows("Microsoft.WindowsAlarms_8wekyb3d8bbwe!App");
+        _settings.NoticeRule(clock)!.Styles = new() { Stay = new() { Color = NoticeStyle.AppColor } };
+        await SettingsPage("notice-apps-own", 20, height: 2600, prepare: window =>
         {
             ((HashSet<string>)Program.Field(window, "_noticeAppsOpen")!).Add("windows:Claude Desktop With A Very Long Application Name (User Setup)");
             ((HashSet<string>)Program.Field(window, "_noticeAppsOpen")!).Add("windows:QQ");
+            ((HashSet<string>)Program.Field(window, "_noticeAppsOpen")!).Add(clock);
+            ((HashSet<string>)Program.Field(window, "_noticeAppsOpen")!).Add("windows:Outlook");
         });
     }
 

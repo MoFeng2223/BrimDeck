@@ -51,7 +51,7 @@ internal sealed class IslandNotice : Window
     private Rect _stageRect, _island;
     // In a part's place: the part's area in the stage, within _island; null while the notice takes the whole island.
     private Rect? _part;
-    // The backlight's color of the shown item (NoticeStyle.Color for level 3), white otherwise.
+    // The backlight's color of the shown item (NoticeStyle.Color for levels 2 and 3), white otherwise.
     private Color _light = GlowColor;
     private bool _leaving, _arrivedUnderPointer, _held;
     private int _generation;
@@ -426,12 +426,13 @@ internal sealed class IslandNotice : Window
     // What the shown item plays on this island (NoticeLevels.Effect): a notice that shows beyond the rate limit plays as a plain one.
     private NoticeEffect Played => _item is { } item ? NoticeLevels.Effect(item.Level, item.Subdued, Form, item.Style?.Liquid) : NoticeEffect.Still;
 
-    // The backlight's color: level 3's chosen one (white, the application's or a swatch), white for every other.
+    // The backlight's color: the one chosen for levels 2 and 3 (white, the application's or a swatch), white for level 1.
     private Color Light()
     {
-        if (_item is not { Level: NoticeLevel.Persistent }) return GlowColor;
-        // The notice's own (its sender's color, or the one of a warning, an error or a success) comes before the level's style.
-        if (!OwnLooks(_item) && Notice is { } own && NoticeTones.Glow(own) is { } tone && ColorConverter.ConvertFromString(tone) is Color toned) return toned;
+        if (_item is not { Level: NoticeLevel.Glow or NoticeLevel.Persistent }) return GlowColor;
+        // For level 3 the notice's own (its sender's color, or the one of a warning, an error or a success) comes before the
+        // level's style, unless the application has its own looks.
+        if (_item.Level == NoticeLevel.Persistent && !OwnLooks(_item) && Notice is { } own && NoticeTones.Glow(own) is { } tone && ColorConverter.ConvertFromString(tone) is Color toned) return toned;
         if (_item is not { Style.Color: { Length: > 0 } chosen }) return GlowColor;
         if (chosen == NoticeStyle.AppColor)
             return Notice is { } notice ? _look.AppColor(Center.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey))) : GlowColor;

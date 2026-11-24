@@ -59,6 +59,11 @@ internal static class NoticeLevelTests
         check("Look: an application's own looks come before the settings'; Lively is level 2's look", NoticeLevelStyles.Of(NoticeLevel.Glow, own, settings).Seconds == 12
             && NoticeLevelStyles.Of(NoticeLevel.Glow, null, settings) == settings.Flash && NoticeLevelStyles.Of(NoticeLevel.Lively, null, settings) == settings.Flash
             && NoticeLevelStyles.Of(NoticeLevel.Plain, new NoticeAppRule(), settings) == settings.Text && NoticeLevelStyles.Of(NoticeLevel.Persistent, null, settings) == settings.Stay);
+        var chat = new NoticeAppRule { Styles = new() { Call = new() { Color = "#5DC98C" } } };
+        check("Look: a call that stays shows with the application's call look, else level 3's; a call no longer staying shows as its level",
+            NoticeLevelStyles.Of(NoticeLevel.Persistent, chat, settings, call: true) == chat.Styles.Call && NoticeLevelStyles.Of(NoticeLevel.Persistent, chat, settings) == chat.Styles.Stay
+            && NoticeLevelStyles.Of(NoticeLevel.Persistent, null, settings, call: true) == settings.Stay && NoticeLevelStyles.Of(NoticeLevel.Glow, chat, settings, call: true) == chat.Styles.Flash
+            && chat.Copy().Styles!.Call is { Color: "#5DC98C" } copied && copied != chat.Styles.Call);
 
         // An application's alarms count together toward the urgent limit, whatever their titles.
         var coordinator = new AttentionCoordinator();
