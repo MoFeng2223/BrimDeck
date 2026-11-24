@@ -12,9 +12,8 @@ public partial class MainWindow
     private PromptTimer? _weatherRingTimer;
     private async void WeatherRefresh_Click(object sender, RoutedEventArgs e)
     {
+        // 停止还是开始刷新由 ManualRefresh 统一判断，视图层不再重复读 IsFetching。
         if (_weatherView is null) return;
-        // While a refresh is under way a second click stops it; otherwise it starts one.
-        if (_weatherView.IsFetching) { _weatherView.Cancel(); return; }
         await _weatherView.ManualRefresh();
         RenderWeatherRefreshButton();
     }
@@ -34,8 +33,7 @@ public partial class MainWindow
             WeatherContent.Children.Add(new Viewbox { Stretch = Stretch.Uniform, Child = _weatherView });
         }
         FitWeather();
-        RenderWeatherRefreshButton();
-        RenderWeatherCityButton();
+        RenderWeatherChrome();
     }
 
     // 拖动调尺寸时每帧只让面板内容跟上新尺寸：页头、刷新环、城市按钮、状态栏都与尺寸无关，
@@ -80,14 +78,20 @@ public partial class MainWindow
     {
         if (_weatherView is null) return;
         await _weatherView.ChooseCityAsync(index);
-        RenderWeatherCityButton();
+        RenderWeatherChrome();
+    }
+    // 页头天气控件只在天气页且已建视图时出现；两处按钮共用同一判据，避免条件漂移。
+    private bool WeatherChromeVisible => Settings.WeatherPage && IsWeatherPage && _weatherView is not null;
+    private void RenderWeatherChrome()
+    {
         RenderWeatherRefreshButton();
+        RenderWeatherCityButton();
     }
     // 按钮文字跟着选择与定位结果走；抓取中、定位到的城市还没回来时保持上一版文字，不闪成空。
     private void RenderWeatherCityButton()
     {
         if (WeatherCityButton is null) return;
-        bool show = Settings.WeatherPage && IsWeatherPage && _weatherView is not null;
+        bool show = WeatherChromeVisible;
         WeatherCityButton.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         if (!show) return;
         string label = _weatherView!.CityLabel;
@@ -101,12 +105,11 @@ public partial class MainWindow
     // page always refreshes itself and a second click stops the refresh under way instead of toggling anything.
     private void RenderWeatherRefreshButton()
     {
-        RenderWeatherCityButton();
-        if (_weatherView is null || WeatherRefreshButton is null) return;
+        if (WeatherRefreshButton is null || _weatherView is null) return;
         bool page = IsWeatherPage;
         bool onScreen = _expanded && page && !IsSuppressed;
         bool fetching = _weatherView.IsFetching;
-        WeatherRefreshButton.Visibility = Settings.WeatherPage && page ? Visibility.Visible : Visibility.Collapsed;
+        WeatherRefreshButton.Visibility = WeatherChromeVisible ? Visibility.Visible : Visibility.Collapsed;
         var tip = fetching ? Loc.T("正在刷新天气… 点击停止", "Refreshing weather… Click to stop") : Loc.T("刷新天气", "Refresh weather");
         if (WeatherRefreshButton.ToolTip is System.Windows.Controls.ToolTip shown) shown.Content = tip; else WeatherRefreshButton.ToolTip = UI.LeftwardToolTip(tip);
         AutomationProperties.SetName(WeatherRefreshButton, fetching ? Loc.T("停止刷新天气", "Stop refreshing weather") : Loc.T("刷新天气", "Refresh weather"));

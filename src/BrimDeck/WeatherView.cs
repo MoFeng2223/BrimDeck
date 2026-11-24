@@ -299,8 +299,20 @@ internal sealed class WeatherView : UserControl
         lowRow.Margin = new Thickness(6, 0, 6, 0); Grid.SetRow(lowRow, 2); days.Children.Add(lowRow);
         dayInfoRow.Margin = new Thickness(6, 0, 6, 0); Grid.SetRow(dayInfoRow, 3); days.Children.Add(dayInfoRow);
         Grid.SetRow(nowText, 0); Grid.SetRowSpan(nowText, 2); days.Children.Add(nowText);
-        IsVisibleChanged += async (_, _) => { if (IsVisible) { state = WeatherData.Load(() => _app.Settings); await Refresh(); } };
-        Loaded += async (_, _) => { await Refresh(); timer.Start(); }; timer.Tick += async (_, _) => await Refresh(); Unloaded += (_, _) => { timer.Stop(); generation++; };
+        // 首帧与切页都走同一个入口：有请求在飞时直接返回，数据还在自动周期内就跳过，
+        // 不再让 Loaded 与 IsVisibleChanged 各发一次、后者把前者取消。
+        IsVisibleChanged += async (_, _) => { if (IsVisible) { state = WeatherData.Load(() => _app.Settings); await EnsureFreshAsync(); } };
+        Loaded += async (_, _) => { await EnsureFreshAsync(); timer.Start(); };
+        // 15 分钟周期是硬触发；正在手动刷新时让它跑完，不打断。
+        timer.Tick += async (_, _) => { if (!fetching) await Refresh(); };
+        Unloaded += (_, _) => { timer.Stop(); generation++; };
+    }
+
+    private async Task EnsureFreshAsync()
+    {
+        if (fetching) return;
+        if (_last is { } snapshot && DateTimeOffset.Now - snapshot.FetchedAt < AutoInterval) return;
+        await Refresh();
     }
 
     internal Task ManualRefresh()
@@ -328,10 +340,8 @@ internal sealed class WeatherView : UserControl
             City city;
             if (selected >= 0 && selected < state.Cities.Count) city = state.Cities[selected];
             else city = await WeatherData.LocateAsync(state.Schedule, token) ?? new City("当前位置", 0, 0);
-            // 历史单独一轮：先画不含历史的一版，历史到了再整体替换。首屏不必等 10 个时光机请求。
+            // 旧请求交给 token 中断；generation 只在部分结果回写时挡一次，避免迟到的首屏覆盖新请求。
             var snapshot = await WeatherData.CurrentAsync(city, state.Schedule, token, partial => { if (request == generation) Render(partial); });
-            if (request != generation) return;
-            if (token.IsCancellationRequested) return;
             Render(snapshot);
             // 定位/选择出的实际城市即缓存键：自动定位的快照也按位置存，AutoKey 记下映射。
             key = city.ToString();
@@ -339,7 +349,7 @@ internal sealed class WeatherView : UserControl
             if (AutoSelected) state.AutoKey = key;
             WeatherData.Save(state); _cycleStart = DateTime.UtcNow;
         } catch (OperationCanceledException) {
-            if (request != generation) return;
+            // 取消即本轮作废，界面与状态由新的 Refresh 接管。
         } catch { if (request == generation) { summary.Children.Clear(); summary.Children.Add(new TextBlock { Text = Loc.T("天气数据不可用", "Weather data unavailable"), FontSize = 20, VerticalAlignment = VerticalAlignment.Center }); } }
         finally { if (ReferenceEquals(_token, cts)) { fetching = false; _token = null; } RaiseState(); }
     }

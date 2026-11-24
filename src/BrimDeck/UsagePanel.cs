@@ -134,7 +134,7 @@ public partial class MainWindow
     {
         RenderSyncButton();
         RenderPageSwitch();
-        RenderWeatherRefreshButton();
+        RenderWeatherChrome();
         ClockLabel.Text = DateTime.Now.ToString("HH:mm");
         // The gear shows a tooltip only while it carries the update notice.
         var updates = _app.Updates;

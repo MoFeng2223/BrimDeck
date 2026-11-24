@@ -1040,7 +1040,7 @@ public partial class MainWindow : Window
         else _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = tone, EasingFunction = easeInOut }, duration, tint), HandoffBehavior.SnapshotAndReplace);
         // The panel is rebuilt when data or settings change, never here: a rebuild on the first frame reads as a stall.
         if (expanded) { RefreshStatus(); UpdateMusicPosition(); }
-        else { RenderSyncButton(); RenderWeatherRefreshButton(); }
+        else { RenderSyncButton(); RenderWeatherChrome(); }
         UpdateMusicTimer();
         UpdateMonitorDemand();
         UpdateGrips();

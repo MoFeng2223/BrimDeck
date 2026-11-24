@@ -454,11 +454,6 @@ internal static class WeatherAggregator
     private static TimeSpan ClockOffset(string? zone, City city)
         => zone is not null && TimeZoneInfo.TryFindSystemTimeZoneById(zone, out var info)
             ? info.GetUtcOffset(DateTimeOffset.UtcNow) : TimeSpan.FromHours(Geo.UtcOffsetHours(city));
-    // 按快照自带的偏移还原城市时钟：界面与覆盖判定用同一份，不会两边算出不同的「现在」。
-    private static DateTimeOffset SnapshotClock(WeatherSnapshot snapshot)
-        => snapshot.UtcOffsetMinutes is > -1440 and < 1440
-            ? DateTimeOffset.Now.ToOffset(TimeSpan.FromMinutes(snapshot.UtcOffsetMinutes))
-            : DateTimeOffset.Now;
     // 整点键：与 HourPoint.Time 同一格式（yyyy-MM-ddTHH:mm，当地时钟），可直接做字符串比较。
     private static string HourKey(DateTimeOffset at)
         => new DateTimeOffset(at.Year, at.Month, at.Day, at.Hour, 0, 0, at.Offset).ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);

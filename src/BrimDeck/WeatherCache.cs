@@ -145,7 +145,12 @@ internal static class WeatherCache
     {
         Memory[id] = new Entry { Value = value, At = at };
         if (Memory.Count <= MemoryLimit) return;
-        foreach (var pair in Memory.OrderBy(pair => pair.Value.At).Take(Memory.Count - MemoryLimit).ToArray()) Memory.TryRemove(pair.Key, out _);
+        foreach (var pair in Memory.OrderBy(pair => pair.Value.At).Take(Memory.Count - MemoryLimit).ToArray())
+        {
+            if (!Memory.TryRemove(pair.Key, out _)) continue;
+            // 只回收无人持有、无人排队的闸门；正在用的保留，下个请求继续复用，避免同键并发两份请求。
+            if (Gates.TryGetValue(pair.Key, out var gate) && gate.CurrentCount == 1) Gates.TryRemove(pair.Key, out _);
+        }
     }
 
     // 启动时清掉长期不用的条目：历史按日期缓存，城市换得勤会留下不少一次性文件。
@@ -206,12 +211,13 @@ internal static class RequestGate
     private static readonly object Sync = new();
     private static bool _dirty;
     private static bool _restored;
+    private static Timer? _flushTimer;
 
     public static bool TryEnter(string source, WeatherSettings? limits)
     {
         lock (Sync)
         {
-            Restore();
+            RestoreCore();
             var state = States.GetOrAdd(source, _ => new State());
             var clock = DateTimeOffset.Now;
             var today = DateOnly.FromDateTime(clock.LocalDateTime);
@@ -223,8 +229,7 @@ internal static class RequestGate
             if ((daily > 0 && state.Count >= daily) || (monthly > 0 && state.MonthCount >= monthly)) return false;
             state.Count++;
             state.MonthCount++;
-            _dirty = true;
-            if (source == "hefeng") Flush();
+            _dirty = true;   // 所有来源统一标记，交给定时器合并落盘，不再只给和风单开一条路径
             return true;
         }
     }
@@ -296,43 +301,55 @@ internal static class RequestGate
 
     public static void Restore()
     {
-        lock (Sync)
+        lock (Sync) RestoreCore();
+        Schedule();
+    }
+
+    private static void RestoreCore()
+    {
+        if (_restored) return;
+        _restored = true;
+        try
         {
-            if (_restored) return;
-            _restored = true;
-            try
+            if (!File.Exists(UsagePath)) return;
+            using var doc = JsonDocument.Parse(File.ReadAllText(UsagePath));
+            var legacyDay = DateOnly.FromDateTime(File.GetLastWriteTime(UsagePath));
+            foreach (var entry in doc.RootElement.EnumerateObject())
             {
-                if (!File.Exists(UsagePath)) return;
-                using var doc = JsonDocument.Parse(File.ReadAllText(UsagePath));
-                var legacyDay = DateOnly.FromDateTime(File.GetLastWriteTime(UsagePath));
-                foreach (var entry in doc.RootElement.EnumerateObject())
-                {
-                    bool legacy = entry.Value.ValueKind == JsonValueKind.Number;
-                    var usage = legacy ? new Usage(legacyDay, entry.Value.GetInt32(), entry.Value.GetInt32())
-                        : entry.Value.Deserialize<Usage>(Json);
-                    if (usage is null) continue;
-                    string key = entry.Name == "hefeng-search" ? "hefeng" : entry.Name;
-                    var state = States.GetOrAdd(key, _ => new State());
-                    state.Day = usage.Day;
-                    state.Count += usage.Count;
-                    state.MonthCount += usage.MonthCount;
-                    _dirty |= legacy;
-                }
+                bool legacy = entry.Value.ValueKind == JsonValueKind.Number;
+                var usage = legacy ? new Usage(legacyDay, entry.Value.GetInt32(), entry.Value.GetInt32())
+                    : entry.Value.Deserialize<Usage>(Json);
+                if (usage is null) continue;
+                string key = entry.Name == "hefeng-search" ? "hefeng" : entry.Name;
+                var state = States.GetOrAdd(key, _ => new State());
+                state.Day = usage.Day;
+                state.Count += usage.Count;
+                state.MonthCount += usage.MonthCount;
+                _dirty |= legacy;
             }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-            catch (JsonException) { }
         }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        catch (JsonException) { }
     }
 
     public static void Flush()
     {
-        lock (Sync)
-        {
-            if (!_dirty) return;
-            var counts = States.ToDictionary(p => p.Key, p => new Usage(p.Value.Day, p.Value.Count, p.Value.MonthCount));
-            if (WeatherFiles.WriteAtomic(UsagePath, JsonSerializer.Serialize(counts, Json))) _dirty = false;
-        }
+        lock (Sync) FlushCore();
+    }
+
+    private static void FlushCore()
+    {
+        if (!_dirty) return;
+        var counts = States.ToDictionary(p => p.Key, p => new Usage(p.Value.Day, p.Value.Count, p.Value.MonthCount));
+        if (WeatherFiles.WriteAtomic(UsagePath, JsonSerializer.Serialize(counts, Json))) _dirty = false;
+    }
+
+    // 计数不再逐请求写盘：30 秒合并一次，进程被终止最多丢半分钟的用量。
+    private static void Schedule()
+    {
+        if (_flushTimer is not null) return;
+        _flushTimer = new Timer(_ => Flush(), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
     }
 }
 
