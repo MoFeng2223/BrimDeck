@@ -19,7 +19,7 @@ internal static class WeatherData
         public WeatherSettings Schedule { get => _settings().Weather; set => _settings().Weather = value; }
         public Dictionary<string, WeatherSnapshot> Cache { get; set; } = [];
         // 自动定位指针：最近一次定位到的实际城市键。快照一律按真实城市键存（定位映射选择的城市/区），
-        // "auto" 不再是数据键，只保留这个指向，供重启后免定位直接命中缓存、设置页「当前位置」行取数。
+        // "auto" 只作指向，供重启后免定位直接命中缓存、设置页「当前位置」行取数。
         public string AutoKey { get; set; } = "";
     }
     private sealed class SnapshotFile { public string Key {get;set;}=""; public WeatherSnapshot? Value {get;set;} }
@@ -73,7 +73,7 @@ internal static class WeatherData
         }
     }
     // 只写下载快照与请求计数。用户在设置页改动的 cities/selected/schedule 属于 DeckSettings，
-    // 由 SettingsWindow/App 的常规设置保存流程写回 settings.json，不再另存 weather.json。
+    // 由 SettingsWindow/App 的常规设置保存流程写回 settings.json。
     internal static void Save(State state)
     {
         lock(SnapLock)
@@ -320,7 +320,7 @@ internal sealed class WeatherSnapshot
     public double WindGustKmh {get;set;} public double WindDirectionDeg {get;set;} public string WindDirection {get;set;}="";
     public double PressureHpa {get;set;} public double VisibilityKm {get;set;} public double DewPointC {get;set;} public double UvIndex {get;set;}
     public double CloudPercent {get;set;} public double PrecipitationMm {get;set;} public string ConditionText {get;set;}="";
-    // 风级（和风 wind.scale；-1 表示无）、降水强度 mm/h 与降水类型（rain/snow/none）。
+    // 风级（和风 wind.scale；-1 表示无）、降水强度 mm/h 与降水类型（rain/snow/ice/mixed/none/unknown）。
     public int WindScale {get;set;}=-1; public double PrecipRateMmH {get;set;} public string PrecipType {get;set;}="";
     // 通用国际标准 AQI（qaqi，-1 表示无）：国内同时有中国标准时并列展示。
     // 空气质量：-1 表示来源没有提供，界面据此隐藏。
@@ -349,7 +349,7 @@ internal sealed class WeatherSnapshot
     public int[] DayNightCodes {get;set;}=[]; public string[] DayNightConditions {get;set;}=[]; public int[] DayNightHumidity {get;set;}=[];
     public double[] DayNightWindMaxKmh {get;set;}=[]; public double[] DayNightGustMaxKmh {get;set;}=[]; public double[] DayNightWindDirDeg {get;set;}=[]; public string[] DayNightWindDir {get;set;}=[];
     public double[] DayNightPrecipMm {get;set;}=[]; public int[] DayNightRainProb {get;set;}=[]; public double[] DayNightCloudPercent {get;set;}=[];
-    // 扩展域：分钟降水 / 预警 / 生活指数。台风来袭由「预警」域覆盖，不再单列台风/辐照/海洋。
+    // 扩展域：分钟降水 / 预警 / 生活指数；台风由预警域覆盖。
     public string[] MinuteTimes {get;set;}=[]; public double[] MinutePrecip {get;set;}=[]; public string MinuteSummary {get;set;}="";
     public WarningItem[] Warnings {get;set;}=[];
     public IndexItem[] Indices {get;set;}=[];

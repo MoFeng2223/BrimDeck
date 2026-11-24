@@ -29,12 +29,12 @@ internal static class WeatherCodes
         if (value.Contains("暴雨")) return 65;
         if (value.Contains("大雨")) return 63;
         if (value.Contains("中雨")) return 63;
-        if (value.Contains("小雨") || value.Contains("雨")) return 61;
         if (value.Contains("阵雨")) return 80;
-        if (value.Contains("暴雪")) return 75;
-        if (value.Contains("大雪")) return 75;
+        if (value.Contains("雨")) return 61;
+        if (value.Contains("暴雪") || value.Contains("大雪")) return 75;
         if (value.Contains("中雪")) return 73;
-        if (value.Contains("小雪") || value.Contains("雪")) return 71;
+        if (value.Contains("阵雪")) return 85;
+        if (value.Contains("雪")) return 71;
         if (value.Contains("雾")) return 45;
         if (value.Contains("霾") || value.Contains("浮尘") || value.Contains("扬沙") || value.Contains("沙尘")) return 45;
         if (value.Contains("阴")) return 3;
@@ -49,8 +49,8 @@ internal static class WeatherCodes
         "100" => 0, "101" or "102" or "103" => 2, "104" => 3,
         "300" or "301" => 80, "302" => 95, "303" or "304" => 96, "305" or "309" => 61,
         "306" or "314" => 63, "307" or "315" => 65, "308" or "316" => 65, "310" or "317" => 65,
-        "311" or "312" or "318" => 65, "313" => 66, "404" or "405" or "406" => 68,
-        "400" or "408" => 71, "401" or "409" => 73, "402" or "410" => 75, "403" or "407" => 75,
+        "311" or "312" or "318" => 65, "313" => 66, "404" or "405" or "406" => 77,
+        "400" or "408" => 71, "401" or "409" => 73, "402" or "410" or "403" => 75, "407" => 85,
         "500" or "501" or "509" or "510" or "514" or "515" => 45,
         "502" or "511" or "512" or "513" => 45, "503" or "504" or "507" or "508" => 45,
         "900" => 0, "901" => 0, "999" => 3, _ => 3
@@ -79,11 +79,22 @@ internal static class WeatherCodes
         return 12;
     }
 
-    // 风向度数 → 16 方位文字（仅 tooltip 等紧凑展示用）。
+    // 风向度数 → 8 方位角度（45° 一档，0/45/…/315）。边界按远离零取整，和图标旋转共用同一档。
+    public static double Compass8Angle(double deg)
+    {
+        if (double.IsNaN(deg)) return double.NaN;
+        double d = (deg % 360 + 360) % 360;
+        return Math.Round(d / 45, MidpointRounding.AwayFromZero) * 45 % 360;
+    }
+
+    // 风向度数 → 8 方位文字（仅 tooltip 等紧凑展示用）。
     public static string DegreeToCompass(double deg)
     {
-        string[] names = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
-        return names[(int)Math.Round(((deg % 360 + 360) % 360) / 22.5) % 16];
+        string[] names = [Loc.T("北", "N"), Loc.T("东北", "NE"), Loc.T("东", "E"), Loc.T("东南", "SE"),
+                          Loc.T("南", "S"), Loc.T("西南", "SW"), Loc.T("西", "W"), Loc.T("西北", "NW")];
+        double angle = Compass8Angle(deg);
+        if (double.IsNaN(angle)) return "";
+        return names[((int)angle / 45) % 8];
     }
 
     public static string Text(int code) => code switch

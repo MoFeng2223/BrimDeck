@@ -51,7 +51,7 @@ internal sealed class CurrentPart
     public string? Condition;
     // 风级（和风 wind.scale，蒲福级数；Open-Meteo 无，界面由风速换算兜底）。
     public int? WindScale;
-    // 降水强度（mm/h）与降水类型（rain/snow/none），和风 precipitation.intensity/type。
+    // 降水强度（mm/h）与降水类型（rain/snow/ice/mixed/none/unknown），和风 precipitation.intensity/type。
     public double? PrecipRateMmH;
     public string? PrecipType;
 }
@@ -140,7 +140,7 @@ internal sealed class DayPoint
     public double? AvgTempC;
     // 白天云量（和风 daytime.cloudCover）。
     public double? CloudPercent;
-    // 夜间分段（和风 nighttime）：夜间天气、湿度、风、降水与云量，白天数据沿用上方字段。
+    // 夜间分段（和风 nighttime）：夜间天气、湿度、风、降水与云量，白天数据取上方字段。
     public int? NightCode;
     public string? NightCondition;
     public int? NightHumidity;
@@ -160,7 +160,7 @@ internal sealed class WeatherPart
     public AirPart? Air { get; set; }
     public List<HourPoint>? Hours { get; set; }
     public List<DayPoint>? Days { get; set; }
-    // 扩展载荷：分钟/预警/指数。台风来袭由「预警」域覆盖，不再单列台风/辐照/海洋域。
+    // 扩展载荷：分钟/预警/指数；台风由预警域覆盖。
     public List<MinutePoint>? Minutes { get; set; }
     // 分钟降水的文字总结（如「未来两小时无降水」），和风 /v7/minutely/5m 顶层 summary。
     public string? MinuteSummary { get; set; }

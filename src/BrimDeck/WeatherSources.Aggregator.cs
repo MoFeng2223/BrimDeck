@@ -5,7 +5,7 @@ using BrimDeck.Core;
 namespace BrimDeck;
 
 // 单源聚合：每个域只请求用户选定的那一家；同一次刷新把多个域合并成尽量少的请求。
-// 指定来源缺的字段就留空，不再跨源补缺。
+// 指定来源缺的字段就留空，不跨源补缺。
 internal static class WeatherAggregator
 {
     private static readonly TimeSpan SourceTimeout = TimeSpan.FromSeconds(15);
@@ -186,7 +186,7 @@ internal static class WeatherAggregator
         }
 
         // 逐时窗口固定以「当前整点前 1 小时」为起点、共 24 条：过去 1 小时 + 当前 + 未来 22 小时。
-        // 过去那 1 小时和风/各预报源都拿不到（和风从下一整点起、时光机不含今天），改由本地历史补：
+        // 过去那 1 小时和风/各预报源都拿不到（和风从下一整点起、时光机不含今天），由本地历史补：
         // 每次成功刷新都把当时的整点数据存进 weather/hour-history，下一小时它就成了「过去」那一格。
         // 本地也没有就留空（NaN / -1），界面隐藏数值，不联网补、不冒充预报。
         var cityKey = city.ToString();

@@ -64,7 +64,7 @@ internal sealed class HeFengSource : IWeatherSource
         string host = context.Host, loc = $"{context.Lon},{context.Lat}", lang = $"lang={context.Lang}";
         // 端点以 2026-11 官方文档 + 本地实测为准：
         // 分钟降水 /v7/minutely/5m —— 只覆盖中国行政区，国外坐标固定 400（伦敦/华盛顿实测）；
-        // 预警 /weatheralert/v1/current/{lat}/{lon} —— 旧 /v7/warning/now 已弃用(403)，全球可用，无预警时返回空数组；
+        // 预警 /weatheralert/v1/current/{lat}/{lon} —— 全球可用，无预警时返回空数组；
         // 指数 /v7/indices/1d —— 全球可用。
         // 分钟降水必须在国外直接跳过：400 虽已不会熔断来源，但每次刷新白发一个必失败的请求。
         var minute = Want(WeatherDomain.Minutely) && Geo.IsChina(context.City)
@@ -227,7 +227,42 @@ internal sealed class HeFengSource : IWeatherSource
         ? value * (UnitOf(parent, name) switch { "m" => 0.001, "ft" => 0.0003048, _ => 1 })
         : null;
 
-    // 0..1 的比例转百分比；若来源已经给百分数（>1.5）则不再放大。
+    // {value, unit} 里的数值按返回单位归一到 °C / hPa / mm。和风默认公制，但控制台可以把账号切成英制；
+    // 统一在入口换算后，模型和界面始终只处理公制，不必到处判断单位。
+    private static double? TemperatureC(JsonElement parent, string name)
+        => Value(parent, name) is { } value
+            ? UnitOf(parent, name) switch
+            {
+                "°F" or "F" or "fahrenheit" => (value - 32) * 5 / 9,
+                "K" or "kelvin" => value - 273.15,
+                _ => value
+            }
+            : null;
+
+    private static double? PressureHpa(JsonElement parent, string name)
+        => Value(parent, name) is { } value
+            ? UnitOf(parent, name) switch
+            {
+                "Pa" or "pa" => value / 100,
+                "kPa" or "kpa" => value * 10,
+                "inHg" or "inhg" => value * 33.8639,
+                "mmHg" or "mmhg" => value * 1.33322,
+                "atm" => value * 1013.25,
+                _ => value
+            }
+            : null;
+
+    private static double? PrecipMmValue(JsonElement box)
+        => Json.Number(box, "value") is { } value
+            ? Json.Text(box, "unit") switch
+            {
+                "cm" => value * 10,
+                "in" or "inch" => value * 25.4,
+                _ => value
+            }
+            : null;
+
+    // 0..1 的比例转百分比；来源已给百分数（>1.5）时原样保留。
     private static double? Percent(JsonElement root, string name) => Json.Number(root, name) is { } value
         ? Math.Round(value <= 1.5 ? value * 100 : value, 1) : null;
 
@@ -243,15 +278,18 @@ internal sealed class HeFengSource : IWeatherSource
         return utc ? stamp.ToOffset(TimeSpan.FromHours(offsetHours)) : stamp;
     }
 
-    // v1 只给 compass 代码（sw/nne…），转成界面惯用的风向文字；精度保留在 WindDirDeg 里。
+    // v1 只给 compass 代码（sw/nne…），界面按 8 方位归并；原始度数仍保留在 WindDirDeg 里。
     private static string? CompassText(string? compass) => compass?.ToLowerInvariant() switch
     {
-        "n" => Loc.T("北风", "N"), "nne" => Loc.T("东北偏北风", "NNE"), "ne" => Loc.T("东北风", "NE"),
-        "ene" => Loc.T("东北偏东风", "ENE"), "e" => Loc.T("东风", "E"), "ese" => Loc.T("东南偏东风", "ESE"),
-        "se" => Loc.T("东南风", "SE"), "sse" => Loc.T("东南偏南风", "SSE"), "s" => Loc.T("南风", "S"),
-        "ssw" => Loc.T("西南偏南风", "SSW"), "sw" => Loc.T("西南风", "SW"), "wsw" => Loc.T("西南偏西风", "WSW"),
-        "w" => Loc.T("西风", "W"), "wnw" => Loc.T("西北偏西风", "WNW"), "nw" => Loc.T("西北风", "NW"),
-        "nnw" => Loc.T("西北偏北风", "NNW"), _ => null
+        "n" or "nnw" => Loc.T("北风", "N"),
+        "nne" or "ne" => Loc.T("东北风", "NE"),
+        "ene" or "e" => Loc.T("东风", "E"),
+        "ese" or "se" => Loc.T("东南风", "SE"),
+        "sse" or "s" => Loc.T("南风", "S"),
+        "ssw" or "sw" => Loc.T("西南风", "SW"),
+        "wsw" or "w" => Loc.T("西风", "W"),
+        "wnw" or "nw" => Loc.T("西北风", "NW"),
+        _ => null
     };
 
 
@@ -271,21 +309,21 @@ internal sealed class HeFengSource : IWeatherSource
             int offset = Geo.UtcOffsetHours(city);
             return new CurrentPart
             {
-                Temperature = Value(root, "temperature"),
-                FeelsLike = Value(root, "feelsLike"),
+                Temperature = TemperatureC(root, "temperature"),
+                FeelsLike = TemperatureC(root, "feelsLike"),
                 Humidity = PercentInt(root, "humidity"),
                 WindKmh = wind is { } windBox ? SpeedKmh(windBox, "speed") : null,
                 WindGustKmh = SpeedKmh(root, "windGust"),
                 WindDirDeg = direction is { } dirBox ? Json.Number(dirBox, "degree") : null,
                 WindDir = direction is { } compassBox ? CompassText(Json.Text(compassBox, "compass")) : null,
-                PressureHpa = Value(root, "pressure"),
+                PressureHpa = PressureHpa(root, "pressure"),
                 VisibilityKm = DistanceKm(root, "visibility"),
-                DewPointC = Value(root, "dewPoint"),
+                DewPointC = TemperatureC(root, "dewPoint"),
                 Uv = Json.Number(root, "uvIndex"),
                 CloudPercent = Percent(root, "cloudCover"),
-                PrecipMm = precipitation is { } p && Json.Get(p, "amount") is { } amount ? Json.Number(amount, "value") : null,
+                PrecipMm = precipitation is { } p && Json.Get(p, "amount") is { } amount ? PrecipMmValue(amount) : null,
                 WindScale = wind is { } scaleBox ? Json.Number(scaleBox, "scale") is { } sc ? (int)Math.Round(sc) : null : null,
-                PrecipRateMmH = precipitation is { } pr && Json.Get(pr, "intensity") is { } inten ? Json.Number(inten, "value") : null,
+                PrecipRateMmH = precipitation is { } pr && Json.Get(pr, "intensity") is { } inten ? PrecipMmValue(inten) : null,
                 PrecipType = precipitation is { } pt ? Json.Text(pt, "type") : null,
                 Code = WeatherCodes.FromHeFeng(Json.Text(condition, "code")),
                 Condition = Json.Text(condition, "text"),
@@ -314,21 +352,21 @@ internal sealed class HeFengSource : IWeatherSource
                 hours.Add(new HourPoint
                 {
                     Time = stamp.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture),
-                    Temperature = Value(item, "temperature"),
-                    FeelsLike = Value(item, "feelsLike"),
+                    Temperature = TemperatureC(item, "temperature"),
+                    FeelsLike = TemperatureC(item, "feelsLike"),
                     Humidity = PercentInt(item, "humidity"),
                     Code = WeatherCodes.FromHeFeng(Json.Get(item, "condition") is { } c ? Json.Text(c, "code") : null),
                     RainProb = precipitation is { } pp ? PercentInt(pp, "probability") : null,
-                    PrecipMm = precipitation is { } pa && Json.Get(pa, "amount") is { } amount ? Json.Number(amount, "value") : null,
+                    PrecipMm = precipitation is { } pa && Json.Get(pa, "amount") is { } amount ? PrecipMmValue(amount) : null,
                     WindScale = wind is { } scaleBox ? Json.Number(scaleBox, "scale") is { } sc ? (int)Math.Round(sc) : null : null,
-                    PrecipRateMmH = precipitation is { } pi && Json.Get(pi, "intensity") is { } inten ? Json.Number(inten, "value") : null,
+                    PrecipRateMmH = precipitation is { } pi && Json.Get(pi, "intensity") is { } inten ? PrecipMmValue(inten) : null,
                     PrecipType = precipitation is { } ptype ? Json.Text(ptype, "type") : null,
                     WindKmh = wind is { } windBox ? SpeedKmh(windBox, "speed") : null,
                     WindGustKmh = SpeedKmh(item, "windGust"),
                     WindDirDeg = direction is { } dirBox ? Json.Number(dirBox, "degree") : null,
-                    PressureHpa = Value(item, "pressure"),
+                    PressureHpa = PressureHpa(item, "pressure"),
                     Uv = Json.Number(item, "uvIndex"),
-                    DewPointC = Value(item, "dewPoint"),
+                    DewPointC = TemperatureC(item, "dewPoint"),
                     CloudPercent = Percent(item, "cloudCover"),
                     VisibilityKm = DistanceKm(item, "visibility")
                 });
@@ -354,9 +392,9 @@ internal sealed class HeFengSource : IWeatherSource
                 var day = new DayPoint
                 {
                     Date = stamp.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    HighC = Value(item, "temperatureMax"),
-                    LowC = Value(item, "temperatureMin"),
-                    AvgTempC = Value(item, "temperatureAvg"),
+                    HighC = TemperatureC(item, "temperatureMax"),
+                    LowC = TemperatureC(item, "temperatureMin"),
+                    AvgTempC = TemperatureC(item, "temperatureAvg"),
                     UvMax = Json.Number(item, "uvIndexMax")
                 };
                 if (Json.Get(item, "daytime") is { } daytime)
@@ -374,7 +412,7 @@ internal sealed class HeFengSource : IWeatherSource
                     day.Humidity = PercentInt(daytime, "humidity");
                     if (Json.Get(daytime, "precipitation") is { } precipitation)
                     {
-                        day.PrecipMm = Json.Get(precipitation, "amount") is { } amount ? Json.Number(amount, "value") : null;
+                        day.PrecipMm = Json.Get(precipitation, "amount") is { } amount ? PrecipMmValue(amount) : null;
                         day.RainProb = PercentInt(precipitation, "probability");
                     }
                     day.CloudPercent = Percent(daytime, "cloudCover");
@@ -395,7 +433,7 @@ internal sealed class HeFengSource : IWeatherSource
                     day.NightGustMaxKmh = SpeedKmh(night, "windGustMax");
                     if (Json.Get(night, "precipitation") is { } nightPrecip)
                     {
-                        day.NightPrecipMm = Json.Get(nightPrecip, "amount") is { } namount ? Json.Number(namount, "value") : null;
+                        day.NightPrecipMm = Json.Get(nightPrecip, "amount") is { } namount ? PrecipMmValue(namount) : null;
                         day.NightRainProb = PercentInt(nightPrecip, "probability");
                     }
                     day.NightCloudPercent = Percent(night, "cloudCover");
@@ -447,7 +485,7 @@ internal sealed class HeFengSource : IWeatherSource
             var primary = Json.Get(chosen, "primaryPollutant");
             var health = Json.Get(chosen, "health");
             var advice = health is { } h && Json.Get(h, "advice") is { } a ? a : (JsonElement?)null;
-            // 通用国际标准（qaqi）：国内标准为主时并列展示，国外场景本身就用 qaqi 为主、不再重复存。
+            // 通用国际标准（qaqi）：国内标准为主时并列展示，qaqi 为主时不重复存。
             int? aqiGlobal = Json.Text(chosen, "code") != "qaqi" && indexes.FirstOrDefault(item => Json.Text(item, "code") == "qaqi") is { } global
                 ? Json.Number(global, "aqi") is { } g ? (int)Math.Round(g) : null : null;
             var air = new AirPart
