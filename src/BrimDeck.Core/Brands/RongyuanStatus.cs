@@ -49,6 +49,19 @@ public static class RongyuanStatus
         return offline == 0 && level is >= 1 and <= 100 ? new(level) : null;
     }
 
+    // VGN's Dragonfly receivers that VGN HUB drives as "ryMs" (391D:1A04, 1A08, 1A13, 1A25, 1A2B, 1A41): the status is got
+    // back 60 ms after it is set; the reply needs report id 0 and 0 at [1] and is not all zeros; the pairing byte is not
+    // looked at; the mouse's level at [3] (0 to 100) and its sleep flag at [5] (0 or 1, 1 asleep). All but 1A04 only on
+    // interface 1 (VGN HUB's MI_01). myfinder-device-battery's vgn_ry_ms.py and upstream-protocols.md (AGPL; facts only; a
+    // contributor's 1A04 at 92 % and 91 %, VGN HUB showing 92 %).
+    public static readonly HashSet<(int, int)> VgnRyMs = [(0x391D, 0x1A04), (0x391D, 0x1A08), (0x391D, 0x1A13), (0x391D, 0x1A25), (0x391D, 0x1A2B), (0x391D, 0x1A41)];
+    public const int VgnRyMsGapMs = 60;
+    public static BatteryRead? VgnRyMsBattery(byte[] r)
+    {
+        if (r.Length < 10 || r[0] != 0x00 || r[1] != 0x00 || !r.AsSpan(1).ContainsAnyExcept((byte)0) || r[3] > 100 || r[5] > 1) return null;
+        return r[5] == 1 ? new(null, Asleep: true) : new(r[3]);
+    }
+
     public static bool Collection(HidShape shape) => shape.UsagePage == 0xFFFF && shape.Usage == 0x0002 && shape.FeatureLength == 65;
 
     // The Veekos Shine 60 on 3151:5026 ("Veekos 2.4G Wireless Keyboard"), whose collection lists feature report 0x83 and not 0:
@@ -71,6 +84,8 @@ public static class RongyuanStatus
     };
     // The F7 read, unless the receiver's own read replaces it (5007).
     private static IEnumerable<BrandWay> StatusWay(string prefix, bool checksum, HidShape shape) => (shape.Vendor, shape.Product) == (0x3151, 0x5007) ? []
+        : VgnRyMs.Contains((shape.Vendor, shape.Product)) ? shape.Product != 0x1A04 && shape.Interface != 1 ? []
+            : [new BrandWay(prefix + ".status", WayTransport.Feature, Request(checksum), VgnRyMsBattery) { GapMs = VgnRyMsGapMs, FeatureLength = 65, Attempts = 1 }]
         : [new BrandWay(prefix + ".status", WayTransport.Feature, Request(checksum),
             MouseReceivers.Contains((shape.Vendor, shape.Product)) ? MouseBattery : Battery) { GapMs = 100, FeatureLength = 65 }];
 

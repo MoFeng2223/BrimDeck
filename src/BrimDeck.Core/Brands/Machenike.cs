@@ -33,7 +33,7 @@ public static class MachenikeMice
         && MouseShapes.Collection(shape, 0xFF1C, 0x92) && shape.OutputLength >= 64;
 
     // The G7's answer: the level alone.
-    public static BatteryRead? G7Battery(byte[] r) => Dongles.VgnBattery(r) is { Percent: > 0 and var level } ? new(level) : null;
+    public static BatteryRead? G7Battery(byte[] r) => Dongles.EvisionKeyboardBattery(r) is { Percent: > 0 and var level } ? new(level) : null;
 
     public static IEnumerable<BrandFamily> Families =>
     [

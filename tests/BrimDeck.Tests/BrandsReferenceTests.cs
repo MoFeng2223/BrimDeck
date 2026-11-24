@@ -94,7 +94,7 @@ static class BrandsReferenceTests
             Brand(Shape(0x054C, 0x0EBF, 0xFF04, 1, outputIds: [0x02])) == "Sony INZONE" && Brand(Shape(0x054C, 0x0EBF, 0xFF04, 2, outputIds: [0x02])) == "Sony INZONE"
             && Brand(Shape(0x054C, 0x0EBF, 0xFF04, 3, outputIds: [0x02])) is null);
         check("Razer: the BlackShark V2 Pro 2023's third id (0557) takes the 90-byte read (0x3F), not the PA read and its remote mode",
-            Razer.Find(0x0557) is { Transaction: 0x3F, Charging: false, Kind: DeviceKind.Headphones } && Brand(Shape(0x1532, 0x0557, 0xFF00, 1, 3, outputIds: [0x02])) is null);
+            Razer.Find(0x0557) is { Transaction: 0x3F, Kind: DeviceKind.Headphones } && Brand(Shape(0x1532, 0x0557, 0xFF00, 1, 3, outputIds: [0x02])) is null);
         check("MCHOSE: the rest of M HUB's keyboard codes name the keyboard behind the 3554:FA09 / 41E4:2001 receiver",
             Dongles.AulaModel(Fa09(0x13, 0x05, 0x01, 0x00, 0x0A, 0x03, 0x00, 0x00, 0x00, 0x02, 0x1C)) == "MCHOSE G87"
             && Dongles.AulaModel(Fa09(0x13, 0x05, 0x01, 0x00, 0x0A, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x34)) == "MCHOSE G87 V2"
@@ -135,7 +135,7 @@ static class BrandsReferenceTests
             && Dongles.AtkKeyboardBattery(Pad(64, 0x04, 0x00, 0x00, 0xFF, 0x06)) is null);
         check("Inphic FA65: its web table's models (71, 90, 76 to 79) on events 40 and 41, named by the model",
             Pushes.Battery(Pushes.Kind.InphicZhen, [0x03, 0x71, 0x40, 0x00, 0x50]) == new BatteryRead(80)
-            && Pushes.Battery(Pushes.Kind.InphicZhen, [0x03, 0x76, 0x41, 0x03, 0x50]) == new BatteryRead(80, true)
+            && Pushes.Battery(Pushes.Kind.InphicZhen, [0x03, 0x76, 0x41, 0x03, 0x50]) == new BatteryRead(80)
             && Pushes.Battery(Pushes.Kind.InphicZhen, [0x03, 0x93, 0x40, 0x00, 0x50]) is null && Pushes.Battery(Pushes.Kind.InphicZhen, [0x03, 0x71, 0x40, 0x00, 0x00]) is null
             && Pushes.Name(Pushes.Kind.InphicZhen, [0x03, 0x71, 0x40, 0x00, 0x50]) == "Inphic IN10 Pro" && Pushes.Name(Pushes.Kind.InphicZhen, null) == "Inphic ZHEN");
         check("Inphic IN10 (older): 03 93 40 on FA65's 0x000A collection is read and named; its states 2 and 3 are none; DELUX's frame unchanged",
@@ -161,6 +161,20 @@ static class BrandsReferenceTests
     // Where BrimDeck's read had no hardware behind it and the reference's differs, the reference's way.
     private static void Evidence(Action<string, bool> check)
     {
+        // The follow-ups to the reference's ways: the NUT75 without charging, VGN's ryMs receivers (all but 1A04 on interface 1, no
+        // check of byte 9), the G3 V2's battery read whatever its online check says, and Razer's 0552 left to its own protocol.
+        var nut75 = BrandFamilyTests.Shape(0x0C45, 0xFEF9, 0xFF60, 0x0061, 2, 65, 65, 0, [0x00], null, "NUT75 2.4G");
+        var huafenda = new byte[64]; huafenda[0] = 0x55; huafenda[1] = 0x10; huafenda[2] = 0x30; huafenda[25] = 70; huafenda[26] = 1;
+        check("WEIKAV NUT75: its level is read without a charging state (its 0x30 request on any interface)",
+            BrandFamilies.Find(nut75) is { Ways: [{ } nutWay] } && nutWay.Parse(huafenda) == new BatteryRead(70));
+        HidShape RyMs(int product, int iface) => BrandFamilyTests.Shape(0x391D, product, 0xFFFF, 2, iface, 0, 0, 65, null, [0x00]);
+        var ryms = new byte[65]; ryms[3] = 88; ryms[9] = 1;
+        check("VGN ryMs: 1A08 on interface 1 is asked, on interface 2 not; 1A04 on either; 1 at 9 is no longer refused",
+            BrandFamilies.Find(RyMs(0x1A08, 1)) is { Ways.Count: 1 } && BrandFamilies.Find(RyMs(0x1A08, 2)) is { Ways.Count: 0 }
+            && BrandFamilies.Find(RyMs(0x1A04, 2)) is { Ways.Count: 1 } && RongyuanStatus.VgnRyMsBattery(ryms) == new BatteryRead(88));
+        check("Logitech G535: its 0x1F20 voltage goes through its own measured curve (3766 mV 30 %), other headsets' through the common one",
+            Hidpp.Adc([0x0E, 0xB6, 0x01], g535: true) is { Percent: 30 } && Hidpp.Adc([0x0E, 0xB6, 0x01]) is { Percent: not 30 } && Hidpp.G535Percent(4200) == 100);
+        check("Razer: the Barracuda X 2022 (0552) is not asked with Razer's report", !Razer.Unlisted(0x0552, "Razer Barracuda X Wireless Receiver"));
         check("EWEADN S9 PRO 8K: the answer with 00 at 4 (a user's receiver, #315) reads as the one with 02",
             EweadnMice.Beiyin(Bytes("03 50 00 0B 00 01 4F 21 07 01 90 65 04 A5 5A 00")) == new BatteryRead(79)
             && EweadnMice.Beiyin(Bytes("03 50 00 0B 02 01 49")) == new BatteryRead(73) && EweadnMice.Beiyin(Bytes("03 50 00 0B 01 01 49")) is null);

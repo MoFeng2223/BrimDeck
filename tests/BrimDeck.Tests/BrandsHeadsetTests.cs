@@ -314,12 +314,12 @@ static class BrandsHeadsetTests
             && Untaken(Shape(0x373B, 0x1262, 0xFF05, 1, 0, outputIds: [0x55]), "ATK Headset")
             && Untaken(Shape(0x373B, 0x1263, 0xFF90, 1, 0, outputIds: [0x55]), "ATK Headset") && Untaken(Shape(0x373B, 0x1262, 0xFF90, 2, 0, outputIds: [0x55]), "ATK Headset")
             && Dongles.Find(0x373B, 0x1262, 0xFF90, "ATK N9V2 ULTIMATE dongle", 0, 0, 1, 64, 64) is null);
-        check("FIFINE and ATK: the query 55 65 01 00; Voltide's measured answer (100 %), charging, full, the headset off (55 0A) and the link lost (1A); the query read back is none",
+        check("FIFINE and ATK: the query 55 65 01 00; Voltide's measured answer (100 %), charging, full, the headset off (55 0A 01) and the link lost (1A); the query read back is none",
             Fifine.Request().SequenceEqual(Hex("55 65 01 00")) && AtkHeadsets.Request().SequenceEqual(Hex("55 65 01 00"))
             && AtkHeadsets.StateBattery(Hex("55 65 64 02 02 00 00 04 00 00 00 00 01 02 01 00 05 02 00", 64)) == new BatteryRead(100)
             && Fifine.Battery(Hex("55 65 32 03", 64)) == new BatteryRead(50, true) && Fifine.Battery(Hex("55 65 50 02 02 00 00 FF", 64)) == new BatteryRead(80)
-            && AtkHeadsets.StateBattery(Hex("55 65 63 04", 64)) == new BatteryRead(100)
-            && AtkHeadsets.StateBattery(Hex("55 0A 00 00", 64)) == new BatteryRead(null, Asleep: true)
+            && AtkHeadsets.StateBattery(Hex("55 65 63 04", 64)) == new BatteryRead(99)
+            && AtkHeadsets.StateBattery(Hex("55 0A 01 00", 64)) == new BatteryRead(null, Asleep: true)
             && Fifine.Battery(Hex("55 65 40 1A", 64)) == new BatteryRead(null, Asleep: true)
             && Fifine.Battery(Hex("55 65 01 00", 64)) is null && AtkHeadsets.StateBattery(Hex("55 65 C8 02", 64)) is null
             && AtkHeadsets.StateBattery(Hex("55 AA 01 02", 64)) is null);
@@ -327,11 +327,11 @@ static class BrandsHeadsetTests
 
     private static void Xiberia(Action<string, bool> check)
     {
-        check("XIBERIA: any 36F9 vendor collection of 64-byte reports that declares 0x55; not a standard collection, not without the report",
-            Names(Shape(0x36F9, 0xF008, 0xFF00, 1, outputIds: [0x55, 0x41]), "XIBERIA").SequenceEqual(["xiberia.battery"])
-            && Names(Shape(0x36F9, 0xF00A, 0x00FF, 1, outputIds: [0x55]), "XIBERIA").SequenceEqual(["xiberia.battery"])
+        check("XIBERIA: a 36F9 collection on 0xFF90 or 0xFF82 of 64-byte reports that declares 0x55; not another page, not without the report",
+            Names(Shape(0x36F9, 0xF008, 0xFF90, 1, outputIds: [0x55, 0x41]), "XIBERIA").SequenceEqual(["xiberia.battery"])
+            && Names(Shape(0x36F9, 0xF00A, 0xFF82, 1, outputIds: [0x55]), "XIBERIA").SequenceEqual(["xiberia.battery"])
             && Untaken(Shape(0x36F9, 0xF008, 0x000C, 1, outputIds: [0x55]), "XIBERIA")
-            && BrandFamilies.Find(Shape(0x36F9, 0xF008, 0xFF00, 1, outputIds: [0x41])) is { Ways.Count: 0 });
+            && BrandFamilies.Find(Shape(0x36F9, 0xF008, 0xFF90, 1, outputIds: [0x41])) is { Ways.Count: 0 });
         check("XIBERIA: the query 55 65 00 00, Voltide's documented answer (55 65 00 4B, 75 %), and the query read back none",
             BrimDeck.Core.Xiberia.Request().SequenceEqual(Hex("55 65 00 00")) && BrimDeck.Core.Xiberia.Battery(Hex("55 65 00 4B", 64)) == new BatteryRead(75)
             && BrimDeck.Core.Xiberia.Battery(Hex("55 65 00 00", 64)) is null && BrimDeck.Core.Xiberia.Battery(Hex("55 65 00 65", 64)) is null);
@@ -449,7 +449,7 @@ static class BrandsHeadsetTests
         var buds = Shape(0x1038, 0x230A, 0xFFC0, 1, 3, outputIds: [0]);
         var elite = Shape(0x1038, 0x2244, 0xFFC0, 1, 3, outputIds: [0x01]);
         var omni = Shape(0x1038, 0x2290, 0xFFC0, 1, 3, outputIds: [0x01]);
-        check("SteelSeries headsets: the Arctis 1 family on 0xFF43 usage 0x0202, the B0 family and the Elite and Omni on 0xFFC0 usage 1, all on interface 3; the Pro Wireless not",
+        check("SteelSeries headsets: the Arctis 1 family on 0xFF43 usage 0x0202, the B0 family and the Elite and Omni on 0xFFC0 usage 1, all on interface 3; the Pro Wireless not there",
             Names(arctis1, brand).SequenceEqual(["steelseries-headset.arctis1"]) && Names(nova5, brand).SequenceEqual(["steelseries-headset.status"])
             && Names(plus, brand).SequenceEqual(["steelseries-headset.status"]) && Names(buds, brand).SequenceEqual(["steelseries-headset.status"])
             && Names(elite, brand).SequenceEqual(["steelseries-headset.status1"]) && Names(omni, brand).SequenceEqual(["steelseries-headset.status1"])

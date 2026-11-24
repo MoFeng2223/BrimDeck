@@ -15,8 +15,9 @@ namespace BrimDeck.Core;
 //   printable characters there, which neither the request read back nor a stray frame carries.
 // - The S9 on the beiyin receiver 372E:1026 (shared by the S9 Pro, Max and Ultra), usage page 0xFF00 usage 1, which has
 //   only feature report 0x03 (63 bytes): set 03 <checksum> 50 00 02 4F 81 (the checksum the sum of the 62 bytes after it),
-//   read back 03 50 00 0B 02 01 <state> ...: the percent in the low 7 bits of [6], bit 7 charging. A state of 0 is the
-//   dongle answering for a sleeping mouse (a real 0 % does not exist; the mouse switches off first). From vigil-watt's
+//   read back 100 ms after it is set (the SDK's receive delay), 03 50 00 0B 02 01 <state> ...: the percent in the low 7 bits
+//   of [6], bit 7 charging. A level of 0 is no reading: nothing shows that an all-zero answer is a live 0 %
+//   (myfinder-device-battery's eweadn_s9pro.py and upstream-protocols.md, AGPL; facts only). From vigil-watt's
 //   EweadnMouseCodec and its notes (MIT; from EWEADN's web HUB, its answer 03 50 00 0B 02 01 49 ..: 73 %, reported by a
 //   contributor). The same frame goes to the S7 and S9 series' other beiyin receivers, 1027, 1029, 103D, 105E, 106E, 107B,
 //   107C, 108A and 108D, which EWEADN's web driver (its beiying SDK) speaks to the same way; not measured by us. The SDK's
@@ -74,6 +75,7 @@ public static class EweadnMice
         frame[1] = (byte)sum;
         return frame;
     }
+    public const int BeiyinGapMs = 100;
     public static BatteryRead? Beiyin(byte[] r)
     {
         // 0B 02 01 after the command's echo: the BASICS answer (MCHOSE's driver checks the 02; another command's answer, such as
@@ -81,7 +83,6 @@ public static class EweadnMice
         // myfinder-device-battery #315 (03 50 00 0B 00 01 <percent> 21 07 01 90 65 04 A5 5A 00, 23 % to 98 %; AGPL, facts only).
         if (r.Length < 7 || r[0] != 0x03 || r[1] != 0x50 || r[2] != 0x00 || r[3] != 0x0B || r[4] is not (0x02 or 0x00) || r[5] != 0x01) return null;
         int level = r[6] & 0x7F;
-        if (r[6] == 0) return new(null, Asleep: true);
         return level is > 0 and <= 100 ? new(level, (r[6] & 0x80) != 0) : null;
     }
 
@@ -98,7 +99,7 @@ public static class EweadnMice
 
     public static IReadOnlyList<BrandWay> Ways(HidShape shape)
     {
-        if (BeiyinCollection(shape)) return [new BrandWay("eweadn.beiyin", WayTransport.Feature, BeiyinRequest(), Beiyin) { GapMs = 20, FeatureLength = 64 }];
+        if (BeiyinCollection(shape)) return [new BrandWay("eweadn.beiyin", WayTransport.Feature, BeiyinRequest(), Beiyin) { GapMs = BeiyinGapMs, FeatureLength = 64 }];
         Func<byte[], BatteryRead?> parse = shape.Vendor == CableVendor ? CableInfo : Info;
         if (InfoCollection(shape)) return
         [

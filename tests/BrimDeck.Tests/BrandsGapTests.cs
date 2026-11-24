@@ -114,8 +114,8 @@ static class BrandsGapTests
             && BrandFamilies.Find(Shape(0x3142, 0x00C3, 0xFF90, 1, 64, 64, []) with { InputIds = input55 }) is { Family.Brand: "FIFINE", Ways.Count: 1 }
             && BrandFamilies.Find(Shape(0x36F9, 0xF008, 0xFF90, 1, 64, 64, []) with { InputIds = input55 }) is { Family.Brand: "XIBERIA", Ways.Count: 1 }
             && BrandFamilies.Find(Shape(0x38A6, 0x001D, 0xFF90, 1, 64, 64, [], "AULA-A9") with { InputIds = input55 }) is { Family.Brand: "AULA headset", Ways.Count: 1 }
-            && BrandFamilies.Find(Shape(0x0D8C, 0x0334, 0xFF90, 1, 64, 64, []) with { InputIds = input55 }) is { Family.Brand: "ZhuAudio C-Media", Ways.Count: 1 }
-            && BrandFamilies.Find(Shape(0x0D8C, 0x0334, 0xFF90, 1, 64, 64, [])) is null
+            && BrandFamilies.Find(Shape(0x20F8, 0xA962, 0xFF90, 1, 64, 64, []) with { InputIds = input55 }) is { Family.Brand: "ZhuAudio C-Media", Ways.Count: 1 }
+            && BrandFamilies.Find(Shape(0x20F8, 0xA962, 0xFF90, 1, 64, 64, [])) is null
             && BrandFamilies.Find(Shape(0x36F9, 0xF008, 0xFF90, 1, 64, 64, [0x41]) with { InputIds = input55 }) is { Ways.Count: 0 }
             && BrandFamilies.Find(Shape(0x36F9, 0xF008, 0xFF90, 1, 64, 64, [])) is { Ways.Count: 0 }
             && BrandFamilies.Find(Shape(0x3142, 0x00C3, 0xFF90, 1, 64, 64, []) with { InputIds = new HashSet<byte> { 0x41 } }) is { Ways.Count: 0 }
@@ -123,10 +123,10 @@ static class BrandsGapTests
             && BrandFamilies.Find(Shape(0x373B, 0x1262, 0xFF90, 1, 64, 64, [])) is { Ways.Count: 0 }
             && BrandFamilies.Find(Shape(0x38A6, 0x001D, 0xFF90, 1, 64, 64, [0x41], "AULA-A9") with { InputIds = input55 }) is { Ways.Count: 0 }
             && BrandFamilies.Find(Shape(0x38A6, 0x001D, 0xFF90, 1, 64, 64, [], "AULA-A9")) is { Ways.Count: 0 }
-            && BrandFamilies.Find(Shape(0x0D8C, 0x0334, 0xFF90, 1, 64, 64, [0x41]) with { InputIds = input55 }) is null
-            && Dongles.MchoseReads(0x600A, "V9 Turbo", 0xFF00, 1, 0, 64, new HashSet<byte>(), new HashSet<byte>(), input55).SequenceEqual([Dongles.MchoseRead.Audio, Dongles.MchoseRead.Status])
-            && Dongles.MchoseReads(0x600A, "V9 Turbo", 0xFF00, 1, 0, 64, new HashSet<byte>(), new HashSet<byte>(), new HashSet<byte>()).Count == 0
-            && Dongles.MchoseReads(0x600A, "V9 Turbo", 0xFF00, 1, 0, 64, new HashSet<byte> { 0x41 }, new HashSet<byte>(), input55).Count == 0);
+            && BrandFamilies.Find(Shape(0x20F8, 0xA962, 0xFF90, 1, 64, 64, [0x41]) with { InputIds = input55 }) is null
+            && Dongles.MchoseReads(0x600D, "V9 Turbo", 0xFF00, 1, 0, 64, new HashSet<byte>(), new HashSet<byte>(), input55).SequenceEqual([Dongles.MchoseRead.Audio, Dongles.MchoseRead.Status])
+            && Dongles.MchoseReads(0x600D, "V9 Turbo", 0xFF00, 1, 0, 64, new HashSet<byte>(), new HashSet<byte>(), new HashSet<byte>()).Count == 0
+            && Dongles.MchoseReads(0x600D, "V9 Turbo", 0xFF00, 1, 0, 64, new HashSet<byte> { 0x41 }, new HashSet<byte>(), input55).Count == 0);
         check("MCHOSE 3837: report 0x55 listed as input alone opens the status read to headsets only, never to a mouse or a keyboard",
             Dongles.MchoseReads(0x4011, "MCHOSE K99 Keyboard", 0xFF70, 0x71, 0, 64, new HashSet<byte>(), new HashSet<byte>(), input55).Count == 0
             && Dongles.MchoseReads(0x100B, "MCHOSE A7 V2 Ultra Mouse", 0xFF01, 1, 0, 64, new HashSet<byte>(), new HashSet<byte>(), input55).Count == 0
@@ -134,14 +134,14 @@ static class BrandsGapTests
         // HaloBattery's 60 % on the cable (00) and rafagfran's 20 % on battery (02); vigil-watt's 100 % (55 65 64 02); M HUB's 03
         // charging, 04 full and 1A asleep (aipno/mchose-linux); 0 the receiver's answer while the headset sleeps (vigil-watt).
         check("MCHOSE V9 Pro: every state: on the cable, on battery, charging, full; asleep (1A) and level 0 asleep, never a level",
-            MchoseV9Pro.Battery(Bytes("55 65 3C 00")) == new BatteryRead(60, true) && MchoseV9Pro.Battery(Bytes("55 65 14 02")) == new BatteryRead(20)
-            && MchoseV9Pro.Battery(Bytes("55 65 64 02 00 00")) == new BatteryRead(100) && MchoseV9Pro.Battery(Bytes("55 65 55 03")) == new BatteryRead(85, true)
-            && MchoseV9Pro.Battery(Bytes("55 65 64 04")) == new BatteryRead(100)
-            && MchoseV9Pro.Battery(Bytes("55 65 50 1A")) == new BatteryRead(null, Asleep: true) && MchoseV9Pro.Battery(Bytes("55 65 00 1A")) == new BatteryRead(null, Asleep: true)
-            && MchoseV9Pro.Battery(Bytes("55 65 00 02")) == new BatteryRead(null, Asleep: true) && MchoseV9Pro.Battery(Bytes("55 65 00 00")) == new BatteryRead(null, Asleep: true));
+            MchoseV9Pro.Battery(Bytes("55 65 3C 00"), true) == new BatteryRead(60, true) && MchoseV9Pro.Battery(Bytes("55 65 14 02"), true) == new BatteryRead(20)
+            && MchoseV9Pro.Battery(Bytes("55 65 64 02 00 00"), true) == new BatteryRead(100) && MchoseV9Pro.Battery(Bytes("55 65 55 03"), true) == new BatteryRead(null, true)
+            && MchoseV9Pro.Battery(Bytes("55 65 64 04"), true) == new BatteryRead(100)
+            && MchoseV9Pro.Battery(Bytes("55 65 50 1A"), true) == new BatteryRead(null, Asleep: true) && MchoseV9Pro.Battery(Bytes("55 65 00 1A"), true) == new BatteryRead(null, Asleep: true)
+            && MchoseV9Pro.Battery(Bytes("55 65 00 02"), true) == new BatteryRead(null, Asleep: true) && MchoseV9Pro.Battery(Bytes("55 65 00 00"), true) == new BatteryRead(null, Asleep: true));
         check("MCHOSE V9 Pro: the request read back, a state no source documents, a level out of range and another command are none",
-            MchoseV9Pro.Battery(MchoseV9Pro.Request()) is null && MchoseV9Pro.Battery(Bytes("55 65 50 01")) is null && MchoseV9Pro.Battery(Bytes("55 65 50 0A")) is null
-            && MchoseV9Pro.Battery(Bytes("55 65 65 02")) is null && MchoseV9Pro.Battery(Bytes("55 11 14 02")) is null && MchoseV9Pro.Battery(Bytes("55 65 14")) is null);
+            MchoseV9Pro.Battery(MchoseV9Pro.Request(), true) is null && MchoseV9Pro.Battery(Bytes("55 65 50 01"), true) is null && MchoseV9Pro.Battery(Bytes("55 65 50 0A"), true) is null
+            && MchoseV9Pro.Battery(Bytes("55 65 65 02"), true) is null && MchoseV9Pro.Battery(Bytes("55 11 14 02"), true) is null && MchoseV9Pro.Battery(Bytes("55 65 14"), true) is null);
         static byte[] Keyboard(params byte[] head)
         {
             var frame = new byte[20]; head.CopyTo(frame, 0);
@@ -150,8 +150,8 @@ static class BrandsGapTests
             return frame;
         }
         check("MCHOSE 41E4 keyboards: the high nibble of the byte after the level is charging (10 on the cable), the low one (full) is not",
-            Dongles.MchoseKeyboardBattery(Keyboard(0x13, 0x4A, 0x01, 0x00, 0x02, 0x34, 0x10)) == new BatteryRead(52, true)
-            && Dongles.MchoseKeyboardBattery(Keyboard(0x13, 0x4A, 0x01, 0x00, 0x02, 0x64, 0x01)) == new BatteryRead(100));
+            Dongles.MchoseKeyboardBattery(Keyboard(0x13, 0x4A, 0x01, 0x00, 0x02, 0x34, 0x10), true) == new BatteryRead(52, true)
+            && Dongles.MchoseKeyboardBattery(Keyboard(0x13, 0x4A, 0x01, 0x00, 0x02, 0x64, 0x01), true) == new BatteryRead(100));
     }
 
     private static void Fa09Receiver(Action<string, bool> check)
@@ -168,24 +168,18 @@ static class BrandsGapTests
             && Dongles.AulaModel(Fa09(0x13, 0x05, 0x01, 0x00, 0x0A, 0x03, 0x00, 0x00, 0x00, 0x09, 0x99)) is null
             && Dongles.AulaModel([0x13, 0x05, 0x01, 0x00, 0x0A, 0x03, 0x00, 0x00, 0x00, 0x02, 0x12, 0x01, 0, 0, 0, 0, 0, 0, 0, 0x00]) is null);
         check("3554:FA09: the 0x0A push (the K98's 100 % with 01) and the 0x4A answer, charging by the high nibble",
-            Dongles.AulaBattery(Fa09(0x13, 0x0A, 0x01, 0x00, 0x04, 0x05, 0x64, 0x01)) == new BatteryRead(100)
-            && Dongles.AulaBattery(Fa09(0x13, 0x0A, 0x01, 0x00, 0x04, 0x05, 0x0A, 0x10)) == new BatteryRead(10, true)
-            && Dongles.AulaBattery(Fa09(0x13, 0x4A, 0x01, 0x00, 0x02, 0x55, 0x00)) == new BatteryRead(85)
-            && Dongles.AulaBattery(Fa09(0x13, 0x4A, 0x01, 0x00, 0x02, 0x65, 0x00)) is null && Dongles.AulaBattery(Dongles.AulaRequest(0x4A)) is null);
+            Dongles.AulaBattery(Fa09(0x13, 0x0A, 0x01, 0x00, 0x04, 0x05, 0x64, 0x01), "MCHOSE G75 Pro") == new BatteryRead(100)
+            && Dongles.AulaBattery(Fa09(0x13, 0x0A, 0x01, 0x00, 0x04, 0x05, 0x0A, 0x10), "MCHOSE G75 Pro") == new BatteryRead(10, true)
+            && Dongles.AulaBattery(Fa09(0x13, 0x4A, 0x01, 0x00, 0x02, 0x55, 0x00), "MCHOSE G75 Pro") == new BatteryRead(85)
+            && Dongles.AulaBattery(Fa09(0x13, 0x4A, 0x01, 0x00, 0x02, 0x65, 0x00), "MCHOSE G75 Pro") is null && Dongles.AulaBattery(Dongles.AulaRequest(0x4A), "MCHOSE G75 Pro") is null);
     }
 
     private static void Logitech(Action<string, bool> check)
     {
         check("Logitech headsets: the 0xFF43 / 0x0202 collection with the long report is HID++'s, either byte order; nothing else",
-            Hidpp.HeadsetCollection(0xFF43, 0x0202, 20, new HashSet<byte> { 0x10, 0x11 }) && Hidpp.HeadsetCollection(0x43FF, 0x0202, 20, new HashSet<byte> { 0x11 })
-            && !Hidpp.HeadsetCollection(0xFF43, 0x0202, 20, new HashSet<byte> { 0x10 }) && !Hidpp.HeadsetCollection(0xFF43, 0x0202, 7, new HashSet<byte> { 0x11 })
-            && !Hidpp.HeadsetCollection(0x000C, 0x0001, 20, new HashSet<byte> { 0x11 }) && !Hidpp.HeadsetCollection(0xFF00, 0x0002, 20, new HashSet<byte> { 0x11 }));
-        check("Logitech G535: register 0x0D asked long, the voltage on its curve and 03 charging; another register is none",
-            Hidpp.HeadsetRegisterRequest(0xFF, 0x0D).SequenceEqual(new byte[] { 0x11, 0xFF, 0x05, 0x0D, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 })
-            && Hidpp.G535Battery(Bytes("10 FF 05 0D 10 4F 01"), 0xFF) is { Percent: 100, Charging: false, Accuracy: BatteryAccuracy.Voltage }
-            && Hidpp.G535Battery(Bytes("11 FF 05 0D 0E E9 03 00"), 0xFF) is { Percent: 50, Charging: true }
-            && Hidpp.G535Battery(Bytes("10 FF 05 0C 0E E9 01"), 0xFF) is null && Hidpp.G535Battery(Bytes("10 FF 05 0D 00 00 01"), 0xFF) is null
-            && Hidpp.G535Battery(Bytes("10 01 05 0D 0E E9 01"), 0xFF) is null);
+            Hidpp.HeadsetCollection(0x0A87, 0xFF43, 0x0202, 20, new HashSet<byte> { 0x10, 0x11 }) && Hidpp.HeadsetCollection(0x0A87, 0x43FF, 0x0202, 20, new HashSet<byte> { 0x11 })
+            && !Hidpp.HeadsetCollection(0x0A87, 0xFF43, 0x0202, 20, new HashSet<byte> { 0x10 }) && !Hidpp.HeadsetCollection(0x0A87, 0xFF43, 0x0202, 7, new HashSet<byte> { 0x11 })
+            && !Hidpp.HeadsetCollection(0x0A87, 0x000C, 0x0001, 20, new HashSet<byte> { 0x11 }) && !Hidpp.HeadsetCollection(0x0A87, 0xFF00, 0x0002, 20, new HashSet<byte> { 0x11 }));
         var centurion = Shape(0x046D, 0x0AF7, 0xFFA0, 1, 64, 64, [0x51]);
         check("Logitech PRO X 2 LIGHTSPEED: the legacy request on its 0xFFA0 collection (the page as measured on Windows); 51 0B with 04 at 8; a power notice with 00 at 6 the headset off, any other notice, the acknowledgement and the request read back none",
             BrandFamilies.Find(centurion) is { Family.Brand: "Logitech Centurion", Ways.Count: 1 }
@@ -217,7 +211,7 @@ static class BrandsGapTests
             Razer.Find(0x00A4) is { Transaction: 0x1F, Interface: -1 } && Razer.Find(0x027B) is { Transaction: 0x9F, Kind: DeviceKind.Keyboard });
         var kingston = Headsets.Kind.CloudIIKingston;
         check("HyperX Cloud II Wireless (Kingston 0951:1718): its 62-byte exchange on 0xFF13 and the 0x0B answers",
-            Headsets.Find(0x0951, 0x1718) == kingston && Headsets.Channel(kingston) == (-1, 0xFF13) && Headsets.Request(kingston).Length == 62
+            Headsets.Find(0x0951, 0x1718) == kingston && Headsets.Reads(kingston, -1, 0xFF13, 1) && !Headsets.Reads(kingston, -1, 0xFF00, 1) && Headsets.Request(kingston).Length == 62
             && Headsets.Request(kingston).Take(17).SequenceEqual(Bytes("06 00 02 00 9A 00 00 68 4A 8E 0A 00 00 00 BB 02 00"))
             && Headsets.ChargingRequest(kingston)![15] == 0x03
             && Headsets.Battery(kingston, Bytes("0B 00 BB 02 00 0F 50 4B")) == new BatteryRead(75) && Headsets.Battery(kingston, Bytes("0B 00 BB 03 00 0F 50 4B")) is null

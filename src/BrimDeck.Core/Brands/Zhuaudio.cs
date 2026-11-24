@@ -24,8 +24,10 @@ namespace BrimDeck.Core;
 // The installed Z HUB's process name is not known (its installer was not read), so the brand does not stand aside for it.
 //
 // ZhuAudio's C-Media headsets (the 朱雀 ZG3's driver, "ZHUAUDIO HUB (CM002X1)" 1.1.15, C-Media's XearONE rebranded; read from
-// its installer without running it, not measured by us). Its INF takes the audio interface of 0D8C:0334, 20F8:A962, A963,
-// A964, 046A:01ED, 0E6A:0110 and 4C4A:4255 (which of them is the ZG3's dongle it does not say), so only these pairs. XearONE
+// its installer without running it, not measured by us). Its INF takes the audio interface of 20F8:A962, A963, A964,
+// 046A:01ED and 4C4A:4255 (which of them is the ZG3's dongle it does not say), so only these pairs; the INF's 0D8C:0334 and
+// 0E6A:0110 are other headsets in users' diagnostics (the iKF V11 Max and the AULA G7: myfinder-device-battery's
+// research/families-2026-11.md; AGPL, facts only), so those are not asked. XearONE
 // (BatteryManager, DriverInstance) writes 55 65 01 in a 64-byte output report to the device's collection that declares report
 // 0x55, and takes 55 65 <percent> <state> from its input reports, the state 2 on battery, 3 charging, 4 full, 0x1A the headset
 // not linked to the dongle, 0x20 a device without the battery; the same frame as the ATK N9 V2's and the MCHOSE V9 Pro's
@@ -107,7 +109,7 @@ public static class Zhuaudio
     }
 
     public static readonly (int Vendor, int Product)[] CmediaHeadsets =
-        [(0x0D8C, 0x0334), (0x20F8, 0xA962), (0x20F8, 0xA963), (0x20F8, 0xA964), (0x046A, 0x01ED), (0x0E6A, 0x0110), (0x4C4A, 0x4255)];
+        [(0x20F8, 0xA962), (0x20F8, 0xA963), (0x20F8, 0xA964), (0x046A, 0x01ED), (0x4C4A, 0x4255)];
     public static byte[] CmediaRequest() => BrandFamilies.Frame(64, 0x55, 0x65, 0x01);
     public static BatteryRead? CmediaBattery(byte[] r)
     {

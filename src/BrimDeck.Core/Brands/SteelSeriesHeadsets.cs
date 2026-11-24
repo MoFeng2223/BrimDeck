@@ -1,7 +1,7 @@
 namespace BrimDeck.Core;
 
 // SteelSeries headsets the Headsets class does not list, vendor 0x1038 (shared with the mice SteelSeriesMice takes and the
-// headsets Headsets takes, so only these products). Each on interface 3:
+// headsets Headsets takes, so only these products). Each on interface 3, but for the Arctis Pro Wireless:
 // - Arctis 1 (12B3, Xbox 12B6), Arctis 7X (12D7) and 7P (12D5), usage page 0xFF43 usage 0x0202: output report 06, 06 12; the
 //   answer 06 12 <status> <percent>, status 01 the headset off; no charging state.
 // - Arctis 7+ (220E, PS5 2212, Xbox 2216, Destiny 2236), Nova 3P/3X Wireless (2269, 226D), Nova 5/5X (2232, 2253) and the
@@ -15,16 +15,20 @@ namespace BrimDeck.Core;
 //   01 B0 .. .. .. .. <percent> at 6; the Elite's power state at 14 (01 the headset offline, 02 charging on the cable, 04
 //   standby, 08 online) and charging at 15 (02); the Omni's state at 15 (01 offline, 02 charging on the cable, 08 on
 //   battery). A switched-off Elite reports 0 %.
+// - Arctis Pro Wireless (1290), on interface 0, a vendor collection (usage page 0xFF00 and up): output report 0x41, 41 AA (31
+//   bytes), answered <state> first, 02 the headset off, 04 on (the gate); then output report 0x40, 40 AA (31 bytes), answered
+//   <step 0..4> first, 25 % a step; no charging state. Neither answer echoes its request, so only those values are taken.
+//   myfinder-device-battery's steelseries.py (AGPL; facts only, after HeadsetControl's steelseries_arctis_pro_wireless); the
+//   offsets as there, the report id 0 of an unnumbered report taken off (StripZero) as hidapi does. Not measured.
 // Requests, layouts and product ids from HeadsetControl (GPL; facts only: steelseries_arctis_1, _7_plus, _nova_3p_wireless,
 // _nova_5, _gamebuds, and pull request 584 for the Omni, verified on one: 93 %), with HaloBattery's steelseries.py and
 // steelseries_elite.py (MIT) for the B0 echo every answer starts with and the Elite (measured: 01 b0 00 00 01 00 1f 64 ...,
-// 31 %). The request read back (B0 00 00 ..., 06 12 00 00) carries no level and is no reading. The Arctis Pro Wireless (1290)
-// is not read: its level is a second request whose answer does not echo it.
+// 31 %). The request read back (B0 00 00 ..., 06 12 00 00) carries no level and is no reading.
 [BrandFamilies]
 public static class SteelSeriesHeadsets
 {
     public const int Vendor = 0x1038;
-    public enum Exchange { Arctis1, Arctis7Plus, Nova5, GameBuds, Elite, Omni }
+    public enum Exchange { Arctis1, Arctis7Plus, Nova5, GameBuds, Elite, Omni, ProWireless }
 
     public static Exchange? Find(int product) => product switch
     {
@@ -36,6 +40,7 @@ public static class SteelSeriesHeadsets
         0x230A or 0x2317 => Exchange.GameBuds,
         0x2244 => Exchange.Elite,
         0x2290 => Exchange.Omni,
+        0x1290 => Exchange.ProWireless,
         _ => null
     };
 
@@ -43,6 +48,7 @@ public static class SteelSeriesHeadsets
     {
         Exchange.Arctis1 => [0x06, 0x12],
         Exchange.Elite or Exchange.Omni => BrandFamilies.Frame(64, 0x01, 0xB0),
+        Exchange.ProWireless => BrandFamilies.Frame(31, 0x40, 0xAA),
         _ => [0x00, 0xB0]
     };
 
@@ -60,9 +66,15 @@ public static class SteelSeriesHeadsets
             // 0 % then (myfinder-device-battery's steelseries_elite.py, its user's station, #138; AGPL, facts only). The request
             // read back has no power code.
             : r[14] == 0x01 || r[6] == 0 && r[14] != 0 ? new(null, Asleep: true) : r[6] is > 0 and <= 100 ? new(r[6], r[15] == 0x02 || r[14] == 0x02) : null,
+        // A step 0 to 4, 0 % included, as the reference shows it.
+        Exchange.ProWireless => r => r.Length >= 1 && r[0] <= 4 ? new(r[0] * 25, Accuracy: BatteryAccuracy.Steps) : null,
         _ => r => r.Length < 16 || r[0] != 0x01 || r[1] != 0xB0 ? null
             : r[15] == 0x01 ? new(null, Asleep: true) : r[15] is 0x02 or 0x08 && r[6] is > 0 and <= 100 ? new(r[6], r[15] == 0x02) : null,
     };
+
+    // The Arctis Pro Wireless's gate: 41 AA, answered 04 with the headset on, 02 with it off; anything else is not its answer.
+    public static byte[] ProWirelessGate() => BrandFamilies.Frame(31, 0x41, 0xAA);
+    public static bool? ProWirelessOn(byte[] r) => r.Length < 1 ? null : r[0] switch { 0x04 => true, 0x02 => false, _ => null };
 
     private static BatteryRead? GameBudsBattery(byte[] r)
     {
@@ -76,13 +88,18 @@ public static class SteelSeriesHeadsets
 
     private static bool Takes(HidShape s)
     {
-        if (s.Vendor != Vendor || Find(s.Product) is not { } exchange || s.Interface is not (3 or -1) || s.OutputLength < 2) return false;
+        if (s.Vendor != Vendor || Find(s.Product) is not { } exchange) return false;
+        if (exchange == Exchange.ProWireless) return s.Interface is 0 or -1 && s.UsagePage >= 0xFF00 && s.OutputLength >= 31;
+        if (s.Interface is not (3 or -1) || s.OutputLength < 2) return false;
         return exchange == Exchange.Arctis1 ? HeadsetPages.Is(s, 0xFF43) && s.Usage == 0x0202 : HeadsetPages.Is(s, 0xFFC0) && s.Usage == 0x0001;
     }
 
     private static IReadOnlyList<BrandWay> Ways(HidShape s)
     {
         var exchange = Find(s.Product)!.Value;
+        if (exchange == Exchange.ProWireless)
+            return [new BrandWay("steelseries-headset.pro-wireless", WayTransport.Output, Request(exchange), Battery(exchange))
+                { Gate = ProWirelessGate(), Gated = ProWirelessOn, TimeoutMs = 1000, StripZero = true }];
         string name = exchange switch
         {
             Exchange.Arctis1 => "steelseries-headset.arctis1", Exchange.Elite or Exchange.Omni => "steelseries-headset.status1",

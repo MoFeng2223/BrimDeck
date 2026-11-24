@@ -39,8 +39,11 @@ static class BrandsMouseTests
         Scyrox(check);
         Pulsar(check);
         Others(check);
-        check("Mouse families: every read within the limits (1 to 2 attempts, at most 1000 ms, listening at most 600 ms)",
-            Seen.Count > 0 && Seen.All(way => way.Attempts is >= 1 and <= 2 && way.TimeoutMs <= (way.Transport == WayTransport.Listen ? 600 : 1000)));
+        // The one exception: the EWEADN X23 Pro's receiver sends its report by itself only about every five seconds, so it is
+        // listened to for RyunixMice.X23ListenMs (myfinder-device-battery's eweadn_x23.py); nothing is sent to it.
+        check("Mouse families: every read within the limits (1 to 2 attempts, at most 1000 ms, listening at most 600 ms, the X23 Pro's 1200 ms)",
+            Seen.Count > 0 && Seen.All(way => way.Attempts is >= 1 and <= 2
+                && way.TimeoutMs <= (way.Transport == WayTransport.Listen ? way.Name == "ryunix.x23" ? RyunixMice.X23ListenMs : 600 : 1000)));
     }
 
     private static void Glorious(Action<string, bool> check)
@@ -179,13 +182,13 @@ static class BrandsMouseTests
         check("EWEADN: the beiyin S9 receiver's feature collection takes the basics read; its 0xFF06 collection is not asked",
             Named(beiyin, "EWEADN mouse", "eweadn.beiyin") && Untaken(Shape(0x372E, 0x1026, 0xFF06, 0x01, input: 31, output: 63, outputIds: [0x09])));
         var request = EweadnMice.BeiyinRequest();
-        check("EWEADN: 03 22 50 00 02 4F 81 padded to 64 bytes (0x22 the sum of the bytes after it), read back 20 ms later",
+        check("EWEADN: 03 22 50 00 02 4F 81 padded to 64 bytes (0x22 the sum of the bytes after it), read back 100 ms later",
             request.Length == 64 && request.Take(7).SequenceEqual(new byte[] { 0x03, 0x22, 0x50, 0x00, 0x02, 0x4F, 0x81 }) && Zeros(request, 7)
-            && Way(beiyin, "eweadn.beiyin") is { GapMs: 20, FeatureLength: 64 });
-        check("EWEADN: vigil-watt's answer 03 50 00 0B 02 01 49 .. reads 73 % (C9: charging), a sleeping 0 is asleep; the request, the residue 03 00 02 and 80 (0 % charging) are none",
+            && Way(beiyin, "eweadn.beiyin") is { GapMs: 100, FeatureLength: 64 });
+        check("EWEADN: vigil-watt's answer 03 50 00 0B 02 01 49 .. reads 73 % (C9: charging), a level of 0 is none; the request, the residue 03 00 02 and 80 (0 % charging) are none",
             EweadnMice.Beiyin(Pad(64, Hex("03 50 00 0B 02 01 49 21 07 01 90 65 04 A5 5A 00"))) == new BatteryRead(73)
             && EweadnMice.Beiyin(Pad(64, Hex("03 50 00 0B 02 01 C9 21 07 01 90 65 04 A5 5A 00"))) == new BatteryRead(73, true)
-            && EweadnMice.Beiyin(Pad(64, Hex("03 50 00 0B 02 01 00 21 07 01 90 65 04 A5 5A 00"))) == new BatteryRead(null, Asleep: true)
+            && EweadnMice.Beiyin(Pad(64, Hex("03 50 00 0B 02 01 00 21 07 01 90 65 04 A5 5A 00"))) is null
             && EweadnMice.Beiyin(Pad(64, Hex("03 50 00 0B 02 01 80"))) is null && EweadnMice.Beiyin(Pad(64, Hex("03 50 01 0B 02 01 49"))) is null
             && EweadnMice.Beiyin(request) is null && EweadnMice.Beiyin(Hex("03 00 02 00 00")) is null
             && EweadnMice.Beiyin(Pad(64, Hex("03 50 00 0B 02 01 7F"))) is null);

@@ -24,6 +24,9 @@ internal sealed class HidInfo
     public List<(byte ReportId, ushort Page, ushort Usage, ushort Link, int Min, int Max)> FeatureBatteries = [];
     // The ids of the input, output and feature reports the collection declares (0 where it numbers none).
     public HashSet<byte> InputIds = [], OutputIds = [], FeatureIds = [];
+    // Each feature report's length in bytes, its id included, where the descriptor makes it plain (FeatureReportSizes); null
+    // where it does not.
+    public IReadOnlyDictionary<byte, int>? FeatureSizes;
     // MI_xx in the path: the USB interface; -1 when the path has none. Worked out once: the readers ask for it every pass.
     public int Interface => _interface ??= Hid.Number(Hid.InterfaceIn, Path);
     // COLxx in the path: the top-level collection where the interface has several; -1 when the path has none.
@@ -115,6 +118,7 @@ internal static class Hid
                     info.InputIds = ReportIds(preparsed, 0, caps[23], caps[24]);
                     info.OutputIds = ReportIds(preparsed, 1, caps[26], caps[27]);
                     info.FeatureIds = ReportIds(preparsed, 2, caps[29], caps[30]);
+                    info.FeatureSizes = FeatureReportSizes(preparsed, caps[29], caps[30], caps[4]);
                 }
                 finally { HidD_FreePreparsedData(preparsed); }
             }
@@ -161,6 +165,26 @@ internal static class Hid
             for (int i = 0; i < length; i++) ids.Add(buffer[i * 72 + 2]);
         }
         return ids;
+    }
+
+    // The feature reports' lengths, where each report is one plain field of bytes: one value capability per report id, not an
+    // alias, 8 bits a value, its length the count plus the id's byte; the longest equal to the collection's. Null for anything
+    // else (buttons, split or wider fields), so a caller that needs the lengths sends nothing.
+    private static Dictionary<byte, int>? FeatureReportSizes(IntPtr preparsed, int buttons, int values, int maximum)
+    {
+        if (buttons > 0 || values is < 1 or > 32 || maximum is < 2 or > 4096) return null;
+        var buffer = new byte[72 * values];
+        ushort length = (ushort)values;
+        if (HidP_GetValueCaps(2, buffer, ref length, preparsed) != HIDP_STATUS_SUCCESS || length != values) return null;
+        var sizes = new Dictionary<byte, int>();
+        for (int i = 0; i < length; i++)
+        {
+            int at = i * 72;
+            byte id = buffer[at + 2];
+            ushort bits = BitConverter.ToUInt16(buffer, at + 18), count = BitConverter.ToUInt16(buffer, at + 20);
+            if (buffer[at + 3] != 0 || bits != 8 || count == 0 || !sizes.TryAdd(id, count + 1)) return null;
+        }
+        return sizes.Values.Max() == maximum ? sizes : null;
     }
 
     // A battery usage's value from a feature report read on the collection.

@@ -6,11 +6,13 @@ namespace BrimDeck.Core;
 // command 1 with its own heartbeat, whose bytes would be read as a pad's battery (OpenFlydigi's PROTOCOL.md, CC0).
 // The pad keeps its own protocol
 // on the vendor collection usage page 0xFFA0, usage 1 (measured on Windows in HaloBattery #191: the Vader 5 Pro's interface 1;
-// 0xA0FF is taken too, in case Windows reports the page byte-swapped). The read is the device info request 5A A5 01 02 00,
-// sent as output report 0x03 where the collection numbers
+// 0xA0FF is taken too, in case Windows reports the page byte-swapped). The read is the device info request 5A A5 01 02 03,
+// the last byte the sum of the two before it, sent as output report 0x03 where the collection numbers
 // its reports (Apex 5) and as unnumbered report 0x00 where it does not (Vader 5, Apex 6: SDL zeroes the id for them). The
 // answer is an input report 5A A5 01 ..., the report id first where there is one; byte 5 of it (counted from 5A) is the
-// device id, byte 11 the battery: high nibble 0 on battery, 1 charging, 2 charged, low nibble the level step. The step is
+// device id, byte 11 the battery: high nibble 0 on battery, the low nibble the level step; high nibble 1 is charging, given
+// without a level, and any other is no reading (myfinder-device-battery's flydigi.py and upstream-protocols.md, AGPL;
+// facts only; from OpenFlydigi's PROTOCOL.md). The step is
 // × 20 (0 to 5) on every model but the Apex 6, where SDL takes it × 10 (0 to 10): SDL_hidapi_flydigi.c (zlib,
 // HandleInfoResponse) decides by the device id (149, 150, 152 are the Apex 6) and HaloBattery's flydigi.py (MIT, checked on
 // a Vader 5 Pro) agrees on × 20 for the rest (OpenFlydigi measured 05 there on an Apex 5 on its dongle). The seven steps
@@ -21,7 +23,7 @@ public static class Flydigi
 {
     public const int Vendor = 0x37D7;
     public const int Apex6 = 0x2502;
-    private static readonly byte[] Info = [0x5A, 0xA5, 0x01, 0x02, 0x00];
+    private static readonly byte[] Info = [0x5A, 0xA5, 0x01, 0x02, 0x01 + 0x02];
     private static readonly HashSet<int> Apex6Ids = [149, 150, 152];
 
     // Flydigi's products on 0x37D7 that are not pads.
@@ -42,8 +44,9 @@ public static class Flydigi
         if (r[at + 5] == 0) return null;
         bool tens = apex6 || Apex6Ids.Contains(r[at + 5]);
         int state = r[at + 11] >> 4, step = r[at + 11] & 0x0F;
-        if (state > 2 || step > (tens ? 10 : 5)) return null;
-        return new(state == 2 ? 100 : step * (tens ? 10 : 20), state is 1 or 2, Accuracy: BatteryAccuracy.Steps);
+        if (state == 1) return new(null, true);
+        if (state != 0 || step > (tens ? 10 : 5)) return null;
+        return new(step * (tens ? 10 : 20), Accuracy: BatteryAccuracy.Steps);
     }
 
     // Windows.Gaming.Input's report for a Flydigi pad is the constant remaining = full = 1000 mWh whatever the battery holds

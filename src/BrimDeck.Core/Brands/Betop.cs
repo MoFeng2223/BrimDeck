@@ -26,6 +26,9 @@ namespace BrimDeck.Core;
 // that does not scramble, so it is asked scrambled first and plain after. Only reads are sent: the client's other commands
 // set modes and profiles (0x11, 0x31), write or save the configuration (0x22, 0x62, 0xA2, 0xE2, 0x13, 0x23), vibrate (0x16),
 // reset (0x36), enter a test mode (0x17), pair (0x27, 0x37) or update the firmware, and none of them is ever sent.
+//
+// The Kunpeng 20 Elite's receiver (20BC:5191, "BTP-KP20EB XINPUT DONGLE") is not asked: its 0x00FF / 3 collection has no known
+// battery report, command or layout (myfinder-device-battery's research/batch4-protocols.md, AGPL; facts only).
 [BrandFamilies]
 public static class Betop
 {
@@ -50,6 +53,7 @@ public static class Betop
     }
 
     public static bool Scrambles(int product) => ScrambledProducts.Contains(product);
+    public const int Kunpeng20Elite = 0x5191;
 
     public static byte[] Request() => BrandFamilies.Frame(2, 0x02, 0x15);
     public static BatteryRead? Battery(byte[] r)
@@ -68,7 +72,7 @@ public static class Betop
 
     public static IEnumerable<BrandFamily> Families =>
     [
-        new("BETOP", shape => (shape.Vendor == Vendor || shape.Vendor == SecondVendor && (ScrambledProducts.Contains(shape.Product) || PlainProducts.Contains(shape.Product)))
+        new("BETOP", shape => (shape.Vendor == Vendor && shape.Product != Kunpeng20Elite || shape.Vendor == SecondVendor && (ScrambledProducts.Contains(shape.Product) || PlainProducts.Contains(shape.Product)))
                 && shape.UsagePage is 0x00FF or 0xFF00 && shape.Usage == 0x0003 && shape.InputLength >= 5,
             shape => BothProducts.Contains(shape.Product) ? [Scrambled, Plain] : Scrambles(shape.Product) ? [Scrambled] : [Plain])
         { Kind = _ => DeviceKind.Controller, Prefix = "betop" },

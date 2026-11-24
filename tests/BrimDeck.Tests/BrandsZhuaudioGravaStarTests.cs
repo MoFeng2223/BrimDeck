@@ -89,14 +89,14 @@ static class BrandsZhuaudioGravaStarTests
             && BrimDeck.Core.Zhuaudio.Battery(Hex("05 EE 80 00 09 00 FF 01 05 FE 07 65 00 00 AA", 64)) is null
             && BrimDeck.Core.Zhuaudio.Battery(Hex("05 EE 80 00 09 00 FF 01 05 FE 07 4B 00 00 00", 64)) is null
             && BrimDeck.Core.Zhuaudio.Battery(BrimDeck.Core.Zhuaudio.PropertyRequest(0x07)) is null);
-        (int Vendor, int Product)[] cmedia = [(0x0D8C, 0x0334), (0x20F8, 0xA962), (0x20F8, 0xA963), (0x20F8, 0xA964), (0x046A, 0x01ED), (0x0E6A, 0x0110), (0x4C4A, 0x4255)];
-        check("ZhuAudio C-Media: the seven pairs of the ZG3 driver's INF take 55 65 01 on a vendor collection declaring report 0x55 with 64 bytes, and no older reader does; other reports, pages, lengths and pairs are not taken",
+        (int Vendor, int Product)[] cmedia = [(0x20F8, 0xA962), (0x20F8, 0xA963), (0x20F8, 0xA964), (0x046A, 0x01ED), (0x4C4A, 0x4255)];
+        check("ZhuAudio C-Media: the five pairs of the ZG3 driver's INF take 55 65 01 on a vendor collection declaring report 0x55 with 64 bytes, and no older reader does; other reports, pages, lengths and pairs are not taken",
             cmedia.All(p => Brand(Shape(p.Vendor, p.Product, 0xFF90, 1, 64, 64, [0x55])) == "ZhuAudio C-Media"
                 && Dongles.Find(p.Vendor, p.Product, 0xFF90, "", 0, -1, 1, 64, 64, -1, new HashSet<byte> { 0x55 }) is null && Headsets.Find(p.Vendor, p.Product) is null
                 && Brand(Shape(p.Vendor, p.Product, 0xFF90, 1, 64, 64, [0x01])) is null && Brand(Shape(p.Vendor, p.Product, 0x000C, 1, 64, 64, [0x55])) is null
                 && Brand(Shape(p.Vendor, p.Product, 0xFF90, 1, 64, 32, [0x55])) is null)
             && Brand(Shape(0x0D8C, 0x0352, 0xFF90, 1, 64, 64, [0x55])) is null
-            && BrandFamilies.Find(Shape(0x0D8C, 0x0334, 0xFF90, 1, 64, 64, [0x55]))!.Value.Ways[0].Request.SequenceEqual(Hex("55 65 01", 64)));
+            && BrandFamilies.Find(Shape(0x20F8, 0xA962, 0xFF90, 1, 64, 64, [0x55]))!.Value.Ways[0].Request.SequenceEqual(Hex("55 65 01", 64)));
         check("ZhuAudio C-Media: 55 65 <level> <state> as XearONE reads it: 2 on battery, 3 charging, 4 full, 1A not linked (asleep); 0x20 (no battery), the request read back, 0 and over 100 are none",
             BrimDeck.Core.Zhuaudio.CmediaBattery(Hex("55 65 50 02", 64)) == new BatteryRead(80)
             && BrimDeck.Core.Zhuaudio.CmediaBattery(Hex("55 65 50 03", 64)) == new BatteryRead(80, true)

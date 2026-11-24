@@ -42,8 +42,8 @@ static class BrandsControllerTests
         var vader5 = BrandFamilies.Find(Shape(0x37D7, 0x2401, 0xA0FF, 1, 1, 33, 33, [0x00]));
         check("Flydigi: the Vader 5 Pro's, Apex 5's and Apex 6's vendor collection 0xFFA0:1 (either byte order) takes the info read, numbered where it declares report 0x03",
             apex5 is { Family.Brand: "Flydigi" } && Names(apex5).SequenceEqual(["flydigi.info"])
-            && apex5.Value.Ways[0].Request.SequenceEqual(new byte[] { 0x03, 0x5A, 0xA5, 0x01, 0x02, 0x00 })
-            && vader5 is { Family.Brand: "Flydigi" } && vader5.Value.Ways[0].Request.SequenceEqual(new byte[] { 0x00, 0x5A, 0xA5, 0x01, 0x02, 0x00 })
+            && apex5.Value.Ways[0].Request.SequenceEqual(new byte[] { 0x03, 0x5A, 0xA5, 0x01, 0x02, 0x03 })
+            && vader5 is { Family.Brand: "Flydigi" } && vader5.Value.Ways[0].Request.SequenceEqual(new byte[] { 0x00, 0x5A, 0xA5, 0x01, 0x02, 0x03 })
             && BrandFamilies.Find(Shape(0x37D7, 0x2502, 0xFFA0, 1, input: 33, outputIds: [0x00])) is { Family.Brand: "Flydigi" });
         // HaloBattery #191's diagnostics: VID=37d7 PID=6001 if=0 usage=ffa0:0001 'flydigi' 'Flydigi CD2'.
         check("Flydigi: every pad of the brand on its vendor collection (a later model too), never the CD2 charging dock on the same page",
@@ -62,16 +62,16 @@ static class BrandsControllerTests
             [id, .. Frame(31, (0, 0x5A), (1, 0xA5), (2, 0x01), (5, device), (6, 1), (11, battery), (15, 0x41), (16, 0x71))];
         var apex5Way = apex5!.Value.Ways[0];
         var apex6Way = BrandFamilies.Find(Shape(0x37D7, 0x2502, 0xFFA0, 1, input: 33, outputIds: [0x00]))!.Value.Ways[0];
-        check("Flydigi: the battery byte, × 20 on battery and charging, full when charged, coarse",
-            apex5Way.Parse(Info(0x03)) == new BatteryRead(60, Accuracy: BatteryAccuracy.Steps) && apex5Way.Parse(Info(0x12, id: 0x00)) == new BatteryRead(40, true, Accuracy: BatteryAccuracy.Steps)
-            && apex5Way.Parse(Info(0x20, id: 0x04)) == new BatteryRead(100, true, Accuracy: BatteryAccuracy.Steps)
+        check("Flydigi: the battery byte, × 20 on battery, coarse; charging without a level; high nibble 2 none",
+            apex5Way.Parse(Info(0x03)) == new BatteryRead(60, Accuracy: BatteryAccuracy.Steps) && apex5Way.Parse(Info(0x12, id: 0x00)) == new BatteryRead(null, true)
+            && apex5Way.Parse(Info(0x20, id: 0x04)) is null
             && apex5Way.Parse(Info(0x05)[1..]) == new BatteryRead(100, Accuracy: BatteryAccuracy.Steps));
         check("Flydigi: the Apex 6 (by its product or its device id 149, 150, 152) counts its step × 10",
             apex6Way.Parse(Info(0x07, 149, 0x00)) == new BatteryRead(70, Accuracy: BatteryAccuracy.Steps) && apex5Way.Parse(Info(0x07, 150)) == new BatteryRead(70, Accuracy: BatteryAccuracy.Steps)
             && apex6Way.Parse(Info(0x0A, 0x01, 0x00)) == new BatteryRead(100, Accuracy: BatteryAccuracy.Steps) && apex5Way.Parse(Info(0x06)) is null);
         check("Flydigi: out of range, the request read back, the pad's input stream and zeros are none",
             apex5Way.Parse(Info(0x30)) is null && apex5Way.Parse(Info(0xFF)) is null
-            && apex5Way.Parse(BrandFamilies.Frame(33, 0x03, 0x5A, 0xA5, 0x01, 0x02, 0x00)) is null
+            && apex5Way.Parse(BrandFamilies.Frame(33, 0x03, 0x5A, 0xA5, 0x01, 0x02, 0x03)) is null
             && apex5Way.Parse(BrandFamilies.Frame(33, 0x03, 0x5A, 0xA5, 0xEF, 0x01, 0x82)) is null && apex5Way.Parse(new byte[33]) is null
             && apex5Way.Parse(Info(0x03)[..20]) is null);
         // #191: the Vader 5 Pro on 37d7:2401 and the Vader 4 Pro on 045e:028e, both 'Xbox 360 Controller for Windows' to
@@ -178,9 +178,9 @@ static class BrandsControllerTests
             XInputBattery.Receiver360Slot(0, 0x0002) && XInputBattery.Receiver360Slot(0, 0x000F) && !XInputBattery.Receiver360Slot(0, 0x0000)
             && !XInputBattery.Receiver360Slot(0x0B13, 0x0002));
         check("XInput: four levels as SDL takes them, coarse; wired is charging without a level; no level for unknown or out of range; nothing for an empty slot",
-            XInputBattery.Battery(0x02, 0) == new BatteryRead(10, Accuracy: BatteryAccuracy.Steps) && XInputBattery.Battery(0x03, 1) == new BatteryRead(40, Accuracy: BatteryAccuracy.Steps)
-            && XInputBattery.Battery(0x03, 2) == new BatteryRead(70, Accuracy: BatteryAccuracy.Steps) && XInputBattery.Battery(0x02, 3) == new BatteryRead(100, Accuracy: BatteryAccuracy.Steps)
-            && XInputBattery.Battery(0x01, 3) == new BatteryRead(null, Charging: true) && XInputBattery.Battery(0x01, 0) == new BatteryRead(null, Charging: true)
+            XInputBattery.Battery(0x02, 0) == new BatteryRead(5, Accuracy: BatteryAccuracy.Steps) && XInputBattery.Battery(0x03, 1) == new BatteryRead(30, Accuracy: BatteryAccuracy.Steps)
+            && XInputBattery.Battery(0x03, 2) == new BatteryRead(65, Accuracy: BatteryAccuracy.Steps) && XInputBattery.Battery(0x02, 3) == new BatteryRead(100, Accuracy: BatteryAccuracy.Steps)
+            && XInputBattery.Battery(0x01, 3) == new BatteryRead(null) && XInputBattery.Battery(0x01, 0) == new BatteryRead(null)
             && XInputBattery.Battery(0xFF, 1) == new BatteryRead(null)
             && XInputBattery.Battery(0x03, 4) == new BatteryRead(null) && XInputBattery.Battery(0x00, 3) is null);
     }

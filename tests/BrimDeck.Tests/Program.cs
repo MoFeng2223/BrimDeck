@@ -122,6 +122,12 @@ try
     BrandsMouseTests.Run(Check);
     BrandsGapTests.Run(Check);
     BrandsReferenceTests.Run(Check);
+    ReferenceRazerTests.Run(Check);
+    ReferenceLogitechTests.Run(Check);
+    ReferenceHeadsetTests.Run(Check);
+    ReferenceKeyboardTests.Run(Check);
+    ReferenceMouseTests.Run(Check);
+    ReferenceMchoseTests.Run(Check);
     BrandsMoreTests.Run(Check);
     BrandsZhuaudioGravaStarTests.Run(Check);
     OfficialDriverTests.Run(Check);

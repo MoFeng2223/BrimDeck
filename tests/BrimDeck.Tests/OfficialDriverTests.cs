@@ -39,13 +39,13 @@ static class OfficialDriverTests
             byte xor = 0; foreach (var b in body[1..]) xor ^= b;
             return [0x4D, .. body, xor];
         }
-        check("MCHOSE Qhw (G98 V3, K87 V3): the battery command with its XOR, status 1 charging and 2 full, and another header or a level of 0 none",
-            Dongles.MchoseQhwRequest().SequenceEqual(Bytes("4D 01 03 00 04 09 00 00 0E"))
-            && Dongles.MchoseQhw(Qhw(1, 55)) == new BatteryRead(55, true) && Dongles.MchoseQhw(Qhw(0, 80)) == new BatteryRead(80)
-            && Dongles.MchoseQhw(Qhw(2, 100)) == new BatteryRead(100)
-            && Dongles.MchoseQhw(Qhw(0, 0)) is null && Dongles.MchoseQhw(Qhw(0, 101)) is null && Dongles.MchoseQhw(Qhw(3, 50)) is null
-            && Dongles.MchoseQhw(Qhw(0, 50, flags: 1)) is null && Dongles.MchoseQhw(Qhw(0, 50, sequence: 1)) is null
-            && Dongles.MchoseQhw(Dongles.MchoseQhwRequest()) is null && Dongles.MchoseQhw(Padded(32, "4D 01 03 00 04 09 00 00 0E")) is null);
+        check("MCHOSE Qhw (G98 V3, K87 V3): the battery command with its XOR, status 1 charging and 2 full, and another header or sequence none",
+            Dongles.MchoseQhwRequest(0).SequenceEqual(Bytes("4D 01 03 00 04 09 00 00 0E"))
+            && Dongles.MchoseQhw(Qhw(1, 55), 0) == new BatteryRead(55, true) && Dongles.MchoseQhw(Qhw(0, 80), 0) == new BatteryRead(80)
+            && Dongles.MchoseQhw(Qhw(2, 100), 0) == new BatteryRead(100)
+            && Dongles.MchoseQhw(Qhw(0, 101), 0) is null && Dongles.MchoseQhw(Qhw(3, 50), 0) is null
+            && Dongles.MchoseQhw(Qhw(0, 50, flags: 1), 0) is null && Dongles.MchoseQhw(Qhw(0, 50, sequence: 1), 0) is null
+            && Dongles.MchoseQhw(Dongles.MchoseQhwRequest(0), 0) is null && Dongles.MchoseQhw(Padded(32, "4D 01 03 00 04 09 00 00 0E"), 0) is null);
         check("MCHOSE Qhw: only the 0xFF80 collection of 1015, 2025 and 2023 that declares 0x4D, never one named CH585 (update mode)",
             Dongles.MchoseReads(0x1015, "MCHOSE G98 V3 2.4G", 0xFF80, 0x0001, 0, 32, new HashSet<byte> { 0x4D }, none).SequenceEqual([Dongles.MchoseRead.Qhw])
             && Dongles.MchoseReads(0x2023, "MCHOSE K87 V3", 0xFF80, 0x0001, 0, 32, new HashSet<byte> { 0x4D }, none).SequenceEqual([Dongles.MchoseRead.Qhw])
@@ -96,13 +96,13 @@ static class OfficialDriverTests
         var f7 = Shape(0x3151, 0x5042, 0xFFFF, 2, 2, 0, 0, 65, featureIds: [0x00]);
         check("Rongyuan F7: MonsGeek's and Akko's receiver list and VGN's on 0xFFFF / 2 only, never LINGBAO's 402D, named by their product string",
             Family(f7) == "Rongyuan receiver" && Family(f7 with { Vendor = 0x374A, Product = 0xA329 }) == "Rongyuan receiver"
-            && Family(f7 with { Vendor = 0x391D, Product = 0x1A25 }) == "VGN" && Family(f7 with { Product = 0x5055 }) == "VGN"
+            && Family(f7 with { Vendor = 0x391D, Product = 0x1A25, Interface = 1 }) == "VGN" && Family(f7 with { Product = 0x5055 }) == "VGN"
             && Family(f7 with { Product = 0x5038 }) == "MonsGeek" && Family(f7 with { Product = 0x402D }) is null
             && Family(f7 with { UsagePage = 0xFF00 }) is null && Family(f7 with { Product = 0x502F }) is null && Family(f7 with { Product = 0x5031 }) is null
             && Family(f7 with { Vendor = 0x391D, Product = 0x1A0E }) == "Rongyuan receiver" 
             && BrandFamilies.Find(f7 with { Product = 0x5038, Name = "2.4G Wireless Keyboard" })!.Value.Family.DisplayName(f7 with { Product = 0x5038, Name = "2.4G Wireless Keyboard" }) is null
             && BrandFamilies.Find(f7 with { Product = 0x5038 })!.Value.Family.DisplayName(f7 with { Product = 0x5038 }) == "MonsGeek M2 V5 HE"
-            && BrandFamilies.Find(f7 with { Vendor = 0x391D, Product = 0x1A25 })!.Value.Family.Kind(f7 with { Vendor = 0x391D, Product = 0x1A25 }) == DeviceKind.Mouse);
+            && BrandFamilies.Find(f7 with { Vendor = 0x391D, Product = 0x1A25, Interface = 1 })!.Value.Family.Kind(f7 with { Vendor = 0x391D, Product = 0x1A25, Interface = 1 }) == DeviceKind.Mouse);
         var v13 = Shape(0x258A, 0x027B, 0xFF02, 2, input: 20, output: 20, outputIds: [0x13]);
         check("VGN 13 receivers: the V98pro V3, V87 V2 and N75 V2 receivers on 0xFF02 / 2 with report 0x13 only; Sinowealth's other ids not",
             Family(v13) == "VGN 13 receiver" && Family(v13 with { Vendor = 0x391D, Product = 0x2A01 }) == "VGN 13 receiver"
@@ -150,11 +150,11 @@ static class OfficialDriverTests
             && Dongles.AtkKeyboardBattery(Padded(64, "04 00 00 1A 06 00 00 00 5C 02")) == new BatteryRead(92, true)
             && Dongles.AtkKeyboardBattery(Padded(64, "04 00 00 1A 06 00 00 00 5C 01")) == new BatteryRead(92)
             && Dongles.AtkKeyboardBattery(Padded(64, "04 00 00 1A 06 00 00 00 00 00")) is null
-            && Dongles.VgnBattery(Padded(64, "04 00 00 1A 06 00 00 00 5C 01")) == new BatteryRead(92, true));
-        var n9 = Shape(0x373B, 0x12D4, 0xFF90, 1, input: 64, output: 64, outputIds: [0x55]);
-        check("ATK N9 V2 PRO and ULTRA: their dongles take the Ultimate's read, named by model; the cables not",
-            Family(n9) == "ATK Headset" && BrandFamilies.Find(n9)!.Value.Family.DisplayName(n9) == "ATK N9 V2 PRO"
-            && Family(n9 with { Product = 0x12D6 }) == "ATK Headset" && Family(n9 with { Product = 0x12D3 }) is null);
+            && Dongles.EvisionKeyboardBattery(Padded(64, "04 00 00 1A 06 00 00 00 5C 01")) == new BatteryRead(92, true));
+        var n9 = Shape(0x373B, 0x12D6, 0xFF90, 1, input: 64, output: 64, outputIds: [0x55]);
+        check("ATK N9 V2 ULTRA: its dongle takes the Ultimate's read, named by model; the N9 V2 PRO's dongle (12D4) and the cables not",
+            Family(n9) == "ATK Headset" && BrandFamilies.Find(n9)!.Value.Family.DisplayName(n9) == "ATK N9 V2 ULTRA"
+            && Family(n9 with { Product = 0x12D4 }) is null && Family(n9 with { Product = 0x12D3 }) is null);
         var hfd = Shape(0x373B, 0x1152, 0xFF60, 0x61, input: 33, output: 33, outputIds: [0x00]);
         check("ATK HFD keyboards: id_get_keyboard_value for the battery on the VIA collection, the answer echoed, an echo of the request none",
             Family(hfd) == "ATK HFD keyboard" && Family(hfd with { UsagePage = 0xFF00, Usage = 1 }) is null && Family(hfd with { Product = 0x1153 }) is null

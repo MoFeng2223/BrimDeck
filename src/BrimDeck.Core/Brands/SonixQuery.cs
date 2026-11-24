@@ -78,10 +78,25 @@ public static class SonixQuery
     private static readonly HashSet<int> HuafendaReceivers = [0xFEF9, 0xFEFA, 0xFEFC, 0xFEFD, 0x8012];
     public static bool HuafendaCollection(HidShape shape)
         => shape.Usage == 0x0061 && shape.InputLength is 33 or 65 && shape.OutputLength is 33 or 65
-            && (shape.Vendor == SonixVendor && HuafendaReceivers.Contains(shape.Product)
+            && (Nut75(shape) ? Page(shape.UsagePage, 0xFF60) && shape.InputLength == 65 && shape.OutputLength == 65 && shape.Interface != 4
+                : shape.Vendor == SonixVendor && HuafendaReceivers.Contains(shape.Product)
                 ? Page(shape.UsagePage, 0xFF60) && shape.Interface == 3 : Page(shape.UsagePage, 0xFF68));
     public static bool TakesHuafenda(HidShape shape) => HuafendaProducts.Contains((shape.Vendor, shape.Product)) && HuafendaCollection(shape);
-    private static BrandWay HuafendaWay(HidShape shape) => new("huafenda.info", WayTransport.Output, HuafendaRequest(shape.OutputLength), Huafenda) { TimeoutMs = 600, StripZero = true };
+    private static BrandWay HuafendaWay(HidShape shape)
+        => new("huafenda.info", WayTransport.Output, Nut75(shape) ? Nut75Request() : HuafendaRequest(shape.OutputLength), TakesEweadn(shape) || Nut75(shape) ? HuafendaLevel : Huafenda)
+            { TimeoutMs = 600, StripZero = true, Attempts = Nut75(shape) ? 1 : 2 };
+    // The level alone, for the 0C45:FEFE receiver: on the AULA F87 Pro V2D behind it, the cable plugged and unplugged, eight
+    // answers each, every byte but the level stayed the same, so it sends no charge state (myfinder-device-battery's
+    // upstream-protocols.md, a contributor's capture; AGPL; facts only).
+    public static BatteryRead? HuafendaLevel(byte[] r) => Huafenda(r) is { } read ? read with { Charging = false } : null;
+
+    // WEIKAV's NUT75 receiver (0C45:FEF9, product string exactly "NUT75 2.4G"): its device-info collection is FF60 / 0x61 with
+    // 65-byte reports on whichever interface it sits, and the read's length byte is 0x30 (AA 10 30 00 00 00 01). The answer is
+    // read as above. myfinder-device-battery's weikav_nut75.py and upstream-protocols.md (AGPL; facts only; from a public
+    // Windows reader and a user's collection list; not measured).
+    public const string Nut75Name = "NUT75 2.4G";
+    public static bool Nut75(HidShape shape) => shape.Vendor == SonixVendor && shape.Product == 0xFEF9 && shape.Name == Nut75Name;
+    public static byte[] Nut75Request() => BrandFamilies.Frame(65, 0x00, 0xAA, 0x10, 0x30, 0x00, 0x00, 0x00, 0x01, 0x00);
 
     private static bool Page(int actual, int page) => actual == page || actual == ((page & 0xFF) << 8 | page >> 8);
     public static bool Collection(HidShape shape) => Page(shape.UsagePage, 0xFF60) && shape.Usage == 0x0061 && shape.InputLength == 33 && shape.OutputLength == 33;

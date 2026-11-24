@@ -11,6 +11,9 @@ namespace BrimDeck.Core;
 // configurator asks for it by reading feature report 0x05, which this read does not do (a pass that hears nothing has no
 // reading). From OpenMouse's Ryunix and Amkette modules (AGPL; facts only: a capture on a wired XS Flow 2 Speed,
 // 04 01 02 01 64 02 00 00 01 20, 100 % full, and the MX1's contributed reports) and MouseDock's X23 Pro reader (MIT).
+// The EWEADN X23 Pro's receiver (026F, product string "X23 Pro Receiver") is listened to for 1200 ms, its report about every
+// five seconds by itself, and gives the level alone (byte 5 is not read): myfinder-device-battery's eweadn_x23.py (AGPL;
+// facts only; not measured).
 [BrandFamilies]
 public static class RyunixMice
 {
@@ -25,12 +28,21 @@ public static class RyunixMice
         return r[4] > 0 ? new(r[4], r[5] == 1) : null;
     }
 
+    public const string X23Name = "X23 Pro Receiver";
+    public const int X23ListenMs = 1200;
+    public static bool X23(HidShape shape) => shape.Product == 0x026F && shape.Name == X23Name;
+    private static bool X23Collection(HidShape shape) => shape.InputLength == 32 && shape.InputIds.Count == 1 && shape.Interface is 1 or -1;
+    public static BatteryRead? X23Battery(byte[] r, byte id)
+        => r.Length >= 5 && r[0] == id && r.AsSpan(1).ContainsAnyExcept((byte)0) && r[4] <= 100 ? new(r[4]) : null;
+
     public static bool Takes(HidShape shape) => shape.Vendor == Vendor && Products.Contains(shape.Product)
         && (MouseShapes.Collection(shape, 0x000A, 0xC7) || MouseShapes.Collection(shape, 0x000A, 0x00)) && shape.InputLength >= 7;
 
     public static IEnumerable<BrandFamily> Families =>
     [
-        new("Ryunix", Takes, _ => [new BrandWay("ryunix.listen", WayTransport.Listen, [], Battery) { TimeoutMs = 600, Attempts = 1 }])
+        new("Ryunix", Takes, shape => X23(shape) ? X23Collection(shape)
+                ? [new BrandWay("ryunix.x23", WayTransport.Listen, [], r => X23Battery(r, shape.InputIds.First())) { TimeoutMs = X23ListenMs, Attempts = 1 }] : []
+            : [new BrandWay("ryunix.listen", WayTransport.Listen, [], Battery) { TimeoutMs = 600, Attempts = 1 }])
         { Kind = _ => DeviceKind.Mouse, Prefix = "ryunix" },
     ];
 }
