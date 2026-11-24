@@ -21,8 +21,10 @@ public enum NoticeSourceState
 }
 
 // The notifications Windows keeps for the current user (UserNotificationListener). Without package identity Windows does not
-// raise its change event for BrimDeck. A push notification log entry names the notification and its application, so the
-// loop reads that one notification and hands it over at once; the whole list is read in the background for baselines,
+// raise its change event for BrimDeck. When Windows writes its notification database (WindowsNoticeDatabase) the loop looks
+// up the ids after the newest and hands a new notification over as soon as Windows returns it. A push notification log entry
+// names the notification and its application, so the loop reads that one notification and hands it over at once (it comes
+// later than the database, and names what the lookup missed); the whole list is read in the background for baselines,
 // removals, the safety reading and when the log cannot be used (WindowsNoticeLoop decides which, this class does the Windows
 // side). A step that fails waits longer after each failure in a row. The first reading after starting or being granted access
 // is a baseline: notices already there are not shown again. The first after waking hands over what arrived meanwhile as
@@ -70,7 +72,8 @@ internal sealed class WindowsNoticeSource : IDisposable
         };
         public void OpenListener() => Listener = UserNotificationListener.Current;
         public void CloseListener() => Listener = null;
-        public WindowsNoticeNotificationRead ReadOne(uint id) => source.LookUp(this, id);
+        public WindowsNoticeNotificationRead ReadOne(uint id) => source.LookUp(this, id, wait: true);
+        public WindowsNoticeNotificationRead Peek(uint id) => source.LookUp(this, id, wait: false);
 
         public bool Probe(IEnumerable<uint> ids)
         {
@@ -118,6 +121,7 @@ internal sealed class WindowsNoticeSource : IDisposable
         public void Synced(int covers) => source.Synced?.Invoke(covers);
     }
     private Run? _run;
+    private WindowsNoticeDatabase? _database;
     // The pointer on an island counts for every source (Interacted), hence static.
     private static long s_lastInteraction;
     // win2 P2: readings Windows has not finished, even ones given up on, with when each started. A new one waits for them, so
@@ -194,6 +198,7 @@ internal sealed class WindowsNoticeSource : IDisposable
         var run = new Run(this);
         lock (_gate) { _run = run; _loop.Begin(run.Core, DateTimeOffset.UtcNow); }
         SystemEvents.PowerModeChanged += PowerModeChanged;
+        _database ??= WindowsNoticeDatabase.Start(DatabaseChanged);
         _ = Task.Run(() => LoopAsync(run));
     }
 
@@ -201,6 +206,7 @@ internal sealed class WindowsNoticeSource : IDisposable
     {
         if (_run is not { } run) return;
         SystemEvents.PowerModeChanged -= PowerModeChanged;
+        _database?.Dispose(); _database = null;
         // Cancelled under the lock, so the loop's last state report either comes before Off or not at all.
         lock (_gate) { _run = null; _loop.End(run.Core); run.Stop.Cancel(); }
         SetState(NoticeSourceState.Off, "");
@@ -255,6 +261,14 @@ internal sealed class WindowsNoticeSource : IDisposable
         }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
     }
 
+    // Windows wrote its notification database: the loop looks up the ids after the newest at its next turn.
+    private void DatabaseChanged()
+    {
+        Run? run;
+        lock (_gate) run = _run;
+        if (run is not null && WindowsNoticeLoop.DatabaseChanged(run.Core)) Wake(run);
+    }
+
     // The log stopped delivering: the loop lets go of the subscription and takes it again (WindowsNoticeLoop.Step), reading in
     // full meanwhile.
     private void LogBroke(Run run)
@@ -295,8 +309,9 @@ internal sealed class WindowsNoticeSource : IDisposable
 
     // The notification a log entry named, looked up on a worker so that a lookup Windows does not answer (seen after waking)
     // is given up after LookupLimit and the loop starts over (life-L5). While one given up on is still out no other starts:
-    // InvalidOperationException makes the loop fall back to a full reading for that entry instead.
-    private WindowsNoticeNotificationRead LookUp(Run run, uint id)
+    // InvalidOperationException makes the loop fall back to a full reading for that entry instead. wait: a notification that is
+    // not there yet is looked for a few more times (LookUpNow); the probe after a database write does not wait, it comes again.
+    private WindowsNoticeNotificationRead LookUp(Run run, uint id, bool wait)
     {
         var listener = run.Listener ?? throw new InvalidOperationException("The notification listener was let go.");
         Task<WindowsNoticeNotificationRead> lookup;
@@ -305,7 +320,7 @@ internal sealed class WindowsNoticeSource : IDisposable
             var now = DateTimeOffset.UtcNow;
             _lookups.RemoveAll(r => r.Task.IsCompleted || now - r.Started >= WindowsNoticePace.ForgetAfter);
             if (!WindowsNoticePace.MayRead(_lookups.Select(r => r.Started), now)) throw new InvalidOperationException("An earlier notification lookup has not finished.");
-            lookup = Task.Run(() => LookUpNow(listener, id));
+            lookup = Task.Run(() => LookUpNow(listener, id, wait));
             _lookups.Add((lookup, now));
         }
         // A lookup given up on may still fail later; that is seen here rather than as an unobserved task exception.
@@ -318,14 +333,14 @@ internal sealed class WindowsNoticeSource : IDisposable
         return lookup.GetAwaiter().GetResult();
     }
 
-    private WindowsNoticeNotificationRead LookUpNow(UserNotificationListener listener, uint id)
+    private WindowsNoticeNotificationRead LookUpNow(UserNotificationListener listener, uint id, bool wait)
     {
         var notification = listener.GetNotification(id);
         // Windows writes the log entry a little before the listener can return the notification. Left to the full reading that
         // follows a miss (WindowsNoticeLogBatch.FailedReadReconcileInterval), every notice reached BrimDeck about 1.2 s after it
         // was made (measured 2026-11-17: thirteen notices, 0.6 to 1.4 s). A few short looks catch it sooner; one that is still
         // missing after them is left to that reading as before.
-        for (int attempt = 0; notification is null && attempt < MissedLooks; attempt++)
+        for (int attempt = 0; wait && notification is null && attempt < MissedLooks; attempt++)
         {
             Thread.Sleep(MissedLookWait);
             notification = listener.GetNotification(id);

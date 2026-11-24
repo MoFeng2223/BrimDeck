@@ -17,6 +17,7 @@ internal static class NoticeEventLogTests
         ListObservations(check);
         LoopStartup(check);
         LoopSteadyState(check);
+        DatabaseProbe(check);
         LoopResume(check);
         LoopReplacement(check);
         LoopFailures(check);
@@ -291,6 +292,50 @@ internal static class NoticeEventLogTests
         check("Loop: access revoked before a lookup stops the run and forgets the list",
             host.States.Last() == WindowsNoticeLoopState.Denied && !host.Listening && !host.LogOpen && host.Lookups == 4
             && Keys(host.Arrived).Last() == Key(104));
+    }
+
+    // A write to the notification database: the loop looks up the ids after the newest and hands a new toast over without waiting
+    // for the log, which then repeats nothing.
+    private static void DatabaseProbe(Action<string, bool> check)
+    {
+        var (loop, run, host) = Settled(10, 11);
+        int reads = host.ListReads, lookups = host.Lookups;
+        host.Listed[12] = Input(12);
+        bool wake = WindowsNoticeLoop.DatabaseChanged(run);
+        check("Database: a write asks for one wake while the probe is pending", wake && !WindowsNoticeLoop.DatabaseChanged(run));
+        loop.Step(run, host, default);
+        check("Database: the toast after the newest id is handed over in the same turn, looked up once and without a list reading",
+            Keys(host.Arrived).SequenceEqual([Key(12)]) && host.Lookups == lookups + 1 && host.ListReads == reads);
+        Log(loop, run, 12);
+        loop.Step(run, host, default);
+        check("Database: the log entry naming it later repeats nothing", host.Arrived.Count == 1);
+
+        lookups = host.Lookups;
+        WindowsNoticeLoop.DatabaseChanged(run);
+        loop.Step(run, host, default);
+        check("Database: a write with nothing new looks up only the next id once the newest is confirmed", host.Arrived.Count == 1 && host.Lookups == lookups + 1);
+
+        // A badge took 13: the probe looks at 13 alone and finds nothing; the log names 14.
+        host.Listed[14] = Input(14);
+        WindowsNoticeLoop.DatabaseChanged(run);
+        loop.Step(run, host, default);
+        bool missed = host.Arrived.Count == 1;
+        Log(loop, run, 14);
+        loop.Step(run, host, default);
+        check("Database: a toast past the ids looked up is left to the log", missed && Keys(host.Arrived).Last() == Key(14));
+
+        loop.SetQuiet(true, host.Now);
+        host.Listed[15] = Input(15);
+        lookups = host.Lookups;
+        WindowsNoticeLoop.DatabaseChanged(run);
+        loop.Step(run, host, default);
+        check("Database: nothing is looked up while locked or paused", host.Lookups == lookups && Keys(host.Arrived).Last() == Key(14));
+
+        var (fresh, freshRun, freshHost) = Started(10);
+        WindowsNoticeLoop.DatabaseChanged(freshRun);
+        freshHost.Listed[11] = Input(11);
+        fresh.Step(freshRun, freshHost, default);
+        check("Database: nothing is looked up before the first reading", freshHost.Lookups == 0 && freshHost.Arrived.Count == 0);
     }
 
     private static void LoopResume(Action<string, bool> check)

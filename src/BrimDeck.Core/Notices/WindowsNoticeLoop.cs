@@ -24,6 +24,9 @@ public interface IWindowsNoticeHost
     WindowsNoticeNotificationRead ReadOne(uint id);
     // The polling probe: whether one of these ids names a notification, or the lookup failed (either asks for a full reading).
     bool Probe(IEnumerable<uint> ids);
+    // The notification with this id as Windows has it now, looked up once without waiting for it to appear (the probe after the
+    // notification database was written, WindowsNoticeLoop.DatabaseChanged). Fails as ReadOne does.
+    WindowsNoticeNotificationRead Peek(uint id) => ReadOne(id);
     // The whole list, with the notices of the ids not in known read too. Runs off the loop thread and gives up after a
     // bounded wait.
     Task<WindowsNoticeReadSnapshot> ReadAll(IReadOnlySet<uint> known, CancellationToken token);
@@ -57,6 +60,11 @@ public sealed class WindowsNoticeRun
     internal DateTimeOffset LastFull = DateTimeOffset.MinValue;
     // Until when the probe looks a few ids ahead (WindowsNoticePace.ProbeIds).
     internal DateTimeOffset WideUntil = DateTimeOffset.MinValue;
+    // The notification database was written: the next turn looks up the ids after the newest (DatabaseChanged). Set from the
+    // watcher's thread.
+    internal int DatabaseProbe;
+    // What that lookup found, handed to the reading of the id it queued so that the notification is not looked up twice. Loop only.
+    internal readonly Dictionary<uint, WindowsNoticeNotificationRead> Peeked = [];
 
     public bool Reading => FullRead.IsRunning;
 }
@@ -149,6 +157,15 @@ public sealed class WindowsNoticeLoop
         return IsCurrent(run);
     }
 
+    // Windows wrote its notification database (wpndatabase.db and its log), on the watcher's thread. It writes it within 50 ms of
+    // a toast and again every 50 ms or so while it shows it; the listener returns the toast 190 to 460 ms after it was shown, while
+    // the push notification log names it only 300 to 860 ms after (measured 2026-11-25 on Windows 11 26200, six toasts). So the
+    // source asks for this probe every 40 ms for a moment after each write (WindowsNoticeSource), and the loop looks up the ids
+    // after the newest at its next turn: a toast is read as soon as Windows can return it, without waiting for the log. The log
+    // stays, and names what the probe missed (an id a badge took first, one past the ids looked up). True when the caller should
+    // wake the loop.
+    public static bool DatabaseChanged(WindowsNoticeRun run) => Interlocked.Exchange(ref run.DatabaseProbe, 1) == 0;
+
     // The log stopped delivering: the loop lets go of the subscription and takes it again (Step), reading in full meanwhile.
     // True when the loop should be woken.
     public bool LogBroke(WindowsNoticeRun run)
@@ -177,6 +194,7 @@ public sealed class WindowsNoticeLoop
     public bool Step(WindowsNoticeRun run, IWindowsNoticeHost host, CancellationToken token)
     {
         var now = host.Now;
+        if (Interlocked.Exchange(ref run.DatabaseProbe, 0) == 1) ProbeDatabase(run, host, now);
         // First a notification the log named, whether or not a full reading is under way: one per turn, the oldest first, so
         // a burst is shown in order and each is handed over as soon as it is read.
         if (run.HasListener && run.Batch.TryNext(out uint id, out string? app))
@@ -186,7 +204,7 @@ public sealed class WindowsNoticeLoop
             bool known, absorbed;
             lock (Gate) { if (_current != run) return false; absorbed = _absorbed?.Contains(id) == true; known = !absorbed && _list.Contains(id); }
             WindowsNoticeLogReadResult result;
-            try { result = WindowsNoticeLogReader.Read(id, app, known, host.ReadOne); }
+            try { result = WindowsNoticeLogReader.Read(id, app, known, one => run.Peeked.Remove(one, out var peeked) ? peeked : host.ReadOne(one)); }
             catch (TimeoutException)
             {
                 // Windows did not answer (seen after waking): the id is left to a full reading with a new listener. One the baseline
@@ -296,6 +314,36 @@ public sealed class WindowsNoticeLoop
         host.Report(host.LogOpen ? WindowsNoticeLoopState.EventLog : WindowsNoticeLoopState.Polling);
         StartFullRead(run, host, token);
         return synced;
+    }
+
+    // The lookup after the notification database was written (DatabaseChanged): the ids after the newest, in order, as the polling
+    // probe looks them up; the first found is queued as a log entry naming it would be, with its own application, and read in
+    // this turn. Nothing while locked or paused, before the first reading, or while a baseline waits for its reading. A lookup that
+    // fails leaves the notice to the log and the readings.
+    private void ProbeDatabase(WindowsNoticeRun run, IWindowsNoticeHost host, DateTimeOffset now)
+    {
+        uint newest;
+        bool confirmed;
+        lock (Gate)
+        {
+            if (_current != run || _quiet || !run.HasListener || _list.Baseline != WindowsNoticeBaseline.None) return;
+            newest = _list.Newest; confirmed = _list.Confirmed;
+        }
+        if (newest == 0) return;
+        // Until a notice has confirmed the newest id, tiles and badges may have taken the next ones: a few are looked up.
+        foreach (uint id in WindowsNoticePace.ProbeIds(newest, now, confirmed ? run.WideUntil : DateTimeOffset.MaxValue))
+        {
+            lock (Gate) if (_list.Contains(id)) continue;
+            WindowsNoticeNotificationRead found;
+            try { found = host.Peek(id); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { return; }
+            if (!found.Found || string.IsNullOrWhiteSpace(found.AppUserModelId)) continue;
+            // An id the batch did not take (named for two applications, or the batch full) leaves nothing behind.
+            if (run.Peeked.Count >= 16) run.Peeked.Clear();
+            run.Peeked[id] = found;
+            run.Batch.Add(new(WindowsNoticeLogEventKind.Notification, id, found.AppUserModelId, false));
+            return;
+        }
     }
 
     private void StartFullRead(WindowsNoticeRun run, IWindowsNoticeHost host, CancellationToken token)

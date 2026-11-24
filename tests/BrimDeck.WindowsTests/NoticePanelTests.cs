@@ -118,6 +118,43 @@ internal static class NoticePanelTests
             check("The fade follows the viewer's height", Math.Abs(((LinearGradientBrush)viewer.OpacityMask).GradientStops[1].Offset - (1 - 36 / viewer.ActualHeight)) < .001);
         }
         finally { window.Close(); }
+
+        // ----- A line that keeps its measurement while it fits -----
+        var shortLine = new FitLineBox { Child = Text("短标题", 12.5) };
+        var longLine = new FitLineBox { Child = Text("A very long title that has to be trimmed at the end of the line", 12.5) };
+        var lines = new StackPanel { Children = { shortLine, longLine } };
+        Lay(lines, 300, out _);
+        var fitted = shortLine.Child.DesiredSize;
+        Lay(lines, 200, out _);
+        check("A line that fits keeps the measurement of its whole width at another width, and is not cut",
+            shortLine.Child.DesiredSize == fitted && !shortLine.Cut && Math.Abs(shortLine.Child.RenderSize.Width - shortLine.Natural) < .5);
+        check("A line that does not fit is laid out at the width it has, with its ellipsis", longLine.Cut && longLine.Child.RenderSize.Width <= 200.5);
+        ((TextBlock)shortLine.Child).Text = "一个长得放不下的标题，一个长得放不下的标题，一个长得放不下的标题";
+        Lay(lines, 200, out _);
+        check("A line whose words changed is measured again", shortLine.Cut && shortLine.Child.RenderSize.Width <= 200.5);
+        var rtl = new FitLineBox { Child = new TextBlock { Text = "שלום", FontSize = 12, FlowDirection = FlowDirection.RightToLeft } };
+        var rtlRow = new StackPanel { Children = { rtl } };
+        Lay(rtlRow, 200, out _);
+        check("A right-to-left line that fits sits at the right end of its room, where it would be laid out at the whole width",
+            Math.Abs(Box(rtl.Child).Right - 200) < .5 || Math.Abs(rtl.Child.TranslatePoint(new Point(), rtl).X - 200) < .5);
+
+        // ----- A stack that lays out again only what is in view -----
+        var stack = new ViewportStack();
+        var rows = Enumerable.Range(0, 30).Select(i => new Border { Height = 40, Child = Text("行 " + i, 12) }).ToList();
+        foreach (var row in rows) stack.Children.Add(row);
+        var list = new ScrollViewer { Content = stack, Width = 300, Height = 200, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Hidden };
+        var listWindow = new Window { Width = 400, Height = 300, ShowInTaskbar = false, ShowActivated = false, WindowStyle = WindowStyle.None, Left = -20000, Top = -20000, Content = list };
+        try
+        {
+            listWindow.Show(); Pump();
+            list.Width = 220; Pump();
+            check("A stack lays out the children in view at its new width and leaves the others as they were",
+                rows[0].RenderSize.Width == 220 && rows[4].RenderSize.Width == 220 && rows[20].RenderSize.Width == 300 && rows[29].RenderSize.Width == 300
+                && stack.DesiredSize.Height == 30 * 40 && Box(rows[29]).Top == 29 * 40);
+            list.ScrollToEnd(); Pump();
+            check("A child scrolled into view is laid out at the stack's width", rows[29].RenderSize.Width == 220 && rows[25].RenderSize.Width == 220);
+        }
+        finally { listWindow.Close(); }
     }
 
     private static void Pump()

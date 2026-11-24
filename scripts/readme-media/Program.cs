@@ -196,6 +196,8 @@ internal sealed partial class Renderer(App app, string output, string language, 
             if (scenes.Contains("notice-glow")) await NoticeGlowScene();
             // The notices page with conversations of several messages, and the notices settings page; for checking.
             if (scenes.Contains("notices-page")) await NoticesPageScene();
+            // What one frame of dragging the panel's edges costs on the notices page, beside the system monitor; for checking.
+            if (scenes.Contains("notice-resize")) await NoticeResizeScene();
             // The collapsed count of unread notices on each form, and where it is set; for checking.
             if (scenes.Contains("notice-strip")) await NoticeStripScene();
             if (scenes.Contains("notice-agenda")) await NoticeAgendaScene();

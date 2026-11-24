@@ -64,29 +64,191 @@ internal sealed class NoticeHead : Panel
     }
 }
 
+// One line of text that ends in "…" where it is cut, measured for a panel whose width keeps changing. WPF lays out a TextBlock
+// that trims its text again for every new width it is given, which costs 50 to 550 µs a line, against about 2 µs for one measured
+// at a width it was measured at before (ReadmeMedia notice-resize, 2026-11-24). Dragging the panel's edges gave each of the notices
+// page's lines a new width every frame, and those lines took most of the frame. A line that fits is measured once at its own width
+// and keeps that measurement whatever width it is given; only a line that is cut is measured at the width it has. A line whose
+// words, font or size changed (WPF marks its measurement out of date) is measured at its own width again.
+internal sealed class FitLine(UIElement line)
+{
+    private static readonly Size Open = new(double.PositiveInfinity, double.PositiveInfinity);
+    private double _natural = double.NaN;
+    private bool _open;
+
+    // The line's whole width.
+    public double Natural { get { Refresh(); return _natural; } }
+
+    public void Measure(double width, double height)
+    {
+        Refresh();
+        if (_natural <= width) { if (!_open) { line.Measure(Open); _open = true; } }
+        else { line.Measure(new Size(width, height)); _open = false; }
+    }
+
+    // A line that fits takes its own width, at the start of the room it has: at the right for one that runs right to left. Drawn
+    // where WPF would draw it had it been measured at the whole width.
+    public void Arrange(Rect room)
+    {
+        if (!_open || _natural >= room.Width) { line.Arrange(room); return; }
+        bool turned = line is FrameworkElement element && element.Parent is FrameworkElement parent && element.FlowDirection != parent.FlowDirection;
+        line.Arrange(new Rect(turned ? room.Right - _natural : room.X, room.Y, _natural, room.Height));
+    }
+
+    private void Refresh()
+    {
+        if (!double.IsNaN(_natural) && line.IsMeasureValid) return;
+        line.Measure(Open);
+        _natural = line.DesiredSize.Width; _open = true;
+    }
+}
+
+// A FitLine as an element, for a line inside an ordinary panel.
+internal sealed class FitLineBox : Decorator
+{
+    private FitLine? _fit;
+    private UIElement? _for;
+
+    private FitLine? Fit()
+    {
+        if (Child is null) return null;
+        if (!ReferenceEquals(_for, Child)) { _fit = new FitLine(Child); _for = Child; }
+        return _fit;
+    }
+
+    protected override Size MeasureOverride(Size available)
+    {
+        if (Fit() is not { } fit) return default;
+        if (double.IsInfinity(available.Width)) return new Size(fit.Natural, Math.Min(available.Height, Child!.DesiredSize.Height));
+        fit.Measure(available.Width, available.Height);
+        return new Size(Math.Min(available.Width, fit.Natural), Child!.DesiredSize.Height);
+    }
+
+    protected override Size ArrangeOverride(Size final)
+    {
+        Fit()?.Arrange(new Rect(final));
+        return final;
+    }
+
+    // The line's whole width, and whether it is cut at the width it has now.
+    public double Natural => Fit()?.Natural ?? 0;
+    public bool Cut => Natural > ActualWidth + .5;
+}
+
+// A vertical stack in a scroll viewer that lays out again only the children in view. The notices page lists every notice of the
+// day, and while the panel's edges were dragged each of them was laid out again for each frame, scrolled out of view or not: with
+// thirty rows that was about sixty lines cut with an ellipsis a frame (ReadmeMedia notice-resize, 2026-11-24). A child out of view
+// keeps the width it was last laid out at, and is laid out at the stack's width as it comes into view (the viewer's scrolling asks
+// for that). The children's heights must not depend on their width, as the notices' rows do not: out of view, a child keeps the
+// height it had.
+internal sealed class ViewportStack : Panel
+{
+    // How far beyond the viewer's edges a child still counts as in view.
+    private const double Slack = 48;
+    // The width each child was last measured at, and the children left at that width by the last measuring.
+    private readonly Dictionary<UIElement, double> _widths = [];
+    private readonly HashSet<UIElement> _held = [];
+    private ScrollViewer? _viewer;
+
+    public ViewportStack()
+    {
+        Loaded += (_, _) => Watch(FindViewer());
+        Unloaded += (_, _) => Watch(null);
+    }
+
+    private ScrollViewer? FindViewer()
+    {
+        for (var node = VisualTreeHelper.GetParent(this); node is not null; node = VisualTreeHelper.GetParent(node))
+            if (node is ScrollViewer viewer) return viewer;
+        return null;
+    }
+
+    private void Watch(ScrollViewer? viewer)
+    {
+        if (ReferenceEquals(viewer, _viewer)) return;
+        if (_viewer is not null) _viewer.ScrollChanged -= Scrolled;
+        _viewer = viewer;
+        if (_viewer is not null) _viewer.ScrollChanged += Scrolled;
+    }
+
+    private void Scrolled(object sender, ScrollChangedEventArgs e)
+    {
+        if (_held.Count > 0 && ReferenceEquals(e.OriginalSource, _viewer) && (e.VerticalChange != 0 || e.ViewportHeightChange != 0)) InvalidateMeasure();
+    }
+
+    // The part of the stack the viewer shows, in the stack's own coordinates, from the last layout; null when that is not known.
+    private Rect? View()
+    {
+        if (_viewer is not { ViewportHeight: > 0 } viewer || RenderSize.Height <= 0 || !viewer.IsAncestorOf(this)) return null;
+        try
+        {
+            var shown = TransformToAncestor(viewer).Inverse?.TransformBounds(new Rect(0, 0, viewer.ViewportWidth, viewer.ViewportHeight));
+            return shown is { } rect ? new Rect(rect.X, rect.Y - Slack, rect.Width, rect.Height + 2 * Slack) : null;
+        }
+        catch (InvalidOperationException) { return null; }
+    }
+
+    protected override Size MeasureOverride(Size available)
+    {
+        var view = double.IsInfinity(available.Width) ? null : View();
+        _held.Clear();
+        double y = 0, widest = 0;
+        foreach (UIElement child in InternalChildren)
+        {
+            double height = child.DesiredSize.Height;
+            bool known = _widths.TryGetValue(child, out double width);
+            if (known && width != available.Width && child.IsMeasureValid && view is { } shown && (y + height < shown.Top || y > shown.Bottom))
+                _held.Add(child);
+            else { child.Measure(new Size(available.Width, double.PositiveInfinity)); _widths[child] = available.Width; }
+            y += child.DesiredSize.Height;
+            widest = Math.Max(widest, child.DesiredSize.Width);
+        }
+        return new Size(double.IsInfinity(available.Width) ? widest : Math.Min(widest, available.Width), y);
+    }
+
+    protected override Size ArrangeOverride(Size final)
+    {
+        double y = 0;
+        foreach (UIElement child in InternalChildren)
+        {
+            double height = child.DesiredSize.Height;
+            child.Arrange(new Rect(0, y, _held.Contains(child) ? _widths[child] : final.Width, height));
+            y += height;
+        }
+        return final;
+    }
+
+    protected override void OnVisualChildrenChanged(DependencyObject? added, DependencyObject? removed)
+    {
+        base.OnVisualChildrenChanged(added, removed);
+        if (removed is UIElement gone) { _widths.Remove(gone); _held.Remove(gone); }
+    }
+}
+
 // What a row says: the title and when, and a line of preview. The time sits at the right of the title; when that would leave the
 // title under RowTitleMinimum it moves to the front of the preview line, so the title is read whole. Children in order: title,
 // time, preview.
 internal sealed class NoticeRowTexts : Panel
 {
     private bool _beside;
+    private FitLine? _title, _preview;
 
     protected override Size MeasureOverride(Size available)
     {
         var (title, time, preview) = (Children[0], Children[1], Children[2]);
-        var open = new Size(double.PositiveInfinity, double.PositiveInfinity);
-        title.Measure(open); time.Measure(open);
-        double width = double.IsInfinity(available.Width) ? title.DesiredSize.Width + NoticeLines.Gap + time.DesiredSize.Width : available.Width;
+        _title ??= new FitLine(title); _preview ??= new FitLine(preview);
+        time.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        double width = double.IsInfinity(available.Width) ? _title.Natural + NoticeLines.Gap + time.DesiredSize.Width : available.Width;
         _beside = NoticeLines.TimeBesideTitle(width);
         double timeWidth = time.DesiredSize.Width + NoticeLines.Gap;
-        title.Measure(new Size(_beside ? Math.Max(0, width - timeWidth) : width, NoticeLines.RowTitleLine));
-        preview.Measure(new Size(_beside ? width : Math.Max(0, width - timeWidth), NoticeLines.RowPreviewLine));
+        _title.Measure(_beside ? Math.Max(0, width - timeWidth) : width, NoticeLines.RowTitleLine);
+        _preview.Measure(_beside ? width : Math.Max(0, width - timeWidth), NoticeLines.RowPreviewLine);
         return new Size(width, NoticeLines.RowTitleLine + NoticeLines.RowGap + NoticeLines.RowPreviewLine);
     }
 
     protected override Size ArrangeOverride(Size final)
     {
-        var (title, time, preview) = (Children[0], Children[1], Children[2]);
+        var (time, title, preview) = (Children[1], _title!, _preview!);
         double timeWidth = time.DesiredSize.Width;
         double secondY = NoticeLines.RowTitleLine + NoticeLines.RowGap;
         if (_beside)

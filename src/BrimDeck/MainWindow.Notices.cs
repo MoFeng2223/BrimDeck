@@ -581,14 +581,11 @@ public partial class MainWindow
             cover.Width = cover.Height = narrow ? 40 : 56;
             who.Margin = new Thickness(narrow ? 10 : 14, 0, 0, 0);
         };
-        if (contextLine is not null)
+        // The line's whole width is kept (FitLineBox): measuring it again at each new width of a drag cost a layout of its words per frame.
+        if (contextLine is not null && contextLine.Children[1] is FitLineBox whole)
             who.SizeChanged += (_, e) =>
             {
-                if (!e.WidthChanged || contextLine.Children[1] is not TextBlock words) return;
-                words.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-                double whole = words.DesiredSize.Width;
-                words.InvalidateMeasure();
-                contextLine.Visibility = whole <= e.NewSize.Width ? Visibility.Visible : Visibility.Collapsed;
+                if (e.WidthChanged) contextLine.Visibility = whole.Natural <= e.NewSize.Width ? Visibility.Visible : Visibility.Collapsed;
             };
 
         // The buttons, at the foot of the column.
@@ -616,7 +613,8 @@ public partial class MainWindow
         if (notice.Progress is { } progress) words.Children.Add(ProgressTrack(progress, accent));
         if (group.Count > 1)
         {
-            var others = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
+            // Laid out again only where in view (ViewportStack): up to twenty lines cut with an ellipsis.
+            var others = new ViewportStack { Margin = new Thickness(0, 8, 0, 0) };
             others.Children.Add(new Border { Height = 1, Background = UI.Brush(UI.Hairline), Margin = new Thickness(0, 0, 0, 6) });
             foreach (var other in group.Where(n => !ReferenceEquals(n, notice)).Take(20))
             {
@@ -693,15 +691,23 @@ public partial class MainWindow
             TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, IsHitTestVisible = false, VerticalAlignment = VerticalAlignment.Top,
             LineHeight = TextBlock.GetLineHeight(box), LineStackingStrategy = LineStackingStrategy.BlockLineHeight, Opacity = 0
         };
-        var host = new Grid { Margin = box.Margin, Children = { box, shown } };
+        // The trimmed words are laid out again only while they are cut (FitLineBox), not at every width of a drag.
+        var fit = new FitLineBox { Child = shown, IsHitTestVisible = false };
+        var host = new Grid { Margin = box.Margin, Children = { box, fit } };
         box.Margin = new Thickness(0);
-        bool pressed = false;
+        bool pressed = false, placed = false;
         void Update()
         {
-            // The trimmed words start where the box's first letter does, which a text box sets in from its edge by itself.
-            if (box.IsLoaded && box.Text.Length > 0 && box.GetRectFromCharacterIndex(0) is { IsEmpty: false } first && double.IsFinite(first.Left) && double.IsFinite(first.Top))
-                shown.Margin = new Thickness(first.Left, first.Top, first.Left, -first.Top);
-            bool trimmed = !pressed && box.SelectionLength == 0 && !box.IsKeyboardFocusWithin && UI.IsCut(shown);
+            // The trimmed words start where the box's first letter does, which a text box sets in from its edge by itself. Left to
+            // right that place does not change with the width, so it is asked for once.
+            if ((!placed || box.FlowDirection == FlowDirection.RightToLeft) && box.IsLoaded && box.Text.Length > 0
+                && box.GetRectFromCharacterIndex(0) is { IsEmpty: false } first && double.IsFinite(first.Left) && double.IsFinite(first.Top))
+            {
+                var margin = new Thickness(first.Left, first.Top, first.Left, -first.Top);
+                if (shown.Margin != margin) shown.Margin = margin;
+                placed = true;
+            }
+            bool trimmed = !pressed && box.SelectionLength == 0 && !box.IsKeyboardFocusWithin && fit.Cut;
             if (trimmed && shown.Opacity == 0) box.ScrollToHome();
             shown.Opacity = trimmed ? 1 : 0;
             box.Opacity = trimmed ? 0 : 1;
@@ -945,7 +951,8 @@ public partial class MainWindow
         tools.Children.Add(frame);
         head.Children.Add(tools);
 
-        var list = new StackPanel { Margin = new Thickness(0, 8, 0, FadeHeight) };
+        // The rows out of view are not laid out again for every width of a drag (ViewportStack).
+        var list = new ViewportStack { Margin = new Thickness(0, 8, 0, FadeHeight) };
         KeyboardNavigation.SetDirectionalNavigation(list, KeyboardNavigationMode.Contained);
         var listed = Listed(center);
         // Keep the full extent when restoring a scroll offset. Build through the keyboard row
@@ -978,7 +985,7 @@ public partial class MainWindow
         return border;
     }
 
-    private void AddNoticeRow(StackPanel list, int index, Notice notice, Notice focus, DateTimeOffset now)
+    private void AddNoticeRow(Panel list, int index, Notice notice, Notice focus, DateTimeOffset now)
     {
         var row = Row(notice, now, Conversation(notice) == Conversation(focus));
         list.Children.Insert(index, row);
@@ -1050,6 +1057,9 @@ public partial class MainWindow
         return empty;
     }
 
+    // The most characters of a row's preview: more than the widest list fits at its narrowest letters (about 3 DIP at 12).
+    private const int PreviewLength = 160;
+
     // A row of the list: the icon with a dot while unread, the title and when, and a line of preview.
     private FrameworkElement Row(Notice notice, DateTimeOffset now, bool selected)
     {
@@ -1079,6 +1089,8 @@ public partial class MainWindow
         var when = UI.Fixed((count > 1 ? Loc.T($"{count} 条 · ", $"{count} · ") : "") + NoticeText.Relative(notice.ReceivedAt, now), 11, NoticeLines.RowTitleLine, UI.Tertiary);
         texts.Children.Add(when);
         string preview = notice.Body.Length > 0 ? NoticeText.Summary(codeWords.Body) : notice.AppName;
+        // A cut line is laid out whole at every width of a drag; more than a row can show only costs time.
+        if (preview.Length > PreviewLength) preview = preview[..(char.IsHighSurrogate(preview[PreviewLength - 1]) ? PreviewLength - 1 : PreviewLength)];
         var second = new TextBlock { FontFamily = UI.PanelFont, FontSize = 12, LineHeight = NoticeLines.RowPreviewLine, Foreground = UI.Brush(UI.Secondary), TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap };
         var (status, color) = notice.Call ? (Loc.T("来电", "Call"), CallColor) : notice.Category == NoticeCategory.Error ? (NoticeText.CategoryName(notice.Category), PanelTheme.Hex("danger"))
             : notice.Category == NoticeCategory.Warning ? (NoticeText.CategoryName(notice.Category), WaitColor) : ("", "");
