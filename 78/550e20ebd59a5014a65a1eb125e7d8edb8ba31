@@ -1,0 +1,199 @@
+src/BrimDeck/MainWindow.AgentStrip.cs
+  s_270c2e99280128::t_344ee43cc24861 1-52,56-113,115-122,128-133
+  s_270c2e99280128::t_30917169ddc528 53-55
+  s_270c2e99280128::t_625a5e7a62e11b 126
+  s_270c2e99280128::t_54ee625e99a8d2 123-125,127
+  s_270c2e99280128::t_1109c99acf96eb 114
+src/BrimDeck/AgentCenter.cs
+  s_270c2e99280128::t_e82ae041ac9f0f 1-47
+src/BrimDeck.Notify/Program.cs
+  s_270c2e99280128::t_686067473e631c 41,57-58,62
+  s_270c2e99280128::t_02957eac7b1330 75-83
+  s_270c2e99280128::t_fe4aafe36c0683 84-85
+src/BrimDeck/MainWindow.Notices.cs
+  s_b791b4e242e646::t_42a3f520f26f35 803-813
+  s_b791b4e242e646::t_2398a749d6f91c 657
+  s_270c2e99280128::t_faebd4f6338d7e 49,73
+  s_270c2e99280128::t_0952da888ff931 456-457
+  s_b791b4e242e646::t_deb192eb630c23 680-713
+  s_b791b4e242e646::t_5283cc180d84bc 565
+  s_b791b4e242e646::t_da0beb8502aaa8 571,573-592
+  s_b791b4e242e646::t_7b90873ea55a84 767-768
+  s_b791b4e242e646::t_25aa927ecec014 550,552-553
+  s_b791b4e242e646::t_eea4c3232f60fe 819-820
+  s_8c2c41badcdd97::t_e8704a70480c58 366,599-600,613,714-715,740,821
+src/BrimDeck.Protocol/NoticeWire.cs
+  s_270c2e99280128::t_ee3e6568e57bb4 408-423
+  s_270c2e99280128::t_0f0cebab40dab4 277-278
+  s_270c2e99280128::t_e9527a30251dfb 236-237
+  s_270c2e99280128::t_109a106e6b7be8 105-150
+  s_270c2e99280128::t_7b34ab18a144ec 363,365-366
+src/BrimDeck.Core/Agents/AgentSessions.cs
+  s_270c2e99280128::t_55d2e76415e222 1-91
+  s_270c2e99280128::t_031b3fd6c2c4c6 92-98,100-107
+  s_270c2e99280128::t_0f74be313e12ff 99
+tests/BrimDeck.Tests/AgentHookTests.cs
+  s_270c2e99280128::t_c22e5cb439c219 59-60,89-90,105-106
+  s_270c2e99280128::t_f8e776eac9036e 245
+  s_270c2e99280128::t_ba3aafa51c524f 29
+  s_270c2e99280128::t_0bf776df532fdd 259
+  s_270c2e99280128::t_bd20e0a11f73ba 243-244,246-255,258,260-270
+  s_270c2e99280128::t_74cf2920856bc8 237
+  s_270c2e99280128::t_985347508044bc 220-236,238-241
+  s_270c2e99280128::t_4ebabd6afffb68 315-316
+  s_270c2e99280128::t_450cb5a6a3471e 180-200,203-219,242,256-257
+  s_270c2e99280128::t_84f38501aed8bd 1-28,30-58,61-88,91-104,107-179,201-202,271-314,317-318
+src/BrimDeck.Core/Notices/NoticeIntake.cs
+  s_270c2e99280128::t_9fddc588b36cf8 93-100
+  s_270c2e99280128::t_968549f3e352d3 82-84
+  s_270c2e99280128::t_f54047b09f529b 101
+src/BrimDeck/NoticePanels.cs
+  h_dc4d9c798f1bc1 137
+  s_b791b4e242e646::t_2ea58ba2c01d6f 115-119,127-136
+src/BrimDeck/PlannerPage.Day.cs
+  s_b791b4e242e646::t_9d960d646121fa 80-81,88
+src/BrimDeck.Protocol/NotifyCommandLine.cs
+  s_270c2e99280128::t_feedbb032a361d 5,11-15
+src/BrimDeck.Core/Notices/NoticeModel.cs
+  s_270c2e99280128::t_0dd3550ef80f57 167-169
+  s_270c2e99280128::t_45836a426ff38d 107-110
+  s_b791b4e242e646::t_c8e5224af867c8 144-146
+src/BrimDeck.Protocol/BrimCommandLine.cs
+  s_270c2e99280128::t_f794896ea07eb7 140-142
+  s_270c2e99280128::t_fd29f11838a818 28-32
+  s_270c2e99280128::t_770159c939434b 121-122,127-139,143-178
+  s_270c2e99280128::t_ae7d5fb7768e09 179
+src/BrimDeck.Core/Agents/OpenCodePlugin.cs
+  s_270c2e99280128::t_8d6c1e228fc79b 1-125
+src/BrimDeck/SettingsMusic.cs
+  h_dc4d9c798f1bc1 109-110,123
+src/BrimDeck.Core/Profiles.cs
+  s_270c2e99280128::t_a4d9e55a55722b 82
+tests/BrimDeck.Tests/DevicesPageTests.cs
+  h_dc4d9c798f1bc1 88,203
+src/BrimDeck/MainWindow.Music.cs
+  s_270c2e99280128::t_23af3e26fff267 142
+  s_270c2e99280128::t_5486a255ab1e7e 1359-1362,1365,1404,1413-1414,1450,1475-1476
+src/BrimDeck/MainWindow.NoticeForm.cs
+  s_b791b4e242e646::t_90e28b12c375e4 144-145,149,151-155
+src/BrimDeck/MainWindow.Hover.cs
+  s_270c2e99280128::t_23af3e26fff267 56
+src/BrimDeck/SettingsAgents.cs
+  s_270c2e99280128::t_58ff79e20e63db 1-58,60-98,100-111,113-177
+  s_270c2e99280128::t_28796e362fcbf3 59
+  s_270c2e99280128::t_54ee625e99a8d2 99,112
+src/BrimDeck/App.xaml.cs
+  s_cb51ecb1e34e9c::t_10d464cb7c91d5 34,147
+src/BrimDeck/MainWindow.CompactColumn.cs
+  s_270c2e99280128::t_23af3e26fff267 52-53,131-132,152
+src/BrimDeck/MainWindow.PageSwitch.cs
+  s_d27d5ea7cb76cb::t_b24d37650d1ff7 19,23,45-48,113-118,120-121
+src/BrimDeck.Protocol/NotifyCli.cs
+  s_270c2e99280128::t_de8080995d6f95 23-27
+  s_270c2e99280128::t_e19bf5ff3f1ea3 108-154
+  s_270c2e99280128::t_9331c1b7bd7aab 80
+  s_270c2e99280128::t_65d50341e7c9aa 105-107,155
+  s_270c2e99280128::t_78c6dc65a94c2c 156
+src/BrimDeck/MainWindow.NoticeQuestions.cs
+  s_270c2e99280128::t_80c0a374017440 1-206
+src/BrimDeck/NoticeCenter.cs
+  s_270c2e99280128::t_cfb8448b5ea5e3 346-348
+  s_270c2e99280128::t_28ce7ac21e8e43 443-445
+  s_270c2e99280128::t_fe7f38fd9ab420 354-355
+  s_270c2e99280128::t_cbd5bc032191ec 421,424,427-442,446-448
+  s_270c2e99280128::t_f7b78b461a7912 490
+tests/BrimDeck.Tests/NoticeCoreTests.cs
+  s_b791b4e242e646::t_f86769a7f96b91 79-83
+  s_b791b4e242e646::t_523a7d78c0383a 404
+  s_b791b4e242e646::t_d1301c5ca00ab4 410
+  s_270c2e99280128::t_31fc4b1db4751d 513-514
+src/BrimDeck/MainWindow.NoticeAgenda.cs
+  s_b791b4e242e646::t_2cfb90910e409b 196
+  s_b791b4e242e646::t_f5f68f076b511c 391-399
+  s_b791b4e242e646::t_4bf40cd405844f 426
+  s_b791b4e242e646::t_2dbefe02aabd1c 142
+  s_b791b4e242e646::t_ce7f5e22306698 96-97
+src/BrimDeck.Core/Notices/NoticeHub.cs
+  s_b791b4e242e646::t_7823017e06f1f1 357-360
+  s_270c2e99280128::t_effe8e2b2dc414 332
+  s_b791b4e242e646::t_2c2bc7811f7044 361
+src/BrimDeck.Core/Settings.cs
+  s_cb51ecb1e34e9c::t_10d464cb7c91d5 95,99,103,806-813,935,1026,1040-1041
+src/BrimDeck.Protocol/AgentHook.cs
+  s_270c2e99280128::t_d28b9af441c19d 97-131
+  s_270c2e99280128::t_0f74be313e12ff 171,178
+  s_270c2e99280128::t_6edb3f1ad9c236 1-10,16-17,19-31,34-52,56-90,93-96,132-142,144-160,163-165,169-170,172-177,179-192,194-232,234,267-329
+  s_270c2e99280128::t_cea4bb8ce0065a 12-15,18,91-92,143,161-162,166-168,193,233,235-266
+  s_270c2e99280128::t_70498acf577329 11,32-33,53-55
+tests/BrimDeck.Tests/CompactReadingTests.cs
+  h_dc4d9c798f1bc1 289,293,297,300,323
+tests/BrimDeck.Tests/Program.cs
+  h_dc4d9c798f1bc1 43
+src/BrimDeck.Core/Agents/AgentHarnesses.cs
+  s_270c2e99280128::t_ea1e5988a30458 371-377,383-384,387-390,399,411-413,417-421,425,427,429-436
+  s_270c2e99280128::t_cb9738155c2a9a 347
+  s_270c2e99280128::t_c66fb4443189a6 13,15-19,31-33,47-48,59-62,70,73-76,80,87-88,107,115-126,132,136,139-142,145-154,159-167
+  s_270c2e99280128::t_1082b146e4057b 184,188,192-195,205,226,248-250,258-262,267,271-273,289,305,313-318,327,344-346,360,378-382,385-386,391,393-394,396-398,400-410
+  s_270c2e99280128::t_b4b21c67154a2a 37-39,155-158,227-228,239,242,244
+  s_270c2e99280128::t_c29c593969a4f2 20-22,34-36,108-114,168-171,251-257,290-297,319-321,333-339,353-354
+  s_270c2e99280128::t_89357e7dc45a8d 1-12,14,23-30,40-46,49,51-58,63-69,71-72,77-79,81-86,89-106,127-129,131,133,135,137-138,144,172-183,185-187,189-191,196-204,206-225,229-238,240-241,243,245-247,263-266,268-270,274-288,298-304,306-312,322-326,328-332,340-343,348-352,355-359,361-365,368-370
+  s_270c2e99280128::t_b852bb4622531c 50,130,134,143
+  s_270c2e99280128::t_59be2f8576e1cf 366-367
+  s_270c2e99280128::t_d0141af017d94e 392,395,414-416,422-424,426,428
+src/BrimDeck/SettingsWindow.cs
+  s_270c2e99280128::t_7f39a92ab602bd 33,38,364,397-398
+  s_270c2e99280128::t_07a5681c6b0e0f 678
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "78550e20ebd59a5014a65a1eb125e7d8edb8ba31",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_270c2e99280128": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "56ee087a-aefb-4ec8-86b0-589feefc379e",
+        "model": "unknown"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_8c2c41badcdd97": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0ab8dbaa-7b2e-4133-bd1d-e6436737763c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_b791b4e242e646": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d0223d52-07c9-4f13-8547-bc8bee83d628",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_cb51ecb1e34e9c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "caedc478-f00e-482a-ba8a-260734b36f8d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_d27d5ea7cb76cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a1fbbaf-f900-4106-a2f3-81aa25991774",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
