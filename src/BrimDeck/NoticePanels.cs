@@ -14,7 +14,7 @@ internal static class NoticeLines
     public const double Gap = 6;
     // The opacity (0 to 255) of the glow in the application's color behind the focus column. Text on it (the status line, the
     // category, the letter plate) keeps its contrast there, so it stays faint.
-    public const byte GlowAlpha = 28;
+    public const byte GlowAlpha = 36;
 
     // Whether a row's time sits at the right of its title: when the title keeps at least RowTitleMinimum beside a time of the usual
     // width. It depends on the row's width alone, not on its words, so every row of the list is laid out the same way.
