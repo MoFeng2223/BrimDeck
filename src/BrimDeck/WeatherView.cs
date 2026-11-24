@@ -24,6 +24,15 @@ internal sealed class WeatherView : UserControl
     // 避免下方信息行加高后 room 不足被降到「藏折线」档。折线判断用的就是这个值，必须与内容高度相符。
     private readonly RowDefinition summaryRow = new() { Height = GridLength.Auto, MinHeight = 86 };
     private readonly RowDefinition daysRow = new() { Height = new GridLength(1, GridUnitType.Star) };
+    // 页脚行占用原本的下边距 16px：刷新时刻与主来源靠右下对齐，既不挤占上方的读数卡与预报区，
+    // 也不改变整页总高度（Fit 里从可用高度扣掉的仍是这 16px）。
+    private readonly RowDefinition footerRow = new() { Height = new GridLength(16) };
+    private readonly TextBlock footerNote = new()
+    {
+        FontSize = 9.5, Foreground = new SolidColorBrush(Color.FromRgb(174, 196, 220)),
+        HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center,
+        TextAlignment = TextAlignment.Right, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 0, 2, 0)
+    };
     private readonly Grid summary = new();
     private readonly UniformGrid stats = new() { Rows = 2, Columns = 2 };
     private readonly UniformGrid forecast = new() { Rows = 1, Columns = 7 };
@@ -83,7 +92,7 @@ internal sealed class WeatherView : UserControl
             _summaryCols = summaryCols;
             if (_last is { } summarySnap) DrawSummary(summarySnap);
         }
-        double avail = Math.Max(0, height - 16);                      // 根 Grid 上边距 0 + 下边距 16
+        double avail = Math.Max(0, height - 16);                      // 根 Grid 上边距 0 + 底部页脚行 16
         summaryRow.MinHeight = Math.Min(summaryMinHeight, avail);     // 今日天气最小高度封顶，避免自身被压坏
         // 列数随宽度在 7（窄）到 24（满宽 440–1200 线性插值）之间自适应；24 列正好是历史 10 + 今天 + 未来 13。
         // 折线画布与预报网格同一套几何：左右边距同为 6、内容宽度同为 width-40，点坐标按列中心计算，保证每个点对准列正中。
@@ -247,15 +256,16 @@ internal sealed class WeatherView : UserControl
         Background = Brushes.Transparent; Foreground = Brushes.White;
         state = WeatherData.Load(() => _app.Settings);
         // Grid 两行：今日天气(Auto 按内容贴顶) / 底部预报(Star 填满余下高度)，宽度与高度都随 Fit 传入值整体填充。
-        // 今日天气内容不多，按内容高度就够；多出来的高度全部给下方预报区，让它上沿紧接天气、下沿贴住窗口底部，
-        // 中间不再留一大块空白。底边距 16 与用量页列表底部一致（UsageContent 的 layout.Bottom）。
+        // 今日天气内容不多，按内容高度就够；多出来的高度全部给下方预报区，让它上沿紧接天气、下沿贴住页脚，
+        // 中间不再留一大块空白。底部 16px 由页脚行占住（刷新时刻与来源），与用量页列表底部基准一致。
         // 上边距 0：页头那一行（36）本身就是内容的上沿，用量页也是把内容直接贴在页头下沿的
         // （UsageContent.Margin 顶边为 0，列内 ColumnTopInset = 2）。这里再留 6 会和用量页形成两套基准。
-        var root = new Grid { Margin = new Thickness(14, 0, 14, 16) };
+        var root = new Grid { Margin = new Thickness(14, 0, 14, 0) };
         root.RowDefinitions.Add(summaryRow);
         root.RowDefinitions.Add(daysRow);
-        Grid.SetRow(summary, 0); Grid.SetRow(days, 1);
-        root.Children.Add(summary); root.Children.Add(days);
+        root.RowDefinitions.Add(footerRow);
+        Grid.SetRow(summary, 0); Grid.SetRow(days, 1); Grid.SetRow(footerNote, 2);
+        root.Children.Add(summary); root.Children.Add(days); root.Children.Add(footerNote);
         host.Children.Add(root); Content = host;
         // days 内部四行上下排列：预报列上段(星期/日期/图标/天气名称/高温)贴顶、折线图占据中间弹性行、
         // 低温/时刻行在下、逐日再看一行的「转前天气名 + 同尺寸图标 + 风向风级」贴底，与折线上方镜像。折线行吸收预报区多出来的高度，
@@ -359,7 +369,7 @@ internal sealed class WeatherView : UserControl
             Background = Brushes.Transparent;
             _last = s;
             if (AutoSelected) _autoCityName = s.Name;
-            DrawSummary(s); DrawForecast(s); DrawChart(s);
+            DrawFooter(s); DrawSummary(s); DrawForecast(s); DrawChart(s);
         } catch { }
     }
     // 顶部读数卡列数：随宽度在 2–6 列之间逐列增减，每加宽约 120px 多一列。
@@ -440,10 +450,8 @@ internal sealed class WeatherView : UserControl
         string range = hasDay ? $"{Degree(s.DayHighC[today])} / {Degree(s.DayLowC[today])}" : "-- / --";
         bottom.Children.Add(new TextBlock { Text = range, FontSize = 13, Foreground = new SolidColorBrush(Color.FromRgb(205, 224, 247)), VerticalAlignment = VerticalAlignment.Center });
         side.Children.Add(bottom);
-        // 来源只显示主每日来源，完整分域来源在详情浮层里逐项列出；详情入口已改到左上角大图标。
-        var footer = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 3, 0, 0) };
-        footer.Children.Add(new TextBlock { Text = SourceLabel(s), FontSize = 9.5, Foreground = new SolidColorBrush(Color.FromRgb(174, 196, 220)), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 190 });
-        side.Children.Add(footer); hero.Children.Add(side);
+        // 来源与刷新时刻统一放在右下角页脚，摘要卡不再单占一行，左侧因此更紧凑。
+        hero.Children.Add(side);
         summary.Children.Add(hero);
         // 读数卡与左侧大图标同一基准顶对齐，多列时上沿才会齐平。
         stats.Rows = 2; stats.Columns = cols;
@@ -544,13 +552,19 @@ internal sealed class WeatherView : UserControl
     private static string Num(double value, string suffix, int digits = 0) => double.IsNaN(value) ? "--" : value.ToString($"F{digits}", System.Globalization.CultureInfo.InvariantCulture) + suffix;
     private static string Degree(double value) => double.IsNaN(value) ? "--" : $"{value:0}°";
     private static string Clock(string[] times, int index) => index >= 0 && index < times.Length && times[index].Length >= 16 ? times[index][11..16] : "--:--";
-    private static string SourceLabel(WeatherSnapshot s)
+    // 右下角页脚：主来源与本次刷新时刻，用底部原有的 16px 空边，不向上挤占摘要卡与预报区。
+    private void DrawFooter(WeatherSnapshot s)
     {
-        string? main = s.Sources.TryGetValue("Daily", out var daily) && daily.Length > 0 ? daily : s.Sources.TryGetValue("Current", out var current) && current.Length > 0 ? current : null;
-        if (main is null) return "";
-        string text = Loc.T("来源 ", "Source ") + main;
-        return text.Length > 46 ? text[..45] + "…" : text;
+        string time = s.FetchedAt.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
+        string source = SourceName(s);
+        footerNote.Text = source.Length > 0
+            ? Loc.T($"{time} 更新 · {source}", $"Updated {time} · {source}")
+            : Loc.T($"{time} 更新", $"Updated {time}");
     }
+    // 主来源：优先每日域，其次实况域；完整的分域来源在详情浮层里逐项列出。
+    private static string SourceName(WeatherSnapshot s)
+        => s.Sources.TryGetValue("Daily", out var daily) && daily.Length > 0 ? daily
+         : s.Sources.TryGetValue("Current", out var current) && current.Length > 0 ? current : "";
     // 详情浮层：当前多维读数、未来 24 小时、24 天（历史 10 + 今天 + 未来 13）、空气质量与分域来源。
     // 浮层盖住整块天气视图并可纵向滚动，关闭后回到摘要；不改变主视图的紧凑布局。
     private void ShowDetails(WeatherSnapshot s)
