@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text.Json;
 using BrimDeck.Core;
 
@@ -13,8 +13,8 @@ internal static class Geo
     public static bool HasChinese(string text) => text.Any(ch => ch is >= '\u4e00' and <= '\u9fff');
     // 城市级名称与省份：都从 City 唯一的完整名称里拆，区县城市取其所属地级市（国内源接口只认城市级）。
     public static (string City, string Province) Parts(City city) => City.GeoPartsOf(city.Name);
-    // 中国统一 UTC+8；其他地区按经度估算，仅用于本地日出日落推算的兜底。
-    public static int UtcOffsetHours(City city) => IsChina(city) ? 8 : (int)Math.Round(city.Longitude / 15.0);
+    // 中国统一 UTC+8；其他地区按经度估算，仅用于本地日升日落推算的兜底。
+    public static double UtcOffsetHours(City city, DateTimeOffset? at = null) => city.TimeZoneId is { Length: > 0 } id && TimeZoneInfo.TryFindSystemTimeZoneById(id, out var zone) ? zone.GetUtcOffset(at ?? DateTimeOffset.UtcNow).TotalHours : IsChina(city) ? 8 : (int)Math.Round(city.Longitude / 15.0);
 }
 
 // 各来源的天气代码统一成 Open-Meteo 使用的 WMO code，界面图标与配色只认这一套。

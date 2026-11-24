@@ -1,4 +1,4 @@
-﻿﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
@@ -12,7 +12,6 @@ public sealed partial class SettingsWindow
         var state=WeatherData.Load(() => S);var cityRows=new StackPanel();bool active=true;
         string autoName="当前位置";if(state.AutoKey.Length>0&&state.Cache.TryGetValue(state.AutoKey,out var autoSnap))autoName=autoSnap.Name;
         var preview=new ContentControl {Content=new WeatherSettingsPreview(state)};
-        // 天气配置现在就是 DeckSettings 的一部分：改动后走与其他设置页相同的保存队列写 settings.json。
         void Save() {try {_app.QueueSave(); WeatherData.Save(state);}catch {}}
         void Fill()
         {
@@ -20,8 +19,6 @@ public sealed partial class SettingsWindow
             for(int i=-1;i<state.Cities.Count;i++) {
                 int index=i;bool selected=i==state.Selected;var city=i<0?null:state.Cities[i];
                 string? temperature=null;int code=3;bool day=true;
-                // 主标题只显示第一段（洪山），副标题显示完整层级（洪山 · 武汉 · 湖北省 · 中国）；
-                // 自动定位行主标题固定「自动定位」，副标题是定位到的完整路径。
                 string name=city is null?Loc.T("自动定位","Auto location"):City.SplitLevels(city.Name)[0];
                 string? subtitle=city is null?null:city.Name;
                 if(city is null){
@@ -38,6 +35,13 @@ public sealed partial class SettingsWindow
                 var border=new Border {Child=grid,Background=selected?(Brush)FindResource("SettingsAccentTint"):Brushes.Transparent,CornerRadius=new CornerRadius(6),Cursor=System.Windows.Input.Cursors.Hand};border.MouseLeftButtonUp+=(_,e)=>{if(e.OriginalSource is not Button)Select();};cityRows.Children.Add(border);
             }
         }
+        var refresh = new Button { Content = Loc.T("刷新", "Refresh"), Style = (Style)FindResource("SettingsPrimaryButton") };
+        var previewHeader = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
+        DockPanel.SetDock(refresh, Dock.Right);
+        previewHeader.Children.Add(refresh);
+        previewHeader.Children.Add(TextLine(Loc.T("天气预览", "Weather preview"), 16, TextPrimary));
+        Target.Children.Add(previewHeader);
+        CancellationTokenSource? refreshRequest = null;
         Target.Children.Add(preview);SectionTitle(Loc.T("当前城市","Current city"));Group(cityRows);
         // 设置页打开即尝试定位：成功则刷新「自动定位」行展示当地城市名，不干扰其余行。
         async Task DetectAsync() { if(!active)return;try {var local=await WeatherData.LocateAsync(state.Schedule,CancellationToken.None);if(active&&local is not null&&!local.Name.Contains("当前位置")){autoName=local.Name;Fill();}}catch{}}
@@ -114,20 +118,20 @@ public sealed partial class SettingsWindow
         // 每行只列出「该区域能覆盖这一类」的来源，不支持的不进下拉；每个域由用户明确指定一家，不再有自动回退。
         SectionTitle(Loc.T("数据来源","Data sources"));
         bool showChina=true;
-        // 日出日落/月升月落/月相属于「每天预报」，不单列配置。
+        // 日升日落/月升月落/月相属于「每天预报」，不单列配置。
         var abilities=new (WeatherDomain[] Domains,string Label,string Hint)[]
         {
             ([WeatherDomain.Current],Loc.T("实时预报","Current"),Loc.T("温度、体感、湿度、风、气压等实况。","Now: temperature, feels-like, humidity, wind, pressure.")),
             ([WeatherDomain.Minutely],Loc.T("分钟预报","Minutely"),Loc.T("未来数小时的分钟级降水。","Minute-by-minute precipitation for the next hours.")),
             ([WeatherDomain.Hourly],Loc.T("小时预报","Hourly"),Loc.T("未来 24 小时逐小时天气。","Hour by hour for the next 24 hours.")),
-            ([WeatherDomain.Daily],Loc.T("每天预报","Daily"),Loc.T("每日高低温、降水、风、紫外线与日出日落月相。","Daily highs, lows, rain, wind, UV and sun/moon times.")),
+            ([WeatherDomain.Daily],Loc.T("每天预报","Daily"),Loc.T("每日高低温、降水、风、紫外线与日升日落月相。","Daily highs, lows, rain, wind, UV and sun/moon times.")),
             ([WeatherDomain.History],Loc.T("时光机","History"),Loc.T("过去一段时间的天气。","Past weather.")),
             ([WeatherDomain.Warning],Loc.T("预警","Warnings"),Loc.T("官方极端天气预警。","Official severe weather warnings.")),
             ([WeatherDomain.Indices],Loc.T("天气指数","Indices"),Loc.T("穿衣、紫外线、运动等生活指数。","Lifestyle indices: clothing, UV, sports and more.")),
             ([WeatherDomain.Air],Loc.T("空气质量","Air quality"),Loc.T("AQI、PM2.5 与 PM10。","AQI, PM2.5 and PM10."))
         };
         bool loadingSources=false;
-        var sourceTable=new StackPanel();
+        var sourceTable=new StackPanel { Visibility=Visibility.Collapsed };
 
         // 区域切换：放在 8 类明细表的上方；切换后只重建下方下拉。
         var regionStrip=new UniformGrid {Columns=2,Width=240};
@@ -137,8 +141,24 @@ public sealed partial class SettingsWindow
             opt.Checked+=(_,_)=>{showChina=china;FillSources();};
             regionStrip.Children.Add(opt);
         }
-        Group(Row(Loc.T("城市区域","City region"),SegmentBorder(regionStrip),
-            TextLine(Loc.T("切换区域后，下方只列出该区域能提供的来源。","Switching region refreshes the sources available below."),11,TextSecondary)));
+        Button arrow = null!;
+        void ToggleSources()
+        {
+            bool open = sourceTable.Visibility != Visibility.Visible;
+            sourceTable.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+            PointArrow(arrow, open);
+        }
+        arrow = ChevronButton(Loc.T("展开或收起数据来源", "Show or hide data sources"), ToggleSources);
+        arrow.Margin = new Thickness(12, 0, 0, 0);
+        PointArrow(arrow, false);
+        var regionControls = new StackPanel { Orientation = Orientation.Horizontal };
+        regionControls.Children.Add(SegmentBorder(regionStrip));
+        regionControls.Children.Add(arrow);
+        var regionRow = Row(Loc.T("城市区域", "City region"), regionControls,
+            TextLine(Loc.T("展开可选择该区域各类天气数据的来源。", "Expand to choose sources for this region."), 11, TextSecondary));
+        regionRow.Background = Brushes.Transparent;
+        regionRow.MouseLeftButtonDown += (_, e) => { ToggleSources(); e.Handled = true; };
+        Group(regionRow);
         Target.Children.Add(sourceTable);
 
         void FillSources()
@@ -166,8 +186,7 @@ public sealed partial class SettingsWindow
                     foreach(var domain in domains) state.Schedule.Sources[domain.ToString()]=id;
                     Save();preview.Content=new WeatherSettingsPreview(state);
                 };
-                string scope=able.Length==0?Loc.T("该区域暂无可用来源","No source in this region"):able.Length==candidates.Length?Loc.T("各家都能提供","from every source"):Loc.T($"仅 {able.Length} 家提供",$"from {able.Length} sources");
-                rows.Add(Row(label,picker,TextLine(hint+" · "+scope,11,TextSecondary)));
+                rows.Add(Row(label,picker,TextLine(hint,11,TextSecondary)));
             }
             GroupInto(sourceTable,rows.ToArray());
             loadingSources=false;
@@ -178,8 +197,30 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("和风天气配置","QWeather setup"));
         var hefengHost=KeyField(state.Schedule.HeFengHost,text=>{state.Schedule.HeFengHost=text;Save();});
         var hefengKey=KeyField(state.Schedule.HeFengKey,text=>{state.Schedule.HeFengKey=text;Save();});
+        TextBox LimitField(Func<int> read, Action<int> write)
+        {
+            var input = new TextBox { Width = 100, Height = 31, Style = (Style)FindResource("SettingsField"), Text = read().ToString() };
+            void Commit()
+            {
+                if (int.TryParse(input.Text, out var value) && value >= 0 && value != read())
+                {
+                    write(value);
+                    Save();
+                }
+                input.Text = read().ToString();
+            }
+            input.LostKeyboardFocus += (_, _) => Commit();
+            input.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) { Commit(); e.Handled = true; } };
+            return input;
+        }
         Group(Row(Loc.T("和风 API Host","QWeather host"),hefengHost,TextLine(Loc.T("必填：控制台分配的项目 Host，例如 abcxyz.re.qweatherapi.com；留空则不启用和风。","Required: the project host from your console, e.g. abcxyz.re.qweatherapi.com; blank disables QWeather."),11,TextSecondary)),
-              Row(Loc.T("和风天气 Key","QWeather key"),hefengKey,TextLine(Loc.T("和风需要 Key：填入后优先使用其全维度数据。","QWeather needs a key: with one it is preferred for all domains."),11,TextSecondary)));
+              Row(Loc.T("和风天气 Key","QWeather key"),hefengKey,TextLine(Loc.T("和风需要 Key：填入后优先使用其全维度数据。","QWeather needs a key: with one it is preferred for all domains."),11,TextSecondary)),
+              Row(Loc.T("每日 API 调用上限", "Daily API limit"),
+                  LimitField(() => state.Schedule.HeFengDailyLimit, v => state.Schedule.HeFengDailyLimit = v),
+                  TextLine(Loc.T("城市搜索与天气请求合计，0 表示不限。", "Includes city searches and weather requests. Set 0 for unlimited calls."), 11, TextSecondary)),
+              Row(Loc.T("每月 API 调用上限", "Monthly API limit"),
+                  LimitField(() => state.Schedule.HeFengMonthlyLimit, v => state.Schedule.HeFengMonthlyLimit = v),
+                  TextLine(Loc.T($"本月已调用 {RequestGate.ThisMonth("hefeng"):N0} 次，0 表示不限。", $"{RequestGate.ThisMonth("hefeng"):N0} calls this month. Set 0 for unlimited calls."), 11, TextSecondary)));
         // 更新与请求状态放页尾：城市与来源才是高频改动项，运行状态看一眼就够。
         SectionTitle(Loc.T("更新与数据","Updates and data"));Group(Row(Loc.T("自动更新","Auto update"),TextLine(Loc.T("每 15 分钟","Every 15 minutes"),12,TextSecondary)),Row(Loc.T("离线时","Offline"),TextLine(Loc.T("自动使用本地缓存","Falls back to the local cache"),12,TextSecondary)));
         // 请求与缓存：按用户指定来源请求 + 分域缓存，这里把当天的实际请求量和磁盘占用摆出来，配额一目了然。
@@ -188,7 +229,39 @@ public sealed partial class SettingsWindow
         var used=WeatherSources.All.Select(source=>(Name:source.Info.Id switch{"weathercomcn"=>Loc.T("中国天气网","ChinaWx"),"hefeng"=>Loc.T("和风","QWeather"),_=>source.Info.Name},Count:RequestGate.Today(source.Info.Id))).Where(item=>item.Count>0).ToArray();
         Group(Row(Loc.T("今日请求","Requests today"),TextLine(used.Length==0?Loc.T("尚未发起请求","No requests yet"):string.Join(" · ",used.Select(item=>$"{item.Name} {item.Count}")),12,TextSecondary)),
               Row(Loc.T("本地缓存","Local cache"),TextLine(Loc.T($"{usage.Count} 项 · {usage.Bytes/1024.0:0} KB（14 天未用自动清理）",$"{usage.Count} entries · {usage.Bytes/1024.0:0} KB (unused entries purged after 14 days)"),12,TextSecondary)));
-        cityRows.Unloaded+=(_,_)=>{active=false;pending?.Cancel();pending?.Dispose();pending=null;fetchCts?.Cancel();fetchCts?.Dispose();fetchCts=null;popup.IsOpen=false;ShowSearching(false);};
+        refresh.Click += async (_, _) =>
+        {
+            if (refreshRequest is not null) return;
+            using var request = new CancellationTokenSource();
+            refreshRequest = request;
+            refresh.IsEnabled = false;
+            refresh.Content = Loc.T("刷新中…", "Refreshing…");
+            bool success = false;
+            try
+            {
+                bool auto = state.Selected < 0 || state.Selected >= state.Cities.Count;
+                var city = auto ? await WeatherData.LocateAsync(state.Schedule, request.Token) : state.Cities[state.Selected];
+                if (city is null) return;
+                var snapshot = await WeatherData.CurrentAsync(city, state.Schedule, request.Token);
+                if (!active || request.IsCancellationRequested || (!auto && !state.Cities.Contains(city))) return;
+                string key = city.ToString();
+                state.Cache[key] = snapshot;
+                if (auto) state.AutoKey = key;
+                Save();
+                Fill();
+                preview.Content = new WeatherSettingsPreview(state);
+                success = true;
+            }
+            catch (OperationCanceledException) when (request.IsCancellationRequested) { }
+            catch { /* Keep the cached preview available for retry. */ }
+            finally
+            {
+                refreshRequest = null;
+                refresh.IsEnabled = true;
+                refresh.Content = success ? Loc.T("刷新", "Refresh") : Loc.T("重试刷新", "Retry refresh");
+            }
+        };
+        cityRows.Unloaded+=(_,_)=>{active=false;refreshRequest?.Cancel();pending?.Cancel();pending?.Dispose();pending=null;fetchCts?.Cancel();fetchCts?.Dispose();fetchCts=null;popup.IsOpen=false;ShowSearching(false);};
 
         TextBox KeyField(string value,Action<string> save)
         {
@@ -223,6 +296,13 @@ internal sealed class WeatherSettingsPreview : Border
         string Num(double value,string suffix)=>double.IsNaN(value)?"--":value.ToString("0.#",System.Globalization.CultureInfo.InvariantCulture)+suffix;
         string Clock(string[] times,int index)=>index>=0&&index<times.Length&&times[index].Length>=16?times[index][11..16]:"--:--";
         Background=WeatherView.Sky(code,day);
+        if (snap is null)
+        {
+            MinHeight = 122;
+            Child = new TextBlock { Text = Place(cityName) + "\n" + Loc.T("刷新以查看天气", "Refresh to see the weather"),
+                TextAlignment = TextAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Foreground = Brushes.White, FontSize = 14 };
+            return;
+        }
         var grid=new Grid();grid.RowDefinitions.Add(new RowDefinition {Height=new GridLength(34)});grid.RowDefinitions.Add(new RowDefinition());grid.RowDefinitions.Add(new RowDefinition {Height=new GridLength(1,GridUnitType.Auto)});
         var head=new Grid {VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(12,0,12,0)};
         head.ColumnDefinitions.Add(new ColumnDefinition());head.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
@@ -242,8 +322,8 @@ internal sealed class WeatherSettingsPreview : Border
         // 三天如果一起放进星号列，UniformGrid 会把可用宽度三等分：内容只有几十像素、格子却有一百多，
         // 数字被拉开、今天的高亮框也胀成一大块——这就是它看起来「胖」的原因。
         var body=new Grid();body.ColumnDefinitions.Add(new ColumnDefinition());body.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
-        var now=new StackPanel {Margin=new Thickness(20,0,0,0),VerticalAlignment=VerticalAlignment.Center};
-        var first=new StackPanel {Orientation=Orientation.Horizontal};first.Children.Add(new WeatherGlyph(code,day) {Width=52,Height=52,Margin=new Thickness(0,0,8,0),VerticalAlignment=VerticalAlignment.Center});
+        var now=new StackPanel {Margin=new Thickness(20,14,0,14),VerticalAlignment=VerticalAlignment.Center};
+        var first=new StackPanel {Orientation=Orientation.Horizontal};first.Children.Add(new WeatherGlyph(code,day) {Width=66,Height=66,Margin=new Thickness(0,0,12,0),VerticalAlignment=VerticalAlignment.Center});
         first.Children.Add(new TextBlock {Text=snap is null?"":Deg(snap.Temperature),FontSize=46,FontWeight=FontWeights.Light,Foreground=Brushes.White,VerticalAlignment=VerticalAlignment.Center});now.Children.Add(first);
         now.Children.Add(new TextBlock {Text=snap is null?"":WeatherView.Condition(code),FontSize=15,FontWeight=FontWeights.Medium,Foreground=new SolidColorBrush(Color.FromRgb(234,242,255))});
         var forecast=new UniformGrid {Rows=1,Columns=3,Margin=new Thickness(12,0,14,0),VerticalAlignment=VerticalAlignment.Center,HorizontalAlignment=HorizontalAlignment.Right};
@@ -251,8 +331,8 @@ internal sealed class WeatherSettingsPreview : Border
         for(int i=0;i<3;i++) {
             string dayTitle="";int dCode=0;string rain="";string high="";string low="";
             if(snap is not null&&snap.DayDates.Length>0) {
-                int idx=Math.Min(today+i,snap.DayDates.Length-1);
-                var date=DateTime.Parse(snap.DayDates[idx]);
+                int idx=today+i; if(idx>=snap.DayDates.Length) break;
+                if (!DateTime.TryParse(snap.DayDates[idx],out var date)) continue;
          dayTitle=i==0?Loc.T("今天","Today"):i==1?Loc.T("明天","Tomorrow"):Loc.T(new[]{"周日","周一","周二","周三","周四","周五","周六"}[(int)date.DayOfWeek],new[]{"Sun","Mon","Tue","Wed","Thu","Fri","Sat"}[(int)date.DayOfWeek]);
                 dCode=snap.DayCodes.Length>idx&&snap.DayCodes[idx]>=0?snap.DayCodes[idx]:3;
                 int r=snap.DayRainProb.Length>idx?snap.DayRainProb[idx]:-1;rain=r>=20?r+"%":"–";
@@ -271,13 +351,12 @@ internal sealed class WeatherSettingsPreview : Border
             col.Children.Add(range);
             // 三列套同一层壳，只有今天有底色与描边：保持等宽，不会因为高亮框多出 2px 而串位。
             var holder=new Border {Child=col,Padding=new Thickness(0,6,0,6),CornerRadius=new CornerRadius(11),BorderThickness=new Thickness(1),
-                Background=i==0?new SolidColorBrush(Color.FromArgb(26,255,255,255)):Brushes.Transparent,
+                Margin=new Thickness(2,0,2,0),Background=new SolidColorBrush(Color.FromArgb((byte)(i==0?34:14),255,255,255)),
                 BorderBrush=i==0?new SolidColorBrush(Color.FromArgb(56,255,255,255)):Brushes.Transparent};
             forecast.Children.Add(holder);
         }
         body.Children.Add(now);Grid.SetColumn(forecast,1);body.Children.Add(forecast);
-        var meta=new Grid {Margin=new Thickness(16,0,14,0),VerticalAlignment=VerticalAlignment.Center};
-        var metaLeft=new StackPanel {Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Center};
+        var meta=new WrapPanel {Margin=new Thickness(16,0,14,0),VerticalAlignment=VerticalAlignment.Center};
         var metaRight=new StackPanel {Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Center};
         string meta1=snap is null?"":Loc.T($"体感 {Num(snap.FeelsLike,"°")}",$"Feels like {Num(snap.FeelsLike,"°")}");
         string meta2=snap is null?"":Loc.T($"湿度 {(snap.HumidityPercent>=0?snap.HumidityPercent+"%":"--")}",$"Humidity {(snap.HumidityPercent>=0?snap.HumidityPercent+"%":"--")}");
@@ -289,14 +368,14 @@ internal sealed class WeatherSettingsPreview : Border
             var item=new StackPanel {Orientation=Orientation.Horizontal,Margin=new Thickness(0,0,16,0)};
             item.Children.Add(new WeatherMetaIcon(kind,ink) {Width=14,Height=14,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,5,0)});
             item.Children.Add(new TextBlock {Text=text,FontSize=11,Foreground=new SolidColorBrush(Color.FromRgb(213,227,245))});
-            metaLeft.Children.Add(item);
+            meta.Children.Add(item);
         }
         var sun=new StackPanel {Orientation=Orientation.Horizontal};
         sun.Children.Add(new WeatherMetaIcon(WeatherMetaKind.Sunrise,Color.FromRgb(255,200,90)){Width=14,Height=14,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,5,0)});
-        sun.Children.Add(new TextBlock {Text=snap is null?"":Loc.T($"日出 {Clock(snap.SunriseTimes,today)} · 日落 {Clock(snap.SunsetTimes,today)}",$"Sunrise {Clock(snap.SunriseTimes,today)} · Sunset {Clock(snap.SunsetTimes,today)}"),FontSize=11,Foreground=new SolidColorBrush(Color.FromRgb(213,227,245))});
+        sun.Children.Add(new TextBlock {Text=snap is null?"":Loc.T($"日升 {Clock(snap.SunriseTimes,today)} · 日落 {Clock(snap.SunsetTimes,today)}",$"Sunrise {Clock(snap.SunriseTimes,today)} · Sunset {Clock(snap.SunsetTimes,today)}"),FontSize=11,Foreground=new SolidColorBrush(Color.FromRgb(213,227,245))});
         metaRight.Children.Add(sun);
-        meta.Children.Add(metaLeft);meta.Children.Add(metaRight);
-        var strip=new Border {Height=34,CornerRadius=new CornerRadius(0,0,13,13),Background=new SolidColorBrush(Color.FromArgb(36,0,0,0)),BorderBrush=new SolidColorBrush(Color.FromArgb(24,255,255,255)),BorderThickness=new Thickness(0,1,0,0),Child=meta};
+        meta.Children.Add(metaRight);
+        var strip=new Border {MinHeight=34,Padding=new Thickness(0,6,0,6),CornerRadius=new CornerRadius(0,0,13,13),Background=new SolidColorBrush(Color.FromArgb(36,0,0,0)),BorderBrush=new SolidColorBrush(Color.FromArgb(24,255,255,255)),BorderThickness=new Thickness(0,1,0,0),Child=meta};
         grid.Children.Add(headBar);Grid.SetRow(body,1);grid.Children.Add(body);Grid.SetRow(strip,2);grid.Children.Add(strip);Child=grid;
     }
 }

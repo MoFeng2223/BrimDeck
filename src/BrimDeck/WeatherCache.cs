@@ -1,3 +1,4 @@
+using BrimDeck.Core;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.IO;
@@ -180,13 +181,12 @@ internal static class RequestGate
         public DateTimeOffset Until;
         public DateOnly Day;
         public int Count;
+        public int MonthCount;
     }
 
     private static readonly ConcurrentDictionary<string, State> States = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, int> DailyLimit = new(StringComparer.Ordinal)
     {
-        ["hefeng"] = 800,        // 免费订阅按 key 计日额度，留出余量
-        ["hefeng-search"] = 500, // 城市搜索有 1 天磁盘缓存，实际请求很少，单独计数即可
         ["weathercomcn"] = 600,
         ["openmeteo"] = 1200
     };
@@ -194,18 +194,24 @@ internal static class RequestGate
     private static bool _dirty;
     private static bool _restored;
 
-    public static bool TryEnter(string source)
+    public static bool TryEnter(string source, WeatherSettings? limits)
     {
-        var now = DateTimeOffset.Now;
-        var state = States.GetOrAdd(source, _ => new State());
         lock (Sync)
         {
-            var today = DateOnly.FromDateTime(now.LocalDateTime);
+            Restore();
+            var state = States.GetOrAdd(source, _ => new State());
+            var clock = DateTimeOffset.Now;
+            var today = DateOnly.FromDateTime(clock.LocalDateTime);
+            if (state.Day.Year != today.Year || state.Day.Month != today.Month) state.MonthCount = 0;
             if (state.Day != today) { state.Day = today; state.Count = 0; }
-            if (state.Until > now) return false;
-            if (state.Count >= DailyLimit.GetValueOrDefault(source, 500)) return false;
+            if (state.Until > clock) return false;
+            int daily = source == "hefeng" ? limits?.HeFengDailyLimit ?? 1500 : DailyLimit.GetValueOrDefault(source, 500);
+            int monthly = source == "hefeng" ? limits?.HeFengMonthlyLimit ?? 50000 : 0;
+            if ((daily > 0 && state.Count >= daily) || (monthly > 0 && state.MonthCount >= monthly)) return false;
             state.Count++;
+            state.MonthCount++;
             _dirty = true;
+            if (source == "hefeng") Flush();
             return true;
         }
     }
@@ -262,33 +268,58 @@ internal static class RequestGate
 
     private static readonly JsonSerializerOptions Json = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
-    // 计数落盘只是为了重启后不会把当天额度重新算满；每 15 分钟随快照保存一次即可，不必逐次写。
+    private sealed record Usage(DateOnly Day, int Count, int MonthCount);
+    private static string UsagePath => Path.Combine(WeatherFiles.CacheRoot, "usage.json");
+
+    public static int ThisMonth(string source)
+    {
+        lock (Sync)
+        {
+            var now = DateTime.Now;
+            return States.TryGetValue(source, out var state) && state.Day.Year == now.Year && state.Day.Month == now.Month
+                ? state.MonthCount : 0;
+        }
+    }
+
     public static void Restore()
     {
-        if (_restored) return;
-        _restored = true;
-        try
+        lock (Sync)
         {
-            string path = Path.Combine(WeatherFiles.CacheRoot, "usage.json");
-            if (!File.Exists(path)) return;
-            if (JsonSerializer.Deserialize<Dictionary<string, int>>(File.ReadAllText(path), Json) is not { } saved) return;
-            var today = DateOnly.FromDateTime(DateTime.Now);
-            foreach (var (source, count) in saved) States[source] = new State { Day = today, Count = count };
+            if (_restored) return;
+            _restored = true;
+            try
+            {
+                if (!File.Exists(UsagePath)) return;
+                using var doc = JsonDocument.Parse(File.ReadAllText(UsagePath));
+                var legacyDay = DateOnly.FromDateTime(File.GetLastWriteTime(UsagePath));
+                foreach (var entry in doc.RootElement.EnumerateObject())
+                {
+                    bool legacy = entry.Value.ValueKind == JsonValueKind.Number;
+                    var usage = legacy ? new Usage(legacyDay, entry.Value.GetInt32(), entry.Value.GetInt32())
+                        : entry.Value.Deserialize<Usage>(Json);
+                    if (usage is null) continue;
+                    string key = entry.Name == "hefeng-search" ? "hefeng" : entry.Name;
+                    var state = States.GetOrAdd(key, _ => new State());
+                    state.Day = usage.Day;
+                    state.Count += usage.Count;
+                    state.MonthCount += usage.MonthCount;
+                    _dirty |= legacy;
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            catch (JsonException) { }
         }
-        catch { }
     }
 
     public static void Flush()
     {
-        Dictionary<string, int> counts;
         lock (Sync)
         {
             if (!_dirty) return;
-            _dirty = false;
-            var today = DateOnly.FromDateTime(DateTime.Now);
-            counts = States.Where(pair => pair.Value.Day == today).ToDictionary(pair => pair.Key, pair => pair.Value.Count);
+            var counts = States.ToDictionary(p => p.Key, p => new Usage(p.Value.Day, p.Value.Count, p.Value.MonthCount));
+            if (WeatherFiles.WriteAtomic(UsagePath, JsonSerializer.Serialize(counts, Json))) _dirty = false;
         }
-        try { WeatherFiles.WriteAtomic(Path.Combine(WeatherFiles.CacheRoot, "usage.json"), JsonSerializer.Serialize(counts, Json)); } catch { }
     }
 }
 
@@ -307,9 +338,10 @@ internal static class WeatherHttp
         Client.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/plain, */*");
     }
 
-    public static async Task<HttpResult> GetAsync(string source, string url, CancellationToken token, Action<HttpRequestMessage>? decorate = null, int seconds = 20)
+    public static async Task<HttpResult> GetAsync(string source, string url, CancellationToken token, Action<HttpRequestMessage>? decorate = null, int seconds = 20, WeatherSettings? limits = null)
     {
-        if (!RequestGate.TryEnter(source)) return new(null, 0);
+        token.ThrowIfCancellationRequested();
+        if (!RequestGate.TryEnter(source, limits)) return new(null, 0);
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
         cts.CancelAfter(TimeSpan.FromSeconds(seconds));
         try

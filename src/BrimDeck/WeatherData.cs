@@ -1,4 +1,4 @@
-﻿﻿using System.IO;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
@@ -129,7 +129,7 @@ internal static class WeatherData
             foreach (var c in list.EnumerateArray())
                 cities.Add(new City(
                     City.Compose(Json.Text(c, "name"), Json.Text(c, "admin2"), Json.Text(c, "admin1"), Json.Text(c, "country")),
-                    c.GetProperty("latitude").GetDouble(), c.GetProperty("longitude").GetDouble()));
+                    c.GetProperty("latitude").GetDouble(), c.GetProperty("longitude").GetDouble()) { TimeZoneId = Json.Text(c, "timezone") });
         return cities;
     }
     // 和风 GeoAPI v2 city/lookup：按地名或「经度,纬度」坐标反查最多 10 个，结构化解析省/市/国家/城市 id。
@@ -146,8 +146,8 @@ internal static class WeatherData
             // 搜索用独立闸门通道：天气取数（尤其时光机一轮 10 次请求）触发 429/失败熔断时，
             // 不该把城市搜索一起停掉——否则用户搜新词会全部落空，看起来像搜索坏了。
             // 超时 8 秒：搜索是交互操作，不该让输入框等满 20 秒。
-            var result = await WeatherHttp.GetAsync("hefeng-search", $"{host}/geo/v2/city/lookup?location={Uri.EscapeDataString(query)}&number=10&lang={lang}", ct,
-                request => request.Headers.TryAddWithoutValidation("X-QW-Api-Key", settings.HeFengKey.Trim()), 8);
+            var result = await WeatherHttp.GetAsync("hefeng", $"{host}/geo/v2/city/lookup?location={Uri.EscapeDataString(query)}&number=10&lang={lang}", ct,
+                request => request.Headers.TryAddWithoutValidation("X-QW-Api-Key", settings.HeFengKey.Trim()), 8, settings);
             if (result.Body is not { Length: > 0 } raw) return null;
             // 只缓存成功响应：否则一次 401/429 或参数错误会把「查不到」钉在这一天，
             // 用户重新输入同样的词永远搜不出来。
@@ -164,7 +164,7 @@ internal static class WeatherData
             if (Json.Text(item, "name") is not { Length: > 0 } name || lat is null || lon is null) continue;
             cities.Add(new City(
                 City.Compose(name, Json.Text(item, "adm2"), Json.Text(item, "adm1"), Json.Text(item, "country")),
-                lat.Value, lon.Value, Json.Text(item, "id") ?? ""));
+                lat.Value, lon.Value, Json.Text(item, "id") ?? "") { TimeZoneId = Json.Text(item, "tz") });
         }
         return cities;
     }
@@ -193,7 +193,7 @@ internal static class WeatherData
                 if(found.Count>0)
                 {
                     // IP 坐标只有城市精度：丢掉反查结果里的区县段与区县 id，不冒充精确到区。
-                    return new City(City.WithoutDistrict(found[0].Name), lat, lon);
+                    return new City(City.WithoutDistrict(found[0].Name), lat, lon) { TimeZoneId = found[0].TimeZoneId };
                 }
             }
             if(root.TryGetProperty("city",out var name)&&name.ValueKind==JsonValueKind.String&&name.GetString() is {Length:>0} query) {
@@ -207,10 +207,27 @@ internal static class WeatherData
             return new City(parts.Count>0?City.Compose([.. parts]):"当前位置",lat,lon);
         } catch { return null; }
     }
-    // 天气聚合入口：当前、24 小时、24 天（历史 10 + 今天 + 未来 13）、日出日落与空气质量由 WeatherAggregator 统一拼装。
+    // 天气聚合入口：当前、24 小时、24 天（历史 10 + 今天 + 未来 13）、日升日落与空气质量由 WeatherAggregator 统一拼装。
     // 历史单独一轮，progress 让界面先画不含历史的版本，历史到了再用返回值整体替换。
     internal static async Task<WeatherSnapshot> CurrentAsync(City city, WeatherSettings schedule, CancellationToken token, Action<WeatherSnapshot>? progress = null)
-        => await WeatherAggregator.FetchAsync(city, schedule, token, progress);
+    {
+        if (string.IsNullOrEmpty(city.TimeZoneId) && !string.IsNullOrWhiteSpace(schedule.HeFengKey)
+            && !string.IsNullOrWhiteSpace(schedule.HeFengHost))
+        {
+            // Resolve older saved cities through the same cached lookup as the city picker.
+            string query = string.IsNullOrEmpty(city.LocationId)
+                ? FormattableString.Invariant($"{city.Longitude:F3},{city.Latitude:F3}") : city.LocationId;
+            try
+            {
+                var matches = await SearchHeFeng(query, schedule, token);
+                if (matches.FirstOrDefault()?.TimeZoneId is { Length: > 0 } zone)
+                    city = city with { TimeZoneId = zone };
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+            catch { /* Weather can still be fetched when city lookup is unavailable. */ }
+        }
+        return await WeatherAggregator.FetchAsync(city, schedule, token, progress);
+    }
     // 在 daily 正序数组中定位“今天”的索引；Today 是聚合时写下的城市当地日期，找不到时回退 0。
     internal static int TodayIndex(WeatherSnapshot s)
     {

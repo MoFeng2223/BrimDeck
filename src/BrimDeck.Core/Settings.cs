@@ -83,6 +83,7 @@ public enum QuotaRingStyle { Nested = 0, Single = 1 }
 // Nothing else stores province/city/country separately — every view slices the levels it needs out of this single string.
 public sealed record City(string Name, double Latitude, double Longitude, string LocationId = "")
 {
+    public string? TimeZoneId { get; init; }
     // 层级分隔符与接口返回顺序一致：区县 · 城市 · 省级 · 国家。
     public const string Separator = " · ";
     public static string[] SplitLevels(string full)
@@ -124,6 +125,8 @@ public enum WeatherDomain { Current, Hourly, Daily, Minutely, Warning, Indices, 
 public sealed class WeatherSettings
 {
     public Dictionary<string, string> Sources { get; set; } = [];
+    public int HeFengDailyLimit { get; set; } = 1500;
+    public int HeFengMonthlyLimit { get; set; } = 50000;
     public string HeFengKey { get; set; } = "";
     public string HeFengHost { get; set; } = "";
     // 只返回用户明确选定的来源。Normalize 会为未选过的域写入一个具体默认值。
@@ -132,6 +135,8 @@ public sealed class WeatherSettings
     public WeatherSettings Copy() => new()
     {
         Sources = new Dictionary<string, string>(Sources ?? []),
+        HeFengDailyLimit = HeFengDailyLimit,
+        HeFengMonthlyLimit = HeFengMonthlyLimit,
         HeFengKey = HeFengKey ?? "",
         HeFengHost = HeFengHost ?? ""
     };

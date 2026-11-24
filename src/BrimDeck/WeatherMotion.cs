@@ -13,7 +13,7 @@ internal static class WeatherMotion
     }
 }
 internal enum WeatherMetaKind { Gust, DewPoint, Uv, AirQuality, WindSock, NoPrecip, Precipitation, Thermo, Droplet, Rain, Snow, Ice, Mixed, Wind, Sunrise, Gauge, Eye, Leaf, Cloud, Location, ChevronDown, ChevronLeft, Check, Close, Add }
-// 元信息矢量图标：16 网格线稿，圆头描边，风格同 MonitorGlyph —— 温度计 / 水滴 / 风 / 日出，及定位、选择、添加、返回等通用交互符号。
+// 元信息矢量图标：16 网格线稿，圆头描边，风格同 MonitorGlyph —— 温度计 / 水滴 / 风 / 日升，及定位、选择、添加、返回等通用交互符号。
 internal sealed class WeatherMetaIcon : FrameworkElement
 {
     private static readonly Dictionary<WeatherMetaKind, Geometry> Shapes = Create();
@@ -30,7 +30,6 @@ internal sealed class WeatherMetaIcon : FrameworkElement
             (WeatherMetaKind.Precipitation,"M3,3 V13 H13 V3 M3,8 H13 M10,5 H13 M10,10.5 H13"),
             (WeatherMetaKind.Thermo,"M6,9.6 V4.4 A2,2 0 0 1 10,4.4 V9.6 A3.2,3.2 0 1 1 6,9.6 Z M8,7.2 V12"),
             (WeatherMetaKind.Droplet,"M8,2.5 C11,6.2 13,9.4 13,11.2 A5,5 0 1 1 3,11.2 C3,9.4 5,6.2 8,2.5 Z"),
-            // 降水四型用纯符号，不套云：雨=水滴、雪=六角雪花、冰=菱形冰粒、混合=水滴+雪花。
             (WeatherMetaKind.Rain,"M3,8 A2.4,2.4 0 0 1 3.8,3.4 A3.4,3.4 0 0 1 10.3,3.6 A2.3,2.3 0 1 1 12,8 Z M5,10 L3.5,13 M9,10.5 L7.5,14 M13,10 L11.5,13"),
             (WeatherMetaKind.Snow,"M8,2.5 V13.5 M3.2,5.25 L12.8,10.75 M3.2,10.75 L12.8,5.25 M6,4 L8,2.5 L10,4 M6,12 L8,13.5 L10,12 M2.2,6.98 L3.2,5.25 L4.2,3.52 M11.8,12.48 L12.8,10.75 L13.8,9.02 M4.2,12.48 L3.2,10.75 L2.2,9.02 M13.8,6.98 L12.8,5.25 L11.8,3.52"),
             (WeatherMetaKind.Ice,"M8,2.5 L13,8 L8,13.5 L3,8 Z M8,2.5 V13.5 M3,8 H13"),

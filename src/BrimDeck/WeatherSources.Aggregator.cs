@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text.Json;
 using BrimDeck.Core;
 
@@ -93,7 +93,7 @@ internal static class WeatherAggregator
     private static WeatherSnapshot Merge(City city, IReadOnlyDictionary<WeatherDomain, IWeatherSource?> owners, Dictionary<string, WeatherPart> parts)
     {
         // 以城市当地日期为中心：查询国外城市时，“今天”不能按用户所在时区算。
-        string? zone = parts.Values.Select(part => part.TimeZone).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+        string? zone = city.TimeZoneId ?? parts.Values.Select(part => part.TimeZone).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
         var today = LocalToday(zone, city);
         var dates = Enumerable.Range(-10, 24).Select(offset => today.AddDays(offset)).ToArray();
         var dayMap = dates.ToDictionary(date => date.ToString("yyyy-MM-dd"), _ => new DayPoint());
@@ -220,6 +220,12 @@ internal static class WeatherAggregator
                 && int.TryParse(hour.Time.Length >= 13 ? hour.Time.Substring(11, 2) : "", out int hourOfDay) && hourOfDay >= 18);
             if (night?.Code is { } code) point.NightCode = code;
         }
+        var localNow = DateTimeOffset.UtcNow.ToOffset(ClockOffset(zone, city)).DateTime;
+        bool daylight = current.IsDay ?? (localNow.Hour is >= 6 and < 18);
+        if (dayMap.TryGetValue(localNow.ToString("yyyy-MM-dd"), out var localDay)
+            && DateTime.TryParse(localDay.Sunrise, out var sunrise) && DateTime.TryParse(localDay.Sunset, out var sunset)
+            && sunrise.Date == localNow.Date && sunset.Date == localNow.Date && sunrise < sunset)
+            daylight = localNow >= sunrise && localNow < sunset;
         var snapshot = new WeatherSnapshot
         {
             Name = city.Name,
@@ -247,7 +253,7 @@ internal static class WeatherAggregator
             PrecipRateMmH = current.PrecipRateMmH ?? double.NaN,
             PrecipType = current.PrecipType ?? "",
             WeatherCode = current.Code ?? 0,
-            IsDay = current.IsDay ?? (DateTime.Now.Hour is >= 6 and < 18),
+            IsDay = daylight,
             ConditionText = current.Condition ?? "",
             Aqi = air?.Aqi ?? -1,
             AqiGlobal = air?.AqiGlobal ?? -1,
@@ -408,7 +414,7 @@ internal static class WeatherAggregator
         if (target.WindDir is null && source.WindDir is not null) { target.WindDir = source.WindDir; }
         any |= Mark(Set<int>(ref target.Humidity, source.Humidity), "d_humidity");
         any |= Mark(Set<double>(ref target.PressureHpa, source.PressureHpa), "d_pressure");
-        // 天文（日出日落、月升月落、月相）随每日预报一起返回，是 Daily 的普通字段。
+        // 天文（日升日落、月升月落、月相）随每日预报一起返回，是 Daily 的普通字段。
         bool FillString(ref string? field, string? value) { if (field is not null || value is null) return false; field = value; return true; }
         any |= Mark(FillString(ref target.Sunrise, source.Sunrise) | FillString(ref target.Sunset, source.Sunset), "d_sun");
         // 晨昏蒙影与太阳正午/午夜、月过中天/月下点：和风 astro 独有的扩展时刻，同为 Daily 字段。
@@ -445,15 +451,9 @@ internal static class WeatherAggregator
         return DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(Geo.UtcOffsetHours(city))).Date;
     }
     // 城市当地的「现在」：逐时窗口锚点按当地时钟算，查询国外城市时不能用用户本地时间。
-    private static DateTimeOffset LocalNow(string? zone)
-    {
-        if (string.IsNullOrWhiteSpace(zone)) return DateTimeOffset.Now;
-        try { return TimeZoneInfo.ConvertTime(DateTimeOffset.Now, TimeZoneInfo.FindSystemTimeZoneById(zone)); }
-        catch { return DateTimeOffset.Now; }
-    }
-    // 城市时钟偏移（分钟）：优先用来源给的时区名（能带夏令时），拿不到就按经纬度估算，国内固定 +8。
     private static TimeSpan ClockOffset(string? zone, City city)
-        => TimeSpan.FromMinutes(string.IsNullOrWhiteSpace(zone) ? Geo.UtcOffsetHours(city) * 60 : LocalNow(zone).Offset.TotalMinutes);
+        => zone is not null && TimeZoneInfo.TryFindSystemTimeZoneById(zone, out var info)
+            ? info.GetUtcOffset(DateTimeOffset.UtcNow) : TimeSpan.FromHours(Geo.UtcOffsetHours(city));
     // 按快照自带的偏移还原城市时钟：界面与覆盖判定用同一份，不会两边算出不同的「现在」。
     private static DateTimeOffset SnapshotClock(WeatherSnapshot snapshot)
         => snapshot.UtcOffsetMinutes is > -1440 and < 1440

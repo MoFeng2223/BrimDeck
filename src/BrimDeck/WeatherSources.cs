@@ -19,7 +19,7 @@ internal interface IWeatherSource
 {
     WeatherSourceInfo Info { get; }
     bool CanServe(City city, WeatherSettings settings);
-    // need 是本次真正缺的域：来源只请求覆盖这些域的接口，不必为一个日出日落把逐时和空气一起拉回来。
+    // need 是本次真正缺的域：来源只请求覆盖这些域的接口，不必为一个日升日落把逐时和空气一起拉回来。
     Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token);
 }
 

@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text.Json;
 using BrimDeck.Core;
 
@@ -15,7 +15,7 @@ internal sealed class HeFengSource : IWeatherSource
     public bool CanServe(City city, WeatherSettings settings) => settings.HeFengKey.Trim().Length > 0 && settings.HeFengHost.Trim().Length > 0;
 
     // 一次请求要用到的公共参数：坐标只保留两位小数（v1 只认这个精度）。
-    private sealed record Context(string Host, string Key, City City)
+    private sealed record Context(string Host, string Key, City City, WeatherSettings Settings)
     {
         public string Lat => City.Latitude.ToString("0.00", CultureInfo.InvariantCulture);
         public string Lon => City.Longitude.ToString("0.00", CultureInfo.InvariantCulture);
@@ -31,7 +31,7 @@ internal sealed class HeFengSource : IWeatherSource
         // Key 随请求头明文传输，一律强制 HTTPS：用户填 http:// 也升级，避免 Key 在明文连接里裸奔。
         host = host.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ? "https://" + host[7..]
              : host.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ? host : "https://" + host;
-        var context = new Context(host, settings.HeFengKey.Trim(), city);
+        var context = new Context(host, settings.HeFengKey.Trim(), city, settings);
         // 历史单独占一段：时光机只认 LocationID、一天一次请求，挂在独立的第二轮，不混进首屏。
         // 延后轮次可能把历史与预警/指数等一起送来，这里按需拆分，互不干扰。
         bool wantHistory = need.Contains(WeatherDomain.History);
@@ -116,7 +116,7 @@ internal sealed class HeFengSource : IWeatherSource
     // Key 走 X-QW-Api-Key 请求头：比放在查询字符串里安全，也避免同时使用两种认证方式。
     private static async Task<string?> SendAsync(Context context, string url, CancellationToken token)
     {
-        var result = await WeatherHttp.GetAsync("hefeng", url, token, request => request.Headers.TryAddWithoutValidation("X-QW-Api-Key", context.Key));
+        var result = await WeatherHttp.GetAsync("hefeng", url, token, request => request.Headers.TryAddWithoutValidation("X-QW-Api-Key", context.Key), limits: context.Settings);
         return result.Body;
     }
 
@@ -191,6 +191,8 @@ internal sealed class HeFengSource : IWeatherSource
                 PressureHpa = Json.Number(daily, "pressure"),
                 Sunrise = Clock("sunrise"),
                 Sunset = Clock("sunset"),
+                Moonrise = Clock("moonrise"),
+                Moonset = Clock("moonset"),
                 MoonPhase = Json.Text(daily, "moonPhase")
             };
             if (Json.Get(root, "weatherHourly") is { ValueKind: JsonValueKind.Array } hourly)
@@ -277,12 +279,12 @@ internal sealed class HeFengSource : IWeatherSource
         => Percent(root, name) is { } value ? (int)Math.Round(value) : null;
 
     // v1 时间默认是 UTC；带 Z 的按城市时区折算，已带偏移（localTime=true）的直接用。
-    private static DateTimeOffset? Stamp(string? raw, int offsetHours)
+    private static DateTimeOffset? Stamp(string? raw, City city)
     {
         if (string.IsNullOrWhiteSpace(raw)) return null;
         if (!DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var stamp)) return null;
-        bool utc = raw.EndsWith('Z') || raw.EndsWith("+00:00", StringComparison.Ordinal);
-        return utc ? stamp.ToOffset(TimeSpan.FromHours(offsetHours)) : stamp;
+        bool utc = raw.EndsWith('Z');
+        return utc ? stamp.ToOffset(TimeSpan.FromHours(Geo.UtcOffsetHours(city, stamp))) : stamp;
     }
 
     // v1 只给 compass 代码（sw/nne…），界面按 8 方位归并；原始度数仍保留在 WindDirDeg 里。
@@ -313,7 +315,7 @@ internal sealed class HeFengSource : IWeatherSource
             var wind = Json.Get(root, "wind");
             var direction = wind is { } w && Json.Get(w, "direction") is { } dir ? dir : (JsonElement?)null;
             var precipitation = Json.Get(root, "precipitation");
-            int offset = Geo.UtcOffsetHours(city);
+            double offset = Geo.UtcOffsetHours(city);
             return new CurrentPart
             {
                 Temperature = TemperatureC(root, "temperature"),
@@ -348,11 +350,10 @@ internal sealed class HeFengSource : IWeatherSource
         {
             using var doc = JsonDocument.Parse(body);
             if (Json.Get(doc.RootElement, "hours") is not { } hoursBox || hoursBox.ValueKind != JsonValueKind.Array) return null;
-            int offset = Geo.UtcOffsetHours(city);
             var hours = new List<HourPoint>();
             foreach (var item in hoursBox.EnumerateArray())
             {
-                if (Stamp(Json.Text(item, "forecastTime"), offset) is not { } stamp) continue;
+                if (Stamp(Json.Text(item, "forecastTime"), city) is not { } stamp) continue;
                 var wind = Json.Get(item, "wind");
                 var direction = wind is { } w && Json.Get(w, "direction") is { } dir ? dir : (JsonElement?)null;
                 var precipitation = Json.Get(item, "precipitation");
@@ -391,11 +392,10 @@ internal sealed class HeFengSource : IWeatherSource
         {
             using var doc = JsonDocument.Parse(body);
             if (Json.Get(doc.RootElement, "days") is not { } daysBox || daysBox.ValueKind != JsonValueKind.Array) return null;
-            int offset = Geo.UtcOffsetHours(city);
             var days = new List<DayPoint>();
             foreach (var item in daysBox.EnumerateArray())
             {
-                if (Stamp(Json.Text(item, "forecastStartTime"), offset) is not { } stamp) continue;
+                if (Stamp(Json.Text(item, "forecastStartTime"), city) is not { } stamp) continue;
                 var day = new DayPoint
                 {
                     Date = stamp.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
@@ -448,22 +448,22 @@ internal sealed class HeFengSource : IWeatherSource
                 if (Json.Get(item, "astro") is { } astro)
                 {
                     // 界面按 ISO 时刻取第 11–16 位显示，这里保持与 Open-Meteo 一致的完整格式。
-                    day.Sunrise = Stamp(Json.Text(astro, "sunrise"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    day.Sunset = Stamp(Json.Text(astro, "sunset"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.Sunrise = Stamp(Json.Text(astro, "sunrise"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.Sunset = Stamp(Json.Text(astro, "sunset"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
                     day.MoonPhase = Json.Text(astro, "moonPhase");
-                    day.Moonrise = Stamp(Json.Text(astro, "moonrise"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    day.Moonset = Stamp(Json.Text(astro, "moonset"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.Moonrise = Stamp(Json.Text(astro, "moonrise"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.Moonset = Stamp(Json.Text(astro, "moonset"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
                     // 晨昏蒙影三级（天文学→航海→民用，由暗到亮）、太阳正午/午夜、月过中天/月下点。
-                    day.AstronomicalDawn = Stamp(Json.Text(astro, "astronomicalDawn"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    day.NauticalDawn = Stamp(Json.Text(astro, "nauticalDawn"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    day.CivilDawn = Stamp(Json.Text(astro, "civilDawn"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    day.CivilDusk = Stamp(Json.Text(astro, "civilDusk"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    day.NauticalDusk = Stamp(Json.Text(astro, "nauticalDusk"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    day.AstronomicalDusk = Stamp(Json.Text(astro, "astronomicalDusk"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    day.SolarNoon = Stamp(Json.Text(astro, "solarNoon"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    day.SolarMidnight = Stamp(Json.Text(astro, "solarMidnight"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    day.MoonTransit = Stamp(Json.Text(astro, "moonTransit"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    day.MoonUnderfoot = Stamp(Json.Text(astro, "moonUnderfoot"), offset)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.AstronomicalDawn = Stamp(Json.Text(astro, "astronomicalDawn"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.NauticalDawn = Stamp(Json.Text(astro, "nauticalDawn"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.CivilDawn = Stamp(Json.Text(astro, "civilDawn"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.CivilDusk = Stamp(Json.Text(astro, "civilDusk"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.NauticalDusk = Stamp(Json.Text(astro, "nauticalDusk"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.AstronomicalDusk = Stamp(Json.Text(astro, "astronomicalDusk"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.SolarNoon = Stamp(Json.Text(astro, "solarNoon"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.SolarMidnight = Stamp(Json.Text(astro, "solarMidnight"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.MoonTransit = Stamp(Json.Text(astro, "moonTransit"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    day.MoonUnderfoot = Stamp(Json.Text(astro, "moonUnderfoot"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
                 }
                 days.Add(day);
             }
@@ -539,11 +539,10 @@ internal sealed class HeFengSource : IWeatherSource
         {
             using var doc = JsonDocument.Parse(body);
             if (Json.Get(doc.RootElement, "hours") is not { } hoursBox || hoursBox.ValueKind != JsonValueKind.Array) return null;
-            int offset = Geo.UtcOffsetHours(city);
             var values = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var item in hoursBox.EnumerateArray())
             {
-                if (Stamp(Json.Text(item, "forecastTime"), offset) is not { } stamp) continue;
+                if (Stamp(Json.Text(item, "forecastTime"), city) is not { } stamp) continue;
                 if (Json.Get(item, "indexes") is not { } indexesBox || indexesBox.ValueKind != JsonValueKind.Array) continue;
                 var chosen = ChooseAirIndex(indexesBox.EnumerateArray().ToArray());
                 if (chosen.ValueKind != JsonValueKind.Object || Json.Number(chosen, "aqi") is not { } aqi) continue;
