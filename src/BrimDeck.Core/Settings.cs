@@ -906,6 +906,8 @@ public sealed class DeckSettings
     // The applications listed for a new user (DefaultNoticeApps) have been added: they are added once, so one the user removes
     // stays removed. False in a file saved before the list existed, whose rules then gain them.
     public bool NoticeAppsListed { get; set; }
+    // The mailboxes whose new mail comes as notices (MailCenter); what signs each in is kept in secrets.dat, not here.
+    public List<BrimDeck.Core.Mail.MailAccount> MailAccounts { get; set; } = [];
     // The named profiles (DeckProfile, Profiles). The current one's settings are the ordinary members of this class; ReturnProfile is
     // the profile a rule replaced while it holds (ProfileRule), to come back to when it stops holding or BrimDeck starts again.
     public List<DeckProfile> Profiles { get; set; } = [];
@@ -1024,6 +1026,7 @@ public sealed class DeckSettings
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.AgentHarnessesFound = [.. AgentHarnessesFound ?? []];
+        copy.MailAccounts = (MailAccounts ?? []).Select(account => account.Copy()).ToList();
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
         copy.FullscreenRules = FullscreenRules.Select(rule => rule with { }).ToList();
         copy.NoticeWslDistros = [.. NoticeWslDistros ?? []];
@@ -1039,6 +1042,7 @@ public sealed class DeckSettings
     {
         AgentWaitMinutes = Math.Clamp(AgentWaitMinutes, 1, (int)(BrimDeck.Protocol.NoticeProtocol.MaxTimeoutMs / 60000));
         AgentHarnessesFound = [.. (AgentHarnessesFound ?? []).Where(id => id is { Length: > 0 }).Distinct(StringComparer.Ordinal)];
+        MailAccounts = BrimDeck.Core.Mail.MailAccount.Normalize(MailAccounts);
         // Saved per-theme choices: one entry per theme id as the panel names it, each with its lists present.
         ThemeChoices = (ThemeChoices ?? []).Where(pair => pair.Value is not null && pair.Key.Length > 0).GroupBy(pair => PanelThemes.NormalizeId(pair.Key))
             .ToDictionary(group => group.Key, group =>

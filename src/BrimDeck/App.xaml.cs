@@ -32,6 +32,8 @@ public partial class App : Application
     // Dynamic notices (NoticeCenter): created before the panels, which take their turns on the island through it.
     internal NoticeCenter Notices { get; private set; } = null!;
     internal AgentCenter Agents { get; private set; } = null!;
+    // The connected mailboxes, whose new mail comes as notices (MailCenter).
+    internal MailCenter Mail { get; private set; } = null!;
     // The planner's events, to-dos and notes (agenda.json), shared by every panel.
     internal AgendaCenter Agenda { get; private set; } = null!;
     // The main panel. It owns the tray icon, reads the usage data and takes the settings preview; every other chosen
@@ -145,6 +147,7 @@ public partial class App : Application
             kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName), cursorPriceCache: Path.Combine(folder, CursorPrices.FileName));
         Notices = new NoticeCenter(this);
         Agents = new AgentCenter(Notices);
+        Mail = new MailCenter(this);
         Agenda = new AgendaCenter(Store.DirectoryPath, Dispatcher);
         // A source read in the background (Qoder) that ended after its round asks for another round to show it; the first reading
         // of a source always does, a later one only while the panel syncs by itself. That round only shows the result: it does
@@ -164,6 +167,7 @@ public partial class App : Application
         // used to skip every later one, which left a panel with no tray icon, no saving and no answer to a second start.
         Step(Deck.Show);
         Step(Notices.ApplySettings);
+        Step(Mail.ApplySettings);
         Step(InitializeHotkeys);
         Step(() => _dataKey = DataKey());
         Step(ApplyProfileRules);
@@ -296,6 +300,12 @@ public partial class App : Application
                 { _settingsWindow?.SaveStatus(Loc.T("密钥文件无法更新，请检查本机设置目录后重试。", "The key file could not be updated. Check the local settings folder and try again."), true); return; }
             }
         }
+        // A mailbox that was removed takes its saved code or sign-in with it.
+        foreach (var removed in Settings.MailAccounts.Where(account => settings.MailAccounts.All(next => next.Id != account.Id)).ToList())
+        {
+            try { Secrets.Delete(removed.Id); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { NoticeCenter.Log(ex); }
+        }
         bool syncEnabled = settings.UsageAutoSync && !Settings.UsageAutoSync;
         // A panel whose collapsed style changes morphs its surface into the new form (MainWindow.MorphShape).
         var styles = Decks.ToDictionary(deck => deck, deck => deck.PanelSettings.Style);
@@ -338,6 +348,7 @@ public partial class App : Application
         UpdateMonitorExtras();
         ApplyToDecks(styles);
         Notices.ApplySettings();
+        Mail.ApplySettings();
         var dataKey = DataKey(); bool dataChanged = dataKey != _dataKey; _dataKey = dataKey;
         QueueSave();
         CollapsedChanged();
@@ -707,7 +718,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         // The notices save their last state before the settings are written for the last time.
-        Exiting = true; Lifetime.Cancel(); Notices?.Dispose(); Agenda?.Dispose(); _save.Stop(); _trim?.Stop(); _release?.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        Exiting = true; Lifetime.Cancel(); Mail?.Dispose(); Notices?.Dispose(); Agenda?.Dispose(); _save.Stop(); _trim?.Stop(); _release?.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
         ClipboardSync?.Dispose(); DropHelper?.Dispose();
         if (Shelf is not null) { Shelf.Exit(); Shelf.Dispose(); }
         Media?.Dispose(); _restingMedia?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Devices?.Dispose(); DeviceReadStore.Finish();

@@ -41,6 +41,7 @@ try
     NoticeLevelTests.Run(root, Check);
     BrimCliTests.Run(Check);
     AgentHookTests.Run(Check);
+    await MailTests.Run(Check);
     CommandPathTests.Run(Check);
     NoticeCodeTests.Run(root, Check);
     RowBatchesTests.Run(Check);
