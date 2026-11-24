@@ -1,0 +1,23 @@
+src/BrimDeck/MainWindow.PageMore.cs
+  s_cb51ecb1e34e9c::t_bfbe454fab0021 1-166
+tests/BrimDeck.WindowsTests/PageCapsuleTests.cs
+  s_cb51ecb1e34e9c::t_afeebbb5a5426d 29-31
+src/BrimDeck/MainWindow.PageSwitch.cs
+  s_cb51ecb1e34e9c::t_d5a9acdc3a4c1d 67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "81c848abc33b826207abafb354a62f9e990c82a6",
+  "prompts": {},
+  "sessions": {
+    "s_cb51ecb1e34e9c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "caedc478-f00e-482a-ba8a-260734b36f8d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
