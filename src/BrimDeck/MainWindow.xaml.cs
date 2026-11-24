@@ -122,7 +122,7 @@ public partial class MainWindow : Window
     // The page built while it waited is not reused (RenderUsage compares its build key, which a failed read does not change).
     internal void FirstReadEnded() { if (_firstReadEnded) return; _firstReadEnded = true; _usageBuilt = null; }
 
-    private sealed record CompactAlertInfo(AppEntry Entry, string Name, string Label, double Used, DateTimeOffset? ResetAt);
+    private sealed record CompactAlertInfo(AppEntry Entry, string Name, string Label, double Used, DateTimeOffset? ResetAt, string? Detail = null, DeviceBattery? Device = null);
 
     public MainWindow(App app, MainWindow? lead = null)
     {
@@ -173,7 +173,7 @@ public partial class MainWindow : Window
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); else if (OffPeakChanged()) RenderCompact(); if (_lead is null) _app.CheckUpdatesIfDue(); };
         _seconds.Tick += (_, _) => { if (_compactClock is not null) _compactClock.Time = DateTime.Now; _seconds.Interval = SecondDelay(DateTime.Now); };
-        _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false); };
+        _alertTimer.Tick += (_, _) => ClearAlert();
         // A new foreground context closes the panel directly (ApplySettings lays it out collapsed), so SetExpanded never sees the
         // panel turn from open to closed: what follows a closing is done here (PanelClosed), as SetExpanded does.
         _host.ContextChanged += context =>
@@ -813,13 +813,31 @@ public partial class MainWindow : Window
 
     internal void ShowAlert(AppEntry entry, string label, double used, DateTimeOffset? resetAt)
         => ShowAlert(new CompactAlertInfo(entry, entry.Name, label + " ", used, resetAt));
-    internal void ClearAlert() { _alertTimer.Stop(); _alert = null; RenderCompact(); }
+    internal void ClearAlert()
+    {
+        _alertTimer.Stop();
+        bool close = _alertOpenedPanel;
+        _alertOpenedPanel = false;
+        _alert = null;
+        HideAlertPanel();
+        RenderCompact();
+        if (close && _expanded && !_preview) SetExpanded(false);
+        else if (!_expanded) SetExpanded(false);
+    }
     // No alert while the panel is suppressed (full-screen rule or hidden by the user): it would not be seen, and it must not
-    // appear later when the panel shows again.
+    // appear later when the panel shows again. With ExpandedQuotaAlerts, opens a short panel (not a page tab); otherwise the
+    // collapsed notice.
     private void ShowAlert(CompactAlertInfo alert)
     {
         if (IsSuppressed) return;
         _alert = alert; _alertTimer.Stop(); _alertTimer.Start();
+        if (AlertOpensPanel)
+        {
+            if (!_alertOpenedPanel) _alertOpenedPanel = !_expanded;
+            ShowAlertPanel(alert);
+            SetExpanded(true);
+            return;
+        }
         RenderCompact();
         if (!_expanded && !IsSuppressed) SetExpanded(false);
     }
@@ -892,9 +910,12 @@ public partial class MainWindow : Window
         // whether the surface was last laid out as the line is kept apart.
         bool fromIndicator = _laidOutIndicator && !expanded && !line;
         _laidOutIndicator = indicator;
-        double wantedHeight = DeckPages.Size(Settings, CurrentPage).Height;
+        bool alerting = expanded && AlertContent.Visibility == Visibility.Visible;
+        var alertSize = AlertPageSize;
+        double contentWidth = alerting ? alertSize.Width : _pageWidth;
+        double wantedHeight = alerting ? alertSize.Height : DeckPages.Size(Settings, CurrentPage).Height;
         var panel = PanelFor(wantedHeight);
-        double panelTop = panel.Top, headerExtra = panel.HeaderExtra;
+        double panelTop = panel.Top, headerExtra = alerting ? 0 : panel.HeaderExtra;
         double pageHeight = PageHeight(wantedHeight, panel);
         // The page as drawn, at the panel's scale; the content is laid out at its unscaled size (ContentCanvas below).
         // Width and height below are the island's in the edge's frame: along the edge and away from it. On a side edge the page's
@@ -902,9 +923,9 @@ public partial class MainWindow : Window
         bool across = _frame.Across;
         // A floating panel, and one on another edge than the top, is taller than its page by headerExtra, the space above its header;
         // on a side edge that runs along the edge.
-        double pageWidth = across ? pageHeight * _scale + headerExtra : _pageWidth * _scale, widestPage = across ? pageWidth : _widestPage * _scale;
+        double pageWidth = across ? pageHeight * _scale + headerExtra : contentWidth * _scale, widestPage = across ? pageWidth : (alerting ? pageWidth : _widestPage * _scale);
         double width = expanded ? pageWidth : shape.Surface.Width;
-        double height = expanded ? (across ? _pageWidth * _scale : pageHeight * _scale + headerExtra) : shape.Surface.Height;
+        double height = expanded ? (across ? contentWidth * _scale : pageHeight * _scale + headerExtra) : shape.Surface.Height;
         // Every compact style opens into the same panel, hanging from the screen edge or, below a lowered capsule, rounded all round.
         double panelRadius = PanelRadius;
         var radius = expanded ? panelTop > 0 ? new CornerRadius(panelRadius) : new CornerRadius(0, 0, panelRadius, panelRadius)
@@ -926,13 +947,13 @@ public partial class MainWindow : Window
         if (!expanded && KeepBootDot(shape)) return;
         Island.BorderThickness = new Thickness(0);
         // On a side edge the page keeps its width as well (MainWindow.Edge.cs).
-        if (across) ExpandedContent.Width = _pageWidth;
+        if (across) ExpandedContent.Width = contentWidth;
         ExpandedContent.Height = pageHeight;
         // The page and its header start headerExtra below the panel's top edge. The header row keeps its own height, so its
         // controls keep their size tier. Collapsing keeps the offset the content had, so it fades out without moving.
         if (expanded) ExpandedContent.Margin = new Thickness(0, headerExtra, 0, 0);
         // Lay out in device-independent pixels. Column typography adapts to its available space.
-        ContentCanvas.Width = _pageWidth;
+        ContentCanvas.Width = contentWidth;
         ContentCanvas.Height = pageHeight;
         // motion-review C1, C4: closing takes three quarters of the set time; a move the keyboard asked for takes 0.6 of it. The
         // open panel changing size in place (a page switch) keeps its own length whatever the setting (PanelMotion.Reshape).

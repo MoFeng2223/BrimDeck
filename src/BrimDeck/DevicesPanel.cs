@@ -82,6 +82,9 @@ public partial class MainWindow
 
     private void DevicesChanged()
     {
+        // An expanded notice owns the page (AlertContent); do not rebuild devices over it. SetExpanded to the notice's size
+        // would otherwise change DevicesKey and RenderDevices would show the page again on top of the card.
+        if (AlertContent.Visibility == Visibility.Visible) return;
         if (!_expanded)
         {
             if (!Settings.ShowsDevices(EffectiveStyle) || _alert is not null) return;
@@ -129,6 +132,7 @@ public partial class MainWindow
     // handover: a page on screen crossfades into the new build; false replaces it at once.
     private void RenderDevices(bool handover = true)
     {
+        if (AlertContent.Visibility == Visibility.Visible) return;
         bool shown = handover && DevicesContent.Visibility == Visibility.Visible && _devicesView is not null && DevicesContent.Children.Contains(_devicesView);
         RefreshStatus();
         UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed;

@@ -797,6 +797,8 @@ public sealed class DeckSettings
     public bool SettingsWindowMaximized { get; set; }
     // Shows the compact notice when a quota rises into the warning or critical level.
     public bool QuotaAlerts { get; set; } = true;
+    // When on, a notice opens a short expanded panel (devices-style card) instead of replacing the collapsed row.
+    public bool ExpandedQuotaAlerts { get; set; }
     // Also reads the Claude Code and Codex CLI session records inside WSL distributions. Off by default: it starts stopped distributions.
     public bool IncludeWsl { get; set; }
     // The named profiles (DeckProfile, Profiles). The current one's settings are the ordinary members of this class; ReturnProfile is
