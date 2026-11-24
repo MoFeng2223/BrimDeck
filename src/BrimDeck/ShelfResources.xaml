@@ -54,6 +54,19 @@
       <Border Height="1" Margin="8,4" Background="{DynamicResource PanelPopupBorder}"/>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
+  <!-- Text on the panel that the pointer can select and copy: a read-only text box drawn as plain text, without a frame, a caret or
+       padding. The selection stays visible while another window has the keyboard. -->
+  <Style x:Key="PanelSelectableText" TargetType="TextBox">
+    <Setter Property="OverridesDefaultStyle" Value="True"/>
+    <Setter Property="IsReadOnly" Value="True"/><Setter Property="IsReadOnlyCaretVisible" Value="False"/><Setter Property="IsTabStop" Value="False"/>
+    <Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="0"/>
+    <Setter Property="CaretBrush" Value="Transparent"/><Setter Property="SelectionBrush" Value="{DynamicResource PanelAccent}"/>
+    <Setter Property="IsInactiveSelectionHighlightEnabled" Value="True"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+    <Setter Property="Cursor" Value="IBeam"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox">
+      <ScrollViewer x:Name="PART_ContentHost" Style="{x:Null}" Focusable="False" Background="Transparent" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden"/>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
   <!-- A text box on the panel: 7 % white with a 1 DIP outline inside, blue while it has the keyboard, as the design sets for input. -->
   <Style x:Key="ShelfTextBox" TargetType="TextBox">
     <Setter Property="OverridesDefaultStyle" Value="True"/>

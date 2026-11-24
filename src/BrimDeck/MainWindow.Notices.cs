@@ -508,6 +508,7 @@ public partial class MainWindow
     private FrameworkElement FocusColumn(Notice notice, NoticeCenter center, DateTimeOffset now)
     {
         var accent = PanelTheme.Readable(center.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)));
+        _focusWords.Clear();
         var column = new Grid { Margin = new Thickness(0, 4, 20, 0), ClipToBounds = false };
         // A faint glow in the color of the picture in front (the sender's avatar, or the application's icon) behind the column, as
         // the music page takes its color from the cover. As wide as the column (and 60 beyond it to the left), not a fixed 420: a glow
@@ -549,22 +550,22 @@ public partial class MainWindow
         if (center.CanOpen(notice))
         {
             hero.Background = Brushes.Transparent; hero.Cursor = Cursors.Hand;
-            hero.MouseLeftButtonUp += (_, e) => { e.Handled = true; _ = OpenFromPage(notice); };
+            // A press on the words selects them instead (SelectableWords).
+            hero.MouseLeftButtonUp += (_, e) => { if (WordsBox(e.OriginalSource) is not null) return; e.Handled = true; _ = OpenFromPage(notice); };
         }
         var who = new StackPanel { Margin = new Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(who, 1); hero.Children.Add(who);
         // The sender's second line (a project, a branch, a session) stands between the source and the time.
-        var source = UI.Fixed(notice.AppName + (notice.Context.Length > 0 ? " · " + notice.Context : "") + " · " + NoticeText.Relative(notice.ReceivedAt, now), 12, 17, UI.Secondary);
-        source.TextTrimming = TextTrimming.CharacterEllipsis;
+        var source = SelectableWords(notice.AppName + (notice.Context.Length > 0 ? " · " + notice.Context : "") + " · " + NoticeText.Relative(notice.ReceivedAt, now), 12, 17, UI.Secondary, line: true);
         who.Children.Add(source);
         // A verification code is hidden wherever the notice shows its words, and a screen reader is told so instead of hearing dots.
         var shown = NoticeCodes.Words(notice, Settings.NoticeCodes);
-        var title = IslandNotice.Directed(UI.Fixed(shown.Title.Length > 0 ? shown.Title : notice.AppName, 19, 25, UI.Primary, FontWeights.SemiBold));
-        title.TextTrimming = TextTrimming.CharacterEllipsis; title.Margin = new Thickness(0, 2, 0, 0);
+        var title = SelectableWords(shown.Title.Length > 0 ? shown.Title : notice.AppName, 19, 25, UI.Primary, line: true, FontWeights.SemiBold);
+        title.Margin = new Thickness(0, 2, 0, 0);
         if (shown.HasCode && notice.Title.Length > 0) AutomationProperties.SetName(title, shown.SpokenTitle);
         who.Children.Add(title);
         string context = NoticeFormOpen(notice) && NoticeText.Summary(shown.Body) is { Length: > 0 } summary ? summary : notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? NoticeText.CategoryName(notice.Category) : Loc.T("来源已关闭这条通知", "Closed at the source");
-        if (context.Length > 0) { var ctx = UI.Fixed(context, 12, 17, UI.Tertiary); ctx.TextTrimming = TextTrimming.CharacterEllipsis; ctx.Margin = new Thickness(0, 2, 0, 0); who.Children.Add(ctx); }
+        if (context.Length > 0) { var ctx = SelectableWords(context, 12, 17, UI.Tertiary, line: true); ctx.Margin = new Thickness(0, 2, 0, 0); who.Children.Add(ctx); }
 
         // The buttons, at the foot of the column.
         var buttons = FocusButtons(notice, center);
@@ -579,7 +580,7 @@ public partial class MainWindow
         if (NoticeTimeLine(notice, now) is { } timeLine) { timeLine.FontSize = 13; timeLine.FontWeight = FontWeights.SemiBold; timeLine.Margin = new Thickness(0, 0, 0, 4); words.Children.Add(timeLine); }
         if (notice.Body.Length > 0)
         {
-            var body = IslandNotice.Directed(new TextBlock { Text = shown.Body, FontFamily = UI.PanelFont, FontSize = group.Count > 1 ? 14 : 13, LineHeight = group.Count > 1 ? 22 : 21, Foreground = UI.Brush(UI.Primary), TextWrapping = TextWrapping.Wrap });
+            var body = SelectableWords(shown.Body, group.Count > 1 ? 14 : 13, group.Count > 1 ? 22 : 21, UI.Primary, line: false);
             if (shown.HasCode) AutomationProperties.SetName(body, shown.SpokenBody);
             words.Children.Add(body);
         }
@@ -603,20 +604,70 @@ public partial class MainWindow
         }
         var scroll = new ScrollViewer { Content = words, Margin = new Thickness(0, 14, 0, 0), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false, PanningMode = PanningMode.VerticalOnly,
             Background = Brushes.Transparent };
-        // A right click on the words offers to copy them (the panel does not take the keyboard, so there is no selection to copy).
-        scroll.MouseRightButtonUp += (_, e) =>
+        // A right click on the words or on the lines beside the icon offers to copy what is selected, the whole text and the title.
+        // Also after a text box has marked the click handled, and marking it handled here keeps the text box's own menu away.
+        void OfferCopy(object sender, MouseButtonEventArgs e)
         {
-            if (CopyText(notice, group.Count > 0 ? group : [notice]) is not { Length: > 0 } text) return;
+            string selected = WordsBox(e.OriginalSource) is { SelectionLength: > 0 } picked ? picked.SelectedText : "";
+            var text = CopyText(notice, group.Count > 0 ? group : [notice]);
+            if (selected.Length == 0 && text is not { Length: > 0 }) return;
             e.Handled = true;
             var menu = NewMenu();
-            menu.Items.Add(Item(Loc.T("复制内容", "Copy text"), () => CopyWords(text)));
+            if (selected.Length > 0) menu.Items.Add(Item(Loc.T("复制所选文字", "Copy selection"), () => CopyWords(selected)));
+            if (text is { Length: > 0 }) menu.Items.Add(Item(Loc.T("复制内容", "Copy text"), () => CopyWords(text)));
             if (shown.Title.Length > 0) menu.Items.Add(Item(Loc.T("复制标题", "Copy title"), () => CopyWords(shown.Title)));
-            OpenMenu(menu, scroll, atPointer: true);
-        };
+            OpenMenu(menu, (FrameworkElement)sender, atPointer: true);
+        }
+        scroll.AddHandler(MouseRightButtonUpEvent, new MouseButtonEventHandler(OfferCopy), true);
+        hero.AddHandler(MouseRightButtonUpEvent, new MouseButtonEventHandler(OfferCopy), true);
         // A long text fades at the column's foot rather than being cut mid line.
         NoticeFade.Foot(scroll, WordsFadeHeight);
         stack.Children.Add(scroll);
         return column;
+    }
+
+    // Words of the focus that the pointer can select (PanelSelectableText), drawn as the text they replace. line: one line of the
+    // given height, cut at the column's edge (a text box has no ellipsis; a drag along it brings the rest into view); otherwise
+    // wrapped. A press on them gives the panel the keyboard, so Ctrl+C copies the selection.
+    private TextBox SelectableWords(string text, double size, double lineHeight, string color, bool line, FontWeight? weight = null)
+    {
+        var box = new TextBox
+        {
+            Style = (Style)FindResource("PanelSelectableText"), Text = text, FontFamily = UI.PanelFont, FontSize = size, FontWeight = weight ?? FontWeights.Normal,
+            Foreground = UI.Brush(color), TextWrapping = line ? TextWrapping.NoWrap : TextWrapping.Wrap,
+            FlowDirection = NoticeText.RightToLeft(text) ? FlowDirection.RightToLeft : FlowDirection.LeftToRight
+        };
+        TextBlock.SetLineHeight(box, lineHeight); TextBlock.SetLineStackingStrategy(box, LineStackingStrategy.BlockLineHeight);
+        if (line) { box.Height = lineHeight; box.VerticalContentAlignment = VerticalAlignment.Center; }
+        // One selection at a time: each text box keeps its own, and shows it after losing the keyboard (PanelSelectableText), so a
+        // press in one clears the others.
+        box.PreviewMouseLeftButtonDown += (_, _) =>
+        {
+            TakeKeyboardForWords();
+            foreach (var other in _focusWords) if (!ReferenceEquals(other, box) && other.SelectionLength > 0) other.Select(0, 0);
+        };
+        _focusWords.Add(box);
+        return box;
+    }
+
+    // The focus column's selectable words (SelectableWords), from the column built last.
+    private readonly List<TextBox> _focusWords = [];
+
+    // The panel opens without the keyboard (PanelKeyboard). A press on the words takes it, before the text box handles the press,
+    // so the selection can be copied with Ctrl+C; the window that had it gets it back when the panel closes. Under mouse
+    // pass-through without the keyboard (PanelTakesKeyboard) the panel keeps out of it, and the right-click menu still copies.
+    private void TakeKeyboardForWords()
+    {
+        if (IsActive || !PanelTakesKeyboard) return;
+        if (PanelKeys.Take()) _app.Shelf.TypingTarget = PanelKeys.Previous;
+    }
+
+    // The text box of the focus's words that holds an element the pointer is on, or null.
+    private static TextBox? WordsBox(object? source)
+    {
+        for (var element = source as DependencyObject; element is not null; element = element is Visual ? VisualTreeHelper.GetParent(element) : LogicalTreeHelper.GetParent(element))
+            if (element is TextBox box) return box;
+        return null;
     }
 
     // The status line's words and its dot's color (null for no dot).
