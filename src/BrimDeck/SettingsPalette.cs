@@ -17,6 +17,8 @@ internal sealed record SettingsPalette(bool Dark)
     public string Divider => Dark ? "#2D2D33" : "#E0E0E6";
     public string RowDivider => Dark ? "#242429" : "#EDEDF1";
     public string Inset => Dark ? "#25252B" : "#EFF0F4";
+    // A segmented control's track on an inset card (the clock's options): a step deeper than the card, as the inset is below the surface.
+    public string InsetTrack => Dark ? "#18181C" : "#E3E4EA";
     public string Input => Dark ? "#202026" : "#FFFFFF";
     public string Popup => Dark ? "#222227" : "#FCFCFD";
     public string Border => Dark ? "#42424B" : "#CED1DA";

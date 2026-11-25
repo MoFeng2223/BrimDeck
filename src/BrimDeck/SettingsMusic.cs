@@ -12,7 +12,8 @@ namespace BrimDeck;
 public sealed partial class SettingsWindow
 {
     // keepPreview marks the segments alone as preview controls, so a press on the rest of the row still ends the preview.
-    private FrameworkElement MusicChoice<T>(string title, T selected, (T Value, string Label)[] options, Action<T> change, bool enabled = true, bool keepPreview = false, string? help = null, double width = 292, string? group = null) where T : notnull
+    // onCard: the row sits on an inset card (SegmentBorder).
+    private FrameworkElement MusicChoice<T>(string title, T selected, (T Value, string Label)[] options, Action<T> change, bool enabled = true, bool keepPreview = false, string? help = null, double width = 292, string? group = null, bool onCard = false) where T : notnull
     {
         var strip = new UniformGrid { Columns = options.Length, Width = width, IsEnabled = enabled };
         if (keepPreview) KeepPreview(strip);
@@ -22,7 +23,7 @@ public sealed partial class SettingsWindow
             AutomationProperties.SetName(choice, title + " " + option.Label); choice.Checked += (_, _) => change(option.Value); strip.Children.Add(choice);
         }
         // Only the options are turned off: the row's info mark still shows its description on hover.
-        var segments = SegmentBorder(strip); segments.IsEnabled = enabled;
+        var segments = SegmentBorder(strip, onCard); segments.IsEnabled = enabled;
         return Row(title, segments, help: help is null ? null : () => help);
     }
     // The options under the style cards belong to the chosen style. Choosing another card slides the current options

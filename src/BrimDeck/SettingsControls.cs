@@ -83,8 +83,9 @@ public sealed partial class SettingsWindow
     // choice (theme, quick size) can still slide the highlight from the old option instead of jumping.
     private readonly Dictionary<string, (double X, DateTime Pressed)> _segmentPresses = [];
 
-    // The selected option's fill is one shared highlight that slides between options.
-    private Border SegmentBorder(FrameworkElement content)
+    // The selected option's fill is one shared highlight that slides between options. onCard: the control sits on an inset card,
+    // where a track in the inset's own color would not show.
+    private Border SegmentBorder(FrameworkElement content, bool onCard = false)
     {
         var options = ((Panel)content).Children.OfType<RadioButton>().ToList();
         string group = options.FirstOrDefault()?.GroupName ?? "";
@@ -126,7 +127,7 @@ public sealed partial class SettingsWindow
         // The first size pass places the highlight (and may start a continued slide); later passes only follow resizes.
         host.Loaded += (_, _) => { if (highlight.Visibility != Visibility.Visible) Place(false); };
         host.SizeChanged += (_, _) => { if (move.HasAnimatedProperties) return; Place(false); };
-        return new Border { Child = host, Background = UI.Brush(Inset), CornerRadius = new CornerRadius(7), Padding = new Thickness(3), Margin = new Thickness(0, 4, 0, 4) };
+        return new Border { Child = host, Background = UI.Brush(onCard ? _palette.InsetTrack : Inset), CornerRadius = new CornerRadius(7), Padding = new Thickness(3), Margin = new Thickness(0, 4, 0, 4) };
     }
 
     // A slider and its framed number. With steps, the slider moves through those values (not evenly apart) and a typed number

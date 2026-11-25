@@ -208,6 +208,7 @@ internal sealed partial class Renderer(App app, string output, string language, 
             // Every clock style with the date in each place and format, alone on the notch and beside the rings, and the clock's
             // settings with the date on; for checking.
             if (scenes.Contains("clock-dates")) await ClockDatesScene();
+            if (scenes.Contains("clock-settings")) await ClockSettingsScene();
             if (scenes.Contains("agenda")) await AgendaScene();
             // Memory and the drives showing what is in use and what is free, expanded and collapsed, and the option; for checking.
             // The expanded monitor's grid editor on its settings page, the saved grid and the readings waiting above it; for checking.
@@ -874,6 +875,24 @@ internal sealed partial class Renderer(App app, string output, string language, 
         _settings.NotchClock = false; _settings.NotchMusic = true; _settings.NotchSummary = true;
         _settings.ClockStyle = default; _settings.ClockColor = ClockColor.White; Refresh();
         await Settle();
+    }
+
+    // The clock's options on the collapsed page with the date on, in both settings themes: the date's choices and the style cards
+    // that show it.
+    private async Task ClockSettingsScene()
+    {
+        _settings.ClockSeconds = true; _settings.ClockDate = true; _settings.ClockColor = ClockColor.White; _settings.Clock24Hour = true; _settings.NotchClock = true;
+        foreach (var (position, weekday) in new[] { (ClockDatePosition.Below, ClockWeekday.After), (ClockDatePosition.Right, ClockWeekday.Hidden), (ClockDatePosition.Above, ClockWeekday.Before) })
+        {
+            _settings.ClockDatePosition = position; _settings.ClockWeekday = weekday;
+            foreach (var format in new[] { ClockDateFormat.MonthDaySlash, ClockDateFormat.YearWords })
+            {
+                _settings.ClockDateFormat = format;
+                foreach (var theme in new[] { SettingsTheme.Light, SettingsTheme.Dark })
+                    await SettingsPage($"clock-settings-{position}-{format}-{theme}".ToLowerInvariant(), 1, 2400, prepare: window => ((HashSet<CompactPart>)Program.Field(window, "_openParts")!).Add(CompactPart.Clock), theme: theme);
+            }
+        }
+        _settings.ClockDate = false; _settings.NotchClock = false; _settings.ClockSeconds = false; _settings.ClockStyle = default;
     }
 
     // The collapsed clock at 2026-11-22 14:32:08 (a Sunday) with the date: every style in each place, the formats and weekday

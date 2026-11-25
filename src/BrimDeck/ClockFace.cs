@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
 using BrimDeck.Core;
 
 namespace BrimDeck;
@@ -26,7 +27,7 @@ internal sealed class ClockFace : FrameworkElement
     private static Typeface Face(FontFamily family, FontWeight? weight = null, bool italic = false)
         => new(family, italic ? FontStyles.Italic : FontStyles.Normal, weight ?? FontWeights.Normal, FontStretches.Normal);
 
-    // The date is dimmer than the time. Beside the time its digits are this much of the time's height and share its baseline;
+    // The date is dimmer than the time. Beside the time its digits are this much of the time's height and centred on the time's;
     // on a line of its own the time is at most TwoLineTime tall and the date TwoLineDate, TwoLineGap apart (heights of the digits' ink).
     private const double DateOpacity = .62, BesideRatio = .76, BesideGap = 6, TwoLineTime = 10, TwoLineDate = 6.6, TwoLineGap = 3.5;
 
@@ -110,16 +111,40 @@ internal sealed class ClockFace : FrameworkElement
     {
         get
         {
-            if (_reserved is null || _reservedFont != Fonts.Version) { _reservedFont = Fonts.Version; _reserved = MeasureReserved(); }
+            if (_reserved is null || _reservedFont != Fonts.Version)
+            {
+                _reservedFont = Fonts.Version;
+                // Every face with the same look takes the same width: measuring it lays out every sample day (in English, every
+                // month too), so it is done once for all of them (the style cards, the notch and the capsule).
+                var key = (_style, _h24, _seconds, _date, Loc.IsEnglish, Fonts.Version, Device);
+                if (!Reserved.TryGetValue(key, out var width)) { if (Reserved.Count > 256) Reserved.Clear(); Reserved[key] = width = MeasureReserved(); }
+                _reserved = width;
+            }
             return _reserved.Value;
         }
     }
+    private static readonly Dictionary<(ClockStyle, bool, bool, ClockDate?, bool, int, double), double> Reserved = [];
+    // The face is the time and the date side by side or one over the other, so it is widest with the widest time and the widest
+    // date: each is found on its own (a width grows with the size it is set at), and the face is laid out once with both.
     private double MeasureReserved()
     {
-        bool months = Loc.IsEnglish && _date is { Format: ClockDateFormat.MonthDayWords or ClockDateFormat.YearWords };
+        const double middle = FaceHeight / 2;
+        var widest = new[] { 10, 22 }.Select(hour => new DateTime(2025, 12, 22, hour, 0, 0)).MaxBy(time => TimeLine(null, time, 0, Brushes.White, 1, middle));
+        if (_date is not { } date) return Layout(null, widest, 0, Brushes.White);
+        bool months = Loc.IsEnglish && date.Format is ClockDateFormat.MonthDayWords or ClockDateFormat.YearWords;
         int[] shown = months ? [.. Enumerable.Range(1, 12)] : [12];
-        return shown.SelectMany(month => Enumerable.Range(22, 7).SelectMany(day => new[] { 10, 22 }.Select(hour => new DateTime(2025, month, day, hour, 0, 0))))
-            .Max(time => Layout(null, time, 0, Brushes.White));
+        var text = shown.SelectMany(month => Enumerable.Range(22, 7).Select(day => DateText(new DateTime(2025, month, day), date)))
+            .Distinct().MaxBy(text => DateLine(null, text, 0, Brushes.White, 10, middle))!;
+        return Layout(null, widest, 0, Brushes.White, text);
+    }
+
+    // The date as the face writes it. The styles with a display face of their own (ChineseFonts) write the weekday in its Latin
+    // letters in Chinese too (WED), so it is set in that face with the digits instead of in a Chinese face beside them.
+    private string DateText(DateTime day, ClockDate date)
+    {
+        if (Loc.IsEnglish || date.Weekday == ClockWeekday.Hidden || !ChineseFonts.ContainsKey(_style)) return ClockDates.Text(day, date.Format, date.Weekday, Loc.IsEnglish);
+        string text = ClockDates.Text(day, date.Format, ClockWeekday.Hidden, false), name = day.ToString("ddd", CultureInfo.InvariantCulture).ToUpperInvariant();
+        return date.Weekday == ClockWeekday.Before ? name + " " + text : text + " " + name;
     }
 
     protected override Size MeasureOverride(Size availableSize) => new(ReservedWidth, FaceHeight * _scale);
@@ -141,12 +166,12 @@ internal sealed class ClockFace : FrameworkElement
     // Device pixels per DIP of the unscaled face.
     private double Device => _scale * VisualTreeHelper.GetDpi(this).PixelsPerDip;
 
-    // Draws the face from x when dc is set; returns the width either way.
-    private double Layout(DrawingContext? dc, DateTime time, double x, Brush paint)
+    // Draws the face from x when dc is set; returns the width either way. dateText: the date shown, the time's own by default.
+    private double Layout(DrawingContext? dc, DateTime time, double x, Brush paint, string? dateText = null)
     {
         const double middle = FaceHeight / 2;
         if (_date is not { } date) return TimeLine(dc, time, x, paint, 1, middle);
-        string text = ClockDates.Text(time, date.Format, date.Weekday, Loc.IsEnglish);
+        string text = dateText ?? DateText(time, date);
         // The stacked digits are two lines already, so the date stands beside them: before them for above, after them for below.
         var position = _style != ClockStyle.Digits ? date.Position : date.Position switch
         {
@@ -162,8 +187,8 @@ internal sealed class ClockFace : FrameworkElement
                 ClockStyle.Digits => full,
                 _ => full * BesideRatio
             };
-            // On the time's baseline; the stacked digits have none, so the date is centred on them.
-            double dateMiddle = _style == ClockStyle.Digits ? middle : middle + (full - ink) / 2;
+            // The date's digits are centred top to bottom on the time's.
+            double dateMiddle = middle;
             double timeWidth = TimeLine(null, time, 0, paint, 1, middle), dateWidth = DateLine(null, text, 0, paint, ink, dateMiddle);
             if (position == ClockDatePosition.Left)
             {
@@ -276,12 +301,18 @@ internal sealed class ClockFace : FrameworkElement
     };
 
     // The date in the clock's style, its digits ink tall and centred on middle; returns its width. The styles set in a font set the
-    // date in it, with any character the font lacks (the Chinese weekday, 年, 月, 日) in the panel's font. The drawn styles draw its
-    // digits, slashes and dashes as they draw the time's, and set the rest in the panel's font.
+    // date in it, with any character the font lacks (年, 月, 日; the plain styles' Chinese weekday) in a Chinese face of the same kind
+    // (ChineseFonts), or the panel's font for the plain styles. The drawn styles draw its digits, slashes and dashes as they draw the
+    // time's, and set the rest in the panel's font.
+    //
+    // Its letters are drawn as text, not as outlines (AsText): the island gives its text ClearType (TextClarity), which outlines never
+    // get, and at the date's small size grayscale outlines were blurred beside the island's other text. For the same reason they are
+    // dimmed by a fainter brush, not an opacity layer, which would turn them back to grayscale.
     private double DateLine(DrawingContext? dc, string text, double x, Brush paint, double ink, double middle)
     {
         bool dim = dc is not null && !_plain;
-        if (dim) dc!.PushOpacity(DateOpacity);
+        Brush letters = paint;
+        if (dim) { letters = paint.Clone(); letters.Opacity = DateOpacity; letters.Freeze(); }
         bool drawn = _style is ClockStyle.Dots or ClockStyle.Pixel or ClockStyle.Segment;
         var (face, spacing) = DateFace();
         // A space is half the digits' height in every face (a serif's own is a hairline). Characters the date's face lacks are set in
@@ -298,25 +329,123 @@ internal sealed class ClockFace : FrameworkElement
             if (glyphs)
             {
                 if (i > 0 && text[i - 1] != ' ') x += pad;
+                // A date that starts with a digit lit only on its right (a seven-segment 1) starts where a 0 would show its ink, so it
+                // stands as far from the time as any other date.
+                if (i == 0) x -= DrawnLead(part[0], ink) - DrawnLead('0', ink);
+                if (dim) dc!.PushOpacity(DateOpacity);
                 x += _style switch
                 {
                     ClockStyle.Dots => Dots(dc, part, x, ink / 6.85, middle),
                     ClockStyle.Pixel => Blocks(dc, part, x, ink / 7, middle),
                     _ => Segments(dc, part, x, ink / SegmentHeight, middle)
                 };
+                if (dim) dc!.Pop();
                 if (end < text.Length && text[end] != ' ') x += pad;
             }
             else
             {
-                var run = own ? new Run(part, face, ink / InkPerEm(face), spacing) : new Run(part, Plain, ink / InkPerEm(Plain) * other, Cells: false);
-                x = Draw(dc, x, Baseline(run, middle), paint, run);
+                // Chinese in a face of the same kind as the clock's (ChineseFace), its characters as tall as the digits; the panel's
+                // font where the style has none of its own.
+                var run = own ? new Run(part, face, ink / InkPerEm(face), spacing, AsText: true)
+                    : ChineseFace() is { } chinese ? new Run(part, chinese, ink / InkPerEm(chinese, "日"), Cells: false, AsText: true)
+                    : new Run(part, Plain, ink / InkPerEm(Plain) * other, Cells: false, AsText: true);
+                var (fitted, baseline) = OnPixel(run, middle);
+                // As for the drawn digits: a narrow first digit (a 1 in its digit's cell) starts where a 0's ink would.
+                if (i == 0 && own && char.IsAsciiDigit(part[0])) x -= FontLead(part[0], fitted) - FontLead('0', fitted);
+                x = Draw(dc, x, baseline, letters, fitted);
             }
             i = end;
         }
-        if (dim) dc!.Pop();
         return x - start;
     }
     private static bool Drawable(char ch) => char.IsAsciiDigit(ch) || ch is '/' or '-';
+
+    // A run drawn as text, at the size within 12% of the one asked for whose digits' ink, as drawn, comes nearest to being centred on
+    // middle, and the baseline that puts it there. Text is drawn with its baseline on a whole device pixel, and a hinted face also
+    // moves the digits' top and bottom to whole pixels (the italic serif's 1 came out a pixel shorter than its outline at 150%), so
+    // the ink is measured as drawn (DrawnInk) rather than taken from the outline. At the size asked for, the date's digits ended up
+    // half a pixel above or below the time's wherever the room left above and below them was an odd number of pixels.
+    private (Run Run, double Baseline) OnPixel(Run run, double middle)
+    {
+        double device = Device;
+        if (device <= 0) return (run, Baseline(run, middle));
+        var key = (run.Face, run.Size, device, middle);
+        if (!Placed.TryGetValue(key, out var placed))
+        {
+            double centre = middle * device, best = double.MaxValue;
+            placed = (run.Size, Baseline(run, middle));
+            for (int step = 0; step <= 24; step++)
+            {
+                // 0, +1%, -1%, +2%, -2% … to 12%: the nearest size that centres the digits within a sixth of a pixel, or failing that
+                // the one that comes nearest. A hinted face keeps one height across several sizes, so the next one can be 7% away.
+                double size = run.Size * (1 + (step + 1) / 2 * (step % 2 == 1 ? .01 : -.01));
+                var (top, bottom) = DrawnInk(run.Face, size, device);
+                double reach = -(top + bottom) / 2, baseline = Math.Round(centre + reach), off = Math.Abs(baseline - reach - centre);
+                if (off < best - .01) { best = off; placed = (size, baseline / device); }
+                if (off <= .16) break;
+            }
+            if (Placed.Count > 512) Placed.Clear();
+            Placed[key] = placed;
+        }
+        return (run with { Size = placed.Size }, placed.Baseline);
+    }
+    private static readonly Dictionary<(Typeface, double, double, double), (double Size, double Baseline)> Placed = [];
+
+    // Where a face's 0 starts and ends above its baseline when drawn at size on a whole-pixel baseline, in device pixels (negative
+    // above): its rows' ink weighed against the fullest row, so a row only partly lit counts as that much of a row.
+    private static (double Top, double Bottom) DrawnInk(Typeface face, double size, double device)
+    {
+        var text = new FormattedText("0", CultureInfo.InvariantCulture, FlowDirection.LeftToRight, face, size, Brushes.White, device);
+        int width = (int)Math.Ceiling(text.WidthIncludingTrailingWhitespace * device) + 8, height = (int)Math.Ceiling(text.Height * device) + 8;
+        double baseline = Math.Ceiling(text.Baseline * device) + 4;
+        var visual = new DrawingVisual();
+        using (var dc = visual.RenderOpen())
+        {
+            dc.PushTransform(new ScaleTransform(device, device));
+            dc.DrawText(text, new Point(4 / device, baseline / device - text.Baseline));
+        }
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+        var pixels = new byte[width * height * 4];
+        bitmap.CopyPixels(pixels, width * 4, 0);
+        var rows = new double[height];
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++) rows[y] = Math.Max(rows[y], pixels[(y * width + x) * 4 + 3]);
+        double full = rows.Max();
+        int first = Array.FindIndex(rows, row => row > 8), last = Array.FindLastIndex(rows, row => row > 8);
+        if (full <= 0 || first < 0) return (-size * device * .7, 0);
+        double top = first + 1 - rows[first] / full, bottom = last + rows[last] / full;
+        return (top - baseline, bottom - baseline);
+    }
+
+    // How far a digit's ink starts into its place in the date: in a drawn style, from its pattern; in a font, from its outline, set in
+    // a cell as wide as the widest digit.
+    private double DrawnLead(char ch, double ink)
+    {
+        if (!char.IsAsciiDigit(ch)) return 0;
+        if (_style == ClockStyle.Segment) return SegmentMap[ch - '0'].Min(key => Segments7[key].X) * ink / SegmentHeight;
+        var rows = DotFont[ch];
+        int column = rows.Min(row => row.IndexOf('1') is var at and >= 0 ? at : row.Length);
+        return column * (_style == ClockStyle.Dots ? ink / 6.85 : ink / 7);
+    }
+    private double FontLead(char ch, Run run)
+    {
+        var text = Text(ch.ToString(), run, Brushes.White);
+        double advance = text.WidthIncludingTrailingWhitespace, cell = run.Cells ? DigitCell(run) : advance;
+        return (cell - advance) / 2 + text.BuildGeometry(new Point()).Bounds.Left;
+    }
+    // The Chinese left in the date (年, 月, 日) for each style with a display face of its own, in a Windows face of the same kind:
+    // a brush script beside the italic serif, a rounded face beside the rounded clock, and bold sans beside the condensed, wide and
+    // neon faces. Bold where the clock's face is heavy. A Windows without the face (its Chinese fonts not installed) uses Microsoft
+    // YaHei UI in its place.
+    private static readonly Dictionary<ClockStyle, (string Family, bool Bold)> ChineseFonts = new()
+    {
+        [ClockStyle.Serif] = ("KaiTi", false), [ClockStyle.Rounded] = ("YouYuan", true), [ClockStyle.Condensed] = ("Microsoft YaHei UI", true),
+        [ClockStyle.Wide] = ("Microsoft YaHei UI", true), [ClockStyle.Neon] = ("DengXian", true)
+    };
+    private Typeface? ChineseFace() => ChineseFonts.TryGetValue(_style, out var font)
+        ? new Typeface(new FontFamily(font.Family + ", Microsoft YaHei UI"), FontStyles.Normal, font.Bold ? FontWeights.Bold : FontWeights.Normal, FontStretches.Normal)
+        : null;
     private (Typeface Face, double Spacing) DateFace() => _style switch
     {
         ClockStyle.Neon => (Face(Orbitron, FontWeights.SemiBold), .04),
@@ -327,8 +456,9 @@ internal sealed class ClockFace : FrameworkElement
         _ => (Plain, 0)
     };
 
-    // Letter spacing is in ems and falls between characters. Digits in a cell run take the widest digit's advance.
-    private readonly record struct Run(string Text, Typeface Face, double Size, double Spacing = 0, double Opacity = 1, bool Cells = true);
+    // Letter spacing is in ems and falls between characters. Digits in a cell run take the widest digit's advance. AsText: drawn as
+    // text rather than as outlines (DateLine).
+    private readonly record struct Run(string Text, Typeface Face, double Size, double Spacing = 0, double Opacity = 1, bool Cells = true, bool AsText = false);
     private double RunWidth(Run run) => Draw(null, 0, 0, Brushes.White, run);
     // Returns where the run ends.
     private double Draw(DrawingContext? dc, double x, double baseline, Brush paint, Run run)
@@ -339,14 +469,14 @@ internal sealed class ClockFace : FrameworkElement
         if (!run.Cells && run.Spacing == 0)
         {
             var whole = Text(run.Text, run, paint);
-            Paint(dc, whole, new Point(x, baseline - whole.Baseline), paint);
+            Paint(dc, whole, new Point(x, baseline - whole.Baseline), paint, run.AsText);
             x += whole.WidthIncludingTrailingWhitespace;
         }
         else for (int i = 0; i < run.Text.Length; i++)
         {
             var text = Text(run.Text[i].ToString(), run, paint);
             double advance = text.WidthIncludingTrailingWhitespace, box = run.Cells && char.IsAsciiDigit(run.Text[i]) ? cell : advance;
-            Paint(dc, text, new Point(x + (box - advance) / 2, baseline - text.Baseline), paint);
+            Paint(dc, text, new Point(x + (box - advance) / 2, baseline - text.Baseline), paint, run.AsText);
             x += box + (i < run.Text.Length - 1 ? spacing : 0);
         }
         if (dim) dc!.Pop();
@@ -354,10 +484,12 @@ internal sealed class ClockFace : FrameworkElement
     }
     // DrawText moves each line to the nearest whole device pixel, which undoes the sub-pixel baseline from Baseline below:
     // at 11.5 DIP the cap height is not a whole number of pixels, so the snapped digits end up to half a pixel off centre.
-    // Filling the glyph outlines keeps the exact position the metrics give.
-    private static void Paint(DrawingContext? dc, FormattedText text, Point origin, Brush paint)
+    // Filling the glyph outlines keeps the exact position the metrics give. asText: drawn as text all the same (Run.AsText); the
+    // text carries its brush.
+    private static void Paint(DrawingContext? dc, FormattedText text, Point origin, Brush paint, bool asText = false)
     {
         if (dc is null) return;
+        if (asText) { dc.DrawText(text, origin); return; }
         var outline = text.BuildGeometry(origin); outline.Freeze();
         dc.DrawGeometry(paint, null, outline);
     }
@@ -371,13 +503,17 @@ internal sealed class ClockFace : FrameworkElement
     }
     private FormattedText Text(string text, Run run, Brush paint)
         => new(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, run.Face, run.Size, paint, VisualTreeHelper.GetDpi(this).PixelsPerDip);
-    // The ink of the run's digit 0, measured from its baseline.
+    // The ink of the run's digit 0, measured from its baseline; once for each face, size and scale, as every line is placed by it.
+    private static readonly Dictionary<(Typeface, double, double), Rect> Inks = [];
     private Rect Ink(Run run)
     {
+        var key = (run.Face, run.Size, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        if (Inks.TryGetValue(key, out var ink)) return ink;
         var zero = Text("0", run, Brushes.White);
-        var ink = zero.BuildGeometry(new Point()).Bounds;
+        ink = zero.BuildGeometry(new Point()).Bounds;
         ink.Offset(0, -zero.Baseline);
-        return ink;
+        if (Inks.Count > 512) Inks.Clear();
+        return Inks[key] = ink;
     }
     // The baseline that centres the ink of the run's digits on the given height.
     private double Baseline(Run run, double middle)
@@ -390,6 +526,14 @@ internal sealed class ClockFace : FrameworkElement
     private double InkPerEm(Typeface face)
     {
         if (!DigitHeights.TryGetValue(face, out var height)) DigitHeights[face] = height = Ink(new Run("0", face, 100)).Height / 100;
+        return height;
+    }
+    // How tall a sample character of a face is per DIP of its size.
+    private static readonly Dictionary<(Typeface, string), double> SampleHeights = [];
+    private double InkPerEm(Typeface face, string sample)
+    {
+        if (!SampleHeights.TryGetValue((face, sample), out var height))
+            SampleHeights[(face, sample)] = height = Text(sample, new Run(sample, face, 100), Brushes.White).BuildGeometry(new Point()).Bounds.Height / 100;
         return height;
     }
 

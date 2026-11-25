@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using BrimDeck.Core;
 
 namespace BrimDeck;
@@ -84,40 +85,60 @@ public sealed partial class SettingsWindow
         date.Visibility = S.ClockDate ? Visibility.Visible : Visibility.Collapsed;
         panel.Children.Add(Toggle(Loc.T("显示日期", "Show date"), S.ClockDate, value =>
         {
-            Change(s => s.ClockDate = value);
+            Change(s => s.ClockDate = value); RefreshClockTiles();
             date.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
         }));
         panel.Children.Add(date);
         return panel;
     }
 
-    // Where the date stands, how it is written and where the weekday goes; shown while the date is on.
+    // Where the date stands, how it is written and where the weekday goes; shown while the date is on. Each choice is shown on the
+    // style cards above.
     private StackPanel DateOptions(CompactStyle compact)
     {
         var panel = new StackPanel();
         void Add(FrameworkElement row) { panel.Children.Add(new Border { Height = 1, Background = UI.Brush(Divider) }); panel.Children.Add(row); }
         Add(MusicChoice(Loc.T("日期位置", "Date position"), S.ClockDatePosition,
             [(ClockDatePosition.Left, Loc.T("左侧", "Left")), (ClockDatePosition.Right, Loc.T("右侧", "Right")), (ClockDatePosition.Above, Loc.T("上方", "Above")), (ClockDatePosition.Below, Loc.T("下方", "Below"))],
-            value => Change(s => s.ClockDatePosition = value), group: "ClockDatePosition" + compact));
-        // Each format is shown as today's date in it.
+            value => { Change(s => s.ClockDatePosition = value); RefreshClockTiles(); }, group: "ClockDatePosition" + compact, onCard: true));
+        // Each format is shown as today's date in it, centred in a box as wide as the longest of them needs.
         var formats = Enum.GetValues<ClockDateFormat>();
-        var format = new ComboBox { Width = 150, Style = (Style)FindResource("SettingsCombo"),
-            ItemsSource = formats.Select(f => ClockDates.Text(DateTime.Today, f, ClockWeekday.Hidden, Loc.IsEnglish)).ToList(), SelectedIndex = Array.IndexOf(formats, S.ClockDateFormat) };
+        var texts = formats.Select(f => ClockDates.Text(DateTime.Today, f, ClockWeekday.Hidden, Loc.IsEnglish)).ToList();
+        var format = new ComboBox { Style = (Style)FindResource("SettingsCombo"), HorizontalContentAlignment = HorizontalAlignment.Center,
+            ItemsSource = texts, SelectedIndex = Array.IndexOf(formats, S.ClockDateFormat) };
+        // The date is centred in the room left of the arrow (the box's own margins for left-aligned text), at the height its line takes
+        // there: the centred box's margins and lift are for the time boxes' digits (SettingsCombo).
+        format.ApplyTemplate();
+        if (format.Template.FindName("Selection", format) is ContentPresenter selection) { selection.Margin = new Thickness(10, 0, 28, 0); selection.RenderTransform = Transform.Identity; }
         AutomationProperties.SetName(format, Loc.T("日期格式", "Date format")); PopupMotion.Attach(format);
-        format.SelectionChanged += (_, _) => { if (format.SelectedIndex >= 0) Change(s => s.ClockDateFormat = formats[format.SelectedIndex]); };
-        Add(Row(Loc.T("日期格式", "Date format"), format));
+        format.SelectionChanged += (_, _) => { if (format.SelectedIndex >= 0) { Change(s => s.ClockDateFormat = formats[format.SelectedIndex]); RefreshClockTiles(); } };
+        // The box is as wide as the longest format: every format lies hidden in its cell, in the same font, in that room with 4 DIP to
+        // spare on each side.
+        var fit = new Grid();
+        foreach (var text in texts) fit.Children.Add(new TextBlock { Text = text, FontSize = 12, Margin = new Thickness(14, 0, 32, 0), Visibility = Visibility.Hidden });
+        fit.Children.Add(format);
+        Add(Row(Loc.T("日期格式", "Date format"), fit));
         Add(MusicChoice(Loc.T("星期", "Weekday"), S.ClockWeekday,
             [(ClockWeekday.Hidden, Loc.T("不显示", "Hidden")), (ClockWeekday.Before, Loc.T("在日期前", "Before")), (ClockWeekday.After, Loc.T("在日期后", "After"))],
-            value => Change(s => s.ClockWeekday = value), group: "ClockWeekday" + compact));
+            value => { Change(s => s.ClockWeekday = value); RefreshClockTiles(); }, group: "ClockWeekday" + compact, onCard: true));
         return panel;
     }
 
-    // Every card shows 14:32:08 today in the chosen color, hour format and seconds, at twice the size of the collapsed surface.
+    // Every card shows 14:32:08 today in the chosen color, hour format and seconds, with the date as chosen, at twice the size of
+    // the collapsed surface; a face too wide for its card at that size is made smaller to fit, clear of the chosen card's check mark.
     private FrameworkElement ClockPreview(ClockStyle style)
-        => new ClockFace(style, S.Clock24Hour, S.ClockSeconds, ClockFace.Palette(S, _app.PreviewDeck.CoverColor), DateTime.Today.AddHours(14).AddMinutes(32).AddSeconds(8)) { LayoutTransform = new ScaleTransform(2, 2) };
+        => new Viewbox { StretchDirection = StretchDirection.DownOnly, Margin = new Thickness(26, 0, 26, 0),
+            // Drawn at that size, not scaled up afterwards, so it lies on whole pixels as the collapsed row's does.
+            Child = new ClockFace(style, S.Clock24Hour, S.ClockSeconds, ClockFace.Palette(S, _app.PreviewDeck.CoverColor), DateTime.Today.AddHours(14).AddMinutes(32).AddSeconds(8),
+                2, date: ClockDate.Of(S)) };
+    // The cards are made again one at a time, each after what is waiting to be drawn, so the slide of the choice that changed them
+    // is not held up; a later change supersedes the cards still waiting.
+    private int _tileRefresh;
     private void RefreshClockTiles()
     {
-        foreach (var (tile, style) in _clockTiles) tile.Content = ClockPreview(style);
+        int refresh = ++_tileRefresh;
+        foreach (var (tile, style) in _clockTiles)
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { if (refresh == _tileRefresh) tile.Content = ClockPreview(style); });
     }
     private static string ColorName(ClockColor color) => color switch
     {
