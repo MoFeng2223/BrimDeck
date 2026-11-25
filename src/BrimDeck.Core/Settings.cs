@@ -576,9 +576,8 @@ public sealed class DeckSettings
     public ClockDateFormat ClockDateFormat { get; set; }
     public ClockWeekday ClockWeekday { get; set; }
     public CompactMusicText MusicText { get; set; }
+    // A track change shows the new title and artist across the whole island, as a notice does (IslandNotice).
     public bool MusicTrackNotice { get; set; } = true;
-    // The title of a track change takes the whole island, shown as a notice is (IslandNotice), instead of the music part alone.
-    public bool MusicTrackNoticeWide { get; set; } = true;
     // A song taken as instrumental (Lyrics.Instrumental) shows its title in the collapsed lyric's place instead of "♪".
     public bool MusicInstrumentalTitle { get; set; }
     // With auto width (CompactAutoWidth), the collapsed middle text's room follows the length of what it shows, within

@@ -33,18 +33,17 @@ public partial class MainWindow
         bool media = Settings.ShowsMusic(EffectiveStyle) && _mediaTrack is { State: not MediaState.Stopped };
         bool cover = media && !PausedHides(PausedMusicHide.Cover), hideText = PausedHides(PausedMusicHide.Text);
         bool equalizer = CompactEqualizerShown;
-        bool notice = media && !hideText && _trackNoticeUntil > DateTimeOffset.UtcNow;
         string text = "";
         if (media && !hideText)
         {
-            if (notice || Settings.MusicText == CompactMusicText.Title) text = _mediaTrack!.Caption;
+            if (Settings.MusicText == CompactMusicText.Title) text = _mediaTrack!.Caption;
             else if (Settings.MusicText == CompactMusicText.Lyrics)
             {
                 _compactLyric = CurrentLyrics(_mediaTrack!).Current;
                 text = CompactLyricText(_mediaTrack!, _compactLyric);
             }
         }
-        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
+        var apps = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps : [];
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor, Look), DateTime.Now, scale, Look, ClockDate.Of(Settings)) : null;
         var transfer = TransferBadge(scale);
         var devices = CompactDevices(scale);
@@ -147,11 +146,11 @@ public partial class MainWindow
         _compactStrip = strips.FirstOrDefault();
 
         // The column's width and length for the shape (CollapsedGeometry.Resolve): the widest fixed part, the readings up to the cap,
-        // and every line with the gaps; the surface never shortens below its tallest line. Like the row, the track notice is left out.
+        // and every line with the gaps; the surface never shortens below its tallest line.
         var stack = CompactColumn.Stack([.. lines.Select(line => line.Height)], gap);
         double wantedColumn = CompactColumn.Width(scale, [layout.CoverSize * (cover ? 1 : 0), equalizer ? layout.EqualizerSize : 0, clock?.ReservedWidth ?? 0, transfer?.Width ?? 0, devices?.PreferredWidth ?? 0, notices?.Width ?? 0, agents?.Width ?? 0, apps.Count > 0 ? layout.RingSize : 0],
             strips.Select(strip => strip.PreferredWidth));
-        double wanted = notice ? (double.IsNaN(_compactWanted) ? stack.Length : _compactWanted) : DevicePixels.Up(stack.Length, dpi);
+        double wanted = DevicePixels.Up(stack.Length, dpi);
         double required = lines.Count == 0 ? 0 : Math.Ceiling(lines.Max(line => line.Height));
         if (double.IsNaN(_compactWanted) || Math.Abs(wanted - _compactWanted) > .5 || Math.Abs(required - _compactRequired) > .5 || double.IsNaN(_compactColumn) || Math.Abs(wantedColumn - _compactColumn) > .5)
         { _compactWanted = wanted; _compactRequired = required; _compactColumn = wantedColumn; Dispatcher.BeginInvoke(DispatcherPriority.Background, FitCompactToContent); }

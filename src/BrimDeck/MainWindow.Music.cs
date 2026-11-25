@@ -51,7 +51,7 @@ public partial class MainWindow
     private string _lyricsKey = "", _musicRenderKey = "", _compactLyric = "";
     // Drives the equalizer, which must keep moving while the cursor moves; see PromptTimer.
     private PromptTimer _musicTick = null!;
-    private DateTimeOffset _lastMusicTick = DateTimeOffset.UtcNow, _positionTick, _trackNoticeUntil;
+    private DateTimeOffset _lastMusicTick = DateTimeOffset.UtcNow, _positionTick;
     private readonly TrackNoticeGate _trackNotice = new();
     private bool _musicStarted, _seeking, _updatingSeek, _commandBusy;
     private MediaTrack? _seekTrack;
@@ -304,8 +304,9 @@ public partial class MainWindow
             // A notice still on screen switches to the new title instead of giving way to the summary until playback starts.
             if (_mediaTrack is not null && Settings.MusicTrackNotice && notice) _trackNotice.Arm(now); else _trackNotice.Disarm();
         }
-        // The coordinator lets the title show only when nothing more important does (NoticeCenter.TryTrack).
-        if (_trackNotice.Observe(_mediaTrack, now) && _app.Notices.TryTrack(this, TrackNoticeTime) && !_trackWide) _trackNoticeUntil = now + TrackNoticeTime;
+        // The coordinator lets the title show on the island only when nothing more important does (NoticeCenter.TryTrack). A song
+        // whose title has not come yet keeps the gate armed until it does.
+        if (_mediaTrack is { Title.Length: > 0 } && _trackNotice.Observe(_mediaTrack, now)) _app.Notices.TryTrack(this, TrackNoticeTime);
         if (lyricsChanged) UpdateLyrics();
         if (changedSong || lyricsChanged || coverChanged || old?.State != _mediaTrack?.State || old?.HasTimeline != _mediaTrack?.HasTimeline) RenderCompact();
         if (IsMusicPage) RenderMusic();
@@ -1200,23 +1201,17 @@ public partial class MainWindow
         if (CompactLyrics && !PausedHides(PausedMusicHide.Text) && _compactLyric != line.Current)
         {
             _compactLyric = line.Current;
-            if (_trackNoticeUntil <= DateTimeOffset.UtcNow)
-            {
-                // A new line scrolls again, also a line that comes back later in the song.
-                _compactTitleRested = null;
-                // A lyric that follows its line builds the row again, which asks for the line's width (RenderCompactMusic).
-                // The surface takes the new width at once, in the same pass: queued after the row was built, it left a frame of the
-                // new line in the old width before the move began (FitCompactToContent; the row then slides, SlideCompactRow).
-                if (_compactMarquee is not null && !TextFollowsLength) _compactMarquee.Text = CompactLyricText(track, line.Current);
-                else { RenderCompact(); if (TextFollowsLength) FitCompactToContent(); }
-            }
+            // A new line scrolls again, also a line that comes back later in the song.
+            _compactTitleRested = null;
+            // A lyric that follows its line builds the row again, which asks for the line's width (RenderCompactMusic).
+            // The surface takes the new width at once, in the same pass: queued after the row was built, it left a frame of the
+            // new line in the old width before the move began (FitCompactToContent; the row then slides, SlideCompactRow).
+            if (_compactMarquee is not null && !TextFollowsLength) _compactMarquee.Text = CompactLyricText(track, line.Current);
+            else { RenderCompact(); if (TextFollowsLength) FitCompactToContent(); }
         }
         // The collapsed row's lyric lights each character up as it is sung (Karaoke), like the page's line; a row
-        // showing anything else (its title, an instrumental's caption) stays whole and fades nothing. During a new
-        // track notice the row shows the caption, not the lyric, so sweeping the lyric's words over the title would
-        // light characters that are not the song's; wait until the notice ends and the marquee holds the line.
-        bool notice = _trackNoticeUntil > DateTimeOffset.UtcNow;
-        bool compactKaraoke = CompactLyrics && !PausedHides(PausedMusicHide.Text) && !notice
+        // showing anything else (its title, an instrumental's caption) stays whole and fades nothing.
+        bool compactKaraoke = CompactLyrics && !PausedHides(PausedMusicHide.Text)
             && CompactLyricText(track, line.Current) == line.Current
             && _compactMarquee is not null && _compactMarquee.Text == line.Current;
         _karaokeCompact = compactKaraoke && words is not null;
@@ -1332,18 +1327,17 @@ public partial class MainWindow
         bool media = Settings.ShowsMusic(EffectiveStyle) && _mediaTrack is { State: not MediaState.Stopped };
         bool showCover = Settings.MusicCompactCover && !PausedHides(PausedMusicHide.Cover), hideText = PausedHides(PausedMusicHide.Text);
         bool equalizer = CompactEqualizerShown;
-        bool notice = media && !hideText && _trackNoticeUntil > DateTimeOffset.UtcNow;
         string text = "";
         if (media && !hideText)
         {
-            if (notice || Settings.MusicText == CompactMusicText.Title) text = _mediaTrack!.Caption;
+            if (Settings.MusicText == CompactMusicText.Title) text = _mediaTrack!.Caption;
             else if (Settings.MusicText == CompactMusicText.Lyrics)
             {
                 _compactLyric = CurrentLyrics(_mediaTrack!).Current;
                 text = CompactLyricText(_mediaTrack!, _compactLyric);
             }
         }
-        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
+        var apps = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps : [];
         var steadyItems = Settings.ShowsSummary(EffectiveStyle) ? QuotaRings(Settings.EnabledApps) : [];
         // The clock keeps its own width; shown alone, it is centred.
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor, Look), DateTime.Now, scale, Look, ClockDate.Of(Settings)) : null;
@@ -1368,15 +1362,15 @@ public partial class MainWindow
         // Readings that do not fit scroll through a window of whole readings, as the rings do (CompactSpacing.Window).
         double ringDiameter = QuotaRing.Diameter(Settings.QuotaRingStyle);
         var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, fixedFace, strip?.PreferredWidth ?? 0, equalizer, Settings.EqualizerBars, showCover, ringDiameter);
-        // An auto-width surface takes the width of what the row shows; the new shape builds the row again. The track notice
-        // and the lyric's changing length are left out, so the width changes only when the content itself does, unless the
-        // middle text follows its length (below).
-        int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count : 0;
+        // An auto-width surface takes the width of what the row shows; the new shape builds the row again. The lyric's changing
+        // length is left out, so the width changes only when the content itself does, unless the middle text follows its length
+        // (below).
+        int steadyRings = apps.Count;
         bool steadyText = media && !hideText && Settings.MusicText != CompactMusicText.None;
         double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, fixedFace, strip?.PreferredWidth ?? 0, dpi, equalizer, Settings.EqualizerBars, showCover, ringDiameter);
         // Middle text that follows its length (TextFollowsLength) asks for the room of what it shows instead of the fixed slot:
-        // the lyric line, or the title where the lyric shows it (no line yet, an instrumental with MusicInstrumentalTitle), and the
-        // title during the track notice, which is shown in the same place. Text hidden while paused asks for no room at all.
+        // the lyric line, or the title where the lyric shows it (no line yet, an instrumental with MusicInstrumentalTitle). Text
+        // hidden while paused asks for no room at all.
         double textSlot = 0;
         if (steadyText && TextFollowsLength)
         {
@@ -1384,8 +1378,7 @@ public partial class MainWindow
             double natural = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, fixedFace, strip?.PreferredWidth ?? 0, dpi, equalizer, Settings.EqualizerBars, showCover, ringDiameter, textSlot);
             wanted = CompactMusicLayout.FollowWidth(natural, wanted, FollowContentLimit(shape));
         }
-        // The surface is never narrower than what the row must show (CompactMusicLayout.RequiredWidth); like the width it asks
-        // for, this leaves out the track notice, so the surface does not move for it.
+        // The surface is never narrower than what the row must show (CompactMusicLayout.RequiredWidth).
         var readingWidths = strip?.ItemWidths() ?? [];
         double required = CompactMusicLayout.RequiredWidth(scale, media, steadyText, fixedFace,
             steadyRings > 0 ? CompactMusicLayout.RingSizeFor(ringDiameter, scale) : 0, CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0), equalizer, Settings.EqualizerBars, showCover);
@@ -1595,7 +1588,7 @@ public partial class MainWindow
         _compactMarquee?.SetScrolling(TextScrolls && MusicAudioActive && IsVisible && !IsSuppressed && !DisplayPower.Off && !_expanded && _alert is null && EffectiveStyle != CompactStyle.Line);
         UpdateLyricScrolling();
         UpdateQuotaCarousel();
-        bool needed = IsVisible && !IsSuppressed && !DisplayPower.Off && (MusicAudioActive && (musicVisible || progressVisible) || animations && systemVisible || _trackNoticeUntil > DateTimeOffset.UtcNow);
+        bool needed = IsVisible && !IsSuppressed && !DisplayPower.Off && (MusicAudioActive && (musicVisible || progressVisible) || animations && systemVisible);
         // Frame-rate ticks only drive visible equalizer bars; the line indicator's progress moves a pixel every few seconds.
         bool bars = animations && (MusicAudioActive && PlayerLevelsVisible || systemVisible);
         _musicTick.Interval = TimeSpan.FromMilliseconds(bars ? 33 : 250);
@@ -1634,13 +1627,7 @@ public partial class MainWindow
     private bool SystemLevelsVisible => IsVisible && !IsSuppressed && !DisplayPower.Off && !_expanded && _alert is null
         && Settings.EqualizerAlways && _compactEqualizer is not null && !MusicAudioActive;
     // The display went off or came back on (DisplayPower): what runs only to be seen stops or starts again.
-    // A track notice that ran out while the display was off (the music tick that ends it was stopped) is cleared first, so the
-    // display comes back to the row as it is now.
-    private void DisplayPowerChanged()
-    {
-        if (!DisplayPower.Off && _trackNoticeUntil != default && DateTimeOffset.UtcNow >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }
-        UpdateMusicTimer(); UpdateMonitorDemand();
-    }
+    private void DisplayPowerChanged() { UpdateMusicTimer(); UpdateMonitorDemand(); }
     private bool MusicAudioActive => _mediaTrack is { State: MediaState.Playing };
     private void TickMusic()
     {
@@ -1658,7 +1645,6 @@ public partial class MainWindow
         bool flowing = levels && shown is not null && _media?.FlowLevels(bandLevels, Settings.EqualizerMode) == true;
         if (_expanded && IsMusicPage) { if (flowing) _musicEqualizer?.Show(bandLevels, playing); else _musicEqualizer?.Tick(peak, playing, seconds); }
         if (!_expanded && _alert is null) { if (flowing) _compactEqualizer?.Show(bandLevels, compactPlaying); else _compactEqualizer?.Tick(peak, compactPlaying, seconds); }
-        if (_trackNoticeUntil != default && now >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }
         if ((now - _positionTick).TotalMilliseconds >= 250) { _positionTick = now; UpdateMusicPosition(); }
     }
     private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; _app.Lyrics.AppleLyricsWritten -= LocalLyricsWritten; _app.Lyrics.KugouLyricsWritten -= LocalLyricsWritten; DisplayPower.Changed -= DisplayPowerChanged; _app.PresentMedia(this, false, false); }

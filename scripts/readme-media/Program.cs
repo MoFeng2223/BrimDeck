@@ -149,7 +149,6 @@ internal sealed partial class Renderer(App app, string output, string language, 
         (_track, _other) = Tracks();
         _deck.SetSnapshots(Snapshots());
         Program.Call(_deck, "ApplyMediaUpdate", [typeof(MediaTrack), typeof(IReadOnlyList<MediaTrack>), typeof(BitmapSource), typeof(bool)], _track, new List<MediaTrack> { _track, _other }, _cover, false);
-        Program.SetField(_deck, "_trackNoticeUntil", default(DateTimeOffset));
         _deck.ApplySettings();
         await Settle();
 
@@ -361,7 +360,7 @@ internal sealed partial class Renderer(App app, string output, string language, 
                 Shot("Align right asked by the sender", NoticeLevel.Plain, first, reply, asked: NoticeAlign.Right);
                 Shot("Merged, count 3, center", NoticeLevel.Plain, first, reply, count: 3);
                 Shot("Longer than the island: starts at the left and scrolls", NoticeLevel.Plain, first, longer, asked: NoticeAlign.Right);
-                // A track change on the whole island (MusicTrackNoticeWide): the title and the artist, no cover in this picture.
+                // A track change on the whole island (MusicTrackNotice): the title and the artist, no cover in this picture.
                 AttentionItem Song() => new()
                 {
                     Lane = "main", Kind = AttentionKind.Track, Key = "track", Level = NoticeLevel.Plain, Duration = TimeSpan.FromSeconds(4),

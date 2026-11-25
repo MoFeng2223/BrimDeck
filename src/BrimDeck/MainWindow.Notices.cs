@@ -99,23 +99,18 @@ public partial class MainWindow
             case AttentionKind.Quota when item.Payload is CompactAlertInfo alert:
                 PresentAlert(alert); break;
             case AttentionKind.Track:
-                // The title takes the whole island, shown as a notice is; the indicator has no room for words, and a panel that
-                // boots or closes keeps the title in its music part as before.
-                if (Settings.MusicTrackNoticeWide && Collapsed.Style != CompactStyle.Line && CanShowNotices && !HoldsNotices && TrackContent() is { } content)
-                {
-                    item.Payload = content; _trackWide = true;
-                    (_noticeWindow ??= new IslandNotice(this, _app)).Present(item);
-                    break;
-                }
-                _trackWide = false;
-                _trackNoticeUntil = DateTimeOffset.UtcNow + item.Duration;
-                RenderCompact(); UpdateMusicTimer();
+                // The title takes the whole island, shown as a notice is; the indicator has no room for words, so it shows nothing.
+                // One that comes while the panel boots or closes waits for it, as a notice does.
+                if (Collapsed.Style == CompactStyle.Line || !CanShowNotices || TrackContent() is not { } content) { _trackShown = false; _app.Notices.Skip(this); return; }
+                item.Payload = content; _trackShown = true;
+                if (HoldsNotices) { ShowAfterBoot(item); return; }
+                (_noticeWindow ??= new IslandNotice(this, _app)).Present(item);
                 break;
         }
     }
 
-    // A track change's title is on the whole island (MusicTrackNoticeWide) rather than in the music part.
-    private bool _trackWide;
+    // A track change's title shows on the island (or waits for the boot to show it there).
+    private bool _trackShown;
 
     private TrackNoticeContent? TrackContent()
         => _mediaTrack is { Title.Length: > 0 } track ? new TrackNoticeContent(track.Title, track.Artist, _mediaCover) : null;
@@ -132,15 +127,11 @@ public partial class MainWindow
                 break;
             case AttentionKind.Quota when item.Payload is CompactAlertInfo alert: EndAlert(alert); break;
             case AttentionKind.Track:
-                if (_trackWide)
-                {
-                    _trackWide = false;
-                    _noticeWindow?.End(item);
-                    if (_expanded) _noticeWindow?.Abort();
-                    break;
-                }
-                if (_trackNoticeUntil == default) break;
-                _trackNoticeUntil = default; RenderCompact(); UpdateMusicTimer();
+                if (!_trackShown) break;
+                _trackShown = false;
+                if (_noticeAfterBoot?.Key == item.Key) _noticeAfterBoot = null;
+                _noticeWindow?.End(item);
+                if (_expanded) _noticeWindow?.Abort();
                 break;
         }
     }
@@ -150,7 +141,11 @@ public partial class MainWindow
         if (item.IsNotice && _noticeAfterBoot?.Key == item.Key) _noticeAfterBoot = item;
         else if (item.IsNotice) _noticeWindow?.Update(item);
         // The next song while the title of the one before still shows on the island: its words change in place.
-        else if (item.Kind == AttentionKind.Track && _trackWide) { if (TrackContent() is { } content) { item.Payload = content; _noticeWindow?.Update(item); } }
+        else if (item.Kind == AttentionKind.Track && _trackShown && TrackContent() is { } content)
+        {
+            item.Payload = content;
+            if (_noticeAfterBoot?.Key == item.Key) _noticeAfterBoot = item; else _noticeWindow?.Update(item);
+        }
         // The same quota rose again while its alert shows: the alert shows the new level.
         else if (item.Kind == AttentionKind.Quota && item.Payload is CompactAlertInfo alert && _alert is not null) { _alert = alert; RenderCompact(); }
     }
