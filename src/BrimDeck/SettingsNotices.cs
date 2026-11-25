@@ -260,10 +260,7 @@ public sealed partial class SettingsWindow
             }
             _soundTry.Stop(); _soundTry.Start();
         }
-        Group(SliderRow(Loc.T("音量", "Volume"), S.NoticeSoundVolume, 0, 100, 5, "%", value => { Change(s => s.NoticeSoundVolume = (int)Math.Round(value)); Try(); }),
-            Toggle(Loc.T("Windows 应用的通知也播放", "Play for Windows apps' notices too"), S.NoticeSoundWindows, value => Change(s => s.NoticeSoundWindows = value),
-                help: Loc.T("这些应用大多自带提示音，开启后可能同时响两次。单独设置了样子的应用按它自己的提示音播放，不受这个开关影响。",
-                    "Most of these apps play their own sound, so you may hear two. An app with its own looks plays the sound chosen there, whatever this switch says.")));
+        Group(SliderRow(Loc.T("音量", "Volume"), S.NoticeSoundVolume, 0, 100, 5, "%", value => { Change(s => s.NoticeSoundVolume = (int)Math.Round(value)); Try(); }));
     }
 
     // A row of segments, as MusicChoice, whose group is named apart from its title: the same title (Effect) shows in several groups

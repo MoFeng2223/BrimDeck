@@ -72,7 +72,7 @@ The built-in sounds are made by BrimDeck as they play: Drop, Ding, Two notes, Ar
 
 You can use your own audio files: choose "Import a file…" in the list. WAV, MP3, M4A, AAC, FLAC and WMA are supported, up to 50 MB each. The file is copied to `sounds` in the data folder and can be chosen for either level; "Open folder" in the Sounds section opens it, and deleting a file there removes it. At level 2 a file plays for at most 10 seconds; at level 3 the whole file loops. A WAV file loops without a seam, while MP3 and other compressed formats may leave a very short gap. When the chosen file is missing, the level's default sound plays.
 
-Notices of Windows apps do not play BrimDeck's sound by default: most of those apps bring their own, which Windows still plays with their banner off. Turn on "Play for Windows apps' notices too" when you want it; an app with its own looks plays the sound chosen there, whatever this switch says. No sound plays during focus, presentations, the lock screen or a pause. The volume is set in the Sounds section; 0 mutes them all.
+Notices of level 2 and level 3 play their sound wherever they come from, those of Windows apps included. Most of those apps bring a sound of their own, which Windows still plays with their banner off, so you may hear two; to avoid that, turn the app's notification sound off in Windows' notification settings, or choose "None" as the sound. An app with its own looks plays the sound chosen there. No sound plays during focus, presentations, the lock screen or a pause. The volume is set in the Sounds section; 0 mutes them all.
 
 The level is the first of these that applies:
 

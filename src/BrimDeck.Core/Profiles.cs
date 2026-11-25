@@ -76,7 +76,7 @@ public static class Profiles
         nameof(DeckSettings.IncludeWsl), nameof(DeckSettings.Apps),
         nameof(DeckSettings.Profiles), nameof(DeckSettings.CurrentProfile), nameof(DeckSettings.ReturnProfile), nameof(DeckSettings.ProfileRules),
         nameof(DeckSettings.FullscreenExceptions), nameof(DeckSettings.MouseWheelPages),
-        nameof(DeckSettings.NoticeWslDistros), nameof(DeckSettings.NoticeCommandAccess), nameof(DeckSettings.NoticeDefaultLevel), nameof(DeckSettings.NoticeStyles), nameof(DeckSettings.NoticeSoundVolume), nameof(DeckSettings.NoticeSoundWindows), nameof(DeckSettings.NoticeStripIcons),
+        nameof(DeckSettings.NoticeWslDistros), nameof(DeckSettings.NoticeCommandAccess), nameof(DeckSettings.NoticeDefaultLevel), nameof(DeckSettings.NoticeStyles), nameof(DeckSettings.NoticeSoundVolume), nameof(DeckSettings.NoticeStripIcons),
         nameof(DeckSettings.NoticeCodes), nameof(DeckSettings.NoticeRespectFocus), nameof(DeckSettings.NoticesPausedUntil),
         nameof(DeckSettings.NoticeHistory), nameof(DeckSettings.NoticeHistoryHours), nameof(DeckSettings.NoticeHotkey),
         nameof(DeckSettings.NoticeApps), nameof(DeckSettings.NoticeAppsListed), nameof(DeckSettings.AgentWaitMinutes), nameof(DeckSettings.AgentHarnessesFound), nameof(DeckSettings.MailAccounts)

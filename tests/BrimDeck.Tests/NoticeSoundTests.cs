@@ -70,15 +70,14 @@ internal static class NoticeSoundTests
     private static void Items(Action<string, bool> check)
     {
         check("Sound: a notice plays the sound of its level's style; level 1 plays none",
-            NoticeSounds.For(Item(NoticeLevel.Glow, sound: "ding"), false) == "ding" && NoticeSounds.For(Item(NoticeLevel.Persistent), false) == NoticeSounds.DefaultLoop
-            && NoticeSounds.For(Item(NoticeLevel.Plain, sound: "ding"), false) == "" && NoticeSounds.For(Item(NoticeLevel.Glow, sound: ""), false) == "");
-        check("Sound: a Windows application's notice plays one only when the user asks; BrimDeck's own, the command line's and WSL's always do",
-            NoticeSounds.For(Item(NoticeLevel.Glow, NoticeOrigin.Windows), false) == "" && NoticeSounds.For(Item(NoticeLevel.Persistent, NoticeOrigin.Windows), false) == ""
-            && NoticeSounds.For(Item(NoticeLevel.Glow, NoticeOrigin.Windows), true) == NoticeSounds.DefaultShort
-            && new[] { NoticeOrigin.Cli, NoticeOrigin.Wsl, NoticeOrigin.Test, NoticeOrigin.Internal }.All(origin => NoticeSounds.For(Item(NoticeLevel.Glow, origin), false) == NoticeSounds.DefaultShort));
+            NoticeSounds.For(Item(NoticeLevel.Glow, sound: "ding")) == "ding" && NoticeSounds.For(Item(NoticeLevel.Persistent)) == NoticeSounds.DefaultLoop
+            && NoticeSounds.For(Item(NoticeLevel.Plain, sound: "ding")) == "" && NoticeSounds.For(Item(NoticeLevel.Glow, sound: "")) == "");
+        check("Sound: a notice of level 2 or 3 plays its sound whatever sent it, a Windows application's as BrimDeck's own, the command line's and WSL's; level 1 plays none",
+            NoticeSounds.For(Item(NoticeLevel.Persistent, NoticeOrigin.Windows)) == NoticeSounds.DefaultLoop && NoticeSounds.For(Item(NoticeLevel.Plain, NoticeOrigin.Windows)) == ""
+            && new[] { NoticeOrigin.Windows, NoticeOrigin.Cli, NoticeOrigin.Wsl, NoticeOrigin.Test, NoticeOrigin.Internal }.All(origin => NoticeSounds.For(Item(NoticeLevel.Glow, origin)) == NoticeSounds.DefaultShort));
         check("Sound: a quota alert and a track change play none; the summary after a quiet spell plays as a notice",
-            NoticeSounds.For(Item(NoticeLevel.Lively, kind: AttentionKind.Quota), true) == "" && NoticeSounds.For(Item(NoticeLevel.Plain, kind: AttentionKind.Track), true) == ""
-            && NoticeSounds.For(Item(NoticeLevel.Glow, kind: AttentionKind.Summary), false) == NoticeSounds.DefaultShort);
+            NoticeSounds.For(Item(NoticeLevel.Lively, kind: AttentionKind.Quota)) == "" && NoticeSounds.For(Item(NoticeLevel.Plain, kind: AttentionKind.Track)) == ""
+            && NoticeSounds.For(Item(NoticeLevel.Glow, kind: AttentionKind.Summary)) == NoticeSounds.DefaultShort);
         // Beyond the rate limit a notice shows as a plain one (AttentionCoordinator.Count): the fourth within ten seconds.
         var attention = new AttentionCoordinator();
         var started = new List<AttentionItem>();
@@ -88,7 +87,7 @@ internal static class NoticeSoundTests
             foreach (var change in attention.Submit(item, T0.AddSeconds(i * 2))) if (change.Started is { } shown) started.Add(shown);
         }
         check("Sound: a notice shown beyond the rate limit plays none, as it does not flash",
-            started.Count == 4 && started.Take(3).All(item => NoticeSounds.For(item, false) == NoticeSounds.DefaultShort) && started[3].Subdued && NoticeSounds.For(started[3], false) == "");
+            started.Count == 4 && started.Take(3).All(item => NoticeSounds.For(item) == NoticeSounds.DefaultShort) && started[3].Subdued && NoticeSounds.For(started[3]) == "");
         check("Sound: an open panel that stays open is known, so that its notice's sound plays once without the island", !attention.Open("b")
             && attention.SetBusy("b", true, T0) is not null && attention.Open("b") && Leaving(attention, "b", true) && !attention.Open("b") && Leaving(attention, "b", false) && attention.Open("b")
             && attention.SetBusy("b", false, T0) is not null && !attention.Open("b"));
@@ -116,10 +115,10 @@ internal static class NoticeSoundTests
         check("Sound settings: the chosen sounds are kept, and a file written before sounds existed plays the defaults at the default volume",
             back.NoticeStyles.Flash.Sound == "ding" && back.NoticeStyles.Stay.Sound == "file:alarm.mp3" && back.NoticeStyles.Text.Sound is null && back.NoticeSoundVolume == 100
             && old.NoticeStyles.Flash.Sound is null && old.NoticeStyles.Flash.Seconds == 9 && NoticeSounds.Of(old.NoticeStyles.Flash.Sound, NoticeLevel.Glow) == NoticeSounds.DefaultShort
-            && NoticeSounds.Of(old.NoticeStyles.Stay.Sound, NoticeLevel.Persistent) == NoticeSounds.DefaultLoop && old.NoticeSoundVolume == NoticeSounds.DefaultVolume && !old.NoticeSoundWindows);
-        check("Sound settings: a copy of a style keeps its sound, and the volume and the Windows switch belong to no profile",
+            && NoticeSounds.Of(old.NoticeStyles.Stay.Sound, NoticeLevel.Persistent) == NoticeSounds.DefaultLoop && old.NoticeSoundVolume == NoticeSounds.DefaultVolume);
+        check("Sound settings: a copy of a style keeps its sound, and the volume belongs to no profile",
             settings.NoticeStyles.Copy().Flash.Sound == "ding" && settings.NoticeStyles.Copy().Stay.Sound == "file:alarm.mp3"
-            && !Profiles.IsProfileKey(nameof(DeckSettings.NoticeSoundVolume)) && !Profiles.IsProfileKey(nameof(DeckSettings.NoticeSoundWindows)));
+            && !Profiles.IsProfileKey(nameof(DeckSettings.NoticeSoundVolume)));
     }
 
     private static void BuiltIn(Action<string, bool> check)

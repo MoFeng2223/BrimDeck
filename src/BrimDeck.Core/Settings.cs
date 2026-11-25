@@ -886,9 +886,6 @@ public sealed class DeckSettings
     public NoticeLevelStyles NoticeStyles { get; set; } = new();
     // How loud the notices' sounds play, 0 to 100 (NoticeSounds.Gain); 0 plays none.
     public int NoticeSoundVolume { get; set; } = NoticeSounds.DefaultVolume;
-    // The notices of Windows applications play BrimDeck's sound too. Off by default: most of them bring their own sound, which
-    // Windows plays whether or not their banner shows.
-    public bool NoticeSoundWindows { get; set; }
     // The collapsed count of unread notices (CompactPart.Notices) shows the icons of the applications they came from before the
     // number; off, a bell.
     public bool NoticeStripIcons { get; set; } = true;

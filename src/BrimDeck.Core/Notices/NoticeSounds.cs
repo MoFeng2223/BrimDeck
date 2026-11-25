@@ -59,15 +59,11 @@ public static class NoticeSounds
         return BuiltIn.Any(known => known.Id == sound && known.Kind == kind) ? sound : Default(kind);
     }
 
-    // The sound of what an island starts to show. A notice shown beyond the rate limit plays as a plain one, so it has none; a
-    // quota alert and a track change have none. windows: Windows applications' notices play it too (they mostly bring their own
-    // sound, so this is off unless the user asks).
-    public static string For(AttentionItem item, bool windows)
-    {
-        if (!item.IsNotice || item.Subdued) return None;
-        if (!windows && item.Payload is Notice { Origin: NoticeOrigin.Windows }) return None;
-        return Of(item.Style?.Sound, item.Level);
-    }
+    // The sound of what an island starts to show: that of its level's style (levels 2 and 3; level 1 has none), whatever sent
+    // the notice. A notice shown beyond the rate limit plays as a plain one, so it has none; a quota alert and a track change
+    // have none. (Windows applications' notices were silent at first unless a switch was turned on, as most of them bring their
+    // own sound; the user's call, 2026-11-25: a notice of level 2 or 3 always plays.)
+    public static string For(AttentionItem item) => !item.IsNotice || item.Subdued ? None : Of(item.Style?.Sound, item.Level);
 
     // The imported file a sound names; null for any other sound.
     public static string? FileName(string sound)

@@ -663,7 +663,7 @@ internal sealed partial class NoticeCenter : IDisposable
     // islands that show it, and never over a loop (NoticeSoundPace).
     private void PlayOnce(AttentionItem item)
     {
-        if (SoundOf(item) is not { Length: > 0 } sound) return;
+        if (NoticeSounds.For(item) is not { Length: > 0 } sound) return;
         if (_soundPace.Admit(item.Key + ":" + item.Level, Sounds.Looping, DateTimeOffset.UtcNow)) Sounds.Once(sound);
     }
 
@@ -675,14 +675,9 @@ internal sealed partial class NoticeCenter : IDisposable
         string? loop = null;
         if (!_disposed)
             foreach (var deck in _app.Decks)
-                if (Attention.Current(deck.NoticeLane) is { Persistent: true } item && SoundOf(item) is { Length: > 0 } sound) { loop = sound; break; }
+                if (Attention.Current(deck.NoticeLane) is { Persistent: true } item && NoticeSounds.For(item) is { Length: > 0 } sound) { loop = sound; break; }
         Sounds.Loop(loop);
     }
-
-    // The sound an item plays (NoticeSounds.For). A Windows application's notice plays one when the settings say so, or when the
-    // user gave that application its own looks: a sound chosen for it there is meant to be heard.
-    private string SoundOf(AttentionItem item)
-        => NoticeSounds.For(item, Settings.NoticeSoundWindows || item.Payload is Notice notice && Settings.NoticeRule(notice.AppKey)?.Styles is not null);
 
     private void Schedule()
     {
