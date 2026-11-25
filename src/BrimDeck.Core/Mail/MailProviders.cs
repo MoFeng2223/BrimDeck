@@ -31,7 +31,7 @@ public static class MailProviders
         new(Sina, "新浪邮箱", "Sina Mail", "imap.sina.com", MailSignIn.Code, ["sina.com", "sina.cn", "vip.sina.com", "vip.sina.cn"], "https://mail.sina.com.cn/", "https://mail.sina.com.cn/", HostByDomain: true),
         new(ICloud, "iCloud 邮件", "iCloud Mail", "imap.mail.me.com", MailSignIn.Code, ["icloud.com", "me.com", "mac.com"], "https://www.icloud.com/mail", "https://account.apple.com/", LocalUser: true),
         new(Gmail, "Gmail", "Gmail", "imap.gmail.com", MailSignIn.Code, ["gmail.com", "googlemail.com"], "https://mail.google.com/", "https://myaccount.google.com/apppasswords"),
-        new(Outlook, "Outlook", "Outlook", "outlook.office365.com", MailSignIn.Microsoft, ["outlook.com", "hotmail.com", "live.com", "msn.com"], "https://outlook.live.com/mail/", ""),
+        new(Outlook, "Outlook", "Outlook", "outlook.office365.com", MailSignIn.Microsoft, ["outlook.com", "hotmail.com", "live.com", "msn.com"], "https://outlook.live.com/mail/", "https://outlook.live.com/mail/"),
         new(Custom, "其他邮箱", "Other mailbox", "", MailSignIn.Code, [], "", "")
     ];
 
@@ -72,6 +72,7 @@ public static class MailProviders
         Gmail => Loc.T("应用专用密码", "App password"),
         Exmail => Loc.T("密码或客户端专用密码", "Password or client password"),
         Custom => Loc.T("密码或授权码", "Password or authorization code"),
+        Outlook => Loc.T("登录凭据", "Sign-in credential"),
         _ => Loc.T("授权码", "Authorization code")
     };
 
@@ -116,8 +117,9 @@ public static class MailProviders
         ],
         Outlook =>
         [
-            Loc.T("在 Outlook 网页版的“设置 › 邮件 › 转发和 IMAP”中打开“允许设备和应用使用 IMAP”。", "On the Outlook website, under Settings › Mail › Forwarding and IMAP, turn on Let devices and apps use IMAP."),
-            Loc.T("填写邮箱地址，点“在浏览器中登录”，在打开的页面登录 Microsoft 账户并同意授权。", "Enter the address, choose Sign in in the browser, then sign in to the Microsoft account on the page that opens and allow access.")
+            Loc.T("在 Outlook 网页版右上角打开“设置”，进入“邮件 › 转发和 IMAP”，打开“让设备和应用使用 IMAP”。个人账户默认关闭，已打开的可跳过。",
+                "In Outlook on the web, open Settings at the top right, go to Mail › Forwarding and IMAP and turn on Let devices and apps use IMAP. It is off by default for personal accounts; skip this if it is on."),
+            Loc.T("点“在浏览器中登录”，在打开的页面登录要连接的 Microsoft 账户，点“接受”。", "Choose Sign in in the browser, sign in to the Microsoft account to connect on the page that opens, and accept the request.")
         ],
         _ =>
         [

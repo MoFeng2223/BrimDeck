@@ -13,7 +13,7 @@ namespace ReadmeMedia;
 
 // The "邮箱" settings page without a mailbox and with mailboxes in each state (connected, connecting, connection lost, refused,
 // switched off, a very long address), and the window that adds a mailbox: the services to choose from, each service's steps and
-// fields, an error under them, and the Outlook page of a version that cannot sign in. No mailbox is connected: the watches are
+// fields (Outlook signs in in the browser), and an error under them. No mailbox is connected: the watches are
 // made and never started, and their states are set by hand. For checking, not for the README.
 internal sealed partial class Renderer
 {
@@ -46,6 +46,7 @@ internal sealed partial class Renderer
         Add(MailProviders.Exmail, "zhang.wei@studio-with-a-very-long-company-domain-name.example.com", new(MailState.Refused, "Login fail."));
         Add(MailProviders.Sina, "oldfriend@sina.com", null, enabled: false);
         Add(MailProviders.Custom, "me@example.org", new(MailState.Watching), host: "imap.example.org");
+        Add(MailProviders.Outlook, "north.lantern@outlook.com", new(MailState.Refused, "AUTHENTICATE failed."));
         _settings.NoticeApps.Add(new() { Key = refused.AppKey, Name = "iCloud", Level = BrimDeck.Core.Notices.NoticeLevel.Silent });
         await SettingsPage("mail-settings", 22, height: 900);
         _settings.NoticeIsland = false; _settings.NoticesPage = false;
@@ -90,6 +91,8 @@ internal sealed partial class Renderer
                 ? "The mail server refused the sign-in. Check the authorization code and that IMAP is turned on." : "登录被拒绝。请确认授权码正确，并且已开启 IMAP 服务。", true]);
         });
         await Dialog("mail-again", _english ? "Connect the mailbox again" : "重新连接邮箱", (shell, _) => Form(shell, MailProviders.ICloud, refused));
+        var outlook = new MailAccount { Provider = MailProviders.Outlook, Address = "north.lantern.with.a.long.name@outlook.com" };
+        await Dialog("mail-again-outlook", _english ? "Connect the mailbox again" : "重新连接邮箱", (shell, _) => Form(shell, MailProviders.Outlook, outlook));
 
         static IEnumerable<DependencyObject> Boxes(DependencyObject parent)
         {

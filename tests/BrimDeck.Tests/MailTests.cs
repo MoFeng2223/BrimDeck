@@ -95,11 +95,24 @@ internal static class MailTests
         string url = MicrosoftMail.AuthorizeUrl("client-1", "http://localhost:5000", "st", "ch", "me@outlook.com");
         check("Microsoft sign-in: the page asks for IMAP and a refresh token, with PKCE, back to this PC",
             url.StartsWith("https://login.microsoftonline.com/common/oauth2/v2.0/authorize?") && url.Contains("client_id=client-1") && url.Contains("response_type=code")
-            && url.Contains("redirect_uri=http%3A%2F%2Flocalhost%3A5000") && url.Contains("scope=https%3A%2F%2Foutlook.office.com%2FIMAP.AccessAsUser.All%20offline_access")
+            && url.Contains("redirect_uri=http%3A%2F%2Flocalhost%3A5000") && url.Contains("scope=openid%20email%20profile%20https%3A%2F%2Foutlook.office.com%2FIMAP.AccessAsUser.All%20offline_access")
             && url.Contains("code_challenge=ch") && url.Contains("code_challenge_method=S256") && url.Contains("state=st") && url.Contains("login_hint=me%40outlook.com"));
+        check("Microsoft sign-in: adding a mailbox offers no account on Microsoft's page",
+            !MicrosoftMail.AuthorizeUrl("client-1", "http://localhost:5000", "st", "ch", null).Contains("login_hint"));
+        static string IdToken(string claims) => "eyJhbGciOiJub25lIn0." + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(claims)).TrimEnd('=').Replace('+', '-').Replace('/', '_') + ".sig";
+        string ours = MicrosoftMail.ClientId;
+        check("Microsoft sign-in: the mailbox is the account signed in to, by its email, else its sign-in name when that is an address",
+            MicrosoftMail.Address(IdToken($$"""{"aud":"{{ours}}","email":"real@outlook.com","preferred_username":"+8613800000000"}"""), ours) == "real@outlook.com"
+            && MicrosoftMail.Address(IdToken($$"""{"aud":"{{ours}}","preferred_username":"me@contoso.com"}"""), ours) == "me@contoso.com"
+            && MicrosoftMail.Address(IdToken($$"""{"aud":"{{ours}}","preferred_username":"+8613800000000"}"""), ours) is null);
+        check("Microsoft sign-in: an ID token for another app or a broken one gives no mailbox",
+            MicrosoftMail.Address(IdToken("""{"aud":"other","email":"real@outlook.com"}"""), ours) is null && MicrosoftMail.Address("not-a-token", ours) is null
+            && MicrosoftMail.Address("a.!!!.b", ours) is null);
         var now = new DateTimeOffset(2026, 11, 24, 12, 0, 0, TimeSpan.Zero);
         var tokens = MicrosoftMail.ReadTokens("""{"access_token":"at","refresh_token":"rt","expires_in":3599}""", null, now);
         check("Microsoft sign-in: the tokens are read with their end", tokens == new MicrosoftTokens("at", "rt", now.AddSeconds(3599)));
+        check("Microsoft sign-in: a sign-in's tokens carry the mailbox of the account",
+            MicrosoftMail.ReadTokens($$"""{"access_token":"at","refresh_token":"rt","expires_in":3599,"id_token":"{{IdToken($$"""{"aud":"{{ours}}","email":"real@outlook.com"}""")}}"}""", null, now).Address == "real@outlook.com");
         check("Microsoft sign-in: a refresh that gives no new refresh token keeps the old one", MicrosoftMail.ReadTokens("""{"access_token":"at2","expires_in":60}""", "rt", now).Refresh == "rt");
         bool refused = false, broken = false;
         try { MicrosoftMail.ReadTokens("""{"error":"invalid_grant","error_description":"AADSTS70000: expired"}""", "rt", now); } catch (MailSecretException ex) { refused = ex.Message.Contains("expired"); }
@@ -108,7 +121,9 @@ internal static class MailTests
         check("Microsoft sign-in: the code and the state are read from the request the browser makes",
             MicrosoftMail.Query("GET /?code=M.C5%2Babc&state=st HTTP/1.1\r\nHost: localhost\r\n\r\n") is { } query && query["code"] == "M.C5+abc" && query["state"] == "st"
             && MicrosoftMail.Query("GET /favicon.ico HTTP/1.1\r\n\r\n") is null && MicrosoftMail.Query("POST /?code=1 HTTP/1.1\r\n\r\n") is null);
-        check("Microsoft sign-in: it is offered only once BrimDeck has a client id", MicrosoftMail.Available == (MicrosoftMail.ClientId.Length > 0));
+        check("Microsoft sign-in: the page the browser comes back to says how it went and clears the code from the address bar",
+            MicrosoftMail.Page(true) is var done && done.Contains("m9 12 2 2 4-4") && done.Contains("history.replaceState") && done.Contains("prefers-color-scheme:dark")
+            && MicrosoftMail.Page(false) is var failed && failed.Contains("m15 9-6 6") && !failed.Contains("m9 12 2 2 4-4"));
     }
 
     private static readonly MailPace Fast = new() { Idle = TimeSpan.FromMilliseconds(300), Poll = TimeSpan.FromMilliseconds(150), Timeout = TimeSpan.FromSeconds(5),

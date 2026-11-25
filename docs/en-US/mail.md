@@ -26,7 +26,15 @@ BrimDeck signs in once with what you entered and saves the mailbox only after th
 | Gmail | App password | myaccount.google.com/apppasswords; needs 2-Step Verification; work or school accounts may not offer it |
 | Other mailbox | Password or authorization code, and the IMAP server | The mailbox's web settings or its administrator |
 
-Outlook, Hotmail and Microsoft 365 mailboxes take neither a password nor a code; they connect only by signing in to the Microsoft account. This version cannot sign in yet, so keep using Outlook's own notifications.
+Outlook, Hotmail and Microsoft 365 mailboxes take neither a password nor a code; they connect by signing in to the Microsoft account:
+
+1. In Outlook on the web, open Settings at the top right, go to Mail › Forwarding and IMAP and turn on Let devices and apps use IMAP. Microsoft says IMAP is off by default for personal accounts; skip this step if it is already on. For a work or school account, IMAP is controlled by its administrator.
+2. In BrimDeck, choose Outlook, then Sign in in the browser.
+3. On the Microsoft page that opens in the browser, sign in to the account to connect and accept the request. When the page says you are signed in, go back to BrimDeck. BrimDeck connects the mailbox of the account you signed in to on that page.
+
+The consent page calls this permission read and write access to your mail. That is how Microsoft describes IMAP access, and there is no read-only version to ask for. BrimDeck opens the inbox read-only and does not change, move or delete mail.
+
+BrimDeck has not been through Microsoft's publisher verification, so the sign-in page shows its publisher as unverified. If a work or school account asks for administrator approval, an administrator of that organization has to approve BrimDeck once. BrimDeck keeps only the sign-in credential Microsoft gives it, never the account password.
 
 Only encrypted connections on port 993 (IMAP over TLS) are supported.
 

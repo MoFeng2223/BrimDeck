@@ -99,7 +99,8 @@ internal sealed class MailCenter : IDisposable
     }
 
     // Signs in to a Microsoft account in the browser for the window that adds a mailbox; null when the user did not allow it.
-    public Task<MicrosoftTokens?> SignInMicrosoftAsync(string address, Func<string, bool> open, CancellationToken stop)
+    // address is the mailbox being signed in again, offered on Microsoft's page.
+    public Task<MicrosoftTokens?> SignInMicrosoftAsync(string? address, Func<string, bool> open, CancellationToken stop)
         => MicrosoftMail.SignInAsync(_http.Value, address, open, stop);
 
     // After sleep the connections are dead; they are made again at once instead of after a timeout.

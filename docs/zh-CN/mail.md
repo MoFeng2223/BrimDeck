@@ -26,7 +26,15 @@ BrimDeck 先用填写的内容登录一次，登录成功后才保存这个邮�
 | Gmail | 应用专用密码 | myaccount.google.com/apppasswords，需要已开启两步验证；工作或学校账号可能没有这一项 |
 | 其他邮箱 | 密码或授权码，以及 IMAP 服务器地址 | 邮箱的网页版设置或管理员 |
 
-Outlook、Hotmail 和 Microsoft 365 邮箱不接受密码或授权码，只能通过登录 Microsoft 账户连接。当前版本还不能登录，请继续使用 Outlook 自己的通知。
+Outlook、Hotmail 和 Microsoft 365 邮箱不接受密码或授权码，需要登录 Microsoft 账户连接：
+
+1. 在 Outlook 网页版右上角打开“设置”，进入“邮件 › 转发和 IMAP”，打开“让设备和应用使用 IMAP”。Microsoft 说明个人账户的 IMAP 默认关闭；已经打开的可以跳过这一步。工作或学校账户的 IMAP 由单位管理员控制。
+2. 在 BrimDeck 中选择 Outlook，点“在浏览器中登录”。
+3. 在浏览器打开的 Microsoft 页面登录要连接的账户，点“接受”。页面显示“登录完成”后回到 BrimDeck。BrimDeck 连接的是你在这个页面上登录的账户的邮箱。
+
+授权页面把这项权限写作“你的邮件的读写访问权限”，这是 Microsoft 对 IMAP 权限的统一说法，没有只读的版本可选。BrimDeck 以只读方式打开收件箱，不修改、移动或删除邮件。
+
+BrimDeck 没有经过 Microsoft 的发布者验证，登录页面会把它的发布者显示为“未验证”。工作或学校账户如果显示需要管理员批准，需要请单位的管理员批准一次。BrimDeck 只保存 Microsoft 给出的登录凭据，不保存账户密码。
 
 只支持 993 端口的加密连接（IMAP over TLS）。
 
