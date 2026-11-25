@@ -29,9 +29,9 @@ internal sealed class WeatherComCnSource : IWeatherSource
         bool wantDays = need.Contains(WeatherDomain.Daily) || need.Contains(WeatherDomain.History);
         bool wantExtras = need.Contains(WeatherDomain.Warning) || need.Contains(WeatherDomain.Indices);
         // 实况偶尔很慢，单独限时 4 秒并落盘 5 分钟：它拖不住已经拿到的每日预报。
-        var currentTask = wantCurrent ? Body($"{id}|current", TimeSpan.FromMinutes(5), $"http://d1.weather.com.cn/sk_2d/{id}.html", token, 4) : Task.FromResult<string?>(null);
+        var currentTask = wantCurrent ? Body($"{id}|current", TimeSpan.FromMinutes(5), $"https://d1.weather.com.cn/sk_2d/{id}.html", token, 4) : Task.FromResult<string?>(null);
         // 预警与生活指数同在一个 weather_index 页面里；预警要尽量新，所以只缓存 10 分钟。
-        var extrasTask = wantExtras ? Body($"{id}|index", TimeSpan.FromMinutes(10), $"http://d1.weather.com.cn/weather_index/{id}.html", token, 6) : Task.FromResult<string?>(null);
+        var extrasTask = wantExtras ? Body($"{id}|index", TimeSpan.FromMinutes(10), $"https://d1.weather.com.cn/weather_index/{id}.html", token, 6) : Task.FromResult<string?>(null);
         // 24 天窗口可能跨月，按起止日期枚举涉及的每个月份；月历一个月只变一次，缓存 6 小时。
         var months = new List<Task<string?>>();
         if (wantDays)
@@ -40,28 +40,33 @@ internal sealed class WeatherComCnSource : IWeatherSource
             for (var month = new DateTime(start.Year, start.Month, 1); month <= end; month = month.AddMonths(1))
             {
                 string stamp = month.ToString("yyyyMM");
-                months.Add(Body($"{id}|{stamp}", TimeSpan.FromHours(6), $"http://d1.weather.com.cn/calendar_new/{stamp[..4]}/{id}_{stamp}.html", token, 6));
+                months.Add(Body($"{id}|{stamp}", TimeSpan.FromHours(6), $"https://d1.weather.com.cn/calendar_new/{stamp[..4]}/{id}_{stamp}.html", token, 6));
             }
         }
         var currentBody = await currentTask;
-        if (currentBody is not null && ExtractObject(currentBody) is { } sk)
+        // 实况页面偶尔返回残缺内容：解析失败只丢实况这一块，已取得的月历/预警/指数不能跟着一起丢。
+        try
         {
-            using var doc = JsonDocument.Parse(sk);
-            var root = doc.RootElement;
-            string? condition = Json.Text(root, "weather");
-            string? windDir = Json.Text(root, "WD");
-            part.Current = new CurrentPart
+            if (currentBody is not null && ExtractObject(currentBody) is { } sk)
             {
-                Temperature = Json.Number(root, "temp"), Humidity = ParsePercent(Json.Text(root, "SD")),
-                PressureHpa = Json.Number(root, "qy"), VisibilityKm = ParseDistance(Json.Text(root, "njd")),
-                PrecipMm = Json.Number(root, "rain"), Code = WeatherCodes.FromText(condition), Condition = condition,
-                WindDir = windDir, WindDirDeg = WeatherCodes.DegreesFromText(windDir),
-                WindKmh = WeatherCodes.FromWindPower(Json.Text(root, "WS")),
-                IsDay = DateTime.Now.Hour is >= 6 and < 18
-            };
-            if (Json.Integer(root, "aqi") is { } aqi && aqi > 0)
-                part.Air = new AirPart { Aqi = aqi, Pm25 = Json.Integer(root, "aqi_pm25"), Level = aqi <= 50 ? 1 : aqi <= 100 ? 2 : aqi <= 150 ? 3 : 4, Text = WeatherCodes.AqiText(aqi) };
+                using var doc = JsonDocument.Parse(sk);
+                var root = doc.RootElement;
+                string? condition = Json.Text(root, "weather");
+                string? windDir = Json.Text(root, "WD");
+                part.Current = new CurrentPart
+                {
+                    Temperature = Json.Number(root, "temp"), Humidity = ParsePercent(Json.Text(root, "SD")),
+                    PressureHpa = Json.Number(root, "qy"), VisibilityKm = ParseDistance(Json.Text(root, "njd")),
+                    PrecipMm = Json.Number(root, "rain"), Code = WeatherCodes.FromText(condition), Condition = condition,
+                    WindDir = windDir, WindDirDeg = WeatherCodes.DegreesFromText(windDir),
+                    WindKmh = WeatherCodes.FromWindPower(Json.Text(root, "WS")),
+                    IsDay = DateTime.Now.Hour is >= 6 and < 18
+                };
+                if (Json.Integer(root, "aqi") is { } aqi && aqi > 0)
+                    part.Air = new AirPart { Aqi = aqi, Pm25 = Json.Integer(root, "aqi_pm25"), Level = aqi <= 50 ? 1 : aqi <= 100 ? 2 : aqi <= 150 ? 3 : 4, Text = WeatherCodes.AqiText(aqi) };
+            }
         }
+        catch { }
         var bodies = await Task.WhenAll(months);
         if (await extrasTask is { } extras) ParseExtras(extras, part);
         var days = new Dictionary<string, DayPoint>();
@@ -110,16 +115,15 @@ internal sealed class WeatherComCnSource : IWeatherSource
     }
 
     // 中国天气网的风级在风向串里（如「西北风3-4级」），ws1 偶尔单独给出；微风按 0 级处理。
-    private static double WindPowerKmh(string? text, string? fallback)
+    private static double? WindPowerKmh(string? text, string? fallback)
     {
         foreach (var part in new[] { text, fallback })
         {
             if (string.IsNullOrWhiteSpace(part)) continue;
             if (part.Contains("微风")) return 0;
-            double kmh = WeatherCodes.FromWindPower(part);
-            if (!double.IsNaN(kmh)) return kmh;
+            if (WeatherCodes.FromWindPower(part) is { } kmh) return kmh;
         }
-        return double.NaN;
+        return null;
     }
 
     private static async Task<string?> ResolveIdAsync(string name, CancellationToken token)
@@ -127,8 +131,8 @@ internal sealed class WeatherComCnSource : IWeatherSource
         // 城市 ID 是静态数据，落盘 30 天：启动后不必先搜一次城市，断网也能定位到已有城市。
         return await WeatherCache.GetAsync<string>("weathercomcn", "id|" + name, TimeSpan.FromDays(30), async ct =>
         {
-            var result = await WeatherHttp.GetAsync("weathercomcn", $"http://toy1.weather.com.cn/search?cityname={Json.Esc(name)}", ct,
-                request => request.Headers.Referrer = new Uri("http://www.weather.com.cn/"), 3);
+            var result = await WeatherHttp.GetAsync("weathercomcn", $"https://toy1.weather.com.cn/search?cityname={Json.Esc(name)}", ct,
+                request => request.Headers.Referrer = new Uri("https://www.weather.com.cn/"), 3);
             if (result.Body is null) return null;
             string json = result.Body.Trim().TrimStart('(').TrimEnd(')');
             if (ExtractArray(json) is not { } array) return null;
@@ -146,7 +150,7 @@ internal sealed class WeatherComCnSource : IWeatherSource
     // 响应体落盘：国内站点不稳定，缓存同时也是断网时的兜底。
     private static Task<string?> Body(string key, TimeSpan ttl, string url, CancellationToken token, int seconds)
         => WeatherCache.GetAsync<string>("weathercomcn", key, ttl, async ct =>
-            (await WeatherHttp.GetAsync("weathercomcn", url, ct, request => request.Headers.Referrer = new Uri("http://www.weather.com.cn/"), seconds)).Body, token);
+            (await WeatherHttp.GetAsync("weathercomcn", url, ct, request => request.Headers.Referrer = new Uri("https://www.weather.com.cn/"), seconds)).Body, token);
 
     // weather_index 页面里内嵌两段 JS：
     //   alarmDZ.w[] 每项是数组式对象：w5 类型、w7 等级、w8 发布时间、w9 正文、w13 标题、w15 失效时间、w14=Cancel 表示已解除；

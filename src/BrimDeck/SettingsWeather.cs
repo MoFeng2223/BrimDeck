@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using System.Windows.Shapes;
 using BrimDeck.Core;
 namespace BrimDeck;
 public sealed partial class SettingsWindow
@@ -12,9 +13,14 @@ public sealed partial class SettingsWindow
         var state=WeatherData.Load(() => S);var cityRows=new StackPanel();bool active=true;
         string autoName="当前位置";if(state.AutoKey.Length>0&&state.Cache.TryGetValue(state.AutoKey,out var autoSnap))autoName=autoSnap.Name;
         var preview=new ContentControl {Content=new WeatherSettingsPreview(state)};
+        // 城市配额徽章：挂在「当前城市」标题右侧的细描边胶囊里，还有空位用绿色、加满转红色。
+        var cityQuotaText=TextLine("",11,TextPrimary);cityQuotaText.VerticalAlignment=VerticalAlignment.Center;
+        var cityQuota=new Border {Child=cityQuotaText,CornerRadius=new CornerRadius(10),Padding=new Thickness(9,2,9,2),Background=Brushes.Transparent,BorderBrush=(Brush)FindResource("SettingsBorder"),BorderThickness=new Thickness(1),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(8,0,0,0)};
+        void UpdateCityQuota(){cityQuotaText.Text=$"{state.Cities.Count}/{DeckSettings.MaxWeatherCities}";cityQuotaText.Foreground=UI.Brush(state.Cities.Count<DeckSettings.MaxWeatherCities?_palette.Positive:_palette.Negative);}
         void Save() {try {_app.QueueSave(); WeatherData.Save(state);}catch {}}
         void Fill()
         {
+            UpdateCityQuota();
             cityRows.Children.Clear();
             for(int i=-1;i<state.Cities.Count;i++) {
                 int index=i;bool selected=i==state.Selected;var city=i<0?null:state.Cities[i];
@@ -27,10 +33,20 @@ public sealed partial class SettingsWindow
                 } else if(state.Cache.TryGetValue(city.ToString(),out var snap)){temperature=$"{snap.Temperature:0}°";code=snap.WeatherCode;day=snap.IsDay;}
                 var controls=new StackPanel {Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};if(temperature is not null)controls.Children.Add(TextLine(temperature,14,TextPrimary));
                 void Select(){state.Selected=index;Save();preview.Content=new WeatherSettingsPreview(state);Fill();}
-                var brush=(SolidColorBrush)FindResource("SettingsTextSecondary");
-                if(city is not null){var remove=new Button {Content=new WeatherMetaIcon(WeatherMetaKind.Close,brush.Color){Width=12,Height=12},Style=(Style)FindResource("SettingsGlyphButton"),ToolTip=Loc.T("删除城市","Remove city")};remove.Click+=(_,_)=>{state.Cities.RemoveAt(index);if(state.Selected==index)state.Selected=-1;else if(state.Selected>index)state.Selected--;Save();preview.Content=new WeatherSettingsPreview(state);Fill();UpdateAdd();};controls.Children.Add(remove);}
+                Button? remove=null;
+                if(city is not null){
+                    // 与「配额与统计」列表的删除按钮同款：X 图标，悬停随按钮前景色变色，贴在行最右侧。
+                    remove=new Button {Style=(Style)FindResource("SettingsGlyphButton"),ToolTip=Loc.T("删除城市","Remove city"),Width=24,Height=26,Padding=new Thickness(0),VerticalAlignment=VerticalAlignment.Center};
+                    var cross=Stroke("M 0,0 L 8,8 M 8,0 L 0,8",8,8,TextSecondary);
+                    cross.SetBinding(Shape.StrokeProperty,new System.Windows.Data.Binding("Foreground"){RelativeSource=new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.FindAncestor,typeof(Button),1)});
+                    remove.Content=cross;
+                    remove.Click+=(_,_)=>{state.Cities.RemoveAt(index);if(state.Selected==index)state.Selected=-1;else if(state.Selected>index)state.Selected--;Save();preview.Content=new WeatherSettingsPreview(state);Fill();UpdateAdd();};
+                }
                 var row=Row(name,controls,subtitle is null?null:TextLine(subtitle,11,TextSecondary));row.Margin=new Thickness(42,0,8,0);
-                var grid=new Grid();grid.Children.Add(row);grid.Children.Add(new WeatherGlyph(code,day) {Width=28,Height=28,HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(4,0,0,0),IsHitTestVisible=false});
+                // 删除按钮单独占一列：温度等列表内容在左，按钮钉在行右缘，与 AI 列表一致。
+                FrameworkElement rowHost=row;
+                if(remove is not null){var outer=new Grid();outer.ColumnDefinitions.Add(new ColumnDefinition());outer.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});outer.Children.Add(row);Grid.SetColumn(remove,1);remove.HorizontalAlignment=HorizontalAlignment.Right;remove.Margin=new Thickness(6,0,0,0);outer.Children.Add(remove);rowHost=outer;}
+                var grid=new Grid();grid.Children.Add(rowHost);grid.Children.Add(new WeatherGlyph(code,day) {Width=28,Height=28,HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(4,0,0,0),IsHitTestVisible=false});
                 if(selected){var indicator=new Border {Width=3,CornerRadius=new CornerRadius(0,2,2,0),Background=(Brush)FindResource("SettingsAccent"),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Stretch};grid.Children.Add(indicator);}
                 var border=new Border {Child=grid,Background=selected?(Brush)FindResource("SettingsAccentTint"):Brushes.Transparent,CornerRadius=new CornerRadius(6),Cursor=System.Windows.Input.Cursors.Hand};border.MouseLeftButtonUp+=(_,e)=>{if(e.OriginalSource is not Button)Select();};cityRows.Children.Add(border);
             }
@@ -42,7 +58,7 @@ public sealed partial class SettingsWindow
         previewHeader.Children.Add(TextLine(Loc.T("天气预览", "Weather preview"), 16, TextPrimary));
         Target.Children.Add(previewHeader);
         CancellationTokenSource? refreshRequest = null;
-        Target.Children.Add(preview);SectionTitle(Loc.T("当前城市","Current city"));Group(cityRows);
+        Target.Children.Add(preview);SectionTitle(Loc.T("当前城市","Current city"),cityQuota);Group(cityRows);
         // 设置页打开即尝试定位：成功则刷新「自动定位」行展示当地城市名，不干扰其余行。
         async Task DetectAsync() { if(!active)return;try {var local=await WeatherData.LocateAsync(state.Schedule,CancellationToken.None);if(active&&local is not null&&!local.Name.Contains("当前位置")){autoName=local.Name;Fill();}}catch{}}
         SectionTitle(Loc.T("添加城市","Add city"));
@@ -194,33 +210,95 @@ public sealed partial class SettingsWindow
         FillSources();
 
 
-        SectionTitle(Loc.T("和风天气配置","QWeather setup"));
-        var hefengHost=KeyField(state.Schedule.HeFengHost,text=>{state.Schedule.HeFengHost=text;Save();});
-        var hefengKey=KeyField(state.Schedule.HeFengKey,text=>{state.Schedule.HeFengKey=text;Save();});
-        TextBox LimitField(Func<int> read, Action<int> write)
+        // 卡片式表单：标签在输入框上方；Host/Key 同一行、两个上限沿用同一套列宽，左右严格对齐。
+        var hefengCard = new Border { CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), Padding = new Thickness(16, 14, 16, 16), Margin = new Thickness(0, 0, 0, 28) };
+        hefengCard.SetResourceReference(Border.BackgroundProperty, "SettingsSurface");
+        hefengCard.SetResourceReference(Border.BorderBrushProperty, "SettingsBorder");
+        var cardBody = new StackPanel();
+        var cardHeading = TextLine(Loc.T("和风天气", "QWeather"), 14, TextPrimary, FontWeights.SemiBold);
+        cardHeading.Margin = new Thickness(0, 0, 0, 14);
+        cardBody.Children.Add(cardHeading);
+        var cardGrid = new Grid();
+        cardGrid.ColumnDefinitions.Add(new ColumnDefinition());
+        cardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
+        cardGrid.ColumnDefinitions.Add(new ColumnDefinition());
+        cardGrid.RowDefinitions.Add(new RowDefinition());
+        cardGrid.RowDefinitions.Add(new RowDefinition());
+        FrameworkElement CardField(string label, FrameworkElement input, FrameworkElement? counter, int row, int column)
         {
-            var input = new TextBox { Width = 100, Height = 31, Style = (Style)FindResource("SettingsField"), Text = read().ToString() };
+            var cell = new StackPanel();
+            if (row > 0) cell.Margin = new Thickness(0, 14, 0, 0);
+            var caption = TextLine(label, 12, TextSecondary);
+            caption.VerticalAlignment = VerticalAlignment.Center;
+            var captionLine = new DockPanel();
+            if (counter is not null)
+            {
+                DockPanel.SetDock(counter, Dock.Right); counter.VerticalAlignment = VerticalAlignment.Center;
+                captionLine.Children.Add(counter);
+            }
+            captionLine.Children.Add(caption);
+            captionLine.Margin = new Thickness(0, 0, 0, 6);
+            cell.Children.Add(captionLine);
+            input.HorizontalAlignment = HorizontalAlignment.Stretch;
+            cell.Children.Add(input);
+            Grid.SetRow(cell, row); Grid.SetColumn(cell, column);
+            return cell;
+        }
+        TextBox TextField(string value, Action<string> save)
+        {
+            var box = new TextBox { Style = (Style)FindResource("SettingsField"), Text = value };
+            box.TextChanged += (_, _) => save(box.Text);
+            return box;
+        }
+        PasswordBox SecretField(string value, Action<string> save)
+        {
+            // Password 在这之后才挂事件，初始装载不会误触发一次保存。
+            var box = new PasswordBox { Style = (Style)FindResource("SettingsPassword"), MaxLength = 4096, Password = value };
+            box.PasswordChanged += (_, _) => save(box.Password);
+            return box;
+        }
+        // 已用/上限计数：挂在字段标签右侧；上限为 0 时分母显示 ∞。改动上限后立即刷新。
+        var dailyCounter=TextLine("",11,TextSecondary);dailyCounter.VerticalAlignment=VerticalAlignment.Center;
+        var monthlyCounter=TextLine("",11,TextSecondary);monthlyCounter.VerticalAlignment=VerticalAlignment.Center;
+        void UpdateCounters()
+        {
+            string Ratio(int used,int limit)=>$"{used}/{(limit==0?"∞":limit.ToString())}";
+            dailyCounter.Text=Ratio(RequestGate.Today("hefeng"),state.Schedule.HeFengDailyLimit);
+            monthlyCounter.Text=Ratio(RequestGate.ThisMonth("hefeng"),state.Schedule.HeFengMonthlyLimit);
+        }
+        UpdateCounters();
+        TextBox LimitField(Func<int> read, Action<int> write, Action? changed = null)
+        {
+            // 0 在界面上显示成「无限」，写回去的仍然是 int 0；聚焦时清空占位文字，直接输入数字即可。
+            string unlimited = Loc.T("无限", "Unlimited");
+            var input = new TextBox { Style = (Style)FindResource("SettingsField") };
+            void Show() => input.Text = read() == 0 ? unlimited : read().ToString();
+            Show();
             void Commit()
             {
-                if (int.TryParse(input.Text, out var value) && value >= 0 && value != read())
-                {
-                    write(value);
-                    Save();
-                }
-                input.Text = read().ToString();
+                string text = input.Text.Trim();
+                int value;
+                if (text.Length == 0 || text == unlimited) value = 0;
+                else if (!int.TryParse(text, out value) || value < 0) value = read();
+                if (value != read()) { write(value); Save(); changed?.Invoke(); }
+                Show();
             }
+            input.GotKeyboardFocus += (_, _) => { if (read() == 0) input.Clear(); };
             input.LostKeyboardFocus += (_, _) => Commit();
             input.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) { Commit(); e.Handled = true; } };
             return input;
         }
-        Group(Row(Loc.T("和风 API Host","QWeather host"),hefengHost,TextLine(Loc.T("必填：控制台分配的项目 Host，例如 abcxyz.re.qweatherapi.com；留空则不启用和风。","Required: the project host from your console, e.g. abcxyz.re.qweatherapi.com; blank disables QWeather."),11,TextSecondary)),
-              Row(Loc.T("和风天气 Key","QWeather key"),hefengKey,TextLine(Loc.T("和风需要 Key：填入后优先使用其全维度数据。","QWeather needs a key: with one it is preferred for all domains."),11,TextSecondary)),
-              Row(Loc.T("每日 API 调用上限", "Daily API limit"),
-                  LimitField(() => state.Schedule.HeFengDailyLimit, v => state.Schedule.HeFengDailyLimit = v),
-                  TextLine(Loc.T("城市搜索与天气请求合计，0 表示不限。", "Includes city searches and weather requests. Set 0 for unlimited calls."), 11, TextSecondary)),
-              Row(Loc.T("每月 API 调用上限", "Monthly API limit"),
-                  LimitField(() => state.Schedule.HeFengMonthlyLimit, v => state.Schedule.HeFengMonthlyLimit = v),
-                  TextLine(Loc.T($"本月已调用 {RequestGate.ThisMonth("hefeng"):N0} 次，0 表示不限。", $"{RequestGate.ThisMonth("hefeng"):N0} calls this month. Set 0 for unlimited calls."), 11, TextSecondary)));
+        cardGrid.Children.Add(CardField(Loc.T("API Host", "API Host"),
+            TextField(state.Schedule.HeFengHost, text => { state.Schedule.HeFengHost = text; Save(); }), null, 0, 0));
+        cardGrid.Children.Add(CardField(Loc.T("API Key", "API Key"),
+            SecretField(state.Schedule.HeFengKey, text => { state.Schedule.HeFengKey = text; Save(); }), null, 0, 2));
+        cardGrid.Children.Add(CardField(Loc.T("每日上限", "Daily limit"),
+            LimitField(() => state.Schedule.HeFengDailyLimit, v => state.Schedule.HeFengDailyLimit = v, UpdateCounters), dailyCounter, 1, 0));
+        cardGrid.Children.Add(CardField(Loc.T("每月上限", "Monthly limit"),
+            LimitField(() => state.Schedule.HeFengMonthlyLimit, v => state.Schedule.HeFengMonthlyLimit = v, UpdateCounters), monthlyCounter, 1, 2));
+        cardBody.Children.Add(cardGrid);
+        hefengCard.Child = cardBody;
+        Target.Children.Add(hefengCard);
         // 更新与请求状态放页尾：城市与来源才是高频改动项，运行状态看一眼就够。
         SectionTitle(Loc.T("更新与数据","Updates and data"));Group(Row(Loc.T("自动更新","Auto update"),TextLine(Loc.T("每 15 分钟","Every 15 minutes"),12,TextSecondary)),Row(Loc.T("离线时","Offline"),TextLine(Loc.T("自动使用本地缓存","Falls back to the local cache"),12,TextSecondary)));
         // 请求与缓存：按用户指定来源请求 + 分域缓存，这里把当天的实际请求量和磁盘占用摆出来，配额一目了然。
@@ -263,12 +341,6 @@ public sealed partial class SettingsWindow
         };
         cityRows.Unloaded+=(_,_)=>{active=false;refreshRequest?.Cancel();pending?.Cancel();pending?.Dispose();pending=null;fetchCts?.Cancel();fetchCts?.Dispose();fetchCts=null;popup.IsOpen=false;ShowSearching(false);};
 
-        TextBox KeyField(string value,Action<string> save)
-        {
-            var box=new TextBox {Width=250,Height=31,Style=(Style)FindResource("SettingsField"),Text=value};
-            box.TextChanged+=(_,_)=>save(box.Text);
-            return box;
-        }
         // 添加城市后立即拉取一次天气写入缓存，列表温度随之刷新；未就绪时该行不显示温度，删除或离开页面的请求一律作废。
         async Task FetchCityAsync(City city) { fetchCts?.Cancel();fetchCts=new();var token=fetchCts.Token;try {var snap=await WeatherData.CurrentAsync(city,state.Schedule,token);if(!active||token.IsCancellationRequested||!state.Cities.Contains(city))return;state.Cache[city.ToString()]=snap;Save();Fill();if(state.Selected>=0&&state.Selected<state.Cities.Count&&state.Cities[state.Selected].ToString()==city.ToString())preview.Content=new WeatherSettingsPreview(state);}catch{}}
     }
@@ -331,7 +403,7 @@ internal sealed class WeatherSettingsPreview : Border
         for(int i=0;i<3;i++) {
             string dayTitle="";int dCode=0;string rain="";string high="";string low="";
             if(snap is not null&&snap.DayDates.Length>0) {
-                int idx=today+i; if(idx>=snap.DayDates.Length) break;
+                int idx=today+i; if(idx<0||idx>=snap.DayDates.Length) break;
                 if (!DateTime.TryParse(snap.DayDates[idx],out var date)) continue;
          dayTitle=i==0?Loc.T("今天","Today"):i==1?Loc.T("明天","Tomorrow"):Loc.T(new[]{"周日","周一","周二","周三","周四","周五","周六"}[(int)date.DayOfWeek],new[]{"Sun","Mon","Tue","Wed","Thu","Fri","Sat"}[(int)date.DayOfWeek]);
                 dCode=snap.DayCodes.Length>idx&&snap.DayCodes[idx]>=0?snap.DayCodes[idx]:3;
@@ -357,7 +429,7 @@ internal sealed class WeatherSettingsPreview : Border
         }
         body.Children.Add(now);Grid.SetColumn(forecast,1);body.Children.Add(forecast);
         var meta=new WrapPanel {Margin=new Thickness(16,0,14,0),VerticalAlignment=VerticalAlignment.Center};
-        var metaRight=new StackPanel {Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Center};
+        var metaRight=new StackPanel {Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Stretch,VerticalAlignment=VerticalAlignment.Center};
         string meta1=snap is null?"":Loc.T($"体感 {Num(snap.FeelsLike,"°")}",$"Feels like {Num(snap.FeelsLike,"°")}");
         string meta2=snap is null?"":Loc.T($"湿度 {(snap.HumidityPercent>=0?snap.HumidityPercent+"%":"--")}",$"Humidity {(snap.HumidityPercent>=0?snap.HumidityPercent+"%":"--")}");
         string meta3=snap is null?"":Loc.T($"风 {Num(snap.WindKmh," km/h")}",$"Wind {Num(snap.WindKmh," km/h")}");
@@ -370,7 +442,7 @@ internal sealed class WeatherSettingsPreview : Border
             item.Children.Add(new TextBlock {Text=text,FontSize=11,Foreground=new SolidColorBrush(Color.FromRgb(213,227,245))});
             meta.Children.Add(item);
         }
-        var sun=new StackPanel {Orientation=Orientation.Horizontal};
+        var sun=new StackPanel {Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right};
         sun.Children.Add(new WeatherMetaIcon(WeatherMetaKind.Sunrise,Color.FromRgb(255,200,90)){Width=14,Height=14,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,5,0)});
         sun.Children.Add(new TextBlock {Text=snap is null?"":Loc.T($"日升 {Clock(snap.SunriseTimes,today)} · 日落 {Clock(snap.SunsetTimes,today)}",$"Sunrise {Clock(snap.SunriseTimes,today)} · Sunset {Clock(snap.SunsetTimes,today)}"),FontSize=11,Foreground=new SolidColorBrush(Color.FromRgb(213,227,245))});
         metaRight.Children.Add(sun);

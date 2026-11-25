@@ -12,9 +12,16 @@ internal static class WindowsLocation
     // 同一位置几分钟内复用：天气自动刷新与设置页打开都会查定位，不必每次等一轮 WiFi 定位。
     public static async Task<(double Lat, double Lon)?> PositionAsync(CancellationToken token)
     {
-        lock (Lock)
+        bool cached;
+        lock (Lock) cached = _last is { } kept && DateTime.UtcNow - kept.At < TimeSpan.FromMinutes(5);
+        // 权限被撤销后 5 分钟内的缓存坐标不该继续发给和风：复用前先用 RequestAccessAsync 快速确认
+        // 定位权限仍然有效（已授权时它只返回当前状态，不弹窗）；已拒绝或查询失败时不返回缓存坐标。
+        if (cached && await AllowedAsync(token))
         {
-            if (_last is { } kept && DateTime.UtcNow - kept.At < TimeSpan.FromMinutes(5)) return (kept.Lat, kept.Lon);
+            lock (Lock)
+            {
+                if (_last is { } kept && DateTime.UtcNow - kept.At < TimeSpan.FromMinutes(5)) return (kept.Lat, kept.Lon);
+            }
         }
         try
         {
@@ -24,6 +31,17 @@ internal static class WindowsLocation
             return await ReadAsync(token);
         }
         catch { return null; }
+    }
+
+    private static async Task<bool> AllowedAsync(CancellationToken token)
+    {
+        try
+        {
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher is { } d && !d.CheckAccess()) return await await d.InvokeAsync(() => AllowedAsync(token));
+            return await Geolocator.RequestAccessAsync().AsTask(token) == GeolocationAccessStatus.Allowed;
+        }
+        catch { return false; }
     }
 
     private static async Task<(double Lat, double Lon)?> ReadAsync(CancellationToken token)

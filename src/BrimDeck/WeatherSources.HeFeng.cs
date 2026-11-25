@@ -52,6 +52,7 @@ internal sealed class HeFengSource : IWeatherSource
             {
                 part ??= new WeatherPart();
                 part.Minutes ??= extra.Minutes; part.Warnings ??= extra.Warnings; part.Indices ??= extra.Indices;
+                part.MinuteSummary ??= extra.MinuteSummary;
             }
         }
         return part;

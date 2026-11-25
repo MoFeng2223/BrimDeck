@@ -9,6 +9,8 @@ namespace BrimDeck;
 internal static class WeatherAggregator
 {
     private static readonly TimeSpan SourceTimeout = TimeSpan.FromSeconds(15);
+    // 时光机 10 次请求分批执行，耗时远超其它域：单独计时，不与预警/指数共用 15 秒预算。
+    private static readonly TimeSpan HistoryTimeout = TimeSpan.FromSeconds(25);
 
     // 两段式：首屏先取实况/预报/空气/分钟；时光机（10 次请求）与和风 v7 重域（预警/指数）放到第二段。
     // progress 在第一段结束后回调一次，界面先画不含历史的版本，历史到了再整体替换。
@@ -43,16 +45,18 @@ internal static class WeatherAggregator
         IReadOnlyDictionary<WeatherDomain, IWeatherSource?> owners, Dictionary<string, WeatherPart> parts,
         bool deferred, CancellationToken token)
     {
-        var groups = new Dictionary<IWeatherSource, List<WeatherDomain>>();
+        // 历史域单独成组（同来源可能出现两次）：各组各自起算超时预算，历史的分批请求不侵占预警/指数的 15 秒。
+        var groups = new Dictionary<(IWeatherSource Source, bool History), List<WeatherDomain>>();
         foreach (var (domain, owner) in owners)
         {
             if (owner is null || IsDeferred(domain) != deferred) continue;
-            if (!groups.TryGetValue(owner, out var list)) groups[owner] = list = [];
+            var key = (owner, domain == WeatherDomain.History);
+            if (!groups.TryGetValue(key, out var list)) groups[key] = list = [];
             list.Add(domain);
         }
         if (groups.Count == 0) return;
         var results = await Task.WhenAll(groups.Select(async pair =>
-            (Id: pair.Key.Info.Id, Part: await TryAsync(pair.Key, city, settings, pair.Value, token))));
+            (Id: pair.Key.Source.Info.Id, Part: await TryAsync(pair.Key.Source, city, settings, pair.Value, token, pair.Key.History))));
         foreach (var (id, part) in results)
         {
             if (part is null) continue;
@@ -80,10 +84,10 @@ internal static class WeatherAggregator
         target.Days = merged;
     }
 
-    private static async Task<WeatherPart?> TryAsync(IWeatherSource source, City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
+    private static async Task<WeatherPart?> TryAsync(IWeatherSource source, City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token, bool history = false)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
-        cts.CancelAfter(SourceTimeout);
+        cts.CancelAfter(history ? HistoryTimeout : SourceTimeout);
         try { return await source.FetchAsync(city, settings, need, cts.Token); }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch { return null; }
@@ -131,6 +135,8 @@ internal static class WeatherAggregator
                         air ??= new AirPart();
                         bool any = false;
                         if (air.Aqi is null && a.Aqi is not null) { air.Aqi = a.Aqi; fieldSources["aqi"] = source.Info.Id; any = true; }
+                        // 国际标准 AQI 独立合并：国内来源同给两套时各自落位，详情页的「国际 AQI」才有值。
+                        if (air.AqiGlobal is null && a.AqiGlobal is not null) { air.AqiGlobal = a.AqiGlobal; fieldSources["aqi_global"] = source.Info.Id; any = true; }
                         if (air.Pm25 is null && a.Pm25 is not null) { air.Pm25 = a.Pm25; fieldSources["pm25"] = source.Info.Id; any = true; }
                         if (air.Pm10 is null && a.Pm10 is not null) { air.Pm10 = a.Pm10; fieldSources["pm10"] = source.Info.Id; any = true; }
                         if (air.Level is null && a.Level is not null) { air.Level = a.Level; any = true; }
@@ -162,7 +168,8 @@ internal static class WeatherAggregator
                     if (part.Hours is { Count: > 0 } hs) { bool any = false; foreach (var hour in hs) if (!hours.ContainsKey(hour.Time)) { hours[hour.Time] = hour; fieldSources.TryAdd("h:" + hour.Time, source.Info.Id); any = true; } if (any) Use(domain, source); }
                     break;
                 case WeatherDomain.Minutely:
-                    if (part.Minutes is { Count: > 0 } mins) { minutes.AddRange(mins.Where(m => !minutes.Any(x => x.Time == m.Time))); Use(domain, source); }
+                    // 覆盖判定同时要求降水量有效：时间点齐全但全缺值（限流空壳）不算覆盖，让聚合器下探其它来源。
+                    if (part.Minutes is { Count: > 0 } mins && mins.Any(m => m.Precip is not null)) { minutes.AddRange(mins.Where(m => !minutes.Any(x => x.Time == m.Time))); Use(domain, source); }
                     minuteSummary ??= part.MinuteSummary;
                     break;
                 case WeatherDomain.Warning:
@@ -202,17 +209,18 @@ internal static class WeatherAggregator
             if (!hours.ContainsKey(time)) { hours[time] = point; fieldSources.TryAdd("h:" + time, "local"); }
         // 字典合并后顺序不保证有序（本地历史与预报源交错插入），先按整点键排好序再找锚点，窗口切片才可靠。
         var ordered = hours.Values.OrderBy(p => p.Time, StringComparer.Ordinal).ToList();
-        int start = 0;
+        // 锚点之后一条都没有（缓存只剩过期旧序列、来源没有未来小时）时不能把旧数据 Skip(0) 冒充预报：
+        // 返回空窗口，界面留空，宁可缺也不误导。
+        int start = -1;
         string anchor = HourKey(DateTimeOffset.Now.ToOffset(ClockOffset(zone, city)).AddHours(-1));
         for (int index = 0; index < ordered.Count; index++)
             if (string.CompareOrdinal(ordered[index].Time, anchor) >= 0) { start = index; break; }
-        var hourList = ordered.Skip(start).Take(24).ToArray();
+        var hourList = start < 0 ? Array.Empty<HourPoint>() : ordered.Skip(start).Take(24).ToArray();
         // 空气质量逐时预报按整点键落到天气逐时窗口；缺哪个小时就留 -1，界面隐藏该点。
         if (air is not null && air.HourAqi.Count > 0)
             foreach (var hour in hourList)
                 if (air.HourAqi.TryGetValue(hour.Time, out var aqi)) hour.Aqi = aqi;
         // 没有夜间分段的来源（Open-Meteo 等）从逐时窗口当晚 18–23 点补一个夜间天气码，
-        // 让逐日列同样能出「转」；补不到就维持缺失，界面按白天单图标兜底。
         foreach (var (date, point) in dayMap)
         {
             if (point.NightCode is not null) continue;

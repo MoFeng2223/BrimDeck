@@ -604,6 +604,16 @@
       <ControlTemplate.Triggers><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource SettingsAccent}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.6"/></Trigger></ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
+  <Style x:Key="SettingsPassword" TargetType="PasswordBox">
+    <Setter Property="Height" Value="35"/>
+    <Setter Property="Foreground" Value="{DynamicResource SettingsTextPrimary}"/><Setter Property="CaretBrush" Value="{DynamicResource SettingsAccent}"/>
+    <Setter Property="Background" Value="{DynamicResource SettingsInput}"/><Setter Property="BorderBrush" Value="{DynamicResource SettingsInputBorder}"/><Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="FontSize" Value="13"/><Setter Property="Padding" Value="10,7"/><Setter Property="VerticalContentAlignment" Value="Center"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="PasswordBox">
+      <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6"><ScrollViewer x:Name="PART_ContentHost" Style="{x:Null}" Focusable="False" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden"/></Border>
+      <ControlTemplate.Triggers><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource SettingsAccent}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.6"/></Trigger></ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
   <Style x:Key="SettingsScrollPage" TargetType="RepeatButton">
     <Setter Property="Focusable" Value="False"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></Setter.Value></Setter>

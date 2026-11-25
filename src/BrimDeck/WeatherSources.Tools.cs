@@ -56,12 +56,13 @@ internal static class WeatherCodes
         "900" => 0, "901" => 0, "999" => 3, _ => 3
     };
 
-    // 蒲福风级（"3-4" 级）→ 风速 km/h，取区间的中值。
-    public static double FromWindPower(string? power)
+    // 蒲福风级（"3-4" 级）→ 风速 km/h，取区间的中值。解析不出风级（串里没有数字）返回 null 视为缺失：
+    // 非有限值一旦写进数据会占住空位，阻断后续来源补写，来源回退因此失效。
+    public static double? FromWindPower(string? power)
     {
-        if (string.IsNullOrWhiteSpace(power)) return double.NaN;
+        if (string.IsNullOrWhiteSpace(power)) return null;
         var numbers = System.Text.RegularExpressions.Regex.Matches(power, "\\d+").Select(match => double.Parse(match.Value, CultureInfo.InvariantCulture)).ToArray();
-        if (numbers.Length == 0) return double.NaN;
+        if (numbers.Length == 0) return null;
         double level = numbers.Average();
         // 蒲福风级对应的风速上界（m/s）：0→0.2, 1→1.5, 2→3.3, ... 12→32.6；取上界的 80% 作为代表值。
         double[] upper = [0.2, 1.5, 3.3, 5.4, 7.9, 10.7, 13.8, 17.1, 20.7, 24.4, 28.4, 32.6, 36.9];

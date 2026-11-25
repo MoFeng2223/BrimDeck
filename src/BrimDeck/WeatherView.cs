@@ -69,6 +69,7 @@ internal sealed class WeatherView : UserControl
     internal static readonly TimeSpan AutoInterval = TimeSpan.FromMinutes(15);
     private readonly DispatcherTimer timer = new() { Interval = AutoInterval };
     private WeatherSnapshot? _last;
+    private string _shownKey = "";   // 当前画面显示的是哪座城市（缓存键）：显示数据与城市绑定，换城不残留
     // 重画节流：拖动改宽度时 Fit 每帧都会被调用，而重建 24 列的列元素与折线并不便宜。
     // 画布宽度与列数当场更新，真正重建最多 30fps，落后的一帧由 _flush 补上。
     private long _drawnAt;
@@ -286,16 +287,20 @@ internal sealed class WeatherView : UserControl
         chart.SizeChanged += (_, _) => ScheduleChartRedraw();
         // 整块底部（列 + 折线 + 低温行）就是一个切换区：鼠标移上去变手型，点一下在「逐时」与「逐日」之间互换。
         // 不设开关按钮——底部本身就是开关，和卡片镜头互不干扰（卡片改看什么，底部改看多久）。
+        // 键盘用户同样可达：可聚焦，Enter/空格与鼠标点按共用同一入口。
         days.Cursor = System.Windows.Input.Cursors.Hand;
         days.Background = Brushes.Transparent;                       // 透明也要有画刷，否则空白处收不到命中测试
-        days.MouseLeftButtonUp += (_, e) =>
+        void ToggleMode()
         {
             if (_last is not { } snap || snap.HourTimes.Length == 0) return;
             _hourlyMode = !_hourlyMode;
             _lens = Lens.Temp;                                        // 切回逐日时没有非气温镜头，顺手复位
             Fit(Width, Height, true); DrawSummary(snap);
-            e.Handled = true;
-        };
+        }
+        days.MouseLeftButtonUp += (_, e) => { ToggleMode(); e.Handled = true; };
+        days.Focusable = true;
+        days.KeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Space) { ToggleMode(); e.Handled = true; } };
+        AutomationProperties.SetName(days, Loc.T("切换逐时/逐日预报", "Toggle hourly or daily forecast"));
         lowRow.Margin = new Thickness(6, 0, 6, 0); Grid.SetRow(lowRow, 2); days.Children.Add(lowRow);
         dayInfoRow.Margin = new Thickness(6, 0, 6, 0); Grid.SetRow(dayInfoRow, 3); days.Children.Add(dayInfoRow);
         Grid.SetRow(nowText, 0); Grid.SetRowSpan(nowText, 2); days.Children.Add(nowText);
@@ -333,7 +338,10 @@ internal sealed class WeatherView : UserControl
         // 缓存键一律是实际城市键：手动选城市用所选城市的键，自动定位用 AutoKey 指向的键；
         // "auto" 只在 AutoKey 里做映射，不是数据键。AutoKey 为空（首启动）时跳过缓存预渲染。
         string key = selected >= 0 && selected < state.Cities.Count ? state.Cities[selected].ToString() : state.AutoKey;
-        if (key.Length > 0 && state.Cache.TryGetValue(key, out var cached)) Render(cached);
+        if (key.Length > 0 && state.Cache.TryGetValue(key, out var cached)) { Render(cached); _shownKey = key; }
+        // 显示数据与城市绑定：换到没有缓存的城市就清掉上一城的残留画面，刷新失败或取消时也不会把
+        // 别的城市的数据挂在新城市标签下；有该城市自己的缓存则直接渲染缓存。
+        else if (_last is not null && _shownKey != key) ShowEmpty();
         fetching = true; RaiseState();
         try {
             using var fresh = force ? WeatherCache.Fresh() : null;
@@ -341,17 +349,31 @@ internal sealed class WeatherView : UserControl
             if (selected >= 0 && selected < state.Cities.Count) city = state.Cities[selected];
             else city = await WeatherData.LocateAsync(state.Schedule, token) ?? new City("当前位置", 0, 0);
             // 旧请求交给 token 中断；generation 只在部分结果回写时挡一次，避免迟到的首屏覆盖新请求。
-            var snapshot = await WeatherData.CurrentAsync(city, state.Schedule, token, partial => { if (request == generation) Render(partial); });
-            Render(snapshot);
+            var snapshot = await WeatherData.CurrentAsync(city, state.Schedule, token, partial => { if (request == generation) { Render(partial); _shownKey = city.ToString(); } });
+            Render(snapshot); _shownKey = city.ToString();
             // 定位/选择出的实际城市即缓存键：自动定位的快照也按位置存，AutoKey 记下映射。
             key = city.ToString();
             state.Cache[key] = snapshot;
             if (AutoSelected) state.AutoKey = key;
-            WeatherData.Save(state); _cycleStart = DateTime.UtcNow;
+            // 只回写天气快照与定位指针，不走整体 Save：设置页刚保存的城市/来源改动不被刷新流程覆盖。
+            WeatherData.SaveSnapshot(key, snapshot, AutoSelected ? key : null);
+            _cycleStart = DateTime.UtcNow;
+            // 下一次自动刷新从本次成功刷新重新起算，页头倒计时环与实际自动刷新时刻保持同步。
+            timer.Stop(); timer.Start();
         } catch (OperationCanceledException) {
-            // 取消即本轮作废，界面与状态由新的 Refresh 接管。
+            // 取消即本轮作废，界面与状态由新的 Refresh 接管（画面已是目标城市自己的缓存或空态）。
         } catch { if (request == generation) { summary.Children.Clear(); summary.Children.Add(new TextBlock { Text = Loc.T("天气数据不可用", "Weather data unavailable"), FontSize = 20, VerticalAlignment = VerticalAlignment.Center }); } }
-        finally { if (ReferenceEquals(_token, cts)) { fetching = false; _token = null; } RaiseState(); }
+        finally { if (ReferenceEquals(_token, cts)) { fetching = false; _token = null; } cts.Dispose(); RaiseState(); }
+    }
+    // 空态：换到没有缓存的城市后、刷新尚未成功时清掉上一城的残留画面（预报列、折线、页脚一并清）。
+    private void ShowEmpty()
+    {
+        _last = null; _shownKey = "";
+        summary.Children.Clear();
+        summary.Children.Add(new TextBlock { Text = Loc.T("暂无天气数据", "No weather data"), FontSize = 20, VerticalAlignment = VerticalAlignment.Center });
+        forecast.Children.Clear(); lowRow.Children.Clear(); dayInfoRow.Children.Clear(); chart.Children.Clear();
+        todayGlow.Visibility = Visibility.Collapsed; nowRule.Visibility = nowText.Visibility = Visibility.Collapsed;
+        footerNote.Text = "";
     }
     internal static string Condition(int code) => code switch
     {
@@ -378,6 +400,11 @@ internal sealed class WeatherView : UserControl
         try {
             Background = Brushes.Transparent;
             _last = s;
+            // 新快照的数据量可能与旧布局不同（例如逐时只剩 8 小时）：按当前快照重算列数再绘制，
+            // 沿用旧列数会把不足的列画错位、按旧列数取数会越界。
+            int columns = Math.Clamp(7 + (int)Math.Round((Width - 440) / 760.0 * 17), 7, 24);
+            int shown = Math.Max(1, Math.Min(columns, Math.Max(1, _hourlyMode ? s.HourTimes.Length : s.DayDates.Length)));
+            _columns = columns; forecast.Columns = shown; lowRow.Columns = shown; dayInfoRow.Columns = shown;
             if (AutoSelected) _autoCityName = s.Name;
             DrawFooter(s); DrawSummary(s); DrawForecast(s); DrawChart(s);
         } catch { }
@@ -432,7 +459,7 @@ internal sealed class WeatherView : UserControl
     {
         summary.Children.Clear(); summary.ColumnDefinitions.Clear();
         summary.RowDefinitions.Clear();
-        int today = WeatherData.TodayIndex(s);    // 正序数组中“今天”的位置
+        int today = CityTodayIndex(s);    // 按城市当前日期在正序数组中定位“今天”；-1 = 跨日缓存对不上今天
         int cols = _summaryCols = SummaryColumns(Width);
         summary.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); summary.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(cols * 105) });
         summary.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -456,7 +483,7 @@ internal sealed class WeatherView : UserControl
         // 今日高低温取自 daily 数组（当天域），与实况温度分属两个数据域：实况来源成功而当天来源
         // 失败时数组可能为空，直接索引会越界异常、被 Render 的 catch 吞成整页空白。缺当天就显示
         // 占位符，实况大温度/图标/四张卡照常渲染——两个域互不牵连。
-        bool hasDay = today < s.DayHighC.Length && today < s.DayLowC.Length;
+        bool hasDay = today >= 0 && today < s.DayHighC.Length && today < s.DayLowC.Length;   // 日期轴过期时不拿旧日期冒充今天的高低温
         string range = hasDay ? $"{Degree(s.DayHighC[today])} / {Degree(s.DayLowC[today])}" : "-- / --";
         bottom.Children.Add(new TextBlock { Text = range, FontSize = 13, Foreground = new SolidColorBrush(Color.FromRgb(205, 224, 247)), VerticalAlignment = VerticalAlignment.Center });
         side.Children.Add(bottom);
@@ -536,9 +563,13 @@ internal sealed class WeatherView : UserControl
                 edge.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(toEdge, TimeSpan.FromMilliseconds(110)));
             }
             // 只有绑定镜头的卡可点；其余卡保持静态，避免“能点却没反应”的错觉。
+            // 可聚焦 + Enter/空格触发，读数卡对键盘用户同样可达。
             if (lens is { } pick)
             {
                 tile.Cursor = System.Windows.Input.Cursors.Hand;
+                tile.Focusable = true;
+                tile.KeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Space) { PickLens(pick); e.Handled = true; } };
+                AutomationProperties.SetName(tile, label);
                 tile.MouseEnter += (_, _) => Ink(fillHot, edgeHot);
                 tile.MouseLeave += (_, _) => Ink(fillIdle, edgeIdle);
                 tile.MouseLeftButtonUp += (_, e) => { e.Handled = true; PickLens(pick); };
@@ -563,13 +594,16 @@ internal sealed class WeatherView : UserControl
     private static string Degree(double value) => double.IsNaN(value) ? "--" : $"{value:0}°";
     private static string Clock(string[] times, int index) => index >= 0 && index < times.Length && times[index].Length >= 16 ? times[index][11..16] : "--:--";
     // 右下角页脚：主来源与本次刷新时刻，用底部原有的 16px 空边，不向上挤占摘要卡与预报区。
+    // 跨日缓存（日期轴对不上城市的今天）标注缓存时刻与「缓存」字样，不冒充刚更新。
     private void DrawFooter(WeatherSnapshot s)
     {
-        string time = s.FetchedAt.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
+        bool stale = CityTodayIndex(s) < 0;
+        string time = s.FetchedAt.ToLocalTime().ToString(stale ? "MM/dd HH:mm" : "HH:mm", CultureInfo.InvariantCulture);
+        string verb = stale ? Loc.T("缓存", "Cached") : Loc.T("更新", "Updated");
         string source = SourceName(s);
         footerNote.Text = source.Length > 0
-            ? Loc.T($"{time} 更新 · {source}", $"Updated {time} · {source}")
-            : Loc.T($"{time} 更新", $"Updated {time}");
+            ? Loc.T($"{time} {verb} · {source}", $"{verb} {time} · {source}")
+            : Loc.T($"{time} {verb}", $"{verb} {time}");
     }
     // 主来源：优先每日域，其次实况域；完整的分域来源在详情浮层里逐项列出。
     private static string SourceName(WeatherSnapshot s)
@@ -577,15 +611,17 @@ internal sealed class WeatherView : UserControl
          : s.Sources.TryGetValue("Current", out var current) && current.Length > 0 ? current : "";
     // 详情浮层：当前多维读数、未来 24 小时、24 天（历史 10 + 今天 + 未来 13）、空气质量与分域来源。
     // 浮层盖住整块天气视图并可纵向滚动，关闭后回到摘要；不改变主视图的紧凑布局。
+    // 换城时浮层还盖着旧城市快照：记录引用，切换城市前先关掉。
+    private Grid? _overlay;
     private void ShowDetails(WeatherSnapshot s)
     {
         var overlay = new Grid { Background = new SolidColorBrush(Color.FromArgb(168, 6, 9, 16)) };
-        host.Children.Add(overlay);
+        host.Children.Add(overlay); _overlay = overlay;
         var body = new StackPanel { Margin = new Thickness(20, 14, 20, 20) };
         var scroll = new ScrollViewer { VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Disabled, Content = body };
         var card = new Border { Margin = new Thickness(12), CornerRadius = new CornerRadius(16), Background = new SolidColorBrush(Color.FromRgb(24, 27, 34)), BorderBrush = new SolidColorBrush(Color.FromArgb(62, 255, 255, 255)), BorderThickness = new Thickness(1), Child = scroll };
         overlay.Children.Add(card);
-        void Close() => host.Children.Remove(overlay);
+        void Close() { _overlay = null; host.Children.Remove(overlay); }
         overlay.MouseLeftButtonDown += (_, e) => { if (ReferenceEquals(e.OriginalSource, overlay)) Close(); };
         overlay.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) { Close(); e.Handled = true; } };
         overlay.Focusable = true; overlay.Focus();
@@ -745,7 +781,8 @@ internal sealed class WeatherView : UserControl
         // 24 天表格：日期、星期、图标、天气、高低温、降水、风、UV、日升日落。
         body.Children.Add(SectionLabel(Loc.T("24 天预报与历史", "24-day forecast and history")));
         var table = new StackPanel();
-        int today = WeatherData.TodayIndex(s);
+        int today = CityTodayIndex(s);
+        bool staleDates = today < 0;   // 跨日缓存：表格不标「今天」，历史行也不再按过期锚点压暗
         AddDayRow(true, -1);
         for (int i = 0; i < s.DayDates.Length; i++) AddDayRow(false, i);
         body.Children.Add(table);
@@ -780,7 +817,7 @@ internal sealed class WeatherView : UserControl
             {
                 if (index < 0 || index >= s.DayDates.Length) { table.Children.Add(row); return; }
                 var date = DateTime.Parse(s.DayDates[index]);
-                bool isToday = index == today, past = index < today;
+                bool isToday = !staleDates && index == today, past = !staleDates && index < today;
                 int code = s.DayCodes.Length > index && s.DayCodes[index] >= 0 ? s.DayCodes[index] : 3;
                 string name = s.DayConditions.Length > index && s.DayConditions[index].Length > 0 ? s.DayConditions[index] : WeatherCodes.Text(code);
                 // 白天/夜间天气并列展示（夜间未单独给时复用白天口径）。
@@ -962,7 +999,9 @@ internal sealed class WeatherView : UserControl
     private static void AstronomyCards(StackPanel body, WeatherSnapshot s)
     {
         Color dim = Color.FromRgb(143, 166, 192), ink = Color.FromRgb(226, 236, 248);
-        int today = WeatherData.TodayIndex(s);
+        int today = CityTodayIndex(s);
+        // 跨日缓存对不上城市的今天：天文卡按旧日期展示会误导，整卡不画。
+        if (today < 0) return;
         // 取当天 ISO 时刻的 HH:mm；数组缺省返回空串，对应项跳过。
         string HHmm(string[] arr) => arr.Length > today && arr[today].Length >= 16 ? arr[today][11..16] : "";
         string moonrise = s.MoonriseTimes.Length > today && s.MoonriseTimes[today].Length >= 16 ? s.MoonriseTimes[today][11..16] : "--:--";
@@ -1047,7 +1086,10 @@ internal sealed class WeatherView : UserControl
     private static int[] Order(WeatherSnapshot s, int columns)
     {
         int len = s.DayDates.Length;
-        int today = WeatherData.TodayIndex(s);          // 正序数组中“今天”的位置
+        int today = CityTodayIndex(s);          // 按城市当前日期定位“今天”
+        // 缓存跨日、城市的今天不在轴上时退回快照自带锚点选窗口：窗口只是决定取哪些天，
+        // 「今天」标签与高亮由调用方按日期轴是否过期另行处理。
+        if (today < 0) today = WeatherData.TodayIndex(s);
         int maxPast = Math.Min(10, today), maxFuture = Math.Min(13, len - today - 1);
         columns = Math.Max(1, Math.Min(columns, len));
         int basic = Math.Min(7, 1 + maxFuture);  // 基础 7 列 = 今天 + 未来 6 天（不足时用全部）
@@ -1239,6 +1281,14 @@ internal sealed class WeatherView : UserControl
         }
         return DateTimeOffset.Now;
     }
+    // 「今天」索引：按城市当前日期在快照日期轴上找。跨日缓存里快照自带的 Today 已过期，
+    // 不能拿它当今天；城市的今天不在轴上（缓存隔了多天）返回 -1，调用方按「日期轴过期」渲染。
+    private static int CityTodayIndex(WeatherSnapshot s)
+    {
+        string today = CityNow(s).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        for (int i = 0; i < s.DayDates.Length; i++) if (s.DayDates[i].StartsWith(today)) return i;
+        return -1;
+    }
     // 底部时刻行文字：0 点标日期（如「11月20日」）/ 其余原样 HH:mm。直接从 ISO 串切，不依赖 DateTime.Parse 的区域设置。
     private static string HourLabel(WeatherSnapshot s, int p)
     {
@@ -1252,7 +1302,8 @@ internal sealed class WeatherView : UserControl
     }
     private void DrawDailyForecast(WeatherSnapshot s)
     {
-        int today = WeatherData.TodayIndex(s);
+        int today = CityTodayIndex(s);
+        bool stale = today < 0;   // 跨日缓存：不把任何一天标成「今天/明天」，一律按星期+绝对日期渲染
         var order = Order(s, forecast.Columns);
         // 「今天」列选择态高亮定位：与预报网格同一套几何（左 6px 边距、列宽 chartWidth/columns、中心对齐），
         // 跨三行覆盖 上段+折线+低温，从列顶贯穿到底部。找不到今天（不该发生）就收起。
@@ -1273,7 +1324,8 @@ internal sealed class WeatherView : UserControl
         for (int p = 0; p < order.Length; p++)
         {
             int i = order[p]; var date = DateTime.Parse(s.DayDates[i]); var column = Column(ColumnRowHeights);
-            string label = i == today ? Loc.T("今天", "Today") : i == today + 1 ? Loc.T("明天", "Tomorrow") : Loc.T(new[] { "周日", "周一", "周二", "周三", "周四", "周五", "周六" }[(int)date.DayOfWeek], new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }[(int)date.DayOfWeek]);
+            string label = stale ? Loc.T(new[] { "周日", "周一", "周二", "周三", "周四", "周五", "周六" }[(int)date.DayOfWeek], new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }[(int)date.DayOfWeek])
+                : i == today ? Loc.T("今天", "Today") : i == today + 1 ? Loc.T("明天", "Tomorrow") : Loc.T(new[] { "周日", "周一", "周二", "周三", "周四", "周五", "周六" }[(int)date.DayOfWeek], new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }[(int)date.DayOfWeek]);
             bool isToday = i == today;
             CellAt(column, new TextBlock { Text = label, FontSize = ColValue, FontWeight = FontWeights.SemiBold, TextAlignment = TextAlignment.Center, Foreground = isToday ? Brushes.White : new SolidColorBrush(Color.FromRgb(205, 224, 247)) }, 0);
             CellAt(column, new TextBlock { Text = date.ToString("MM/dd"), Foreground = new SolidColorBrush(Color.FromRgb(150, 168, 192)), FontSize = ColNote, TextAlignment = TextAlignment.Center }, 1);
@@ -1749,7 +1801,14 @@ internal sealed class WeatherView : UserControl
     {
         if (state.Selected == index) return;
         state.Selected = index; _app.QueueSave(); WeatherData.Save(state);
+        CloseDetails();   // 换城后浮层还盖着旧城市的快照：先关再刷
         await Refresh();
+    }
+    private void CloseDetails()
+    {
+        if (_overlay is not { } open) return;
+        _overlay = null;
+        host.Children.Remove(open);
     }
     internal Action? SettingsRequested;
 }

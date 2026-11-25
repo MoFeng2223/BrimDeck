@@ -96,6 +96,8 @@ internal sealed class WeatherGlyph : FrameworkElement
         base.OnRender(d);
         double scale = Math.Min(ActualWidth, ActualHeight) / 80;
         if (scale <= 0) return;
+        // 天气代码缺失（负值）不是晴天：整格留空不画，避免缺数据被渲染成大太阳。
+        if (code < 0) return;
         d.PushTransform(new TranslateTransform((ActualWidth - 80 * scale) / 2, (ActualHeight - 80 * scale) / 2));
         d.PushTransform(new ScaleTransform(scale, scale));
         double wave = Math.Sin(2 * Math.PI * phase);

@@ -94,7 +94,14 @@ internal sealed class OpenMeteoSource : IWeatherSource
                     });
                 }
                 // 当前 UV 从小时序列补齐：current 接口不返回 uv_index。
-                if (part.Current is { Uv: null } && part.Hours.FirstOrDefault(hour => hour.Temperature is not null) is { Uv: { } uv }) part.Current.Uv = uv;
+                // 先按当地时间定位当前小时取 UV，序列里没有（过去两小时的旧点不算）再退回最近一条有 UV 的。
+                if (part.Current is { Uv: null })
+                {
+                    string nowKey = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(Geo.UtcOffsetHours(city))).ToString("yyyy-MM-ddTHH:00", CultureInfo.InvariantCulture);
+                    var pick = part.Hours.FirstOrDefault(hour => hour.Time == nowKey && hour.Uv is not null)
+                        ?? part.Hours.FirstOrDefault(hour => hour.Uv is not null);
+                    if (pick is { Uv: { } uv }) part.Current.Uv = uv;
+                }
             }
         }
         catch { }

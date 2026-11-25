@@ -1013,6 +1013,8 @@ public sealed class DeckSettings
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
         ClipboardWidth = double.IsFinite(ClipboardWidth) ? Math.Clamp(ClipboardWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : ShelfSizes.Default.Width;
         ClipboardHeight = double.IsFinite(ClipboardHeight) ? Math.Clamp(ClipboardHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ShelfSizes.Default.Height;
+        WeatherWidth = double.IsFinite(WeatherWidth) ? Math.Clamp(WeatherWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : 660;
+        WeatherHeight = double.IsFinite(WeatherHeight) ? Math.Clamp(WeatherHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 360;
         if (!Enum.IsDefined(TransferDragOut)) TransferDragOut = TransferDragOut.Copy;
         if (!Enum.IsDefined(ShelfShown)) ShelfShown = ShelfShown.Both;
         if (!Enum.IsDefined(ShelfArrangement)) ShelfArrangement = ShelfArrangement.Split;

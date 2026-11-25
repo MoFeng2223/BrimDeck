@@ -37,6 +37,14 @@ internal static class WeatherData
         WeatherFiles.Ensure(WeatherFiles.Snapshots);
         WeatherCache.Prune(TimeSpan.FromDays(14));
         RequestGate.Restore();
+        // 旧版本曾把和风 GeoAPI（城市搜索 search| / 坐标反查 place|）的结果写进本地缓存，和风明确禁止缓存
+        // GeoAPI 数据：启动时一次性清掉这些遗留文件，之后的 GeoAPI 请求也不再落盘。
+        try
+        {
+            string hefeng = Path.Combine(WeatherFiles.CacheRoot, "hefeng");
+            foreach (var file in Directory.GetFiles(hefeng, "search*.json").Concat(Directory.GetFiles(hefeng, "place*.json"))) File.Delete(file);
+        }
+        catch { }
     }
     internal static State Load(Func<DeckSettings> settings)
     {
@@ -74,14 +82,17 @@ internal static class WeatherData
     }
     // 只写下载快照与请求计数。用户在设置页改动的 cities/selected/schedule 属于 DeckSettings，
     // 由 SettingsWindow/App 的常规设置保存流程写回 settings.json。
-    internal static void Save(State state)
+    // 返回是否全部写盘成功：WriteAtomic 失败时如实上报（false），调用方据此提示保存失败，
+    // 而不是把丢数据当成已保存。
+    internal static bool Save(State state)
     {
+        bool ok=true;
         lock(SnapLock)
             foreach(var (key,snapshot) in state.Cache)
             {
                 // 版本检查在前：设置页驻留的旧快照（A）不得因配置保存把已被天气页新快照（B）覆盖的历史写回去。
                 if(Written.TryGetValue(key,out var at)&&snapshot.FetchedAt<=at)continue;
-                if(!WeatherFiles.WriteAtomic(Path.Combine(WeatherFiles.Snapshots,WeatherFiles.Name(key,".json")),JsonSerializer.Serialize(new SnapshotFile{Key=key,Value=snapshot},WeatherJson)))continue;
+                if(!WeatherFiles.WriteAtomic(Path.Combine(WeatherFiles.Snapshots,WeatherFiles.Name(key,".json")),JsonSerializer.Serialize(new SnapshotFile{Key=key,Value=snapshot},WeatherJson))){ok=false;continue;}
                 Written[key]=snapshot.FetchedAt;
                 // 快照确实被接受后才并入本地历史；历史键=快照的真实城市键（CityKey，Merge 时写入）。
                 WeatherHourHistory.Record(snapshot.CityKey,snapshot);
@@ -90,7 +101,29 @@ internal static class WeatherData
         RequestGate.Flush();
         // 自动定位指针随快照一起落盘："auto" 只是映射，重启后靠它免定位命中缓存。
         if(state.AutoKey.Length>0)
-            WeatherFiles.WriteAtomic(Path.Combine(WeatherFiles.Root,"weather","auto.json"),JsonSerializer.Serialize(new SnapshotFile{Key=state.AutoKey},WeatherJson));
+            ok&=WeatherFiles.WriteAtomic(Path.Combine(WeatherFiles.Root,"weather","auto.json"),JsonSerializer.Serialize(new SnapshotFile{Key=state.AutoKey},WeatherJson));
+        return ok;
+    }
+    // 刷新回写专用：只落一座城市的快照（可选带自动定位指针），不遍历整个缓存、不触碰设置里的城市/来源，
+    // 天气页刷新不会把设置页刚保存的改动覆盖掉。
+    internal static void SaveSnapshot(string key,WeatherSnapshot snapshot,string? autoKey=null)
+    {
+        lock(SnapLock)
+        {
+            // 与 Save 同一套版本检查：已落盘的同键快照不会被更旧的回写覆盖。
+            if(!(Written.TryGetValue(key,out var at)&&snapshot.FetchedAt<=at))
+            {
+                if(WeatherFiles.WriteAtomic(Path.Combine(WeatherFiles.Snapshots,WeatherFiles.Name(key,".json")),JsonSerializer.Serialize(new SnapshotFile{Key=key,Value=snapshot},WeatherJson)))
+                {
+                    Written[key]=snapshot.FetchedAt;
+                    // 快照确实被接受后才并入本地历史；历史键=快照的真实城市键（CityKey，Merge 时写入）。
+                    WeatherHourHistory.Record(snapshot.CityKey,snapshot);
+                }
+            }
+            if(autoKey is {Length:>0})
+                WeatherFiles.WriteAtomic(Path.Combine(WeatherFiles.Root,"weather","auto.json"),JsonSerializer.Serialize(new SnapshotFile{Key=autoKey},WeatherJson));
+        }
+        RequestGate.Flush();
     }
     // 城市搜索：配置了和风 Key/Host 就只用和风 GeoAPI——能精确命中区县（搜「洪山区」得「洪山区 · 武汉市 · 湖北省」），
     // 返回的 LocationID 与和风时光机同源。请求失败不退回 Open-Meteo，避免同一次搜索混用两套层级和精度。
@@ -133,7 +166,8 @@ internal static class WeatherData
         return cities;
     }
     // 和风 GeoAPI v2 city/lookup：按地名或「经度,纬度」坐标反查最多 10 个，结构化解析省/市/国家/城市 id。
-    // 结果落盘一天：输入框防抖后的每一次查询不重复烧免费额度。错误响应不落盘。
+    // 和风明确禁止缓存 GeoAPI 数据，因此这里不做任何落盘/内存缓存：防抖后的每一次查询都直接请求。
+    // 错误响应（HTTP 非 2xx 或 code != 200）直接当作空结果，调用方据此区分「没有这个城市」与请求失败。
     private static async Task<List<City>> SearchHeFeng(string query, WeatherSettings settings, CancellationToken token)
     {
         string host = settings.HeFengHost.Trim().TrimEnd('/');
@@ -141,19 +175,17 @@ internal static class WeatherData
         host = host.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ? "https://" + host[7..]
              : host.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ? host : "https://" + host;
         string lang = Loc.IsEnglish ? "en" : "zh";
-        string body = await WeatherCache.GetAsync<string>("hefeng", "search|" + lang + "|" + query, TimeSpan.FromDays(1), async ct =>
+        string body = "";
+        // 搜索用独立闸门通道：天气取数（尤其时光机一轮 10 次请求）触发 429/失败熔断时，
+        // 不该把城市搜索一起停掉——否则用户搜新词会全部落空，看起来像搜索坏了。
+        // 超时 8 秒：搜索是交互操作，不该让输入框等满 20 秒。
+        var result = await WeatherHttp.GetAsync("hefeng", $"{host}/geo/v2/city/lookup?location={Uri.EscapeDataString(query)}&number=10&lang={lang}", token,
+            request => request.Headers.TryAddWithoutValidation("X-QW-Api-Key", settings.HeFengKey.Trim()), 8, settings);
+        if (result.Body is { Length: > 0 } raw)
         {
-            // 搜索用独立闸门通道：天气取数（尤其时光机一轮 10 次请求）触发 429/失败熔断时，
-            // 不该把城市搜索一起停掉——否则用户搜新词会全部落空，看起来像搜索坏了。
-            // 超时 8 秒：搜索是交互操作，不该让输入框等满 20 秒。
-            var result = await WeatherHttp.GetAsync("hefeng", $"{host}/geo/v2/city/lookup?location={Uri.EscapeDataString(query)}&number=10&lang={lang}", ct,
-                request => request.Headers.TryAddWithoutValidation("X-QW-Api-Key", settings.HeFengKey.Trim()), 8, settings);
-            if (result.Body is not { Length: > 0 } raw) return null;
-            // 只缓存成功响应：否则一次 401/429 或参数错误会把「查不到」钉在这一天，
-            // 用户重新输入同样的词永远搜不出来。
             using var probe = JsonDocument.Parse(raw);
-            return Json.Text(probe.RootElement, "code") is { Length: > 0 } code && code != "200" ? null : raw;
-        }, token) ?? "";
+            if (!(Json.Text(probe.RootElement, "code") is { Length: > 0 } code && code != "200")) body = raw;
+        }
         var cities = new List<City>();
         if (body.Length == 0) return cities;
         using var doc = JsonDocument.Parse(body);
@@ -175,19 +207,32 @@ internal static class WeatherData
     // 3) 无和风 Key：退回按 IP 城市名搜索或直接用 IP 返回的地名拼装。
     internal static async Task<City?> LocateAsync(WeatherSettings settings, CancellationToken token)
     {
+        bool hefeng=settings.HeFengKey.Trim().Length>0&&settings.HeFengHost.Trim().Length>0;
+        // 阶段一（Windows 定位 → 和风反查区县）与阶段二（IP 定位）分开 try/catch：
+        // 反查抛异常时不清空已取得的系统坐标，流程落到 IP 阶段继续——只丢「区县级」精度，不丢定位本身。
+        (double Lat,double Lon)? precise=null;
         try {
-            bool hefeng=settings.HeFengKey.Trim().Length>0&&settings.HeFengHost.Trim().Length>0;
-            if(hefeng&&await WindowsLocation.PositionAsync(token) is { } precise)
+            if(hefeng)precise=await WindowsLocation.PositionAsync(token);
+            if(precise is { } coords)
             {
-                var found=await SearchHeFeng(Math.Round(precise.Lon,3)+","+Math.Round(precise.Lat,3),settings,token);
-                if(found.Count>0)return found[0];
+                try
+                {
+                    var found=await SearchHeFeng(Math.Round(coords.Lon,3)+","+Math.Round(coords.Lat,3),settings,token);
+                    if(found.Count>0)return found[0];
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+                catch { }
             }
+        } catch { }
+        try {
             using var doc=JsonDocument.Parse(await Http.GetStringAsync("https://ipwho.is/?lang="+(Loc.IsEnglish?"en":"zh-CN"),token));
             var root=doc.RootElement;
             if(root.TryGetProperty("success",out var ok)&&ok.ValueKind==JsonValueKind.False)return null;
             if(!root.TryGetProperty("latitude",out var la)||!root.TryGetProperty("longitude",out var lo))return null;
             double lat=la.GetDouble(),lon=lo.GetDouble();
-            if(hefeng)
+            // 系统坐标在手（反查失败落下来的）不再对 IP 坐标做反查：坐标已是数百米级，
+            // 只需要 IP 补城市名；返回时坐标仍用系统定位的精确值。
+            if(hefeng&&precise is null)
             {
                 var found=await SearchHeFeng(Math.Round(lon,3)+","+Math.Round(lat,3),settings,token);
                 if(found.Count>0)
@@ -198,13 +243,18 @@ internal static class WeatherData
             }
             if(root.TryGetProperty("city",out var name)&&name.ValueKind==JsonValueKind.String&&name.GetString() is {Length:>0} query) {
                 var found=await Search(query,settings,token);
-                if(found.Count>0)return found.OrderBy(c=>Math.Abs(c.Latitude-lat)+Math.Abs(c.Longitude-lon)).First();
+                if(found.Count>0)
+                {
+                    var best=found.OrderBy(c=>Math.Abs(c.Latitude-(precise?.Lat??lat))+Math.Abs(c.Longitude-(precise?.Lon??lon))).First();
+                    // 有系统坐标时搜索只用来拿规范的名称与 LocationId，坐标以系统定位为准。
+                    return precise is { } coords ? best with { Latitude=coords.Lat,Longitude=coords.Lon } : best;
+                }
             }
             var parts=new List<string>();
             if(root.TryGetProperty("city",out name)&&name.ValueKind==JsonValueKind.String&&name.GetString() is {Length:>0} s)parts.Add(s);
             if(root.TryGetProperty("region",out var region)&&region.ValueKind==JsonValueKind.String&&region.GetString() is {Length:>0} r)parts.Add(r);
             if(root.TryGetProperty("country",out var country)&&country.ValueKind==JsonValueKind.String&&country.GetString() is {Length:>0} c&&!parts.Contains(c))parts.Add(c);
-            return new City(parts.Count>0?City.Compose([.. parts]):"当前位置",lat,lon);
+            return new City(parts.Count>0?City.Compose([.. parts]):"当前位置",precise?.Lat??lat,precise?.Lon??lon);
         } catch { return null; }
     }
     // 天气聚合入口：当前、24 小时、24 天（历史 10 + 今天 + 未来 13）、日升日落与空气质量由 WeatherAggregator 统一拼装。
