@@ -931,7 +931,7 @@ begin
   else if (CurUninstallStep = usPostUninstall) and DeleteUserData and not HasParam('/UPGRADE') then
   begin
     DeleteDataFolder;
-    // The recent notices are kept in the install folder by default (NoticeStorage); they are user data too.
+    // Earlier versions kept the recent notices in the install folder; a copy never started since may still have them there.
     DelTree(ExpandConstant('{app}\notices'), True, True, True);
   end
   else if CurUninstallStep = usDone then

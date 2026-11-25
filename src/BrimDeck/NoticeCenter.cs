@@ -1021,7 +1021,7 @@ internal sealed partial class NoticeCenter : IDisposable
     // ----- History -----
 
     // The folder the notices are kept in (NoticeStorage).
-    public static string HistoryFolder(DeckSettings settings) => NoticeStorage.DefaultFolder;
+    public static string HistoryFolder(DeckSettings settings) => NoticeStorage.Folder;
 
     // Follows the settings: where the notices are kept and whether (see NoticeHistoryPlan for what that does with the file).
     private void UseHistoryFolder(DeckSettings settings)
@@ -1109,7 +1109,7 @@ internal sealed partial class NoticeCenter : IDisposable
                 if (trust != NoticeStorage.FolderTrust.Trusted) return (trust, NoticeHistoryState.Refused, new List<Notice>(), new List<NoticeKnownApp>());
                 // A file never read moves along with the folder (life-L1).
                 if (moveFrom is not null) NoticeStorage.Move(moveFrom, history.DirectoryPath);
-                // The first time, notices an earlier version kept in the old default folder (%LOCALAPPDATA%) move to the default one.
+                // The first time, notices an earlier version kept in the install folder move to the data folder.
                 if (moveLegacy) NoticeStorage.MoveLegacy(history.DirectoryPath);
                 var state = history.Load(out var notices, out var apps);
                 return (trust, state, notices, apps);

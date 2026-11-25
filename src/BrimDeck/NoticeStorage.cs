@@ -6,27 +6,14 @@ using BrimDeck.Core.Notices;
 
 namespace BrimDeck;
 
-// Where the recent notices are kept by default: a "notices" folder in BrimDeck's own install folder, so they stay on the drive
-// BrimDeck was installed to instead of the system drive. An install folder BrimDeck cannot write to (Program Files) falls back
-// to the data folder in %LOCALAPPDATA%, where earlier versions kept them; a file left there is moved over once.
+// Where the recent notices are kept: a "notices" folder in BrimDeck's data folder in %LOCALAPPDATA%, beside settings.json, so
+// every copy of BrimDeck the user runs (another install folder, a portable copy, a new build) reads the same notices. Earlier
+// versions kept them in the install folder when it could be written to; a file left there is moved over once.
 internal static class NoticeStorage
 {
-    private static string? _default;
+    public static string Folder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "notices");
 
-    public static string LegacyFolder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "notices");
-
-    public static string DefaultFolder => _default ??= Choose();
-
-    // An existing "notices" folder is used only while it is the current user's own (or the administrators' or the system's),
-    // no link, and no other account may change what is in it: one another account can write to could lead the writes
-    // elsewhere or swap the file (sec-M1, S1). One of the user's own that an earlier version left open is closed first.
-    // Read once, on the install folder (a local drive).
-    private static string Choose()
-    {
-        var installed = Path.Combine(AppContext.BaseDirectory, "notices");
-        if (Directory.Exists(installed)) return Check(installed, unknown: false, repair: true) == FolderTrust.Trusted ? installed : LegacyFolder;
-        return Writable(AppContext.BaseDirectory) ? installed : LegacyFolder;
-    }
+    public static string InstallFolder => Path.Combine(AppContext.BaseDirectory, "notices");
 
     // What BrimDeck makes of a folder. Linked: it is a link (junction, symbolic link). Foreign: another account owns it.
     // Shared: the user's own, but other accounts may also create, replace or delete files in it. Unreachable: it could not be
@@ -94,25 +81,13 @@ internal static class NoticeStorage
 
     private const string TrustedInstaller = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
 
-    // Whether a file can be created in the folder; nothing is left behind. A new random name, created only if nothing has
-    // that name, so a link planted under a name BrimDeck would use is never written through (S2).
-    private static bool Writable(string folder)
-    {
-        try
-        {
-            using var probe = new FileStream(Path.Combine(folder, ".brimdeck-write-test-" + Guid.NewGuid().ToString("N")), FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose);
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
-    }
-
     // Checks the folder before anything is read from or written to it, and creates it private to the current user (the
     // default one is closed again if it was opened up). Anything but Trusted means BrimDeck leaves the folder alone: a folder
     // the user chose is reported, not used. Reads the disk (on a network share, it may wait for it): call it in the background,
     // once per folder. A folder whose drive is missing is not created; reading it reports that.
     public static FolderTrust Prepare(string folder, bool create = true)
     {
-        bool isDefault = string.Equals(folder, DefaultFolder, StringComparison.OrdinalIgnoreCase);
+        bool isDefault = string.Equals(folder, Folder, StringComparison.OrdinalIgnoreCase);
         var trust = Check(folder, unknown: !isDefault, repair: isDefault);
         if (trust != FolderTrust.Trusted || !create || Directory.Exists(folder) || !NoticeHistory.Reachable(folder)) return trust;
         try { Directory.CreateDirectory(folder); if (!OnNetwork(folder)) MakePrivate(folder); }
@@ -192,10 +167,11 @@ internal static class NoticeStorage
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PrivilegeNotHeldException or InvalidOperationException) { }
     }
 
-    // Moves the saved notices and icons from the old default folder into the new one, once, when the new one has none yet.
+    // Moves the saved notices and icons an earlier version kept in this copy's install folder into the data folder, once, when
+    // the data folder has none yet. The install folder's "notices" goes once it is empty.
     public static void MoveLegacy(string folder)
     {
-        var legacy = LegacyFolder;
+        var legacy = InstallFolder;
         if (!Move(legacy, folder)) return;
         try { if (Directory.Exists(legacy) && !Directory.EnumerateFileSystemEntries(legacy).Any()) Directory.Delete(legacy); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }

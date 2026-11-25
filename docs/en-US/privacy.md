@@ -34,7 +34,7 @@ BrimDeck reads only the sign-in state and usage records that apps already keep. 
 
 ## Files stored on this PC
 
-Files are stored in `%LOCALAPPDATA%\BrimDeck`, except the notice history, which is kept in BrimDeck's install folder by default (see their row):
+Files are stored in `%LOCALAPPDATA%\BrimDeck`:
 
 | File | Contents |
 | --- | --- |
@@ -56,7 +56,7 @@ Files are stored in `%LOCALAPPDATA%\BrimDeck`, except the notice history, which 
 | `backups\` | Backups saved automatically before importing settings (the latest 5), in the same form as an exported settings file; the API keys in them are a copy of `secrets.dat` as it is, still encrypted for the current user, so they import only on this PC and account |
 | `sensor-stops.json`, `sensor-pending.json` | The system monitor readings stopped because the PC froze (the drive or graphics adapter model, the board model and BIOS version), and the readings under way, so a reading that froze the PC is found at the next start; a record is removed when the reading is turned on again in the settings |
 | `crash.log` | Error records; cleared when it exceeds 1 MB |
-| `notices\notices.dat`, `notices\icons\` | With live notices on and kept: the notice history (24 hours and at most 500 by default), encrypted for the current user with Windows encryption; application icons (from Windows, no notice content). **Kept by default in the `notices` folder of BrimDeck's install folder** (opened to the current user only), and here only when the install folder cannot be written to; the folder can be changed in settings; uninstalling with "Delete user data" removes the default folders only, so delete a folder you chose yourself by hand (or clear the notice history before uninstalling) |
+| `notices\notices.dat`, `notices\icons\` | With live notices on and kept: the notice history (24 hours and at most 500 by default), encrypted for the current user with Windows encryption; application icons (from Windows, no notice content). The `notices` folder is opened to the current user only; notices an earlier version kept in the install folder move here on first start |
 | `notices.log` | Live notices' error records: error types, codes and code locations only, never titles or bodies; rotated past 256 KB |
 | `notice-banners.json` | With "Turn off other apps' notification banners" on: the ids of the apps whose banner BrimDeck turned off and their previous `ShowBanner` value, so it can be put back exactly; and the ids of apps whose banner you turned on again in Windows, which BrimDeck leaves alone. Deleted once everything is restored and the switch is off |
 | `wechat-gate.json` | With WeChat's "Read message content" on: where the one byte lies in WeChat's program file (looked up once for each WeChat version), and the id and start time of the WeChat process BrimDeck changed, so it can be put back; no chat content. The messages read go to the notice history like any other notice |
