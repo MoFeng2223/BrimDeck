@@ -175,12 +175,14 @@ internal sealed class NoticeAgendaForm : StackPanel
     private readonly AgendaDateField _day;
     private readonly Button _todoSubmit;
     private bool _todo;
+    // The choice the switch was last drawn for: drawn for the other, its fill glides from it.
+    private bool? _switchDrawn;
     public event Action? Submitted, Cancelled;
 
     public NoticeAgendaForm(PanelLook look, Action<TextBox> keyboard, bool existing, bool todo)
     {
         _look = look; _todo = todo;
-        _eventSwitch = Switch(); _todoSwitch = Switch();
+        _eventSwitch = Holder(); _todoSwitch = Holder();
 
         _event = new AgendaEventForm(look, keyboard, existing ? Loc.T("保存", "Save") : Loc.T("加入日程", "Add event"), showStartDay: true, compact: true) { Lead = _eventSwitch };
         _event.Submitted += Submit;
@@ -256,34 +258,37 @@ internal sealed class NoticeAgendaForm : StackPanel
         _todo = todo;
         _event.Visibility = todo ? Visibility.Collapsed : Visibility.Visible;
         _todoForm.Visibility = todo ? Visibility.Visible : Visibility.Collapsed;
-        var row = new StackPanel { Orientation = Orientation.Horizontal };
-        row.Children.Add(Segment(Loc.T("待办", "To-do"), todo, () => Kind(true)));
-        row.Children.Add(Segment(Loc.T("日程", "Event"), !todo, () => Kind(false)));
-        (todo ? _todoSwitch : _eventSwitch).Child = row;
+        var group = Switch(todo);
+        (todo ? _todoSwitch : _eventSwitch).Child = group;
         (todo ? _eventSwitch : _todoSwitch).Child = null;
         CheckTodo();
     }
 
-    // The switch's track: the fill, with a pixel around its two halves.
-    private Border Switch() => new()
-    {
-        CornerRadius = new CornerRadius(_look.Corner(6)), Background = UI.Brush(_look.Fill), Padding = new Thickness(1),
-        HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center
-    };
+    // Where the switch goes: before the title or before the to-do's words, whichever is shown.
+    private static Border Holder() => new() { HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
 
-    // One half of the switch, as the notices list's "全部"/"未读": 18 high, the chosen one on the selected fill. The words are centred
-    // by their letters as drawn (InkCentredText): centred by their line, Chinese sat low.
-    private Button Segment(string text, bool on, Action click)
+    // "待办"/"日程": the panel's segmented switch (AgendaDraw.Segments), as the notices list's "全部"/"未读" and the planner page. One
+    // fill on the track marks the chosen half and glides to the other on a choice; the other half takes no fill under the pointer,
+    // only its words brighten. Its words are centred by their letters as drawn.
+    private Border Switch(bool todo)
     {
-        var label = AgendaDraw.Label(text, 11, on ? _look.Primary : _look.Secondary);
-        string rest = on ? _look.FillSelected : "Transparent";
-        var face = new Border { Height = 18, CornerRadius = new CornerRadius(_look.Corner(5)), Padding = new Thickness(9, 0, 9, 0), Background = UI.Brush(rest), Child = label };
-        label.FitHeight(face, 18, Loc.T("待办", "To-do"), Loc.T("日程", "Event"));
-        var button = AgendaDraw.Bare(face, text, () => { if (!on) click(); }, (over, down) =>
-            face.Background = UI.Brush(down ? _look.Hex("pressed") : on ? _look.FillSelected : over ? _look.Hex("hover") : "Transparent"));
-        if (on) AutomationProperties.SetItemStatus(button, Loc.T("已选中", "Selected"));
-        return button;
+        string[] names = [Loc.T("待办", "To-do"), Loc.T("日程", "Event")];
+        var segments = new List<Button>();
+        for (int i = 0; i < names.Length; i++)
+        {
+            bool toTodo = i == 0, on = toTodo == todo;
+            var words = AgendaDraw.Label(names[i], 11, on ? _look.Primary : _look.Secondary);
+            var button = AgendaDraw.Segment(_look, words, names[i], on, () => Kind(toTodo), bright => words.Text.Foreground = UI.Brush(bright ? _look.Primary : _look.Secondary),
+                SwitchHeight, new Thickness(9, 0, 9, 0));
+            AgendaDraw.Fit(button, words, SwitchHeight, names);
+            if (on) AutomationProperties.SetItemStatus(button, Loc.T("已选中", "Selected"));
+            segments.Add(button);
+        }
+        int? from = _switchDrawn is { } drawn && drawn != todo ? (drawn ? 0 : 1) : null;
+        _switchDrawn = todo;
+        return AgendaDraw.Segments(_look, segments, todo ? 0 : 1, from, Soft.At(this));
     }
+    private const double SwitchHeight = 18;
 
     private void CheckTodo() => _todoSubmit.IsEnabled = _words.Text.Trim().Length > 0;
 

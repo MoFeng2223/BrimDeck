@@ -300,7 +300,7 @@ internal static class AgendaFields
 // found where it was laid out and moved by whole device pixels to put the letters' middle at the box's.
 internal sealed class LetterBox : TextBox
 {
-    private static readonly Dictionary<(string, string, double, int, TextFormattingMode, double), (double Top, double Bottom)> Spans = [];
+    private static readonly Dictionary<(string, string, double, int, TextFormattingMode, double, double, VerticalAlignment, Thickness, Thickness), (double Top, double Bottom)> Spans = [];
     private string? _sample;
     private FrameworkElement? _host, _line;
     private readonly TranslateTransform _shift = new();
@@ -335,21 +335,27 @@ internal sealed class LetterBox : TextBox
         if (pixels <= 0 || (_line ??= Line(_host)) is not { } line || Template is null) return;
         var (top, bottom) = Span(pixels);
         // Where the line's top is in the box without the shift, and the whole pixels that bring the letters' middle to the box's.
+        // Where none does (an odd number of pixels left above and below them), they go half a pixel up rather than down: rounded to
+        // even, the time fields' figures sat half a pixel low at some scales and high at others.
         double at = line.TransformToAncestor(this).Transform(new Point()).Y - _shift.Y;
-        double shift = Math.Round((ActualHeight / 2 - (at + (top + bottom) / 2)) * pixels) / pixels;
+        double shift = Math.Ceiling((ActualHeight / 2 - (at + (top + bottom) / 2)) * pixels - .5) / pixels;
         if (Math.Abs(shift - _shift.Y) > 1e-6) _shift.Y = shift;
     }
 
-    // Where Sample's letters start and end below the top of the line, in DIP, drawn in a box with this one's template and font.
+    // Where Sample's letters start and end below the top of the line, in DIP, drawn in a box with this one's template and font, as
+    // tall as this one and its line placed as this one's is (the same frame, padding and alignment). Where the line is centred on
+    // half a pixel (a 17 high line in a 28 high field at 100%), layout rounding moves the line a whole pixel but its letters are
+    // drawn from where it would have been, a pixel lower in it than in a box only as tall as its line: measured so, the time
+    // fields' figures stayed 1.5 pixels low.
     private (double Top, double Bottom) Span(double pixels)
     {
         var mode = TextOptions.GetTextFormattingMode(this);
         // The boxes' templates differ only in their corners (AgendaFields.Box), which do not move the line.
-        var key = (_sample!, FontFamily.Source, FontSize, FontWeight.ToOpenTypeWeight(), mode, pixels);
+        var key = (_sample!, FontFamily.Source, FontSize, FontWeight.ToOpenTypeWeight(), mode, pixels, ActualHeight, VerticalContentAlignment, BorderThickness, Padding);
         if (Spans.TryGetValue(key, out var span)) return span;
         var probe = new TextBox { Template = Template, Text = _sample, FontFamily = FontFamily, FontSize = FontSize, FontWeight = FontWeight, FontStyle = FontStyle,
-            Foreground = Brushes.White, Background = Brushes.Transparent, BorderBrush = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(0),
-            UseLayoutRounding = true };
+            Foreground = Brushes.White, Background = Brushes.Transparent, BorderBrush = Brushes.Transparent, BorderThickness = BorderThickness, Padding = Padding,
+            Height = ActualHeight, VerticalContentAlignment = VerticalContentAlignment, UseLayoutRounding = true };
         TextOptions.SetTextFormattingMode(probe, mode);
         VisualTreeHelper.SetRootDpi(probe, new DpiScale(pixels, pixels));
         probe.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
@@ -566,7 +572,8 @@ internal sealed class AgendaDatePopup
     private DateOnly _month, _chosen, _today;
     private Action<DateOnly?>? _picked;
     private string? _clear;
-    public bool IsOpen => _popup.IsOpen;
+    // Open and not leaving: what holds the panel open, and what Esc closes first.
+    public bool IsOpen => _popup.Showing;
     public event Action? Closed;
 
     public AgendaDatePopup(PanelLook look)
@@ -580,19 +587,18 @@ internal sealed class AgendaDatePopup
 
     public void Show(FrameworkElement target, DateOnly chosen, DateOnly today, Action<DateOnly> picked) => Show(target, chosen, today, day => { if (day is { } d) picked(d); }, null);
 
+    // Shown from target, or closed when it is already open from there (a second click on the field).
     public void Show(FrameworkElement target, DateOnly chosen, DateOnly today, Action<DateOnly?> picked, string? clear)
     {
-        if (_popup.ClosedByPressOn(target)) return;
+        if (_popup.Showing && ReferenceEquals(_popup.PlacementTarget, target)) { _popup.Close(); return; }
         _chosen = chosen; _today = today; _picked = picked; _clear = clear;
         _month = new DateOnly(chosen.Year, chosen.Month, 1);
         PanelTheme.Text(_frame, target);
-        _popup.PlacementTarget = target;
-        _popup.Watch(target);
         Build();
-        _popup.IsOpen = true;
+        _popup.Open(target);
     }
 
-    public void Close() => _popup.IsOpen = false;
+    public void Close() => _popup.Close();
 
     private void Build()
     {
@@ -656,7 +662,7 @@ internal sealed class AgendaChoicePopup
     private readonly PanelLook _look;
     private readonly OpenerPopup _popup;
     private readonly Border _frame;
-    public bool IsOpen => _popup.IsOpen;
+    public bool IsOpen => _popup.Showing;
 
     public AgendaChoicePopup(PanelLook look)
     {
@@ -666,9 +672,10 @@ internal sealed class AgendaChoicePopup
         _popup = new OpenerPopup { Child = _frame };
     }
 
+    // Shown from target, or closed when it is already open from there.
     public void Show(FrameworkElement target, IReadOnlyList<Choice> choices)
     {
-        if (_popup.ClosedByPressOn(target)) return;
+        if (_popup.Showing && ReferenceEquals(_popup.PlacementTarget, target)) { _popup.Close(); return; }
         var look = _look;
         bool ticks = choices.Any(choice => choice.Chosen);
         var stack = new StackPanel();
@@ -694,36 +701,40 @@ internal sealed class AgendaChoicePopup
         }
         _frame.Child = stack;
         PanelTheme.Text(_frame, target);
-        _popup.PlacementTarget = target;
-        _popup.Watch(target);
-        _popup.IsOpen = true;
+        _popup.Open(target);
     }
 
-    public void Close() => _popup.IsOpen = false;
+    public void Close() => _popup.Close();
 
     private const string Tick = "M20 6 9 17l-5-5";
 }
 
-// A pop-up that closes on a press outside it (StaysOpen false), and a press on what opened it (a field, a button) closes it. While
-// open it holds the mouse, so a press on its opener goes to the pop-up first, which closes on it (Popup.OnPreviewMouseButton); WPF
-// then gives that same press to the opener's button, in the same moment and without the preview events, and on release the
-// button's click opened the pop-up again, so it seemed not to close. (Traced on the notices page's date field: the pop-up closed
-// and the field's button took the mouse within the same millisecond.) So the opener's taking the mouse is noted, and a click that
-// comes from a press taken as the pop-up closed does not open it: ClosedByPressOn, asked before opening.
+// A drop-down beside what opened it (a field, a button), which fades in and out in its own window. WPF's closing on a press outside
+// (StaysOpen false) takes the window away at once, so its leaving was shown by a picture in a second window (PopupMotion), and the
+// two windows never changed in the same frame: closed while it still faded in, which a click a little quick already did, its words
+// blinked or doubled. So it stays open until its leaving is drawn (StaysOpen true) and watches presses itself, as the panel's menus
+// do (PointerPressObserver): one outside it and its opener closes it; one on its opener goes to the opener, whose click closes it
+// (Show while Showing) or, while it leaves, brings it back from where its leaving had come to. It goes at once when its opener
+// leaves the screen (the panel closes, the page is drawn again).
 //
 // It lies 4 above what opened it, or 4 below where there is no room above (Popup's own Top placement turned below kept the offset
-// up and covered the opener's lower edge). It opens and closes as the app's other drop-downs do (PopupMotion): it fades in, and its
-// last picture fades out as it closes; without that it came up a moment after the click and was gone at once.
+// up and covered the opener's lower edge).
 internal sealed class OpenerPopup : Popup
 {
     private const double Gap = 4;
+    private Native.PointerPressObserver? _presses;
+    // Counts the entrances and leavings: a leaving that ends after the pop-up was opened again does nothing.
+    private int _motion;
+
+    // Open and not leaving.
+    public bool Showing { get; private set; }
 
     public OpenerPopup()
     {
-        StaysOpen = false; AllowsTransparency = true; PopupAnimation = PopupAnimation.None;
+        StaysOpen = true; AllowsTransparency = true; PopupAnimation = PopupAnimation.None;
         Placement = PlacementMode.Custom;
         CustomPopupPlacementCallback = Place;
-        PopupMotion.Attach(this);
+        Closed += (_, _) => { _presses?.Dispose(); _presses = null; };
     }
 
     // The places offered, in screen pixels from the opener's top-left corner: above it, then below it.
@@ -733,36 +744,65 @@ internal sealed class OpenerPopup : Popup
         return [new(new Point(0, -popup.Height - gap), PopupPrimaryAxis.Horizontal), new(new Point(0, target.Height + gap), PopupPrimaryAxis.Horizontal)];
     }
 
-    // Environment.TickCount when IsOpen last turned false (as it happens: Closed comes later, once the pop-up's window is gone),
-    // and when the opener last took the mouse.
-    private int _closedAt = Environment.TickCount - 60_000, _pressedAt = Environment.TickCount - 120_000;
-    private UIElement? _opener;
-
-    public void Watch(UIElement opener)
+    // Opens it from opener; while it leaves, it turns back from where it is.
+    public void Open(UIElement opener)
     {
-        if (ReferenceEquals(_opener, opener)) return;
-        _opener?.RemoveHandler(GotMouseCaptureEvent, (MouseEventHandler)Pressed);
-        _opener = opener;
-        opener.AddHandler(GotMouseCaptureEvent, (MouseEventHandler)Pressed, true);
+        if (!ReferenceEquals(PlacementTarget, opener))
+        {
+            if (PlacementTarget is UIElement old) { old.IsVisibleChanged -= OpenerShown; if (old is FrameworkElement gone) gone.Unloaded -= OpenerGone; }
+            opener.IsVisibleChanged += OpenerShown;
+            if (opener is FrameworkElement element) element.Unloaded += OpenerGone;
+            PlacementTarget = opener;
+        }
+        _motion++;
+        Showing = true;
+        if (Child is not UIElement content) return;
+        content.IsHitTestVisible = true;
+        if (IsOpen)
+        {
+            Soft.Enter(content, content.Opacity, content.RenderTransform is TranslateTransform shift ? shift.Y : 0);
+            return;
+        }
+        IsOpen = true;
+        Soft.Enter(content);
+        _presses ??= new Native.PointerPressObserver(Dispatcher, Pressed);
     }
 
-    // Whether the click on opener now opening the pop-up comes from the press it closed on: that press is used up.
-    public bool ClosedByPressOn(UIElement opener)
+    // Closes it, fading out while it rises (Soft.Leave); now, or where nothing moves, at once.
+    public void Close(bool now = false)
     {
-        if (!ReferenceEquals(opener, _opener)) return false;
-        int after = unchecked(_pressedAt - _closedAt);
-        if (after < 0 || after > 100) return false;
-        _pressedAt = _closedAt - 120_000;
-        return true;
+        if (!IsOpen) { Showing = false; return; }
+        if (!Showing && !now) return;
+        Showing = false;
+        int motion = ++_motion;
+        if (now || Child is not UIElement content || !Soft.At(content)) { Shut(); return; }
+        content.IsHitTestVisible = false;
+        Soft.Leave(content, () => { if (motion == _motion) Shut(); });
     }
 
-    protected override void OnPropertyChanged(DependencyPropertyChangedEventArgs e)
+    // Gone: the window closes and its content is as at rest for the next opening.
+    private void Shut()
     {
-        base.OnPropertyChanged(e);
-        if (e.Property == IsOpenProperty && e.NewValue is false) _closedAt = Environment.TickCount;
+        _motion++;
+        Showing = false;
+        IsOpen = false;
+        if (Child is not UIElement content) return;
+        content.BeginAnimation(UIElement.OpacityProperty, null);
+        if (content.RenderTransform is TranslateTransform shift) shift.BeginAnimation(TranslateTransform.YProperty, null);
+        content.IsHitTestVisible = true;
     }
 
-    private void Pressed(object sender, MouseEventArgs e) => _pressedAt = Environment.TickCount;
+    // A press anywhere on the screen, in device pixels: outside the pop-up and its opener it closes the pop-up.
+    private void Pressed(Point point)
+    {
+        if (Showing && !Holds(Child, point) && !Holds(PlacementTarget, point)) Close();
+    }
+
+    private static bool Holds(UIElement? element, Point point) => element is FrameworkElement { IsVisible: true } shown && PresentationSource.FromVisual(shown) is not null
+        && new Rect(shown.PointToScreen(new Point()), shown.PointToScreen(new Point(shown.ActualWidth, shown.ActualHeight))).Contains(point);
+
+    private void OpenerShown(object sender, DependencyPropertyChangedEventArgs e) { if (e.NewValue is false) Close(now: true); }
+    private void OpenerGone(object sender, RoutedEventArgs e) => Close(now: true);
 }
 
 // How an event repeats: the repeat icon, the rule in words for a series starting on First ("每周二") and a chevron; a click opens
