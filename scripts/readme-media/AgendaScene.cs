@@ -154,7 +154,7 @@ internal sealed partial class Renderer
         {
             var type = Type.GetType("BrimDeck.AgendaEventForm, BrimDeck")!;
             var look = Program.GetProperty(_deck, "Look");
-            var form = Activator.CreateInstance(type, Program.Any, null, [look, (Action<TextBox>)(_ => { }), submit, delete, startDay], null)!;
+            var form = Activator.CreateInstance(type, Program.Any, null, [look, (Action<TextBox>)(_ => { }), submit, delete, startDay, false], null)!;
             Program.SetProperty(form, "Today", (Func<DateOnly>)(() => today));
             Program.Call(form, "Fill", [typeof(string), typeof(DateTime), typeof(DateTime), typeof(bool), typeof(AgendaRepeat)], title, start, end, false, repeat);
             Program.SetField(Page(), "_form", form);

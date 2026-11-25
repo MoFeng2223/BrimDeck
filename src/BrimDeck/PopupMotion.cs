@@ -26,7 +26,8 @@ internal static class PopupMotion
 {
     private static readonly ConditionalWeakTable<object, Placed> Places = new();
     // The waiting picture's pop-up for the opening under way, null between openings.
-    private sealed class Placed { public Popup? Ghost; public Image? Picture; public Window? Window; public DispatcherTimer? Refresh; public Action? Unhook; }
+    // Leaving: the picture still fading out from the last closing, and how to take it away at once.
+    private sealed class Placed { public Popup? Ghost; public Image? Picture; public Window? Window; public DispatcherTimer? Refresh; public Action? Unhook; public Image? Leaving; public Action? StopLeaving; }
 
     public static void Attach(Popup popup)
     {
@@ -35,7 +36,18 @@ internal static class PopupMotion
         Places.Add(popup, placed);
         popup.Opened += (_, _) =>
         {
-            Soft.Enter(popup.Child);
+            // Opened again while its last picture still leaves (quick clicks on what opens it): the content comes in from where that
+            // picture is, and the picture stays where it is until the content's first frame is drawn over it, then goes. Started
+            // from nothing each time, the two crossed every click and the list flickered.
+            if (placed.Leaving is { } leaving && placed.StopLeaving is { } stop)
+            {
+                double opacity = leaving.Opacity, y = leaving.RenderTransform is TranslateTransform shift ? shift.Y : 0;
+                placed.Leaving = null; placed.StopLeaving = null;
+                leaving.Opacity = opacity; leaving.BeginAnimation(UIElement.OpacityProperty, null);
+                Soft.Enter(popup.Child, opacity, y);
+                popup.Dispatcher.BeginInvoke(DispatcherPriority.Background, stop);
+            }
+            else Soft.Enter(popup.Child);
             Prepare(placed, () => popup.IsOpen ? popup.Child : null, () => Anchor(popup));
         };
         popup.Closed += (_, _) => Leave(popup.Child as FrameworkElement, placed);
@@ -175,6 +187,12 @@ internal static class PopupMotion
         if (image.Source is null) { ghost.IsOpen = false; return; }
         DependencyPropertyChangedEventHandler hidden = (_, _) => ghost.IsOpen = false;
         window.IsVisibleChanged += hidden;
-        Soft.Leave(image, () => { window.IsVisibleChanged -= hidden; ghost.IsOpen = false; });
+        void Gone()
+        {
+            window.IsVisibleChanged -= hidden; ghost.IsOpen = false;
+            if (ReferenceEquals(placed.Leaving, image)) { placed.Leaving = null; placed.StopLeaving = null; }
+        }
+        placed.Leaving = image; placed.StopLeaving = Gone;
+        Soft.Leave(image, Gone);
     }
 }

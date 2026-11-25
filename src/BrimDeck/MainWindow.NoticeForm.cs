@@ -35,7 +35,7 @@ public partial class MainWindow
     private void OpenNoticeForm(Notice notice, AgendaEvent? item, AgendaTodo? todo, bool typing = true)
     {
         var today = DateOnly.FromDateTime(DateTime.Now);
-        if (item is not null) ShowNoticeForm(notice, item.Id, null, false, item.Title, item.Start, item.End, item.AllDay, item.FirstDay, typing);
+        if (item is not null) ShowNoticeForm(notice, item.Id, null, false, item.Title, item.Start, item.End, item.AllDay, item.FirstDay, typing, item.Repeat);
         else if (todo is not null)
         {
             var day = todo.Day ?? today;
@@ -45,11 +45,15 @@ public partial class MainWindow
     }
 
     private void ShowNoticeForm(Notice notice, string? eventId, string? todoId, bool asTodo, string text, DateTime start, DateTime end, bool allDay, DateOnly day, bool typing)
+        => ShowNoticeForm(notice, eventId, todoId, asTodo, text, start, end, allDay, day, typing, AgendaRepeat.None);
+
+    // repeat: how the event changed repeats (a series is shown by its first time, and a change applies to every time of it).
+    private void ShowNoticeForm(Notice notice, string? eventId, string? todoId, bool asTodo, string text, DateTime start, DateTime end, bool allDay, DateOnly day, bool typing, AgendaRepeat repeat)
     {
         CloseNoticeForm();
         bool existing = eventId is not null || todoId is not null;
         var form = new NoticeAgendaForm(Look, AgendaKeyboard, existing, asTodo) { Today = () => DateOnly.FromDateTime(DateTime.Now) };
-        form.Fill(text, start, end, allDay, day);
+        form.Fill(text, start, end, allDay, day, repeat);
         var state = new NoticeFormState(notice.Id, form, eventId, todoId);
         form.Submitted += () => SaveNoticeForm(state);
         form.Cancelled += () => { CloseNoticeForm(); RenderNotices(); };
@@ -68,19 +72,19 @@ public partial class MainWindow
         if (state.EventId is { } eventId && book.FindEvent(eventId) is { } item)
         {
             if (value.Todo) { if (book.EventToTodo(eventId, value.Day) is { } made) book.SetTodoText(made.Id, value.Text); }
-            else book.UpdateEvent(eventId, value.Text, value.Start, value.End, value.AllDay, item.Detail);
+            else book.UpdateEvent(eventId, value.Text, value.Start, value.End, value.AllDay, item.Detail, value.Repeat);
         }
         else if (state.TodoId is { } todoId && book.FindTodo(todoId) is not null)
         {
             if (value.Todo) { book.SetTodoText(todoId, value.Text); book.SetTodoDay(todoId, value.Day); }
-            else if (book.TodoToEvent(todoId, value.Start, value.End, value.AllDay) is { } made) book.UpdateEvent(made.Id, value.Text, value.Start, value.End, value.AllDay, null);
+            else if (book.TodoToEvent(todoId, value.Start, value.End, value.AllDay, repeat: value.Repeat) is { } made) book.UpdateEvent(made.Id, value.Text, value.Start, value.End, value.AllDay, null, value.Repeat);
         }
         else if (notice is not null)
         {
             // New, or what it was to change is gone meanwhile (removed on the planner page): added afresh from the notice.
             var source = AgendaSource.From(notice);
             if (value.Todo) book.AddTodo(value.Text, value.Day, now, source: source);
-            else book.AddEvent(value.Text, value.Start, value.End, value.AllDay, now, source: source);
+            else book.AddEvent(value.Text, value.Start, value.End, value.AllDay, now, source: source, repeat: value.Repeat);
         }
         RenderNotices();
     }
@@ -115,7 +119,6 @@ public partial class MainWindow
         bool short_ = ContentCanvas.Height < NoticeFormShortPanel;
         if (short_) { status.Visibility = Visibility.Collapsed; hero.Visibility = Visibility.Collapsed; }
         state.Form.Margin = new Thickness(0, short_ ? 0 : 10, 0, 0);
-        state.Form.Tight = short_;
         return new ScrollViewer { Content = state.Form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false,
             PanningMode = PanningMode.VerticalOnly, Background = Brushes.Transparent };
     }
@@ -158,202 +161,131 @@ public partial class MainWindow
     }
 }
 
-// The fields of the notices page's form (N3 of the design): "待办"/"日程" and the form's buttons on one line, then the title (or the
-// to-do's words) and the day with the times and "全天". Its fields are the planner's (AgendaFields); its rows wrap where the column is
-// too narrow for them (the narrowest page). An event that ran over several days keeps its length when only its day or times change.
+// The notices page's form. An event takes the planner's own event form (AgendaEventForm, compact): its title, its day and times,
+// "全天", how it repeats and the buttons. A to-do takes the same shape: its words, then its day with the buttons. "待办"/"日程" is
+// before the title or the words (above them on a narrow column), so it stays in its place when switching; the words and the day go
+// along.
 internal sealed class NoticeAgendaForm : StackPanel
 {
     private readonly PanelLook _look;
-    private readonly bool _existing;
-    private readonly AgendaTextField _title, _words;
+    private readonly Border _eventSwitch, _todoSwitch;
+    private readonly StackPanel _todoForm;
+    private readonly AgendaEventForm _event;
+    private readonly AgendaTextField _words;
     private readonly AgendaDateField _day;
-    private readonly AgendaTimeField _start, _end;
-    private readonly ToggleButton _allDay;
-    private readonly FrameworkElement _times, _allDayRow;
-    private readonly TextBlock _textLabel, _dayLabel;
-    private readonly Button _submit;
-    private readonly Border _segments;
-    private readonly Grid _grid;
-    private readonly AgendaSplitRow _head;
-    private readonly WrapPanel _when;
+    private readonly Button _todoSubmit;
     private bool _todo;
-    private int _spanDays;
     public event Action? Submitted, Cancelled;
 
     public NoticeAgendaForm(PanelLook look, Action<TextBox> keyboard, bool existing, bool todo)
     {
-        _look = look; _existing = existing; _todo = todo;
-        _title = AgendaFields.Text(look, keyboard, Loc.T("标题", "Title"));
+        _look = look; _todo = todo;
+        _eventSwitch = Switch(); _todoSwitch = Switch();
+
+        _event = new AgendaEventForm(look, keyboard, existing ? Loc.T("保存", "Save") : Loc.T("加入日程", "Add event"), showStartDay: true, compact: true) { Lead = _eventSwitch };
+        _event.Submitted += Submit;
+        _event.Cancelled += () => Cancelled?.Invoke();
+        Children.Add(_event);
+
         _words = AgendaFields.Text(look, keyboard, Loc.T("待办内容", "To-do"));
         _day = AgendaFields.Date(look, Loc.T("日期", "Date"));
-        _start = AgendaFields.Time(look, keyboard, Loc.T("开始时间", "Start time"));
-        _end = AgendaFields.Time(look, keyboard, Loc.T("结束时间", "End time"), endOfDay: true);
-        _allDay = AgendaFields.Check(look, false, Loc.T("全天", "All day"));
-        _allDay.VerticalAlignment = VerticalAlignment.Center;
-
-        // "待办" | "日程", then "取消" and the main button at the right end; the buttons go under them where the line is too short.
-        _segments = new Border { CornerRadius = new CornerRadius(look.Corner(6)), Background = UI.Brush(look.Fill), Padding = new Thickness(1), VerticalAlignment = VerticalAlignment.Center };
+        _day.VerticalAlignment = VerticalAlignment.Center;
         var cancel = AgendaDraw.Pill(look, Loc.T("取消", "Cancel"), () => Cancelled?.Invoke());
         cancel.Margin = new Thickness(0, 0, 6, 0);
-        _submit = AgendaDraw.Pill(look, "", Submit);
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Children = { cancel, _submit } };
-        _head = new AgendaSplitRow { Children = { _segments, buttons } };
-        Children.Add(_head);
+        _todoSubmit = AgendaDraw.Pill(look, existing ? Loc.T("保存", "Save") : Loc.T("加入待办", "Add to-do"), Submit);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Children = { cancel, _todoSubmit } };
+        var foot = new AgendaSplitRow { Margin = new Thickness(0, 6, 0, 0), Children = { _day, buttons } };
+        _todoForm = new StackPanel { Children = { new AgendaLeadRow { Children = { _todoSwitch, _words } }, foot } };
+        Children.Add(_todoForm);
 
-        // The two lines share their labels' column, so the fields start at one edge in either language.
-        var grid = _grid = new Grid { Margin = new Thickness(0, 8, 0, 0) };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, MinWidth = 28 });
-        grid.ColumnDefinitions.Add(new ColumnDefinition());
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(8) });
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        _textLabel = Label(); _dayLabel = Label();
-        _dayLabel.VerticalAlignment = VerticalAlignment.Top; _dayLabel.Margin = new Thickness(0, 6, 8, 0);
-        Grid.SetRow(_dayLabel, 2);
-        grid.Children.Add(_textLabel); grid.Children.Add(_dayLabel);
-        var text = new Grid { Children = { _title, _words } };
-        Grid.SetColumn(text, 1); grid.Children.Add(text);
-
-        // The day, the times and "全天" wrap onto further lines on a narrow column, each part whole.
-        var dash = AgendaDraw.Words("–", 12.5, 18, look.Tertiary);
-        dash.VerticalAlignment = VerticalAlignment.Center; dash.Margin = new Thickness(6, 0, 6, 0);
-        _times = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6), Children = { _start, dash, _end } };
-        var allDayLabel = AgendaDraw.Words(Loc.T("全天", "All day"), 11.5, 16, look.Secondary);
-        allDayLabel.VerticalAlignment = VerticalAlignment.Center; allDayLabel.Margin = new Thickness(6, 0, 0, 0);
-        // Its gap from the times is its own, so the times never carry a margin past the column's edge when they wrap.
-        var allDayRow = new StackPanel { Orientation = Orientation.Horizontal, Height = 28, Margin = new Thickness(12, 0, 0, 6), Background = Brushes.Transparent, Cursor = Cursors.Hand, Children = { _allDay, allDayLabel } };
-        allDayRow.MouseLeftButtonUp += (_, e) => { if (e.OriginalSource is DependencyObject source && Within(source, _allDay)) return; _allDay.IsChecked = _allDay.IsChecked != true; e.Handled = true; };
-        _allDayRow = allDayRow;
-        _day.Margin = new Thickness(0, 0, 8, 6);
-        var when = _when = new WrapPanel { Margin = new Thickness(0, 0, 0, -6), Children = { _day, _times, _allDayRow } };
-        Grid.SetColumn(when, 1); Grid.SetRow(when, 2); grid.Children.Add(when);
-        Children.Add(grid);
-
-        _title.Changed += Check; _words.Changed += Check; _start.Changed += Check; _end.Changed += Check; _day.Changed += Check;
-        _allDay.Checked += (_, _) => AllDayChanged(); _allDay.Unchecked += (_, _) => AllDayChanged();
-        foreach (var box in new[] { _title.Box, _words.Box, _start.Box, _end.Box })
-            box.PreviewKeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; Submit(); } };
+        _words.Changed += CheckTodo;
+        _words.Box.PreviewKeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; Submit(); } };
         Kind(todo);
     }
 
-    private TextBlock Label()
+    public Func<DateOnly> Today { set { _event.Today = value; _day.Today = value; } }
+
+    public bool PopupOpen => _event.PopupOpen || _day.Popup.IsOpen;
+    public void ClosePopups() { _event.ClosePopups(); _day.Popup.Close(); }
+
+    // The values to start from: the words (an event's title, a to-do's text), the times of an event and how it repeats, the day of a
+    // to-do.
+    public void Fill(string text, DateTime start, DateTime end, bool allDay, DateOnly day, AgendaRepeat repeat)
     {
-        var label = AgendaDraw.Words("", 11.5, 16, _look.Tertiary);
-        label.VerticalAlignment = VerticalAlignment.Center; label.Margin = new Thickness(0, 0, 8, 0);
-        return label;
+        _event.Fill(text, start, end, allDay, repeat);
+        _words.Text = text;
+        _day.Date = day;
+        CheckTodo();
     }
 
-    private static bool Within(DependencyObject node, DependencyObject ancestor)
-    {
-        for (var at = node; at is not null; at = at is Visual ? VisualTreeHelper.GetParent(at) : LogicalTreeHelper.GetParent(at))
-            if (ReferenceEquals(at, ancestor)) return true;
-        return false;
-    }
-
-    public Func<DateOnly> Today { set => _day.Today = value; }
-
-    // On a short panel the lines sit closer together, so the form fits under the status line's place without scrolling.
-    public bool Tight
-    {
-        set
-        {
-            double gap = value ? 4 : 6;
-            _head.LineGap = gap;
-            _grid.Margin = new Thickness(0, value ? 6 : 8, 0, 0);
-            _grid.RowDefinitions[1].Height = new GridLength(value ? 6 : 8);
-            _day.Margin = new Thickness(0, 0, 8, gap);
-            _times.Margin = new Thickness(0, 0, 0, gap);
-            _allDayRow.Margin = new Thickness(12, 0, 0, gap);
-            _when.Margin = new Thickness(0, 0, 0, -gap);
-            _head.InvalidateMeasure();
-        }
-    }
-    public bool PopupOpen => _day.Popup.IsOpen;
-    public void ClosePopups() => _day.Popup.Close();
-
-    // The values to start from: the words (an event's title, a to-do's text), the times of an event, the day of a to-do. A timed event
-    // ending at 00:00 ends at 24:00 of the day before.
-    public void Fill(string text, DateTime start, DateTime end, bool allDay, DateOnly day)
-    {
-        _title.Text = text; _words.Text = text;
-        _day.Date = _todo ? day : DateOnly.FromDateTime(start);
-        _start.Set(start.TimeOfDay);
-        DateTime lastDay;
-        if (allDay) { lastDay = end.Date; var timed = start.AddHours(1); _end.Set(timed.Date > start.Date ? TimeSpan.FromHours(24) : timed.TimeOfDay); }
-        else if (end.TimeOfDay == TimeSpan.Zero && end > start) { lastDay = end.Date.AddDays(-1); _end.Set(TimeSpan.FromHours(24)); }
-        else { lastDay = end.Date; _end.Set(end.TimeOfDay); }
-        _spanDays = Math.Max(0, (lastDay - start.Date).Days);
-        _allDay.IsChecked = allDay;
-        AllDayChanged();
-    }
-
-    // What the form describes: a to-do (its words and day) or an event; null while it is neither.
-    public (bool Todo, string Text, DateOnly Day, DateTime Start, DateTime End, bool AllDay)? Value
+    // What the form describes: a to-do (its words and day) or an event (its times and how it repeats); null while it is neither.
+    public (bool Todo, string Text, DateOnly Day, DateTime Start, DateTime End, bool AllDay, AgendaRepeat Repeat)? Value
     {
         get
         {
-            string text = (_todo ? _words : _title).Text.Trim();
-            if (text.Length == 0) return null;
-            var day = _day.Date;
-            if (_todo) return (true, text, day, default, default, false);
-            var last = AgendaTime.Midnight(day.AddDays(_spanDays));
-            if (_allDay.IsChecked == true) return (false, text, day, AgendaTime.Midnight(day), last, true);
-            if (_start.Value is not { } from || _end.Value is not { } to || from >= TimeSpan.FromHours(24)) return null;
-            var start = AgendaTime.Midnight(day) + from;
-            var end = last + to;
-            return end > start ? (false, text, day, start, end, false) : null;
+            if (_todo)
+            {
+                string words = _words.Text.Trim();
+                return words.Length == 0 ? null : (true, words, _day.Date, default, default, false, AgendaRepeat.None);
+            }
+            if (_event.Value is not { } item) return null;
+            return (false, item.Title, DateOnly.FromDateTime(item.Start), item.Start, item.End, item.AllDay, _event.Repeat.Repeat);
         }
     }
 
     // The words take the keyboard with their text selected.
     public void FocusText(Action<Control> begin)
     {
-        var box = (_todo ? _words : _title).Box;
-        begin(box);
-        box.Dispatcher.BeginInvoke(() => box.SelectAll(), System.Windows.Threading.DispatcherPriority.Input);
+        if (!_todo) { _event.FocusTitle(begin); return; }
+        begin(_words.Box);
+        _words.Box.Dispatcher.BeginInvoke(() => _words.Box.SelectAll(), System.Windows.Threading.DispatcherPriority.Input);
     }
 
-    // Switches between a to-do and an event; the words go along.
+    // Switches between a to-do and an event; the words and the day go along, an event keeping the number of days it runs over.
     private void Kind(bool todo)
     {
-        if (todo != _todo) { if (todo) _words.Text = _title.Text; else _title.Text = _words.Text; }
+        if (todo != _todo)
+        {
+            if (todo) { _words.Text = _event.Title.Text; _day.Date = _event.StartDay.Date; }
+            else
+            {
+                _event.Title.Text = _words.Text;
+                _event.StartDay.Date = _day.Date;
+            }
+        }
         _todo = todo;
-        _title.Visibility = todo ? Visibility.Collapsed : Visibility.Visible;
-        _words.Visibility = todo ? Visibility.Visible : Visibility.Collapsed;
-        _times.Visibility = _allDayRow.Visibility = todo ? Visibility.Collapsed : Visibility.Visible;
-        _textLabel.Text = todo ? Loc.T("内容", "Text") : Loc.T("标题", "Title");
-        _dayLabel.Text = todo ? Loc.T("日期", "Date") : Loc.T("时间", "Time");
-        string submit = _existing ? Loc.T("保存", "Save") : todo ? Loc.T("加入待办", "Add to-do") : Loc.T("加入日程", "Add event");
-        if (((Border)_submit.Content).Child is InkCentredText label) { label.Text.Text = submit; label.InvalidateMeasure(); label.InvalidateArrange(); }
-        AutomationProperties.SetName(_submit, submit);
+        _event.Visibility = todo ? Visibility.Collapsed : Visibility.Visible;
+        _todoForm.Visibility = todo ? Visibility.Visible : Visibility.Collapsed;
         var row = new StackPanel { Orientation = Orientation.Horizontal };
         row.Children.Add(Segment(Loc.T("待办", "To-do"), todo, () => Kind(true)));
         row.Children.Add(Segment(Loc.T("日程", "Event"), !todo, () => Kind(false)));
-        _segments.Child = row;
-        Check();
+        (todo ? _todoSwitch : _eventSwitch).Child = row;
+        (todo ? _eventSwitch : _todoSwitch).Child = null;
+        CheckTodo();
     }
 
-    // One half of the switch, as the notices list's "全部"/"未读": 18 high, the chosen one on the selected fill.
+    // The switch's track: the fill, with a pixel around its two halves.
+    private Border Switch() => new()
+    {
+        CornerRadius = new CornerRadius(_look.Corner(6)), Background = UI.Brush(_look.Fill), Padding = new Thickness(1),
+        HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center
+    };
+
+    // One half of the switch, as the notices list's "全部"/"未读": 18 high, the chosen one on the selected fill. The words are centred
+    // by their letters as drawn (InkCentredText): centred by their line, Chinese sat low.
     private Button Segment(string text, bool on, Action click)
     {
-        var label = AgendaDraw.Words(text, 11, 18, on ? _look.Primary : _look.Secondary);
-        label.VerticalAlignment = VerticalAlignment.Center;
+        var label = AgendaDraw.Label(text, 11, on ? _look.Primary : _look.Secondary);
         string rest = on ? _look.FillSelected : "Transparent";
         var face = new Border { Height = 18, CornerRadius = new CornerRadius(_look.Corner(5)), Padding = new Thickness(9, 0, 9, 0), Background = UI.Brush(rest), Child = label };
+        label.FitHeight(face, 18, Loc.T("待办", "To-do"), Loc.T("日程", "Event"));
         var button = AgendaDraw.Bare(face, text, () => { if (!on) click(); }, (over, down) =>
             face.Background = UI.Brush(down ? _look.Hex("pressed") : on ? _look.FillSelected : over ? _look.Hex("hover") : "Transparent"));
         if (on) AutomationProperties.SetItemStatus(button, Loc.T("已选中", "Selected"));
         return button;
     }
 
-    private void AllDayChanged()
-    {
-        bool allDay = _allDay.IsChecked == true;
-        _start.IsEnabledField = !allDay; _end.IsEnabledField = !allDay;
-        Check();
-    }
-
-    private void Check() => _submit.IsEnabled = Value is not null;
+    private void CheckTodo() => _todoSubmit.IsEnabled = _words.Text.Trim().Length > 0;
 
     private void Submit() { if (Value is not null) Submitted?.Invoke(); }
 }

@@ -89,6 +89,21 @@ internal static class Soft
         shift.BeginAnimation(TranslateTransform.YProperty, fall);
     }
 
+    // An entrance taken up from where a leaving picture of the same content is (PopupMotion: a drop-down opened again while its
+    // last picture still leaves): from that opacity and height to its place, in the share of the time that is left, so a quick run
+    // of clicks fades one way and back without starting from nothing each time.
+    public static void Enter(UIElement? element, double fromOpacity, double fromY)
+    {
+        if (element is null || !At(element)) return;
+        int time = Math.Max(Quick / 2, (int)(Short * Math.Clamp(1 - fromOpacity, 0, 1)));
+        var start = Fade(fromOpacity, 1, time); start.FillBehavior = FillBehavior.Stop;
+        element.BeginAnimation(UIElement.OpacityProperty, start);
+        if (element.RenderTransform is not (null or MatrixTransform { Matrix.IsIdentity: true } or TranslateTransform { IsFrozen: false })) return;
+        if (element.RenderTransform is not TranslateTransform shift) element.RenderTransform = shift = new TranslateTransform();
+        var fall = Fade(fromY, 0, time + 60); fall.FillBehavior = FillBehavior.Stop;
+        shift.BeginAnimation(TranslateTransform.YProperty, fall);
+    }
+
     // The way back: it fades as it rises the same few DIPs, a little quicker, as the monitor page's card leaves. done runs once
     // it has gone. It leaves at full speed and slows, as what arrives does (motion-review F13).
     public static void Leave(UIElement element, Action done, double rise = 4)

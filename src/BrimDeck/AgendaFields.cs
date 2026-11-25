@@ -561,7 +561,7 @@ internal sealed class AgendaDateField : ContentControl
 internal sealed class AgendaDatePopup
 {
     private readonly PanelLook _look;
-    private readonly Popup _popup;
+    private readonly OpenerPopup _popup;
     private readonly Border _frame;
     private DateOnly _month, _chosen, _today;
     private Action<DateOnly?>? _picked;
@@ -574,7 +574,7 @@ internal sealed class AgendaDatePopup
         _look = look;
         _frame = new Border { Background = UI.Brush(look.Hex("popup")), BorderBrush = UI.Brush(look.Hex("popupBorder")), BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(look.Corner(10)), Padding = new Thickness(8, 6, 8, 8), Width = 224 };
-        _popup = new Popup { Child = _frame, StaysOpen = false, AllowsTransparency = true, Placement = PlacementMode.Top, VerticalOffset = -4, PopupAnimation = PopupAnimation.None };
+        _popup = new OpenerPopup { Child = _frame };
         _popup.Closed += (_, _) => Closed?.Invoke();
     }
 
@@ -582,10 +582,12 @@ internal sealed class AgendaDatePopup
 
     public void Show(FrameworkElement target, DateOnly chosen, DateOnly today, Action<DateOnly?> picked, string? clear)
     {
+        if (_popup.ClosedByPressOn(target)) return;
         _chosen = chosen; _today = today; _picked = picked; _clear = clear;
         _month = new DateOnly(chosen.Year, chosen.Month, 1);
         PanelTheme.Text(_frame, target);
         _popup.PlacementTarget = target;
+        _popup.Watch(target);
         Build();
         _popup.IsOpen = true;
     }
@@ -641,7 +643,7 @@ internal sealed class AgendaDatePopup
     {
         var picked = _picked;
         Close();
-        picked?.Invoke(day);
+        PopupMotion.AfterClose(() => picked?.Invoke(day));
     }
 }
 
@@ -652,7 +654,7 @@ internal sealed class AgendaChoicePopup
     public sealed record Choice(string Text, Action Pick, bool Chosen = false);
 
     private readonly PanelLook _look;
-    private readonly Popup _popup;
+    private readonly OpenerPopup _popup;
     private readonly Border _frame;
     public bool IsOpen => _popup.IsOpen;
 
@@ -661,11 +663,12 @@ internal sealed class AgendaChoicePopup
         _look = look;
         _frame = new Border { Background = UI.Brush(look.Hex("popup")), BorderBrush = UI.Brush(look.Hex("popupBorder")), BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(look.Corner(10)), Padding = new Thickness(4) };
-        _popup = new Popup { Child = _frame, StaysOpen = false, AllowsTransparency = true, Placement = PlacementMode.Top, VerticalOffset = -4, PopupAnimation = PopupAnimation.None };
+        _popup = new OpenerPopup { Child = _frame };
     }
 
     public void Show(FrameworkElement target, IReadOnlyList<Choice> choices)
     {
+        if (_popup.ClosedByPressOn(target)) return;
         var look = _look;
         bool ticks = choices.Any(choice => choice.Chosen);
         var stack = new StackPanel();
@@ -683,7 +686,7 @@ internal sealed class AgendaChoicePopup
                 row.Children.Add(tick);
             }
             var pick = choice.Pick;
-            var button = AgendaDraw.Face(look, row, choice.Text, () => { Close(); pick(); }, 26, 6, new Thickness(8, 0, 8, 0));
+            var button = AgendaDraw.Face(look, row, choice.Text, () => { Close(); PopupMotion.AfterClose(pick); }, 26, 6, new Thickness(8, 0, 8, 0));
             AgendaDraw.Fit(button, label, 26);
             button.HorizontalContentAlignment = HorizontalAlignment.Stretch;
             ((Border)button.Content).HorizontalAlignment = HorizontalAlignment.Stretch;
@@ -692,12 +695,74 @@ internal sealed class AgendaChoicePopup
         _frame.Child = stack;
         PanelTheme.Text(_frame, target);
         _popup.PlacementTarget = target;
+        _popup.Watch(target);
         _popup.IsOpen = true;
     }
 
     public void Close() => _popup.IsOpen = false;
 
     private const string Tick = "M20 6 9 17l-5-5";
+}
+
+// A pop-up that closes on a press outside it (StaysOpen false), and a press on what opened it (a field, a button) closes it. While
+// open it holds the mouse, so a press on its opener goes to the pop-up first, which closes on it (Popup.OnPreviewMouseButton); WPF
+// then gives that same press to the opener's button, in the same moment and without the preview events, and on release the
+// button's click opened the pop-up again, so it seemed not to close. (Traced on the notices page's date field: the pop-up closed
+// and the field's button took the mouse within the same millisecond.) So the opener's taking the mouse is noted, and a click that
+// comes from a press taken as the pop-up closed does not open it: ClosedByPressOn, asked before opening.
+//
+// It lies 4 above what opened it, or 4 below where there is no room above (Popup's own Top placement turned below kept the offset
+// up and covered the opener's lower edge). It opens and closes as the app's other drop-downs do (PopupMotion): it fades in, and its
+// last picture fades out as it closes; without that it came up a moment after the click and was gone at once.
+internal sealed class OpenerPopup : Popup
+{
+    private const double Gap = 4;
+
+    public OpenerPopup()
+    {
+        StaysOpen = false; AllowsTransparency = true; PopupAnimation = PopupAnimation.None;
+        Placement = PlacementMode.Custom;
+        CustomPopupPlacementCallback = Place;
+        PopupMotion.Attach(this);
+    }
+
+    // The places offered, in screen pixels from the opener's top-left corner: above it, then below it.
+    private CustomPopupPlacement[] Place(Size popup, Size target, Point offset)
+    {
+        double gap = Gap * (PlacementTarget is { } opener ? VisualTreeHelper.GetDpi(opener).DpiScaleY : 1);
+        return [new(new Point(0, -popup.Height - gap), PopupPrimaryAxis.Horizontal), new(new Point(0, target.Height + gap), PopupPrimaryAxis.Horizontal)];
+    }
+
+    // Environment.TickCount when IsOpen last turned false (as it happens: Closed comes later, once the pop-up's window is gone),
+    // and when the opener last took the mouse.
+    private int _closedAt = Environment.TickCount - 60_000, _pressedAt = Environment.TickCount - 120_000;
+    private UIElement? _opener;
+
+    public void Watch(UIElement opener)
+    {
+        if (ReferenceEquals(_opener, opener)) return;
+        _opener?.RemoveHandler(GotMouseCaptureEvent, (MouseEventHandler)Pressed);
+        _opener = opener;
+        opener.AddHandler(GotMouseCaptureEvent, (MouseEventHandler)Pressed, true);
+    }
+
+    // Whether the click on opener now opening the pop-up comes from the press it closed on: that press is used up.
+    public bool ClosedByPressOn(UIElement opener)
+    {
+        if (!ReferenceEquals(opener, _opener)) return false;
+        int after = unchecked(_pressedAt - _closedAt);
+        if (after < 0 || after > 100) return false;
+        _pressedAt = _closedAt - 120_000;
+        return true;
+    }
+
+    protected override void OnPropertyChanged(DependencyPropertyChangedEventArgs e)
+    {
+        base.OnPropertyChanged(e);
+        if (e.Property == IsOpenProperty && e.NewValue is false) _closedAt = Environment.TickCount;
+    }
+
+    private void Pressed(object sender, MouseEventArgs e) => _pressedAt = Environment.TickCount;
 }
 
 // How an event repeats: the repeat icon, the rule in words for a series starting on First ("每周二") and a chevron; a click opens
@@ -785,15 +850,70 @@ internal sealed class AgendaSplitRow : Panel
     }
 }
 
+// The last child fills the line; the one before it, where there is one, goes before it at its own width. Where that would leave
+// the last child narrower than MinFill, the first goes on a line of its own above it. The notices page's form: "待办"/"日程" before
+// the title or the to-do's words.
+internal sealed class AgendaLeadRow : Panel
+{
+    public double Gap { get; set; } = 8;
+    public double LineGap { get; set; } = 6;
+    public double MinFill { get; set; } = 160;
+    private bool _split;
+
+    protected override Size MeasureOverride(Size available)
+    {
+        if (Children.Count == 0) return new Size();
+        var fill = Children[^1];
+        if (Children.Count == 1) { fill.Measure(available); return fill.DesiredSize; }
+        var lead = Children[0];
+        lead.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        double width = double.IsFinite(available.Width) ? available.Width : lead.DesiredSize.Width + Gap + MinFill;
+        _split = width - lead.DesiredSize.Width - Gap < MinFill;
+        fill.Measure(new Size(_split ? width : width - lead.DesiredSize.Width - Gap, available.Height));
+        return _split ? new Size(width, lead.DesiredSize.Height + LineGap + fill.DesiredSize.Height)
+            : new Size(width, Math.Max(lead.DesiredSize.Height, fill.DesiredSize.Height));
+    }
+
+    protected override Size ArrangeOverride(Size final)
+    {
+        if (Children.Count == 0) return final;
+        var fill = Children[^1];
+        if (Children.Count == 1) { fill.Arrange(new Rect(final)); return final; }
+        var lead = Children[0];
+        Size l = lead.DesiredSize, f = fill.DesiredSize;
+        if (_split)
+        {
+            lead.Arrange(new Rect(0, 0, Math.Min(l.Width, final.Width), l.Height));
+            fill.Arrange(new Rect(0, l.Height + LineGap, final.Width, f.Height));
+        }
+        else
+        {
+            double height = Math.Max(l.Height, f.Height);
+            lead.Arrange(new Rect(0, (height - l.Height) / 2, l.Width, l.Height));
+            double x = l.Width + Gap;
+            fill.Arrange(new Rect(x, (height - f.Height) / 2, Math.Max(0, final.Width - x), f.Height));
+        }
+        return final;
+    }
+}
+
 // The form for an event (the planner's "添加日程", changing an event, giving a to-do a time; the notices page's "加入日程"): its title
 // on one line, then its times, "全天" and the buttons. The start's day is shown only when ShowStartDay (the notices page, an event
 // that began on an earlier day than the one shown); otherwise it is StartDay as given. The end's day starts as the start's: another
 // day makes the event run over several days. Under the times, how it repeats (for a series, the times are its first time's) and the
 // buttons. The main button is available only while the values make an event (AgendaBook.Shape): a title, and an end after the
 // start. Enter in the title presses it. "删除" on a form opened from a time of a repeating event (Series) asks which times go.
+//
+// Compact (the notices page, whose column is about 150 wide on its narrowest panel): drawn on the page rather than as a card, the
+// main button on the gray fill as "取消" is ("打开应用" is the page's main button), and the end's day shown only for an event that
+// runs over several days; another start day then moves the end by as many days, so the event keeps its length. The times go onto
+// further lines where the column is too narrow for them, each field whole.
 internal sealed class AgendaEventForm : Border
 {
     private readonly PanelLook _look;
+    private readonly bool _compact;
+    private readonly AgendaLeadRow _titleRow;
+    private DateOnly _startWas;
     public AgendaTextField Title { get; }
     public AgendaDateField StartDay { get; }
     public AgendaTimeField StartTime { get; }
@@ -811,11 +931,12 @@ internal sealed class AgendaEventForm : Border
     public bool Series { get; set; }
     public bool SeriesHasEarlier { get; set; }
 
-    // submit: the main button's words ("添加", "保存", "加入日程"); delete: offer "删除".
-    public AgendaEventForm(PanelLook look, Action<TextBox> keyboard, string submit, bool delete = false, bool showStartDay = false)
+    // submit: the main button's words ("添加", "保存", "加入日程"); delete: offer "删除"; compact: the notices page's form.
+    public AgendaEventForm(PanelLook look, Action<TextBox> keyboard, string submit, bool delete = false, bool showStartDay = false, bool compact = false)
     {
-        _look = look;
-        Background = UI.Brush(look.Fill); CornerRadius = new CornerRadius(look.Corner(8)); Padding = new Thickness(8); VerticalAlignment = VerticalAlignment.Top;
+        _look = look; _compact = compact;
+        VerticalAlignment = VerticalAlignment.Top;
+        if (!compact) { Background = UI.Brush(look.Fill); CornerRadius = new CornerRadius(look.Corner(8)); Padding = new Thickness(8); }
         Title = AgendaFields.Text(look, keyboard, Loc.T("标题", "Title"));
         StartDay = AgendaFields.Date(look, Loc.T("开始日期", "Start date"));
         StartTime = AgendaFields.Time(look, keyboard, Loc.T("开始时间", "Start time"));
@@ -826,34 +947,42 @@ internal sealed class AgendaEventForm : Border
         // The dash between the times, drawn as a short line in the middle of the fields' height, where their figures' middle is.
         _dash = new Rectangle { Width = 6, Height = 1.25, Fill = UI.Brush(look.Tertiary), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 6, 0) };
 
-        var times = new StackPanel { Orientation = Orientation.Horizontal };
-        if (showStartDay) { StartDay.Margin = new Thickness(0, 0, 6, 0); times.Children.Add(StartDay); }
-        times.Children.Add(StartTime); times.Children.Add(_dash);
-        EndDay.Margin = new Thickness(0, 0, 6, 0);
-        times.Children.Add(EndDay); times.Children.Add(EndTime);
+        // The start's day, the times from start to end and "全天" wrap where the column is too narrow for them; the times break
+        // only where they must too (an end on another day), each field whole. The lines are as far apart as the form's rows.
+        var times = new WrapPanel();
+        if (showStartDay) { StartDay.Margin = new Thickness(0, 0, 6, 6); times.Children.Add(StartDay); }
+        EndDay.Margin = new Thickness(0, 0, 6, 6); EndTime.Margin = new Thickness(0, 0, 0, 6);
+        times.Children.Add(new WrapPanel { Children = { new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6), Children = { StartTime, _dash } }, EndDay, EndTime } });
         // As tall as the fields, the box and "全天" in its middle: the box by its own, the words by their letters as drawn.
         var allDayLabel = AgendaDraw.Label(Loc.T("全天", "All day"), 11.5, look.Secondary);
         allDayLabel.Margin = new Thickness(6, 0, 0, 0);
-        var allDayRow = new StackPanel { Orientation = Orientation.Horizontal, Height = 28, Margin = new Thickness(12, 0, 0, 0), Background = Brushes.Transparent, Cursor = Cursors.Hand, Children = { AllDay, allDayLabel } };
+        var allDayRow = new StackPanel { Orientation = Orientation.Horizontal, Height = 28, Margin = new Thickness(12, 0, 0, 6), Background = Brushes.Transparent, Cursor = Cursors.Hand, Children = { AllDay, allDayLabel } };
         allDayRow.MouseLeftButtonUp += (_, e) => { if (e.OriginalSource is DependencyObject source && IsWithin(source, AllDay)) return; AllDay.IsChecked = AllDay.IsChecked != true; e.Handled = true; };
         times.Children.Add(allDayRow);
 
         _deleteChoices = new AgendaChoicePopup(look);
         _delete = AgendaDraw.Pill(look, Loc.T("删除", "Delete"), Delete, danger: true);
         _cancel = AgendaDraw.Pill(look, Loc.T("取消", "Cancel"), () => Cancelled?.Invoke());
-        _submit = AgendaDraw.Pill(look, submit, Submit, main: true);
+        _submit = AgendaDraw.Pill(look, submit, Submit, main: !compact);
         _delete.Margin = new Thickness(0, 0, 6, 0); _cancel.Margin = new Thickness(0, 0, 6, 0);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         if (delete) buttons.Children.Add(_delete);
         buttons.Children.Add(_cancel); buttons.Children.Add(_submit);
 
         Repeat = new AgendaRepeatField(look) { VerticalAlignment = VerticalAlignment.Center };
-        times.Margin = new Thickness(0, 6, 0, 0);
+        times.Margin = new Thickness(0, 6, 0, -6);
         var foot = new AgendaSplitRow { Margin = new Thickness(0, 6, 0, 0), Children = { Repeat, buttons } };
-        Child = new StackPanel { Children = { Title, times, foot } };
+        _titleRow = new AgendaLeadRow { Children = { Title } };
+        Child = new StackPanel { Children = { _titleRow, times, foot } };
 
         Title.Changed += Check; StartTime.Changed += Check; EndTime.Changed += Check; EndDay.Changed += Check;
-        StartDay.Changed += () => { Repeat.First = StartDay.Date; Check(); };
+        StartDay.Changed += () =>
+        {
+            if (_compact) EndDay.Date = EndDay.Date.AddDays(StartDay.Date.DayNumber - _startWas.DayNumber);
+            _startWas = StartDay.Date;
+            Repeat.First = StartDay.Date;
+            Check();
+        };
         AllDay.Checked += (_, _) => AllDayChanged(); AllDay.Unchecked += (_, _) => AllDayChanged();
         Title.Box.PreviewKeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; Submit(); } };
         StartTime.Box.PreviewKeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; Submit(); } };
@@ -869,6 +998,16 @@ internal sealed class AgendaEventForm : Border
 
     // The day "today" is, for the years the day fields write and their months' marks.
     public Func<DateOnly> Today { set { StartDay.Today = value; EndDay.Today = value; } }
+
+    // Something on the title's line before it (the notices page's "待办"/"日程"), above it where the line is too short for both.
+    public FrameworkElement? Lead
+    {
+        set
+        {
+            if (_titleRow.Children.Count > 1) _titleRow.Children.RemoveAt(0);
+            if (value is not null) _titleRow.Children.Insert(0, value);
+        }
+    }
 
     // Whether a pop-up of the form is open (a month, the repeat rules, the delete choices): the panel stays open while it is.
     public bool PopupOpen => StartDay.Popup.IsOpen || EndDay.Popup.IsOpen || Repeat.Popup.IsOpen || _deleteChoices.IsOpen;
@@ -909,6 +1048,8 @@ internal sealed class AgendaEventForm : Border
             EndDay.Date = DateOnly.FromDateTime(end);
             EndTime.Set(end.TimeOfDay);
         }
+        _startWas = StartDay.Date;
+        if (_compact) EndDay.Visibility = EndDay.Date != StartDay.Date ? Visibility.Visible : Visibility.Collapsed;
         AllDay.IsChecked = allDay;
         AllDayChanged();
     }
