@@ -76,6 +76,6 @@ public partial class MainWindow
         if (ShadowBounds.Margin != margin) ShadowBounds.Margin = margin;
     }
 
-    private static readonly double SystemScale = GetDpiForSystem() is var dpi and > 0 ? dpi / 96d : 1;
+    internal static readonly double SystemScale = GetDpiForSystem() is var dpi and > 0 ? dpi / 96d : 1;
     [DllImport("user32")] private static extern uint GetDpiForSystem();
 }

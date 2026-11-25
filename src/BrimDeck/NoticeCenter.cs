@@ -708,6 +708,13 @@ internal sealed partial class NoticeCenter : IDisposable
     }
     public void Withdraw(string key) => Apply(Attention.Withdraw(key, DateTimeOffset.UtcNow));
 
+    // The panel's island plays the motion of the notice it shows for this long: a waiting notice takes over only after it.
+    public void Playing(MainWindow deck, TimeSpan length)
+    {
+        var now = DateTimeOffset.UtcNow;
+        Attention.Playing(deck.NoticeLane, now + length, now);
+        Schedule();
+    }
     // The pointer is over the shown item, its details are open, or the keyboard works it: its time stands still.
     public void Hold(MainWindow deck, bool held) => Apply(Attention.Hold(deck.NoticeLane, held, DateTimeOffset.UtcNow));
     // The panel opened or closed. Opened on any screen, the user is looking at BrimDeck: the notices on every screen's island end,

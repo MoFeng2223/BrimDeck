@@ -58,10 +58,10 @@ public readonly record struct AttentionChange(string Lane, AttentionItem? Ended,
 // Decides what each panel's collapsed island briefly shows. One item shows at a time per lane, for its duration.
 //
 // Notices show as they arrive. One of the conversation that already shows or waits merges into it (the latest words, a
-// count). Any other takes the island over once the notice that shows has been up for MinimumShown (an urgent one at
-// once), unless that one is persistent, more important (a lower Rank) or held by the user (Hold); what it replaces is not
-// shown again. Several that wait take over in the order they came. A notice that waited longer than Staleness is not shown
-// at all (it stays in the recent notices).
+// count). Any other takes the island over once the notice that shows has been up for MinimumShown and its presenter has
+// played its motion to the end (Playing; an urgent one at once), unless that one is persistent, more important (a lower
+// Rank) or held by the user (Hold); what it replaces is not shown again. Several that wait take over in the order they
+// came. A notice that waited longer than Staleness is not shown at all (it stays in the recent notices).
 //
 // More than RateLimit notices per RateWindow still show at once, but subdued: as plain notices, so the island does not
 // keep flashing. Urgent ones (an alarm) are never subdued and are held back beyond UrgentLimit per UrgentWindow. A notice
@@ -258,6 +258,19 @@ public sealed class AttentionCoordinator
         }
         return next;
     }
+
+    // The lane's presenter plays the motion of the notice that shows until then (the backlight, the liquid): a waiting notice
+    // takes its place only after that, so each notice's motion plays whole and the next one's starts on an island at rest.
+    // Taken over at MinimumShown, a motion that lasts longer was cut off and the next began over its last ripples (the user,
+    // 2026-11-25: the ripples seemed to play once and the backlight twice). An urgent notice still takes over at once. Never
+    // longer than MotionLimit, whatever the presenter asks.
+    public void Playing(string laneName, DateTimeOffset until, DateTimeOffset now)
+    {
+        if (!_lanes.TryGetValue(laneName, out var lane) || lane.Current is not { IsNotice: true }) return;
+        if (until > now + MotionLimit) until = now + MotionLimit;
+        if (until > lane.Yields) lane.Yields = until;
+    }
+    public static readonly TimeSpan MotionLimit = TimeSpan.FromSeconds(5);
 
     // While the user hovers the item, has opened its details or works it from the keyboard, its time stands still and
     // nothing takes its place. Released, it keeps what was left, at least MinimumRemaining.

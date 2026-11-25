@@ -212,6 +212,26 @@ internal static class NoticeCoreTests
         check("They take over in the order they came; the notice replaced is not shown again", took is [{ Ended.Key: "a" }, { Started.Key: "b2" }]
             && turn.Queued("t").Single().Key == "c" && turn.NextDeadline(T0.AddSeconds(1.5)) == T0.AddSeconds(3));
         turn.Tick(T0.AddSeconds(3));
+        // The island plays the motion of the notice it shows (the backlight, the liquid) for longer than 1.5 s: the waiting notice
+        // takes over once that has played, not in the middle of it. An urgent one does not wait, and a presenter cannot hold the
+        // island for longer than MotionLimit.
+        var plays = new AttentionCoordinator();
+        plays.Submit(Item("t", AttentionKind.Notice, "a", "A"), T0);
+        plays.Playing("t", T0.AddSeconds(2.2), T0.AddSeconds(.2));
+        plays.Submit(Item("t", AttentionKind.Notice, "b", "B"), T0.AddSeconds(.5));
+        check("A waiting notice takes over only once the shown notice's motion has played", plays.NextDeadline(T0.AddSeconds(.5)) == T0.AddSeconds(2.2)
+            && plays.Tick(T0.AddSeconds(1.5)).Count == 0 && plays.Current("t")?.Key == "a" && plays.Tick(T0.AddSeconds(2.2)) is [{ Ended.Key: "a" }, { Started.Key: "b" }]);
+        plays.Playing("t", T0.AddSeconds(4.4), T0.AddSeconds(2.4));
+        plays.Submit(Item("t", AttentionKind.Notice, "a2", "A"), T0.AddSeconds(2.5));
+        plays.Submit(Item("t", AttentionKind.Notice, "b2", "B"), T0.AddSeconds(2.6));
+        check("Meanwhile a message of the conversation that shows merges into it and one of another waits", plays.Current("t") is { Key: "b2", Count: 2 }
+            && plays.Queued("t").Single().Key == "a2" && plays.Tick(T0.AddSeconds(3.7)).Count == 0);
+        var alarm = new AttentionItem { Lane = "t", Kind = AttentionKind.Notice, Key = "alarm", Group = "Clock", Duration = TimeSpan.FromSeconds(6), Urgent = true };
+        check("An urgent notice takes over in the middle of a motion", plays.Submit(alarm, T0.AddSeconds(3.8)) is [{ Ended.Key: "b2" }, { Started.Key: "alarm" }]);
+        plays.Playing("t", T0.AddSeconds(60), T0.AddSeconds(4));
+        check("A motion holds the island no longer than the limit", plays.NextDeadline(T0.AddSeconds(4)) == T0.AddSeconds(4) + AttentionCoordinator.MotionLimit);
+        plays.Playing("other", T0.AddSeconds(9), T0.AddSeconds(4));
+        check("A lane that shows nothing has no motion to wait for", plays.Current("other") is null && plays.Queued("other").Count == 0);
         var atOnce = turn.Submit(Item("t", AttentionKind.Notice, "d", "D"), T0.AddSeconds(6));
         check("A notice that has been up long enough gives way at once", turn.Current("t")?.Key == "d" && atOnce is [{ Ended.Key: "c" }, { Started.Key: "d" }]
             && turn.Queued("t").Count == 0 && turn.NextDeadline(T0.AddSeconds(6)) == T0.AddSeconds(12));

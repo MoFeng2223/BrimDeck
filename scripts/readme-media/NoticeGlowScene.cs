@@ -48,7 +48,7 @@ internal sealed partial class Renderer
             var notice = new Notice { AppKey = "windows:Chat", AppName = "QQ", Title = Loc.T("产品群", "Product team"), Body = Loc.T("收到", "Got it"), ReceivedAt = _now, CreatedAt = _now };
             var item = new AttentionItem { Lane = "main", Kind = AttentionKind.Notice, Key = notice.Id, Payload = notice, Level = level, Duration = TimeSpan.FromSeconds(6), Style = look };
             Program.SetField(window, "_item", item);
-            Program.Call(window, "Layout", []); Program.Call(window, "Dress", []); Program.Call(window, "BuildContent", []);
+            Program.Call(window, "Layout", []); Program.Call(window, "Dress", []); Program.Call(window, "BuildContent", []); Program.Call(window, "KeepAt", [typeof(double)], scale);
             Program.Call(window, "StartMotion", []);
             if (Program.Field(window, "_liquid") is not null) Program.Call(window, "Step", [typeof(double)], (double)Program.Field(window, "_start")! + time);
             var stage = (FrameworkElement)window.Content;

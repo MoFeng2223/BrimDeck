@@ -43,7 +43,7 @@ internal sealed partial class Renderer
                 _settings.ClickToExpand = click; _settings.OpenDelay = delay; _settings.NoticeCodes = codes;
                 var item = new AttentionItem { Lane = "main", Kind = AttentionKind.Notice, Key = notice.Id, Payload = notice, Level = NoticeLevel.Persistent, Duration = TimeSpan.FromSeconds(6) };
                 Program.SetField(window, "_item", item);
-                Program.Call(window, "Layout", []); Program.Call(window, "Dress", []); Program.Call(window, "BuildContent", []);
+                Program.Call(window, "Layout", []); Program.Call(window, "Dress", []); Program.Call(window, "BuildContent", []); Program.Call(window, "KeepAt", [typeof(double)], scale);
                 var stage = (FrameworkElement)window.Content;
                 var size = new Size(window.Width, window.Height);
                 stage.Measure(size); stage.Arrange(new Rect(size)); stage.UpdateLayout();

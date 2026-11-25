@@ -327,7 +327,7 @@ internal sealed partial class Renderer(App app, string output, string language, 
                     Style = look ?? _settings.NoticeStyles.For(level) };
                 if (subdued) typeof(AttentionItem).GetProperty(nameof(AttentionItem.Subdued))!.SetValue(item, true);
                 Program.SetField(window, "_item", item);
-                Program.Call(window, "Layout", []); Program.Call(window, "Dress", []); Program.Call(window, "BuildContent", []);
+                Program.Call(window, "Layout", []); Program.Call(window, "Dress", []); Program.Call(window, "BuildContent", []); Program.Call(window, "KeepAt", [typeof(double)], scale);
                 Program.Call(window, "StartMotion", []);
                 bool moving = Program.Field(window, "_liquid") is not null;
                 if (moving) Program.Call(window, "Step", [typeof(double)], (double)Program.Field(window, "_start")! + time);
@@ -400,7 +400,8 @@ internal sealed partial class Renderer(App app, string output, string language, 
         {
             Language = language, Style = CompactStyle.Notch, UsagePage = true, MusicPage = true, Width = 760, Height = 240,
             MusicWidth = 440, MusicHeight = 200, OpenDelay = 0, CloseDelay = 3_600_000, AnimationDuration = 360, Animations = true,
-            Maximized = WindowBehavior.Normal, Borderless = WindowBehavior.Normal, Exclusive = WindowBehavior.Normal,
+            // Nor does a window that lies where the island is on this computer turn it into the line.
+            Maximized = WindowBehavior.Normal, Borderless = WindowBehavior.Normal, Exclusive = WindowBehavior.Normal, Occupied = WindowBehavior.Normal,
             MusicTrackNotice = false, QuotaAlerts = true, UsageAutoSync = true, MusicText = CompactMusicText.None,
             // The file transfer's count joins the collapsed row only in the image that is about it (DevicesScene).
             NotchTransfer = false, CapsuleTransfer = false,

@@ -305,7 +305,8 @@ public sealed class IslandLiquid
                 double corner = side > 0 ? _cornerRight : _cornerLeft;
                 for (int i = 0; i < 3; i++)
                 {
-                    double born = .05 + i * .17 + rand() * .04, life = .95 + rand() * .1, sigma = Math.Clamp(half * .05, 9, 120);
+                    // A little slower than at first (a swell every .17 s that lived .95 s): the user found those slightly hurried.
+                    double born = .05 + i * .19 + rand() * .04, life = 1.1 + rand() * .1, sigma = Math.Clamp(half * .05, 9, 120);
                     // Its pace carries it half the island's length in the six tenths of its life before it fades.
                     double speed = half * .6 / (1 - Math.Exp(-.6 * .6 * life));
                     _ripples.Add(new Ripple(corner, side, born, (3.4 - i * .6) * swell, sigma, speed, life, 0));
@@ -403,6 +404,8 @@ public sealed class IslandLiquid
         }
         for (int i = 0; i < count; i++)
         {
+            // Most of a long island is at rest at any moment.
+            if (into[i] == 0) continue;
             double s = _outline[i].S, fromTop = _closed ? 6 : Math.Min(s, OutlineLength - s);
             into[i] = Band * Math.Tanh(into[i] / Band) * Smooth(fromTop / 6);
         }

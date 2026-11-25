@@ -23,10 +23,18 @@ namespace BrimDeck;
 // has none, lights up once), a glowing one flashes the backlight without moving the outline (the indicator breathes), a lively
 // one moves as well, and one that stays until handled plays the lively motion again every few seconds.
 //
-// The window lies over the island with room around it for the bubbles and the backlight, and is shown only while a notice is.
+// The window lies over the island with room around it for the ripples and the backlight, and is shown only while a notice is.
 // While it shows, the island underneath is hidden (MainWindow.SetIslandCovered) and drawn here in the same outline and material.
 // A level-1 notice whose sender asks for a collapsed part's place (Notice.Slot) leaves the island as it is and draws over that
 // part alone, in the island's material, with the words inside it. It never takes focus.
+//
+// What a frame of the motion costs: the island's shadow, the shade, the backlight, the light along the edge and the indicator's
+// bloom are each drawn once and kept as a picture (Layer), blur included; a frame only changes how strongly they show (Paint).
+// The island itself keeps its drawing too. Only what the liquid moves is drawn again every frame: the stretches of the outline
+// that stand out with their beads (DrawParts) and, while the light flashes, the light along the edge that follows them, both
+// from as few of the outline's points as the ripples need (Sample); or the indicator's thread. Redrawn whole every frame, a
+// long island (about 1800 outline points, nine strokes for the edge's light and three blurs) missed about one frame in five at
+// 165 Hz.
 internal sealed class IslandNotice : Window
 {
     private static readonly Color LineFlash = Color.FromRgb(0xF5, 0xF5, 0xF7), GlowColor = Color.FromRgb(0xF0, 0xF3, 0xF8);
@@ -39,7 +47,10 @@ internal sealed class IslandNotice : Window
     private readonly MainWindow _deck;
     private readonly App _app;
     private readonly Canvas _stage = new() { Background = null };
-    private readonly Layer _shadow = new(), _shade = new(), _glowWide = new(), _glowCore = new(), _bloomWide = new(), _bloomMiddle = new(), _bloomSmall = new(), _body = new(), _parts = new();
+    private readonly Layer _shadow = new(kept: true), _shade = new(kept: true), _glowWide = new(kept: true), _glowCore = new(kept: true), _bloomWide = new(kept: true), _bloomMiddle = new(kept: true),
+        _bloomSmall = new(kept: true), _body = new(), _parts = new(), _edge = new(kept: true), _beads = new();
+    // Back to front (see the constructor).
+    private Layer[] Layers => [_shadow, _shade, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _body, _parts, _edge, _beads];
     private readonly Border _hit = new() { Background = Brushes.Transparent, Cursor = Cursors.Hand };
     private readonly Canvas _content = new() { IsHitTestVisible = false, ClipToBounds = true };
     // The notice's buttons (BuildButtons), inside the pointer's area: the pointer on one is still on the notice.
@@ -48,6 +59,8 @@ internal sealed class IslandNotice : Window
     private AttentionItem? _item;
     private CollapsedShape _shape = null!;
     private NoticeLook _look = NoticeLook.Current();
+    // The display's scale the window was last dressed for.
+    private double _dpi = 1;
     private Rect _stageRect, _island;
     // In a part's place: the part's area in the stage, within _island; null while the notice takes the whole island.
     private Rect? _part;
@@ -63,7 +76,11 @@ internal sealed class IslandNotice : Window
     private double _start, _t, _k, _length;
     private readonly List<IslandLiquid.Circle> _circles = [];
     private readonly List<IslandLiquid.Neck> _necks = [];
-    private Geometry? _notchGlowCore, _notchGlowWide;
+    // The island's model at rest, for what is drawn once whatever plays: the backlight's shape and the line of the edge's light.
+    private IslandLiquid? _still;
+    // Whether the last frame drew any of the liquid, so that the frame after the last ripple clears it; and whether the kept
+    // light along the edge was last drawn along a moving outline, so that it is drawn at rest again before it shows without the liquid.
+    private bool _partsDrawn, _edgeMoved;
 
     public IslandNotice(MainWindow deck, App app)
     {
@@ -72,21 +89,23 @@ internal sealed class IslandNotice : Window
         Topmost = true; ShowActivated = false; ShowInTaskbar = false; Title = "BrimDeck notices"; UseLayoutRounding = true;
         TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
         Content = _stage;
-        // Back to front: the shadow, the shade and over it the backlight (or the indicator's bloom) behind the island, the island with
-        // the light along its edge, the beads that trail its ripples, the content and the area that takes the pointer.
-        foreach (var layer in new[] { _shadow, _shade, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _body, _parts })
+        // Back to front: the shadow, the shade and over it the backlight (or the indicator's bloom) behind the island, the island,
+        // what the liquid pushes out of it, the light along its edge, the beads that trail the ripples, the content and the area
+        // that takes the pointer.
+        foreach (var layer in Layers)
         {
             // Nothing is drawn before the island has been laid out (Layout sets _shape): Prepare shows the window once, far off screen,
             // before any notice, and the layers' first render then asked for the island's form (a NullReferenceException on every start
             // that left the window shown).
             layer.Ready = () => _shape is not null;
-            _stage.Children.Add(layer);
+            _stage.Children.Add(layer.Element);
         }
+        foreach (var layer in new[] { _shade, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _edge }) layer.Shown = 0;
         _stage.Children.Add(_content); _stage.Children.Add(_hit);
         _hit.Child = _buttons;
-        _shadow.Draw = DrawShadow; _shade.Draw = DrawShade; _shade.Opacity = 0; _glowWide.Draw = d => DrawGlow(d, wide: true); _glowCore.Draw = d => DrawGlow(d, wide: false);
-        _bloomWide.Draw = d => DrawBloom(d, 3, 4, .55); _bloomMiddle.Draw = d => DrawBloom(d, 1.5, 1.5, .6); _bloomSmall.Draw = d => DrawBloom(d, .5, 0, .8);
-        _body.Draw = DrawBody; _parts.Draw = DrawParts;
+        _shadow.Draw = DrawShadow; _shade.Draw = DrawShade; _glowWide.Draw = d => DrawGlow(d, wide: true); _glowCore.Draw = d => DrawGlow(d, wide: false);
+        _bloomWide.Draw = d => DrawBloom(d, 3, 4); _bloomMiddle.Draw = d => DrawBloom(d, 1.5, 1.5); _bloomSmall.Draw = d => DrawBloom(d, .5, 0);
+        _body.Draw = DrawBody; _parts.Draw = DrawParts; _edge.Draw = DrawEdgeLight; _beads.Draw = DrawBeads;
         RenderOptions.SetClearTypeHint(_content, ClearTypeHint.Enabled);
         AutomationProperties.SetName(_hit, Loc.T("灵动提示", "Live notice"));
         _hoverOpen = new(Dispatcher, () => { _hoverOpen!.Stop(); if (_item is not null && !_leaving && _hit.IsMouseOver) OpenPage(byKey: false); });
@@ -245,7 +264,6 @@ internal sealed class IslandNotice : Window
         Layout();
         Dress();
         BuildContent();
-        _body.InvalidateVisual(); _shadow.InvalidateVisual();
     }
 
     // The notices hotkey with a notice on the island: the panel opens on the notices page and takes the keyboard.
@@ -366,7 +384,7 @@ internal sealed class IslandNotice : Window
         _stageRect = stage;
         _island = new Rect(island.X - stage.X, island.Y - stage.Y, island.Width, island.Height);
         Place();
-        foreach (var layer in new[] { _shadow, _shade, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _body, _parts }) { layer.Width = stage.Width; layer.Height = stage.Height; }
+        foreach (var layer in Layers) { layer.Width = stage.Width; layer.Height = stage.Height; layer.Fit(_dpi, stage.Width, stage.Height); }
         _part = PartOf(_item) is { } part ? new Rect(part.X - stage.X, part.Y - stage.Y, part.Width, part.Height) : null;
         // The pointer's area: the island (a part's place), and for the thin indicator the band round it the island's own hover area takes.
         var hit = _part ?? (Form == IslandForm.Line ? new Rect(_island.X - 12, 0, _island.Width + 24, _island.Bottom + 10) : _island);
@@ -375,9 +393,8 @@ internal sealed class IslandNotice : Window
         Canvas.SetLeft(_content, _island.X); Canvas.SetTop(_content, _island.Y); _content.Width = _island.Width; _content.Height = _island.Height;
         var outline = IslandBorder.BuildOutline(_island.Width, _island.Height, _shape.Shoulder, new CornerRadius(_shape.TopRadius, _shape.TopRadius, _shape.BottomRadius, _shape.BottomRadius));
         _content.Clip = _part is { } area ? Geometry.Combine(outline, new RectangleGeometry(new Rect(area.X - _island.X, area.Y - _island.Y, area.Width, area.Height)), GeometryCombineMode.Intersect, null) : outline;
-        _notchGlowCore = _notchGlowWide = null;
-        _rest = _frameBody = _frameInner = _frameEdge = null; _edgePens = null;
-        _shade.InvalidateVisual();
+        _still = null; _rest = null; _sampled = null; _edgeBrushes = null; _rimPen = null; _gradient = null;
+        Redraw();
     }
 
     private void Place()
@@ -394,8 +411,8 @@ internal sealed class IslandNotice : Window
     private void Dress()
     {
         double dpi = PresentationSource.FromVisual(this) is null ? (WindowsHost.MonitorScreen(_deck.HotkeyMonitor) ?? WindowsHost.PrimaryScreen()).Scale : VisualTreeHelper.GetDpi(this).DpiScaleX;
-        _look = NoticeLook.Current(dpi);
-        _fill = null; _rim = null; _edgePens = null;
+        _look = NoticeLook.Current(dpi); _dpi = dpi;
+        _fill = null; _rim = null; _edgeBrushes = null; _rimPen = null; _gradient = null;
         // The island's shadow, from a copy of its body behind it; a see-through surface would show that copy, so it has none.
         _shadow.Effect = _look.ShadowOpacity <= 0 || _look.HighContrast || _look.Surface.A < 255 ? null : new DropShadowEffect
         {
@@ -406,11 +423,29 @@ internal sealed class IslandNotice : Window
         _glowWide.Effect = new BlurEffect { Radius = 3.2 * 3 * _k, RenderingBias = RenderingBias.Performance };
         // The shade under the backlight is softer (σ 5.5; the indicator's, under its bloom, 7).
         _shade.Effect = new BlurEffect { Radius = (_shape is not null && Form == IslandForm.Line ? 7 : 5.5) * 3 * _k, RenderingBias = RenderingBias.Performance };
-        _shade.InvalidateVisual();
         _bloomSmall.Effect = new BlurEffect { Radius = 1.6 * 3 * _k, RenderingBias = RenderingBias.Performance };
         _bloomMiddle.Effect = new BlurEffect { Radius = 4 * 3 * _k, RenderingBias = RenderingBias.Performance };
         _bloomWide.Effect = new BlurEffect { Radius = 9 * 3 * _k, RenderingBias = RenderingBias.Performance };
-        _body.InvalidateVisual(); _shadow.InvalidateVisual();
+        foreach (var layer in Layers) layer.Fit(dpi, _stageRect.Width, _stageRect.Height);
+        Redraw();
+    }
+
+    // For pictures of the window taken off screen at a scale of their own (scripts/readme-media): the kept layers are made at
+    // that scale, as they are at the display's when the window shows.
+    internal void KeepAt(double scale) { foreach (var layer in Layers) layer.Fit(scale * MainWindow.SystemScale, _stageRect.Width, _stageRect.Height); }
+
+    // Everything is drawn again: the island, its theme or the display's scale changed.
+    private void Redraw()
+    {
+        foreach (var layer in Layers) layer.InvalidateVisual();
+        Paint();
+    }
+
+    // The light's color changed: what is drawn in it is drawn again.
+    private void Relight()
+    {
+        _edgeBrushes = null;
+        foreach (var layer in new[] { _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _edge }) layer.InvalidateVisual();
     }
 
     // ----- Motion -----
@@ -434,27 +469,41 @@ internal sealed class IslandNotice : Window
         return ColorConverter.ConvertFromString(chosen) is Color color ? color : GlowColor;
     }
 
+    private IslandLiquid Model(bool liquid)
+    {
+        var form = Form;
+        double width = _island.Width / _k, height = _island.Height / _k;
+        return form switch
+        {
+            IslandForm.Notch => new IslandLiquid(form, width, height, liquid: liquid, fury: Fury, corner: _shape.BottomRadius / _k, shoulder: _shape.Shoulder / _k),
+            _ => new IslandLiquid(form, width, height, liquid: liquid, fury: Fury)
+        };
+    }
+
+    private IslandLiquid Still => _still ??= Model(liquid: false);
+
+    // A short rest after a notice's motion before the next notice may take the island with its own.
+    private const double Rest = .25;
+
     private void StartMotion()
     {
         StopMotion();
         _replay.Stop();
         var effect = Played;
-        if (!MotionAllowed || effect == NoticeEffect.Still) { RedrawAll(); return; }
-        var form = Form;
-        double width = _island.Width / _k, height = _island.Height / _k;
+        if (!MotionAllowed || effect == NoticeEffect.Still) { Paint(); return; }
         // Without the liquid the model keeps the island's shape and only times the backlight (the indicator: its breathing).
         bool liquid = effect == NoticeEffect.Liquid;
-        _liquid = form switch
-        {
-            IslandForm.Notch => new IslandLiquid(form, width, height, liquid: liquid, fury: Fury, corner: _shape.BottomRadius / _k, shoulder: _shape.Shoulder / _k),
-            _ => new IslandLiquid(form, width, height, liquid: liquid, fury: Fury)
-        };
+        _liquid = Model(liquid);
         _effect = effect;
-        _light = Light(); _edgePens = null;
-        _length = liquid ? _liquid.Total : NoticeLevels.EffectLength(effect, form) + .05;
+        var light = Light();
+        if (light != _light) { _light = light; Relight(); }
+        else if (_edgeMoved) _edge.InvalidateVisual();
+        _length = liquid ? _liquid.Total : NoticeLevels.EffectLength(effect, Form) + .05;
         _start = Eased.Now; _t = 0;
         Motion.Start(_body, Step);
         if (_item is { Persistent: true }) { _replay.Interval = AttentionCoordinator.PersistentReplay; _replay.Start(); }
+        // Another notice waits for this one's motion to have played (AttentionCoordinator.Playing).
+        if (_item is { IsNotice: true }) Center.Playing(_deck, TimeSpan.FromSeconds(_length / Pace + Rest));
     }
 
     // One display frame of the motion; false once it has played.
@@ -463,7 +512,7 @@ internal sealed class IslandNotice : Window
         if (_liquid is null) return false;
         _t = Math.Max(0, now - _start) * Pace;
         if (_t >= _length) { StopMotion(); return false; }
-        RedrawAll();
+        Paint();
         return true;
     }
 
@@ -471,41 +520,89 @@ internal sealed class IslandNotice : Window
     {
         if (_liquid is null) return;
         _liquid = null;
-        RedrawAll();
-    }
-
-    private void RedrawAll()
-    {
-        foreach (var layer in new[] { _shadow, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _body, _parts }) layer.InvalidateVisual();
-        Shade();
+        Paint();
     }
 
     // How strong the shade is at its darkest, under the backlight and under the indicator's bloom.
     private const double ShadeMost = .55, LineShadeMost = .65;
 
-    // The shade's strength at this frame. It keeps its drawing (DrawShade) and only changes its opacity: it rises and falls with the
-    // light, and is as strong as the light is bright, since a white light is lost on a light desktop while a deep color shows there
-    // by itself and would only be dulled.
-    private void Shade()
+    // One frame: how strongly each kept layer shows at this moment, and a new drawing of what the liquid moves. The shade rises
+    // and falls with the light, and is as strong as the light is bright, since a white light is lost on a light desktop while a
+    // deep color shows there by itself and would only be dulled. Nothing of the light shows on a notice in a part's place.
+    private void Paint()
     {
-        if (_shape is null || _liquid is null || _part is not null) { _shade.Opacity = 0; return; }
-        bool line = Form == IslandForm.Line;
-        double light = line ? (_effect == NoticeEffect.Brighten ? 0 : IslandLiquid.BreathAt(_t)) : IslandLiquid.GlowAt(_t);
-        _shade.Opacity = light * (line ? LineShadeMost : ShadeMost) * new ThemeColor(255, _light.R, _light.G, _light.B).Luminance;
+        if (_shape is null) return;
+        bool line = Form == IslandForm.Line, playing = _liquid is not null && _part is null;
+        double glow = playing && !line ? IslandLiquid.GlowAt(_t) : 0;
+        double breath = playing && line && _effect != NoticeEffect.Brighten ? IslandLiquid.BreathAt(_t) : 0;
+        _glowWide.Shown = _glowCore.Shown = glow;
+        _edge.Shown = glow > 0 ? glow * EdgeLight().Strength : 0;
+        // The light along the edge follows the liquid while it shows.
+        if (glow > 0 && _liquid is { Liquid: true }) _edge.InvalidateVisual();
+        _shade.Shown = (line ? breath * LineShadeMost : glow * ShadeMost) * new ThemeColor(255, _light.R, _light.G, _light.B).Luminance;
+        _bloomWide.Shown = breath * .55; _bloomMiddle.Shown = breath * .6; _bloomSmall.Shown = breath * .8;
+        if (line) _body.InvalidateVisual();
+        else if (_liquid is { Liquid: true } || _partsDrawn) { _parts.InvalidateVisual(); _beads.InvalidateVisual(); }
     }
 
     // ----- Drawing -----
 
-    private Brush? _fill, _rim;
+    private Brush? _fill, _rim, _gradient;
+    private Pen? _rimPen;
 
     private Brush Fill => _fill ??= Freeze(new SolidColorBrush(_look.Surface));
+    private Brush Rim => _rim ??= Freeze(_look.Rim.Clone());
 
-    // The island at rest, and the body and the line of the light along its edge for the frame they were last made for, kept until
-    // the island or the frame changes.
-    private Geometry? _rest, _frameBody, _frameInner, _frameEdge;
-    private IslandLiquid? _frameLiquid;
-    private double _frameTime;
+    // The island at rest, kept until the island changes.
+    private Geometry? _rest;
+
+    // The outline at the frame being drawn: how far each of its points stands out, and the points a drawing needs. On a straight
+    // edge those are few: a chord between two of them stays within Fine of the points it skips, so an edge at rest takes a point
+    // every Span and a long swell one in about eight; every point of a curve is kept. Made once for the layers that draw it.
     private double[] _outs = [];
+    private readonly List<int> _kept = [];
+    private (IslandLiquid Model, double Time)? _sampled;
+    private const double Fine = .05;
+    private const int Span = 24;
+
+    private IslandLiquid Sample()
+    {
+        var moving = _liquid is { Liquid: true } ? _liquid : null;
+        var model = moving ?? Still;
+        double time = moving is null ? 0 : _t;
+        if (_sampled is { } made && ReferenceEquals(made.Model, model) && made.Time == time) return model;
+        var outline = model.Outline;
+        int count = outline.Count;
+        if (_outs.Length < count) _outs = new double[count];
+        if (moving is null) Array.Clear(_outs, 0, count); else moving.EdgeOuts(time, _outs);
+        _kept.Clear();
+        for (int a = 0; a < count;)
+        {
+            _kept.Add(a);
+            if (a == count - 1) break;
+            int b = a + 1;
+            var at = outline[a];
+            for (; b < count - 1 && b - a < Span; b++)
+            {
+                var next = outline[b + 1];
+                if (next.Nx != at.Nx || next.Ny != at.Ny) break;
+                double step = (_outs[b + 1] - _outs[a]) / (b + 1 - a);
+                bool fits = true;
+                for (int j = a + 1; j <= b && fits; j++) fits = Math.Abs(_outs[j] - _outs[a] - step * (j - a)) <= Fine;
+                if (!fits) break;
+            }
+            a = b;
+        }
+        _sampled = (model, time);
+        return model;
+    }
+
+    // A point of the frame's outline moved off along its normal, in the stage.
+    private Point Off(IslandLiquid model, int i, double off)
+    {
+        var p = model.Outline[i];
+        return new(_island.X + (p.X + p.Nx * off) * _k, _island.Y + (p.Y + p.Ny * off) * _k);
+    }
 
     // The island at rest, exactly as IslandBorder draws it.
     private Geometry RestOutline()
@@ -521,60 +618,19 @@ internal sealed class IslandNotice : Window
         return _rest = Freeze(outline);
     }
 
-    // The island's body at this frame: its outline pushed out by the ripples (the notch's top edge stays against the screen).
-    // Without the liquid it is the island at rest, to the pixel.
-    private Geometry BodyOutline()
-    {
-        if (_liquid is not { Liquid: true } || Form == IslandForm.Line) return RestOutline();
-        Frame();
-        return _frameBody!;
-    }
-
-    // How far inside the island's edge its light begins. The strip left between them keeps the island's own color, so the light
-    // has the island on both sides of it and shows as a line of light on any desktop; right at the edge, a white light met a
-    // light desktop and only made the edge look soft.
-    private const double EdgeInset = 1.25;
-
-    // The frame's outline, made once for the layers that draw it: the body; the same outline EdgeInset further in, along which
-    // the edge lights up; and for the notch that line left open, without its top edge, which lies against the screen.
-    private void Frame()
-    {
-        if (_liquid is not { } liquid || _frameBody is not null && ReferenceEquals(_frameLiquid, liquid) && (_frameTime == _t || !liquid.Liquid)) return;
-        var outline = liquid.Outline;
-        if (_outs.Length < outline.Count) _outs = new double[outline.Count];
-        liquid.EdgeOuts(_t, _outs);
-        bool notch = Form == IslandForm.Notch;
-        StreamGeometry body = new(), inner = new() { FillRule = FillRule.Nonzero }, edge = new();
-        using (StreamGeometryContext g = body.Open(), n = inner.Open(), e = edge.Open())
-        {
-            if (notch) { g.BeginFigure(new Point(_island.X, _island.Y), true, true); n.BeginFigure(new Point(_island.X, _island.Y), true, true); }
-            for (int i = 0; i < outline.Count; i++)
-            {
-                var p = outline[i];
-                double o = _outs[i], d = o - EdgeInset;
-                Point point = new(_island.X + (p.X + p.Nx * o) * _k, _island.Y + (p.Y + p.Ny * o) * _k), within = new(_island.X + (p.X + p.Nx * d) * _k, _island.Y + (p.Y + p.Ny * d) * _k);
-                if (i == 0 && !notch) { g.BeginFigure(point, true, true); n.BeginFigure(within, true, true); }
-                else { g.LineTo(point, true, false); n.LineTo(within, true, false); }
-                if (!notch) continue;
-                if (i == 0) e.BeginFigure(within, false, false); else e.LineTo(within, true, false);
-            }
-        }
-        body.Freeze(); inner.Freeze(); edge.Freeze();
-        // Without the liquid the body is the island at rest, to the pixel; only the light's line is taken from the model.
-        _frameBody = liquid.Liquid ? body : RestOutline();
-        _frameInner = inner; _frameEdge = notch ? edge : inner; _frameLiquid = liquid; _frameTime = _t;
-    }
-
+    // The island's shadow, from a copy of the island at rest: the few DIPs the liquid stands out do not show in it.
     private void DrawShadow(DrawingContext drawing)
     {
         if (_shadow.Effect is null || Form == IslandForm.Line || _part is not null) return;
-        drawing.DrawGeometry(Fill, null, BodyOutline());
+        drawing.DrawGeometry(Fill, null, RestOutline());
     }
 
+    // The island at rest. What the liquid pushes out of it is drawn over its edge (DrawParts), so it is not drawn again while
+    // the liquid moves; the indicator's thread is (DrawLine).
     private void DrawBody(DrawingContext drawing)
     {
         if (Form == IslandForm.Line) { DrawLine(drawing); return; }
-        var body = BodyOutline();
+        var body = RestOutline();
         // In a part's place only that part of the island is drawn, over the part the island shows there.
         if (_part is { } part) drawing.PushClip(new RectangleGeometry(part));
         drawing.DrawGeometry(Fill, null, body);
@@ -583,12 +639,10 @@ internal sealed class IslandNotice : Window
         if (_look.RimWidth > 0)
         {
             // Clipped to the body, the outer half of the stroke goes, so the pen is twice the rim's width (as IslandBorder's).
-            _rim ??= Freeze(_look.Rim.Clone());
             drawing.PushClip(body);
-            drawing.DrawGeometry(null, new Pen(_rim, _look.RimWidth * 2), body);
+            drawing.DrawGeometry(null, new Pen(Rim, _look.RimWidth * 2), body);
             drawing.Pop();
         }
-        DrawEdgeLight(drawing, body);
         if (_part is not null) drawing.Pop();
     }
 
@@ -611,10 +665,10 @@ internal sealed class IslandNotice : Window
     }
 
     // The light along the island's edge, on its own surface: strongest where it begins (EdgeInset from the edge) and gone 6 DIPs
-    // further in, EdgeMost · exp(−(d / 2.2)^1.3) at the distance d from there, as strokes of growing width whose strengths add up to that.
+    // further in, EdgeMost · exp(−(d / 2.2)^1.3) at the distance d from there, as bands of growing depth whose strengths add up to that.
     private const double EdgeMost = .9;
     private static readonly (double Depth, double Alpha)[] EdgeSteps = MakeEdgeSteps();
-    private Pen[]? _edgePens;
+    private Brush[]? _edgeBrushes;
 
     private static (double Depth, double Alpha)[] MakeEdgeSteps()
     {
@@ -641,46 +695,123 @@ internal sealed class IslandNotice : Window
         return (text, darker ? .55 : 1);
     }
 
-    // The light along the edge, flashing with the backlight and following the liquid's outline. It is drawn on the island, which
-    // BrimDeck colors itself, so it shows whatever the desktop behind is; under the content, which stays as it is.
-    private void DrawEdgeLight(DrawingContext drawing, Geometry body)
+    // How far inside the island's edge its light begins. The strip left between them keeps the island's own color, so the light
+    // has the island on both sides of it and shows as a line of light on any desktop; right at the edge, a white light met a
+    // light desktop and only made the edge look soft.
+    private const double EdgeInset = 1.25;
+
+    // The light along the edge, flashing with the backlight (Paint). It is drawn on the island, which BrimDeck colors itself, so
+    // it shows whatever the desktop behind is; under the content, which stays as it is. Each of EdgeSteps is a band from the
+    // line EdgeInset inside the outline to its depth further in, filled; the notch's are left open at its top edge, which lies
+    // against the screen. Without the liquid the outline is the island's at rest and the picture is kept; with it the light
+    // follows the frame's outline and is drawn again while it shows (Paint), from the few points Sample keeps. (Strokes of the
+    // whole outline clipped to its inside, as at first, cost a long island several milliseconds a frame.)
+    private void DrawEdgeLight(DrawingContext drawing)
     {
-        if (_liquid is null || _part is not null || Form == IslandForm.Line) return;
-        double g = IslandLiquid.GlowAt(_t);
-        if (g <= .004) return;
-        var (color, strength) = EdgeLight();
+        _edgeMoved = false;
+        if (_part is not null || Form == IslandForm.Line) return;
+        var model = Sample();
+        if (_kept.Count < 3) return;
+        _edgeMoved = _liquid is { Liquid: true };
+        var (color, _) = EdgeLight();
         bool notch = Form == IslandForm.Notch;
-        if (_edgePens is null)
-        {
-            // Brightest over the middle and dimmer towards the ends, as the backlight.
-            (double, double)[] stops = notch ? [(0, .6), (.06, .72), (.28, 1), (.72, 1), (.94, .72), (1, .6)] : [(0, .6), (.12, .78), (.32, 1), (.68, 1), (.88, .78), (1, .6)];
-            _edgePens = [.. EdgeSteps.Select(step => Freeze(new Pen(Fade(_island.X, _island.Right, stops, color, step.Alpha), 2 * step.Depth * _k) { LineJoin = PenLineJoin.Round }))];
-        }
-        Frame();
-        drawing.PushClip(body);
-        drawing.PushClip(_frameInner);
-        drawing.PushOpacity(g * strength);
+        // Brightest over the middle and dimmer towards the ends, as the backlight.
+        (double, double)[] stops = notch ? [(0, .6), (.06, .72), (.28, 1), (.72, 1), (.94, .72), (1, .6)] : [(0, .6), (.12, .78), (.32, 1), (.68, 1), (.88, .78), (1, .6)];
+        _edgeBrushes ??= [.. EdgeSteps.Select(step => (Brush)Fade(_island.X, _island.Right, stops, color, step.Alpha))];
         // The notch's fades out up its shoulders to nothing where they meet the screen.
         if (notch) drawing.PushOpacityMask(Freeze(new LinearGradientBrush(Colors.Transparent, Colors.Black, new Point(0, _island.Y + _k), new Point(0, _island.Y + Math.Max(2 * _k, _shape.Shoulder * 7 / 16)))
             { MappingMode = BrushMappingMode.Absolute }));
-        foreach (var pen in _edgePens) drawing.DrawGeometry(null, pen, _frameEdge);
+        for (int step = 0; step < EdgeSteps.Length; step++)
+        {
+            double depth = EdgeInset + EdgeSteps[step].Depth;
+            var band = new StreamGeometry { FillRule = FillRule.EvenOdd };
+            using (var g = band.Open())
+            {
+                // The capsule's: the ring between two loops. The notch's: along the line and back along its depth.
+                g.BeginFigure(Off(model, _kept[0], _outs[_kept[0]] - EdgeInset), true, true);
+                for (int k = 1; k < _kept.Count; k++) g.LineTo(Off(model, _kept[k], _outs[_kept[k]] - EdgeInset), true, false);
+                if (notch) for (int k = _kept.Count - 1; k >= 0; k--) g.LineTo(Off(model, _kept[k], _outs[_kept[k]] - depth), true, false);
+                else
+                {
+                    g.BeginFigure(Off(model, _kept[0], _outs[_kept[0]] - depth), true, true);
+                    for (int k = 1; k < _kept.Count; k++) g.LineTo(Off(model, _kept[k], _outs[_kept[k]] - depth), true, false);
+                }
+            }
+            band.Freeze();
+            drawing.DrawGeometry(_edgeBrushes[step], null, band);
+        }
         if (notch) drawing.Pop();
-        drawing.Pop();
-        drawing.Pop();
-        drawing.Pop();
     }
 
-    // The beads that trail some ripples, in the island's own color.
+    // A theme's gradient or rim spreads over the island's bounds; drawn on a part of the island alone it is given those bounds.
+    private Brush OnIsland(Brush brush)
+    {
+        if (brush is not LinearGradientBrush { MappingMode: BrushMappingMode.RelativeToBoundingBox } relative) return brush;
+        var absolute = relative.Clone();
+        absolute.MappingMode = BrushMappingMode.Absolute;
+        absolute.StartPoint = new Point(_island.X + relative.StartPoint.X * _island.Width, _island.Y + relative.StartPoint.Y * _island.Height);
+        absolute.EndPoint = new Point(_island.X + relative.EndPoint.X * _island.Width, _island.Y + relative.EndPoint.Y * _island.Height);
+        return Freeze(absolute);
+    }
+
+    // What the liquid moves at this frame, over the island at rest: each stretch of the outline that stands out, from just inside
+    // the island's edge (so no seam shows, and the rim there is covered) out to where the ripples push it, in the island's
+    // material with the rim along its new edge. Only those stretches are made, from the points Sample keeps, however long the
+    // island is.
     private void DrawParts(DrawingContext drawing)
     {
-        if (_liquid is not { Liquid: true } liquid || Form == IslandForm.Line) return;
+        _partsDrawn = false;
+        if (_liquid is not { Liquid: true } liquid || Form == IslandForm.Line || _part is not null) return;
+        Sample();
+        // A see-through surface drawn twice would show darker: there the stretch begins at the edge itself.
+        double rim = _look.RimWidth, seam = _look.Surface.A < 255 ? 0 : Math.Max(1, rim + .5) / _k, half = rim / 2 / _k;
+        const double Least = .04;
+        StreamGeometry? swells = null, rims = null;
+        StreamGeometryContext? g = null, r = null;
+        int count = _kept.Count;
+        for (int k = 0; k < count; k++)
+        {
+            if (!(_outs[_kept[k]] > Least)) continue;
+            int from = Math.Max(0, k - 1);
+            while (k < count && _outs[_kept[k]] > Least) k++;
+            int to = Math.Min(count - 1, k);
+            g ??= (swells = new StreamGeometry { FillRule = FillRule.Nonzero }).Open();
+            g.BeginFigure(Off(liquid, _kept[from], -seam), true, true);
+            for (int j = from; j <= to; j++) g.LineTo(Off(liquid, _kept[j], _outs[_kept[j]]), true, false);
+            for (int j = to; j > from; j--) g.LineTo(Off(liquid, _kept[j], -seam), true, false);
+            if (!(rim > 0)) continue;
+            r ??= (rims = new StreamGeometry()).Open();
+            r.BeginFigure(Off(liquid, _kept[from], _outs[_kept[from]] - half), false, false);
+            for (int j = from + 1; j <= to; j++) r.LineTo(Off(liquid, _kept[j], _outs[_kept[j]] - half), true, true);
+        }
+        g?.Close(); r?.Close();
+        if (swells is not null)
+        {
+            swells.Freeze();
+            drawing.DrawGeometry(Fill, null, swells);
+            if (_look.Gradient is { } gradient) drawing.DrawGeometry(_gradient ??= OnIsland(gradient), null, swells);
+            if (_look.Pattern is { } pattern) drawing.DrawGeometry(pattern, null, swells);
+            if (rims is not null)
+            {
+                rims.Freeze();
+                drawing.DrawGeometry(null, _rimPen ??= Freeze(new Pen(OnIsland(Rim), rim) { LineJoin = PenLineJoin.Round }), rims);
+            }
+            _partsDrawn = true;
+        }
+    }
+
+    // The beads that trail some ripples, in the island's own color, over the light along its edge.
+    private void DrawBeads(DrawingContext drawing)
+    {
+        if (_liquid is not { Liquid: true } liquid || Form == IslandForm.Line || _part is not null) return;
         liquid.Beads(_t, _circles);
         if (_circles.Count == 0) return;
-        var parts = new StreamGeometry { FillRule = FillRule.Nonzero };
-        using (var g = parts.Open())
-            foreach (var c in _circles) Circle(g, _island.X + c.X * _k, _island.Y + c.Y * _k, c.R * _k);
-        parts.Freeze();
-        drawing.DrawGeometry(Fill, null, parts);
+        var beads = new StreamGeometry { FillRule = FillRule.Nonzero };
+        using (var b = beads.Open())
+            foreach (var c in _circles) Circle(b, _island.X + c.X * _k, _island.Y + c.Y * _k, c.R * _k);
+        beads.Freeze();
+        drawing.DrawGeometry(Fill, null, beads);
+        _partsDrawn = true;
     }
 
     // How bright the indicator is at this frame: two breaths, or the one of a plain notice.
@@ -715,55 +846,39 @@ internal sealed class IslandNotice : Window
         drawing.DrawGeometry(Freeze(new SolidColorBrush(lit)), null, geometry);
     }
 
-    // The capsule's and the notch's backlight: behind the island, so the liquid shows dark against it. wide: the blurred outer layer.
+    // The capsule's and the notch's backlight: behind the island, so the liquid shows dark against it. wide: the blurred outer
+    // layer. Drawn once at its brightest; Paint sets how bright it shows.
     private void DrawGlow(DrawingContext drawing, bool wide)
     {
-        if (_liquid is not { } liquid || Form == IslandForm.Line) return;
-        double g = IslandLiquid.GlowAt(_t);
-        if (g <= .004) return;
-        Geometry band;
+        if (Form == IslandForm.Line || _part is not null) return;
+        var model = Still;
+        var band = new StreamGeometry { FillRule = FillRule.EvenOdd };
         LinearGradientBrush brush;
         if (Form == IslandForm.Capsule)
         {
             double cx = _island.X + _island.Width / 2, cy = _island.Y + _island.Height / 2;
-            double left = -liquid.Width / 2, right = liquid.Width / 2;
-            var (outer, inner) = liquid.CapsuleRing(left, right, wide ? 10 : 3.4);
-            var ring = new StreamGeometry { FillRule = FillRule.EvenOdd };
-            using (var c = ring.Open()) { Polygon(c, outer, cx, cy); Polygon(c, inner, cx, cy); }
-            ring.Freeze();
-            band = ring;
+            double left = -model.Width / 2, right = model.Width / 2;
+            var (outer, inner) = model.CapsuleRing(left, right, wide ? 10 : 3.4);
+            using (var c = band.Open()) { Polygon(c, outer, cx, cy); Polygon(c, inner, cx, cy); }
             brush = Fade(cx + left * _k, cx + right * _k, [(0, .6), (.12, .78), (.32, 1), (.68, 1), (.88, .78), (1, .6)]);
         }
         else
         {
-            ref var cached = ref wide ? ref _notchGlowWide : ref _notchGlowCore;
-            if (cached is null)
-            {
-                var shape = new StreamGeometry();
-                using (var c = shape.Open()) Polygon(c, liquid.NotchBand(wide ? 12 : 3.8), _island.X, _island.Y);
-                shape.Freeze();
-                cached = shape;
-            }
-            band = cached;
+            using (var c = band.Open()) Polygon(c, model.NotchBand(wide ? 12 : 3.8), _island.X, _island.Y);
             brush = Fade(_island.X, _island.Right, [(0, .6), (.06, .72), (.28, 1), (.72, 1), (.94, .72), (1, .6)]);
         }
-        drawing.PushOpacity(g);
+        band.Freeze();
         drawing.DrawGeometry(brush, null, band);
-        drawing.Pop();
     }
 
-    // The indicator's bloom: its own shape grown by grow and moved down by drop, blurred (the layer's effect), breathing twice.
-    // A plain notice has none: the line alone lights up.
-    private void DrawBloom(DrawingContext drawing, double grow, double drop, double opacity)
+    // The indicator's bloom: its own shape at rest grown by grow and moved down by drop, blurred (the layer's effect). Paint
+    // lets it breathe; a plain notice has none, the line alone lights up.
+    private void DrawBloom(DrawingContext drawing, double grow, double drop)
     {
-        if (_liquid is not { } liquid || Form != IslandForm.Line || _effect == NoticeEffect.Brighten) return;
-        double b = IslandLiquid.BreathAt(_t);
-        if (b <= .004) return;
+        if (Form != IslandForm.Line) return;
         double cx = _island.X + _island.Width / 2, cy = _island.Y + _island.Height / 2;
-        double half = (liquid.Height / 2 + grow) * _k, left = cx - (liquid.LineEnd(_t, -1) + grow) * _k, right = cx + (liquid.LineEnd(_t, 1) + grow) * _k;
-        drawing.PushOpacity(b * opacity);
-        drawing.DrawRoundedRectangle(Freeze(new SolidColorBrush(_light)), null, new Rect(left, cy + drop * _k - half, Math.Max(0, right - left), 2 * half), half, half);
-        drawing.Pop();
+        double half = _island.Height / 2 + grow * _k, reach = _island.Width / 2 + grow * _k;
+        drawing.DrawRoundedRectangle(Freeze(new SolidColorBrush(_light)), null, new Rect(cx - reach, cy + drop * _k - half, 2 * reach, 2 * half), half, half);
     }
 
     private LinearGradientBrush Fade(double from, double to, (double Offset, double Alpha)[] stops) => Fade(from, to, stops, _light, 1);
@@ -1037,12 +1152,50 @@ internal sealed class IslandNotice : Window
     }
 
     // A layer of the drawing, drawn by its delegate whenever it is invalidated.
+    // kept: it is drawn once and kept as a picture, together with what its effect makes of it (the effect is the layer's, the
+    // picture belongs to the element around it), so a frame that only changes how strongly it shows (Shown) neither draws nor
+    // blurs anything. The island's own shadow is kept the same way (MainWindow.Shadow.cs).
     private sealed class Layer : FrameworkElement
     {
         public Action<DrawingContext>? Draw;
         // False until the window has laid the island out: nothing is drawn then.
         public Func<bool>? Ready;
-        public Layer() { IsHitTestVisible = false; }
+        private readonly Canvas? _keeper;
+        private readonly BitmapCache? _picture;
+        private readonly Bounds? _bounds;
+        public Layer(bool kept = false)
+        {
+            IsHitTestVisible = false;
+            if (!kept) return;
+            _picture = new BitmapCache { SnapsToDevicePixels = true };
+            _keeper = new Canvas { IsHitTestVisible = false, CacheMode = _picture, Children = { (_bounds = new Bounds()), this } };
+        }
+        // What stands in the window's tree for this layer.
+        public UIElement Element => (UIElement?)_keeper ?? this;
+        public double Shown { set { var element = Element; if (element.Opacity != value) element.Opacity = value; } }
+
+        // The picture is drawn at the display's scale and reaches past the layer and its blur by whole device pixels: one whose
+        // edge fell between pixels is resampled when drawn. WPF already draws it at the system's DPI, so it is asked only for
+        // what this monitor's scale adds. Called when the layer's size, its effect or the scale changes.
+        public void Fit(double scale, double width, double height)
+        {
+            if (_keeper is null || !(scale > 0)) return;
+            double render = scale / MainWindow.SystemScale;
+            if (_picture!.RenderAtScale != render) _picture.RenderAtScale = render;
+            double spread = Effect switch { BlurEffect blur => blur.Radius, DropShadowEffect shadow => shadow.BlurRadius + shadow.ShadowDepth, _ => 0 };
+            double reach = Math.Ceiling((spread + 2) * scale) / scale;
+            var area = new Rect(-reach, -reach, Math.Ceiling((width + reach) * scale) / scale + reach, Math.Ceiling((height + reach) * scale) / scale + reach);
+            if (_bounds!.Area == area) return;
+            _bounds.Area = area; _bounds.InvalidateVisual();
+        }
         protected override void OnRender(DrawingContext drawingContext) { if (Ready?.Invoke() != false) Draw?.Invoke(drawingContext); }
+
+        // Draws nothing that shows: it gives the kept picture its bounds.
+        private sealed class Bounds : FrameworkElement
+        {
+            public Rect Area;
+            public Bounds() { IsHitTestVisible = false; }
+            protected override void OnRender(DrawingContext drawingContext) { if (!Area.IsEmpty && Area.Width > 0 && Area.Height > 0) drawingContext.DrawRectangle(Brushes.Transparent, null, Area); }
+        }
     }
 }
