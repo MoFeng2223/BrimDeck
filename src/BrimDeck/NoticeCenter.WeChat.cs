@@ -50,11 +50,16 @@ internal sealed partial class NoticeCenter
     // Whether the notices page offers to answer the notice: it names a chat and the list can be read now.
     public bool CanReply(Notice notice) => WeChatRows.ChatOf(notice) is not null && _wechat is { State: WeChatState.Reading };
 
-    // Sends the words to a chat in WeChat. The chat's notices are done with once it is sent.
+    // Sends the words to a chat in WeChat, with its window left where it is. When the chat cannot be opened so (the window is
+    // minimized, say), WeChat is asked to bring its window forward and it is tried once more. The chat's notices are done with
+    // once it is sent.
     public async Task<WeChatSend> ReplyAsync(string chat, string text)
     {
         if (_wechat is not { } source) return WeChatSend.NoWeChat;
         var result = await source.SendAsync(chat, text);
+        if (result == WeChatSend.NotOpened && Hub.Notices.FirstOrDefault(n => WeChatRows.ChatOf(n) == chat) is { } notice
+            && ChatRestore.TryRestore(notice, true, new ProtocolRegistry(), new ProtocolLauncher()))
+            result = await source.SendAsync(chat, text, raised: true);
         if (result == WeChatSend.Sent && !_disposed)
             foreach (var same in Hub.Notices.Where(n => WeChatRows.ChatOf(n) == chat && n.SourcePresent).ToList()) { Withdraw(same.Id); Hub.SourceRemoved(same.InstanceKey); }
         return result;
@@ -63,7 +68,10 @@ internal sealed partial class NoticeCenter
     public static string SendFailure(WeChatSend result) => result switch
     {
         WeChatSend.NoWeChat => Loc.T("微信未运行或读不到窗口", "WeChat is not running, or its window cannot be read"),
-        WeChatSend.NoChat or WeChatSend.NotOpened => Loc.T("在微信的聊天列表里找不到这个会话", "This chat is not in WeChat's chat list"),
+        WeChatSend.NoList => Loc.T("微信没有停在聊天页", "WeChat is not showing its chats"),
+        WeChatSend.NoChat => Loc.T("微信聊天列表里看不到这个会话", "This chat is not in view in WeChat's chat list"),
+        WeChatSend.SameName => Loc.T("微信里有同名的会话，无法分辨", "WeChat has more than one chat of this name"),
+        WeChatSend.NotOpened => Loc.T("未能在微信中打开这个会话", "Could not open this chat in WeChat"),
         WeChatSend.Draft => Loc.T("微信输入框里有未发送的内容", "WeChat's input box holds unsent text"),
         _ => Loc.T("未能发送，请在微信中回复", "Could not send; reply in WeChat")
     };

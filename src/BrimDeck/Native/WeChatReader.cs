@@ -8,11 +8,12 @@ using BrimDeck.Core.Notices;
 
 namespace BrimDeck.Native;
 
-internal enum WeChatSend { Sent, NoWeChat, NoChat, NotOpened, Draft, NotTyped, NotSent }
+// NoList: WeChat shows another page than its chats. NoChat: no row in view has the chat's name. SameName: two rows have it.
+internal enum WeChatSend { Sent, NoWeChat, NoList, NoChat, SameName, NotOpened, Draft, NotTyped, NotSent }
 
 // Reads desktop WeChat's main window through UI Automation, once Qt's accessibility is on in it (WeChatGate): the rows of the
 // chat list, and for a reply the open chat's input box and its send button. Nothing is read from WeChat's files or memory, the
-// pointer is not moved and no key is pressed; WeChat's window may be minimized, but not closed to the tray (it then has no
+// pointer is not moved (a chat is opened by a click posted to the window) and no key is pressed; WeChat's window may be minimized, but not closed to the tray (it then has no
 // controls to read). Element ids and class names are those of WeChat 4.2.0.13. Every call goes to WeChat's process and may
 // take a while or fail when its window changes, so they are made on a worker thread, one at a time (WeChatSource).
 internal sealed partial class WeChatReader
@@ -93,39 +94,52 @@ internal sealed partial class WeChatReader
         return _list = AutomationElement.FromHandle(window).FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.AutomationIdProperty, WeChatRows.ListId));
     }
 
-    // Opens a chat by selecting its row, as a click on it does. True once the input box is that chat's.
-    public bool Open(nint window, string chat)
+    public static bool Shown(nint window) => IsWindowVisible(window) && !IsIconic(window);
+
+    // Opens a chat as a click on its row does; null once the input box is that chat's, else why not. WeChat 4.2.0.13 opens a
+    // chat only on a click: the row's SelectionItem and Invoke do nothing (tried 2026-11-25).
+    public WeChatSend? Open(nint window, string chat)
     {
         try
         {
-            if (List(window) is not { } list) return false;
+            if (List(window) is not { } list) return WeChatSend.NoList;
             var rows = list.FindAll(TreeScope.Children, new PropertyCondition(AutomationElement.AutomationIdProperty, WeChatRows.IdPrefix + chat));
-            // Two chats of one name share the id: which is meant cannot be told.
-            if (rows.Count != 1) return false;
+            // Rows are made only for the chats in view; two chats of one name share the id, and which is meant cannot be told.
+            if (rows.Count != 1) return rows.Count == 0 ? WeChatSend.NoChat : WeChatSend.SameName;
             var row = rows[0];
-            if (IsOpen(window, row, chat)) return true;
-            if (row.TryGetCurrentPattern(SelectionItemPattern.Pattern, out object select)) ((SelectionItemPattern)select).Select();
-            if (Until(ChatWait, () => IsOpen(window, row, chat))) return true;
-            if (row.TryGetCurrentPattern(InvokePattern.Pattern, out object invoke)) ((InvokePattern)invoke).Invoke();
-            return Until(ChatWait, () => IsOpen(window, row, chat));
+            if (IsOpen(window, row, chat)) return null;
+            return Click(window, row, list) && Until(ChatWait, () => IsOpen(window, row, chat)) ? null : WeChatSend.NotOpened;
         }
-        catch (Exception ex) when (Gone(ex)) { _list = null; return false; }
+        catch (Exception ex) when (Gone(ex)) { _list = null; return WeChatSend.NotOpened; }
+    }
+
+    // A left click posted to WeChat's window at the middle of the element's part in view (of the list, for a row). The pointer
+    // is not moved and the window is not brought forward; a minimized window has nothing to click.
+    private static bool Click(nint window, AutomationElement element, AutomationElement? within = null)
+    {
+        if (IsIconic(window)) return false;
+        var area = element.Current.BoundingRectangle;
+        if (within is not null) area.Intersect(within.Current.BoundingRectangle);
+        if (area.IsEmpty || area.Height < 8 || area.Width < 8) return false;
+        var point = new POINT { X = (int)(area.X + area.Width / 2), Y = (int)(area.Y + area.Height / 2) };
+        if (!ScreenToClient(window, ref point)) return false;
+        nint at = (point.Y << 16) | (point.X & 0xFFFF);
+        return PostMessage(window, WM_MOUSEMOVE, 0, at) && PostMessage(window, WM_LBUTTONDOWN, MK_LBUTTON, at) && PostMessage(window, WM_LBUTTONUP, 0, at);
     }
 
     // Sends a text to a chat in the list: opens the chat, puts the text into the input box, checks that it is there and that the
-    // box is still that chat's, and presses WeChat's send button. A box that already holds words the user typed is left alone.
+    // box is still that chat's, and clicks WeChat's send button (its Invoke does nothing either). A box that already holds words
+    // the user typed is left alone.
     public WeChatSend Send(nint window, string chat, string text)
     {
         try
         {
-            if (List(window) is null) return WeChatSend.NoChat;
-            if (!Open(window, chat)) return WeChatSend.NotOpened;
+            if (Open(window, chat) is { } failed) return failed;
             if (Input(window) is not { } input || !input.TryGetCurrentPattern(ValuePattern.Pattern, out object pattern) || pattern is not ValuePattern box || box.Current.IsReadOnly) return WeChatSend.NotTyped;
             if (box.Current.Value.Length > 0) return WeChatSend.Draft;
             box.SetValue(text);
             if (!Until(TypeWait, () => Same(box.Current.Value, text)) || !Named(input, chat)) { Empty(box); return WeChatSend.NotTyped; }
-            if (SendButton(input) is not { } button || !Until(TypeWait, () => button.Current.IsEnabled) || !button.TryGetCurrentPattern(InvokePattern.Pattern, out object press)) { Empty(box); return WeChatSend.NotSent; }
-            ((InvokePattern)press).Invoke();
+            if (SendButton(input) is not { } button || !Until(TypeWait, () => button.Current.IsEnabled) || !Click(window, button)) { Empty(box); return WeChatSend.NotSent; }
             if (Until(SendWait, () => box.Current.Value.Length == 0)) return WeChatSend.Sent;
             Empty(box);
             return WeChatSend.NotSent;
@@ -175,7 +189,10 @@ internal sealed partial class WeChatReader
     private static bool Gone(Exception ex) => ex is ElementNotAvailableException or ElementNotEnabledException or InvalidOperationException or COMException or TimeoutException or ArgumentException or Win32Exception;
 
     private delegate bool EnumProc(nint window, nint data);
+    private const uint WM_MOUSEMOVE = 0x0200, WM_LBUTTONDOWN = 0x0201, WM_LBUTTONUP = 0x0202;
+    private const nint MK_LBUTTON = 1;
     [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] private struct WINDOWPLACEMENT { public int Length, Flags, Show, MinX, MinY, MaxX, MaxY; public RECT Normal; }
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc proc, nint data);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
@@ -185,4 +202,7 @@ internal sealed partial class WeChatReader
     [DllImport("user32.dll")] private static extern bool GetWindowPlacement(nint window, ref WINDOWPLACEMENT placement);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool IsIconic(nint window);
+    [DllImport("user32.dll")] private static extern bool ScreenToClient(nint window, ref POINT point);
+    [DllImport("user32.dll")] private static extern bool PostMessage(nint window, uint message, nint wParam, nint lParam);
 }

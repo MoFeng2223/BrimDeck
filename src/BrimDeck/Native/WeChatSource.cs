@@ -135,44 +135,38 @@ internal sealed class WeChatSource : IDisposable
         return (WeChatState.Reading, WeChatGateResult.Open, _watch.Observe(rows, flashed, WeChatReader.InFront(main.Pid), DateTime.Now));
     }
 
-    // Opens a chat in WeChat's window (the caller brings the window forward first; the list may need a moment to come back).
-    public async Task<bool> OpenAsync(string chat)
+    // Opens a chat in WeChat's window (the caller brings the window forward first).
+    public Task<bool> OpenAsync(string chat)
+        => OnWindowAsync(window => _reader.Open(window, chat) is null, false, true);
+
+    // Sends the words to a chat. raised: the caller has just asked WeChat to bring its window forward.
+    public Task<WeChatSend> SendAsync(string chat, string text, bool raised = false)
+        => OnWindowAsync(window => _reader.Send(window, chat, text), WeChatSend.NoWeChat, raised);
+
+    // Does something with WeChat's main window on a worker thread. After the window was asked to come forward it may take a
+    // moment to be shown with its chat list again, and is waited for.
+    private async Task<T> OnWindowAsync<T>(Func<nint, T> act, T none, bool raised)
     {
-        if (_disposed) return false;
+        if (_disposed) return none;
         await _busy.WaitAsync(_stop.Token);
         try
         {
             return await Task.Run(() =>
             {
-                for (int attempt = 0; attempt < 8; attempt++)
+                for (int attempt = 0; ; attempt++)
                 {
                     lock (_work)
                     {
-                        if (_stop.IsCancellationRequested) return false;
-                        if (WeChatReader.FindMain() is { } main && WeChatReader.TreeOpen(main.Handle) && _reader.Rows(main.Handle) is { Count: > 0 }) return _reader.Open(main.Handle, chat);
+                        if (_stop.IsCancellationRequested) return none;
+                        if (WeChatReader.FindMain() is { } main && WeChatReader.TreeOpen(main.Handle)
+                            && (!raised || WeChatReader.Shown(main.Handle) && _reader.Rows(main.Handle) is { Count: > 0 })) return act(main.Handle);
                     }
+                    if (!raised || attempt == 7) return none;
                     Thread.Sleep(250);
                 }
-                return false;
             }, _stop.Token);
         }
-        catch (OperationCanceledException) { return false; }
-        finally { _busy.Release(); }
-    }
-
-    public async Task<WeChatSend> SendAsync(string chat, string text)
-    {
-        if (_disposed) return WeChatSend.NoWeChat;
-        await _busy.WaitAsync(_stop.Token);
-        try
-        {
-            return await Task.Run(() =>
-            {
-                lock (_work)
-                    return !_stop.IsCancellationRequested && WeChatReader.FindMain() is { } main && WeChatReader.TreeOpen(main.Handle) ? _reader.Send(main.Handle, chat, text) : WeChatSend.NoWeChat;
-            }, _stop.Token);
-        }
-        catch (OperationCanceledException) { return WeChatSend.NoWeChat; }
+        catch (OperationCanceledException) { return none; }
         finally { _busy.Release(); }
     }
 
