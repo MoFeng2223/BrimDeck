@@ -64,6 +64,7 @@ public partial class MainWindow
             Foreground = UI.Brush(UI.Primary), TextWrapping = TextWrapping.Wrap, FlowDirection = FlowDirection.LeftToRight
         };
         text.PreviewMouseLeftButtonDown += (_, _) => TakeKeyboardForWords();
+        WatchWords(text);
         AutomationProperties.SetName(text, Loc.T("命令：", "Command: ") + code);
         return new Border
         {

@@ -693,16 +693,26 @@ public partial class MainWindow
         };
         TextBlock.SetLineHeight(box, lineHeight); TextBlock.SetLineStackingStrategy(box, LineStackingStrategy.BlockLineHeight);
         if (line) { box.Height = lineHeight; box.VerticalContentAlignment = VerticalAlignment.Center; }
-        // One selection at a time: each text box keeps its own, and shows it after losing the keyboard (PanelSelectableText), so a
-        // press in one clears the others.
-        box.PreviewMouseLeftButtonDown += (_, _) =>
-        {
-            TakeKeyboardForWords();
-            foreach (var other in _focusWords) if (!ReferenceEquals(other, box) && other.SelectionLength > 0) other.Select(0, 0);
-        };
-        _focusWords.Add(box);
+        box.PreviewMouseLeftButtonDown += (_, _) => TakeKeyboardForWords();
+        WatchWords(box);
         return box;
     }
+
+    // Selectable words of the focus column. Each text box keeps its selection, and shows it after losing the keyboard
+    // (PanelSelectableText), so a left press anywhere on the panel other than in a box clears the selections of every other box,
+    // as a press beside selected text does in a browser.
+    private void WatchWords(TextBox box)
+    {
+        _focusWords.Add(box);
+        if (_wordsPressWatched) return;
+        _wordsPressWatched = true;
+        PreviewMouseLeftButtonDown += (_, e) =>
+        {
+            var pressed = WordsBox(e.OriginalSource);
+            foreach (var other in _focusWords) if (!ReferenceEquals(other, pressed) && other.SelectionLength > 0) other.Select(0, 0);
+        };
+    }
+    private bool _wordsPressWatched;
 
     // Below this width (DIP) the hero shows its cover at 40 instead of 56.
     private const double HeroNarrow = 260;
