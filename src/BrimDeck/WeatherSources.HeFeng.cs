@@ -124,6 +124,8 @@ internal sealed class HeFengSource : IWeatherSource
 
     private static async Task<List<DayPoint>?> FetchHistory(Context context, CancellationToken token)
     {
+        // 手动刷新（Fresh）只该强制实况/预报；历史是定稿数据，重拉 10 天纯属浪费配额。
+        using var cached = WeatherCache.Cached();
         // 优先用城市自带的 LocationID：搜索/定位时 GeoAPI 已经返回并存在 City.LocationId 里，
         // 不必再靠坐标反查——反查受限流冷却/网络影响，一次失败就会让整段历史为空。
         // 只有城市没带 id 时才回退到坐标反查。

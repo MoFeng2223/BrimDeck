@@ -395,8 +395,8 @@ internal sealed class WeatherSnapshot
     public int[] DayNightCodes {get;set;}=[]; public string[] DayNightConditions {get;set;}=[]; public int[] DayNightHumidity {get;set;}=[];
     public double[] DayNightWindMaxKmh {get;set;}=[]; public double[] DayNightGustMaxKmh {get;set;}=[]; public double[] DayNightWindDirDeg {get;set;}=[]; public string[] DayNightWindDir {get;set;}=[];
     public double[] DayNightPrecipMm {get;set;}=[]; public int[] DayNightRainProb {get;set;}=[]; public double[] DayNightCloudPercent {get;set;}=[];
-    // 扩展域：分钟降水 / 预警 / 生活指数；台风由预警域覆盖。
-    public string[] MinuteTimes {get;set;}=[]; public double[] MinutePrecip {get;set;}=[]; public string MinuteSummary {get;set;}="";
+    // 扩展域：分钟降水 / 预警 / 生活指数；
+    public string[] MinuteTimes {get;set;}=[]; public double?[] MinutePrecip {get;set;}=[]; public string MinuteSummary {get;set;}="";
     public WarningItem[] Warnings {get;set;}=[];
     public IndexItem[] Indices {get;set;}=[];
     // 每个数据域实际贡献的来源，例如 Daily → "中国天气网 + Open-Meteo"。

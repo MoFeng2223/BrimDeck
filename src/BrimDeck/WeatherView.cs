@@ -89,6 +89,9 @@ internal sealed class WeatherView : UserControl
     internal static readonly TimeSpan AutoInterval = TimeSpan.FromMinutes(15);
     private readonly DispatcherTimer timer = new() { Interval = AutoInterval };
     private WeatherSnapshot? _last;
+    // 上一次成功绘制的内容签名（不含 FetchedAt）与失败标记：签名一致且没画全过时只更新页脚。
+    private string _renderSignature = "";
+    private bool _renderFailed;
     private string _shownKey = "";   // 当前画面显示的是哪座城市（缓存键）：显示数据与城市绑定，换城不残留
     // 重画节流：拖动改宽度时 Fit 每帧都会被调用，而重建 24 列的列元素与折线并不便宜。
     // 画布宽度与列数当场更新，真正重建最多 30fps，落后的一帧由 _flush 补上。
@@ -116,18 +119,11 @@ internal sealed class WeatherView : UserControl
         }
         double avail = Math.Max(0, height - 16 - minuteRow.Height.Value);   // 根 Grid 上边距 0 + 底部页脚行 16 + 分钟窄条
         summaryRow.MinHeight = Math.Min(summaryMinHeight, avail);     // 今日天气最小高度封顶，避免自身被压坏
-        // 列数随宽度在 7（窄）到 24（满宽 440–1200 线性插值）之间自适应；24 列正好是历史 10 + 今天 + 未来 13。
-        // 折线画布与预报网格同一套几何：左右边距同为 6、内容宽度同为 width-40，点坐标按列中心计算，保证每个点对准列正中。
         double chartWidth = Math.Max(30, width - 40);
-        int columns = Math.Clamp(7 + (int)Math.Round((width - 440) / 760.0 * 17), 7, 24);
-        // 列数收敛：每日模式随宽度在 7–24 天内自适应，24 列正好是历史 10 + 今天 + 未来 13；
-        // 24h 模式固定 24 列对应 24 个逐时数据点（数据不足时按实际逐时数收敛），保证「24 个日期 ↔ 24 个时刻」一一对应。
-        // 逐时与逐日共用同一套列数阶梯：宽度压缩到 400 以下就只留 7 列，绝不把 24 个时刻硬挤进去。
-        // 列数定了之后，预报列、折线采样点、逐时/逐日两种模式全部按同一个列宽几何排，点永远落在列正中。
-        int shown = _last is { } available
-            ? (_hourlyMode ? Math.Min(columns, Math.Max(1, available.HourTimes.Length)) : Math.Min(columns, available.DayDates.Length))
-            : columns;
-        int shownValue = Math.Max(1, shown);
+        int columns = LayoutColumns(width);
+        // 24h 模式固定 24 列对应 24 个逐时数据点，保证「24 个日期 ↔ 24 个时刻」一一对应。
+        // 逐时与逐日共用同一套列数阶梯：宽度压缩到 400 以下就只留 7 列。
+        int shownValue = LayoutShown(columns, _last);
         bool columnsChanged = columns != _columns, shownChanged = shownValue != forecast.Columns;
         bool heightChanged = Math.Abs(avail - _lastAvail) > 0.5;
         bool redraw = force || columnsChanged || Math.Abs(chartWidth - _chartWidth) > 0.5;
@@ -397,33 +393,71 @@ internal sealed class WeatherView : UserControl
             timer.Stop(); timer.Start();
         } catch (OperationCanceledException) {
             // 取消即本轮作废，界面与状态由新的 Refresh 接管（画面已是目标城市自己的缓存或空态）。
-        } catch { if (request == generation) { summary.Children.Clear(); summary.Children.Add(new TextBlock { Text = Loc.T("天气数据不可用", "Weather data unavailable"), FontSize = 20, VerticalAlignment = VerticalAlignment.Center }); } }
+        } catch { if (request == generation) { _renderSignature = ""; summary.Children.Clear(); summary.Children.Add(new TextBlock { Text = Loc.T("天气数据不可用", "Weather data unavailable"), FontSize = 20, VerticalAlignment = VerticalAlignment.Center }); } }
         finally { if (ReferenceEquals(_token, cts)) { fetching = false; _token = null; } cts.Dispose(); RaiseState(); }
     }
     // 空态：换到没有缓存的城市后、刷新尚未成功时清掉上一城的残留画面（预报列、折线、页脚一并清）。
     private void ShowEmpty()
     {
         _last = null; _shownKey = "";
+        // 区块已被清空：作废内容签名，否则换回同一份缓存时会被「无变化」判定跳过、只剩页脚。
+        _renderSignature = ""; _renderFailed = false;
         summary.Children.Clear();
         summary.Children.Add(new TextBlock { Text = Loc.T("暂无天气数据", "No weather data"), FontSize = 20, VerticalAlignment = VerticalAlignment.Center });
         forecast.Children.Clear(); lowRow.Children.Clear(); dayInfoRow.Children.Clear(); chart.Children.Clear();
         todayGlow.Visibility = Visibility.Collapsed; nowRule.Visibility = nowText.Visibility = Visibility.Collapsed;
         footerNote.Text = "";
     }
+    // 列数几何的唯一计算点：宽度→列数、快照→实际列数，Fit（判变）与 Render（重画）共用。
+    private static int LayoutColumns(double width) => Math.Clamp(7 + (int)Math.Round((width - 440) / 760.0 * 17), 7, 24);
+    private int LayoutShown(int columns, WeatherSnapshot? s) => Math.Max(1, s is { } available
+        ? (_hourlyMode ? Math.Min(columns, Math.Max(1, available.HourTimes.Length)) : Math.Min(columns, available.DayDates.Length))
+        : columns);
+    private void ApplyLayout(WeatherSnapshot s)
+    {
+        int columns = LayoutColumns(Width), shown = LayoutShown(columns, s);
+        _columns = columns; forecast.Columns = shown; lowRow.Columns = shown; dayInfoRow.Columns = shown;
+    }
+    // 单个区块绘制失败不拖累其余区块；异常进调试输出，避免整页静默变空白。返回值用于标记这一版没画全，
+    // 让下一次相同的快照不会因为「内容签名没变」被跳过，而是重试一遍。
+    private bool DrawPart(string name, Action draw)
+    {
+        try { draw(); return true; }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[WeatherView] {name}: {ex}"); return false; }
+    }
+    // 内容签名不含 FetchedAt：自动刷新拿回同一份数据时只需换页脚时刻，整页重建没有意义。
+    private static readonly System.Text.Json.JsonSerializerOptions SignatureJson = new()
+    {
+        NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals
+    };
+    private static string Signature(WeatherSnapshot s)
+    {
+        var fetched = s.FetchedAt;
+        s.FetchedAt = default;
+        try { return System.Text.Json.JsonSerializer.Serialize(s, SignatureJson); }
+        catch { return ""; }
+        finally { s.FetchedAt = fetched; }
+    }
     private void Render(WeatherSnapshot s)
     {
-        try {
-            Background = Brushes.Transparent;
+        if (_hourlyMode && s.HourTimes.Length == 0) { _hourlyMode = false; _lens = Lens.Temp; }
+        ApplyLayout(s);
+        if (AutoSelected) _autoCityName = s.Name;
+        string signature = Signature(s);
+        if (signature.Length > 0 && signature == _renderSignature && !_renderFailed)
+        {
             _last = s;
-            if (_hourlyMode && s.HourTimes.Length == 0) { _hourlyMode = false; _lens = Lens.Temp; }
-            // 新快照的数据量可能与旧布局不同（例如逐时只剩 8 小时）：按当前快照重算列数再绘制，
-            // 沿用旧列数会把不足的列画错位、按旧列数取数会越界。
-            int columns = Math.Clamp(7 + (int)Math.Round((Width - 440) / 760.0 * 17), 7, 24);
-            int shown = Math.Max(1, Math.Min(columns, Math.Max(1, _hourlyMode ? s.HourTimes.Length : s.DayDates.Length)));
-            _columns = columns; forecast.Columns = shown; lowRow.Columns = shown; dayInfoRow.Columns = shown;
-            if (AutoSelected) _autoCityName = s.Name;
-            DrawFooter(s); DrawSummary(s); DrawForecast(s); DrawChart(s); DrawMinute(s);
-        } catch { }
+            DrawPart("页脚", () => DrawFooter(s));
+            return;
+        }
+        _renderSignature = signature;
+        bool drawn = true;
+        drawn &= DrawPart("页脚", () => DrawFooter(s));
+        drawn &= DrawPart("摘要", () => DrawSummary(s));
+        drawn &= DrawPart("预报列", () => DrawForecast(s));
+        drawn &= DrawPart("折线", () => DrawChart(s));
+        drawn &= DrawPart("分钟降水", () => DrawMinute(s));
+        _renderFailed = !drawn;
     }
     // 把任意粒度的分钟点（和风 5min×24、Open-Meteo 15min×8）重采样成 24 格 × 5 分钟，
     // 每格取区间峰值，两种来源画出来形状一致。
@@ -446,7 +480,8 @@ internal sealed class WeatherView : UserControl
             int to = Math.Max(from + 1, (i + 1) * points.Length / slots);
             double peak = 0;
             for (int j = from; j < Math.Min(to, points.Length); j++)
-                if (!double.IsNaN(points[j])) peak = Math.Max(peak, points[j]);
+                // 缺失点现在是 null；旧快照可能仍存着 NaN，两种都跳过。
+                if (points[j] is { } value && !double.IsNaN(value)) peak = Math.Max(peak, value);
             values[i] = peak;
         }
         _minuteHasRain = values.Any(v => v > 0);
@@ -460,6 +495,8 @@ internal sealed class WeatherView : UserControl
             _ => Loc.T("未来 2 小时无降水", "No rain in the next 2 hours")
         };
         double peakValue = Math.Max(0.2, values.Max());
+        // 无雨时整行本来就隐藏，不重建 24 个柱子。
+        if (!_minuteHasRain) { UpdateMinuteVisibility(); return; }
         foreach (double v in values)
         {
             double ratio = Math.Min(1, v / peakValue);

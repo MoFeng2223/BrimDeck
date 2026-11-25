@@ -346,7 +346,7 @@ internal static class WeatherAggregator
             MoonTransitTimes = datePoints(dayMap, dates, point => point.MoonTransit ?? ""),
             MoonUnderfootTimes = datePoints(dayMap, dates, point => point.MoonUnderfoot ?? ""),
             MinuteTimes = minutes.OrderBy(m => m.Time, StringComparer.Ordinal).Select(m => m.Time).ToArray(),
-            MinutePrecip = minutes.OrderBy(m => m.Time, StringComparer.Ordinal).Select(m => m.Precip ?? double.NaN).ToArray(),
+            MinutePrecip = minutes.OrderBy(m => m.Time, StringComparer.Ordinal).Select(m => m.Precip).ToArray(),
             MinuteSummary = minuteSummary ?? "",
             Warnings = [.. warnings],
             Indices = [.. indices],

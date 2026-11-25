@@ -27,6 +27,7 @@ try
         && City.GeoPartsOf("伦敦 · 安大略 · 加拿大") == ("伦敦", "安大略"));
 
     ClipboardSyncTests.Run(Check);
+    await WeatherCacheTests.Run(Check);
     await PiUsageTests.Run(root, Check);
     await CodeAgentUsageTests.Run(root, Check);
     await CommandCodeUsageTests.Run(root, Check);

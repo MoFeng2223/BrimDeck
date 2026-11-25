@@ -12,7 +12,18 @@ internal static class WeatherMotion
     internal static void Attach(FrameworkElement element)
     {
         var scale=new ScaleTransform(1,1); element.RenderTransform=scale; element.RenderTransformOrigin=new Point(.5,.5);
-        void Go(double value) { foreach(var property in new[]{ScaleTransform.ScaleXProperty,ScaleTransform.ScaleYProperty}) scale.BeginAnimation(property,new DoubleAnimation(value,System.TimeSpan.FromMilliseconds(160)) { EasingFunction=new CubicEase { EasingMode=EasingMode.EaseOut } }); }
+        void Go(double value)
+        {
+            // 系统设置「减少动态效果」时不做缩放动画，直接落到目标值。
+            if (!SystemParameters.ClientAreaAnimation)
+            {
+                scale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+                scale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+                scale.ScaleX=scale.ScaleY=value;
+                return;
+            }
+            foreach(var property in new[]{ScaleTransform.ScaleXProperty,ScaleTransform.ScaleYProperty}) scale.BeginAnimation(property,new DoubleAnimation(value,System.TimeSpan.FromMilliseconds(160)) { EasingFunction=new CubicEase { EasingMode=EasingMode.EaseOut } });
+        }
         element.MouseEnter+=(_,_)=>Go(1.035); element.MouseLeave+=(_,_)=>Go(1); element.PreviewMouseLeftButtonDown+=(_,_)=>Go(.95); element.PreviewMouseLeftButtonUp+=(_,_)=>Go(1.035);
     }
 }
