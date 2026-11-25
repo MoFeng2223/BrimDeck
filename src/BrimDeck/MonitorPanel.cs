@@ -67,8 +67,9 @@ public partial class MainWindow
         if (page && !_monitorShowing) _monitorView?.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
         if (strip && !_stripShowing) UpdateCompactStrips(_app.Monitor?.Latest, motion: false);
         _monitorShowing = page; _stripShowing = strip;
-        // The devices page and the collapsed battery reading ask on the same occasions.
+        // The devices page, collapsed battery reading and collapsed proxy icon ask on the same occasions.
         UpdateDevicesDemand();
+        UpdateProxyDemand();
     }
     // The collapsed readings the row was last built without (StripAdmission.Hidden): the drives until their first figures, and for
     // good on a machine without them; and the temperatures and letters it was built with (StripAdmission.Layout).

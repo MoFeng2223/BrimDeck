@@ -89,6 +89,7 @@ try
     OfficialDriverTests.Run(Check);
     PowerTests.Run(Check);
     DevicesPageTests.Run(Check);
+    ProxyStatusTests.Run(Check);
     FrameRateTests.Run(Check);
     ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);

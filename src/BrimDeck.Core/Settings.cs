@@ -90,14 +90,14 @@ public enum EqualizerMode { Flow = 0, Spectrum = 1 }
 public enum QuotaRingStyle { Nested = 0, Single = 1 }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left; Music places
 // only the title or lyric. Saved as numbers, so new members go at the end.
-public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer, Devices }
+public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer, Devices, Proxy }
 public static class CompactParts
 {
     // The order of new settings and of restoring the defaults: the equalizer and the clock come last.
-    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices, CompactPart.Equalizer, CompactPart.Clock];
+    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices, CompactPart.Proxy, CompactPart.Equalizer, CompactPart.Clock];
     // The order in which parts missing from a saved file are added after its own. A file saved before the equalizer and the clock
-    // were put in order adds them after its parts, the clock last, where they stood; the devices' batteries (1.3.0) join last.
-    private static readonly IReadOnlyList<CompactPart> Missing = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices];
+    // were put in order adds them after its parts, the clock last, where they stood; the devices' batteries (1.3.0) and proxy status join last.
+    private static readonly IReadOnlyList<CompactPart> Missing = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices, CompactPart.Proxy];
     // Each known part once, in the saved order; a part missing from the file takes its place after the others.
     public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Missing).Distinct()];
 }
@@ -743,6 +743,11 @@ public sealed class DeckSettings
     // The notch and the capsule each show the devices' batteries (CompactPart.Devices).
     public bool NotchDevices { get; set; }
     public bool CapsuleDevices { get; set; }
+    // The notch and the capsule each show the local proxy status icon (CompactPart.Proxy), hidden automatically while no supported proxy runs.
+    public bool NotchProxy { get; set; }
+    public bool CapsuleProxy { get; set; }
+    // Which traffic-capture indicators the collapsed proxy icon displays beside the routing mode (Both, SystemProxy, Tun).
+    public ProxyIndicators ProxyIndicators { get; set; } = ProxyIndicators.Both;
     // The expanded page shows a line under memory and network with the frame rate of the program in front, its name and its display's
     // refresh rate (FrameRates). Off by default; read only while the page is open, and only where the user may read Windows' frame
     // events (the Performance Log Users group, or BrimDeck elevated).
@@ -822,6 +827,7 @@ public sealed class DeckSettings
     // The indicator is too thin for readings, as for the clock.
     public bool ShowsMonitor(CompactStyle style) => style switch { CompactStyle.Notch => NotchMonitor, CompactStyle.Capsule => CapsuleMonitor, _ => false };
     public bool ShowsDevices(CompactStyle style) => style switch { CompactStyle.Notch => NotchDevices, CompactStyle.Capsule => CapsuleDevices, _ => false };
+    public bool ShowsProxy(CompactStyle style) => style switch { CompactStyle.Notch => NotchProxy, CompactStyle.Capsule => CapsuleProxy, _ => false };
     // The file transfer's count needs the page and its column: with either hidden, nothing can be dropped there.
     public bool ShowsTransfer(CompactStyle style) => ClipboardPage && ShelfShown != ShelfShown.Clipboard && style switch { CompactStyle.Notch => NotchTransfer, CompactStyle.Capsule => CapsuleTransfer, _ => false };
     // The page's columns are stacked as cards only while it shows both.
@@ -1037,6 +1043,7 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(NotchEdge)) NotchEdge = ScreenEdge.Top;
         if (!Enum.IsDefined(LineEdge)) LineEdge = ScreenEdge.Top;
         if (!Enum.IsDefined(LineOpens)) LineOpens = IndicatorOpens.Panel;
+        if (!Enum.IsDefined(ProxyIndicators)) ProxyIndicators = ProxyIndicators.Both;
         if (NotchAnchor is { } notchAnchor && !Enum.IsDefined(notchAnchor)) NotchAnchor = null;
         if (LineAnchor is { } lineAnchor && !Enum.IsDefined(lineAnchor)) LineAnchor = null;
         if (!Enum.IsDefined(GripDoubleClick)) GripDoubleClick = GripDoubleClick.Move;
