@@ -328,9 +328,9 @@ internal sealed partial class NoticeCenter : IDisposable
         if (Attention.Suppressed) { Attention.Submit(Item("", notice), now); return; }
         var lanes = Lanes();
         foreach (var lane in lanes) Apply(Attention.Submit(Item(lane, notice, refresh), now));
-        // Every panel that would show it is open and staying open: the notice shows on their notices page instead of an island,
-        // and its sound plays once there, a loop too (nothing ends it on the page).
-        if (!refresh && lanes.Count > 0 && lanes.All(Attention.Open)) PlayOnce(Item(lanes[0], notice));
+        // A panel on any screen is open and staying open: the notice shows on no island, only on the notices page, and its sound
+        // plays once, a loop too (nothing ends it on the page).
+        if (!refresh && lanes.Count > 0 && Attention.AnyOpen) PlayOnce(Item(lanes[0], notice));
     }
 
     // The panels that show an arriving notice: each one whose profile shows notices (NoticeIsland) and that can show one now. A
@@ -710,15 +710,9 @@ internal sealed partial class NoticeCenter : IDisposable
 
     // The pointer is over the shown item, its details are open, or the keyboard works it: its time stands still.
     public void Hold(MainWindow deck, bool held) => Apply(Attention.Hold(deck.NoticeLane, held, DateTimeOffset.UtcNow));
-    // The panel opened or closed. Opened over a notice (a click on it, the pointer resting on it, a hotkey), the user has it in
-    // front of them: it ends on the other screens too.
-    public void DeckExpanded(MainWindow deck, bool expanded)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var shown = expanded ? Attention.Current(deck.NoticeLane) : null;
-        Apply(Attention.SetBusy(deck.NoticeLane, expanded, now));
-        if (shown is { IsNotice: true }) Apply(Attention.Withdraw(shown.Key, now));
-    }
+    // The panel opened or closed. Opened on any screen, the user is looking at BrimDeck: the notices on every screen's island end,
+    // including those waiting there, whatever each screen's profile shows (AttentionCoordinator.SetBusy).
+    public void DeckExpanded(MainWindow deck, bool expanded) => Apply(Attention.SetBusy(deck.NoticeLane, expanded, DateTimeOffset.UtcNow));
     // The pointer left the open panel, or came back to it (AttentionCoordinator.SetLeaving).
     public void DeckLeaving(MainWindow deck, bool leaving) => Attention.SetLeaving(deck.NoticeLane, leaving);
     public void DeckRetired(MainWindow deck) { Attention.RemoveLane(deck.NoticeLane); SyncLoop(); Schedule(); }

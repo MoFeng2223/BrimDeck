@@ -300,6 +300,33 @@ internal static class NoticeCoreTests
         var beyond = unhurried.Submit(new AttentionItem { Lane = "p", Kind = AttentionKind.Notice, Key = "stay", Level = NoticeLevel.Persistent, Duration = TimeSpan.FromSeconds(6) }, T0);
         check("A persistent notice is never subdued by the rate limit", beyond is [{ Started: { Persistent: true, Subdued: false } }]);
 
+        // Several screens: opening the panel on one ends the notices on all of them, including those waiting, even where the panel
+        // opened showed none (its profile shows no notices); another screen's quota alert stays.
+        static AttentionItem On(string lane, string key) => new()
+        {
+            Lane = lane, Kind = AttentionKind.Notice, Key = key, Group = key, Level = NoticeLevel.Persistent, Duration = TimeSpan.FromSeconds(6)
+        };
+        var opening = new AttentionCoordinator();
+        foreach (var lane in new[] { "a", "b" }) { opening.Submit(On(lane, "call"), T0); opening.Submit(On(lane, "alarm"), T0); }
+        opening.Submit(On("c", "alarm"), T0);
+        opening.Submit(Item("d", AttentionKind.Quota, "quota", seconds: 30), T0);
+        var opened = opening.SetBusy("a", true, T0.AddSeconds(1));
+        check("Opening the panel on one screen ends the notices on every screen and starts none of those waiting",
+            new[] { "a", "b", "c" }.All(lane => opening.Current(lane) is null && opening.Queued(lane).Count == 0) && opened.All(change => change.Started is null));
+        check("Another screen's quota alert stays", opening.Current("d")?.Key == "quota");
+        var other = new AttentionCoordinator();
+        other.Submit(On("b", "call"), T0);
+        other.SetBusy("a", true, T0.AddSeconds(1));
+        check("Opening a panel that showed no notice still ends the one on another screen", other.Current("b") is null);
+        var arriving = other.Submit(On("b", "late"), T0.AddSeconds(2));
+        check("While a panel is open, a notice that arrives shows on no other screen", arriving.Count == 0 && other.Current("b") is null && other.Queued("b").Count == 0 && other.AnyOpen);
+        other.Submit(Item("b", AttentionKind.Quota, "quota", seconds: 30), T0.AddSeconds(2));
+        check("Another screen's quota alert still shows while a panel is open", other.Current("b")?.Key == "quota");
+        other.Dismiss("b", T0.AddSeconds(3));
+        other.SetLeaving("a", true);
+        other.Submit(On("b", "after"), T0.AddSeconds(4));
+        check("Once the pointer has left the open panel, other screens show arriving notices again", other.Current("b")?.Key == "after" && !other.AnyOpen);
+
         var busy = new AttentionCoordinator();
         busy.Submit(Item("b", AttentionKind.Quota, "q1", seconds: 5), T0);
         busy.SetBusy("b", true, T0.AddSeconds(1));

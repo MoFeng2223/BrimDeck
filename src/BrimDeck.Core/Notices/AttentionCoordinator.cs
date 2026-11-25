@@ -123,6 +123,8 @@ public sealed class AttentionCoordinator
     public IReadOnlyList<AttentionItem> Queued(string lane) => _lanes.TryGetValue(lane, out var state) ? state.Queue : [];
     // The lane's panel is open and staying open: a notice that arrives shows on its notices page, not on the island.
     public bool Open(string lane) => _lanes.TryGetValue(lane, out var state) && state.Busy && !state.Leaving;
+    // A panel on any screen is open and staying open: an arriving notice shows on no island, only on the notices page.
+    public bool AnyOpen => _lanes.Values.Any(state => state.Busy && !state.Leaving);
 
     // The group of a notice: its application and, when it has one, its title (a chat's notifications are titled with the
     // conversation), so that one conversation's messages merge and another's take the island over.
@@ -195,6 +197,8 @@ public sealed class AttentionCoordinator
             if (item.Kind == AttentionKind.Quota || lane.Leaving && item.IsNotice) Enqueue(lane, item);
             return changes;
         }
+        // The panel of another screen is open: the user sees the notice there, so this island does not show it either.
+        if (item.IsNotice && AnyOpen) return changes;
         if (lane.Current is null)
         {
             if (CanStart(item, now)) Start(lane, item, now, changes);
@@ -277,6 +281,8 @@ public sealed class AttentionCoordinator
     }
 
     // The lane's panel is open. Its notices are on the panel's notices page; what was showing ends (a quota alert waits).
+    // The user has opened a panel: the notices that show or wait on the other panels end as well, whatever this panel showed
+    // (another notice, nothing because its profile shows no notices). Their quota alerts and track changes stay.
     public IReadOnlyList<AttentionChange> SetBusy(string laneName, bool busy, DateTimeOffset now)
     {
         var changes = new List<AttentionChange>();
@@ -288,6 +294,16 @@ public sealed class AttentionCoordinator
             lane.Held = false;
             if (lane.Current is not null) End(lane, now, changes, requeue: lane.Current.Kind == AttentionKind.Quota);
             lane.Queue.RemoveAll(item => item.Kind != AttentionKind.Quota);
+            foreach (var other in _lanes.Values)
+            {
+                if (other == lane) continue;
+                other.Queue.RemoveAll(item => item.IsNotice);
+                if (other.Current is { IsNotice: true })
+                {
+                    End(other, now, changes, requeue: false);
+                    if (!other.Busy) StartNext(other, now, changes);
+                }
+            }
         }
         else StartNext(lane, now, changes);
         return changes;

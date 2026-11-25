@@ -19,8 +19,12 @@ public partial class MainWindow
     private static readonly TimeSpan TrackNoticeTime = TimeSpan.FromSeconds(4);
     private IslandNotice? _noticeWindow;
     private bool _noticesSubscribed, _noticesRenderQueued, _keepPageOnOpen;
-    // Notices not seen before the page opened; they keep their dot while it stays open.
+    // Notices not seen before the page opened; each keeps its dot until it is shown in the focus (_readOnPage).
     private HashSet<string> _freshNotices = [];
+    // Those of _freshNotices shown in the focus since the page opened: their dot is gone. The unread list keeps them until it is
+    // chosen again, so that a row does not vanish from under the pointer as it is clicked.
+    private readonly HashSet<string> _readOnPage = new(StringComparer.Ordinal);
+    private bool Fresh(Notice notice) => _freshNotices.Contains(notice.Id) && !_readOnPage.Contains(notice.Id);
     // The rows the page lists, with the revision each was built from, and what else the page was built from (see UpdateNoticeRows).
     private readonly List<(Notice Notice, int Revision, string Key, FrameworkElement Row)> _pageRows = [];
     private string _pageKey = "";
@@ -256,10 +260,11 @@ public partial class MainWindow
 
     private void NoticesPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Notices);
 
-    // The page is on screen: everything listed counts as seen; what was new keeps its dot until the page closes.
+    // The page is on screen: everything listed counts as seen; what was new keeps its dot until it is shown in the focus.
     private void NoticesPageShown()
     {
         _freshNotices = _app.Notices.Hub.Notices.Where(n => !n.Viewed).Select(n => n.Id).ToHashSet();
+        _readOnPage.Clear();
         _noticeEarlier = false;
         _app.Notices.Hub.MarkAllViewed();
     }
@@ -435,7 +440,7 @@ public partial class MainWindow
         foreach (var notice in notices)
         {
             string key = Conversation(notice);
-            bool fresh = _freshNotices.Contains(notice.Id);
+            bool fresh = Fresh(notice);
             if (_conversations.TryGetValue(key, out var seen)) { _conversations[key] = (seen.Count + 1, seen.Fresh || fresh); continue; }
             _conversations[key] = (1, fresh);
             heads.Add(notice);
@@ -443,7 +448,7 @@ public partial class MainWindow
         return heads;
     }
 
-    private (int Count, bool Fresh) ConversationOf(Notice notice) => _conversations.TryGetValue(Conversation(notice), out var found) ? found : (1, _freshNotices.Contains(notice.Id));
+    private (int Count, bool Fresh) ConversationOf(Notice notice) => _conversations.TryGetValue(Conversation(notice), out var found) ? found : (1, Fresh(notice));
 
     private Notice? FocusedNotice(NoticeCenter center)
     {
@@ -478,6 +483,7 @@ public partial class MainWindow
         var now = DateTimeOffset.UtcNow;
         _pageKey = NoticePageKey(center); _noticeLayout = NoticeLayout();
         var focus = FocusedNotice(center);
+        MarkReadOnPage(center, focus);
         KeepNoticeForm(focus);
         _focusKey = FocusKey(focus, now);
         if (focus is null) { NoticesContent.Children.Add(_pageEmpty = Empty(center)); WatchPageLive(); return; }
@@ -494,6 +500,23 @@ public partial class MainWindow
         if (refocus is not null && _pageRows.FirstOrDefault(r => r.Notice.Id == refocus).Row is { } focused)
             Dispatcher.BeginInvoke(() => focused.Focus(), System.Windows.Threading.DispatcherPriority.Input);
         WatchPageLive();
+    }
+
+    // The notice in the focus has been read, with the rest of its conversation, which the focus shows under it: their dots go.
+    private void MarkReadOnPage(NoticeCenter center, Notice? focus)
+    {
+        if (focus is null || _freshNotices.Count == 0) return;
+        string conversation = Conversation(focus);
+        foreach (var notice in center.Hub.Notices)
+            if (_freshNotices.Contains(notice.Id) && Conversation(notice) == conversation) _readOnPage.Add(notice.Id);
+    }
+
+    // The unread list from now on leaves out what was read on the page; a new set, so that the page key changes.
+    private void ShowUnreadOnly()
+    {
+        if (_readOnPage.Count > 0) { _freshNotices = _freshNotices.Where(id => !_readOnPage.Contains(id)).ToHashSet(); _readOnPage.Clear(); }
+        _noticeUnread = true;
+        RenderNotices();
     }
 
     private ScrollViewer? _pageScroll;
@@ -952,7 +975,7 @@ public partial class MainWindow
         var switcher = new StackPanel { Orientation = Orientation.Horizontal };
         var frame = new Border { CornerRadius = new CornerRadius(6), Background = UI.Brush(UI.Fill), Padding = new Thickness(1), Child = switcher, Margin = new Thickness(6, 0, 0, 0) };
         switcher.Children.Add(Segment(Loc.T("全部", "All"), !_noticeUnread, () => { _noticeUnread = false; RenderNotices(); }));
-        switcher.Children.Add(Segment(Loc.T("未读", "Unread"), _noticeUnread, () => { _noticeUnread = true; RenderNotices(); }));
+        switcher.Children.Add(Segment(Loc.T("未读", "Unread"), _noticeUnread, ShowUnreadOnly));
         tools.Children.Add(frame);
         head.Children.Add(tools);
 

@@ -66,7 +66,7 @@ Levels 2 and 3 can each have a sound; level 1 has none:
 
 - Level 2's sound plays once as the notice shows. A notice plays it once, two sounds are at least a second apart, and a notice that no longer flashes because more than 3 arrived within 10 seconds plays none.
 - Level 3's sound loops, its end joining its start without a pause, until the notice ends (the panel is opened, it is handled or closed, or after 3 minutes unless its sender says otherwise). No other sound plays over a loop.
-- A notice that arrives while the panel is open only shows on the notices page; its sound plays once, a level 3 sound a single round.
+- A notice that arrives while the panel is open only shows on the notices page; its sound plays once, a level 3 sound a single round. With several screens, a notice that arrives while the panel is open on any of them does not show on the others either.
 
 The built-in sounds are made by BrimDeck as they play: Drop, Ding, Two notes, Arpeggio, Knock and Chord for level 2, and Marimba, Chimes, Morning, Phone and Beeps for level 3. Choosing one in the list plays it once.
 
@@ -84,7 +84,7 @@ The level is the first of these that applies:
 
 A notice that stays ends when:
 
-- you click it, rest the pointer on it so the notices page opens, or open the panel;
+- you click it, rest the pointer on it so the notices page opens, or open the panel (on any screen: it ends on every screen, even when they use different profiles);
 - its source no longer has it: it was cleared from Windows' notification center (BrimDeck finds out the next time it reads the whole list), the alarm or countdown was stopped, the sender closed it with `brim-notify close` or sent the same `-r` key again at another level;
 - it has shown for 3 minutes.
 
