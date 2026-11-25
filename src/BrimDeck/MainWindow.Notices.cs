@@ -838,7 +838,7 @@ public partial class MainWindow
             copyAll = GlyphPill("", copyName, () => SayCopied(copyAll!, CopyWords(text), copyName));
             flow.Add(copyAll);
         }
-        if (NoticeTodoButton(notice) is { } todo) flow.Add(todo);
+        foreach (var add in NoticeAddButtons(notice)) flow.Add(add);
         // The notice's own buttons that can still do something (NoticeCenter.Buttons): one that answers its sender while the sender
         // waits, one that copies or opens always. The sender's main button is the page's main one when no application can be opened.
         var own = center.Buttons(notice);

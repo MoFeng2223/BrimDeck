@@ -12,8 +12,8 @@ using ShapePath = System.Windows.Shapes.Path;
 namespace BrimDeck;
 
 // The notices page's way into the planner (NoticeAgenda): a strip between the focus's words and its buttons with the times read
-// from the notice ("加入日程"), what it already added ("查看", "撤销") or its verification code ("复制验证码"); a round button that
-// makes a notice of plain words today's to-do; and the colored words at the start of a row's second line in the list.
+// from the notice ("加入日程"), what it already added ("查看", "撤销") or its verification code ("复制验证码"); two round buttons
+// that add a notice of plain words as an event or as today's to-do; and the colored words at the start of a row's second line.
 public partial class MainWindow
 {
     // Whether the page offers to add notices to the planner: only while the planner page is on (a planner switched off in the
@@ -267,16 +267,32 @@ public partial class MainWindow
         _app.Agenda.Book.AddEvent(NoticeAgenda.EventTitle(notice, time), moment.Start, moment.End, moment.AllDay, DateTime.Now, source: AgendaSource.From(notice));
     }
 
-    // ----- The to-do button -----
+    // ----- The event and to-do buttons -----
 
-    // After delete and copy in the button row: a notice of plain words, not added yet, becomes today's to-do.
-    private Button? NoticeTodoButton(Notice notice)
+    // After delete and copy in the button row, for a notice of plain words not added yet: "加入日程" opens the form as an event
+    // starting at the next half hour, to set its time; "加入待办" makes it today's to-do at once.
+    private Button[] NoticeAddButtons(Notice notice)
     {
-        if (!OfferOf(notice, DateTime.Now).Todo || NoticeAgenda.TodoText(notice) is not { Length: > 0 } text) return null;
-        string name = Loc.T("加入待办", "Add to to-dos");
-        var button = PillButton("", name, () => _app.Agenda.Book.AddTodo(text, DateOnly.FromDateTime(DateTime.Today), DateTime.Now, source: AgendaSource.From(notice)));
+        // Not while the form is open for the notice: its own buttons add it then.
+        if (NoticeFormOpen(notice) || !OfferOf(notice, DateTime.Now).Todo || NoticeAgenda.TodoText(notice) is not { Length: > 0 } text) return [];
+        return
+        [
+            RoundGlyphButton(CalendarAddIcon, Loc.T("加入日程", "Add event"), () =>
+            {
+                var now = DateTime.Now;
+                var start = AgendaCalendar.NewEventStart(DateOnly.FromDateTime(now), now);
+                ShowNoticeForm(notice, null, null, false, text, start, start.AddHours(1), false, DateOnly.FromDateTime(start), true);
+            }),
+            RoundGlyphButton(ListAddIcon, Loc.T("加入待办", "Add to to-dos"),
+                () => _app.Agenda.Book.AddTodo(text, DateOnly.FromDateTime(DateTime.Today), DateTime.Now, source: AgendaSource.From(notice)))
+        ];
+    }
+
+    private Button RoundGlyphButton(string icon, string name, Action click)
+    {
+        var button = PillButton("", name, click);
         var face = (Border)button.Content;
-        var glyph = StripGlyph(CalendarAddIcon, 15, UI.Primary);
+        var glyph = StripGlyph(icon, 15, UI.Primary);
         glyph.HorizontalAlignment = HorizontalAlignment.Center;
         face.Child = glyph; face.Padding = new Thickness(0); button.Width = 32; button.ToolTip = name;
         return button;
@@ -419,9 +435,10 @@ public partial class MainWindow
         return $"#{(byte)Math.Round(alpha * 255):X2}{Mix(a.R, b.R):X2}{Mix(a.G, b.G):X2}{Mix(a.B, b.B):X2}";
     }
 
-    // Line icons drawn on a 24 box (as the design's): a calendar, a calendar with a plus, a check, a key.
+    // Line icons drawn on a 24 box (as the design's): a calendar, a calendar with a plus, a list with a plus, a check, a key.
     private const string CalendarIcon = "M 8,2 V 6 M 16,2 V 6 M 5,4 H 19 A 2,2 0 0 1 21,6 V 20 A 2,2 0 0 1 19,22 H 5 A 2,2 0 0 1 3,20 V 6 A 2,2 0 0 1 5,4 Z M 3,10 H 21";
     private const string CalendarAddIcon = "M 8,2 V 6 M 16,2 V 6 M 21,13 V 6 A 2,2 0 0 0 19,4 H 5 A 2,2 0 0 0 3,6 V 20 A 2,2 0 0 0 5,22 H 13 M 3,10 H 21 M 16,19 H 22 M 19,16 V 22";
+    private const string ListAddIcon = "M 11,12 H 3 M 16,6 H 3 M 16,18 H 3 M 18,9 V 15 M 21,12 H 15";
     private const string CheckIcon = "M 20,6 L 9,17 L 4,12";
     private const string CloseIcon = "M 18,6 L 6,18 M 6,6 L 18,18";
     private const string PencilIcon = "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5zM15 5l4 4";

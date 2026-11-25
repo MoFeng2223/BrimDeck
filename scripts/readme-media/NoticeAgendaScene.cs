@@ -8,7 +8,7 @@ using BrimDeck.Core.Notices;
 namespace ReadmeMedia;
 
 // The notices page's strip between the focus's words and its buttons, with invented notices: a time read from a title ("加入日程"),
-// the event added, a notice of plain words with its "加入待办" button and after it was added, a verification code, a long title and
+// the event added, a notice of plain words with its "加入日程" and "加入待办" buttons and after it was added, a verification code, a long title and
 // body with two times, the narrowest page, the English interface and the light theme. The planner's data is made on a folder of its
 // own and thrown away; no notice source is started. For checking against the design, not for the README.
 internal sealed partial class Renderer
@@ -80,6 +80,13 @@ internal sealed partial class Renderer
             var added = book.FromNotice(notice.Id);
             Program.Call(_deck, "OpenNoticeForm", [typeof(Notice), typeof(AgendaEvent), typeof(AgendaTodo), typeof(bool)], notice, added.Events.LastOrDefault(), added.Todos.LastOrDefault(), false);
         }
+        // "加入日程" of a notice of plain words: the form as an event at the next half hour.
+        void PlainForm(Notice notice)
+        {
+            var start = AgendaCalendar.NewEventStart(DateOnly.FromDateTime(DateTime.Now), DateTime.Now);
+            Program.Call(_deck, "ShowNoticeForm", [typeof(Notice), typeof(string), typeof(string), typeof(bool), typeof(string), typeof(DateTime), typeof(DateTime), typeof(bool), typeof(DateOnly), typeof(bool)],
+                notice, null, null, false, NoticeAgenda.TodoText(notice), start, start.AddHours(1), false, DateOnly.FromDateTime(start), false);
+        }
         void AddEvent(Notice notice, int index = 0)
         {
             var time = NoticeAgenda.Read(notice, TimeZoneInfo.Local).Times[index];
@@ -90,6 +97,8 @@ internal sealed partial class Renderer
         {
             await Shot("1-times", meeting);
             await Shot("2-todo-button", chat);
+            await Shot("2b-narrow-todo-button", chat, 460, 280);
+            await FormShot("form-0-plain-event", chat, () => PlainForm(chat));
             await Shot("3-code", code);
             await Shot("4-long-two-times", longer);
             await Shot("5-narrow-two-times", longer, 460, 280);
