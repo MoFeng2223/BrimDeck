@@ -307,7 +307,7 @@ internal sealed partial class NoticeCenter : IDisposable
         {
             // One conversation's messages (the application and the title) merge into one notice.
             Lane = lane, Kind = AttentionKind.Notice, Key = notice.Id, Group = AttentionCoordinator.GroupOf(notice.AppKey, notice.Title),
-            Priority = notice.Priority, Payload = notice, Refresh = refresh, Level = level, Style = style, Limit = notice.Timeout,
+            Priority = notice.Priority, Payload = notice, Refresh = refresh, Level = level, Style = style, Limit = StayLimit(notice),
             // A ringing call is as urgent as an alarm; the user can still make its application low priority (NoticeHub).
             Urgent = NoticeClock.Alerting(notice.Timing, now) || notice.Call && notice.Priority != NoticePriority.Low,
             Duration = TimeSpan.FromSeconds(style.Seconds)
@@ -315,8 +315,16 @@ internal sealed partial class NoticeCenter : IDisposable
     }
 
     // How strongly the notice shows on the island now (NoticeLevels.Resolve), by the user's rule for its application, what it
-    // is, what its sender asked and the default level of the settings.
-    internal NoticeLevel Level(Notice notice, DateTimeOffset now) => NoticeLevels.Resolve(notice, Settings.NoticeRule(notice.AppKey), Settings.NoticeDefaultLevel, now);
+    // is and what its sender asked.
+    internal NoticeLevel Level(Notice notice, DateTimeOffset now) => NoticeLevels.Resolve(notice, Settings.NoticeRule(notice.AppKey), now);
+
+    // How long a level-3 notice stays on the island at most: the settings' time, or the sender's (Notice.Timeout) when shorter.
+    // The sender's wait for an answer runs its own time (BeginWait); the notice stays on the notices page.
+    private TimeSpan StayLimit(Notice notice)
+    {
+        var most = TimeSpan.FromSeconds(Settings.NoticeStaySeconds);
+        return notice.Timeout is { } asked && asked < most ? asked : most;
+    }
 
     // Shows the notice on every panel whose profile shows notices. Each panel has its own item with the notice's key, so that
     // handling it on one screen ends it on all (Withdraw).
@@ -838,12 +846,9 @@ internal sealed partial class NoticeCenter : IDisposable
         return (WindowsSyncStatus.Done, removed.Count, added);
     }
 
-    // A notice of BrimDeck's own, to try the look and the placement. It is never sent to Windows, so it cannot come back
-    // through the notification list. It shows at the default level of the settings and with their alignment.
-    public void SendTest() => SendTest(NoticeLevel.Auto);
-
-    // level, align: to try one level or alignment; Auto and null take the settings'. BrimDeck's own features show their
-    // notices the same way: Receive with a NoticeInput that names its Level and Align.
+    // A notice of BrimDeck's own, to try a level's look or an alignment (null takes the settings'). It is never sent to Windows,
+    // so it cannot come back through the notification list. BrimDeck's own features show their notices the same way: Receive
+    // with a NoticeInput that names its Level and Align.
     public void SendTest(NoticeLevel level, NoticeAlign? align = null)
     {
         Receive(new NoticeInput
@@ -851,7 +856,7 @@ internal sealed partial class NoticeCenter : IDisposable
             Origin = NoticeOrigin.Test, AppKey = TestAppKey, AppName = "BrimDeck", InstanceKey = "test:" + Guid.NewGuid().ToString("N"),
             Title = Loc.T("灵动提示测试", "Live notice test"),
             Body = Loc.T("通知会在岛上显示。鼠标移上去即可打开通知页。", "Notices show on the island. Rest the pointer on it to open the notices page."),
-            Category = NoticeCategory.Info, Level = level == NoticeLevel.Auto ? Settings.NoticeDefaultLevel : level, Align = align
+            Category = NoticeCategory.Info, Level = level, Align = align
         });
     }
 
@@ -987,8 +992,8 @@ internal sealed partial class NoticeCenter : IDisposable
         foreach (var lane in Lanes())
             Apply(Attention.Submit(new AttentionItem
             {
-                Lane = lane, Kind = AttentionKind.Summary, Key = "summary:" + now.Ticks, Payload = arrived, Level = Settings.NoticeDefaultLevel,
-                Style = Settings.NoticeStyles.For(Settings.NoticeDefaultLevel), Duration = TimeSpan.FromSeconds(Settings.NoticeStyles.For(Settings.NoticeDefaultLevel).Seconds)
+                Lane = lane, Kind = AttentionKind.Summary, Key = "summary:" + now.Ticks, Payload = arrived, Level = NoticeLevel.Glow,
+                Style = Settings.NoticeStyles.Flash, Duration = TimeSpan.FromSeconds(Settings.NoticeStyles.Flash.Seconds)
             }, now));
     }
 

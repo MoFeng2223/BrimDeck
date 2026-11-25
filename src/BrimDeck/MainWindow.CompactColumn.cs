@@ -33,16 +33,7 @@ public partial class MainWindow
         bool media = Settings.ShowsMusic(EffectiveStyle) && _mediaTrack is { State: not MediaState.Stopped };
         bool cover = media && !PausedHides(PausedMusicHide.Cover), hideText = PausedHides(PausedMusicHide.Text);
         bool equalizer = CompactEqualizerShown;
-        string text = "";
-        if (media && !hideText)
-        {
-            if (Settings.MusicText == CompactMusicText.Title) text = _mediaTrack!.Caption;
-            else if (Settings.MusicText == CompactMusicText.Lyrics)
-            {
-                _compactLyric = CurrentLyrics(_mediaTrack!).Current;
-                text = CompactLyricText(_mediaTrack!, _compactLyric);
-            }
-        }
+        string text = media && !hideText ? CompactMusicLine(_mediaTrack!) : "";
         var apps = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps : [];
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor, Look), DateTime.Now, scale, Look, ClockDate.Of(Settings)) : null;
         var transfer = TransferBadge(scale);

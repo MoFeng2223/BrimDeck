@@ -697,7 +697,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                 // The current theme's application colors go back to its own; the other themes keep what was saved for them.
                 case 3:{var previous=s.Apps;s.QuotaAlerts=defaults.QuotaAlerts;s.IncludeWsl=defaults.IncludeWsl;s.QuotaRingStyle=defaults.QuotaRingStyle;s.QuotaRingRemaining=defaults.QuotaRingRemaining;s.QuotaRingLetters=defaults.QuotaRingLetters;s.Apps=defaults.Apps;PanelThemes.CarryAppChoices(s,previous);break;}
                 case 5:s.EqualizerAlways=defaults.EqualizerAlways;s.EqualizerBars=defaults.EqualizerBars;s.EqualizerMode=defaults.EqualizerMode;s.EqualizerColor=defaults.EqualizerColor;s.EqualizerCustomColor=defaults.EqualizerCustomColor;
-                    s.MusicText=defaults.MusicText;s.MusicEqualizerBars=defaults.MusicEqualizerBars;s.MusicTrackNotice=defaults.MusicTrackNotice;s.MusicPausedHide=defaults.MusicPausedHide;s.MusicInstrumentalTitle=defaults.MusicInstrumentalTitle;s.MusicLyricAutoWidth=defaults.MusicLyricAutoWidth;s.MusicTitleAutoWidth=defaults.MusicTitleAutoWidth;s.MusicCompactCover=defaults.MusicCompactCover;s.MusicPageCover=defaults.MusicPageCover;s.LyricsEnabled=defaults.LyricsEnabled;s.MusicSimulatedKaraoke=defaults.MusicSimulatedKaraoke;s.MusicLyricsLayout=defaults.MusicLyricsLayout;s.MusicLyricsAlign=defaults.MusicLyricsAlign;
+                    s.MusicText=defaults.MusicText;s.MusicEqualizerBars=defaults.MusicEqualizerBars;s.MusicTrackNotice=defaults.MusicTrackNotice;s.MusicTrackNoticeInPart=defaults.MusicTrackNoticeInPart;s.MusicPausedHide=defaults.MusicPausedHide;s.MusicInstrumentalTitle=defaults.MusicInstrumentalTitle;s.MusicLyricAutoWidth=defaults.MusicLyricAutoWidth;s.MusicTitleAutoWidth=defaults.MusicTitleAutoWidth;s.MusicCompactCover=defaults.MusicCompactCover;s.MusicPageCover=defaults.MusicPageCover;s.LyricsEnabled=defaults.LyricsEnabled;s.MusicSimulatedKaraoke=defaults.MusicSimulatedKaraoke;s.MusicLyricsLayout=defaults.MusicLyricsLayout;s.MusicLyricsAlign=defaults.MusicLyricsAlign;
                     s.MusicLyricColor=defaults.MusicLyricColor;s.MusicLyricCustomColor=defaults.MusicLyricCustomColor;break;
                 case MusicGesturesPage:s.MusicDragLeft=defaults.MusicDragLeft;s.MusicDragRight=defaults.MusicDragRight;s.MusicDragUp=defaults.MusicDragUp;s.MusicDragDown=defaults.MusicDragDown;
                     s.MusicSwipeLeft=defaults.MusicSwipeLeft;s.MusicSwipeRight=defaults.MusicSwipeRight;break;
@@ -708,7 +708,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                     s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=[.. palette.ClockGradients[0].Stops];
                     PanelThemes.ApplyMatching(palette,s);break;}
                 // The two switches (collapsed and expanded view) and the applications (the other page) stay as they are.
-                case NoticesSettingsPage:s.NoticeDefaultLevel=defaults.NoticeDefaultLevel;s.NoticeStyles=new();s.NoticeSoundVolume=defaults.NoticeSoundVolume;s.NoticeStripIcons=defaults.NoticeStripIcons;s.NoticeAgentsMerged=defaults.NoticeAgentsMerged;
+                case NoticesSettingsPage:s.NoticeStyles=new();s.NoticeStaySeconds=defaults.NoticeStaySeconds;s.NoticeSoundVolume=defaults.NoticeSoundVolume;s.NoticeStripIcons=defaults.NoticeStripIcons;s.NoticeAgentsMerged=defaults.NoticeAgentsMerged;
                     s.NoticeCodes=defaults.NoticeCodes;s.NoticeRespectFocus=defaults.NoticeRespectFocus;s.NoticesPausedUntil=null;s.NoticeHistory=defaults.NoticeHistory;s.NoticeHistoryHours=defaults.NoticeHistoryHours;break;
                 // The list goes back to the applications a new user has; the WSL distributions stay, as they are set up in them.
                 case NoticeAppsSettingsPage:s.NoticeApps=[.. DeckSettings.DefaultNoticeApps()];s.NoticeAppsListed=true;break;
@@ -1303,11 +1303,18 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     }
 
     private Grid SliderRow(string title, double value, double min, double max, double tick, string unit, Action<double> changed, string? help = null)
+        => SliderRow(title, value, min, max, tick, unit, changed, help, null);
+
+    // A slider row through the given values only (NumericControls).
+    private Grid StepsRow(string title, double value, double[] steps, string unit, Action<double> changed, string? help = null)
+        => SliderRow(title, value, steps[0], steps[^1], 1, unit, changed, help, steps);
+
+    private Grid SliderRow(string title, double value, double min, double max, double tick, string unit, Action<double> changed, string? help, double[]? steps)
     {
         var row=new Grid { Height=44 };
         row.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(174)});row.ColumnDefinitions.Add(new ColumnDefinition());row.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
         row.Children.Add(SettingLabel(title, help is null ? null : () => help));
-        var controls=NumericControls(title,value,min,max,tick,unit,changed);controls.Slider.Margin=new Thickness(0,0,18,0);Grid.SetColumn(controls.Slider,1);row.Children.Add(controls.Slider);Grid.SetColumn(controls.Number,2);controls.Number.VerticalAlignment=VerticalAlignment.Center;row.Children.Add(controls.Number);
+        var controls=NumericControls(title,value,min,max,tick,unit,changed,steps);controls.Slider.Margin=new Thickness(0,0,18,0);Grid.SetColumn(controls.Slider,1);row.Children.Add(controls.Slider);Grid.SetColumn(controls.Number,2);controls.Number.VerticalAlignment=VerticalAlignment.Center;row.Children.Add(controls.Number);
         return row;
     }
 

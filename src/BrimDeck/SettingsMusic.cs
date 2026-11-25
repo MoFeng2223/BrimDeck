@@ -282,9 +282,10 @@ public sealed partial class SettingsWindow
                 (PausedMusicHide.Cover, Loc.T("封面", "Cover")), (PausedMusicHide.Both, Loc.T("全部", "Both")) }, v => Change(s => s.MusicPausedHide = v),
                 help: Loc.T("音乐暂停时，收起状态下隐藏所选内容，恢复播放后重新显示。“文字”指按“中间文字”显示的歌名或歌词；“全部”指文字和封面，不包括律动条。",
                     "While music is paused, the chosen part is hidden when collapsed and comes back when playback resumes. \"Text\" is the title or lyric shown by \"Middle text\"; \"Both\" is the text and the cover, not the equalizer.")),
-            Toggle(Loc.T("切歌时短暂显示歌名", "Briefly show the title on a track change"), S.MusicTrackNotice, v => Change(s => s.MusicTrackNotice = v),
-                help: Loc.T("切歌时，歌名和歌手像通知一样显示在整个岛上，位置跟随“灵动提示 › 文字位置”。指示条形态不显示文字。",
-                    "On a track change the title and artist show across the whole island, as a notice does, placed by \"Live notices › Text position\". The indicator shows no words.")),
+            Toggle(Loc.T("切歌时短暂显示歌名", "Briefly show the title on a track change"), S.MusicTrackNotice, v => { Change(s => s.MusicTrackNotice = v); ShowPage(_page); },
+                help: Loc.T("切歌时，歌名和歌手像通知一样显示在岛上。指示条形态不显示文字。",
+                    "On a track change the title and artist show on the island, as a notice does. The indicator shows no words.")),
+            .. TrackNoticePlace(),
             Toggle(Loc.T("显示封面", "Show cover"), S.MusicCompactCover, v => Change(s => s.MusicCompactCover = v))]);
         SectionTitle(Loc.T("展开时", "When expanded"));
         var lyricColor = Row(Loc.T("当前歌词颜色", "Current lyric color"), ColorSwatches("MusicLyricColor", Loc.T("当前歌词颜色 ", "Current lyric color "),
@@ -611,4 +612,13 @@ public sealed partial class SettingsWindow
         }
         QuickSizeRow(sizes);
     }
+
+    // Where a track change's title shows, offered while it shows at all: the whole island, or the music part's place only.
+    private FrameworkElement[] TrackNoticePlace() => !S.MusicTrackNotice ? [] :
+    [
+        MusicChoice(Loc.T("歌名显示位置", "Title shows in"), S.MusicTrackNoticeInPart, [(false, Loc.T("整个岛", "Whole island")), (true, Loc.T("音乐区域", "Music area"))],
+            v => Change(s => s.MusicTrackNoticeInPart = v),
+            help: Loc.T("选择“音乐区域”时，歌名和歌手在音乐区域的文字位置显示几秒，代替歌词，之后恢复。“中间文字”为“无”时仍显示在整个岛上。",
+                "With Music area, the title and artist show for a few seconds where the music part's words are, in place of the lyric, which then comes back. With Middle text set to None, they still show across the whole island."), width: 200)
+    ];
 }

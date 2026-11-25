@@ -129,11 +129,18 @@ public sealed partial class SettingsWindow
         return new Border { Child = host, Background = UI.Brush(Inset), CornerRadius = new CornerRadius(7), Padding = new Thickness(3), Margin = new Thickness(0, 4, 0, 4) };
     }
 
-    private (Slider Slider, Border Number) NumericControls(string title, double value, double min, double max, double tick, string unit, Action<double> changed)
+    // A slider and its framed number. With steps, the slider moves through those values (not evenly apart) and a typed number
+    // takes the nearest of them; without, through whole numbers from min to max by tick.
+    private (Slider Slider, Border Number) NumericControls(string title, double value, double min, double max, double tick, string unit, Action<double> changed, double[]? steps = null)
     {
-        var slider = new Slider { Style=(Style)FindResource("SettingsSlider"),Minimum=min,Maximum=max,Value=Math.Clamp(value,min,max),
+        // The slider's position of a number, and the number of a position.
+        double Position(double number) => steps is null ? Math.Clamp(Math.Round(number),min,max) : Array.IndexOf(steps,steps.MinBy(step=>Math.Abs(step-number)));
+        double Number(double position) => steps is null ? position : steps[(int)Math.Round(position)];
+        string Shown(double position) => Number(position).ToString(steps is null ? "0" : "0.#",CultureInfo.InvariantCulture);
+        if(steps is not null){min=0;max=steps.Length-1;tick=1;}
+        var slider = new Slider { Style=(Style)FindResource("SettingsSlider"),Minimum=min,Maximum=max,Value=Position(value),
             SmallChange=tick,LargeChange=tick*2,TickFrequency=tick,IsSnapToTickEnabled=true,IsMoveToPointEnabled=true,VerticalAlignment=VerticalAlignment.Center };
-        var input = new TextBox { Style=(Style)FindResource("SettingsNumber"),Width=40,Text=slider.Value.ToString("0",CultureInfo.InvariantCulture),VerticalAlignment=VerticalAlignment.Center };
+        var input = new TextBox { Style=(Style)FindResource("SettingsNumber"),Width=40,Text=Shown(slider.Value),VerticalAlignment=VerticalAlignment.Center };
         AutomationProperties.SetName(slider,title); AutomationProperties.SetName(input,Loc.T(title+"数值", title+" value"));
         var units=TextLine(unit,10,TextTertiary);units.Margin=new Thickness(4,0,6,0);units.VerticalAlignment=VerticalAlignment.Center;
         var minus=new RepeatButton { Style=(Style)FindResource("SettingsStepper"),Content="−" };
@@ -142,21 +149,21 @@ public sealed partial class SettingsWindow
         // The framed box: the number, its unit, a divider and the steppers (NumberBox).
         var chip=NumberBox.Create(input,units,minus,plus,UI.Brush(Divider),UI.Brush(_palette.Input),UI.Brush(_palette.InputBorder));
         FieldFocus(chip, input, () => UI.Brush(_palette.InputBorder));
-        void Set(double number)
+        void Move(double position)
         {
-            var next=Math.Clamp(Math.Round(number),min,max);
-            if(Math.Abs(slider.Value-next)<.01) { input.Text=next.ToString("0",CultureInfo.InvariantCulture);return; }
+            var next=Math.Clamp(Math.Round(position),min,max);
+            if(Math.Abs(slider.Value-next)<.01) { input.Text=Shown(next);return; }
             slider.Value=next;
         }
-        slider.ValueChanged+=(_,_)=>{input.Text=slider.Value.ToString("0",CultureInfo.InvariantCulture);changed(slider.Value);};
+        slider.ValueChanged+=(_,_)=>{input.Text=Shown(slider.Value);changed(Number(slider.Value));};
         void Commit()
         {
-            if(double.TryParse(input.Text,NumberStyles.Float,CultureInfo.InvariantCulture,out var number)&&double.IsFinite(number))Set(number);
-            input.Text=slider.Value.ToString("0",CultureInfo.InvariantCulture);
+            if(double.TryParse(input.Text,NumberStyles.Float,CultureInfo.InvariantCulture,out var number)&&double.IsFinite(number))Move(Position(number));
+            input.Text=Shown(slider.Value);
         }
-        minus.Click+=(_,_)=>Set(slider.Value-tick);plus.Click+=(_,_)=>Set(slider.Value+tick);
+        minus.Click+=(_,_)=>Move(slider.Value-tick);plus.Click+=(_,_)=>Move(slider.Value+tick);
         input.LostKeyboardFocus+=(_,_)=>Commit();
-        input.KeyDown+=(_,e)=>{if(e.Key==Key.Enter){Commit();e.Handled=true;}if(e.Key==Key.Escape){input.Text=slider.Value.ToString("0",CultureInfo.InvariantCulture);e.Handled=true;}};
+        input.KeyDown+=(_,e)=>{if(e.Key==Key.Enter){Commit();e.Handled=true;}if(e.Key==Key.Escape){input.Text=Shown(slider.Value);e.Handled=true;}};
         return(slider,chip);
     }
     private FrameworkElement Dimension(string title, double value, double min, double max, Action<double> changed)

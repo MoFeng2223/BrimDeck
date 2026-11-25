@@ -566,42 +566,44 @@ internal static class NoticeCoreTests
         var defaults = new DeckSettings();
         defaults.Normalize();
         check("Notices are on by default, with no WSL distribution, flashing, and QQ, WeChat and the Clock listed", defaults.NoticesEnabled && defaults.NoticeWslDistros.Count == 0
-            && defaults.NoticeHistory && defaults.NoticeHistoryHours == 24 && defaults.NoticeHotkey == "" && defaults.NoticeDefaultLevel == NoticeLevel.Glow
-            && defaults.NoticeStyles.Text.Seconds == 6 && !defaults.NoticeStyles.Flash.Liquid && defaults.NoticeStyles.Stay.Liquid && defaults.NoticeStyles.Stay.Color == ""
+            && defaults.NoticeHistory && defaults.NoticeHistoryHours == 24 && defaults.NoticeHotkey == ""
+            && defaults.NoticeStyles.Text.Seconds == 3 && defaults.NoticeStyles.Flash.Seconds == 3 && !defaults.NoticeStyles.Flash.Liquid && defaults.NoticeStyles.Stay.Liquid && defaults.NoticeStyles.Stay.Color == ""
             && defaults.NoticeApps.Select(rule => rule.Key).SequenceEqual(["windows:QQ", "flash:wechat", "windows:Microsoft.WindowsAlarms_8wekyb3d8bbwe!App"]) && defaults.NoticeAppsListed);
         check("Every Windows application and source is received unless switched off; a taskbar-flash chat only once listed", defaults.NoticeReceives("windows:QQ")
             && defaults.NoticeReceives("windows:Other") && defaults.NoticeReceives("cli:make") && defaults.NoticeReceives("wsl:Ubuntu:app") && !defaults.NoticeReceives("flash:wecom"));
         var odd = new DeckSettings
         {
-            NoticeDefaultLevel = NoticeLevel.Lively, NoticeHistoryHours = 100_000, NoticesWidth = double.PositiveInfinity, NoticeAppsListed = true,
-            NoticeStyles = new() { Text = new() { Seconds = 0 }, Flash = new() { Color = "nonsense" }, Stay = new() { Color = "ff0000" } },
+            NoticeHistoryHours = 100_000, NoticesWidth = double.PositiveInfinity, NoticeAppsListed = true,
+            NoticeStyles = new() { Flash = new() { Color = "nonsense", Seconds = 0 }, Stay = new() { Color = "ff0000", Seconds = 30 } },
             NoticeWslDistros = ["Ubuntu", " ubuntu ", "", "Debian", @"..\..\server\share", "a b"],
             NoticeApps = [new() { Key = "a", AccentColor = "ff0000", Level = NoticeLevel.Lively }, new() { Key = "a" }, new() { Key = " " }, new() { Key = "windows:Off", Enabled = false, Level = (NoticeLevel)9 }]
         };
         odd.Normalize();
-        check("Notice settings are normalized", odd.NoticeDefaultLevel == NoticeLevel.Glow && odd.NoticeStyles.Text.Seconds == 2
+        check("Notice settings are normalized", odd.NoticeStyles.Flash.Seconds == .5 && odd.NoticeStyles.Stay.Seconds == 10
             && odd.NoticeStyles.Flash.Color == "" && odd.NoticeStyles.Stay.Color == "#FF0000" && odd.NoticeHistoryHours == 720 && odd.NoticesWidth == 460
-            && odd.NoticeWslDistros.SequenceEqual(["Ubuntu", "Debian"]) && odd.NoticeApps.Count == 2 && odd.NoticeApps[0].AccentColor == "#FF0000" && odd.NoticeApps[0].Level == NoticeLevel.Glow
+            && odd.NoticeWslDistros.SequenceEqual(["Ubuntu", "Debian"]) && odd.NoticeApps.Count == 2 && odd.NoticeApps[0].AccentColor == "#FF0000" && odd.NoticeApps[0].Level == NoticeLevel.Auto
             && !odd.NoticeApps[1].Enabled && odd.NoticeApps[1].Level == NoticeLevel.Auto && !odd.NoticeReceives("windows:Off"));
-        var older = new DeckSettings { NoticeApps = [new() { Key = "windows:QQ", Level = NoticeLevel.Plain }, new() { Key = "windows:Mail" }] };
+        var older = new DeckSettings { NoticeApps = [new() { Key = "windows:QQ", Level = NoticeLevel.Silent }, new() { Key = "windows:Mail" }] };
         older.Normalize();
-        check("A list saved before the default applications existed gains them once, keeping its own rules", older.NoticeApps.Count == 4 && older.NoticeRule("windows:QQ")!.Level == NoticeLevel.Plain && older.NoticeAppsListed);
+        check("A list saved before the default applications existed gains them once, keeping its own rules", older.NoticeApps.Count == 4 && older.NoticeRule("windows:QQ")!.Level == NoticeLevel.Silent && older.NoticeAppsListed);
         older.NoticeApps.RemoveAll(rule => rule.Key == "windows:QQ");
         older.Normalize();
         check("A default application the user removed stays removed", older.NoticeRule("windows:QQ") is null);
         var copy = odd.Copy();
-        copy.NoticeApps[0].Styles = new(); copy.NoticeStyles.Text.Icon = false; copy.NoticeWslDistros.Add("Arch");
-        check("Copies do not share notice rules, looks or distributions", odd.NoticeApps[0].Styles is null && odd.NoticeStyles.Text.Icon && odd.NoticeWslDistros.Count == 2);
+        copy.NoticeApps[0].Styles = new(); copy.NoticeStyles.Flash.Icon = false; copy.NoticeWslDistros.Add("Arch");
+        check("Copies do not share notice rules, looks or distributions", odd.NoticeApps[0].Styles is null && odd.NoticeStyles.Flash.Icon && odd.NoticeWslDistros.Count == 2);
         var store = new SettingsStore(Path.Combine(root, "notice-settings"), "1.2.0");
         var saved = new DeckSettings
         {
             NoticeIsland = true, LastPage = DeckPage.Notices, NoticesPausedUntil = T0,
-            NoticeApps = [new() { Key = "windows:X", Name = "X", Level = NoticeLevel.Persistent, Styles = new() { Text = new() { Seconds = 9 } } }]
+            NoticeApps = [new() { Key = "windows:X", Name = "X", Level = NoticeLevel.Silent, Styles = new() { Flash = new() { Seconds = .5 } } }],
+            NoticeStyles = new() { Flash = new() { Seconds = 7 } }
         };
         store.Save(saved);
         var json = File.ReadAllText(store.FilePath);
         var back = store.Load();
         check("Notice settings survive saving", back.NoticeIsland && back.LastPage == DeckPage.Notices && back.NoticesPausedUntil == T0
-            && back.NoticeRule("windows:X") is { Level: NoticeLevel.Persistent, Styles.Text.Seconds: 9 } && JsonDocument.Parse(json).RootElement.GetProperty("LastPage").GetInt32() == 5);
+            && back.NoticeRule("windows:X") is { Level: NoticeLevel.Silent, Styles.Flash.Seconds: .5 } && back.NoticeStyles.Flash.Seconds == 7
+            && !json.Contains("\"Text\":{", StringComparison.Ordinal) && JsonDocument.Parse(json).RootElement.GetProperty("LastPage").GetInt32() == 5);
     }
 }

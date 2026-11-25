@@ -1198,7 +1198,8 @@ public partial class MainWindow
             }
             for (int i = 0; i < _lyricsBelow.Length; i++) _lyricsBelow[i].Text = i < window.After.Count ? window.After[i] : "";
         }
-        if (CompactLyrics && !PausedHides(PausedMusicHide.Text) && _compactLyric != line.Current)
+        // While a track change's title shows in the lyric's place (_trackInPart), the line waits; the row is built again when it ends.
+        if (CompactLyrics && !_trackInPart && !PausedHides(PausedMusicHide.Text) && _compactLyric != line.Current)
         {
             _compactLyric = line.Current;
             // A new line scrolls again, also a line that comes back later in the song.
@@ -1278,6 +1279,15 @@ public partial class MainWindow
         double insets = CollapsedGeometry.SurfaceWidth(style, shape.Surface.Height, 1, _scale) - 1;
         return double.IsFinite(span) && span > 0 ? Math.Max(0, span - Math.Max(0, insets)) : double.PositiveInfinity;
     }
+    // The collapsed music part's words, by its middle text: the title, or the lyric; while a track change shows there
+    // (_trackInPart), the title whatever the middle text.
+    private string CompactMusicLine(MediaTrack track)
+    {
+        if (Settings.MusicText == CompactMusicText.None) return "";
+        if (_trackInPart || Settings.MusicText == CompactMusicText.Title) return track.Caption;
+        _compactLyric = CurrentLyrics(track).Current;
+        return CompactLyricText(track, _compactLyric);
+    }
     // The collapsed lyric: the line, or the title without one, and for an instrumental when chosen (DeckSettings.MusicInstrumentalTitle).
     private string CompactLyricText(MediaTrack track, string line)
         => line.Length == 0 || Settings.MusicInstrumentalTitle && _lyrics.Instrumental ? track.Caption : line;
@@ -1327,16 +1337,7 @@ public partial class MainWindow
         bool media = Settings.ShowsMusic(EffectiveStyle) && _mediaTrack is { State: not MediaState.Stopped };
         bool showCover = Settings.MusicCompactCover && !PausedHides(PausedMusicHide.Cover), hideText = PausedHides(PausedMusicHide.Text);
         bool equalizer = CompactEqualizerShown;
-        string text = "";
-        if (media && !hideText)
-        {
-            if (Settings.MusicText == CompactMusicText.Title) text = _mediaTrack!.Caption;
-            else if (Settings.MusicText == CompactMusicText.Lyrics)
-            {
-                _compactLyric = CurrentLyrics(_mediaTrack!).Current;
-                text = CompactLyricText(_mediaTrack!, _compactLyric);
-            }
-        }
+        string text = media && !hideText ? CompactMusicLine(_mediaTrack!) : "";
         var apps = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps : [];
         var steadyItems = Settings.ShowsSummary(EffectiveStyle) ? QuotaRings(Settings.EnabledApps) : [];
         // The clock keeps its own width; shown alone, it is centred.

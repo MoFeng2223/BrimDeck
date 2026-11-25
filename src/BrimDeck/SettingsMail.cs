@@ -71,7 +71,7 @@ public sealed partial class SettingsWindow
     }
 
     // One mailbox: the service and the address, the connection's state, and at the right what to do when the sign-in was
-    // refused, the level its notices show at, its switch and the cross that removes it.
+    // refused, whether its notices show on the island, its switch and the cross that removes it.
     private FrameworkElement MailRow(MailAccount account)
     {
         var provider = MailProviders.Find(account.Provider);
@@ -91,8 +91,10 @@ public sealed partial class SettingsWindow
         AutomationProperties.SetName(again, (string)again.Content + " " + name);
         var retry = ActionButton(Loc.T("重试", "Retry"), () => _app.Mail.Retry(account.Id)); retry.Margin = new Thickness(0, 0, 12, 0);
         AutomationProperties.SetName(retry, Loc.T("重试 ", "Retry ") + name);
-        var level = LevelCombo(account.AppKey, provider.Name, S.NoticeRule(account.AppKey), windows: true);
-        level.IsEnabled = account.Enabled; level.Margin = new Thickness(0, 0, 14, 0);
+        var islandSwitch = IslandSwitch(account.AppKey, provider.Name, S.NoticeRule(account.AppKey));
+        islandSwitch.IsEnabled = account.Enabled;
+        // Two switches side by side: each says what it is.
+        var island = Captioned(Loc.T("岛上提示", "Island"), islandSwitch); island.Margin = new Thickness(0, 0, 14, 0);
         var receive = NoticeToggle(name + " · " + Loc.T("接收", "Receive"), account.Enabled, value =>
         {
             Change(s => { if (s.MailAccounts.FirstOrDefault(a => a.Id == account.Id) is { } saved) saved.Enabled = value; });
@@ -107,7 +109,7 @@ public sealed partial class SettingsWindow
         });
         cross.Margin = new Thickness(10, 0, 0, 0);
         var controls = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        foreach (var control in new FrameworkElement[] { again, retry, level, receive, cross }) { control.VerticalAlignment = VerticalAlignment.Center; controls.Children.Add(control); }
+        foreach (var control in new FrameworkElement[] { again, retry, island, Captioned(Loc.T("接收", "Receive"), receive), cross }) { control.VerticalAlignment = VerticalAlignment.Center; controls.Children.Add(control); }
 
         void Read()
         {
@@ -124,6 +126,16 @@ public sealed partial class SettingsWindow
         row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.Children.Add(labels); Grid.SetColumn(controls, 1); row.Children.Add(controls);
         return row;
+    }
+
+    // A switch with a short caption before it.
+    private StackPanel Captioned(string caption, FrameworkElement control)
+    {
+        var panel = new StackPanel { Orientation = Orientation.Horizontal };
+        var text = TextLine(caption, 11.5, TextSecondary); text.VerticalAlignment = VerticalAlignment.Center; text.Margin = new Thickness(0, 0, 6, 0);
+        control.VerticalAlignment = VerticalAlignment.Center;
+        panel.Children.Add(text); panel.Children.Add(control);
+        return panel;
     }
 
     // A field of the window that adds a mailbox: its caption above a framed input.

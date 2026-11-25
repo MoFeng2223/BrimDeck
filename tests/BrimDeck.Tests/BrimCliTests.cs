@@ -233,13 +233,13 @@ internal static class BrimCliTests
         var asked = hub.Receive(Input("Run?", "dotnet test", "-k", "perm", "--action", "allow=Allow", "--action", "deny=Deny", "--copy", "Copy=dotnet test"), T0.AddSeconds(5));
         var waiting = asked.Notice!;
         check("Hub: a notice that is waited for is listed, stays until handled and offers its buttons", asked.Present && hub.Notices.Contains(waiting) && waiting is { Awaited: true, Actions.Count: 3 }
-            && NoticeLevels.Resolve(waiting, null, NoticeLevel.Plain, T0) == NoticeLevel.Persistent && (waiting.Capabilities & NoticeCapabilities.Actions) != 0);
+            && NoticeLevels.Resolve(waiting, null, T0) == NoticeLevel.Persistent && (waiting.Capabilities & NoticeCapabilities.Actions) != 0);
         check("Hub: it does so whatever level the sender or the user's rule names, short of keeping it to the notices page",
-            NoticeLevels.Resolve(waiting, new NoticeAppRule { Level = NoticeLevel.Plain }, NoticeLevel.Plain, T0) == NoticeLevel.Persistent
-            && NoticeLevels.Resolve(waiting, new NoticeAppRule { Level = NoticeLevel.Silent }, NoticeLevel.Plain, T0) == NoticeLevel.Silent);
+            NoticeLevels.Resolve(waiting, new NoticeAppRule { Level = NoticeLevel.Plain }, T0) == NoticeLevel.Persistent
+            && NoticeLevels.Resolve(waiting, new NoticeAppRule { Level = NoticeLevel.Silent }, T0) == NoticeLevel.Silent);
         hub.Answered(waiting.Id);
         check("Hub: once answered it no longer waits or stays, loses the buttons that answered and keeps the one that copies", waiting is { Awaited: false, SourcePresent: false }
-            && (waiting.Capabilities & NoticeCapabilities.Actions) == 0 && NoticeLevels.Resolve(waiting, null, NoticeLevel.Plain, T0) != NoticeLevel.Persistent
+            && (waiting.Capabilities & NoticeCapabilities.Actions) == 0 && NoticeLevels.Resolve(waiting, null, T0) != NoticeLevel.Persistent
             && waiting.Actions.Any(action => action.Kind == NoticeActionKind.Copy) && hub.Notices.Contains(waiting));
         var asks = hub.Receive(Input("Run?", "dotnet test", "-k", "perm", "--action", "allow=Allow"), T0.AddSeconds(9));
         check("Hub: asked again with the same words, it shows and waits again", asks is { Present: true, Receipt: NoticeReceipt.Updated } && asks.Notice == waiting && waiting is { Awaited: true, SourcePresent: true });

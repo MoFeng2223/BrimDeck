@@ -174,8 +174,8 @@ public sealed class Notice
 
 // The user's choices for one application or source (the "应用" settings page). A taskbar-flash chat shows only while it has a
 // rule (NoticeKeys.ListedOnly); a Windows application, a command-line or a WSL source shows without one. Enabled false drops
-// its notices (the "接收" switch of a Windows application, "不提示" of a source). Level Auto follows the default level (a source: the level its message asks for); Silent keeps
-// its notices in the recent notices without showing them as they arrive ("只进通知页").
+// its notices (the "接收" switch). Level is Auto or Silent: Auto shows its notices at their fixed level (NoticeLevels.Resolve);
+// Silent ("岛上提示" off) keeps them in the recent notices without showing them as they arrive.
 public sealed class NoticeAppRule
 {
     public string Key { get; set; } = "";

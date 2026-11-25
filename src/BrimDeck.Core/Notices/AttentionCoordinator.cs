@@ -32,7 +32,8 @@ public sealed class AttentionItem
     // Stays until it is handled: it ends only when the user clicks or closes it, the panel opens, it is withdrawn (its
     // source no longer has it), or after PersistentLimit.
     public bool Persistent => Level == NoticeLevel.Persistent;
-    // How long it may stay until handled when its sender says so (Notice.Timeout); null takes PersistentLimit.
+    // How long it may stay until handled: the settings' time, or its sender's when shorter (NoticeCenter.StayLimit); null takes
+    // PersistentLimit.
     public TimeSpan? Limit { get; set; }
     internal TimeSpan StaysFor => Limit ?? AttentionCoordinator.PersistentLimit;
     // Started beyond the rate limit: it shows at once all the same, but as a plain notice (no backlight, no ripples).
@@ -88,7 +89,8 @@ public sealed class AttentionCoordinator
     public static readonly TimeSpan MinimumRemaining = TimeSpan.FromMilliseconds(1500);
     // A notice shows at least this long before another takes its place, so that each can be read.
     public static readonly TimeSpan MinimumShown = TimeSpan.FromMilliseconds(1500);
-    // A persistent notice nobody handles ends after this, so that a call or an alarm does not hold the island for ever.
+    // A persistent item without a Limit of its own ends after this, so that it does not hold the island for ever; a sender that
+    // waits for an answer without a time of its own waits this long.
     public static readonly TimeSpan PersistentLimit = TimeSpan.FromMinutes(3);
     // While a persistent notice shows, its presenter plays the notice's motion again this often.
     public static readonly TimeSpan PersistentReplay = TimeSpan.FromSeconds(3);

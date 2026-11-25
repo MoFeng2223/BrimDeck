@@ -15,7 +15,7 @@ Both switches belong to a profile. When screens use different profiles (Settings
 
 The notch and the capsule also show a notice count by default, with how many notices are unread: under Settings › Collapsed view › Content you can turn "Notices" off or drag it among the other parts. It needs the notices page, shows nothing while no notice is unread, opens the notices page when clicked, and clears once that page has been opened. It shows the icons of the apps with unread notices stacked together (the newest at the right, at most 3, a missed call first) and the total after them; switch off "Show app icons" under Settings › Live notices › How notices show › Notice count to show a bell instead, or switch on "Show with AI coding tools" to show the AI coding tools' sessions together with the notices, in the notices' place. Without auto width, the count and the AI coding tools never widen the island: short of room, the tools first drop their words, then each keeps one icon. The indicator bar shows no count.
 
-Settings › Live notices has two pages: "How notices show" sets how each of the three levels looks, and "Apps" sets which apps show notices and at which level. Then:
+Settings › Live notices has two pages: "How notices show" sets how levels 2 and 3 look, and "Apps" sets which apps' notices are received and whether they show on the island. Then:
 
 - The open panel gains a "Notice history" page (bell icon, with a red dot while there are notices you have not seen; a notice that popped up but that you did not hover, open or see on the page still counts as unseen). It lists the notices kept, where each can be read, opened in its application, copied or deleted; notices can be paused or cleared.
   - Notices of a chat application (WeChat, QQ, DingTalk, Feishu, Teams, Slack, Telegram and the like) with the same title are one conversation (a chat application's title is the chat's name): it takes one row in the list, showing its newest notice and how many it holds; the left side shows the newest, with the other messages in full under it (up to 20). The delete button deletes the whole conversation's records. Mail and every other application's notices take one row each.
@@ -41,22 +41,22 @@ The capsule's and the notch's liquid motion is the design "胶囊通知动效" p
 
 ## Notice levels
 
-Each notice shows on the island at one level:
+Each notice shows on the island at one level. The levels are fixed; they cannot be chosen for an app in the settings:
 
 | Level | What shows |
 |---|---|
 | 1 · Text | The island keeps its shape; only its content is replaced by the notice's words. The notice can take the whole island, or only the place of one part of the collapsed island (quota ring, music, system monitor, clock, file shelf, device batteries) while the other parts show as usual. The indicator, which has no room for words, lights up once. |
-| 2 · Flash | As level 1, and the island's edge flashes: "Glow" lights the backlight twice and the island's outline keeps still; "Lively" adds the liquid ripples of the section above. The indicator breathes. |
-| 3 · Stay | As level 2, and it stays until it is handled, playing again about every 3 seconds. The glow can be set to another color. |
+| 2 · Flash | Used by apps' notices. The island shows the notice's words and its edge flashes: "Glow" lights the backlight twice and the island's outline keeps still; "Lively" adds the liquid ripples of the section above. The indicator breathes. |
+| 3 · Stay | Used by calls, ringing alarms, event reminders and approvals waiting for you. As level 2, and it stays until it is handled or its longest stay is over, playing again about every 3 seconds. The glow can be set to another color. |
 
-There is also "List only": the notice only goes to the notice history and does not show on the island.
+With an app's "Island" switch off on the "Apps" page, its notices only go to the notice history and do not show on the island.
 
-How each level looks is set under Settings › Live notices › How notices show: whether the app icon shows, how long levels 1 and 2 show, the effect (Glow or Lively) and the sound of levels 2 and 3, and the default color of level 3. "Try it" beside each level sends a sample notice. Notices take the whole island; only a message that names a place with `--slot` replaces just one part.
+How levels 2 and 3 look is set under Settings › Live notices › How notices show: whether the app icon shows, how long level 2 shows (0.5 seconds or 1 to 10 seconds, 3 by default), the effect (Glow or Lively) and the sound of both levels, and level 3's default color and longest stay (10 seconds to 3 minutes, 1 minute by default). "Try it" beside each level sends a sample notice. Notices take the whole island; only a message that names a place with `--slot` replaces just one part.
 
-When an app needs a different look, click the arrow beside its name under Settings › Live notices › Apps to open "Own looks". That app's notices then follow its own settings, which come before the "How notices show" page and the look a message asks for. It shows the look of the level the app uses now (a program set to "As sent" lists all three levels): levels 2 and 3 have a glow color and an effect, levels 1 and 2 a display time, and every level the app icon switch. When you change the app's level, the look of the new level shows here. Besides:
+When an app needs a different look, click the arrow beside its name under Settings › Live notices › Apps to open "Own looks". That app's notices then follow its own settings, which come before the "How notices show" page and the look a message asks for. It shows the look of level 2, and for a source of the command line or a program level 3 as well: each has a glow color, an effect, a sound and the app icon switch, and level 2 a display time. Besides:
 
 - Chat apps (QQ, DingTalk, Feishu and others) have a "Calls" group with its own color, effect and icon for voice and video calls; a call stays on the island until answered, declined or the panel is opened.
-- Clock, calendar and reminder apps and command-line programs whose level is not 3 have a group for their alarms, event reminders or "Waiting on you" notices, which always stay.
+- Clock, calendar and reminder apps have a group for their alarms or event reminders, which always stay.
 
 "Own looks" is closed by default and is seldom needed.
 
@@ -65,7 +65,7 @@ When an app needs a different look, click the arrow beside its name under Settin
 Levels 2 and 3 can each have a sound; level 1 has none:
 
 - Level 2's sound plays once as the notice shows. A notice plays it once, two sounds are at least a second apart, and a notice that no longer flashes because more than 3 arrived within 10 seconds plays none.
-- Level 3's sound loops, its end joining its start without a pause, until the notice ends (the panel is opened, it is handled or closed, or after 3 minutes unless its sender says otherwise). No other sound plays over a loop.
+- Level 3's sound loops, its end joining its start without a pause, until the notice ends (the panel is opened, it is handled or closed, or its longest stay is over). No other sound plays over a loop.
 - A notice that arrives while the panel is open only shows on the notices page; its sound plays once, a level 3 sound a single round. With several screens, a notice that arrives while the panel is open on any of them does not show on the others either.
 
 The built-in sounds are made by BrimDeck as they play: Drop, Ding, Two notes, Arpeggio, Knock and Chord for level 2, and Marimba, Chimes, Morning, Phone and Beeps for level 3. Choosing one in the list plays it once.
@@ -76,17 +76,16 @@ Notices of level 2 and level 3 play their sound wherever they come from, those o
 
 The level is the first of these that applies:
 
-1. You set the app to "List only".
+1. You turned the app's "Island" switch off: notices page only.
 2. A call, a ringing alarm, an ended countdown, an event's reminder and an approval waiting for you are level 3.
-3. The level you chose for the app.
-4. The level its sender asked for (`-l` on the command line).
-5. The default level: level 2, which you can change to level 1 or 3 on the "How notices show" page.
+3. The level its sender asked for (BrimDeck's own features, plug-ins, and `-l` on the command line).
+4. Any other notice is level 2.
 
 A notice that stays ends when:
 
 - you click it, rest the pointer on it so the notices page opens, or open the panel (on any screen: it ends on every screen, even when they use different profiles);
 - its source no longer has it: it was cleared from Windows' notification center (BrimDeck finds out the next time it reads the whole list), the alarm or countdown was stopped, the sender closed it with `brim-notify close` or sent the same `-r` key again at another level;
-- it has shown for 3 minutes.
+- it has shown for its longest stay: 1 minute by default, 10 seconds to 3 minutes under level 3 on the "How notices show" page; a sender that gives a shorter `--timeout` gets its own time. Once gone from the island, the notice stays on the notices page, where it can still be handled.
 
 While it shows, other notices go to the notice history and wait as usual; a normal notice that waited over 30 seconds is not shown late. With animations off (in BrimDeck's settings or Windows' "Animation effects") or in high contrast, every level only shows the words.
 
@@ -156,7 +155,7 @@ The application id in a Windows notification does not always say which applicati
 - **Common programs Windows gives no name for**: Bilibili, DingTalk, Gemini, classic Outlook and others take a name BrimDeck knows; Electron programs installed with Squirrel (Discord, Slack) are named after their program.
 - **Tray balloons of older programs**: shown as "Tray app" when Windows gives no name, rather than a long number; desktop programs known only by their path are named after the program file.
 - **Default categories**: Windows notifications carry no category. Notices from the Claude, Codex (ChatGPT) and Gemini desktop apps and Cursor are marked "Task"; Windows system notices, Windows Security, NVIDIA App, Adobe Creative Cloud, Clash Party/Clash Verge, Snipping Tool, Lenovo and Intel utilities and similar are marked "Info"; chat, mail and browsers stay "Message".
-- **Calls**: a notice from a chat application (QQ, WeChat, Teams, WhatsApp, Discord and others) or Phone Link that is a voice or video call ("Incoming call", "is calling you", "邀请你进行语音通话"…) gets the call mark and shows at once like an alarm (unless the application is set to List only); a missed call does not count.
+- **Calls**: a notice from a chat application (QQ, WeChat, Teams, WhatsApp, Discord and others) or Phone Link that is a voice or video call ("Incoming call", "is calling you", "邀请你进行语音通话"…) gets the call mark and shows at once like an alarm (unless the application's "Island" switch is off); a missed call does not count.
 - **Replaced notifications**: when an application updates its notification (QQ gathering new messages into one, for example), Windows removes the old one and adds a new one. If both come from the same application with the same title in the same reading, BrimDeck updates the existing notice instead of keeping two.
 - **Emoji**: WPF draws no color fonts, so emoji are monochrome; sequences joined from several emoji (a family, the rainbow flag) may show as a box, and flags as two letters. This is a platform limit; the text itself is unaffected.
 
@@ -219,7 +218,7 @@ Options of `brim notify send`:
 | `-b/--body TEXT` | The body; it may also be the second argument |
 | `-s/--source NAME` | The source's name; the environment variable `BRIM_SOURCE` names it for a whole script or hook. `brim` when not given. Settings › Live notices › Apps lists sources by this name, each with its own choices |
 | `--context TEXT` | A second line beside the source: a project, a branch, a session |
-| `-l/--level LEVEL` | `silent`, `plain`, `flash`, `persistent`, or `0` to `3`. The level you chose for the source comes first; how each level looks is decided under Settings › Live notices › How notices show |
+| `-l/--level LEVEL` | `silent`, `plain`, `flash`, `persistent`, or `0` to `3`. Not given, level 2; with the source's "Island" switch off, notices page only. How levels 2 and 3 look is decided under Settings › Live notices › How notices show |
 | `-c/--category KIND` | `message`, `task`, `success`, `warning`, `error`, `info`. A notice that stays glows orange, red or green for `warning`, `error` and `success` |
 | `--glow "#RRGGBB"` | The backlight of a notice that stays; it comes before the category's color and the default color of the settings |
 | `--slot PLACE` | Where a level 1 notice shows: `island` (the whole island), `usage`, `music`, `monitor`, `clock`, `transfer`, `devices`. Not given, the notice takes the whole island; when the collapsed island has no such part, or is the indicator, the notice takes the whole island |
@@ -233,7 +232,7 @@ Options of `brim notify send`:
 | `--copy LABEL=TEXT` | A button that copies the text |
 | `--open LABEL=TARGET` | A button that opens a web address (http, https), a local file or folder, or `app:<application id>`. From WSL only web addresses |
 | `--wait` | Wait until the notice is handled, closed or runs out of time |
-| `--timeout DURATION` | How long a notice that stays may stay, for example `5m`; 3 minutes by default, 30 at most |
+| `--timeout DURATION` | How long to wait for the result, for example `5m`; 3 minutes by default, 30 at most. A notice that stays is on the island for at most the longest stay set under "How notices show", or this time when it is shorter |
 | `--no-history` | Only show it on the island; do not list it among the recent notices |
 | `--json FILE` | Read the whole message as JSON from a file, or from standard input with `-`; options given on the command line come over its values |
 
@@ -249,7 +248,7 @@ Buttons:
 Waiting for an answer (`--wait`, or any `--action`):
 
 - The command keeps its connection until you choose a button, close or delete the notice, it runs out of time, or its sender closes it with `close`.
-- Such a notice always stays until handled and is always listed on the notices page, unless you set its source to "List only" or "Don't show".
+- Such a notice always stays until handled and is always listed on the notices page, unless you turned its source's "Island" or "Receive" switch off.
 - Ending the command first (Ctrl+C) closes the notice too.
 
 Exit codes:
@@ -260,7 +259,7 @@ Exit codes:
 | 1 | Usage error (a message over 64 KB even with its texts cut to BrimDeck's limits included) |
 | 2 | Refused by BrimDeck (a `close`, `stop` or `remove` that found no such key or id included) |
 | 3 | BrimDeck is not running, live notices are off, or no answer came in time (the notice may still show) |
-| 4 | When waiting: the notice was closed or deleted without a choice, or its source is set to "Don't show" |
+| 4 | When waiting: the notice was closed or deleted without a choice, or its source's "Receive" switch is off |
 | 5 | When waiting: it ran out of time |
 
 `brim run` exits with the program's own code. Titles and bodies are cut to BrimDeck's limits before they are sent. A hook should fall back to its usual flow on exit code 3 rather than wait.
@@ -322,7 +321,7 @@ Alarms, timers, countdowns, mail and event reminders are recognized and shown by
 
 - Notices are sorted by the application's id (AUMID) and the notice's text, in memory on this PC; the original notification is not kept, and no mailbox or calendar is read (apart from the mailboxes you connect on the Mailboxes page; see [Mailboxes](mail.md)). The sorting is heuristic: Outlook's and Teams' reminder wording varies by version and language, and what is not recognized shows as an ordinary notice.
 - The reminders of Clock, Outlook, To Do, Teams, Calendar and similar apps show by default; to stop one, switch off its "Receive" under Settings › Live notices › Apps.
-- Alarms, ended countdowns and event reminders are high priority, show at level 3 and are not affected by the "at most 3 in 10 seconds" limit, but at most 3 ring per minute from one source (each Windows application on its own; brim-notify, and WSL applications, each share one); the rest wait their turn, so a script that sets many timers at once does not hold back another application's alarm. An application you set to "List only" stays quiet as usual. While locked, presenting or paused they only count toward the summary. An event entered more than 10 minutes after its start is recorded as an ordinary notice. Windows notifications that arrived while the PC slept are recorded, not shown, on waking, except reminders raised in the last 10 minutes or for an event starting within 10 minutes either way, which still alert. At most 200 timers, events still to remind and running stopwatches are kept; beyond that, the one BrimDeck received first is dropped from the source holding the most (and the log says so), so other applications' reminders are not affected.
+- Alarms, ended countdowns and event reminders are high priority, show at level 3 and are not affected by the "at most 3 in 10 seconds" limit, but at most 3 ring per minute from one source (each Windows application on its own; brim-notify, and WSL applications, each share one); the rest wait their turn, so a script that sets many timers at once does not hold back another application's alarm. An application whose "Island" switch is off stays quiet as usual. While locked, presenting or paused they only count toward the summary. An event entered more than 10 minutes after its start is recorded as an ordinary notice. Windows notifications that arrived while the PC slept are recorded, not shown, on waking, except reminders raised in the last 10 minutes or for an event starting within 10 minutes either way, which still alert. At most 200 timers, events still to remind and running stopwatches are kept; beyond that, the one BrimDeck received first is dropped from the source holding the most (and the log says so), so other applications' reminders are not affected.
 - The live words follow one shared second tick, which runs only while a running timer shows on the island or on the notice history page. Countdowns and events are worked out from the clock, again at once after waking or a change of the system time. A reminder missed by more than 10 minutes (asleep, BrimDeck not running) does not pop up; the list says "Ended at 15:30".
 - Limits: Windows does not share the Clock app's running timers, stopwatch or alarm list, nor the snooze and dismiss buttons of its notifications, so a Clock alarm shows only when it rings and cannot be snoozed from BrimDeck; for a timer on the island use `brim-notify timer`. Calendar sync (reading Outlook's or Windows' calendar directly) is not supported yet; the applications' own reminder notifications are used.
 
@@ -349,7 +348,7 @@ brim-notify "New mail" --kind mail
 ## How notices show
 
 - A notice never takes the keyboard focus, and never pops up over the open panel or details you are using; while the panel is open, the bell only gets its red dot.
-- Levels 1 and 2 stay 6 seconds by default, each changeable on the "How notices show" page; hovering, opening the details or working it from the keyboard pauses the time.
+- Level 1 stays 3 seconds; level 2 stays 3 seconds by default, changeable on the "How notices show" page; hovering, opening the details or working it from the keyboard pauses the time.
 - A new notice of a conversation (the same application and title; a QQ notification's title is the conversation's name; without a title, the application) joins the one of that conversation that shows or waits on the island: it shows the latest words and a count. A merged notice stays at most twice its duration.
 - A notice of another conversation shows at once: it takes the island over if the notice there has been up for 1.5 seconds, and otherwise as soon as it has (an alarm or a call does not wait). The notice it replaces is not shown again; it stays in the notice history. Several that wait take over in the order they arrived. A normal notice waits for a high priority one to end; a notice that stays until handled and one the pointer rests on are not replaced. A normal notice that waited over 30 seconds is not shown late.
 - At most 3 notices per 10 seconds play their motion; one beyond that still shows at once, but at level 1 (no light, no ripples).
@@ -371,7 +370,7 @@ brim-notify "New mail" --kind mail
 - Raw notification content, attachments and pictures are never saved. Icons come only from Windows or local files; nothing is downloaded. Network paths, links and shortcuts as icons are refused.
 - The diagnostic log `notices.log` holds only error types, codes and code locations, never titles or bodies.
 - The local channel accepts only the current user on this PC (a named pipe that refuses network access). A notice's content is only ever shown as text: it is never run and its links are never opened.
-- Every Windows app shows notices by default; a common app, or an app added to the "Apps" page from the notice history, can stop being received, be given a level (including "List only"), have its Windows system banner switched, and have its own looks. Sources from the command line and programs are listed automatically after they first send, and can be set to "Don't show".
+- Every Windows app shows notices by default; a common app, or an app added to the "Apps" page from the notice history, can be kept off the island or stop being received, have its Windows system banner switched, and have its own looks. Sources from the command line and programs are listed automatically after they first send, and can be kept off the island or stop being received.
 - Verification codes (Settings › Live notices › How notices show › Hide verification codes, off by default): when on, BrimDeck recognizes a code in a notice's title and body on this PC (a Chinese or English keyword with digits or a short letter-and-digit code nearby; order numbers, amounts, phone numbers, dates and links do not count) and hides it with dots on the island and the notices page; a screen reader hears "verification code hidden". The notices page gets a "Copy code" button. Recognition goes nowhere online and into no log; the clipboard is written only when that button is clicked, marked so that Windows keeps it out of the clipboard history and cloud sync, and emptied after 60 seconds if it still holds that code (left alone if something else was copied). The encrypted notice history keeps the hidden text, so a code cannot be copied after a restart; switching the setting off restores everything. The recognition rules are ported from xiaotang-daozai (MIT, see ThirdPartyNotices.txt) and prefer missing a code to hiding something that is not one.
 
 ## Compatibility (tested)

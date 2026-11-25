@@ -576,8 +576,10 @@ public sealed class DeckSettings
     public ClockDateFormat ClockDateFormat { get; set; }
     public ClockWeekday ClockWeekday { get; set; }
     public CompactMusicText MusicText { get; set; }
-    // A track change shows the new title and artist across the whole island, as a notice does (IslandNotice).
+    // A track change shows the new title and artist across the whole island, as a notice does (IslandNotice); with
+    // MusicTrackNoticeInPart, in the music part's place only, while the island shows that part.
     public bool MusicTrackNotice { get; set; } = true;
+    public bool MusicTrackNoticeInPart { get; set; }
     // A song taken as instrumental (Lyrics.Instrumental) shows its title in the collapsed lyric's place instead of "♪".
     public bool MusicInstrumentalTitle { get; set; }
     // With auto width (CompactAutoWidth), the collapsed middle text's room follows the length of what it shows, within
@@ -880,10 +882,12 @@ public sealed class DeckSettings
     // brim notify list and remove reach every notice, an application's notifications included, and remove takes a Windows one
     // out of Windows' notification center too. Off by default: any program of the user can run brim (NoticeEntries).
     public bool NoticeCommandAccess { get; set; }
-    // The level of a notice nothing else decides (NoticeLevels.Resolve): Plain (level 1), Glow (level 2) or Persistent (level 3).
-    public NoticeLevel NoticeDefaultLevel { get; set; } = NoticeLevel.Glow;
     // How each level looks on the island (the settings' first notices page); an application may have its own (NoticeAppRule.Styles).
     public NoticeLevelStyles NoticeStyles { get; set; } = new();
+    // How long a level-3 notice stays on the island at most, in seconds (its sender may ask for less), MinNoticeStay to
+    // MaxNoticeStay.
+    public int NoticeStaySeconds { get; set; } = 60;
+    public const int MinNoticeStay = 10, MaxNoticeStay = 180;
     // How loud the notices' sounds play, 0 to 100 (NoticeSounds.Gain); 0 plays none.
     public int NoticeSoundVolume { get; set; } = NoticeSounds.DefaultVolume;
     // The collapsed count of unread notices (CompactPart.Notices) shows the icons of the applications they came from before the
@@ -1218,7 +1222,7 @@ public sealed class DeckSettings
             .Select(d => d with { Id = d.Id.Trim(), Name = (d.Name ?? "").Trim() }).DistinctBy(d => d.Id).ToList();
         if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;
         NoticeWslDistros = (NoticeWslDistros ?? []).Where(name => name is not null).Select(name => name.Trim()).Where(NoticeIntake.IsDistroName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        NoticeDefaultLevel = NoticeLevels.Default(NoticeDefaultLevel);
+        NoticeStaySeconds = Math.Clamp(NoticeStaySeconds, MinNoticeStay, MaxNoticeStay);
         NoticeStyles ??= new();
         NoticeStyles.Normalize();
         NoticeSoundVolume = Math.Clamp(NoticeSoundVolume, 0, 100);
@@ -1235,7 +1239,8 @@ public sealed class DeckSettings
         {
             rule.Name = (rule.Name ?? "").Trim();
             rule.AccentColor = AppPresets.NormalizeColor(rule.AccentColor);
-            rule.Level = rule.Level switch { NoticeLevel.Lively => NoticeLevel.Glow, NoticeLevel.Silent or NoticeLevel.Plain or NoticeLevel.Glow or NoticeLevel.Persistent => rule.Level, _ => NoticeLevel.Auto };
+            // The levels are fixed: a level chosen before only says whether the notices show on the island.
+            rule.Level = rule.Level == NoticeLevel.Silent ? NoticeLevel.Silent : NoticeLevel.Auto;
             rule.Styles?.Normalize();
         }
         Core.Profiles.Normalize(this);

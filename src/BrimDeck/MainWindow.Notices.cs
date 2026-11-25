@@ -102,7 +102,11 @@ public partial class MainWindow
                 // The title takes the whole island, shown as a notice is; the indicator has no room for words, so it shows nothing.
                 // One that comes while the panel boots or closes waits for it, as a notice does.
                 if (Collapsed.Style == CompactStyle.Line || !CanShowNotices || TrackContent() is not { } content) { _trackShown = false; _app.Notices.Skip(this); return; }
-                item.Payload = content; _trackShown = true;
+                _trackShown = true;
+                // Set to the music part (MusicTrackNoticeInPart): the part's own words show the title in place of the lyric, in their
+                // face and size, and the island keeps the width rules it has for them.
+                if (TrackInPartPossible) { _trackInPart = true; RenderCompact(); FitCompactToContent(); break; }
+                item.Payload = content;
                 if (HoldsNotices) { ShowAfterBoot(item); return; }
                 (_noticeWindow ??= new IslandNotice(this, _app)).Present(item);
                 break;
@@ -111,6 +115,11 @@ public partial class MainWindow
 
     // A track change's title shows on the island (or waits for the boot to show it there).
     private bool _trackShown;
+    // It shows as the music part's words (_trackShown too): set so, with the part showing words now (its middle text chosen and not
+    // hidden while paused). Without them the title takes the whole island.
+    private bool _trackInPart;
+    private bool TrackInPartPossible => Settings.MusicTrackNoticeInPart && Settings.MusicText != CompactMusicText.None && Settings.ShowsMusic(EffectiveStyle)
+        && !PausedHides(PausedMusicHide.Text);
 
     private TrackNoticeContent? TrackContent()
         => _mediaTrack is { Title.Length: > 0 } track ? new TrackNoticeContent(track.Title, track.Artist, _mediaCover) : null;
@@ -129,6 +138,7 @@ public partial class MainWindow
             case AttentionKind.Track:
                 if (!_trackShown) break;
                 _trackShown = false;
+                if (_trackInPart) { _trackInPart = false; RenderCompact(); FitCompactToContent(); break; }
                 if (_noticeAfterBoot?.Key == item.Key) _noticeAfterBoot = null;
                 _noticeWindow?.End(item);
                 if (_expanded) _noticeWindow?.Abort();
@@ -141,6 +151,7 @@ public partial class MainWindow
         if (item.IsNotice && _noticeAfterBoot?.Key == item.Key) _noticeAfterBoot = item;
         else if (item.IsNotice) _noticeWindow?.Update(item);
         // The next song while the title of the one before still shows on the island: its words change in place.
+        else if (item.Kind == AttentionKind.Track && _trackInPart) { RenderCompact(); FitCompactToContent(); }
         else if (item.Kind == AttentionKind.Track && _trackShown && TrackContent() is { } content)
         {
             item.Payload = content;

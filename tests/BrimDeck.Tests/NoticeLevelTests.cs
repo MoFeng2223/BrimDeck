@@ -21,18 +21,16 @@ internal static class NoticeLevelTests
     private static Notice Made(NoticeCategory category = NoticeCategory.Message, NoticePriority priority = NoticePriority.Normal, NoticeLevel level = NoticeLevel.Auto,
         bool call = false, NoticeTiming? timing = null) => new() { AppKey = "windows:Chat", Title = "t", Category = category, Priority = priority, Level = level, Call = call, Timing = timing };
 
-    private static NoticeLevel Of(Notice notice, NoticeAppRule? rule = null, NoticeLevel fallback = NoticeLevel.Glow) => NoticeLevels.Resolve(notice, rule, fallback, T0);
+    private static NoticeLevel Of(Notice notice, NoticeAppRule? rule = null) => NoticeLevels.Resolve(notice, rule, T0);
 
     private static void Resolve(Action<string, bool> check)
     {
-        check("Level: an ordinary message takes the default level, one of the three (the older Lively is level 2)", Of(Made()) == NoticeLevel.Glow && Of(Made(), fallback: NoticeLevel.Lively) == NoticeLevel.Glow
-            && Of(Made(), fallback: NoticeLevel.Plain) == NoticeLevel.Plain && Of(Made(), fallback: NoticeLevel.Persistent) == NoticeLevel.Persistent && Of(Made(), fallback: NoticeLevel.Silent) == NoticeLevel.Glow
-            && Of(Made(), fallback: NoticeLevel.Auto) == NoticeLevel.Glow);
-        check("Level: the category and the priority do not change the level", Of(Made(priority: NoticePriority.High), fallback: NoticeLevel.Plain) == NoticeLevel.Plain
-            && new[] { NoticeCategory.Error, NoticeCategory.Warning, NoticeCategory.Task, NoticeCategory.Success, NoticeCategory.Info }.All(category => Of(Made(category), fallback: NoticeLevel.Plain) == NoticeLevel.Plain));
-        check("Level: the sender's level comes before the default", Of(Made(NoticeCategory.Info, level: NoticeLevel.Lively)) == NoticeLevel.Glow
+        check("Level: an ordinary message flashes (level 2)", Of(Made()) == NoticeLevel.Glow);
+        check("Level: the category and the priority do not change the level", Of(Made(priority: NoticePriority.High)) == NoticeLevel.Glow
+            && new[] { NoticeCategory.Error, NoticeCategory.Warning, NoticeCategory.Task, NoticeCategory.Success, NoticeCategory.Info }.All(category => Of(Made(category)) == NoticeLevel.Glow));
+        check("Level: the sender's level is kept (the older Lively is level 2)", Of(Made(NoticeCategory.Info, level: NoticeLevel.Lively)) == NoticeLevel.Glow
             && Of(Made(NoticeCategory.Error, level: NoticeLevel.Plain)) == NoticeLevel.Plain && Of(Made(level: NoticeLevel.Silent)) == NoticeLevel.Silent
-            && Of(Made(level: NoticeLevel.Glow), fallback: NoticeLevel.Plain) == NoticeLevel.Glow && Of(Made(level: NoticeLevel.Persistent)) == NoticeLevel.Persistent);
+            && Of(Made(level: NoticeLevel.Glow)) == NoticeLevel.Glow && Of(Made(level: NoticeLevel.Persistent)) == NoticeLevel.Persistent);
         check("Level: a call, a ringing alarm, a countdown that ended and an event's reminder stay until handled, whatever the sender asked or its priority",
             Of(Made(call: true, priority: NoticePriority.High)) == NoticeLevel.Persistent && Of(Made(call: true, priority: NoticePriority.Low)) == NoticeLevel.Persistent
             && Of(Made(timing: new NoticeTiming { Kind = NoticeTimeKind.Alarm }, level: NoticeLevel.Plain)) == NoticeLevel.Persistent
@@ -42,10 +40,8 @@ internal static class NoticeLevelTests
             Of(Made(timing: new NoticeTiming { Kind = NoticeTimeKind.Countdown, Native = true, EndsAt = T0.AddMinutes(5) })) == NoticeLevel.Glow
             && Of(Made(timing: new NoticeTiming { Kind = NoticeTimeKind.Stopwatch, Native = true, StartsAt = T0 })) == NoticeLevel.Glow
             && Of(Made(timing: new NoticeTiming { Kind = NoticeTimeKind.Mail })) == NoticeLevel.Glow);
-        var plain = new NoticeAppRule { Key = "windows:Chat", Level = NoticeLevel.Plain };
-        check("Level: the user's level for the application comes before the sender's, after calls and alarms", Of(Made(call: true, priority: NoticePriority.High), plain) == NoticeLevel.Persistent
-            && Of(Made(level: NoticeLevel.Persistent), plain) == NoticeLevel.Plain && Of(Made(NoticeCategory.Error), new NoticeAppRule { Level = NoticeLevel.Persistent }) == NoticeLevel.Persistent
-            && Of(Made(NoticeCategory.Info), new NoticeAppRule { Level = NoticeLevel.Lively }) == NoticeLevel.Glow && Of(Made(level: NoticeLevel.Silent), new NoticeAppRule { Level = NoticeLevel.Glow }) == NoticeLevel.Glow);
+        check("Level: a level left in an application's rule from before decides nothing", Of(Made(), new NoticeAppRule { Level = NoticeLevel.Plain }) == NoticeLevel.Glow
+            && Of(Made(), new NoticeAppRule { Level = NoticeLevel.Persistent }) == NoticeLevel.Glow && Of(Made(level: NoticeLevel.Plain), new NoticeAppRule { Level = NoticeLevel.Persistent }) == NoticeLevel.Plain);
         check("Level: an application set to list only keeps even its calls and alarms off the island", Of(Made(call: true), new NoticeAppRule { Level = NoticeLevel.Silent }) == NoticeLevel.Silent
             && Of(Made(timing: new NoticeTiming { Kind = NoticeTimeKind.Alarm }), new NoticeAppRule { Level = NoticeLevel.Silent }) == NoticeLevel.Silent);
         check("Level: a rule without a level decides nothing", Of(Made(NoticeCategory.Error), new NoticeAppRule()) == NoticeLevel.Glow && new NoticeAppRule().Level == NoticeLevel.Auto);
@@ -93,7 +89,7 @@ internal static class NoticeLevelTests
         var quiet = hub.Receive(new NoticeInput { Origin = NoticeOrigin.Windows, AppKey = "windows:Quiet", AppName = "Quiet", InstanceKey = "q", Title = "Hi", Call = true }, T0);
         check("Hub: the Silent level for an application shows as Muted does, also for its calls", quiet.Receipt == NoticeReceipt.Accepted && !quiet.Present);
         rules["cli:deploy"] = new NoticeAppRule { Key = "cli:deploy", Level = NoticeLevel.Lively };
-        check("Hub: the user's level for the application comes before a sender's silent", hub.Receive(Cli("s2", level: NoticeLevel.Silent), T0).Present);
+        check("Hub: a level left in the application's rule from before does not override a sender's silent", !hub.Receive(Cli("s2", level: NoticeLevel.Silent), T0).Present);
         rules.Remove("cli:deploy");
 
         var stay = hub.Receive(Cli("p1", "job", NoticeLevel.Persistent, NoticeAlign.Right), T0);
@@ -172,35 +168,29 @@ internal static class NoticeLevelTests
 
     private static void SettingsValues(string root, Action<string, bool> check)
     {
-        var defaults = new DeckSettings();
-        check("Settings: by default notices flash", defaults.NoticeDefaultLevel == NoticeLevel.Glow);
         var odd = new DeckSettings
         {
-            NoticeDefaultLevel = NoticeLevel.Lively, NoticeAppsListed = true,
-            NoticeApps = [new() { Key = "a", Level = NoticeLevel.Persistent }, new() { Key = "b", Level = NoticeLevel.Silent }, new() { Key = "c", Level = (NoticeLevel)40 }, new() { Key = "d", Level = NoticeLevel.Lively }]
+            NoticeAppsListed = true, NoticeStaySeconds = 5,
+            NoticeApps = [new() { Key = "a", Level = NoticeLevel.Persistent }, new() { Key = "b", Level = NoticeLevel.Silent }, new() { Key = "c", Level = (NoticeLevel)40 }, new() { Key = "d", Level = NoticeLevel.Plain }]
         };
         odd.Normalize();
-        check("Settings: the default level is one of the three (Lively reads as level 2); an application's may also be Default or list only", odd.NoticeDefaultLevel == NoticeLevel.Glow
-            && odd.NoticeApps.Select(rule => rule.Level).SequenceEqual([NoticeLevel.Persistent, NoticeLevel.Silent, NoticeLevel.Auto, NoticeLevel.Glow]));
-        foreach (var level in new[] { NoticeLevel.Auto, NoticeLevel.Silent })
-        {
-            var other = new DeckSettings { NoticeDefaultLevel = level };
-            other.Normalize();
-            check($"Settings: {level} is not a default level", other.NoticeDefaultLevel == NoticeLevel.Glow);
-        }
+        check("Settings: an application's rule only keeps its notices off the island or not; a level chosen before is dropped",
+            odd.NoticeApps.Select(rule => rule.Level).SequenceEqual([NoticeLevel.Auto, NoticeLevel.Silent, NoticeLevel.Auto, NoticeLevel.Auto]));
+        var longer = new DeckSettings { NoticeStaySeconds = 999 };
+        longer.Normalize();
+        check("Settings: level 3 stays 60 seconds at most by default, 10 to 180", new DeckSettings().NoticeStaySeconds == 60 && odd.NoticeStaySeconds == 10 && longer.NoticeStaySeconds == 180);
         var copy = odd.Copy();
-        copy.NoticeApps[1].Level = NoticeLevel.Plain;
-        check("Settings: a copy carries the level and shares no rule", copy.NoticeDefaultLevel == NoticeLevel.Glow && odd.NoticeApps[1].Level == NoticeLevel.Silent);
+        copy.NoticeApps[1].Level = NoticeLevel.Auto;
+        check("Settings: a copy shares no rule", odd.NoticeApps[1].Level == NoticeLevel.Silent);
         var store = new SettingsStore(Path.Combine(root, "notice-level-settings"), "1.2.0");
-        store.Save(new DeckSettings { NoticeDefaultLevel = NoticeLevel.Persistent, NoticeApps = [new() { Key = "windows:X", Name = "X", Level = NoticeLevel.Plain }] });
+        store.Save(new DeckSettings { NoticeStaySeconds = 120, NoticeApps = [new() { Key = "windows:X", Name = "X", Level = NoticeLevel.Silent }] });
         var back = store.Load();
-        check("Settings: the level and an application's level survive saving", back.NoticeDefaultLevel == NoticeLevel.Persistent
-            && back.NoticeRule("windows:X")?.Level == NoticeLevel.Plain);
-        File.WriteAllText(store.FilePath, "{\"NoticesEnabled\":true,\"NoticeScreen\":1,\"NoticeApps\":[{\"Key\":\"windows:X\",\"Muted\":true}]}");
+        check("Settings: the longest stay and an application kept off the island survive saving", back.NoticeStaySeconds == 120 && back.NoticeRule("windows:X")?.Level == NoticeLevel.Silent);
+        File.WriteAllText(store.FilePath, "{\"NoticesEnabled\":true,\"NoticeScreen\":1,\"NoticeDefaultLevel\":5,\"NoticeApps\":[{\"Key\":\"windows:X\",\"Muted\":true}]}");
         var old = store.Load();
-        check("Settings: a file saved before they existed reads the defaults and gains the default applications", old.NoticeDefaultLevel == NoticeLevel.Glow
+        check("Settings: a file saved before reads the defaults and gains the default applications", old.NoticeStaySeconds == 60
             && old.NoticeRule("windows:X") is { Level: NoticeLevel.Auto } && old.NoticeRule("windows:QQ") is not null);
-        check("Settings: the level and the looks are kept for all profiles, as the other notice settings are", !Profiles.IsProfileKey(nameof(DeckSettings.NoticeDefaultLevel))
+        check("Settings: the looks and the longest stay are kept for all profiles, as the other notice settings are", !Profiles.IsProfileKey(nameof(DeckSettings.NoticeStaySeconds))
             && !Profiles.IsProfileKey(nameof(DeckSettings.NoticeStyles)));
     }
 

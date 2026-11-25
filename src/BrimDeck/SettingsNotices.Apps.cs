@@ -69,13 +69,13 @@ public sealed partial class SettingsWindow
         GroupShown([.. rows]);
     }
 
-    // The applications set apart from the rest: added from the ones that have sent notices, each with its own level, receive switch
-    // and banner switch; removing one gives it back the defaults.
+    // The applications set apart from the rest: added from the ones that have sent notices, each with its own island, receive and
+    // banner switches; removing one gives it back the defaults.
     private void OtherAppsSection(NoticeCenter center)
     {
         var add = AddAppButton(Loc.T("从通知记录添加", "Add from notice history"), AddNoticeAppMenu, Loc.T("从通知记录添加", "Add from notice history"));
-        SectionTitle(Loc.T("其他应用", "Other apps"), add, () => Loc.T("没有列在这里的应用，通知默认都会接收。添加后可以单独关闭接收、调整提示等级或系统横幅；移除后恢复默认。",
-            "The notices of apps not listed here are received by default. Once added, an app can stop being received or have its own level or system banner; removing it goes back to the defaults."));
+        SectionTitle(Loc.T("其他应用", "Other apps"), add, () => Loc.T("没有列在这里的应用，通知默认都会接收并在岛上提示。添加后可以单独关闭岛上提示、接收或系统横幅；移除后恢复默认。",
+            "The notices of apps not listed here are received and shown on the island by default. Once added, an app can be kept off the island, stop being received or have its system banner switched; removing it goes back to the defaults."));
         var listed = S.NoticeApps.Where(rule => NoticeKeys.OnAppList(rule.Key) && !IsCommonApp(rule.Key)).ToList();
         var rows = new List<FrameworkElement>();
         if (listed.Count == 0)
@@ -93,16 +93,18 @@ public sealed partial class SettingsWindow
         GroupShown([.. rows]);
     }
 
-    // The column headings over the rows: the level, and for Windows applications the receive and banner switches.
+    // The column headings over the rows: the island and receive switches, and for Windows applications the banner switch.
     private FrameworkElement AppColumns(bool windows)
     {
         var row = AppGrid();
         row.MinHeight = 28;
-        var level = TextLine(Loc.T("提示等级", "Level"), 11, TextTertiary); level.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(level, 2); row.Children.Add(level);
+        row.Children.Add(Heading(2, Loc.T("岛上提示", "Island"), () => Loc.T("关闭后，通知只进入通知页，不在岛上提示。", "When off, notices only go to the notices page and do not show on the island.")));
+        row.Children.Add(Heading(3, Loc.T("接收", "Receive"), () => windows
+            ? Loc.T("关闭后，BrimDeck 不再显示这个应用的通知，也不记入通知页。Windows 自己的通知不受影响。",
+                "When off, BrimDeck no longer shows this app's notices nor keeps them on the notices page. Windows' own notifications are not affected.")
+            : Loc.T("关闭后，BrimDeck 不再显示这个来源的提示，也不记入通知页。", "When off, BrimDeck no longer shows this source's notices nor keeps them on the notices page.")));
         if (windows)
         {
-            row.Children.Add(Heading(3, Loc.T("接收", "Receive"), () => Loc.T("关闭后，BrimDeck 不再显示这个应用的通知，也不记入通知页。Windows 自己的通知不受影响。",
-                "When off, BrimDeck no longer shows this app's notices nor keeps them on the notices page. Windows' own notifications are not affected.")));
             row.Children.Add(Heading(4, Loc.T("系统横幅", "System banner"), () => Loc.T("与 Windows 设置中这个应用的“显示通知横幅”是同一个开关，显示的是它现在的状态，在这里切换会直接修改 Windows 设置，退出 BrimDeck 后仍然保持。关闭后，通知不再从屏幕右下角弹出，仍会进入 Windows 通知中心，提示音不变。",
                 "The same switch as this app's \"Show notification banners\" in Windows Settings, shown as it is now; switching it here changes Windows Settings and stays after BrimDeck exits. When off, notices no longer pop up in the corner of the screen; they still go to Windows' notification center and keep their sound.")));
         }
@@ -119,13 +121,13 @@ public sealed partial class SettingsWindow
         }
     }
 
-    // icon · name · level · receive · banner · remove
+    // icon · name · island · receive · banner · remove
     private static Grid AppGrid()
     {
         var row = new Grid { MinHeight = 44, Background = Brushes.Transparent };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition());
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(144) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(80) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(96) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
@@ -136,8 +138,8 @@ public sealed partial class SettingsWindow
     private static string AppName(NoticeCenter center, NoticeAppRule rule)
         => rule.Name.Length > 0 ? rule.Name : center.Hub.KnownApps.FirstOrDefault(app => app.Key == rule.Key)?.Name ?? rule.Key;
 
-    // One application or source: its icon, its name with the arrow that opens it, a line on how it goes, its level, for a Windows
-    // application its receive switch and Windows' own banner switch, and for one set apart the cross that takes it off the list
+    // One application or source: its icon, its name with the arrow that opens it, a line on how it goes, its island and receive
+    // switches, for a Windows application Windows' own banner switch, and for one set apart the cross that takes it off the list
     // (back to the defaults; a common app stays listed, and a source of the command line shows again with its next message).
     // Opened, a common app shows what to do in it (or WeChat's two ways) above its own looks; any other its own looks.
     private FrameworkElement NoticeAppRow(NoticeCenter center, string key, string name, bool windows, CommonApp? common = null)
@@ -160,21 +162,20 @@ public sealed partial class SettingsWindow
         labels.Children.Add(heading);
         labels.Children.Add(common is null ? StatusLine(() => AppNote(center, key, rule)) : CommonStatus(center, common, open ? null : Flip));
         Grid.SetColumn(labels, 1); row.Children.Add(labels);
-        var level = LevelCombo(key, name, rule, windows);
-        level.VerticalAlignment = VerticalAlignment.Center; level.HorizontalAlignment = HorizontalAlignment.Left;
-        level.IsEnabled = !windows || receives;
-        Grid.SetColumn(level, 2); row.Children.Add(level);
+        var island = IslandSwitch(key, name, rule);
+        island.IsEnabled = receives;
+        Grid.SetColumn(island, 2); row.Children.Add(island);
+        var receive = NoticeToggle(name + " · " + Loc.T("接收", "Receive"), receives, value =>
+        {
+            EditRule(key, name, r => r.Enabled = value); island.IsEnabled = value;
+            title.SetResourceReference(TextBlock.ForegroundProperty, value ? "SettingsTextPrimary" : "SettingsTextSecondary");
+            foreach (var line in _noticeStatusLines.ToList()) line();
+            if (_noticeAppsOpen.Contains(key)) ShowPage(_page);
+        });
+        receive.HorizontalAlignment = HorizontalAlignment.Center;
+        Grid.SetColumn(receive, 3); row.Children.Add(receive);
         if (windows)
         {
-            var receive = NoticeToggle(name + " · " + Loc.T("接收", "Receive"), receives, value =>
-            {
-                EditRule(key, name, r => r.Enabled = value); level.IsEnabled = value;
-                title.SetResourceReference(TextBlock.ForegroundProperty, value ? "SettingsTextPrimary" : "SettingsTextSecondary");
-                foreach (var line in _noticeStatusLines.ToList()) line();
-                if (_noticeAppsOpen.Contains(key)) ShowPage(_page);
-            });
-            receive.HorizontalAlignment = HorizontalAlignment.Center;
-            Grid.SetColumn(receive, 3); row.Children.Add(receive);
             if (key.StartsWith("windows:", StringComparison.Ordinal) && BannerSwitch(center, key["windows:".Length..], name) is { } banner)
             {
                 Grid.SetColumn(banner, 4); row.Children.Add(banner);

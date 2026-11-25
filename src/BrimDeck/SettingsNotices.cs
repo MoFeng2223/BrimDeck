@@ -12,11 +12,11 @@ using BrimDeck.Native;
 
 namespace BrimDeck;
 
-// The two "灵动提示" pages. How notices show (NoticesSettingsPage): the default level, how each of the three levels looks, the
-// collapsed count of unread notices, the quiet times and the history; whether notices show at all is each profile's switch under
-// 收起外观 (NoticeIslandSection). Apps (NoticeAppsSettingsPage, SettingsNotices.Apps.cs): the common apps, always listed, and the
-// other Windows applications set apart, each one's level and banner, the command-line and WSL sources, and the WSL
-// distributions. An application may have its own looks for the levels, under its row, closed until asked for. Source states
+// The two "灵动提示" pages. How notices show (NoticesSettingsPage): how levels 2 and 3 look (level 1 is BrimDeck's own and
+// fixed; the levels themselves are fixed, NoticeLevels.Resolve), the collapsed count of unread notices, the quiet times and the
+// history; whether notices show at all is each profile's switch under 收起外观 (NoticeIslandSection). Apps
+// (NoticeAppsSettingsPage, SettingsNotices.Apps.cs): the common apps, always listed, and the other Windows applications set
+// apart, each one's island, receive and banner switches, the command-line and WSL sources, and the WSL distributions. An application may have its own looks for the levels, under its row, closed until asked for. Source states
 // change while a page is open (access granted, an agent started); their lines follow NoticeCenter.Changed without rebuilding
 // the page.
 public sealed partial class SettingsWindow
@@ -26,18 +26,10 @@ public sealed partial class SettingsWindow
     // The applications whose own looks are open under their row.
     private readonly HashSet<string> _noticeAppsOpen = new(StringComparer.Ordinal);
 
-    private static string LevelName(NoticeLevel level) => level switch
-    {
-        NoticeLevel.Plain => Loc.T("文字", "Text"), NoticeLevel.Persistent => Loc.T("常驻", "Stay"), NoticeLevel.Silent => Loc.T("只进通知页", "List only"),
-        _ => Loc.T("闪动", "Flash")
-    };
+    private static string LevelTitle(NoticeLevel level) => level == NoticeLevel.Persistent ? Loc.T("等级 3 · 常驻", "Level 3 · Stay") : Loc.T("等级 2 · 闪动", "Level 2 · Flash");
 
-    private static string LevelTitle(NoticeLevel level) => level switch
-    {
-        NoticeLevel.Plain => Loc.T("等级 1 · 文字", "Level 1 · Text"), NoticeLevel.Persistent => Loc.T("等级 3 · 常驻", "Level 3 · Stay"), _ => Loc.T("等级 2 · 闪动", "Level 2 · Flash")
-    };
-
-    private static readonly NoticeLevel[] Levels = [NoticeLevel.Plain, NoticeLevel.Glow, NoticeLevel.Persistent];
+    // The levels whose looks the settings offer; level 1 is BrimDeck's own and looks the same always.
+    private static readonly NoticeLevel[] Levels = [NoticeLevel.Glow, NoticeLevel.Persistent];
 
     // ----- How notices show -----
 
@@ -47,10 +39,7 @@ public sealed partial class SettingsWindow
         _noticeStatusLines.Clear();
         NoticeIslandOffRow();
         SectionTitle(Loc.T("通用", "General"));
-        Group(MusicChoice(Loc.T("默认等级", "Default level"), NoticeLevels.Default(S.NoticeDefaultLevel), [.. Levels.Select(level => (level, LevelName(level)))],
-                value => Change(s => s.NoticeDefaultLevel = value),
-                help: Loc.T("应用的提示等级选“默认”时使用。", "Used for an app whose level is set to Default.")),
-            Toggle(Loc.T("遮住验证码", "Hide verification codes"), S.NoticeCodes, value => Change(s => s.NoticeCodes = value),
+        Group(Toggle(Loc.T("遮住验证码", "Hide verification codes"), S.NoticeCodes, value => Change(s => s.NoticeCodes = value),
                 help: Loc.T("识别通知里的验证码，用圆点遮住，并在通知页提供“复制验证码”按钮。复制 60 秒后自动清除剪贴板。",
                     "Recognizes a verification code in a notice, hides it with dots and offers a \"Copy code\" button on the notices page. The clipboard is cleared 60 seconds after copying.")));
         foreach (var level in Levels)
@@ -73,13 +62,11 @@ public sealed partial class SettingsWindow
         WatchNotices(center);
     }
 
-    private static string LevelHelp(NoticeLevel level) => level switch
-    {
-        NoticeLevel.Plain => Loc.T("岛的形状不变，只把里面的内容换成提示文字，停留时间到后恢复原样。", "The island keeps its shape; only its content turns into the notice's words, until the time is up."),
-        NoticeLevel.Persistent => Loc.T("提示一直留在岛上并定时闪动，直到展开面板或处理后才消失。来电、闹钟和需要审批的提示总是使用这一等级，除非该应用设为“只进通知页”或“不提示”。",
-            "The notice stays on the island and flashes now and then until the panel is opened or it is handled. Calls, alarms and approvals always use this level, unless their app is set to List only or Don't show."),
-        _ => Loc.T("在等级 1 的基础上，岛的边缘闪一下。辉光：边缘亮一下；灵动：辉光加液体波纹。", "As level 1, and the island's edge flashes. Glow: the edge lights up once. Lively: the glow and a liquid ripple.")
-    };
+    private static string LevelHelp(NoticeLevel level) => level == NoticeLevel.Persistent
+        ? Loc.T("来电、闹钟和需要审批的提示使用这一等级：一直留在岛上并定时闪动，直到处理、展开面板或超过最长停留时间。",
+            "Calls, alarms and approvals use this level: the notice stays on the island and flashes now and then until it is handled, the panel is opened or the longest stay is over.")
+        : Loc.T("应用的通知使用这一等级：岛上显示提示文字，边缘闪一下，停留时间到后恢复原样。辉光：边缘亮一下；灵动：辉光加液体波纹。",
+            "Apps' notices use this level: the island shows the notice's words and its edge flashes, until the time is up. Glow: the edge lights up once. Lively: the glow and a liquid ripple.");
 
     // Whether arriving notices show on the collapsed island: each profile's switch, under 收起外观 (Compact). Independent of the
     // notices page under 展开外观; either one receives notices.
@@ -133,21 +120,27 @@ public sealed partial class SettingsWindow
         shown.Child = island;
     }
 
-    // The rows of one look (style, shown as a notice of level shows): the effect of levels 2 and 3, the backlight's color, the icon,
-    // and how long levels 1 and 2 stay. The "提示方式" page offers the color for level 3 only, as the one of a message that names
-    // none; an application's own looks (own) offer it for level 2 as well. edit saves a change to the look and redraws its preview;
+    // The rows of one look (style, shown as a notice of level shows): the effect, the backlight's color, the icon, how long level 2
+    // stays and the sound. The "提示方式" page offers the color for level 3 only, as the one of a message that names none, and level
+    // 3's longest stay, which is the same for every application; an application's own looks (own) offer the color for level 2 as
+    // well. edit saves a change to the look and redraws its preview;
     // the rows stay as they are. name tells the rows of several groups on a page apart for screen readers and the segment groups.
     private List<FrameworkElement> LevelRows(NoticeLevel level, NoticeStyle style, Action<Action<NoticeStyle>> edit, string name, bool own)
     {
-        var rows = new List<FrameworkElement>();
-        if (level != NoticeLevel.Plain)
-            rows.Add(NoticeChoice(Loc.T("效果", "Effect"), "NoticeEffect" + name, style.Liquid, [(false, Loc.T("辉光", "Glow")), (true, Loc.T("灵动", "Lively"))],
-                value => edit(s => s.Liquid = value), 150));
-        if (level == NoticeLevel.Persistent || own && level == NoticeLevel.Glow) rows.Add(LightRow(style, edit, name, own));
+        var rows = new List<FrameworkElement>
+        {
+            NoticeChoice(Loc.T("效果", "Effect"), "NoticeEffect" + name, style.Liquid, [(false, Loc.T("辉光", "Glow")), (true, Loc.T("灵动", "Lively"))],
+                value => edit(s => s.Liquid = value), 150)
+        };
+        if (level == NoticeLevel.Persistent || own) rows.Add(LightRow(style, edit, name, own));
         rows.Add(Toggle(Loc.T("显示应用图标", "Show app icon"), style.Icon, value => edit(s => s.Icon = value)));
         if (level != NoticeLevel.Persistent)
-            rows.Add(SliderRow(Loc.T("停留时间", "Shown for"), style.Seconds, NoticeStyle.MinSeconds, NoticeStyle.MaxSeconds, 1, Loc.T(" 秒", " s"), value => edit(s => s.Seconds = (int)Math.Round(value))));
-        if (level != NoticeLevel.Plain) rows.Add(SoundRow(level, style, edit, name));
+            rows.Add(StepsRow(Loc.T("停留时间", "Shown for"), style.Seconds, NoticeStyle.SecondsSteps, Loc.T(" 秒", " s"), value => edit(s => s.Seconds = value)));
+        else if (!own)
+            rows.Add(SliderRow(Loc.T("最长停留", "Stays at most"), S.NoticeStaySeconds, DeckSettings.MinNoticeStay, DeckSettings.MaxNoticeStay, 10, Loc.T(" 秒", " s"),
+                value => Change(s => s.NoticeStaySeconds = (int)Math.Round(value)),
+                help: Loc.T("没有处理的提示到时后从岛上消失，仍保留在通知页。", "A notice not handled by then leaves the island and stays on the notices page.")));
+        rows.Add(SoundRow(level, style, edit, name));
         return rows;
     }
 
@@ -625,30 +618,19 @@ public sealed partial class SettingsWindow
     // The note of an application whose notifications are off in Windows altogether (no banner to switch, nothing reaches BrimDeck).
     private static string NotificationsOffNote => Loc.T("Windows 中已关闭这个应用的通知", "This app's notifications are off in Windows");
 
-    // The level: Default (the default level, named), the three levels, "只进通知页"; a command-line source has "按发送方" in place of
-    // Default and "不提示" as well.
-    private ComboBox LevelCombo(string key, string name, NoticeAppRule? rule, bool windows)
+    // Whether an application's notices show on the island as they arrive ("岛上提示"); off, they only go to the notices page
+    // (NoticeAppRule.Level Silent). The level they show at is fixed (NoticeLevels.Resolve).
+    private CheckBox IslandSwitch(string key, string name, NoticeAppRule? rule)
     {
-        var options = new List<(NoticeLevel Level, bool Enabled, string Label)>
+        var toggle = NoticeToggle(name + " · " + Loc.T("岛上提示", "On the island"), rule?.Level != NoticeLevel.Silent, value =>
         {
-            (NoticeLevel.Auto, true, windows ? Loc.T("默认（", "Default (") + LevelName(NoticeLevels.Default(S.NoticeDefaultLevel)) + Loc.T("）", ")") : Loc.T("按发送方", "As sent")),
-            (NoticeLevel.Plain, true, LevelName(NoticeLevel.Plain)), (NoticeLevel.Glow, true, LevelName(NoticeLevel.Glow)), (NoticeLevel.Persistent, true, LevelName(NoticeLevel.Persistent)),
-            (NoticeLevel.Silent, true, LevelName(NoticeLevel.Silent))
-        };
-        if (!windows) options.Add((NoticeLevel.Auto, false, Loc.T("不提示", "Don't show")));
-        // A Windows application not received says so with its receive switch; its level stays as chosen (shown dimmed).
-        int selected = rule is { Enabled: false } && !windows ? options.Count - 1 : Math.Max(0, options.FindIndex(option => option.Enabled && option.Level == (rule?.Level ?? NoticeLevel.Auto)));
-        var combo = new ComboBox { Width = 132, Style = (Style)FindResource("SettingsCombo"), ItemsSource = options.Select(option => option.Label).ToList(), SelectedIndex = selected };
-        AutomationProperties.SetName(combo, name + " · " + Loc.T("提示等级", "Level"));
-        combo.SelectionChanged += (_, _) =>
-        {
-            if (combo.SelectedIndex < 0) return;
-            var (level, enabled, _) = options[combo.SelectedIndex];
-            EditRule(key, name, r => { r.Level = level; r.Enabled = enabled; });
-            // The own looks open under the row show the chosen level's.
+            EditRule(key, name, r => r.Level = value ? NoticeLevel.Auto : NoticeLevel.Silent);
+            foreach (var line in _noticeStatusLines.ToList()) line();
+            // The own looks open under the row say whether the notices show.
             if (_noticeAppsOpen.Contains(key)) ShowPage(_page);
-        };
-        return combo;
+        });
+        toggle.HorizontalAlignment = HorizontalAlignment.Center;
+        return toggle;
     }
 
     // Changes an application's rule, adding it for a source that had none; a source's rule that no longer differs from having none
@@ -661,9 +643,9 @@ public sealed partial class SettingsWindow
         if (!NoticeKeys.OnAppList(key) && rule.Enabled && rule.Level == NoticeLevel.Auto && rule.Styles is null) s.NoticeApps.Remove(rule);
     });
 
-    // An application's own looks: off follows the "提示方式" page; on, a copy of it to change. Shown is the look of the level its
-    // notices show at (the three levels for a program whose level its messages decide), and the look of the notices that stay
-    // until handled whatever the level: a chat's calls (their own look, NoticeLevelStyles.Call), and a clock's, a calendar's or a
+    // An application's own looks: off follows the "提示方式" page; on, a copy of it to change. Shown is the look of level 2, at which
+    // its notices show (and level 3 for a program, whose messages may ask for it), and the look of the notices that stay until
+    // handled: a chat's calls (their own look, NoticeLevelStyles.Call), and a clock's, a calendar's or a
     // program's that ring or wait (level 3's, while the level shown is not 3).
     private FrameworkElement OwnLooks(string key, string name, NoticeAppRule? rule)
     {
@@ -692,9 +674,7 @@ public sealed partial class SettingsWindow
                 }, group, own: true)]);
             }
             var sample = (name, name, Loc.T("一条新通知", "A new notice"));
-            NoticeLevel[] levels = rule.Level == NoticeLevel.Auto
-                ? ProgramSource(key) ? Levels : [NoticeLevels.Default(S.NoticeDefaultLevel)]
-                : [NoticeLevels.Default(rule.Level)];
+            NoticeLevel[] levels = ProgramSource(key) ? Levels : [NoticeLevel.Glow];
             foreach (var level in levels)
             {
                 SectionTitle(levels.Length > 1 ? LevelTitle(level) : Loc.T("通知 · ", "Notices · ") + LevelTitle(level));
@@ -771,8 +751,8 @@ public sealed partial class SettingsWindow
         var helper = BrimCommand.Installed ? BrimCommand.File : WslNoticeBridge.HelperPath;
         var copy = ActionButton(Loc.T("复制命令行路径", "Copy command line path"), () => { try { Clipboard.SetText(helper); } catch (System.Runtime.InteropServices.ExternalException) { } });
         copy.ToolTip = helper;
-        SectionTitle(Loc.T("命令行与程序", "Command line and programs"), copy, () => Loc.T("通过命令行或程序发来的提示，按发送方给出的名称列在这里，第一次发送后自动出现。“按发送方”使用消息里指定的等级。用法见使用说明。",
-            "Notices sent through the command line or by a program are listed here under the name their sender gives, once the first one arrives. As sent uses the level the message asks for. See the documentation for how to send them."));
+        SectionTitle(Loc.T("命令行与程序", "Command line and programs"), copy, () => Loc.T("通过命令行或程序发来的提示，按发送方给出的名称列在这里，第一次发送后自动出现，按消息里指定的等级显示。用法见使用说明。",
+            "Notices sent through the command line or by a program are listed here under the name their sender gives, once the first one arrives. They show at the level the message asks for. See the documentation for how to send them."));
         var sources = center.Hub.KnownApps.Where(app => ProgramSource(app.Key)).Select(app => (app.Key, app.Name))
             .Concat(S.NoticeApps.Where(rule => ProgramSource(rule.Key) && center.Hub.KnownApps.All(app => app.Key != rule.Key)).Select(rule => (rule.Key, Name: rule.Name.Length > 0 ? rule.Name : rule.Key)))
             .Take(60).ToList();

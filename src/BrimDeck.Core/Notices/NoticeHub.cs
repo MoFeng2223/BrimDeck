@@ -129,7 +129,7 @@ public sealed class NoticeHub
         var priority = NoticeClock.Alerting(input.Timing, now) || input.Call ? AlertPriority(input.PriorityHint) : EffectivePriority(input.PriorityHint);
         // Kept in the recent notices without showing as it arrives: a low priority notice, or the Silent level (the user's for the
         // application, or the sender's own).
-        bool Quiet(Notice kept) => kept.Priority == NoticePriority.Low || NoticeLevels.Resolve(kept, rule, NoticeLevel.Glow, now) == NoticeLevel.Silent;
+        bool Quiet(Notice kept) => kept.Priority == NoticePriority.Low || NoticeLevels.Resolve(kept, rule, now) == NoticeLevel.Silent;
         bool late = Late(input, priority, now);
         if (input.Unlisted)
         {
@@ -290,7 +290,7 @@ public sealed class NoticeHub
             notice.ReceivedAt = now;
             _notices.Remove(notice); _notices.Insert(0, notice);
             if (_receives(notice.AppKey) && notice.Priority != NoticePriority.Low
-                && NoticeLevels.Resolve(notice, rule, NoticeLevel.Glow, now) != NoticeLevel.Silent) shown.Add(notice);
+                && NoticeLevels.Resolve(notice, rule, now) != NoticeLevel.Silent) shown.Add(notice);
         }
         if (changed) { Recount(); Changed?.Invoke(); Persist?.Invoke(false); }
         return shown;
