@@ -187,11 +187,11 @@ public sealed partial class SettingsWindow
     }
 
     // The "Add app" button with its chevron, which opens a menu of apps.
-    private Button AddAppButton(string name, Action<Button> open)
+    private Button AddAppButton(string name, Action<Button> open, string? label = null)
     {
         var add = new Button { Style = (Style)FindResource("SettingsOutlineButton"), VerticalAlignment = VerticalAlignment.Center };
         var content = new StackPanel { Orientation = Orientation.Horizontal };
-        content.Children.Add(new TextBlock { Text = Loc.T("添加应用", "Add app"), VerticalAlignment = VerticalAlignment.Center });
+        content.Children.Add(new TextBlock { Text = label ?? Loc.T("添加应用", "Add app"), VerticalAlignment = VerticalAlignment.Center });
         var chevron = Chevron(); chevron.Margin = new Thickness(6, 1, 0, -1); content.Children.Add(chevron);
         add.Content = content;
         AutomationProperties.SetName(add, name);

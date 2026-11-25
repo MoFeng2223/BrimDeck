@@ -14,10 +14,11 @@ namespace BrimDeck;
 
 // The two "灵动提示" pages. How notices show (NoticesSettingsPage): the default level, how each of the three levels looks, the
 // collapsed count of unread notices, the quiet times and the history; whether notices show at all is each profile's switch under
-// 收起外观 (NoticeIslandSection). Apps (NoticeAppsSettingsPage): the Windows applications whose notices show and
-// each one's level and banner, the command-line and WSL sources, and the WSL distributions. An application may have its own looks
-// for the levels, under its row, closed until asked for. Source states change while a page is open (access granted, an agent
-// started); their lines follow NoticeCenter.Changed without rebuilding the page.
+// 收起外观 (NoticeIslandSection). Apps (NoticeAppsSettingsPage, SettingsNotices.Apps.cs): the common apps, always listed, and the
+// other Windows applications set apart, each one's level and banner, the command-line and WSL sources, and the WSL
+// distributions. An application may have its own looks for the levels, under its row, closed until asked for. Source states
+// change while a page is open (access granted, an agent started); their lines follow NoticeCenter.Changed without rebuilding
+// the page.
 public sealed partial class SettingsWindow
 {
     internal const int NoticesSettingsPage = 19, NoticeAppsSettingsPage = 20;
@@ -422,19 +423,7 @@ public sealed partial class SettingsWindow
         Group([.. rows]);
     }
 
-    // ----- Apps -----
-
-    private void NoticeAppsPage()
-    {
-        var center = _app.Notices;
-        _noticeStatusLines.Clear();
-        NoticesOffRow();
-        WindowsAppsSection(center);
-        ProgramSourcesSection(center);
-        WslSection(center);
-        NoticeCompatibilitySection();
-        WatchNotices(center);
-    }
+    // ----- Apps (the page itself: SettingsNotices.Apps.cs) -----
 
     // What brim notify list and remove may reach (NoticeEntries): without this, the notices of the command line and programs only.
     private void NoticeCompatibilitySection()
@@ -470,33 +459,6 @@ public sealed partial class SettingsWindow
         Update();
         _noticeStatusLines.Add(Update);
         return line;
-    }
-
-    // The Windows applications set apart from the rest, and the chats whose taskbar button flashes (WeChat). Every Windows
-    // application's notices are received unless its row's switch is off; a taskbar-flash chat only while listed. While Windows does
-    // not let BrimDeck read notifications, a row says so first, with the way to allow it.
-    private void WindowsAppsSection(NoticeCenter center)
-    {
-        var add = AddAppButton(Loc.T("添加应用", "Add app"), AddNoticeAppMenu);
-        SectionTitle(Loc.T("Windows 应用", "Windows apps"), add, () => Loc.T("所有 Windows 应用的通知默认都会接收。把应用添加到这里，可以单独关闭接收、调整提示等级，或开关它的系统横幅。移除后恢复默认。\nBrimDeck 读取的是应用发给 Windows 的通知：钉钉、飞书需要在各自的设置中打开桌面通知；微信不发送 Windows 通知，只能在任务栏图标闪烁时提示有新消息。",
-            "Every Windows app's notices are received by default. Add an app here to stop receiving it, change its level, or switch its system banner. Removing it goes back to the default.\nBrimDeck reads the notifications apps send to Windows: DingTalk and Feishu need desktop notifications turned on in their own settings; WeChat sends none, so only its flashing taskbar button tells of a new message."));
-        _bannerSwitches.Clear();
-        var rows = new List<FrameworkElement>();
-        var access = AccessRow(center);
-        rows.Add(access);
-        var listed = S.NoticeApps.Where(rule => NoticeKeys.OnAppList(rule.Key)).ToList();
-        if (listed.Count == 0)
-        {
-            var none = TextLine(Loc.T("没有应用。所有应用的通知都会接收；需要单独设置的应用可以添加到这里。", "No apps. Every app's notices are received; add an app here to set it apart."), 12, TextSecondary);
-            none.TextWrapping = TextWrapping.Wrap;
-            rows.Add(new Border { Child = none, Padding = new Thickness(0, 13, 0, 13) });
-        }
-        else
-        {
-            rows.Add(AppColumns(windows: true));
-            foreach (var rule in listed) rows.Add(NoticeAppRow(center, rule.Key, AppName(center, rule), windows: true));
-        }
-        GroupShown([.. rows]);
     }
 
     // A group whose rows may hide (a status row with nothing to say): the dividers go with the rows they sit above.
@@ -595,6 +557,7 @@ public sealed partial class SettingsWindow
         var title = TextLine("", 13, _palette.Negative, FontWeights.SemiBold);
         var detail = StatusLine(() => center.WindowsState switch
         {
+            NoticeSourceState.NeedsAccess => (Loc.T("允许后，BrimDeck 才能收到各个应用的通知。", "Once allowed, BrimDeck can receive apps' notifications."), false),
             NoticeSourceState.Denied => (Loc.T("在“隐私和安全性 › 通知”中允许应用访问通知", "Allow apps to access notifications in Privacy & security › Notifications"), false),
             NoticeSourceState.Failed => (Loc.T("稍后重试。", "Trying again shortly.") + (center.WindowsFailure.Length > 0 ? " " + center.WindowsFailure : ""), false),
             _ => ("", false)
@@ -622,147 +585,12 @@ public sealed partial class SettingsWindow
         return row;
     }
 
-    // The column headings over the rows: the level, and for Windows applications the banner switch.
-    private FrameworkElement AppColumns(bool windows)
-    {
-        var row = AppGrid();
-        row.MinHeight = 28;
-        var level = TextLine(Loc.T("提示等级", "Level"), 11, TextTertiary); level.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(level, 2); row.Children.Add(level);
-        if (windows)
-        {
-            row.Children.Add(Heading(3, Loc.T("接收", "Receive"), () => Loc.T("关闭后，BrimDeck 不再显示这个应用的通知，也不记入通知页。Windows 自己的通知不受影响。",
-                "When off, BrimDeck no longer shows this app's notices nor keeps them on the notices page. Windows' own notifications are not affected.")));
-            row.Children.Add(Heading(4, Loc.T("系统横幅", "System banner"), () => Loc.T("与 Windows 设置中这个应用的“显示通知横幅”是同一个开关，显示的是它现在的状态，在这里切换会直接修改 Windows 设置，退出 BrimDeck 后仍然保持。关闭后，通知不再从屏幕右下角弹出，仍会进入 Windows 通知中心，提示音不变。",
-                "The same switch as this app's \"Show notification banners\" in Windows Settings, shown as it is now; switching it here changes Windows Settings and stays after BrimDeck exits. When off, notices no longer pop up in the corner of the screen; they still go to Windows' notification center and keep their sound.")));
-        }
-        return row;
-
-        FrameworkElement Heading(int column, string title, Func<string> help)
-        {
-            var heading = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            heading.Children.Add(TextLine(title, 11, TextTertiary));
-            var info = HelpIcon(title, help, 12);
-            info.Margin = new Thickness(4, 0, 0, 0); heading.Children.Add(info);
-            Grid.SetColumn(heading, column);
-            return heading;
-        }
-    }
-
-    // icon · name · level · receive · banner · remove
-    private static Grid AppGrid()
-    {
-        var row = new Grid { MinHeight = 44, Background = Brushes.Transparent };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        row.ColumnDefinitions.Add(new ColumnDefinition());
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(144) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(96) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
-        return row;
-    }
-
-    // An application's name as the settings show it: the one it was listed under, else the one its notices carry, else its key.
-    private static string AppName(NoticeCenter center, NoticeAppRule rule)
-        => rule.Name.Length > 0 ? rule.Name : center.Hub.KnownApps.FirstOrDefault(app => app.Key == rule.Key)?.Name ?? rule.Key;
-
-    // One application or source: its icon, its name (with the arrow that opens its own looks), what to know about it, its level,
-    // for a Windows application its receive switch and Windows' own banner switch, and the cross that takes it off the list (back
-    // to the default; a source of the command line shows again with its next message, so it has none). Its own looks show under
-    // it while open.
-    private FrameworkElement NoticeAppRow(NoticeCenter center, string key, string name, bool windows)
-    {
-        var rule = S.NoticeRule(key);
-        var known = center.Hub.KnownApps.FirstOrDefault(app => app.Key == key);
-        var row = AppGrid();
-        var icon = NoticeAppIcon(name, known?.IconRef, 20, center); icon.Margin = new Thickness(0, 0, 12, 0); icon.VerticalAlignment = VerticalAlignment.Center;
-        row.Children.Add(icon);
-        bool open = _noticeAppsOpen.Contains(key);
-        var title = TextLine(name, 13, TextPrimary); title.TextTrimming = TextTrimming.CharacterEllipsis; title.VerticalAlignment = VerticalAlignment.Center; title.ToolTip = name;
-        var heading = new DockPanel { LastChildFill = false };
-        var arrow = ChevronButton(Loc.T("单独设置样子：", "Own looks: ") + name, () => { if (!_noticeAppsOpen.Remove(key)) _noticeAppsOpen.Add(key); ShowPage(_page); });
-        PointArrow(arrow, open); arrow.Margin = new Thickness(2, 0, 0, 0);
-        title.MaxWidth = 200;
-        heading.Children.Add(title); heading.Children.Add(arrow);
-        var labels = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 7, 12, 7) };
-        labels.Children.Add(heading);
-        var note = StatusLine(() => AppNote(center, key, rule));
-        labels.Children.Add(note);
-        Grid.SetColumn(labels, 1); row.Children.Add(labels);
-        bool receives = rule?.Enabled ?? true;
-        var level = LevelCombo(key, name, rule, windows);
-        level.VerticalAlignment = VerticalAlignment.Center; level.HorizontalAlignment = HorizontalAlignment.Left;
-        level.IsEnabled = !windows || receives;
-        Grid.SetColumn(level, 2); row.Children.Add(level);
-        if (windows)
-        {
-            var receive = NoticeToggle(name + " · " + Loc.T("接收", "Receive"), receives, value =>
-            {
-                EditRule(key, name, r => r.Enabled = value); level.IsEnabled = value;
-                if (_noticeAppsOpen.Contains(key)) ShowPage(_page);
-            });
-            receive.HorizontalAlignment = HorizontalAlignment.Center;
-            Grid.SetColumn(receive, 3); row.Children.Add(receive);
-            if (key.StartsWith("windows:", StringComparison.Ordinal) && BannerSwitch(center, key["windows:".Length..], name) is { } banner)
-            {
-                Grid.SetColumn(banner, 4); row.Children.Add(banner);
-            }
-            var cross = RemoveButton(name, () => { Change(s => s.NoticeApps.RemoveAll(r => r.Key == key)); _noticeAppsOpen.Remove(key); ShowPage(_page); });
-            Grid.SetColumn(cross, 5); row.Children.Add(cross);
-        }
-        bool wechat = key == WeChatRows.AppKey && receives;
-        if (!open && !wechat) return row;
-        var stack = new StackPanel(); stack.Children.Add(row);
-        if (wechat) stack.Children.Add(WeChatOptions(rule, name));
-        if (open) stack.Children.Add(OwnLooks(key, name, rule));
-        return stack;
-    }
-
-    // What to know about a row: what WeChat's and the Clock's notices are, and what went wrong (the taskbar watch, the banner).
-    private (string, bool) AppNote(NoticeCenter center, string key, NoticeAppRule? rule)
-    {
-        if (key == WeChatRows.AppKey && rule is { Enabled: true, ReadContent: true } && center.ChatFlashError is null) return WeChatNote(center);
-        if (key.StartsWith("flash:", StringComparison.Ordinal))
-            return center.ChatFlashError is { } error ? (Loc.T("无法监视任务栏：", "Could not watch the taskbar: ") + error, true) : (Loc.T("任务栏图标闪烁时提示“有新消息”", "\"New message\" when its taskbar button flashes"), false);
-        if (key.StartsWith("windows:", StringComparison.Ordinal))
-        {
-            string appId = key["windows:".Length..];
-            if (_bannerNotes.TryGetValue(appId, out var problem)) return (problem, true);
-            if (NoticeTimeSources.ForApp(appId) is { Role: NoticeTimeRole.Clock }) return (Loc.T("闹钟、计时器结束", "Alarms and finished timers"), false);
-        }
-        // A common chat none of whose notices has arrived yet: what to turn on in it. Gone with its first notice.
-        if (ChatSetup(key) is { } setup && center.Hub.KnownApps.All(app => app.Key != key)) return (setup, false);
-        if (rule?.Styles is not null) return (Loc.T("已单独设置样子", "Has its own looks"), false);
-        return ("", false);
-    }
-
-    // The common chats offered first under "添加应用", whether or not they have sent a notice yet, by the application ids their
-    // notices carry (QQ's, DingTalk's and Feishu's are the ids their Start menu entries register); WeChat sends no Windows
-    // notifications and is known by its taskbar flash (ChatFlash).
-    private static (string Key, string Name)[] CommonChats() =>
-    [
-        (NoticeKeys.Windows("QQ"), "QQ"), (NoticeKeys.Windows("ali.dingtalk.release"), Loc.T("钉钉", "DingTalk")),
-        (NoticeKeys.Windows("com.electron.Feishu"), Loc.T("飞书", "Feishu")), ("flash:wechat", Loc.T("微信", "WeChat"))
-    ];
-
-    // What to turn on in a common chat for its messages to reach Windows' notifications, in the chat's own words (DingTalk's from
-    // its installed interface text, Feishu's from its help center).
-    private static string? ChatSetup(string key) => key switch
-    {
-        "windows:QQ" => Loc.T("还没有收到通知：确认 QQ 设置中已开启消息通知", "No notice yet: check that message notifications are on in QQ's settings"),
-        "windows:ali.dingtalk.release" => Loc.T("还没有收到通知：在钉钉“设置与隐私 › 通知”中打开“消息桌面通知”",
-            "No notice yet: in DingTalk, turn on \"Message Desktop Notifications\" under \"Settings and Privacy › Notifications\""),
-        "windows:com.electron.Feishu" => Loc.T("还没有收到通知：在飞书“设置 › 通知”中勾选“横幅消息通知”，并选择显示消息内容",
-            "No notice yet: in Feishu, select \"Banner notification\" under \"Settings › Notifications\" and choose to show the message content"),
-        _ => null
-    };
-
     // Windows' own banner switch of an application, as Windows has it now (NoticeBanners.Shown), read again when the settings window
     // comes forward. Switching it writes Windows' setting at once; one that does not stay is put back and said under the name. Off
     // and unchangeable while the application's notifications are off in Windows; none for an id Windows keeps no setting under.
     private CheckBox? BannerSwitch(NoticeCenter center, string appId, string name)
     {
         if (!NoticeBanners.Usable(appId) || appId == WindowsNoticeSource.OwnAppId) return null;
-        string notificationsOff = Loc.T("Windows 中已关闭这个应用的通知", "This app's notifications are off in Windows");
         bool reading = false;
         CheckBox? toggle = null;
         toggle = NoticeToggle(name + " · " + Loc.T("系统横幅", "System banner"), false, value =>
@@ -779,8 +607,8 @@ public sealed partial class SettingsWindow
             bool? shown;
             try { shown = NoticeBanners.Shown(center.BannerRegistry, appId); }
             catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or System.Security.SecurityException) { shown = null; }
-            if (shown is null) _bannerNotes[appId] = notificationsOff;
-            else if (_bannerNotes.TryGetValue(appId, out var note) && note == notificationsOff) _bannerNotes.Remove(appId);
+            if (shown is null) _bannerNotes[appId] = NotificationsOffNote;
+            else if (_bannerNotes.TryGetValue(appId, out var note) && note == NotificationsOffNote) _bannerNotes.Remove(appId);
             reading = true;
             toggle!.IsChecked = shown == true;
             toggle.IsEnabled = shown is not null;
@@ -794,6 +622,8 @@ public sealed partial class SettingsWindow
 
     // What went wrong with an application's banner switch, said under its name, by application id.
     private readonly Dictionary<string, string> _bannerNotes = new(StringComparer.OrdinalIgnoreCase);
+    // The note of an application whose notifications are off in Windows altogether (no banner to switch, nothing reaches BrimDeck).
+    private static string NotificationsOffNote => Loc.T("Windows 中已关闭这个应用的通知", "This app's notifications are off in Windows");
 
     // The level: Default (the default level, named), the three levels, "只进通知页"; a command-line source has "按发送方" in place of
     // Default and "不提示" as well.
@@ -806,7 +636,8 @@ public sealed partial class SettingsWindow
             (NoticeLevel.Silent, true, LevelName(NoticeLevel.Silent))
         };
         if (!windows) options.Add((NoticeLevel.Auto, false, Loc.T("不提示", "Don't show")));
-        int selected = rule is { Enabled: false } ? options.Count - 1 : Math.Max(0, options.FindIndex(option => option.Enabled && option.Level == (rule?.Level ?? NoticeLevel.Auto)));
+        // A Windows application not received says so with its receive switch; its level stays as chosen (shown dimmed).
+        int selected = rule is { Enabled: false } && !windows ? options.Count - 1 : Math.Max(0, options.FindIndex(option => option.Enabled && option.Level == (rule?.Level ?? NoticeLevel.Auto)));
         var combo = new ComboBox { Width = 132, Style = (Style)FindResource("SettingsCombo"), ItemsSource = options.Select(option => option.Label).ToList(), SelectedIndex = selected };
         AutomationProperties.SetName(combo, name + " · " + Loc.T("提示等级", "Level"));
         combo.SelectionChanged += (_, _) =>
@@ -918,116 +749,6 @@ public sealed partial class SettingsWindow
             return picture;
         }
         return NoticeLetter.Plate(name, size, (Color)ColorConverter.ConvertFromString(_palette.Accent));
-    }
-
-    // "添加应用": a search field, the applications that sent notices lately and are not listed, then the other applications Windows
-    // keeps notification settings for (read in the background) and the chats whose taskbar button BrimDeck watches. Typing filters
-    // both; the list scrolls past what fits.
-    private void AddNoticeAppMenu(Button anchor)
-    {
-        var center = _app.Notices;
-        var popup = new Popup { PlacementTarget = anchor, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
-        var search = new TextBox { Style = (Style)FindResource("SettingsField"), Height = 28, FontSize = 12.5, Padding = new Thickness(8, 0, 8, 0), Margin = new Thickness(2, 2, 2, 6) };
-        AutomationProperties.SetName(search, Loc.T("搜索应用", "Search apps"));
-        var items = new StackPanel { Width = 268 };
-        var list = new ScrollViewer { Style = (Style)FindResource("SettingsScrollViewer"), Content = items, Focusable = false, MaxHeight = 360,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
-        var body = new StackPanel(); body.Children.Add(search); body.Children.Add(list);
-        popup.Child = new Border { Child = body, Background = UI.Brush(_palette.Popup), BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(5) };
-        var now = DateTimeOffset.UtcNow;
-        var chats = CommonChats().Where(chat => S.NoticeRule(chat.Key) is null).ToList();
-        bool Chat(string key) => chats.Any(chat => chat.Key == key);
-        var recent = center.Hub.KnownApps.Where(app => NoticeKeys.OnAppList(app.Key) && S.NoticeRule(app.Key) is null && !Chat(app.Key))
-            .Select(app => (app.Key, app.Name, app.IconRef, When: NoticeText.Relative(app.LastSeen, now))).ToList();
-        var others = ChatFlashApps.All.Where(app => app.Enabled && S.NoticeRule("flash:" + app.Id) is null && !Chat("flash:" + app.Id) && recent.All(r => r.Key != "flash:" + app.Id))
-            .Select(app => ("flash:" + app.Id, app.Name + Loc.T("（任务栏闪烁）", " (taskbar flash)"))).ToList();
-        void Add(string key, string name)
-        {
-            popup.IsOpen = false;
-            Change(s => { if (s.NoticeRule(key) is null) s.NoticeApps.Add(new NoticeAppRule { Key = key, Name = name }); });
-            ShowPage(_page);
-        }
-        void Fill()
-        {
-            items.Children.Clear();
-            string filter = search.Text.Trim();
-            bool Match(string name) => filter.Length == 0 || name.Contains(filter, StringComparison.CurrentCultureIgnoreCase);
-            void Header(string text)
-            {
-                if (items.Children.Count > 0) items.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider), Margin = new Thickness(4, 5, 4, 3) });
-                var header = TextLine(text, 10.5, TextTertiary); header.Margin = new Thickness(10, 4, 10, 3); items.Children.Add(header);
-            }
-            void Entry(string key, string name, string? iconRef, string note)
-            {
-                var item = MenuEntry(name, note, true, false);
-                if (item.Content is DockPanel content)
-                {
-                    var plate = NoticeAppIcon(name, iconRef, 16, center); plate.Margin = new Thickness(0, 0, 9, 0); plate.VerticalAlignment = VerticalAlignment.Center;
-                    DockPanel.SetDock(plate, Dock.Left); content.Children.Insert(0, plate);
-                    foreach (var text in content.Children.OfType<TextBlock>()) text.TextTrimming = TextTrimming.CharacterEllipsis;
-                }
-                item.ToolTip = name;
-                AutomationProperties.SetName(item, Loc.T("添加 ", "Add ") + name);
-                item.Click += (_, _) => Add(key, name);
-                items.Children.Add(item);
-            }
-            // The common chats, each with what it is known by: when it last sent a notice, or for WeChat its taskbar flash.
-            var shownChats = chats.Where(chat => Match(chat.Name)).ToList();
-            if (shownChats.Count > 0)
-            {
-                Header(Loc.T("常用聊天应用", "Common chats"));
-                foreach (var (key, name) in shownChats)
-                {
-                    var known = center.Hub.KnownApps.FirstOrDefault(app => app.Key == key);
-                    string note = key.StartsWith("flash:", StringComparison.Ordinal) ? Loc.T("任务栏闪烁", "Taskbar flash") : known is null ? "" : NoticeText.Relative(known.LastSeen, now);
-                    Entry(key, name, known?.IconRef, note);
-                }
-            }
-            var shownRecent = recent.Where(app => Match(app.Name)).ToList();
-            if (shownRecent.Count > 0) { Header(Loc.T("最近发过通知", "Sent notices lately")); foreach (var app in shownRecent) Entry(app.Key, app.Name, app.IconRef, app.When); }
-            var shownOthers = others.Concat(_registeredApps.Where(app => S.NoticeRule(app.Key) is null && !Chat(app.Key) && recent.All(r => r.Key != app.Key)))
-                .Where(app => Match(app.Item2)).ToList();
-            if (shownOthers.Count > 0) { Header(Loc.T("其他应用", "Other apps")); foreach (var (key, name) in shownOthers) Entry(key, name, null, ""); }
-            if (items.Children.Count == 0)
-            {
-                var none = TextLine(filter.Length > 0 ? Loc.T($"没有找到“{filter}”。应用发过一次通知后会出现在这里。", $"Nothing called \"{filter}\". An app appears here once it has sent a notice.")
-                    : Loc.T("没有可添加的应用。应用发过一次通知后会出现在这里。", "No apps to add. An app appears here once it has sent a notice."), 12, TextTertiary);
-                none.TextWrapping = TextWrapping.Wrap; none.Margin = new Thickness(10, 8, 10, 10);
-                items.Children.Add(none);
-            }
-        }
-        search.TextChanged += (_, _) => Fill();
-        Fill();
-        popup.Opened += (_, _) => Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, () => { search.Focus(); Keyboard.Focus(search); });
-        popup.IsOpen = true;
-        // The applications Windows keeps notification settings for, by name, read once per window in the background.
-        if (!_registeredRead)
-        {
-            _registeredRead = true;
-            _ = Task.Run(RegisteredApps).ContinueWith(task => Dispatcher.BeginInvoke(() =>
-            {
-                if (task.IsCompletedSuccessfully) _registeredApps = task.Result;
-                if (popup.IsOpen) Fill();
-            }), TaskScheduler.Default);
-        }
-    }
-
-    private bool _registeredRead;
-    private List<(string Key, string Name)> _registeredApps = [];
-
-    private static List<(string Key, string Name)> RegisteredApps()
-    {
-        var found = new List<(string Key, string Name)>();
-        foreach (var appId in NoticeBannerRegistry.Configured())
-        {
-            if (!NoticeBanners.Usable(appId) || appId == WindowsNoticeSource.OwnAppId) continue;
-            string? name = null;
-            try { name = AppIdentity.RegisteredName(appId); }
-            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidCastException or UnauthorizedAccessException) { }
-            name ??= WindowsNoticeApps.KnownName(appId);
-            if (name is { Length: > 0 }) found.Add((NoticeKeys.Windows(appId), name.Trim()));
-        }
-        return [.. found.DistinctBy(app => app.Key).OrderBy(app => app.Name, StringComparer.CurrentCultureIgnoreCase)];
     }
 
     // The sources that send through the command line or a program (brim-notify, a hook in an AI tool), and WSL applications'

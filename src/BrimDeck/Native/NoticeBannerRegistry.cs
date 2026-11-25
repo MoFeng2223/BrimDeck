@@ -10,9 +10,8 @@ namespace BrimDeck.Native;
 internal sealed class NoticeBannerRegistry : IBannerRegistry
 {
     private const string ShowBanner = "ShowBanner", Enabled = "Enabled";
-    // Windows' own notification settings nest a desktop program's id ("{known folder}\folder\app.exe") as keys; deeper or more
-    // keys than these are not looked for.
-    private const int MostDepth = 6, MostKeys = 2000;
+    // The Start menu's applications listed at most.
+    private const int MostKeys = 2000;
 
     private static string Path(string appId) => NoticeBanners.Usable(appId) ? NoticeBanners.SettingsKey + "\\" + appId : throw new ArgumentException("Unusable application id.", nameof(appId));
 
@@ -92,37 +91,6 @@ internal sealed class NoticeBannerRegistry : IBannerRegistry
             Registry.CurrentUser.DeleteSubKey(path, throwOnMissingSubKey: false);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { }
-    }
-
-    // The applications Windows already keeps notification settings for: every key under SettingsKey that holds a value (a
-    // nested desktop program's id is the path of keys down to it).
-    public static List<string> Configured()
-    {
-        var found = new List<string>();
-        try
-        {
-            using var root = Registry.CurrentUser.OpenSubKey(NoticeBanners.SettingsKey);
-            if (root is not null) Walk(root, "", 0, found);
-        }
-        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException) { }
-        return found;
-
-        static void Walk(RegistryKey key, string path, int depth, List<string> found)
-        {
-            foreach (var name in key.GetSubKeyNames())
-            {
-                if (found.Count >= MostKeys) return;
-                string id = path.Length == 0 ? name : path + "\\" + name;
-                try
-                {
-                    using var sub = key.OpenSubKey(name);
-                    if (sub is null) continue;
-                    if (sub.ValueCount > 0) found.Add(id);
-                    if (depth + 1 < MostDepth && sub.SubKeyCount > 0) Walk(sub, id, depth + 1, found);
-                }
-                catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException) { }
-            }
-        }
     }
 
     // The Start menu's applications (shell:AppsFolder), by application id: the folder names each item by its id. Read through

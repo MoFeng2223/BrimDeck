@@ -442,6 +442,28 @@
       </ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
+  <!-- One of a few choices listed one under another, each with lines of its own (WeChat's two ways): a round mark beside the
+       content, filled with the accent when chosen. The whole choice takes the click. -->
+  <Style x:Key="SettingsRadio" TargetType="RadioButton">
+    <Setter Property="FocusVisualStyle" Value="{StaticResource SettingsFocus}"/>
+    <Setter Property="Foreground" Value="{DynamicResource SettingsTextPrimary}"/><Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
+      <Grid Background="Transparent">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="26"/><ColumnDefinition/></Grid.ColumnDefinitions>
+        <Grid Width="16" Height="16" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,1,0,0">
+          <Ellipse x:Name="Ring" Stroke="{DynamicResource SettingsInputBorder}" StrokeThickness="1.5" Fill="{DynamicResource SettingsInput}"/>
+          <Ellipse x:Name="Dot" Width="8" Height="8" Fill="{DynamicResource SettingsAccent}" Visibility="Collapsed"/>
+        </Grid>
+        <ContentPresenter Grid.Column="1"/>
+      </Grid>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource SettingsTextPrimary}"/></Trigger>
+        <Trigger Property="IsChecked" Value="True"><Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource SettingsAccent}"/><Setter TargetName="Dot" Property="Visibility" Value="Visible"/></Trigger>
+        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.35"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
   <!-- A choice among several that can be picked together (the kinds in a category's rule): a pill, filled with the accent when on. -->
   <Style x:Key="SettingsChip" TargetType="ToggleButton">
     <Setter Property="FocusVisualStyle" Value="{StaticResource SettingsFocus}"/>

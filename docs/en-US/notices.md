@@ -94,15 +94,15 @@ While it shows, other notices go to the notice history and wait as usual; a norm
 
 | Source | What it is | Default |
 |---|---|---|
-| Windows app notifications | The current user's notifications in Windows' notification center: source, icon, time and text. Every app's notifications are received by default; to stop receiving an app, add it under Settings › Live notices › Apps and switch off its "Receive". "Add app" adds apps that sent notifications recently or are registered for notifications in Windows; removing one goes back to the default. Messages inside applications are not read, and the notification center is not cleared or changed, unless "Let brim list and remove all notices" is on and `brim notify remove` removes a notice. | On |
-| WeChat new messages | WeChat for PC does not send Windows notifications. While WeChat is in the "Apps" list, its flashing taskbar icon shows "WeChat has new messages"; the messages and their senders are not read. | In the list |
+| Windows app notifications | The current user's notifications in Windows' notification center: source, icon, time and text. Every app's notifications are received by default; to stop receiving an app, switch off its "Receive" under Settings › Live notices › Apps: the common apps are always listed at the top; any other app is added with "Add from notice history", from the apps that have sent notifications, so that what is added is the sender itself. Removing one goes back to the default. An app that has not sent a notification yet is not offered. Messages inside applications are not read, and the notification center is not cleared or changed, unless "Let brim list and remove all notices" is on and `brim notify remove` removes a notice. | On |
+| WeChat new messages | WeChat for PC does not send Windows notifications. While "Receive" is on in WeChat's row on the "Apps" page, its flashing taskbar icon shows "WeChat has new messages"; the messages and their senders are not read. Reading message content is a choice of its own, below. | On |
 | brim-notify | `BrimDeck.Notify.exe` on Windows and `brim-notify` in WSL send notices directly. | On |
 | WSL desktop notifications | Standard desktop notifications (freedesktop D-Bus, such as `notify-send`) in the chosen distributions. | Off, per distribution |
 | Mailboxes | New mail in the mailboxes you connect: the sender, the subject and the start of the text. Added under Settings › Live notices › Mailboxes; see [Mailboxes](mail.md). | None connected |
 
 ### Common chat apps
 
-BrimDeck reads the notifications apps send to Windows, so a chat app's messages reach the island only while its desktop notifications are on. Under "Add app" on the "Apps" page, "Common chats" adds them directly; until one has sent a notice, its row says what to turn on.
+BrimDeck reads the notifications apps send to Windows, so a chat app's messages reach the island only while its desktop notifications are on. "Common apps" on the "Apps" page always lists WeChat, QQ, DingTalk and Feishu, each saying under its name whether it is being received; until one has sent a notice, or while its notifications are off in Windows, opening its row shows the settings to turn on.
 
 | App | What to turn on |
 |---|---|
@@ -115,14 +115,14 @@ Each of them also needs its notifications allowed under Windows Settings › Sys
 
 ### WeChat: reading message content
 
-WeChat for PC sends no Windows notifications, so by default only its flashing taskbar button tells of a new message. With "Read message content" on under WeChat's row in Settings › Live notices › Apps (off by default; turning it on asks for confirmation), BrimDeck reads the chat list in WeChat's window instead:
+WeChat for PC sends no Windows notifications, so by default only its flashing taskbar button tells of a new message. With WeChat's row opened in Settings › Live notices › Apps and "How it is noticed" changed from "Taskbar flash" to "Read message content" (choosing it asks for confirmation), BrimDeck reads the chat list in WeChat's window instead:
 
 - A notice shows the chat's name and its latest message (with the sender in a group), and a chat's messages are kept together on the notices page; "Open app" opens WeChat on that chat.
 - The notices page can reply: the text is sent through WeChat's own input box and Send button. Nothing is sent while WeChat's input box holds unsent text.
 - WeChat's window may be minimized, but do not close it to the tray (the close button at its top right). In the tray nothing can be read and only the taskbar flash shows "New message"; reading resumes once the window is open again.
 - Only the chats in view in the chat list are read, and only the latest message of each; of several messages in a row, those in between may be missed. A muted chat tells only of a message that mentions you, "Official Accounts" and "Service Accounts" tell nothing, and nothing is told while you are using WeChat. A chat read in WeChat has its notices marked as handled.
 
-This changes the running WeChat. WeChat exposes its interface only when it detects a screen reader; BrimDeck changes the one byte in the WeChat process's memory that says accessibility is on from 0 to 1, then reads the chat list through Windows' UI Automation. It changes none of WeChat's files, injects no code and does not read WeChat's database. Turning the option off or exiting BrimDeck writes 0 back. WeChat does not support this: it may make WeChat unstable, stop working after a WeChat update, or get the account restricted. Whether to turn it on is your decision.
+This changes the running WeChat. WeChat exposes its interface only when it detects a screen reader; BrimDeck changes the one byte in the WeChat process's memory that says accessibility is on from 0 to 1, then reads the chat list through Windows' UI Automation. It changes none of WeChat's files, injects no code and does not read WeChat's database. Going back to "Taskbar flash" or exiting BrimDeck writes 0 back. WeChat does not support this: it may make WeChat unstable, stop working after a WeChat update, or get the account restricted. Whether to turn it on is your decision.
 
 ### Windows: event log mode and polling
 
@@ -371,7 +371,7 @@ brim-notify "New mail" --kind mail
 - Raw notification content, attachments and pictures are never saved. Icons come only from Windows or local files; nothing is downloaded. Network paths, links and shortcuts as icons are refused.
 - The diagnostic log `notices.log` holds only error types, codes and code locations, never titles or bodies.
 - The local channel accepts only the current user on this PC (a named pipe that refuses network access). A notice's content is only ever shown as text: it is never run and its links are never opened.
-- Every Windows app shows notices by default; an app added to the "Apps" page can stop being received, be given a level (including "List only"), have its Windows system banner switched, and have its own looks. Sources from the command line and programs are listed automatically after they first send, and can be set to "Don't show".
+- Every Windows app shows notices by default; a common app, or an app added to the "Apps" page from the notice history, can stop being received, be given a level (including "List only"), have its Windows system banner switched, and have its own looks. Sources from the command line and programs are listed automatically after they first send, and can be set to "Don't show".
 - Verification codes (Settings › Live notices › How notices show › Hide verification codes, off by default): when on, BrimDeck recognizes a code in a notice's title and body on this PC (a Chinese or English keyword with digits or a short letter-and-digit code nearby; order numbers, amounts, phone numbers, dates and links do not count) and hides it with dots on the island and the notices page; a screen reader hears "verification code hidden". The notices page gets a "Copy code" button. Recognition goes nowhere online and into no log; the clipboard is written only when that button is clicked, marked so that Windows keeps it out of the clipboard history and cloud sync, and emptied after 60 seconds if it still holds that code (left alone if something else was copied). The encrypted notice history keeps the hidden text, so a code cannot be copied after a restart; switching the setting off restores everything. The recognition rules are ported from xiaotang-daozai (MIT, see ThirdPartyNotices.txt) and prefer missing a code to hiding something that is not one.
 
 ## Compatibility (tested)

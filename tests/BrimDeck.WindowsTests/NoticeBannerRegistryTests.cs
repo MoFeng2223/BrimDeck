@@ -25,8 +25,6 @@ internal static class NoticeBannerRegistryTests
                 check("banners: turning off writes ShowBanner = 0 as a DWORD", states[appId] == BannerState.TurnedOff && key?.GetValueKind("ShowBanner") == RegistryValueKind.DWord
                     && (int?)key.GetValue("ShowBanner") == 0 && key.ValueCount == 1);
             check("banners: a desktop program's id becomes nested keys", states[nested] == BannerState.TurnedOff && registry.Read(nested).BannerOff);
-            check("banners: Windows' notification settings list the apps it keeps, nested ones included",
-                NoticeBannerRegistry.Configured() is var configured && configured.Contains(appId, StringComparer.OrdinalIgnoreCase) && configured.Contains(nested, StringComparer.OrdinalIgnoreCase));
             check("banners: the ledger file records them", File.Exists(ledgerPath) && BannerLedger.Load(ledgerPath)?.Find(appId) is { Previous: null, CreatedKey: true });
             check("banners: restoring everything from the ledger (the uninstaller's path) works", NoticeBannerRegistry.RestoreAll(data));
             check("banners: the keys BrimDeck created are gone again", Registry.CurrentUser.OpenSubKey(keyPath) is null && registry.Read(nested) is { KeyExists: false }

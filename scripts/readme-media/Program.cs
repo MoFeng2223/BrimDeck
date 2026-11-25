@@ -196,6 +196,8 @@ internal sealed partial class Renderer(App app, string output, string language, 
             if (scenes.Contains("notice-glow")) await NoticeGlowScene();
             // The notices page with conversations of several messages, and the notices settings page; for checking.
             if (scenes.Contains("notices-page")) await NoticesPageScene();
+            // The notices' "Apps" settings page in each state, and the menu that adds an app from the notice history; for checking.
+            if (scenes.Contains("notice-apps")) await NoticeAppsScene();
             // What one frame of dragging the panel's edges costs on the notices page, beside the system monitor; for checking.
             if (scenes.Contains("notice-resize")) await NoticeResizeScene();
             // The collapsed count of unread notices on each form, and where it is set; for checking.
@@ -2134,10 +2136,10 @@ internal sealed partial class Renderer(App app, string output, string language, 
         }
     }
 
-    private async Task SettingsPage(string name, int page, double height = 640, bool tips = false, Action<SettingsWindow>? prepare = null)
+    private async Task SettingsPage(string name, int page, double height = 640, bool tips = false, Action<SettingsWindow>? prepare = null, double width = 960, SettingsTheme theme = SettingsTheme.Dark)
     {
-        const double scale = 1.5, width = 960;
-        _settings.Theme = SettingsTheme.Dark;
+        const double scale = 1.5;
+        _settings.Theme = theme;
         var window = new SettingsWindow(app);
         prepare?.Invoke(window);
         window.ShowPage(page);
