@@ -44,6 +44,7 @@ internal static class Program
             if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: window capture (not yet known to work on a virtual display).");
             else CaptureChecks.Run(Check);
             CheckSettledClip();
+            CheckDockedTopRim();
             CheckPageToolTips();
             LayoutRetryTests.Run(Check);
             InkLabelSettleTests.Run(Check);
@@ -169,6 +170,114 @@ internal static class Program
                 Check($"the {name} at rest draws nothing past its rounded outline at {scale * 100:0}% ({outside} faint edge pixels, strongest alpha {strongest})",
                     strongest <= 64 && outside <= 16);
             }
+    }
+
+    // A surface docked flush to a screen edge (the notch and an expanded panel whose top corners are square) must omit the rim
+    // along y = 0 so transparency does not expose a bright hairline along the screen edge, while keeping its sides, bottom and
+    // floating shapes rimmed as before.
+    private static void CheckDockedTopRim()
+    {
+        static (byte[] Pixels, int Width, int Height) Draw(double w, double h, CornerRadius corners, double shoulder, double scale, bool settled, double pixel = 0, double rimWidth = 1, System.Windows.Media.Brush? bevel = null, double topRimOpacity = double.NaN)
+        {
+            var island = new BrimDeck.IslandBorder
+            {
+                Width = w, Height = h, Background = System.Windows.Media.Brushes.Black, CornerRadius = corners,
+                ShoulderRadius = shoulder, MaterialOpacity = 1, SurfaceOpacity = 0.2, RimWidth = rimWidth,
+                RimBrush = System.Windows.Media.Brushes.White, Pixel = pixel, BevelBrush = bevel,
+                TopRimOpacity = topRimOpacity, ClipToBounds = true, SettledClip = settled
+            };
+            System.Windows.Media.VisualTreeHelper.SetRootDpi(island, new DpiScale(scale, scale));
+            island.Measure(new Size(w, h)); island.Arrange(new Rect(0, 0, w, h)); island.UpdateLayout();
+            int pw = (int)(w * scale), ph = (int)(h * scale);
+            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(pw, ph, 96 * scale, 96 * scale, System.Windows.Media.PixelFormats.Pbgra32);
+            bitmap.Render(island);
+            var pixels = new byte[pw * ph * 4];
+            bitmap.CopyPixels(pixels, pw * 4, 0);
+            return (pixels, pw, ph);
+        }
+        static (byte R, byte A) At(byte[] pixels, int width, int x, int y)
+        {
+            int i = (y * width + x) * 4;
+            return (pixels[i + 2], pixels[i + 3]);
+        }
+
+        foreach (double scale in new[] { 1d, 1.5 })
+        {
+            string pct = $"{scale * 100:0}%";
+            foreach (bool settled in new[] { false, true })
+            {
+                var (px, pw, ph) = Draw(238, 32, new CornerRadius(0, 0, 12, 12), 16, scale, settled);
+                var top0 = At(px, pw, pw / 2, 0);
+                var top1 = At(px, pw, pw / 2, 1);
+                var bottom = At(px, pw, pw / 2, ph - 1);
+                Check($"notch ({(settled ? "settled" : "animated")}) omits top rim at {pct} (y0={top0.R}/a{top0.A}, y1={top1.R}/a{top1.A}, bottom={bottom.R}/a{bottom.A})",
+                    top0.R == 0 && top0.A == 51 && top1.R == 0 && top1.A == 51 && bottom.R >= 200 && bottom.A == 255);
+            }
+
+            {
+                var (px, pw, ph) = Draw(300, 120, new CornerRadius(0, 0, 24, 24), 0, scale, false);
+                var top0 = At(px, pw, pw / 2, 0);
+                var top1 = At(px, pw, pw / 2, 1);
+                var topLeft = At(px, pw, 0, 0);
+                var topRight = At(px, pw, pw - 1, 0);
+                var bottom = At(px, pw, pw / 2, ph - 1);
+                Check($"docked expanded panel omits top rim while keeping side and bottom rims up to y=0 at {pct}",
+                    top0.R == 0 && top0.A == 51 && top1.R == 0 && top1.A == 51
+                    && topLeft.R >= 200 && topLeft.A == 255 && topRight.R >= 200 && topRight.A == 255
+                    && bottom.R >= 200 && bottom.A == 255);
+            }
+
+            {
+                var (px, pw, ph) = Draw(238, 32, new CornerRadius(0, 0, 12, 12), 16, scale, false, pixel: 2, rimWidth: 2, bevel: System.Windows.Media.Brushes.Gray);
+                var top0 = At(px, pw, pw / 2, 0);
+                var bottom = At(px, pw, pw / 2, ph - 1);
+                Check($"pixel-theme docked notch omits top bevel while keeping bottom bevel at {pct}",
+                    top0.R == 0 && top0.A == 51 && bottom.R >= 100 && bottom.A == 255);
+            }
+
+            foreach (bool settled in new[] { false, true })
+            {
+                var (px, pw, ph) = Draw(238, 32, new CornerRadius(0, 0, 12, 12), 16, scale, settled, pixel: 2, rimWidth: 2, bevel: null);
+                var top0 = At(px, pw, pw / 2, 0);
+                var bottom = At(px, pw, pw / 2, ph - 1);
+                Check($"pixel-theme docked notch without bevel ({(settled ? "settled" : "animated")}) omits top rim at {pct}",
+                    top0.R == 0 && top0.A == 51 && bottom.R >= 200 && bottom.A == 255);
+            }
+
+            foreach (var (label, w, h, radius, settled) in new[]
+            {
+                ("capsule (animated)", 196d, 32d, 16d, false),
+                ("capsule (settled)", 196d, 32d, 16d, true),
+                ("floating expanded panel", 300d, 120d, 24d, false)
+            })
+            {
+                var (px, pw, _) = Draw(w, h, new CornerRadius(radius), 0, scale, settled);
+                var top0 = At(px, pw, pw / 2, 0);
+                Check($"{label} keeps its top rim at {pct}", top0.R >= 200 && top0.A == 255);
+            }
+
+            // Mid-transition from line or capsule to a docked expanded panel: top corners are still > 0 while TopRimOpacity is 0,
+            // so the flat top span must draw no transient rim line while the sides and bottom keep theirs.
+            {
+                var (px, pw, ph) = Draw(300, 120, new CornerRadius(1.5, 1.5, 20, 20), 0, scale, false, topRimOpacity: 0);
+                var top0 = At(px, pw, pw / 2, 0);
+                var top1 = At(px, pw, pw / 2, 1);
+                var side = At(px, pw, 0, ph / 2);
+                var bottom = At(px, pw, pw / 2, ph - 1);
+                Check($"opening transition with TopRimOpacity=0 omits top rim even while top corners are rounding down at {pct}",
+                    top0.R == 0 && top0.A == 51 && top1.R == 0 && top1.A == 51
+                    && side.R >= 200 && side.A == 255 && bottom.R >= 200 && bottom.A == 255);
+            }
+
+            // Mid-fade TopRimOpacity (e.g. capsule detaching/attaching) attenuates only the top edge without dimming the bottom.
+            {
+                var (px, pw, ph) = Draw(200, 40, new CornerRadius(8, 8, 16, 16), 0, scale, false, topRimOpacity: 0.5);
+                var top0 = At(px, pw, pw / 2, 0);
+                var bottom = At(px, pw, pw / 2, ph - 1);
+                Check($"half TopRimOpacity fades only the top edge while keeping the bottom rim full at {pct} (y0={top0.R}/a{top0.A})",
+                    top0.R is >= 110 and <= 145 && bottom.R >= 200 && bottom.A == 255);
+            }
+        }
     }
 
     // A page left without the pointer moving closes the tooltips opened over it, and only those (BrimDeck.PageToolTips).
