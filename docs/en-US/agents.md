@@ -87,9 +87,9 @@ In the Claude desktop app and the IDE extensions, the app's own prompt and the i
 
 ## Collapsed row
 
-The notch and the capsule show the "AI coding tools" part by default: a mark with the tool's first letter for each active session, with a dot at its lower right for the state (yellow: waiting for you; blue: working; green: done), and the state of the session in front in words. Nothing shows without an active session. Clicking it opens the notices page.
+The notch and the capsule show the "AI coding tools" part by default: a round icon for each active session, the tool's own program icon (its first letter when its desktop app is not installed); a tool with several sessions shows its icon once for each, at most 3 icons in all. The session that most needs you stands at the right and alone shows its state: a turning blue ring while it works; a yellow ring, a small shake and a "!" or "?" while it waits for an approval or an answer; a green ring with a tick once done. The words after it say what the sessions are doing: how long the only working session has run, or how many work or wait. Nothing shows without an active session. Clicking it opens the notices page.
 
-You can switch the part off, or drag it to another place, in Settings › Collapsed view › Shown content. A finished session shows for 10 minutes; a working session that sends nothing for 30 minutes counts as ended.
+You can switch the part off, or drag it to another place, in Settings › Collapsed view › Shown content. With "Show with AI coding tools" on, under Settings › Live notices › How notices show › Notice count, it shows together with the unread notices, in the notices' place. A finished session shows for 10 minutes; a working session that sends nothing for 30 minutes counts as ended.
 
 ## Connecting other tools
 

@@ -6,11 +6,13 @@ namespace BrimDeck.Core.Agents;
 public enum AgentState { Started, Working, Approval, Question, Done, Idle, Ended }
 
 // One session of a coding agent. Harness is the tool's id (AgentHarnessIds), Name the name it is shown by; Project the folder
-// it works in (its last part); Prompt what it was last asked; Message what it said last.
+// it works in (its last part); Prompt what it was last asked; Message what it said last. Since: when its current task began,
+// the start of the working turn (a wait for the user within it does not start it again); the collapsed row counts from it.
 public sealed record AgentSession(string Harness, string Name, string Id, AgentState State, string Project, string Prompt, string Message,
     DateTimeOffset StartedAt, DateTimeOffset UpdatedAt)
 {
     public string Key => Harness + "\u0001" + Id;
+    public DateTimeOffset Since { get; init; } = UpdatedAt;
 }
 
 // The sessions BrimDeck knows of, kept in memory only: a restart forgets them, and the next hook brings a session back.
@@ -58,7 +60,12 @@ public sealed class AgentSessions
         bool fresh = state == AgentState.Working && message.Title is { Length: > 0 };
         var session = new AgentSession(harness, Text(message.AppName, before?.Name ?? harness), id, state,
             Text(message.Context, before?.Project ?? ""), Text(message.Title, before?.Prompt ?? ""), fresh ? Text(message.Body, "") : Text(message.Body, before?.Message ?? ""),
-            before?.StartedAt ?? now, now);
+            before?.StartedAt ?? now, now)
+        {
+            // A turn starts with a new prompt, or with work that follows anything but working or waiting for the user.
+            Since = before is not null && !fresh && (state is AgentState.Approval or AgentState.Question
+                || before.State is AgentState.Working or AgentState.Approval or AgentState.Question) ? before.Since : now
+        };
         _sessions[key] = session;
         if (_sessions.Count > Limit)
             foreach (var old in _sessions.Values.OrderBy(s => s.UpdatedAt).Take(_sessions.Count - Limit).ToList()) _sessions.Remove(old.Key);

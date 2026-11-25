@@ -118,7 +118,10 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("通知条", "Notice count"), ActionButton(Loc.T("收起外观", "Collapsed view"), () => ShowPage(1)),
             () => Loc.T("显示未读通知的条数，在“收起外观”的显示内容中打开。打开通知页后清零。", "Shows how many notices are unread on the island; turn it on in Collapsed view's content. Opening the notices page clears it."));
         Group(Toggle(Loc.T("显示应用图标", "Show app icons"), S.NoticeStripIcons, value => Change(s => s.NoticeStripIcons = value),
-            help: Loc.T("在条数前显示最近几条未读通知的应用图标，最多 3 个。关闭后显示铃铛。", "Shows the icons of up to 3 apps the latest unread notices came from before the count. Off, a bell shows.")));
+                help: Loc.T("在总数前叠放最近几个有未读通知的应用图标，最多 3 个。关闭后显示铃铛。", "Stacks the icons of up to 3 apps with unread notices before the total. Off, a bell shows.")),
+            Toggle(Loc.T("与 AI 编程工具合并显示", "Show with AI coding tools"), S.NoticeAgentsMerged, value => Change(s => s.NoticeAgentsMerged = value),
+                help: Loc.T("AI 编程工具的会话与通知一起显示在“通知”的位置。只有等你处理的会话显示文字；位置不够时只保留最需要处理的一项。",
+                    "Shows the AI coding tools' sessions together with the notices, in the notices' place. Only sessions waiting for you show words; short of room, only the most urgent item stays.")));
     }
 
     // A look changed: its preview (shown) takes the picture of the new look (fresh) in place. The page is not rebuilt, so the

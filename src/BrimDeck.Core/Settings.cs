@@ -893,6 +893,9 @@ public sealed class DeckSettings
     // NoticeCodes). Off by default: it reads the notices' words and, on a click, writes the clipboard.
     public bool NoticeCodes { get; set; }
     // Holds notices back during a Windows focus session or presentation mode.
+    // The coding agents' sessions (CompactPart.Agents) show together with the unread notices, in the notices' place, instead of
+    // in a place of their own: they share one width, and only waiting sessions say anything in words.
+    public bool NoticeAgentsMerged { get; set; }
     public bool NoticeRespectFocus { get; set; } = true;
     // Notices are held back until this time (BrimDeck's own pause); null when not paused.
     public DateTimeOffset? NoticesPausedUntil { get; set; }

@@ -290,6 +290,45 @@ internal static class AgentHookTests
         check("Sessions: a session that ends goes at once", sessions.Apply(Report("ended"), T0.AddSeconds(1)) && sessions.All.Count == 0);
         for (int i = 0; i < AgentSessions.Limit + 5; i++) sessions.Apply(Report("working", session: "x" + i), T0.AddSeconds(i));
         check("Sessions: at most a limit is kept, the oldest go", sessions.All.Count == AgentSessions.Limit && sessions.All.All(s => s.Id != "x0"));
+
+        var turns = new AgentSessions();
+        turns.Apply(Report("working", title: "fix"), T0);
+        turns.Apply(Report("working"), T0.AddMinutes(1));
+        turns.Apply(Report("approval"), T0.AddMinutes(2));
+        turns.Answered("claude", "s1", T0.AddMinutes(3));
+        turns.Apply(Report("working"), T0.AddMinutes(4));
+        check("Sessions: a task's time runs from its prompt through the waits for the user", turns.All.Single().Since == T0);
+        turns.Apply(Report("done"), T0.AddMinutes(5));
+        turns.Apply(Report("working"), T0.AddMinutes(6));
+        check("Sessions: work after a finished turn is a new task", turns.All.Single().Since == T0.AddMinutes(6));
+        turns.Apply(Report("working", title: "again"), T0.AddMinutes(7));
+        check("Sessions: a new prompt is a new task", turns.All.Single().Since == T0.AddMinutes(7));
+        Stacks(check);
+    }
+
+    private static AgentSession Session(string harness, string id, AgentState state, int minute)
+        => new(harness, harness, id, state, "app", "", "", T0, T0.AddMinutes(minute)) { Since = T0.AddMinutes(minute) };
+
+    private static void Stacks(Action<string, bool> check)
+    {
+        check("Stack: nothing to show without sessions", AgentStacks.Of([]) is null);
+        var one = AgentStacks.Of([Session("claude", "a", AgentState.Working, 1)])!;
+        check("Stack: one working session shows its time", one is { Label: AgentLabel.Elapsed, Shown.Count: 1 } && one.Front.Id == "a");
+        var mixed = AgentStacks.Of([Session("claude", "a", AgentState.Working, 1), Session("codex", "b", AgentState.Question, 2), Session("claude", "c", AgentState.Done, 3)])!;
+        check("Stack: the waiting session is in front, at the right, and names what it waits for",
+            mixed is { Label: AgentLabel.Question, Count: 1 } && mixed.Front.Id == "b" && mixed.Shown[^1].Id == "b" && mixed.Shown.Select(s => s.Id).SequenceEqual(["c", "a", "b"]));
+        var tools = AgentStacks.Of([Session("claude", "a", AgentState.Working, 1), Session("codex", "b", AgentState.Working, 2), Session("claude", "c", AgentState.Working, 3)])!;
+        check("Stack: a tool's sessions stand together, the tool of the most urgent one in front",
+            tools is { Label: AgentLabel.Working, Count: 3 } && tools.Shown.Select(s => s.Harness).SequenceEqual(["codex", "claude", "claude"]) && tools.Front.Id == "c");
+        var waiting = AgentStacks.Of([Session("claude", "a", AgentState.Approval, 5), Session("claude", "b", AgentState.Question, 2), Session("codex", "c", AgentState.Working, 1)])!;
+        check("Stack: more than one waiting counts them; the one that has waited longest is in front",
+            waiting is { Label: AgentLabel.Waiting, Count: 2 } && waiting.Front.Id == "b");
+        var many = AgentStacks.Of([.. Enumerable.Range(0, 5).Select(i => Session("claude", "s" + i, AgentState.Working, i))])!;
+        check("Stack: at most three icons, the count says all", many is { Label: AgentLabel.Working, Count: 5, Shown.Count: AgentStacks.MaxShown });
+        check("Stack: only finished sessions say so", AgentStacks.Of([Session("claude", "a", AgentState.Done, 1)]) is { Label: AgentLabel.Done });
+        check("Stack: the time reads m:ss, then h:mm:ss, and its pattern keeps the width",
+            AgentStacks.Elapsed(TimeSpan.FromSeconds(192)) == "3:12" && AgentStacks.Elapsed(TimeSpan.FromSeconds(3725)) == "1:02:05"
+            && AgentStacks.ElapsedPattern(TimeSpan.FromSeconds(192)) == "0:00" && AgentStacks.ElapsedPattern(TimeSpan.FromMinutes(12)) == "00:00");
     }
 
     private static AgentHookPlan Antigravity(string json) => AgentHook.Plan(AgentHookFormats.Antigravity, "antigravity", "Antigravity", Input(json), chinese: true);

@@ -1347,11 +1347,10 @@ public partial class MainWindow
         // The devices' batteries keep one width too (as many devices as show, each with the room of its widest figure), counted with them.
         var devices = CompactDevices(scale);
         double devicesWidth = devices is null ? 0 : DevicePixels.Up(devices.PreferredWidth, dpi);
-        // The unread notices' count, as the file transfer's: a fixed part whose width follows its icons and digits.
-        var notices = NoticeStrip(scale);
+        // The unread notices' count and the coding agents' sessions, as the file transfer's: fixed parts whose width follows their
+        // icons and words (MainWindow.CompactAttention.cs); merged, both in the notices' place.
+        var (notices, agents) = CompactAttention(scale, 0);
         double noticesWidth = notices?.Width ?? 0;
-        // The coding agents' sessions, the same kind of fixed part.
-        var agents = AgentStrip(scale);
         double agentsWidth = agents?.Width ?? 0;
         double transferWidth = transfer?.Width ?? 0, fixedFace = FixedFace(scale, clock?.ReservedWidth ?? 0, transferWidth, devicesWidth, noticesWidth, agentsWidth);
         // The system readings ask for the width of everything chosen, on whole device pixels; the whole ones that fit their region show.
@@ -1362,6 +1361,20 @@ public partial class MainWindow
         // Readings that do not fit scroll through a window of whole readings, as the rings do (CompactSpacing.Window).
         double ringDiameter = QuotaRing.Diameter(Settings.QuotaRingStyle);
         var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, fixedFace, strip?.PreferredWidth ?? 0, equalizer, Settings.EqualizerBars, showCover, ringDiameter);
+        // A surface with a width of its own keeps it: the notices and the agents give up what would widen it (CompactAttention).
+        if (!Settings.CompactAutoWidth(EffectiveStyle) && (notices is not null || agents is not null))
+        {
+            double given = GivenContentWidth();
+            bool textShown = media && !hideText && Settings.MusicText != CompactMusicText.None;
+            double ringNeed = apps.Count > 0 ? CompactMusicLayout.RingSizeFor(ringDiameter, scale) : 0, readingNeed = CompactSpacing.Minimum(strip?.ItemWidths() ?? [], strip?.Gap ?? 0);
+            double Need() => CompactMusicLayout.RequiredWidth(scale, media, textShown, fixedFace, ringNeed, readingNeed, equalizer, Settings.EqualizerBars, showCover);
+            for (int level = 1; level < AttentionLevels && Need() > given + .5; level++)
+            {
+                (notices, agents) = CompactAttention(scale, level);
+                noticesWidth = notices?.Width ?? 0; agentsWidth = agents?.Width ?? 0;
+                fixedFace = FixedFace(scale, clock?.ReservedWidth ?? 0, transferWidth, devicesWidth, noticesWidth, agentsWidth);
+            }
+        }
         // An auto-width surface takes the width of what the row shows; the new shape builds the row again. The lyric's changing
         // length is left out, so the width changes only when the content itself does, unless the middle text follows its length
         // (below).

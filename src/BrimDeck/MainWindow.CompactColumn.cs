@@ -47,8 +47,9 @@ public partial class MainWindow
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor, Look), DateTime.Now, scale, Look, ClockDate.Of(Settings)) : null;
         var transfer = TransferBadge(scale);
         var devices = CompactDevices(scale);
-        var notices = NoticeStrip(scale, column);
-        var agents = AgentStrip(scale);
+        // The notices and the agents give up what is wider than the column, a step at a time (CompactAttention).
+        var (notices, agents) = CompactAttention(scale, 0);
+        for (int level = 1; level < AttentionLevels && Math.Max(notices?.Width ?? 0, agents?.Width ?? 0) > column + .5; level++) (notices, agents) = CompactAttention(scale, level);
         var layout = CompactMusicLayout.Calculate(10000, scale, media, apps.Count, text.Length > 0, FixedFace(scale, clock?.ReservedWidth ?? 0, transfer?.Width ?? 0, devices?.PreferredWidth ?? 0, notices?.Width ?? 0, agents?.Width ?? 0), 0, equalizer, Settings.EqualizerBars, ring: QuotaRing.Diameter(Settings.QuotaRingStyle));
         // One strip per reading, each alone on its line and centred in it. The drives show no glyph here: each drive has a line with its
         // letter and its figures, stacked or side by side as chosen in the settings, so any number of drives stand one below the other.

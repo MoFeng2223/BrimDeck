@@ -708,7 +708,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                     s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=[.. palette.ClockGradients[0].Stops];
                     PanelThemes.ApplyMatching(palette,s);break;}
                 // The two switches (collapsed and expanded view) and the applications (the other page) stay as they are.
-                case NoticesSettingsPage:s.NoticeDefaultLevel=defaults.NoticeDefaultLevel;s.NoticeStyles=new();s.NoticeSoundVolume=defaults.NoticeSoundVolume;s.NoticeStripIcons=defaults.NoticeStripIcons;
+                case NoticesSettingsPage:s.NoticeDefaultLevel=defaults.NoticeDefaultLevel;s.NoticeStyles=new();s.NoticeSoundVolume=defaults.NoticeSoundVolume;s.NoticeStripIcons=defaults.NoticeStripIcons;s.NoticeAgentsMerged=defaults.NoticeAgentsMerged;
                     s.NoticeCodes=defaults.NoticeCodes;s.NoticeRespectFocus=defaults.NoticeRespectFocus;s.NoticesPausedUntil=null;s.NoticeHistory=defaults.NoticeHistory;s.NoticeHistoryHours=defaults.NoticeHistoryHours;break;
                 // The list goes back to the applications a new user has; the WSL distributions stay, as they are set up in them.
                 case NoticeAppsSettingsPage:s.NoticeApps=[.. DeckSettings.DefaultNoticeApps()];s.NoticeAppsListed=true;break;

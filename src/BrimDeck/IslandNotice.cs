@@ -35,7 +35,7 @@ namespace BrimDeck;
 // from as few of the outline's points as the ripples need (Sample); or the indicator's thread. Redrawn whole every frame, a
 // long island (about 1800 outline points, nine strokes for the edge's light and three blurs) missed about one frame in five at
 // 165 Hz.
-internal sealed class IslandNotice : Window
+internal sealed partial class IslandNotice : Window
 {
     private static readonly Color LineFlash = Color.FromRgb(0xF5, 0xF5, 0xF7), GlowColor = Color.FromRgb(0xF0, 0xF3, 0xF8);
     // The backlight's own color (white), as the settings show it for level 3.
@@ -964,6 +964,8 @@ internal sealed class IslandNotice : Window
         double plate = Math.Round(20 * scale), gap = Math.Round(8 * scale);
         // The buttons take their room at the right; the words have what is left.
         available = Math.Max(0, available - BuildButtons(scale, inset, available));
+        // A call's ringing time, or what a coding agent waits for, at the right (IslandNotice.Marks.cs).
+        available = Math.Max(0, available - BuildTrailing(scale, origin + inset, available, gap));
         bool withIcon = _item.Style?.Icon != false && (OwnLooks(_item) || Notice?.HideIcon != true) && available >= plate + gap + 48 * scale;
         if (!withIcon) plate = gap = 0;
         var (title, summary) = Texts();
@@ -1108,21 +1110,19 @@ internal sealed class IslandNotice : Window
         // A track change shows the song's cover, as the music part does.
         if (Track is { } track) return MusicVisuals.Cover(track.Cover, size, Math.Round(size * .22), look: PanelTheme.Main);
         var notice = Notice;
+        // A call and a coding agent's question or approval have marks of their own (IslandNotice.Marks.cs).
+        if (OwnMark(size) is { } mark) return mark;
         if (notice is not null && NoticeLetter.ShowsPicture(notice, Settings) && Center.Icons.Get(notice.Picture, out _) is { } avatar) return NoticeLetter.Round(avatar, size);
         var image = _item?.Kind == AttentionKind.Summary ? null : Center.Icons.Get(notice?.IconRef, out _);
-        if (image is not null)
-        {
-            var picture = new Image { Source = image, Width = size, Height = size, Stretch = Stretch.Uniform };
-            RenderOptions.SetBitmapScalingMode(picture, BitmapScalingMode.HighQuality);
-            return picture;
-        }
         var accent = notice is null ? PanelTheme.ColorOf("accent") : _look.AppColor(Center.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)));
+        // The application's icon round, as the collapsed row shows it (CompactStacks.Icon).
+        if (notice is not null && _item?.Kind != AttentionKind.Summary) return CompactStacks.Icon(image, size, _shape.Scale, PanelLook.Of(_deck), notice.AppName, accent);
         return NoticeLetter.Plate(notice?.AppName, size, accent, bell: notice is null);
     }
 
     private void IconLoaded(string iconRef)
     {
-        if (_leaving || Notice?.IconRef != iconRef && Notice?.Picture != iconRef) return;
+        if (_leaving || Notice?.IconRef != iconRef && Notice?.Picture != iconRef && !OwnMarkIcon(iconRef)) return;
         BuildContent();
     }
 
