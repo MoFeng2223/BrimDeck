@@ -417,9 +417,8 @@ public partial class MainWindow
 
     private static bool Today(Notice notice) => notice.ReceivedAt.ToLocalTime().Date == DateTime.Today;
 
-    // Notices of one conversation: the same application and the same title (a chat application's title is the chat's name). A
-    // notice without a title stands alone.
-    private static string Conversation(Notice notice) => notice.Title.Length > 0 ? notice.AppKey + "\u0001" + notice.Title : "\u0001" + notice.Id;
+    // Notices of one conversation: a chat application's with the same title (NoticeConversations). Any other notice stands alone.
+    private static string Conversation(Notice notice) => NoticeConversations.Key(notice);
 
     // How many notices each listed conversation holds and whether any of them is unread, as of the last Listed.
     private readonly Dictionary<string, (int Count, bool Fresh)> _conversations = new(StringComparer.Ordinal);
@@ -528,7 +527,8 @@ public partial class MainWindow
         column.Children.Add(stack);
 
         // The status line: what kind of notice is in front, and how many of the same conversation it stands for.
-        var group = center.Hub.Notices.Where(n => n.AppKey == notice.AppKey && n.Title.Length > 0 && n.Title == notice.Title).ToList();
+        string conversation = Conversation(notice);
+        var group = center.Hub.Notices.Where(n => Conversation(n) == conversation).ToList();
         var meta = new DockPanel { Height = 20 };
         DockPanel.SetDock(meta, System.Windows.Controls.Dock.Top); stack.Children.Add(meta);
         var (status, color) = StatusOf(notice, center);
@@ -613,18 +613,22 @@ public partial class MainWindow
         if (notice.Progress is { } progress) words.Children.Add(ProgressTrack(progress, accent));
         if (group.Count > 1)
         {
-            // Laid out again only where in view (ViewportStack): up to twenty lines cut with an ellipsis.
-            var others = new ViewportStack { Margin = new Thickness(0, 8, 0, 0) };
-            others.Children.Add(new Border { Height = 1, Background = UI.Brush(UI.Hairline), Margin = new Thickness(0, 0, 0, 6) });
+            // The other messages in full, wrapped and selectable like the newest: a chat's messages are put together here, so cutting
+            // them to a line would leave the rest of what was said nowhere to read. Up to twenty; their heights follow the width, so a
+            // plain stack rather than ViewportStack, which needs heights that do not.
+            var others = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
+            others.Children.Add(new Border { Height = 1, Background = UI.Brush(UI.Hairline), Margin = new Thickness(0, 0, 0, 2) });
             foreach (var other in group.Where(n => !ReferenceEquals(n, notice)).Take(20))
             {
-                var line = new DockPanel { Height = 22 };
-                var when = UI.Fixed(NoticeText.Relative(other.ReceivedAt, now), 11, 22, UI.Tertiary); DockPanel.SetDock(when, System.Windows.Controls.Dock.Right); when.Margin = new Thickness(8, 0, 0, 0);
-                line.Children.Add(when);
                 var otherWords = NoticeCodes.Words(other, Settings.NoticeCodes);
-                var text = UI.Fixed(NoticeText.Summary(otherWords.Body), 12, 22, UI.Secondary); text.TextTrimming = TextTrimming.CharacterEllipsis;
-                if (otherWords.HasCode) AutomationProperties.SetName(text, NoticeText.Summary(otherWords.SpokenBody));
-                line.Children.Add(IslandNotice.Directed(text));
+                if (otherWords.Body.Length == 0) continue;
+                var line = new DockPanel { Margin = new Thickness(0, 6, 0, 0) };
+                var when = UI.Fixed(NoticeText.Relative(other.ReceivedAt, now), 11, 20, UI.Tertiary);
+                DockPanel.SetDock(when, System.Windows.Controls.Dock.Right); when.Margin = new Thickness(8, 0, 0, 0); when.VerticalAlignment = VerticalAlignment.Top;
+                line.Children.Add(when);
+                var text = SelectableWords(otherWords.Body, 13, 20, UI.Secondary, line: false);
+                if (otherWords.HasCode) AutomationProperties.SetName(text, otherWords.SpokenBody);
+                line.Children.Add(text);
                 others.Children.Add(line);
             }
             words.Children.Add(others);
@@ -777,7 +781,8 @@ public partial class MainWindow
         var row = new NoticeButtons { Margin = new Thickness(0, 12, 0, 0) };
         var flow = row.Children;
         // Delete takes the whole conversation the focus shows: left behind, its earlier messages would take the row again.
-        var members = center.Hub.Notices.Where(n => Conversation(n) == Conversation(notice)).ToList();
+        string conversation = Conversation(notice);
+        var members = center.Hub.Notices.Where(n => Conversation(n) == conversation).ToList();
         string deleteName = members.Count > 1 ? Loc.T($"删除这个会话的 {members.Count} 条记录", $"Delete this conversation's {members.Count} notices") : Loc.T("删除这条记录", "Delete this notice");
         var delete = PillButton("", deleteName, () => { foreach (var member in members) center.Delete(member); _noticeFocus = null; RenderNotices(); });
         ((Border)delete.Content).Child = new TextBlock { Text = "", FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 13, Foreground = UI.Brush(UI.Primary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };

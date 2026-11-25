@@ -51,7 +51,7 @@ Each row also lets you:
 
 - Only unread mail that arrives after the connection is made. Mail already in the inbox when the mailbox is added, or when BrimDeck starts, is not announced.
 - Mail that arrived while the PC slept or was offline is listed unread on the notices page once the connection is back, without popping up (this holds for any mail more than 10 minutes old when BrimDeck learns of it).
-- Several mails from one sender make one conversation on the notices page.
+- Each mail takes its own row on the notices page; several mails from one sender are not put together.
 - At most the latest 20 at a time.
 - With both switches of live notices off, mailboxes are not connected.
 

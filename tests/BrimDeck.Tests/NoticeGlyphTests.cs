@@ -68,6 +68,19 @@ internal static class NoticeGlyphTests
         var wrong = apps.Where(app => NoticeGlyphs.App(app.Key, app.Name, app.Origin) != app.Expected).Select(app => app.Name).ToList();
         check("Application types are told from keys and names (" + string.Join(", ", wrong) + ")", wrong.Count == 0);
 
+        // Only a chat application's notices with the same title make one conversation on the notice page; mail and the rest stand alone.
+        Notice Made(string key, string name, string title) => new() { AppKey = key, AppName = name, Origin = NoticeOrigin.Windows, Title = title };
+        bool Together(Notice a, Notice b) => NoticeConversations.Key(a) == NoticeConversations.Key(b);
+        string qq = NoticeKeys.Windows("QQ"), wechat = WeChatRows.AppKey, outlook = NoticeKeys.Windows("Microsoft.Office.OUTLOOK.EXE.15");
+        string mailAccount = NoticeKeys.Internal("mail:" + Guid.NewGuid().ToString("N"));
+        check("A chat application's notices with the same title make one conversation",
+            Together(Made(qq, "QQ", "小组"), Made(qq, "QQ", "小组")) && Together(Made(wechat, "微信", "小周"), Made(wechat, "微信", "小周"))
+            && !Together(Made(qq, "QQ", "小组"), Made(qq, "QQ", "小周")) && !Together(Made(qq, "QQ", ""), Made(qq, "QQ", "")));
+        check("Mail and other applications' notices with the same title stay apart",
+            !Together(Made(outlook, "Outlook", "Luohuidong"), Made(outlook, "Outlook", "Luohuidong"))
+            && !Together(Made(mailAccount, "someone@qq.com", "Luohuidong"), Made(mailAccount, "someone@qq.com", "Luohuidong"))
+            && !Together(Made(NoticeKeys.Windows("Claude"), "Claude", "BrimDeck"), Made(NoticeKeys.Windows("Claude"), "Claude", "BrimDeck")));
+
         // Colors on every built-in theme and on a custom theme with a light gradient and weak state colors.
         var custom = PanelThemes.Build("glyph-test", PanelThemes.Parse("""
             {"base":"light","colors":{"surface":"#F4F1EA","danger":"#FFB3B3","accent":"#C8E6FF","fill":"#0F000000"},
