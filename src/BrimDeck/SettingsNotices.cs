@@ -58,7 +58,12 @@ public sealed partial class SettingsWindow
             AutomationProperties.SetName(test, Loc.T("试一下", "Try it") + " " + LevelTitle(level));
             SectionTitle(LevelTitle(level), test, () => LevelHelp(level));
             var style = S.NoticeStyles.For(level);
-            Group([LevelPreview(level, style), .. LevelRows(level, style, change => EditNoticeStyles(s => change(s.NoticeStyles.For(level))), level.ToString(), own: false)]);
+            var preview = LevelPreview(level, style);
+            Group([preview, .. LevelRows(level, style, change =>
+            {
+                Change(s => change(s.NoticeStyles.For(level)));
+                Redraw(preview, LevelPreview(level, S.NoticeStyles.For(level)));
+            }, level.ToString(), own: false)]);
         }
         NoticeSoundSection(center);
         NoticeStripSection();
@@ -115,13 +120,19 @@ public sealed partial class SettingsWindow
             help: Loc.T("在条数前显示最近几条未读通知的应用图标，最多 3 个。关闭后显示铃铛。", "Shows the icons of up to 3 apps the latest unread notices came from before the count. Off, a bell shows.")));
     }
 
-    // The settings' looks change and the page shows them (its previews follow).
-    private void EditNoticeStyles(Action<DeckSettings> edit) { Change(edit); ShowPage(_page); }
+    // A look changed: its preview (shown) takes the picture of the new look (fresh) in place. The page is not rebuilt, so the
+    // control just used keeps its place and focus.
+    private static void Redraw(Border shown, Border fresh)
+    {
+        var island = fresh.Child;
+        fresh.Child = null;
+        shown.Child = island;
+    }
 
     // The rows of one look (style, shown as a notice of level shows): the effect of levels 2 and 3, the backlight's color, the icon,
     // and how long levels 1 and 2 stay. The "提示方式" page offers the color for level 3 only, as the one of a message that names
-    // none; an application's own looks (own) offer it for level 2 as well. edit changes the look. name tells the rows of several
-    // groups on a page apart for screen readers and the segment groups.
+    // none; an application's own looks (own) offer it for level 2 as well. edit saves a change to the look and redraws its preview;
+    // the rows stay as they are. name tells the rows of several groups on a page apart for screen readers and the segment groups.
     private List<FrameworkElement> LevelRows(NoticeLevel level, NoticeStyle style, Action<Action<NoticeStyle>> edit, string name, bool own)
     {
         var rows = new List<FrameworkElement>();
@@ -137,39 +148,57 @@ public sealed partial class SettingsWindow
     }
 
     // The sound of level 2 (played once) or level 3 (a loop): none, a built-in sound of the level's kind, a file in the sounds
-    // folder, or a file to import into it. Choosing one plays it once.
+    // folder, or a file to import into it. Choosing one plays it once. The list is read again when it opens, so that a file imported
+    // in another row or added to the folder meanwhile shows without rebuilding the page.
     private FrameworkElement SoundRow(NoticeLevel level, NoticeStyle style, Action<Action<NoticeStyle>> edit, string name)
     {
         var center = _app.Notices;
         var kind = NoticeSounds.KindOf(level) ?? NoticeSoundKind.Short;
         string chosen = NoticeSounds.Of(style.Sound, level);
-        var choices = new List<(string Sound, string Label)> { (NoticeSounds.None, Loc.T("无", "None")) };
-        choices.AddRange(NoticeSounds.BuiltIn.Where(sound => sound.Kind == kind).Select(sound => (sound.Id, sound.Name)));
-        var files = NoticeSounds.Files(center.SoundFolder);
-        choices.AddRange(files.Select(file => (NoticeSounds.ForFile(file), file)));
-        // A chosen file that has left the folder stays listed, so that the row shows what is saved (the default plays meanwhile).
-        if (NoticeSounds.FileName(chosen) is { } gone && !files.Contains(gone, StringComparer.OrdinalIgnoreCase)) choices.Add((chosen, gone + Loc.T("（文件不存在）", " (missing)")));
-        int shown = Math.Max(0, choices.FindIndex(choice => string.Equals(choice.Sound, chosen, StringComparison.OrdinalIgnoreCase)));
-        var labels = choices.Select(choice => choice.Label).ToList();
-        labels.Add(Loc.T("导入文件…", "Import a file…"));
-        var combo = new ComboBox { Width = 200, Style = (Style)FindResource("SettingsCombo"), ItemsSource = labels, SelectedIndex = shown };
+        var choices = new List<(string Sound, string Label)>();
+        var combo = new ComboBox { Width = 200, Style = (Style)FindResource("SettingsCombo") };
         AutomationProperties.SetName(combo, Loc.T("提示音", "Sound") + " " + name + " " + LevelTitle(level));
+        bool filling = false;
+        int Shown() => Math.Max(0, choices.FindIndex(choice => string.Equals(choice.Sound, chosen, StringComparison.OrdinalIgnoreCase)));
+        void Show() { filling = true; combo.SelectedIndex = Shown(); filling = false; }
+        void Fill()
+        {
+            var next = new List<(string Sound, string Label)> { (NoticeSounds.None, Loc.T("无", "None")) };
+            next.AddRange(NoticeSounds.BuiltIn.Where(sound => sound.Kind == kind).Select(sound => (sound.Id, sound.Name)));
+            var files = NoticeSounds.Files(center.SoundFolder);
+            next.AddRange(files.Select(file => (NoticeSounds.ForFile(file), file)));
+            // A chosen file that has left the folder stays listed, so that the row shows what is saved (the default plays meanwhile).
+            if (NoticeSounds.FileName(chosen) is { } gone && !files.Contains(gone, StringComparer.OrdinalIgnoreCase)) next.Add((chosen, gone + Loc.T("（文件不存在）", " (missing)")));
+            if (next.SequenceEqual(choices)) return;
+            choices.Clear(); choices.AddRange(next);
+            var labels = choices.Select(choice => choice.Label).ToList();
+            labels.Add(Loc.T("导入文件…", "Import a file…"));
+            filling = true; combo.ItemsSource = labels; filling = false;
+            Show();
+        }
+        Fill();
+        combo.DropDownOpened += (_, _) => Fill();
         combo.SelectionChanged += async (_, _) =>
         {
             int picked = combo.SelectedIndex;
-            if (picked < 0 || picked == shown) return;
+            if (filling || picked < 0) return;
             if (picked < choices.Count)
             {
                 string sound = choices[picked].Sound;
+                if (string.Equals(sound, chosen, StringComparison.OrdinalIgnoreCase)) return;
+                chosen = sound;
                 center.Sounds.Once(sound);
                 edit(s => s.Sound = sound);
                 return;
             }
             // "Import a file…" is not a choice to keep: the row shows the saved sound again while the file is picked.
-            combo.SelectedIndex = shown;
+            Show();
             if (await ImportSoundAsync(center) is not { } imported) return;
+            chosen = imported;
             center.Sounds.Once(imported);
             edit(s => s.Sound = imported);
+            Fill();
+            Show();
         };
         return Row(Loc.T("提示音", "Sound"), combo);
     }
@@ -287,7 +316,7 @@ public sealed partial class SettingsWindow
     // A still picture of a notice of this level on a capsule in the panel theme's colors: the words, the icon while it shows, and
     // the backlight of levels 2 and 3 in the style's color. sample: the application, title and words shown; by default a chat's
     // message, and an alarm for level 3.
-    private FrameworkElement LevelPreview(NoticeLevel level, NoticeStyle style, (string App, string Title, string Body)? sample = null)
+    private Border LevelPreview(NoticeLevel level, NoticeStyle style, (string App, string Title, string Body)? sample = null)
     {
         bool alarm = level == NoticeLevel.Persistent;
         var (app, heading, body) = sample ?? (alarm ? (Loc.T("时钟", "Clock"), Loc.T("闹钟", "Alarm"), Loc.T("07:30 起床", "07:30 Wake up"))
@@ -820,7 +849,17 @@ public sealed partial class SettingsWindow
                 return;
             }
             Group(toggle);
-            void Edit(Func<NoticeLevelStyles, NoticeStyle> pick, Action<NoticeStyle> change) { EditRule(key, name, r => { r.Styles ??= S.NoticeStyles.Copy(); change(pick(r.Styles)); }); ShowPage(_page); }
+            // One look: its preview and rows. shown reads the look from the application's looks; pick does too, making the calls'
+            // own look on its first change. A change redraws the preview only.
+            void Look(NoticeLevel level, (string, string, string) sample, Func<NoticeLevelStyles, NoticeStyle> shown, Func<NoticeLevelStyles, NoticeStyle> pick, string group)
+            {
+                var preview = LevelPreview(level, shown(styles), sample);
+                Group([preview, .. LevelRows(level, shown(styles), change =>
+                {
+                    EditRule(key, name, r => { r.Styles ??= S.NoticeStyles.Copy(); change(pick(r.Styles)); });
+                    if (S.NoticeRule(key)?.Styles is { } now) Redraw(preview, LevelPreview(level, shown(now), sample));
+                }, group, own: true)]);
+            }
             var sample = (name, name, Loc.T("一条新通知", "A new notice"));
             NoticeLevel[] levels = rule.Level == NoticeLevel.Auto
                 ? ProgramSource(key) ? Levels : [NoticeLevels.Default(S.NoticeDefaultLevel)]
@@ -828,18 +867,17 @@ public sealed partial class SettingsWindow
             foreach (var level in levels)
             {
                 SectionTitle(levels.Length > 1 ? LevelTitle(level) : Loc.T("通知 · ", "Notices · ") + LevelTitle(level));
-                Group([LevelPreview(level, styles.For(level), sample), .. LevelRows(level, styles.For(level), change => Edit(s => s.For(level), change), key + level, own: true)]);
+                Look(level, sample, s => s.For(level), s => s.For(level), key + level);
             }
             if (TakesCalls(key, name))
             {
                 SectionTitle(Loc.T("来电", "Calls"), help: () => Loc.T("语音和视频来电一直留在岛上并定时闪动，直到接听、挂断或展开面板。", "Voice and video calls stay on the island and flash now and then until answered, declined or the panel is opened."));
-                Group([LevelPreview(NoticeLevel.Persistent, styles.ForCall(), (name, Loc.T("小周", "Zhou"), Loc.T("邀请你语音通话", "Incoming voice call"))),
-                    .. LevelRows(NoticeLevel.Persistent, styles.ForCall(), change => Edit(s => s.Call ??= s.Stay.Copy(), change), key + "Call", own: true)]);
+                Look(NoticeLevel.Persistent, (name, Loc.T("小周", "Zhou"), Loc.T("邀请你语音通话", "Incoming voice call")), s => s.ForCall(), s => s.Call ??= s.Stay.Copy(), key + "Call");
             }
             if (!levels.Contains(NoticeLevel.Persistent) && StayKind(key) is { } stay)
             {
                 SectionTitle(stay.Title, help: () => stay.Help);
-                Group([LevelPreview(NoticeLevel.Persistent, styles.Stay, (name, name, stay.Sample)), .. LevelRows(NoticeLevel.Persistent, styles.Stay, change => Edit(s => s.Stay, change), key + "Stay", own: true)]);
+                Look(NoticeLevel.Persistent, (name, name, stay.Sample), s => s.Stay, s => s.Stay, key + "Stay");
             }
         });
         if (panel.Children.Count > 0 && panel.Children[^1] is Border last) last.Margin = new Thickness(0, 0, 0, 8);
