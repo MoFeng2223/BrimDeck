@@ -83,6 +83,11 @@ internal sealed partial class Renderer
         Form(trip.Title, trip.Start, trip.End, "event:" + trip.Id, Loc.T("保存", "Save"), true, true);
         await Shot("edit-earlier-start");
         CloseForm();
+        // A time of a series that began on an earlier day: the form shows the series, its first day and how it repeats.
+        var standUp = book.Events.First(item => item.Repeat == AgendaRepeat.Weekdays);
+        Form(standUp.Title, standUp.Start, standUp.End, "event:" + standUp.Id, Loc.T("保存", "Save"), true, true, standUp.Repeat);
+        await Shot("edit-repeat");
+        CloseForm();
         View(AgendaView.Todos);
         await Shot("busy-todos");
         View(AgendaView.Events);
@@ -93,8 +98,10 @@ internal sealed partial class Renderer
         View(AgendaView.Todos); await Shot("narrow-todos");
         View(AgendaView.Note); await Shot("narrow-note");
         View(AgendaView.Events); Blocks(true); await Shot("narrow-blocks"); Blocks(false);
-        Form(Loc.T("取体检报告", "Pick up the health report"), now.Date.AddHours(17.5), now.Date.AddHours(18), "new", Loc.T("添加", "Add"), false, false);
+        Form(Loc.T("取体检报告", "Pick up the health report"), now.Date.AddHours(17.5), now.Date.AddHours(18), "new", Loc.T("添加", "Add"), false, false, AgendaRepeat.Monthly);
         await Shot("narrow-add");
+        Form(Loc.T("站会", "Stand-up"), now.Date.AddHours(9), now.Date.AddHours(9.5), "event:x", Loc.T("保存", "Save"), true, true, AgendaRepeat.Weekdays);
+        await Shot("narrow-edit-repeat");
         CloseForm();
         Choose(new DateOnly(2026, 12, 3)); await Shot("narrow-other-week");
         Choose(today);
@@ -143,13 +150,13 @@ internal sealed partial class Renderer
         try { Directory.Delete(folder, true); } catch (IOException) { }
 
         // The form, put in place as a click would, without taking the keyboard.
-        void Form(string title, DateTime start, DateTime end, string what, string submit, bool delete, bool startDay)
+        void Form(string title, DateTime start, DateTime end, string what, string submit, bool delete, bool startDay, AgendaRepeat repeat = AgendaRepeat.None)
         {
             var type = Type.GetType("BrimDeck.AgendaEventForm, BrimDeck")!;
             var look = Program.GetProperty(_deck, "Look");
             var form = Activator.CreateInstance(type, Program.Any, null, [look, (Action<TextBox>)(_ => { }), submit, delete, startDay], null)!;
             Program.SetProperty(form, "Today", (Func<DateOnly>)(() => today));
-            Program.Call(form, "Fill", [typeof(string), typeof(DateTime), typeof(DateTime), typeof(bool)], title, start, end, false);
+            Program.Call(form, "Fill", [typeof(string), typeof(DateTime), typeof(DateTime), typeof(bool), typeof(AgendaRepeat)], title, start, end, false, repeat);
             Program.SetField(Page(), "_form", form);
             Program.SetField(Page(), "_formFor", what);
         }
@@ -194,7 +201,7 @@ internal sealed partial class Renderer
         var trip = book.AddEvent(Loc.T("出差上海", "Trip to Shanghai"), T(11, 23, 20), T(11, 25, 12), false, now)!;
         E("小周生日", "Zhou's birthday", T(11, 24, 0), T(11, 24, 0), allDay: true);
         E("发布值守", "Release watch", T(11, 23, 22), T(11, 24, 2));
-        E("站会", "Stand-up", T(11, 24, 9), T(11, 24, 9.5), detail: Loc.T("腾讯会议", "Online meeting"));
+        book.AddEvent(Loc.T("站会", "Stand-up"), T(11, 16, 9), T(11, 16, 9.5), false, now, Loc.T("腾讯会议", "Online meeting"), repeat: AgendaRepeat.Weekdays);
         E("第四季度产品评审会暨下季度规划讨论（含供应商沟通环节与预算复核）", "Fourth-quarter product review and next quarter's planning (with the suppliers' session and the budget check)",
             T(11, 24, 9.5), T(11, 24, 11.5), detail: Loc.T("5 楼大会议室", "Big room, 5th floor"), source: Source("Outlook", null));
         E("供应商电话", "Supplier call", T(11, 24, 10), T(11, 24, 11));

@@ -66,8 +66,10 @@ public sealed class AgendaBook
 
     // An event as the form gives it, checked and put in shape, or null when it cannot be one: no title, a timed event that ends
     // before or as it starts, an all-day event whose last day is before its first. Times are cut to the minute; a timed event
-    // without an end lasts an hour; an all-day event keeps only the dates.
-    public static AgendaEvent? Shape(string id, string title, DateTime start, DateTime? end, bool allDay, string? detail, AgendaSource? source, DateTime created)
+    // without an end lasts an hour; an all-day event keeps only the dates. An event that does not repeat keeps no last day or
+    // skipped days; a series keeps its last day only when it is not before its first day, and the skipped days from its first day.
+    public static AgendaEvent? Shape(string id, string title, DateTime start, DateTime? end, bool allDay, string? detail, AgendaSource? source, DateTime created,
+        AgendaRepeat repeat = AgendaRepeat.None, DateOnly? until = null, IReadOnlyList<DateOnly>? skipped = null)
     {
         if (Clean(title) is not { } name) return null;
         DateTime from, to;
@@ -83,26 +85,64 @@ public sealed class AgendaBook
             to = end is { } given ? AgendaTime.Minute(given) : from.AddHours(1);
             if (to <= from) return null;
         }
-        return new AgendaEvent { Id = id, Title = name, Start = from, End = to, AllDay = allDay, Detail = Clean(detail), Source = source, Created = AgendaTime.Second(created) };
+        var first = DateOnly.FromDateTime(from);
+        if (!Enum.IsDefined(repeat) || repeat == AgendaRepeat.None) { repeat = AgendaRepeat.None; until = null; skipped = null; }
+        if (until < first) until = null;
+        IReadOnlyList<DateOnly> skip = skipped is null ? [] : skipped.Any(day => day < first) ? skipped.Where(day => day >= first).ToList() : skipped;
+        return new AgendaEvent
+        {
+            Id = id, Title = name, Start = from, End = to, AllDay = allDay, Detail = Clean(detail), Source = source, Created = AgendaTime.Second(created),
+            Repeat = repeat, Until = until, Skipped = skip
+        };
     }
 
-    public AgendaEvent? AddEvent(string title, DateTime start, DateTime? end, bool allDay, DateTime now, string? detail = null, AgendaSource? source = null)
+    public AgendaEvent? AddEvent(string title, DateTime start, DateTime? end, bool allDay, DateTime now, string? detail = null, AgendaSource? source = null, AgendaRepeat repeat = AgendaRepeat.None)
     {
-        if (Shape(NewId(), title, start, end, allDay, detail, source, now) is not { } item) return null;
+        if (Shape(NewId(), title, start, end, allDay, detail, source, now, repeat) is not { } item) return null;
         _events.Add(item); Raise();
         return item;
     }
 
-    // Changes an event's title, times, all-day and detail; its Id, source and creation stay. Null when there is no such event or
-    // the new values are refused (see Shape); the event is unchanged then.
-    public AgendaEvent? UpdateEvent(string id, string title, DateTime start, DateTime? end, bool allDay, string? detail)
+    // Changes an event's title, times, all-day, detail and, when given, how it repeats (null keeps it); its Id, source and creation
+    // stay, and a series keeps its last day and skipped days (see Shape). A series' times are its first time's: every time of it
+    // changes. Null when there is no such event or the new values are refused (see Shape); the event is unchanged then.
+    public AgendaEvent? UpdateEvent(string id, string title, DateTime start, DateTime? end, bool allDay, string? detail, AgendaRepeat? repeat = null)
     {
         int index = _events.FindIndex(item => item.Id == id);
-        if (index < 0 || Shape(id, title, start, end, allDay, detail, _events[index].Source, _events[index].Created) is not { } shaped) return null;
+        if (index < 0) return null;
+        var old = _events[index];
+        if (Shape(id, title, start, end, allDay, detail, old.Source, old.Created, repeat ?? old.Repeat, old.Until, old.Skipped) is not { } shaped) return null;
         var item = shaped with { Extra = _events[index].Extra };
         if (item == _events[index]) return item;
         _events[index] = item; Raise();
         return item;
+    }
+
+    // Deletes the time of a series that starts on day: the day is skipped. A series left without any time is removed whole, as is
+    // an event that does not repeat. Returns the series as it is now; null when it was removed or has no time on day.
+    public AgendaEvent? SkipOccurrence(string id, DateOnly day)
+    {
+        int index = _events.FindIndex(item => item.Id == id);
+        if (index < 0 || !_events[index].Occurs(day)) return null;
+        var item = _events[index];
+        if (item.Repeat == AgendaRepeat.None) { RemoveEvent(id); return null; }
+        var changed = item with { Skipped = [.. item.Skipped, day] };
+        if (changed.Until is { } until && !changed.OccursBefore(until.AddDays(1))) { RemoveEvent(id); return null; }
+        _events[index] = changed; Raise();
+        return changed;
+    }
+
+    // Deletes the times of a series from day on: its last day becomes the day before. A series without a time before day is
+    // removed whole, as is an event that does not repeat. Returns the series as it is now; null when it was removed or not there.
+    public AgendaEvent? EndBefore(string id, DateOnly day)
+    {
+        int index = _events.FindIndex(item => item.Id == id);
+        if (index < 0) return null;
+        var item = _events[index];
+        if (item.Repeat == AgendaRepeat.None || !item.OccursBefore(day)) { RemoveEvent(id); return null; }
+        var changed = item with { Until = day.AddDays(-1), Skipped = item.Skipped.Where(skip => skip < day).ToList() };
+        _events[index] = changed; Raise();
+        return changed;
     }
 
     // The removed event, to put back with Restore, or null when there was none.
@@ -190,18 +230,18 @@ public sealed class AgendaBook
 
     // Gives a to-do a time: it becomes an event with its text as the title, keeping its Id, source and creation, and the to-do
     // is gone. Null (and the to-do stays) when there is no such to-do or the times are refused (see Shape).
-    public AgendaEvent? TodoToEvent(string todoId, DateTime start, DateTime? end, bool allDay, string? detail = null)
+    public AgendaEvent? TodoToEvent(string todoId, DateTime start, DateTime? end, bool allDay, string? detail = null, AgendaRepeat repeat = AgendaRepeat.None)
     {
         int index = _todos.FindIndex(item => item.Id == todoId);
         if (index < 0) return null;
         var todo = _todos[index];
-        if (Shape(todo.Id, todo.Text, start, end, allDay, detail, todo.Source, todo.Created) is not { } item) return null;
+        if (Shape(todo.Id, todo.Text, start, end, allDay, detail, todo.Source, todo.Created, repeat) is not { } item) return null;
         _todos.RemoveAt(index); _events.Add(item); Raise();
         return item;
     }
 
     // Takes an event back to a to-do of day (null: "长期"), with its title as the text, keeping its Id, source and creation.
-    // The event's detail line has no place in a to-do and is dropped.
+    // The event's detail line and how it repeats have no place in a to-do and are dropped.
     public AgendaTodo? EventToTodo(string eventId, DateOnly? day)
     {
         int index = _events.FindIndex(item => item.Id == eventId);

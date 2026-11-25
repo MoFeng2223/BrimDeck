@@ -31,11 +31,16 @@ public enum AgendaPhase { Upcoming, Ongoing, Past }
 
 public static class AgendaQuery
 {
+    // The parts of the events on day; a repeating event gives the part of each of its times that shows on day.
     public static IReadOnlyList<AgendaSegment> Segments(IEnumerable<AgendaEvent> events, DateOnly day)
     {
         var list = new List<(AgendaSegment Segment, int Order)>();
         int order = 0;
-        foreach (var item in events) { if (Segment(item, day) is { } segment) list.Add((segment, order)); order++; }
+        foreach (var item in events)
+        {
+            foreach (var time in item.Occurrences(day, day)) if (Segment(time, day) is { } segment) list.Add((segment, order));
+            order++;
+        }
         return list.OrderBy(pair => pair.Segment.AllDay ? 0 : 1)
             .ThenBy(pair => pair.Segment.AllDay ? pair.Segment.Event.Start : pair.Segment.Start)
             .ThenBy(pair => pair.Segment.AllDay ? pair.Segment.Event.End : pair.Segment.End)
@@ -43,6 +48,7 @@ public static class AgendaQuery
             .Select(pair => pair.Segment).ToList();
     }
 
+    // The part on day of one event, or of one time of a repeating event (AgendaEvent.Occurrence).
     public static AgendaSegment? Segment(AgendaEvent item, DateOnly day)
     {
         if (!item.Covers(day)) return null;
@@ -111,17 +117,20 @@ public static class AgendaQuery
     public static bool Overdue(AgendaTodo todo, DateOnly today) => !todo.Done && todo.Due is { } due && due < today;
 
     public static AgendaCounts Counts(AgendaData data, DateOnly day, DateOnly today)
-        => new(data.Events.Count(item => item.Covers(day)), Todos(data.Todos, day, today).Open, data.Notes.ContainsKey(day));
+        => new(Segments(data.Events, day).Count, Todos(data.Todos, day, today).Open, data.Notes.ContainsKey(day));
 
     // The marks of the days from first on, count of them (42 for a month of six rows, 7 for a week).
     public static IReadOnlyList<AgendaDayMark> Marks(AgendaData data, DateOnly first, int count)
     {
         var last = first.AddDays(Math.Max(count, 1) - 1);
-        var shown = data.Events.Where(item => item.FirstDay <= last && item.LastDay >= first).ToList();
-        // The lines: the day ranges of events over several days, overlapping ones merged. Taken from every event, not only those
-        // in range, so a line's ends are its own and not the range's.
+        // Each time of a repeating event that shows in the range counts as an event of its own.
+        var shown = data.Events.SelectMany(item => item.Occurrences(first, last)).ToList();
+        // The lines: the day ranges of events over several days, overlapping ones merged. Taken from every event that does not
+        // repeat, not only those in range, so a line's ends are its own and not the range's; a repeating one's times in the range
+        // are whole, ends included.
         var lines = new List<(DateOnly First, DateOnly Last)>();
-        foreach (var item in data.Events.Where(item => item.DayCount > 1).OrderBy(item => item.FirstDay))
+        var spanning = data.Events.Where(item => item.Repeat == AgendaRepeat.None).Concat(shown.Where(item => item.Repeat != AgendaRepeat.None)).Where(item => item.DayCount > 1);
+        foreach (var item in spanning.OrderBy(item => item.FirstDay))
         {
             if (lines.Count > 0 && item.FirstDay <= lines[^1].Last)
             { if (item.LastDay > lines[^1].Last) lines[^1] = (lines[^1].First, item.LastDay); }

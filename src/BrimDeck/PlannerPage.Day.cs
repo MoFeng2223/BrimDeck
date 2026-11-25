@@ -29,9 +29,11 @@ internal sealed partial class PlannerPage
     // The list or blocks choice the add row's switch was last drawn for: drawn for the other, its fill glides over.
     private bool? _blocksDrawn;
 
-    // The event form, and what it is for: "new", "event:<id>" or "todo:<id>" (giving a to-do a time).
+    // The event form, and what it is for: "new", "event:<id>" or "todo:<id>" (giving a to-do a time); for an event, the day the time
+    // of it that was opened starts on (a repeating event's "只删除这一次" deletes that one).
     private AgendaEventForm? _form;
     private string? _formFor;
+    private DateOnly _formTime;
     // A to-do whose words are being changed, in its box.
     private string? _editingTodo;
     private TextBox? _todoEdit;
@@ -266,7 +268,8 @@ internal sealed partial class PlannerPage
         text.Children.Add(AgendaDraw.Words(item.Title, 12.5, 17, past ? Look.Secondary : Look.Primary, past ? null : FontWeights.SemiBold));
         var phase = AgendaQuery.Phase(segment, now);
         string? status = AgendaText.Status(segment, now);
-        if (Second(item.Source, [item.Detail], status, phase == AgendaPhase.Ongoing && segment.Day == Today, marked, 11.5, 15, Look.Secondary) is { } second) text.Children.Add(second);
+        string? repeat = item.Repeat == AgendaRepeat.None ? null : AgendaText.Repeat(item.Repeat, item.FirstDay);
+        if (Second(item.Source, [repeat, item.Detail], status,phase == AgendaPhase.Ongoing && segment.Day == Today, marked, 11.5, 15, Look.Secondary) is { } second) text.Children.Add(second);
         Grid.SetColumn(text, 4); grid.Children.Add(text);
 
         string rest = marked ? AgendaDraw.Tint(Look.Accent, .16) : editing ? Look.Fill : "#00000000";
@@ -461,14 +464,23 @@ internal sealed partial class PlannerPage
     }
 
     // The form opens in place of the add bar: empty for a new event, filled for an event (with "删除"), or with a to-do's words.
+    // item may be one time of a repeating event (AgendaEvent.Occurrence): the form then shows the series, its first time and how it
+    // repeats, and a change applies to every time of it.
     private void OpenEventForm(AgendaEvent? item, AgendaTodo? todo = null)
     {
         CommitTodo();
         if (_form is not null) { _form.ClosePopups(); Detach(_form); _form = null; }
-        bool elsewhere = item is not null && item.FirstDay != _day || _layout == AgendaLayout.Short;
+        var series = item is null ? null : Book.FindEvent(item.Id) ?? item;
+        bool elsewhere = series is not null && series.FirstDay != _day || _layout == AgendaLayout.Short;
         string submit = item is null && todo is null ? Loc.T("添加", "Add") : Loc.T("保存", "Save");
         var form = new AgendaEventForm(Look, _deck.AgendaKeyboard, submit, delete: item is not null, showStartDay: elsewhere) { Today = () => Today };
-        if (item is not null) form.Fill(item.Title, item.Start, item.End, item.AllDay);
+        if (series is not null)
+        {
+            form.Fill(series.Title, series.Start, series.End, series.AllDay, series.Repeat);
+            _formTime = item!.FirstDay;
+            form.Series = series.Repeat != AgendaRepeat.None;
+            form.SeriesHasEarlier = series.OccursBefore(_formTime);
+        }
         else
         {
             var start = AgendaCalendar.NewEventStart(_day, Now);
@@ -477,9 +489,19 @@ internal sealed partial class PlannerPage
         _formFor = item is not null ? "event:" + item.Id : todo is not null ? "todo:" + todo.Id : "new";
         form.Submitted += SubmitForm;
         form.Cancelled += () => { CloseForm(); Show(); };
-        form.Deleted += () =>
+        form.Deleted += scope =>
         {
-            if (_formFor is { } what && what.StartsWith("event:", StringComparison.Ordinal)) { CloseForm(); Book.RemoveEvent(what[6..]); }
+            if (_formFor is { } what && what.StartsWith("event:", StringComparison.Ordinal))
+            {
+                var time = _formTime;
+                CloseForm();
+                _ = scope switch
+                {
+                    AgendaDeleteScope.This => Book.SkipOccurrence(what[6..], time),
+                    AgendaDeleteScope.Later => Book.EndBefore(what[6..], time),
+                    _ => Book.RemoveEvent(what[6..])
+                };
+            }
             Show();
         };
         _form = form;
@@ -490,18 +512,20 @@ internal sealed partial class PlannerPage
     private void SubmitForm()
     {
         if (_form?.Value is not { } value || _formFor is not { } what) return;
+        var repeat = _form.Repeat.Repeat;
         CloseForm();
         var now = Now;
         if (what.StartsWith("event:", StringComparison.Ordinal))
         {
             string id = what[6..];
-            if (Book.UpdateEvent(id, value.Title, value.Start, value.End, value.AllDay, Book.FindEvent(id)?.Detail) is null) Book.AddEvent(value.Title, value.Start, value.End, value.AllDay, now);
+            if (Book.UpdateEvent(id, value.Title, value.Start, value.End, value.AllDay, Book.FindEvent(id)?.Detail, repeat) is null)
+                Book.AddEvent(value.Title, value.Start, value.End, value.AllDay, now, repeat: repeat);
         }
         else if (what.StartsWith("todo:", StringComparison.Ordinal))
         {
-            if (Book.TodoToEvent(what[5..], value.Start, value.End, value.AllDay) is null) Book.AddEvent(value.Title, value.Start, value.End, value.AllDay, now);
+            if (Book.TodoToEvent(what[5..], value.Start, value.End, value.AllDay, repeat: repeat) is null) Book.AddEvent(value.Title, value.Start, value.End, value.AllDay, now, repeat: repeat);
         }
-        else Book.AddEvent(value.Title, value.Start, value.End, value.AllDay, now);
+        else Book.AddEvent(value.Title, value.Start, value.End, value.AllDay, now, repeat: repeat);
         Show();
     }
 

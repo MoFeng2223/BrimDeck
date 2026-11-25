@@ -645,6 +645,108 @@ internal sealed class AgendaDatePopup
     }
 }
 
+// A short list to pick one line of, in a pop-up above (or under) what opened it, as wide as its longest line: how an event
+// repeats, which times of a repeating event to delete. A tick at the right marks the chosen line, where there is one.
+internal sealed class AgendaChoicePopup
+{
+    public sealed record Choice(string Text, Action Pick, bool Chosen = false);
+
+    private readonly PanelLook _look;
+    private readonly Popup _popup;
+    private readonly Border _frame;
+    public bool IsOpen => _popup.IsOpen;
+
+    public AgendaChoicePopup(PanelLook look)
+    {
+        _look = look;
+        _frame = new Border { Background = UI.Brush(look.Hex("popup")), BorderBrush = UI.Brush(look.Hex("popupBorder")), BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(look.Corner(10)), Padding = new Thickness(4) };
+        _popup = new Popup { Child = _frame, StaysOpen = false, AllowsTransparency = true, Placement = PlacementMode.Top, VerticalOffset = -4, PopupAnimation = PopupAnimation.None };
+    }
+
+    public void Show(FrameworkElement target, IReadOnlyList<Choice> choices)
+    {
+        var look = _look;
+        bool ticks = choices.Any(choice => choice.Chosen);
+        var stack = new StackPanel();
+        foreach (var choice in choices)
+        {
+            var label = AgendaDraw.Label(choice.Text, 12, look.Primary);
+            var row = new Grid { Children = { label } };
+            row.ColumnDefinitions.Add(new ColumnDefinition());
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            if (ticks)
+            {
+                var tick = AgendaDraw.CentredIcon(Tick, 12, choice.Chosen ? look.Accent : "#00000000");
+                tick.Margin = new Thickness(16, 0, 0, 0);
+                Grid.SetColumn(tick, 1);
+                row.Children.Add(tick);
+            }
+            var pick = choice.Pick;
+            var button = AgendaDraw.Face(look, row, choice.Text, () => { Close(); pick(); }, 26, 6, new Thickness(8, 0, 8, 0));
+            AgendaDraw.Fit(button, label, 26);
+            button.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+            ((Border)button.Content).HorizontalAlignment = HorizontalAlignment.Stretch;
+            stack.Children.Add(button);
+        }
+        _frame.Child = stack;
+        PanelTheme.Text(_frame, target);
+        _popup.PlacementTarget = target;
+        _popup.IsOpen = true;
+    }
+
+    public void Close() => _popup.IsOpen = false;
+
+    private const string Tick = "M20 6 9 17l-5-5";
+}
+
+// How an event repeats: the repeat icon, the rule in words for a series starting on First ("每周二") and a chevron; a click opens
+// the rules in an AgendaChoicePopup.
+internal sealed class AgendaRepeatField : ContentControl
+{
+    private static readonly AgendaRepeat[] Rules = [AgendaRepeat.None, AgendaRepeat.Daily, AgendaRepeat.Weekdays, AgendaRepeat.Weekly, AgendaRepeat.Monthly, AgendaRepeat.Yearly];
+    private readonly InkCentredText _label;
+    private AgendaRepeat _repeat;
+    private DateOnly _first;
+    public event Action? Changed;
+    public AgendaChoicePopup Popup { get; }
+
+    public AgendaRepeatField(PanelLook look)
+    {
+        var icon = AgendaDraw.CentredIcon(Icon, 12, look.Secondary);
+        _label = AgendaDraw.Label("", 12, look.Primary);
+        _label.Margin = new Thickness(6, 0, 0, 0);
+        var chevron = AgendaDraw.CentredIcon(AgendaDraw.Chevron, 11, look.Tertiary);
+        chevron.Margin = new Thickness(6, 0, 0, 0);
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Children = { icon, _label, chevron } };
+        string rest = look.Fill;
+        var face = new Border { Height = 28, CornerRadius = new CornerRadius(look.Corner(8)), Padding = new Thickness(9, 0, 8, 0), Background = UI.Brush(rest), Child = row };
+        _label.FitHeight(face, 28);
+        Popup = new AgendaChoicePopup(look);
+        Content = AgendaDraw.Bare(face, Loc.T("重复", "Repeat"), Open, (over, down) =>
+            face.Background = UI.Brush(down ? look.Hex("pressed") : over ? look.FillSelected : rest));
+        Show();
+    }
+
+    public AgendaRepeat Repeat { get => _repeat; set { bool changed = value != _repeat; _repeat = value; Show(); if (changed) Changed?.Invoke(); } }
+
+    // The series' first day, which the weekly, monthly and yearly rules are worded by.
+    public DateOnly First { get => _first; set { _first = value; Show(); } }
+
+    private void Show()
+    {
+        _label.Text.Text = AgendaText.Repeat(_repeat, _first);
+        _label.InvalidateMeasure(); _label.InvalidateArrange();
+    }
+
+    private void Open() => Popup.Show(this, [.. Rules.Select(rule => new AgendaChoicePopup.Choice(AgendaText.Repeat(rule, _first), () => Repeat = rule, rule == _repeat))]);
+
+    private const string Icon = "m17 2 4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3";
+}
+
+// Which times of a repeating event "删除" takes: the one opened, that one and the later ones, or all of them.
+internal enum AgendaDeleteScope { All, This, Later }
+
 // Lays out two parts on one line, the second at its right end; where they do not fit side by side, the second goes on a line of its
 // own under the first, still at the right. The forms' rows: the times on the left, the buttons on the right.
 internal sealed class AgendaSplitRow : Panel
@@ -686,8 +788,9 @@ internal sealed class AgendaSplitRow : Panel
 // The form for an event (the planner's "添加日程", changing an event, giving a to-do a time; the notices page's "加入日程"): its title
 // on one line, then its times, "全天" and the buttons. The start's day is shown only when ShowStartDay (the notices page, an event
 // that began on an earlier day than the one shown); otherwise it is StartDay as given. The end's day starts as the start's: another
-// day makes the event run over several days. The main button is available only while the values make an event (AgendaBook.Shape):
-// a title, and an end after the start. Enter in the title presses it.
+// day makes the event run over several days. Under the times, how it repeats (for a series, the times are its first time's) and the
+// buttons. The main button is available only while the values make an event (AgendaBook.Shape): a title, and an end after the
+// start. Enter in the title presses it. "删除" on a form opened from a time of a repeating event (Series) asks which times go.
 internal sealed class AgendaEventForm : Border
 {
     private readonly PanelLook _look;
@@ -697,9 +800,16 @@ internal sealed class AgendaEventForm : Border
     public AgendaDateField EndDay { get; }
     public AgendaTimeField EndTime { get; }
     public ToggleButton AllDay { get; }
+    public AgendaRepeatField Repeat { get; }
     private readonly Button _submit, _cancel, _delete;
+    private readonly AgendaChoicePopup _deleteChoices;
     private readonly FrameworkElement _dash;
-    public event Action? Submitted, Cancelled, Deleted;
+    public event Action? Submitted, Cancelled;
+    public event Action<AgendaDeleteScope>? Deleted;
+    // Set by the page for a form opened from a time of a repeating event: "删除" then asks whether only that time goes, that time
+    // and the later ones (offered when the series has a time before it), or all of them.
+    public bool Series { get; set; }
+    public bool SeriesHasEarlier { get; set; }
 
     // submit: the main button's words ("添加", "保存", "加入日程"); delete: offer "删除".
     public AgendaEventForm(PanelLook look, Action<TextBox> keyboard, string submit, bool delete = false, bool showStartDay = false)
@@ -728,7 +838,8 @@ internal sealed class AgendaEventForm : Border
         allDayRow.MouseLeftButtonUp += (_, e) => { if (e.OriginalSource is DependencyObject source && IsWithin(source, AllDay)) return; AllDay.IsChecked = AllDay.IsChecked != true; e.Handled = true; };
         times.Children.Add(allDayRow);
 
-        _delete = AgendaDraw.Pill(look, Loc.T("删除", "Delete"), () => Deleted?.Invoke(), danger: true);
+        _deleteChoices = new AgendaChoicePopup(look);
+        _delete = AgendaDraw.Pill(look, Loc.T("删除", "Delete"), Delete, danger: true);
         _cancel = AgendaDraw.Pill(look, Loc.T("取消", "Cancel"), () => Cancelled?.Invoke());
         _submit = AgendaDraw.Pill(look, submit, Submit, main: true);
         _delete.Margin = new Thickness(0, 0, 6, 0); _cancel.Margin = new Thickness(0, 0, 6, 0);
@@ -736,11 +847,13 @@ internal sealed class AgendaEventForm : Border
         if (delete) buttons.Children.Add(_delete);
         buttons.Children.Add(_cancel); buttons.Children.Add(_submit);
 
-        var row = new AgendaSplitRow { Margin = new Thickness(0, 6, 0, 0), Children = { times, buttons } };
-        Child = new StackPanel { Children = { Title, row } };
+        Repeat = new AgendaRepeatField(look) { VerticalAlignment = VerticalAlignment.Center };
+        times.Margin = new Thickness(0, 6, 0, 0);
+        var foot = new AgendaSplitRow { Margin = new Thickness(0, 6, 0, 0), Children = { Repeat, buttons } };
+        Child = new StackPanel { Children = { Title, times, foot } };
 
         Title.Changed += Check; StartTime.Changed += Check; EndTime.Changed += Check; EndDay.Changed += Check;
-        StartDay.Changed += () => { Check(); };
+        StartDay.Changed += () => { Repeat.First = StartDay.Date; Check(); };
         AllDay.Checked += (_, _) => AllDayChanged(); AllDay.Unchecked += (_, _) => AllDayChanged();
         Title.Box.PreviewKeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; Submit(); } };
         StartTime.Box.PreviewKeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; Submit(); } };
@@ -757,15 +870,28 @@ internal sealed class AgendaEventForm : Border
     // The day "today" is, for the years the day fields write and their months' marks.
     public Func<DateOnly> Today { set { StartDay.Today = value; EndDay.Today = value; } }
 
-    // Whether a month of the form is open: the panel stays open while it is.
-    public bool PopupOpen => StartDay.Popup.IsOpen || EndDay.Popup.IsOpen;
-    public void ClosePopups() { StartDay.Popup.Close(); EndDay.Popup.Close(); }
+    // Whether a pop-up of the form is open (a month, the repeat rules, the delete choices): the panel stays open while it is.
+    public bool PopupOpen => StartDay.Popup.IsOpen || EndDay.Popup.IsOpen || Repeat.Popup.IsOpen || _deleteChoices.IsOpen;
+    public void ClosePopups() { StartDay.Popup.Close(); EndDay.Popup.Close(); Repeat.Popup.Close(); _deleteChoices.Close(); }
 
-    // Puts the values in: an all-day event's end is its last day; a timed one ending at 00:00 ends at 24:00 of the day before.
-    public void Fill(string title, DateTime start, DateTime end, bool allDay)
+    private void Delete()
+    {
+        if (!Series) { Deleted?.Invoke(AgendaDeleteScope.All); return; }
+        var choices = new List<AgendaChoicePopup.Choice> { new(Loc.T("只删除这一次", "This one only"), () => Deleted?.Invoke(AgendaDeleteScope.This)) };
+        if (SeriesHasEarlier) choices.Add(new(Loc.T("删除这一次及以后", "This one and later ones"), () => Deleted?.Invoke(AgendaDeleteScope.Later)));
+        choices.Add(new(Loc.T("删除全部", "All of them"), () => Deleted?.Invoke(AgendaDeleteScope.All)));
+        _deleteChoices.Show(_delete, choices);
+    }
+
+    // Puts the values in: an all-day event's end is its last day; a timed one ending at 00:00 ends at 24:00 of the day before. For a
+    // series, its first time and how it repeats.
+    public void Fill(string title, DateTime start, DateTime end, bool allDay) => Fill(title, start, end, allDay, AgendaRepeat.None);
+    public void Fill(string title, DateTime start, DateTime end, bool allDay, AgendaRepeat repeat)
     {
         Title.Text = title;
         StartDay.Date = DateOnly.FromDateTime(start);
+        Repeat.First = StartDay.Date;
+        Repeat.Repeat = repeat;
         StartTime.Set(start.TimeOfDay);
         if (allDay)
         {

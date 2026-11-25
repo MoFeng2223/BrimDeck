@@ -25,6 +25,7 @@ static class AgendaTests
             Marks(check);
             Changes(check);
             Conversions(check);
+            Repeats(Path.Combine(root, "agenda-repeat"), check);
             Files(Path.Combine(root, "agenda"), check);
             Words(check);
             English(check);
@@ -301,6 +302,90 @@ static class AgendaTests
         check("Agenda: merging the file keeps what was made here and adds the rest",
             early.FindTodo(kept.Id)!.Text == "先加的" && early.FindTodo("other") is not null && early.FindEvent("e") is not null
             && early.Note(Today) == "这里写的" && early.Note(D("2026-11-21")) == "昨天的便签" && early.Todos.Count == 2);
+    }
+
+    // Repeating events: which days each rule gives, the times shown on a day, the month marks and counts, deleting one time or the
+    // times from a day on, changes that keep the series' last day and skipped days, the file, and the words.
+    private static void Repeats(string folder, Action<string, bool> check)
+    {
+        var book = new AgendaBook();
+        // 2026-11-23 is a Monday.
+        var standUp = book.AddEvent("站会", T("2026-11-23 09:30"), T("2026-11-23 10:00"), false, Now, repeat: AgendaRepeat.Daily)!;
+        bool At(AgendaEvent item, string day, string start) => book.Segments(D(day)).Any(s => s.Event.Id == item.Id && s.Start == T(day + " " + start));
+        check("Agenda: a daily event shows on every day from its first, at its own time, with the series' id",
+            At(standUp, "2026-11-23", "09:30") && At(standUp, "2026-11-25", "09:30") && At(standUp, "2027-03-01", "09:30") && book.Segments(D("2026-11-22")).Count == 0
+            && book.Segments(D("2026-11-25"))[0].Event.End == T("2026-11-25 10:00") && book.FindEvent(standUp.Id) == standUp);
+
+        var weekdays = book.AddEvent("早会", T("2026-11-22 08:00"), T("2026-11-22 08:15"), false, Now, repeat: AgendaRepeat.Weekdays)!;
+        check("Agenda: a weekday event skips Saturday and Sunday, its first day counted whatever it is",
+            At(weekdays, "2026-11-22", "08:00") && At(weekdays, "2026-11-27", "08:00") && !At(weekdays, "2026-11-28", "08:00") && !At(weekdays, "2026-11-29", "08:00")
+            && At(weekdays, "2026-11-30", "08:00"));
+        var weekly = book.AddEvent("周会", T("2026-11-24 15:00"), T("2026-11-24 16:00"), false, Now, repeat: AgendaRepeat.Weekly)!;
+        check("Agenda: a weekly event shows on its first day's weekday", At(weekly, "2026-12-01", "15:00") && !At(weekly, "2026-11-25", "15:00"));
+        var monthly = book.AddEvent("月结", T("2027-01-31 10:00"), T("2027-01-31 11:00"), false, Now, repeat: AgendaRepeat.Monthly)!;
+        check("Agenda: a monthly event from the 31st skips months without one",
+            book.Segments(D("2027-02-28")).All(s => s.Event.Id != monthly.Id) && At(monthly, "2027-03-31", "10:00") && book.Segments(D("2027-04-30")).All(s => s.Event.Id != monthly.Id));
+        var yearly = book.AddEvent("纪念日", T("2028-02-29 00:00"), T("2028-02-29 00:00"), true, Now, repeat: AgendaRepeat.Yearly)!;
+        check("Agenda: a yearly all-day event on 29 February shows only in leap years",
+            book.Segments(D("2029-02-28")).All(s => s.Event.Id != yearly.Id) && book.Segments(D("2032-02-29")).Single(s => s.Event.Id == yearly.Id).AllDay);
+        foreach (var id in new[] { weekdays.Id, weekly.Id, monthly.Id, yearly.Id }) book.RemoveEvent(id);
+
+        var night = book.AddEvent("值班", T("2026-11-23 22:00"), T("2026-11-24 02:00"), false, Now, repeat: AgendaRepeat.Daily)!;
+        var nightParts = book.Segments(D("2026-11-25")).Where(s => s.Event.Id == night.Id).ToList();
+        check("Agenda: a daily event past midnight shows the end of the evening before and the start of the night",
+            nightParts.Count == 2 && nightParts[0].Start == T("2026-11-25 00:00") && nightParts[0].End == T("2026-11-25 02:00") && nightParts[0].FromEarlier
+            && nightParts[1].Start == T("2026-11-25 22:00") && nightParts[1].ContinuesLater && book.Segments(D("2026-11-23")).Count(s => s.Event.Id == night.Id) == 1);
+        check("Agenda: the switch counts each time shown on the day", book.Counts(D("2026-11-25"), Today).Events == 3);
+        var marks = book.Marks(D("2026-11-16"), 14);
+        check("Agenda: the month marks every day of a daily event, not the days before it, and joins the nights' days with a line",
+            marks.Where(m => m.Day >= D("2026-11-23")).All(m => m.Events && m.InSpan) && marks.Where(m => m.Day < D("2026-11-23")).All(m => !m.Events && !m.InSpan)
+            && marks.Single(m => m.Day == D("2026-11-23")).SpanStart && marks.Single(m => m.Day == D("2026-11-23")).DayEvents);
+        book.RemoveEvent(night.Id);
+
+        var skipped = book.SkipOccurrence(standUp.Id, D("2026-11-25"))!;
+        check("Agenda: deleting one time skips its day only",
+            !At(standUp, "2026-11-25", "09:30") && At(standUp, "2026-11-24", "09:30") && At(standUp, "2026-11-26", "09:30") && skipped.Skipped.SequenceEqual([D("2026-11-25")]));
+        check("Agenda: a day without a time of the series cannot be skipped", book.SkipOccurrence(standUp.Id, D("2026-11-20")) is null && book.FindEvent(standUp.Id) is not null);
+        var ended = book.EndBefore(standUp.Id, D("2026-11-27"))!;
+        check("Agenda: deleting a time and the later ones ends the series the day before",
+            ended.Until == D("2026-11-26") && At(standUp, "2026-11-26", "09:30") && !At(standUp, "2026-11-27", "09:30") && !At(standUp, "2026-12-10", "09:30"));
+        var moved = book.UpdateEvent(standUp.Id, "站会", T("2026-11-23 09:45"), T("2026-11-23 10:15"), false, null)!;
+        check("Agenda: changing a series moves every time and keeps its rule, last day and skipped days",
+            moved.Repeat == AgendaRepeat.Daily && moved.Until == D("2026-11-26") && moved.Skipped.SequenceEqual([D("2026-11-25")]) && At(standUp, "2026-11-24", "09:45"));
+        var once = book.UpdateEvent(standUp.Id, "站会", T("2026-11-23 09:45"), T("2026-11-23 10:15"), false, null, AgendaRepeat.None)!;
+        check("Agenda: a series made not to repeat keeps only its first time",
+            once is { Repeat: AgendaRepeat.None, Until: null, Skipped.Count: 0 } && !At(standUp, "2026-11-24", "09:45") && At(standUp, "2026-11-23", "09:45"));
+        book.UpdateEvent(standUp.Id, "站会", T("2026-11-23 09:45"), T("2026-11-23 10:15"), false, null, AgendaRepeat.Daily);
+        check("Agenda: deleting the times from the first one on removes the series", book.EndBefore(standUp.Id, D("2026-11-23")) is null && book.FindEvent(standUp.Id) is null);
+        var two = book.AddEvent("培训", T("2026-11-23 14:00"), T("2026-11-23 15:00"), false, Now, repeat: AgendaRepeat.Daily)!;
+        book.EndBefore(two.Id, D("2026-11-25"));
+        book.SkipOccurrence(two.Id, D("2026-11-23"));
+        check("Agenda: deleting the last time left of an ended series removes it", book.SkipOccurrence(two.Id, D("2026-11-24")) is null && book.FindEvent(two.Id) is null);
+        var todo = book.AddTodo("周报", Today, Now)!;
+        check("Agenda: a to-do given a time may repeat", book.TodoToEvent(todo.Id, T("2026-11-27 17:00"), null, false, repeat: AgendaRepeat.Weekly) is { Repeat: AgendaRepeat.Weekly });
+
+        Directory.CreateDirectory(folder);
+        var store = new AgendaStore(folder);
+        var series = book.AddEvent("站会", T("2026-11-23 09:30"), T("2026-11-23 10:00"), false, Now, repeat: AgendaRepeat.Weekdays)!;
+        book.SkipOccurrence(series.Id, D("2026-11-26")); book.SkipOccurrence(series.Id, D("2026-11-24"));
+        book.EndBefore(series.Id, D("2026-12-31"));
+        store.Write(book.Snapshot());
+        var text = File.ReadAllText(store.FilePath);
+        var back = store.Read(Now).Data.Events.Single(item => item.Id == series.Id);
+        check("Agenda: the file keeps the rule, the last day and the skipped days in order",
+            text.Contains("\"repeat\": \"weekdays\"") && text.Contains("\"until\": \"2026-12-30\"") && text.Contains("\"2026-11-24\",") && !text.Contains("\"repeat\": null")
+            && back is { Repeat: AgendaRepeat.Weekdays, Until: { } until } && until == D("2026-12-30") && back.Skipped.Order().SequenceEqual([D("2026-11-24"), D("2026-11-26")])
+            && AgendaStore.Serialize(store.Read(Now).Data) == AgendaStore.Serialize(book.Snapshot()));
+        const string later = """
+            { "format": 1, "events": [ { "id": "e1", "title": "双周会", "start": "2026-11-23T10:00", "end": "2026-11-23T11:00", "repeat": "biweekly", "until": null, "skipped": [] } ] }
+            """;
+        var unknown = AgendaStore.Parse(later);
+        check("Agenda: a rule this version does not know shows the event once and is written back as it was",
+            unknown.Events.Single().Repeat == AgendaRepeat.None && AgendaStore.Serialize(unknown).Contains("\"repeat\": \"biweekly\""));
+
+        check("Agenda: the rules' words name the day they repeat on",
+            AgendaText.Repeat(AgendaRepeat.Weekly, D("2026-11-24")) == "每周二" && AgendaText.Repeat(AgendaRepeat.Monthly, D("2026-11-25")) == "每月 25 日"
+            && AgendaText.Repeat(AgendaRepeat.Yearly, D("2027-11-25")) == "每年 11月25日" && AgendaText.Repeat(AgendaRepeat.None, Today) == "不重复");
     }
 
     private static void Conversions(Action<string, bool> check)

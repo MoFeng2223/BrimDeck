@@ -122,6 +122,18 @@ public static class AgendaText
         return $"{Date(item.FirstDay, year)} {Clock(item.Start, item.FirstDay)} – {Date(item.LastDay, year)} {Clock(item.End, item.LastDay)}";
     }
 
+    // How an event repeats, for a series that starts on first: "不重复", "每天", "每个工作日", "每周二", "每月 25 日", "每年 11月25日"
+    // ("Does not repeat", "Daily", "Every weekday", "Weekly on Tue", "Monthly on day 25", "Yearly on Nov 25").
+    public static string Repeat(AgendaRepeat repeat, DateOnly first) => repeat switch
+    {
+        AgendaRepeat.Daily => Loc.T("每天", "Daily"),
+        AgendaRepeat.Weekdays => Loc.T("每个工作日", "Every weekday"),
+        AgendaRepeat.Weekly => Loc.T($"每{Weekday(first.DayOfWeek)}", $"Weekly on {Weekday(first.DayOfWeek)}"),
+        AgendaRepeat.Monthly => Loc.T($"每月 {first.Day} 日", $"Monthly on day {first.Day}"),
+        AgendaRepeat.Yearly => Loc.T($"每年 {Date(first, false)}", $"Yearly on {Date(first, false)}"),
+        _ => Loc.T("不重复", "Does not repeat")
+    };
+
     // At the end of a to-do with a due day: "11月30日截止 · 还有 8 天", "明天截止", "今天截止", "11月20日截止 · 已过期 2 天"; a ticked
     // to-do only names the day.
     public static string Due(DateOnly due, DateOnly today, bool done = false)

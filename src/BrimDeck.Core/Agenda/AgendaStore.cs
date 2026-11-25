@@ -107,7 +107,12 @@ public sealed class AgendaStore(string directory)
         return data;
     }
 
-    private static readonly string[] EventKeys = ["id", "title", "start", "end", "allDay", "detail", "source", "created"];
+    private static readonly string[] EventKeys = ["id", "title", "start", "end", "allDay", "detail", "source", "created", "repeat", "until", "skipped"];
+    // How "repeat" is written; an event that does not repeat has no "repeat", "until" or "skipped".
+    private static readonly Dictionary<AgendaRepeat, string> RepeatNames = new()
+    {
+        [AgendaRepeat.Daily] = "daily", [AgendaRepeat.Weekdays] = "weekdays", [AgendaRepeat.Weekly] = "weekly", [AgendaRepeat.Monthly] = "monthly", [AgendaRepeat.Yearly] = "yearly"
+    };
     private static readonly string[] TodoKeys = ["id", "text", "day", "due", "done", "doneAt", "source", "created"];
     private static readonly string[] SourceKeys = ["notice", "app", "appName", "sender", "icon"];
 
@@ -118,6 +123,12 @@ public sealed class AgendaStore(string directory)
         node["start"] = item.AllDay ? AgendaTime.Text(item.FirstDay) : AgendaTime.Text(item.Start);
         node["end"] = item.AllDay ? AgendaTime.Text(DateOnly.FromDateTime(item.End)) : AgendaTime.Text(item.End);
         node["allDay"] = item.AllDay; node["detail"] = item.Detail; node["source"] = Node(item.Source); node["created"] = AgendaTime.Text(item.Created);
+        if (RepeatNames.TryGetValue(item.Repeat, out var repeat))
+        {
+            node["repeat"] = repeat;
+            node["until"] = item.Until is { } until ? AgendaTime.Text(until) : null;
+            node["skipped"] = new JsonArray([.. item.Skipped.Order().Select(day => (JsonNode)AgendaTime.Text(day))]);
+        }
         return node;
     }
 
@@ -150,8 +161,13 @@ public sealed class AgendaStore(string directory)
         var end = AgendaTime.Parse(Text(node["end"]));
         if (!allDay && end is null) return null;
         var created = AgendaTime.Parse(Text(node["created"])) ?? start;
-        var item = AgendaBook.Shape(Id(node), title, start, end, allDay, Text(node["detail"]), Source(node["source"]), created);
-        return item is null ? null : item with { Extra = Rest(node, EventKeys) };
+        // A rule this version does not know leaves the event shown once, at its first time, and the rule is written back as it was
+        // read. Skipped days that cannot be read are left out.
+        var repeat = RepeatNames.FirstOrDefault(pair => pair.Value == Text(node["repeat"])).Key;
+        bool unknown = repeat == AgendaRepeat.None && node["repeat"] is not null;
+        var skipped = (node["skipped"] as JsonArray ?? []).Select(day => AgendaTime.ParseDay(Text(day))).OfType<DateOnly>().Distinct().ToList();
+        var item = AgendaBook.Shape(Id(node), title, start, end, allDay, Text(node["detail"]), Source(node["source"]), created, repeat, AgendaTime.ParseDay(Text(node["until"])), skipped);
+        return item is null ? null : item with { Extra = Rest(node, unknown ? EventKeys[..^3] : EventKeys) };
     }
 
     private static AgendaTodo? Todo(JsonObject node)

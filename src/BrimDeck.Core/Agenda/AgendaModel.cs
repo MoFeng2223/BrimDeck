@@ -35,8 +35,16 @@ public sealed record AgendaSource
     };
 }
 
+// How an event repeats. Each time starts on a day the rule gives, at the first time's clock time, and lasts as long as it.
+// Weekly: on the first day's weekday. Monthly: on the first day's day of the month, so a series from the 31st skips months
+// without one. Yearly: on the first day's month and day (a 29 February one only in leap years). Weekdays: Monday to Friday.
+public enum AgendaRepeat { None, Daily, Weekdays, Weekly, Monthly, Yearly }
+
 // An event. A timed one runs from Start to End (End later than Start, any number of days later). An all-day one covers the days
 // from Start's date to End's date, both included; both are kept at 00:00. Detail is the one extra line (a place, a meeting link).
+// A repeating one (Repeat) is a series: Start and End are its first time; it occurs on its first day and on every later day the
+// rule gives, up to Until when there is one, except the days in Skipped (a time deleted alone). The planner shows each time as
+// a copy of the series moved to its day (Occurrence), with the series' Id.
 public sealed record AgendaEvent
 {
     public required string Id { get; init; }
@@ -47,13 +55,64 @@ public sealed record AgendaEvent
     public string? Detail { get; init; }
     public AgendaSource? Source { get; init; }
     public DateTime Created { get; init; }
+    public AgendaRepeat Repeat { get; init; }
+    public DateOnly? Until { get; init; }
+    public IReadOnlyList<DateOnly> Skipped { get; init; } = [];
     internal JsonObject? Extra { get; init; }
 
     public DateOnly FirstDay => DateOnly.FromDateTime(Start);
     // The last day the event shows on: an all-day event's last date; a timed one ending at exactly 00:00 does not reach that day.
+    // For a series, the last day of its first time.
     public DateOnly LastDay => AllDay ? DateOnly.FromDateTime(End) : DateOnly.FromDateTime(End.TimeOfDay == TimeSpan.Zero ? End.AddDays(-1) : End);
     public int DayCount => LastDay.DayNumber - FirstDay.DayNumber + 1;
+    // Whether this event (one time of it, for a series) shows on day.
     public bool Covers(DateOnly day) => day >= FirstDay && day <= LastDay;
+
+    // Whether a time of the event starts on day.
+    public bool Occurs(DateOnly day)
+    {
+        if (Repeat == AgendaRepeat.None) return day == FirstDay;
+        if (day < FirstDay || Until is { } until && day > until || Skipped.Contains(day)) return false;
+        if (day == FirstDay) return true;
+        return Repeat switch
+        {
+            AgendaRepeat.Daily => true,
+            AgendaRepeat.Weekdays => day.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday),
+            AgendaRepeat.Weekly => day.DayOfWeek == FirstDay.DayOfWeek,
+            AgendaRepeat.Monthly => day.Day == FirstDay.Day,
+            AgendaRepeat.Yearly => day.Month == FirstDay.Month && day.Day == FirstDay.Day,
+            _ => false
+        };
+    }
+
+    // The time of the event that starts on day: the series moved there whole (call it for a day it Occurs on).
+    public AgendaEvent Occurrence(DateOnly day)
+    {
+        int days = day.DayNumber - FirstDay.DayNumber;
+        return days == 0 ? this : this with { Start = Start.AddDays(days), End = End.AddDays(days) };
+    }
+
+    // The times of the event that show on any day from first to last, in order of their start.
+    public IEnumerable<AgendaEvent> Occurrences(DateOnly first, DateOnly last)
+    {
+        if (Repeat == AgendaRepeat.None)
+        {
+            if (FirstDay <= last && LastDay >= first) yield return this;
+            yield break;
+        }
+        var from = first.AddDays(-(DayCount - 1));
+        if (from < FirstDay) from = FirstDay;
+        if (Until is { } until && last > until) last = until;
+        for (var day = from; day <= last; day = day.AddDays(1))
+            if (Occurs(day)) yield return Occurrence(day);
+    }
+
+    // Whether the series has a time before day (to tell whether deleting the times from a day on leaves any).
+    public bool OccursBefore(DateOnly day)
+    {
+        for (var at = FirstDay; at < day; at = at.AddDays(1)) if (Occurs(at)) return true;
+        return false;
+    }
 }
 
 // A to-do. Day: the day it belongs to, or null for "长期" (no day). Due: the day it must be done by, or null. DoneAt: when it was
