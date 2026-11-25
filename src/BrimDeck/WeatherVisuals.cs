@@ -27,8 +27,8 @@ internal static class WeatherMotion
         element.MouseEnter+=(_,_)=>Go(1.035); element.MouseLeave+=(_,_)=>Go(1); element.PreviewMouseLeftButtonDown+=(_,_)=>Go(.95); element.PreviewMouseLeftButtonUp+=(_,_)=>Go(1.035);
     }
 }
-internal enum WeatherMetaKind { Gust, DewPoint, Uv, AirQuality, WindSock, NoPrecip, Precipitation, Thermo, Droplet, Rain, Snow, Ice, Mixed, Wind, Sunrise, Gauge, Eye, Leaf, Cloud, Location, ChevronDown, ChevronLeft, Check, Close, Add }
-// 元信息矢量图标：16 网格线稿，圆头描边，风格同 MonitorGlyph —— 温度计 / 水滴 / 风 / 日升，及定位、选择、添加、返回等通用交互符号。
+internal enum WeatherMetaKind { Gust, DewPoint, Uv, AirQuality, WindSock, NoPrecip, Precipitation, Thermo, Droplet, Rain, Snow, Ice, Mixed, Wind, Sunrise, Gauge, Eye, Cloud, Location }
+// 元信息矢量图标：16 网格线稿，圆头描边，风格同 MonitorGlyph —— 温度计 / 水滴 / 风 / 日升 / 定位等读数标注符号。
 internal sealed class WeatherMetaIcon : FrameworkElement
 {
     private static readonly Dictionary<WeatherMetaKind, Geometry> Shapes = Create();
@@ -53,14 +53,8 @@ internal sealed class WeatherMetaIcon : FrameworkElement
             (WeatherMetaKind.Sunrise,"M4.2,13 A3.8,3.8 0 0 1 11.8,13 M2.5,13 H13.5 M3.9,8.4 L2.9,6.3 M8,6.6 V4.4 M12.1,8.4 L13.1,6.3"),
             (WeatherMetaKind.Gauge,"M8,3 A5,5 0 1 1 7.99,3 Z M8,8 L10.4,5.6 M5.2,12.5 H10.8"),
             (WeatherMetaKind.Eye,"M2.5,8 C4.5,5.2 6.2,4 8,4 C9.8,4 11.5,5.2 13.5,8 C11.5,10.8 9.8,12 8,12 C6.2,12 4.5,10.8 2.5,8 Z M8,6.2 A1.8,1.8 0 1 0 8,9.8 A1.8,1.8 0 1 0 8,6.2 Z"),
-            (WeatherMetaKind.Leaf,"M3,10.5 C3,5.8 6.2,3 12.5,3 C12.5,9.8 9.2,12.5 4.8,12.5 C4,12.5 3.5,11.5 3,10.5 Z M3.5,12.5 C6,10.2 8.6,8.2 11.5,6.2"),
             (WeatherMetaKind.Cloud,"M4.8,11.5 A2.9,2.9 0 0 1 5.2,5.8 A4.3,4.3 0 0 1 12.8,7 A2.7,2.7 0 0 1 12,12 H5.2 A2.7,2.7 0 0 1 4.8,11.5 Z"),
             (WeatherMetaKind.Location,"M8,2.5 C10.6,2.5 12.3,4.4 12.3,6.8 C12.3,10.2 8,13.4 8,13.4 C8,13.4 3.7,10.2 3.7,6.8 C3.7,4.4 5.4,2.5 8,2.5 Z M8,5.3 A1.7,1.7 0 1 0 8,8.7 A1.7,1.7 0 1 0 8,5.3 Z"),
-            (WeatherMetaKind.ChevronDown,"M4,6.5 L8,10.5 L12,6.5"),
-            (WeatherMetaKind.ChevronLeft,"M12,6.5 L8,10.5 L4,6.5"),
-            (WeatherMetaKind.Check,"M3.5,8.5 L6.5,11.5 L12.5,4.5"),
-            (WeatherMetaKind.Close,"M4.5,4.5 L11.5,11.5 M11.5,4.5 L4.5,11.5"),
-            (WeatherMetaKind.Add,"M8,3 V13 M3,8 H13"),
         }) { var g=Geometry.Parse(data); g.Freeze(); map[kind]=g; }
         return map;
     }

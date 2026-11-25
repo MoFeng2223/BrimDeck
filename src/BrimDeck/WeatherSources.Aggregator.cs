@@ -125,11 +125,8 @@ internal static class WeatherAggregator
         var indices = new List<IndexItem>();
         string? minuteSummary = null;
         var used = new Dictionary<WeatherDomain, List<string>>();
-        var provided = new Dictionary<string, bool>();
-        var fieldSources = new Dictionary<string, string>();
         void Use(WeatherDomain domain, IWeatherSource source)
         {
-            provided[source.Info.Id] = true;
             if (!used.TryGetValue(domain, out var list)) used[domain] = list = [];
             if (!list.Contains(source.Info.Name)) list.Add(source.Info.Name);
         }
@@ -141,19 +138,19 @@ internal static class WeatherAggregator
             switch (domain)
             {
                 case WeatherDomain.Current:
-                    if (part.Current is { } c) { bool any = MergeCurrent(current, c, source.Info.Id, fieldSources); if (any) Use(domain, source); }
+                    if (part.Current is { } c) { bool any = MergeCurrent(current, c); if (any) Use(domain, source); }
                     break;
                 case WeatherDomain.Air:
-                    // 空气质量按字段补齐：中国天气网给 AQI，Open-Meteo 补 PM2.5/PM10，避免整块先到先得丢掉污染物浓度。
+                    // 空气质量按字段补齐：同一份返回里空位才填，单源聚合不做跨源补缺。
                     if (part.Air is { } a && a.HasData)
                     {
                         air ??= new AirPart();
                         bool any = false;
-                        if (air.Aqi is null && a.Aqi is not null) { air.Aqi = a.Aqi; fieldSources["aqi"] = source.Info.Id; any = true; }
-                        // 国际标准 AQI 独立合并：国内来源同给两套时各自落位，详情页的「国际 AQI」才有值。
-                        if (air.AqiGlobal is null && a.AqiGlobal is not null) { air.AqiGlobal = a.AqiGlobal; fieldSources["aqi_global"] = source.Info.Id; any = true; }
-                        if (air.Pm25 is null && a.Pm25 is not null) { air.Pm25 = a.Pm25; fieldSources["pm25"] = source.Info.Id; any = true; }
-                        if (air.Pm10 is null && a.Pm10 is not null) { air.Pm10 = a.Pm10; fieldSources["pm10"] = source.Info.Id; any = true; }
+                        if (air.Aqi is null && a.Aqi is not null) { air.Aqi = a.Aqi; any = true; }
+                        // 国际标准 AQI 独立合并：国内来源同给两套时各自落位，快照的 AqiGlobal 才有值。
+                        if (air.AqiGlobal is null && a.AqiGlobal is not null) { air.AqiGlobal = a.AqiGlobal; any = true; }
+                        if (air.Pm25 is null && a.Pm25 is not null) { air.Pm25 = a.Pm25; any = true; }
+                        if (air.Pm10 is null && a.Pm10 is not null) { air.Pm10 = a.Pm10; any = true; }
                         if (air.Level is null && a.Level is not null) { air.Level = a.Level; any = true; }
                         if (air.Text is null && a.Text is not null) { air.Text = a.Text; any = true; }
                         if (air.Primary is null && a.Primary is not null) { air.Primary = a.Primary; any = true; }
@@ -166,21 +163,19 @@ internal static class WeatherAggregator
                         {
                             if (!air.Pollutants.TryAdd(code, value)) continue;
                             if (a.Units.TryGetValue(code, out var unit)) air.Units[code] = unit;
-                            fieldSources["air:" + code] = source.Info.Id;
                             any = true;
                         }
                         // 空气质量逐时预报按整点键补齐；目前只有和风提供。
                         if (air.HourAqi.Count == 0 && a.HourAqi.Count > 0)
                         {
                             air.HourAqi = a.HourAqi;
-                            fieldSources["air:hourly"] = source.Info.Id;
                             any = true;
                         }
                         if (any) Use(domain, source);
                     }
                     break;
                 case WeatherDomain.Hourly:
-                    if (part.Hours is { Count: > 0 } hs) { bool any = false; foreach (var hour in hs) if (!hours.ContainsKey(hour.Time)) { hours[hour.Time] = hour; fieldSources.TryAdd("h:" + hour.Time, source.Info.Id); any = true; } if (any) Use(domain, source); }
+                    if (part.Hours is { Count: > 0 } hs) { bool any = false; foreach (var hour in hs) if (!hours.ContainsKey(hour.Time)) { hours[hour.Time] = hour; any = true; } if (any) Use(domain, source); }
                     break;
                 case WeatherDomain.Minutely:
                     // 覆盖判定同时要求降水量有效：时间点齐全但全缺值（限流空壳）不算覆盖，让聚合器下探其它来源。
@@ -188,7 +183,7 @@ internal static class WeatherAggregator
                     minuteSummary ??= part.MinuteSummary;
                     break;
                 case WeatherDomain.Warning:
-                    // 空列表也是一次有效回答（「当前无预警」），同样记来源，详情页预警区才能标出是谁在值守。
+                    // 空列表也是一次有效回答（「当前无预警」），同样记来源。
                     if (part.Warnings is { } warns) { warnings.AddRange(warns); Use(domain, source); }
                     break;
                 case WeatherDomain.Indices:
@@ -203,10 +198,10 @@ internal static class WeatherAggregator
                         foreach (var day in ds)
                         {
                             // 按日期归属：今天及以后算预报，之前算历史。
-                            // 否则先遍历的 Daily 会把历史一起合并掉，History 永远标不出来源。
+                            // 否则先遍历的 Daily 会把历史一起合并掉，History 域永远拿不到数据。
                             if ((string.CompareOrdinal(day.Date, todayKey) < 0) != (domain == WeatherDomain.History)) continue;
                             if (!dayMap.TryGetValue(day.Date, out var target)) continue;
-                            if (MergeDay(target, day, source.Info.Id, fieldSources)) any = true;
+                            if (MergeDay(target, day)) any = true;
                         }
                         if (any) Use(domain, source);
                     }
@@ -223,10 +218,9 @@ internal static class WeatherAggregator
             bool contributed = false;
             foreach (var day in supplement)
                 if (dayMap.TryGetValue(day.Date, out var target))
-                    contributed |= MergeDay(target, day, ChinaDailyForecast.Id, fieldSources);
+                    contributed |= MergeDay(target, day);
             if (contributed)
             {
-                provided[ChinaDailyForecast.Id] = true;
                 if (!used.TryGetValue(WeatherDomain.Daily, out var names)) used[WeatherDomain.Daily] = names = [];
                 names.Add(ChinaDailyForecast.Name);
             }
@@ -234,7 +228,7 @@ internal static class WeatherAggregator
         var cityKey = WeatherData.CacheKey(city, sourceId);
         var local = WeatherHourHistory.Read(cityKey);
         foreach (var (time, point) in local)
-            if (!hours.ContainsKey(time)) { hours[time] = point; fieldSources.TryAdd("h:" + time, "local"); }
+            if (!hours.ContainsKey(time)) hours[time] = point;
         // 字典合并后顺序不保证有序（本地历史与预报源交错插入），先按整点键排好序再找锚点，窗口切片才可靠。
         var ordered = hours.Values.OrderBy(p => p.Time, StringComparer.Ordinal).ToList();
         // 锚点之后一条都没有（缓存只剩过期旧序列、来源没有未来小时）时不能把旧数据 Skip(0) 冒充预报：
@@ -290,7 +284,6 @@ internal static class WeatherAggregator
             PrecipType = current.PrecipType ?? "",
             WeatherCode = current.Code ?? 0,
             IsDay = daylight,
-            ConditionText = current.Condition ?? "",
             Aqi = air?.Aqi ?? -1,
             AqiGlobal = air?.AqiGlobal ?? -1,
             Pm25 = air?.Pm25 ?? -1,
@@ -366,13 +359,7 @@ internal static class WeatherAggregator
             HourDewPointC = hourList.Select(hour => hour.DewPointC ?? double.NaN).ToArray(),
             HourCloudPercent = hourList.Select(hour => hour.CloudPercent ?? double.NaN).ToArray(),
             HourVisibilityKm = hourList.Select(hour => hour.VisibilityKm ?? double.NaN).ToArray(),
-            Sources = used.ToDictionary(pair => pair.Key.ToString(), pair => string.Join(" + ", pair.Value)),
-            FieldSources = fieldSources,
-            // 每域列出所有声明支持的来源（含未提供数据的），保序去重；图例中未提供的以灰色圆点标注。
-            DomainSources = Enum.GetValues<WeatherDomain>().ToDictionary(
-                domain => domain.ToString(),
-                domain => WeatherSources.All.Where(source => source.Info.Domains.Contains(domain)).Select(source => source.Info.Id).Distinct().ToArray()),
-            SourceProvided = provided
+            Sources = used.ToDictionary(pair => pair.Key.ToString(), pair => string.Join(" + ", pair.Value))
         };
         return snapshot;
     }
@@ -406,72 +393,70 @@ internal static class WeatherAggregator
         return false;
     }
 
-    private static bool MergeCurrent(CurrentPart target, CurrentPart source, string sourceId, Dictionary<string, string> fieldSources)
+    // 空位才写入：来源链靠前的那份数据优先，后面的来源只补空缺；返回是否补入了任何字段。
+    private static bool MergeCurrent(CurrentPart target, CurrentPart source)
     {
         bool any = false;
-        bool Mark(bool ok, string field) { if (ok) { fieldSources[field] = sourceId; return true; } return false; }
-        any |= Mark(Set(ref target.Temperature, source.Temperature), "temp");
-        any |= Mark(Set(ref target.FeelsLike, source.FeelsLike), "feels");
-        any |= Mark(Set(ref target.Humidity, source.Humidity), "humidity");
-        any |= Mark(Set(ref target.WindKmh, source.WindKmh), "wind");
-        any |= Mark(Set(ref target.WindGustKmh, source.WindGustKmh), "gust");
-        any |= Mark(Set(ref target.WindDirDeg, source.WindDirDeg), "wind_dir");
-        any |= Mark(Set(ref target.PressureHpa, source.PressureHpa), "pressure");
-        any |= Mark(Set(ref target.VisibilityKm, source.VisibilityKm), "visibility");
-        any |= Mark(Set(ref target.DewPointC, source.DewPointC), "dew");
-        any |= Mark(Set(ref target.Uv, source.Uv), "uv");
-        any |= Mark(Set(ref target.CloudPercent, source.CloudPercent), "cloud");
-        any |= Mark(Set(ref target.PrecipMm, source.PrecipMm), "precip");
-        any |= Mark(Set(ref target.Code, source.Code), "code");
-        any |= Mark(Set(ref target.IsDay, source.IsDay), "is_day");
-        any |= Mark(Set<int>(ref target.WindScale, source.WindScale), "wind_scale");
-        any |= Mark(Set(ref target.PrecipRateMmH, source.PrecipRateMmH), "precip_rate");
-        if (target.WindDir is null && source.WindDir is not null) { target.WindDir = source.WindDir; fieldSources["wind_dir_text"] = sourceId; any = true; }
-        if (target.Condition is null && source.Condition is not null) { target.Condition = source.Condition; fieldSources["condition"] = sourceId; any = true; }
+        any |= Set(ref target.Temperature, source.Temperature);
+        any |= Set(ref target.FeelsLike, source.FeelsLike);
+        any |= Set(ref target.Humidity, source.Humidity);
+        any |= Set(ref target.WindKmh, source.WindKmh);
+        any |= Set(ref target.WindGustKmh, source.WindGustKmh);
+        any |= Set(ref target.WindDirDeg, source.WindDirDeg);
+        any |= Set(ref target.PressureHpa, source.PressureHpa);
+        any |= Set(ref target.VisibilityKm, source.VisibilityKm);
+        any |= Set(ref target.DewPointC, source.DewPointC);
+        any |= Set(ref target.Uv, source.Uv);
+        any |= Set(ref target.CloudPercent, source.CloudPercent);
+        any |= Set(ref target.PrecipMm, source.PrecipMm);
+        any |= Set(ref target.Code, source.Code);
+        any |= Set(ref target.IsDay, source.IsDay);
+        any |= Set<int>(ref target.WindScale, source.WindScale);
+        any |= Set(ref target.PrecipRateMmH, source.PrecipRateMmH);
+        if (target.WindDir is null && source.WindDir is not null) { target.WindDir = source.WindDir; any = true; }
+        if (target.Condition is null && source.Condition is not null) { target.Condition = source.Condition; any = true; }
         if (target.PrecipType is null && source.PrecipType is not null) { target.PrecipType = source.PrecipType; any = true; }
         return any;
     }
 
-    private static bool MergeDay(DayPoint target, DayPoint source, string sourceId, Dictionary<string, string> fieldSources)
+    private static bool MergeDay(DayPoint target, DayPoint source)
     {
-        string key = "d:" + target.Date;
-        bool Mark(bool ok, string field) { if (ok) { fieldSources.TryAdd(field + ":" + target.Date, sourceId); fieldSources.TryAdd(key, sourceId); return true; } return false; }
         bool any = false;
         // 注意：这里所有字段必须用非短路的 `|` 串联。`Set`/`FillString` 只在目标为空时填入并返回 true，
         // 用 `||` 会在第一个成功字段处短路，导致同一来源后续字段（如 solarNoon）永远补不进来。
-        any |= Mark(Set<int>(ref target.Code, source.Code) | (target.Condition is null && source.Condition is not null), "d_cond");
+        any |= Set<int>(ref target.Code, source.Code) | (target.Condition is null && source.Condition is not null);
         if (target.Condition is null && source.Condition is not null) { target.Condition = source.Condition; }
-        any |= Mark(Set<double>(ref target.HighC, source.HighC) | Set<double>(ref target.FeelsHighC, source.FeelsHighC), "d_high");
-        any |= Mark(Set<double>(ref target.LowC, source.LowC) | Set<double>(ref target.FeelsLowC, source.FeelsLowC), "d_low");
-        any |= Mark(Set<int>(ref target.RainProb, source.RainProb) | Set<double>(ref target.PrecipMm, source.PrecipMm), "d_rain");
-        any |= Mark(Set<double>(ref target.UvMax, source.UvMax), "d_uv");
-        any |= Mark(Set<double>(ref target.WindMaxKmh, source.WindMaxKmh) | Set<double>(ref target.GustMaxKmh, source.GustMaxKmh)
-            | Set<double>(ref target.WindDirDeg, source.WindDirDeg) | (target.WindDir is null && source.WindDir is not null), "d_wind");
+        any |= Set<double>(ref target.HighC, source.HighC) | Set<double>(ref target.FeelsHighC, source.FeelsHighC);
+        any |= Set<double>(ref target.LowC, source.LowC) | Set<double>(ref target.FeelsLowC, source.FeelsLowC);
+        any |= Set<int>(ref target.RainProb, source.RainProb) | Set<double>(ref target.PrecipMm, source.PrecipMm);
+        any |= Set<double>(ref target.UvMax, source.UvMax);
+        any |= Set<double>(ref target.WindMaxKmh, source.WindMaxKmh) | Set<double>(ref target.GustMaxKmh, source.GustMaxKmh)
+            | Set<double>(ref target.WindDirDeg, source.WindDirDeg) | (target.WindDir is null && source.WindDir is not null);
         if (target.WindDir is null && source.WindDir is not null) { target.WindDir = source.WindDir; }
-        any |= Mark(Set<int>(ref target.Humidity, source.Humidity), "d_humidity");
-        any |= Mark(Set<double>(ref target.PressureHpa, source.PressureHpa), "d_pressure");
+        any |= Set<int>(ref target.Humidity, source.Humidity);
+        any |= Set<double>(ref target.PressureHpa, source.PressureHpa);
         // 天文（日升日落、月升月落、月相）随每日预报一起返回，是 Daily 的普通字段。
         bool FillString(ref string? field, string? value) { if (field is not null || value is null) return false; field = value; return true; }
-        any |= Mark(FillString(ref target.Sunrise, source.Sunrise) | FillString(ref target.Sunset, source.Sunset), "d_sun");
+        any |= FillString(ref target.Sunrise, source.Sunrise) | FillString(ref target.Sunset, source.Sunset);
         // 晨昏蒙影与太阳正午/午夜、月过中天/月下点：和风 astro 独有的扩展时刻，同为 Daily 字段。
-        any |= Mark(FillString(ref target.AstronomicalDawn, source.AstronomicalDawn) | FillString(ref target.NauticalDawn, source.NauticalDawn)
+        any |= FillString(ref target.AstronomicalDawn, source.AstronomicalDawn) | FillString(ref target.NauticalDawn, source.NauticalDawn)
             | FillString(ref target.CivilDawn, source.CivilDawn) | FillString(ref target.CivilDusk, source.CivilDusk)
             | FillString(ref target.NauticalDusk, source.NauticalDusk) | FillString(ref target.AstronomicalDusk, source.AstronomicalDusk)
-            | FillString(ref target.SolarNoon, source.SolarNoon) | FillString(ref target.SolarMidnight, source.SolarMidnight), "d_astro");
-        any |= Mark(FillString(ref target.MoonTransit, source.MoonTransit) | FillString(ref target.MoonUnderfoot, source.MoonUnderfoot), "d_moon");
-        any |= Mark(FillString(ref target.Moonrise, source.Moonrise) | FillString(ref target.Moonset, source.Moonset)
-            | FillString(ref target.MoonPhase, source.MoonPhase), "d_moon");
+            | FillString(ref target.SolarNoon, source.SolarNoon) | FillString(ref target.SolarMidnight, source.SolarMidnight);
+        any |= FillString(ref target.MoonTransit, source.MoonTransit) | FillString(ref target.MoonUnderfoot, source.MoonUnderfoot);
+        any |= FillString(ref target.Moonrise, source.Moonrise) | FillString(ref target.Moonset, source.Moonset)
+            | FillString(ref target.MoonPhase, source.MoonPhase);
         // 日均温与白天云量：和风独有（Open-Meteo daily 不返回这两项）。
-        any |= Mark(Set<double>(ref target.AvgTempC, source.AvgTempC), "d_avg");
-        any |= Mark(Set<double>(ref target.CloudPercent, source.CloudPercent), "d_cloud");
+        any |= Set<double>(ref target.AvgTempC, source.AvgTempC);
+        any |= Set<double>(ref target.CloudPercent, source.CloudPercent);
         // 夜间分段：夜间天气/湿度/风/降水/云量，缺哪项补哪项。
-        any |= Mark(Set<int>(ref target.NightCode, source.NightCode) | (target.NightCondition is null && source.NightCondition is not null), "d_night");
+        any |= Set<int>(ref target.NightCode, source.NightCode) | (target.NightCondition is null && source.NightCondition is not null);
         if (target.NightCondition is null && source.NightCondition is not null) { target.NightCondition = source.NightCondition; }
-        any |= Mark(Set<int>(ref target.NightHumidity, source.NightHumidity), "d_night");
-        any |= Mark(Set<double>(ref target.NightWindMaxKmh, source.NightWindMaxKmh) | Set<double>(ref target.NightGustMaxKmh, source.NightGustMaxKmh)
-            | Set<double>(ref target.NightWindDirDeg, source.NightWindDirDeg) | (target.NightWindDir is null && source.NightWindDir is not null), "d_night");
-        any |= Mark(Set<double>(ref target.NightPrecipMm, source.NightPrecipMm) | Set<int>(ref target.NightRainProb, source.NightRainProb), "d_night");
-        any |= Mark(Set<double>(ref target.NightCloudPercent, source.NightCloudPercent), "d_night");
+        any |= Set<int>(ref target.NightHumidity, source.NightHumidity);
+        any |= Set<double>(ref target.NightWindMaxKmh, source.NightWindMaxKmh) | Set<double>(ref target.NightGustMaxKmh, source.NightGustMaxKmh)
+            | Set<double>(ref target.NightWindDirDeg, source.NightWindDirDeg) | (target.NightWindDir is null && source.NightWindDir is not null);
+        any |= Set<double>(ref target.NightPrecipMm, source.NightPrecipMm) | Set<int>(ref target.NightRainProb, source.NightRainProb);
+        any |= Set<double>(ref target.NightCloudPercent, source.NightCloudPercent);
         return any;
     }
 
