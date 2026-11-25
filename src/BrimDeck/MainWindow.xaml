@@ -35,7 +35,7 @@
            Collapsed, SetExpanded places it at the box HoverExtensionBox gives; open, it stretches across the island again. -->
       <Border x:Name="HoverExtension" Background="#01000000" Height="0" VerticalAlignment="Top" HorizontalAlignment="Stretch"/>
       <local:IslandBorder x:Name="Island" HorizontalAlignment="Left" VerticalAlignment="Top" Width="238" Height="32"
-              Background="Black" BorderThickness="0" CornerRadius="0,0,12,12" ShoulderRadius="16" MaterialOpacity="1" ClipToBounds="True">
+              Background="Black" BorderThickness="0" CornerRadius="0,0,12,12" ShoulderRadius="16" MaterialOpacity="1" TopRimOpacity="0" ClipToBounds="True">
         <!-- The layered window and the island's rounded clip would leave text in grayscale; the surface beneath is always opaque,
              so ClearType is safe here. Text under a fade, a mask or another clip falls back to grayscale until that ends. -->
         <!-- Turned back upright when the panel hangs from another edge than the top (MainWindow.Edge.cs). -->

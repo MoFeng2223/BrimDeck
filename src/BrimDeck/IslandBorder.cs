@@ -21,6 +21,12 @@ public sealed class IslandBorder : Border
     public static readonly DependencyProperty SurfaceOpacityProperty = DependencyProperty.Register(
         nameof(SurfaceOpacity), typeof(double), typeof(IslandBorder),
         new FrameworkPropertyMetadata(1d, FrameworkPropertyMetadataOptions.AffectsRender));
+    // Opacity of the rim along the top edge (y = 0), from 0 (omitted for a surface docked to a screen edge) to 1 (full rim for
+    // a floating surface). NaN (the default) derives 0 or 1 from the shape itself (IsTopDocked), so static previews and tests
+    // need not set it while animated transitions in MainWindow can hold it at 0 or fade it cleanly before touching the edge.
+    public static readonly DependencyProperty TopRimOpacityProperty = DependencyProperty.Register(
+        nameof(TopRimOpacity), typeof(double), typeof(IslandBorder),
+        new FrameworkPropertyMetadata(double.NaN, FrameworkPropertyMetadataOptions.AffectsRender));
 
     // The theme's layers over the base color: a gradient and a pattern (scan lines, or a pixel theme's texture). Like the rim
     // they fade with MaterialOpacity, so the indicator, which has neither, keeps its plain color.
@@ -54,7 +60,9 @@ public sealed class IslandBorder : Border
     private Pen? _rim;
     private (Size Size, double Shoulder, CornerRadius Corners, double Inset, double Step, double Rim)? _outlineKey;
     private Geometry _outline = Geometry.Empty;
-    private (Geometry Light, Geometry Shade)? _bevel;
+    private Geometry _rimOutline = Geometry.Empty;
+    private Geometry _topEdge = Geometry.Empty;
+    private (Geometry Light, Geometry TopLight, Geometry Shade)? _bevel;
 
     static IslandBorder() => CornerRadiusProperty.OverrideMetadata(typeof(IslandBorder),
         new FrameworkPropertyMetadata(default(CornerRadius), FrameworkPropertyMetadataOptions.AffectsRender | FrameworkPropertyMetadataOptions.AffectsArrange));
@@ -71,6 +79,7 @@ public sealed class IslandBorder : Border
         set => SetValue(MaterialOpacityProperty, value);
     }
     public double SurfaceOpacity { get => (double)GetValue(SurfaceOpacityProperty); set => SetValue(SurfaceOpacityProperty, value); }
+    public double TopRimOpacity { get => (double)GetValue(TopRimOpacityProperty); set => SetValue(TopRimOpacityProperty, value); }
     public Brush? Gradient { get => (Brush?)GetValue(GradientProperty); set => SetValue(GradientProperty, value); }
     public Brush? Pattern { get => (Brush?)GetValue(PatternProperty); set => SetValue(PatternProperty, value); }
     internal IslandDecor? Decor { get => (IslandDecor?)GetValue(DecorProperty); set => SetValue(DecorProperty, value); }
@@ -120,19 +129,55 @@ public sealed class IslandBorder : Border
         if (Pattern is { } pattern) drawingContext.DrawGeometry(pattern, null, outline);
     }
 
+    private double EffectiveTopRim()
+    {
+        double value = TopRimOpacity;
+        return double.IsNaN(value) ? (IsTopDocked(ShoulderRadius, CornerRadius) ? 0d : 1d) : Math.Clamp(value, 0, 1);
+    }
+
     private void Rim(DrawingContext drawingContext, Geometry outline)
     {
         if (RimWidth <= 0) return;
+        double topRim = EffectiveTopRim();
         if (_bevel is { } bevel && BevelBrush is { } shade)
         {
             drawingContext.DrawGeometry(RimBrush, null, bevel.Light);
+            if (topRim > 0 && !bevel.TopLight.IsEmpty())
+            {
+                if (topRim < 1) drawingContext.PushOpacity(topRim);
+                drawingContext.DrawGeometry(RimBrush, null, bevel.TopLight);
+                if (topRim < 1) drawingContext.Pop();
+            }
             drawingContext.DrawGeometry(shade, null, bevel.Shade);
         }
-        else if (_settledClip) drawingContext.DrawGeometry(RimBrush, null, Ring(outline));
+        else if (_settledClip)
+        {
+            if (topRim >= 1) drawingContext.DrawGeometry(RimBrush, null, Ring(outline, outline, openTop: false));
+            else
+            {
+                drawingContext.DrawGeometry(RimBrush, null, Ring(outline, _rimOutline, openTop: true));
+                if (topRim > 0 && !_topEdge.IsEmpty())
+                {
+                    drawingContext.PushOpacity(topRim);
+                    drawingContext.DrawGeometry(RimBrush, null, TopRing(outline, _topEdge));
+                    drawingContext.Pop();
+                }
+            }
+        }
         else
         {
             if (_rim is null) { _rim = new Pen(RimBrush, RimWidth * 2); _rim.Freeze(); }
-            drawingContext.DrawGeometry(null, _rim, outline);
+            if (topRim >= 1) drawingContext.DrawGeometry(null, _rim, outline);
+            else
+            {
+                drawingContext.DrawGeometry(null, _rim, _rimOutline);
+                if (topRim > 0 && !_topEdge.IsEmpty())
+                {
+                    drawingContext.PushOpacity(topRim);
+                    drawingContext.DrawGeometry(null, _rim, _topEdge);
+                    drawingContext.Pop();
+                }
+            }
         }
     }
 
@@ -150,13 +195,21 @@ public sealed class IslandBorder : Border
     // The rim's inner half as a filled ring, for the outline it was made from; made only at rest, so never on an animation's frames.
     private Geometry? _ring, _ringOutline;
     private double _ringWidth;
-    private Geometry Ring(Geometry outline)
+    private bool _ringOpenTop;
+    private Geometry Ring(Geometry outline, Geometry rimOutline, bool openTop)
     {
-        if (_ring is not null && ReferenceEquals(_ringOutline, outline) && _ringWidth == RimWidth) return _ring;
-        var widened = outline.GetWidenedPathGeometry(new Pen(Brushes.Black, RimWidth * 2));
+        if (_ring is not null && ReferenceEquals(_ringOutline, outline) && _ringWidth == RimWidth && _ringOpenTop == openTop) return _ring;
+        var widened = rimOutline.GetWidenedPathGeometry(new Pen(Brushes.Black, RimWidth * 2));
         var ring = Geometry.Combine(outline, widened, GeometryCombineMode.Intersect, null);
         ring.Freeze();
-        _ring = ring; _ringOutline = outline; _ringWidth = RimWidth;
+        _ring = ring; _ringOutline = outline; _ringWidth = RimWidth; _ringOpenTop = openTop;
+        return ring;
+    }
+    private Geometry TopRing(Geometry outline, Geometry topEdge)
+    {
+        var widened = topEdge.GetWidenedPathGeometry(new Pen(Brushes.Black, RimWidth * 2));
+        var ring = Geometry.Combine(outline, widened, GeometryCombineMode.Intersect, null);
+        ring.Freeze();
         return ring;
     }
     private RectangleGeometry? _bounds;
@@ -189,16 +242,29 @@ public sealed class IslandBorder : Border
         _outlineKey = key;
         // Stepped, the inset (the shadow caster's) is whole device pixels too, so its steps stay on them at 125 % or 175 %.
         double inset = step > 0 ? Math.Round(Inset * dpi, MidpointRounding.AwayFromZero) / dpi : Inset;
-        (_outline, _bevel) = Shape(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, inset, step, RimWidth, dpi);
+        (_outline, _rimOutline, _topEdge, _bevel) = Shape(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, inset, step, RimWidth, dpi);
         return _outline;
     }
 
-    // The outline, stepped for a pixel theme, and then its bevel, a whole number of device pixels thick and never thinner than one.
-    private static (Geometry Outline, (Geometry Light, Geometry Shade)? Bevel) Shape(double w, double h, double shoulder, CornerRadius corners, double inset, double step, double rimWidth, double dpi)
+    // A shape with shoulders (the notch) or square top corners (an expanded panel docked to the edge) hangs flush from the
+    // screen edge at y = 0 in the edge's frame (EdgeFrame maps every docked edge there), so the rim omits that edge.
+    private static bool IsTopDocked(double shoulder, CornerRadius corners)
+        => shoulder > 0 || (corners.TopLeft <= 0 && corners.TopRight <= 0);
+
+    // The outline, stepped for a pixel theme, its open-top rim path and separate top edge (so TopRimOpacity can fade or omit the
+    // edge at y = 0 cleanly without rebuilding geometry), and its bevel split into sides/interior light, top light and shade.
+    private static (Geometry Outline, Geometry RimOutline, Geometry TopEdge, (Geometry Light, Geometry TopLight, Geometry Shade)? Bevel) Shape(double w, double h, double shoulder, CornerRadius corners, double inset, double step, double rimWidth, double dpi)
     {
-        if (step <= 0) return (BuildOutline(w, h, shoulder, corners, inset), null);
+        if (step <= 0)
+        {
+            var outline = BuildOutline(w, h, shoulder, corners, inset);
+            var (rim, top) = BuildOpenTopRim(w, h, shoulder, corners, inset);
+            return (outline, rim, top, null);
+        }
         var stairs = BuildStairs(w, h, shoulder, corners, inset, step);
-        return (Polygon(stairs), rimWidth > 0 && stairs.Count >= 3 ? Bevel(stairs, PixelStairs.Step(rimWidth, dpi)) : null);
+        var polygon = Polygon(stairs);
+        var (rimPoly, topPoly) = OpenTopPolygon(stairs);
+        return (polygon, rimPoly, topPoly, rimWidth > 0 && stairs.Count >= 3 ? Bevel(stairs, PixelStairs.Step(rimWidth, dpi)) : null);
     }
 
     // The smooth outline flattened into straight edges, turned into steps (PixelStairs.Build).
@@ -240,25 +306,55 @@ public sealed class IslandBorder : Border
         return geometry;
     }
 
+    // The stepped polygon split into an open stroke path (without the flat edge along y = top) and that top segment on its own,
+    // for pixel themes without a bevel brush.
+    private static (Geometry Rim, Geometry TopEdge) OpenTopPolygon(IReadOnlyList<Point> points)
+    {
+        if (points.Count < 3) return (Geometry.Empty, Geometry.Empty);
+        double top = points.Min(p => p.Y);
+        int topEdge = -1;
+        for (int i = 0; i < points.Count; i++)
+        {
+            Point a = points[i], b = points[(i + 1) % points.Count];
+            if (Math.Abs(a.Y - b.Y) < 1e-9 && Math.Abs(a.Y - top) < 1e-6 && a.X < b.X) { topEdge = i; break; }
+        }
+        if (topEdge < 0) return (Polygon(points), Geometry.Empty);
+        int start = (topEdge + 1) % points.Count;
+        var geometry = new StreamGeometry();
+        using (var path = geometry.Open())
+        {
+            path.BeginFigure(points[start], false, false);
+            for (int k = 1; k < points.Count; k++)
+                path.LineTo(points[(start + k) % points.Count], true, false);
+        }
+        geometry.Freeze();
+        var topLine = new LineGeometry(points[topEdge], points[start]);
+        topLine.Freeze();
+        return (geometry, topLine);
+    }
+
     // The bevel of a stepped outline: a band `thickness` DIP wide inside every edge, those facing up or left in one geometry and
     // those facing down or right in the other. The outline runs clockwise, so the inside lies to the right of each edge: an edge
-    // running right faces up, one running down faces right, and so on.
-    private static (Geometry Light, Geometry Shade) Bevel(IReadOnlyList<Point> points, double thickness)
+    // running right faces up, one running down faces right, and so on. The top-most horizontal segment (y = top) is kept apart
+    // as TopLight so TopRimOpacity can fade or omit it cleanly when docked to a screen edge.
+    private static (Geometry Light, Geometry TopLight, Geometry Shade) Bevel(IReadOnlyList<Point> points, double thickness)
     {
-        var light = new GeometryGroup(); var shade = new GeometryGroup();
+        double top = points.Count > 0 ? points.Min(p => p.Y) : double.NaN;
+        var light = new GeometryGroup(); var topLight = new GeometryGroup(); var shade = new GeometryGroup();
         for (int i = 0; i < points.Count; i++)
         {
             Point a = points[i], b = points[(i + 1) % points.Count];
             if (Math.Abs(a.Y - b.Y) < 1e-9)
             {
-                if (a.X < b.X) light.Children.Add(new RectangleGeometry(new Rect(a.X, a.Y, b.X - a.X, thickness)));
+                if (a.X < b.X)
+                    (Math.Abs(a.Y - top) < 1e-6 ? topLight : light).Children.Add(new RectangleGeometry(new Rect(a.X, a.Y, b.X - a.X, thickness)));
                 else shade.Children.Add(new RectangleGeometry(new Rect(b.X, a.Y - thickness, a.X - b.X, thickness)));
             }
             else if (a.Y < b.Y) shade.Children.Add(new RectangleGeometry(new Rect(a.X - thickness, a.Y, thickness, b.Y - a.Y)));
             else light.Children.Add(new RectangleGeometry(new Rect(a.X, b.Y, thickness, a.Y - b.Y)));
         }
-        light.Freeze(); shade.Freeze();
-        return (light, shade);
+        light.Freeze(); topLight.Freeze(); shade.Freeze();
+        return (light, topLight, shade);
     }
 
     // The island's smooth outline for a size, shoulder and corners; insetBy draws it that far inside the bounds (Inset). Frozen.
@@ -318,5 +414,69 @@ public sealed class IslandBorder : Border
         if (inset > 0) geometry.Transform = new TranslateTransform(inset, top);
         geometry.Freeze();
         return geometry;
+    }
+
+    // The smooth outline split into an open rim path (without the flat top edge along y = 0) and that top segment on its own.
+    // Handles both square top corners (docked notch/panel) and rounded top corners (mid-transition from a capsule or line) so
+    // the flat top span can stay hidden or fade independently while the shoulders/corners/sides meet y = 0 cleanly butt-to-butt.
+    private static (Geometry Rim, Geometry TopEdge) BuildOpenTopRim(double w, double h, double shoulderRadius, CornerRadius corners, double insetBy)
+    {
+        if (!(w > 0) || !(h > 0)) return (Geometry.Empty, Geometry.Empty);
+        double shoulder = Math.Clamp(shoulderRadius, 0, Math.Min(w / 4, h / 2));
+        double shoulderDepth = shoulder * (7d / 16);
+        double inset = Math.Clamp(insetBy, 0, Math.Min(w, h) / 4), top = shoulder > 0 ? 0 : inset;
+        w -= 2 * inset; h -= top + inset;
+        if (!(w > 0) || !(h > 0)) return (Geometry.Empty, Geometry.Empty);
+        double left = shoulder, right = w - shoulder;
+        double limit = Math.Max(0, Math.Min(shoulder > 0 ? Math.Min(h - shoulderDepth, h / 2) : h / 2, (right - left) / 2));
+        double bl = Math.Clamp(corners.BottomLeft - inset, 0, limit);
+        double br = Math.Clamp(corners.BottomRight - inset, 0, limit);
+        double tl = Math.Clamp(corners.TopLeft - inset, 0, Math.Min(w, h) / 2);
+        double tr = Math.Clamp(corners.TopRight - inset, 0, Math.Min(w, h) / 2);
+        const double k = .5522847498307936;
+        double x0 = shoulder > 0 ? 0 : tl, x1 = shoulder > 0 ? w : w - tr;
+        var geometry = new StreamGeometry();
+        using (var path = geometry.Open())
+        {
+            path.BeginFigure(new Point(x1, 0), false, false);
+            if (shoulder > 0)
+            {
+                path.BezierTo(new Point(w - shoulder * .28, 0), new Point(w - shoulder * .64, 0),
+                    new Point(w - shoulder * .82, shoulderDepth * .18), true, true);
+                path.BezierTo(new Point(right, shoulderDepth * .36), new Point(right, shoulderDepth * .72),
+                    new Point(right, shoulderDepth), true, true);
+            }
+            else if (tr > 0)
+                path.BezierTo(new Point(w - tr * (1 - k), 0), new Point(w, tr * (1 - k)),
+                    new Point(w, tr), true, true);
+            path.LineTo(new Point(right, h - br), true, false);
+            path.BezierTo(new Point(right, h - br * (1 - k)), new Point(right - br * (1 - k), h),
+                new Point(right - br, h), true, true);
+            path.LineTo(new Point(left + bl, h), true, false);
+            path.BezierTo(new Point(left + bl * (1 - k), h), new Point(left, h - bl * (1 - k)),
+                new Point(left, h - bl), true, true);
+            path.LineTo(new Point(left, shoulder > 0 ? shoulderDepth : tl), true, false);
+            if (shoulder > 0)
+            {
+                path.BezierTo(new Point(left, shoulderDepth * .72), new Point(left, shoulderDepth * .36),
+                    new Point(shoulder * .82, shoulderDepth * .18), true, true);
+                path.BezierTo(new Point(shoulder * .64, 0), new Point(shoulder * .28, 0),
+                    new Point(0, 0), true, true);
+            }
+            else if (tl > 0)
+                path.BezierTo(new Point(0, tl * (1 - k)), new Point(tl * (1 - k), 0),
+                    new Point(tl, 0), true, true);
+        }
+        Geometry topEdge = Geometry.Empty;
+        if (x1 > x0)
+        {
+            var line = new LineGeometry(new Point(x0, 0), new Point(x1, 0));
+            if (inset > 0) line.Transform = new TranslateTransform(inset, top);
+            line.Freeze();
+            topEdge = line;
+        }
+        if (inset > 0) geometry.Transform = new TranslateTransform(inset, top);
+        geometry.Freeze();
+        return (geometry, topEdge);
     }
 }

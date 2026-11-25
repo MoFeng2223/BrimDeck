@@ -523,7 +523,7 @@ public partial class MainWindow : Window
         _windowOffset = Math.Clamp(centre - FrameWidth / 2, 0, Math.Max(0, MonitorBoundsDip.Width - FrameWidth));
         var place = _frame.ToScreen(new DipRect(_windowOffset, 0, FrameWidth, FrameHeight));
         if (PresentationSource.FromVisual(this) is not null && VisualTreeHelper.GetDpi(this).DpiScaleX is var old && old != scale)
-            WindowsHost.MoveTo(this, (int)(bounds.Left + place.X * scale), (int)(bounds.Top + place.Y * scale));
+            WindowsHost.MoveTo(this, (int)Math.Round(bounds.Left + place.X * scale), (int)Math.Round(bounds.Top + place.Y * scale));
         double current = PresentationSource.FromVisual(this) is null ? scale : VisualTreeHelper.GetDpi(this).DpiScaleX;
         Left = bounds.Left / current + place.X;
         Top = bounds.Top / current + place.Y;
@@ -1077,6 +1077,16 @@ public partial class MainWindow : Window
         Animate(ShadowHost, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);
         // The surface stays opaque throughout; it loses its rim and turns grey only once it has the indicator's shape.
         Animate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0 : 1, duration, rim, easeOut);
+        // Only floating shapes (a capsule, or a panel below a lowered capsule) draw the rim along y = 0; docked shapes and the
+        // indicator keep it at 0 so expanding from the line never flashes a top line, and a capsule fades it out before docking.
+        double topRim = expanded ? (panelTop > 0 ? 1 : 0) : (style == CompactStyle.Capsule ? 1 : 0);
+        if (duration == 0 || (topRim > 0 && (fromIndicator || expanded && line && !wasExpanded)))
+            SetImmediate(Island, IslandBorder.TopRimOpacityProperty, topRim);
+        else
+        {
+            Track topRimTrack = topRim <= 0 ? new(0, .2) : outOfShoulders ? new(.35, .7) : new(.55, .9);
+            Animate(Island, IslandBorder.TopRimOpacityProperty, topRim, duration, topRimTrack, easeOut);
+        }
         var tone = Look.ColorOf(indicator ? "indicator" : "surface");
         // Opening from the indicator, the surface takes its own color while it is still the thin line: the opening spring is
         // half way open within a few frames, and a tint still under way showed for those frames as a large block in the

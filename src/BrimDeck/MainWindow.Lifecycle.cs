@@ -156,6 +156,7 @@ public partial class MainWindow
         SetImmediate(Island, MarginProperty, new Thickness(0, DotTop(shape), 0, 0));
         SetImmediate(Island, Border.CornerRadiusProperty, new CornerRadius(dot / 2));
         SetImmediate(Island, IslandBorder.ShoulderRadiusProperty, 0d);
+        SetImmediate(Island, IslandBorder.TopRimOpacityProperty, 1d);
         SetImmediate(Compact, OpacityProperty, 0d);
         SetImmediate(MusicIndicator, OpacityProperty, 0d);
         SetImmediate(ShadowHost, OpacityProperty, 0d);
@@ -172,6 +173,7 @@ public partial class MainWindow
         SetImmediate(Island, Border.CornerRadiusProperty, new CornerRadius(dot / 2));
         SetImmediate(Island, IslandBorder.ShoulderRadiusProperty, 0d);
         SetImmediate(Island, IslandBorder.MaterialOpacityProperty, 1d);
+        SetImmediate(Island, IslandBorder.TopRimOpacityProperty, 1d);
         SetImmediate(Island, OpacityProperty, 1d);
         SetImmediate(_surface, SolidColorBrush.ColorProperty, Look.ColorOf("surface"));
         // The line's playback progress lies inside the surface: it is not part of the dot (SetExpanded brings it back).
@@ -206,6 +208,7 @@ public partial class MainWindow
         Animate(CompactScale, ScaleTransform.ScaleYProperty, Soft.Shrunk, shrink, compact, Soft.Out);
         Animate(ShadowHost, OpacityProperty, 0, shrink, shadow, Soft.Out);
         Animate(Island, IslandBorder.MaterialOpacityProperty, 1, shrink, tone, Soft.Out);
+        Animate(Island, IslandBorder.TopRimOpacityProperty, 1, shrink, corners, Soft.Out);
         _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = Look.ColorOf("surface"), EasingFunction = Soft.InOut }, shrink, tone), HandoffBehavior.SnapshotAndReplace);
         Animate(Island, IslandBorder.ShoulderRadiusProperty, 0, shrink, corners, Soft.InOut);
         Island.BeginAnimation(Border.CornerRadiusProperty, Timed(new CornerRadiusAnimation { To = new CornerRadius(dot / 2), EasingFunction = Soft.Out }, shrink, corners), HandoffBehavior.SnapshotAndReplace);
