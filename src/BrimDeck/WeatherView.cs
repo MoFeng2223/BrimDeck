@@ -1610,12 +1610,12 @@ internal sealed class WeatherView : UserControl
             Canvas.SetTop(centerGlyph, (14 + horizon - centerGlyph.Height) / 2);
             chart.Children.Add(centerGlyph);
         }
-        var todayMoonrise = marks.FirstOrDefault(m => !m.sun && m.name == Loc.T("月出", "Moonrise") && m.at.Date == now.Date);
+        var todayMoonrise = marks.FirstOrDefault(m => !m.sun && m.name == Loc.T("月升", "Moonrise") && m.at.Date == now.Date);
         if (todayMoonrise != default && (todayMoonrise.at < start || todayMoonrise.at >= end))
         {
             var caption = new TextBlock
             {
-                Text = Loc.T("今日月出 ", "Moonrise today ") + todayMoonrise.at.ToString("HH:mm"),
+                Text = Loc.T("今日月升 ", "Moonrise today ") + todayMoonrise.at.ToString("HH:mm"),
                 FontSize = 11, Foreground = Ink(silver)
             };
             Canvas.SetLeft(caption, 6); Canvas.SetTop(caption, 0); chart.Children.Add(caption);
