@@ -1,0 +1,34 @@
+src/BrimDeck.Core/Notices/NoticeConversations.cs
+  s_afd12fb5136a45::t_7c3a0ed1e169cd 1-21
+docs/en-US/mail.md
+  s_afd12fb5136a45::t_382cdfcd42ef96 54
+src/BrimDeck/MainWindow.Notices.cs
+  s_afd12fb5136a45::t_46188766a86ffd 420-421
+  s_afd12fb5136a45::t_6e3ad1bd32b20b 530-531
+  s_afd12fb5136a45::t_5550418bff88be 616-620,624-631
+  s_afd12fb5136a45::t_8951cda4e27b9b 784-785
+tests/BrimDeck.Tests/NoticeGlyphTests.cs
+  s_afd12fb5136a45::t_d95532a8f159d9 71-83
+docs/en-US/notices.md
+  s_afd12fb5136a45::t_ef4a419616d063 21
+docs/zh-CN/notices.md
+  s_afd12fb5136a45::t_2ad2c7cb4fdb72 21
+docs/zh-CN/mail.md
+  s_afd12fb5136a45::t_f9e0d4ccca88ce 54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "13ac6c2ef71fbd175bf4e42e38189941da5900e7",
+  "prompts": {},
+  "sessions": {
+    "s_afd12fb5136a45": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c289113-9422-4f8e-a8c0-892f361dfc75",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
