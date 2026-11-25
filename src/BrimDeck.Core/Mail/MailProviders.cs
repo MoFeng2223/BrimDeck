@@ -20,7 +20,6 @@ public static class MailProviders
 {
     // Every mailbox is reached by IMAP over TLS on this port.
     public const int Port = 993;
-    public const int MaxAccounts = 8;
     public const string Custom = "imap", Qq = "qq", NetEase = "netease", Exmail = "exmail", ICloud = "icloud", Gmail = "gmail", Sina = "sina", Outlook = "outlook";
 
     public static IReadOnlyList<MailProvider> All { get; } =

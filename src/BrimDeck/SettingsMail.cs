@@ -35,10 +35,9 @@ public sealed partial class SettingsWindow
 
         var add = ActionButton(Loc.T("添加邮箱", "Add mailbox"), () => ShowMailDialog(null));
         add.Style = (Style)FindResource("SettingsOutlineButton");
-        add.IsEnabled = S.MailAccounts.Count < MailProviders.MaxAccounts;
         SectionTitle(Loc.T("邮箱", "Mailboxes"), add, () => Loc.T(
-            $"只读取收件箱里新到的邮件，不改变已读状态，不发送也不删除邮件。授权码或登录凭据加密保存在本机，只发往邮箱服务商的服务器。最多 {MailProviders.MaxAccounts} 个邮箱。",
-            $"Only mail new to the inbox is read; nothing is marked read, sent or deleted. The authorization code or sign-in credential is stored encrypted on this PC and sent only to the mail provider's servers. Up to {MailProviders.MaxAccounts} mailboxes."));
+            "只读取收件箱里新到的邮件，不改变已读状态，不发送也不删除邮件。授权码或登录凭据加密保存在本机，只发往邮箱服务商的服务器。",
+            "Only mail new to the inbox is read; nothing is marked read, sent or deleted. The authorization code or sign-in credential is stored encrypted on this PC and sent only to the mail provider's servers."));
         var rows = new List<FrameworkElement>();
         if (S.MailAccounts.Count == 0)
         {

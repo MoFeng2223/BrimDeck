@@ -52,13 +52,13 @@ internal static class MailTests
             settings.MailAccounts.Count == 2 && settings.MailAccounts[0].Address == "a@qq.com" && settings.MailAccounts[1] is { Provider: MailProviders.Custom, Host: "imap.example.com" });
         settings.MailAccounts = [.. Enumerable.Range(0, 20).Select(i => new MailAccount { Provider = "qq", Address = $"a{i}@qq.com" })];
         settings.Normalize();
-        check("Mail: at most MaxAccounts mailboxes are kept", settings.MailAccounts.Count == MailProviders.MaxAccounts);
+        check("Mail: any number of mailboxes is kept", settings.MailAccounts.Count == 20);
         var copy = settings.Copy();
         copy.MailAccounts[0].Address = "changed@qq.com";
         check("Mail: a copy of the settings has its own mailboxes", settings.MailAccounts[0].Address == "a0@qq.com");
         check("Mail: the mailboxes belong to the whole app, not to a profile", !Profiles.IsProfileKey(nameof(DeckSettings.MailAccounts)));
         var read = JsonSerializer.Deserialize<DeckSettings>(JsonSerializer.Serialize(settings))!;
-        check("Mail: the mailboxes are saved with the settings and no secret with them", read.MailAccounts.Count == MailProviders.MaxAccounts && read.MailAccounts[0].Id == settings.MailAccounts[0].Id
+        check("Mail: the mailboxes are saved with the settings and no secret with them", read.MailAccounts.Count == 20 && read.MailAccounts[0].Id == settings.MailAccounts[0].Id
             && !JsonSerializer.Serialize(settings.MailAccounts[0]).Contains("assword", StringComparison.OrdinalIgnoreCase));
         check("Mail: a new code gives the mailbox another signature", new MailAccount { Address = "a@qq.com", Secret = Guid.NewGuid() }.Signature != new MailAccount { Address = "a@qq.com", Secret = Guid.NewGuid() }.Signature);
     }

@@ -40,7 +40,7 @@ public sealed class MailAccount
         var kept = new List<MailAccount>();
         foreach (var account in accounts ?? [])
         {
-            if (account is null || kept.Count >= MailProviders.MaxAccounts) continue;
+            if (account is null) continue;
             account.Provider = MailProviders.Find(account.Provider).Id;
             account.Address = Clean(account.Address, 254); account.Host = MailProviders.Host(account.Host) ?? ""; account.UserName = Clean(account.UserName, 254);
             if (account.Id == Guid.Empty || account.Address.Length == 0 || kept.Any(other => other.Id == account.Id)) continue;

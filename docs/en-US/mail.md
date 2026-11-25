@@ -14,7 +14,7 @@ If you already use a mail app such as Outlook, Foxmail or Thunderbird, or have t
 2. Choose the mail service.
 3. Follow the steps in the window to generate an authorization code (or app password) on the service's website, enter the address and the code, and choose "Connect".
 
-BrimDeck signs in once with what you entered and saves the mailbox only after that worked. Up to 8 mailboxes can be added.
+BrimDeck signs in once with what you entered and saves the mailbox only after that worked.
 
 | Service | What to enter | Where to get it |
 |---|---|---|
