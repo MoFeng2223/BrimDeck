@@ -9,9 +9,12 @@ using Microsoft.Win32;
 
 namespace BrimDeck.Native;
 
-// Whether the local proxy status is wanted. Watch: at least one panel shows the proxy icon on its collapsed surface.
+// Whether the local proxy status is wanted. Watch: at least one panel shows the proxy icon or open proxy page.
 // None: every watcher and timer stops so reading costs nothing while off, hidden or with the display off.
 internal enum ProxyDemand { None, Watch }
+
+// Discovered local IPC / loopback endpoint and config folder for the currently running proxy client.
+internal sealed record ProxyEndpoint(string ClientName, string? PipeName, Uri? HttpBaseUri, string? Secret, string? ConfigDir);
 
 // Read-only monitor for Clash Verge (and compatible Clash / Mihomo desktop clients) on Windows.
 // Reads local IPC (named pipe / loopback HTTP /configs), local config files with shared read-only access,
@@ -78,7 +81,7 @@ internal sealed class ProxyWatcher : IDisposable
 
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan PipeAclBackoff = TimeSpan.FromSeconds(15);
-    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromMilliseconds(450);
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromMilliseconds(1500);
 
     private readonly Dispatcher _dispatcher;
     private readonly DispatcherTimer _linger;
@@ -92,11 +95,14 @@ internal sealed class ProxyWatcher : IDisposable
     private readonly Dictionary<string, long> _blockedPipes = new(StringComparer.OrdinalIgnoreCase);
     private string? _activePipe;
     private string? _lastClient;
+    private ProxyMode _lastLiveApiMode = ProxyMode.Unknown;
+    private ProxyEndpoint? _lastLiveEndpoint;
     private readonly Dictionary<string, (DateTime WrittenUtc, long Length, ClashConfigValues Value)> _configCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (DateTime WrittenUtc, long Length, VergeConfigValues Value)> _vergeCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
 
     public ProxySnapshot Snapshot { get; private set; } = ProxySnapshot.Stopped;
+    public ProxyEndpoint? Endpoint { get; private set; }
     public ProxyDemand Demand => _running;
     // Raised on the UI thread whenever Snapshot changes.
     public event Action? Changed;
@@ -130,6 +136,19 @@ internal sealed class ProxyWatcher : IDisposable
     public void Refresh()
     {
         if (_running == ProxyDemand.Watch) QueuePoll();
+    }
+
+    // Called by ProxyController right after an explicit PATCH /configs mode change so collapsed & expanded views stay in sync immediately.
+    public void NotifyLiveMode(ProxyMode mode)
+    {
+        if (_disposed || mode == ProxyMode.Unknown) return;
+        _lastLiveApiMode = mode;
+        _ = _dispatcher.BeginInvoke(DispatcherPriority.Normal, () =>
+        {
+            if (_disposed || !Snapshot.Running || Snapshot.Mode == mode) return;
+            Snapshot = Snapshot with { Mode = mode };
+            Changed?.Invoke();
+        });
     }
 
     private void Run(ProxyDemand demand)
@@ -231,13 +250,15 @@ internal sealed class ProxyWatcher : IDisposable
             {
                 if (ct.IsCancellationRequested || _disposed) return;
                 Interlocked.Exchange(ref _repollRequested, 0);
-                var next = await ReadSnapshotAsync(ct).ConfigureAwait(false);
+                var (next, endpoint) = await ReadSnapshotAsync(ct).ConfigureAwait(false);
                 if (ct.IsCancellationRequested || _disposed) return;
                 _ = _dispatcher.BeginInvoke(DispatcherPriority.Normal, () =>
                 {
                     if (_disposed || _running != ProxyDemand.Watch) return;
-                    if (next == Snapshot) return;
+                    bool changed = next != Snapshot || endpoint != Endpoint;
+                    if (!changed) return;
                     Snapshot = next;
+                    Endpoint = endpoint;
                     Changed?.Invoke();
                 });
             }
@@ -253,26 +274,33 @@ internal sealed class ProxyWatcher : IDisposable
         }
     }
 
-    private async Task<ProxySnapshot> ReadSnapshotAsync(CancellationToken ct)
+    private async Task<(ProxySnapshot Snapshot, ProxyEndpoint? Endpoint)> ReadSnapshotAsync(CancellationToken ct)
     {
         var client = DetectRunningClient();
         if (client is null)
         {
             _lastClient = null;
             _activePipe = null;
+            _lastLiveApiMode = ProxyMode.Unknown;
+            _lastLiveEndpoint = null;
             _blockedPipes.Clear();
-            return ProxySnapshot.Stopped;
+            return (ProxySnapshot.Stopped, null);
         }
         if (!string.Equals(_lastClient, client.Name, StringComparison.Ordinal))
         {
             _lastClient = client.Name;
             _activePipe = null;
+            _lastLiveApiMode = ProxyMode.Unknown;
+            _lastLiveEndpoint = null;
             _blockedPipes.Clear();
         }
 
         ProxyMode? apiMode = null;
         bool? apiTun = null;
         string? apiTunDevice = null;
+        string? activePipe = null;
+        Uri? activeHttp = null;
+        string? activeSecret = null;
         var triedPipes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // 1. Named Pipe probe first (Clash Verge Rev's default IPC channel; zero disk I/O when reachable).
@@ -282,7 +310,6 @@ internal sealed class ProxyWatcher : IDisposable
         var pipeResult = await ProbeCandidatePipesAsync(initialPipes, triedPipes, ct).ConfigureAwait(false);
         if (!pipeResult.Ok)
         {
-            _activePipe = null;
             var livePipes = EnumerateLocalPipes(client.PipePrefixes);
             if (client.PipeName is { Length: > 0 } legacyPipe) livePipes.Add(legacyPipe);
             pipeResult = await ProbeCandidatePipesAsync(livePipes, triedPipes, ct).ConfigureAwait(false);
@@ -292,13 +319,16 @@ internal sealed class ProxyWatcher : IDisposable
             apiMode = pipeResult.Mode;
             apiTun = pipeResult.Tun;
             apiTunDevice = pipeResult.TunDevice;
+            activePipe = _activePipe;
         }
+
+        string? activeDir = ResolveConfigDir(client);
 
         // Only inspect local YAML files when the named pipe did not already return both mode and TUN state.
         ClashConfigValues config = default;
         VergeConfigValues verge = default;
         if (apiMode is null || apiTun is null)
-            (config, verge) = ReadClientFiles(client);
+            (config, verge) = ReadClientFiles(client, activeDir);
 
         // 1b. If config YAML declares a custom external-controller-pipe not yet tried, probe it now.
         if (apiMode is null && ProxyParsers.NormalizePipeName(config.ExternalControllerPipe) is { } configuredPipe)
@@ -309,6 +339,7 @@ internal sealed class ProxyWatcher : IDisposable
                 apiMode = cfgPipeResult.Mode;
                 apiTun = cfgPipeResult.Tun;
                 apiTunDevice = cfgPipeResult.TunDevice;
+                activePipe = _activePipe;
             }
         }
 
@@ -321,14 +352,33 @@ internal sealed class ProxyWatcher : IDisposable
                 apiMode = httpResult.Mode;
                 apiTun = httpResult.Tun;
                 apiTunDevice = httpResult.TunDevice;
+                activeHttp = baseUri;
+                activeSecret = config.Secret;
             }
+        }
+
+        // Preserve live API mode and working endpoint across transient probe timeouts while the same client keeps running
+        // (e.g., while Mihomo is busy running a full-group delay test) so static config.yaml never overwrites live mode.
+        if (apiMode is { } liveMode && liveMode != ProxyMode.Unknown)
+        {
+            _lastLiveApiMode = liveMode;
+            _lastLiveEndpoint = new ProxyEndpoint(client.Name, activePipe, activeHttp, activeSecret, activeDir);
+        }
+        else if (_lastLiveApiMode != ProxyMode.Unknown && _lastLiveEndpoint is { } prev && string.Equals(prev.ClientName, client.Name, StringComparison.Ordinal))
+        {
+            apiMode = _lastLiveApiMode;
+            activePipe ??= prev.PipeName;
+            activeHttp ??= prev.HttpBaseUri;
+            activeSecret ??= prev.Secret;
         }
 
         // 3. Authoritative Windows OS signals: HKCU system proxy and active Clash/Mihomo TUN adapter.
         bool? osSysProxy = ReadWindowsSystemProxy();
         bool? osTun = apiTun is null ? ReadWindowsTunInterface(apiTunDevice ?? config.TunDevice) : null;
 
-        return ProxyParsers.Resolve(true, client.Name, apiMode, apiTun, config, verge, osSysProxy, osTun);
+        var snapshot = ProxyParsers.Resolve(true, client.Name, apiMode, apiTun, config, verge, osSysProxy, osTun);
+        var endpoint = new ProxyEndpoint(client.Name, activePipe, activeHttp, activeSecret, activeDir);
+        return (snapshot, endpoint);
     }
 
     private async Task<ProbeResult> ProbeCandidatePipesAsync(IEnumerable<string> candidates, HashSet<string> tried, CancellationToken ct)
@@ -387,13 +437,15 @@ internal sealed class ProxyWatcher : IDisposable
         return null;
     }
 
-    private (ClashConfigValues Config, VergeConfigValues Verge) ReadClientFiles(ClientProfile client)
+    private static string? ResolveConfigDir(ClientProfile client)
     {
-        string? activeDir = null;
         foreach (var dir in client.ConfigDirs())
-        {
-            if (Directory.Exists(dir)) { activeDir = dir; break; }
-        }
+            if (Directory.Exists(dir)) return dir;
+        return null;
+    }
+
+    private (ClashConfigValues Config, VergeConfigValues Verge) ReadClientFiles(ClientProfile client, string? activeDir)
+    {
         if (activeDir is null) return (default, default);
 
         VergeConfigValues verge = default;
@@ -498,7 +550,7 @@ internal sealed class ProxyWatcher : IDisposable
                     var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
                     try
                     {
-                        await pipe.ConnectAsync(300, token).ConfigureAwait(false);
+                        await pipe.ConnectAsync(800, token).ConfigureAwait(false);
                         return pipe;
                     }
                     catch

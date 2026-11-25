@@ -127,7 +127,15 @@ public partial class App
             if (devices.Demand != DeviceDemand.None) later = true;
             else { Devices = null; devices.Changed -= DeviceBatteriesChanged; devices.Dispose(); released = true; }
         }
-        if (Proxy is { } proxy && !Settings.ShowsProxy(Settings.Style) && _proxyStrips.Count == 0 && !_proxySettings)
+        if (ProxyControl is { } proxyControl && !Settings.ProxyPage && _proxyPages.Count == 0)
+        {
+            ProxyControl = null;
+            proxyControl.StateChanged -= ProxyControllerStateChanged;
+            proxyControl.TrafficChanged -= ProxyControllerTrafficChanged;
+            proxyControl.Dispose();
+            released = true;
+        }
+        if (Proxy is { } proxy && !Settings.ProxyPage && !Settings.ShowsProxy(Settings.Style) && _proxyPages.Count + _proxyStrips.Count == 0 && !_proxySettings)
         {
             if (proxy.Demand != ProxyDemand.None) later = true;
             else { Proxy = null; proxy.Changed -= ProxyStatusChanged; proxy.Dispose(); released = true; }

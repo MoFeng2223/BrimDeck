@@ -25,6 +25,7 @@ public partial class MainWindow
     private readonly Button MonitorPageButton = new() { Content = "Monitor", Width = 60, Height = 24 };
     private readonly Button ShelfPageButton = new() { Content = "Clipboard", Width = 60, Height = 24 };
     private readonly Button DevicesPageButton = new() { Content = "Devices", Width = 60, Height = 24 };
+    private readonly Button ProxyPageButton = new() { Content = "Proxy", Width = 60, Height = 24 };
     private readonly Grid PageSwitch = new();
     private readonly Border PageCapsule = new() { Width = 60, Height = 24 };
     private readonly TranslateTransform PageCapsuleShift = new();

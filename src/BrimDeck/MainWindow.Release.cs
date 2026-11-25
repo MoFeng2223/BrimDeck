@@ -39,6 +39,10 @@ public partial class MainWindow
                     held |= _devicesView is not null;
                     _devicesView = null; _devicesKey = ""; _devicesLayout = null;
                     break;
+                case DeckPage.Proxy:
+                    held |= _proxyView is not null;
+                    _proxyView = null; _proxyViewKey = "";
+                    break;
                 case DeckPage.Clipboard:
                     held |= _shelfBuilt is not null;
                     ShelfToolbar.Children.Clear(); _shelfRows.Clear(); _shelfTabs.Clear(); _fileFrame = null; _searchBox = null; _editBox = null;

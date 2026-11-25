@@ -46,7 +46,9 @@
     <Compile Include="..\..\src\BrimDeck\Native\EncoDeckBatteries.cs" Link="EncoDeckBatteries.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\PhoneLinkBatteries.cs" Link="PhoneLinkBatteries.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\ProxyWatcher.cs" Link="ProxyWatcher.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\ProxyController.cs" Link="ProxyController.cs" />
     <Compile Include="..\..\src\BrimDeck\ProxyStrip.cs" Link="ProxyStrip.cs" />
+    <Compile Include="..\..\src\BrimDeck\ProxyView.cs" Link="ProxyView.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\AppIdentity.cs" Link="AppIdentity.cs" />
     <Compile Include="..\..\src\BrimDeck\MainWindow.Shadow.cs" Link="MainWindow.Shadow.cs" />
     <Compile Include="..\..\src\BrimDeck\LayoutRetry.cs" Link="LayoutRetry.cs" />

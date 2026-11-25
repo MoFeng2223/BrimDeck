@@ -11,6 +11,7 @@ internal static class ProxyStatusTests
         TunMatching(check);
         Resolution(check);
         SettingsAndText(check);
+        ControlParsers(check);
     }
 
     private static void MihomoApi(Action<string, bool> check)
@@ -180,5 +181,129 @@ internal static class ProxyStatusTests
                 ProxyText.Summary(snap, ProxyIndicators.Both) == "Clash Verge · Rule · System proxy on · TUN off");
         }
         finally { Loc.Use(prevLang); }
+    }
+
+    private static void ControlParsers(Action<string, bool> check)
+    {
+        const string proxiesJson = """
+            {
+              "proxies": {
+                "GLOBAL": { "type": "Selector", "now": "Proxy", "all": ["Proxy", "Auto", "HiddenGroup", "DIRECT"] },
+                "Auto": { "type": "URLTest", "now": "HK-01", "all": ["HK-01", "JP-01"] },
+                "Proxy": { "type": "Selector", "now": "Auto", "all": ["Auto", "HK-01", "JP-01", "DIRECT"] },
+                "HiddenGroup": { "type": "Selector", "now": "HK-01", "all": ["HK-01"], "hidden": true },
+                "HK-01": { "type": "Shadowsocks", "history": [{ "delay": 88 }, { "delay": 42 }] },
+                "JP-01": { "type": "VLESS", "history": [{ "delay": 0 }] },
+                "DIRECT": { "type": "Direct" }
+              }
+            }
+            """;
+
+        var ruleGroups = ProxyControlParsers.ParseMihomoProxies(proxiesJson, ProxyMode.Rule);
+        check("Proxy control: Rule mode orders Selector before URLTest, hides GLOBAL and hidden groups, and resolves latest node delays",
+            ruleGroups.Count == 2
+            && ruleGroups[0].Name == "Proxy" && ruleGroups[0].CanSelect && ruleGroups[0].Now == "Auto"
+            && ruleGroups[1].Name == "Auto" && !ruleGroups[1].CanSelect
+            && ruleGroups[0].Nodes.First(n => n.Name == "HK-01").DelayMs == 42
+            && ruleGroups[0].Nodes.First(n => n.Name == "JP-01").DelayMs is null
+            && ruleGroups[0].Nodes.First(n => n.Name == "Auto").IsGroup);
+
+        var globalGroups = ProxyControlParsers.ParseMihomoProxies(proxiesJson, ProxyMode.Global);
+        check("Proxy control: Global mode places GLOBAL first",
+            globalGroups.Count == 3 && globalGroups[0].Name == "GLOBAL");
+
+        var switched = ProxyControlParsers.WithSelectedNode(ruleGroups, "Proxy", "HK-01");
+        var withDelays = ProxyControlParsers.WithDelays(switched, new Dictionary<string, int?> { ["JP-01"] = 95, ["HK-01"] = null });
+        check("Proxy control: immutable selection and delay updates propagate cleanly",
+            withDelays[0].Now == "HK-01"
+            && withDelays[0].Nodes.First(n => n.Name == "JP-01").DelayMs == 95
+            && withDelays[0].Nodes.First(n => n.Name == "HK-01").DelayMs is null
+            && withDelays[1].Nodes.First(n => n.Name == "JP-01").DelayMs == 95
+            && ProxyControlParsers.GroupsEqual(ruleGroups, [.. ruleGroups])
+            && !ProxyControlParsers.GroupsEqual(ruleGroups, switched));
+
+        var resolved = ProxyControlParsers.ResolveActiveNode(ruleGroups, ruleGroups[0]);
+        check("Proxy control: resolves nested active node chain (Proxy -> Auto -> HK-01) with leaf delay",
+            resolved.DirectChoice == "Auto" && resolved.LeafNode == "HK-01" && resolved.DelayMs == 42);
+
+        var hk = ProxyControlParsers.SplitLeadingRegionFlag("\U0001F1ED\U0001F1F0 Hong Kong 01");
+        var jp = ProxyControlParsers.SplitLeadingRegionFlag("\U0001F1EF\U0001F1F5Tokyo 02");
+        var plain = ProxyControlParsers.SplitLeadingRegionFlag("Traffic Reset: 6 Days Left");
+        check("Proxy control: splits leading regional indicator flags into crisp ASCII codes",
+            hk == ("HK", "Hong Kong 01")
+            && jp == ("JP", "Tokyo 02")
+            && plain == (null, "Traffic Reset: 6 Days Left")
+            && ProxyControlParsers.FormatNodeDisplayName("\U0001F1FA\U0001F1F8 US 01") == "US  US 01");
+
+        check("Proxy control: parses /traffic, /memory, /connections and delay responses",
+            ProxyControlParsers.TryParseTrafficSample("""{"up":1234,"down":56789,"upTotal":1000,"downTotal":2000}""", out var tr)
+            && tr.UpBytesPerSec == 1234 && tr.DownBytesPerSec == 56789 && tr.DownTotalBytes == 2000
+            && ProxyControlParsers.TryParseMemoryBytes("""{"inuse":41943040,"oslimit":0}""", out var mem) && mem == 41943040
+            && ProxyControlParsers.TryParseConnectionsSummary("""{"downloadTotal":9000,"uploadTotal":3000,"connections":[{"id":"1"},{"id":"2"}]}""", out var conn, mem)
+            && conn.ActiveCount == 2 && conn.DownloadTotal == 9000 && conn.MemoryInUseBytes == 41943040
+            && ProxyControlParsers.ParseGroupDelayMap("""{"HK-01":35,"JP-01":0}""").Count == 1
+            && ProxyControlParsers.ParseSingleDelay("""{"delay":61}""") == 61
+            && ProxyControlParsers.ParseSingleDelay("""{"delay":0}""") is null);
+
+        const string vergeControlYaml = """
+            auto_close_connection: false
+            default_latency_test: https://cp.cloudflare.com/generate_204
+            default_latency_timeout: 3200
+            """;
+        var latencyCfg = ProxyControlParsers.ParseVergeControlYaml(vergeControlYaml);
+        check("Proxy control: reads verge.yaml latency test URL, timeout and auto_close_connection",
+            latencyCfg.TestUrl == "https://cp.cloudflare.com/generate_204" && latencyCfg.TimeoutMs == 3200 && !latencyCfg.AutoCloseConnection);
+
+        const string profilesYaml = """
+            current: uid-2
+            items:
+              - uid: uid-1
+                type: remote
+                name: OtherProfile
+                url: https://secret.invalid/sub
+                extra:
+                  upload: 100
+                  download: 200
+                  total: 1000
+                  expire: 1800000000
+              - uid: uid-2
+                type: remote
+                name: MainProfile
+                url: https://secret.invalid/sub2
+                extra:
+                  upload: 1073741824
+                  download: 3221225472
+                  total: 21474836480
+                  expire: 1900000000
+            """;
+        var sub = ProxyControlParsers.ParseVergeProfilesYaml(profilesYaml);
+        const string zeroIndentProfilesYaml = """
+            current: uid-2
+            items:
+            - uid: uid-2
+              type: remote
+              name: ZeroIndentProfile
+              extra:
+                upload: 500
+                download: 500
+                total: 2000
+            """;
+        var subZero = ProxyControlParsers.ParseVergeProfilesYaml(zeroIndentProfilesYaml);
+        check("Proxy control: reads active profile quota from both indented and zero-indent profiles.yaml",
+            sub is not null && sub.ProfileName == "MainProfile" && sub.HasTraffic
+            && sub.UsedBytes == 4294967296L && sub.TotalBytes == 21474836480L && Math.Abs(sub.UsedFraction - 0.2) < 0.001
+            && subZero is not null && subZero.ProfileName == "ZeroIndentProfile" && subZero.UsedBytes == 1000 && subZero.TotalBytes == 2000);
+
+        var pageSettings = new DeckSettings();
+        check("Proxy page settings: off by default, valid Quick Size presets and enum values",
+            !pageSettings.ProxyPage && (int)DeckPage.Proxy == 5 && (int)DefaultDeckPage.Proxy == 7
+            && DeckPages.Opening(DefaultDeckPage.Proxy) == DeckPage.Proxy
+            && DeckPages.Size(pageSettings, DeckPage.Proxy) == ProxySizes.Default
+            && ProxySizes.For(PanelSize.Compact) == (500, 170)
+            && ProxySizes.For(PanelSize.Standard) == (640, 230)
+            && ProxySizes.For(PanelSize.Spacious) == (880, 320));
+        DeckPages.SetSize(pageSettings, DeckPage.Proxy, 720, 260);
+        check("Proxy page settings: SetSize updates Proxy page independently",
+            DeckPages.Size(pageSettings, DeckPage.Proxy) == (720, 260) && pageSettings.Width == new DeckSettings().Width);
     }
 }

@@ -150,6 +150,31 @@ public sealed partial class SettingsWindow
         return item;
     }
 
+    private void ProxySizeControls()
+    {
+        var dimensions = new Grid { Margin = new Thickness(0, 8, 0, 0) }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
+        var width = Dimension(Loc.T("宽度", "Width"), S.ProxyWidth, 440, 1200, value => Resize(s => s.ProxyWidth = value, DeckPage.Proxy)); width.Margin = new Thickness(0, 0, 20, 0); dimensions.Children.Add(width);
+        var height = Dimension(Loc.T("高度", "Height"), S.ProxyHeight, 140, 400, value => Resize(s => s.ProxyHeight = value, DeckPage.Proxy)); height.Margin = new Thickness(20, 0, 0, 0); Grid.SetColumn(height, 1); dimensions.Children.Add(height);
+        Target.Children.Add(dimensions);
+        var sizes = KeepPreview(new System.Windows.Controls.Primitives.UniformGrid { Columns = 3, Width = 292 });
+        foreach (var size in Enum.GetValues<PanelSize>())
+        {
+            var (w, h) = ProxySizes.For(size);
+            var choice = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = PanelSizes.Name(size), GroupName = "ProxySize", IsChecked = (S.ProxyWidth, S.ProxyHeight) == (w, h) };
+            System.Windows.Automation.AutomationProperties.SetName(choice, Loc.T("代理控制快捷尺寸 ", "Proxy control quick size ") + PanelSizes.Name(size));
+            choice.Checked += (_, _) => { Resize(s => { s.ProxyWidth = w; s.ProxyHeight = h; }, DeckPage.Proxy); ShowPage(2); };
+            sizes.Children.Add(choice);
+        }
+        QuickSizeRow(sizes);
+        var hint = TextLine(
+            Loc.T("仅在展开“代理控制”页时通过 Mihomo 本机接口读取并控制代理模式、策略组节点、延迟测试与实时网速；系统代理与 TUN 仅只读显示。",
+                "Connects to the local Mihomo API only while the Proxy control page is open for mode, group/node selection, latency tests and live traffic; System Proxy and TUN are read-only."),
+            11, TextTertiary);
+        hint.Margin = new Thickness(0, 8, 0, 0);
+        hint.TextWrapping = TextWrapping.Wrap;
+        Target.Children.Add(hint);
+    }
+
     private static IEnumerable<T> FindVisualChildren<T>(DependencyObject root) where T : DependencyObject
     {
         if (root is Panel panel)
