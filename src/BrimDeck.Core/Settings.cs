@@ -91,18 +91,19 @@ public enum EqualizerMode { Flow = 0, Spectrum = 1 }
 // as numbers, so new members go at the end; a file without it, or with a number not listed, is Single.
 public enum QuotaRingStyle { Nested = 0, Single = 1 }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left; Music places
-// only the title or lyric. Saved as numbers, so new members go at the end.
+// only the title or lyric. Saved as numbers, so new members go at the end. Agents is no longer a part of its own: the coding
+// agents show within Notices (the live notices, MainWindow.CompactAttention.cs); a saved order that names it drops it.
 public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer, Devices, Notices, Agents }
 public static class CompactParts
 {
-    // The order of new settings and of restoring the defaults: the equalizer and the clock come last.
-    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices, CompactPart.Notices, CompactPart.Agents, CompactPart.Equalizer, CompactPart.Clock];
+    // The order of new settings and of restoring the defaults: the equalizer and the clock come last, the clock at the very end.
+    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices, CompactPart.Notices, CompactPart.Equalizer, CompactPart.Clock];
     // The order in which parts missing from a saved file are added after its own. A file saved before the equalizer and the clock
     // were put in order adds them after its parts, the clock last, where they stood; the devices' batteries (1.3.0) and then the
     // notices' count join last.
-    private static readonly IReadOnlyList<CompactPart> Missing = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices, CompactPart.Notices, CompactPart.Agents];
+    private static readonly IReadOnlyList<CompactPart> Missing = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices, CompactPart.Notices];
     // Each known part once, in the saved order; a part missing from the file takes its place after the others.
-    public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Missing).Distinct()];
+    public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part) && part != CompactPart.Agents).Concat(Missing).Distinct()];
 }
 // Saved settings keep the number, so a new style goes at the end. 1 was the two-line style, the time over the date; the date is
 // now a setting of its own (ClockDate), and SettingsMigrations turns that style into the minimal one with the date below.
@@ -801,13 +802,10 @@ public sealed class DeckSettings
     // The notch and the capsule each show the devices' batteries (CompactPart.Devices).
     public bool NotchDevices { get; set; }
     public bool CapsuleDevices { get; set; }
-    // The notch and the capsule each show how many notices are unread (CompactPart.Notices); shown only while some are. On by default.
+    // The notch and the capsule each show the live notices (CompactPart.Notices): the unread notices and, with NoticeStripAgents,
+    // the coding agents' sessions; shown only while there is any. On by default.
     public bool NotchNotices { get; set; } = true;
     public bool CapsuleNotices { get; set; } = true;
-    // The notch and the capsule each show the coding agents' sessions that work, wait for the user or just finished
-    // (CompactPart.Agents); shown only while there is one. On by default.
-    public bool NotchAgents { get; set; } = true;
-    public bool CapsuleAgents { get; set; } = true;
     // How long a coding agent's approval or question waits on the island for an answer before it goes back to the terminal, in minutes.
     public int AgentWaitMinutes { get; set; } = 5;
     // The coding agents found on this PC the last time the settings looked (AgentHarnesses ids), listed again without looking.
@@ -893,13 +891,15 @@ public sealed class DeckSettings
     // The collapsed count of unread notices (CompactPart.Notices) shows the icons of the applications they came from before the
     // number; off, a bell.
     public bool NoticeStripIcons { get; set; } = true;
+    // The live notices' part shows the coding agents' sessions too, before the unread notices. On by default.
+    public bool NoticeStripAgents { get; set; } = true;
+    // The sessions' icons and the applications' icons stack in one group, the one that most needs the user in front, with one
+    // word or number after it; off, two groups side by side, each with its own words.
+    public bool NoticeAgentsMerged { get; set; }
     // Recognises a verification code in a notice, hides it wherever the notice is shown and offers a button that copies it (see
     // NoticeCodes). Off by default: it reads the notices' words and, on a click, writes the clipboard.
     public bool NoticeCodes { get; set; }
     // Holds notices back during a Windows focus session or presentation mode.
-    // The coding agents' sessions (CompactPart.Agents) show together with the unread notices, in the notices' place, instead of
-    // in a place of their own: they share one width, and only waiting sessions say anything in words.
-    public bool NoticeAgentsMerged { get; set; }
     public bool NoticeRespectFocus { get; set; } = true;
     // Notices are held back until this time (BrimDeck's own pause); null when not paused.
     public DateTimeOffset? NoticesPausedUntil { get; set; }
@@ -941,8 +941,9 @@ public sealed class DeckSettings
     // The indicator is too thin for readings, as for the clock.
     public bool ShowsMonitor(CompactStyle style) => style switch { CompactStyle.Notch => NotchMonitor, CompactStyle.Capsule => CapsuleMonitor, _ => false };
     public bool ShowsDevices(CompactStyle style) => style switch { CompactStyle.Notch => NotchDevices, CompactStyle.Capsule => CapsuleDevices, _ => false };
-    // The notices' count needs the notices page, which a click on it opens.
-    public bool ShowsAgents(CompactStyle style) => style switch { CompactStyle.Notch => NotchAgents, CompactStyle.Capsule => CapsuleAgents, _ => false };
+    // The coding agents show within the live notices' part (NoticeStripAgents). The notices' count needs the notices page, which a
+    // click on it opens.
+    public bool ShowsAgents(CompactStyle style) => NoticeStripAgents && style switch { CompactStyle.Notch => NotchNotices, CompactStyle.Capsule => CapsuleNotices, _ => false };
     public bool ShowsNotices(CompactStyle style) => DeckPages.Shown(this, DeckPage.Notices) && style switch { CompactStyle.Notch => NotchNotices, CompactStyle.Capsule => CapsuleNotices, _ => false };
     // The file transfer's count needs the page and its column: with either hidden, nothing can be dropped there.
     public bool ShowsTransfer(CompactStyle style) => ClipboardPage && ShelfShown != ShelfShown.Clipboard && style switch { CompactStyle.Notch => NotchTransfer, CompactStyle.Capsule => CapsuleTransfer, _ => false };

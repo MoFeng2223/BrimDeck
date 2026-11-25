@@ -38,10 +38,10 @@ public partial class MainWindow
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor, Look), DateTime.Now, scale, Look, ClockDate.Of(Settings)) : null;
         var transfer = TransferBadge(scale);
         var devices = CompactDevices(scale);
-        // The notices and the agents give up what is wider than the column, a step at a time (CompactAttention).
-        var (notices, agents) = CompactAttention(scale, 0);
-        for (int level = 1; level < AttentionLevels && Math.Max(notices?.Width ?? 0, agents?.Width ?? 0) > column + .5; level++) (notices, agents) = CompactAttention(scale, level);
-        var layout = CompactMusicLayout.Calculate(10000, scale, media, apps.Count, text.Length > 0, FixedFace(scale, clock?.ReservedWidth ?? 0, transfer?.Width ?? 0, devices?.PreferredWidth ?? 0, notices?.Width ?? 0, agents?.Width ?? 0), 0, equalizer, Settings.EqualizerBars, ring: QuotaRing.Diameter(Settings.QuotaRingStyle));
+        // The live notices give up what is wider than the column, a step at a time (CompactAttention).
+        var notices = CompactAttention(scale, 0);
+        for (int level = 1; level < AttentionLevels && (notices?.Width ?? 0) > column + .5; level++) notices = CompactAttention(scale, level);
+        var layout = CompactMusicLayout.Calculate(10000, scale, media, apps.Count, text.Length > 0, FixedFace(scale, clock?.ReservedWidth ?? 0, transfer?.Width ?? 0, devices?.PreferredWidth ?? 0, notices?.Width ?? 0), 0, equalizer, Settings.EqualizerBars, ring: QuotaRing.Diameter(Settings.QuotaRingStyle));
         // One strip per reading, each alone on its line and centred in it. The drives show no glyph here: each drive has a line with its
         // letter and its figures, stacked or side by side as chosen in the settings, so any number of drives stand one below the other.
         var strips = new List<MonitorStrip>();
@@ -119,8 +119,6 @@ public partial class MainWindow
                     Add(transfer, transfer.Height, CompactPart.Transfer); break;
                 case CompactPart.Notices when notices is not null:
                     Add(notices, notices.Height, CompactPart.Notices); break;
-                case CompactPart.Agents when agents is not null:
-                    Add(agents, agents.Height, CompactPart.Agents); break;
                 // The devices a line each; should a device's line be wider than the column, they scroll as the readings do.
                 case CompactPart.Devices when devices is not null:
                     if (devices.PreferredWidth > column + .5)
@@ -140,7 +138,7 @@ public partial class MainWindow
         // The column's width and length for the shape (CollapsedGeometry.Resolve): the widest fixed part, the readings up to the cap,
         // and every line with the gaps; the surface never shortens below its tallest line.
         var stack = CompactColumn.Stack([.. lines.Select(line => line.Height)], gap);
-        double wantedColumn = CompactColumn.Width(scale, [layout.CoverSize * (cover ? 1 : 0), equalizer ? layout.EqualizerSize : 0, clock?.ReservedWidth ?? 0, transfer?.Width ?? 0, devices?.PreferredWidth ?? 0, notices?.Width ?? 0, agents?.Width ?? 0, apps.Count > 0 ? layout.RingSize : 0],
+        double wantedColumn = CompactColumn.Width(scale, [layout.CoverSize * (cover ? 1 : 0), equalizer ? layout.EqualizerSize : 0, clock?.ReservedWidth ?? 0, transfer?.Width ?? 0, devices?.PreferredWidth ?? 0, notices?.Width ?? 0, apps.Count > 0 ? layout.RingSize : 0],
             strips.Select(strip => strip.PreferredWidth));
         double wanted = DevicePixels.Up(stack.Length, dpi);
         double required = lines.Count == 0 ? 0 : Math.Ceiling(lines.Max(line => line.Height));

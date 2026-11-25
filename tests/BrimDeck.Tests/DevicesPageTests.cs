@@ -85,7 +85,7 @@ static class DevicesPageTests
             hidden.DeviceChoices.Single() is { Key: "bt:AA", Name: "Mouse", Collapsed: false, Expanded: false, Label: null });
         check("Devices settings: the battery reading becomes the devices' part where the readings showed",
             hidden.CapsuleDevices && !hidden.NotchDevices && hidden.CompactReadings.All(r => r.Item != CompactMonitorItems.Battery)
-            && hidden.CapsuleOrder.TakeLast(3).SequenceEqual([CompactPart.Devices, CompactPart.Notices, CompactPart.Agents]) && hidden.DeviceWarningPercent == 30);
+            && hidden.CapsuleOrder.TakeLast(2).SequenceEqual([CompactPart.Devices, CompactPart.Notices]) && hidden.DeviceWarningPercent == 30);
         var unshown = SettingsMigrations.Read("""{"AppVersion":"1.2.4","CapsuleMonitor":true,"CompactReadings":[{"Item":256,"Visible":false}]}""", new Version(1, 3, 0), out _);
         check("Devices settings: a battery reading that was hidden leaves the part off", !unshown.CapsuleDevices && !unshown.NotchDevices);
 
@@ -200,6 +200,6 @@ static class DevicesPageTests
         check("Battery reading: retired, a saved table drops it", older.All(r => r.Item != CompactMonitorItems.Battery)
             && !CompactMonitor.Order.Contains(CompactMonitorItems.Battery) && (CompactMonitor.Every & CompactMonitorItems.Battery) == 0);
         check("Devices part: a saved order without it takes it at the end, before the notices' count",
-            CompactParts.Normalize([CompactPart.Clock, CompactPart.Rings]).TakeLast(3).SequenceEqual([CompactPart.Devices, CompactPart.Notices, CompactPart.Agents]));
+            CompactParts.Normalize([CompactPart.Clock, CompactPart.Rings]).TakeLast(2).SequenceEqual([CompactPart.Devices, CompactPart.Notices]));
     }
 }

@@ -66,26 +66,21 @@ public partial class MainWindow
         _ => Loc.T("已结束", "Ended")
     };
 
-    // words: whether the row says in words what the sessions are doing; merged (shown with the notices, DeckSettings.
-    // NoticeAgentsMerged): only a waiting session says so. single: only the front icon (CompactAttention's last step).
-    private FrameworkElement? AgentStrip(double scale, bool words = true, bool single = false, bool merged = false)
+    // The agents' group of the live notices shown apart (MainWindow.CompactAttention.cs). words: whether it says in words what the
+    // sessions are doing. single: only the front icon (CompactAttention's last step).
+    private FrameworkElement? AgentStrip(double scale, bool words = true, bool single = false)
     {
         var sessions = AgentStripContent();
         _agentStripShown = AgentStripKey(sessions); _compactAgents = null; _agentElapsed = null;
         if (AgentStacks.Of(sessions) is not { } stack) { StopAgentClock(); return null; }
         double s = CompactMusicLayout.SafeScale(scale), dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
-        var icons = new List<FrameworkElement>();
+        // Every session's icon shows its own state: three working sessions turn three rings.
         IReadOnlyList<AgentSession> shown = single ? [stack.Front] : stack.Shown;
-        foreach (var session in shown)
-        {
-            var icon = AgentIcon(session, s);
-            icons.Add(ReferenceEquals(session, stack.Front) ? CompactStacks.State(icon, session.State, s, Look, Animates) : icon);
-        }
-        var stacked = CompactStacks.Stack(icons, s, CompactStacks.RingPad(s));
+        var stacked = CompactStacks.Stack([.. shown.Select(session => (CompactStacks.State(AgentIcon(session, s), session.State, s, Look, Animates), CompactStacks.RingPad(s)))], s);
         TextBlock? text = null;
         string? reserve = null;
         bool waits = stack.Label is AgentLabel.Approval or AgentLabel.Question or AgentLabel.Waiting;
-        if (words && (!merged || waits))
+        if (words)
         {
             string said = stack.Label switch
             {

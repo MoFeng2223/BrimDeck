@@ -40,7 +40,7 @@ internal sealed partial class Renderer
             => sessions.Apply(new NoticeMessage { Type = NoticeTypes.Agent, AppId = harness, AppName = name, Session = id, State = state, Context = "brimdeck", Title = state == "working" ? "fix" : null },
                 DateTimeOffset.UtcNow.AddMinutes(-minutesAgo).AddSeconds(-12));
         void Clear() { sessions.Clear(); hub.MarkAllViewed(); }
-        _settings.NotchNotices = true; _settings.CapsuleNotices = true; _settings.NotchAgents = true; _settings.CapsuleAgents = true;
+        _settings.NotchNotices = true; _settings.CapsuleNotices = true; _settings.NoticeStripAgents = true;
         _settings.NotchTransfer = false; _settings.CapsuleTransfer = false; _settings.NotchClock = true; _settings.CapsuleClock = true;
         _settings.Style = CompactStyle.Capsule;
         _deck.SetExpanded(false, true);
@@ -114,7 +114,7 @@ internal sealed partial class Renderer
         _settings.NotchEdge = ScreenEdge.Top;
 
         Clear();
-        _settings.NotchNotices = false; _settings.CapsuleNotices = false; _settings.NotchAgents = false; _settings.CapsuleAgents = false;
+        _settings.NotchNotices = false; _settings.CapsuleNotices = false;
         _settings.Occupied = occupied; _settings.Animations = animations; Refresh();
         Program.SetProperty(app, "Exiting", false);
         await Settle();

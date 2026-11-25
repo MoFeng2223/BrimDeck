@@ -31,8 +31,7 @@ public static class AgentStacks
     public static AgentStack? Of(IReadOnlyList<AgentSession> active)
     {
         if (active.Count == 0) return null;
-        var urgent = active.OrderBy(s => AgentSessions.Rank(s.State)).ThenBy(s => Waits(s) ? s.UpdatedAt.UtcTicks : -s.UpdatedAt.UtcTicks).ThenBy(s => s.Key, StringComparer.Ordinal).ToList();
-        var order = urgent.GroupBy(s => s.Harness, StringComparer.Ordinal).SelectMany(tool => tool).ToList();
+        var order = Order(active);
         var front = order[0];
         // Left to right: the least urgent of those shown first, the front at the right.
         var shown = order.Take(MaxShown).Reverse().ToList();
@@ -43,6 +42,13 @@ public static class AgentStacks
             : working == 1 ? (AgentLabel.Elapsed, 1)
             : (AgentLabel.Done, active.Count);
         return new(shown, front, label, count);
+    }
+
+    // Every session, the most urgent first, as Of orders them.
+    public static List<AgentSession> Order(IReadOnlyList<AgentSession> active)
+    {
+        var urgent = active.OrderBy(s => AgentSessions.Rank(s.State)).ThenBy(s => Waits(s) ? s.UpdatedAt.UtcTicks : -s.UpdatedAt.UtcTicks).ThenBy(s => s.Key, StringComparer.Ordinal);
+        return [.. urgent.GroupBy(s => s.Harness, StringComparer.Ordinal).SelectMany(tool => tool)];
     }
 
     public static bool Waits(AgentSession session) => session.State is AgentState.Approval or AgentState.Question;

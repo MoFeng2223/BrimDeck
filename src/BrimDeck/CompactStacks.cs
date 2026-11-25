@@ -114,20 +114,18 @@ internal static class CompactStacks
         return grid;
     }
 
-    // The icons from left to right, each next one on top. The last may stand in a state's ring (pad: the ring's room around it),
-    // which leaves the icons' spacing as it is.
-    public static FrameworkElement Stack(IReadOnlyList<FrameworkElement> icons, double s, double frontPad = 0)
+    // The icons from left to right, each next one on top. An icon may stand in a state's ring (Pad: the ring's room around it),
+    // which leaves the icons' spacing as it is: the icons themselves keep one step apart.
+    public static FrameworkElement Stack(IReadOnlyList<(FrameworkElement Icon, double Pad)> icons, double s)
     {
         double size = Diameter(s), step = Step(s);
-        double pad = icons.Count == 1 ? frontPad : 0;
-        double width = pad + (icons.Count - 1) * step + size + frontPad, height = size + 2 * frontPad;
+        double most = icons.Count == 0 ? 0 : icons.Max(item => item.Pad), first = icons.Count == 0 ? 0 : icons[0].Pad, last = icons.Count == 0 ? 0 : icons[^1].Pad;
+        double width = first + Math.Max(0, icons.Count - 1) * step + size + last, height = size + 2 * most;
         var canvas = new Canvas { Width = width, Height = height, IsHitTestVisible = false };
         for (int i = 0; i < icons.Count; i++)
         {
-            var icon = icons[i];
-            bool front = i == icons.Count - 1;
-            double left = pad + i * step - (front ? frontPad : 0);
-            Canvas.SetLeft(icon, left); Canvas.SetTop(icon, front ? 0 : frontPad);
+            var (icon, pad) = icons[i];
+            Canvas.SetLeft(icon, first + i * step - pad); Canvas.SetTop(icon, most - pad);
             canvas.Children.Add(icon);
         }
         return canvas;

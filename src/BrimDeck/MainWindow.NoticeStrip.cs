@@ -68,7 +68,7 @@ public partial class MainWindow
         if (apps.Count == 0) marks.Add(CompactStacks.Plate(CompactStacks.Diameter(s), s, Look, NoticeBadges.Glyph(NoticeGlyph.Bell, Math.Round(CompactStacks.Diameter(s) * .5), Look.ColorOf("textPrimary"))));
         // Oldest of those shown at the left, the newest at the right, on top.
         else foreach (var notice in (single ? apps.Take(1) : apps).Reverse()) marks.Add(NoticeStripIcon(notice, s));
-        var stack = CompactStacks.Stack(marks, s);
+        var stack = CompactStacks.Stack([.. marks.Select(mark => (mark, 0.0))], s);
         // Tabular figures, as the file transfer's count: the number keeps its width while it counts within the same digits.
         var number = CompactStacks.Words(count > 99 ? "99+" : count.ToString(CultureInfo.InvariantCulture), s, Look.Primary);
         Typography.SetNumeralAlignment(number, FontNumeralAlignment.Tabular);

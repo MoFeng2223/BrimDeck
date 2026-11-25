@@ -102,13 +102,17 @@ public sealed partial class SettingsWindow
     // The collapsed count of unread notices: switched on for the notch and the capsule under 收起外观 › 显示内容, shown here.
     private void NoticeStripSection()
     {
-        SectionTitle(Loc.T("通知条", "Notice count"), ActionButton(Loc.T("收起外观", "Collapsed view"), () => ShowPage(1)),
-            () => Loc.T("显示未读通知的条数，在“收起外观”的显示内容中打开。打开通知页后清零。", "Shows how many notices are unread on the island; turn it on in Collapsed view's content. Opening the notices page clears it."));
+        SectionTitle(Loc.T("灵动通知", "Live notices"), ActionButton(Loc.T("收起外观", "Collapsed view"), () => ShowPage(1)),
+            () => Loc.T("收起时显示未读通知和 AI 编程工具的会话，在“收起外观”的显示内容中打开和排序。打开通知页后未读清零。",
+                "Shows the unread notices and the AI coding tools' sessions on the island; turn it on and place it in Collapsed view's content. Opening the notices page clears the unread ones."));
         Group(Toggle(Loc.T("显示应用图标", "Show app icons"), S.NoticeStripIcons, value => Change(s => s.NoticeStripIcons = value),
-                help: Loc.T("在总数前叠放最近几个有未读通知的应用图标，最多 3 个。关闭后显示铃铛。", "Stacks the icons of up to 3 apps with unread notices before the total. Off, a bell shows.")),
-            Toggle(Loc.T("与 AI 编程工具合并显示", "Show with AI coding tools"), S.NoticeAgentsMerged, value => Change(s => s.NoticeAgentsMerged = value),
-                help: Loc.T("AI 编程工具的会话与通知一起显示在“通知”的位置。只有等你处理的会话显示文字；位置不够时只保留最需要处理的一项。",
-                    "Shows the AI coding tools' sessions together with the notices, in the notices' place. Only sessions waiting for you show words; short of room, only the most urgent item stays.")));
+                help: Loc.T("在总数前叠放有未读通知的应用图标，最多 3 个。关闭后显示铃铛。", "Stacks the icons of up to 3 apps with unread notices before the total. Off, a bell shows.")),
+            Toggle(Loc.T("显示 AI 编程工具", "Show AI coding tools"), S.NoticeStripAgents, value => Change(s => s.NoticeStripAgents = value),
+                help: Loc.T("显示正在运行、等待审批或回答、刚刚完成的会话。需要先在“AI 编程工具”设置页中为工具安装钩子。",
+                    "Shows the sessions that are working, waiting for approval or an answer, or just finished. Install the tools' hooks on the AI coding tools settings page first.")),
+            Toggle(Loc.T("合并为一组", "Stack as one group"), S.NoticeAgentsMerged, value => Change(s => s.NoticeAgentsMerged = value),
+                help: Loc.T("会话图标和应用图标叠在同一组里，最需要处理的在最前，只写一处文字。关闭时分为两组，AI 编程工具在前。",
+                    "Stacks the sessions' and the apps' icons in one group, the most urgent in front, with one word or number. Off, two groups, the AI coding tools first.")));
     }
 
     // A look changed: its preview (shown) takes the picture of the new look (fresh) in place. The page is not rebuilt, so the
