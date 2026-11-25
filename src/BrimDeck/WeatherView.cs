@@ -15,7 +15,7 @@ using State = BrimDeck.WeatherData.State;
 
 namespace BrimDeck;
 
-// Open-Meteo weather, stored separately from account and device settings.
+// 天气视图：按域聚合 Open-Meteo、和风与中国天气网的数据，与账号/设备设置分开存放。
 internal sealed class WeatherView : UserControl
 {
     private readonly App _app;
@@ -232,7 +232,7 @@ internal sealed class WeatherView : UserControl
                     stretchForecast ? GridUnitType.Star : GridUnitType.Pixel);
             }
         }
-        bool showTemp = level >= 2 && _lens != Lens.Celestial;   // 日月镜头有自己的底部时刻行，低温/时刻行让位
+        bool showTemp = level >= 2 && _lens != Lens.Celestial;   // 天文镜头有自己的底部时刻行，低温/时刻行让位
         // 逐时与逐日必须同进退：lowRow 在逐日放低温、在逐时放时刻，只要显隐规则一致，days 的骨架就恒定。
         lowRow.Visibility = showTemp ? Visibility.Visible : Visibility.Collapsed;
         // 逐日信息行只在「有低温行 + 逐日模式」出现；切到逐时后时刻独占 lowRow，这一行收起。
@@ -577,7 +577,7 @@ internal sealed class WeatherView : UserControl
         drawn &= DrawPart("预报列", () => DrawForecast(s));
         drawn &= DrawPart("折线", () => DrawChart(s));
         drawn &= DrawPart("分钟降水", () => DrawMinute(s));
-        if (_indicesMode) drawn &= DrawPart("生活指数", () => FillIndices(s));
+        if (_indicesMode) drawn &= DrawPart("生活指数", () => DrawIndices(s));
         _renderFailed = !drawn;
     }
     // 把任意粒度的分钟点（和风 5min×24、Open-Meteo 15min×8）重采样成 24 格 × 5 分钟，
@@ -659,8 +659,8 @@ internal sealed class WeatherView : UserControl
     {
         "红色" => "红", "橙色" => "橙", "黄色" => "黄", "蓝色" => "蓝", _ => level
     };
-    // 摘要卡里的预警胶囊：只留「类型 · 等级」，完整标题/正文放 ToolTip，点击打开详情。
-    private Border WarningBadge(WarningItem w, int total, WeatherSnapshot s)
+    // 摘要卡里的预警胶囊：只留「类型 · 等级」，完整标题/正文放 ToolTip，点击切到生活指数视图。
+    private Border WarningBadge(WarningItem w, int total)
     {
         (Color bg, Color fg) = WarnRank(w.Level) switch
         {
@@ -733,7 +733,7 @@ internal sealed class WeatherView : UserControl
         => double.IsNaN(s.PrecipRateMmH) && string.IsNullOrWhiteSpace(s.PrecipType)
             ? null
             : Loc.T($"强度 {Num(s.PrecipRateMmH, " mm/h", 1)} · {PrecipName(s.PrecipType)}", $"Rate {Num(s.PrecipRateMmH, " mm/h", 1)} · {PrecipName(s.PrecipType)}");
-    // 左上：大图标 + 大字温度 + 天气描述 + 高低温 + 来源；右上：随宽度扩展的实况读数卡（体感/湿度/风速…日月入口）。
+    // 左上：大图标 + 大字温度 + 高低温/预警；右上：随宽度扩展的实况读数卡（体感/湿度/风速…天文入口）。来源统一放右下角页脚。
     private void DrawSummary(WeatherSnapshot s)
     {
         summary.Children.Clear(); summary.ColumnDefinitions.Clear();
@@ -771,7 +771,7 @@ internal sealed class WeatherView : UserControl
         if (warn is not null)
         {
             tempRow.Children.Add(new TextBlock { Text = range, FontSize = 11, Margin = new Thickness(8, 0, 0, 6), Foreground = ColText, VerticalAlignment = VerticalAlignment.Bottom });
-            bottom.Children.Add(WarningBadge(warn, s.Warnings.Length, s));
+            bottom.Children.Add(WarningBadge(warn, s.Warnings.Length));
         }
         else bottom.Children.Add(new TextBlock { Text = range, FontSize = 13, Foreground = ColText, VerticalAlignment = VerticalAlignment.Center });
         side.Children.Add(bottom);
@@ -900,17 +900,17 @@ internal sealed class WeatherView : UserControl
             ? Loc.T($"{time} {verb} · {source}", $"{verb} {time} · {source}")
             : Loc.T($"{time} {verb}", $"{verb} {time}");
     }
-    // 主来源：优先每日域，其次实况域；完整的分域来源在详情浮层里逐项列出。
+    // 页脚主来源：优先每日域，其次实况域；完整分域来源由快照的 Sources 字典保存。
     private static string SourceName(WeatherSnapshot s)
         => s.Sources.TryGetValue("Daily", out var daily) && daily.Length > 0 ? daily
          : s.Sources.TryGetValue("Current", out var current) && current.Length > 0 ? current : "";
-    // 生活指数视图：点天气图标时与底部 days（逐时/逐日预报）互换，占同一行、可纵向滚动。
-    // 换城/刷新走 Render 里的 FillIndices；不再用遮罩浮层，主视图布局保持不变。
+    // 视图切换：点天气图标时，底部 days（逐时/逐日预报）与 indicesView（生活指数）互换。
+    // 两者共用同一行；指数视图有数据时才值得切过去，因此这里只翻转状态，内容由 DrawIndices 负责。
     private void ToggleView()
     {
         if (_last is not { } snap) return;
         _indicesMode = !_indicesMode;
-        if (_indicesMode) FillIndices(snap);
+        if (_indicesMode) DrawIndices(snap);
         indicesView.Visibility = _indicesMode ? Visibility.Visible : Visibility.Collapsed;
         days.Visibility = !_indicesMode && _forecastLevel >= 1 ? Visibility.Visible : Visibility.Collapsed;
         SyncSummaryAlignment();
@@ -918,21 +918,13 @@ internal sealed class WeatherView : UserControl
         Fit(Width, Height, true);
     }
 
-    private void FillIndices(WeatherSnapshot s)
+    // 生活指数视图：清空后重建卡片，只展示指数本身，无数据时给一行轻提示。
+    // 高频项排前、冷门项在后；等级语义色见 IndexTone。
+    private void DrawIndices(WeatherSnapshot s)
     {
         var body = indicesBody;
         body.Children.Clear();
-        // 指数视图只放指数卡片本身，不显示「天气指数」「数据来源」这类分区标题。
-        ShowExtraSections(body, s);
-    }
-
-    // 指数卡片展示。无数据时只显示一行轻提示。
-    private void ShowExtraSections(StackPanel body, WeatherSnapshot s)
-    {
-
-
-        // 天气指数：全部展示（和风 type=0 最多 16 项），两列卡。高频项排前、冷门项在后，不折叠、不隐藏。
-        // 等级做成语义色胶囊（绿=适宜/优、黄=较适宜/中、红=不宜/差），说明压成单行、悬浮看全文。
+        // 按 type 去重后全部展示（和风 type=0 最多 16 项），两列卡。等级语义色、说明自动换行。
         if (s.Indices.Length == 0) body.Children.Add(Note(Loc.T("暂无生活指数", "No lifestyle indices")));
         else
         {
@@ -943,14 +935,14 @@ internal sealed class WeatherView : UserControl
                 int priority = item.Type switch { "3" => 0, "2" => 1, "5" => 2, "1" => 3, "9" => 4, "10" => 5, _ => 6 };
                 return priority * 100 + (int.TryParse(item.Type, out int id) ? id : 99);
             }
-            var picked = s.Indices.GroupBy(item => item.Type.Length > 0 ? item.Type : item.Name).Select(group => group.First()).OrderBy(Rank).ToArray();
+            var items = s.Indices.GroupBy(item => item.Type.Length > 0 ? item.Type : item.Name).Select(group => group.First()).OrderBy(Rank).ToArray();
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition());
             grid.ColumnDefinitions.Add(new ColumnDefinition());
             body.Children.Add(grid);
-            for (int i = 0; i < picked.Length; i++)
+            for (int i = 0; i < items.Length; i++)
             {
-                var item = picked[i];
+                var item = items[i];
                 string name = item.Name.EndsWith("指数") && item.Name.Length > 2 ? item.Name[..^2] : item.Name;
                 string value = item.Category.Length > 0 ? item.Category : item.Level;
                 string icon = item.Type switch
@@ -958,7 +950,7 @@ internal sealed class WeatherView : UserControl
                     "1" => "🏃", "2" => "🚗", "3" => "👕", "4" => "🎣",
                     "5" => "☀", "6" => "🧳", "7" => "🌼", "8" => "🛋",
                     "9" => "💊", "10" => "☁", "11" => "❄", "12" => "🕶",
-                    "13" => "💄", "14" => "👓", "15" => "☂", "16" => "🌬", _ => "☷"
+                    "13" => "💄", "14" => "👓", "15" => "☂", "16" => "🌬", _ => "📋"
                 };
                 var header = new Grid();
                 header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -992,9 +984,9 @@ internal sealed class WeatherView : UserControl
         }
     }
 
-    // 指数等级语义色：绿=适合、黄=中性/过渡、红=不宜/极端。
+    // 指数等级文字色：绿=适合、黄=中性/过渡、红=不宜/极端、灰=纯建议或无等级。
     // 和风的 level 数字是语言无关判据，但方向按 type 而定：多数「数字越大越差」，
-    // 穿衣(3) 反而是 5=舒适最好、两端寒冷/炎热差；空调(11)/太阳镜(12)/化妆(13) 纯建议无好坏，一律中性。
+    // 穿衣(3) 反而是 5=舒适最好、两端寒冷/炎热差；空调(11)/太阳镜(12)/化妆(13) 纯建议无好坏，一律中性灰。
     private static Color IndexTone(IndexItem item)
     {
         int level = int.TryParse(item.Level, out var n) ? n : 0;
@@ -1042,7 +1034,7 @@ internal sealed class WeatherView : UserControl
     {
         forecast.Children.Clear(); lowRow.Children.Clear(); dayInfoRow.Children.Clear(); tempLabels.Clear(); conditionLabels.Clear(); conditionRows.Clear();
         nowRule.Visibility = Visibility.Collapsed; nowText.Visibility = Visibility.Collapsed;   // 「现在」分界线只属于逐时
-        // 日月镜头：预报列收起，弧线、色带与底部时刻行全部画进弹性的 chart 画布（由 DrawChart 统一绘制）。
+        // 天文镜头：预报列收起，弧线、色带与底部时刻行全部画进弹性的 chart 画布（由 DrawChart 统一绘制）。
         if (_lens == Lens.Celestial) { forecast.Visibility = Visibility.Collapsed; todayGlow.Visibility = Visibility.Collapsed; return; }
         forecast.Visibility = Visibility.Visible;
         // 锚点只依赖列宽，宽度变化时可以单独重贴，不必重建列。
@@ -1091,7 +1083,7 @@ internal sealed class WeatherView : UserControl
         int night = NightCodeAt(s, i);
         return night >= 0 ? night : DayCodeAt(s, i);
     }
-    // 逐时模式：列里放「风向+风速 / 风级 / 图标 / 天气名称 / 温度」，时刻放在最底部那一行，与折线共用同一个列几何。
+    // 逐时模式：列里放「风向风级 / 降水概率 / 空气等级 / 图标 / 天气名称 / 温度」，时刻放在最底部那一行，与折线共用同一个列几何。
     // 0 点那一列改标日期（如「11月20日」）。「现在」不占任何一列：它落在「过去那一格」与「当前那一格」
     // 之间的分界线上——竖线贯穿列区到底行、线顶写「现在」，当前这一格照常显示自己的时刻。
     private void DrawHourlyForecast(WeatherSnapshot s)
@@ -1245,7 +1237,7 @@ internal sealed class WeatherView : UserControl
             nowText.Margin = new Thickness(Math.Max(0, edge - nowText.Width / 2), 0, 0, 0);
             return;
         }
-        // 「今天」列高亮：跨三行覆盖上段+折线+低温，与列内左右各 3px 留白对齐。找不到今天（跨日缓存）就收起。
+        // 「今天」列高亮：跨四行覆盖上段+折线+低温+逐日信息行，与列内左右各 3px 留白对齐。找不到今天（跨日缓存）就收起。
         int today = CityTodayIndex(s);
         var order = Order(s, forecast.Columns);
         int todayPos = -1;
@@ -1366,8 +1358,7 @@ internal sealed class WeatherView : UserControl
         }
     }
     // 当日 24 小时逐时温度曲线：弹性高度带（随画布实际高度伸缩）、列中心取点，横轴按逐时列数均匀分列，
-    // 与上段预报网格同为 forecast.Columns 列，每个采样点对准对应时刻列的正中心；时间由下方时刻行表达，
-    // 时刻统一由下方时刻行（lowRow）逐列对齐表达，避免同一串时间在一屏里出现两次。
+    // 与上段预报网格同为 forecast.Columns 列，每个采样点对准对应时刻列的正中心；时刻由下方 lowRow 逐列表达，避免重复。
     private void DrawHourly(WeatherSnapshot s)
     {
         int n = Math.Max(1, forecast.Columns); if (n < 2) return;
@@ -1476,7 +1467,7 @@ internal sealed class WeatherView : UserControl
             Canvas.SetLeft(label, X(p) - label.DesiredSize.Width / 2); Canvas.SetTop(label, baseY - h - 13); chart.Children.Add(label);
         }
     }
-    // 日月镜头视口窗口左缘。窗口宽 24h，规则：当前时段所处天体弧以其中天为窗口中心——
+    // 天文镜头视口窗口左缘。窗口宽 24h，规则：当前时段所处天体弧以其中天为窗口中心——
     // 日弧以正午居中、月弧以月中天居中；两弧之间的晨昏间隙以「现在」居中。
     // 中天近似弧线时间中点，弧长 < 24h 时两侧余量各 (24−弧长)/2，当前曲线必落在视口内、不被 0/24 边界拆开；
     // 中天极端偏移时 clamp 进 [落端−12, 升端+12] 强制满足不跨条件，clamp 区间退化（弧长>24h）则退回弧线中点。

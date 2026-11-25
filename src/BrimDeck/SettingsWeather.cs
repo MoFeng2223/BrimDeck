@@ -456,7 +456,7 @@ public sealed partial class SettingsWindow
         Target.Children.Add(dimensions);
     }
 }
-// Settings-only preview: draws the same glass card as the island's summary, but never hosts or mutates the island view.
+// 设置页天气预览卡：用拟真的天气渐变绘制，不跟随设置主题；只展示快照，不承载也不修改灵动岛视图。
 internal sealed class WeatherSettingsCard : Border
 {
     private readonly WeatherData.State state;

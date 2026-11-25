@@ -57,7 +57,7 @@ internal sealed class HeFengSource : IWeatherSource
         return part;
     }
 
-    // v7 扩展接口：分钟降水 / 实时预警 / 天气指数。均在「天气和基础服务」每月前 5 万次免费额度内。
+    // v7 扩展接口：分钟降水 / 实时预警 / 生活指数。均在「天气和基础服务」每月前 5 万次免费额度内。
     private static async Task<WeatherPart?> FetchExtraV7(Context context, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
     {
         bool Want(WeatherDomain domain) => need.Contains(domain);

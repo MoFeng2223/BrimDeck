@@ -20,10 +20,10 @@ internal sealed class WarningItem
     public string End { get; set; } = "";
 }
 
-// 生活指数：名称、等级、类别与说明
+// 生活指数：和风的 type ID、名称、等级、类别与说明
 internal sealed class IndexItem
 {
-    public string Type { get; set; } = "";   // 和风指数 type ID，语言无关；用于精选与等级着色
+    public string Type { get; set; } = "";   // 和风指数 type ID，语言无关；用于排序与等级着色
     public string Date { get; set; } = "";
     public string Name { get; set; } = "";
     public string Level { get; set; } = "";

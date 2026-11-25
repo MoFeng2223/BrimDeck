@@ -130,7 +130,7 @@ public partial class MainWindow
 
         // A refresh spins the arrows until it ends, whether asked for by hand or by the 15-minute cycle.
         bool animations = Animates;
-        string spin = !onScreen || !animations || !fetching ? "" : "details";
+        string spin = !onScreen || !animations || !fetching ? "" : "refreshing";
         if (_weatherSpin == spin) return;
         _weatherSpin = spin;
         WeatherRefreshRotation.BeginAnimation(RotateTransform.AngleProperty, spin.Length == 0 ? null : new DoubleAnimation

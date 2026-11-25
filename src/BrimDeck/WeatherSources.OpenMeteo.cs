@@ -140,7 +140,7 @@ internal sealed class OpenMeteoSource : IWeatherSource
             && part.Minutes is not { Count: > 0 } ? null : part;
     }
 
-    // 响应体落盘：三份数据各自过期，未过期直接读盘，重启后同样能复用，断网时退回上一份。
+    // 响应体落盘：四份数据（预报/逐时/空气/分钟降水）各自过期，未过期直接读盘，重启后同样能复用，断网时退回上一份。
     private static async Task<string> Body(string key, TimeSpan ttl, string url, CancellationToken token)
         => await WeatherCache.GetAsync<string>("openmeteo", key, ttl, async ct => (await WeatherHttp.GetAsync("openmeteo", url, ct)).Body, token) ?? "";
     private static int AqiLevel(int aqi) => aqi <= 50 ? 1 : aqi <= 100 ? 2 : aqi <= 150 ? 3 : aqi <= 200 ? 4 : aqi <= 300 ? 5 : 6;
