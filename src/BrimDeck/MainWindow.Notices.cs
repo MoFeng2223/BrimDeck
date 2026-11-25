@@ -820,7 +820,8 @@ public partial class MainWindow
     private FrameworkElement FocusButtons(Notice notice, NoticeCenter center)
     {
         // Delete and the notice's own actions, then the main button, which stays at the right. Where they do not fit one line, "打开应用"
-        // becomes a round icon like the others; they wrap to a second line only where even that does not fit (NoticeButtons).
+        // becomes a round icon like the others, then copy is left out and the buttons move closer; they wrap to a second line only
+        // where even that does not fit (NoticeButtons).
         var row = new NoticeButtons { Margin = new Thickness(0, 12, 0, 0) };
         var flow = row.Children;
         // Delete takes the whole conversation the focus shows: left behind, its earlier messages would take the row again.
@@ -837,6 +838,7 @@ public partial class MainWindow
             Button? copyAll = null;
             copyAll = GlyphPill("", copyName, () => SayCopied(copyAll!, CopyWords(text), copyName));
             flow.Add(copyAll);
+            row.Optional = copyAll;
         }
         foreach (var add in NoticeAddButtons(notice)) flow.Add(add);
         // The notice's own buttons that can still do something (NoticeCenter.Buttons): one that answers its sender while the sender
@@ -869,6 +871,8 @@ public partial class MainWindow
             };
             flow.Add(main);
         }
+        // The row sets the space between its buttons itself (NoticeButtons.Gap).
+        foreach (var button in flow.OfType<FrameworkElement>()) button.Margin = new Thickness(0);
         return row;
     }
 

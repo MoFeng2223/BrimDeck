@@ -267,47 +267,77 @@ internal sealed class NoticeRowTexts : Panel
     }
 }
 
-// The focus's buttons: delete and the actions flow from the left and wrap to a new line where one does not fit; with MainLast, the
-// last child (the main button) sits at the right end of the last line it lands on. On one line this is what a dock panel gave; at
-// the narrowest page, where the buttons did not fit, they are all reached instead of the later ones being cut off.
+// The focus's buttons: delete and the actions flow from the left, Gap apart (the panel sets the space; the buttons' own margins are
+// added to it), and wrap to a new line where one does not fit; with MainLast, the last child (the main button) sits at the right
+// end of the last line it lands on. To keep the row on one line as the column narrows, in this order: the main button shows an
+// icon instead of its words (CompactMain), the Optional button is left out, and the space between the buttons shrinks down to
+// LeastGap. Only where even that does not fit do the buttons wrap, all of them shown, so none is cut off.
 internal sealed class NoticeButtons : Panel
 {
-    public const double LineGap = 8;
+    public const double LineGap = 8, Gap = 8, LeastGap = 6;
     public bool MainLast { get; set; }
-    // Turns the main button, last, into a round icon (true) or back into its words (false). Where the row does not fit one line
-    // with the words, the main button shows the icon, so the row stays on one line; it wraps only where even that does not fit.
+    // Turns the main button, last, into a round icon (true) or back into its words (false).
     public Action<bool>? CompactMain { get; set; }
-    private bool _compact;
-    private double _fullMain;
+    // A button that is left out where the row would not otherwise fit one line (copy: the right-click menu on the words copies too).
+    public UIElement? Optional { get; set; }
+    private bool _compact, _dropped;
+    private double _fullMain, _optionalWidth, _gap = Gap;
     private readonly List<Point> _at = [];
 
     protected override Size MeasureOverride(Size available)
     {
         _at.Clear();
-        double x = 0, y = 0, line = 0, widest = 0;
         var open = new Size(double.PositiveInfinity, double.PositiveInfinity);
         foreach (UIElement child in Children) child.Measure(open);
-        if (MainLast && CompactMain is { } compactMain && Children.Count > 1 && !double.IsInfinity(available.Width))
-        {
-            var main = Children[^1];
-            // The width with the words, kept from when they showed: the icon's would always fit.
-            if (!_compact) _fullMain = main.DesiredSize.Width;
-            double others = 0;
-            for (int i = 0; i < Children.Count - 1; i++) others += Children[i].DesiredSize.Width;
-            bool compact = others + _fullMain > available.Width;
-            if (compact != _compact) { _compact = compact; compactMain(compact); main.Measure(open); }
-        }
+        _gap = Gap;
+        if (!double.IsInfinity(available.Width)) Fit(available.Width, open);
+        double x = 0, y = 0, line = 0, widest = 0;
         for (int i = 0; i < Children.Count; i++)
         {
             var child = Children[i];
+            if (child.Visibility == Visibility.Collapsed) { _at.Add(default); continue; }
             var (w, h) = (child.DesiredSize.Width, child.DesiredSize.Height);
             if (x > 0 && x + w > available.Width) { y += line + LineGap; x = 0; line = 0; }
             // The main button, last, goes to the right end of its line (or, on a line of its own, of the row).
             double at = MainLast && i == Children.Count - 1 && !double.IsInfinity(available.Width) ? Math.Max(x, available.Width - w) : x;
             _at.Add(new Point(at, y));
-            x += w; line = Math.Max(line, h); widest = Math.Max(widest, at + w);
+            x = at + w + _gap; line = Math.Max(line, h); widest = Math.Max(widest, at + w);
         }
         return new Size(double.IsInfinity(available.Width) ? widest : available.Width, y + line);
+    }
+
+    // Chooses the main button's face, whether the optional button shows and the space between the buttons for this width.
+    private void Fit(double width, Size open)
+    {
+        var main = MainLast && Children.Count > 1 ? Children[^1] : null;
+        var optional = Optional is not null && Children.Contains(Optional) ? Optional : null;
+        // The widths with the words and with the optional button, kept from when they showed.
+        if (main is not null && !_compact) _fullMain = main.DesiredSize.Width;
+        if (optional is not null && !_dropped) _optionalWidth = optional.DesiredSize.Width;
+        double rest = 0; int count = 0;
+        foreach (UIElement child in Children)
+            if (!ReferenceEquals(child, main) && !ReferenceEquals(child, optional) && child.Visibility != Visibility.Collapsed) { rest += child.DesiredSize.Width; count++; }
+        static double Row(double widths, int count, double gap) => widths + Math.Max(0, count - 1) * gap;
+        int mains = main is null ? 0 : 1, optionals = optional is null ? 0 : 1;
+
+        bool compact = main is not null && CompactMain is not null && Row(rest + _optionalWidth * optionals + _fullMain, count + optionals + mains, Gap) > width;
+        if (compact != _compact && CompactMain is { } compactMain) { _compact = compact; compactMain(compact); main!.Measure(open); }
+        double mainWidth = main is null ? 0 : _compact ? main.DesiredSize.Width : _fullMain;
+
+        // The optional button is left out only where the row then fits one line: where it wraps anyway, there is room for it.
+        bool drop = optional is not null && Row(rest + _optionalWidth + mainWidth, count + 1 + mains, Gap) > width
+            && Row(rest + mainWidth, count + mains, LeastGap) <= width;
+        if (optional is not null && drop != _dropped)
+        {
+            _dropped = drop;
+            optional.Visibility = drop ? Visibility.Collapsed : Visibility.Visible;
+            optional.Measure(open);
+        }
+
+        int shown = count + mains + (optional is not null && !_dropped ? 1 : 0);
+        double widths = rest + mainWidth + (optional is not null && !_dropped ? _optionalWidth : 0);
+        if (shown > 1 && Row(widths, shown, Gap) > width && Row(widths, shown, LeastGap) <= width)
+            _gap = Math.Floor((width - widths) / (shown - 1) * 2) / 2;
     }
 
     protected override Size ArrangeOverride(Size final)

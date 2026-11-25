@@ -85,9 +85,9 @@ internal static class NoticePanelTests
         NoticeButtons Buttons(bool main = true)
         {
             var row = new NoticeButtons { MainLast = main };
-            row.Children.Add(new Border { Width = 32, Height = 32, Margin = new Thickness(0, 0, 8, 0) });
-            row.Children.Add(new Border { Width = 60, Height = 32, Margin = new Thickness(0, 0, 8, 0) });
-            row.Children.Add(new Border { Width = 60, Height = 32, Margin = new Thickness(0, 0, 8, 0) });
+            row.Children.Add(new Border { Width = 32, Height = 32 });
+            row.Children.Add(new Border { Width = 60, Height = 32 });
+            row.Children.Add(new Border { Width = 60, Height = 32 });
             row.Children.Add(new Border { Width = 100, Height = 32 });
             return row;
         }
@@ -100,6 +100,38 @@ internal static class NoticePanelTests
             && Enumerable.Range(0, 4).All(i => Box(twoLines.Children[i]).Right <= 178.5 && Box(twoLines.Children[i]).Left >= 0));
         var plain = Buttons(main: false); Lay(plain, 400, out _);
         check("Without a main button the last one stays with the others", Math.Abs(Box(plain.Children[3]).Right - 400) > 1 && Box(plain.Children[3]).Left == Box(plain.Children[2]).Right + 8);
+
+        // ----- The focus's round buttons: delete, copy (optional), event, to-do, and "open app", 80 wide with its words, 32 as an icon -----
+        NoticeButtons Round()
+        {
+            var row = new NoticeButtons { MainLast = true };
+            for (int i = 0; i < 4; i++) row.Children.Add(new Border { Width = 32, Height = 32 });
+            var main = new Border { Width = 80, Height = 32 };
+            row.Children.Add(main);
+            row.Optional = row.Children[1];
+            row.CompactMain = compact => main.Width = compact ? 32 : 80;
+            return row;
+        }
+        bool OneLine(NoticeButtons row, double width) => row.DesiredSize.Height == 32 && Math.Abs(Box(row.Children[4]).Right - width) < .5 && Box(row.Children[0]).Left == 0;
+        double Space(NoticeButtons row, int a, int b) => Box(row.Children[b]).Left - Box(row.Children[a]).Right;
+        var spacious = Round(); Lay(spacious, 400, out _);
+        check("Round buttons with room: all on one line, the main one with its words, 8 apart",
+            OneLine(spacious, 400) && spacious.Children[1].Visibility == Visibility.Visible && Box(spacious.Children[4]).Width == 80 && Space(spacious, 0, 1) == 8);
+        var iconMain = Round(); Lay(iconMain, 200, out _);
+        check("Narrower, the main button shows its icon and copy stays",
+            OneLine(iconMain, 200) && iconMain.Children[1].Visibility == Visibility.Visible && Box(iconMain.Children[4]).Width == 32 && Space(iconMain, 1, 2) == 8);
+        var noCopy = Round(); Lay(noCopy, 180, out _);
+        check("Narrower still, copy is left out and the rest stay on one line 8 apart",
+            OneLine(noCopy, 180) && noCopy.Children[1].Visibility == Visibility.Collapsed && Space(noCopy, 0, 2) == 8 && Space(noCopy, 2, 3) == 8);
+        var close = Round(); Lay(close, 150, out _);
+        check("At the narrowest column (150) the buttons move closer, not under 6, and stay on one line",
+            OneLine(close, 150) && close.Children[1].Visibility == Visibility.Collapsed && Space(close, 0, 2) >= NoticeButtons.LeastGap && Space(close, 0, 2) < 8);
+        Lay(close, 400, out _);
+        check("Wide again, copy comes back and the main button shows its words",
+            OneLine(close, 400) && close.Children[1].Visibility == Visibility.Visible && Box(close.Children[4]).Width == 80 && Space(close, 0, 1) == 8);
+        var wrapped = Round(); Lay(wrapped, 140, out var wrappedSize);
+        check("Where even that does not fit, the buttons wrap with copy shown",
+            wrappedSize.Height > 32 && wrapped.Children[1].Visibility == Visibility.Visible && Enumerable.Range(0, 5).All(i => Box(wrapped.Children[i]).Right <= 140.5));
 
         // ----- The fade at a column's foot: a mask on the viewer -----
         var viewer = new ScrollViewer { Content = new Border { Height = 600, Width = 100 }, Height = 200, Width = 100 };
