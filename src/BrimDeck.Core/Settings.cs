@@ -1222,7 +1222,7 @@ public sealed class DeckSettings
         NoticeStyles ??= new();
         NoticeStyles.Normalize();
         NoticeSoundVolume = Math.Clamp(NoticeSoundVolume, 0, 100);
-        NoticeHistoryHours = Math.Clamp(NoticeHistoryHours, 1, 24 * 7);
+        NoticeHistoryHours = Math.Clamp(NoticeHistoryHours, 1, 24 * 30);
         NoticesWidth = double.IsFinite(NoticesWidth) ? Math.Clamp(NoticesWidth, 440, 1200) : 460;
         NoticesHeight = double.IsFinite(NoticesHeight) ? Math.Clamp(NoticesHeight, 140, 400) : 280;
         NoticeApps = (NoticeApps ?? []).Where(rule => rule is not null && !string.IsNullOrWhiteSpace(rule.Key)).DistinctBy(rule => rule.Key).Take(500).ToList();

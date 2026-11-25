@@ -560,7 +560,7 @@ internal static class NoticeCoreTests
         };
         odd.Normalize();
         check("Notice settings are normalized", odd.NoticeDefaultLevel == NoticeLevel.Glow && odd.NoticeStyles.Text.Seconds == 2
-            && odd.NoticeStyles.Flash.Color == "" && odd.NoticeStyles.Stay.Color == "#FF0000" && odd.NoticeHistoryHours == 168 && odd.NoticesWidth == 460
+            && odd.NoticeStyles.Flash.Color == "" && odd.NoticeStyles.Stay.Color == "#FF0000" && odd.NoticeHistoryHours == 720 && odd.NoticesWidth == 460
             && odd.NoticeWslDistros.SequenceEqual(["Ubuntu", "Debian"]) && odd.NoticeApps.Count == 2 && odd.NoticeApps[0].AccentColor == "#FF0000" && odd.NoticeApps[0].Level == NoticeLevel.Glow
             && !odd.NoticeApps[1].Enabled && odd.NoticeApps[1].Level == NoticeLevel.Auto && !odd.NoticeReceives("windows:Off"));
         var older = new DeckSettings { NoticeApps = [new() { Key = "windows:QQ", Level = NoticeLevel.Plain }, new() { Key = "windows:Mail" }] };

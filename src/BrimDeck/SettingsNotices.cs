@@ -381,7 +381,7 @@ public sealed partial class SettingsWindow
         AutomationProperties.SetName(clear, Loc.T("清空通知历史", "Clear notice history"));
         SectionTitle(Loc.T("通知历史", "Notice history"), clear, () => Loc.T("通知页里的通知保存在本机，用 Windows 为当前用户提供的加密，最多 500 条，不保存附件和头像。只清除 BrimDeck 中的记录，Windows 通知中心不受影响。",
             "The notices of the notices page are saved on this PC with the encryption Windows provides for the current user, at most 500, without attachments or pictures. Clearing removes BrimDeck's records only; Windows' notification center is not affected."));
-        int[] hours = [1, 24, 72, 168];
+        int[] hours = [1, 24, 72, 168, 720];
         var labels = new List<string> { Loc.T("退出时清空", "Until exit") };
         labels.AddRange(hours.Select(h => h < 24 ? Loc.T($"{h} 小时", $"{h} h") : Loc.T($"{h / 24} 天", Loc.Count(h / 24, "day", "days"))));
         int index = !S.NoticeHistory ? 0 : Array.IndexOf(hours, S.NoticeHistoryHours) is var at && at >= 0 ? at + 1 : 2;
