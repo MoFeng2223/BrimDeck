@@ -26,7 +26,7 @@ public sealed record ProxySnapshot(bool Running, ProxyMode Mode, bool SystemProx
 public readonly record struct VergeConfigValues(bool? EnableSystemProxy, bool? EnableTunMode);
 
 // Values extracted from a Clash / Mihomo core config (clash-verge.yaml or config.yaml).
-public readonly record struct ClashConfigValues(ProxyMode Mode, bool? TunEnabled, string? TunDevice, string? ExternalController, string? Secret);
+public readonly record struct ClashConfigValues(ProxyMode Mode, bool? TunEnabled, string? TunDevice, string? ExternalController, string? Secret, string? ExternalControllerPipe = null);
 
 // Pure parsers and merge logic for Clash Verge / Mihomo local controller responses and YAML config files.
 // Only routing mode, TUN state and loopback controller address are read; proxy nodes, servers and subscriptions are ignored.
@@ -99,13 +99,13 @@ public static class ProxyParsers
         return new(sysProxy, tun);
     }
 
-    // Extracts top-level mode, external-controller, secret and tun.{enable,device} from Clash / Mihomo YAML.
+    // Extracts top-level mode, external-controller, external-controller-pipe, secret and tun.{enable,device} from Clash / Mihomo YAML.
     public static ClashConfigValues ParseClashConfigYaml(string? yaml)
     {
         if (string.IsNullOrWhiteSpace(yaml)) return default;
         var mode = ProxyMode.Unknown;
         bool? tunEnabled = null;
-        string? tunDevice = null, controller = null, secret = null;
+        string? tunDevice = null, controller = null, secret = null, pipe = null;
         bool inTun = false;
         int tunIndent = -1;
         foreach (var raw in yaml.AsSpan().EnumerateLines())
@@ -125,6 +125,8 @@ public static class ProxyParsers
                     mode = ParseMode(val.ToString());
                 else if (key.Equals("external-controller", StringComparison.OrdinalIgnoreCase))
                     controller = val.Length > 0 ? val.ToString() : null;
+                else if (key.Equals("external-controller-pipe", StringComparison.OrdinalIgnoreCase))
+                    pipe = val.Length > 0 ? val.ToString() : null;
                 else if (key.Equals("secret", StringComparison.OrdinalIgnoreCase))
                     secret = val.Length > 0 ? val.ToString() : null;
                 else if (key.Equals("tun", StringComparison.OrdinalIgnoreCase) && val.Length == 0)
@@ -144,7 +146,26 @@ public static class ProxyParsers
                     tunDevice = val.ToString();
             }
         }
-        return new(mode, tunEnabled, tunDevice, controller, secret);
+        return new(mode, tunEnabled, tunDevice, controller, secret, pipe);
+    }
+
+    // Validates and extracts a local Windows named pipe name from an external-controller-pipe value.
+    // Remote pipes (\\server\pipe\...) and path traversal characters are rejected.
+    public static string? NormalizePipeName(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var text = raw.Trim();
+        if (text.StartsWith(@"\\.\pipe\", StringComparison.OrdinalIgnoreCase))
+            text = text[@"\\.\pipe\".Length..];
+        else if (text.StartsWith("//./pipe/", StringComparison.OrdinalIgnoreCase))
+            text = text["//./pipe/".Length..];
+        else if (text.StartsWith(@"\\", StringComparison.Ordinal) || text.StartsWith("//", StringComparison.Ordinal))
+            return null;
+        if (text.Length == 0 || text.Contains('\\') || text.Contains('/') || text.Contains(':') || text.Contains("..", StringComparison.Ordinal))
+            return null;
+        foreach (var ch in text)
+            if (char.IsWhiteSpace(ch) || char.IsControl(ch)) return null;
+        return text;
     }
 
     // Validates and normalizes an external-controller value to a loopback HTTP base URI.

@@ -18,13 +18,14 @@ internal enum ProxyDemand { None, Watch }
 // Windows system proxy registry state and active TUN network interfaces — never writes files or modifies the proxy client.
 internal sealed class ProxyWatcher : IDisposable
 {
-    private sealed record ClientProfile(string Name, string[] Processes, string? PipeName, Func<string[]> ConfigDirs, string[] ConfigFiles, string? VergeFile);
+    private sealed record ClientProfile(string Name, string[] Processes, string? PipeName, string[] PipePrefixes, Func<string[]> ConfigDirs, string[] ConfigFiles, string? VergeFile);
 
     private static readonly ClientProfile[] Clients =
     [
         new("Clash Verge",
             ["clash-verge.exe", "verge-mihomo.exe", "verge-mihomo-alpha.exe"],
             "verge-mihomo",
+            ["verge-mihomo-production-", "verge-mihomo-sidecar-"],
             () =>
             {
                 var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
@@ -39,6 +40,7 @@ internal sealed class ProxyWatcher : IDisposable
         new("Clash Nyanpasu",
             ["clash-nyanpasu.exe", "nyanpasu-mihomo.exe"],
             null,
+            [],
             () =>
             {
                 var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
@@ -49,6 +51,7 @@ internal sealed class ProxyWatcher : IDisposable
         new("Clash Party",
             ["Clash Party.exe", "Mihomo Party.exe"],
             null,
+            [],
             () =>
             {
                 var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
@@ -63,6 +66,7 @@ internal sealed class ProxyWatcher : IDisposable
         new("Clash for Windows",
             ["Clash for Windows.exe"],
             null,
+            [],
             () =>
             {
                 var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -85,7 +89,8 @@ internal sealed class ProxyWatcher : IDisposable
     private CancellationTokenSource? _runCts;
     private int _polling;
     private int _repollRequested;
-    private long _pipeBlockedUntil;
+    private readonly Dictionary<string, long> _blockedPipes = new(StringComparer.OrdinalIgnoreCase);
+    private string? _activePipe;
     private string? _lastClient;
     private readonly Dictionary<string, (DateTime WrittenUtc, long Length, ClashConfigValues Value)> _configCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (DateTime WrittenUtc, long Length, VergeConfigValues Value)> _vergeCache = new(StringComparer.OrdinalIgnoreCase);
@@ -252,31 +257,39 @@ internal sealed class ProxyWatcher : IDisposable
         if (client is null)
         {
             _lastClient = null;
-            Volatile.Write(ref _pipeBlockedUntil, 0);
+            _activePipe = null;
+            _blockedPipes.Clear();
             return ProxySnapshot.Stopped;
         }
         if (!string.Equals(_lastClient, client.Name, StringComparison.Ordinal))
         {
             _lastClient = client.Name;
-            Volatile.Write(ref _pipeBlockedUntil, 0);
+            _activePipe = null;
+            _blockedPipes.Clear();
         }
 
         ProxyMode? apiMode = null;
         bool? apiTun = null;
         string? apiTunDevice = null;
+        var triedPipes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // 1. Named Pipe probe first (Clash Verge Rev's default IPC channel; zero disk I/O when reachable).
-        if (client.PipeName is { Length: > 0 } pipeName && Environment.TickCount64 >= Volatile.Read(ref _pipeBlockedUntil))
+        // Prefer cached active pipe, then live enumerated v2.4+ production/sidecar pipes, then legacy pipe name.
+        var initialPipes = new List<string>(4);
+        if (_activePipe is { Length: > 0 } cachedPipe) initialPipes.Add(cachedPipe);
+        var pipeResult = await ProbeCandidatePipesAsync(initialPipes, triedPipes, ct).ConfigureAwait(false);
+        if (!pipeResult.Ok)
         {
-            var pipeResult = await ProbeNamedPipeAsync(pipeName, ct).ConfigureAwait(false);
-            if (pipeResult.AccessDenied)
-                Volatile.Write(ref _pipeBlockedUntil, Environment.TickCount64 + (long)PipeAclBackoff.TotalMilliseconds);
-            else if (pipeResult.Ok)
-            {
-                apiMode = pipeResult.Mode;
-                apiTun = pipeResult.Tun;
-                apiTunDevice = pipeResult.TunDevice;
-            }
+            _activePipe = null;
+            var livePipes = EnumerateLocalPipes(client.PipePrefixes);
+            if (client.PipeName is { Length: > 0 } legacyPipe) livePipes.Add(legacyPipe);
+            pipeResult = await ProbeCandidatePipesAsync(livePipes, triedPipes, ct).ConfigureAwait(false);
+        }
+        if (pipeResult.Ok)
+        {
+            apiMode = pipeResult.Mode;
+            apiTun = pipeResult.Tun;
+            apiTunDevice = pipeResult.TunDevice;
         }
 
         // Only inspect local YAML files when the named pipe did not already return both mode and TUN state.
@@ -284,6 +297,18 @@ internal sealed class ProxyWatcher : IDisposable
         VergeConfigValues verge = default;
         if (apiMode is null || apiTun is null)
             (config, verge) = ReadClientFiles(client);
+
+        // 1b. If config YAML declares a custom external-controller-pipe not yet tried, probe it now.
+        if (apiMode is null && ProxyParsers.NormalizePipeName(config.ExternalControllerPipe) is { } configuredPipe)
+        {
+            var cfgPipeResult = await ProbeCandidatePipesAsync([configuredPipe], triedPipes, ct).ConfigureAwait(false);
+            if (cfgPipeResult.Ok)
+            {
+                apiMode = cfgPipeResult.Mode;
+                apiTun = cfgPipeResult.Tun;
+                apiTunDevice = cfgPipeResult.TunDevice;
+            }
+        }
 
         // 2. Loopback HTTP controller probe (fallback when external-controller is bound locally).
         if (apiMode is null && ProxyParsers.NormalizeLoopbackController(config.ExternalController) is { } baseUri)
@@ -302,6 +327,50 @@ internal sealed class ProxyWatcher : IDisposable
         bool? osTun = apiTun is null ? ReadWindowsTunInterface(apiTunDevice ?? config.TunDevice) : null;
 
         return ProxyParsers.Resolve(true, client.Name, apiMode, apiTun, config, verge, osSysProxy, osTun);
+    }
+
+    private async Task<ProbeResult> ProbeCandidatePipesAsync(IEnumerable<string> candidates, HashSet<string> tried, CancellationToken ct)
+    {
+        long now = Environment.TickCount64;
+        foreach (var raw in candidates)
+        {
+            if (string.IsNullOrEmpty(raw) || !tried.Add(raw)) continue;
+            if (_blockedPipes.TryGetValue(raw, out var until) && now < until) continue;
+            var result = await ProbeNamedPipeAsync(raw, ct).ConfigureAwait(false);
+            if (result.AccessDenied)
+            {
+                _blockedPipes[raw] = Environment.TickCount64 + (long)PipeAclBackoff.TotalMilliseconds;
+                if (string.Equals(_activePipe, raw, StringComparison.OrdinalIgnoreCase)) _activePipe = null;
+                continue;
+            }
+            if (result.Ok)
+            {
+                _blockedPipes.Remove(raw);
+                _activePipe = raw;
+                return result;
+            }
+        }
+        return default;
+    }
+
+    private static List<string> EnumerateLocalPipes(string[] prefixes)
+    {
+        var found = new List<string>();
+        if (prefixes.Length == 0) return found;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var prefix in prefixes)
+        {
+            try
+            {
+                foreach (var path in Directory.EnumerateFiles(@"\\.\pipe\", prefix + "*"))
+                {
+                    if (ProxyParsers.NormalizePipeName(path) is { } name && seen.Add(name))
+                        found.Add(name);
+                }
+            }
+            catch { }
+        }
+        return found;
     }
 
     private static ClientProfile? DetectRunningClient()
@@ -339,7 +408,7 @@ internal sealed class ProxyWatcher : IDisposable
 
         var mode = ProxyMode.Unknown;
         bool? tunEnabled = null;
-        string? tunDevice = null, controller = null, secret = null;
+        string? tunDevice = null, controller = null, secret = null, controllerPipe = null;
         foreach (var path in files)
         {
             var parsed = ReadCachedClashYaml(path);
@@ -348,8 +417,9 @@ internal sealed class ProxyWatcher : IDisposable
             tunDevice ??= parsed.TunDevice;
             controller ??= parsed.ExternalController;
             secret ??= parsed.Secret;
+            controllerPipe ??= parsed.ExternalControllerPipe;
         }
-        return (new ClashConfigValues(mode, tunEnabled, tunDevice, controller, secret), verge);
+        return (new ClashConfigValues(mode, tunEnabled, tunDevice, controller, secret, controllerPipe), verge);
     }
 
     private VergeConfigValues ReadCachedVergeYaml(string path)

@@ -57,6 +57,7 @@ internal static class ProxyStatusTests
             mixed-port: 7897
             mode: "global" # user switched
             external-controller: '127.0.0.1:9097'
+            external-controller-pipe: \\.\pipe\verge-mihomo-sidecar-release-abcdef1234
             secret: "my#secret"
             dns:
               enable: false
@@ -68,9 +69,11 @@ internal static class ProxyStatusTests
               - name: test
             """;
         var clash = ProxyParsers.ParseClashConfigYaml(clashYaml);
-        check("Proxy YAML: extracts mode, controller, secret and tun block while ignoring other indented blocks",
+        check("Proxy YAML: extracts mode, controller, pipe, secret and tun block while ignoring other indented blocks",
             clash.Mode == ProxyMode.Global && clash.TunEnabled == true && clash.TunDevice == "Mihomo"
-            && clash.ExternalController == "127.0.0.1:9097" && clash.Secret == "my#secret");
+            && clash.ExternalController == "127.0.0.1:9097"
+            && clash.ExternalControllerPipe == @"\\.\pipe\verge-mihomo-sidecar-release-abcdef1234"
+            && clash.Secret == "my#secret");
 
         const string directYaml = "mode: direct\ntun:\n  enable: false\n";
         var direct = ProxyParsers.ParseClashConfigYaml(directYaml);
@@ -93,6 +96,15 @@ internal static class ProxyStatusTests
             && ProxyParsers.NormalizeLoopbackController("https://127.0.0.1:9090") is null
             && ProxyParsers.NormalizeLoopbackController("127.0.0.1:0") is null
             && ProxyParsers.NormalizeLoopbackController("") is null);
+
+        check("Proxy pipe: normalizes local pipes and rejects remote or traversal paths",
+            ProxyParsers.NormalizePipeName(@"\\.\pipe\verge-mihomo-production-abc123") == "verge-mihomo-production-abc123"
+            && ProxyParsers.NormalizePipeName("verge-mihomo") == "verge-mihomo"
+            && ProxyParsers.NormalizePipeName("//./pipe/verge-mihomo") == "verge-mihomo"
+            && ProxyParsers.NormalizePipeName(@"\\remote-pc\pipe\verge-mihomo") is null
+            && ProxyParsers.NormalizePipeName(@"..\verge-mihomo") is null
+            && ProxyParsers.NormalizePipeName(@"verge\mihomo") is null
+            && ProxyParsers.NormalizePipeName("") is null);
     }
 
     private static void TunMatching(Action<string, bool> check)
