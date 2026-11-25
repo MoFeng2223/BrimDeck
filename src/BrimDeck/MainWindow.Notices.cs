@@ -630,7 +630,17 @@ public partial class MainWindow
         {
             var body = SelectableWords(shown.Body, group.Count > 1 ? 14 : 13, group.Count > 1 ? 22 : 21, UI.Primary, line: false);
             if (shown.HasCode) AutomationProperties.SetName(body, shown.SpokenBody);
-            words.Children.Add(body);
+            if (group.Count > 1)
+            {
+                // Among the messages of a conversation the newest carries its time on the right as the others do.
+                var newest = new DockPanel();
+                var when = UI.Fixed(NoticeText.Relative(notice.ReceivedAt, now), 11, 22, UI.Tertiary);
+                DockPanel.SetDock(when, System.Windows.Controls.Dock.Right); when.Margin = new Thickness(8, 0, 0, 0); when.VerticalAlignment = VerticalAlignment.Top;
+                newest.Children.Add(when);
+                newest.Children.Add(body);
+                words.Children.Add(newest);
+            }
+            else words.Children.Add(body);
         }
         if (notice.Code.Length > 0) words.Children.Add(NoticeCodeBlock(notice.Code));
         if (notice.Progress is { } progress) words.Children.Add(ProgressTrack(progress, accent));
