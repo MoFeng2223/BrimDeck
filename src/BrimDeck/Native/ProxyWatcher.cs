@@ -219,7 +219,8 @@ internal sealed class ProxyWatcher : IDisposable
             return;
         }
         var token = cts.Token;
-        _ = Task.Run(() => PollAsync(token), token);
+        // Do not pass token to Task.Run scheduling so cancellation can never skip PollAsync's finally latch release.
+        _ = Task.Run(() => PollAsync(token));
     }
 
     private async Task PollAsync(CancellationToken ct)
@@ -228,6 +229,7 @@ internal sealed class ProxyWatcher : IDisposable
         {
             do
             {
+                if (ct.IsCancellationRequested || _disposed) return;
                 Interlocked.Exchange(ref _repollRequested, 0);
                 var next = await ReadSnapshotAsync(ct).ConfigureAwait(false);
                 if (ct.IsCancellationRequested || _disposed) return;

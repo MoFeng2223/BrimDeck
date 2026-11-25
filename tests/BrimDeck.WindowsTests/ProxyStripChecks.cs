@@ -107,10 +107,11 @@ internal static class ProxyStripChecks
         PanelTheme.Use(new DeckSettings());
         var bmp = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
         bmp.Render(visual);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var fullPath = Path.GetFullPath(path);
+        if (Path.GetDirectoryName(fullPath) is { Length: > 0 } dir) Directory.CreateDirectory(dir);
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bmp));
-        using var fs = File.Create(path);
+        using var fs = File.Create(fullPath);
         encoder.Save(fs);
     }
 }
