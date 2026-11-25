@@ -121,17 +121,44 @@ public sealed record City(string Name, double Latitude, double Longitude, string
 // Weather domains requested by the aggregator.
 public enum WeatherDomain { Current, Hourly, Daily, Minutely, Warning, Indices, Air, History }
 
+public enum WeatherMetric { Wind, Feels, Humidity, Gust, DewPoint, Celestial, Precip, Pressure, Aqi, Cloud, Visibility, Uv, Temp }
+public sealed record WeatherChip(WeatherMetric Metric, bool Visible = true);
+
 // Per-city source choices and QWeather credentials.
 public sealed class WeatherSettings
 {
+    private static readonly WeatherMetric[] ChipMetrics = Enum.GetValues<WeatherMetric>().Where(metric => metric != WeatherMetric.Temp).ToArray();
+    public List<WeatherChip> Chips { get; set; } = ChipMetrics.Select(metric => new WeatherChip(metric)).ToList();
     public Dictionary<string, string> CitySources { get; set; } = [];
     public string SourceFor(City? city) => CitySources.GetValueOrDefault(city?.ToString() ?? "auto") ?? (HeFengKey.Length > 0 && HeFengHost.Length > 0 ? "hefeng" : "openmeteo");
     public int HeFengDailyLimit { get; set; } = 1500;
     public int HeFengMonthlyLimit { get; set; } = 50000;
     public string HeFengKey { get; set; } = "";
     public string HeFengHost { get; set; } = "";
+    // Keep each six-slot row intact. A disabled slot can receive an overflow chip
+    // from the other row when their visible counts differ by at least three.
+    public List<WeatherChip>[] ChipRows(int columns)
+    {
+        var rows = Chips.Chunk(6).Select(row => row.ToList()).ToArray();
+        int Count(int row) => Math.Min(columns, rows[row].Count(chip => chip.Visible));
+        while (Math.Abs(Count(0) - Count(1)) >= 3)
+        {
+            int from = Count(0) > Count(1) ? 0 : 1;
+            var donor = rows[from];
+            var receiver = rows[1 - from];
+            var enabled = donor.Where(chip => chip.Visible).ToArray();
+            var moving = enabled[Math.Min(columns, enabled.Length - 1)];
+            var empty = receiver.First(chip => !chip.Visible);
+            donor[donor.IndexOf(moving)] = empty;
+            receiver.Remove(empty);
+            receiver.Add(moving);
+        }
+        return rows;
+    }
+
     public WeatherSettings Copy() => new()
     {
+        Chips = [.. Chips],
         CitySources = new(CitySources ?? []),
         HeFengDailyLimit = HeFengDailyLimit,
         HeFengMonthlyLimit = HeFengMonthlyLimit,
@@ -140,6 +167,8 @@ public sealed class WeatherSettings
     };
     public void Normalize()
     {
+        Chips = (Chips ?? []).Where(chip => chip is not null && ChipMetrics.Contains(chip.Metric))
+            .Concat(ChipMetrics.Select(metric => new WeatherChip(metric))).DistinctBy(chip => chip.Metric).ToList();
         CitySources = (CitySources ?? []).Where(pair => pair.Value is "hefeng" or "openmeteo")
             .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
         HeFengKey = (HeFengKey ?? "").Trim();

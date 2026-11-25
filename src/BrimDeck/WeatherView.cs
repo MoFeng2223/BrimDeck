@@ -1,3 +1,4 @@
+using Lens = BrimDeck.Core.WeatherMetric;
 using System.Globalization;
 using System.Linq;
 using System.Windows;
@@ -57,12 +58,16 @@ internal sealed class WeatherView : UserControl
     private readonly UniformGrid stats = new() { Rows = 2, Columns = 2 };
     private readonly UniformGrid forecast = new() { Rows = 1, Columns = 7 };
     private readonly Grid days = new();
+    // 底部区域第二套视图：生活指数。与 days 互斥占据同一行，点天气图标切换。
+    private readonly ScrollViewer indicesView = new() { VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Disabled, Visibility = Visibility.Collapsed };
+    private readonly StackPanel indicesBody = new();
+    private bool _indicesMode;
     // 折线是预报区里唯一的弹性带：所在行是 Star、画布拉伸填充（MinHeight 保底），多余高度全部由折线吸收。
     // 高度变化被折线连续伸缩消化，而不是靠收起/展开内容行——骨架恒定，抖动在结构上无从产生。
     private readonly Canvas chart = new() { MinHeight = ChartMinHeight, Width = 588, Background = Brushes.Transparent, VerticalAlignment = VerticalAlignment.Stretch };
     private bool _hourlyMode = true;    // 底部曲线视图：true=当日 24h 逐时（默认），false=每日高低温
     // 底部「看什么」：卡片点一下换成该指标的逐时曲线，再点一次回到气温。逐日只有气温，所以非气温镜头一律切到逐时。
-    private enum Lens { Temp, Feels, Humidity, Wind, Gust, Precip, Pressure, DewPoint, Uv, Cloud, Visibility, Aqi, Celestial }
+    private WeatherChip[] _drawnChips = [];
     private Lens _lens = Lens.Temp;
     // 逐日列内的纵向顺序：星期/日期/转后图标/天气名/高温 →【折线图】→ 低温 →（转前名/同尺寸图标/风级）。折线插在高低温之间。
     private readonly UniformGrid lowRow = new() { Rows = 1, Columns = 7, Height = LowRowHeight };
@@ -107,13 +112,24 @@ internal sealed class WeatherView : UserControl
     private double _chartDrawnWidth;
     private DispatcherTimer? _chartSettle;
     // 主题配色只有几种，画刷冻结后共享：一次重画会碰上百个元素，逐个 new 只会白白制造垃圾。
-    private static readonly Brush ColText = Frozen(205, 224, 247);
-    private static readonly Brush ColMuted = Frozen(150, 168, 192);
-    private static readonly Brush ColCondition = Frozen(198, 214, 232);
-    private static readonly Brush ColWind = Frozen(160, 205, 235);
-    private static readonly Brush ChartTemp = Frozen(102, 194, 255);
+    private readonly PanelLook _look;
+    private Brush ColText => UI.Brush(_look.Secondary);
+    private Brush ColMuted => UI.Brush(_look.Tertiary);
+    private Brush ColCondition => UI.Brush(_look.Primary);
+    private Brush ColWind => Ink(Color.FromRgb(160,205,235));
+    private Brush ChartTemp => Ink(Color.FromRgb(102,194,255));
+    private Brush Ink(Color color) => new SolidColorBrush(_look.Readable(color, PanelThemes.TextContrast));
+    internal void ApplyWeatherTheme()
+    {
+        Foreground = UI.Brush(_look.Primary);
+        minuteTitle.Foreground = footerNote.Foreground = ColMuted;
+        minuteNote.Foreground = ColText;
+        _renderSignature = 0;
+        if (_last is not { } snap) return;
+        Render(snap);
+    }
     private static readonly Brush NowRuleBrush = Frozen(150, 143, 208, 255);
-    private static readonly Brush NowTextBrush = Frozen(143, 208, 255);
+    private Brush NowTextBrush => Ink(Color.FromRgb(143, 208, 255));
     private static readonly Brush TodayFill = Frozen(26, 255, 255, 255);
     private static readonly Brush TodayEdge = Frozen(56, 255, 255, 255);
     private static Brush Frozen(byte r, byte g, byte b) { var brush = new SolidColorBrush(Color.FromRgb(r, g, b)); brush.Freeze(); return brush; }
@@ -132,7 +148,7 @@ internal sealed class WeatherView : UserControl
         UpdateMinuteVisibility();
         // 顶部读数卡随宽度在 2–6 列之间逐列增减；跨档时重建摘要。
         int summaryCols = SummaryColumns(width);
-        if (summaryCols != _summaryCols)
+        if (summaryCols != _summaryCols || !_drawnChips.SequenceEqual(_app.Settings.Weather.Chips))
         {
             _summaryCols = summaryCols;
             if (_last is { } summarySnap) DrawSummary(summarySnap);
@@ -174,7 +190,7 @@ internal sealed class WeatherView : UserControl
     // 只有当面板矮到放不下预报条、只剩今日天气时，才让今日天气接管弹性行并居中，避免贴着页头、下面空一大片。
     private void SyncSummaryAlignment()
     {
-        bool showDays = days.Visibility == Visibility.Visible;
+        bool showDays = _indicesMode || days.Visibility == Visibility.Visible;   // 指数视图与 days 共用这一行，任一可见就占满
         summaryRow.Height = showDays ? GridLength.Auto : new GridLength(1, GridUnitType.Star);
         daysRow.Height = showDays ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         var place = showDays ? VerticalAlignment.Top : VerticalAlignment.Center;
@@ -199,15 +215,38 @@ internal sealed class WeatherView : UserControl
         var chartVisibility = level >= 3 ? Visibility.Visible : Visibility.Collapsed;
         bool chartToggled = chart.Visibility != chartVisibility;
         chart.Visibility = chartVisibility;
+        // 折线收起时，上下各可见行按原有内容高度分配空间。
+        bool stretchForecast = level is 1 or 2 && _lens != Lens.Celestial;
+        var flexible = new GridLength(1, GridUnitType.Star);
+        int conditionIndex = _hourlyMode ? HourlyConditionRow : DailyConditionRow;
+        double upperHeight = rows.Sum() - rows[conditionIndex] + conditionHeight + ColumnInset;
+        days.RowDefinitions[0].Height = stretchForecast ? new GridLength(upperHeight, GridUnitType.Star) : GridLength.Auto;
+        days.RowDefinitions[1].Height = chartVisibility == Visibility.Visible ? flexible : new GridLength(0);
+        foreach (var border in forecast.Children.OfType<Border>())
+        {
+            if (border.Child is not Grid column) continue;
+            for (int i = 0; i < column.RowDefinitions.Count; i++)
+            {
+                if (i == conditionIndex) continue;
+                column.RowDefinitions[i].Height = new GridLength(rows[i],
+                    stretchForecast ? GridUnitType.Star : GridUnitType.Pixel);
+            }
+        }
         bool showTemp = level >= 2 && _lens != Lens.Celestial;   // 日月镜头有自己的底部时刻行，低温/时刻行让位
         // 逐时与逐日必须同进退：lowRow 在逐日放低温、在逐时放时刻，只要显隐规则一致，days 的骨架就恒定。
         lowRow.Visibility = showTemp ? Visibility.Visible : Visibility.Collapsed;
         // 逐日信息行只在「有低温行 + 逐日模式」出现；切到逐时后时刻独占 lowRow，这一行收起。
         dayInfoRow.Visibility = showTemp && !_hourlyMode ? Visibility.Visible : Visibility.Collapsed;
         // 信息行只有两档：完整（天气名 + 28px 图标 + 风）与紧凑（图标 + 风）。
-        dayInfoRow.Height = showCondition ? DayInfoFull : DayInfoCompact;
+        double infoHeight = showCondition ? DayInfoFull : DayInfoCompact;
+        lowRow.Height = stretchForecast ? double.NaN : LowRowHeight;
+        dayInfoRow.Height = stretchForecast ? double.NaN : infoHeight;
+        days.RowDefinitions[2].Height = stretchForecast && showTemp ? new GridLength(LowRowHeight, GridUnitType.Star) : GridLength.Auto;
+        days.RowDefinitions[3].Height = stretchForecast && showTemp && !_hourlyMode ? new GridLength(infoHeight, GridUnitType.Star) : GridLength.Auto;
+        foreach (Grid info in dayInfoRow.Children)
+            info.RowDefinitions[0].Height = new GridLength(showCondition ? DayInfoFull - DayInfoCompact : 0);
         foreach (var p in tempLabels) p.Visibility = showTemp ? Visibility.Visible : Visibility.Collapsed;
-        days.Visibility = level >= 1 ? Visibility.Visible : Visibility.Collapsed;
+        days.Visibility = !_indicesMode && level >= 1 ? Visibility.Visible : Visibility.Collapsed;
         // 折线行重新出现时行高从 0 展开，画布还没按新高度画过：立刻补一版，布局后 SizeChanged 会再校准一次。
         if (chartToggled && chartVisibility == Visibility.Visible && _last is { } snap) DrawChart(snap);
     }
@@ -313,11 +352,12 @@ internal sealed class WeatherView : UserControl
     internal event Action? StateChanged;
     private void RaiseState() => StateChanged?.Invoke();
 
-    public WeatherView(App app)
+    public WeatherView(App app, PanelLook look)
     {
         _app = app;
+        _look = look;
         Width = 620; Height = 290;
-        Background = Brushes.Transparent; Foreground = Brushes.White;
+        Background = Brushes.Transparent; ApplyWeatherTheme();
         state = WeatherData.Load(() => _app.Settings);
         // Grid 两行：今日天气(Auto 按内容贴顶) / 底部预报(Star 填满余下高度)，宽度与高度都随 Fit 传入值整体填充。
         // 今日天气内容不多，按内容高度就够；多出来的高度全部给下方预报区，让它上沿紧接天气、下沿贴住页脚，
@@ -341,6 +381,13 @@ internal sealed class WeatherView : UserControl
         root.RowDefinitions.Add(footerRow);
         Grid.SetRow(summary, 0); Grid.SetRow(minuteStrip, 1); Grid.SetRow(days, 2); Grid.SetRow(footerNote, 3);
         root.Children.Add(summary); root.Children.Add(minuteStrip); root.Children.Add(days); root.Children.Add(footerNote);
+        // 生活指数视图与 days 占同一行、同一层；默认折叠，点天气图标时与 days 互换可见性。
+        Grid.SetRow(indicesView, 2);
+        indicesView.Content = indicesBody;
+        indicesView.SetResourceReference(Control.TemplateProperty, "WeatherIndicesScrollTemplate");
+        indicesView.Margin = new Thickness(0, 0, -root.Margin.Right, 0);
+        indicesView.Padding = new Thickness(6, 2, 1, 2);
+        root.Children.Add(indicesView);
         host.Children.Add(root); Content = host;
         // days 内部四行上下排列：预报列上段(星期/日期/图标/天气名称/高温)贴顶、折线图占据中间弹性行、
         // 低温/时刻行在下、逐日再看一行的「转前天气名 + 同尺寸图标 + 风向风级」贴底，与折线上方镜像。折线行吸收预报区多出来的高度，
@@ -530,6 +577,7 @@ internal sealed class WeatherView : UserControl
         drawn &= DrawPart("预报列", () => DrawForecast(s));
         drawn &= DrawPart("折线", () => DrawChart(s));
         drawn &= DrawPart("分钟降水", () => DrawMinute(s));
+        if (_indicesMode) drawn &= DrawPart("生活指数", () => FillIndices(s));
         _renderFailed = !drawn;
     }
     // 把任意粒度的分钟点（和风 5min×24、Open-Meteo 15min×8）重采样成 24 格 × 5 分钟，
@@ -589,7 +637,7 @@ internal sealed class WeatherView : UserControl
     // 逐日模式优先保证 24 天预报的可用高度，不显示窄条；窄窗口只留文字不画柱。
     private void UpdateMinuteVisibility()
     {
-        bool show = _hourlyMode && _last is { MinutePrecip.Length: > 0 } && _minuteHasRain && Height >= 200;
+        bool show = !_indicesMode && _hourlyMode && _last is { MinutePrecip.Length: > 0 } && _minuteHasRain && Height >= 200;
         minuteRow.Height = show ? new GridLength(34) : new GridLength(0);
         minuteStrip.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         minuteBars.Visibility = Width >= 420 ? Visibility.Visible : Visibility.Collapsed;
@@ -622,12 +670,12 @@ internal sealed class WeatherView : UserControl
             _ => (Color.FromArgb(0x34, 0x7F, 0xB8, 0xFF), Color.FromRgb(184, 216, 255))
         };
         var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        row.Children.Add(new TextBlock { Text = "⚠", FontSize = 10, Foreground = new SolidColorBrush(fg), Margin = new Thickness(0, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center });
+        row.Children.Add(new TextBlock { Text = "⚠", FontSize = 10, Foreground = Ink(fg), Margin = new Thickness(0, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center });
         string name = w.Type.Length > 0
             ? (w.Level.Length > 0 ? $"{w.Type} · {WarnLevelShort(w.Level)}" : w.Type)
             : (w.Title.Length > 0 ? w.Title : w.Level);
-        row.Children.Add(new TextBlock { Text = name, FontSize = 11, Foreground = new SolidColorBrush(fg), TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center });
-        if (total > 1) row.Children.Add(new TextBlock { Text = $"+{total - 1}", FontSize = 10, Foreground = new SolidColorBrush(fg), Margin = new Thickness(4, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
+        row.Children.Add(new TextBlock { Text = name, FontSize = 11, Foreground = Ink(fg), TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center });
+        if (total > 1) row.Children.Add(new TextBlock { Text = $"+{total - 1}", FontSize = 10, Foreground = Ink(fg), Margin = new Thickness(4, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
         var badge = new Border
         {
             Child = row, Background = new SolidColorBrush(bg), CornerRadius = new CornerRadius(7),
@@ -638,7 +686,7 @@ internal sealed class WeatherView : UserControl
                 : (w.Title.Length > 0 ? w.Title : null)
         };
         AutomationProperties.SetName(badge, Loc.T("气象预警", "Weather warning") + " " + name);
-        badge.MouseLeftButtonUp += (_, e) => { e.Handled = true; ShowDetails(s); };
+        badge.MouseLeftButtonUp += (_, e) => { e.Handled = true; if (!_indicesMode) ToggleView(); };
         return badge;
     }
     // 风速卡的标题直接带上 8 方位风向与风级，省一张卡；没有风向文字（如 Open-Meteo）时按度数归一。
@@ -672,10 +720,14 @@ internal sealed class WeatherView : UserControl
     };
     private static string PrecipTitle(WeatherSnapshot s) => PrecipName(s.PrecipType);
 
-    // 空气卡：标题行放等级文字（优/良/轻度污染…），主数值放 AQI。和风给 category 就直接用，
-    private static string AirTitle(WeatherSnapshot s)
-        => s.Aqi < 0 ? Loc.T("空气", "Air") : s.AqiText.Length > 0 ? s.AqiText : WeatherCodes.AqiText(s.Aqi);
-    private static string AirValue(WeatherSnapshot s) => s.Aqi >= 0 ? $"AQI: {s.Aqi}" : "--";
+    // 空气卡：标题固定「空气质量」，主值显示「等级 数值」（如「优 35」），空格分割。
+    // 和风给了 category 就直接用，否则按国标 HJ 633 由 AQI 换算。
+    private static string AirLevel(WeatherSnapshot s)
+    {
+        if (s.Aqi < 0) return "--";
+        string level = s.AqiText.Length > 0 ? s.AqiText : WeatherCodes.AqiText(s.Aqi);
+        return $"{level} {s.Aqi}";
+    }
 
     private string? PrecipTip(WeatherSnapshot s)
         => double.IsNaN(s.PrecipRateMmH) && string.IsNullOrWhiteSpace(s.PrecipType)
@@ -693,16 +745,16 @@ internal sealed class WeatherView : UserControl
         // 今日天气内容顶对齐：内容不多，不跟着面板拉伸，多出的高度留给下方预报区填充。
         // 垂直基准由 SyncSummaryAlignment 统一管理（只剩今日天气时才改为居中）。
         var hero = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 2, 8, 2), VerticalAlignment = VerticalAlignment.Top };
-        // 左上角大图标是详情入口：悬浮播放天气动效，点击打开详情浮层。
+        // 左上角大图标是视图切换入口：悬浮播放天气动效，点击在「逐时/逐日预报」与「生活指数」间互换。
         var heroGlyph = new WeatherGlyph(s.WeatherCode, s.IsDay, animated: true)
         {
             Width = 56, Height = 56, Margin = new Thickness(0, 0, 12, 0),
             VerticalAlignment = VerticalAlignment.Center, Cursor = System.Windows.Input.Cursors.Hand,
-            ToolTip = Loc.T("点击查看天气详情", "Click for weather details")
+            ToolTip = Loc.T("点击切换生活指数 / 天气预报", "Click to toggle lifestyle indices / forecast")
         };
-        AutomationProperties.SetName(heroGlyph, Loc.T("天气详情", "Weather details"));
+        AutomationProperties.SetName(heroGlyph, Loc.T("切换生活指数与天气预报", "Toggle lifestyle indices and forecast"));
         WeatherMotion.Attach(heroGlyph);
-        heroGlyph.MouseLeftButtonUp += (_, e) => { e.Handled = true; ShowDetails(s); };
+        heroGlyph.MouseLeftButtonUp += (_, e) => { e.Handled = true; ToggleView(); };
         hero.Children.Add(heroGlyph);
         var side = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         var tempRow = new StackPanel { Orientation = Orientation.Horizontal };
@@ -739,7 +791,7 @@ internal sealed class WeatherView : UserControl
             (WeatherMetaKind.Thermo, Color.FromRgb(255, 176, 102), Loc.T("体感", "Feels like"), Num(s.FeelsLike, "°"), Lens.Feels, null),
             (WeatherMetaKind.Droplet, Color.FromRgb(112, 178, 255), Loc.T("湿度", "Humidity"), s.HumidityPercent >= 0 ? $"{s.HumidityPercent}%" : "--", Lens.Humidity, null),
             (WeatherMetaKind.Gauge, Color.FromRgb(168, 186, 208), Loc.T("气压", "Pressure"), Num(s.PressureHpa, " hPa"), Lens.Pressure, null),
-            (WeatherMetaKind.AirQuality, Color.FromRgb(126, 208, 154), AirTitle(s), AirValue(s), Lens.Aqi, null),
+            (WeatherMetaKind.AirQuality, (Color)ColorConverter.ConvertFromString(WeatherCodes.AqiColor(s.Aqi)), Loc.T("空气质量", "Air quality"), AirLevel(s), Lens.Aqi, null),
             (WeatherMetaKind.Cloud, Color.FromRgb(196, 214, 232), Loc.T("云量", "Cloud"), Num(s.CloudPercent, "%"), Lens.Cloud, null)
         ];
         (WeatherMetaKind kind, Color ink, string label, string value, Lens? lens, string? tip)[] lower =
@@ -751,16 +803,23 @@ internal sealed class WeatherView : UserControl
             (WeatherMetaKind.Uv, Color.FromRgb(255, 206, 112), Loc.T("紫外线", "UV"), Num(s.UvIndex, ""), Lens.Uv, null),
             (WeatherMetaKind.Sunrise, Color.FromRgb(255, 200, 90), Loc.T($"日升 {rise}", $"Sunrise {rise}"), Loc.T($"日落 {set}", $"Sunset {set}"), Lens.Celestial, null)
         ];
-        var tiles = new List<(WeatherMetaKind kind, Color ink, string label, string value, Lens? lens, string? tip)>(2 * cols);
-        for (int i = 0; i < cols; i++) tiles.Add(upper[i]);
-        // 最右列下排始终是日月入口；其余下排按同一序号与上排配对。
-        for (int i = 0; i < cols; i++) tiles.Add(i == cols - 1 ? lower[^1] : lower[i]);
-        foreach (var (kind, ink, label, value, lens, tip) in tiles)
+        _drawnChips = [.. _app.Settings.Weather.Chips];
+        var available = upper.Concat(lower).ToDictionary(tile => tile.lens!.Value);
+        foreach (var row in _app.Settings.Weather.ChipRows(cols))
         {
+            var metrics = row.Where(chip => chip.Visible).Take(cols).ToArray();
+            for (int i = metrics.Length; i < cols; i++)
+                stats.Children.Add(new Border { IsHitTestVisible = false });
+            foreach (var chip in metrics) AddTile(chip.Metric);
+        }
+
+        void AddTile(Lens metric)
+        {
+            var (kind, ink, label, value, lens, tip) = available[metric];
             var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             // 字号按实测宽度定：格宽 105，减内边距 14、描边 2、图标 15 + 间距 5 后，文字可用约 69。
-            text.Children.Add(new TextBlock { Text = label, FontFamily = UI.PanelFont, FontSize = 9.5, Foreground = new SolidColorBrush(Color.FromRgb(169, 189, 214)), Margin = new Thickness(0, 0, 0, 2), TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis });
-            text.Children.Add(new TextBlock { Text = value, FontFamily = UI.PanelFont, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Brushes.White, TextWrapping = TextWrapping.NoWrap });
+            text.Children.Add(new TextBlock { Text = label, FontFamily = UI.PanelFont, FontSize = 9.5, Foreground = ColText, Margin = new Thickness(0, 0, 0, 2), TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis });
+            text.Children.Add(new TextBlock { Text = value, FontFamily = UI.PanelFont, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(_look.Primary), TextWrapping = TextWrapping.NoWrap });
             var body = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
             // 风速卡用 8 方位箭头指示风向；箭头优先跟标题文字同档，文字缺失时才按角度分档。
             // 其余卡用各自的元信息图标。
@@ -845,123 +904,119 @@ internal sealed class WeatherView : UserControl
     private static string SourceName(WeatherSnapshot s)
         => s.Sources.TryGetValue("Daily", out var daily) && daily.Length > 0 ? daily
          : s.Sources.TryGetValue("Current", out var current) && current.Length > 0 ? current : "";
-    // 详情浮层：当前多维读数、未来 24 小时、24 天（历史 10 + 今天 + 未来 13）、空气质量与分域来源。
-    // 浮层盖住整块天气视图并可纵向滚动，关闭后回到摘要；不改变主视图的紧凑布局。
-    // 换城时浮层还盖着旧城市快照：记录引用，切换城市前先关掉。
-    private Grid? _overlay;
-    private void ShowDetails(WeatherSnapshot s)
+    // 生活指数视图：点天气图标时与底部 days（逐时/逐日预报）互换，占同一行、可纵向滚动。
+    // 换城/刷新走 Render 里的 FillIndices；不再用遮罩浮层，主视图布局保持不变。
+    private void ToggleView()
     {
-        var overlay = new Grid { Background = new SolidColorBrush(Color.FromArgb(168, 6, 9, 16)) };
-        host.Children.Add(overlay); _overlay = overlay;
-        var body = new StackPanel { Margin = new Thickness(20, 14, 20, 20) };
-        var scroll = new ScrollViewer { VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Disabled, Content = body };
-        var card = new Border { Margin = new Thickness(12), CornerRadius = new CornerRadius(16), Background = new SolidColorBrush(Color.FromRgb(24, 27, 34)), BorderBrush = new SolidColorBrush(Color.FromArgb(62, 255, 255, 255)), BorderThickness = new Thickness(1), Child = scroll };
-        overlay.Children.Add(card);
-        void Close() { _overlay = null; host.Children.Remove(overlay); }
-        overlay.MouseLeftButtonDown += (_, e) => { if (ReferenceEquals(e.OriginalSource, overlay)) Close(); };
-        overlay.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) { Close(); e.Handled = true; } };
-        overlay.Focusable = true; overlay.Focus();
-
-        // 扩展区：生活指数与数据来源图例。
-        ShowExtraSections(body, s);
-
-        // 数据来源图例：提供数据的来源用专属色，未提供/未启用的用灰色圆点。
-        body.Children.Add(SectionLabel(Loc.T("数据来源", "Sources")));
-        var info = new StackPanel();
-        var allIds = s.DomainSources.Values.SelectMany(ids => ids).Distinct().ToArray();
-        if (allIds.Length > 0)
-        {
-            var legend = new WrapPanel { Margin = new Thickness(2, 0, 0, 6) };
-            foreach (var id in allIds)
-            {
-                bool ok = s.SourceProvided.TryGetValue(id, out var yes) && yes;
-                var color = ok ? SourceColor(id) : Color.FromRgb(108, 116, 128);
-                var chip = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 12, 2) };
-                chip.Children.Add(new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Background = new SolidColorBrush(color), VerticalAlignment = VerticalAlignment.Center });
-                chip.Children.Add(new TextBlock { Text = SourceName(id), FontSize = 11, Foreground = new SolidColorBrush(color), Margin = new Thickness(5, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
-                legend.Children.Add(chip);
-            }
-            info.Children.Add(legend);
-        }
-        body.Children.Add(info);
-        Soft.Enter(card);
+        if (_last is not { } snap) return;
+        _indicesMode = !_indicesMode;
+        if (_indicesMode) FillIndices(snap);
+        indicesView.Visibility = _indicesMode ? Visibility.Visible : Visibility.Collapsed;
+        days.Visibility = !_indicesMode && _forecastLevel >= 1 ? Visibility.Visible : Visibility.Collapsed;
+        SyncSummaryAlignment();
+        UpdateMinuteVisibility();
+        Fit(Width, Height, true);
     }
 
-    // 扩展数据展示：全部收在详情浮层，主视图维持紧凑与掉帧级性能。
-    // 每个分区各自判断有无数据，缺省只显示一行轻提示，不为没有数据的域留大片空白。
-    private static void ShowExtraSections(StackPanel body, WeatherSnapshot s)
+    private void FillIndices(WeatherSnapshot s)
     {
-        Color dim = Color.FromRgb(143, 166, 192), ink = Color.FromRgb(226, 236, 248), accent = Color.FromRgb(99, 179, 244);
-        static TextBlock Pill(string text, Color color, double size = 11) => new()
-        {
-            Text = text, FontSize = size, Foreground = new SolidColorBrush(color), TextWrapping = TextWrapping.NoWrap
-        };
+        var body = indicesBody;
+        body.Children.Clear();
+        // 指数视图只放指数卡片本身，不显示「天气指数」「数据来源」这类分区标题。
+        ShowExtraSections(body, s);
+    }
 
-        // 区块标题行：标题右侧放该域实际贡献来源的色点，来源名收进悬浮提示；颜色含义由底部图例统一解释。
-        // fieldPrefixes 非空时改从字段级来源取（天文等域混在 Daily 里，按实际字段归源才准确）。
-        void Header(string text, string domain, params string[] fieldPrefixes)
-        {
-            List<string> ids;
-            if (fieldPrefixes.Length > 0)
-                ids = s.FieldSources.Where(kv => kv.Value.Length > 0 && fieldPrefixes.Any(p => kv.Key.StartsWith(p, StringComparison.Ordinal))).Select(kv => kv.Value).Distinct().ToList();
-            else if (s.DomainSources.TryGetValue(domain, out var declared))
-                ids = declared.Where(id => s.SourceProvided.TryGetValue(id, out var ok) && ok).ToList();
-            else ids = [];
-            SectionHeader(body, text, ids);
-        }
+    // 指数卡片展示。无数据时只显示一行轻提示。
+    private void ShowExtraSections(StackPanel body, WeatherSnapshot s)
+    {
 
-        // 1) 生活指数：两列卡，名称 + 等级 + 说明。
-        // 标题颜色跟该域实际贡献的来源走（指数由和风提供 → 和风紫），
-        // 与上方读数卡/图例的来源配色保持一致；没有来源信息时才退回 accent。
-        Header(Loc.T("天气指数", "Lifestyle indices"), "Indices");
-        Color indexColor = accent;
-        if (s.DomainSources.TryGetValue("Indices", out var indexIds) && indexIds.FirstOrDefault(id => s.SourceProvided.TryGetValue(id, out var ok) && ok) is { } indicesId) indexColor = SourceColor(indicesId);
+
+        // 天气指数：全部展示（和风 type=0 最多 16 项），两列卡。高频项排前、冷门项在后，不折叠、不隐藏。
+        // 等级做成语义色胶囊（绿=适宜/优、黄=较适宜/中、红=不宜/差），说明压成单行、悬浮看全文。
         if (s.Indices.Length == 0) body.Children.Add(Note(Loc.T("暂无生活指数", "No lifestyle indices")));
         else
         {
-            var grid = new UniformGrid { Columns = 2, Margin = new Thickness(2, 0, 2, 4) };
-            foreach (var item in s.Indices)
+            // 排序按和风 type ID（语言无关）：穿衣3 / 洗车2 / 紫外线5 / 运动1 / 感冒9 / 空气清爽10 优先，
+            // 其余按 type 升序跟在后面；海外城市只返回 1-5，中国城市才有 1-16 全部。
+            static int Rank(IndexItem item)
             {
-                var card = new StackPanel { Margin = new Thickness(3) };
-                card.Children.Add(Pill((item.Name.Length > 0 ? item.Name : item.Category) + (item.Level.Length > 0 ? $" · {item.Level}" : ""), indexColor, 11.5));
-                if (item.Text.Length > 0) { var msg = Pill(item.Text, ink, 10.5); msg.TextWrapping = TextWrapping.Wrap; card.Children.Add(msg); }
-                grid.Children.Add(new Border { Child = card, Background = new SolidColorBrush(Color.FromArgb(18, 255, 255, 255)), CornerRadius = new CornerRadius(8), Padding = new Thickness(8, 6, 8, 6) });
+                int priority = item.Type switch { "3" => 0, "2" => 1, "5" => 2, "1" => 3, "9" => 4, "10" => 5, _ => 6 };
+                return priority * 100 + (int.TryParse(item.Type, out int id) ? id : 99);
             }
+            var picked = s.Indices.GroupBy(item => item.Type.Length > 0 ? item.Type : item.Name).Select(group => group.First()).OrderBy(Rank).ToArray();
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition());
+            grid.ColumnDefinitions.Add(new ColumnDefinition());
             body.Children.Add(grid);
+            for (int i = 0; i < picked.Length; i++)
+            {
+                var item = picked[i];
+                string name = item.Name.EndsWith("指数") && item.Name.Length > 2 ? item.Name[..^2] : item.Name;
+                string value = item.Category.Length > 0 ? item.Category : item.Level;
+                string icon = item.Type switch
+                {
+                    "1" => "🏃", "2" => "🚗", "3" => "👕", "4" => "🎣",
+                    "5" => "☀", "6" => "🧳", "7" => "🌼", "8" => "🛋",
+                    "9" => "💊", "10" => "☁", "11" => "❄", "12" => "🕶",
+                    "13" => "💄", "14" => "👓", "15" => "☂", "16" => "🌬", _ => "☷"
+                };
+                var header = new Grid();
+                header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star) });
+                header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+                header.Children.Add(new TextBlock { Text = icon, FontFamily = new FontFamily("Segoe UI Emoji, Segoe UI Symbol"),
+                    Foreground = ColText, FontSize = 15, Width = 24, VerticalAlignment = VerticalAlignment.Center });
+                var title = new TextBlock { Text = name, FontSize = 13, FontWeight = FontWeights.SemiBold,
+                    Foreground = UI.Brush(_look.Primary), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+                Grid.SetColumn(title, 1);
+                header.Children.Add(title);
+                var level = new TextBlock { Text = value, FontSize = 13, FontWeight = FontWeights.SemiBold,
+                    Foreground = Ink(IndexTone(item)), TextAlignment = TextAlignment.Right, TextWrapping = TextWrapping.Wrap,
+                    VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) };
+                Grid.SetColumn(level, 2);
+                header.Children.Add(level);
+
+                var card = new StackPanel();
+                card.Children.Add(header);
+                if (item.Text.Length > 0)
+                    card.Children.Add(new TextBlock { Text = item.Text, FontSize = 11.5, Foreground = ColText,
+                        Margin = new Thickness(0, 5, 0, 0), TextWrapping = TextWrapping.Wrap });
+                var tile = new Border { Child = card, Margin = new Thickness(2, 0, 2, 5), Padding = new Thickness(10, 8, 10, 8),
+                    Background = new SolidColorBrush(Color.FromArgb(16, 255, 255, 255)), CornerRadius = new CornerRadius(7) };
+                if (i % 2 == 0)
+                    grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                Grid.SetRow(tile, i / 2);
+                Grid.SetColumn(tile, i % 2);
+                grid.Children.Add(tile);
+            }
         }
     }
 
-    // 分区标题行（详情页共用）：标题右侧放该分区实际贡献来源的色点，名字收进悬浮提示，图例负责解释颜色。
-    private static void SectionHeader(StackPanel body, string text, IReadOnlyCollection<string> ids)
+    // 指数等级语义色：绿=适合、黄=中性/过渡、红=不宜/极端。
+    // 和风的 level 数字是语言无关判据，但方向按 type 而定：多数「数字越大越差」，
+    // 穿衣(3) 反而是 5=舒适最好、两端寒冷/炎热差；空调(11)/太阳镜(12)/化妆(13) 纯建议无好坏，一律中性。
+    private static Color IndexTone(IndexItem item)
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(2, 16, 0, 8) };
-        row.Children.Add(new TextBlock { Text = text, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(143, 166, 192)), VerticalAlignment = VerticalAlignment.Center });
-        foreach (var id in ids)
+        int level = int.TryParse(item.Level, out var n) ? n : 0;
+        bool neutral = item.Type is "11" or "12" or "13";
+        bool bad, warn;
+        if (neutral) { bad = warn = false; }
+        else if (item.Type == "3") { bad = level is 1 or 2 or 7; warn = level is 3 or 6; }
+        else if (level > 0)
         {
-            var dot = new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(3.5), Background = new SolidColorBrush(SourceColor(id)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) };
-            System.Windows.Controls.ToolTipService.SetToolTip(dot, Loc.T($"来自 {SourceName(id)}", $"From {SourceName(id)}"));
-            row.Children.Add(dot);
+            bad = level >= 4 || item.Category.Contains("不宜") || item.Category.Contains("很差") || item.Category.Contains("极易") || item.Category.Contains("不舒适");
+            warn = !bad && (level == 3 || item.Category.Contains("较") || item.Category.Contains("一般") || item.Category.Contains("中"));
         }
-        body.Children.Add(row);
+        else
+        {
+            bad = item.Category.Contains("不宜") || item.Category.Contains("很差") || item.Category.Contains("极易") || item.Category.Contains("不舒适");
+            warn = !bad && (item.Category.Contains("较") || item.Category.Contains("一般") || item.Category.Contains("中"));
+        }
+        Color tone = bad ? Color.FromRgb(255, 148, 148) : warn ? Color.FromRgb(255, 202, 112) : Color.FromRgb(138, 216, 158);
+        return neutral || (level == 0 && !bad && !warn) ? Color.FromRgb(152, 169, 187) : tone;
     }
 
-    private static TextBlock SectionLabel(string text) => new() { Text = text, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(143, 166, 192)), Margin = new Thickness(2, 16, 0, 8) };
-    private static TextBlock Note(string text) => new() { Text = text, FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(143, 166, 192)), Margin = new Thickness(2, 0, 0, 6) };
-    // 来源主题色：每家在详情页读数卡与图例中使用专属颜色，一眼看出该字段数据来自哪个来源。
-    private static Color SourceColor(string id) => id switch
-    {
-        "openmeteo" => Color.FromRgb(102, 194, 255),   // 天蓝
-        "weathercomcn" => Color.FromRgb(255, 163, 72), // 中国天气网橙
-        "hefeng" => Color.FromRgb(188, 139, 255),      // 和风紫
-        "local" => Color.FromRgb(158, 178, 200),       // 本地历史：灰，区别于任何在线来源
-        _ => Color.FromRgb(158, 178, 200)
-    };
-    private static string SourceName(string id) => id switch
-    {
-        "openmeteo" => "Open-Meteo", "weathercomcn" => Loc.T("中国天气网", "China Weather"),
-        "hefeng" => Loc.T("和风天气", "QWeather"),
-        "local" => Loc.T("本地记录", "Local history"), _ => id
-    };
+    private TextBlock Note(string text) => new() { Text = text, FontSize = 11, Foreground = ColMuted, Margin = new Thickness(2, 0, 0, 6) };
     // 宽度自适应列数，按时间正序（过去→今天→未来）取窗口：最小 7 列=今天+未来6天，最大 24 列=过去10+今天+未来13，左右按同比例同步扩展。
     private static int[] Order(WeatherSnapshot s, int columns)
     {
@@ -1071,7 +1126,7 @@ internal sealed class WeatherView : UserControl
                 {
                     Text = prob >= 0 ? $"{prob}%" : $"{pmm:0.#}", FontSize = ColNote, TextAlignment = TextAlignment.Center,
                     HorizontalAlignment = HorizontalAlignment.Center, TextWrapping = TextWrapping.NoWrap,
-                    Foreground = new SolidColorBrush(Color.FromRgb(96, 168, 246))
+                    Foreground = Ink(Color.FromRgb(96, 168, 246))
                 };
                 var tip = new List<string>();
                 if (prob >= 0) tip.Add(Loc.T("降水概率 ", "PoP ") + prob + "%");
@@ -1089,7 +1144,7 @@ internal sealed class WeatherView : UserControl
                 {
                     Text = AqiLevelShort(aqi), FontSize = ColNote, TextAlignment = TextAlignment.Center,
                     HorizontalAlignment = HorizontalAlignment.Center, TextWrapping = TextWrapping.NoWrap,
-                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(WeatherCodes.AqiColor(aqi)))
+                    Foreground = Ink((Color)ColorConverter.ConvertFromString(WeatherCodes.AqiColor(aqi)))
                 };
                 level.ToolTip = $"{Loc.T("空气质量", "Air quality")} {WeatherCodes.AqiText(aqi)} · AQI {aqi}";
                 CellAt(column, level, 2);
@@ -1215,7 +1270,7 @@ internal sealed class WeatherView : UserControl
             string label = stale ? Loc.T(new[] { "周日", "周一", "周二", "周三", "周四", "周五", "周六" }[(int)date.DayOfWeek], new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }[(int)date.DayOfWeek])
                 : i == today ? Loc.T("今天", "Today") : i == today + 1 ? Loc.T("明天", "Tomorrow") : Loc.T(new[] { "周日", "周一", "周二", "周三", "周四", "周五", "周六" }[(int)date.DayOfWeek], new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }[(int)date.DayOfWeek]);
             bool isToday = i == today;
-            CellAt(column, new TextBlock { Text = label, FontSize = ColValue, FontWeight = FontWeights.SemiBold, TextAlignment = TextAlignment.Center, Foreground = isToday ? Brushes.White : ColText }, 0);
+            CellAt(column, new TextBlock { Text = label, FontSize = ColValue, FontWeight = FontWeights.SemiBold, TextAlignment = TextAlignment.Center, Foreground = isToday ? UI.Brush(_look.Primary) : ColText }, 0);
             CellAt(column, new TextBlock { Text = date.ToString("MM/dd"), Foreground = ColMuted, FontSize = ColNote, TextAlignment = TextAlignment.Center }, 1);
             int before = DayCodeAt(s, i);
             int night = NightCodeAt(s, i);
@@ -1232,14 +1287,18 @@ internal sealed class WeatherView : UserControl
             tempLabels.Add(high); CellAt(column, high, 4);
             // 今天列的选择态高亮由垫底的 todayGlow 贯穿整列承担，列自身保持透明。
             forecast.Children.Add(new Border { CornerRadius = new CornerRadius(15), Margin = new Thickness(3, 0, 3, 0), Padding = new Thickness(4, 2, 4, 2), Background = Brushes.Transparent, Child = column });
-            var low = new TextBlock { Text = Degree(s.DayLowC[i]), Foreground = Brushes.White, FontSize = ColValue, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Center, Width = 64, TextWrapping = TextWrapping.NoWrap, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            var low = new TextBlock { Text = Degree(s.DayLowC[i]), Foreground = UI.Brush(_look.Primary), FontSize = ColValue, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Center, Width = 64, TextWrapping = TextWrapping.NoWrap, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
             tempLabels.Add(low); lowRow.Children.Add(low);
-            var info = new StackPanel { Orientation = Orientation.Vertical, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            var info = new Grid();
+            info.RowDefinitions.Add(new RowDefinition());
+            info.RowDefinitions.Add(new RowDefinition { Height = new GridLength(ColGlyph, GridUnitType.Star) });
+            info.RowDefinitions.Add(new RowDefinition { Height = new GridLength(DayInfoCompact - ColGlyph, GridUnitType.Star) });
             var lowerName = new TextBlock { Text = HourCondition(before), FontSize = ColNote, TextWrapping = TextWrapping.NoWrap, TextAlignment = TextAlignment.Center, Foreground = ColCondition };
             conditionLabels.Add(lowerName);
             info.Children.Add(lowerName);
             var lowerGlyph = new WeatherGlyph(before, true) { Width = ColGlyph, Height = ColGlyph, HorizontalAlignment = HorizontalAlignment.Center };
-            info.Children.Add(lowerGlyph);
+            lowerGlyph.VerticalAlignment = VerticalAlignment.Center;
+            CellAt(info, lowerGlyph, 1);
             string dirText = s.DayWindDir.Length > i ? s.DayWindDir[i] : "";
             double dir = s.DayWindDirDeg.Length > i ? s.DayWindDirDeg[i] : double.NaN;
             double wind = s.DayWindMaxKmh.Length > i ? s.DayWindMaxKmh[i] : double.NaN;
@@ -1252,7 +1311,7 @@ internal sealed class WeatherView : UserControl
             }
             string bft = Bft(wind);
             if (bft.Length > 0) windRow.Children.Add(new TextBlock { Text = bft, FontSize = ColNote, TextAlignment = TextAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Foreground = ColWind });
-            if (windRow.Children.Count > 0) info.Children.Add(windRow);
+            if (windRow.Children.Count > 0) CellAt(info, windRow, 2);
             if (!double.IsNaN(dir)) info.ToolTip = !string.IsNullOrWhiteSpace(dirText) ? dirText : WeatherCodes.DegreeToCompass(dir) + Loc.T("风", "");
             dayInfoRow.Children.Add(info);
         }
@@ -1326,7 +1385,7 @@ internal sealed class WeatherView : UserControl
             double yy = Y(s.HourTempsC[p]);
             var dot = new System.Windows.Shapes.Ellipse { Width = 5, Height = 5, Fill = brush }; Canvas.SetLeft(dot, X(p) - 2.5); Canvas.SetTop(dot, yy - 2.5); chart.Children.Add(dot);
             // 每个点都标温度：列宽最小约 48px，单个「7°」只占 12–18px，相邻两点间隔 48px，不会压字。
-            var probe = new TextBlock { Text = $"{s.HourTempsC[p]:0}°", FontSize = 9, Foreground = brush };
+            var probe = new TextBlock { Text = $"{s.HourTempsC[p]:0}°", FontSize = 9, Foreground = brush is SolidColorBrush solid ? Ink(solid.Color) : brush };
             probe.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             Canvas.SetLeft(probe, X(p) - probe.DesiredSize.Width / 2); Canvas.SetTop(probe, yy - 14); chart.Children.Add(probe);
         }
@@ -1350,7 +1409,7 @@ internal sealed class WeatherView : UserControl
             double yy = Y(data[p]);
             var dot = new System.Windows.Shapes.Ellipse { Width = 5, Height = 5, Fill = brush };
             Canvas.SetLeft(dot, X(p) - 2.5); Canvas.SetTop(dot, yy - 2.5); chart.Children.Add(dot);
-            var label = new TextBlock { Text = degree ? data[p].ToString(fmt, CultureInfo.InvariantCulture) + "°" : data[p].ToString(fmt, CultureInfo.InvariantCulture), FontSize = 9, Foreground = brush };
+            var label = new TextBlock { Text = degree ? data[p].ToString(fmt, CultureInfo.InvariantCulture) + "°" : data[p].ToString(fmt, CultureInfo.InvariantCulture), FontSize = 9, Foreground = brush is SolidColorBrush solid ? Ink(solid.Color) : brush };
             label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             Canvas.SetLeft(label, X(p) - label.DesiredSize.Width / 2); Canvas.SetTop(label, yy - 14); chart.Children.Add(label);
         }
@@ -1412,7 +1471,7 @@ internal sealed class WeatherView : UserControl
             var bar = new System.Windows.Shapes.Rectangle { Width = Math.Max(3, col * 0.42), Height = h, Fill = brush, RadiusX = 2, RadiusY = 2, Opacity = 0.85 };
             Canvas.SetLeft(bar, X(p) - bar.Width / 2); Canvas.SetTop(bar, baseY - h); chart.Children.Add(bar);
             if (ordinal++ % step != 0) continue;
-            var label = new TextBlock { Text = labelText(p), FontSize = 9, Foreground = brush };
+            var label = new TextBlock { Text = labelText(p), FontSize = 9, Foreground = brush is SolidColorBrush solid ? Ink(solid.Color) : brush };
             label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             Canvas.SetLeft(label, X(p) - label.DesiredSize.Width / 2); Canvas.SetTop(label, baseY - h - 13); chart.Children.Add(label);
         }
@@ -1557,7 +1616,7 @@ internal sealed class WeatherView : UserControl
             var caption = new TextBlock
             {
                 Text = Loc.T("今日月出 ", "Moonrise today ") + todayMoonrise.at.ToString("HH:mm"),
-                FontSize = 11, Foreground = new SolidColorBrush(silver)
+                FontSize = 11, Foreground = Ink(silver)
             };
             Canvas.SetLeft(caption, 6); Canvas.SetTop(caption, 0); chart.Children.Add(caption);
         }
@@ -1568,7 +1627,7 @@ internal sealed class WeatherView : UserControl
             var label = new TextBlock
             {
                 Text = m.name + "\n" + m.at.ToString("HH:mm"), TextAlignment = TextAlignment.Center,
-                FontSize = 9, Foreground = new SolidColorBrush(m.sun ? gold : silver)
+                FontSize = 9, Foreground = Ink(m.sun ? gold : silver)
             };
             label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             double x = X(m.at), left = Math.Max(nextLeft, x - label.DesiredSize.Width / 2);
@@ -1605,7 +1664,7 @@ internal sealed class WeatherView : UserControl
     }
     // 风向箭头：几何按「指向上」画，直接旋到风的来向；气象风向就是来向，北风指北（向上）。
     // 角度先归到 8 方位，逐时箭头只有 0/45/…/315 八种朝向，和风向文字同一档。
-    private static UIElement WindMark(double deg) => new Path
+    private UIElement WindMark(double deg) => new Path
     {
         Data = Geometry.Parse("M0,-4.6 L3.6,3.4 L0,1.4 L-3.6,3.4 Z"),
         Fill = ColWind,
@@ -1672,14 +1731,7 @@ internal sealed class WeatherView : UserControl
     {
         if (state.Selected == index) return;
         state.Selected = index; _app.QueueSave(); WeatherData.Save(state);
-        CloseDetails();   // 换城后浮层还盖着旧城市的快照：先关再刷
         await Refresh();
-    }
-    private void CloseDetails()
-    {
-        if (_overlay is not { } open) return;
-        _overlay = null;
-        host.Children.Remove(open);
     }
     internal Action? SettingsRequested;
 }

@@ -41,7 +41,7 @@ internal sealed class WeatherMetaIcon : FrameworkElement
             (WeatherMetaKind.DewPoint,"M5,2 C4,4.5 1.8,6.5 1.8,8.4 A3.2,3.2 0 0 0 8.2,8.4 C8.2,6.5 6,4 5,2 Z M11,9 V3 A1.4,1.4 0 0 1 13.8,3 V9 A2.5,2.5 0 1 1 11,9 Z"),
             (WeatherMetaKind.Uv,"M2,7 A5,5 0 0 0 9,2 M2,2 L4.5,4.5 M5.5,9 L9.5,13 M9,7 L13,11 M11,3.5 L14.5,7"),
             (WeatherMetaKind.AirQuality,"M2,13 H14 M4,10 V8 M8,10 V5.5 M12,10 V2.5"),
-            (WeatherMetaKind.NoPrecip,"M8,2 C6,5 3.5,7.4 3.5,10 A4.5,4.5 0 0 0 11.4,13 M12.4,9.2 Q12,7.5 11,6 M2,14 L14,2"),
+            (WeatherMetaKind.NoPrecip,"M8,2 C7,4 3.5,7.5 3.5,10 A4.5,4.5 0 0 0 12.5,10 C12.5,7.5 9,4 8,2 Z M2,14 L14,2"),
             (WeatherMetaKind.Precipitation,"M3,3 V13 H13 V3 M3,8 H13 M10,5 H13 M10,10.5 H13"),
             (WeatherMetaKind.Thermo,"M6,9.6 V4.4 A2,2 0 0 1 10,4.4 V9.6 A3.2,3.2 0 1 1 6,9.6 Z M8,7.2 V12"),
             (WeatherMetaKind.Droplet,"M8,2.5 C11,6.2 13,9.4 13,11.2 A5,5 0 1 1 3,11.2 C3,9.4 5,6.2 8,2.5 Z"),
@@ -195,7 +195,7 @@ internal sealed class WeatherGlyph : FrameworkElement
         new(brush, width) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
 }
 
-// 月相图标：按 8 档月相文本（和风英文、其他来源中文都有）绘制真实亮面——
+// 月相图标：按 8 档月相文本
 // 亮区由外圆半弧与终结线椭圆弧围成：蛾眉/残月终结线贴亮侧成窄月牙、上/下弦退化为半圆、
 // 盈/亏凸月亮面越过中线；盈月亮在右、亏月亮在左，与北半球视角一致。新月只画淡虚线盘面，满月整圆实心。
 internal sealed class MoonPhaseIcon : FrameworkElement

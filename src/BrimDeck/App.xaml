@@ -144,6 +144,15 @@
         </ControlTemplate>
       </Setter.Value></Setter>
     </Style>
+    <ControlTemplate x:Key="WeatherIndicesScrollTemplate" TargetType="ScrollViewer">
+      <Grid>
+        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="14"/></Grid.ColumnDefinitions>
+        <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" Content="{TemplateBinding Content}" CanContentScroll="{TemplateBinding CanContentScroll}" Margin="{TemplateBinding Padding}"/>
+        <ScrollBar x:Name="PART_VerticalScrollBar" Grid.Column="1" Width="6" HorizontalAlignment="Center" Orientation="Vertical"
+                   Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}" Maximum="{TemplateBinding ScrollableHeight}"
+                   ViewportSize="{TemplateBinding ViewportHeight}" Value="{Binding VerticalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}"/>
+      </Grid>
+    </ControlTemplate>
     <Style TargetType="ScrollViewer">
       <Setter Property="VerticalScrollBarVisibility" Value="Auto"/><Setter Property="HorizontalScrollBarVisibility" Value="Disabled"/><Setter Property="PanningMode" Value="VerticalOnly"/>
       <Setter Property="Template"><Setter.Value>

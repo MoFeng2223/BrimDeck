@@ -636,6 +636,7 @@ internal sealed class HeFengSource : IWeatherSource
             foreach (var item in list.EnumerateArray())
                 result.Add(new IndexItem
                 {
+                    Type = Json.Text(item, "type") ?? "",
                     Date = Json.Text(item, "date") ?? "",
                     Name = Json.Text(item, "name") ?? "",
                     Level = Json.Text(item, "level") ?? "",

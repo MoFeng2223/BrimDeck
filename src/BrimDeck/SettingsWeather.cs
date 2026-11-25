@@ -1,3 +1,5 @@
+using System.Windows.Input;
+using System.Windows.Media.Animation;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -22,6 +24,8 @@ public sealed partial class SettingsWindow
         {
             UpdateCityQuota();
             cityRows.Children.Clear();
+            var movable = new StackPanel();
+            const double cityRowHeight = 54;
             for(int i=-1;i<state.Cities.Count;i++) {
                 int index=i;bool selected=i==state.Selected;var city=i<0?null:state.Cities[i];
                 string? temperature=null;int code=3;bool day=true;
@@ -46,14 +50,14 @@ public sealed partial class SettingsWindow
                 temperatureLabel.Width=40;
                 temperatureLabel.VerticalAlignment=VerticalAlignment.Center;
                 controls.Children.Add(temperatureLabel);
-                void Select(){state.Selected=index;Save();preview.RenderWeatherCard();Fill();}
+                void Select(){state.Selected=city is null ? -1 : state.Cities.IndexOf(city);Save();preview.RenderWeatherCard();Fill();}
                 Button? remove=null;
                 if(city is not null){
                     remove=new Button {Style=(Style)FindResource("SettingsGlyphButton"),ToolTip=Loc.T("删除城市","Remove city"),Width=24,Height=26,Padding=new Thickness(0),VerticalAlignment=VerticalAlignment.Center};
                     var cross=Stroke("M 0,0 L 8,8 M 8,0 L 0,8",8,8,TextSecondary);
                     cross.SetBinding(Shape.StrokeProperty,new System.Windows.Data.Binding("Foreground"){RelativeSource=new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.FindAncestor,typeof(Button),1)});
                     remove.Content=cross;
-                    remove.Click+=(_,_)=>{state.Cities.RemoveAt(index);if(state.Selected==index)state.Selected=-1;else if(state.Selected>index)state.Selected--;Save();preview.RenderWeatherCard();Fill();UpdateAdd();};
+                    remove.Click+=(_,_)=>{int at=state.Cities.IndexOf(city);if(at<0)return;state.Cities.RemoveAt(at);if(state.Selected==at)state.Selected=-1;else if(state.Selected>at)state.Selected--;Save();preview.RenderWeatherCard();Fill();UpdateAdd();};
                 }
                 var row=Row(name,controls,subtitle is null?null:TextLine(subtitle,11,TextSecondary));row.Margin=new Thickness(42,0,8,0);
                 var grid=new Grid();
@@ -67,13 +71,30 @@ public sealed partial class SettingsWindow
                 }
                 grid.Children.Add(new WeatherGlyph(code,day) {Width=28,Height=28,HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(4,0,0,0),IsHitTestVisible=false});
                 if(selected){var indicator=new Border {Width=3,CornerRadius=new CornerRadius(0,2,2,0),Background=(Brush)FindResource("SettingsAccent"),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Stretch};grid.Children.Add(indicator);}
-                var border=new Border {Child=grid,Background=selected?(Brush)FindResource("SettingsAccentTint"):Brushes.Transparent,CornerRadius=new CornerRadius(6),Cursor=System.Windows.Input.Cursors.Hand};border.MouseLeftButtonUp+=(_,e)=>{if(!picker.IsMouseOver && e.OriginalSource is not Button)Select();};cityRows.Children.Add(border);
+                var border=new Border {Child=grid,Background=selected?(Brush)FindResource("SettingsAccentTint"):Brushes.Transparent,CornerRadius=new CornerRadius(6),Cursor=System.Windows.Input.Cursors.Hand};border.MouseLeftButtonUp+=(_,e)=>{if(!picker.IsMouseOver && e.OriginalSource is not Button)Select();};
+                var line=new Grid();
+                line.ColumnDefinitions.Add(new ColumnDefinition { Width=new GridLength(24) });
+                line.ColumnDefinitions.Add(new ColumnDefinition());
+                Grid.SetColumn(border,1);
+                line.Children.Add(border);
+                var frame=new Border { Child=line, Height=cityRowHeight, Tag=city, RenderTransform=new TranslateTransform() };
+                if(city is null) { cityRows.Children.Add(frame); continue; }
+                var grip=new GripHandle { Width=22, Background=Brushes.Transparent, Cursor=Cursors.SizeAll, Child=Grip(TextTertiary) };
+                line.Children.Add(grip);
+                movable.Children.Add(frame);
+                AttachDrag(grip,name,()=>movable,cityRowHeight,list=>
+                {
+                    var current=state.Selected>=0 ? state.Cities[state.Selected] : null;
+                    state.Cities=list.Children.OfType<Border>().Select(row=>(City)row.Tag).ToList();
+                    state.Selected=current is null ? -1 : state.Cities.IndexOf(current);
+                    Save();
+                });
             }
+            cityRows.Children.Add(movable);
         }
-        Target.Children.Add(preview);SectionTitle(Loc.T("当前城市","Current city"),cityQuota);Group(cityRows);
+        Target.Children.Add(preview);SectionTitle(Loc.T("当前城市","Current city"),cityQuota);
         // 设置页打开即尝试定位：成功则刷新「自动定位」行展示当地城市名，不干扰其余行。
         async Task DetectAsync() { if(!active)return;try {var local=await WeatherData.LocateAsync(state.Schedule,CancellationToken.None);if(active&&local is not null&&!local.Name.Contains("当前位置")){autoName=local.Name;Fill();}}catch{}}
-        SectionTitle(Loc.T("添加城市","Add city"));
         var input=new TextBox {Width=250,Height=31,Style=(Style)FindResource("SettingsField")};
         var placeholder=new TextBlock {Text=Loc.T("支持中英文","Chinese or English"),FontSize=13,Foreground=(Brush)FindResource("SettingsTextSecondary"),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(12,0,0,0),IsHitTestVisible=false};void UpdatePlaceholder()=>placeholder.Visibility=input.Text.Length==0?Visibility.Visible:Visibility.Collapsed;input.TextChanged+=(_,_)=>UpdatePlaceholder();
         var inputHost=new Grid {Width=250};inputHost.Children.Add(input);inputHost.Children.Add(placeholder);UpdatePlaceholder();
@@ -141,7 +162,10 @@ public sealed partial class SettingsWindow
             catch { if(pending is not null&&token==pending.Token){options.ItemsSource=null;options.Visibility=Visibility.Collapsed;empty.Text=failedText;empty.Visibility=Visibility.Visible;popup.IsOpen=true;} }
             finally { if(pending is not null&&token==pending.Token)ShowSearching(false); }
         };
-        var controlsRow=new StackPanel {Orientation=Orientation.Horizontal};controlsRow.Children.Add(inputHost);controlsRow.Children.Add(add);Group(Row(Loc.T("搜索城市","Search city"),controlsRow));
+        var controlsRow=new StackPanel {Orientation=Orientation.Horizontal};controlsRow.Children.Add(inputHost);controlsRow.Children.Add(add);
+        var searchRow=Row(Loc.T("搜索城市","Search city"),controlsRow);searchRow.Margin=new Thickness(42,0,8,0);
+        Group(cityRows,searchRow);
+        WeatherChipControls();
         var hefengCard = new Border { CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), Padding = new Thickness(16, 14, 16, 16), Margin = new Thickness(0, 0, 0, 28) };
         hefengCard.SetResourceReference(Border.BackgroundProperty, "SettingsSurface");
         hefengCard.SetResourceReference(Border.BorderBrushProperty, "SettingsBorder");
@@ -272,6 +296,158 @@ public sealed partial class SettingsWindow
             finally { if (ReferenceEquals(fetchCts, request)) fetchCts = null; }
         }
     }
+    private void WeatherChipControls()
+    {
+        SectionTitle(Loc.T("主页右上角胶囊", "Weather summary chips"));
+        var grid = new UniformGrid { Rows = 2, Columns = 6 };
+        var hint = Loc.T("点击显示或隐藏，拖动调整顺序。", "Click to show or hide. Drag to reorder.");
+        Target.Children.Add(grid);
+        void Draw()
+        {
+            grid.Children.Clear();
+            foreach (var item in S.Weather.ChipRows(6).SelectMany(row => row.OrderBy(chip => chip.Visible)))
+            {
+                var label = item.Metric switch
+                {
+                    WeatherMetric.Wind => Loc.T("风速", "Wind"), WeatherMetric.Feels => Loc.T("体感", "Feels like"),
+                    WeatherMetric.Humidity => Loc.T("湿度", "Humidity"), WeatherMetric.Gust => Loc.T("阵风", "Gusts"),
+                    WeatherMetric.DewPoint => Loc.T("露点", "Dew point"), WeatherMetric.Celestial => Loc.T("天文", "Astronomy"),
+                    WeatherMetric.Precip => Loc.T("降水", "Precipitation"), WeatherMetric.Pressure => Loc.T("气压", "Pressure"),
+                    WeatherMetric.Aqi => Loc.T("空气质量", "Air quality"), WeatherMetric.Cloud => Loc.T("云量", "Cloud"),
+                    WeatherMetric.Visibility => Loc.T("能见度", "Visibility"), _ => Loc.T("紫外线", "UV")
+                };
+                var refresh = new List<Action>();
+                var chip = PickChip(label, [], hint, refresh);
+                foreach (var update in refresh) update();
+                chip.IsChecked = item.Visible;
+                chip.Tag = item.Metric;
+                chip.RenderTransform = new TranslateTransform();
+                chip.Click += (_, _) =>
+                {
+                    Resize(settings =>
+                {
+                        var chips = settings.Weather.Chips;
+                        int index = chips.FindIndex(c => c.Metric == item.Metric);
+                        chips[index] = chips[index] with { Visible = chip.IsChecked == true };
+                    }, DeckPage.Weather);
+                    Draw();
+                };
+                AttachWeatherChipDrag(chip, grid, () =>
+                {
+                    var buttons = grid.Children.Cast<ToggleButton>().ToDictionary(c => (WeatherMetric)c.Tag);
+                    Resize(settings =>
+                    {
+                        var chips = settings.Weather.Chips.ToDictionary(c => c.Metric);
+                        settings.Weather.Chips = grid.Children.Cast<ToggleButton>().Select(c => chips[(WeatherMetric)c.Tag]).ToList();
+                    }, DeckPage.Weather);
+                    var ordered = S.Weather.ChipRows(6).SelectMany(row => row.OrderBy(c => c.Visible));
+                    foreach (var (entry, index) in ordered.Select((entry, index) => (entry, index)))
+                    {
+                        var button = buttons[entry.Metric];
+                        if (grid.Children.IndexOf(button) == index) continue;
+                        grid.Children.Remove(button);
+                        grid.Children.Insert(index, button);
+                    }
+                });
+                grid.Children.Add(chip);
+            }
+        }
+        Draw();
+    }
+
+    private static void AttachWeatherChipDrag(ToggleButton chip, UniformGrid grid, Action saveOrder)
+    {
+        Point? press = null;
+        bool dragging = false;
+        int from = 0, target = 0;
+        Point Slot(int i) => new((i % grid.Columns) * grid.ActualWidth / grid.Columns,
+                                 (i / grid.Columns) * grid.ActualHeight / grid.Rows);
+        static void Offset(UIElement element, Vector delta, bool glide)
+        {
+            var transform = (TranslateTransform)element.RenderTransform;
+            void Set(System.Windows.DependencyProperty property, double value)
+            {
+                double start = (double)transform.GetValue(property);
+                transform.BeginAnimation(property, null);
+                transform.SetValue(property, value);
+                if (glide && Soft.Enabled && Math.Abs(start-value) > .1)
+                    transform.BeginAnimation(property, new DoubleAnimation(start,value,TimeSpan.FromMilliseconds(Soft.Choose))
+                        { EasingFunction=Soft.Out, FillBehavior=FillBehavior.Stop });
+            }
+            Set(TranslateTransform.XProperty,delta.X);
+            Set(TranslateTransform.YProperty,delta.Y);
+        }
+        void Finish(bool commit)
+        {
+            press = null;
+            if (!dragging) return;
+            dragging = false;
+            if (chip.IsMouseCaptured) chip.ReleaseMouseCapture();
+            Panel.SetZIndex(chip,0);
+            var positions = grid.Children.Cast<UIElement>().Select((c,i) =>
+                (c, pos: Slot(i) + new Vector(((TranslateTransform)c.RenderTransform).X, ((TranslateTransform)c.RenderTransform).Y))).ToArray();
+            if (commit && from != target)
+            {
+                if (from / grid.Columns != target / grid.Columns)
+                {
+                    var other = grid.Children[target];
+                    grid.Children.RemoveAt(target);
+                    grid.Children.Remove(chip);
+                    if (from < target) { grid.Children.Insert(from,other); grid.Children.Insert(target,chip); }
+                    else { grid.Children.Insert(target,chip); grid.Children.Insert(from,other); }
+                }
+                else
+                {
+                    grid.Children.RemoveAt(from);
+                    grid.Children.Insert(target,chip);
+                }
+            }
+            if (commit && from != target) saveOrder();
+            foreach (var (c,pos) in positions)
+            {
+                Offset(c,pos-Slot(grid.Children.IndexOf(c)),false);
+                Offset(c,new Vector(),true);
+            }
+
+        }
+        chip.PreviewMouseLeftButtonDown += (_,e) => press=e.GetPosition(grid);
+        chip.PreviewMouseMove += (_,e) =>
+        {
+            if (press is not Point start || e.LeftButton != MouseButtonState.Pressed) return;
+            var delta=e.GetPosition(grid)-start;
+            if (!dragging)
+            {
+                if (Math.Abs(delta.X)<SystemParameters.MinimumHorizontalDragDistance &&
+                    Math.Abs(delta.Y)<SystemParameters.MinimumVerticalDragDistance) return;
+                from=target=grid.Children.IndexOf(chip);
+                dragging=true;
+                Panel.SetZIndex(chip,2);
+            }
+            Offset(chip,delta,false);
+            var center=Slot(from)+delta;
+            int column=Math.Clamp((int)Math.Floor(center.X*grid.Columns/grid.ActualWidth+.5),0,grid.Columns-1);
+            int row=Math.Clamp((int)Math.Floor(center.Y*grid.Rows/grid.ActualHeight+.5),0,grid.Rows-1);
+            int next=Math.Min(grid.Children.Count-1,row*grid.Columns+column);
+            if (next==target) return;
+            target=next;
+            for(int i=0;i<grid.Children.Count;i++)
+            {
+                if(i==from) continue;
+                int slot = from / grid.Columns != target / grid.Columns
+                    ? (i == target ? from : i)
+                    : i>from && i<=target ? i-1 : i<from && i>=target ? i+1 : i;
+                Offset(grid.Children[i],Slot(slot)-Slot(i),true);
+            }
+        };
+        chip.PreviewMouseLeftButtonUp += (_,e) =>
+        {
+            if (dragging) e.Handled=true;
+            Finish(true);
+        };
+        chip.LostMouseCapture += (_,_) => Finish(false);
+        chip.PreviewKeyDown += (_,e) => { if(dragging && e.Key==Key.Escape){Finish(false);e.Handled=true;} };
+    }
+
     private void WeatherSizeControls()
     {
         var dimensions = new Grid { Margin = new Thickness(0, 8, 0, 0) }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
@@ -313,19 +489,28 @@ internal sealed class WeatherSettingsCard : Border
         int dateIndex=today+selectedDay;
         bool future=selectedDay>0;
         if(future && snap is not null){code=(uint)dateIndex < (uint)snap.DayCodes.Length ? snap.DayCodes[dateIndex] : -1;day=true;}
-        Background=snap is null ? new SolidColorBrush(Color.FromRgb(49,63,81)) : WeatherVisuals.Sky(code,day);
+        // 天空底色保持拟真的天气渐变，不掺设置页主题色；只有前景文字/图标按天空深浅做对比度校正。
+        // 这样晴昼是通透的蓝天、夜晚是深邃蓝黑，浅天空（雾、雪）时前景自动压深保证可读。
+        var sky=WeatherVisuals.Sky(code,day);
+        Background=snap is null ? new SolidColorBrush(Color.FromRgb(49,63,81)) : sky;
+        var stops=sky.GradientStops.Select(stop=>new ThemeColor(255,stop.Color.R,stop.Color.G,stop.Color.B)).ToArray();
+        Color InkColor(string hex)=>PanelTheme.ToColor(ThemeColor.Parse(hex).EnsureContrast(stops,PanelThemes.TextContrast));
+        Brush Ink(string hex)=>new SolidColorBrush(InkColor(hex));
+        var primary=Ink("#F4F8FF");
+        var secondary=Ink("#D3E3F7");
+
         var grid=new Grid();grid.RowDefinitions.Add(new RowDefinition {Height=new GridLength(34)});grid.RowDefinitions.Add(new RowDefinition());grid.RowDefinitions.Add(new RowDefinition {Height=new GridLength(1,GridUnitType.Auto)});
         var head=new Grid {VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(12,0,12,0)};
         head.ColumnDefinitions.Add(new ColumnDefinition());head.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
         var locIcon=new StackPanel {Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};
-        locIcon.Children.Add(new WeatherMetaIcon(WeatherMetaKind.Location,Color.FromRgb(205,224,247)){Width=12,Height=12,VerticalAlignment=VerticalAlignment.Center});
+        locIcon.Children.Add(new WeatherMetaIcon(WeatherMetaKind.Location,InkColor("#CDDFF7")){Width=12,Height=12,VerticalAlignment=VerticalAlignment.Center});
         // 城市名只有一份完整名称：选中城市取 City.Name，自动定位退回快照 Name（也是完整名称）。
         string headerName=state.Selected>=0&&state.Selected<state.Cities.Count?cityName:(snap?.Name??cityName);
-        locIcon.Children.Add(new TextBlock {Text=Place(headerName),FontSize=12,FontWeight=FontWeights.SemiBold,Foreground=new SolidColorBrush(Color.FromRgb(234,242,255)),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(4,0,0,0),TextTrimming=TextTrimming.CharacterEllipsis});
+        locIcon.Children.Add(new TextBlock {Text=Place(headerName),FontSize=12,FontWeight=FontWeights.SemiBold,Foreground=secondary,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(4,0,0,0),TextTrimming=TextTrimming.CharacterEllipsis});
         var headRight=new StackPanel {Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Center};
-        var upd=new TextBlock {Text=snap is null?"":Loc.T($"更新于 {snap.FetchedAt:HH:mm}",$"Updated {snap.FetchedAt:HH:mm}"),FontSize=10.5,Foreground=new SolidColorBrush(Color.FromRgb(188,208,234)),VerticalAlignment=VerticalAlignment.Center};
+        var upd=new TextBlock {Text=snap is null?"":Loc.T($"更新于 {snap.FetchedAt:HH:mm}",$"Updated {snap.FetchedAt:HH:mm}"),FontSize=10.5,Foreground=secondary,VerticalAlignment=VerticalAlignment.Center};
         string source=snap is not null&&snap.Sources.TryGetValue("Daily",out var daily)&&daily.Length>0?daily:WeatherSources.Name(state.Schedule.SourceFor(state.Selected>=0&&state.Selected<state.Cities.Count?state.Cities[state.Selected]:null));
-        var src=new TextBlock {Text=snap is null?"":source,FontSize=10.5,Foreground=new SolidColorBrush(Color.FromRgb(188,208,234)),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(10,0,0,0),TextTrimming=TextTrimming.CharacterEllipsis};
+        var src=new TextBlock {Text=snap is null?"":source,FontSize=10.5,Foreground=secondary,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(10,0,0,0),TextTrimming=TextTrimming.CharacterEllipsis};
         headRight.Children.Add(upd);headRight.Children.Add(src);
         head.Children.Add(locIcon);Grid.SetColumn(headRight,1);head.Children.Add(headRight);
         var headBar=new Border {Height=34,CornerRadius=new CornerRadius(13,13,0,0),Background=new SolidColorBrush(Color.FromArgb(46,0,0,0)),BorderBrush=new SolidColorBrush(Color.FromArgb(24,255,255,255)),BorderThickness=new Thickness(0,0,0,1),Child=head};
@@ -336,12 +521,12 @@ internal sealed class WeatherSettingsCard : Border
         var now=new StackPanel {Margin=new Thickness(20,14,0,14),VerticalAlignment=VerticalAlignment.Center};
         var first=new StackPanel {Orientation=Orientation.Horizontal};var icon=new Border {Background=Brushes.Transparent, Width=66,Height=66,Margin=new Thickness(0,0,12,0),
             Child=snap is null || code<0
-                ? new TextBlock {Text="↻", FontSize=40,Foreground=Brushes.White,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center}
+                ? new TextBlock {Text="↻", FontSize=40,Foreground=primary,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center}
                 : new WeatherGlyph(code,day,animated:true), ToolTip=Loc.T("刷新天气","Refresh weather")};
         AttachAction(icon,()=>RefreshRequested?.Invoke());
         first.Children.Add(icon);
-        first.Children.Add(new TextBlock {Text=snap is null?"":Deg(future ? dateIndex<snap.DayHighC.Length?snap.DayHighC[dateIndex]:double.NaN : snap.Temperature),FontSize=46,FontWeight=FontWeights.Light,Foreground=Brushes.White,VerticalAlignment=VerticalAlignment.Center});now.Children.Add(first);
-        now.Children.Add(new TextBlock {Text=snap is null?"":code<0?"":WeatherVisuals.Condition(code),FontSize=15,FontWeight=FontWeights.Medium,Foreground=new SolidColorBrush(Color.FromRgb(234,242,255))});
+        first.Children.Add(new TextBlock {Text=snap is null?"":Deg(future ? dateIndex<snap.DayHighC.Length?snap.DayHighC[dateIndex]:double.NaN : snap.Temperature),FontSize=46,FontWeight=FontWeights.Light,Foreground=primary,VerticalAlignment=VerticalAlignment.Center});now.Children.Add(first);
+        now.Children.Add(new TextBlock {Text=snap is null?"":code<0?"":WeatherVisuals.Condition(code),FontSize=15,FontWeight=FontWeights.Medium,Foreground=secondary});
         var forecast=new UniformGrid {Rows=1,Columns=3,Margin=new Thickness(12,0,14,0),VerticalAlignment=VerticalAlignment.Center,HorizontalAlignment=HorizontalAlignment.Right};
 
         for(int i=0;i<3;i++) {
@@ -356,14 +541,14 @@ internal sealed class WeatherSettingsCard : Border
             }
             // 每列固定 64px：正好装下「今天 / 图标 / 降水 / 15°/4°」，三列合计 192，右边留出呼吸位。
             var col=new StackPanel {Width=64,VerticalAlignment=VerticalAlignment.Center};
-            col.Children.Add(new TextBlock {Text=dayTitle,FontSize=11.5,FontWeight=FontWeights.SemiBold,Foreground=new SolidColorBrush(Color.FromRgb(205,224,247)),TextAlignment=TextAlignment.Center,TextWrapping=TextWrapping.NoWrap});
+            col.Children.Add(new TextBlock {Text=dayTitle,FontSize=11.5,FontWeight=FontWeights.SemiBold,Foreground=secondary,TextAlignment=TextAlignment.Center,TextWrapping=TextWrapping.NoWrap});
             col.Children.Add(new WeatherGlyph(dCode,true) {Width=28,Height=28,HorizontalAlignment=HorizontalAlignment.Center,Margin=new Thickness(0,5,0,3)});
-            col.Children.Add(new TextBlock {Text=rain,FontSize=10.5,Foreground=new SolidColorBrush(Color.FromRgb(143,208,255)),TextAlignment=TextAlignment.Center,Height=13,TextWrapping=TextWrapping.NoWrap});
+            col.Children.Add(new TextBlock {Text=rain,FontSize=10.5,Foreground=secondary,TextAlignment=TextAlignment.Center,Height=13,TextWrapping=TextWrapping.NoWrap});
             // 高低温并成一行：每列只有一天，分成两行会把格子撑得又高又空，两个数字还各占一侧。
             var range=new StackPanel {Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Center,Margin=new Thickness(0,1,0,0)};
-            range.Children.Add(new TextBlock {Text=high,FontSize=14.5,FontWeight=FontWeights.SemiBold,Foreground=Brushes.White,TextWrapping=TextWrapping.NoWrap});
-            range.Children.Add(new TextBlock {Text="/",FontSize=10.5,Foreground=new SolidColorBrush(Color.FromRgb(150,168,192)),VerticalAlignment=VerticalAlignment.Bottom,Margin=new Thickness(2,0,2,2)});
-            range.Children.Add(new TextBlock {Text=low,FontSize=11.5,Foreground=new SolidColorBrush(Color.FromRgb(182,201,226)),VerticalAlignment=VerticalAlignment.Bottom,Margin=new Thickness(0,0,0,2),TextWrapping=TextWrapping.NoWrap});
+            range.Children.Add(new TextBlock {Text=high,FontSize=14.5,FontWeight=FontWeights.SemiBold,Foreground=primary,TextWrapping=TextWrapping.NoWrap});
+            range.Children.Add(new TextBlock {Text="/",FontSize=10.5,Foreground=secondary,VerticalAlignment=VerticalAlignment.Bottom,Margin=new Thickness(2,0,2,2)});
+            range.Children.Add(new TextBlock {Text=low,FontSize=11.5,Foreground=secondary,VerticalAlignment=VerticalAlignment.Bottom,Margin=new Thickness(0,0,0,2),TextWrapping=TextWrapping.NoWrap});
             col.Children.Add(range);
             // 三列套同一层壳，只有今天有底色与描边：保持等宽，不会因为高亮框多出 2px 而串位。
             var holder=new Border {Child=col,Padding=new Thickness(0,6,0,6),CornerRadius=new CornerRadius(11),BorderThickness=new Thickness(1),
@@ -394,9 +579,9 @@ internal sealed class WeatherSettingsCard : Border
             ? Loc.T($"{windDir} {Num(wind," km/h")}",$"{windDir} {Num(wind," km/h")}")
             : Loc.T($"风 {Num(wind," km/h")}",$"Wind {Num(wind," km/h")}");
         foreach(var (kind,ink,text) in new[] {
-            (WeatherMetaKind.Thermo,Color.FromRgb(255,176,102),meta1),
-            (WeatherMetaKind.Droplet,Color.FromRgb(112,178,255),meta2),
-            (WeatherMetaKind.Wind,Color.FromRgb(140,200,220),meta3) }) {
+            (WeatherMetaKind.Thermo,InkColor("#FFB066"),meta1),
+            (WeatherMetaKind.Droplet,InkColor("#70B2FF"),meta2),
+            (WeatherMetaKind.Wind,InkColor("#8CC8DC"),meta3) }) {
             var item=new StackPanel {Orientation=Orientation.Horizontal,Margin=new Thickness(0,0,16,0)};
             // 风条目用 8 方位旋转箭头指示风向，与灵动岛实况风速卡一致；没有有效角度才退回通用风图标。
             if(kind==WeatherMetaKind.Wind && !double.IsNaN(windAngle))
@@ -407,13 +592,13 @@ internal sealed class WeatherSettingsCard : Border
             }
             else
                 item.Children.Add(new WeatherMetaIcon(kind,ink) {Width=14,Height=14,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,5,0)});
-            item.Children.Add(new TextBlock {Text=text,FontSize=11,Foreground=new SolidColorBrush(Color.FromRgb(213,227,245)),VerticalAlignment=VerticalAlignment.Center});
+            item.Children.Add(new TextBlock {Text=text,FontSize=11,Foreground=secondary,VerticalAlignment=VerticalAlignment.Center});
             meta.Children.Add(item);
         }
         // 日升日落条目与其他元信息行水平居中对齐：图标与文本各自垂直居中，整块在 footer 右侧垂直居中。
         var sun=new StackPanel {Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Center};
-        sun.Children.Add(new WeatherMetaIcon(WeatherMetaKind.Sunrise,Color.FromRgb(255,200,90)){Width=14,Height=14,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,5,0)});
-        sun.Children.Add(new TextBlock {Text=snap is null?"":Loc.T($"日升 {Clock(snap.SunriseTimes,dateIndex)} · 日落 {Clock(snap.SunsetTimes,dateIndex)}",$"Sunrise {Clock(snap.SunriseTimes,dateIndex)} · Sunset {Clock(snap.SunsetTimes,dateIndex)}"),FontSize=11,Foreground=new SolidColorBrush(Color.FromRgb(213,227,245)),VerticalAlignment=VerticalAlignment.Center});
+        sun.Children.Add(new WeatherMetaIcon(WeatherMetaKind.Sunrise,InkColor("#FFC85A")){Width=14,Height=14,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,5,0)});
+        sun.Children.Add(new TextBlock {Text=snap is null?"":Loc.T($"日升 {Clock(snap.SunriseTimes,dateIndex)} · 日落 {Clock(snap.SunsetTimes,dateIndex)}",$"Sunrise {Clock(snap.SunriseTimes,dateIndex)} · Sunset {Clock(snap.SunsetTimes,dateIndex)}"),FontSize=11,Foreground=secondary,VerticalAlignment=VerticalAlignment.Center});
         footer.Children.Add(meta);
         Grid.SetColumn(sun,1);
         sun.Margin=new Thickness(0,0,14,0);
