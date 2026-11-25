@@ -987,11 +987,7 @@ public partial class MainWindow
         var pause = IconToggle(center.Paused ? "" : "", center.Paused ? Loc.T("恢复提醒", "Resume") : Loc.T("暂停提醒 1 小时", "Pause for 1 h"),
             () => { center.Pause(center.Paused ? null : TimeSpan.FromHours(1)); RenderNotices(); });
         tools.Children.Add(pause);
-        var switcher = new StackPanel { Orientation = Orientation.Horizontal };
-        var frame = new Border { CornerRadius = new CornerRadius(6), Background = UI.Brush(UI.Fill), Padding = new Thickness(1), Child = switcher, Margin = new Thickness(6, 0, 0, 0) };
-        switcher.Children.Add(Segment(Loc.T("全部", "All"), !_noticeUnread, () => { _noticeUnread = false; RenderNotices(); }));
-        switcher.Children.Add(Segment(Loc.T("未读", "Unread"), _noticeUnread, ShowUnreadOnly));
-        tools.Children.Add(frame);
+        tools.Children.Add(FilterSwitch());
         head.Children.Add(tools);
 
         // The rows out of view are not laid out again for every width of a drag (ViewportStack).
@@ -1035,17 +1031,33 @@ public partial class MainWindow
         _pageRows.Add((notice, notice.Revision, RowKey(notice, now), row));
     }
 
-    private Button Segment(string text, bool on, Action click)
+    // "全部"/"未读": the panel's segmented switch (AgendaDraw.Segments), as on the planner page. One fill on the track marks the
+    // chosen half and glides to the other on a choice; the other half takes no fill under the pointer, only its words brighten.
+    private Border FilterSwitch()
     {
-        var face = new Border { CornerRadius = new CornerRadius(5), Height = 18, Padding = new Thickness(9, 0, 9, 0), Background = UI.Brush(on ? UI.FillSelected : "Transparent") };
-        face.Child = UI.InkCentered(text, 11, 18, on ? UI.Primary : UI.Secondary);
-        var button = new Button { Content = face, Cursor = Cursors.Hand, FocusVisualStyle = (Style)Application.Current.FindResource("PanelKeyboardFocus"), Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };
-        button.Click += (_, _) => { if (!on) click(); };
-        // The chosen segment keeps its fill; the other takes the hover and pressed ones.
-        Feel(button, (over, down) => face.Background = UI.Brush(down ? PanelTheme.Hex("pressed") : on ? UI.FillSelected : over ? PanelTheme.Hex("hover") : "Transparent"));
-        AutomationProperties.SetName(button, text);
-        return button;
+        string[] names = [Loc.T("全部", "All"), Loc.T("未读", "Unread")];
+        var segments = new List<Button>();
+        for (int i = 0; i < names.Length; i++)
+        {
+            bool on = (i == 1) == _noticeUnread;
+            var words = AgendaDraw.Label(names[i], 11, on ? Look.Primary : Look.Secondary);
+            Action choose = i == 1 ? ShowUnreadOnly : () => { _noticeUnread = false; RenderNotices(); };
+            var button = AgendaDraw.Segment(Look, words, names[i], on, choose, bright => words.Text.Foreground = UI.Brush(bright ? Look.Primary : Look.Secondary),
+                FilterHeight, new Thickness(9, 0, 9, 0));
+            AgendaDraw.Fit(button, words, FilterHeight, names);
+            if (on) AutomationProperties.SetItemStatus(button, Loc.T("已选中", "Selected"));
+            segments.Add(button);
+        }
+        int chosen = _noticeUnread ? 1 : 0;
+        int? from = _filterDrawn is { } drawn && drawn != _noticeUnread ? (drawn ? 1 : 0) : null;
+        _filterDrawn = _noticeUnread;
+        var group = AgendaDraw.Segments(Look, segments, chosen, from, Animates);
+        group.Margin = new Thickness(6, 0, 0, 0);
+        return group;
     }
+    private const double FilterHeight = 18;
+    // The filter the switch was last drawn for: drawn for the other, its fill glides from it.
+    private bool? _filterDrawn;
 
     private static Button IconToggle(string glyph, string name, Action click)
     {
