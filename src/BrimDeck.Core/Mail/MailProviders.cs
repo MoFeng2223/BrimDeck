@@ -80,8 +80,10 @@ public static class MailProviders
     {
         Qq =>
         [
-            Loc.T("在 QQ 邮箱网页版进入“设置 › 账号与安全”。", "On the QQ Mail website, open Settings › Account & Security (设置 › 账号与安全)."),
-            Loc.T("开启 IMAP/SMTP 服务，按页面提示验证身份后生成授权码。", "Turn on the IMAP/SMTP service, verify as the page asks, and generate an authorization code (授权码)."),
+            Loc.T("在 QQ 邮箱网页版点击右上角的“设置”，再点击左侧的“账号与安全”。", "On the QQ Mail website, choose 设置 at the top right, then 账号与安全 on the left."),
+            Loc.T("在新打开的页面左侧点击“安全设置”。", "On the page that opens, choose 安全设置 on the left."),
+            Loc.T("在“POP3/IMAP/SMTP/Exchange/CardDAV 服务”下点击“开启服务”，按页面提示验证身份后生成授权码。",
+                "Under POP3/IMAP/SMTP/Exchange/CardDAV 服务, choose 开启服务, verify as the page asks, and generate an authorization code (授权码)."),
             Loc.T("把 16 位授权码填在下面。", "Enter the 16-character code below.")
         ],
         NetEase =>

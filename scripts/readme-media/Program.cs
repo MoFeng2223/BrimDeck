@@ -326,8 +326,8 @@ internal sealed partial class Renderer(App app, string output, string language, 
             void Shot(string label, NoticeLevel level, double time, string body, NoticeAlign? asked = null, bool subdued = false, int count = 1, AttentionItem? given = null, NoticeStyle? look = null, NoticeSlot? slot = null, Action<Notice>? setup = null)
             {
                 var notice = new Notice { AppKey = "windows:Chat", AppName = "QQ", Title = title, Body = body, Align = asked, Slot = slot, ReceivedAt = _now, CreatedAt = _now };
-                var item = given ?? new AttentionItem { Lane = "main", Kind = AttentionKind.Notice, Key = notice.Id, Payload = notice, Level = level, Count = count, Duration = TimeSpan.FromSeconds(6),
                 setup?.Invoke(notice);
+                var item = given ?? new AttentionItem { Lane = "main", Kind = AttentionKind.Notice, Key = notice.Id, Payload = notice, Level = level, Count = count, Duration = TimeSpan.FromSeconds(6),
                     Style = look ?? _settings.NoticeStyles.For(level) };
                 if (subdued) typeof(AttentionItem).GetProperty(nameof(AttentionItem.Subdued))!.SetValue(item, true);
                 Program.SetField(window, "_item", item);
@@ -364,7 +364,6 @@ internal sealed partial class Renderer(App app, string output, string language, 
                 Shot("Align left asked by the sender", NoticeLevel.Plain, first, reply, asked: NoticeAlign.Left);
                 Shot("Align right asked by the sender", NoticeLevel.Plain, first, reply, asked: NoticeAlign.Right);
                 Shot("Merged, count 3, center", NoticeLevel.Plain, first, reply, count: 3);
-                Shot("Longer than the island: starts at the left and scrolls", NoticeLevel.Plain, first, longer, asked: NoticeAlign.Right);
                 // The marks of their own (IslandNotice.Marks.cs): the application's real icon round, a call, a coding agent waiting.
                 Shot("The application's icon, round", NoticeLevel.Plain, first, reply, setup: n => n.IconRef = "aumid:QQ");
                 Shot("A call ringing for 8 s", NoticeLevel.Persistent, first, Loc.T("QQ 语音通话", "QQ voice call"), asked: NoticeAlign.Left, setup: n => { n.Title = Loc.T("张三", "Zhang San"); n.Call = true; n.CreatedAt = DateTimeOffset.UtcNow.AddSeconds(-8); });
@@ -373,6 +372,7 @@ internal sealed partial class Renderer(App app, string output, string language, 
                     setup: n => { n.AppName = "Claude Code"; n.Title = Loc.T("运行命令", "Run a command"); n.Awaited = true; n.ReplaceKey = "agent:claude:s1"; });
                 Shot("Codex asking a question", NoticeLevel.Persistent, first, Loc.T("数据库用 SQLite 还是 PostgreSQL？", "SQLite or PostgreSQL?"), asked: NoticeAlign.Left,
                     setup: n => { n.AppName = "Codex"; n.Title = Loc.T("提问", "Question"); n.Awaited = true; n.ReplaceKey = "agent:codex:s2"; n.Questions = [new BrimDeck.Protocol.NoticeQuestion { Question = "?" }]; });
+                Shot("Longer than the island: starts at the left and scrolls", NoticeLevel.Plain, first, longer, asked: NoticeAlign.Right);
                 // A track change on the whole island (MusicTrackNotice): the title and the artist, no cover in this picture.
                 AttentionItem Song() => new()
                 {

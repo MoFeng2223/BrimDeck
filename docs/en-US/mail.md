@@ -18,7 +18,7 @@ BrimDeck signs in once with what you entered and saves the mailbox only after th
 
 | Service | What to enter | Where to get it |
 |---|---|---|
-| QQ Mail (qq.com, foxmail.com) | Authorization code (授权码) | QQ Mail website, 设置 › 账号与安全: turn on the IMAP/SMTP service and generate a code |
+| QQ Mail (qq.com, foxmail.com) | Authorization code (授权码) | QQ Mail website, 设置 › 账号与安全 › 安全设置: under POP3/IMAP/SMTP/Exchange/CardDAV 服务, choose 开启服务 and generate a code |
 | NetEase Mail (163.com, 126.com, yeah.net) | Authorization code (授权码) | NetEase Mail website, 设置 › POP3/SMTP/IMAP: turn on the IMAP/SMTP service |
 | Tencent Exmail | The mailbox password; with 安全登录 on, a client password (客户端专用密码) | Exmail website, 设置 › 收发信设置 to turn on IMAP; the client password under 设置 › 邮箱绑定 |
 | Sina Mail | Authorization code (授权码) | Sina Mail website, 设置 › 客户端pop/imap/smtp |
