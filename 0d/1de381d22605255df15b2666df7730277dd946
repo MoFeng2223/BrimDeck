@@ -1,0 +1,48 @@
+src/BrimDeck.Core/Notices/AttentionCoordinator.cs
+  s_cabe44964f0612::t_24033411ef71b3 284-285,297-306
+  s_cabe44964f0612::t_a9a7ddf4865ee9 200-201
+  s_cabe44964f0612::t_7e8ae0b1ba3e18 126-127
+tests/BrimDeck.Tests/NoticeCoreTests.cs
+  s_cabe44964f0612::t_290dab2b3915cb 321-328
+  s_cabe44964f0612::t_8f6d87c1aa5e2d 303-308,314,317-320,329
+  s_cabe44964f0612::t_d877a1a559c735 309-313,315-316
+docs/zh-CN/notices.md
+  s_cabe44964f0612::t_cbfda535467467 69,87
+src/BrimDeck/NoticeCenter.cs
+  s_cabe44964f0612::t_485b6c48167e85 713-715
+  s_cabe44964f0612::t_951d5526914619 331-333
+src/BrimDeck/MainWindow.Notices.cs
+  s_d99389783c3a2d::t_2dccaebded7baa 263,267
+  s_d99389783c3a2d::t_6b2dd792a0212c 22,24-27
+  s_d99389783c3a2d::t_0e7e44e591a15e 486
+  s_d99389783c3a2d::t_5229f90dff8159 451
+  s_d99389783c3a2d::t_61ad8266d73138 505-521
+  s_d99389783c3a2d::t_6ab7be3d43c922 978
+  s_d99389783c3a2d::t_382780db7cc1c9 443
+docs/en-US/notices.md
+  s_cabe44964f0612::t_cbfda535467467 69,87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0d1de381d22605255df15b2666df7730277dd946",
+  "prompts": {},
+  "sessions": {
+    "s_cabe44964f0612": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01c2e37d-5754-423c-9ae7-f364decec751",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_d99389783c3a2d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9d23bda3-7a63-491e-bd60-0d6639de9716",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
