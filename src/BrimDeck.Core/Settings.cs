@@ -118,23 +118,21 @@ public sealed record City(string Name, double Latitude, double Longitude, string
     }
 }
 
-// Weather's eight data domains, as offered in the settings page.
+// Weather domains requested by the aggregator.
 public enum WeatherDomain { Current, Hourly, Daily, Minutely, Warning, Indices, Air, History }
 
-// Per-domain source choices and the QWeather credentials, saved as one object in settings.json.
+// Per-city source choices and QWeather credentials.
 public sealed class WeatherSettings
 {
-    public Dictionary<string, string> Sources { get; set; } = [];
+    public Dictionary<string, string> CitySources { get; set; } = [];
+    public string SourceFor(City? city) => CitySources.GetValueOrDefault(city?.ToString() ?? "auto") ?? (HeFengKey.Length > 0 && HeFengHost.Length > 0 ? "hefeng" : "openmeteo");
     public int HeFengDailyLimit { get; set; } = 1500;
     public int HeFengMonthlyLimit { get; set; } = 50000;
     public string HeFengKey { get; set; } = "";
     public string HeFengHost { get; set; } = "";
-    // 只返回用户明确选定的来源。Normalize 会为未选过的域写入一个具体默认值。
-    public string Choice(WeatherDomain domain)
-        => Sources.TryGetValue(domain.ToString(), out var value) && value.Length > 0 ? value : "";
     public WeatherSettings Copy() => new()
     {
-        Sources = new Dictionary<string, string>(Sources ?? []),
+        CitySources = new(CitySources ?? []),
         HeFengDailyLimit = HeFengDailyLimit,
         HeFengMonthlyLimit = HeFengMonthlyLimit,
         HeFengKey = HeFengKey ?? "",
@@ -142,12 +140,10 @@ public sealed class WeatherSettings
     };
     public void Normalize()
     {
-        Sources = (Sources ?? []).Where(pair => Enum.TryParse<WeatherDomain>(pair.Key, out _) && !string.IsNullOrWhiteSpace(pair.Value))
+        CitySources = (CitySources ?? []).Where(pair => pair.Value is "hefeng" or "openmeteo")
             .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
         HeFengKey = (HeFengKey ?? "").Trim();
         HeFengHost = (HeFengHost ?? "").Trim();
-        string initial = HeFengKey.Length > 0 && HeFengHost.Length > 0 ? "hefeng" : "openmeteo";
-        foreach (var domain in Enum.GetValues<WeatherDomain>()) Sources.TryAdd(domain.ToString(), initial);
     }
 }
 

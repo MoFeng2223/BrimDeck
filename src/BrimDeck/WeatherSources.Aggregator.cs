@@ -14,17 +14,32 @@ internal static class WeatherAggregator
 
     // 两段式：首屏先取实况/预报/空气/分钟；时光机（10 次请求）与和风 v7 重域（预警/指数）放到第二段。
     // progress 在第一段结束后回调一次，界面先画不含历史的版本，历史到了再整体替换。
-    public static async Task<WeatherSnapshot> FetchAsync(City city, WeatherSettings settings, CancellationToken token, Action<WeatherSnapshot>? progress = null)
+    public static async Task<WeatherSnapshot> FetchAsync(City city, WeatherSettings settings, string sourceId, CancellationToken token, Action<WeatherSnapshot>? progress = null)
     {
         // 每个域在本次刷新里的负责来源；null 表示这个域本次不取数（未选择、来源不支持或不能服务这座城）。
-        var owners = Enum.GetValues<WeatherDomain>().ToDictionary(domain => domain, domain => Owner(domain, city, settings));
+        var owners = Enum.GetValues<WeatherDomain>().ToDictionary(domain => domain, domain => Owner(domain, city, settings, sourceId));
         var parts = new Dictionary<string, WeatherPart>(StringComparer.Ordinal);
 
         await FetchRoundAsync(city, settings, owners, parts, deferred: false, token: token);
         if (progress is not null && owners.Any(owner => owner.Value is not null && IsDeferred(owner.Key)))
-            progress(Merge(city, owners, parts));
+            progress(Merge(city, sourceId, owners, parts));
+        var supplement = LoadDailySupplementAsync();
         await FetchRoundAsync(city, settings, owners, parts, deferred: true, token: token);
-        return Merge(city, owners, parts);
+        return Merge(city, sourceId, owners, parts, await supplement);
+
+        async Task<List<DayPoint>> LoadDailySupplementAsync()
+        {
+            if (sourceId != "hefeng" || !Geo.IsChina(city)) return [];
+            var today = LocalToday(city.TimeZoneId ?? "Asia/Shanghai", city);
+            var days = parts.GetValueOrDefault(sourceId)?.Days;
+            if (days is not null && Enumerable.Range(0, 14).All(offset =>
+                days.Any(day => day.Date == today.AddDays(offset).ToString("yyyy-MM-dd") &&
+                    day.HighC.HasValue && day.LowC.HasValue && day.Code.HasValue && day.NightCode.HasValue &&
+                    day.PrecipMm.HasValue && day.WindDir is not null && day.WindMaxKmh.HasValue))) return [];
+            try { return await ChinaDailyForecast.FetchAsync(city, today, token); }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+            catch { return []; }
+        }
     }
 
     // 时光机与 v7 重域推后到第二段：请求多、返回慢，不该拖住首屏。
@@ -33,9 +48,9 @@ internal static class WeatherAggregator
 
     // 某个域由哪一家来源负责：用户选定且这家支持该域、能服务这座城市。
     // 不按区域下探，也不跨源补缺——没配置或不可用时这个域就留空。
-    private static IWeatherSource? Owner(WeatherDomain domain, City city, WeatherSettings settings)
+    private static IWeatherSource? Owner(WeatherDomain domain, City city, WeatherSettings settings, string sourceId)
     {
-        var source = WeatherSources.Find(settings.Choice(domain));
+        var source = WeatherSources.Find(sourceId);
         return source is not null && source.Info.Domains.Contains(domain) && source.CanServe(city, settings) ? source : null;
     }
 
@@ -94,7 +109,7 @@ internal static class WeatherAggregator
     }
 
     // 合并：先建立以今天为中心的 24 天日期轴（历史 10 + 今天 + 未来 13），再按域把负责来源的数据叠上去。
-    private static WeatherSnapshot Merge(City city, IReadOnlyDictionary<WeatherDomain, IWeatherSource?> owners, Dictionary<string, WeatherPart> parts)
+    private static WeatherSnapshot Merge(City city, string sourceId, IReadOnlyDictionary<WeatherDomain, IWeatherSource?> owners, Dictionary<string, WeatherPart> parts, List<DayPoint>? supplement = null)
     {
         // 以城市当地日期为中心：查询国外城市时，“今天”不能按用户所在时区算。
         string? zone = city.TimeZoneId ?? parts.Values.Select(part => part.TimeZone).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
@@ -203,7 +218,20 @@ internal static class WeatherAggregator
         // 过去那 1 小时和风/各预报源都拿不到（和风从下一整点起、时光机不含今天），由本地历史补：
         // 每次成功刷新都把当时的整点数据存进 weather/hour-history，下一小时它就成了「过去」那一格。
         // 本地也没有就留空（NaN / -1），界面隐藏数值，不联网补、不冒充预报。
-        var cityKey = city.ToString();
+        if (supplement is not null)
+        {
+            bool contributed = false;
+            foreach (var day in supplement)
+                if (dayMap.TryGetValue(day.Date, out var target))
+                    contributed |= MergeDay(target, day, ChinaDailyForecast.Id, fieldSources);
+            if (contributed)
+            {
+                provided[ChinaDailyForecast.Id] = true;
+                if (!used.TryGetValue(WeatherDomain.Daily, out var names)) used[WeatherDomain.Daily] = names = [];
+                names.Add(ChinaDailyForecast.Name);
+            }
+        }
+        var cityKey = WeatherData.CacheKey(city, sourceId);
         var local = WeatherHourHistory.Read(cityKey);
         foreach (var (time, point) in local)
             if (!hours.ContainsKey(time)) { hours[time] = point; fieldSources.TryAdd("h:" + time, "local"); }

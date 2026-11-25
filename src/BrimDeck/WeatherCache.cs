@@ -340,21 +340,16 @@ internal static class RequestGate
             if (!File.Exists(UsagePath)) return;
             using var doc = JsonDocument.Parse(File.ReadAllText(UsagePath));
             var today = DateOnly.FromDateTime(DateTime.Now);
-            var legacyDay = DateOnly.FromDateTime(File.GetLastWriteTime(UsagePath));
             foreach (var entry in doc.RootElement.EnumerateObject())
             {
-                bool legacy = entry.Value.ValueKind == JsonValueKind.Number;
-                var usage = legacy ? new Usage(legacyDay, entry.Value.GetInt32(), entry.Value.GetInt32())
-                    : entry.Value.Deserialize<Usage>(Json);
+                var usage = entry.Value.Deserialize<Usage>(Json);
                 if (usage is null) continue;
-                string key = entry.Name == "hefeng-search" ? "hefeng" : entry.Name;
-                var state = States.GetOrAdd(key, _ => new State());
+                var state = States.GetOrAdd(entry.Name, _ => new State());
                 state.Day = usage.Day;
                 // 只恢复属于今天的当日计数：昨天落盘的计数若被标成今天，会把今天还没花的请求误拦。
                 if (usage.Day == today) state.Count += usage.Count;
                 // 月度累计跨天有效，同月内照常恢复（跨月由 TryEnter 的月度重置兜底）。
                 if (usage.Day.Year == today.Year && usage.Day.Month == today.Month) state.MonthCount += usage.MonthCount;
-                _dirty |= legacy;
             }
         }
         catch (IOException) { }

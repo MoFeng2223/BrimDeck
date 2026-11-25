@@ -1,8 +1,12 @@
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Shapes;
 using System.Linq;
+using BrimDeck.Core;
 namespace BrimDeck;
+// 天气领域的可视资源统一宿主（惯例同 MusicVisuals / PowerGlyphs）：动画、矢量图标、天气图形、
+// 月相，以及跨视图复用的天空渐变 / 天气文字 / 风向箭头。页面类不承担资源职责。
 internal static class WeatherMotion
 {
     internal static void Attach(FrameworkElement element)
@@ -250,4 +254,41 @@ internal sealed class MoonPhaseIcon : FrameworkElement
         }
         geo.Freeze(); return geo;
     }
+}
+
+// 天气领域跨视图复用的可视工具：天空渐变、天气条件文案、风向箭头。
+// 设置页与灵动岛页共用，页面类不再承担这些资源职责（惯例同 MusicVisuals.Icon / PowerGlyphs）。
+internal static class WeatherVisuals
+{
+    // WMO 码 → 最短一档天气文字：0 晴、1/2 多云、3 阴、45/48 雾、51~67 雨、71~77 雪、80~82 阵雨、
+    // 85/86 阵雪、95+ 雷雨。码值已由 WeatherCodes 归一到同一套区间，这里只负责翻成文字。
+    internal static string Condition(int code) => code switch
+    {
+        0 => Loc.T("晴", "Sunny"), 1 or 2 => Loc.T("多云", "Cloudy"), 3 => Loc.T("阴", "Overcast"),
+        45 or 48 => Loc.T("雾", "Foggy"), >= 51 and <= 67 => Loc.T("雨", "Rain"), >= 71 and <= 77 => Loc.T("雪", "Snow"),
+        >= 80 and <= 82 => Loc.T("阵雨", "Showers"), 85 or 86 => Loc.T("阵雪", "Snow showers"), >= 95 => Loc.T("雷雨", "Thunderstorm"), _ => Loc.T("多云", "Cloudy")
+    };
+    // 天空渐变随昼夜与天气切换：晴昼蓝、阴霾灰、雨夜深蓝灰、雷雨紫，夜晚统一深邃蓝黑。
+    internal static LinearGradientBrush Sky(int code, bool day)
+    {
+        var (a, b) = day ? code switch {
+            <= 2 => (Color.FromRgb(31, 77, 143), Color.FromRgb(85, 127, 175)),
+            3 => (Color.FromRgb(74, 86, 104), Color.FromRgb(113, 128, 150)),
+            45 or 48 => (Color.FromRgb(96, 102, 114), Color.FromRgb(140, 148, 160)),
+            >= 95 => (Color.FromRgb(59, 46, 86), Color.FromRgb(110, 91, 138)),
+            >= 71 and <= 77 or 85 or 86 => (Color.FromRgb(93, 122, 154), Color.FromRgb(176, 196, 222)),
+            _ => (Color.FromRgb(44, 58, 77), Color.FromRgb(93, 109, 126))
+        } : (Color.FromRgb(13, 18, 48), Color.FromRgb(35, 40, 74));
+        var brush = new LinearGradientBrush(a, b, 150);
+        brush.Freeze(); return brush;
+    }
+    // 实况风速卡的方向图标：同一套 8 方位角度，颜色跟随卡片，尺寸与其他元信息图标一致。
+    internal static FrameworkElement WindArrowIcon(double deg, Color ink) => new Path
+    {
+        Data = Geometry.Parse("M8,1.5 L11.2,13 L8,10.2 L4.8,13 Z"),
+        Fill = new SolidColorBrush(ink),
+        Width = 15, Height = 15, Stretch = Stretch.Uniform, VerticalAlignment = VerticalAlignment.Center,
+        RenderTransformOrigin = new Point(.5, .5),
+        RenderTransform = new RotateTransform(double.IsNaN(deg) ? 0 : WeatherCodes.Compass8Angle(deg))
+    };
 }

@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text.Json;
 using BrimDeck.Core;
 
@@ -7,7 +7,7 @@ namespace BrimDeck;
 internal sealed class OpenMeteoSource : IWeatherSource
 {
     public WeatherSourceInfo Info { get; } = new("openmeteo", "Open-Meteo", Loc.T("全球数值预报 · CC BY 4.0", "Global forecast · CC BY 4.0"),
-        [WeatherDomain.Current, WeatherDomain.Hourly, WeatherDomain.Daily, WeatherDomain.Air, WeatherDomain.History, WeatherDomain.Minutely], WeatherRegion.Global);
+        [WeatherDomain.Current, WeatherDomain.Hourly, WeatherDomain.Daily, WeatherDomain.Air, WeatherDomain.History, WeatherDomain.Minutely]);
     public bool CanServe(City city, WeatherSettings settings) => true;
 
     public async Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)

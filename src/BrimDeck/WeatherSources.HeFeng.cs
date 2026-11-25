@@ -10,8 +10,7 @@ internal sealed class HeFengSource : IWeatherSource
 {
     public WeatherSourceInfo Info { get; } = new("hefeng", Loc.T("和风天气", "QWeather"), Loc.T("实况/预报/分钟/预警/指数/空气/历史", "Now/forecast/minute/alert/indices/air/history"),
         // 官方「天气和基础服务」每月前 5 万次免费（个人用量等于免费）；台风/辐照/海洋等付费或无坐标接口的能力不接入。
-        [WeatherDomain.Current, WeatherDomain.Hourly, WeatherDomain.Daily, WeatherDomain.Air, WeatherDomain.History, WeatherDomain.Minutely, WeatherDomain.Warning, WeatherDomain.Indices],
-        WeatherRegion.Global);
+        [WeatherDomain.Current, WeatherDomain.Hourly, WeatherDomain.Daily, WeatherDomain.Air, WeatherDomain.History, WeatherDomain.Minutely, WeatherDomain.Warning, WeatherDomain.Indices]);
     public bool CanServe(City city, WeatherSettings settings) => settings.HeFengKey.Trim().Length > 0 && settings.HeFengHost.Trim().Length > 0;
 
     // 一次请求要用到的公共参数：坐标只保留两位小数（v1 只认这个精度）。

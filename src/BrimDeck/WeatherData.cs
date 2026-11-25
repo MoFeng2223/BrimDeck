@@ -9,7 +9,6 @@ namespace BrimDeck;
 // City 与 WeatherSettings 由于要存进 settings.json，定义在 BrimDeck.Core；本文件只把下载到的快照放在 weather/snapshot/。
 internal static class WeatherData
 {
-    // 配置全部来自 settings.json；本类只把其中的天气字段投影成视图使用的 State，并另存下载的快照。
     internal sealed class State
     {
         private readonly Func<DeckSettings> _settings;
@@ -20,7 +19,9 @@ internal static class WeatherData
         public Dictionary<string, WeatherSnapshot> Cache { get; set; } = [];
         // 自动定位指针：最近一次定位到的实际城市键。快照一律按真实城市键存（定位映射选择的城市/区），
         // "auto" 只作指向，供重启后免定位直接命中缓存、设置页「当前位置」行取数。
-        public string AutoKey { get; set; } = "";
+        private string _autoKey = "";
+        public string AutoKey { get => _autoKey.EndsWith("|" + Schedule.SourceFor(null), StringComparison.Ordinal) ? _autoKey : ""; set => _autoKey = value; }
+        public string KeyFor(City city) => CacheKey(city, Schedule.SourceFor(city));
     }
     private sealed class SnapshotFile { public string Key {get;set;}=""; public WeatherSnapshot? Value {get;set;} }
     private static readonly HttpClient Http=new() {Timeout=TimeSpan.FromSeconds(20)};
@@ -37,14 +38,6 @@ internal static class WeatherData
         WeatherFiles.Ensure(WeatherFiles.Snapshots);
         WeatherCache.Prune(TimeSpan.FromDays(14));
         RequestGate.Restore();
-        // 旧版本曾把和风 GeoAPI（城市搜索 search| / 坐标反查 place|）的结果写进本地缓存，和风明确禁止缓存
-        // GeoAPI 数据：启动时一次性清掉这些遗留文件，之后的 GeoAPI 请求也不再落盘。
-        try
-        {
-            string hefeng = Path.Combine(WeatherFiles.CacheRoot, "hefeng");
-            foreach (var file in Directory.GetFiles(hefeng, "search*.json").Concat(Directory.GetFiles(hefeng, "place*.json"))) File.Delete(file);
-        }
-        catch { }
     }
     internal static State Load(Func<DeckSettings> settings)
     {
@@ -259,25 +252,9 @@ internal static class WeatherData
     }
     // 天气聚合入口：当前、24 小时、24 天（历史 10 + 今天 + 未来 13）、日升日落与空气质量由 WeatherAggregator 统一拼装。
     // 历史单独一轮，progress 让界面先画不含历史的版本，历史到了再用返回值整体替换。
-    internal static async Task<WeatherSnapshot> CurrentAsync(City city, WeatherSettings schedule, CancellationToken token, Action<WeatherSnapshot>? progress = null)
-    {
-        if (string.IsNullOrEmpty(city.TimeZoneId) && !string.IsNullOrWhiteSpace(schedule.HeFengKey)
-            && !string.IsNullOrWhiteSpace(schedule.HeFengHost))
-        {
-            // Resolve older saved cities through the same cached lookup as the city picker.
-            string query = string.IsNullOrEmpty(city.LocationId)
-                ? FormattableString.Invariant($"{city.Longitude:F3},{city.Latitude:F3}") : city.LocationId;
-            try
-            {
-                var matches = await SearchHeFeng(query, schedule, token);
-                if (matches.FirstOrDefault()?.TimeZoneId is { Length: > 0 } zone)
-                    city = city with { TimeZoneId = zone };
-            }
-            catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-            catch { /* Weather can still be fetched when city lookup is unavailable. */ }
-        }
-        return await WeatherAggregator.FetchAsync(city, schedule, token, progress);
-    }
+    internal static string CacheKey(City city, string sourceId) => city.ToString() + "|" + sourceId;
+    internal static async Task<WeatherSnapshot> CurrentAsync(City city, WeatherSettings schedule, string sourceId, CancellationToken token, Action<WeatherSnapshot>? progress = null)
+        => await WeatherAggregator.FetchAsync(city, schedule, sourceId, token, progress);
     // 在 daily 正序数组中定位“今天”的索引；Today 是聚合时写下的城市当地日期，找不到时回退 0。
     internal static int TodayIndex(WeatherSnapshot s)
     {
