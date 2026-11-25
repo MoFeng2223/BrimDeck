@@ -27,6 +27,23 @@ public static class ChatFlashApps
         string name = Path.GetFileName(executable.Trim());
         return (apps ?? All).FirstOrDefault(app => app.Executables.Any(known => string.Equals(known, name, StringComparison.OrdinalIgnoreCase)));
     }
+
+    // Where an installed chat's program is, from the icons Windows' list of installed programs names for its entries
+    // (Uninstall\*\DisplayIcon: "D:\Tencent\Weixin\Weixin.exe" in quotes, or D:\Tencent\QQNT\QQ.exe,0): the first that is one
+    // of the application's executables, written out in full on a local drive.
+    public static string? InstalledPath(ChatFlashApp app, IEnumerable<string?> displayIcons)
+    {
+        foreach (var icon in displayIcons)
+        {
+            if (string.IsNullOrWhiteSpace(icon)) continue;
+            string path = icon.Trim();
+            if (path.StartsWith('"')) path = path.IndexOf('"', 1) is var end and > 0 ? path[1..end] : "";
+            else if (path.LastIndexOf(',') is var comma and > 0 && int.TryParse(path[(comma + 1)..], out _)) path = path[..comma];
+            path = path.Trim();
+            if (NoticeIntake.IsLocalWindowsPath(path) && Find(path, [app]) is not null) return path;
+        }
+        return null;
+    }
 }
 
 // Decides what a flashing taskbar button means. The only things it is given are the flashing window and, through the two
@@ -37,9 +54,10 @@ public static class ChatFlashApps
 // nothing. Runs on one thread (the UI thread).
 public sealed class ChatFlashFilter(Func<nint, string?> executable, Func<nint, bool> inApplication, Func<DateTimeOffset> now, TimeSpan? window = null, IReadOnlyList<ChatFlashApp>? apps = null)
 {
-    // WeChat flashes again for each message until it is brought forward; three minutes keeps a busy chat to a few popups an hour
-    // and still tells the user about a message that arrives after a quiet spell.
-    public static readonly TimeSpan DefaultWindow = TimeSpan.FromMinutes(3);
+    // WeChat flashes its button for each new message, unread ones before it or not: about four flashes within two to three
+    // seconds, then nothing until the next message (measured on WeChat 4.x). Flashes within five seconds of the first of a round
+    // are that one message; a later flash is another message and is told again. The user chose five seconds.
+    public static readonly TimeSpan DefaultWindow = TimeSpan.FromSeconds(5);
     private readonly TimeSpan _window = window ?? DefaultWindow;
     private readonly Dictionary<string, (DateTimeOffset Start, int Group)> _groups = new(StringComparer.Ordinal);
 

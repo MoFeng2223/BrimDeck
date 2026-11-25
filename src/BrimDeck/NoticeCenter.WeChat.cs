@@ -20,7 +20,7 @@ internal sealed partial class NoticeCenter
         string folder = _app.Store.DirectoryPath;
         if (read)
         {
-            _wechat ??= new WeChatSource(_dispatcher, folder, input => { if (_enabled && !_disposed) Receive(input); },
+            _wechat ??= new WeChatSource(_dispatcher, folder, input => { if (_enabled && !_disposed) Receive(WithIcon(input)); },
                 key => { if (!_disposed) Hub.SourceRemoved(key); }, () => { if (!_disposed) Changed?.Invoke(); });
             return;
         }
@@ -36,8 +36,12 @@ internal sealed partial class NoticeCenter
     {
         if (!_enabled || _disposed) return;
         if (input.AppKey == WeChatRows.AppKey && _wechat is { } source && source.Flashed(input)) return;
-        Receive(input);
+        Receive(WithIcon(input));
     }
+
+    // A watched chat names no icon itself; its notices carry its program's (ChatAppIcons).
+    private static NoticeInput WithIcon(NoticeInput input)
+        => input.IconRef is null && ChatAppIcons.Ref(input.AppKey) is { } icon ? input with { IconRef = icon } : input;
 
     // Brings WeChat's window forward and, for a notice that names a chat, opens that chat.
     private async Task<bool> OpenWeChatAsync(Notice notice)

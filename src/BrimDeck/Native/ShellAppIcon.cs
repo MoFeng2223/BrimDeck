@@ -7,18 +7,23 @@ using System.Windows.Media.Imaging;
 namespace BrimDeck.Native;
 
 // The icon Windows shows for an application in its Apps folder (the Start menu's list), found by the application's user model
-// id. Desktop applications that send notifications through a Start menu shortcut (QQ, WeChat's installer, most Win32 programs)
+// id, or the icon of a program file. Desktop applications that send notifications through a Start menu shortcut (QQ, WeChat's installer, most Win32 programs)
 // give no logo through the notification itself; the shell still knows their icon from the shortcut or the program. Read on a
 // thread of its own in the single-threaded apartment the shell's objects expect; returned as PNG bytes.
 internal static class ShellAppIcon
 {
     public static Task<byte[]?> PngAsync(string appUserModelId, int size = 128)
+        => string.IsNullOrWhiteSpace(appUserModelId) ? Task.FromResult<byte[]?>(null) : ReadAsync(@"shell:AppsFolder\" + appUserModelId, size);
+
+    // The icon of a program file, as Explorer shows it; the program is not run. The caller checks the path (NoticeIcons).
+    public static Task<byte[]?> FilePngAsync(string path, int size = 128) => ReadAsync(path, size);
+
+    private static Task<byte[]?> ReadAsync(string parsingName, int size)
     {
-        if (string.IsNullOrWhiteSpace(appUserModelId)) return Task.FromResult<byte[]?>(null);
         var done = new TaskCompletionSource<byte[]?>(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
         {
-            try { done.SetResult(Read(appUserModelId, size)); }
+            try { done.SetResult(Read(parsingName, size)); }
             catch (Exception ex) when (ex is COMException or ArgumentException or InvalidOperationException or IOException or NotSupportedException) { done.SetResult(null); }
         }) { IsBackground = true, Name = "BrimDeck app icon" };
         thread.SetApartmentState(ApartmentState.STA);
@@ -26,10 +31,10 @@ internal static class ShellAppIcon
         return done.Task;
     }
 
-    private static byte[]? Read(string appUserModelId, int size)
+    private static byte[]? Read(string parsingName, int size)
     {
         var factoryId = typeof(IShellItemImageFactory).GUID;
-        if (SHCreateItemFromParsingName(@"shell:AppsFolder\" + appUserModelId, IntPtr.Zero, ref factoryId, out var factory) != 0 || factory is null) return null;
+        if (SHCreateItemFromParsingName(parsingName, IntPtr.Zero, ref factoryId, out var factory) != 0 || factory is null) return null;
         IntPtr bitmap = IntPtr.Zero;
         try
         {

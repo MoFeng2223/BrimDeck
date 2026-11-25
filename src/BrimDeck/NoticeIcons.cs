@@ -46,6 +46,9 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
         return null;
     }
 
+    // Whether the icon is being read now (Get gave null and Loaded follows), not known to be missing.
+    public bool IsLoading(string? iconRef) => iconRef is not null && _loading.Contains(iconRef);
+
     private async Task LoadAsync(string iconRef)
     {
         BitmapSource? image = null;
@@ -94,6 +97,7 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
             return stored is not null ? ReadImageFile(stored) : null;
         }
         if (iconRef.StartsWith("file:", StringComparison.Ordinal)) return ReadLocal(iconRef[5..]);
+        if (iconRef.StartsWith("exe:", StringComparison.Ordinal)) return await ReadProgram(iconRef[4..]);
         if (WslDistribution(iconRef) is { } distro)
         {
             string icon = iconRef[(5 + distro.Length)..];
@@ -120,6 +124,18 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
         try { if (new DriveInfo(path[..1]).DriveType is not (DriveType.Fixed or DriveType.Removable)) return null; }
         catch (ArgumentException) { return null; }
         return ThroughLinks(path) ? null : ReadImageFile(path);
+    }
+
+    // A program's own icon ("exe:" references, which only BrimDeck makes, for the chats it watches: ChatAppIcons). The same
+    // checks as for an icon file; the shell reads the icon from the program, which is not run.
+    private static async Task<byte[]?> ReadProgram(string path)
+    {
+        if (!NoticeIntake.IsLocalWindowsPath(path) || !path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return null;
+        try { if (new DriveInfo(path[..1]).DriveType is not (DriveType.Fixed or DriveType.Removable)) return null; }
+        catch (ArgumentException) { return null; }
+        var file = new FileInfo(path);
+        if (!file.Exists || file.LinkTarget is not null || (file.Attributes & FileAttributes.ReparsePoint) != 0 || ThroughLinks(path)) return null;
+        return await ShellAppIcon.FilePngAsync(path);
     }
 
     // The distribution of a "wsl:<distribution>:<icon>" reference, if it names one by a valid distribution name: the name

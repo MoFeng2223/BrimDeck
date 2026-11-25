@@ -146,7 +146,7 @@ public sealed partial class SettingsWindow
         var known = center.Hub.KnownApps.FirstOrDefault(app => app.Key == key);
         bool receives = S.NoticeReceives(key);
         var row = AppGrid();
-        var icon = NoticeAppIcon(name, known?.IconRef, 20, center); icon.Margin = new Thickness(0, 0, 12, 0); icon.VerticalAlignment = VerticalAlignment.Center;
+        var icon = NoticeAppIcon(name, known?.IconRef ?? ChatAppIcons.Ref(key), 20, center); icon.Margin = new Thickness(0, 0, 12, 0); icon.VerticalAlignment = VerticalAlignment.Center;
         row.Children.Add(icon);
         bool open = _noticeAppsOpen.Contains(key);
         void Flip() { if (!_noticeAppsOpen.Remove(key)) _noticeAppsOpen.Add(key); ShowPage(_page); }
@@ -418,7 +418,7 @@ public sealed partial class SettingsWindow
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); grid.ColumnDefinitions.Add(new ColumnDefinition()); grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition()); grid.RowDefinitions.Add(new RowDefinition());
-        var icon = NoticeAppIcon(app.Name, app.IconRef, 16, _app.Notices); icon.Margin = new Thickness(0, 1, 9, 0); icon.VerticalAlignment = VerticalAlignment.Top;
+        var icon = NoticeAppIcon(app.Name, app.IconRef ?? ChatAppIcons.Ref(app.Key), 16, _app.Notices); icon.Margin = new Thickness(0, 1, 9, 0); icon.VerticalAlignment = VerticalAlignment.Top;
         Grid.SetRowSpan(icon, 2); grid.Children.Add(icon);
         var name = TextLine(app.Name, 12.5, added ? TextSecondary : TextPrimary); name.TextTrimming = TextTrimming.CharacterEllipsis;
         Grid.SetColumn(name, 1); grid.Children.Add(name);

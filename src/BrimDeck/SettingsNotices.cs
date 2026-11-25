@@ -739,16 +739,28 @@ public sealed partial class SettingsWindow
         };
     }
 
-    // The icon a row shows: the application's own, read from its notices, else its first letter on a plate.
+    // The icon a row shows: the application's own, read from its notices (or for a watched chat from its program), else its
+    // first letter on a plate. An icon still being read takes the plate's place when it arrives.
     private FrameworkElement NoticeAppIcon(string name, string? iconRef, double size, NoticeCenter center)
     {
-        if (center.Icons.Get(iconRef, out _) is { } image)
+        Image Picture(System.Windows.Media.Imaging.BitmapSource image)
         {
             var picture = new Image { Source = image, Width = size, Height = size, Stretch = Stretch.Uniform };
             RenderOptions.SetBitmapScalingMode(picture, BitmapScalingMode.HighQuality);
             return picture;
         }
-        return NoticeLetter.Plate(name, size, (Color)ColorConverter.ConvertFromString(_palette.Accent));
+        if (center.Icons.Get(iconRef, out _) is { } image) return Picture(image);
+        var plate = NoticeLetter.Plate(name, size, (Color)ColorConverter.ConvertFromString(_palette.Accent));
+        if (!center.Icons.IsLoading(iconRef)) return plate;
+        var holder = new Border { Child = plate };
+        void Arrived(string loaded)
+        {
+            if (loaded != iconRef) return;
+            center.Icons.Loaded -= Arrived;
+            if (center.Icons.Get(iconRef, out _) is { } icon) holder.Child = Picture(icon);
+        }
+        center.Icons.Loaded += Arrived;
+        return holder;
     }
 
     // The sources that send through the command line or a program (brim-notify, a hook in an AI tool), and WSL applications'

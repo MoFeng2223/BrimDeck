@@ -47,17 +47,20 @@ internal static class NoticeFlashTests
     {
         var world = new World();
         var filter = world.Filter();
+        check("Flash: a round is five seconds", ChatFlashFilter.DefaultWindow == TimeSpan.FromSeconds(5));
         var first = filter.OnFlash(10)!;
-        world.Now = T0.AddSeconds(5);
+        world.Now = T0.AddSeconds(1);
         var second = filter.OnFlash(10)!;
-        world.Now = T0.AddMinutes(2.9);
+        world.Now = T0.AddSeconds(4.9);
         var third = filter.OnFlash(11)!;
-        check("Flash: repeated flashes within the window are the same notice (the hub updates it)", first.InstanceKey == second.InstanceKey && second.InstanceKey == third.InstanceKey && first.AppKey == second.AppKey);
-        world.Now = T0.AddMinutes(3).AddSeconds(1);
+        check("Flash: the flashes of one message are the same notice (the hub updates it)", first.InstanceKey == second.InstanceKey && second.InstanceKey == third.InstanceKey && first.AppKey == second.AppKey);
+        world.Now = T0.AddSeconds(100);
         var later = filter.OnFlash(10)!;
-        check("Flash: a flash after the window is a new notice", later.InstanceKey != first.InstanceKey);
-        world.Now = T0.AddMinutes(3).AddSeconds(30);
-        check("Flash: the window counts from the first flash of a notice, so steady flashing alerts again", filter.OnFlash(10)!.InstanceKey == later.InstanceKey);
+        check("Flash: the next message, while the first is still unread, is a new notice", later.InstanceKey != first.InstanceKey);
+        world.Now = T0.AddSeconds(102);
+        check("Flash: a round's flashes count from its first one", filter.OnFlash(10)!.InstanceKey == later.InstanceKey);
+        world.Now = T0.AddSeconds(105);
+        check("Flash: a flash five seconds after a round began is another message, told again", filter.OnFlash(10)!.InstanceKey != later.InstanceKey);
         world.Now = T0.AddMinutes(-1);
         check("Flash: a clock that went back starts a new notice", filter.OnFlash(10)!.InstanceKey != later.InstanceKey);
 
@@ -88,6 +91,14 @@ internal static class NoticeFlashTests
         check("Flash: ids are unique and every row names executables", ChatFlashApps.All.Select(app => app.Id).Distinct().Count() == ChatFlashApps.All.Count
             && ChatFlashApps.All.All(app => app.Executables.Count > 0 && app.Executables.All(e => e.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))));
         check("Flash: lookups by name and by path", ChatFlashApps.Find(@"D:\x\Weixin.exe")?.Id == "wechat" && ChatFlashApps.Find("") is null && ChatFlashApps.Find(null) is null && ChatFlashApps.Find("weixin") is null);
+        var wechat = ChatFlashApps.All.First(app => app.Id == "wechat");
+        check("Flash: the installed program is found from the installed programs' icons, quoted or with an index",
+            ChatFlashApps.InstalledPath(wechat, [null, "", @"D:\Tencent\QQNT\QQ.exe,0", "\"D:\\Tencent\\Weixin\\Weixin.exe\""]) == @"D:\Tencent\Weixin\Weixin.exe"
+            && ChatFlashApps.InstalledPath(wechat, [@"C:\Program Files\Tencent\WeChat\WeChat.exe,0"]) == @"C:\Program Files\Tencent\WeChat\WeChat.exe"
+            && ChatFlashApps.InstalledPath(wechat, [@"C:\Program Files\Tencent\WeChat\WeChat.exe"]) == @"C:\Program Files\Tencent\WeChat\WeChat.exe");
+        check("Flash: other programs, network paths, relative paths and broken quotes are not the installed program",
+            ChatFlashApps.InstalledPath(wechat, [@"D:\Tencent\QQNT\QQ.exe", @"\\server\share\Weixin.exe", "Weixin.exe", "\"D:\\Tencent\\Weixin\\Weixin.exe", @"D:\x\..\Weixin.exe", @"D:\Weixin\Weixin.exe.bak"]) is null
+            && ChatFlashApps.InstalledPath(wechat, []) is null);
     }
 
     private static void Setting(Action<string, bool> check)
