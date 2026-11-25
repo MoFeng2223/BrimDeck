@@ -304,7 +304,7 @@ public partial class MainWindow
     }
     // A list or text with nothing to scroll lets the wheel through to the panel (PanelWheel: the volume or the pages); one that
     // scrolls keeps it. A scroll viewer marks every wheel handled, so this takes the mark back when there is nothing to scroll.
-    private static T PassWheel<T>(T viewer) where T : ScrollViewer
+    internal static T PassWheel<T>(T viewer) where T : ScrollViewer
     {
         viewer.AddHandler(MouseWheelEvent, new MouseWheelEventHandler((_, e) => { if (viewer.ScrollableHeight < 1) e.Handled = false; }), true);
         return viewer;

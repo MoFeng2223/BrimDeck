@@ -199,6 +199,8 @@ internal sealed partial class PlannerPage
             PanningMode = PanningMode.VerticalOnly, Background = Brushes.Transparent
         };
         NoticeFade.Foot(scroll, 18);
+        // A day's list or to-dos with nothing to scroll let the wheel through to the panel (the pages or the volume).
+        MainWindow.PassWheel(scroll);
         scroll.ScrollChanged += (_, e) => { if (!_rebuilding && e.ExtentHeightChange == 0 && e.ViewportHeightChange == 0) remember(scroll.VerticalOffset); };
         return scroll;
     }
