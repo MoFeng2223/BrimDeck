@@ -36,10 +36,10 @@
       <Border x:Name="HoverExtension" Background="#01000000" Height="0" VerticalAlignment="Top" HorizontalAlignment="Stretch"/>
       <local:IslandBorder x:Name="Island" HorizontalAlignment="Left" VerticalAlignment="Top" Width="238" Height="32"
               Background="Black" BorderThickness="0" CornerRadius="0,0,12,12" ShoulderRadius="16" MaterialOpacity="1" ClipToBounds="True">
-        <!-- The layered window and the island's rounded clip would leave text in grayscale; the surface beneath is always opaque,
-             so ClearType is safe here. Text under a fade, a mask or another clip falls back to grayscale until that ends. -->
+        <!-- The layered window, the island's rounded clip, the scroll views, text boxes and fades inside would leave text in
+             grayscale; TextClarity gives every element the ClearType hint (a see-through surface turns it back to grayscale). -->
         <!-- Turned back upright when the panel hangs from another edge than the top (MainWindow.Edge.cs). -->
-        <Grid x:Name="IslandContent" RenderOptions.ClearTypeHint="Enabled">
+        <Grid x:Name="IslandContent" local:TextClarity.ClearType="True">
           <Border x:Name="MusicIndicator" Height="4" HorizontalAlignment="Left" VerticalAlignment="Center" Background="#FF55555A" CornerRadius="2" Visibility="Collapsed" IsHitTestVisible="False"/>
           <!-- Compact music, quotas and the clock share the fixed content area; quota alerts take precedence. -->
           <Grid x:Name="Compact" HorizontalAlignment="Center" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
