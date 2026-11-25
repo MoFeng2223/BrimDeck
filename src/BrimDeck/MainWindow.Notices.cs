@@ -263,16 +263,84 @@ public partial class MainWindow
     // The page is on screen: everything listed counts as seen; what was new keeps its dot until it is shown in the focus.
     private void NoticesPageShown()
     {
-        _freshNotices = _app.Notices.Hub.Notices.Where(n => !n.Viewed).Select(n => n.Id).ToHashSet();
-        _readOnPage.Clear();
+        TakeFreshNotices();
         _noticeEarlier = false;
         _app.Notices.Hub.MarkAllViewed();
     }
+
+    // The notices not seen yet. While they are the same notices the set stays the same, with what of it was read on the page, so
+    // a page built for them while the panel was closed (PrebuildNotices) is still what the opening shows.
+    private void TakeFreshNotices()
+    {
+        var fresh = _app.Notices.Hub.Notices.Where(n => !n.Viewed).Select(n => n.Id).ToHashSet();
+        if (_freshNotices.SetEquals(fresh)) return;
+        _freshNotices = fresh;
+        _readOnPage.Clear();
+    }
+
+    // ----- Building the page while the panel is closed -----
+    //
+    // Every other page is built while the panel is closed, so its opening only shows it. The notices page was built as the panel
+    // opened, and building and laying it out held the opening's first frame for 70 to 270 ms (ReadmeMedia notice-perf,
+    // 2026-11-25): the surface appeared most of the way open instead of growing. It is now built a while after what it shows
+    // changed, while the panel is closed on it, without marking anything seen; the opening shows it when nothing changed since.
+
+    // The page on screen was built while the panel was closed, and has not been shown since.
+    private bool _noticesPrebuilt;
+    private System.Windows.Threading.DispatcherTimer? _noticePrebuild;
+    private long _noticePrebuildAt;
+    // After a notice arrives the page waits for its motion on the island (about 1.8 s), which the build would hold up for a few
+    // frames; after the panel closes, for the closing.
+    private static readonly TimeSpan PrebuildAfterNotice = TimeSpan.FromSeconds(2), PrebuildAfterClosing = TimeSpan.FromMilliseconds(600);
+
+    private void QueueNoticePrebuild(TimeSpan after)
+    {
+        if (_expanded || _preview || CurrentPage != DeckPage.Notices) return;
+        long now = Environment.TickCount64, at = Math.Max(_noticePrebuildAt, now + (long)after.TotalMilliseconds);
+        if (_noticePrebuild is null)
+        {
+            _noticePrebuild = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.ApplicationIdle, Dispatcher);
+            _noticePrebuild.Tick += (_, _) => PrebuildNotices();
+        }
+        _noticePrebuildAt = at;
+        _noticePrebuild.Stop();
+        _noticePrebuild.Interval = TimeSpan.FromMilliseconds(Math.Max(1, at - now));
+        _noticePrebuild.Start();
+    }
+
+    private void PrebuildNotices()
+    {
+        _noticePrebuild?.Stop();
+        _noticePrebuildAt = 0;
+        if (_expanded || _preview || CurrentPage != DeckPage.Notices || _app.Notices is null || !DeckPages.Shown(Settings, DeckPage.Notices)) return;
+        // What the opening resets (NoticesPageShown), without marking anything seen.
+        TakeFreshNotices();
+        _noticeEarlier = false;
+        if (_noticesPrebuilt && NoticesContent.Visibility == Visibility.Visible && FitNoticeLayout() && UpdateNoticeRows()) return;
+        RenderNotices(fresh: true);
+        _noticesPrebuilt = true;
+    }
+
+    // The panel opens on the notices page: the page built while it was closed shows when it is still what the page shows,
+    // otherwise the page is built now.
+    private void ShowNoticesOnOpening()
+    {
+        NoticesPageShown();
+        bool ready = _noticesPrebuilt && NoticesContent.Visibility == Visibility.Visible && FitNoticeLayout() && UpdateNoticeRows();
+        _noticesPrebuilt = false;
+        if (!ready) { RenderNotices(fresh: true); return; }
+        // What RenderNotices does only for a page on screen.
+        WatchPageLive();
+    }
+
+    // The panel closed: the page is built again for the next opening, at the top of its list and without what was opened on it.
+    private void NoticesPanelClosed() => QueueNoticePrebuild(PrebuildAfterClosing);
 
     private void NoticesChanged()
     {
         UpdateNoticeBadge();
         NoticeStripChanged();
+        if (!_expanded) QueueNoticePrebuild(PrebuildAfterNotice);
         if (!_expanded || CurrentPage != DeckPage.Notices || _noticesRenderQueued) return;
         // Several changes in a row (a burst, icons arriving) are drawn once.
         _noticesRenderQueued = true;
@@ -338,12 +406,12 @@ public partial class MainWindow
     private (DeckSettings? Settings, int Theme, double Width, double Height) NoticeLayout()
         => (Settings, PanelTheme.Generation, ContentCanvas.Width, ContentCanvas.Height);
 
-    // RenderUsage on the notices page (N50-2). Closed, the page is not drawn at all: SetExpanded builds it as the panel opens,
-    // with what arrived meanwhile. Open with the page already on screen for the same theme, a data refresh or the minute's tick
+    // RenderUsage on the notices page (N50-2). Closed, the page is built a while later (PrebuildNotices), or as the panel opens
+    // (SetExpanded) with what arrived meanwhile. Open with the page already on screen for the same theme, a data refresh or the minute's tick
     // builds it again only when what it shows changed, and a new size only fits it (FitNoticeLayout).
     private void RenderNoticesPage()
     {
-        if (!_expanded && !_preview) return;
+        if (!_expanded && !_preview) { QueueNoticePrebuild(PrebuildAfterClosing); return; }
         if (NoticesContent.Visibility == Visibility.Visible && FitNoticeLayout() && UpdateNoticeRows()) { RefreshStatus(); return; }
         RenderNotices();
     }
@@ -465,6 +533,7 @@ public partial class MainWindow
     // fresh: the page comes into view (the panel opens on it, or another page gives way to it).
     private void RenderNotices(bool fresh = false)
     {
+        _noticesPrebuilt = false;
         fresh |= NoticesContent.Visibility != Visibility.Visible;
         SubscribeNotices();
         RefreshStatus();
@@ -477,7 +546,7 @@ public partial class MainWindow
         NoticesContent.Children.Clear(); NoticesContent.ColumnDefinitions.Clear();
         _waitingPlates.Clear(); _focusGlow = null;
         _liveRows.Clear();
-        _pageRows.Clear(); _noticeBatches?.Cancel(); _noticeBatches = null; _pageEmpty = null; _pageScroll = null;
+        _pageRows.Clear(); _noticeBatches?.Cancel(); _noticeBatches = null; _wordBatches?.Cancel(); _wordBatches = null; _pageEmpty = null; _pageScroll = null;
         NoticesContent.Margin = PageMargin;
         var center = _app.Notices;
         var now = DateTimeOffset.UtcNow;
@@ -623,8 +692,9 @@ public partial class MainWindow
         if (NoticeReplyStrip(notice, center) is { } reply) { DockPanel.SetDock(reply, System.Windows.Controls.Dock.Bottom); stack.Children.Add(reply); }
         if (NoticeAgendaStrip(notice) is { } strip) { DockPanel.SetDock(strip, System.Windows.Controls.Dock.Bottom); stack.Children.Add(strip); }
 
-        // The words, scrolling within the column when they are long; the other messages of the same conversation under them.
-        var words = new StackPanel { Margin = new Thickness(0, 0, 0, WordsFadeHeight) };
+        // The words, scrolling within the column when they are long; the other messages of the same conversation under them. Only
+        // the messages in view are laid out again for each width of a drag (ViewportStack).
+        var words = new ViewportStack { Margin = new Thickness(0, 0, 0, WordsFadeHeight) };
         if (NoticeTimeLine(notice, now) is { } timeLine) { timeLine.FontSize = 13; timeLine.FontWeight = FontWeights.SemiBold; timeLine.Margin = new Thickness(0, 0, 0, 4); words.Children.Add(timeLine); }
         if (notice.Body.Length > 0)
         {
@@ -647,24 +717,13 @@ public partial class MainWindow
         if (group.Count > 1)
         {
             // The other messages in full, wrapped and selectable like the newest: a chat's messages are put together here, so cutting
-            // them to a line would leave the rest of what was said nowhere to read. Up to twenty; their heights follow the width, so a
-            // plain stack rather than ViewportStack, which needs heights that do not.
-            var others = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
-            others.Children.Add(new Border { Height = 1, Background = UI.Brush(UI.Hairline), Margin = new Thickness(0, 0, 0, 2) });
-            foreach (var other in group.Where(n => !ReferenceEquals(n, notice)).Take(20))
-            {
-                var otherWords = NoticeCodes.Words(other, Settings.NoticeCodes);
-                if (otherWords.Body.Length == 0) continue;
-                var line = new DockPanel { Margin = new Thickness(0, 6, 0, 0) };
-                var when = UI.Fixed(NoticeText.Relative(other.ReceivedAt, now), 11, 20, UI.Tertiary);
-                DockPanel.SetDock(when, System.Windows.Controls.Dock.Right); when.Margin = new Thickness(8, 0, 0, 0); when.VerticalAlignment = VerticalAlignment.Top;
-                line.Children.Add(when);
-                var text = SelectableWords(otherWords.Body, 13, 20, UI.Secondary, line: false);
-                if (otherWords.HasCode) AutomationProperties.SetName(text, otherWords.SpokenBody);
-                line.Children.Add(text);
-                others.Children.Add(line);
-            }
-            words.Children.Add(others);
+            // them to a line would leave the rest of what was said nowhere to read. Up to twenty, the first few at once and the rest
+            // from queued passes: built all at once, their text boxes held the panel's opening for well over a frame.
+            words.Children.Add(new Border { Height = 1, Background = UI.Brush(UI.Hairline), Margin = new Thickness(0, 8, 0, 2) });
+            var others = group.Where(n => !ReferenceEquals(n, notice)).Take(20).ToList();
+            _wordBatches = new RowBatches<Notice>(others, (_, other) => AddOtherWords(words, other, now),
+                action => Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, action), OtherWordsBatch);
+            _wordBatches.Start(InitialOtherWords);
         }
         var scroll = new ScrollViewer { Content = words, Margin = new Thickness(0, 14, 0, 0), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false, PanningMode = PanningMode.VerticalOnly,
             Background = Brushes.Transparent };
@@ -688,6 +747,25 @@ public partial class MainWindow
         NoticeFade.Foot(scroll, WordsFadeHeight);
         stack.Children.Add(scroll);
         return column;
+    }
+
+    // The earlier messages of the focus's conversation built at once, and per queued pass afterwards.
+    private const int InitialOtherWords = 4, OtherWordsBatch = 3;
+    private RowBatches<Notice>? _wordBatches;
+
+    // One earlier message of the focus's conversation under its newest: its words, wrapped, and when it came on the right.
+    private void AddOtherWords(Panel words, Notice other, DateTimeOffset now)
+    {
+        var otherWords = NoticeCodes.Words(other, Settings.NoticeCodes);
+        if (otherWords.Body.Length == 0) return;
+        var line = new DockPanel { Margin = new Thickness(0, 6, 0, 0) };
+        var when = UI.Fixed(NoticeText.Relative(other.ReceivedAt, now), 11, 20, UI.Tertiary);
+        DockPanel.SetDock(when, System.Windows.Controls.Dock.Right); when.Margin = new Thickness(8, 0, 0, 0); when.VerticalAlignment = VerticalAlignment.Top;
+        line.Children.Add(when);
+        var text = SelectableWords(otherWords.Body, 13, 20, UI.Secondary, line: false);
+        if (otherWords.HasCode) AutomationProperties.SetName(text, otherWords.SpokenBody);
+        line.Children.Add(text);
+        words.Children.Add(line);
     }
 
     // Words of the focus that the pointer can select (PanelSelectableText), drawn as the text they replace. line: one line of the

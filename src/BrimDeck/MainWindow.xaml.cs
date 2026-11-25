@@ -173,7 +173,7 @@ public partial class MainWindow : Window
         InitializeMotion();
         Island.Background = _surface;
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
-        _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); else if (OffPeakChanged()) RenderCompact(); if (_lead is null) _app.CheckUpdatesIfDue(); };
+        _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); else { if (OffPeakChanged()) RenderCompact(); QueueNoticePrebuild(PrebuildAfterClosing); } if (_lead is null) _app.CheckUpdatesIfDue(); };
         _seconds.Tick += (_, _) => { if (_compactClock is not null) _compactClock.Time = DateTime.Now; _seconds.Interval = SecondDelay(DateTime.Now); };
         // An open panel closes as a closing, after the new context is laid out, so the notices' coordinator and the hotkey hear
         // of it (DeckExpanded, HotkeyPanelCollapsed) and what follows a closing is done (PanelClosed); clearing _expanded first
@@ -909,6 +909,7 @@ public partial class MainWindow : Window
         WatchOutsidePress(false);
         ResetShelf();
         AgendaPanelClosed();
+        NoticesPanelClosed();
         HotkeyPanelCollapsed();
         ReplayCompactTitle();
         _app.RequestTrim();
@@ -995,15 +996,15 @@ public partial class MainWindow : Window
         // Lay out in device-independent pixels. Column typography adapts to its available space.
         ContentCanvas.Width = _pageWidth;
         ContentCanvas.Height = pageHeight;
-        // The recent notices page is drawn only while it shows (NoticesChanged), so notices that arrived while the panel was
-        // closed are not on it yet: it is drawn again before the panel opens, and what it lists counts as seen as on a page
+        // The recent notices page is built while the panel is closed a while after what it shows changed (PrebuildNotices); what
+        // arrived since is not on it yet: it is built again before the panel opens, and what it lists counts as seen as on a page
         // switch, the notices hotkey's opening too.
         if (expanded && !wasExpanded && !_preview && CurrentPage == DeckPage.Notices && _app.Notices is not null)
         {
             // Marking the list seen raises Changed; the page is drawn here once, not again at background priority mid-opening.
             bool queued = _noticesRenderQueued;
             _noticesRenderQueued = true;
-            try { NoticesPageShown(); RenderNotices(fresh: true); }
+            try { ShowNoticesOnOpening(); }
             finally { _noticesRenderQueued = queued; }
         }
         // motion-review C1, C4: closing takes three quarters of the set time; a move the keyboard asked for takes 0.6 of it. The

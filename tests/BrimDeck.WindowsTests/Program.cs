@@ -25,6 +25,7 @@ internal static class Program
             if (args is ["--only", "ringletter", ..]) { RingLetterChecks.Run(Check, args.Length > 2 ? args[2] : null); return Finish(); }
             if (args is ["--only", "drawn"]) { DrawnAutomationTests.Run(Check); return Finish(); }
             if (args is ["--only", "paste"]) { PasteInputChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "notices"]) { NoticePanelTests.Run(Check); NoticeRowBatchTests.Run(Check); return Finish(); }
             if (args is ["--only", "settings"]) { SettingsFocusTests.Run(Check); BrimDeck.MainWindow.CheckPageCapsuleFit(Check); return Finish(); }
             if (args is ["--only", "maximize"]) { SettingsMaximizeChecks.Run(Check); return Finish(); }
             if (args is ["--only", "popup"]) { PopupGhostChecks.Run(Check); return Finish(); }

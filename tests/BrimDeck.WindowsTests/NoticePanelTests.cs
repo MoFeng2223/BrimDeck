@@ -187,6 +187,40 @@ internal static class NoticePanelTests
             check("A child scrolled into view is laid out at the stack's width", rows[29].RenderSize.Width == 220 && rows[25].RenderSize.Width == 220);
         }
         finally { listWindow.Close(); }
+
+        // ----- Children whose height follows the width (the focus's wrapped messages) -----
+        var words = new ViewportStack();
+        var messages = Enumerable.Range(0, 20).Select(i => new TextBlock { Text = string.Concat(Enumerable.Repeat("一段会换行的消息 ", 6)) + i, FontSize = 13, TextWrapping = TextWrapping.Wrap }).ToList();
+        foreach (var message in messages) words.Children.Add(message);
+        var wordsViewer = new ScrollViewer { Content = words, Width = 300, Height = 200, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Hidden };
+        var wordsWindow = new Window { Width = 400, Height = 300, ShowInTaskbar = false, ShowActivated = false, WindowStyle = WindowStyle.None, Left = -20000, Top = -20000, Content = wordsViewer };
+        try
+        {
+            wordsWindow.Show(); Pump();
+            wordsViewer.ScrollToVerticalOffset(wordsViewer.ScrollableHeight * 2 / 3); Pump();
+            var marker = messages.First(m => m.TranslatePoint(new Point(), wordsViewer).Y >= 0);
+            double markerAt = marker.TranslatePoint(new Point(), wordsViewer).Y, extent = wordsViewer.ExtentHeight;
+            for (double width = 296; width >= 220; width -= 4) { wordsViewer.Width = width; Pump(); }
+            check("While the width keeps changing, the messages out of view keep the width and height they had",
+                messages[0].RenderSize.Width == 300 && messages[^1].RenderSize.Width == 300 && Math.Abs(marker.TranslatePoint(new Point(), wordsViewer).Y - markerAt) < 1);
+            Wait(400);
+            check("Once the width has settled, every message is laid out at it and the stack is as tall as they are",
+                messages.All(m => m.RenderSize.Width == 220) && Math.Abs(words.DesiredSize.Height - messages.Sum(m => m.DesiredSize.Height)) < .5 && wordsViewer.ExtentHeight > extent);
+            check("The messages above the view growing taller move the view with them, so what was in view stays where it was",
+                Math.Abs(marker.TranslatePoint(new Point(), wordsViewer).Y - markerAt) < 1);
+        }
+        finally { wordsWindow.Close(); }
+    }
+
+    // Runs the dispatcher for the given time, then until it is idle.
+    private static void Wait(int milliseconds)
+    {
+        var frame = new DispatcherFrame();
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(milliseconds) };
+        timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; };
+        timer.Start();
+        Dispatcher.PushFrame(frame);
+        Pump();
     }
 
     private static void Pump()

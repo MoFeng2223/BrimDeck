@@ -139,21 +139,37 @@ internal sealed class FitLineBox : Decorator
 // day, and while the panel's edges were dragged each of them was laid out again for each frame, scrolled out of view or not: with
 // thirty rows that was about sixty lines cut with an ellipsis a frame (ReadmeMedia notice-resize, 2026-11-24). A child out of view
 // keeps the width it was last laid out at, and is laid out at the stack's width as it comes into view (the viewer's scrolling asks
-// for that). The children's heights must not depend on their width, as the notices' rows do not: out of view, a child keeps the
-// height it had.
+// for that). Out of view, a child keeps the height it had, so a child whose height follows its width (the focus's wrapped messages)
+// is laid out at the new width once the size has stopped changing for SettleAfter. The children starting above the view that change
+// height move the view with them, while the width changes and as it settles, so what is in view stays where it is.
 internal sealed class ViewportStack : Panel
 {
     // How far beyond the viewer's edges a child still counts as in view.
     private const double Slack = 48;
+    private static readonly TimeSpan SettleAfter = TimeSpan.FromMilliseconds(160);
     // The width each child was last measured at, and the children left at that width by the last measuring.
     private readonly Dictionary<UIElement, double> _widths = [];
     private readonly HashSet<UIElement> _held = [];
     private ScrollViewer? _viewer;
+    private System.Windows.Threading.DispatcherTimer? _settle;
+    // The next measuring lays out every child, held or not.
+    private bool _all;
 
     public ViewportStack()
     {
         Loaded += (_, _) => Watch(FindViewer());
-        Unloaded += (_, _) => Watch(null);
+        Unloaded += (_, _) => { Watch(null); _settle?.Stop(); };
+    }
+
+    // Lays out the held children at the stack's width once no new width has come for SettleAfter.
+    private void SettleLater()
+    {
+        if (_settle is null)
+        {
+            _settle = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Background, Dispatcher) { Interval = SettleAfter };
+            _settle.Tick += (_, _) => { _settle.Stop(); if (_held.Count > 0) { _all = true; InvalidateMeasure(); } };
+        }
+        _settle.Stop(); _settle.Start();
     }
 
     private ScrollViewer? FindViewer()
@@ -191,18 +207,29 @@ internal sealed class ViewportStack : Panel
     protected override Size MeasureOverride(Size available)
     {
         var view = double.IsInfinity(available.Width) ? null : View();
+        bool all = _all;
+        _all = false;
         _held.Clear();
-        double y = 0, widest = 0;
+        // before: where the children were laid out last; above: how much the children that start above the view grew. The first
+        // child that starts in view keeps its place in the view, as a browser keeps the content in view in place.
+        double y = 0, before = 0, above = 0, widest = 0;
         foreach (UIElement child in InternalChildren)
         {
             double height = child.DesiredSize.Height;
             bool known = _widths.TryGetValue(child, out double width);
-            if (known && width != available.Width && child.IsMeasureValid && view is { } shown && (y + height < shown.Top || y > shown.Bottom))
+            if (!all && known && width != available.Width && child.IsMeasureValid && view is { } shown && (y + height < shown.Top || y > shown.Bottom))
                 _held.Add(child);
-            else { child.Measure(new Size(available.Width, double.PositiveInfinity)); _widths[child] = available.Width; }
-            y += child.DesiredSize.Height;
+            else
+            {
+                child.Measure(new Size(available.Width, double.PositiveInfinity));
+                _widths[child] = available.Width;
+                if (known && view is { } at && before < at.Top + Slack - .5) above += child.DesiredSize.Height - height;
+            }
+            y += child.DesiredSize.Height; before += height;
             widest = Math.Max(widest, child.DesiredSize.Width);
         }
+        if (_held.Count > 0) SettleLater();
+        if (above != 0 && _viewer is { } viewer) viewer.ScrollToVerticalOffset(Math.Max(0, viewer.VerticalOffset + above));
         return new Size(double.IsInfinity(available.Width) ? widest : Math.Min(widest, available.Width), y);
     }
 

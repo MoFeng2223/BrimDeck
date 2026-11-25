@@ -199,6 +199,7 @@ internal sealed partial class Renderer(App app, string output, string language, 
             if (scenes.Contains("notice-apps")) await NoticeAppsScene();
             // What one frame of dragging the panel's edges costs on the notices page, beside the system monitor; for checking.
             if (scenes.Contains("notice-resize")) await NoticeResizeScene();
+            if (scenes.Contains("notice-perf")) await NoticePerfScene();
             // The collapsed count of unread notices on each form, and where it is set; for checking.
             if (scenes.Contains("notice-strip")) await NoticeStripScene();
             if (scenes.Contains("notice-agenda")) await NoticeAgendaScene();
