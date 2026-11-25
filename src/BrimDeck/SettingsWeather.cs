@@ -20,24 +20,72 @@ public sealed partial class SettingsWindow
         var cityQuota=new Border {Child=cityQuotaText,CornerRadius=new CornerRadius(10),Padding=new Thickness(9,2,9,2),Background=Brushes.Transparent,BorderBrush=(Brush)FindResource("SettingsBorder"),BorderThickness=new Thickness(1),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(8,0,0,0)};
         void UpdateCityQuota(){cityQuotaText.Text=$"{state.Cities.Count}/{DeckSettings.MaxWeatherCities}";cityQuotaText.Foreground=UI.Brush(state.Cities.Count<DeckSettings.MaxWeatherCities?_palette.Positive:_palette.Negative);}
         void Save() {try {_app.QueueSave(); WeatherData.Save(state);}catch {}}
+        // 城市清单用同一套列宽，间隔也是真实的列：拖拽位 / 间隔 / 城市 / 间隔 / 天气 / 间隔 / 温度 / 间隔 / 数据源 / 间隔 / 删除。
+        // 列头、数据行、搜索页脚共用它，文字和控件落在同一列而不是靠相邻列硬挤。
+        Grid CityGrid()
+        {
+            var grid=new Grid();
+            foreach(double width in new[]{24.0,12.0,0.0,16.0,48.0,12.0,68.0,14.0,132.0,12.0,28.0})
+                grid.ColumnDefinitions.Add(new ColumnDefinition {Width=width==0 ? new GridLength(1,GridUnitType.Star) : new GridLength(width)});
+            return grid;
+        }
+        static (string Title, string? Detail) SplitName(string full)
+        {
+            var levels=City.SplitLevels(full);
+            return levels.Length==0 ? (full,null) : (levels[0],levels.Length>1 ? string.Join(City.Separator,levels.Skip(1)) : null);
+        }
+        // 接口给的城市级名称常不带「市」（合肥·安徽省·中国）。只在显示层补后缀，不改动保存的完整名称。
+        static string DisplayCityName(string full)
+        {
+            var levels=City.SplitLevels(full);
+            if(levels.Length<2) return full;
+            string first=levels[0],second=levels[1];
+            bool province=second.EndsWith("省")||second.Contains("自治区")||second.EndsWith("特别行政区")||second.EndsWith("地区");
+            bool bare=!first.EndsWith("市")&&!first.EndsWith("省")&&!first.EndsWith("区")&&!first.EndsWith("县")&&!first.EndsWith("旗")&&!first.EndsWith("盟");
+            if(province&&bare&&first is not ("香港" or "澳门" or "北京" or "上海" or "天津" or "重庆"))levels[0]=first+"市";
+            return string.Join(City.Separator,levels);
+        }
         void Fill()
         {
             UpdateCityQuota();
             cityRows.Children.Clear();
-            var movable = new StackPanel();
-            const double cityRowHeight = 54;
+            var movable=new StackPanel();
+            const double cityRowHeight=54;
             for(int i=-1;i<state.Cities.Count;i++) {
-                int index=i;bool selected=i==state.Selected;var city=i<0?null:state.Cities[i];
+                bool selected=i==state.Selected;var city=i<0?null:state.Cities[i];
                 string? temperature=null;int code=3;bool day=true;
-                string name=city is null?Loc.T("自动定位","Auto location"):City.SplitLevels(city.Name)[0];
-                string? subtitle=city is null?null:city.Name;
+                string name=Loc.T("自动定位","Auto location");string? subtitle=null;
                 if(city is null){
-                    if(autoName.Trim().Length>0&&!autoName.Contains("当前位置"))subtitle=autoName;
-                    if(state.Cache.TryGetValue(state.AutoKey,out var snap)){temperature=$"{snap.Temperature:0}°";code=snap.WeatherCode;day=snap.IsDay;if(!snap.Name.Contains("当前位置"))subtitle=snap.Name;}
-                } else if(state.Cache.TryGetValue(state.KeyFor(city),out var snap)){temperature=$"{snap.Temperature:0}°";code=snap.WeatherCode;day=snap.IsDay;}
-                var controls=new StackPanel {Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};var sources=WeatherSources.All;
-                var picker=new ComboBox {Width=160, Margin=new Thickness(4,0,14,0), Style=(Style)FindResource("SettingsCombo"),
-                    ItemsSource=sources.Select(source=>source.Info.Name).ToArray(), SelectedIndex=Array.FindIndex(sources,source=>source.Info.Id==state.Schedule.SourceFor(city))};
+                    string local=autoName;
+                    if(state.Cache.TryGetValue(state.AutoKey,out var snap)){
+                        temperature=$"{snap.Temperature:0}°";code=snap.WeatherCode;day=snap.IsDay;
+                        if(!snap.Name.Contains("当前位置"))local=snap.Name;
+                    }
+                    if(local.Trim().Length>0&&!local.Contains("当前位置"))subtitle=DisplayCityName(local);
+                } else {
+                    var parts=SplitName(city.Name);name=parts.Title;subtitle=DisplayCityName(city.Name);
+                    if(state.Cache.TryGetValue(state.KeyFor(city),out var snap)){temperature=$"{snap.Temperature:0}°";code=snap.WeatherCode;day=snap.IsDay;}
+                }
+                var grid=CityGrid();var sources=WeatherSources.All;
+                if(selected){
+                    var bar=new Border {Width=3,CornerRadius=new CornerRadius(0,2,2,0),Background=(Brush)FindResource("SettingsAccent"),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Stretch,IsHitTestVisible=false};
+                    Grid.SetColumn(bar,0);grid.Children.Add(bar);
+                }
+                if(city is not null){
+                    var grip=new GripHandle {Width=22,Background=Brushes.Transparent,Cursor=Cursors.SizeAll,Child=Grip(TextTertiary),VerticalAlignment=VerticalAlignment.Center};
+                    Grid.SetColumn(grip,0);grid.Children.Add(grip);
+                }
+                var labels=new StackPanel {VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,10,0)};
+                var title=TextLine(name,13,TextPrimary,FontWeights.SemiBold);title.TextTrimming=TextTrimming.CharacterEllipsis;labels.Children.Add(title);
+                if(subtitle is not null){var detail=TextLine(subtitle,11,TextSecondary);detail.TextTrimming=TextTrimming.CharacterEllipsis;labels.Children.Add(detail);}
+                Grid.SetColumn(labels,2);grid.Children.Add(labels);
+                var glyph=new WeatherGlyph(code,day) {Width=30,Height=30,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center,IsHitTestVisible=false};
+                Grid.SetColumn(glyph,4);grid.Children.Add(glyph);
+                var temperatureLabel=TextLine(temperature ?? "",14,TextPrimary,FontWeights.SemiBold);
+                temperatureLabel.HorizontalAlignment=HorizontalAlignment.Right;temperatureLabel.VerticalAlignment=VerticalAlignment.Center;temperatureLabel.Margin=new Thickness(0,0,8,0);
+                Grid.SetColumn(temperatureLabel,6);grid.Children.Add(temperatureLabel);
+                var picker=new ComboBox {Width=108,Height=28,FontSize=11,Margin=new Thickness(0),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center,Style=(Style)FindResource("SettingsCombo"),
+                    ItemsSource=sources.Select(source=>source.Info.Name).ToArray(),SelectedIndex=Array.FindIndex(sources,source=>source.Info.Id==state.Schedule.SourceFor(city))};
                 PopupMotion.Attach(picker);
                 picker.SelectionChanged+=(_,_)=>{
                     if(picker.SelectedIndex<0)return;
@@ -45,48 +93,32 @@ public sealed partial class SettingsWindow
                     Save();preview.RenderWeatherCard();Fill();
                     _=RefreshCityWeatherAsync(city);
                 };
-                controls.Children.Add(picker);
-                var temperatureLabel=TextLine(temperature ?? "",14,TextPrimary);
-                temperatureLabel.Width=40;
-                temperatureLabel.VerticalAlignment=VerticalAlignment.Center;
-                controls.Children.Add(temperatureLabel);
-                void Select(){state.Selected=city is null ? -1 : state.Cities.IndexOf(city);Save();preview.RenderWeatherCard();Fill();}
-                Button? remove=null;
+                Grid.SetColumn(picker,8);grid.Children.Add(picker);
                 if(city is not null){
-                    remove=new Button {Style=(Style)FindResource("SettingsGlyphButton"),ToolTip=Loc.T("删除城市","Remove city"),Width=24,Height=26,Padding=new Thickness(0),VerticalAlignment=VerticalAlignment.Center};
+                    var remove=new Button {Style=(Style)FindResource("SettingsGlyphButton"),ToolTip=Loc.T("删除城市","Remove city"),Width=22,Height=24,Padding=new Thickness(0),VerticalAlignment=VerticalAlignment.Center,HorizontalAlignment=HorizontalAlignment.Center};
                     var cross=Stroke("M 0,0 L 8,8 M 8,0 L 0,8",8,8,TextSecondary);
                     cross.SetBinding(Shape.StrokeProperty,new System.Windows.Data.Binding("Foreground"){RelativeSource=new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.FindAncestor,typeof(Button),1)});
                     remove.Content=cross;
                     remove.Click+=(_,_)=>{int at=state.Cities.IndexOf(city);if(at<0)return;state.Cities.RemoveAt(at);if(state.Selected==at)state.Selected=-1;else if(state.Selected>at)state.Selected--;Save();preview.RenderWeatherCard();Fill();UpdateAdd();};
+                    Grid.SetColumn(remove,10);grid.Children.Add(remove);
                 }
-                var row=Row(name,controls,subtitle is null?null:TextLine(subtitle,11,TextSecondary));row.Margin=new Thickness(42,0,8,0);
-                var grid=new Grid();
-                grid.ColumnDefinitions.Add(new ColumnDefinition());
-                grid.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(30)});
-                grid.Children.Add(row);
-                if(remove is not null){
-                    Grid.SetColumn(remove,1);
-                    remove.HorizontalAlignment=HorizontalAlignment.Right;
-                    grid.Children.Add(remove);
-                }
-                grid.Children.Add(new WeatherGlyph(code,day) {Width=28,Height=28,HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(4,0,0,0),IsHitTestVisible=false});
-                if(selected){var indicator=new Border {Width=3,CornerRadius=new CornerRadius(0,2,2,0),Background=(Brush)FindResource("SettingsAccent"),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Stretch};grid.Children.Add(indicator);}
-                var border=new Border {Child=grid,Background=selected?(Brush)FindResource("SettingsAccentTint"):Brushes.Transparent,CornerRadius=new CornerRadius(6),Cursor=System.Windows.Input.Cursors.Hand};border.MouseLeftButtonUp+=(_,e)=>{if(!picker.IsMouseOver && e.OriginalSource is not Button)Select();};
-                var line=new Grid();
-                line.ColumnDefinitions.Add(new ColumnDefinition { Width=new GridLength(24) });
-                line.ColumnDefinitions.Add(new ColumnDefinition());
-                Grid.SetColumn(border,1);
-                line.Children.Add(border);
-                var frame=new Border { Child=line, Height=cityRowHeight, Tag=city, RenderTransform=new TranslateTransform() };
+                void Select(){state.Selected=city is null ? -1 : state.Cities.IndexOf(city);Save();preview.RenderWeatherCard();Fill();}
+                var frame=new Border {Child=grid,Height=cityRowHeight,Tag=city,RenderTransform=new TranslateTransform(),
+                    Background=selected?(Brush)FindResource("SettingsAccentTint"):Brushes.Transparent,
+                    BorderBrush=UI.Brush(_palette.RowDivider),BorderThickness=new Thickness(0,city is null?0:1,0,0),Cursor=System.Windows.Input.Cursors.Hand};
+                frame.MouseLeftButtonUp+=(_,e)=>{
+                    bool overGrip=grid.Children.OfType<GripHandle>().Any(handle=>handle.IsMouseOver);
+                    if(!picker.IsMouseOver && !overGrip && e.OriginalSource is not Button)Select();
+                };
                 if(city is null) { cityRows.Children.Add(frame); continue; }
-                var grip=new GripHandle { Width=22, Background=Brushes.Transparent, Cursor=Cursors.SizeAll, Child=Grip(TextTertiary) };
-                line.Children.Add(grip);
                 movable.Children.Add(frame);
-                AttachDrag(grip,name,()=>movable,cityRowHeight,list=>
+                var gripHandle=grid.Children.OfType<GripHandle>().First();
+                AttachDrag(gripHandle,name,()=>movable,cityRowHeight,list=>
                 {
                     var current=state.Selected>=0 ? state.Cities[state.Selected] : null;
                     state.Cities=list.Children.OfType<Border>().Select(row=>(City)row.Tag).ToList();
                     state.Selected=current is null ? -1 : state.Cities.IndexOf(current);
+                    foreach(var row in list.Children.OfType<Border>())row.BorderThickness=new Thickness(0,1,0,0);
                     Save();
                 });
             }
@@ -127,6 +159,16 @@ public sealed partial class SettingsWindow
             loading.Visibility=on?Visibility.Visible:Visibility.Collapsed;
             if(on) empty.Visibility=Visibility.Collapsed;
         }
+        // 状态徽章与配额计数器提前声明：添加城市时触发的刷新在编译期会先引用到它们，晚声明会被判定为未赋值。
+        var statusDot = new Ellipse {Width = 7, Height = 7, Fill = UI.Brush(TextTertiary)};
+        var statusText = TextLine(Loc.T("未测试", "Not tested"), 11, TextSecondary);
+        statusText.VerticalAlignment = VerticalAlignment.Center; statusText.Margin = new Thickness(6, 0, 0, 0);
+        var statusContent = new StackPanel {Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center};
+        statusContent.Children.Add(statusDot); statusContent.Children.Add(statusText);
+        var statusBadge = new Border {Child = statusContent, Height = 28, Padding = new Thickness(10, 0, 10, 0),
+            VerticalAlignment = VerticalAlignment.Center, ToolTip = Loc.T("点击上方刷新按钮后自动检测", "Checked automatically when you use the refresh button above")};
+        var dailyCounter=TextLine("",11,TextSecondary);dailyCounter.VerticalAlignment=VerticalAlignment.Center;
+        var monthlyCounter=TextLine("",11,TextSecondary);monthlyCounter.VerticalAlignment=VerticalAlignment.Center;
         City? picked=null;bool programmatic=false;CancellationTokenSource? pending=null;CancellationTokenSource? fetchCts=null;
         // 城市上限与 DeckSettings.Normalize 共用同一常量：满了就禁用添加并说明原因，不会出现「加了却被规范化丢掉」。
         bool CanAdd() => state.Cities.Count < DeckSettings.MaxWeatherCities;
@@ -162,17 +204,40 @@ public sealed partial class SettingsWindow
             catch { if(pending is not null&&token==pending.Token){options.ItemsSource=null;options.Visibility=Visibility.Collapsed;empty.Text=failedText;empty.Visibility=Visibility.Visible;popup.IsOpen=true;} }
             finally { if(pending is not null&&token==pending.Token)ShowSearching(false); }
         };
-        var controlsRow=new StackPanel {Orientation=Orientation.Horizontal};controlsRow.Children.Add(inputHost);controlsRow.Children.Add(add);
-        var searchRow=Row(Loc.T("搜索城市","Search city"),controlsRow);searchRow.Margin=new Thickness(42,0,8,0);
-        Group(cityRows,searchRow);
+        // 搜索行与城市行共用列宽，作为清单页脚；添加按钮落在数据源列，整组收进一张卡。
+        var foot=CityGrid();
+        var glass=new Grid {Width=15,Height=15,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center,IsHitTestVisible=false};
+        glass.Children.Add(new Ellipse {Width=10,Height=10,HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Top,Fill=Brushes.Transparent,Stroke=UI.Brush(TextSecondary),StrokeThickness=1.2});
+        glass.Children.Add(new Line {X1=7.5,Y1=7.5,X2=12.5,Y2=12.5,Stroke=UI.Brush(TextSecondary),StrokeThickness=1.2,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round});
+        Grid.SetColumn(glass,0);foot.Children.Add(glass);
+        Grid.SetColumn(inputHost,2);Grid.SetColumnSpan(inputHost,6);foot.Children.Add(inputHost);
+        Grid.SetColumn(add,8);add.Width=108;add.Height=28;add.Margin=new Thickness(0);add.HorizontalAlignment=HorizontalAlignment.Center;foot.Children.Add(add);
+        var footBorder=new Border {Child=foot,Height=48,BorderBrush=UI.Brush(_palette.RowDivider),BorderThickness=new Thickness(0,1,0,0)};
+        var cityHeader=CityGrid();
+        void Head(string text,int column,TextAlignment alignment=TextAlignment.Left,double right=0,double left=0)
+        {
+            var label=TextLine(text,11,TextTertiary);label.VerticalAlignment=VerticalAlignment.Center;label.TextAlignment=alignment;
+            if(right>0||left>0)label.Margin=new Thickness(left,0,right,0);
+            Grid.SetColumn(label,column);cityHeader.Children.Add(label);
+        }
+        Head(Loc.T("城市","City"),2);Head(Loc.T("天气","Weather"),4,TextAlignment.Center);Head(Loc.T("温度","Temperature"),6,TextAlignment.Right,8);Head(Loc.T("数据源","Source"),8,TextAlignment.Center);
+        var headBorder=new Border {Child=cityHeader,Height=30,BorderBrush=UI.Brush(_palette.RowDivider),BorderThickness=new Thickness(0,0,0,1)};
+        var cityList=new StackPanel();cityList.Children.Add(headBorder);cityList.Children.Add(cityRows);cityList.Children.Add(footBorder);
+        var cityCard=new Border {Child=cityList,CornerRadius=new CornerRadius(8),BorderThickness=new Thickness(1),Margin=new Thickness(0,0,0,28)};
+        cityCard.SetResourceReference(Border.BackgroundProperty,"SettingsSurface");
+        cityCard.SetResourceReference(Border.BorderBrushProperty,"SettingsBorder");
+        Target.Children.Add(cityCard);
         WeatherChipControls();
         var hefengCard = new Border { CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), Padding = new Thickness(16, 14, 16, 16), Margin = new Thickness(0, 0, 0, 28) };
         hefengCard.SetResourceReference(Border.BackgroundProperty, "SettingsSurface");
         hefengCard.SetResourceReference(Border.BorderBrushProperty, "SettingsBorder");
         var cardBody = new StackPanel();
         var cardHeading = TextLine(Loc.T("和风天气", "QWeather"), 14, TextPrimary, FontWeights.SemiBold);
-        cardHeading.Margin = new Thickness(0, 0, 0, 14);
-        cardBody.Children.Add(cardHeading);
+        cardHeading.VerticalAlignment = VerticalAlignment.Center;
+        // 标题右侧只展示连通性状态，不在设置页发起测试；结果来自预览卡刷新时的真实和风请求。
+        var cardHeadingRow = new DockPanel {Margin = new Thickness(0, 0, 0, 14)};
+        DockPanel.SetDock(statusBadge, Dock.Right); cardHeadingRow.Children.Add(statusBadge); cardHeadingRow.Children.Add(cardHeading);
+        cardBody.Children.Add(cardHeadingRow);
         var cardGrid = new Grid();
         cardGrid.ColumnDefinitions.Add(new ColumnDefinition());
         cardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
@@ -213,8 +278,6 @@ public sealed partial class SettingsWindow
             return box;
         }
         // 已用/上限计数：挂在字段标签右侧；上限为 0 时分母显示 ∞。改动上限后立即刷新。
-        var dailyCounter=TextLine("",11,TextSecondary);dailyCounter.VerticalAlignment=VerticalAlignment.Center;
-        var monthlyCounter=TextLine("",11,TextSecondary);monthlyCounter.VerticalAlignment=VerticalAlignment.Center;
         void UpdateCounters()
         {
             string Ratio(int used,int limit)=>$"{used}/{(limit==0?"∞":limit.ToString())}";
@@ -222,6 +285,32 @@ public sealed partial class SettingsWindow
             monthlyCounter.Text=Ratio(RequestGate.ThisMonth("hefeng"),state.Schedule.HeFengMonthlyLimit);
         }
         UpdateCounters();
+        void SetStatus(string text, Brush brush, string tip)
+        {
+            statusText.Text = text; statusText.Foreground = brush; statusDot.Fill = brush; statusBadge.ToolTip = tip;
+        }
+        // 改了 Host / Key 就让旧结果失效，下一次真实刷新再判定，不在设置页额外发请求。
+        void ResetStatus()
+        {
+            SetStatus(Loc.T("未测试", "Not tested"), UI.Brush(TextTertiary),
+                Loc.T("配置已更改，下次刷新会重新检测", "Configuration changed; the next refresh will check again"));
+        }
+        void MarkRefresh(string cityName, bool ok, bool requested, TimeSpan elapsed)
+        {
+            UpdateCounters();
+            if (!requested)
+            {
+                statusBadge.ToolTip = Loc.T("本次来自缓存，未重新检测", "Served from cache; not rechecked");
+                return;
+            }
+            string detail = ok
+                ? Loc.T($"{cityName} 实况响应正常", $"{cityName} responded normally")
+                : RequestGate.Cooldown("hefeng") > TimeSpan.Zero
+                    ? Loc.T("请求闸门冷却中，请稍后再试", "Request gate cooling down; try again later")
+                    : Loc.T("请求已发出但未取到数据，请检查 Key、额度与网络", "Request sent but no data returned; check the key, quota and network");
+            SetStatus(ok ? Loc.T("已连通", "Connected") : Loc.T("连接失败", "Failed"),
+                ok ? UI.Brush(_palette.Positive) : UI.Brush(_palette.Negative), $"{detail} · {elapsed.TotalSeconds:0.0}s");
+        }
         TextBox LimitField(Func<int> read, Action<int> write, Action? changed = null)
         {
             // 0 在界面上显示成「无限」，写回去的仍然是 int 0；聚焦时清空占位文字，直接输入数字即可。
@@ -244,9 +333,9 @@ public sealed partial class SettingsWindow
             return input;
         }
         cardGrid.Children.Add(CardField(Loc.T("API Host", "API Host"),
-            TextField(state.Schedule.HeFengHost, text => { state.Schedule.HeFengHost = text; Save(); }), null, 0, 0));
+            TextField(state.Schedule.HeFengHost, text => { state.Schedule.HeFengHost = text; Save(); ResetStatus(); }), null, 0, 0));
         cardGrid.Children.Add(CardField(Loc.T("API Key", "API Key"),
-            SecretField(state.Schedule.HeFengKey, text => { state.Schedule.HeFengKey = text; Save(); }), null, 0, 2));
+            SecretField(state.Schedule.HeFengKey, text => { state.Schedule.HeFengKey = text; Save(); ResetStatus(); }), null, 0, 2));
         cardGrid.Children.Add(CardField(Loc.T("每日上限", "Daily limit"),
             LimitField(() => state.Schedule.HeFengDailyLimit, v => state.Schedule.HeFengDailyLimit = v, UpdateCounters), dailyCounter, 1, 0));
         cardGrid.Children.Add(CardField(Loc.T("每月上限", "Monthly limit"),
@@ -278,6 +367,9 @@ public sealed partial class SettingsWindow
             fetchCts = request;
             var token = request.Token;
             var sourceId = state.Schedule.SourceFor(selectedCity);
+            bool watchHefeng = sourceId == "hefeng";
+            int before = watchHefeng ? RequestGate.Today("hefeng") : 0;
+            var watch = System.Diagnostics.Stopwatch.StartNew();
             try
             {
                 var city = selectedCity ?? await WeatherData.LocateAsync(state.Schedule, token);
@@ -285,6 +377,14 @@ public sealed partial class SettingsWindow
                 var snapshot = await WeatherData.CurrentAsync(city, state.Schedule, sourceId, token);
                 if (!active || token.IsCancellationRequested || sourceId != state.Schedule.SourceFor(selectedCity)
                     || (selectedCity is not null && !state.Cities.Contains(selectedCity))) return;
+                if (watchHefeng)
+                {
+                    // 只有这次真的发出请求才更新状态：缓存命中不该冒充连通测试，也不额外消耗配额。
+                    bool requested = RequestGate.Today("hefeng") > before;
+                    bool ok = requested && WeatherSources.Find("hefeng") is { } source
+                        && snapshot.Sources.Values.Any(value => value.Contains(source.Info.Name, StringComparison.Ordinal));
+                    MarkRefresh(DisplayCityName(city.Name), ok, requested, watch.Elapsed);
+                }
                 var key = WeatherData.CacheKey(city, sourceId);
                 state.Cache[key] = snapshot;
                 if (selectedCity is null) state.AutoKey = key;
