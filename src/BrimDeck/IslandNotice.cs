@@ -248,11 +248,6 @@ internal sealed class IslandNotice : Window
         _body.InvalidateVisual(); _shadow.InvalidateVisual();
     }
 
-    public void IslandChanged()
-    {
-        if (IsVisible && _deck.Collapsed != _shape) Refresh();
-    }
-
     // The notices hotkey with a notice on the island: the panel opens on the notices page and takes the keyboard.
     public void EnterKeyboard() { if (_item is not null) Activate(byKey: true); }
 

@@ -68,9 +68,9 @@ public partial class MainWindow
 
     // The capsule in the line's place, in DIPs from the monitor's corner (the screen's frame): the capsule's own size (its width as
     // its content asks, with auto width), against the line's edge at the capsule's own distance from it.
-    private CollapsedShape PeekCapsule(double? wanted)
+    private CollapsedShape PeekCapsule(double? wanted, double required)
     {
-        var own = CollapsedGeometry.Resolve(Settings, CompactStyle.Capsule, _screenMonitor, _screenWork, _pixelsPerDip, wanted, _compactRequired, _scale);
+        var own = CollapsedGeometry.Resolve(Settings, CompactStyle.Capsule, _screenMonitor, _screenWork, _pixelsPerDip, wanted, required, _scale);
         var (line, edge, reach) = LineOnScreen();
         var surface = IndicatorCapsule.Place(line, edge, own.Surface.Width, own.Surface.Height, Settings.CapsuleTop, _screenWork);
         _peekHolds = IndicatorCapsule.Holds(reach, surface);
@@ -79,10 +79,10 @@ public partial class MainWindow
 
     // The notch in the line's place, in the frame of the line's edge (Dock gives the notch the line's edge and anchor while it shows):
     // the notch's own size, centred on the line along the edge (IndicatorCapsule.Along).
-    private CollapsedShape PeekNotch(double? wanted)
+    private CollapsedShape PeekNotch(double? wanted, double required, double column)
     {
-        var notch = CollapsedGeometry.Resolve(Settings, CompactStyle.Notch, MonitorBoundsDip, WorkDip, _pixelsPerDip, wanted, _compactRequired, _scale,
-            ColumnFor(CompactStyle.Notch) ? double.IsNaN(_compactColumn) ? 0 : _compactColumn : null);
+        var notch = CollapsedGeometry.Resolve(Settings, CompactStyle.Notch, MonitorBoundsDip, WorkDip, _pixelsPerDip, wanted, required, _scale,
+            ColumnFor(CompactStyle.Notch) ? double.IsNaN(column) ? 0 : column : null);
         var line = CollapsedGeometry.Resolve(Settings, CompactStyle.Line, MonitorBoundsDip, WorkDip, _pixelsPerDip, null, 0, _scale, null, Settings.Dock(CompactStyle.Line).OverTaskbar).Surface;
         var surface = notch.Surface with { X = IndicatorCapsule.Along(line.X + line.Width / 2, notch.Surface.Width, MonitorBoundsDip.Width) };
         _peekHolds = IndicatorCapsule.Holds(IndicatorCapsule.LineReach(_frame, line), _frame.ToScreen(surface));

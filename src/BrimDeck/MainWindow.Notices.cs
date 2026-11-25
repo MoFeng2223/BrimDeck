@@ -158,8 +158,9 @@ public partial class MainWindow
     private const int BootNoticeLimit = 10_000;
     // When the panel's closing ends (SetExpanded); 0 when it is not closing.
     private long _collapseEnds;
-    // A notice waits for the boot to play and for the panel to finish closing.
-    private bool HoldsNotices => BootHoldsPointer || Environment.TickCount64 < _collapseEnds;
+    // A notice waits for the boot to play, for the panel to finish closing, and for the island to reach the width its content
+    // last asked for: started during that move, the notice took the new width at once over an island still on its way there.
+    private bool HoldsNotices => BootHoldsPointer || Environment.TickCount64 < Math.Max(_collapseEnds, _contentResizeEnds);
 
     // Shows the item once the boot has played and the panel has closed; ended or updated meanwhile (AttentionEnded,
     // AttentionUpdated), the latest wins.
@@ -194,7 +195,7 @@ public partial class MainWindow
     // past the limit.
     private TimeSpan BootNoticeWait(long now)
     {
-        long ends = Math.Max(_bootEnds, _collapseEnds);
+        long ends = Math.Max(_bootEnds, Math.Max(_collapseEnds, _contentResizeEnds));
         long wait = _bootWaiting || ends <= now ? 100 : ends - now + 1;
         return TimeSpan.FromMilliseconds(Math.Clamp(wait, 1, Math.Max(1, _bootNoticeSince + BootNoticeLimit - now)));
     }
@@ -209,7 +210,11 @@ public partial class MainWindow
     {
         _islandCovered = covered;
         HoverZone.Visibility = covered ? Visibility.Hidden : Visibility.Visible;
-        if (covered || !_compactFaded) return;
+        if (covered) return;
+        // The width the content asked for while the notice showed (FitCompactToContent) is taken once this call is done: it is
+        // reached from inside SetExpanded (the panel opening over the notice) and ApplySettings, which a fit must not run within.
+        if (_fitAfterNotice) Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, FitCompactToContent);
+        if (!_compactFaded) return;
         // The island's own content faded out for the notice (FadeIslandContent) comes back: by its opacity alone once the notice ran
         // out, at once when the panel opens over it (its opening moves the content itself).
         _compactFaded = false;

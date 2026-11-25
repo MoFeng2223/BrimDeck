@@ -107,7 +107,7 @@ public partial class MainWindow
         int boot = ++_boot; _bootWaiting = false;
         if (_poweringOff || _app.Exiting || _retiring) return;
         if (_expanded || IsSuppressed || !CanAnimateLifecycle) { SetImmediate(HoverZone, OpacityProperty, 1d); return; }
-        var shape = Collapsed = ShapeFor(EffectiveStyle);
+        var shape = Collapsed = CollapsedNow();
         PlaceDot(shape);
         _bootDot = true; Island.SettledClip = false;
         SetImmediate(ShadowHost, OpacityProperty, 0d);

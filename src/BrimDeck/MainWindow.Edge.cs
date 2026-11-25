@@ -85,7 +85,7 @@ public partial class MainWindow
     private (ScreenEdge Edge, bool OverTaskbar)? CapsuleBottomDock()
     {
         // The capsule the line opens into is docked from the line's place (MainWindow.Peek.cs).
-        var surface = CapsuleFromLine ? PeekCapsule(null).Surface : CollapsedGeometry.Resolve(Settings, CompactStyle.Capsule, _screenMonitor, _screenWork, _pixelsPerDip, null, 0, _scale).Surface;
+        var surface = CapsuleFromLine ? PeekCapsule(null, ShapeAsks.Required).Surface : CollapsedGeometry.Resolve(Settings, CompactStyle.Capsule, _screenMonitor, _screenWork, _pixelsPerDip, null, 0, _scale).Surface;
         if (surface.Y - _screenWork.Y <= CollapsedHover.BridgeMaxGap) return null;
         if (surface.Bottom > _screenWork.Bottom + .5) return (ScreenEdge.Bottom, true);
         return _screenWork.Bottom - surface.Bottom <= CollapsedHover.BridgeMaxGap ? (ScreenEdge.Bottom, false) : null;

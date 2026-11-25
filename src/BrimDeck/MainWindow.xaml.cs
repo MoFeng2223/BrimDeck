@@ -429,7 +429,7 @@ public partial class MainWindow : Window
         UpdateCollapsedGeometry(bounds, work, scale);
         // A new edge lays the panel out there at once (MainWindow.Edge.cs); the row is built again for it.
         bool newEdge = ApplyFrame();
-        if (newEdge) Collapsed = ShapeFor(EffectiveStyle);
+        if (newEdge) Collapsed = CollapsedNow();
         NoteCollapsedWidth(shapeBefore, dipBefore);
         // Page widths are unscaled; drawn at the panel's scale they fit the work area less 12 DIP each side.
         double Fit(double width) => Math.Max(240, Math.Min(width, (work.Width / scale - 24) / _scale));
@@ -560,26 +560,39 @@ public partial class MainWindow : Window
         var frame = _frame.Monitor;
         MonitorBoundsDip = new DipRect(bounds.Left / scale, bounds.Top / scale, frame.Width, frame.Height);
         WorkDip = _frame.FromScreen(screenWork);
-        Collapsed = ShapeFor(EffectiveStyle);
+        Collapsed = CollapsedNow();
     }
     private CollapsedShape ShapeFor(CompactStyle style)
     {
-        double? wanted = Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null;
+        var asks = ShapeAsks;
+        double? wanted = Settings.CompactAutoWidth(style) && !double.IsNaN(asks.Wanted) ? asks.Wanted : null;
         // The capsule or the notch the line opens into takes the line's place (MainWindow.Peek.cs).
         if (style == CompactStyle.Capsule && CapsuleFromLine)
         {
-            var placed = PeekCapsule(wanted);
+            var placed = PeekCapsule(wanted, asks.Required);
             return placed with { Surface = _frame.FromScreen(placed.Surface) };
         }
-        if (style == CompactStyle.Notch && NotchFromLine) return PeekNotch(wanted);
+        if (style == CompactStyle.Notch && NotchFromLine) return PeekNotch(wanted, asks.Required, asks.Column);
         // The capsule keeps its place on the screen; docked with the bottom (MainWindow.Edge.cs) it is only seen from there.
         if (style == CompactStyle.Capsule && _frame.Edge != ScreenEdge.Top)
         {
-            var onScreen = CollapsedGeometry.Resolve(Settings, style, _screenMonitor, _screenWork, _pixelsPerDip, wanted, _compactRequired, _scale);
+            var onScreen = CollapsedGeometry.Resolve(Settings, style, _screenMonitor, _screenWork, _pixelsPerDip, wanted, asks.Required, _scale);
             return onScreen with { Surface = _frame.FromScreen(onScreen.Surface) };
         }
-        return CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip, wanted, _compactRequired, _scale,
-            ColumnFor(style) ? double.IsNaN(_compactColumn) ? 0 : _compactColumn : null, style == CompactStyle.Line && Dock(style).OverTaskbar);
+        return CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip, wanted, asks.Required, _scale,
+            ColumnFor(style) ? double.IsNaN(asks.Column) ? 0 : asks.Column : null, style == CompactStyle.Line && Dock(style).OverTaskbar);
+    }
+    // What the content asks for, as the collapsed shape is built from it: the latest asks, or, while a notice shows on the island
+    // (NoticeHoldsWidth), those Collapsed was last built from (CollapsedNow). Every lay-out then keeps the island's width under a
+    // notice of any level, also one that a change of settings or theme starts, not only the content's own (FitCompactToContent).
+    private (double Wanted, double Required, double Column) _shapeAsks = (double.NaN, 0, double.NaN);
+    private (double Wanted, double Required, double Column) ShapeAsks
+        => NoticeHoldsWidth ? _shapeAsks : (_compactWanted, _compactRequired, _compactColumn);
+    // The shape for Collapsed, which records the asks it is built from.
+    private CollapsedShape CollapsedNow()
+    {
+        _shapeAsks = ShapeAsks;
+        return ShapeFor(EffectiveStyle);
     }
     // The width the collapsed column asks for (CompactColumn.Width); NaN until it is first built.
     private double _compactColumn = double.NaN;
@@ -592,8 +605,13 @@ public partial class MainWindow : Window
     private double? _openCentre;
     // The content changed what it asks for: the collapsed surface moves to the new width with its usual animation, and the window
     // grows first when the surface would be wider than it.
+    // While a notice shows on the island (from its arrival until the island is uncovered again), the island keeps its width: a
+    // new lyric line or a new unread count laid the notice out again at the new width in one frame and restarted its motion.
+    // The width is taken once the island is uncovered (SetIslandCovered).
     private void FitCompactToContent()
     {
+        if (NoticeHoldsWidth) { _fitAfterNotice = true; return; }
+        _fitAfterNotice = false;
         var before = Collapsed;
         UpdateCollapsedGeometry();
         if (Equals(Collapsed.Surface, before.Surface)) return;
@@ -605,8 +623,10 @@ public partial class MainWindow : Window
         if (Collapsed.Surface.X < _windowOffset || Collapsed.Surface.X + Collapsed.Surface.Width > _windowOffset + FrameWidth || Collapsed.Surface.Bottom + 24 > FrameHeight) { ApplySettings(); return; }
         _contentResize = true;
         try { SetExpanded(false, _edgeArriving); } finally { _contentResize = false; }
-        _noticeWindow?.IslandChanged();
     }
+    private bool NoticeHoldsWidth => _islandCovered || _noticeWindow?.Item is not null;
+    // The content asked for a new width while a notice held the island's.
+    private bool _fitAfterNotice;
     // SetExpanded runs for FitCompactToContent: the surface at rest takes the width its content asks for (ContentResize).
     private bool _contentResize;
     // The collapsed surface was last laid out as the line (SetExpanded), so the line turning into another style can tell.
@@ -925,7 +945,7 @@ public partial class MainWindow : Window
         _escapeDismissal?.SetEnabled(HoldsEscape);
         if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
         if (wasExpanded && !expanded) PanelClosed();
-        Collapsed = ShapeFor(EffectiveStyle);
+        Collapsed = CollapsedNow();
         var shape = Collapsed;
         var style = shape.Style;
         bool line = style == CompactStyle.Line, indicator = !expanded && line;
@@ -1125,9 +1145,14 @@ public partial class MainWindow : Window
             Island.BeginAnimation(Border.CornerRadiusProperty, Timed(new CornerRadiusAnimation { To = radius, EasingFunction = morphing ? Soft.Out : corners }, duration, cornerTrack), HandoffBehavior.SnapshotAndReplace);
         }
         bool compactGone = expanded || line;
-        Animate(Compact, OpacityProperty, compactGone ? 0 : 1, duration, compact, easeOut, () => { if (_expanded || ShapeFor(EffectiveStyle).Style == CompactStyle.Line) Compact.Visibility = Visibility.Hidden; });
-        Animate(CompactScale, ScaleTransform.ScaleXProperty, compactGone ? Soft.Shrunk : 1, duration, compact, easeOut);
-        Animate(CompactScale, ScaleTransform.ScaleYProperty, compactGone ? Soft.Shrunk : 1, duration, compact, easeOut);
+        // A surface at rest taking a new width leaves the content's fade alone: the content coming back after a notice
+        // (SetIslandCovered) held at its faded opacity until late in the move and then came in all at once.
+        if (!resizing || line)
+        {
+            Animate(Compact, OpacityProperty, compactGone ? 0 : 1, duration, compact, easeOut, () => { if (_expanded || ShapeFor(EffectiveStyle).Style == CompactStyle.Line) Compact.Visibility = Visibility.Hidden; });
+            Animate(CompactScale, ScaleTransform.ScaleXProperty, compactGone ? Soft.Shrunk : 1, duration, compact, easeOut);
+            Animate(CompactScale, ScaleTransform.ScaleYProperty, compactGone ? Soft.Shrunk : 1, duration, compact, easeOut);
+        }
         // The line's playback progress, hidden while the surface was the boot's dot, comes back with the compact content.
         Animate(MusicIndicator, OpacityProperty, 1, duration, compact, easeOut);
         Animate(ShadowHost, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);
