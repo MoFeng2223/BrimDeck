@@ -8,6 +8,9 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
+// 请求闸门、请求结果与统一 HTTP 入口；真正的缓存实现在 BrimDeck.Core/WeatherCache.cs。
+// 本文件只关心「能不能发、怎么发、结果如何」，不负责数据缓存与快照落盘。
+
 // 请求闸门：退避 + 每日预算。
 // 和风文档明确「不要在被限流时硬重试，会被判定为攻击并冻结账号」，因此 401/403 直接停 30 分钟，
 // 429 指数退避，网络失败短退避；成功即清零。预算只是防跑飞的安全网，正常用量远达不到。
@@ -26,7 +29,7 @@ internal static class RequestGate
     private static readonly ConcurrentDictionary<string, State> States = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, int> DailyLimit = new(StringComparer.Ordinal)
     {
-        ["weathercomcn"] = 600,
+        [ChinaDailySupplement.Id] = 600,
         ["openmeteo"] = 1200
     };
     private static readonly object Sync = new();

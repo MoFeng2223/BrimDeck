@@ -373,7 +373,7 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("请求与缓存","Requests and cache"));
         var usage=WeatherCache.Usage();
         var used=WeatherSources.All.Select(source=>(Name:source.Info.Id=="hefeng"?Loc.T("和风","QWeather"):source.Info.Name,Count:RequestGate.Today(source.Info.Id)))
-            .Append((Name:ChinaDailyForecast.Name,Count:RequestGate.Today(ChinaDailyForecast.Id))).Where(item=>item.Count>0).ToArray();
+            .Append((Name:ChinaDailySupplement.Name,Count:RequestGate.Today(ChinaDailySupplement.Id))).Where(item=>item.Count>0).ToArray();
         Group(Row(Loc.T("今日请求","Requests today"),TextLine(used.Length==0?Loc.T("尚未发起请求","No requests yet"):string.Join(" · ",used.Select(item=>$"{item.Name} {item.Count}")),12,TextSecondary)),
               Row(Loc.T("本地缓存","Local cache"),TextLine(Loc.T($"{usage.Count} 项 · {usage.Bytes/1024.0:0} KB（14 天未用自动清理）",$"{usage.Count} entries · {usage.Bytes/1024.0:0} KB (unused entries purged after 14 days)"),12,TextSecondary)));
         preview.RefreshRequested += async () =>
@@ -648,7 +648,7 @@ internal sealed class WeatherSettingsCard : Border
         string Deg(double value)=>double.IsNaN(value)?"--":$"{value:0}°";
         string Num(double value,string suffix)=>double.IsNaN(value)?"--":value.ToString("0.#",System.Globalization.CultureInfo.InvariantCulture)+suffix;
         string Clock(string[] times,int index)=>index>=0&&index<times.Length&&times[index].Length>=16?times[index][11..16]:"--:--";
-        int today=snap is null?0:WeatherData.TodayIndex(snap);
+        int today=snap is null?0:WeatherClock.SnapshotIndex(snap);
         int dateIndex=today+selectedDay;
         bool future=selectedDay>0;
         if(future && snap is not null){code=(uint)dateIndex < (uint)snap.DayCodes.Length ? snap.DayCodes[dateIndex] : -1;day=true;}

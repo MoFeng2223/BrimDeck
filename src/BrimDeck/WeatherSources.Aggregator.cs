@@ -5,7 +5,7 @@ using BrimDeck.Core;
 namespace BrimDeck;
 
 // 单源聚合：每个域只请求用户选定的那一家；同一次刷新把多个域合并成尽量少的请求。
-// 指定来源缺的字段就留空，不跨源补缺。
+// 指定来源缺的字段就留空，不跨源补缺；唯一的例外是和风日预报在国内由中国天气网补充通道补齐缺口。
 internal static class WeatherAggregator
 {
     private static readonly TimeSpan SourceTimeout = TimeSpan.FromSeconds(15);
@@ -29,14 +29,11 @@ internal static class WeatherAggregator
 
         async Task<List<DayPoint>> LoadDailySupplementAsync()
         {
-            if (sourceId != "hefeng" || !Geo.IsChina(city)) return [];
+            if (!ChinaDailySupplement.Applies(sourceId, city)) return [];
             var today = LocalToday(city.TimeZoneId ?? "Asia/Shanghai", city);
             var days = parts.GetValueOrDefault(sourceId)?.Days;
-            if (days is not null && Enumerable.Range(0, 14).All(offset =>
-                days.Any(day => day.Date == today.AddDays(offset).ToString("yyyy-MM-dd") &&
-                    day.HighC.HasValue && day.LowC.HasValue && day.Code.HasValue && day.NightCode.HasValue &&
-                    day.PrecipMm.HasValue && day.WindDir is not null && day.WindMaxKmh.HasValue))) return [];
-            try { return await ChinaDailyForecast.FetchAsync(city, today, token); }
+            if (!ChinaDailySupplement.Missing(days, today)) return [];
+            try { return await ChinaDailySupplement.FetchAsync(city, today, token); }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
             catch { return []; }
         }
@@ -162,7 +159,6 @@ internal static class WeatherAggregator
                         foreach (var (code, value) in a.Pollutants)
                         {
                             if (!air.Pollutants.TryAdd(code, value)) continue;
-                            if (a.Units.TryGetValue(code, out var unit)) air.Units[code] = unit;
                             any = true;
                         }
                         // 空气质量逐时预报按整点键补齐；目前只有和风提供。
@@ -222,7 +218,7 @@ internal static class WeatherAggregator
             if (contributed)
             {
                 if (!used.TryGetValue(WeatherDomain.Daily, out var names)) used[WeatherDomain.Daily] = names = [];
-                names.Add(ChinaDailyForecast.Name);
+                names.Add(ChinaDailySupplement.Name);
             }
         }
         var cityKey = WeatherData.CacheKey(city, sourceId);
@@ -294,7 +290,6 @@ internal static class WeatherAggregator
             AirEffect = air?.HealthEffect ?? "",
             AirAdvice = air?.HealthGeneral ?? "",
             AirAdviceSensitive = air?.HealthSensitive ?? "",
-            AirPollutants = air is null ? [] : AirLines(air),
             DayDates = dates.Select(date => date.ToString("yyyy-MM-dd")).ToArray(),
             DayCodes = datePoints(dayMap, dates, point => point.Code ?? -1),
             DayConditions = datePoints(dayMap, dates, point => point.Condition ?? ""),
@@ -366,25 +361,6 @@ internal static class WeatherAggregator
 
     private static T[] datePoints<T>(Dictionary<string, DayPoint> map, DateTime[] dates, Func<DayPoint, T> select)
         => dates.Select(date => select(map[date.ToString("yyyy-MM-dd")])).ToArray();
-
-    // 污染物按固定顺序输出为「名称 → 值 单位」，界面照着列即可，不必再关心代码与单位换算。
-    private static readonly string[] PollutantOrder = ["pm2p5", "pm10", "o3", "no2", "so2", "co", "no", "nmhc"];
-    private static Dictionary<string, string> AirLines(AirPart air)
-    {
-        var lines = new Dictionary<string, string>();
-        // 痕量气体（O₃、CO）常在 1 以下，用两位小数，避免被舍成 0。
-        void Add(string code, double value)
-            => lines[PollutantName(code)] = $"{(value is > 0 and < 1 ? value.ToString("0.00", CultureInfo.InvariantCulture) : value.ToString("0.#", CultureInfo.InvariantCulture))} {PrettyUnit(air.Units.GetValueOrDefault(code) ?? "")}".Trim();
-        foreach (var code in PollutantOrder) if (air.Pollutants.TryGetValue(code, out var value)) Add(code, value);
-        foreach (var (code, value) in air.Pollutants) if (!PollutantOrder.Contains(code)) Add(code, value);
-        return lines;
-    }
-    private static string PollutantName(string code) => code switch
-    {
-        "pm2p5" => "PM2.5", "pm10" => "PM10", "o3" => "O₃", "no2" => "NO₂",
-        "so2" => "SO₂", "co" => "CO", "no" => "NO", "nmhc" => "NMHC", _ => code.ToUpperInvariant()
-    };
-    private static string PrettyUnit(string unit) => unit.Replace("m3", "m³");
 
     // 空位才写入：来源链靠前的那份数据优先，后面的来源只补空缺。
     private static bool Set<T>(ref T? field, T? value) where T : struct

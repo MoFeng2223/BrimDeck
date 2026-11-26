@@ -6,7 +6,7 @@ using System.Linq;
 using BrimDeck.Core;
 namespace BrimDeck;
 // 天气领域的可视资源统一宿主（惯例同 MusicVisuals / PowerGlyphs）：动画、矢量图标、天气图形、
-// 月相，以及跨视图复用的天空渐变 / 天气文字 / 风向箭头。页面类不承担资源职责。
+// 月相，以及跨视图复用的天空渐变 / 天气文字 / AQI 展示色 / 风向箭头。页面类不承担资源职责。
 internal static class WeatherMotion
 {
     internal static void Attach(FrameworkElement element)
@@ -284,6 +284,14 @@ internal static class WeatherVisuals
         0 => Loc.T("晴", "Sunny"), 1 or 2 => Loc.T("多云", "Cloudy"), 3 => Loc.T("阴", "Overcast"),
         45 or 48 => Loc.T("雾", "Foggy"), >= 51 and <= 67 => Loc.T("雨", "Rain"), >= 71 and <= 77 => Loc.T("雪", "Snow"),
         >= 80 and <= 82 => Loc.T("阵雨", "Showers"), 85 or 86 => Loc.T("阵雪", "Snow showers"), >= 95 => Loc.T("雷雨", "Thunderstorm"), _ => Loc.T("多云", "Cloudy")
+    };
+    // AQI 国标 HJ 633 的展示色：等级仍由 WeatherCodes.AqiBand 判定，颜色只在这里映射成 WPF 画刷用的 Color。
+    internal static Color AqiInk(int aqi) => WeatherCodes.AqiBand(aqi) switch
+    {
+        0 => Color.FromRgb(0x9B, 0x9B, 0xA3), 1 => Color.FromRgb(0x5C, 0xC8, 0x5C),
+        2 => Color.FromRgb(0xF2, 0xC9, 0x4C), 3 => Color.FromRgb(0xF2, 0x99, 0x4A),
+        4 => Color.FromRgb(0xEB, 0x57, 0x57), 5 => Color.FromRgb(0x9B, 0x51, 0xE0),
+        _ => Color.FromRgb(0xB1, 0x2E, 0x3A)
     };
     // 天空渐变随昼夜与天气切换：晴昼蓝、阴霾灰、雨夜深蓝灰、雷雨紫，夜晚统一深邃蓝黑。
     internal static LinearGradientBrush Sky(int code, bool day)

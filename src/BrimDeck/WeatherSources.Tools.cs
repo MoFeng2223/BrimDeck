@@ -16,6 +16,35 @@ internal static class Geo
     public static double UtcOffsetHours(City city, DateTimeOffset? at = null) => city.TimeZoneId is { Length: > 0 } id && TimeZoneInfo.TryFindSystemTimeZoneById(id, out var zone) ? zone.GetUtcOffset(at ?? DateTimeOffset.UtcNow).TotalHours : IsChina(city) ? 8 : (int)Math.Round(city.Longitude / 15.0);
 }
 
+// 城市时钟与日期轴定位：只有一套实现，数据层、设置页和视图都从这里取“今天”。
+internal static class WeatherClock
+{
+    // 城市当地此刻；快照没带时区信息时退回本机时间。
+    internal static DateTimeOffset Now(WeatherSnapshot s)
+    {
+        if (s.UtcOffsetMinutes is > -1440 and < 1440)
+        {
+            try { return DateTimeOffset.Now.ToOffset(TimeSpan.FromMinutes(s.UtcOffsetMinutes)); } catch { }
+        }
+        return DateTimeOffset.Now;
+    }
+
+    // 快照抓取时写下的今天在正序日期轴上的位置；找不到回退 0。用于选窗口这类不关心跨日的场景。
+    internal static int SnapshotIndex(WeatherSnapshot s)
+    {
+        for (int i = 0; i < s.DayDates.Length; i++) if (s.DayDates[i].StartsWith(s.Today, StringComparison.Ordinal)) return i;
+        return 0;
+    }
+
+    // 城市当前日期在日期轴上的位置；缓存跨日对不上时返回 -1，让视图把日期轴标成过期。
+    internal static int LiveIndex(WeatherSnapshot s)
+    {
+        string today = Now(s).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        for (int i = 0; i < s.DayDates.Length; i++) if (s.DayDates[i].StartsWith(today, StringComparison.Ordinal)) return i;
+        return -1;
+    }
+}
+
 // 各来源的天气代码统一成 Open-Meteo 使用的 WMO code，界面图标与配色只认这一套。
 internal static class WeatherCodes
 {
@@ -114,7 +143,7 @@ internal static class WeatherCodes
     };
 
     // AQI 国标 HJ 633 的唯一分档：0=无数据，1..6=优/良/轻度/中度/重度/严重。
-    // 等级文字、展示颜色、逐时短标签、Open-Meteo 的 Level 都按这一档取值，阈值只在这里写一遍。
+    // 等级文字、逐时短标签与 Open-Meteo 的 Level 都按这一档取值，阈值只在这里写一遍；展示色在 WeatherVisuals。
     public static int AqiBand(int aqi) => aqi switch
     {
         < 0 => 0, <= 50 => 1, <= 100 => 2, <= 150 => 3, <= 200 => 4, <= 300 => 5, _ => 6
@@ -124,11 +153,6 @@ internal static class WeatherCodes
     {
         0 => "", 1 => Loc.T("优", "Good"), 2 => Loc.T("良", "Moderate"), 3 => Loc.T("轻度污染", "Light"),
         4 => Loc.T("中度污染", "Moderate pollution"), 5 => Loc.T("重度污染", "Heavy"), _ => Loc.T("严重污染", "Severe")
-    };
-
-    public static string AqiColor(int aqi) => AqiBand(aqi) switch
-    {
-        0 => "#9B9BA3", 1 => "#5CC85C", 2 => "#F2C94C", 3 => "#F2994A", 4 => "#EB5757", 5 => "#9B51E0", _ => "#B12E3A"
     };
 
     // 中文/英文风向 → 角度，供箭头与文字保持同一档。

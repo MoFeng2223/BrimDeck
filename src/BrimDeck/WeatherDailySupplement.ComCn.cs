@@ -4,10 +4,25 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-internal static class ChinaDailyForecast
+// 和风日预报的国内补充通道：只在和风已选、城市在中国、且未来 14 天核心字段有缺口时补数据。
+// 它不是可独立选择的来源，不进 WeatherSources.All；适用条件与缺口判断都收在这里，聚合器不认识具体来源字符串。
+internal static class ChinaDailySupplement
 {
     internal const string Id = "weathercomcn";
     internal static string Name => Loc.T("中国天气网", "China Weather");
+
+    // 聚合器只问「这个通道适用吗」，不用写死来源 ID 和地域规则。
+    internal static bool Applies(string sourceId, City city) => sourceId == HeFengSource.Id && Geo.IsChina(city);
+
+    // 核心字段齐全就不补；缺一天就整批拉取，沿用原来的补缺边界。
+    internal static bool Missing(IReadOnlyCollection<DayPoint>? days, DateTime today)
+    {
+        if (days is null) return true;
+        return !Enumerable.Range(0, 14).All(offset =>
+            days.Any(day => day.Date == today.AddDays(offset).ToString("yyyy-MM-dd") &&
+                day.HighC.HasValue && day.LowC.HasValue && day.Code.HasValue && day.NightCode.HasValue &&
+                day.PrecipMm.HasValue && day.WindDir is not null && day.WindMaxKmh.HasValue));
+    }
 
     internal static async Task<List<DayPoint>> FetchAsync(City city, DateTime today, CancellationToken token)
     {
@@ -94,9 +109,9 @@ internal static class ChinaDailyForecast
     private static async Task<string?> ResolveIdAsync(string name, CancellationToken token)
     {
         // 城市 ID 是静态数据，落盘 30 天：启动后不必先搜一次城市，断网也能定位到已有城市。
-        return await WeatherCache.GetAsync<string>("weathercomcn", "id|" + name, TimeSpan.FromDays(30), async ct =>
+        return await WeatherCache.GetAsync<string>(Id, "id|" + name, TimeSpan.FromDays(30), async ct =>
         {
-            var result = await WeatherHttp.GetAsync("weathercomcn", $"https://toy1.weather.com.cn/search?cityname={Json.Esc(name)}", ct,
+            var result = await WeatherHttp.GetAsync(Id, $"https://toy1.weather.com.cn/search?cityname={Json.Esc(name)}", ct,
                 request => request.Headers.Referrer = new Uri("https://www.weather.com.cn/"), 3);
             if (result.Body is null) return null;
             string json = result.Body.Trim().TrimStart('(').TrimEnd(')');
@@ -114,8 +129,8 @@ internal static class ChinaDailyForecast
 
     // 响应体落盘：国内站点不稳定，缓存同时也是断网时的兜底。
     private static Task<string?> Body(string key, TimeSpan ttl, string url, CancellationToken token, int seconds)
-        => WeatherCache.GetAsync<string>("weathercomcn", key, ttl, async ct =>
-            (await WeatherHttp.GetAsync("weathercomcn", url, ct, request => request.Headers.Referrer = new Uri("https://www.weather.com.cn/"), seconds)).Body, token);
+        => WeatherCache.GetAsync<string>(Id, key, ttl, async ct =>
+            (await WeatherHttp.GetAsync(Id, url, ct, request => request.Headers.Referrer = new Uri("https://www.weather.com.cn/"), seconds)).Body, token);
 
     private static string? ExtractArray(string body)
     {

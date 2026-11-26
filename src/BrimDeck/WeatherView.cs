@@ -800,7 +800,7 @@ internal sealed class WeatherView : UserControl
     {
         summary.Children.Clear(); summary.ColumnDefinitions.Clear();
         summary.RowDefinitions.Clear();
-        int today = CityTodayIndex(s);    // 按城市当前日期在正序数组中定位“今天”；-1 = 跨日缓存对不上今天
+        int today = WeatherClock.LiveIndex(s);    // 按城市当前日期在正序数组中定位“今天”；-1 = 跨日缓存对不上今天
         var plan = PlanSummary(Width);
         int cols = _summaryCols = plan.Columns; _summaryIcon = plan.Icon;
         // 左列 Hero 取自然宽（图标 + 温度 + 高低温），右列指标区吃掉全部余宽：
@@ -863,7 +863,7 @@ internal sealed class WeatherView : UserControl
             (WeatherMetaKind.Thermo, Color.FromRgb(255, 176, 102), Loc.T("体感", "Feels like"), Num(s.FeelsLike, "°"), Lens.Feels, null),
             (WeatherMetaKind.Droplet, Color.FromRgb(112, 178, 255), Loc.T("湿度", "Humidity"), s.HumidityPercent >= 0 ? $"{s.HumidityPercent}%" : "--", Lens.Humidity, null),
             (WeatherMetaKind.Gauge, Color.FromRgb(168, 186, 208), Loc.T("气压", "Pressure"), Num(s.PressureHpa, " hPa"), Lens.Pressure, null),
-            (WeatherMetaKind.AirQuality, (Color)ColorConverter.ConvertFromString(WeatherCodes.AqiColor(s.Aqi)), Loc.T("空气质量", "Air quality"), AirLevel(s), Lens.Aqi, null),
+            (WeatherMetaKind.AirQuality, WeatherVisuals.AqiInk(s.Aqi), Loc.T("空气质量", "Air quality"), AirLevel(s), Lens.Aqi, null),
             (WeatherMetaKind.Cloud, Color.FromRgb(196, 214, 232), Loc.T("云量", "Cloud"), Num(s.CloudPercent, "%"), Lens.Cloud, null)
         ];
         (WeatherMetaKind kind, Color ink, string label, string value, Lens? lens, string? tip)[] lower =
@@ -967,7 +967,7 @@ internal sealed class WeatherView : UserControl
     // 跨日缓存（日期轴对不上城市的今天）标注缓存时刻与「缓存」字样，不冒充刚更新。
     private void DrawFooter(WeatherSnapshot s)
     {
-        bool stale = CityTodayIndex(s) < 0;
+        bool stale = WeatherClock.LiveIndex(s) < 0;
         string time = s.FetchedAt.ToLocalTime().ToString(stale ? "MM/dd HH:mm" : "HH:mm", CultureInfo.InvariantCulture);
         string verb = stale ? Loc.T("缓存", "Cached") : Loc.T("更新", "Updated");
         string source = SourceName(s);
@@ -1087,10 +1087,10 @@ internal sealed class WeatherView : UserControl
     private static int[] Order(WeatherSnapshot s, int columns)
     {
         int len = s.DayDates.Length;
-        int today = CityTodayIndex(s);          // 按城市当前日期定位“今天”
+        int today = WeatherClock.LiveIndex(s);          // 按城市当前日期定位“今天”
         // 缓存跨日、城市的今天不在轴上时退回快照自带锚点选窗口：窗口只是决定取哪些天，
         // 「今天」标签与高亮由调用方按日期轴是否过期另行处理。
-        if (today < 0) today = WeatherData.TodayIndex(s);
+        if (today < 0) today = WeatherClock.SnapshotIndex(s);
         int maxPast = Math.Min(10, today), maxFuture = Math.Min(13, len - today - 1);
         columns = Math.Max(1, Math.Min(columns, len));
         int basic = Math.Min(7, 1 + maxFuture);  // 基础 7 列 = 今天 + 未来 6 天（不足时用全部）
@@ -1202,7 +1202,7 @@ internal sealed class WeatherView : UserControl
                 rain.ToolTip = string.Join(" · ", tip);
                 CellAt(column, rain, 1);
             }
-            // 第 3 行：空气质量等级。文字与颜色由该小时 AQI 按国标 HJ 633 换算（复用 AqiText/AqiColor，与空气卡同一套标准），
+            // 第 3 行：空气质量等级。文字与颜色由该小时 AQI 按国标 HJ 633 换算（复用 AqiText/AqiInk，与空气卡同一套标准），
             // 列窄只写短名（去掉「污染」后缀：优/良/轻度/中度/重度/严重），悬停 tooltip 给全文与数值。
             // 逐时 AQI 仅和风提供，其他来源/城市该行留空——0 信息不占位。
             int aqi = p < s.HourAqi.Length ? s.HourAqi[p] : -1;
@@ -1212,7 +1212,7 @@ internal sealed class WeatherView : UserControl
                 {
                     Text = AqiLevelShort(aqi), FontSize = ColNote, TextAlignment = TextAlignment.Center,
                     HorizontalAlignment = HorizontalAlignment.Center, TextWrapping = TextWrapping.NoWrap,
-                    Foreground = Ink((Color)ColorConverter.ConvertFromString(WeatherCodes.AqiColor(aqi)))
+                    Foreground = Ink(WeatherVisuals.AqiInk(aqi))
                 };
                 level.ToolTip = $"{Loc.T("空气质量", "Air quality")} {WeatherCodes.AqiText(aqi)} · AQI {aqi}";
                 CellAt(column, level, 2);
@@ -1255,7 +1255,7 @@ internal sealed class WeatherView : UserControl
     // 时钟按城市所在时区算（快照里带 UTC 偏移），查国外城市时不会拿本机时间硬套。
     private static int HourNow(WeatherSnapshot s, int n)
     {
-        string now = CityNow(s).ToString("yyyy-MM-ddTHH:00", CultureInfo.InvariantCulture);
+        string now = WeatherClock.Now(s).ToString("yyyy-MM-ddTHH:00", CultureInfo.InvariantCulture);
         int best = 0;
         for (int p = 0; p < Math.Min(n, s.HourTimes.Length); p++)
         {
@@ -1264,23 +1264,6 @@ internal sealed class WeatherView : UserControl
             else break;
         }
         return best;
-    }
-    // 城市当地此刻；快照没带时区信息时退回本机时间。
-    private static DateTimeOffset CityNow(WeatherSnapshot s)
-    {
-        if (s.UtcOffsetMinutes is > -1440 and < 1440)
-        {
-            try { return DateTimeOffset.Now.ToOffset(TimeSpan.FromMinutes(s.UtcOffsetMinutes)); } catch { }
-        }
-        return DateTimeOffset.Now;
-    }
-    // 「今天」索引：按城市当前日期在快照日期轴上找。跨日缓存里快照自带的 Today 已过期，
-    // 不能拿它当今天；城市的今天不在轴上（缓存隔了多天）返回 -1，调用方按「日期轴过期」渲染。
-    private static int CityTodayIndex(WeatherSnapshot s)
-    {
-        string today = CityNow(s).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        for (int i = 0; i < s.DayDates.Length; i++) if (s.DayDates[i].StartsWith(today)) return i;
-        return -1;
     }
     // 底部时刻行文字：0 点标日期（如「11月20日」）/ 其余原样 HH:mm。直接从 ISO 串切，不依赖 DateTime.Parse 的区域设置。
     private static string HourLabel(WeatherSnapshot s, int p)
@@ -1316,7 +1299,7 @@ internal sealed class WeatherView : UserControl
             return;
         }
         // 「今天」列高亮：跨四行覆盖上段+折线+低温+逐日信息行，与列内左右各 3px 留白对齐。找不到今天（跨日缓存）就收起。
-        int today = CityTodayIndex(s);
+        int today = WeatherClock.LiveIndex(s);
         var order = Order(s, forecast.Columns);
         int todayPos = -1;
         for (int p = 0; p < order.Length && todayPos < 0; p++) if (order[p] == today) todayPos = p;
@@ -1331,7 +1314,7 @@ internal sealed class WeatherView : UserControl
     }
     private void DrawDailyForecast(WeatherSnapshot s)
     {
-        int today = CityTodayIndex(s);
+        int today = WeatherClock.LiveIndex(s);
         bool stale = today < 0;   // 跨日缓存：不把任何一天标成「今天/明天」，一律按星期+绝对日期渲染
         var order = Order(s, forecast.Columns);
         for (int p = 0; p < order.Length; p++)
@@ -1551,7 +1534,7 @@ internal sealed class WeatherView : UserControl
     private void DrawCelestialView(WeatherSnapshot s)
     {
         todayGlow.Visibility = Visibility.Collapsed;
-        DateTime now = CityNow(s).DateTime;
+        DateTime now = WeatherClock.Now(s).DateTime;
         double width = Math.Max(30, chart.Width), height = ChartBand();
         bool showArcs = height >= CelestialArcHeight;
         double band = Math.Max(26, height - 26);
