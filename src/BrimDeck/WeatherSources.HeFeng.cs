@@ -83,7 +83,7 @@ internal static class HeFengMonitor
 // v7 补充分钟降水、官方预警与生活指数；时光机补过去 10 天。选定它时只读它的返回，缺项显示 "-"。
 internal sealed class HeFengSource : IWeatherSource
 {
-    public WeatherSourceInfo Info { get; } = new("hefeng", Loc.T("和风天气", "QWeather"), Loc.T("实况/预报/分钟/预警/指数/空气/历史", "Now/forecast/minute/alert/indices/air/history"),
+    public WeatherSourceInfo Info { get; } = new("hefeng", Loc.T("和风天气", "QWeather"),
         // 官方「天气和基础服务」每月前 5 万次免费（个人用量等于免费）；台风/辐照/海洋等付费或无坐标接口的能力不接入。
         [WeatherDomain.Current, WeatherDomain.Hourly, WeatherDomain.Daily, WeatherDomain.Air, WeatherDomain.History, WeatherDomain.Minutely, WeatherDomain.Warning, WeatherDomain.Indices]);
     public bool CanServe(City city, WeatherSettings settings) => settings.HeFengKey.Trim().Length > 0 && settings.HeFengHost.Trim().Length > 0;
@@ -149,8 +149,9 @@ internal sealed class HeFengSource : IWeatherSource
         var indices = Want(WeatherDomain.Indices) ? Body(context, "v7i|" + context.Site + "|" + context.Day, TimeSpan.FromHours(2), $"{host}/v7/indices/1d?location={loc}&type=0&{lang}", token) : Task.FromResult<string?>(null);
         await Task.WhenAll(minute, warning, indices);
         var part = new WeatherPart();
-        if (ParseMinutelyV7(minute.Result) is { Count: > 0 } minutes) part.Minutes = minutes;
-        part.MinuteSummary = ParseMinutelySummaryV7(minute.Result);
+        var (minutes, summary) = ParseMinutelyV7(minute.Result);
+        if (minutes is { Count: > 0 }) part.Minutes = minutes;
+        part.MinuteSummary = summary;
         // 解析成功（含空列表=「当前无预警」）都写入；失败/错误码保持 null，与"没请求"区分。
         if (ParseWarningV7(warning.Result) is { } warnings) part.Warnings = warnings;
         if (ParseIndicesV7(indices.Result) is { Count: > 0 } entries) part.Indices = entries;
@@ -416,7 +417,6 @@ internal sealed class HeFengSource : IWeatherSource
                 PrecipRateMmH = precipitation is { } pr && Json.Get(pr, "intensity") is { } inten ? PrecipMmValue(inten) : null,
                 PrecipType = precipitation is { } pt ? Json.Text(pt, "type") : null,
                 Code = WeatherCodes.FromHeFeng(Json.Text(condition, "code")),
-                Condition = Json.Text(condition, "text"),
                 // v1 不给昼夜标记，按城市当地时刻判断，国外城市才不会用本机时区算错。
                 IsDay = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(offset)).Hour is >= 6 and < 18
             };
@@ -447,9 +447,6 @@ internal sealed class HeFengSource : IWeatherSource
                     Code = WeatherCodes.FromHeFeng(Json.Get(item, "condition") is { } c ? Json.Text(c, "code") : null),
                     RainProb = precipitation is { } pp ? PercentInt(pp, "probability") : null,
                     PrecipMm = precipitation is { } pa && Json.Get(pa, "amount") is { } amount ? PrecipMmValue(amount) : null,
-                    WindScale = wind is { } scaleBox ? Json.Number(scaleBox, "scale") is { } sc ? (int)Math.Round(sc) : null : null,
-                    PrecipRateMmH = precipitation is { } pi && Json.Get(pi, "intensity") is { } inten ? PrecipMmValue(inten) : null,
-                    PrecipType = precipitation is { } ptype ? Json.Text(ptype, "type") : null,
                     WindKmh = wind is { } windBox ? SpeedKmh(windBox, "speed") : null,
                     WindGustKmh = SpeedKmh(item, "windGust"),
                     WindDirDeg = direction is { } dirBox ? Json.Number(dirBox, "degree") : null,
@@ -637,14 +634,17 @@ internal sealed class HeFengSource : IWeatherSource
     // ---- v7 扩展域解析：非 200 或未订阅一律返回空，界面按缺失显示 "-" ----
     private static bool V7Ok(JsonElement root) => Json.Text(root, "code") is "200" or "0";
 
-    private static List<MinutePoint>? ParseMinutelyV7(string? body)
+    // 分钟降水逐点与整段文字总结同处一份响应，只解析一次 JSON。
+    private static (List<MinutePoint>? Minutes, string? Summary) ParseMinutelyV7(string? body)
     {
-        if (body is null) return null;
+        if (body is null) return (null, null);
         try
         {
             using var doc = JsonDocument.Parse(body);
             var root = doc.RootElement;
-            if (!V7Ok(root) || Json.Get(root, "minutely") is not { ValueKind: JsonValueKind.Array } list) return null;
+            if (!V7Ok(root)) return (null, null);
+            string? summary = Json.Text(root, "summary");
+            if (Json.Get(root, "minutely") is not { ValueKind: JsonValueKind.Array } list) return (null, summary);
             var result = new List<MinutePoint>();
             foreach (var item in list.EnumerateArray())
             {
@@ -652,21 +652,9 @@ internal sealed class HeFengSource : IWeatherSource
                 if (time is null) continue;
                 result.Add(new MinutePoint { Time = time, Precip = Json.Number(item, "precip") });
             }
-            return result.Count > 0 ? result : null;
+            return (result.Count > 0 ? result : null, summary);
         }
-        catch { return null; }
-    }
-
-    // 分钟降水的整段文字总结（如「未来两小时无降水」），与逐点数据同一响应。
-    private static string? ParseMinutelySummaryV7(string? body)
-    {
-        if (body is null) return null;
-        try
-        {
-            using var doc = JsonDocument.Parse(body);
-            return V7Ok(doc.RootElement) ? Json.Text(doc.RootElement, "summary") : null;
-        }
-        catch { return null; }
+        catch { return (null, null); }
     }
 
     private static List<WarningItem>? ParseWarningV7(string? body)
@@ -693,9 +681,7 @@ internal sealed class HeFengSource : IWeatherSource
                     Title = Json.Text(item, "headline") ?? "",
                     Text = Json.Text(item, "description") ?? "",
                     Level = level,
-                    Type = type,
-                    Start = Json.Text(item, "onsetTime") ?? Json.Text(item, "effectiveTime") ?? "",
-                    End = Json.Text(item, "expireTime") ?? ""
+                    Type = type
                 });
             }
             return result.Count > 0 ? result : null;
@@ -716,7 +702,6 @@ internal sealed class HeFengSource : IWeatherSource
                 result.Add(new IndexItem
                 {
                     Type = Json.Text(item, "type") ?? "",
-                    Date = Json.Text(item, "date") ?? "",
                     Name = Json.Text(item, "name") ?? "",
                     Level = Json.Text(item, "level") ?? "",
                     Category = Json.Text(item, "category") ?? "",

@@ -9,22 +9,19 @@ internal sealed class MinutePoint
     public double? Precip { get; set; }
 }
 
-// 气象预警：一条预警的标题、正文、等级、类型与生效区间
+// 气象预警：一条预警的标题、正文、等级与类型
 internal sealed class WarningItem
 {
     public string Title { get; set; } = "";
     public string Text { get; set; } = "";
     public string Level { get; set; } = "";
     public string Type { get; set; } = "";
-    public string Start { get; set; } = "";
-    public string End { get; set; } = "";
 }
 
 // 生活指数：和风的 type ID、名称、等级、类别与说明
 internal sealed class IndexItem
 {
     public string Type { get; set; } = "";   // 和风指数 type ID，语言无关；用于排序与等级着色
-    public string Date { get; set; } = "";
     public string Name { get; set; } = "";
     public string Level { get; set; } = "";
     public string Category { get; set; } = "";
@@ -49,7 +46,6 @@ internal sealed class CurrentPart
     public double? PrecipMm;
     public int? Code;
     public bool? IsDay;
-    public string? Condition;
     // 风级（和风 wind.scale，蒲福级数；Open-Meteo 无，界面由风速换算兜底）。
     public int? WindScale;
     // 降水强度（mm/h）与降水类型（rain/snow/ice/mixed/none/unknown），和风 precipitation.intensity/type。
@@ -98,9 +94,6 @@ internal sealed class HourPoint
     public double? DewPointC { get; set; }
     public double? CloudPercent { get; set; }
     public double? VisibilityKm { get; set; }
-    public int? WindScale { get; set; }
-    public double? PrecipRateMmH { get; set; }
-    public string? PrecipType { get; set; }
     // 该小时的 AQI，来自和风空气质量逐时预报；与天气逐时数据按时刻键合并。
     public int? Aqi { get; set; }
 }

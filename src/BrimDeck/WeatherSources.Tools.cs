@@ -10,7 +10,6 @@ internal static class Geo
     // 中国范围框（含港澳台与南海诸岛）：决定国内来源能否服务这座城市，
     // 也用于判断和风分钟降水这类「仅中国坐标」的接口是否值得请求。
     public static bool IsChina(City city) => city.Latitude is >= 17 and <= 54 && city.Longitude is >= 73 and <= 136;
-    public static bool HasChinese(string text) => text.Any(ch => ch is >= '\u4e00' and <= '\u9fff');
     // 城市级名称与省份：都从 City 唯一的完整名称里拆，区县城市取其所属地级市（国内源接口只认城市级）。
     public static (string City, string Province) Parts(City city) => City.GeoPartsOf(city.Name);
     // 中国统一 UTC+8；其他地区按经度估算，仅用于本地日升日落推算的兜底。
@@ -114,15 +113,22 @@ internal static class WeatherCodes
         _ => Loc.T("多云", "Cloudy")
     };
 
-    public static string AqiText(int aqi) => aqi switch
+    // AQI 国标 HJ 633 的唯一分档：0=无数据，1..6=优/良/轻度/中度/重度/严重。
+    // 等级文字、展示颜色、逐时短标签、Open-Meteo 的 Level 都按这一档取值，阈值只在这里写一遍。
+    public static int AqiBand(int aqi) => aqi switch
     {
-        < 0 => "", <= 50 => Loc.T("优", "Good"), <= 100 => Loc.T("良", "Moderate"), <= 150 => Loc.T("轻度污染", "Light"),
-        <= 200 => Loc.T("中度污染", "Moderate pollution"), <= 300 => Loc.T("重度污染", "Heavy"), _ => Loc.T("严重污染", "Severe")
+        < 0 => 0, <= 50 => 1, <= 100 => 2, <= 150 => 3, <= 200 => 4, <= 300 => 5, _ => 6
     };
 
-    public static string AqiColor(int aqi) => aqi switch
+    public static string AqiText(int aqi) => AqiBand(aqi) switch
     {
-        < 0 => "#9B9BA3", <= 50 => "#5CC85C", <= 100 => "#F2C94C", <= 150 => "#F2994A", <= 200 => "#EB5757", <= 300 => "#9B51E0", _ => "#B12E3A"
+        0 => "", 1 => Loc.T("优", "Good"), 2 => Loc.T("良", "Moderate"), 3 => Loc.T("轻度污染", "Light"),
+        4 => Loc.T("中度污染", "Moderate pollution"), 5 => Loc.T("重度污染", "Heavy"), _ => Loc.T("严重污染", "Severe")
+    };
+
+    public static string AqiColor(int aqi) => AqiBand(aqi) switch
+    {
+        0 => "#9B9BA3", 1 => "#5CC85C", 2 => "#F2C94C", 3 => "#F2994A", 4 => "#EB5757", 5 => "#9B51E0", _ => "#B12E3A"
     };
 
     // 中文/英文风向 → 角度，供箭头与文字保持同一档。

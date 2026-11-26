@@ -6,7 +6,7 @@ namespace BrimDeck;
 
 internal sealed class OpenMeteoSource : IWeatherSource
 {
-    public WeatherSourceInfo Info { get; } = new("openmeteo", "Open-Meteo", Loc.T("全球数值预报 · CC BY 4.0", "Global forecast · CC BY 4.0"),
+    public WeatherSourceInfo Info { get; } = new("openmeteo", "Open-Meteo",
         [WeatherDomain.Current, WeatherDomain.Hourly, WeatherDomain.Daily, WeatherDomain.Air, WeatherDomain.History, WeatherDomain.Minutely]);
     public bool CanServe(City city, WeatherSettings settings) => true;
 
@@ -113,7 +113,7 @@ internal sealed class OpenMeteoSource : IWeatherSource
                 part.Air = new AirPart
                 {
                     Aqi = Json.Integer(current, "us_aqi"), Pm25 = Json.Integer(current, "pm2_5"), Pm10 = Json.Integer(current, "pm10"),
-                    Level = Json.Integer(current, "us_aqi") is { } aqi ? AqiLevel(aqi) : null,
+                    Level = Json.Integer(current, "us_aqi") is { } aqi ? WeatherCodes.AqiBand(aqi) : null,
                     Text = Json.Integer(current, "us_aqi") is { } value ? WeatherCodes.AqiText(value) : null
                 };
         }
@@ -143,5 +143,4 @@ internal sealed class OpenMeteoSource : IWeatherSource
     // 响应体落盘：四份数据（预报/逐时/空气/分钟降水）各自过期，未过期直接读盘，重启后同样能复用，断网时退回上一份。
     private static async Task<string> Body(string key, TimeSpan ttl, string url, CancellationToken token)
         => await WeatherCache.GetAsync<string>("openmeteo", key, ttl, async ct => (await WeatherHttp.GetAsync("openmeteo", url, ct)).Body, token) ?? "";
-    private static int AqiLevel(int aqi) => aqi <= 50 ? 1 : aqi <= 100 ? 2 : aqi <= 150 ? 3 : aqi <= 200 ? 4 : aqi <= 300 ? 5 : 6;
 }

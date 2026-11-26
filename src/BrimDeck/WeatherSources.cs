@@ -9,7 +9,7 @@ namespace BrimDeck;
 //   WeatherSources.Tools.cs      Geo / WeatherCodes / Json 纯函数
 // WeatherDomain 与 WeatherSettings 定义在 BrimDeck.Core：它们是 settings.json 的一部分。
 
-internal sealed record WeatherSourceInfo(string Id, string Name, string Detail, WeatherDomain[] Domains);
+internal sealed record WeatherSourceInfo(string Id, string Name, WeatherDomain[] Domains);
 
 internal interface IWeatherSource
 {

@@ -1745,10 +1745,10 @@ internal sealed class WeatherView : UserControl
     };
     // 码值已由 WeatherCodes 归一到同一套区间，这里只翻成最短的一档文字：列宽最小约 44px，
     // 中文最多三个字，英文最多六个字母，超出就会被 TextBlock 直接裁掉。
-    private static string AqiLevelShort(int aqi) => aqi switch
+    private static string AqiLevelShort(int aqi) => WeatherCodes.AqiBand(aqi) switch
     {
-        < 0 => "", <= 50 => Loc.T("优", "Good"), <= 100 => Loc.T("良", "Fair"), <= 150 => Loc.T("轻度", "Light"),
-        <= 200 => Loc.T("中度", "Med."), <= 300 => Loc.T("重度", "Heavy"), _ => Loc.T("严重", "Sev.")
+        0 => "", 1 => Loc.T("优", "Good"), 2 => Loc.T("良", "Fair"), 3 => Loc.T("轻度", "Light"),
+        4 => Loc.T("中度", "Med."), 5 => Loc.T("重度", "Heavy"), _ => Loc.T("严重", "Sev.")
     };
     private static string HourCondition(int code) => code switch
     {

@@ -393,6 +393,13 @@ internal static class WeatherAggregator
         return false;
     }
 
+    // 字符串字段的空位补写，与 Set 同一语义（null 才算空，空串算已填）。
+    private static bool FillString(ref string? field, string? value)
+    {
+        if (field is not null || value is null) return false;
+        field = value; return true;
+    }
+
     // 空位才写入：来源链靠前的那份数据优先，后面的来源只补空缺；返回是否补入了任何字段。
     private static bool MergeCurrent(CurrentPart target, CurrentPart source)
     {
@@ -413,30 +420,26 @@ internal static class WeatherAggregator
         any |= Set(ref target.IsDay, source.IsDay);
         any |= Set<int>(ref target.WindScale, source.WindScale);
         any |= Set(ref target.PrecipRateMmH, source.PrecipRateMmH);
-        if (target.WindDir is null && source.WindDir is not null) { target.WindDir = source.WindDir; any = true; }
-        if (target.Condition is null && source.Condition is not null) { target.Condition = source.Condition; any = true; }
-        if (target.PrecipType is null && source.PrecipType is not null) { target.PrecipType = source.PrecipType; any = true; }
+        any |= FillString(ref target.WindDir, source.WindDir);
+        any |= FillString(ref target.PrecipType, source.PrecipType);
         return any;
     }
 
     private static bool MergeDay(DayPoint target, DayPoint source)
     {
         bool any = false;
-        // 注意：这里所有字段必须用非短路的 `|` 串联。`Set`/`FillString` 只在目标为空时填入并返回 true，
-        // 用 `||` 会在第一个成功字段处短路，导致同一来源后续字段（如 solarNoon）永远补不进来。
-        any |= Set<int>(ref target.Code, source.Code) | (target.Condition is null && source.Condition is not null);
-        if (target.Condition is null && source.Condition is not null) { target.Condition = source.Condition; }
+        // 每条 `Set`/`FillString` 都要执行，所以用非短路的 `|` 串联：换成 `||` 会在第一个成功字段处
+        // 短路，导致该来源后续的字段（如 solarNoon）补不进来。
+        any |= Set<int>(ref target.Code, source.Code) | FillString(ref target.Condition, source.Condition);
         any |= Set<double>(ref target.HighC, source.HighC) | Set<double>(ref target.FeelsHighC, source.FeelsHighC);
         any |= Set<double>(ref target.LowC, source.LowC) | Set<double>(ref target.FeelsLowC, source.FeelsLowC);
         any |= Set<int>(ref target.RainProb, source.RainProb) | Set<double>(ref target.PrecipMm, source.PrecipMm);
         any |= Set<double>(ref target.UvMax, source.UvMax);
         any |= Set<double>(ref target.WindMaxKmh, source.WindMaxKmh) | Set<double>(ref target.GustMaxKmh, source.GustMaxKmh)
-            | Set<double>(ref target.WindDirDeg, source.WindDirDeg) | (target.WindDir is null && source.WindDir is not null);
-        if (target.WindDir is null && source.WindDir is not null) { target.WindDir = source.WindDir; }
+            | Set<double>(ref target.WindDirDeg, source.WindDirDeg) | FillString(ref target.WindDir, source.WindDir);
         any |= Set<int>(ref target.Humidity, source.Humidity);
         any |= Set<double>(ref target.PressureHpa, source.PressureHpa);
         // 天文（日升日落、月升月落、月相）随每日预报一起返回，是 Daily 的普通字段。
-        bool FillString(ref string? field, string? value) { if (field is not null || value is null) return false; field = value; return true; }
         any |= FillString(ref target.Sunrise, source.Sunrise) | FillString(ref target.Sunset, source.Sunset);
         // 晨昏蒙影与太阳正午/午夜、月过中天/月下点：和风 astro 独有的扩展时刻，同为 Daily 字段。
         any |= FillString(ref target.AstronomicalDawn, source.AstronomicalDawn) | FillString(ref target.NauticalDawn, source.NauticalDawn)
@@ -450,11 +453,10 @@ internal static class WeatherAggregator
         any |= Set<double>(ref target.AvgTempC, source.AvgTempC);
         any |= Set<double>(ref target.CloudPercent, source.CloudPercent);
         // 夜间分段：夜间天气/湿度/风/降水/云量，缺哪项补哪项。
-        any |= Set<int>(ref target.NightCode, source.NightCode) | (target.NightCondition is null && source.NightCondition is not null);
-        if (target.NightCondition is null && source.NightCondition is not null) { target.NightCondition = source.NightCondition; }
+        any |= Set<int>(ref target.NightCode, source.NightCode) | FillString(ref target.NightCondition, source.NightCondition);
         any |= Set<int>(ref target.NightHumidity, source.NightHumidity);
         any |= Set<double>(ref target.NightWindMaxKmh, source.NightWindMaxKmh) | Set<double>(ref target.NightGustMaxKmh, source.NightGustMaxKmh)
-            | Set<double>(ref target.NightWindDirDeg, source.NightWindDirDeg) | (target.NightWindDir is null && source.NightWindDir is not null);
+            | Set<double>(ref target.NightWindDirDeg, source.NightWindDirDeg) | FillString(ref target.NightWindDir, source.NightWindDir);
         any |= Set<double>(ref target.NightPrecipMm, source.NightPrecipMm) | Set<int>(ref target.NightRainProb, source.NightRainProb);
         any |= Set<double>(ref target.NightCloudPercent, source.NightCloudPercent);
         return any;
