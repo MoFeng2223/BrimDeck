@@ -122,12 +122,28 @@ public sealed record City(string Name, double Latitude, double Longitude, string
 public enum WeatherDomain { Current, Hourly, Daily, Minutely, Warning, Indices, Air, History }
 
 public enum WeatherMetric { Wind, Feels, Humidity, Gust, DewPoint, Celestial, Precip, Pressure, Aqi, Cloud, Visibility, Uv, Temp }
+// QWeather lifestyle index IDs are also stored in settings.json.
+public enum LifestyleIndex
+{
+    Sport = 1, CarWash = 2, Clothing = 3, Fishing = 4, Ultraviolet = 5, Travel = 6,
+    Pollen = 7, Comfort = 8, ColdRisk = 9, AirDispersion = 10, AirConditioning = 11,
+    Sunglasses = 12, Makeup = 13, DryingClothes = 14, Traffic = 15, SunProtection = 16
+}
+public sealed record LifestyleSlot(LifestyleIndex Type, bool Visible = true);
 public sealed record WeatherChip(WeatherMetric Metric, bool Visible = true);
 
 // Per-city source choices and QWeather credentials.
 public sealed class WeatherSettings
 {
     private static readonly WeatherMetric[] ChipMetrics = Enum.GetValues<WeatherMetric>().Where(metric => metric != WeatherMetric.Temp).ToArray();
+    private static readonly LifestyleIndex[] DefaultIndices =
+    [
+        LifestyleIndex.Clothing, LifestyleIndex.CarWash, LifestyleIndex.Ultraviolet, LifestyleIndex.Sport,
+        LifestyleIndex.ColdRisk, LifestyleIndex.AirDispersion, LifestyleIndex.Fishing, LifestyleIndex.Travel,
+        LifestyleIndex.Pollen, LifestyleIndex.Comfort, LifestyleIndex.AirConditioning, LifestyleIndex.Sunglasses,
+        LifestyleIndex.Makeup, LifestyleIndex.DryingClothes, LifestyleIndex.Traffic, LifestyleIndex.SunProtection
+    ];
+    public List<LifestyleSlot> LifestyleIndices { get; set; } = DefaultIndices.Select(type => new LifestyleSlot(type)).ToList();
     public List<WeatherChip> Chips { get; set; } = ChipMetrics.Select(metric => new WeatherChip(metric)).ToList();
     public Dictionary<string, string> CitySources { get; set; } = [];
     public string SourceFor(City? city) => CitySources.GetValueOrDefault(city?.ToString() ?? "auto") ?? (HeFengKey.Length > 0 && HeFengHost.Length > 0 ? "hefeng" : "openmeteo");
@@ -159,6 +175,7 @@ public sealed class WeatherSettings
     public WeatherSettings Copy() => new()
     {
         Chips = [.. Chips],
+        LifestyleIndices = [.. LifestyleIndices ?? []],
         CitySources = new(CitySources ?? []),
         HeFengDailyLimit = HeFengDailyLimit,
         HeFengMonthlyLimit = HeFengMonthlyLimit,
@@ -167,6 +184,8 @@ public sealed class WeatherSettings
     };
     public void Normalize()
     {
+        LifestyleIndices = (LifestyleIndices ?? []).Where(slot => slot is not null && Enum.IsDefined(slot.Type))
+            .Concat(DefaultIndices.Select(type => new LifestyleSlot(type))).DistinctBy(slot => slot.Type).ToList();
         Chips = (Chips ?? []).Where(chip => chip is not null && ChipMetrics.Contains(chip.Metric))
             .Concat(ChipMetrics.Select(metric => new WeatherChip(metric))).DistinctBy(chip => chip.Metric).ToList();
         CitySources = (CitySources ?? []).Where(pair => pair.Value is "hefeng" or "openmeteo")

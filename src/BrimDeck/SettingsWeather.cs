@@ -352,6 +352,7 @@ public sealed partial class SettingsWindow
             .Append((Name:ChinaDailyForecast.Name,Count:RequestGate.Today(ChinaDailyForecast.Id))).Where(item=>item.Count>0).ToArray();
         Group(Row(Loc.T("今日请求","Requests today"),TextLine(used.Length==0?Loc.T("尚未发起请求","No requests yet"):string.Join(" · ",used.Select(item=>$"{item.Name} {item.Count}")),12,TextSecondary)),
               Row(Loc.T("本地缓存","Local cache"),TextLine(Loc.T($"{usage.Count} 项 · {usage.Bytes/1024.0:0} KB（14 天未用自动清理）",$"{usage.Count} entries · {usage.Bytes/1024.0:0} KB (unused entries purged after 14 days)"),12,TextSecondary)));
+        LifestyleControls();
         preview.RefreshRequested += async () =>
         {
             using var fresh = WeatherCache.Fresh();
@@ -453,6 +454,47 @@ public sealed partial class SettingsWindow
             }
         }
         Draw();
+    }
+
+    private void LifestyleControls()
+    {
+        SectionTitle(Loc.T("生活指数排版", "Lifestyle index layout"));
+        static string Label(LifestyleIndex type) => type switch
+        {
+            LifestyleIndex.Sport => Loc.T("运动", "Sport"),
+            LifestyleIndex.CarWash => Loc.T("洗车", "Car wash"),
+            LifestyleIndex.Clothing => Loc.T("穿衣", "Clothing"),
+            LifestyleIndex.Fishing => Loc.T("钓鱼", "Fishing"),
+            LifestyleIndex.Ultraviolet => Loc.T("紫外线", "UV"),
+            LifestyleIndex.Travel => Loc.T("旅游", "Travel"),
+            LifestyleIndex.Pollen => Loc.T("花粉过敏", "Pollen"),
+            LifestyleIndex.Comfort => Loc.T("舒适度", "Comfort"),
+            LifestyleIndex.ColdRisk => Loc.T("感冒", "Cold risk"),
+            LifestyleIndex.AirDispersion => Loc.T("空气扩散", "Air dispersion"),
+            LifestyleIndex.AirConditioning => Loc.T("空调开启", "Air conditioning"),
+            LifestyleIndex.Sunglasses => Loc.T("太阳镜", "Sunglasses"),
+            LifestyleIndex.Makeup => Loc.T("化妆", "Makeup"),
+            LifestyleIndex.DryingClothes => Loc.T("晾晒", "Drying clothes"),
+            LifestyleIndex.Traffic => Loc.T("交通", "Traffic"),
+            LifestyleIndex.SunProtection => Loc.T("防晒", "Sun protection"),
+            _ => type.ToString()
+        };
+        var grid = new UniformGrid { Rows = 8, Columns = 2 };
+        Target.Children.Add(grid);
+        void SaveLayout() => Resize(settings => settings.Weather.LifestyleIndices = grid.Children.Cast<ToggleButton>()
+            .Select(button => new LifestyleSlot((LifestyleIndex)button.Tag, button.IsChecked == true)).ToList(), DeckPage.Weather);
+        foreach (var slot in S.Weather.LifestyleIndices)
+        {
+            var refresh = new List<Action>();
+            var chip = PickChip(Label(slot.Type), [], Loc.T("点击显示或隐藏，拖动调整顺序", "Click to show or hide. Drag to reorder."), refresh);
+            foreach (var update in refresh) update();
+            chip.Tag = slot.Type;
+            chip.IsChecked = slot.Visible;
+            chip.RenderTransform = new TranslateTransform();
+            chip.Click += (_, _) => SaveLayout();
+            AttachWeatherChipDrag(chip, grid, SaveLayout);
+            grid.Children.Add(chip);
+        }
     }
 
     private static void AttachWeatherChipDrag(ToggleButton chip, UniformGrid grid, Action saveOrder)

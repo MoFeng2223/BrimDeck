@@ -149,6 +149,8 @@ internal sealed class WeatherView : UserControl
         UpdateMinuteVisibility();
         // 顶部读数卡按可用宽度取列数（2–6）、Hero 分三档尺寸；只有跨档才重建。
         // 列宽本身由 Star 列弹性分配，连续拖宽时不需要重建：卡片跟着变宽变窄即可。
+        if (_indicesMode && _last is { } indicesSnap && !_drawnIndices.SequenceEqual(_app.Settings.Weather.LifestyleIndices))
+            DrawIndices(indicesSnap);
         var summaryPlan = PlanSummary(width);
         if (summaryPlan.Columns != _summaryCols || summaryPlan.Icon != _summaryIcon || !_drawnChips.SequenceEqual(_app.Settings.Weather.Chips))
         {
@@ -979,22 +981,21 @@ internal sealed class WeatherView : UserControl
 
     // 生活指数视图：清空后重建卡片，只展示指数本身，无数据时给一行轻提示。
     // 高频项排前、冷门项在后；等级语义色见 IndexTone。
+    private LifestyleSlot[] _drawnIndices = [];
     private void DrawIndices(WeatherSnapshot s)
     {
         var body = indicesBody;
         body.Children.Clear();
-        // 按 type 去重后全部展示（和风 type=0 最多 16 项），两列卡。等级语义色、说明自动换行。
-        if (s.Indices.Length == 0) body.Children.Add(Note(Loc.T("暂无生活指数", "No lifestyle indices")));
+        _drawnIndices = [.. _app.Settings.Weather.LifestyleIndices];
+        var available = s.Indices.DistinctBy(item => item.Type.Length > 0 ? item.Type : item.Name).ToArray();
+        var byType = available.ToLookup(item => int.TryParse(item.Type, out int type) ? type : 0);
+        var items = _drawnIndices.Where(slot => slot.Visible).SelectMany(slot => byType[(int)slot.Type])
+            .Concat(available.Where(item => !int.TryParse(item.Type, out int type) || !Enum.IsDefined((LifestyleIndex)type))).ToArray();
+        if (items.Length == 0)
+            body.Children.Add(Note(available.Length == 0 ? Loc.T("暂无生活指数", "No lifestyle indices")
+                : Loc.T("可在天气设置中开启生活指数", "Enable lifestyle indices in weather settings")));
         else
         {
-            // 排序按和风 type ID（语言无关）：穿衣3 / 洗车2 / 紫外线5 / 运动1 / 感冒9 / 空气清爽10 优先，
-            // 其余按 type 升序跟在后面；海外城市只返回 1-5，中国城市才有 1-16 全部。
-            static int Rank(IndexItem item)
-            {
-                int priority = item.Type switch { "3" => 0, "2" => 1, "5" => 2, "1" => 3, "9" => 4, "10" => 5, _ => 6 };
-                return priority * 100 + (int.TryParse(item.Type, out int id) ? id : 99);
-            }
-            var items = s.Indices.GroupBy(item => item.Type.Length > 0 ? item.Type : item.Name).Select(group => group.First()).OrderBy(Rank).ToArray();
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition());
             grid.ColumnDefinitions.Add(new ColumnDefinition());
