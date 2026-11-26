@@ -183,8 +183,7 @@ public sealed partial class SettingsWindow
         statusContent.Children.Add(statusDot); statusContent.Children.Add(statusText);
         // 一个按钮同时承担两件事：圆点与文字是连通性状态，点击它就发一次真实请求手动测试。
         var statusButton = new Button {Style = (Style)FindResource("SettingsOutlineButton"), Content = statusContent,
-            Height = 28, MinWidth = 108, Padding = new Thickness(10, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center,
-            ToolTip = Loc.T("点击测试连通性（计入配额）；刷新天气时也会自动检测", "Click to test connectivity (counts toward quota); a weather refresh also checks it")};
+            Height = 28, MinWidth = 108, Padding = new Thickness(10, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center};
         bool testing = false;
         statusButton.Click += async (_, _) =>
         {
@@ -195,7 +194,7 @@ public sealed partial class SettingsWindow
             try { await HeFengSource.ProbeAsync(state.Schedule, CancellationToken.None); }
             finally { testing = false; statusButton.IsEnabled = true; UpdateCounters(); RenderStatus(HeFengMonitor.Current); }
         };
-        // 状态由和风源文件里的监测器直接回报真实 HTTP 结果，设置页只负责把状态画到按钮上。
+        // 状态由 HeFengMonitor 按真实 HTTP 结果回报，设置页只负责把状态画到按钮上。
         void RenderStatus(HeFengCheck check)
         {
             if (testing) return;

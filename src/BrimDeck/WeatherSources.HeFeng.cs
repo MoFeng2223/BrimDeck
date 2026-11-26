@@ -37,10 +37,12 @@ internal sealed class HeFengSource : IWeatherSource
     // 手动测试：复用实况请求那条链路（含判定与状态发布），只是坐标固定北京、绕过缓存。
     internal static async Task ProbeAsync(WeatherSettings settings, CancellationToken token)
     {
-        string host = NormalizeHost(settings.HeFengHost);
-        if (host.Length == 0 || settings.HeFengKey.Trim().Length == 0) return;
-        var context = new Context(host, settings.HeFengKey.Trim(), new City("北京", 39.90, 116.41), settings);
-        await SendAsync(context, $"{host}/weather/v1/current/{context.Lat}/{context.Lon}?localTime=true&lang={context.Lang}", token, probe: true);
+        // 先判空再归一化：NormalizeHost("") 会得到 "https://"，拿它当有效 Host 会白发一个必失败的请求。
+        string rawHost = settings.HeFengHost.Trim(), key = settings.HeFengKey.Trim();
+        if (rawHost.Length == 0 || key.Length == 0) return;
+        string host = NormalizeHost(rawHost);
+        var context = new Context(host, key, new City("北京", 39.90, 116.41), settings);
+        await FetchRawAsync(context, $"{host}/weather/v1/current/{context.Lat}/{context.Lon}?localTime=true&lang={context.Lang}", token, probe: true);
     }
 
     public async Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
@@ -83,10 +85,10 @@ internal sealed class HeFengSource : IWeatherSource
         // 指数 /v7/indices/1d —— 全球可用。
         // 分钟降水必须在国外直接跳过：400 虽已不会熔断来源，但每次刷新白发一个必失败的请求。
         var minute = Want(WeatherDomain.Minutely) && Geo.IsChina(context.City)
-            ? Body(context, "v7m|" + context.Site, TimeSpan.FromMinutes(10), $"{host}/v7/minutely/5m?location={loc}&{lang}", token)
+            ? FetchBodyAsync(context, "v7m|" + context.Site, TimeSpan.FromMinutes(10), $"{host}/v7/minutely/5m?location={loc}&{lang}", token)
             : Task.FromResult<string?>(null);
-        var warning = Want(WeatherDomain.Warning) ? Body(context, "v7w|" + context.Site, TimeSpan.FromMinutes(10), $"{host}/weatheralert/v1/current/{context.Lat}/{context.Lon}?{lang}", token) : Task.FromResult<string?>(null);
-        var indices = Want(WeatherDomain.Indices) ? Body(context, "v7i|" + context.Site + "|" + context.Day, TimeSpan.FromHours(2), $"{host}/v7/indices/1d?location={loc}&type=0&{lang}", token) : Task.FromResult<string?>(null);
+        var warning = Want(WeatherDomain.Warning) ? FetchBodyAsync(context, "v7w|" + context.Site, TimeSpan.FromMinutes(10), $"{host}/weatheralert/v1/current/{context.Lat}/{context.Lon}?{lang}", token) : Task.FromResult<string?>(null);
+        var indices = Want(WeatherDomain.Indices) ? FetchBodyAsync(context, "v7i|" + context.Site + "|" + context.Day, TimeSpan.FromHours(2), $"{host}/v7/indices/1d?location={loc}&type=0&{lang}", token) : Task.FromResult<string?>(null);
         await Task.WhenAll(minute, warning, indices);
         var part = new WeatherPart();
         var (minutes, summary) = ParseMinutelyV7(minute.Result);
@@ -107,12 +109,12 @@ internal sealed class HeFengSource : IWeatherSource
         string query = $"localTime=true&lang={context.Lang}";
         // 四个接口各自过期：实况最短、逐天最长，互不牵连（官方推荐 10–30 分钟 / 30–60 分钟 / 1–6 小时）。
         // 实况是可用性探针：只有它发出真实请求并收到响应，才更新和风连通状态。
-        var current = Want(WeatherDomain.Current) ? Body(context, "current|" + context.Site, TimeSpan.FromMinutes(10), $"{host}/weather/v1/current/{context.Lat}/{context.Lon}?{query}", token, probe: true) : Task.FromResult<string?>(null);
-        var hours = Want(WeatherDomain.Hourly) ? Body(context, "hourly|" + context.Site + "|" + context.Day, TimeSpan.FromMinutes(30), $"{host}/weather/v1/hourly/{context.Lat}/{context.Lon}?hours=24&{query}", token) : Task.FromResult<string?>(null);
-        var days = Want(WeatherDomain.Daily) ? Body(context, "daily|" + context.Site + "|" + context.Day, TimeSpan.FromHours(2), $"{host}/weather/v1/daily/{context.Lat}/{context.Lon}?days=10&{query}", token) : Task.FromResult<string?>(null);
-        var air = Want(WeatherDomain.Air) ? Body(context, "air|" + context.Site, TimeSpan.FromMinutes(30), $"{host}/airquality/v1/current/{context.Lat}/{context.Lon}?lang={context.Lang}", token) : Task.FromResult<string?>(null);
+        var current = Want(WeatherDomain.Current) ? FetchBodyAsync(context, "current|" + context.Site, TimeSpan.FromMinutes(10), $"{host}/weather/v1/current/{context.Lat}/{context.Lon}?{query}", token, probe: true) : Task.FromResult<string?>(null);
+        var hours = Want(WeatherDomain.Hourly) ? FetchBodyAsync(context, "hourly|" + context.Site + "|" + context.Day, TimeSpan.FromMinutes(30), $"{host}/weather/v1/hourly/{context.Lat}/{context.Lon}?hours=24&{query}", token) : Task.FromResult<string?>(null);
+        var days = Want(WeatherDomain.Daily) ? FetchBodyAsync(context, "daily|" + context.Site + "|" + context.Day, TimeSpan.FromHours(2), $"{host}/weather/v1/daily/{context.Lat}/{context.Lon}?days=10&{query}", token) : Task.FromResult<string?>(null);
+        var air = Want(WeatherDomain.Air) ? FetchBodyAsync(context, "air|" + context.Site, TimeSpan.FromMinutes(30), $"{host}/airquality/v1/current/{context.Lat}/{context.Lon}?lang={context.Lang}", token) : Task.FromResult<string?>(null);
         // 空气质量预报与实况分开缓存：实况 30 分钟、未来 24 小时逐时同样 30 分钟，缓存键带当地日期。
-        var airHours = Want(WeatherDomain.Air) ? Body(context, "airhours|" + context.Site + "|" + context.Day, TimeSpan.FromMinutes(30), $"{host}/airquality/v1/hourly/{context.Lat}/{context.Lon}?localTime=true&lang={context.Lang}", token) : Task.FromResult<string?>(null);
+        var airHours = Want(WeatherDomain.Air) ? FetchBodyAsync(context, "airhours|" + context.Site + "|" + context.Day, TimeSpan.FromMinutes(30), $"{host}/airquality/v1/hourly/{context.Lat}/{context.Lon}?localTime=true&lang={context.Lang}", token) : Task.FromResult<string?>(null);
         await Task.WhenAll(current, hours, days, air, airHours);
         var part = new WeatherPart();
         if (ParseCurrentV1(current.Result, context.City) is { } now) part.Current = now;
@@ -127,11 +129,13 @@ internal sealed class HeFengSource : IWeatherSource
         return part.Current is null && part.Hours is null && part.Days is null && part.Air is null ? null : part;
     }
 
-    private static Task<string?> Body(Context context, string key, TimeSpan ttl, string url, CancellationToken token, bool probe = false)
-        => WeatherCache.GetAsync<string>("hefeng", key, ttl, ct => SendAsync(context, url, ct, probe), token);
+    // 带缓存取一份和风原始响应；probe 只标记这条请求是否用于连通性判定。
+    private static Task<string?> FetchBodyAsync(Context context, string key, TimeSpan ttl, string url, CancellationToken token, bool probe = false)
+        => WeatherCache.GetAsync<string>("hefeng", key, ttl, ct => FetchRawAsync(context, url, ct, probe), token);
 
     // Key 走 X-QW-Api-Key 请求头：比放在查询字符串里安全，也避免同时使用两种认证方式。
-    private static async Task<string?> SendAsync(Context context, string url, CancellationToken token, bool probe = false)
+    // 实测请求并回报探针状态，与通用传输层的 SendAsync 区分开。
+    private static async Task<string?> FetchRawAsync(Context context, string url, CancellationToken token, bool probe = false)
     {
         int generation = HeFengMonitor.Generation;
         var watch = System.Diagnostics.Stopwatch.StartNew();
@@ -149,7 +153,7 @@ internal sealed class HeFengSource : IWeatherSource
         // 优先用城市自带的 LocationID：搜索/定位时 GeoAPI 已经返回并存在 City.LocationId 里，
         // 不必再靠坐标反查——反查受限流冷却/网络影响，一次失败就会让整段历史为空。
         // 只有城市没带 id 时才回退到坐标反查。
-        string? id = context.City.LocationId is { Length: > 0 } known ? known : await LocationId(context, token);
+        string? id = context.City.LocationId is { Length: > 0 } known ? known : await LookupLocationIdAsync(context, token);
         if (id is null) return null;
         // 按城市当地日期回溯：跨时区时用本机日期会整体错一天。
         var today = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(Geo.UtcOffsetHours(context.City))).Date;
@@ -164,7 +168,7 @@ internal sealed class HeFengSource : IWeatherSource
             await gate.WaitAsync(token);
             try
             {
-                var body = await Body(context, $"history|{id}|{context.Lang}|{stamp}", ttl, $"{context.Host}/v7/historical/weather?location={id}&date={stamp.Replace("-", "")}&lang={context.Lang}", token);
+                var body = await FetchBodyAsync(context, $"history|{id}|{context.Lang}|{stamp}", ttl, $"{context.Host}/v7/historical/weather?location={id}&date={stamp.Replace("-", "")}&lang={context.Lang}", token);
                 return ParseHistory(body, stamp);
             }
             // 单日失败只丢这一天：历史是一天一条请求，不能因为某天超时/被限流就把整段 10 天清空。
@@ -176,10 +180,10 @@ internal sealed class HeFengSource : IWeatherSource
     }
 
     // 时光机只接受 LocationID，用与本城相同的坐标反查一次并落盘 30 天；失败就整个历史域跳过，不影响其它数据。
-    private static Task<string?> LocationId(Context context, CancellationToken token)
+    private static Task<string?> LookupLocationIdAsync(Context context, CancellationToken token)
         => WeatherCache.GetAsync<string>("hefeng", $"place|{context.Lat},{context.Lon}", TimeSpan.FromDays(30), async ct =>
         {
-            var body = await SendAsync(context, $"{context.Host}/geo/v2/city/lookup?location={context.Lon},{context.Lat}&number=1", ct);
+            var body = await FetchRawAsync(context, $"{context.Host}/geo/v2/city/lookup?location={context.Lon},{context.Lat}&number=1", ct);
             if (body is null) return null;
             using var doc = JsonDocument.Parse(body);
             if (Json.Get(doc.RootElement, "location") is { ValueKind: JsonValueKind.Array } locations)

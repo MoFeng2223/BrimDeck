@@ -5,16 +5,16 @@ namespace BrimDeck;
 
 // 和风可用性监测：只认「实况」这一条真实请求的结果。缓存命中、闸门拦截、请求级 400 都不算，
 // 避免把国外坐标必失败的分钟降水、或另一座城市的并发请求误判成来源不可用。
-// 分类依赖和风的 HTTP 语义，所以他和来源实现放同一层；只把文件独立出来，不让来源反向依赖设置页。
+// 分类依赖和风的 HTTP 语义，所以和来源实现放同一层；只把文件独立出来，不让来源反向依赖设置页。
 internal enum HeFengState { Untested, Connected, Failed }
 
-internal sealed record HeFengCheck(HeFengState State, string Detail, DateTimeOffset At, TimeSpan Elapsed);
+internal sealed record HeFengCheck(HeFengState State, string Detail, TimeSpan Elapsed);
 
 internal static class HeFengMonitor
 {
     private static readonly object Sync = new();
     private static HeFengCheck _current = new(HeFengState.Untested,
-        Loc.T("等待下一次真实刷新", "Waiting for the next live refresh"), default, default);
+        Loc.T("等待下一次真实刷新", "Waiting for the next live refresh"), default);
     private static int _generation;
 
     public static HeFengCheck Current { get { lock (Sync) return _current; } }
@@ -28,7 +28,7 @@ internal static class HeFengMonitor
         {
             _generation++;
             _current = new HeFengCheck(HeFengState.Untested,
-                Loc.T("配置已更改，下次刷新会重新检测", "Configuration changed; the next refresh will check again"), DateTimeOffset.Now, default);
+                Loc.T("配置已更改，下次刷新会重新检测", "Configuration changed; the next refresh will check again"), default);
             fresh = _current;
         }
         Changed?.Invoke(fresh);
@@ -39,7 +39,7 @@ internal static class HeFengMonitor
     {
         var (state, detail) = Classify(status, body);
         if (state is null) return;   // 闸门未放行 / 请求级错误：不判来源可用性
-        var check = new HeFengCheck(state.Value, detail!, DateTimeOffset.Now, elapsed);
+        var check = new HeFengCheck(state.Value, detail!, elapsed);
         lock (Sync)
         {
             if (generation != _generation) return;
