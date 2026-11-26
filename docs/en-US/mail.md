@@ -3,6 +3,7 @@
 With a mailbox connected, BrimDeck sends a notice when new mail arrives:
 
 - The notice shows the sender, the subject and the start of the text, on the island and on the notices page like any other notice.
+- It carries the mail service's icon; mail from an "Other mailbox" shows an envelope, under the domain of its address (company.com, for example).
 - A verification code in the mail can be copied with the "Copy code" button (turn on Settings › Live notices › How notices show › Hide verification codes).
 - "Open mailbox" opens the mailbox's website in the browser.
 
@@ -11,8 +12,8 @@ If you already use a mail app such as Outlook, Foxmail or Thunderbird, or have t
 ## Adding a mailbox
 
 1. Open Settings › Live notices › Mailboxes and choose "Add mailbox".
-2. Choose the mail service.
-3. Follow the steps in the window to generate an authorization code (or app password) on the service's website, enter the address and the code, and choose "Connect".
+2. Type your email address. BrimDeck recognizes the mail service from the address' domain; once it has, press Enter to go on, and the address is carried to the next step. You can also choose the service in the list, or type its name to filter the list. For a work, school or self-hosted mailbox, choose "Other mailbox" under the list.
+3. Follow the steps in the window to generate an authorization code (or app password) on the service's website, enter the code and choose "Connect". The button at the right of the code field shows what you typed.
 
 BrimDeck signs in once with what you entered and saves the mailbox only after that worked.
 
@@ -24,12 +25,12 @@ BrimDeck signs in once with what you entered and saves the mailbox only after th
 | Sina Mail | Authorization code (授权码) | Sina Mail website, 设置 › 客户端pop/imap/smtp |
 | iCloud Mail | App-specific password | account.apple.com, Sign-In and Security › App-Specific Passwords; needs two-factor authentication |
 | Gmail | App password | myaccount.google.com/apppasswords; needs 2-Step Verification; work or school accounts may not offer it |
-| Other mailbox | Password or authorization code, and the IMAP server | The mailbox's web settings or its administrator |
+| Other mailbox | Password or authorization code, and the IMAP server (host name only); where the mailbox signs in with another name (an employee ID, for example), that user name | The mailbox's web settings or its administrator |
 
 Outlook, Hotmail and Microsoft 365 mailboxes take neither a password nor a code; they connect by signing in to the Microsoft account:
 
 1. In Outlook on the web, open Settings at the top right, go to Mail › Forwarding and IMAP and turn on Let devices and apps use IMAP. Microsoft says IMAP is off by default for personal accounts; skip this step if it is already on. For a work or school account, IMAP is controlled by its administrator.
-2. In BrimDeck, choose Outlook, then Sign in in the browser.
+2. In BrimDeck, choose Outlook, then Sign in in the browser. While BrimDeck waits, "Cancel" stops the waiting.
 3. On the Microsoft page that opens in the browser, sign in to the account to connect and accept the request. When the page says you are signed in, go back to BrimDeck. BrimDeck connects the mailbox of the account you signed in to on that page.
 
 The consent page calls this permission read and write access to your mail. That is how Microsoft describes IMAP access, and there is no read-only version to ask for. BrimDeck opens the inbox read-only and does not change, move or delete mail.
@@ -40,20 +41,23 @@ Only encrypted connections on port 993 (IMAP over TLS) are supported.
 
 ## The list of mailboxes
 
-Each mailbox has a row with the state of its connection:
+Each mailbox has a row: the service's icon and the address, and under them the state of its connection, followed by the service (for an "Other mailbox", its IMAP server) and when mail last came.
 
 | State | Meaning |
 |---|---|
 | Connected | New mail is being received |
 | Connecting… | Signing in |
 | Connection lost; trying again shortly | The network or the server is unavailable for now. BrimDeck tries again after 5 seconds, 15 seconds, 1 minute, then every 5 minutes |
-| Sign-in refused | The server refused the sign-in: the code no longer works (after a password change, for example) or IMAP was turned off. BrimDeck stops trying by itself, since repeated failures can get an account restricted; choose "Enter again" for a new code, or "Retry" |
+| Sign-in refused | The server refused the sign-in: the code no longer works (after a password change, for example) or IMAP was turned off. BrimDeck stops trying by itself, since repeated failures can get an account restricted; choose "Enter again" after the state (for Outlook, "Sign in again") for a new code, or "Retry" |
+| Receiving is off | The mailbox is paused with its Receive switch and not connected |
 
-Each row also lets you:
+At the right of each row, as on the Apps page:
 
-- choose the level of this mailbox's notices (default, level 1 to 3, or notices page only); see [Live notices](notices.md#notice-levels).
-- pause it with its switch.
-- remove the mailbox with the × at the right, which also deletes the code saved on this PC.
+- Island: when off, new mail only goes to the notices page and does not show on the island.
+- Receive: when off, the mailbox is disconnected and no new mail comes in; the code stays on this PC, so turning it on again connects it.
+- The × removes the mailbox and deletes the code saved on this PC.
+
+The arrow beside the address opens the row, which shows the mail service, the IMAP server, the sign-in name and when mail last came. Its "Connect again" takes a new code, or signs in again, at any time, not only after the sign-in was refused.
 
 ## When you are told
 

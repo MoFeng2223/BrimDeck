@@ -36,6 +36,31 @@ internal static class MailTests
         check("Mail: every service has its steps and the name of its secret", MailProviders.All.All(p => MailProviders.Steps(p).Length >= 2 && MailProviders.SecretName(p).Length > 0));
         check("Mail: every listed service but the user's own has a server and a website", MailProviders.All.Where(p => p.Id != MailProviders.Custom).All(p => MailProviders.Host(p.Host) == p.Host && p.WebMail.StartsWith("https://")));
 
+        check("Mail: every listed service has its own built-in icon, the mailbox with its own server the envelope",
+            MailProviders.Listed.All(p => MailProviders.IconRef(p) == "brand:mail-" + p.Id) && MailProviders.Listed.Select(MailProviders.IconRef).Distinct().Count() == MailProviders.All.Count - 1
+            && MailProviders.IconRef(MailProviders.Find(MailProviders.Custom)) == MailProviders.EnvelopeIcon && MailProviders.EnvelopeIcon == "glyph:mail"
+            && NoticeGlyphs.Kinds["mail"] == NoticeGlyph.Mail && !MailProviders.Listed.Any(p => MailProviders.IconRef(p) == "brand:qq"));
+        check("Mail: the mailbox with its own server is offered apart from the list", !MailProviders.Listed.Any(p => p.Id == MailProviders.Custom) && MailProviders.Listed.Count() == MailProviders.All.Count - 1);
+        check("Mail: every service says what addresses it takes, and what its steps lead to",
+            MailProviders.All.All(p => MailProviders.DomainNote(p).Length > 0 && MailProviders.StepsHeading(p).Length > 0)
+            && MailProviders.DomainNote(MailProviders.Find(MailProviders.Qq)) == "qq.com · foxmail.com" && MailProviders.DomainNote(MailProviders.Find(MailProviders.Gmail)) == "gmail.com"
+            && MailProviders.DomainNote(MailProviders.Find(MailProviders.NetEase)) == "163.com · 126.com · yeah.net" && !MailProviders.DomainNote(MailProviders.Find(MailProviders.Exmail)).Contains('.'));
+
+        var recognized = MailProviders.Choose(" Someone@Foxmail.com ");
+        check("Mail picker: a whole address is recognized and every service stays listed",
+            recognized is { Address: true, Domain: "foxmail.com", Match.Id: MailProviders.Qq } && recognized.Shown.Count == MailProviders.All.Count - 1);
+        var unknown = MailProviders.Choose("lin.chen@company.com");
+        check("Mail picker: an address of no listed service is an address without a match", unknown is { Address: true, Domain: "company.com", Match: null } && unknown.Shown.Count == MailProviders.All.Count - 1);
+        check("Mail picker: an address still being typed is not yet an address", MailProviders.Choose("name@qq") is { Address: false, Match: null } && MailProviders.Choose("name@") is { Address: false }
+            && MailProviders.Choose("name@qq").Shown.Count == MailProviders.All.Count - 1);
+        check("Mail picker: words find services by either name and by domain",
+            MailProviders.Choose("网易").Shown.Select(p => p.Id).SequenceEqual([MailProviders.NetEase]) && MailProviders.Choose("netease").Shown.Select(p => p.Id).SequenceEqual([MailProviders.NetEase])
+            && MailProviders.Choose("126").Shown.Select(p => p.Id).SequenceEqual([MailProviders.NetEase]) && MailProviders.Choose("HOTMAIL").Shown.Select(p => p.Id).SequenceEqual([MailProviders.Outlook])
+            && MailProviders.Choose("企业").Shown.Select(p => p.Id).SequenceEqual([MailProviders.Exmail]) && MailProviders.Choose("mail").Shown.Count > 3);
+        check("Mail picker: words that find nothing leave the list empty, and nothing typed shows every service",
+            MailProviders.Choose("zzz-nothing").Shown.Count == 0 && MailProviders.Choose("  ").Shown.Count == MailProviders.All.Count - 1 && MailProviders.Choose(null) is { Address: false, Match: null });
+        check("Mail picker: the other mailbox is never in the list", !MailProviders.Choose("其他").Shown.Any(p => p.Id == MailProviders.Custom) && !MailProviders.Choose("imap").Shown.Any(p => p.Id == MailProviders.Custom));
+
         var account = new MailAccount { Provider = MailProviders.ICloud, Address = "john@icloud.com" };
         check("Mail: a listed mailbox is reached on its service's server over TLS", account.Endpoint() is { Host: "imap.mail.me.com", Port: 993, UserName: "john", Tls: true });
         account.UserName = "john@icloud.com";
@@ -78,6 +103,12 @@ internal static class MailTests
         check("Mail notice: the code in it is found as in any notice", VerificationCode.Find(notice.Title, notice.Body) is not null);
         var bare = MailNotices.Notice(new MailAccount { Provider = MailProviders.Custom, Address = "me@example.com", Host = "imap.example.com" }, new MailMessage(1, 1, "", "a@b.c", "", "", now.AddHours(-2)), now);
         check("Mail notice: without a name the address stands for the sender, and an empty subject is said", bare.Title == "a@b.c" && bare.Body.Length > 0 && bare.Actions.Count == 0);
+        check("Mail notice: a listed service's mail has the service's name and icon", notice.IconRef == "brand:mail-qq" && notice.AppName == MailProviders.Find(MailProviders.Qq).Name);
+        check("Mail notice: a mailbox with its own server's mail comes under its domain, with the envelope", bare is { AppName: "example.com", IconRef: MailProviders.EnvelopeIcon });
+        var outlook = MailNotices.Notice(new MailAccount { Provider = MailProviders.Outlook, Address = "me@contoso.com" }, new MailMessage(1, 2, "A", "a@b.c", "S", "", now), now);
+        check("Mail notice: a listed service keeps its name whatever the address' domain", outlook is { AppName: "Outlook", IconRef: "brand:mail-outlook" });
+        check("Mail: the name notices come under", MailProviders.SourceName(MailProviders.Find(MailProviders.Custom), " me@Mail.Company.com ") == "mail.company.com"
+            && MailProviders.SourceName(MailProviders.Find(MailProviders.Gmail), "me@company.com") == "Gmail");
         check("Mail notice: mail that is old when it is learned of is only listed", bare.Missed);
 
         var hub = new NoticeHub(_ => null, _ => true);

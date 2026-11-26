@@ -91,7 +91,7 @@ public partial class MainWindow
         if (notice.IconRef is { } iconRef) _noticeStripIcons.Add(iconRef);
         var image = _app.Notices.Icons.Get(notice.IconRef, out _);
         var accent = PanelTheme.Readable(_app.Notices.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)));
-        return CompactStacks.Icon(image, size, s, Look, notice.AppName, accent);
+        return CompactStacks.Icon(image, size, s, Look, notice.AppName, accent, notice.IconRef);
     }
 
     // Opened while the pointer is on the count, the panel opens on the notices page.

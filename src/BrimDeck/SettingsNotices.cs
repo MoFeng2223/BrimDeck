@@ -734,7 +734,7 @@ public sealed partial class SettingsWindow
             return picture;
         }
         if (center.Icons.Get(iconRef, out _) is { } image) return Picture(image);
-        var plate = NoticeLetter.Plate(name, size, (Color)ColorConverter.ConvertFromString(_palette.Accent));
+        var plate = NoticeLetter.Plate(name, size, (Color)ColorConverter.ConvertFromString(_palette.Accent), iconRef: iconRef);
         if (!center.Icons.IsLoading(iconRef)) return plate;
         var holder = new Border { Child = plate };
         void Arrived(string loaded)

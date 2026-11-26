@@ -58,6 +58,7 @@ public sealed class MailAccount
 
 // A new message as a notice: who it is from as the title, the subject and the start of the text as the body. Messages from one
 // sender merge into one conversation on the notices page, as a chat's do. Verification codes are found in it as in any notice.
+// It comes under the service's name and icon; a mailbox with its own server under its domain and BrimDeck's envelope.
 public static class MailNotices
 {
     // Mail older than this when BrimDeck learns of it (the PC slept, the network was away) is listed unread but not shown as arriving.
@@ -70,7 +71,8 @@ public static class MailNotices
         string subject = message.Subject.Length > 0 ? message.Subject : Loc.T("（无主题）", "(No subject)");
         return new()
         {
-            Origin = NoticeOrigin.Internal, AppKey = account.AppKey, AppName = provider.Name, Context = account.Address,
+            Origin = NoticeOrigin.Internal, AppKey = account.AppKey, AppName = MailProviders.SourceName(provider, account.Address), Context = account.Address,
+            IconRef = MailProviders.IconRef(provider),
             InstanceKey = $"mail:{account.Id:N}:{message.UidValidity}:{message.Uid}",
             Title = from, Body = message.Preview.Length > 0 ? subject + "\n" + message.Preview : subject,
             CreatedAt = message.Date, Timing = new NoticeTiming { Kind = NoticeTimeKind.Mail },

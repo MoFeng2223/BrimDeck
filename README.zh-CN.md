@@ -234,3 +234,4 @@ BrimDeck 采用 [Apache License 2.0](LICENSE)。第三方组件的许可证见 [
 
 - 系统监控页参考并改编自 Nongfsq 的 [ftop](https://github.com/Nongfsq/ftop)，ftop 采用 MIT 许可证，感谢原作者。
 - 设备电量的部分协议移植自多个开源项目，名单见[设备电量支持](docs/zh-CN/devices.md#致谢)，感谢各位作者。
+- BrimDeck 内置的第三方应用与邮箱服务图标（如微信、QQ、Gmail、Outlook）是各自所有者的商标，只用于标明所属的应用或服务，不在 Apache License 2.0 的许可范围内。

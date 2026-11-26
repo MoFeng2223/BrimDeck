@@ -1,4 +1,5 @@
 using System.IO;
+using BrimDeck.Core.Mail;
 using BrimDeck.Core.Notices;
 using BrimDeck.Native;
 
@@ -7,7 +8,8 @@ namespace BrimDeck;
 // The icons the settings show for an application before it has sent a notice. The common chats (WeChat, QQ, DingTalk, Feishu)
 // have their official icons built in ("brand:<name>", Assets\Apps), so they show one whether installed or not; any other Windows
 // application, the Clock among them, has the icon of its Start menu entry ("aumid:<id>", read by NoticeIcons). An icon its
-// notices brought, or for WeChat its installed program's, comes first.
+// notices brought, or for WeChat its installed program's, comes first. The mail services' icons are built in the same way
+// ("brand:mail-<id>", Assets\Mail, MailProviders.IconRef).
 internal static class AppBrandIcons
 {
     private static readonly Dictionary<string, string> s_byKey = new(StringComparer.Ordinal)
@@ -29,8 +31,10 @@ internal static class AppBrandIcons
     // The PNG of a built-in icon; null for a name that is not one of them.
     public static byte[]? Read(string name)
     {
-        if (!s_byKey.ContainsValue(name)) return null;
-        using var stream = typeof(AppBrandIcons).Assembly.GetManifestResourceStream("BrimDeck.Apps." + name + ".png");
+        string? resource = s_byKey.ContainsValue(name) ? "BrimDeck.Apps." + name + ".png"
+            : MailProviders.Listed.Any(provider => "brand:" + name == MailProviders.IconRef(provider)) ? "BrimDeck.Mail." + name["mail-".Length..] + ".png" : null;
+        if (resource is null) return null;
+        using var stream = typeof(AppBrandIcons).Assembly.GetManifestResourceStream(resource);
         if (stream is null) return null;
         using var copy = new MemoryStream();
         stream.CopyTo(copy);

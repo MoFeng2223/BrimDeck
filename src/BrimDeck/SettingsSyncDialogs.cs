@@ -24,7 +24,8 @@ public sealed partial class SettingsWindow
     // A code with the steps above it, a status under it and, when the next step is the user's, one button.
     private sealed record SyncCodeView(StackPanel Root, SyncCodeBox Code, TextBlock Status, Button Action);
 
-    private SyncDialogShell SyncDialog(string title, double width = 420)
+    // heading: a title row of the window's own in place of the title (the mail window's, with its back button and icon).
+    private SyncDialogShell SyncDialog(string title, double width = 420, FrameworkElement? heading = null)
     {
         var dialog = new Window { Owner = this, Title = title, Width = width, SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false, FontFamily = SettingsFont(UiFontRole.Panel),
@@ -34,18 +35,24 @@ public sealed partial class SettingsWindow
         dialog.SourceInitialized += (_, _) => Native.SettingsChrome.SetTheme(dialog, _palette.Dark);
         TextOptions.SetTextFormattingMode(dialog, TextFormattingMode.Display);
         var body = new StackPanel();
-        dialog.Content = SyncDialogFrame(title, body, dialog.Close);
+        dialog.Content = SyncDialogFrame(title, body, dialog.Close, heading);
         return new(dialog, body);
     }
 
     // The window's content: the title with the close button at the top right (Esc closes too), and the body under them.
-    private FrameworkElement SyncDialogFrame(string title, StackPanel body, Action close)
+    private FrameworkElement SyncDialogFrame(string title, StackPanel body, Action close, FrameworkElement? heading = null)
     {
         var layout = new Grid();
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var heading = TextLine(title, 16, TextPrimary, FontWeights.SemiBold);
-        heading.Margin = new Thickness(24, 18, 56, 0); heading.TextTrimming = TextTrimming.CharacterEllipsis;
+        if (heading is null)
+        {
+            var text = TextLine(title, 16, TextPrimary, FontWeights.SemiBold);
+            text.Margin = new Thickness(24, 18, 56, 0); text.TextTrimming = TextTrimming.CharacterEllipsis;
+            heading = text;
+        }
+        // A row of its own is centred on the close button.
+        else { heading.Margin = new Thickness(24, 9, 56, 0); heading.MinHeight = 34; heading.VerticalAlignment = VerticalAlignment.Top; }
         layout.Children.Add(heading);
         var button = ActionButton("", close); button.Content = CaptionIcon("close"); button.Style = (Style)FindResource("SettingsCloseButton");
         button.Width = 32; button.Height = 32; button.Padding = new Thickness(0); button.Margin = new Thickness(0, 10, 10, 0);

@@ -1889,3 +1889,8 @@ Licensed under the Apache License, Version 2.0, reproduced above.
 Application icons in Assets\Apps (WeChat, QQ, DingTalk, Feishu)
 These icons and the names they stand for are trademarks of their respective owners. They are shown only to identify these
 applications in BrimDeck's settings and notices, and are not covered by BrimDeck's license.
+
+
+Mail service icons in Assets\Mail (QQ Mail, NetEase Mail, Tencent Exmail, Sina Mail, iCloud Mail, Gmail, Outlook)
+These icons and the names they stand for are trademarks of their respective owners. They are shown only to identify these
+mail services in BrimDeck's settings and notices, and are not covered by BrimDeck's license.

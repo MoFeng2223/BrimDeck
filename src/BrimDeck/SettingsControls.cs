@@ -180,8 +180,8 @@ public sealed partial class SettingsWindow
     }
 
     // A question before an action that cannot be undone, in a small dialog over the settings: Cancel (Esc) or the action, in red
-    // (in the accent color when it is not a danger).
-    private bool Confirm(string title, string message, string action, bool danger = true)
+    // (in the accent color when it is not a danger). subject: what the action is done to, shown between the title and the message.
+    private bool Confirm(string title, string message, string action, bool danger = true, FrameworkElement? subject = null)
     {
         var dialog = new Window { Title = title, Owner = this, Width = 400, SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false, FontFamily = SettingsFont(UiFontRole.Panel),
@@ -190,23 +190,32 @@ public sealed partial class SettingsWindow
         _palette.Apply(dialog.Resources); Native.SettingsChrome.Apply(dialog);
         dialog.SourceInitialized += (_, _) => Native.SettingsChrome.SetTheme(dialog, _palette.Dark);
         TextOptions.SetTextFormattingMode(dialog, TextFormattingMode.Display);
+        bool confirmed = false;
+        dialog.Content = ConfirmFrame(dialog, title, message, action, danger, subject, chosen => { confirmed = chosen; dialog.Close(); }, out var cancel);
+        // Cancel has the focus, so Enter alone does not delete.
+        dialog.Loaded += (_, _) => cancel.Focus();
+        dialog.ShowDialog();
+        return confirmed;
+    }
+
+    // The confirmation's content, apart from its window so that the rendering of it for checking can draw it. styles: where the
+    // buttons' styles are found; done: true for the action, false for Cancel.
+    private Border ConfirmFrame(FrameworkElement styles, string title, string message, string action, bool danger, FrameworkElement? subject, Action<bool> done, out Button cancel)
+    {
         var panel = new StackPanel { Margin = new Thickness(24, 20, 24, 20) };
         var heading = TextLine(title, 16, TextPrimary, FontWeights.SemiBold); heading.Margin = new Thickness(0, 0, 0, 10); panel.Children.Add(heading);
+        if (subject is not null) { subject.Margin = new Thickness(0, 4, 0, 14); panel.Children.Add(subject); }
         var text = TextLine(message, 12.5, TextSecondary); text.TextWrapping = TextWrapping.Wrap; panel.Children.Add(text);
-        bool confirmed = false;
-        var cancel = ActionButton(Loc.T("取消", "Cancel"), dialog.Close); cancel.Style = (Style)dialog.FindResource("SettingsOutlineButton"); cancel.IsCancel = true;
-        var confirm = ActionButton(action, () => { confirmed = true; dialog.Close(); }); confirm.Style = (Style)dialog.FindResource(danger ? "SettingsDangerButton" : "SettingsPrimaryButton");
+        cancel = ActionButton(Loc.T("取消", "Cancel"), () => done(false)); cancel.Style = (Style)styles.FindResource("SettingsOutlineButton"); cancel.IsCancel = true;
+        var confirm = ActionButton(action, () => done(true)); confirm.Style = (Style)styles.FindResource(danger ? "SettingsDangerButton" : "SettingsPrimaryButton");
         foreach (var button in new[] { cancel, confirm }) { button.MinWidth = 84; button.Padding = new Thickness(14, 6, 14, 6); }
         confirm.Margin = new Thickness(8, 0, 0, 0);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 20, 0, 0) };
         buttons.Children.Add(cancel); buttons.Children.Add(confirm); panel.Children.Add(buttons);
         var frame = new Border { BorderThickness = new Thickness(1), Child = panel };
         frame.SetResourceReference(Border.BorderBrushProperty, "SettingsBorder");
-        frame.SetResourceReference(Border.BackgroundProperty, "SettingsSurface"); dialog.Content = frame;
-        // Cancel has the focus, so Enter alone does not delete.
-        dialog.Loaded += (_, _) => cancel.Focus();
-        dialog.ShowDialog();
-        return confirmed;
+        frame.SetResourceReference(Border.BackgroundProperty, "SettingsSurface");
+        return frame;
     }
 }
 

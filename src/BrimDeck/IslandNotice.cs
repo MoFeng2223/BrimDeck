@@ -1116,7 +1116,7 @@ internal sealed partial class IslandNotice : Window
         var image = _item?.Kind == AttentionKind.Summary ? null : Center.Icons.Get(notice?.IconRef, out _);
         var accent = notice is null ? PanelTheme.ColorOf("accent") : _look.AppColor(Center.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)));
         // The application's icon round, as the collapsed row shows it (CompactStacks.Icon).
-        if (notice is not null && _item?.Kind != AttentionKind.Summary) return CompactStacks.Icon(image, size, _shape.Scale, PanelLook.Of(_deck), notice.AppName, accent);
+        if (notice is not null && _item?.Kind != AttentionKind.Summary) return CompactStacks.Icon(image, size, _shape.Scale, PanelLook.Of(_deck), notice.AppName, accent, notice.IconRef);
         return NoticeLetter.Plate(notice?.AppName, size, accent, bell: notice is null);
     }
 

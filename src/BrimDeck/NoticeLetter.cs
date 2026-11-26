@@ -20,8 +20,13 @@ internal static class NoticeLetter
     // Whether a notice may show its picture: not when the user keeps it to the application's name.
     public static bool ShowsPicture(Notice notice, DeckSettings settings) => notice.Picture is not null;
 
-    // bell: a summary of notices, which has no application.
-    public static FrameworkElement Plate(string? appName, double size, Color accent, bool bell = false)
+    // A glyph that stands for an application's icon ("glyph:<kind>", NoticeGlyphs.Kinds): drawn on the plate in place of the letter.
+    // BrimDeck's own sources without an icon to show use it (a mailbox with its own server: MailProviders.EnvelopeIcon).
+    public static NoticeGlyph? GlyphOf(string? iconRef)
+        => iconRef is { Length: > 6 } && iconRef.StartsWith("glyph:", StringComparison.Ordinal) && NoticeGlyphs.Kinds.TryGetValue(iconRef[6..], out var glyph) ? glyph : null;
+
+    // bell: a summary of notices, which has no application. iconRef: the notice's icon, when it names a glyph (GlyphOf).
+    public static FrameworkElement Plate(string? appName, double size, Color accent, bool bell = false, string? iconRef = null)
     {
         var plate = new Grid { Width = size, Height = size };
         const byte tint = 40;
@@ -32,9 +37,9 @@ internal static class NoticeLetter
             BorderBrush = new SolidColorBrush(Color.FromArgb(46, accent.R, accent.G, accent.B)),
             BorderThickness = new Thickness(size >= 40 ? 1 : 0)
         });
-        if (bell)
+        if ((bell ? NoticeGlyph.Bell : GlyphOf(iconRef)) is { } kind)
         {
-            var glyph = NoticeBadges.Glyph(NoticeGlyph.Bell, Math.Round(size * .6), accent);
+            var glyph = NoticeBadges.Glyph(kind, Math.Round(size * .6), accent);
             glyph.HorizontalAlignment = HorizontalAlignment.Center; glyph.VerticalAlignment = VerticalAlignment.Center;
             plate.Children.Add(glyph);
             return plate;

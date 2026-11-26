@@ -34,6 +34,45 @@ public static class MailProviders
         new(Custom, "其他邮箱", "Other mailbox", "", MailSignIn.Code, [], "", "")
     ];
 
+    // The services offered in the list of the window that adds a mailbox; the mailbox with its own server is offered apart.
+    public static IEnumerable<MailProvider> Listed => All.Where(provider => provider.Id != Custom);
+
+    // The icon of a service's mailboxes, in the settings and on their notices: the service's own, built into BrimDeck
+    // ("brand:mail-<id>"); a mailbox with its own server has BrimDeck's envelope on a plate (EnvelopeIcon).
+    public const string EnvelopeIcon = "glyph:mail";
+    public static string IconRef(MailProvider provider) => provider.Id == Custom ? EnvelopeIcon : "brand:mail-" + provider.Id;
+
+    // What a service's entry in the list says under its name: the endings of its addresses (the usual ones, not every one), or
+    // for Exmail that it is the company's own domain.
+    public static string DomainNote(MailProvider provider) => provider.Id switch
+    {
+        Exmail => Loc.T("公司自己的域名", "Your company's own domain"),
+        Custom => Loc.T("公司、学校或自建邮箱，填写 IMAP 服务器", "Work, school or own mail, by its IMAP server"),
+        Gmail => "gmail.com",
+        NetEase => "163.com · 126.com · yeah.net",
+        _ => string.Join(" · ", provider.Domains.Take(2))
+    };
+
+    // What the box at the top of the window that adds a mailbox makes of its text. A whole address (its domain has a dot) is
+    // Address, with the service it belongs to (Match, null when none is listed for it); anything else filters the list by the
+    // services' names and domains (Shown). Empty text shows every service.
+    public sealed record Pick(bool Address, string? Domain, MailProvider? Match, IReadOnlyList<MailProvider> Shown);
+
+    public static Pick Choose(string? text)
+    {
+        string typed = (text ?? "").Trim();
+        if (Domain(typed) is { } domain && domain.Contains('.')) return new(true, domain, ForAddress(typed), [.. Listed]);
+        if (typed.Length == 0 || typed.Contains('@')) return new(false, null, null, [.. Listed]);
+        return new(false, null, null, [.. Listed.Where(provider => Matches(provider, typed))]);
+    }
+
+    private static bool Matches(MailProvider provider, string typed)
+        => new[] { provider.NameZh, provider.NameEn, DomainNote(provider) }.Concat(provider.Domains).Any(word => word.Contains(typed, StringComparison.OrdinalIgnoreCase));
+
+    // The name a mailbox's notices come under: the service's, or for a mailbox with its own server the address' domain.
+    public static string SourceName(MailProvider provider, string address)
+        => provider.Id == Custom && Domain(address) is { } domain ? domain : provider.Name;
+
     // The provider of that id; the mailbox with its own server for an id not known.
     public static MailProvider Find(string? id) => All.FirstOrDefault(provider => provider.Id == id) ?? All[^1];
 
@@ -73,6 +112,19 @@ public static class MailProviders
         Custom => Loc.T("密码或授权码", "Password or authorization code"),
         Outlook => Loc.T("登录凭据", "Sign-in credential"),
         _ => Loc.T("授权码", "Authorization code")
+    };
+
+    // What the steps lead to, over them: where, and what the user comes back with.
+    public static string StepsHeading(MailProvider provider) => provider.Id switch
+    {
+        Qq => Loc.T("先在 QQ 邮箱网页版取得授权码", "First, get an authorization code on the QQ Mail website"),
+        NetEase => Loc.T("先在网易邮箱网页版取得授权码", "First, get an authorization code on the NetEase Mail website"),
+        Exmail => Loc.T("先在企业邮箱网页版开启 IMAP 服务", "First, turn on IMAP on the Exmail website"),
+        Sina => Loc.T("先在新浪邮箱网页版取得授权码", "First, get an authorization code on the Sina Mail website"),
+        ICloud => Loc.T("先在 Apple 账户网站生成 App 专用密码", "First, generate an app-specific password on the Apple Account website"),
+        Gmail => Loc.T("先在 Google 账号网站创建应用专用密码", "First, create an app password on the Google Account website"),
+        Outlook => Loc.T("先在 Outlook 网页版打开 IMAP", "First, turn on IMAP in Outlook on the web"),
+        _ => Loc.T("先在邮箱的网页版开启 IMAP 服务", "First, turn on IMAP on your mailbox's website")
     };
 
     // What to do on the provider's website before signing in here, in the website's own words.

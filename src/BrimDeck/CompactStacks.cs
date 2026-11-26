@@ -27,15 +27,16 @@ internal static class CompactStacks
 
     // The application's icon in a round outline. The picture is cut round: one with a plate of its own (most icons) fills the
     // circle, its transparent margin left out; a mark on a transparent ground (a logo with no plate) sits smaller on a plate of
-    // the panel's fill, so that it reads on any theme. Without a picture, the name's first letter in the accent color.
-    public static FrameworkElement Icon(BitmapSource? image, double size, double s, PanelLook look, string? name, Color accent)
+    // the panel's fill, so that it reads on any theme. Without a picture, the name's first letter in the accent color, or the glyph
+    // iconRef names (NoticeLetter.GlyphOf).
+    public static FrameworkElement Icon(BitmapSource? image, double size, double s, PanelLook look, string? name, Color accent, string? iconRef = null)
     {
         double edge = Outline(s), inner = size - 2 * edge;
         var grid = Round(size, look);
         FrameworkElement face;
         if (image is null)
         {
-            face = NoticeLetter.Plate(name, inner, accent);
+            face = NoticeLetter.Plate(name, inner, accent, iconRef: iconRef);
             face.Clip = new EllipseGeometry(new Point(inner / 2, inner / 2), inner / 2, inner / 2);
         }
         else
