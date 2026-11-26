@@ -1250,7 +1250,8 @@ internal sealed partial class NoticeCenter : IDisposable
         _pipe?.Dispose(); _pipe = null;
         _flash?.Dispose(); _flash = null;
         _wechat?.Dispose(); _wechat = null;
-        _dingTalk?.Dispose(); _dingTalk = null;
+        _dingTalkMessages?.Dispose(); _dingTalkMessages = null;
+        _dingTalkCalls?.Dispose(); _dingTalkCalls = null;
         _feishu?.Dispose(); _feishu = null;
         _windows.Dispose(); _wsl.Dispose();
         _disposed = true;

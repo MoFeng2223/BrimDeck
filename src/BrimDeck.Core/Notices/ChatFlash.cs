@@ -70,6 +70,9 @@ public sealed class ChatFlashFilter(Func<nint, string?> executable, Func<nint, b
     public static readonly TimeSpan DefaultWindow = TimeSpan.FromSeconds(5);
     private readonly TimeSpan _window = window ?? DefaultWindow;
     private readonly Dictionary<string, (DateTimeOffset Start, DateTimeOffset Latest, int Group)> _groups = new(StringComparer.Ordinal);
+    // The groups count from 1 in each run of BrimDeck, while the notices of an earlier run are kept: without a mark of the run
+    // in the key, a new message would take the key of a saved one and only update it, with the same words, so it would not show.
+    private readonly string _run = Guid.NewGuid().ToString("N")[..8];
 
     public NoticeInput? OnFlash(nint handle)
     {
@@ -89,9 +92,9 @@ public sealed class ChatFlashFilter(Func<nint, string?> executable, Func<nint, b
         return Input(app, group);
     }
 
-    private static NoticeInput Input(ChatFlashApp app, int group) => new()
+    private NoticeInput Input(ChatFlashApp app, int group) => new()
     {
-        Origin = NoticeOrigin.Windows, AppKey = "flash:" + app.Id, AppName = app.Name, InstanceKey = $"flash:{app.Id}:{group}",
+        Origin = NoticeOrigin.Windows, AppKey = "flash:" + app.Id, AppName = app.Name, InstanceKey = $"flash:{app.Id}:{_run}:{group}",
         Title = app.Name, Body = Loc.T("有新消息", "New message"), Category = NoticeCategory.Message
     };
 }

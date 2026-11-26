@@ -71,6 +71,11 @@ internal static class NoticeFlashTests
         check("Flash: the hub lists a burst once and shows it once", arrived is { Receipt: NoticeReceipt.Accepted, Present: true } && merged is { Receipt: NoticeReceipt.Updated, Present: false } && hub.Notices.Count == 1);
         check("Flash: the next burst is shown and listed beside it", hub.Receive(later, T0.AddMinutes(4)).Present && hub.Notices.Count == 2);
 
+        // BrimDeck restarted: the notices of the run before are kept, and a new run's first message is a new notice beside them.
+        var restarted = world.Filter().OnFlash(10)!;
+        check("Flash: after a restart the first message is not taken for a kept notice of the run before", restarted.InstanceKey != first.InstanceKey
+            && hub.Receive(restarted, T0.AddMinutes(30)) is { Receipt: NoticeReceipt.Accepted, Present: true });
+
         var two = new World();
         two.Images[40] = "Lark.exe";
         var both = two.Filter([new ChatFlashApp("wechat", "微信", "WeChat", ["Weixin.exe"], true), new ChatFlashApp("feishu", "飞书", "Feishu", ["Lark.exe"], true)]);
@@ -104,25 +109,18 @@ internal static class NoticeFlashTests
     // DingTalk's windows as UI Automation read them on 2026-11-26 (DingTalkPopups).
     private static void DingTalk(Action<string, bool> check)
     {
-        static DingTalkText L(string name) => new("ddesign::Label", name);
         static DingTalkText Q(string name) => new("QLabel", name);
         static DingTalkText A(string name) => new("dtguitoolkit::AutoAdjustLabel", name);
-        var mention = DingTalkPopups.Read(DingTalkPopups.MessageClass, "Form", [Q("消息"), Q("余昊"), L("余昊,余昊"), L("[有人@你]余昊: @余昊 ")], "k1");
-        check("DingTalk: a popup is the chat and its message, as a DingTalk message notice", mention is { AppKey: DingTalkPopups.AppKey, AppName: "钉钉", Title: "余昊,余昊", Body: "[有人@你]余昊: @余昊", Call: false, InstanceKey: "k1", Category: NoticeCategory.Message });
-        var missed = DingTalkPopups.Read(DingTalkPopups.MessageClass, "Form", [Q("消息"), L("钉钉电话"), L("未接来电：余昊、余昊")], "k2");
-        check("DingTalk: a missed call is a message, not a ringing call", missed is { Title: "钉钉电话", Body: "未接来电：余昊、余昊", Call: false });
-        check("DingTalk: a popup without its two labels says nothing", DingTalkPopups.Read(DingTalkPopups.MessageClass, "Form", [Q("消息"), L("  "), L("余昊")], "k") is null
-            && DingTalkPopups.Read(DingTalkPopups.MessageClass, "Form", [], "k") is null);
         var call = DingTalkPopups.Read(DingTalkPopups.CallClass, "语音通话", [Q("语音通话"), Q("余昊"), Q("余昊"), Q("邀请你语音通话"), Q("通话纪要"), Q("挂断"), Q("接听")], "k3");
         check("DingTalk: a ringing call is a call from its caller", call is { Title: "余昊", Body: "邀请你语音通话", Call: true });
         var meeting = DingTalkPopups.Read(DingTalkPopups.MeetingClass, "钉钉视频会议", [A("余昊 邀请你加入"), A("余昊"), A("余昊,余昊_1126"), Q("接听"), Q("拒绝"), Q("麦克风已开"), Q("摄像头已关")], "k4");
         check("DingTalk: a meeting invitation is a call from who invites, with the meeting", meeting is { Title: "余昊", Body: "钉钉视频会议 · 余昊,余昊_1126", Call: true });
         check("DingTalk: a call window without an invitation says nothing", DingTalkPopups.Read(DingTalkPopups.CallClass, "语音通话", [Q("语音通话"), Q("挂断")], "k") is null
             && DingTalkPopups.Read(DingTalkPopups.MeetingClass, "钉钉语音会议", [A("余昊")], "k") is null);
-        check("DingTalk: only its popup in DingTalk.exe and its call windows in tblive.exe are read",
-            DingTalkPopups.Watched("DingTalk.exe", DingTalkPopups.MessageClass) && DingTalkPopups.Watched("TBLIVE.EXE", DingTalkPopups.CallClass) && DingTalkPopups.Watched("tblive.exe", DingTalkPopups.MeetingClass)
-            && !DingTalkPopups.Watched("tblive.exe", DingTalkPopups.MessageClass) && !DingTalkPopups.Watched("DingTalk.exe", DingTalkPopups.CallClass)
-            && !DingTalkPopups.Watched("DingTalk.exe", "DtMainFrameView") && !DingTalkPopups.Watched("other.exe", DingTalkPopups.MessageClass) && !DingTalkPopups.Watched(null, DingTalkPopups.MessageClass));
+        check("DingTalk: only its call windows, and only in its call program, are read",
+            DingTalkPopups.Watched("TBLIVE.EXE", DingTalkPopups.CallClass) && DingTalkPopups.Watched("tblive.exe", DingTalkPopups.MeetingClass)
+            && !DingTalkPopups.Watched("DingTalk.exe", DingTalkPopups.CallClass) && !DingTalkPopups.Watched("tblive.exe", "DtMainFrameView")
+            && !DingTalkPopups.Watched("other.exe", DingTalkPopups.CallClass) && !DingTalkPopups.Watched(null, DingTalkPopups.CallClass));
         check("DingTalk: its flashes are DingTalk's notices", new ChatFlashFilter(_ => @"D:\Program Files (x86)\DingDing\main\current\DingTalk.exe", _ => false, () => T0).OnFlash(1) is { AppKey: DingTalkPopups.AppKey, Title: "钉钉", Body: "有新消息" });
 
         // DingTalk flashes until read: three flashes about 1.06 seconds apart, then still for up to 3.2 seconds (measured).
