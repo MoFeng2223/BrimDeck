@@ -502,18 +502,32 @@ internal sealed class WeatherView : UserControl
             using var fresh = force ? WeatherCache.Fresh() : null;
             City city;
             if (selected >= 0 && selected < state.Cities.Count) city = state.Cities[selected];
-            else city = await WeatherData.LocateAsync(state.Schedule, token) ?? new City("当前位置", 0, 0);
+            else
+            {
+                var located = await WeatherData.LocateAsync(state.Schedule, token);
+                token.ThrowIfCancellationRequested();
+                if (selected != state.Selected || request != generation) return;
+                if (located is null)
+                {
+                    if (_last is null) ShowEmpty();
+                    return;
+                }
+                city = located;
+            }
             // 旧请求交给 token 中断；generation 只在部分结果回写时挡一次，避免迟到的首屏覆盖新请求。
             var sourceId = state.Schedule.SourceFor(selected < 0 ? null : city);
             key = WeatherData.CacheKey(city, sourceId);
-            var snapshot = await WeatherData.CurrentAsync(city, state.Schedule, sourceId, token, partial => { if (request == generation && sourceId == state.Schedule.SourceFor(selected < 0 ? null : city)) QueuePartial(partial, key, request); });
-            if (request != generation || token.IsCancellationRequested || sourceId != state.Schedule.SourceFor(selected < 0 ? null : city)) return;
+            if (_shownKey != key && state.Cache.TryGetValue(key, out var locatedCache))
+            {
+                Render(locatedCache);
+                _shownKey = key;
+            }
+            var snapshot = await WeatherData.CurrentAsync(city, state.Schedule, sourceId, token, partial => { if (request == generation && selected == state.Selected && sourceId == state.Schedule.SourceFor(selected < 0 ? null : city) && (_shownKey != key || _last is null)) QueuePartial(partial, key, request); });
+            if (request != generation || selected != state.Selected || token.IsCancellationRequested || sourceId != state.Schedule.SourceFor(selected < 0 ? null : city)) return;
             // 终版马上就到：作废还没执行的 partial，避免一次刷新把整页重建两遍。
             _pendingPartial = null;
             Render(snapshot); _shownKey = key;
             // 定位/选择出的实际城市即缓存键：自动定位的快照也按位置存，AutoKey 记下映射。
-            state.Cache[key] = snapshot;
-            if (AutoSelected) state.AutoKey = key;
             // 只回写天气快照与定位指针，不走整体 Save：设置页刚保存的城市/来源改动不被刷新流程覆盖。
             WeatherData.SaveSnapshot(key, snapshot, AutoSelected ? key : null);
             _cycleStart = DateTime.UtcNow;
@@ -521,7 +535,7 @@ internal sealed class WeatherView : UserControl
             timer.Stop(); timer.Start();
         } catch (OperationCanceledException) {
             // 取消即本轮作废，界面与状态由新的 Refresh 接管（画面已是目标城市自己的缓存或空态）。
-        } catch { if (request == generation) { _pendingPartial = null; _renderSignature = 0; summary.Children.Clear(); summary.Children.Add(new TextBlock { Text = Loc.T("天气数据不可用", "Weather data unavailable"), FontSize = 20, VerticalAlignment = VerticalAlignment.Center }); } }
+        } catch { if (request == generation && (_last is null || _shownKey != key)) { _pendingPartial = null; _renderSignature = 0; summary.Children.Clear(); summary.Children.Add(new TextBlock { Text = Loc.T("天气数据不可用", "Weather data unavailable"), FontSize = 20, VerticalAlignment = VerticalAlignment.Center }); } }
         finally { if (ReferenceEquals(_token, cts)) { fetching = false; _token = null; } cts.Dispose(); RaiseState(); }
     }
     // 空态：换到没有缓存的城市后、刷新尚未成功时清掉上一城的残留画面（预报列、折线、页脚一并清）。
@@ -1786,7 +1800,7 @@ internal sealed class WeatherView : UserControl
     internal async Task ChooseCityAsync(int index)
     {
         if (state.Selected == index) return;
-        state.Selected = index; _app.QueueSave(); WeatherData.Save(state);
+        state.Selected = index; _app.QueueSave();
         await Refresh();
     }
     internal Action? SettingsRequested;

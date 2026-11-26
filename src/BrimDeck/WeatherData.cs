@@ -16,11 +16,11 @@ internal static class WeatherData
         public List<City> Cities { get => _settings().WeatherCities; set => _settings().WeatherCities = value; }
         public int Selected { get => _settings().WeatherSelected; set => _settings().WeatherSelected = value; }
         public WeatherSettings Schedule { get => _settings().Weather; set => _settings().Weather = value; }
-        public Dictionary<string, WeatherSnapshot> Cache { get; set; } = [];
+        public IReadOnlyDictionary<string, WeatherSnapshot> Cache => Snapshots;
         // 自动定位指针：最近一次定位到的实际城市键。快照一律按真实城市键存（定位映射选择的城市/区），
         // "auto" 只作指向，供重启后免定位直接命中缓存、设置页「当前位置」行取数。
-        private string _autoKey = "";
-        public string AutoKey { get => _autoKey.EndsWith("|" + Schedule.SourceFor(null), StringComparison.Ordinal) ? _autoKey : ""; set => _autoKey = value; }
+
+        public string AutoKey { get => _autoKey.EndsWith("|" + Schedule.SourceFor(null), StringComparison.Ordinal) ? _autoKey : ""; }
         public string KeyFor(City city) => CacheKey(city, Schedule.SourceFor(city));
     }
     private sealed class SnapshotFile { public string Key {get;set;}=""; public WeatherSnapshot? Value {get;set;} }
@@ -30,6 +30,9 @@ internal static class WeatherData
     // 已落盘的快照时间：同一条数据没有更新就不再重复写盘，刷新一座城只碰一个文件。
     private static readonly object SnapLock=new();
     private static readonly Dictionary<string,DateTimeOffset> Written=new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, WeatherSnapshot> Snapshots = new(StringComparer.Ordinal);
+    private static string _autoKey = "";
+    internal static event Action? SnapshotChanged;
     private static int _started;
     // 进程内只做一次：清理过期缓存条目、恢复当日请求计数。
     private static void Start()
@@ -38,21 +41,20 @@ internal static class WeatherData
         WeatherFiles.Ensure(WeatherFiles.Snapshots);
         WeatherCache.Prune(TimeSpan.FromDays(14));
         RequestGate.Restore();
-    }
-    internal static State Load(Func<DeckSettings> settings)
-    {
-        Start();
-        var state=new State(settings);
-        foreach(var (key,snapshot) in ReadSnapshots())state.Cache[key]=snapshot;
+        foreach(var (key,snapshot) in ReadSnapshots())Snapshots[key]=snapshot;
         // 自动定位指针（weather/auto.json，与快照分开放，避免混进快照枚举）：
         // 快照都按真实城市键存，"auto" 只是映射，重启后靠它免定位命中缓存。
         try
         {
             string pointer=Path.Combine(WeatherFiles.Root,"weather","auto.json");
-            if(File.Exists(pointer)&&JsonSerializer.Deserialize<SnapshotFile>(File.ReadAllText(pointer),WeatherJson) is { Key.Length:>0 } entry)state.AutoKey=entry.Key;
+            if(File.Exists(pointer)&&JsonSerializer.Deserialize<SnapshotFile>(File.ReadAllText(pointer),WeatherJson) is { Key.Length:>0 } entry)_autoKey=entry.Key;
         }
         catch { }
-        return state;
+    }
+    internal static State Load(Func<DeckSettings> settings)
+    {
+        Start();
+        return new State(settings);
     }
     private static IEnumerable<(string Key,WeatherSnapshot Value)> ReadSnapshots()
     {
@@ -73,37 +75,12 @@ internal static class WeatherData
             yield return (key,snapshot);
         }
     }
-    // 只写下载快照与请求计数。用户在设置页改动的 cities/selected/schedule 属于 DeckSettings，
-    // 由 SettingsWindow/App 的常规设置保存流程写回 settings.json。
-    // 返回是否全部写盘成功：WriteAtomic 失败时如实上报（false），调用方据此提示保存失败，
-    // 而不是把丢数据当成已保存。
-    internal static bool Save(State state)
-    {
-        bool ok=true;
-        lock(SnapLock)
-            foreach(var (key,snapshot) in state.Cache)
-            {
-                // 版本检查在前：设置页驻留的旧快照（A）不得因配置保存把已被天气页新快照（B）覆盖的历史写回去。
-                if(Written.TryGetValue(key,out var at)&&snapshot.FetchedAt<=at)continue;
-                if(!WeatherFiles.WriteAtomic(Path.Combine(WeatherFiles.Snapshots,WeatherFiles.Name(key,".json")),JsonSerializer.Serialize(new SnapshotFile{Key=key,Value=snapshot},WeatherJson))){ok=false;continue;}
-                Written[key]=snapshot.FetchedAt;
-                // 快照确实被接受后才并入本地历史；历史键=快照的真实城市键（CityKey，Merge 时写入）。
-                WeatherHourHistory.Record(snapshot.CityKey,snapshot);
-            }
-        // 请求计数随保存一起落盘：重启后不会把当天额度重新算满。
-        RequestGate.Flush();
-        // 自动定位指针随快照一起落盘："auto" 只是映射，重启后靠它免定位命中缓存。
-        if(state.AutoKey.Length>0)
-            ok&=WeatherFiles.WriteAtomic(Path.Combine(WeatherFiles.Root,"weather","auto.json"),JsonSerializer.Serialize(new SnapshotFile{Key=state.AutoKey},WeatherJson));
-        return ok;
-    }
-    // 刷新回写专用：只落一座城市的快照（可选带自动定位指针），不遍历整个缓存、不触碰设置里的城市/来源，
-    // 天气页刷新不会把设置页刚保存的改动覆盖掉。
     internal static void SaveSnapshot(string key,WeatherSnapshot snapshot,string? autoKey=null)
     {
         lock(SnapLock)
         {
-            // 与 Save 同一套版本检查：已落盘的同键快照不会被更旧的回写覆盖。
+            if (!Snapshots.TryGetValue(key, out var previous) || snapshot.FetchedAt >= previous.FetchedAt)
+                Snapshots[key] = snapshot;
             if(!(Written.TryGetValue(key,out var at)&&snapshot.FetchedAt<=at))
             {
                 if(WeatherFiles.WriteAtomic(Path.Combine(WeatherFiles.Snapshots,WeatherFiles.Name(key,".json")),JsonSerializer.Serialize(new SnapshotFile{Key=key,Value=snapshot},WeatherJson)))
@@ -114,9 +91,13 @@ internal static class WeatherData
                 }
             }
             if(autoKey is {Length:>0})
+            {
+                _autoKey = autoKey;
                 WeatherFiles.WriteAtomic(Path.Combine(WeatherFiles.Root,"weather","auto.json"),JsonSerializer.Serialize(new SnapshotFile{Key=autoKey},WeatherJson));
+            }
         }
         RequestGate.Flush();
+        SnapshotChanged?.Invoke();
     }
     // 城市搜索：配置了和风 Key/Host 就只用和风 GeoAPI——能精确命中区县（搜「洪山区」得「洪山区 · 武汉市 · 湖北省」），
     // 返回的 LocationID 与和风时光机同源。请求失败不退回 Open-Meteo，避免同一次搜索混用两套层级和精度。
@@ -254,7 +235,13 @@ internal static class WeatherData
     // 历史单独一轮，progress 让界面先画不含历史的版本，历史到了再用返回值整体替换。
     internal static string CacheKey(City city, string sourceId) => city.ToString() + "|" + sourceId;
     internal static async Task<WeatherSnapshot> CurrentAsync(City city, WeatherSettings schedule, string sourceId, CancellationToken token, Action<WeatherSnapshot>? progress = null)
-        => await WeatherAggregator.FetchAsync(city, schedule, sourceId, token, progress);
+    {
+        var snapshot = await WeatherAggregator.FetchAsync(city, schedule, sourceId, token, progress);
+        token.ThrowIfCancellationRequested();
+        if (snapshot.Sources.Count > 0 || double.IsFinite(snapshot.Temperature)) return snapshot;
+        if (Snapshots.TryGetValue(CacheKey(city, sourceId), out var cached)) return cached;
+        return snapshot;
+    }
     // 在 daily 正序数组中定位“今天”的索引；Today 是聚合时写下的城市当地日期，找不到时回退 0。
     internal static int TodayIndex(WeatherSnapshot s)
     {

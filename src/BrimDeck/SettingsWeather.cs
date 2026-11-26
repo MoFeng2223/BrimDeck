@@ -19,7 +19,7 @@ public sealed partial class SettingsWindow
         var cityQuotaText=TextLine("",11,TextPrimary);cityQuotaText.VerticalAlignment=VerticalAlignment.Center;
         var cityQuota=new Border {Child=cityQuotaText,CornerRadius=new CornerRadius(10),Padding=new Thickness(9,2,9,2),Background=Brushes.Transparent,BorderBrush=(Brush)FindResource("SettingsBorder"),BorderThickness=new Thickness(1),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(8,0,0,0)};
         void UpdateCityQuota(){cityQuotaText.Text=$"{state.Cities.Count}/{DeckSettings.MaxWeatherCities}";cityQuotaText.Foreground=UI.Brush(state.Cities.Count<DeckSettings.MaxWeatherCities?_palette.Positive:_palette.Negative);}
-        void Save() {try {_app.QueueSave(); WeatherData.Save(state);}catch {}}
+        void Save() {try {_app.QueueSave(); }catch {}}
         // 城市清单用同一套列宽，间隔也是真实的列：拖拽位 / 间隔 / 城市 / 间隔 / 天气 / 间隔 / 温度 / 间隔 / 数据源 / 间隔 / 删除。
         // 列头、数据行、搜索页脚共用它，文字和控件落在同一列而不是靠相邻列硬挤。
         Grid CityGrid()
@@ -58,13 +58,13 @@ public sealed partial class SettingsWindow
                 if(city is null){
                     string local=autoName;
                     if(state.Cache.TryGetValue(state.AutoKey,out var snap)){
-                        temperature=$"{snap.Temperature:0}°";code=snap.WeatherCode;day=snap.IsDay;
+                        temperature=double.IsFinite(snap.Temperature)?$"{snap.Temperature:0}°":"--";code=snap.WeatherCode;day=snap.IsDay;
                         if(!snap.Name.Contains("当前位置"))local=snap.Name;
                     }
                     if(local.Trim().Length>0&&!local.Contains("当前位置"))subtitle=DisplayCityName(local);
                 } else {
                     var parts=SplitName(city.Name);name=parts.Title;subtitle=DisplayCityName(city.Name);
-                    if(state.Cache.TryGetValue(state.KeyFor(city),out var snap)){temperature=$"{snap.Temperature:0}°";code=snap.WeatherCode;day=snap.IsDay;}
+                    if(state.Cache.TryGetValue(state.KeyFor(city),out var snap)){temperature=double.IsFinite(snap.Temperature)?$"{snap.Temperature:0}°":"--";code=snap.WeatherCode;day=snap.IsDay;}
                 }
                 var grid=CityGrid();var sources=WeatherSources.All;
                 if(selected){
@@ -126,7 +126,21 @@ public sealed partial class SettingsWindow
         }
         Target.Children.Add(preview);SectionTitle(Loc.T("当前城市","Current city"),cityQuota);
         // 设置页打开即尝试定位：成功则刷新「自动定位」行展示当地城市名，不干扰其余行。
-        async Task DetectAsync() { if(!active)return;try {var local=await WeatherData.LocateAsync(state.Schedule,CancellationToken.None);if(active&&local is not null&&!local.Name.Contains("当前位置")){autoName=local.Name;Fill();}}catch{}}
+        async Task DetectAsync()
+        {
+            try
+            {
+                var source = state.Schedule.SourceFor(null);
+                var local = await WeatherData.LocateAsync(state.Schedule, CancellationToken.None);
+                if (!active || local is null || source != state.Schedule.SourceFor(null)) return;
+                autoName = local.Name;
+                var key = WeatherData.CacheKey(local, source);
+                if (key != state.AutoKey && state.Cache.TryGetValue(key, out var cached))
+                    WeatherData.SaveSnapshot(key, cached, key);
+                else Fill();
+            }
+            catch { }
+        }
         var input=new TextBox {Width=250,Height=31,Style=(Style)FindResource("SettingsField")};
         var placeholder=new TextBlock {Text=Loc.T("支持中英文","Chinese or English"),FontSize=13,Foreground=(Brush)FindResource("SettingsTextSecondary"),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(12,0,0,0),IsHitTestVisible=false};void UpdatePlaceholder()=>placeholder.Visibility=input.Text.Length==0?Visibility.Visible:Visibility.Collapsed;input.TextChanged+=(_,_)=>UpdatePlaceholder();
         var inputHost=new Grid {Width=250};inputHost.Children.Add(input);inputHost.Children.Add(placeholder);UpdatePlaceholder();
@@ -358,7 +372,9 @@ public sealed partial class SettingsWindow
             using var fresh = WeatherCache.Fresh();
             await RefreshCityWeatherAsync(state.Selected >= 0 && state.Selected < state.Cities.Count ? state.Cities[state.Selected] : null);
         };
-        cityRows.Unloaded+=(_,_)=>{active=false;pending?.Cancel();pending?.Dispose();pending=null;fetchCts?.Cancel();fetchCts?.Dispose();fetchCts=null;popup.IsOpen=false;ShowSearching(false);};
+        void UpdateSnapshots() { Fill(); preview.RenderWeatherCard(); }
+        WeatherData.SnapshotChanged += UpdateSnapshots;
+        cityRows.Unloaded+=(_,_)=>{WeatherData.SnapshotChanged -= UpdateSnapshots;active=false;pending?.Cancel();pending?.Dispose();pending=null;fetchCts?.Cancel();fetchCts?.Dispose();fetchCts=null;popup.IsOpen=false;ShowSearching(false);};
 
         // 添加城市后立即拉取一次天气写入缓存，列表温度随之刷新；未就绪时该行不显示温度，删除或离开页面的请求一律作废。
         async Task RefreshCityWeatherAsync(City? selectedCity)
@@ -387,11 +403,7 @@ public sealed partial class SettingsWindow
                     MarkRefresh(DisplayCityName(city.Name), ok, requested, watch.Elapsed);
                 }
                 var key = WeatherData.CacheKey(city, sourceId);
-                state.Cache[key] = snapshot;
-                if (selectedCity is null) state.AutoKey = key;
-                Save();
-                Fill();
-                preview.RenderWeatherCard();
+                WeatherData.SaveSnapshot(key, snapshot, selectedCity is null ? key : null);
             }
             catch { }
             finally { if (ReferenceEquals(fetchCts, request)) fetchCts = null; }
