@@ -439,7 +439,8 @@ public sealed partial class SettingsWindow
         void Draw()
         {
             grid.Children.Clear();
-            foreach (var item in S.Weather.ChipRows(6).SelectMany(row => row.OrderBy(chip => chip.Visible)))
+            // 设置页是固定开关矩阵：隐藏只改选中态，不按可见性重排，也不借用主页的跨行补齐逻辑。
+            foreach (var item in S.Weather.Chips)
             {
                 var label = item.Metric switch
                 {
@@ -456,33 +457,18 @@ public sealed partial class SettingsWindow
                 chip.IsChecked = item.Visible;
                 chip.Tag = item.Metric;
                 chip.RenderTransform = new TranslateTransform();
-                chip.Click += (_, _) =>
+                chip.Click += (_, _) => Resize(settings =>
                 {
-                    Resize(settings =>
+                    var chips = settings.Weather.Chips;
+                    int index = chips.FindIndex(c => c.Metric == item.Metric);
+                    chips[index] = chips[index] with { Visible = chip.IsChecked == true };
+                }, DeckPage.Weather);
+                // 拖拽已经改好 grid.Children，直接按当前顺序存回去即可，不要再按可见性重排。
+                AttachWeatherChipDrag(chip, grid, () => Resize(settings =>
                 {
-                        var chips = settings.Weather.Chips;
-                        int index = chips.FindIndex(c => c.Metric == item.Metric);
-                        chips[index] = chips[index] with { Visible = chip.IsChecked == true };
-                    }, DeckPage.Weather);
-                    Draw();
-                };
-                AttachWeatherChipDrag(chip, grid, () =>
-                {
-                    var buttons = grid.Children.Cast<ToggleButton>().ToDictionary(c => (WeatherMetric)c.Tag);
-                    Resize(settings =>
-                    {
-                        var chips = settings.Weather.Chips.ToDictionary(c => c.Metric);
-                        settings.Weather.Chips = grid.Children.Cast<ToggleButton>().Select(c => chips[(WeatherMetric)c.Tag]).ToList();
-                    }, DeckPage.Weather);
-                    var ordered = S.Weather.ChipRows(6).SelectMany(row => row.OrderBy(c => c.Visible));
-                    foreach (var (entry, index) in ordered.Select((entry, index) => (entry, index)))
-                    {
-                        var button = buttons[entry.Metric];
-                        if (grid.Children.IndexOf(button) == index) continue;
-                        grid.Children.Remove(button);
-                        grid.Children.Insert(index, button);
-                    }
-                });
+                    var chips = settings.Weather.Chips.ToDictionary(c => c.Metric);
+                    settings.Weather.Chips = grid.Children.Cast<ToggleButton>().Select(c => chips[(WeatherMetric)c.Tag]).ToList();
+                }, DeckPage.Weather));
                 grid.Children.Add(chip);
             }
         }
