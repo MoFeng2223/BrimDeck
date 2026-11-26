@@ -24,7 +24,7 @@ internal sealed class ProxyController : IDisposable
     private readonly DispatcherTimer _statsTimer;
     private readonly Queue<ProxyTrafficSample> _history = new(HistoryCapacity + 2);
     private readonly HashSet<string> _testingGroups = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _testingNodes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> _testingNodes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (DateTime WrittenUtc, long Length, ProxySubscriptionInfo? Value)> _profilesCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (DateTime WrittenUtc, long Length, ProxyLatencyConfig Value)> _vergeControlCache = new(StringComparer.OrdinalIgnoreCase);
 
@@ -37,12 +37,14 @@ internal sealed class ProxyController : IDisposable
     private int _repollPending;
     private int _repollIncludeProxies;
     private long _mutationVersion;
+    private long _sessionId;
+    private long _nextTestOwner;
     private string? _endpointKey;
 
     public ProxyControlSnapshot Snapshot { get; private set; } = ProxyControlSnapshot.Empty;
     public IReadOnlyList<ProxyTrafficSample> TrafficHistory => [.. _history];
     public bool IsTestingGroup(string groupName) => _testingGroups.Contains(groupName);
-    public bool IsTestingNode(string nodeName) => _testingNodes.Contains(nodeName);
+    public bool IsTestingNode(string nodeName) => _testingNodes.ContainsKey(nodeName);
     public bool BusyModeSwitch { get; private set; }
 
     internal void SetPreviewState(ProxyControlSnapshot snapshot, IReadOnlyList<ProxyTrafficSample> traffic)
@@ -105,17 +107,24 @@ internal sealed class ProxyController : IDisposable
 
         if (!status.Running)
         {
+            CancelActiveWork();
             _history.Clear();
             bool hadContent = Snapshot.Status.Running || Snapshot.ApiConnected || Snapshot.Groups.Count > 0;
             Snapshot = ProxyControlSnapshot.Empty;
-            if (_active) CancelActiveWork();
             if (hadContent) StateChanged?.Invoke();
             return;
         }
 
         bool statusChanged = status != Snapshot.Status;
         bool modeChanged = status.Mode != Snapshot.Status.Mode;
-        if (statusChanged)
+        if (endpointChanged)
+        {
+            // Switching controller endpoints starts fresh cumulative traffic counters.
+            _history.Clear();
+            Snapshot = Snapshot with { Status = status, Traffic = default, Connections = default };
+            StateChanged?.Invoke();
+        }
+        else if (statusChanged)
         {
             Snapshot = Snapshot with { Status = status };
             StateChanged?.Invoke();
@@ -147,15 +156,17 @@ internal sealed class ProxyController : IDisposable
             return;
         }
 
+        long sessionId = Interlocked.Increment(ref _sessionId);
         _activeCts = new CancellationTokenSource();
         var ct = _activeCts.Token;
         _statsTimer.Start();
         QueueRefresh(includeProxies: true);
-        _ = Task.Run(() => RunTrafficLoopAsync(ct));
+        _ = Task.Run(() => RunTrafficLoopAsync(sessionId, ct));
     }
 
     private void CancelActiveWork()
     {
+        Interlocked.Increment(ref _sessionId);
         _statsTimer.Stop();
         try { _groupTestCts?.Cancel(); } catch { }
         _groupTestCts?.Dispose();
@@ -175,6 +186,7 @@ internal sealed class ProxyController : IDisposable
             return;
         }
         var token = cts.Token;
+        long sessionId = Volatile.Read(ref _sessionId);
         // Do not pass token to Task.Run scheduling so cancellation can never skip releasing the _refreshing latch.
         _ = Task.Run(async () =>
         {
@@ -182,22 +194,22 @@ internal sealed class ProxyController : IDisposable
             {
                 do
                 {
-                    if (token.IsCancellationRequested || _disposed) return;
+                    if (token.IsCancellationRequested || _disposed || Volatile.Read(ref _sessionId) != sessionId) return;
                     Interlocked.Exchange(ref _repollPending, 0);
                     bool proxies = Interlocked.Exchange(ref _repollIncludeProxies, 0) == 1;
                     var version = Volatile.Read(ref _mutationVersion);
                     var endpoint = ResolveWorkingEndpoint();
                     var status = _watcher.Snapshot;
-                    await RefreshCoreAsync(status, endpoint, proxies, version, token).ConfigureAwait(false);
+                    await RefreshCoreAsync(status, endpoint, proxies, version, sessionId, token).ConfigureAwait(false);
                 }
-                while (!token.IsCancellationRequested && Interlocked.Exchange(ref _repollPending, 0) == 1);
+                while (!token.IsCancellationRequested && Volatile.Read(ref _sessionId) == sessionId && Interlocked.Exchange(ref _repollPending, 0) == 1);
             }
             catch (OperationCanceledException) { }
             catch { }
             finally
             {
                 Interlocked.Exchange(ref _refreshing, 0);
-                if (!token.IsCancellationRequested && !_disposed && Interlocked.Exchange(ref _repollPending, 0) == 1)
+                if (!token.IsCancellationRequested && !_disposed && Volatile.Read(ref _sessionId) == sessionId && Interlocked.Exchange(ref _repollPending, 0) == 1)
                     QueueRefresh(Interlocked.Exchange(ref _repollIncludeProxies, 0) == 1);
             }
         });
@@ -224,11 +236,11 @@ internal sealed class ProxyController : IDisposable
         return ep;
     }
 
-    private async Task RefreshCoreAsync(ProxySnapshot status, ProxyEndpoint? endpoint, bool includeProxies, long expectedVersion, CancellationToken ct)
+    private async Task RefreshCoreAsync(ProxySnapshot status, ProxyEndpoint? endpoint, bool includeProxies, long expectedVersion, long sessionId, CancellationToken ct)
     {
         if (!status.Running || endpoint is null)
         {
-            PublishUpdate(ProxyControlSnapshot.Empty, statsOnly: false, expectedVersion);
+            PublishUpdate(ProxyControlSnapshot.Empty, statsOnly: false, expectedVersion, sessionId);
             return;
         }
 
@@ -241,14 +253,16 @@ internal sealed class ProxyController : IDisposable
                 Status = status,
                 ApiConnected = false,
                 Groups = [],
+                HiddenGroups = [],
                 Subscription = subscription,
                 LatencyConfig = latencyCfg,
                 Error = null
-            }, statsOnly: false, expectedVersion);
+            }, statsOnly: false, expectedVersion, sessionId);
             return;
         }
 
         var groups = Snapshot.Groups;
+        IReadOnlyList<ProxyGroupInfo> hiddenGroups = Snapshot.HiddenGroups ?? [];
         var mode = status.Mode;
         bool apiOk = Snapshot.ApiConnected;
         bool fetchedStructure = false;
@@ -269,7 +283,9 @@ internal sealed class ProxyController : IDisposable
             if (proxiesText is not null)
             {
                 apiOk = true;
-                groups = ProxyControlParsers.ParseMihomoProxies(proxiesText, mode);
+                var (visible, hidden) = ProxyControlParsers.ParseMihomoProxiesWithHidden(proxiesText, mode);
+                groups = visible;
+                hiddenGroups = hidden;
             }
             else if (cfgText is null)
             {
@@ -302,17 +318,18 @@ internal sealed class ProxyController : IDisposable
             Status = status,
             ApiConnected = apiOk,
             Groups = apiOk ? groups : [],
+            HiddenGroups = apiOk ? hiddenGroups : [],
             Subscription = subscription,
             Connections = connSummary,
             LatencyConfig = latencyCfg,
             Error = null
-        }, statsOnly: !fetchedStructure, expectedVersion);
+        }, statsOnly: !fetchedStructure, expectedVersion, sessionId);
     }
 
-    private async Task RunTrafficLoopAsync(CancellationToken ct)
+    private async Task RunTrafficLoopAsync(long sessionId, CancellationToken ct)
     {
         int backoffMs = 800;
-        while (!ct.IsCancellationRequested && !_disposed)
+        while (!ct.IsCancellationRequested && !_disposed && Volatile.Read(ref _sessionId) == sessionId)
         {
             var endpoint = ResolveWorkingEndpoint();
             if (endpoint is null || (string.IsNullOrEmpty(endpoint.PipeName) && endpoint.HttpBaseUri is null))
@@ -333,15 +350,24 @@ internal sealed class ProxyController : IDisposable
                     continue;
                 }
 
-                backoffMs = 800;
+                bool gotSample = false;
                 await using var stream = await res.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
                 using var reader = new StreamReader(stream, Encoding.UTF8);
-                while (!ct.IsCancellationRequested)
+                while (!ct.IsCancellationRequested && Volatile.Read(ref _sessionId) == sessionId)
                 {
                     var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
                     if (line is null) break;
                     if (ProxyControlParsers.TryParseTrafficSample(line, out var sample))
-                        PublishTraffic(sample);
+                    {
+                        if (!gotSample) { gotSample = true; backoffMs = 800; }
+                        PublishTraffic(sample, sessionId);
+                    }
+                }
+                // Back off on unexpected EOF so a closed stream never spin-reconnects.
+                if (!ct.IsCancellationRequested && !_disposed && Volatile.Read(ref _sessionId) == sessionId)
+                {
+                    await DelayQuietly(backoffMs, ct).ConfigureAwait(false);
+                    backoffMs = Math.Min(backoffMs * 2, 4000);
                 }
             }
             catch (OperationCanceledException) { break; }
@@ -359,6 +385,7 @@ internal sealed class ProxyController : IDisposable
         var endpoint = ResolveWorkingEndpoint();
         if (endpoint is null || (string.IsNullOrEmpty(endpoint.PipeName) && endpoint.HttpBaseUri is null)) return false;
 
+        long sessionId = Volatile.Read(ref _sessionId);
         Interlocked.Increment(ref _mutationVersion);
         BusyModeSwitch = true;
         StateChanged?.Invoke();
@@ -385,7 +412,9 @@ internal sealed class ProxyController : IDisposable
 
             _ = _dispatcher.BeginInvoke(DispatcherPriority.Normal, () =>
             {
-                if (_disposed) return;
+                if (_disposed || Volatile.Read(ref _sessionId) != sessionId) return;
+                // Re-bump version on commit so any refresh started before PATCH completed is rejected.
+                Interlocked.Increment(ref _mutationVersion);
                 Snapshot = Snapshot with { Status = Snapshot.Status with { Mode = verifiedMode } };
                 StateChanged?.Invoke();
                 QueueRefresh(includeProxies: true);
@@ -412,6 +441,7 @@ internal sealed class ProxyController : IDisposable
         var endpoint = ResolveWorkingEndpoint();
         if (endpoint is null || (string.IsNullOrEmpty(endpoint.PipeName) && endpoint.HttpBaseUri is null)) return false;
 
+        long sessionId = Volatile.Read(ref _sessionId);
         Interlocked.Increment(ref _mutationVersion);
         var path = "/proxies/" + Uri.EscapeDataString(groupName);
         var payload = $"{{\"name\":\"{JsonEncodedText.Encode(nodeName)}\"}}";
@@ -421,8 +451,14 @@ internal sealed class ProxyController : IDisposable
         bool closeConnections = Snapshot.LatencyConfig.AutoCloseConnection;
         _ = _dispatcher.BeginInvoke(DispatcherPriority.Normal, () =>
         {
-            if (_disposed) return;
-            Snapshot = Snapshot with { Groups = ProxyControlParsers.WithSelectedNode(Snapshot.Groups, groupName, nodeName) };
+            if (_disposed || Volatile.Read(ref _sessionId) != sessionId) return;
+            // Re-bump version on commit so any refresh started before PUT completed is rejected.
+            Interlocked.Increment(ref _mutationVersion);
+            Snapshot = Snapshot with
+            {
+                Groups = ProxyControlParsers.WithSelectedNode(Snapshot.Groups, groupName, nodeName),
+                HiddenGroups = Snapshot.HiddenGroups is { Count: > 0 } h ? ProxyControlParsers.WithSelectedNode(h, groupName, nodeName) : Snapshot.HiddenGroups
+            };
             StateChanged?.Invoke();
             QueueRefresh(includeProxies: true);
         });
@@ -447,26 +483,39 @@ internal sealed class ProxyController : IDisposable
             return false;
         }
 
+        long sessionId = Volatile.Read(ref _sessionId);
+        long owner = ++_nextTestOwner;
+
         // Preserve display order so top visible nodes finish and appear first.
+        // Only take ownership of nodes not currently being probed by another operation.
         var targets = new List<string>(group.Nodes.Count);
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var cleared = new Dictionary<string, int?>(StringComparer.Ordinal);
         foreach (var node in group.Nodes)
         {
-            if (seen.Add(node.Name))
+            if (!seen.Add(node.Name)) continue;
+            if (IsNonTestableBuiltIn(node.Name))
             {
                 cleared[node.Name] = null;
-                if (!IsNonTestableBuiltIn(node.Name))
-                {
-                    targets.Add(node.Name);
-                    _testingNodes.Add(node.Name);
-                }
+                continue;
+            }
+            if (_testingNodes.TryAdd(node.Name, owner))
+            {
+                targets.Add(node.Name);
+                cleared[node.Name] = null;
             }
         }
 
-        // Step 1: Immediately wipe all old delays for this group before any probes finish.
-        Interlocked.Increment(ref _mutationVersion);
-        Snapshot = Snapshot with { Groups = ProxyControlParsers.WithDelays(Snapshot.Groups, cleared) };
+        // Step 1: Immediately wipe all old delays for owned nodes before any probes finish.
+        if (cleared.Count > 0)
+        {
+            Interlocked.Increment(ref _mutationVersion);
+            Snapshot = Snapshot with
+            {
+                Groups = ProxyControlParsers.WithDelays(Snapshot.Groups, cleared),
+                HiddenGroups = Snapshot.HiddenGroups is { Count: > 0 } h ? ProxyControlParsers.WithDelays(h, cleared) : Snapshot.HiddenGroups
+            };
+        }
         StateChanged?.Invoke();
 
         try { _groupTestCts?.Cancel(); } catch { }
@@ -482,6 +531,13 @@ internal sealed class ProxyController : IDisposable
         var pendingDone = new List<string>();
         int flushScheduled = 0;
         int anySuccess = 0;
+
+        void ReleaseOwned(IEnumerable<string> names)
+        {
+            foreach (var n in names)
+                if (_testingNodes.TryGetValue(n, out var cur) && cur == owner)
+                    _testingNodes.Remove(n);
+        }
 
         void ScheduleFlush()
         {
@@ -505,11 +561,16 @@ internal sealed class ProxyController : IDisposable
                         pendingDelays.Clear();
                         pendingDone.Clear();
                     }
-                    foreach (var n in done) _testingNodes.Remove(n);
+                    ReleaseOwned(done);
+                    if (Volatile.Read(ref _sessionId) != sessionId) return;
                     if (batch.Count > 0)
                     {
                         Interlocked.Increment(ref _mutationVersion);
-                        Snapshot = Snapshot with { Groups = ProxyControlParsers.WithDelays(Snapshot.Groups, batch) };
+                        Snapshot = Snapshot with
+                        {
+                            Groups = ProxyControlParsers.WithDelays(Snapshot.Groups, batch),
+                            HiddenGroups = Snapshot.HiddenGroups is { Count: > 0 } h ? ProxyControlParsers.WithDelays(h, batch) : Snapshot.HiddenGroups
+                        };
                     }
                     StateChanged?.Invoke();
                 });
@@ -571,13 +632,18 @@ internal sealed class ProxyController : IDisposable
                     pendingDelays.Clear();
                     pendingDone.Clear();
                 }
-                foreach (var n in targets) _testingNodes.Remove(n);
+                ReleaseOwned(targets);
+                _testingGroups.Remove(groupName);
+                if (Volatile.Read(ref _sessionId) != sessionId) return;
                 if (leftover.Count > 0)
                 {
                     Interlocked.Increment(ref _mutationVersion);
-                    Snapshot = Snapshot with { Groups = ProxyControlParsers.WithDelays(Snapshot.Groups, leftover) };
+                    Snapshot = Snapshot with
+                    {
+                        Groups = ProxyControlParsers.WithDelays(Snapshot.Groups, leftover),
+                        HiddenGroups = Snapshot.HiddenGroups is { Count: > 0 } h ? ProxyControlParsers.WithDelays(h, leftover) : Snapshot.HiddenGroups
+                    };
                 }
-                _testingGroups.Remove(groupName);
                 StateChanged?.Invoke();
             });
         }
@@ -594,10 +660,19 @@ internal sealed class ProxyController : IDisposable
     {
         if (_disposed || string.IsNullOrEmpty(nodeName)) return null;
         var endpoint = ResolveWorkingEndpoint();
-        if (endpoint is null || (string.IsNullOrEmpty(endpoint.PipeName) && endpoint.HttpBaseUri is null) || !_testingNodes.Add(nodeName)) return null;
+        if (endpoint is null || (string.IsNullOrEmpty(endpoint.PipeName) && endpoint.HttpBaseUri is null)) return null;
+        long sessionId = Volatile.Read(ref _sessionId);
+        long owner = ++_nextTestOwner;
+        if (!_testingNodes.TryAdd(nodeName, owner)) return null;
+
         // Clear old delay on the tested node immediately before measuring.
+        var clearMap = new Dictionary<string, int?>(StringComparer.Ordinal) { [nodeName] = null };
         Interlocked.Increment(ref _mutationVersion);
-        Snapshot = Snapshot with { Groups = ProxyControlParsers.WithDelays(Snapshot.Groups, new Dictionary<string, int?>(StringComparer.Ordinal) { [nodeName] = null }) };
+        Snapshot = Snapshot with
+        {
+            Groups = ProxyControlParsers.WithDelays(Snapshot.Groups, clearMap),
+            HiddenGroups = Snapshot.HiddenGroups is { Count: > 0 } h ? ProxyControlParsers.WithDelays(h, clearMap) : Snapshot.HiddenGroups
+        };
         StateChanged?.Invoke();
         try
         {
@@ -610,10 +685,15 @@ internal sealed class ProxyController : IDisposable
             _ = _dispatcher.BeginInvoke(DispatcherPriority.Normal, () =>
             {
                 if (_disposed) return;
+                if (_testingNodes.TryGetValue(nodeName, out var cur) && cur == owner) _testingNodes.Remove(nodeName);
+                if (Volatile.Read(ref _sessionId) != sessionId) return;
                 Interlocked.Increment(ref _mutationVersion);
                 var update = new Dictionary<string, int?>(StringComparer.Ordinal) { [nodeName] = delay };
-                Snapshot = Snapshot with { Groups = ProxyControlParsers.WithDelays(Snapshot.Groups, update) };
-                _testingNodes.Remove(nodeName);
+                Snapshot = Snapshot with
+                {
+                    Groups = ProxyControlParsers.WithDelays(Snapshot.Groups, update),
+                    HiddenGroups = Snapshot.HiddenGroups is { Count: > 0 } h ? ProxyControlParsers.WithDelays(h, update) : Snapshot.HiddenGroups
+                };
                 StateChanged?.Invoke();
             });
             return delay;
@@ -622,19 +702,25 @@ internal sealed class ProxyController : IDisposable
         {
             _ = _dispatcher.BeginInvoke(DispatcherPriority.Normal, () =>
             {
-                _testingNodes.Remove(nodeName);
-                StateChanged?.Invoke();
+                if (_testingNodes.TryGetValue(nodeName, out var cur) && cur == owner) _testingNodes.Remove(nodeName);
+                if (!_disposed && Volatile.Read(ref _sessionId) == sessionId) StateChanged?.Invoke();
             });
             return null;
         }
     }
 
-    private void PublishUpdate(ProxyControlSnapshot next, bool statsOnly, long expectedVersion)
+    private void PublishUpdate(ProxyControlSnapshot next, bool statsOnly, long expectedVersion, long sessionId)
     {
         _ = _dispatcher.BeginInvoke(DispatcherPriority.Normal, () =>
         {
-            if (_disposed) return;
+            if (_disposed || !_active || Volatile.Read(ref _sessionId) != sessionId) return;
             var prev = Snapshot;
+            // Within the same collection session, never roll cumulative totals backwards if /traffic is ahead of /connections.
+            var mergedConn = next.Connections with
+            {
+                UploadTotal = Math.Max(prev.Connections.UploadTotal, next.Connections.UploadTotal),
+                DownloadTotal = Math.Max(prev.Connections.DownloadTotal, next.Connections.DownloadTotal)
+            };
             if (statsOnly)
             {
                 // Stats-only refresh must never overwrite Groups or Status mutated concurrently (e.g. progressive delay probes).
@@ -642,7 +728,7 @@ internal sealed class ProxyController : IDisposable
                 {
                     ApiConnected = next.ApiConnected || prev.ApiConnected,
                     Subscription = next.Subscription,
-                    Connections = next.Connections,
+                    Connections = mergedConn,
                     LatencyConfig = next.LatencyConfig,
                     Error = next.Error
                 };
@@ -658,13 +744,16 @@ internal sealed class ProxyController : IDisposable
             var merged = next with
             {
                 Traffic = prev.Traffic,
-                Groups = testing && prev.Groups.Count > 0 ? prev.Groups : next.Groups
+                Connections = mergedConn,
+                Groups = testing && prev.Groups.Count > 0 ? prev.Groups : next.Groups,
+                HiddenGroups = testing && prev.HiddenGroups is { Count: > 0 } ? prev.HiddenGroups : next.HiddenGroups
             };
             bool stateChanged =
                 prev.Status != merged.Status
                 || prev.ApiConnected != merged.ApiConnected
                 || prev.Subscription != merged.Subscription
-                || !ProxyControlParsers.GroupsEqual(prev.Groups, merged.Groups);
+                || !ProxyControlParsers.GroupsEqual(prev.Groups, merged.Groups)
+                || !ProxyControlParsers.GroupsEqual(prev.HiddenGroups ?? [], merged.HiddenGroups ?? []);
             bool connectionsChanged = prev.Connections != merged.Connections;
             Snapshot = merged;
             if (stateChanged) StateChanged?.Invoke();
@@ -672,11 +761,11 @@ internal sealed class ProxyController : IDisposable
         });
     }
 
-    private void PublishTraffic(ProxyTrafficSample sample)
+    private void PublishTraffic(ProxyTrafficSample sample, long sessionId)
     {
         _ = _dispatcher.BeginInvoke(DispatcherPriority.Normal, () =>
         {
-            if (_disposed || !_active) return;
+            if (_disposed || !_active || Volatile.Read(ref _sessionId) != sessionId) return;
             _history.Enqueue(sample);
             while (_history.Count > HistoryCapacity) _history.Dequeue();
             var conn = Snapshot.Connections;
@@ -694,29 +783,34 @@ internal sealed class ProxyController : IDisposable
         if (string.IsNullOrEmpty(configDir) || !Directory.Exists(configDir))
             return (null, ProxyLatencyConfig.Default);
 
-        ProxySubscriptionInfo? sub = null;
         var profilesPath = Path.Combine(configDir, "profiles.yaml");
+        bool hasCachedProfile = _profilesCache.TryGetValue(profilesPath, out var cachedProfile);
+        ProxySubscriptionInfo? sub = hasCachedProfile ? cachedProfile.Value : null;
         if (TryFileStamp(profilesPath, out var pStamp))
         {
-            if (_profilesCache.TryGetValue(profilesPath, out var cached) && cached.WrittenUtc == pStamp.WrittenUtc && cached.Length == pStamp.Length)
-                sub = cached.Value;
-            else if (ReadSharedText(profilesPath) is { } text)
+            if (!hasCachedProfile || cachedProfile.WrittenUtc != pStamp.WrittenUtc || cachedProfile.Length != pStamp.Length)
             {
-                sub = ProxyControlParsers.ParseVergeProfilesYaml(text);
-                _profilesCache[profilesPath] = (pStamp.WrittenUtc, pStamp.Length, sub);
+                if (ReadSharedText(profilesPath) is { } text)
+                {
+                    sub = ProxyControlParsers.ParseVergeProfilesYaml(text);
+                    _profilesCache[profilesPath] = (pStamp.WrittenUtc, pStamp.Length, sub);
+                }
             }
         }
 
-        var latency = ProxyLatencyConfig.Default;
         var vergePath = Path.Combine(configDir, "verge.yaml");
+        bool hasCachedLatency = _vergeControlCache.TryGetValue(vergePath, out var cachedLatency);
+        // Preserve the last successfully read verge.yaml config across transient read failures so auto_close_connection: false is never overwritten by Default.
+        var latency = hasCachedLatency ? cachedLatency.Value : ProxyLatencyConfig.Default;
         if (TryFileStamp(vergePath, out var vStamp))
         {
-            if (_vergeControlCache.TryGetValue(vergePath, out var cached) && cached.WrittenUtc == vStamp.WrittenUtc && cached.Length == vStamp.Length)
-                latency = cached.Value;
-            else if (ReadSharedText(vergePath) is { } text)
+            if (!hasCachedLatency || cachedLatency.WrittenUtc != vStamp.WrittenUtc || cachedLatency.Length != vStamp.Length)
             {
-                latency = ProxyControlParsers.ParseVergeControlYaml(text);
-                _vergeControlCache[vergePath] = (vStamp.WrittenUtc, vStamp.Length, latency);
+                if (ReadSharedText(vergePath) is { } text)
+                {
+                    latency = ProxyControlParsers.ParseVergeControlYaml(text);
+                    _vergeControlCache[vergePath] = (vStamp.WrittenUtc, vStamp.Length, latency);
+                }
             }
         }
         return (sub, latency);

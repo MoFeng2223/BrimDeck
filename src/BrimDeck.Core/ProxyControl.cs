@@ -46,7 +46,8 @@ public sealed record ProxyControlSnapshot(
     ProxyTrafficSample Traffic,
     ProxyConnectionsSummary Connections,
     ProxyLatencyConfig LatencyConfig,
-    string? Error = null)
+    string? Error = null,
+    IReadOnlyList<ProxyGroupInfo>? HiddenGroups = null)
 {
     public static readonly ProxyControlSnapshot Empty = new(
         ProxySnapshot.Stopped, false, [], null, default, default, ProxyLatencyConfig.Default);
@@ -72,18 +73,23 @@ public static class ProxyControlParsers
     public static bool IsGroupType(string? type) => ParseGroupKind(type) != ProxyGroupKind.Other
         || (type ?? "").Trim().Equals("Relay", StringComparison.OrdinalIgnoreCase);
 
-    // Parses Mihomo GET /proxies JSON into ordered proxy groups with member types and latest delays.
-    // Preserves the user's declared group order from proxies["GLOBAL"].all whenever present.
+    // Parses Mihomo GET /proxies JSON into ordered visible proxy groups with member types and latest delays.
     public static List<ProxyGroupInfo> ParseMihomoProxies(string? json, ProxyMode mode = ProxyMode.Rule)
+        => ParseMihomoProxiesWithHidden(json, mode).Visible;
+
+    // Parses Mihomo GET /proxies JSON into visible groups (for display) and hidden groups (kept solely to resolve chained active nodes).
+    // Preserves the user's declared group order from proxies["GLOBAL"].all whenever present.
+    public static (List<ProxyGroupInfo> Visible, List<ProxyGroupInfo> Hidden) ParseMihomoProxiesWithHidden(string? json, ProxyMode mode = ProxyMode.Rule)
     {
-        var result = new List<ProxyGroupInfo>();
-        if (string.IsNullOrWhiteSpace(json)) return result;
+        var visible = new List<ProxyGroupInfo>();
+        var hiddenGroups = new List<ProxyGroupInfo>();
+        if (string.IsNullOrWhiteSpace(json)) return (visible, hiddenGroups);
         try
         {
             using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind != JsonValueKind.Object) return result;
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return (visible, hiddenGroups);
             if (!doc.RootElement.TryGetProperty("proxies", out var proxiesObj) || proxiesObj.ValueKind != JsonValueKind.Object)
-                return result;
+                return (visible, hiddenGroups);
 
             var entries = new Dictionary<string, (string Type, string Now, List<string> All, int? Delay, bool Hidden)>(StringComparer.Ordinal);
             foreach (var prop in proxiesObj.EnumerateObject())
@@ -114,7 +120,7 @@ public static class ProxyControlParsers
 
             foreach (var (name, entry) in entries)
             {
-                if (entry.All.Count == 0 || entry.Hidden) continue;
+                if (entry.All.Count == 0) continue;
                 if (BuiltInProxies.Contains(name)) continue;
                 var kind = ParseGroupKind(entry.Type);
                 if (kind == ProxyGroupKind.Other && !entry.Type.Equals("Relay", StringComparison.OrdinalIgnoreCase)) continue;
@@ -129,10 +135,12 @@ public static class ProxyControlParsers
                     else
                         nodes.Add(new ProxyNodeInfo(memberName, "", null, false));
                 }
-                result.Add(new ProxyGroupInfo(name, kind, entry.Now, nodes, entry.Hidden));
+                var info = new ProxyGroupInfo(name, kind, entry.Now, nodes, entry.Hidden);
+                if (entry.Hidden) hiddenGroups.Add(info);
+                else visible.Add(info);
             }
 
-            result.Sort((a, b) =>
+            visible.Sort((a, b) =>
             {
                 bool aGlobal = a.Name.Equals("GLOBAL", StringComparison.Ordinal);
                 bool bGlobal = b.Name.Equals("GLOBAL", StringComparison.Ordinal);
@@ -145,9 +153,10 @@ public static class ProxyControlParsers
                 if (aOrd != bOrd) return aOrd.CompareTo(bOrd);
                 return StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name);
             });
-            return result;
+            hiddenGroups.Sort((a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
+            return (visible, hiddenGroups);
         }
-        catch (JsonException) { return result; }
+        catch (JsonException) { return (visible, hiddenGroups); }
     }
 
     // Parses one JSON payload from Mihomo GET /traffic.
@@ -298,16 +307,16 @@ public static class ProxyControlParsers
         long upload = 0, download = 0, total = 0;
         long? expire = null;
         bool hasExtra = false;
-        ProxySubscriptionInfo? matched = null;
+        var parsedItems = new List<(string Uid, ProxySubscriptionInfo Info)>();
 
         void FlushItem()
         {
-            if (uid is not null && currentUid is not null && uid.Equals(currentUid, StringComparison.Ordinal))
+            if (uid is not null)
             {
                 if (hasExtra && total > 0)
-                    matched = new ProxySubscriptionInfo(string.IsNullOrWhiteSpace(name) ? "" : name.Trim(), upload, download, total, expire is > 0 ? expire : null);
+                    parsedItems.Add((uid, new ProxySubscriptionInfo(string.IsNullOrWhiteSpace(name) ? "" : name.Trim(), upload, download, total, expire is > 0 ? expire : null)));
                 else if (!string.IsNullOrWhiteSpace(name))
-                    matched = new ProxySubscriptionInfo(name.Trim(), 0, 0, 0, null);
+                    parsedItems.Add((uid, new ProxySubscriptionInfo(name.Trim(), 0, 0, 0, null)));
             }
             uid = null; name = null; upload = 0; download = 0; total = 0; expire = null; hasExtra = false;
             inExtra = false; extraIndent = -1;
@@ -376,6 +385,10 @@ public static class ProxyControlParsers
         }
 
         if (inItems) FlushItem();
+        if (currentUid is null) return null;
+        ProxySubscriptionInfo? matched = null;
+        foreach (var (itemUid, info) in parsedItems)
+            if (itemUid.Equals(currentUid, StringComparison.Ordinal)) matched = info;
         return matched;
     }
 
@@ -393,13 +406,18 @@ public static class ProxyControlParsers
         { inExtra = true; extraIndent = -1; }
     }
 
-    // Resolves the active selection chain for a proxy group (e.g. Proxies -> Auto -> HK Hong Kong 01) with latest delay.
-    public static (string DirectChoice, string LeafNode, int? DelayMs) ResolveActiveNode(IReadOnlyList<ProxyGroupInfo> groups, ProxyGroupInfo group)
+    // Resolves the active selection chain for a proxy group (e.g. Proxies -> Auto/HiddenGroup -> HK Hong Kong 01) with latest delay.
+    public static (string DirectChoice, string LeafNode, int? DelayMs) ResolveActiveNode(
+        IReadOnlyList<ProxyGroupInfo> groups,
+        ProxyGroupInfo group,
+        IReadOnlyList<ProxyGroupInfo>? hiddenGroups = null)
     {
         var direct = group.Now;
         if (string.IsNullOrWhiteSpace(direct)) return ("", "", null);
         var byName = new Dictionary<string, ProxyGroupInfo>(StringComparer.Ordinal);
         foreach (var g in groups) byName.TryAdd(g.Name, g);
+        if (hiddenGroups is not null)
+            foreach (var g in hiddenGroups) byName.TryAdd(g.Name, g);
 
         var visited = new HashSet<string>(StringComparer.Ordinal) { group.Name };
         var currentGroup = group;
@@ -514,11 +532,11 @@ public static class ProxyControlParsers
         value /= 1024;
         if (value < 1024) return value < 10 ? $"{value:0.0} KB" : $"{value:0} KB";
         value /= 1024;
-        if (value < 1024) return value < 100 ? $"{value:0.1} MB" : $"{value:0} MB";
+        if (value < 1024) return value < 100 ? $"{value:0.0} MB" : $"{value:0} MB";
         value /= 1024;
-        if (value < 1024) return value < 100 ? $"{value:0.1} GB" : $"{value:0} GB";
+        if (value < 1024) return value < 100 ? $"{value:0.0} GB" : $"{value:0} GB";
         value /= 1024;
-        return $"{value:0.2} TB";
+        return $"{value:0.00} TB";
     }
 
     public static string FormatDelay(int? delayMs) => delayMs is > 0 and var ms ? $"{ms} ms" : "—";

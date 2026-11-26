@@ -82,6 +82,7 @@ internal sealed class ProxyWatcher : IDisposable
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan PipeAclBackoff = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromMilliseconds(1500);
+    private const long LiveModeGraceMs = 15_000;
 
     private readonly Dispatcher _dispatcher;
     private readonly DispatcherTimer _linger;
@@ -97,6 +98,8 @@ internal sealed class ProxyWatcher : IDisposable
     private string? _lastClient;
     private ProxyMode _lastLiveApiMode = ProxyMode.Unknown;
     private ProxyEndpoint? _lastLiveEndpoint;
+    private long _lastLiveApiTick;
+    private DateTime _lastLiveConfigWriteUtc = DateTime.MinValue;
     private readonly Dictionary<string, (DateTime WrittenUtc, long Length, ClashConfigValues Value)> _configCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (DateTime WrittenUtc, long Length, VergeConfigValues Value)> _vergeCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
@@ -143,6 +146,7 @@ internal sealed class ProxyWatcher : IDisposable
     {
         if (_disposed || mode == ProxyMode.Unknown) return;
         _lastLiveApiMode = mode;
+        _lastLiveApiTick = Environment.TickCount64;
         _ = _dispatcher.BeginInvoke(DispatcherPriority.Normal, () =>
         {
             if (_disposed || !Snapshot.Running || Snapshot.Mode == mode) return;
@@ -254,7 +258,7 @@ internal sealed class ProxyWatcher : IDisposable
                 if (ct.IsCancellationRequested || _disposed) return;
                 _ = _dispatcher.BeginInvoke(DispatcherPriority.Normal, () =>
                 {
-                    if (_disposed || _running != ProxyDemand.Watch) return;
+                    if (_disposed || ct.IsCancellationRequested || _running != ProxyDemand.Watch) return;
                     bool changed = next != Snapshot || endpoint != Endpoint;
                     if (!changed) return;
                     Snapshot = next;
@@ -283,6 +287,8 @@ internal sealed class ProxyWatcher : IDisposable
             _activePipe = null;
             _lastLiveApiMode = ProxyMode.Unknown;
             _lastLiveEndpoint = null;
+            _lastLiveApiTick = 0;
+            _lastLiveConfigWriteUtc = DateTime.MinValue;
             _blockedPipes.Clear();
             return (ProxySnapshot.Stopped, null);
         }
@@ -292,6 +298,8 @@ internal sealed class ProxyWatcher : IDisposable
             _activePipe = null;
             _lastLiveApiMode = ProxyMode.Unknown;
             _lastLiveEndpoint = null;
+            _lastLiveApiTick = 0;
+            _lastLiveConfigWriteUtc = DateTime.MinValue;
             _blockedPipes.Clear();
         }
 
@@ -358,18 +366,31 @@ internal sealed class ProxyWatcher : IDisposable
         }
 
         // Preserve live API mode and working endpoint across transient probe timeouts while the same client keeps running
-        // (e.g., while Mihomo is busy running a full-group delay test) so static config.yaml never overwrites live mode.
+        // (e.g., while Mihomo is busy running a full-group delay test), expiring after LiveModeGraceMs or when config files change.
+        var newestConfigWrite = NewestConfigWriteUtc(client, activeDir);
         if (apiMode is { } liveMode && liveMode != ProxyMode.Unknown)
         {
             _lastLiveApiMode = liveMode;
+            _lastLiveApiTick = Environment.TickCount64;
+            _lastLiveConfigWriteUtc = newestConfigWrite;
             _lastLiveEndpoint = new ProxyEndpoint(client.Name, activePipe, activeHttp, activeSecret, activeDir);
         }
-        else if (_lastLiveApiMode != ProxyMode.Unknown && _lastLiveEndpoint is { } prev && string.Equals(prev.ClientName, client.Name, StringComparison.Ordinal))
+        else if (_lastLiveApiMode != ProxyMode.Unknown
+            && _lastLiveEndpoint is { } prev
+            && string.Equals(prev.ClientName, client.Name, StringComparison.Ordinal)
+            && (Environment.TickCount64 - _lastLiveApiTick) <= LiveModeGraceMs
+            && newestConfigWrite <= _lastLiveConfigWriteUtc)
         {
             apiMode = _lastLiveApiMode;
             activePipe ??= prev.PipeName;
             activeHttp ??= prev.HttpBaseUri;
             activeSecret ??= prev.Secret;
+        }
+        else
+        {
+            _lastLiveApiMode = ProxyMode.Unknown;
+            _lastLiveEndpoint = null;
+            _lastLiveApiTick = 0;
         }
 
         // 3. Authoritative Windows OS signals: HKCU system proxy and active Clash/Mihomo TUN adapter.
@@ -510,6 +531,18 @@ internal sealed class ProxyWatcher : IDisposable
             return true;
         }
         catch { stamp = default; return false; }
+    }
+
+    private static DateTime NewestConfigWriteUtc(ClientProfile client, string? activeDir)
+    {
+        if (activeDir is null) return DateTime.MinValue;
+        var newest = DateTime.MinValue;
+        foreach (var name in client.ConfigFiles)
+        {
+            var dt = SafeLastWriteUtc(Path.Combine(activeDir, name));
+            if (dt > newest) newest = dt;
+        }
+        return newest;
     }
 
     private static DateTime SafeLastWriteUtc(string path)

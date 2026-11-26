@@ -226,6 +226,36 @@ internal static class ProxyStatusTests
         check("Proxy control: resolves nested active node chain (Proxy -> Auto -> HK-01) with leaf delay",
             resolved.DirectChoice == "Auto" && resolved.LeafNode == "HK-01" && resolved.DelayMs == 42);
 
+        const string hiddenChainJson = """
+            {
+              "proxies": {
+                "Proxy": { "type": "Selector", "now": "HiddenGroup", "all": ["HiddenGroup", "JP-01"] },
+                "HiddenGroup": { "type": "URLTest", "now": "HK-01", "all": ["HK-01", "JP-01"], "hidden": true },
+                "HK-01": { "type": "Shadowsocks", "history": [{ "delay": 42 }] },
+                "JP-01": { "type": "VLESS", "history": [{ "delay": 99 }] }
+              }
+            }
+            """;
+        var (visibleWithHidden, hiddenOnly) = ProxyControlParsers.ParseMihomoProxiesWithHidden(hiddenChainJson, ProxyMode.Rule);
+        var resolvedHidden = ProxyControlParsers.ResolveActiveNode(visibleWithHidden, visibleWithHidden[0], hiddenOnly);
+        check("Proxy control: resolves active chain through hidden groups without exposing hidden tabs",
+            visibleWithHidden.Count == 1 && visibleWithHidden[0].Name == "Proxy"
+            && hiddenOnly.Count == 1 && hiddenOnly[0].Name == "HiddenGroup"
+            && resolvedHidden.DirectChoice == "HiddenGroup" && resolvedHidden.LeafNode == "HK-01" && resolvedHidden.DelayMs == 42);
+
+        check("Proxy control: FormatSize and FormatRate use true decimal placeholders for integer and fractional values",
+            ProxyControlParsers.FormatSize(0) == "0 B"
+            && ProxyControlParsers.FormatSize(512) == "512 B"
+            && ProxyControlParsers.FormatSize(1536) == "1.5 KB"
+            && ProxyControlParsers.FormatSize(1024L * 1024) == "1.0 MB"
+            && ProxyControlParsers.FormatSize((long)(1.5 * 1024 * 1024)) == "1.5 MB"
+            && ProxyControlParsers.FormatSize(1024L * 1024 * 1024) == "1.0 GB"
+            && ProxyControlParsers.FormatSize((long)(1.5 * 1024 * 1024 * 1024)) == "1.5 GB"
+            && ProxyControlParsers.FormatSize(1024L * 1024 * 1024 * 1024) == "1.00 TB"
+            && ProxyControlParsers.FormatSize((long)(1.25 * 1024 * 1024 * 1024 * 1024)) == "1.25 TB"
+            && ProxyControlParsers.FormatRate(1024L * 1024) == "1.0 MB/s"
+            && ProxyControlParsers.FormatRate((long)(2.5 * 1024 * 1024)) == "2.5 MB/s");
+
         var hk = ProxyControlParsers.SplitLeadingRegionFlag("\U0001F1ED\U0001F1F0 Hong Kong 01");
         var jp = ProxyControlParsers.SplitLeadingRegionFlag("\U0001F1EF\U0001F1F5Tokyo 02");
         var plain = ProxyControlParsers.SplitLeadingRegionFlag("Traffic Reset: 6 Days Left");
@@ -289,10 +319,30 @@ internal static class ProxyStatusTests
                 total: 2000
             """;
         var subZero = ProxyControlParsers.ParseVergeProfilesYaml(zeroIndentProfilesYaml);
-        check("Proxy control: reads active profile quota from both indented and zero-indent profiles.yaml",
+        const string currentAfterItemsYaml = """
+            items:
+              - uid: uid-1
+                type: remote
+                name: FirstProfile
+                extra:
+                  upload: 100
+                  download: 200
+                  total: 1000
+              - uid: uid-2
+                type: remote
+                name: TrailingCurrentProfile
+                extra:
+                  upload: 1024
+                  download: 2048
+                  total: 8192
+            current: uid-2
+            """;
+        var subAfter = ProxyControlParsers.ParseVergeProfilesYaml(currentAfterItemsYaml);
+        check("Proxy control: reads active profile quota from indented, zero-indent and trailing-current profiles.yaml",
             sub is not null && sub.ProfileName == "MainProfile" && sub.HasTraffic
             && sub.UsedBytes == 4294967296L && sub.TotalBytes == 21474836480L && Math.Abs(sub.UsedFraction - 0.2) < 0.001
-            && subZero is not null && subZero.ProfileName == "ZeroIndentProfile" && subZero.UsedBytes == 1000 && subZero.TotalBytes == 2000);
+            && subZero is not null && subZero.ProfileName == "ZeroIndentProfile" && subZero.UsedBytes == 1000 && subZero.TotalBytes == 2000
+            && subAfter is not null && subAfter.ProfileName == "TrailingCurrentProfile" && subAfter.UsedBytes == 3072 && subAfter.TotalBytes == 8192);
 
         var pageSettings = new DeckSettings();
         check("Proxy page settings: off by default, valid Quick Size presets and enum values",

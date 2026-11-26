@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -74,6 +76,11 @@ internal sealed class ProxyView : Grid
     private TextBlock? _testBtnLabel;
     private ProxyNodeList? _nodeList;
 
+    internal Button? MoreGroupsButton => _moreGroupsBtn;
+    internal Button? TestButton => _testBtn;
+    internal IReadOnlyList<Button> VisibleGroupTabButtons => _tabButtons.Select(t => t.Btn).ToList();
+    internal ProxyNodeList? NodeList => _nodeList;
+
     private PanelLook Look => PanelLook.Of(this);
 
     public ProxyView(ProxyController controller, string? selectedGroup, Action<string> rememberGroup)
@@ -131,15 +138,106 @@ internal sealed class ProxyView : Grid
 
     private static double DividerWidth(double totalW) => totalW < 520 ? 15 : totalW >= 740 ? 25 : 21;
 
-    private (int Limit, double TabLabelMax) GroupTabBudget()
+    private double MeasureTextWidth(string text, double fontSize, FontWeight weight)
     {
+        if (string.IsNullOrEmpty(text)) return 0;
+        var font = TryFindResource("FontPanel") as FontFamily ?? new FontFamily("Segoe UI");
+        double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        if (dpi <= 0) dpi = 1;
+        var ft = new FormattedText(text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+            new Typeface(font, FontStyles.Normal, weight, FontStretches.Normal), fontSize, Brushes.Transparent, dpi);
+        return ft.WidthIncludingTrailingWhitespace;
+    }
+
+    // Plans visible group tabs from each tab's full rendered width (padding, margin, optional Auto badge, and label)
+    // while strictly reserving room for the "+N" overflow picker and the Test button so neither can ever be clipped.
+    private (List<(ProxyGroupInfo Group, double LabelMax)> Visible, double TabsMaxWidth) PlanGroupTabs(
+        IReadOnlyList<ProxyGroupInfo> groups, ProxyGroupInfo? activeGroup)
+    {
+        if (groups.Count == 0) return ([], 0);
         double totalW = ActualWidth > 0 ? ActualWidth : ProxySizes.Default.Width;
         double rightW = Math.Max(140, totalW - LeftColumnWidth(totalW) - DividerWidth(totalW));
-        int limit = rightW < 290 ? 2 : rightW < 410 ? 3 : rightW >= 510 ? 5 : 4;
-        double reserved = rightW < 290 ? 108 : 114;
-        double padPerTab = rightW < 290 ? 16 : 20;
-        double labelMax = Math.Clamp(Math.Floor((rightW - reserved) / limit) - padPerTab, 48, 108);
-        return (limit, labelMax);
+
+        double testTextW = Math.Max(
+            MeasureTextWidth(Loc.T("测速", "Test"), 12, FontWeights.Medium),
+            MeasureTextWidth(Loc.T("测速中", "Testing"), 12, FontWeights.Medium));
+        double testReserve = (_compactHeight ? 4 : 6) + (_compactHeight ? 16 : 20) + 13 + (_compactHeight ? 4 : 5) + Math.Ceiling(testTextW) + 4;
+
+        double tabPadX = _compactHeight ? 7 : _spacious ? 10 : 8.5;
+        double tabMarginRight = _compactHeight ? 3 : 4;
+        double tabChromeW = tabPadX * 2 + tabMarginRight + 2;
+        double autoBadgeW = _compactHeight ? 0 : 4 + Math.Ceiling(MeasureTextWidth(Loc.T("自动", "Auto"), 9.5, FontWeights.Normal)) + 2;
+        double labelFontSize = _spacious ? 12.5 : 12;
+        double minLabelW = _compactHeight ? 34 : 42;
+        double maxLabelCap = _spacious ? 132 : 112;
+
+        int maxLimit = Math.Min(groups.Count, rightW < 290 ? 2 : rightW < 410 ? 3 : rightW >= 510 ? 5 : 4);
+
+        double MeasureMoreReserve(int hiddenCount)
+        {
+            if (hiddenCount <= 0) return 0;
+            double txtW = MeasureTextWidth($"+{hiddenCount}", 11.5, FontWeights.Medium);
+            return (_compactHeight ? 12 : 16) + Math.Ceiling(txtW) + 4 + 7 + 4;
+        }
+
+        for (int count = maxLimit; count >= 1; count--)
+        {
+            var candidate = SelectVisibleGroups(groups, activeGroup, count);
+            int hidden = Math.Max(0, groups.Count - candidate.Count);
+            double moreReserve = MeasureMoreReserve(hidden);
+            double availTabs = Math.Max(0, Math.Floor(rightW - testReserve - moreReserve));
+
+            var fixedWidths = new double[candidate.Count];
+            var naturalLabels = new double[candidate.Count];
+            double totalFixed = 0, totalNatural = 0;
+            for (int i = 0; i < candidate.Count; i++)
+            {
+                fixedWidths[i] = tabChromeW + (!candidate[i].CanSelect && !_compactHeight ? autoBadgeW : 0);
+                naturalLabels[i] = Math.Min(maxLabelCap, Math.Ceiling(MeasureTextWidth(candidate[i].Name, labelFontSize, FontWeights.SemiBold)));
+                totalFixed += fixedWidths[i];
+                totalNatural += naturalLabels[i];
+            }
+
+            double labelPool = availTabs - totalFixed;
+            bool fits = labelPool >= totalNatural || labelPool >= candidate.Count * minLabelW;
+            if (!fits && count > 1) continue;
+
+            // Water-fill label widths: short names take their natural width while longer names share the leftover pool.
+            var allocated = new double[candidate.Count];
+            double remainingPool = Math.Max(0, labelPool);
+            var undecided = new List<int>(candidate.Count);
+            for (int i = 0; i < candidate.Count; i++) undecided.Add(i);
+
+            while (undecided.Count > 0)
+            {
+                double share = remainingPool / undecided.Count;
+                bool settledAny = false;
+                for (int k = undecided.Count - 1; k >= 0; k--)
+                {
+                    int idx = undecided[k];
+                    if (naturalLabels[idx] <= share)
+                    {
+                        allocated[idx] = naturalLabels[idx];
+                        remainingPool -= naturalLabels[idx];
+                        undecided.RemoveAt(k);
+                        settledAny = true;
+                    }
+                }
+                if (!settledAny)
+                {
+                    double floorShare = Math.Max(16, Math.Floor(share));
+                    foreach (int idx in undecided) allocated[idx] = Math.Min(maxLabelCap, floorShare);
+                    break;
+                }
+            }
+
+            var result = new List<(ProxyGroupInfo Group, double LabelMax)>(candidate.Count);
+            for (int i = 0; i < candidate.Count; i++)
+                result.Add((candidate[i], Math.Max(16, Math.Floor(allocated[i]))));
+            return (result, availTabs);
+        }
+
+        return ([], 0);
     }
 
     private void ApplyResponsiveLayout()
@@ -572,24 +670,23 @@ internal sealed class ProxyView : Grid
         // Row 0: Clean borderless group pills + overflow picker + monochrome Test pill.
         double barHeight = spacious ? 30 : 28;
         var tabBar = new Grid { Margin = new Thickness(0, 0, 0, spacious ? 10 : 7) };
+        tabBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        tabBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         tabBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         tabBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        var leftHeader = new Grid { ClipToBounds = true };
-        leftHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        leftHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        _tabsPanel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        leftHeader.Children.Add(_tabsPanel);
+        _tabsPanel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, ClipToBounds = true };
+        Grid.SetColumn(_tabsPanel, 0);
+        tabBar.Children.Add(_tabsPanel);
 
         (_moreGroupsBtn, _moreGroupsLabel) = BuildMoreGroupsButton(barHeight, compactHeight);
         _moreGroupsBtn.Visibility = Visibility.Collapsed;
         Grid.SetColumn(_moreGroupsBtn, 1);
-        leftHeader.Children.Add(_moreGroupsBtn);
-        tabBar.Children.Add(leftHeader);
+        tabBar.Children.Add(_moreGroupsBtn);
 
         (_testBtn, _testBtnLabel) = BuildTestButton(barHeight, compactHeight);
         _testBtn.Margin = new Thickness(compactHeight ? 4 : 6, 0, 0, 0);
-        Grid.SetColumn(_testBtn, 1);
+        Grid.SetColumn(_testBtn, 3);
         tabBar.Children.Add(_testBtn);
         Grid.SetRow(tabBar, 0);
         col.Children.Add(tabBar);
@@ -639,15 +736,15 @@ internal sealed class ProxyView : Grid
             _rememberGroup(activeGroup.Name);
         }
 
-        var (limit, labelMax) = GroupTabBudget();
-        var visibleTabs = SelectVisibleGroups(snap.Groups, activeGroup, limit);
-        var tabsSig = $"{limit}|{(int)labelMax}|" + string.Join("\n", visibleTabs.Select(g => $"{g.Name}|{(g.CanSelect ? 1 : 0)}"));
+        var (plannedTabs, tabsMaxWidth) = PlanGroupTabs(snap.Groups, activeGroup);
+        if (_tabsPanel is not null) _tabsPanel.MaxWidth = tabsMaxWidth;
+        var tabsSig = $"{(int)tabsMaxWidth}|" + string.Join("\n", plannedTabs.Select(p => $"{p.Group.Name}|{(p.Group.CanSelect ? 1 : 0)}|{(int)p.LabelMax}"));
         if (tabsSig != _groupTabsSignature && _tabsPanel is not null)
         {
             _groupTabsSignature = tabsSig;
             _tabsPanel.Children.Clear();
             _tabButtons.Clear();
-            foreach (var group in visibleTabs)
+            foreach (var (group, labelMax) in plannedTabs)
             {
                 var (btn, lbl) = CreateGroupTabButton(group, labelMax);
                 _tabsPanel.Children.Add(btn);
@@ -666,7 +763,7 @@ internal sealed class ProxyView : Grid
 
         if (_moreGroupsBtn is not null && _moreGroupsLabel is not null)
         {
-            int hiddenCount = Math.Max(0, snap.Groups.Count - visibleTabs.Count);
+            int hiddenCount = Math.Max(0, snap.Groups.Count - plannedTabs.Count);
             _moreGroupsBtn.Visibility = hiddenCount > 0 ? Visibility.Visible : Visibility.Collapsed;
             if (hiddenCount > 0)
             {
@@ -683,7 +780,12 @@ internal sealed class ProxyView : Grid
             _testBtn.IsEnabled = hasGroup && !testing;
             _testBtnLabel.Text = testing ? Loc.T("测速中", "Testing") : Loc.T("测速", "Test");
             if (hasGroup)
-                _testBtn.ToolTip = Loc.T($"测试「{activeGroup!.Name}」全部节点延迟", $"Test latency for all nodes in {activeGroup!.Name}");
+            {
+                var testUrl = string.IsNullOrWhiteSpace(snap.LatencyConfig.TestUrl) ? ProxyLatencyConfig.Default.TestUrl : snap.LatencyConfig.TestUrl;
+                _testBtn.ToolTip = Loc.T(
+                    $"测试「{activeGroup!.Name}」全部节点延迟（由本机 Mihomo 经节点探测 {testUrl}）",
+                    $"Test latency for all nodes in {activeGroup!.Name} (local Mihomo probes {testUrl} through each node)");
+            }
         }
 
         UpdateActiveNodeCard(snap, activeGroup);
@@ -837,7 +939,7 @@ internal sealed class ProxyView : Grid
             return;
         }
 
-        var (direct, leaf, delay) = ProxyControlParsers.ResolveActiveNode(snap.Groups, activeGroup);
+        var (direct, leaf, delay) = ProxyControlParsers.ResolveActiveNode(snap.Groups, activeGroup, snap.HiddenGroups);
         var formattedLeaf = ProxyControlParsers.FormatNodeDisplayName(leaf);
         _activeNodeBar.Background = UI.Brush(ThemeAccentHex());
         bool chained = !string.Equals(direct, leaf, StringComparison.Ordinal);
@@ -1292,9 +1394,9 @@ internal sealed class ProxyView : Grid
         return block;
     }
 
-    // Single-element custom-drawn virtualized node list with Motion-driven smooth wheel scrolling
-    // and borderless BrimDeck frosted cards tailored to Standard vs Spacious tiers.
-    private sealed class ProxyNodeList : FrameworkElement
+    // Single-element custom-drawn virtualized node list with Motion-driven smooth wheel scrolling,
+    // full keyboard navigation, UI Automation support, and borderless BrimDeck frosted cards.
+    internal sealed class ProxyNodeList : FrameworkElement
     {
         private const double ScrollBarSlot = 9;
 
@@ -1310,6 +1412,11 @@ internal sealed class ProxyView : Grid
         private bool _scrolling;
         private int _hoveredIndex = -1;
         private int _pressedIndex = -1;
+        private string? _pressedNodeName;
+        private int _focusedIndex = -1;
+        private string? _focusedNodeName;
+        private bool _showKeyboardFocus;
+        private bool _focusFromPointer;
         private bool _hoverScrollBar;
         private bool _draggingThumb;
         private double _dragStartY, _dragStartScroll;
@@ -1317,6 +1424,9 @@ internal sealed class ProxyView : Grid
         private readonly ToolTip _tip = new() { Placement = PlacementMode.Bottom };
         private readonly System.Windows.Threading.DispatcherTimer _tipTimer = new() { Interval = TimeSpan.FromMilliseconds(420) };
         private int _tipIndex = -1;
+
+        internal int FocusedIndex => _focusedIndex;
+        internal string? FocusedNodeName => _focusedNodeName;
 
         private PanelLook Look => PanelLook.Of(this);
         private double CardHeight => _spacious ? 49 : 42;
@@ -1328,6 +1438,8 @@ internal sealed class ProxyView : Grid
             _onSelect = onSelect;
             _onTestNode = onTestNode;
             _isTestingNode = isTestingNode;
+            Focusable = true;
+            FocusVisualStyle = null;
             SnapsToDevicePixels = true;
             ClipToBounds = true;
             Cursor = Cursors.Hand;
@@ -1347,9 +1459,27 @@ internal sealed class ProxyView : Grid
 
         public void SetGroup(ProxyGroupInfo? group)
         {
+            bool groupSwitched = !string.Equals(_group?.Name, group?.Name, StringComparison.Ordinal);
             _group = group;
             ClampScroll();
             if (_hoveredIndex >= (_group?.Nodes.Count ?? 0)) _hoveredIndex = -1;
+            if (_pressedIndex >= 0 && (_group is null || _pressedIndex >= _group.Nodes.Count
+                || !string.Equals(_group.Nodes[_pressedIndex].Name, _pressedNodeName, StringComparison.Ordinal)))
+            {
+                _pressedIndex = -1;
+                _pressedNodeName = null;
+            }
+            if (groupSwitched)
+            {
+                _focusedIndex = -1;
+                _focusedNodeName = null;
+                if (IsKeyboardFocused) EnsureValidFocusIndex();
+            }
+            else if (_focusedNodeName is not null || IsKeyboardFocused)
+            {
+                ReconcileFocusIndex();
+            }
+            ProxyNodeListPeer.Refresh(this);
             InvalidateVisual();
         }
 
@@ -1359,6 +1489,10 @@ internal sealed class ProxyView : Grid
             _targetScroll = 0;
             _scrolling = false;
             _hoveredIndex = -1;
+            _pressedIndex = -1;
+            _pressedNodeName = null;
+            _focusedIndex = -1;
+            _focusedNodeName = null;
             HideTip();
             InvalidateVisual();
         }
@@ -1366,17 +1500,139 @@ internal sealed class ProxyView : Grid
         public void ScrollToNode(string nodeName)
         {
             if (_group is null || ActualWidth <= 0 || ActualHeight <= 0) return;
-            int idx = -1;
-            for (int i = 0; i < _group.Nodes.Count; i++)
-            {
-                if (string.Equals(_group.Nodes[i].Name, nodeName, StringComparison.Ordinal)) { idx = i; break; }
-            }
+            int idx = IndexOfNode(nodeName);
             if (idx < 0) return;
             int cols = ColumnsFor(ContentWidth);
             int row = idx / cols;
             double rowTop = row * (CardHeight + GapY);
             double target = Math.Clamp(rowTop - Math.Max(0, (ActualHeight - CardHeight) * 0.38), 0, MaxScroll);
             AnimateScrollTo(target);
+        }
+
+        private int IndexOfNode(string? nodeName)
+        {
+            if (_group is null || string.IsNullOrEmpty(nodeName)) return -1;
+            for (int i = 0; i < _group.Nodes.Count; i++)
+            {
+                if (string.Equals(_group.Nodes[i].Name, nodeName, StringComparison.Ordinal)) return i;
+            }
+            return -1;
+        }
+
+        private void ReconcileFocusIndex()
+        {
+            if (_group is null || _group.Nodes.Count == 0)
+            {
+                _focusedIndex = -1;
+                _focusedNodeName = null;
+                return;
+            }
+            int byName = IndexOfNode(_focusedNodeName);
+            if (byName >= 0)
+            {
+                _focusedIndex = byName;
+                return;
+            }
+            if (IsKeyboardFocused)
+            {
+                EnsureValidFocusIndex();
+            }
+            else if (_focusedIndex >= _group.Nodes.Count)
+            {
+                _focusedIndex = _group.Nodes.Count - 1;
+                _focusedNodeName = _group.Nodes[_focusedIndex].Name;
+            }
+            else if (_focusedIndex >= 0)
+            {
+                _focusedNodeName = _group.Nodes[_focusedIndex].Name;
+            }
+        }
+
+        private void EnsureValidFocusIndex()
+        {
+            if (_group is null || _group.Nodes.Count == 0)
+            {
+                _focusedIndex = -1;
+                _focusedNodeName = null;
+                return;
+            }
+            int byName = IndexOfNode(_focusedNodeName);
+            if (byName >= 0)
+            {
+                _focusedIndex = byName;
+                return;
+            }
+            int activeIdx = IndexOfNode(_group.Now);
+            _focusedIndex = activeIdx >= 0 ? activeIdx : 0;
+            _focusedNodeName = _group.Nodes[_focusedIndex].Name;
+        }
+
+        private void EnsureNodeVisible(int idx)
+        {
+            if (_group is null || idx < 0 || idx >= _group.Nodes.Count || ActualWidth <= 0 || ActualHeight <= 0) return;
+            int cols = ColumnsFor(ContentWidth);
+            int row = idx / cols;
+            double cardTop = row * (CardHeight + GapY);
+            double cardBottom = cardTop + CardHeight;
+            if (cardTop < _targetScroll)
+                AnimateScrollTo(cardTop);
+            else if (cardBottom > _targetScroll + ActualHeight)
+                AnimateScrollTo(cardBottom - ActualHeight);
+        }
+
+        private void ActivateNode(int idx, bool allowTestFallback = true)
+        {
+            if (_group is null || idx < 0 || idx >= _group.Nodes.Count) return;
+            var node = _group.Nodes[idx];
+            if (_group.CanSelect)
+            {
+                if (!string.Equals(_group.Now, node.Name, StringComparison.Ordinal))
+                    _onSelect(_group.Name, node.Name);
+            }
+            else if (allowTestFallback)
+            {
+                _onTestNode(node.Name);
+            }
+        }
+
+        private void ActivateNodeByName(string nodeName, bool allowTestFallback)
+        {
+            int idx = IndexOfNode(nodeName);
+            if (idx < 0) return;
+            _focusedIndex = idx;
+            _focusedNodeName = nodeName;
+            EnsureNodeVisible(idx);
+            ActivateNode(idx, allowTestFallback);
+            InvalidateVisual();
+        }
+
+        private void FocusNodeByName(string nodeName)
+        {
+            int idx = IndexOfNode(nodeName);
+            if (idx < 0) return;
+            _focusedIndex = idx;
+            _focusedNodeName = nodeName;
+            _showKeyboardFocus = true;
+            EnsureNodeVisible(idx);
+            Focus();
+            ProxyNodeListPeer.RaiseFocusChanged(this, nodeName);
+            InvalidateVisual();
+        }
+
+        private bool IsNodeSelected(string nodeName) =>
+            _group is not null && string.Equals(_group.Now, nodeName, StringComparison.Ordinal);
+
+        internal Rect NodeRect(int idx)
+        {
+            if (_group is null || idx < 0 || idx >= _group.Nodes.Count || ActualWidth <= 4 || ActualHeight <= 4)
+                return Rect.Empty;
+            double cw = ContentWidth;
+            int cols = ColumnsFor(cw);
+            double cardW = Math.Max(20, (cw - (cols - 1) * GapX) / cols);
+            double strideX = cardW + GapX, strideY = CardHeight + GapY;
+            int row = idx / cols;
+            int col = idx % cols;
+            return new Rect(Math.Round(col * strideX), row * strideY - _scroll, cardW, CardHeight);
         }
 
         private void AnimateScrollTo(double target)
@@ -1440,6 +1696,109 @@ internal sealed class ProxyView : Grid
             _targetScroll = Math.Clamp(_targetScroll, 0, max);
         }
 
+        protected override void OnGotKeyboardFocus(KeyboardFocusChangedEventArgs e)
+        {
+            base.OnGotKeyboardFocus(e);
+            EnsureValidFocusIndex();
+            _showKeyboardFocus = !_focusFromPointer;
+            if (_focusedIndex >= 0)
+            {
+                EnsureNodeVisible(_focusedIndex);
+                ProxyNodeListPeer.RaiseFocusChanged(this, _focusedNodeName);
+            }
+            InvalidateVisual();
+        }
+
+        protected override void OnLostKeyboardFocus(KeyboardFocusChangedEventArgs e)
+        {
+            base.OnLostKeyboardFocus(e);
+            _showKeyboardFocus = false;
+            InvalidateVisual();
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            var key = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (HandleKey(key, Keyboard.Modifiers))
+            {
+                e.Handled = true;
+                return;
+            }
+            base.OnKeyDown(e);
+        }
+
+        internal bool HandleKey(Key key, ModifierKeys modifiers)
+        {
+            if (_group is null || _group.Nodes.Count == 0) return false;
+            EnsureValidFocusIndex();
+            if (_focusedIndex < 0) return false;
+
+            int count = _group.Nodes.Count;
+            int cols = ColumnsFor(ContentWidth);
+            int visibleRows = Math.Max(1, (int)Math.Floor((ActualHeight + GapY) / (CardHeight + GapY)));
+            int next = _focusedIndex;
+
+            switch (key)
+            {
+                case Key.Up:
+                    next = _focusedIndex - cols >= 0 ? _focusedIndex - cols : _focusedIndex;
+                    break;
+                case Key.Down:
+                    if (_focusedIndex + cols < count) next = _focusedIndex + cols;
+                    else if (_focusedIndex / cols < (count - 1) / cols) next = count - 1;
+                    break;
+                case Key.Left:
+                    next = Math.Max(0, _focusedIndex - 1);
+                    break;
+                case Key.Right:
+                    next = Math.Min(count - 1, _focusedIndex + 1);
+                    break;
+                case Key.Home:
+                    next = 0;
+                    break;
+                case Key.End:
+                    next = count - 1;
+                    break;
+                case Key.PageUp:
+                    next = Math.Max(0, _focusedIndex - visibleRows * cols);
+                    break;
+                case Key.PageDown:
+                    next = Math.Min(count - 1, _focusedIndex + visibleRows * cols);
+                    break;
+                case Key.Enter:
+                case Key.Space:
+                    _showKeyboardFocus = true;
+                    ActivateNode(_focusedIndex);
+                    InvalidateVisual();
+                    return true;
+                case Key.T:
+                case Key.Apps:
+                    _showKeyboardFocus = true;
+                    _onTestNode(_group.Nodes[_focusedIndex].Name);
+                    InvalidateVisual();
+                    return true;
+                case Key.F10 when (modifiers & ModifierKeys.Shift) != 0:
+                    _showKeyboardFocus = true;
+                    _onTestNode(_group.Nodes[_focusedIndex].Name);
+                    InvalidateVisual();
+                    return true;
+                default:
+                    return false;
+            }
+
+            _showKeyboardFocus = true;
+            if (next != _focusedIndex)
+            {
+                _focusedIndex = next;
+                _focusedNodeName = _group.Nodes[next].Name;
+                HideTip();
+                EnsureNodeVisible(next);
+                ProxyNodeListPeer.RaiseFocusChanged(this, _focusedNodeName);
+            }
+            InvalidateVisual();
+            return true;
+        }
+
         protected override void OnMouseWheel(MouseWheelEventArgs e)
         {
             // Always absorb wheel scrolling over the node list so panel mouse-wheel page switching never fires here.
@@ -1473,6 +1832,7 @@ internal sealed class ProxyView : Grid
             bool changed = _hoveredIndex != -1 || _hoverScrollBar || _pressedIndex != -1;
             _hoveredIndex = -1;
             _pressedIndex = -1;
+            _pressedNodeName = null;
             _hoverScrollBar = false;
             HideTip();
             if (changed) InvalidateVisual();
@@ -1480,57 +1840,68 @@ internal sealed class ProxyView : Grid
 
         protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
         {
-            var pos = e.GetPosition(this);
+            if (HandlePointerDown(e.GetPosition(this), captureMouse: true))
+                e.Handled = true;
+        }
+
+        internal bool HandlePointerDown(Point pos, bool captureMouse = false)
+        {
             if (MaxScroll > 0 && pos.X >= ActualWidth - ScrollBarSlot)
             {
                 _draggingThumb = true;
                 _scrolling = false;
                 _dragStartY = pos.Y;
                 _dragStartScroll = _scroll;
-                CaptureMouse();
-                e.Handled = true;
-                return;
+                if (captureMouse) CaptureMouse();
+                return true;
             }
             int idx = HitTestNode(pos);
-            if (idx >= 0)
+            if (idx >= 0 && _group is not null && idx < _group.Nodes.Count)
             {
                 _pressedIndex = idx;
-                e.Handled = true;
+                _pressedNodeName = _group.Nodes[idx].Name;
+                _focusedIndex = idx;
+                _focusedNodeName = _pressedNodeName;
+                _focusFromPointer = true;
+                Focus();
+                _focusFromPointer = false;
                 InvalidateVisual();
+                return true;
             }
+            return false;
         }
 
         protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
         {
+            if (HandlePointerUp(e.GetPosition(this)))
+                e.Handled = true;
+        }
+
+        internal bool HandlePointerUp(Point pos)
+        {
             if (_draggingThumb)
             {
                 _draggingThumb = false;
-                ReleaseMouseCapture();
-                e.Handled = true;
+                if (IsMouseCaptured) ReleaseMouseCapture();
                 InvalidateVisual();
-                return;
+                return true;
             }
             int wasPressed = _pressedIndex;
+            string? wasPressedName = _pressedNodeName;
             _pressedIndex = -1;
-            if (wasPressed >= 0 && _group is not null)
+            _pressedNodeName = null;
+            if (wasPressed >= 0 && wasPressedName is not null && _group is not null)
             {
-                int idx = HitTestNode(e.GetPosition(this));
-                if (idx == wasPressed && idx < _group.Nodes.Count)
+                int idx = HitTestNode(pos);
+                if (idx == wasPressed && idx < _group.Nodes.Count
+                    && string.Equals(_group.Nodes[idx].Name, wasPressedName, StringComparison.Ordinal))
                 {
-                    var node = _group.Nodes[idx];
-                    if (_group.CanSelect)
-                    {
-                        if (!string.Equals(_group.Now, node.Name, StringComparison.Ordinal))
-                            _onSelect(_group.Name, node.Name);
-                    }
-                    else
-                    {
-                        _onTestNode(node.Name);
-                    }
+                    ActivateNode(idx);
                 }
-                e.Handled = true;
                 InvalidateVisual();
+                return true;
             }
+            return false;
         }
 
         protected override void OnMouseRightButtonUp(MouseButtonEventArgs e)
@@ -1538,10 +1909,14 @@ internal sealed class ProxyView : Grid
             int idx = HitTestNode(e.GetPosition(this));
             if (idx >= 0 && _group is not null && idx < _group.Nodes.Count)
             {
+                _focusedIndex = idx;
+                _focusedNodeName = _group.Nodes[idx].Name;
                 e.Handled = true;
                 _onTestNode(_group.Nodes[idx].Name);
             }
         }
+
+        protected override AutomationPeer OnCreateAutomationPeer() => new ProxyNodeListPeer(this);
 
         private void UpdateHover(Point pos)
         {
@@ -1569,8 +1944,8 @@ internal sealed class ProxyView : Grid
             if (_group is null || _tipIndex < 0 || _tipIndex >= _group.Nodes.Count) return;
             var node = _group.Nodes[_tipIndex];
             var hint = _group.CanSelect
-                ? Loc.T("左键切换，右键测速", "Click to select, right-click to test")
-                : Loc.T("自动策略组，点击测速", "Automatic group, click to test");
+                ? Loc.T("左键/Enter 切换，右键/T 测速（经节点探测测速地址）", "Click/Enter to select, right-click/T to test (probes test URL via node)")
+                : Loc.T("自动策略组，点击/Enter/T 测速（经节点探测测速地址）", "Automatic group, click/Enter/T to test (probes test URL via node)");
             var delay = _isTestingNode(node.Name) ? Loc.T("测速中…", "Testing…") : ProxyControlParsers.FormatDelay(node.DelayMs);
             var meta = string.IsNullOrWhiteSpace(node.Type) ? delay : $"{node.Type} · {delay}";
             _tip.Content = $"{ProxyControlParsers.FormatNodeDisplayName(node.Name)}\n{meta}\n{hint}";
@@ -1650,6 +2025,12 @@ internal sealed class ProxyView : Grid
             var pressedBrush = UI.Brush(Look.Hex("pressed"));
             var accentHex = SystemParameters.HighContrast ? Look.Primary : Look.Readable(Look.Accent, PanelThemes.GraphicContrast);
             var accentBrush = UI.Brush(accentHex);
+            Pen? focusPen = null;
+            if (IsKeyboardFocused && _showKeyboardFocus)
+            {
+                focusPen = new Pen(accentBrush, 1.5);
+                focusPen.Freeze();
+            }
 
             var greenBrush = UI.Brush(SystemParameters.HighContrast ? Look.Primary : Look.Readable(PositiveHex, PanelThemes.TextContrast));
             var warnBrush = UI.Brush(SystemParameters.HighContrast ? Look.Primary : Look.Readable(Look.WarningDefault, PanelThemes.TextContrast));
@@ -1671,6 +2052,7 @@ internal sealed class ProxyView : Grid
                     bool selected = string.Equals(_group.Now, node.Name, StringComparison.Ordinal);
                     bool hovered = idx == _hoveredIndex;
                     bool pressed = idx == _pressedIndex;
+                    bool focused = focusPen is not null && idx == _focusedIndex;
                     bool testing = _isTestingNode(node.Name);
 
                     double x = Math.Round(c * strideX);
@@ -1679,6 +2061,12 @@ internal sealed class ProxyView : Grid
                     dc.DrawRoundedRectangle(selected ? selectedFillBrush : fillBrush, null, rect, radius, radius);
                     if (pressed) dc.DrawRoundedRectangle(pressedBrush, null, rect, radius, radius);
                     else if (hovered) dc.DrawRoundedRectangle(hoverBrush, null, rect, radius, radius);
+                    if (focused)
+                    {
+                        var focusRect = new Rect(rect.X + 0.75, rect.Y + 0.75, Math.Max(0, rect.Width - 1.5), Math.Max(0, rect.Height - 1.5));
+                        double focusRadius = Math.Max(0, radius - 0.75);
+                        dc.DrawRoundedRectangle(null, focusPen, focusRect, focusRadius, focusRadius);
+                    }
 
                     double textLeft = x + padX;
                     if (selected)
@@ -1769,6 +2157,215 @@ internal sealed class ProxyView : Grid
             "reject" => Loc.T("拒绝", "Reject"),
             _ => ""
         };
+
+        // UI Automation container peer for ProxyNodeList exposing List semantics, Selection pattern, and stable child node items.
+        private sealed class ProxyNodeListPeer(ProxyNodeList owner) : FrameworkElementAutomationPeer(owner), ISelectionProvider
+        {
+            private readonly ProxyNodeList _list = owner;
+            private readonly Dictionary<string, ProxyNodeItemPeer> _itemPeers = new(StringComparer.Ordinal);
+            private string _keys = "";
+            private string _lastSelected = "";
+
+            protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.List;
+            protected override string GetClassNameCore() => nameof(ProxyNodeList);
+
+            protected override string GetNameCore() => _list._group is { } g
+                ? Loc.T($"策略组「{g.Name}」节点列表", $"{g.Name} proxy nodes")
+                : Loc.T("代理节点列表", "Proxy nodes");
+
+            protected override string GetHelpTextCore() => _list._group is { CanSelect: true }
+                ? Loc.T("使用方向键浏览节点，按 Enter 或空格切换节点，按 T 测速", "Use arrow keys to browse nodes, Enter or Space to select, T to test latency")
+                : Loc.T("使用方向键浏览节点，按 Enter、空格或 T 测速", "Use arrow keys to browse nodes, Enter, Space or T to test latency");
+
+            public override object GetPattern(PatternInterface pattern) =>
+                pattern == PatternInterface.Selection ? this : base.GetPattern(pattern);
+
+            bool ISelectionProvider.CanSelectMultiple => false;
+            bool ISelectionProvider.IsSelectionRequired => _list._group is { CanSelect: true, Nodes.Count: > 0 };
+
+            IRawElementProviderSimple[] ISelectionProvider.GetSelection()
+            {
+                _ = GetChildren();
+                var now = _list._group?.Now;
+                if (!string.IsNullOrEmpty(now) && _itemPeers.TryGetValue(now, out var peer))
+                {
+                    var provider = ProviderFromPeer(peer);
+                    if (provider is not null) return [provider];
+                }
+                return [];
+            }
+
+            internal IRawElementProviderSimple ProviderForSelf() => ProviderFromPeer(this)!;
+
+            protected override List<AutomationPeer> GetChildrenCore()
+            {
+                var children = new List<AutomationPeer>();
+                var group = _list._group;
+                if (group is null || group.Nodes.Count == 0)
+                {
+                    _itemPeers.Clear();
+                    _keys = "";
+                    _lastSelected = "";
+                    return children;
+                }
+
+                var current = new HashSet<string>(StringComparer.Ordinal);
+                var order = new List<string>(group.Nodes.Count);
+                for (int i = 0; i < group.Nodes.Count; i++)
+                {
+                    var node = group.Nodes[i];
+                    if (!_itemPeers.TryGetValue(node.Name, out var peer))
+                        _itemPeers[node.Name] = peer = new ProxyNodeItemPeer(this, _list, node.Name);
+                    peer.Update(i, node);
+                    current.Add(node.Name);
+                    order.Add(node.Name);
+                    children.Add(peer);
+                }
+                foreach (var stale in _itemPeers.Keys.Where(k => !current.Contains(k)).ToList())
+                    _itemPeers.Remove(stale);
+                _keys = string.Join('\n', order);
+                _lastSelected = group.Now ?? "";
+                return children;
+            }
+
+            public static void Refresh(ProxyNodeList owner)
+            {
+                if (FromElement(owner) is ProxyNodeListPeer peer) peer.RefreshItems();
+            }
+
+            public static void RaiseFocusChanged(ProxyNodeList owner, string? nodeName)
+            {
+                if (string.IsNullOrEmpty(nodeName)) return;
+                if (FromElement(owner) is ProxyNodeListPeer peer) peer.NotifyFocusedItem(nodeName);
+            }
+
+            private void NotifyFocusedItem(string nodeName)
+            {
+                if (!ListenerExists(AutomationEvents.AutomationFocusChanged)) return;
+                _ = GetChildren();
+                if (_itemPeers.TryGetValue(nodeName, out var item))
+                    item.RaiseAutomationEvent(AutomationEvents.AutomationFocusChanged);
+            }
+
+            private void RefreshItems()
+            {
+                var group = _list._group;
+                var keys = new List<string>();
+                if (group is not null)
+                {
+                    for (int i = 0; i < group.Nodes.Count; i++)
+                    {
+                        var node = group.Nodes[i];
+                        if (_itemPeers.TryGetValue(node.Name, out var peer)) peer.Update(i, node);
+                        keys.Add(node.Name);
+                    }
+                }
+                string nextKeys = string.Join('\n', keys);
+                string nextSelected = group?.Now ?? "";
+                bool structureChanged = nextKeys != _keys;
+                bool selectionChanged = !string.Equals(nextSelected, _lastSelected, StringComparison.Ordinal);
+                _lastSelected = nextSelected;
+                ResetChildrenCache();
+                if (structureChanged && ListenerExists(AutomationEvents.StructureChanged))
+                    InvalidatePeer();
+                if (selectionChanged && ListenerExists(AutomationEvents.SelectionItemPatternOnElementSelected))
+                {
+                    _ = GetChildren();
+                    if (!string.IsNullOrEmpty(nextSelected) && _itemPeers.TryGetValue(nextSelected, out var selectedPeer))
+                        selectedPeer.RaiseAutomationEvent(AutomationEvents.SelectionItemPatternOnElementSelected);
+                }
+            }
+        }
+
+        private sealed class ProxyNodeItemPeer(ProxyNodeListPeer parent, ProxyNodeList owner, string nodeName)
+            : AutomationPeer, ISelectionItemProvider, IInvokeProvider
+        {
+            private int _index;
+            private ProxyNodeInfo _node = new(nodeName, "", null, false);
+
+            public void Update(int index, ProxyNodeInfo node)
+            {
+                _index = index;
+                _node = node;
+            }
+
+            protected override string GetNameCore() => ProxyControlParsers.FormatNodeDisplayName(_node.Name);
+            protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.ListItem;
+            protected override string GetClassNameCore() => "";
+            protected override string GetAutomationIdCore() => "";
+            protected override string GetAcceleratorKeyCore() => "";
+            protected override string GetAccessKeyCore() => "";
+            protected override string GetItemTypeCore() => ShortProtocol(_node.Type);
+
+            protected override string GetItemStatusCore()
+            {
+                var delay = owner._isTestingNode(_node.Name)
+                    ? Loc.T("测速中", "Testing")
+                    : ProxyControlParsers.FormatDelay(_node.DelayMs);
+                var proto = ShortProtocol(_node.Type);
+                return string.IsNullOrEmpty(proto) ? delay : $"{proto} · {delay}";
+            }
+
+            protected override string GetHelpTextCore() => owner._group is { CanSelect: true }
+                ? Loc.T("按 Enter 或空格切换节点，按 T 测速", "Press Enter or Space to select, T to test latency")
+                : Loc.T("按 Enter、空格或 T 测速", "Press Enter, Space or T to test latency");
+
+            protected override AutomationPeer? GetLabeledByCore() => null;
+            protected override AutomationOrientation GetOrientationCore() => AutomationOrientation.None;
+            protected override List<AutomationPeer>? GetChildrenCore() => null;
+            protected override bool IsContentElementCore() => true;
+            protected override bool IsControlElementCore() => true;
+            protected override bool IsEnabledCore() => owner.IsEnabled;
+            protected override bool IsKeyboardFocusableCore() => owner.IsEnabled;
+            protected override bool HasKeyboardFocusCore() => owner.IsKeyboardFocused && string.Equals(owner._focusedNodeName, nodeName, StringComparison.Ordinal);
+            protected override bool IsPasswordCore() => false;
+            protected override bool IsRequiredForFormCore() => false;
+            protected override void SetFocusCore() => owner.FocusNodeByName(nodeName);
+
+            public override object? GetPattern(PatternInterface pattern) => pattern switch
+            {
+                PatternInterface.SelectionItem => this,
+                PatternInterface.Invoke => this,
+                _ => null
+            };
+
+            protected override Rect GetBoundingRectangleCore()
+            {
+                var box = owner.NodeRect(_index);
+                if (box.IsEmpty || PresentationSource.FromVisual(owner) is null) return Rect.Empty;
+                return new Rect(owner.PointToScreen(box.TopLeft), owner.PointToScreen(box.BottomRight));
+            }
+
+            protected override bool IsOffscreenCore()
+            {
+                var box = owner.NodeRect(_index);
+                return parent.IsOffscreen() || box.IsEmpty || !box.IntersectsWith(new Rect(owner.RenderSize));
+            }
+
+            protected override Point GetClickablePointCore()
+            {
+                var box = GetBoundingRectangleCore();
+                return box.IsEmpty ? new Point(double.NaN, double.NaN) : new Point(box.X + box.Width / 2, box.Y + box.Height / 2);
+            }
+
+            bool ISelectionItemProvider.IsSelected => owner.IsNodeSelected(nodeName);
+            IRawElementProviderSimple ISelectionItemProvider.SelectionContainer => parent.ProviderForSelf();
+
+            void ISelectionItemProvider.Select()
+            {
+                if (!owner.IsEnabled) throw new ElementNotEnabledException();
+                owner.ActivateNodeByName(nodeName, allowTestFallback: false);
+            }
+
+            void ISelectionItemProvider.AddToSelection() => ((ISelectionItemProvider)this).Select();
+            void ISelectionItemProvider.RemoveFromSelection() { }
+
+            void IInvokeProvider.Invoke()
+            {
+                if (!owner.IsEnabled) throw new ElementNotEnabledException();
+                owner.ActivateNodeByName(nodeName, allowTestFallback: true);
+            }
+        }
     }
 
     // Lightweight custom-rendered dual sparkline harmonized with the active panel theme.

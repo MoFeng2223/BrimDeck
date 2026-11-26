@@ -12,6 +12,7 @@ public partial class MainWindow
     private bool _proxyStripShowing, _proxyPageShowing;
     private ProxyStrip? _compactProxy;
     private ProxyView? _proxyView;
+    private ProxyController? _proxyViewController;
     private string _proxyViewKey = "";
     private string? _selectedProxyGroup;
 
@@ -113,13 +114,14 @@ public partial class MainWindow
             _app.PresentProxy(this, true, _proxyStripShowing);
 
         var key = ProxyViewKey();
-        if (_proxyView is not null && key == _proxyViewKey && ProxyContent.Children.Contains(_proxyView))
+        if (_proxyView is not null && ReferenceEquals(_proxyViewController, controller) && key == _proxyViewKey && ProxyContent.Children.Contains(_proxyView))
         {
             _proxyView.UpdateState();
             return;
         }
 
         _proxyViewKey = key;
+        _proxyViewController = controller;
         var old = shown ? _proxyView : null;
         _proxyView = new ProxyView(controller, _selectedProxyGroup, group => _selectedProxyGroup = group);
         _proxyView.UpdateState();
