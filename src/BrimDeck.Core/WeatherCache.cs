@@ -133,7 +133,9 @@ public static class WeatherCache
         try
         {
             if (!File.Exists(path)) return false;
-            var envelope = JsonSerializer.Deserialize<Envelope>(File.ReadAllText(path), Json);
+            Envelope? envelope;
+            using (var stream = File.OpenRead(path))
+                envelope = JsonSerializer.Deserialize<Envelope>(stream, Json);
             if (envelope is null || envelope.V != Schema || envelope.K != key || envelope.Value.Length == 0) { File.Delete(path); return false; }
             if (JsonSerializer.Deserialize<T>(envelope.Value, Json) is not { } parsed) return false;
             // 读盘期间内存可能已被并发请求写入更新鲜的值，别拿磁盘旧值盖掉。

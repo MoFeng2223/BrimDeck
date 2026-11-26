@@ -100,12 +100,26 @@ internal sealed class WeatherGlyph : FrameworkElement
     private static readonly Geometry cloud = Geometry.Parse("M20,54 C10,54 6,48 7,41 C8,34 13,30 20,30 C23,18 34,14 44,19 C49,21 52,25 54,30 C63,28 71,34 71,42 C71,49 66,54 58,54 Z");
     private static readonly Geometry bolt = Geometry.Parse("M41,48 L54,48 45,59 52,59 32,77 38,63 31,63 Z");
 
+    private static readonly Pen sunRay = Frozen(RoundedPen(sunlight, 3));
+    private static readonly Pen fogLine = Frozen(RoundedPen(moonlight, 4));
+    private static readonly Pen snowArm = Frozen(RoundedPen(moonlight, 2.6));
+    private static readonly Pen rainLine = Frozen(RoundedPen(water, 4));
+    private static readonly Pen cloudOutline = Frozen(new Pen(new SolidColorBrush(Color.FromArgb(110, 108, 133, 165)), 1.6));
+    private static readonly Brush dayGlow = Frozen(new RadialGradientBrush(Color.FromArgb(125, 255, 192, 78), Colors.Transparent));
+    private static readonly Brush nightGlow = Frozen(new RadialGradientBrush(Color.FromArgb(80, 159, 203, 255), Colors.Transparent));
+    private static readonly Geometry star = Frozen(Geometry.Parse("M0,-6 Q1,-1 5,0 Q1,1 0,6 Q-1,1 -5,0 Q-1,-1 0,-6 Z"));
+
+    private static T Frozen<T>(T resource) where T : Freezable
+    {
+        resource.Freeze();
+        return resource;
+    }
+
     protected override void OnRender(DrawingContext d)
     {
         base.OnRender(d);
         double scale = Math.Min(ActualWidth, ActualHeight) / 80;
         if (scale <= 0) return;
-        // 天气代码缺失（负值）不是晴天：整格留空不画，避免缺数据被渲染成大太阳。
         if (code < 0) return;
         d.PushTransform(new TranslateTransform((ActualWidth - 80 * scale) / 2, (ActualHeight - 80 * scale) / 2));
         d.PushTransform(new ScaleTransform(scale, scale));
@@ -115,16 +129,15 @@ internal sealed class WeatherGlyph : FrameworkElement
         {
             var center = cloudy ? new Point(55, 25) : new Point(38, 39);
             double radius = cloudy ? 13 : 21;
-            var glow = new RadialGradientBrush(day ? Color.FromArgb(125, 255, 192, 78) : Color.FromArgb(80, 159, 203, 255), Colors.Transparent);
+            var glow = day ? dayGlow : nightGlow;
             d.DrawEllipse(glow, null, center, radius * 1.75, radius * 1.75);
             if (day)
             {
-                var ray = RoundedPen(sunlight, 3);
                 for (int i = 0; i < 8; i++)
                 {
                     double angle = i * Math.PI / 4 + wave * .08;
                     var axis = new Vector(Math.Cos(angle), Math.Sin(angle));
-                    d.DrawLine(ray, center + axis * (radius + 5), center + axis * (radius + 10));
+                    d.DrawLine(sunRay, center + axis * (radius + 5), center + axis * (radius + 10));
                 }
                 d.DrawEllipse(sunlight, null, center, radius, radius);
             }
@@ -135,7 +148,7 @@ internal sealed class WeatherGlyph : FrameworkElement
                     new EllipseGeometry(center + new Vector(radius * .50, -radius * .38), radius * .92, radius * .92));
                 d.DrawGeometry(moonlight, null, crescent);
                 d.PushTransform(new TranslateTransform(center.X + radius * .85, center.Y - radius * .55));
-                d.DrawGeometry(moonlight, null, Geometry.Parse("M0,-6 Q1,-1 5,0 Q1,1 0,6 Q-1,1 -5,0 Q-1,-1 0,-6 Z"));
+                d.DrawGeometry(moonlight, null, star);
                 d.Pop();
             }
         }
@@ -144,15 +157,14 @@ internal sealed class WeatherGlyph : FrameworkElement
             d.PushTransform(new TranslateTransform(0, wave + (code <= 3 ? 7 : 0)));
             if (code == 1) d.PushTransform(new ScaleTransform(.80, .80, 15, 45));
             d.DrawGeometry(code >= 51 || code == 3 ? stormCloud : fairCloud,
-                new Pen(new SolidColorBrush(Color.FromArgb(110, 108, 133, 165)), 1.6), cloud);
+                cloudOutline, cloud);
             if (code == 1) d.Pop();
             d.Pop();
         }
         if (code is 45 or 48)
         {
-            var mist = RoundedPen(moonlight, 4);
-            d.DrawLine(mist, new Point(12, 59), new Point(58, 59));
-            d.DrawLine(mist, new Point(25, 67), new Point(68, 67));
+            d.DrawLine(fogLine, new Point(12, 59), new Point(58, 59));
+            d.DrawLine(fogLine, new Point(25, 67), new Point(68, 67));
         }
         else if (code >= 95)
         {
@@ -172,13 +184,13 @@ internal sealed class WeatherGlyph : FrameworkElement
                     for (int j = 0; j < 3; j++)
                     {
                         var arm = new Vector(5 * Math.Cos(j * Math.PI / 3), 5 * Math.Sin(j * Math.PI / 3));
-                        d.DrawLine(RoundedPen(moonlight, 2.6), center - arm, center + arm);
+                        d.DrawLine(snowArm, center - arm, center + arm);
                     }
                 }
                 else if (ice && i == 1 || code < 60)
                     d.DrawEllipse(ice ? moonlight : water, null, center, 2.6, 3.2);
                 else
-                    d.DrawLine(RoundedPen(water, 4), center + new Vector(2, -3), center + new Vector(-2, 5));
+                    d.DrawLine(rainLine, center + new Vector(2, -3), center + new Vector(-2, 5));
             }
         }
         d.Pop();
