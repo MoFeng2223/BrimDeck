@@ -1,8 +1,8 @@
 namespace BrimDeck.Core.Notices;
 
-// One text of a chat program's call window as UI Automation gives it, in the window's order: the Qt class of the label, its
-// words and its id (CallWindowWatch).
-public readonly record struct PopupText(string Class, string Name, string Id = "");
+// One text or button of a chat program's call window as UI Automation gives it, in the window's order: the class of the label
+// or button, its words, its id, and whether it is a button (CallWindowWatch).
+public readonly record struct PopupText(string Class, string Name, string Id = "", bool Button = false);
 
 // DingTalk's ringing calls, which it shows in windows of its own (read 2026-11-26 on DingTalk 8.x, Windows 11, Chinese
 // interface). Its messages are not read here: DingTalk draws no popup for a group's message that does not name the user, so
@@ -20,6 +20,9 @@ public static class DingTalkPopups
     public const string CallProgram = "tblive.exe";
     private const string MeetingLabelClass = "dtguitoolkit::AutoAdjustLabel";
     private static readonly string[] InviteMarks = ["邀请你", "邀请您", "invite"];
+    // The buttons of a call window that answer and that decline: a one-to-one call's say "接听" and "挂断" (given by UI
+    // Automation as check boxes, each with a label of the same words beside it), a meeting invitation's "接听" and "拒绝".
+    public static readonly string[] Accept = ["接听", "Answer", "Accept"], Decline = ["挂断", "拒绝", "Hang up", "Decline", "Reject"];
     private static readonly string[] Buttons = ["接听", "挂断", "拒绝", "通话纪要", "麦克风已开", "麦克风已关", "摄像头已开", "摄像头已关", "通话结束", "Answer", "Decline", "Hang up"];
 
     // Whether a window of this program and class is one of DingTalk's call windows; the program is a file name.
@@ -29,7 +32,7 @@ public static class DingTalkPopups
     // The notice a shown call window says; null when its texts are not as expected (DingTalk changed them, or it is empty).
     public static NoticeInput? Read(string className, string windowTitle, IReadOnlyList<PopupText> texts, string instanceKey)
     {
-        var words = texts.Select(text => text with { Name = (text.Name ?? "").Trim() }).Where(text => text.Name.Length > 0).ToList();
+        var words = texts.Where(text => !text.Button).Select(text => text with { Name = (text.Name ?? "").Trim() }).Where(text => text.Name.Length > 0).ToList();
         return className switch
         {
             CallClass => Call(windowTitle, words, instanceKey),

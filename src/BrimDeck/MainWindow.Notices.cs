@@ -956,9 +956,17 @@ public partial class MainWindow
         }
         foreach (var action in center.TimeActions(notice).Take(2))
             flow.Add(PillButton(action.Label, action.Label, () => { center.TimeAction(notice, action.Key); RenderNotices(); }));
-        if (center.CanOpen(notice))
+        // A call that still rings is answered or declined here, with its window's own buttons, in place of opening the application.
+        if (center.CanAnswer(notice))
         {
-            string open = OpenLabel(notice);
+            flow.Add(AnswerButton(notice, center, CallAnswer.Decline));
+            if (center.CanAnswerWithVoice(notice)) flow.Add(AnswerButton(notice, center, CallAnswer.Voice));
+            flow.Add(AnswerButton(notice, center, CallAnswer.Accept));
+            row.MainLast = true;
+        }
+        else if (center.CanOpen(notice))
+        {
+            string open = Loc.T("打开应用", "Open app");
             var main = PillButton(open, open, () => _ = OpenFromPage(notice), primary: true);
             row.MainLast = true;
             CompactToOpenIcon(row, main, open);
@@ -1018,7 +1026,31 @@ public partial class MainWindow
         return button;
     }
 
-    private static string OpenLabel(Notice notice) => notice.Call ? Loc.T($"打开 {notice.AppName} 接听", $"Answer in {notice.AppName}") : Loc.T("打开应用", "Open app");
+    // "挂断" (red), "语音接听" (where the call window offers to answer a video call with voice only) or "接听" (the main button) of
+    // a ringing call. Pressed, each waits for the call's window; where its button did not take effect, the button says so for a
+    // moment and the call is left to the application.
+    private Button AnswerButton(Notice notice, NoticeCenter center, CallAnswer answer)
+    {
+        bool accept = answer != CallAnswer.Decline;
+        string name = answer switch { CallAnswer.Decline => Loc.T("挂断", "Decline"), CallAnswer.Voice => Loc.T("语音接听", "Answer with voice"), _ => Loc.T("接听", "Answer") };
+        Button? button = null;
+        bool busy = false;
+        button = PillButton(name, name, async () =>
+        {
+            if (busy) return;
+            busy = true;
+            bool done = await center.AnswerAsync(notice, answer);
+            busy = false;
+            if (done) { RenderNotices(); return; }
+            string said = accept ? Loc.T($"未能接听，请在{notice.AppName}中操作", $"Could not answer; use {notice.AppName}") : Loc.T($"未能挂断，请在{notice.AppName}中操作", $"Could not decline; use {notice.AppName}");
+            void Say(string words) { if (((Border)button!.Content).Child is InkCentredText label) label.Text.Text = words; AutomationProperties.SetName(button!, words); }
+            Say(said);
+            var back = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            back.Tick += (_, _) => { back.Stop(); Say(name); };
+            back.Start();
+        }, primary: answer == CallAnswer.Accept, fill: answer == CallAnswer.Decline ? PanelTheme.Hex("danger") : null);
+        return button;
+    }
 
     // A round button that shows only a glyph of the system's icon font.
     private static Button GlyphPill(string glyph, string name, Action click)
@@ -1084,21 +1116,25 @@ public partial class MainWindow
         button.PreviewMouseLeftButtonUp += (_, _) => paint(over, down = false);
     }
 
-    // A capsule button of the design: 32 high, the main one in the text color with the surface's color on it.
-    private static Button PillButton(string text, string name, Action click, bool primary = false)
+    // A capsule button of the design: 32 high, the main one in the text color with the surface's color on it. Its words are centred
+    // by their letters as drawn and on whole device pixels (AgendaDraw.Label), as the planner's buttons are.
+    // fill: a color of its own (the red of "挂断"), with the words in the panel's surface color as on the main button.
+    private static Button PillButton(string text, string name, Action click, bool primary = false, string? fill = null)
     {
-        string rest = primary ? UI.Primary : UI.Fill;
+        string rest = fill ?? (primary ? UI.Primary : UI.Fill);
+        bool solid = primary || fill is not null;
         var face = new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(16)), Background = UI.Brush(rest), Padding = new Thickness(16, 0, 16, 0), Height = 32 };
-        var label = UI.InkCentered(text, 12.5, 32, UI.Primary, FontWeights.SemiBold);
-        if (primary) label.Foreground = new SolidColorBrush(PanelTheme.ColorOf("surface"));
+        var label = AgendaDraw.Label(text, 12.5, solid ? PanelTheme.Hex("surface") : UI.Primary, FontWeights.SemiBold);
+        label.HorizontalAlignment = HorizontalAlignment.Center;
         face.Child = label;
+        label.FitHeight(face, 32);
         var button = new Button { Content = face, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0), FocusVisualStyle = (Style)Application.Current.FindResource("PanelPillKeyboardFocus"), Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };
         if (primary) button.Margin = new Thickness(0);
         // Under the pointer the main button dims a little, the others take the selected fill; pressed, the main one dims more and
         // the others take the pressed fill.
         Feel(button, (over, down) =>
         {
-            if (primary) face.Opacity = down ? .76 : over ? .88 : 1;
+            if (solid) face.Opacity = down ? .76 : over ? .88 : 1;
             else face.Background = UI.Brush(down ? PanelTheme.Hex("pressed") : over ? UI.FillSelected : rest);
         });
         button.Click += (_, _) => click();

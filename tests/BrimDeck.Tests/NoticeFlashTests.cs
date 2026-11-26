@@ -10,7 +10,7 @@ internal static class NoticeFlashTests
     {
         string language = Loc.Language;
         Loc.Use(Loc.Chinese);
-        try { Decisions(check); Coalescing(check); Table(check); Setting(check); DingTalk(check); WeChatCall(check); }
+        try { Decisions(check); Coalescing(check); Table(check); Setting(check); DingTalk(check); WeChatCall(check); FeishuCall(check); }
         finally { Loc.Use(language); }
     }
 
@@ -124,6 +124,28 @@ internal static class NoticeFlashTests
             WeChatCalls.Watched("WEIXIN.EXE", WeChatCalls.CallClass) && !WeChatCalls.Watched("Weixin.exe", "mmui::MainWindow")
             && !WeChatCalls.Watched("WeChatAppEx.exe", WeChatCalls.CallClass) && !WeChatCalls.Watched(null, WeChatCalls.CallClass));
         check("WeChat: a call's notice is not a chat's, so it offers no reply", WeChatRows.ChatOf(new Notice { AppKey = WeChatRows.AppKey, Title = "泡泡", InstanceKey = "wechatcall:1:2" }) is null);
+    }
+
+    // Feishu's call window as UI Automation read it on 2026-11-27, its interface in traditional Chinese (FeishuCalls).
+    private static void FeishuCall(Action<string, bool> check)
+    {
+        static PopupText L(string name) => new("Label", name);
+        static PopupText B(string name) => new("LabelButton", name, Button: true);
+        PopupText[] video = [new("RoundImageButton", "", Button: true), L("用户546325"), L("邀請你進行視訊通話"), B("拒絕"), B("視訊接聽"), B("語音接聽"),
+            L("Your current call will end if you accept this call."), L("Your current call will end if you accept this call.")];
+        check("Feishu: a ringing video call is a call from its caller", FeishuCalls.Read(FeishuCalls.WindowClass, "飛書會議", video, "feishu:call:1")
+            is { Title: "用户546325", Body: "邀請你進行視訊通話", Call: true, AppKey: FeishuBanners.AppKey, InstanceKey: "feishu:call:1" });
+        check("Feishu: a voice call in simplified Chinese is read the same way",
+            FeishuCalls.Read(FeishuCalls.WindowClass, "飞书会议", [L("小周"), L("邀请你进行语音通话"), B("拒绝"), B("接听")], "k") is { Title: "小周", Body: "邀请你进行语音通话" });
+        check("Feishu: a window without an invitation, or without a button that declines, says nothing",
+            FeishuCalls.Read(FeishuCalls.WindowClass, "飛書會議", [L("用户546325"), B("拒絕")], "k") is null
+            && FeishuCalls.Read(FeishuCalls.WindowClass, "飛書會議", [L("用户546325"), L("邀請你進行視訊通話")], "k") is null
+            && FeishuCalls.Read("Chrome_WidgetWin_1", "飛書會議", video, "k") is null);
+        check("Feishu: only its windows of the call window's class are read",
+            FeishuCalls.Watched("Feishu.exe", FeishuCalls.WindowClass) && FeishuCalls.Watched("LARK.EXE", FeishuCalls.WindowClass)
+            && !FeishuCalls.Watched("Feishu.exe", "Chrome_WidgetWin_1") && !FeishuCalls.Watched("chrome.exe", FeishuCalls.WindowClass) && !FeishuCalls.Watched(null, FeishuCalls.WindowClass));
+        check("Feishu: a video call can be answered with video or with voice only, by the buttons' words",
+            FeishuCalls.Accept.Contains("視訊接聽") && FeishuCalls.Voice.Contains("語音接聽") && FeishuCalls.Decline.Contains("拒絕") && !FeishuCalls.Accept.Intersect(FeishuCalls.Voice).Any());
     }
 
     // DingTalk's windows as UI Automation read them on 2026-11-26 (DingTalkPopups).

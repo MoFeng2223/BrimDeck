@@ -15,6 +15,8 @@ public static class WeChatCalls
     public const string TipsId = "voip_caller_tips";
     // Not WeChatRows.KeyPrefix: a call is not a chat's message, and its notice offers no reply.
     public const string KeyPrefix = "wechatcall:";
+    // The call window's buttons that answer and that decline ("展开" of a video call only makes it bigger).
+    public static readonly string[] Accept = ["接听", "Answer", "Accept"], Decline = ["拒绝", "Decline", "Reject"];
 
     // Whether a window of this program and class is WeChat's ringing call; the program is a file name.
     public static bool Watched(string? program, string? className) => program is not null && className is not null
@@ -24,9 +26,9 @@ public static class WeChatCalls
     public static NoticeInput? Read(string className, string windowTitle, IReadOnlyList<PopupText> texts, string instanceKey)
     {
         if (className != CallClass) return null;
-        string tips = (texts.FirstOrDefault(text => text.Id == TipsId).Name ?? "").Trim().TrimEnd('.', '。', '…', ' ');
+        string tips = (texts.FirstOrDefault(text => !text.Button && text.Id == TipsId).Name ?? "").Trim().TrimEnd('.', '。', '…', ' ');
         if (tips.Length == 0) return null;
-        string caller = (texts.FirstOrDefault(text => text.Id == CallerId).Name ?? "").Trim();
+        string caller = (texts.FirstOrDefault(text => !text.Button && text.Id == CallerId).Name ?? "").Trim();
         return new NoticeInput
         {
             Origin = NoticeOrigin.Windows, AppKey = AppKey, AppName = Loc.T("微信", "WeChat"), InstanceKey = instanceKey,

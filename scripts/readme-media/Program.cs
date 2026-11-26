@@ -195,6 +195,8 @@ internal sealed partial class Renderer(App app, string output, string language, 
             if (scenes.Contains("notice-glow")) await NoticeGlowScene();
             // The notices page with conversations of several messages, and the notices settings page; for checking.
             if (scenes.Contains("notices-page")) await NoticesPageScene();
+            // The notices page with a ringing call and its buttons that answer and decline it; for checking.
+            if (scenes.Contains("notice-call")) await NoticeCallScene();
             // The notices' "Apps" settings page in each state, and the menu that adds an app from the notice history; for checking.
             if (scenes.Contains("notice-apps")) await NoticeAppsScene();
             // The windows that ask before DingTalk's and WeChat's messages are read, beside NetEase's full control; for checking.

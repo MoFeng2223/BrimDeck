@@ -790,6 +790,29 @@ internal sealed partial class NoticeCenter : IDisposable
     public bool CanOpen(Notice notice) => notice.AppKey is WeChatRows.AppKey or FeishuBanners.AppKey || notice.Origin == NoticeOrigin.Windows && (notice.Capabilities & NoticeCapabilities.OpenApp) != 0
         || notice.Actions.Any(action => action.Key == "default") && (notice.Capabilities & NoticeCapabilities.Actions) != 0;
 
+    // The watch of the call window a call's notice was read from, while that call still rings; else null.
+    private CallWindowWatch? RingingWatch(Notice notice)
+        => !notice.Call || !notice.SourcePresent ? null
+            : new[] { _wechatCalls, _dingTalkCalls, _feishuCalls }.FirstOrDefault(watch => watch is not null && watch.Has(notice.InstanceKey));
+
+    // Whether the notices page offers to answer and to decline the call here: its window still rings; and whether it also offers
+    // to answer a video call with voice only.
+    public bool CanAnswer(Notice notice) => RingingWatch(notice) is not null;
+    public bool CanAnswerWithVoice(Notice notice) => RingingWatch(notice) is { } watch && watch.HasVoice(notice.InstanceKey);
+
+    // Answers or declines the call with its window's own button. False when that did not work; the caller says so.
+    public async Task<bool> AnswerAsync(Notice notice, CallAnswer answer)
+    {
+        if (RingingWatch(notice) is not { } watch) return false;
+        try
+        {
+            if (!await watch.Press(notice.InstanceKey, answer)) return false;
+            Hub.MarkViewed(notice.Id);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log(ex); return false; }
+    }
+
     // Opens the application the notice came from. False when that did not work; the caller keeps the details open and says so.
     // Any failure on the way is recorded (notices.log) and reads as not opened: the notices page's button and the island's do not
     // wait on the result's errors, so an error that got out left a click without any answer.
