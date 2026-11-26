@@ -627,7 +627,8 @@ internal sealed class HeFengSource : IWeatherSource
                     Type = type
                 });
             }
-            return result.Count > 0 ? result : null;
+            // 空数组是一次有效回答（当前无预警），不能折叠成 null，否则聚合器分不清「没预警」和「没请求到」。
+            return result;
         }
         catch { return null; }
     }

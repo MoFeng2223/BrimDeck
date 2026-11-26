@@ -708,18 +708,23 @@ internal sealed class WeatherView : UserControl
         return new SummaryPlan(columns, icon, temp, heroWidth);
     }
 
-    // 预警等级归一：中文/英文都落到 1–4，用来排序与配色。
-    private static int WarnRank(string level) => level switch
+    // 预警等级归一：和风 color.code 是小写英文（red/amber/blue…），severity 用英文词；中文旧写法也一并认。
+    private static int WarnRank(string level) => level.Trim().ToLowerInvariant() switch
     {
-        "红色" or "Red" => 4,
-        "橙色" or "Orange" => 3,
-        "黄色" or "Yellow" => 2,
-        "蓝色" or "Blue" => 1,
+        "红色" or "red" or "purple" or "black" or "extreme" => 4,
+        "橙色" or "orange" or "amber" or "severe" => 3,
+        "黄色" or "yellow" or "moderate" => 2,
+        "蓝色" or "blue" or "green" or "minor" => 1,
+        "white" or "gray" or "unknown" => 0,
         _ => 2
     };
-    private static string WarnLevelShort(string level) => level switch
+    private static string WarnLevelShort(string level) => level.Trim().ToLowerInvariant() switch
     {
-        "红色" => "红", "橙色" => "橙", "黄色" => "黄", "蓝色" => "蓝", _ => level
+        "红色" or "red" or "purple" or "black" or "extreme" => "红",
+        "橙色" or "orange" or "amber" or "severe" => "橙",
+        "黄色" or "yellow" or "moderate" => "黄",
+        "蓝色" or "blue" or "green" or "minor" => "蓝",
+        _ => level
     };
     // 摘要卡里的预警胶囊：只留「类型 · 等级」，完整标题/正文放 ToolTip，点击切到生活指数视图。
     private Border WarningBadge(WarningItem w, int total)
