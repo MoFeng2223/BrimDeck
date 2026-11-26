@@ -791,7 +791,15 @@ internal sealed partial class NoticeCenter : IDisposable
         || notice.Actions.Any(action => action.Key == "default") && (notice.Capabilities & NoticeCapabilities.Actions) != 0;
 
     // Opens the application the notice came from. False when that did not work; the caller keeps the details open and says so.
+    // Any failure on the way is recorded (notices.log) and reads as not opened: the notices page's button and the island's do not
+    // wait on the result's errors, so an error that got out left a click without any answer.
     public async Task<bool> OpenAsync(Notice notice)
+    {
+        try { return await OpenCoreAsync(notice); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log(ex); return false; }
+    }
+
+    private async Task<bool> OpenCoreAsync(Notice notice)
     {
         Hub.MarkViewed(notice.Id);
         if (notice.AppKey == WeChatRows.AppKey) return await OpenWeChatAsync(notice);

@@ -475,7 +475,9 @@ internal sealed class WindowsNoticeSource : IDisposable
     private static T? Safe<T>(Func<T> read)
     {
         try { return read(); }
-        catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or NotImplementedException) { return default; }
+        // InvalidCastException: what Windows' projection throws when the object lacks the interface asked for, such as the package of
+        // a desktop program's AppInfo.
+        catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or NotImplementedException or InvalidCastException) { return default; }
     }
 
     // The application's logo as Windows provides it for its notifications, as PNG (or other image) bytes. Desktop applications
@@ -569,7 +571,7 @@ internal sealed class WindowsNoticeSource : IDisposable
         lock (_apps) _apps.TryGetValue(appId, out app);
         string? family = app is null ? null : Safe(() => app.PackageFamilyName);
         if (replay is { } toast && await ReplayAsync(appId, toast, !string.IsNullOrEmpty(family))) return true;
-        if (FocusOpenWindow(appId, app)) return true;
+        if (FocusOpenWindow(appId, string.IsNullOrEmpty(family) ? null : app)) return true;
         if (!string.IsNullOrEmpty(family))
         {
             try
@@ -596,11 +598,14 @@ internal sealed class WindowsNoticeSource : IDisposable
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { return false; }
     }
 
-    private static bool FocusOpenWindow(string appId, Windows.ApplicationModel.AppInfo? app)
+    // packaged: the application's AppInfo when it is a packaged app, else null. A desktop program's AppInfo has no package, and
+    // asking it for one throws InvalidCastException (QQ, 2026-11-26), which left every open of a notice no longer in the center
+    // undone.
+    private static bool FocusOpenWindow(string appId, Windows.ApplicationModel.AppInfo? packaged)
     {
         try
         {
-            string? folder = app is null ? null : Safe(() => app.Package?.InstalledLocation?.Path);
+            string? folder = packaged is null ? null : Safe(() => packaged.Package?.InstalledLocation?.Path);
             return NoticeAppWindows.TryFocus(NoticeAppWindows.Hint(appId, folder), new AppWindowSystem(), Environment.ProcessId);
         }
         catch (Exception ex) when (ex is COMException or System.ComponentModel.Win32Exception or InvalidOperationException or UnauthorizedAccessException or ArgumentException or System.IO.IOException) { return false; }
