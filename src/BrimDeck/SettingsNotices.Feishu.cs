@@ -18,13 +18,10 @@ public sealed partial class SettingsWindow
         var heading = TextLine(Loc.T("提示方式", "How it is noticed"), 12, TextSecondary); heading.Margin = new Thickness(0, 0, 0, 4);
         panel.Children.Add(heading);
         var flash = ModeChoice("FeishuMode", Loc.T("任务栏闪烁", "Taskbar flash"),
-            Loc.T("飞书图标闪烁时提示“有新消息”，无具体消息内容。", "\"New message\" when Feishu's taskbar button flashes, without the message's content."), null, null);
+            Loc.T("飞书图标闪烁时提示“有新消息”，无具体消息内容。", "\"New message\" when Feishu's taskbar button flashes, without the message's content."), null);
         var read = ModeChoice("FeishuMode", Loc.T("读取消息内容", "Read message content"),
             Loc.T("读取飞书弹出的消息横幅，显示会话名和消息，并隐藏飞书自己的横幅。",
-                "Reads the message banners Feishu shows, for the chat's name and the message, and hides Feishu's own banner."),
-            Loc.T("飞书不为免打扰的会话弹出横幅，也不闪烁。在飞书中关闭横幅后，仍按任务栏闪烁提示“有新消息”；选择“隐藏消息详情”时读不到消息内容。",
-                "Feishu shows no banner and no flash for a muted chat. With the banner off in Feishu, messages are still noticed by the taskbar flash; with \"Hide message details\" chosen, no message content can be read."),
-            null);
+                "Reads the message banners Feishu shows, for the chat's name and the message, and hides Feishu's own banner."), null);
         flash.IsChecked = !reading; read.IsChecked = reading;
         flash.Checked += (_, _) => { EditRule(FeishuBanners.AppKey, name, r => r.ReadContent = false); ShowPage(_page); };
         read.Checked += (_, _) => { EditRule(FeishuBanners.AppKey, name, r => r.ReadContent = true); ShowPage(_page); };

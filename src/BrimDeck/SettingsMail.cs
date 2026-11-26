@@ -139,10 +139,10 @@ public sealed partial class SettingsWindow
 
         FrameworkElement Heading(int column, string title, Func<string> help)
         {
-            var heading = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            heading.Children.Add(TextLine(title, 11, TextTertiary));
+            // As the apps' columns: the mark centered on the heading's letters, with no room added beside its own box.
             var info = HelpIcon(title, help, 12);
-            info.Margin = new Thickness(4, 0, 0, 0); heading.Children.Add(info);
+            info.Margin = new Thickness(0);
+            var heading = new HelpHeading(TextLine(title, 11, TextTertiary), info) { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(heading, column);
             return heading;
         }
@@ -302,7 +302,7 @@ public sealed partial class SettingsWindow
     // refused, the links that enter the code again and try once more. read reads it again.
     private FrameworkElement MailStatus(MailAccount account, MailProvider provider, out Action read)
     {
-        var dot = new Ellipse { Width = 6, Height = 6, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 6, 6, 0) };
+        var dot = new Ellipse { Width = 6, Height = 6 };
         var state = TextLine("", 11.5, TextSecondary);
         AutomationProperties.SetLiveSetting(state, AutomationLiveSetting.Polite);
         TextBlock Separator() { var dotText = TextLine("·", 11.5, TextTertiary); dotText.Margin = new Thickness(6, 0, 6, 0); return dotText; }
@@ -322,7 +322,8 @@ public sealed partial class SettingsWindow
         var retrySeparator = Separator();
         var retry = Link(Loc.T("重试", "Retry"), account.Address, () => _app.Mail.Retry(account.Id));
         var line = new WrapPanel { Margin = new Thickness(0, 2, 0, 0) };
-        foreach (var part in new FrameworkElement[] { dot, state, tailSeparator, tail, lastSeparator, last, againSeparator, again, retrySeparator, retry }) line.Children.Add(part);
+        // The dot on the middle of the state's letters (StepLine).
+        foreach (var part in new FrameworkElement[] { new StepLine(dot, state, 6), tailSeparator, tail, lastSeparator, last, againSeparator, again, retrySeparator, retry }) line.Children.Add(part);
         read = () =>
         {
             var (kind, text, refused) = MailStateLine(account);

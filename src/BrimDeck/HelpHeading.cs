@@ -18,6 +18,10 @@ internal sealed class HelpHeading : Panel
     private readonly FrameworkElement _icon;
     private readonly TranslateTransform _shift = new();
 
+    // The heading only as tall as its label, the icon's box reaching past it: for a title whose line lines up with something
+    // beside it at the top (a round choice's circle), which a taller heading would push down.
+    public bool LabelHeight { get; init; }
+
     public HelpHeading(TextBlock label, FrameworkElement icon)
     {
         _label = label; _icon = icon;
@@ -29,7 +33,7 @@ internal sealed class HelpHeading : Panel
     {
         var free = new Size(double.PositiveInfinity, available.Height);
         _label.Measure(free); _icon.Measure(free);
-        return new Size(_label.DesiredSize.Width + _icon.DesiredSize.Width, Math.Max(_label.DesiredSize.Height, _icon.DesiredSize.Height));
+        return new Size(_label.DesiredSize.Width + _icon.DesiredSize.Width, LabelHeight ? _label.DesiredSize.Height : Math.Max(_label.DesiredSize.Height, _icon.DesiredSize.Height));
     }
 
     protected override Size ArrangeOverride(Size final)

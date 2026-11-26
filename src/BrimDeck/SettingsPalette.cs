@@ -28,6 +28,9 @@ internal sealed record SettingsPalette(bool Dark)
     public string Accent => Dark ? "#88B0EE" : "#347BDF";
     // Text that says something failed or is unavailable.
     public string Negative => Dark ? "#F0A6AA" : "#B12E3A";
+    // Text and its dot for something to look at that still works, less well (WeChat closed to the tray, noticed by its flash
+    // only; a sensor's stop; a theme about to be overwritten).
+    public string Caution => Dark ? "#E8B04B" : "#B7791F";
     // A status dot for something set up and working: at least 3:1 against the surface (WCAG 1.4.11).
     public string Positive => Dark ? "#5DC98C" : "#2F9E5E";
     // A link inside running text: at least 4.5:1 against the surface, so it reads as text and stands apart from it.
@@ -62,6 +65,7 @@ internal sealed record SettingsPalette(bool Dark)
         Brush("SettingsInset", Inset); Brush("SettingsSurface", Surface);
         Brush("SettingsSwitchOff", InputBorder); Brush("SettingsInputBorder", InputBorder);
         Brush("SettingsError", Dark ? "#F0A6AA" : "#B12E3A");
+        Brush("SettingsCaution", Caution);
     }
     public static bool IsDark(SettingsTheme theme)
     {

@@ -60,13 +60,16 @@ internal abstract class ControlDialog : Window
         Body.Children.Add(new HelpHeading(label, info) { HorizontalAlignment = HorizontalAlignment.Left });
     }
 
-    // The notice about the debugging port: a shield and a heading on an inset surface. Its text is added into the panel returned.
-    protected StackPanel AddNotice(string heading)
+    // The notice about the debugging port (a shield), or about what may go wrong (warning: a triangle): the mark and a heading
+    // on an inset surface. Its text is added into the panel returned.
+    protected StackPanel AddNotice(string heading, bool warning = false)
     {
         var notice = new StackPanel();
         var head = new StackPanel { Orientation = Orientation.Horizontal };
-        head.Children.Add(new System.Windows.Shapes.Path { Width = 15, Height = 15, Stretch = Stretch.Uniform,
-            Data = Geometry.Parse("M8,1.5 L13.5,3.6 V7.4 C13.5,10.7 11.2,13.3 8,14.5 C4.8,13.3 2.5,10.7 2.5,7.4 V3.6 Z M5.6,8 L7.4,9.8 L10.6,6.4"),
+        // The triangle is drawn in its 16 × 16 box as it is, so that it stays centered on the heading's line.
+        head.Children.Add(new System.Windows.Shapes.Path { Width = warning ? 16 : 15, Height = warning ? 16 : 15, Stretch = warning ? Stretch.None : Stretch.Uniform,
+            Data = Geometry.Parse(warning ? "M8,1.8 L14.6,13.6 H1.4 Z M8,6.2 V9.4 M8,11.5 V11.6"
+                : "M8,1.5 L13.5,3.6 V7.4 C13.5,10.7 11.2,13.3 8,14.5 C4.8,13.3 2.5,10.7 2.5,7.4 V3.6 Z M5.6,8 L7.4,9.8 L10.6,6.4"),
             Stroke = UI.Brush(Palette.Secondary), StrokeThickness = 1.4, StrokeLineJoin = PenLineJoin.Round,
             StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center });
         head.Children.Add(Text(heading, 13.5, Palette.Primary, true)); notice.Children.Add(head);

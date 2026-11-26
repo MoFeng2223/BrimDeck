@@ -106,22 +106,22 @@ public sealed partial class SettingsWindow
         row.MinHeight = 28;
         row.Children.Add(Heading(2, Loc.T("岛上提示", "Island"), () => Loc.T("关闭后，通知只进入通知页，不在岛上提示。", "When off, notices only go to the notices page and do not show on the island.")));
         row.Children.Add(Heading(3, Loc.T("接收", "Receive"), () => windows
-            ? Loc.T("关闭后，BrimDeck 不再显示这个应用的通知，也不记入通知页。Windows 自己的通知不受影响。",
-                "When off, BrimDeck no longer shows this app's notices nor keeps them on the notices page. Windows' own notifications are not affected.")
-            : Loc.T("关闭后，BrimDeck 不再显示这个来源的提示，也不记入通知页。", "When off, BrimDeck no longer shows this source's notices nor keeps them on the notices page.")));
+            ? Loc.T("关闭后，BrimDeck 不再显示这个应用的通知。Windows 自己的通知不受影响。",
+                "When off, BrimDeck no longer shows this app's notices. Windows' own notifications are not affected.")
+            : Loc.T("关闭后，BrimDeck 不再显示这个来源的提示。", "When off, BrimDeck no longer shows this source's notices.")));
         if (windows)
         {
-            row.Children.Add(Heading(4, Loc.T("系统横幅", "System banner"), () => Loc.T("与 Windows 设置中这个应用的“显示通知横幅”是同一个开关，显示的是它现在的状态，在这里切换会直接修改 Windows 设置，退出 BrimDeck 后仍然保持。关闭后，通知不再从屏幕右下角弹出，仍会进入 Windows 通知中心，提示音不变。",
-                "The same switch as this app's \"Show notification banners\" in Windows Settings, shown as it is now; switching it here changes Windows Settings and stays after BrimDeck exits. When off, notices no longer pop up in the corner of the screen; they still go to Windows' notification center and keep their sound.")));
+            row.Children.Add(Heading(4, Loc.T("系统横幅", "System banner"), () => Loc.T("与 Windows 设置中这个应用的“显示通知横幅”是同一个开关，显示的是它现在的状态，在这里切换会直接修改 Windows 设置，退出 BrimDeck 后仍然保持。关闭后，通知不再从屏幕右下角弹出，仍会进入 Windows 通知中心，Windows 的通知提示音照常播放。",
+                "The same switch as this app's \"Show notification banners\" in Windows Settings, shown as it is now; switching it here changes Windows Settings and stays after BrimDeck exits. When off, notices no longer pop up in the corner of the screen; they still go to Windows' notification center, and Windows still plays their sound.")));
         }
         return row;
 
         FrameworkElement Heading(int column, string title, Func<string> help)
         {
-            var heading = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            heading.Children.Add(TextLine(title, 11, TextTertiary));
+            // The mark's own box leaves room around it; no more is added between it and the heading.
             var info = HelpIcon(title, help, 12);
-            info.Margin = new Thickness(4, 0, 0, 0); heading.Children.Add(info);
+            info.Margin = new Thickness(0);
+            var heading = new HelpHeading(TextLine(title, 11, TextTertiary), info) { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(heading, column);
             return heading;
         }
@@ -216,28 +216,31 @@ public sealed partial class SettingsWindow
         return (last, false);
     }
 
-    private enum NoteDot { None, Good, Waiting, Problem }
+    private enum NoteDot { None, Good, Waiting, Caution, Problem }
 
     // A status line led by a colored dot (working, nothing yet, something to set right) and followed by a link that does what the
     // line asks; it follows the sources while the page shows (WatchNotices).
     private FrameworkElement DotLine(Func<(NoteDot Dot, string Text, string? Link, Action? Act)> read, double top = 2)
     {
-        var dot = new Ellipse { Width = 6, Height = 6, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 6, 6, 0) };
+        var dot = new Ellipse { Width = 6, Height = 6 };
         var text = TextLine("", 11.5, TextSecondary); text.TextWrapping = TextWrapping.Wrap; text.TextTrimming = TextTrimming.None; text.Margin = new Thickness(0, 0, 6, 0);
         AutomationProperties.SetLiveSetting(text, AutomationLiveSetting.Polite);
         Action? act = null;
         var link = ActionButton("", () => act?.Invoke()); link.Style = (Style)FindResource("SettingsLink"); link.FontSize = 11.5;
         link.Foreground = UI.Brush(_palette.Link); link.VerticalAlignment = VerticalAlignment.Top;
         var line = new WrapPanel { Margin = new Thickness(0, top, 0, 0) };
-        line.Children.Add(dot); line.Children.Add(text); line.Children.Add(link);
+        // The dot on the middle of the text's first line (StepLine).
+        line.Children.Add(new StepLine(dot, text, 6)); line.Children.Add(link);
         void Update()
         {
             var state = read();
             text.Text = state.Text;
-            if (state.Dot == NoteDot.Problem) text.SetResourceReference(TextBlock.ForegroundProperty, "SettingsError");
-            else text.SetResourceReference(TextBlock.ForegroundProperty, "SettingsTextSecondary");
+            text.SetResourceReference(TextBlock.ForegroundProperty, state.Dot switch
+            {
+                NoteDot.Problem => "SettingsError", NoteDot.Caution => "SettingsCaution", _ => "SettingsTextSecondary"
+            });
             dot.Visibility = state.Dot == NoteDot.None ? Visibility.Collapsed : Visibility.Visible;
-            dot.Fill = state.Dot switch { NoteDot.Good => UI.Brush(_palette.Positive), NoteDot.Problem => UI.Brush(_palette.Negative), _ => Brushes.Transparent };
+            dot.Fill = state.Dot switch { NoteDot.Good => UI.Brush(_palette.Positive), NoteDot.Caution => UI.Brush(_palette.Caution), NoteDot.Problem => UI.Brush(_palette.Negative), _ => Brushes.Transparent };
             dot.Stroke = state.Dot == NoteDot.Waiting ? UI.Brush(_palette.InputBorder) : null;
             dot.StrokeThickness = state.Dot == NoteDot.Waiting ? 1.2 : 0;
             act = state.Act;
@@ -328,13 +331,13 @@ public sealed partial class SettingsWindow
         string[] all = steps;
         for (int i = 0; i < all.Length; i++)
         {
-            var number = new TextBlock { Text = (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            var number = new TextBlock { Text = (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), FontSize = 11, FontFamily = SettingsFont(UiFontRole.Panel) };
             number.SetResourceReference(TextBlock.ForegroundProperty, "SettingsTextSecondary");
-            var circle = new Border { Width = 18, Height = 18, CornerRadius = new CornerRadius(9), Child = number, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 1, 10, 0) };
+            var circle = new Border { Width = 18, Height = 18, CornerRadius = new CornerRadius(9) };
             circle.SetResourceReference(Border.BackgroundProperty, "SettingsInset");
-            var text = TextLine(all[i], 12.5, TextPrimary); text.TextWrapping = TextWrapping.Wrap; text.LineHeight = 20; text.TextTrimming = TextTrimming.None;
-            var step = new DockPanel { Margin = new Thickness(0, i == 0 ? 0 : 7, 0, 0) };
-            DockPanel.SetDock(circle, Dock.Left); step.Children.Add(circle); step.Children.Add(text);
+            var text = TextLine(all[i], 12.5, TextPrimary); text.TextWrapping = TextWrapping.Wrap; text.TextTrimming = TextTrimming.None;
+            text.LineHeight = 20; text.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
+            var step = new StepLine(circle, text, 10, number) { Margin = new Thickness(0, i == 0 ? 0 : 7, 0, 0) };
             panel.Children.Add(step);
         }
         return new Border { Child = panel, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0, 1, 0, 0) };

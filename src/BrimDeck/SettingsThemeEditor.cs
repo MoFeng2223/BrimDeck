@@ -271,7 +271,7 @@ public sealed partial class SettingsWindow
     }
     private string OverwriteColor => CautionColor;
     // Amber, for what asks for care: overwriting a theme, a reading that was stopped.
-    private string CautionColor => _palette.Dark ? "#E8B04B" : "#B7791F";
+    private string CautionColor => _palette.Caution;
 
     // The chosen theme of the user's while it has unsaved changes. Its frame stays the chosen card's color, so it is still seen as
     // the theme in use.
