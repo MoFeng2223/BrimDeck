@@ -141,18 +141,22 @@ internal sealed class ProxyWatcher : IDisposable
         if (_running == ProxyDemand.Watch) QueuePoll();
     }
 
-    // Called by ProxyController right after an explicit PATCH /configs mode change so collapsed & expanded views stay in sync immediately.
-    public void NotifyLiveMode(ProxyMode mode)
+    // Called by ProxyController on the UI thread after a session-verified PATCH /configs mode change so collapsed & expanded views stay in sync immediately.
+    public void NotifyLiveMode(ProxyMode mode, ProxyEndpoint? expectedEndpoint = null)
     {
         if (_disposed || mode == ProxyMode.Unknown) return;
-        _lastLiveApiMode = mode;
-        _lastLiveApiTick = Environment.TickCount64;
-        _ = _dispatcher.BeginInvoke(DispatcherPriority.Normal, () =>
+        void Apply()
         {
-            if (_disposed || !Snapshot.Running || Snapshot.Mode == mode) return;
+            if (_disposed || !Snapshot.Running) return;
+            if (expectedEndpoint is not null && Endpoint != expectedEndpoint) return;
+            _lastLiveApiMode = mode;
+            _lastLiveApiTick = Environment.TickCount64;
+            if (Snapshot.Mode == mode) return;
             Snapshot = Snapshot with { Mode = mode };
             Changed?.Invoke();
-        });
+        }
+        if (_dispatcher.CheckAccess()) Apply();
+        else _ = _dispatcher.BeginInvoke(DispatcherPriority.Normal, Apply);
     }
 
     private void Run(ProxyDemand demand)

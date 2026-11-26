@@ -408,19 +408,18 @@ internal sealed class ProxyController : IDisposable
                 verifiedMode = liveMode;
 
             bool closeConnections = Snapshot.LatencyConfig.AutoCloseConnection;
-            _watcher.NotifyLiveMode(verifiedMode);
-
             _ = _dispatcher.BeginInvoke(DispatcherPriority.Normal, () =>
             {
                 if (_disposed || Volatile.Read(ref _sessionId) != sessionId) return;
                 // Re-bump version on commit so any refresh started before PATCH completed is rejected.
                 Interlocked.Increment(ref _mutationVersion);
+                _watcher.NotifyLiveMode(verifiedMode, endpoint);
                 Snapshot = Snapshot with { Status = Snapshot.Status with { Mode = verifiedMode } };
                 StateChanged?.Invoke();
                 QueueRefresh(includeProxies: true);
             });
 
-            if (closeConnections)
+            if (closeConnections && Volatile.Read(ref _sessionId) == sessionId)
                 _ = Task.Run(() => SendStatusAsync(endpoint, HttpMethod.Delete, "/connections", null, TimeSpan.FromSeconds(2), CancellationToken.None));
             return true;
         }
@@ -778,14 +777,21 @@ internal sealed class ProxyController : IDisposable
         });
     }
 
-    private (ProxySubscriptionInfo? Subscription, ProxyLatencyConfig LatencyConfig) ReadLocalVergeMetadata(string? configDir)
+    internal (ProxySubscriptionInfo? Subscription, ProxyLatencyConfig LatencyConfig) ReadLocalVergeMetadata(string? configDir)
     {
-        if (string.IsNullOrEmpty(configDir) || !Directory.Exists(configDir))
+        if (string.IsNullOrEmpty(configDir))
             return (null, ProxyLatencyConfig.Default);
 
         var profilesPath = Path.Combine(configDir, "profiles.yaml");
+        var vergePath = Path.Combine(configDir, "verge.yaml");
         bool hasCachedProfile = _profilesCache.TryGetValue(profilesPath, out var cachedProfile);
+        bool hasCachedLatency = _vergeControlCache.TryGetValue(vergePath, out var cachedLatency);
         ProxySubscriptionInfo? sub = hasCachedProfile ? cachedProfile.Value : null;
+        // Preserve the last successfully read verge.yaml config across transient directory/file failures so auto_close_connection: false is never overwritten by Default.
+        var latency = hasCachedLatency ? cachedLatency.Value : ProxyLatencyConfig.Default;
+        if (!Directory.Exists(configDir))
+            return (sub, latency);
+
         if (TryFileStamp(profilesPath, out var pStamp))
         {
             if (!hasCachedProfile || cachedProfile.WrittenUtc != pStamp.WrittenUtc || cachedProfile.Length != pStamp.Length)
@@ -798,10 +804,6 @@ internal sealed class ProxyController : IDisposable
             }
         }
 
-        var vergePath = Path.Combine(configDir, "verge.yaml");
-        bool hasCachedLatency = _vergeControlCache.TryGetValue(vergePath, out var cachedLatency);
-        // Preserve the last successfully read verge.yaml config across transient read failures so auto_close_connection: false is never overwritten by Default.
-        var latency = hasCachedLatency ? cachedLatency.Value : ProxyLatencyConfig.Default;
         if (TryFileStamp(vergePath, out var vStamp))
         {
             if (!hasCachedLatency || cachedLatency.WrittenUtc != vStamp.WrittenUtc || cachedLatency.Length != vStamp.Length)

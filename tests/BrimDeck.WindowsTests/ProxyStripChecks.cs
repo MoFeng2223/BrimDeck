@@ -64,6 +64,45 @@ internal static class ProxyStripChecks
 
         CheckAutoGroupTabLayout(check);
         CheckNodeListAccessibilityAndPressIdentity(check);
+        CheckMetadataCacheSurvivesMissingDir(check);
+    }
+
+    private static void CheckMetadataCacheSurvivesMissingDir(Action<string, bool> check)
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "brimdeck-proxy-meta-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(tempDir);
+            File.WriteAllText(Path.Combine(tempDir, "verge.yaml"),
+                "auto_close_connection: false\ndefault_latency_test: https://cp.cloudflare.com/generate_204\ndefault_latency_timeout: 2800\n");
+            File.WriteAllText(Path.Combine(tempDir, "profiles.yaml"),
+                "items:\n  - uid: u1\n    name: Main\n    extra:\n      upload: 100\n      download: 200\n      total: 1000\ncurrent: u1\n");
+
+            using var watcher = new BrimDeck.Native.ProxyWatcher(System.Windows.Threading.Dispatcher.CurrentDispatcher);
+            using var controller = new BrimDeck.Native.ProxyController(System.Windows.Threading.Dispatcher.CurrentDispatcher, watcher);
+
+            var (sub1, lat1) = controller.ReadLocalVergeMetadata(tempDir);
+            bool initialOk = sub1 is { ProfileName: "Main", UsedBytes: 300, TotalBytes: 1000 }
+                && !lat1.AutoCloseConnection && lat1.TestUrl == "https://cp.cloudflare.com/generate_204" && lat1.TimeoutMs == 2800;
+
+            // Simulate transient file disappearance: cached settings must remain intact.
+            File.Delete(Path.Combine(tempDir, "verge.yaml"));
+            var (_, latAfterFileGone) = controller.ReadLocalVergeMetadata(tempDir);
+            bool fileGoneOk = !latAfterFileGone.AutoCloseConnection && latAfterFileGone.TimeoutMs == 2800;
+
+            // Simulate transient directory disappearance: cached settings and profile must still remain intact.
+            Directory.Delete(tempDir, recursive: true);
+            var (subAfterDirGone, latAfterDirGone) = controller.ReadLocalVergeMetadata(tempDir);
+            bool dirGoneOk = subAfterDirGone is { ProfileName: "Main" }
+                && !latAfterDirGone.AutoCloseConnection && latAfterDirGone.TimeoutMs == 2800;
+
+            check("proxy controller: preserves cached verge.yaml auto_close_connection=false across file and directory access failures",
+                initialOk && fileGoneOk && dirGoneOk);
+        }
+        finally
+        {
+            try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true); } catch { }
+        }
     }
 
     private static void CheckAutoGroupTabLayout(Action<string, bool> check)
