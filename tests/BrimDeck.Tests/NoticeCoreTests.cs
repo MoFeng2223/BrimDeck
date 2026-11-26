@@ -594,6 +594,14 @@ internal static class NoticeCoreTests
         older.NoticeApps.RemoveAll(rule => rule.Key == "windows:QQ");
         older.Normalize();
         check("A default application the user removed stays removed", older.NoticeRule("windows:QQ") is null);
+        const string clock = "windows:Microsoft.WindowsAlarms_8wekyb3d8bbwe!App";
+        var listedClock = SettingsMigrations.Read($$"""{"AppVersion":"1.3.3","NoticeAppsListed":true,"NoticeApps":[{"Key":"windows:QQ","Name":"QQ"},{"Key":"{{clock}}","Name":"时钟","Enabled":true,"Level":0,"Styles":null,"AccentColor":""}]}""");
+        var changedClock = SettingsMigrations.Read($$"""{"AppVersion":"1.3.3","NoticeAppsListed":true,"NoticeApps":[{"Key":"{{clock}}","Name":"时钟","Enabled":false}]}""");
+        check("The Clock row an earlier version listed goes, unless the user changed it", listedClock.NoticeRule(clock) is null && listedClock.NoticeRule("windows:QQ") is not null
+            && listedClock.NoticeClockUnlisted && changedClock.NoticeRule(clock) is { Enabled: false } && defaults.NoticeClockUnlisted);
+        listedClock.NoticeApps.Add(new() { Key = clock, Name = "时钟" });
+        listedClock.Normalize();
+        check("A Clock row the user adds again stays", listedClock.NoticeRule(clock) is not null);
         var copy = odd.Copy();
         copy.NoticeApps[0].Styles = new(); copy.NoticeStyles.Flash.Icon = false; copy.NoticeWslDistros.Add("Arch");
         check("Copies do not share notice rules, looks or distributions", odd.NoticeApps[0].Styles is null && odd.NoticeStyles.Flash.Icon && odd.NoticeWslDistros.Count == 2);

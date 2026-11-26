@@ -658,7 +658,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     // the user added and their quota sources, the largest loss of any page, so it says so.
     private string ResetConfirmText(int page) => Loc.T($"将把“{_pages[page]}”页的全部设置恢复为默认值。", $"This puts every setting on the {_pages[page]} page back to its default.")
         + (page == 3 ? Loc.T("\n\n应用列表也会换回默认：你添加的应用、各应用的额度来源与自定义设置都会消失。", "\n\nThe application list also goes back to the default: the applications you added, and each one's quota source and custom settings, are removed.") : "")
-        + (page == NoticeAppsSettingsPage ? Loc.T("\n\n列表换回 QQ、微信和时钟：你添加的应用、各应用的等级、横幅开关与单独设置的样子都会消失。", "\n\nThe list goes back to QQ, WeChat and Clock: the applications you added, and each one's level, banner switch and own looks, are removed.") : "");
+        + (page == NoticeAppsSettingsPage ? Loc.T("\n\n列表换回 QQ、微信、钉钉和飞书：你添加的应用、各应用的等级、横幅开关与单独设置的样子都会消失。", "\n\nThe list goes back to QQ, WeChat, DingTalk and Feishu: the applications you added, and each one's level, banner switch and own looks, are removed.") : "");
     private void ResetPage()
     {
         var defaults=new DeckSettings();

@@ -914,6 +914,9 @@ public sealed class DeckSettings
     // The applications listed for a new user (DefaultNoticeApps) have been added: they are added once, so one the user removes
     // stays removed. False in a file saved before the list existed, whose rules then gain them.
     public bool NoticeAppsListed { get; set; }
+    // The Windows Clock row that versions before 1.3.3 listed for a new user has been taken out (OldDefaultClock). It goes once, and
+    // only while still as it was listed, so a Clock row the user changed or adds again stays.
+    public bool NoticeClockUnlisted { get; set; }
     // The mailboxes whose new mail comes as notices (MailCenter); what signs each in is kept in secrets.dat, not here.
     public List<BrimDeck.Core.Mail.MailAccount> MailAccounts { get; set; } = [];
     // The named profiles (DeckProfile, Profiles). The current one's settings are the ordinary members of this class; ReturnProfile is
@@ -1244,6 +1247,11 @@ public sealed class DeckSettings
             rule.Level = rule.Level == NoticeLevel.Silent ? NoticeLevel.Silent : NoticeLevel.Auto;
             rule.Styles?.Normalize();
         }
+        if (!NoticeClockUnlisted)
+        {
+            NoticeApps.RemoveAll(rule => rule.Key == OldDefaultClock && rule.Enabled && rule.Level == NoticeLevel.Auto && rule.Styles is null && rule.AccentColor == "");
+            NoticeClockUnlisted = true;
+        }
         Core.Profiles.Normalize(this);
     }
     public NoticeAppRule? NoticeRule(string appKey) => NoticeApps.FirstOrDefault(rule => rule.Key == appKey);
@@ -1252,7 +1260,8 @@ public sealed class DeckSettings
     public bool NoticeReceives(string appKey) => NoticeRule(appKey) is { } rule ? rule.Enabled : !NoticeKeys.ListedOnly(appKey);
     // What a new user's list of applications holds: QQ (its notifications' application id is "QQ") and WeChat's, DingTalk's
     // and Feishu's taskbar flash (ChatFlash). The Windows Clock was listed too while an unlisted Windows application's notices were not
-    // received; they are now, so it is no longer listed for a new user (a file that has it keeps it until the user removes it).
+    // received; they are now, so it is no longer listed, and a file listed then loses it once (NoticeClockUnlisted).
+    private const string OldDefaultClock = "windows:Microsoft.WindowsAlarms_8wekyb3d8bbwe!App";
     public static IReadOnlyList<NoticeAppRule> DefaultNoticeApps() =>
     [
         new() { Key = NoticeKeys.Windows("QQ"), Name = "QQ" },
