@@ -1,3 +1,5 @@
+using System.Windows.Automation;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media.Animation;
 using System.Windows;
@@ -417,6 +419,23 @@ public sealed partial class SettingsWindow
         Target.Children.Add(row);
     }
 
+    // 天气选择胶囊：用各项自己的图标，不复用监控页的角色圆点胶囊。
+    private ToggleButton WeatherPickChip(UIElement icon, string name, string help)
+    {
+        var content = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        content.Children.Add(icon);
+        content.Children.Add(new TextBlock { Text = name, Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
+        var chip = new ToggleButton { Style = (Style)FindResource("SettingsPickChip"), Content = content, Margin = new Thickness(0, 0, 8, 8), ToolTip = help };
+        // 图标颜色跟随胶囊自身：选中/悬浮时和文字一起变成强调色，取消时回落到次级文字色。
+        Binding ChipInk() => new() { Path = new PropertyPath(nameof(Control.Foreground)),
+            RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(ToggleButton), 1) };
+        if (icon is WeatherMetaIcon glyph) glyph.SetBinding(WeatherMetaIcon.InkProperty, ChipInk());
+        else if (icon is TextBlock emoji) emoji.SetBinding(TextBlock.ForegroundProperty, ChipInk());
+        AutomationProperties.SetName(chip, Loc.T("显示 ", "Show: ") + name);
+        AutomationProperties.SetHelpText(chip, help);
+        return chip;
+    }
+
     private void WeatherChipControls()
     {
         ChipSectionTitle(Loc.T("实况信息", "Current conditions"));
@@ -437,9 +456,9 @@ public sealed partial class SettingsWindow
                     WeatherMetric.Aqi => Loc.T("空气质量", "Air quality"), WeatherMetric.Cloud => Loc.T("云量", "Cloud"),
                     WeatherMetric.Visibility => Loc.T("能见度", "Visibility"), _ => Loc.T("紫外线", "UV")
                 };
-                var refresh = new List<Action>();
-                var chip = PickChip(label, [], hint, refresh);
-                foreach (var update in refresh) update();
+                var icon = new WeatherMetaIcon(WeatherVisuals.MetricKind(item.Metric), (Color)ColorConverter.ConvertFromString(TextSecondary))
+                { Width = 14, Height = 14, VerticalAlignment = VerticalAlignment.Center };
+                var chip = WeatherPickChip(icon, label, hint);
                 chip.IsChecked = item.Visible;
                 chip.Tag = item.Metric;
                 chip.RenderTransform = new TranslateTransform();
@@ -505,9 +524,9 @@ public sealed partial class SettingsWindow
             .Select(button => new LifestyleSlot((LifestyleIndex)button.Tag, button.IsChecked == true)).ToList(), DeckPage.Weather);
         foreach (var slot in S.Weather.LifestyleIndices)
         {
-            var refresh = new List<Action>();
-            var chip = PickChip(Label(slot.Type), [], Loc.T("点击显示或隐藏，拖动调整顺序", "Click to show or hide. Drag to reorder."), refresh);
-            foreach (var update in refresh) update();
+            var icon = new TextBlock { Text = WeatherVisuals.LifestyleIcon(slot.Type), FontFamily = new FontFamily("Segoe UI Emoji, Segoe UI Symbol"),
+                FontSize = 14, Width = 18, VerticalAlignment = VerticalAlignment.Center };
+            var chip = WeatherPickChip(icon, Label(slot.Type), Loc.T("点击显示或隐藏，拖动调整顺序", "Click to show or hide. Drag to reorder."));
             chip.Tag = slot.Type;
             chip.IsChecked = slot.Visible;
             chip.RenderTransform = new TranslateTransform();

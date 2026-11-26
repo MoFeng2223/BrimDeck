@@ -864,21 +864,21 @@ internal sealed class WeatherView : UserControl
         // UniformGrid 按行填充：先写满上排再写下排，同一列的上下两张才会成对。
         (WeatherMetaKind kind, Color ink, string label, string value, Lens? lens, string? tip)[] upper =
         [
-            (WeatherMetaKind.WindSock, Color.FromRgb(140, 200, 220), WindTitle(s), Num(s.WindKmh, " km/h"), Lens.Wind, null),
-            (WeatherMetaKind.Thermo, Color.FromRgb(255, 176, 102), Loc.T("体感", "Feels like"), Num(s.FeelsLike, "°"), Lens.Feels, null),
-            (WeatherMetaKind.Droplet, Color.FromRgb(112, 178, 255), Loc.T("湿度", "Humidity"), s.HumidityPercent >= 0 ? $"{s.HumidityPercent}%" : "--", Lens.Humidity, null),
-            (WeatherMetaKind.Gauge, Color.FromRgb(168, 186, 208), Loc.T("气压", "Pressure"), Num(s.PressureHpa, " hPa"), Lens.Pressure, null),
-            (WeatherMetaKind.AirQuality, WeatherVisuals.AqiInk(s.Aqi), Loc.T("空气质量", "Air quality"), AirLevel(s), Lens.Aqi, null),
-            (WeatherMetaKind.Cloud, Color.FromRgb(196, 214, 232), Loc.T("云量", "Cloud"), Num(s.CloudPercent, "%"), Lens.Cloud, null)
+            (WeatherVisuals.MetricKind(Lens.Wind), Color.FromRgb(140, 200, 220), WindTitle(s), Num(s.WindKmh, " km/h"), Lens.Wind, null),
+            (WeatherVisuals.MetricKind(Lens.Feels), Color.FromRgb(255, 176, 102), Loc.T("体感", "Feels like"), Num(s.FeelsLike, "°"), Lens.Feels, null),
+            (WeatherVisuals.MetricKind(Lens.Humidity), Color.FromRgb(112, 178, 255), Loc.T("湿度", "Humidity"), s.HumidityPercent >= 0 ? $"{s.HumidityPercent}%" : "--", Lens.Humidity, null),
+            (WeatherVisuals.MetricKind(Lens.Pressure), Color.FromRgb(168, 186, 208), Loc.T("气压", "Pressure"), Num(s.PressureHpa, " hPa"), Lens.Pressure, null),
+            (WeatherVisuals.MetricKind(Lens.Aqi), WeatherVisuals.AqiInk(s.Aqi), Loc.T("空气质量", "Air quality"), AirLevel(s), Lens.Aqi, null),
+            (WeatherVisuals.MetricKind(Lens.Cloud), Color.FromRgb(196, 214, 232), Loc.T("云量", "Cloud"), Num(s.CloudPercent, "%"), Lens.Cloud, null)
         ];
         (WeatherMetaKind kind, Color ink, string label, string value, Lens? lens, string? tip)[] lower =
         [
-            (WeatherMetaKind.Gust, Color.FromRgb(126, 212, 226), Loc.T("阵风", "Gusts"), Num(s.WindGustKmh, " km/h"), Lens.Gust, null),
-            (WeatherMetaKind.DewPoint, Color.FromRgb(88, 146, 220), Loc.T("露点", "Dew point"), Num(s.DewPointC, "°"), Lens.DewPoint, null),
+            (WeatherVisuals.MetricKind(Lens.Gust), Color.FromRgb(126, 212, 226), Loc.T("阵风", "Gusts"), Num(s.WindGustKmh, " km/h"), Lens.Gust, null),
+            (WeatherVisuals.MetricKind(Lens.DewPoint), Color.FromRgb(88, 146, 220), Loc.T("露点", "Dew point"), Num(s.DewPointC, "°"), Lens.DewPoint, null),
             (PrecipIcon(s.PrecipType), Color.FromRgb(96, 168, 246), PrecipTitle(s), Num(s.PrecipitationMm, " mm", 1), Lens.Precip, PrecipTip(s)),
-            (WeatherMetaKind.Eye, Color.FromRgb(150, 204, 232), Loc.T("能见度", "Visibility"), Num(s.VisibilityKm, " km", 1), Lens.Visibility, null),
-            (WeatherMetaKind.Uv, Color.FromRgb(255, 206, 112), Loc.T("紫外线", "UV"), Num(s.UvIndex, ""), Lens.Uv, null),
-            (WeatherMetaKind.Sunrise, Color.FromRgb(255, 200, 90), Loc.T($"日升 {rise}", $"Sunrise {rise}"), Loc.T($"日落 {set}", $"Sunset {set}"), Lens.Celestial, null)
+            (WeatherVisuals.MetricKind(Lens.Visibility), Color.FromRgb(150, 204, 232), Loc.T("能见度", "Visibility"), Num(s.VisibilityKm, " km", 1), Lens.Visibility, null),
+            (WeatherVisuals.MetricKind(Lens.Uv), Color.FromRgb(255, 206, 112), Loc.T("紫外线", "UV"), Num(s.UvIndex, ""), Lens.Uv, null),
+            (WeatherVisuals.MetricKind(Lens.Celestial), Color.FromRgb(255, 200, 90), Loc.T($"日升 {rise}", $"Sunrise {rise}"), Loc.T($"日落 {set}", $"Sunset {set}"), Lens.Celestial, null)
         ];
         _drawnChips = [.. _app.Settings.Weather.Chips];
         var available = upper.Concat(lower).ToDictionary(tile => tile.lens!.Value);
@@ -1024,13 +1024,7 @@ internal sealed class WeatherView : UserControl
                 var item = items[i];
                 string name = item.Name.EndsWith("指数") && item.Name.Length > 2 ? item.Name[..^2] : item.Name;
                 string value = item.Category.Length > 0 ? item.Category : item.Level;
-                string icon = item.Type switch
-                {
-                    "1" => "🏃", "2" => "🚗", "3" => "👕", "4" => "🎣",
-                    "5" => "☀", "6" => "🧳", "7" => "🌼", "8" => "🛋",
-                    "9" => "💊", "10" => "☁", "11" => "❄", "12" => "🕶",
-                    "13" => "💄", "14" => "🧺", "15" => "🚦", "16" => "🧴", _ => "📋"
-                };
+                string icon = WeatherVisuals.LifestyleIcon(item.Type);
                 var header = new Grid();
                 header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star) });

@@ -58,11 +58,17 @@ internal sealed class WeatherMetaIcon : FrameworkElement
         }) { var g=Geometry.Parse(data); g.Freeze(); map[kind]=g; }
         return map;
     }
-    private readonly WeatherMetaKind kind; private readonly Pen pen;
-    internal WeatherMetaIcon(WeatherMetaKind kind,Color ink) { this.kind=kind; pen=new Pen(new SolidColorBrush(ink),1.5){StartLineCap=PenLineCap.Round,EndLineCap=PenLineCap.Round,LineJoin=PenLineJoin.Round}; IsHitTestVisible=false; }
+    // 图标颜色可绑定：设置页胶囊让它跟随按钮 Foreground，主页读数卡仍传固定实况色。
+    internal static readonly DependencyProperty InkProperty = DependencyProperty.Register(
+        nameof(Ink), typeof(Brush), typeof(WeatherMetaIcon), new PropertyMetadata(Brushes.Gray));
+    internal Brush Ink { get => (Brush)GetValue(InkProperty); set => SetValue(InkProperty, value); }
+    private readonly WeatherMetaKind kind;
+    internal WeatherMetaIcon(WeatherMetaKind kind, Color ink) : this(kind, new SolidColorBrush(ink)) { }
+    internal WeatherMetaIcon(WeatherMetaKind kind, Brush ink) { this.kind=kind; Ink=ink; IsHitTestVisible=false; }
     protected override void OnRender(DrawingContext d)
     {
         base.OnRender(d); double s=Math.Min(ActualWidth,ActualHeight)/16; if(s<=0) return;
+        var pen=new Pen(Ink,1.5){StartLineCap=PenLineCap.Round,EndLineCap=PenLineCap.Round,LineJoin=PenLineJoin.Round};
         d.PushTransform(new MatrixTransform(s,0,0,s,(ActualWidth-16*s)/2,(ActualHeight-16*s)/2));
         d.DrawGeometry(null,pen,Shapes[kind]);
         d.Pop();
@@ -293,6 +299,36 @@ internal static class WeatherVisuals
         4 => Color.FromRgb(0xEB, 0x57, 0x57), 5 => Color.FromRgb(0x9B, 0x51, 0xE0),
         _ => Color.FromRgb(0xB1, 0x2E, 0x3A)
     };
+    // 设置页选择胶囊与主页读数卡共用同一套元信息图标；主页可按实况改颜色，这里只决定图形。
+    internal static WeatherMetaKind MetricKind(WeatherMetric metric) => metric switch
+    {
+        WeatherMetric.Wind => WeatherMetaKind.WindSock,
+        WeatherMetric.Feels => WeatherMetaKind.Thermo,
+        WeatherMetric.Humidity => WeatherMetaKind.Droplet,
+        WeatherMetric.Gust => WeatherMetaKind.Gust,
+        WeatherMetric.DewPoint => WeatherMetaKind.DewPoint,
+        WeatherMetric.Celestial => WeatherMetaKind.Sunrise,
+        WeatherMetric.Precip => WeatherMetaKind.Rain,
+        WeatherMetric.Pressure => WeatherMetaKind.Gauge,
+        WeatherMetric.Aqi => WeatherMetaKind.AirQuality,
+        WeatherMetric.Cloud => WeatherMetaKind.Cloud,
+        WeatherMetric.Visibility => WeatherMetaKind.Eye,
+        WeatherMetric.Uv => WeatherMetaKind.Uv,
+        _ => WeatherMetaKind.Location
+    };
+    // 和风生活指数 ID → 默认图标。14/15/16 分别是晾晒/交通/防晒，别按旧编号错配成眼镜/雨伞/风。
+    internal static string LifestyleIcon(LifestyleIndex type) => type switch
+    {
+        LifestyleIndex.Sport => "🏃", LifestyleIndex.CarWash => "🚗", LifestyleIndex.Clothing => "👕",
+        LifestyleIndex.Fishing => "🎣", LifestyleIndex.Ultraviolet => "☀", LifestyleIndex.Travel => "🧳",
+        LifestyleIndex.Pollen => "🌼", LifestyleIndex.Comfort => "🛋", LifestyleIndex.ColdRisk => "💊",
+        LifestyleIndex.AirDispersion => "☁", LifestyleIndex.AirConditioning => "❄", LifestyleIndex.Sunglasses => "🕶",
+        LifestyleIndex.Makeup => "💄", LifestyleIndex.DryingClothes => "🧺", LifestyleIndex.Traffic => "🚦",
+        LifestyleIndex.SunProtection => "🧴", _ => "📋"
+    };
+    // 来源给的是字符串 ID；非数字或未知 ID 沿用通用图标。
+    internal static string LifestyleIcon(string type)
+        => int.TryParse(type, out int id) && Enum.IsDefined((LifestyleIndex)id) ? LifestyleIcon((LifestyleIndex)id) : "📋";
     // 天空渐变随昼夜与天气切换：晴昼蓝、阴霾灰、雨夜深蓝灰、雷雨紫，夜晚统一深邃蓝黑。
     internal static LinearGradientBrush Sky(int code, bool day)
     {
