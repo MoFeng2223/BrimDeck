@@ -319,12 +319,13 @@ public sealed partial class SettingsWindow
         _ => null
     };
 
-    // Numbered steps under a heading, the last always saying what shows once they worked.
+    // Numbered steps under a heading. The row's status line says on its own whether messages arrive, and the steps of DingTalk
+    // and Feishu stay shown while they do, so no step says what shows once they worked.
     private FrameworkElement Steps(string heading, string[] steps)
     {
         var panel = new StackPanel { Margin = new Thickness(0, 12, 0, 12) };
         var title = TextLine(heading, 12, TextSecondary); title.Margin = new Thickness(0, 0, 0, 8); panel.Children.Add(title);
-        string[] all = [.. steps, Loc.T("收到下一条消息后，这一行会显示“正在接收”。", "Once the next message arrives, this row says \"Receiving\".")];
+        string[] all = steps;
         for (int i = 0; i < all.Length; i++)
         {
             var number = new TextBlock { Text = (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };

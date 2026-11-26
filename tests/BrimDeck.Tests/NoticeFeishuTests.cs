@@ -42,6 +42,9 @@ internal static class NoticeFeishuTests
         var hint = NoticeAppWindows.Hint(FeishuBanners.StartMenuId, null);
         check("Feishu: opening it looks for a window of Feishu.exe or Lark.exe before starting its Start menu entry", WindowsNoticeList.IsAppId(FeishuBanners.StartMenuId)
             && hint.Matches(@"D:\Programs\Feishu\app\Feishu.exe") && hint.Matches(@"C:\Lark\Lark.exe") && !hint.Matches(@"D:\Programs\Feishu\app\file_search_host.exe"));
+        check("Feishu: a banner's, a flash's and a DingTalk popup's notice is never called closed at the source; a Windows notification's can be",
+            NoticeKeys.NeverClosed("feishu:msg:3:638999") && NoticeKeys.NeverClosed("flash:feishu:ab12cd34:2") && NoticeKeys.NeverClosed("dingtalk:msg:1:638999")
+            && !NoticeKeys.NeverClosed("dingtalk:call:1:638999") && !NoticeKeys.NeverClosed("windows:QQ:5") && !NoticeKeys.NeverClosed("") && !NoticeKeys.NeverClosed(null));
         check("Feishu: only Feishu.exe and Lark.exe are Feishu", FeishuBanners.IsProgram("Feishu.exe") && FeishuBanners.IsProgram("LARK.EXE")
             && !FeishuBanners.IsProgram("FeishuUpdate.exe") && !FeishuBanners.IsProgram("") && !FeishuBanners.IsProgram(null));
     }

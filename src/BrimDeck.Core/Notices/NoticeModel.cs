@@ -212,6 +212,11 @@ public static class NoticeKeys
     // The sources that show only once the user lists them on the "应用" page: the chats whose taskbar button flashes (ChatFlash),
     // since watching the taskbar is the user's choice. Windows applications, command-line and WSL sources show without a rule.
     public static bool ListedOnly(string appKey) => appKey.StartsWith("flash:", StringComparison.Ordinal);
+    // The notices whose source never says they are gone: a flash of a taskbar button (ChatFlashFilter, "flash:"), a Feishu
+    // banner read (FeishuWatch, "feishu:msg:") and a DingTalk message popup read (DingTalkWatch, "dingtalk:msg:"). The notices
+    // page does not call them closed at the source (a notice kept from before BrimDeck restarted is), nor shows them faded.
+    public static bool NeverClosed(string? instanceKey) => instanceKey is { } key
+        && (key.StartsWith("flash:", StringComparison.Ordinal) || key.StartsWith("feishu:msg:", StringComparison.Ordinal) || key.StartsWith("dingtalk:msg:", StringComparison.Ordinal));
     // The rows of the "Windows 应用" list on the "应用" page: Windows applications and the taskbar-flash chats. Not the notices of
     // a sender Windows does not name (UnknownWindowsApp): they cannot be set apart by application.
     public static bool OnAppList(string appKey) => appKey.StartsWith("windows:", StringComparison.Ordinal) && appKey != UnknownWindowsApp || ListedOnly(appKey);

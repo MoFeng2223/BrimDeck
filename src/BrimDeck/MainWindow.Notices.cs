@@ -673,7 +673,7 @@ public partial class MainWindow
         title.Margin = new Thickness(0, 2, 0, 0);
         if (shown.HasCode && notice.Title.Length > 0) AutomationProperties.SetName(title, shown.SpokenTitle);
         who.Children.Add(TrimmedLine(title));
-        string context = NoticeFormOpen(notice) && NoticeText.Summary(shown.Body) is { Length: > 0 } summary ? summary : notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? NoticeText.CategoryName(notice.Category) : Loc.T("来源已关闭这条通知", "Closed at the source");
+        string context = NoticeFormOpen(notice) && NoticeText.Summary(shown.Body) is { Length: > 0 } summary ? summary : ShownPresent(notice) ? NoticeText.CategoryName(notice.Category) : Loc.T("来源已关闭这条通知", "Closed at the source");
         Grid? contextLine = null;
         if (context.Length > 0) { var ctx = SelectableWords(context, 12, 17, UI.Tertiary, line: true); ctx.Margin = new Thickness(0, 2, 0, 0); contextLine = TrimmedLine(ctx); who.Children.Add(contextLine); }
         // On a narrow column the cover is smaller, and the third line is left out where it does not fit whole: cut, it says too
@@ -877,6 +877,10 @@ public partial class MainWindow
             if (element is TextBox box) return box;
         return null;
     }
+
+    // Whether the page shows a notice as still there at its source: a test notice, and one whose source never says it is gone
+    // (NoticeKeys.NeverClosed: a taskbar flash, a Feishu banner, a DingTalk message popup), are never "closed at the source".
+    private static bool ShownPresent(Notice notice) => notice.SourcePresent || notice.Origin == NoticeOrigin.Test || NoticeKeys.NeverClosed(notice.InstanceKey);
 
     // The status line's words and its dot's color (null for no dot).
     private static (string Text, string? Color) StatusOf(Notice notice, NoticeCenter center)
@@ -1253,7 +1257,7 @@ public partial class MainWindow
                 HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -3, -3, 0), IsHitTestVisible = false });
         grid.Children.Add(icon);
         // The title, the time and a line of preview; the time moves under a title it would leave too short (NoticeRowTexts).
-        var texts = new NoticeRowTexts { Opacity = notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? 1 : .78 };
+        var texts = new NoticeRowTexts { Opacity = ShownPresent(notice) ? 1 : .78 };
         Grid.SetColumn(texts, 1); grid.Children.Add(texts);
         var codeWords = NoticeCodes.Words(notice, Settings.NoticeCodes);
         var title = IslandNotice.Directed(UI.Fixed(codeWords.Title.Length > 0 ? codeWords.Title : notice.AppName, 12.5, NoticeLines.RowTitleLine, UI.Primary, FontWeights.SemiBold));
