@@ -864,21 +864,21 @@ internal sealed class WeatherView : UserControl
         // UniformGrid 按行填充：先写满上排再写下排，同一列的上下两张才会成对。
         (WeatherMetaKind kind, Color ink, string label, string value, Lens? lens, string? tip)[] upper =
         [
-            (WeatherVisuals.MetricKind(Lens.Wind), Color.FromRgb(140, 200, 220), WindTitle(s), Num(s.WindKmh, " km/h"), Lens.Wind, null),
-            (WeatherVisuals.MetricKind(Lens.Feels), Color.FromRgb(255, 176, 102), Loc.T("体感", "Feels like"), Num(s.FeelsLike, "°"), Lens.Feels, null),
-            (WeatherVisuals.MetricKind(Lens.Humidity), Color.FromRgb(112, 178, 255), Loc.T("湿度", "Humidity"), s.HumidityPercent >= 0 ? $"{s.HumidityPercent}%" : "--", Lens.Humidity, null),
-            (WeatherVisuals.MetricKind(Lens.Pressure), Color.FromRgb(168, 186, 208), Loc.T("气压", "Pressure"), Num(s.PressureHpa, " hPa"), Lens.Pressure, null),
+            (WeatherVisuals.MetricKind(Lens.Wind), WeatherVisuals.MetricInk(Lens.Wind), WindTitle(s), Num(s.WindKmh, " km/h"), Lens.Wind, null),
+            (WeatherVisuals.MetricKind(Lens.Feels), WeatherVisuals.MetricInk(Lens.Feels), Loc.T("体感", "Feels like"), Num(s.FeelsLike, "°"), Lens.Feels, null),
+            (WeatherVisuals.MetricKind(Lens.Humidity), WeatherVisuals.MetricInk(Lens.Humidity), Loc.T("湿度", "Humidity"), s.HumidityPercent >= 0 ? $"{s.HumidityPercent}%" : "--", Lens.Humidity, null),
+            (WeatherVisuals.MetricKind(Lens.Pressure), WeatherVisuals.MetricInk(Lens.Pressure), Loc.T("气压", "Pressure"), Num(s.PressureHpa, " hPa"), Lens.Pressure, null),
             (WeatherVisuals.MetricKind(Lens.Aqi), WeatherVisuals.AqiInk(s.Aqi), Loc.T("空气质量", "Air quality"), AirLevel(s), Lens.Aqi, null),
-            (WeatherVisuals.MetricKind(Lens.Cloud), Color.FromRgb(196, 214, 232), Loc.T("云量", "Cloud"), Num(s.CloudPercent, "%"), Lens.Cloud, null)
+            (WeatherVisuals.MetricKind(Lens.Cloud), WeatherVisuals.MetricInk(Lens.Cloud), Loc.T("云量", "Cloud"), Num(s.CloudPercent, "%"), Lens.Cloud, null)
         ];
         (WeatherMetaKind kind, Color ink, string label, string value, Lens? lens, string? tip)[] lower =
         [
-            (WeatherVisuals.MetricKind(Lens.Gust), Color.FromRgb(126, 212, 226), Loc.T("阵风", "Gusts"), Num(s.WindGustKmh, " km/h"), Lens.Gust, null),
-            (WeatherVisuals.MetricKind(Lens.DewPoint), Color.FromRgb(88, 146, 220), Loc.T("露点", "Dew point"), Num(s.DewPointC, "°"), Lens.DewPoint, null),
-            (PrecipIcon(s.PrecipType), Color.FromRgb(96, 168, 246), PrecipTitle(s), Num(s.PrecipitationMm, " mm", 1), Lens.Precip, PrecipTip(s)),
-            (WeatherVisuals.MetricKind(Lens.Visibility), Color.FromRgb(150, 204, 232), Loc.T("能见度", "Visibility"), Num(s.VisibilityKm, " km", 1), Lens.Visibility, null),
-            (WeatherVisuals.MetricKind(Lens.Uv), Color.FromRgb(255, 206, 112), Loc.T("紫外线", "UV"), Num(s.UvIndex, ""), Lens.Uv, null),
-            (WeatherVisuals.MetricKind(Lens.Celestial), Color.FromRgb(255, 200, 90), Loc.T($"日升 {rise}", $"Sunrise {rise}"), Loc.T($"日落 {set}", $"Sunset {set}"), Lens.Celestial, null)
+            (WeatherVisuals.MetricKind(Lens.Gust), WeatherVisuals.MetricInk(Lens.Gust), Loc.T("阵风", "Gusts"), Num(s.WindGustKmh, " km/h"), Lens.Gust, null),
+            (WeatherVisuals.MetricKind(Lens.DewPoint), WeatherVisuals.MetricInk(Lens.DewPoint), Loc.T("露点", "Dew point"), Num(s.DewPointC, "°"), Lens.DewPoint, null),
+            (PrecipIcon(s.PrecipType), WeatherVisuals.MetricInk(Lens.Precip), PrecipTitle(s), Num(s.PrecipitationMm, " mm", 1), Lens.Precip, PrecipTip(s)),
+            (WeatherVisuals.MetricKind(Lens.Visibility), WeatherVisuals.MetricInk(Lens.Visibility), Loc.T("能见度", "Visibility"), Num(s.VisibilityKm, " km", 1), Lens.Visibility, null),
+            (WeatherVisuals.MetricKind(Lens.Uv), WeatherVisuals.MetricInk(Lens.Uv), Loc.T("紫外线", "UV"), Num(s.UvIndex, ""), Lens.Uv, null),
+            (WeatherVisuals.MetricKind(Lens.Celestial), WeatherVisuals.MetricInk(Lens.Celestial), Loc.T($"日升 {rise}", $"Sunrise {rise}"), Loc.T($"日落 {set}", $"Sunset {set}"), Lens.Celestial, null)
         ];
         _drawnChips = [.. _app.Settings.Weather.Chips];
         var available = upper.Concat(lower).ToDictionary(tile => tile.lens!.Value);

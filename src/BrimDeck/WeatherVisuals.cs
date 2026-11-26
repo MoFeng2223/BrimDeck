@@ -58,17 +58,11 @@ internal sealed class WeatherMetaIcon : FrameworkElement
         }) { var g=Geometry.Parse(data); g.Freeze(); map[kind]=g; }
         return map;
     }
-    // 图标颜色可绑定：设置页胶囊让它跟随按钮 Foreground，主页读数卡仍传固定实况色。
-    internal static readonly DependencyProperty InkProperty = DependencyProperty.Register(
-        nameof(Ink), typeof(Brush), typeof(WeatherMetaIcon), new PropertyMetadata(Brushes.Gray));
-    internal Brush Ink { get => (Brush)GetValue(InkProperty); set => SetValue(InkProperty, value); }
-    private readonly WeatherMetaKind kind;
-    internal WeatherMetaIcon(WeatherMetaKind kind, Color ink) : this(kind, new SolidColorBrush(ink)) { }
-    internal WeatherMetaIcon(WeatherMetaKind kind, Brush ink) { this.kind=kind; Ink=ink; IsHitTestVisible=false; }
+    private readonly WeatherMetaKind kind; private readonly Pen pen;
+    internal WeatherMetaIcon(WeatherMetaKind kind,Color ink) { this.kind=kind; pen=new Pen(new SolidColorBrush(ink),1.5){StartLineCap=PenLineCap.Round,EndLineCap=PenLineCap.Round,LineJoin=PenLineJoin.Round}; IsHitTestVisible=false; }
     protected override void OnRender(DrawingContext d)
     {
         base.OnRender(d); double s=Math.Min(ActualWidth,ActualHeight)/16; if(s<=0) return;
-        var pen=new Pen(Ink,1.5){StartLineCap=PenLineCap.Round,EndLineCap=PenLineCap.Round,LineJoin=PenLineJoin.Round};
         d.PushTransform(new MatrixTransform(s,0,0,s,(ActualWidth-16*s)/2,(ActualHeight-16*s)/2));
         d.DrawGeometry(null,pen,Shapes[kind]);
         d.Pop();
@@ -315,6 +309,23 @@ internal static class WeatherVisuals
         WeatherMetric.Visibility => WeatherMetaKind.Eye,
         WeatherMetric.Uv => WeatherMetaKind.Uv,
         _ => WeatherMetaKind.Location
+    };
+    // 主页读数卡的默认配色。设置页胶囊用同一套颜色，让图标仍是那一项自己的颜色，而不是按钮文字色。
+    internal static Color MetricInk(WeatherMetric metric) => metric switch
+    {
+        WeatherMetric.Wind => Color.FromRgb(140, 200, 220),
+        WeatherMetric.Feels => Color.FromRgb(255, 176, 102),
+        WeatherMetric.Humidity => Color.FromRgb(112, 178, 255),
+        WeatherMetric.Gust => Color.FromRgb(126, 212, 226),
+        WeatherMetric.DewPoint => Color.FromRgb(88, 146, 220),
+        WeatherMetric.Celestial => Color.FromRgb(255, 200, 90),
+        WeatherMetric.Precip => Color.FromRgb(96, 168, 246),
+        WeatherMetric.Pressure => Color.FromRgb(168, 186, 208),
+        WeatherMetric.Aqi => AqiInk(-1),
+        WeatherMetric.Cloud => Color.FromRgb(196, 214, 232),
+        WeatherMetric.Visibility => Color.FromRgb(150, 204, 232),
+        WeatherMetric.Uv => Color.FromRgb(255, 206, 112),
+        _ => Color.FromRgb(160, 180, 200)
     };
     // 和风生活指数 ID → 默认图标。14/15/16 分别是晾晒/交通/防晒，别按旧编号错配成眼镜/雨伞/风。
     internal static string LifestyleIcon(LifestyleIndex type) => type switch

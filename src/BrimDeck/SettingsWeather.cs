@@ -1,5 +1,4 @@
 using System.Windows.Automation;
-using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media.Animation;
 using System.Windows;
@@ -426,11 +425,6 @@ public sealed partial class SettingsWindow
         content.Children.Add(icon);
         content.Children.Add(new TextBlock { Text = name, Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
         var chip = new ToggleButton { Style = (Style)FindResource("SettingsPickChip"), Content = content, Margin = new Thickness(0, 0, 8, 8), ToolTip = help };
-        // 图标颜色跟随胶囊自身：选中/悬浮时和文字一起变成强调色，取消时回落到次级文字色。
-        Binding ChipInk() => new() { Path = new PropertyPath(nameof(Control.Foreground)),
-            RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(ToggleButton), 1) };
-        if (icon is WeatherMetaIcon glyph) glyph.SetBinding(WeatherMetaIcon.InkProperty, ChipInk());
-        else if (icon is TextBlock emoji) emoji.SetBinding(TextBlock.ForegroundProperty, ChipInk());
         AutomationProperties.SetName(chip, Loc.T("显示 ", "Show: ") + name);
         AutomationProperties.SetHelpText(chip, help);
         return chip;
@@ -456,7 +450,7 @@ public sealed partial class SettingsWindow
                     WeatherMetric.Aqi => Loc.T("空气质量", "Air quality"), WeatherMetric.Cloud => Loc.T("云量", "Cloud"),
                     WeatherMetric.Visibility => Loc.T("能见度", "Visibility"), _ => Loc.T("紫外线", "UV")
                 };
-                var icon = new WeatherMetaIcon(WeatherVisuals.MetricKind(item.Metric), (Color)ColorConverter.ConvertFromString(TextSecondary))
+                var icon = new WeatherMetaIcon(WeatherVisuals.MetricKind(item.Metric), WeatherVisuals.MetricInk(item.Metric))
                 { Width = 14, Height = 14, VerticalAlignment = VerticalAlignment.Center };
                 var chip = WeatherPickChip(icon, label, hint);
                 chip.IsChecked = item.Visible;
