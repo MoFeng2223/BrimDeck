@@ -15,6 +15,7 @@ internal static class AppBrandIcons
     private static readonly Dictionary<string, string> s_byKey = new(StringComparer.Ordinal)
     {
         ["flash:wechat"] = "wechat",
+        ["flash:dingtalk"] = "dingtalk",
         [NoticeKeys.Windows("QQ")] = "qq",
         [NoticeKeys.Windows("ali.dingtalk.release")] = "dingtalk",
         [NoticeKeys.Windows("com.electron.Feishu")] = "feishu"

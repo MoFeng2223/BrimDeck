@@ -3,22 +3,29 @@ namespace BrimDeck.Core.Notices;
 // A chat application that tells the user about a new message only by flashing its taskbar button (desktop WeChat 4.x sends no
 // Windows notification). Executables are matched by file name, case-insensitively; a row that is not Enabled is known but
 // never reported, so another application is added by one row and one switch here. RestoreUri, when set, is the address the
-// application's own URL scheme brings its window forward with (ChatRestore); only WeChat has one.
-public sealed record ChatFlashApp(string Id, string NameZh, string NameEn, IReadOnlyList<string> Executables, bool Enabled, string? RestoreUri = null)
+// application's own URL scheme brings its window forward with (ChatRestore); only WeChat has one. QuietGap, when set, is how
+// long the button must stay still before a flash is another message (ChatFlashFilter); without it a round lasts the filter's
+// window from its first flash.
+public sealed record ChatFlashApp(string Id, string NameZh, string NameEn, IReadOnlyList<string> Executables, bool Enabled, string? RestoreUri = null, TimeSpan? QuietGap = null)
 {
     public string Name => Loc.T(NameZh, NameEn);
 }
 
 public static class ChatFlashApps
 {
-    // Only WeChat is on. The others are rows waiting to be verified on a real machine (their executable names are not checked).
+    // DingTalk flashes its button until the message is read: three flashes about 1.06 seconds apart, then still for 1.1 to
+    // 3.2 seconds (measured 2026-11-26), and again. Four seconds of stillness end a message, so a flashing that goes on is one.
+    public static readonly TimeSpan DingTalkQuiet = TimeSpan.FromSeconds(4);
+
+    // WeChat and DingTalk are on (DingTalk flashes while "消息任务栏图标闪动" is on in its settings). The others are rows waiting
+    // to be verified on a real machine (their executable names are not checked).
     public static readonly IReadOnlyList<ChatFlashApp> All =
     [
         new("wechat", "微信", "WeChat", ["Weixin.exe", "WeChat.exe"], true, ChatRestore.WeChatUri),
         new("wecom", "企业微信", "WeCom", ["WXWork.exe"], false),
         new("qq", "QQ", "QQ", ["QQ.exe"], false),
         new("feishu", "飞书", "Feishu", ["Feishu.exe", "Lark.exe"], false),
-        new("dingtalk", "钉钉", "DingTalk", ["DingTalk.exe"], false)
+        new("dingtalk", "钉钉", "DingTalk", ["DingTalk.exe"], true, QuietGap: DingTalkQuiet)
     ];
 
     public static ChatFlashApp? Find(string? executable, IReadOnlyList<ChatFlashApp>? apps = null)
@@ -59,7 +66,7 @@ public sealed class ChatFlashFilter(Func<nint, string?> executable, Func<nint, b
     // are that one message; a later flash is another message and is told again. The user chose five seconds.
     public static readonly TimeSpan DefaultWindow = TimeSpan.FromSeconds(5);
     private readonly TimeSpan _window = window ?? DefaultWindow;
-    private readonly Dictionary<string, (DateTimeOffset Start, int Group)> _groups = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (DateTimeOffset Start, DateTimeOffset Latest, int Group)> _groups = new(StringComparer.Ordinal);
 
     public NoticeInput? OnFlash(nint handle)
     {
@@ -69,11 +76,13 @@ public sealed class ChatFlashFilter(Func<nint, string?> executable, Func<nint, b
         int group = 1;
         if (_groups.TryGetValue(app.Id, out var last))
         {
-            // A clock that went back starts a new group rather than merging into one from the future.
-            group = at >= last.Start && at - last.Start < _window ? last.Group : last.Group + 1;
-            if (group == last.Group) return Input(app, group);
+            // A clock that went back starts a new group rather than merging into one from the future. An application that
+            // flashes until read is one message while it keeps flashing; any other, for the window from its first flash.
+            bool same = app.QuietGap is { } quiet ? at >= last.Latest && at - last.Latest < quiet : at >= last.Start && at - last.Start < _window;
+            if (same) { _groups[app.Id] = last with { Latest = at }; return Input(app, last.Group); }
+            group = last.Group + 1;
         }
-        _groups[app.Id] = (at, group);
+        _groups[app.Id] = (at, at, group);
         return Input(app, group);
     }
 

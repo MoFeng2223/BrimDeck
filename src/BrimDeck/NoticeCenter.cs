@@ -168,7 +168,7 @@ internal sealed partial class NoticeCenter : IDisposable
         {
             _windows.Stop(); _wsl.Apply([]);
             EndWaits();
-            StopChatFlash(); ApplyWeChat(false);
+            StopChatFlash(); ApplyWeChat(false); ApplyDingTalk(false);
             _maintenance.Stop(); _quietCheck.Stop();
             ScheduleDue();
             // Whatever shows ends and nothing waiting shows later; quota alerts and track changes keep working through the
@@ -188,6 +188,7 @@ internal sealed partial class NoticeCenter : IDisposable
         // The taskbar flash source runs while a chat it watches is listed and received (WeChat is, for a new user).
         if (ChatFlashApps.All.Any(app => app.Enabled && settings.NoticeRule("flash:" + app.Id) is { Enabled: true })) StartChatFlash(); else StopChatFlash();
         ApplyWeChat(settings.NoticeRule(WeChatRows.AppKey) is { Enabled: true, ReadContent: true });
+        ApplyDingTalk(settings.NoticeRule(DingTalkPopups.AppKey) is { Enabled: true, ReadContent: true });
         _wsl.Apply(settings.NoticeWslDistros);
         _maintenance.Start();
         Hub.Prune(DateTimeOffset.UtcNow);
@@ -1238,6 +1239,7 @@ internal sealed partial class NoticeCenter : IDisposable
         _pipe?.Dispose(); _pipe = null;
         _flash?.Dispose(); _flash = null;
         _wechat?.Dispose(); _wechat = null;
+        _dingTalk?.Dispose(); _dingTalk = null;
         _windows.Dispose(); _wsl.Dispose();
         _disposed = true;
         // BrimDeck exits: the senders that wait hear nothing more (their connections end with the pipe), and no timer of

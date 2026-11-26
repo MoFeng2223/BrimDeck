@@ -10,7 +10,7 @@ internal static class NoticeFlashTests
     {
         string language = Loc.Language;
         Loc.Use(Loc.Chinese);
-        try { Decisions(check); Coalescing(check); Table(check); Setting(check); }
+        try { Decisions(check); Coalescing(check); Table(check); Setting(check); DingTalk(check); }
         finally { Loc.Use(language); }
     }
 
@@ -87,7 +87,7 @@ internal static class NoticeFlashTests
 
     private static void Table(Action<string, bool> check)
     {
-        check("Flash: only WeChat is enabled", ChatFlashApps.All.Where(app => app.Enabled).Select(app => app.Id).SequenceEqual(["wechat"]));
+        check("Flash: WeChat and DingTalk are enabled", ChatFlashApps.All.Where(app => app.Enabled).Select(app => app.Id).SequenceEqual(["wechat", "dingtalk"]));
         check("Flash: ids are unique and every row names executables", ChatFlashApps.All.Select(app => app.Id).Distinct().Count() == ChatFlashApps.All.Count
             && ChatFlashApps.All.All(app => app.Executables.Count > 0 && app.Executables.All(e => e.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))));
         check("Flash: lookups by name and by path", ChatFlashApps.Find(@"D:\x\Weixin.exe")?.Id == "wechat" && ChatFlashApps.Find("") is null && ChatFlashApps.Find(null) is null && ChatFlashApps.Find("weixin") is null);
@@ -101,11 +101,54 @@ internal static class NoticeFlashTests
             && ChatFlashApps.InstalledPath(wechat, []) is null);
     }
 
+    // DingTalk's windows as UI Automation read them on 2026-11-26 (DingTalkPopups).
+    private static void DingTalk(Action<string, bool> check)
+    {
+        static DingTalkText L(string name) => new("ddesign::Label", name);
+        static DingTalkText Q(string name) => new("QLabel", name);
+        static DingTalkText A(string name) => new("dtguitoolkit::AutoAdjustLabel", name);
+        var mention = DingTalkPopups.Read(DingTalkPopups.MessageClass, "Form", [Q("消息"), Q("余昊"), L("余昊,余昊"), L("[有人@你]余昊: @余昊 ")], "k1");
+        check("DingTalk: a popup is the chat and its message, as a DingTalk message notice", mention is { AppKey: DingTalkPopups.AppKey, AppName: "钉钉", Title: "余昊,余昊", Body: "[有人@你]余昊: @余昊", Call: false, InstanceKey: "k1", Category: NoticeCategory.Message });
+        var missed = DingTalkPopups.Read(DingTalkPopups.MessageClass, "Form", [Q("消息"), L("钉钉电话"), L("未接来电：余昊、余昊")], "k2");
+        check("DingTalk: a missed call is a message, not a ringing call", missed is { Title: "钉钉电话", Body: "未接来电：余昊、余昊", Call: false });
+        check("DingTalk: a popup without its two labels says nothing", DingTalkPopups.Read(DingTalkPopups.MessageClass, "Form", [Q("消息"), L("  "), L("余昊")], "k") is null
+            && DingTalkPopups.Read(DingTalkPopups.MessageClass, "Form", [], "k") is null);
+        var call = DingTalkPopups.Read(DingTalkPopups.CallClass, "语音通话", [Q("语音通话"), Q("余昊"), Q("余昊"), Q("邀请你语音通话"), Q("通话纪要"), Q("挂断"), Q("接听")], "k3");
+        check("DingTalk: a ringing call is a call from its caller", call is { Title: "余昊", Body: "邀请你语音通话", Call: true });
+        var meeting = DingTalkPopups.Read(DingTalkPopups.MeetingClass, "钉钉视频会议", [A("余昊 邀请你加入"), A("余昊"), A("余昊,余昊_1126"), Q("接听"), Q("拒绝"), Q("麦克风已开"), Q("摄像头已关")], "k4");
+        check("DingTalk: a meeting invitation is a call from who invites, with the meeting", meeting is { Title: "余昊", Body: "钉钉视频会议 · 余昊,余昊_1126", Call: true });
+        check("DingTalk: a call window without an invitation says nothing", DingTalkPopups.Read(DingTalkPopups.CallClass, "语音通话", [Q("语音通话"), Q("挂断")], "k") is null
+            && DingTalkPopups.Read(DingTalkPopups.MeetingClass, "钉钉语音会议", [A("余昊")], "k") is null);
+        check("DingTalk: only its popup in DingTalk.exe and its call windows in tblive.exe are read",
+            DingTalkPopups.Watched("DingTalk.exe", DingTalkPopups.MessageClass) && DingTalkPopups.Watched("TBLIVE.EXE", DingTalkPopups.CallClass) && DingTalkPopups.Watched("tblive.exe", DingTalkPopups.MeetingClass)
+            && !DingTalkPopups.Watched("tblive.exe", DingTalkPopups.MessageClass) && !DingTalkPopups.Watched("DingTalk.exe", DingTalkPopups.CallClass)
+            && !DingTalkPopups.Watched("DingTalk.exe", "DtMainFrameView") && !DingTalkPopups.Watched("other.exe", DingTalkPopups.MessageClass) && !DingTalkPopups.Watched(null, DingTalkPopups.MessageClass));
+        check("DingTalk: its flashes are DingTalk's notices", new ChatFlashFilter(_ => @"D:\Program Files (x86)\DingDing\main\current\DingTalk.exe", _ => false, () => T0).OnFlash(1) is { AppKey: DingTalkPopups.AppKey, Title: "钉钉", Body: "有新消息" });
+
+        // DingTalk flashes until read: three flashes about 1.06 seconds apart, then still for up to 3.2 seconds (measured).
+        var now = T0;
+        var filter = new ChatFlashFilter(_ => "DingTalk.exe", _ => false, () => now);
+        var first = filter.OnFlash(1)!;
+        bool one = true;
+        double start = 0;
+        foreach (double still in new[] { 2.09, 1.97, 3.04, 1.75, 3.17, 1.58, 1.14 })
+        {
+            foreach (double at in new[] { 1.06, 2.12 }) { now = T0.AddSeconds(start + at); one &= filter.OnFlash(1)!.InstanceKey == first.InstanceKey; }
+            start += 2.12 + still;
+            now = T0.AddSeconds(start);
+            one &= filter.OnFlash(1)!.InstanceKey == first.InstanceKey;
+        }
+        check("DingTalk: a flashing that goes on until read is one message", one);
+        now = now.AddSeconds(4.1);
+        check("DingTalk: after four seconds still, a flash is another message", filter.OnFlash(1)!.InstanceKey != first.InstanceKey && ChatFlashApps.DingTalkQuiet == TimeSpan.FromSeconds(4));
+    }
+
     private static void Setting(Action<string, bool> check)
     {
         var defaults = new DeckSettings();
         defaults.Normalize();
-        check("Flash: WeChat's taskbar flash is listed for a new user", defaults.NoticeRule("flash:wechat") is not null && defaults.NoticeReceives("flash:wechat"));
+        check("Flash: WeChat's and DingTalk's taskbar flash are listed for a new user", defaults.NoticeRule("flash:wechat") is not null && defaults.NoticeReceives("flash:wechat")
+            && defaults.NoticeRule(DingTalkPopups.AppKey) is { ReadContent: false } && defaults.NoticeReceives(DingTalkPopups.AppKey));
         string folder = Path.Combine(Path.GetTempPath(), "BrimDeck-FlashTests-" + Guid.NewGuid().ToString("N"));
         try
         {

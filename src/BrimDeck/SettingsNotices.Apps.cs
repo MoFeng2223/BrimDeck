@@ -51,7 +51,7 @@ public sealed partial class SettingsWindow
     [
         new(WeChatRows.AppKey, Loc.T("微信", "WeChat"), null),
         new(NoticeKeys.Windows("QQ"), "QQ", "QQ"),
-        new(NoticeKeys.Windows("ali.dingtalk.release"), Loc.T("钉钉", "DingTalk"), "ali.dingtalk.release"),
+        new(DingTalkPopups.AppKey, Loc.T("钉钉", "DingTalk"), null),
         new(NoticeKeys.Windows("com.electron.Feishu"), Loc.T("飞书", "Feishu"), "com.electron.Feishu")
     ];
 
@@ -62,8 +62,8 @@ public sealed partial class SettingsWindow
 
     private void CommonAppsSection(NoticeCenter center)
     {
-        SectionTitle(Loc.T("常用应用", "Common apps"), help: () => Loc.T("这些应用的消息可以在岛上提示。QQ、钉钉、飞书需要在各自的设置中打开系统通知，展开一行可以看到方法；微信可以选择提示方式。",
-            "These apps' messages can show on the island. QQ, DingTalk and Feishu need system notifications turned on in their own settings; open a row to see how. For WeChat, choose how its messages are noticed."));
+        SectionTitle(Loc.T("常用应用", "Common apps"), help: () => Loc.T("这些应用的消息可以在岛上提示。QQ、飞书需要在各自的设置中打开系统通知，展开一行可以看到方法；微信、钉钉可以选择提示方式。",
+            "These apps' messages can show on the island. QQ and Feishu need system notifications turned on in their own settings; open a row to see how. For WeChat and DingTalk, choose how their messages are noticed."));
         var rows = new List<FrameworkElement> { AppColumns(windows: true) };
         foreach (var app in CommonApps()) rows.Add(NoticeAppRow(center, app.Key, app.Name, windows: true, app));
         GroupShown([.. rows]);
@@ -259,6 +259,7 @@ public sealed partial class SettingsWindow
             if (center.ChatFlashError is { } error) return (NoteDot.Problem, Loc.T("无法监视任务栏：", "Could not watch the taskbar: ") + error, null, null);
             return S.NoticeRule(app.Key)?.ReadContent == true ? WeChatShort(center) : (NoteDot.Good, Loc.T("按任务栏闪烁提示", "Noticed by its taskbar flash"), null, null);
         }
+        if (app.Key == DingTalkPopups.AppKey) return DingTalkShort(center, show);
         string appId = app.Key["windows:".Length..];
         if (_bannerNotes.TryGetValue(appId, out var problem))
             // Opened, the row shows the way to Windows Settings under it (WindowsOffBlock).
@@ -278,6 +279,7 @@ public sealed partial class SettingsWindow
     {
         var panel = new StackPanel { Margin = new Thickness(32, 0, 0, 0) };
         if (app.Key == WeChatRows.AppKey) panel.Children.Add(WeChatModes(center, rule, app.Name));
+        else if (app.Key == DingTalkPopups.AppKey) panel.Children.Add(DingTalkModes(center, rule, app.Name));
         else
         {
             string appId = app.Key["windows:".Length..];
@@ -305,18 +307,14 @@ public sealed partial class SettingsWindow
         return block;
     }
 
-    // What to turn on in a common app for its messages to reach Windows' notifications, in the app's own words: DingTalk's from the
-    // interface text it installs (i18n\zh_CN.json and en.json), Feishu's from its help center. QQ's setting is not named: its
-    // interface text is not readable from its files.
+    // What to turn on in a common app for its messages to reach Windows' notifications, in the app's own words: Feishu's from its
+    // help center. QQ's setting is not named: its interface text is not readable from its files. DingTalk's are with its two ways
+    // (DingTalkModes).
     private static (string Heading, string[] Steps)? CommonSteps(string key) => key switch
     {
         "windows:QQ" => (Loc.T("在 QQ 中打开消息通知", "Turn on message notifications in QQ"),
             [Loc.T("确认 QQ 正在运行并已登录。", "Make sure QQ is running and signed in."),
              Loc.T("在 QQ 的设置中检查是否关闭了消息通知，关闭了就重新打开。", "In QQ's settings, check whether message notifications are off, and turn them back on if so.")]),
-        "windows:ali.dingtalk.release" => (Loc.T("在钉钉中打开桌面通知", "Turn on desktop notifications in DingTalk"),
-            [Loc.T("打开钉钉的“设置与隐私”，进入“通知”。", "In DingTalk, open \"Settings and Privacy\", then \"Notifications\"."),
-             Loc.T("在“桌面通知”中打开“消息桌面通知”。需要来电提示时，同时打开“显示通话/会议邀请通知”。",
-                 "Under \"Desktop Notifications\", turn on \"Message Desktop Notifications\". For calls, also turn on \"Display call/meeting invitation notifications\".")]),
         "windows:com.electron.Feishu" => (Loc.T("在飞书中打开横幅通知", "Turn on banner notifications in Feishu"),
             [Loc.T("打开飞书的“设置”，进入“通知”。", "In Feishu, open \"Settings\", then \"Notifications\"."),
              Loc.T("勾选“横幅消息通知”，并选择显示消息内容。", "Select \"Banner notification\" and choose to show the message content.")]),

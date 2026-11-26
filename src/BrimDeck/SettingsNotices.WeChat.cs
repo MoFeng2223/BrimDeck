@@ -18,8 +18,8 @@ public sealed partial class SettingsWindow
         var panel = new StackPanel { Margin = new Thickness(0, 12, 0, 8) };
         var heading = TextLine(Loc.T("提示方式", "How it is noticed"), 12, TextSecondary); heading.Margin = new Thickness(0, 0, 0, 4);
         panel.Children.Add(heading);
-        var flash = Mode(Loc.T("任务栏闪烁", "Taskbar flash"), Loc.T("微信图标闪烁时提示“有新消息”，不读取消息内容。", "\"New message\" when WeChat's taskbar button flashes; no message content is read."), null, null);
-        var read = Mode(Loc.T("读取消息内容", "Read message content"),
+        var flash = ModeChoice("WeChatMode", Loc.T("任务栏闪烁", "Taskbar flash"), Loc.T("微信图标闪烁时提示“有新消息”，不读取消息内容。", "\"New message\" when WeChat's taskbar button flashes; no message content is read."), null, null);
+        var read = ModeChoice("WeChatMode", Loc.T("读取消息内容", "Read message content"),
             Loc.T("显示会话名和消息，同一会话合并，可以在通知页直接回复。微信窗口可以最小化，但不能关到托盘。",
                 "Shows the chat's name and the message, keeps a chat's messages together, and lets you reply on the notices page. WeChat's window may be minimized but not closed to the tray."),
             Loc.T("只能读到聊天列表中当前显示的会话，每个会话只有最新一条。微信关到托盘时读不到内容，只提示“有新消息”。",
@@ -40,21 +40,22 @@ public sealed partial class SettingsWindow
         };
         panel.Children.Add(flash); panel.Children.Add(read);
         return new Border { Child = panel, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0, 1, 0, 0) };
+    }
 
-        // One way: a round choice with its name, what it does, behind the info mark what it cannot do, and how it goes.
-        RadioButton Mode(string title, string description, string? help, FrameworkElement? status)
-        {
-            var titleLine = new StackPanel { Orientation = Orientation.Horizontal };
-            titleLine.Children.Add(TextLine(title, 13, TextPrimary));
-            if (help is not null) { var info = HelpIcon(title, () => help, 12); info.Margin = new Thickness(6, 0, 0, 0); info.VerticalAlignment = VerticalAlignment.Center; titleLine.Children.Add(info); }
-            var text = TextLine(description, 11.5, TextSecondary); text.TextWrapping = TextWrapping.Wrap; text.TextTrimming = TextTrimming.None; text.Margin = new Thickness(0, 2, 0, 0);
-            var content = new StackPanel(); content.Children.Add(titleLine); content.Children.Add(text);
-            if (status is not null) content.Children.Add(status);
-            var choice = new RadioButton { Style = (Style)FindResource("SettingsRadio"), Content = content, GroupName = "WeChatMode", Margin = new Thickness(0, 6, 0, 6) };
-            AutomationProperties.SetName(choice, title);
-            AutomationProperties.SetHelpText(choice, description);
-            return choice;
-        }
+    // One way of a chat's being noticed (WeChat's, DingTalk's): a round choice with its name, what it does, behind the info mark
+    // what it cannot do, and how it goes.
+    private RadioButton ModeChoice(string group, string title, string description, string? help, FrameworkElement? status)
+    {
+        var titleLine = new StackPanel { Orientation = Orientation.Horizontal };
+        titleLine.Children.Add(TextLine(title, 13, TextPrimary));
+        if (help is not null) { var info = HelpIcon(title, () => help, 12); info.Margin = new Thickness(6, 0, 0, 0); info.VerticalAlignment = VerticalAlignment.Center; titleLine.Children.Add(info); }
+        var text = TextLine(description, 11.5, TextSecondary); text.TextWrapping = TextWrapping.Wrap; text.TextTrimming = TextTrimming.None; text.Margin = new Thickness(0, 2, 0, 0);
+        var content = new StackPanel(); content.Children.Add(titleLine); content.Children.Add(text);
+        if (status is not null) content.Children.Add(status);
+        var choice = new RadioButton { Style = (Style)FindResource("SettingsRadio"), Content = content, GroupName = group, Margin = new Thickness(0, 6, 0, 6) };
+        AutomationProperties.SetName(choice, title);
+        AutomationProperties.SetHelpText(choice, description);
+        return choice;
     }
 
     // How the reading of WeChat's chat list goes, in full, under the choice.

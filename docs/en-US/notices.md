@@ -101,12 +101,12 @@ While it shows, other notices go to the notice history and wait as usual; a norm
 
 ### Common chat apps
 
-BrimDeck reads the notifications apps send to Windows, so a chat app's messages reach the island only while its desktop notifications are on. "Common apps" on the "Apps" page always lists WeChat, QQ, DingTalk and Feishu, each saying under its name whether it is being received; until one has sent a notice, or while its notifications are off in Windows, opening its row shows the settings to turn on.
+BrimDeck reads the notifications apps send to Windows, so a chat app's messages reach the island only while its desktop notifications are on. WeChat and DingTalk send no Windows notifications and are noticed in other ways. "Common apps" on the "Apps" page always lists WeChat, QQ, DingTalk and Feishu, each saying under its name whether it is being received; opening a row shows the settings to turn on.
 
 | App | What to turn on |
 |---|---|
 | QQ | Sends Windows notifications by default. If nothing shows, check that message notifications are on in QQ's settings and that Windows allows QQ's notifications under Settings › System › Notifications. |
-| DingTalk | Click your profile photo in the upper-left corner, open "Settings and Privacy › Notifications" and turn on "Message Desktop Notifications" under "Desktop Notifications"; for calls, also "Display call/meeting invitation notifications". |
+| DingTalk | Sends no Windows notifications. By default its flashing taskbar button tells of a new message; it can read message content instead, see [DingTalk](#dingtalk-two-ways-of-being-noticed) below. |
 | Feishu | Click your profile photo in the upper-left corner, open "Settings › Notifications", select "Message notifications" and "Banner notification", and choose to show the message content in the banner; without it the island only shows a line such as "new message". |
 | WeChat | WeChat for PC sends no Windows notifications. Only its flashing taskbar button tells of a new message; the sender and the text cannot be read. |
 
@@ -122,6 +122,15 @@ WeChat for PC sends no Windows notifications, so by default only its flashing ta
 - Only the chats in view in the chat list are read, and only the latest message of each; of several messages in a row, those in between may be missed. A muted chat tells only of a message that mentions you, "Official Accounts" and "Service Accounts" tell nothing, and nothing is told while you are using WeChat. A chat read in WeChat has its notices marked as handled.
 
 This changes the running WeChat. WeChat exposes its interface only when it detects a screen reader; BrimDeck changes the one byte in the WeChat process's memory that says accessibility is on from 0 to 1, then reads the chat list through Windows' UI Automation. It changes none of WeChat's files, injects no code and does not read WeChat's database. Going back to "Taskbar flash" or exiting BrimDeck writes 0 back. WeChat does not support this: it may make WeChat unstable, stop working after a WeChat update, or get the account restricted. Whether to turn it on is your decision.
+
+### DingTalk: two ways of being noticed
+
+DingTalk sends no Windows notifications: its message popups and call windows are its own. With DingTalk's row opened in Settings › Live notices › Apps, choose "How it is noticed". DingTalk's settings are in the menu of your profile photo and name in its upper-left corner: choose "Settings", then "Notifications".
+
+- **Taskbar flash** (the default): "New message" when DingTalk's taskbar button flashes; no message content is read. Select "Message taskbar icon blinks" under DingTalk's "Notifications".
+- **Read message content**: when DingTalk shows a message popup or a call window in the corner of the screen, BrimDeck reads its text through Windows' UI Automation. A message shows the chat's name and its text (with the sender in a group), and a missed call shows as "钉钉电话" (DingTalk call). Voice and video calls and meeting invitations show as incoming calls until answered, declined or given up. Under "Notifications", select "Message Desktop Notifications" and choose "Show message details", then select "Message taskbar icon blinks"; for calls, on the same page under "Calls & Meetings Notifications", select "Display call/meeting invitation notifications".
+
+DingTalk shows message popups only for one-on-one chats, @mentions, people you follow and red envelopes; a group's other messages only make its taskbar button flash, so with "Read message content" they still show as "New message". With "Hide message details" chosen in DingTalk, the popup only says that a message arrived, and no content can be read. With "Display call/meeting invitation notifications" cleared, DingTalk for PC no longer receives voice and video call invitations (DingTalk says so when it is cleared): a call shows no call window and no missed-call popup, DingTalk's taskbar button only flashes once, and BrimDeck can show only "New message". A muted chat, and meetings while "Do not disturb in desktop video conferencing" is on, may show no popup. BrimDeck does not change DingTalk, click its windows or read its files.
 
 ### Windows: event log mode and polling
 
