@@ -74,7 +74,7 @@ static class DevicesPageTests
         var older = SettingsMigrations.Read("""{"AppVersion":"1.2.2","MonitorPage":true,"PanelScale":150,"PageOrder":[2,0,1]}""");
         check("Devices settings: a file from before the page reads with the page's defaults, in its default place",
             older.DevicesPage && older.DevicesWidth == 460 && older.DevicesHeight == 200 && older.DeviceChoices.Count == 0 && older.DeviceLowPercent == Devices.DefaultLowPercent
-            && older.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Clipboard, DeckPage.Devices]) && older.PanelScale == 150);
+            && older.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Clipboard, DeckPage.Devices, DeckPage.Proxy]) && older.PanelScale == 150);
         // 1.3.0: a device switched off was off on the page and in the collapsed row; the battery reading among the system readings
         // becomes the devices' own part where the readings showed it; getting low was ten points above low.
         var hidden = SettingsMigrations.Read("""
@@ -85,7 +85,7 @@ static class DevicesPageTests
             hidden.DeviceChoices.Single() is { Key: "bt:AA", Name: "Mouse", Collapsed: false, Expanded: false, Label: null });
         check("Devices settings: the battery reading becomes the devices' part where the readings showed",
             hidden.CapsuleDevices && !hidden.NotchDevices && hidden.CompactReadings.All(r => r.Item != CompactMonitorItems.Battery)
-            && hidden.CapsuleOrder.Last() == CompactPart.Devices && hidden.DeviceWarningPercent == 30);
+            && hidden.CapsuleOrder.Contains(CompactPart.Devices) && hidden.CapsuleOrder.IndexOf(CompactPart.Devices) > hidden.CapsuleOrder.IndexOf(CompactPart.Transfer) && hidden.DeviceWarningPercent == 30);
         var unshown = SettingsMigrations.Read("""{"AppVersion":"1.2.4","CapsuleMonitor":true,"CompactReadings":[{"Item":256,"Visible":false}]}""", new Version(1, 3, 0), out _);
         check("Devices settings: a battery reading that was hidden leaves the part off", !unshown.CapsuleDevices && !unshown.NotchDevices);
 
@@ -199,6 +199,8 @@ static class DevicesPageTests
         var older = CompactMonitor.Normalize([new CompactReading { Item = CompactMonitorItems.Cpu }, new CompactReading { Item = CompactMonitorItems.Battery }]);
         check("Battery reading: retired, a saved table drops it", older.All(r => r.Item != CompactMonitorItems.Battery)
             && !CompactMonitor.Order.Contains(CompactMonitorItems.Battery) && (CompactMonitor.Every & CompactMonitorItems.Battery) == 0);
-        check("Devices part: a saved order without it takes it at the end", CompactParts.Normalize([CompactPart.Clock, CompactPart.Rings]).Last() == CompactPart.Devices);
+        var normalizedOrder = CompactParts.Normalize([CompactPart.Clock, CompactPart.Rings]);
+        check("Devices part: a saved order without it appends it after earlier parts",
+            normalizedOrder.IndexOf(CompactPart.Devices) > normalizedOrder.IndexOf(CompactPart.Transfer) && normalizedOrder.Last() == CompactPart.Proxy);
     }
 }

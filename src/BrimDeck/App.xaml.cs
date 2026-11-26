@@ -60,6 +60,14 @@ public partial class App : Application
     internal DeviceBatteryPace DevicePace { get; } = new();
     internal event Action? DevicesChanged;
     private readonly HashSet<MainWindow> _devicePages = [], _deviceStrips = [];
+    // Local proxy status (Clash Verge / Mihomo), shared by every panel; runs only while wanted (UpdateProxyDemand).
+    internal ProxyWatcher? Proxy { get; private set; }
+    internal ProxyController? ProxyControl { get; private set; }
+    internal event Action? ProxyChanged;
+    internal event Action? ProxyControlChanged;
+    internal event Action? ProxyTrafficChanged;
+    private readonly HashSet<MainWindow> _proxyPages = [];
+    private readonly HashSet<MainWindow> _proxyStrips = [];
     // The panels whose collapsed row shows readings or is only hidden for now (the panel open, a notice in it, PresentMonitor): the
     // temperatures the row shows are read for these, so a row shown again has them in its first readings and not a dash.
     private readonly HashSet<MainWindow> _heldStrip = [];
@@ -162,6 +170,7 @@ public partial class App : Application
         {
             DisplayPower.Install(Dispatcher);
             DisplayPower.Changed += UpdateDeviceDemand;
+            DisplayPower.Changed += UpdateProxyDemand;
             DisplayPower.Changed += UpdateMonitorSettingsDemand;
         });
         _save.Tick += (_, _) => FlushSettings();
@@ -299,6 +308,7 @@ public partial class App : Application
         ApplyHotkeys();
         ApplyTray();
         UpdateDeviceDemand();
+        UpdateProxyDemand();
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
         bool languageChanged = Loc.Normalize(settings.Language) != Loc.Language;
         if (languageChanged) UseLanguage();
@@ -529,6 +539,50 @@ public partial class App : Application
     // The settings' devices page lists what is connected, so it reads the devices while it is open.
     private bool _deviceSettings;
     internal void WatchDevicesForSettings(bool open) { _deviceSettings = open; UpdateDeviceDemand(); }
+    // Local proxy status is read only while a panel shows the collapsed icon (or settings previews its connection);
+    // otherwise nothing runs.
+    internal void PresentProxy(MainWindow deck, bool page, bool strip)
+    {
+        if (page) _proxyPages.Add(deck); else _proxyPages.Remove(deck);
+        if (strip) _proxyStrips.Add(deck); else _proxyStrips.Remove(deck);
+        UpdateProxyDemand();
+    }
+    private bool _proxySettings;
+    internal void WatchProxyForSettings(bool open) { _proxySettings = open; UpdateProxyDemand(); }
+    internal ProxyController EnsureProxyController()
+    {
+        if (Proxy is null)
+        {
+            Proxy = new ProxyWatcher(Dispatcher);
+            Proxy.UsePlan(MemoryPlan);
+            Proxy.Changed += ProxyStatusChanged;
+        }
+        if (ProxyControl is null)
+        {
+            ProxyControl = new ProxyController(Dispatcher, Proxy);
+            ProxyControl.StateChanged += ProxyControllerStateChanged;
+            ProxyControl.TrafficChanged += ProxyControllerTrafficChanged;
+        }
+        return ProxyControl;
+    }
+    private void UpdateProxyDemand()
+    {
+        bool needPage = _proxyPages.Count > 0 && !DisplayPower.Off;
+        var demand = (needPage || _proxyStrips.Count > 0 || _proxySettings) && !DisplayPower.Off ? ProxyDemand.Watch : ProxyDemand.None;
+        if (Exiting) return;
+        if (Proxy is null && demand != ProxyDemand.None)
+        {
+            Proxy = new ProxyWatcher(Dispatcher);
+            Proxy.UsePlan(MemoryPlan);
+            Proxy.Changed += ProxyStatusChanged;
+        }
+        Proxy?.SetDemand(demand);
+        if (needPage) EnsureProxyController();
+        ProxyControl?.SetActive(needPage);
+    }
+    private void ProxyStatusChanged() => ProxyChanged?.Invoke();
+    private void ProxyControllerStateChanged() => ProxyControlChanged?.Invoke();
+    private void ProxyControllerTrafficChanged() => ProxyTrafficChanged?.Invoke();
     private void DeviceBatteriesChanged()
     {
         if (Devices is { } devices && Settings.DeviceChoices.Count > 0 && DeviceLists.Adopt(devices.All, Settings.DeviceChoices) is { } adopted)
@@ -682,7 +736,7 @@ public partial class App : Application
         Exiting = true; Lifetime.Cancel(); _save.Stop(); _trim?.Stop(); _release?.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
         ClipboardSync?.Dispose();
         if (Shelf is not null) { Shelf.Exit(); Shelf.Dispose(); }
-        Media?.Dispose(); _restingMedia?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Devices?.Dispose(); DeviceReadStore.Finish();
+        Media?.Dispose(); _restingMedia?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Devices?.Dispose(); DeviceReadStore.Finish(); ProxyControl?.Dispose(); Proxy?.Dispose();
         if (Settings.DeviceBatteryEstimates) DeviceBatteryPaceStore.Finish(DevicePace); else ForgetDevicePace();
         Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }

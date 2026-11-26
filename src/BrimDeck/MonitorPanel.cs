@@ -67,8 +67,9 @@ public partial class MainWindow
         if (page && !_monitorShowing) _monitorView?.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
         if (strip && !_stripShowing) UpdateCompactStrips(_app.Monitor?.Latest, motion: false);
         _monitorShowing = page; _stripShowing = strip;
-        // The devices page and the collapsed battery reading ask on the same occasions.
+        // The devices page, collapsed battery reading and collapsed proxy icon ask on the same occasions.
         UpdateDevicesDemand();
+        UpdateProxyDemand();
     }
     // The collapsed readings the row was last built without (StripAdmission.Hidden): the drives until their first figures, and for
     // good on a machine without them; and the temperatures and letters it was built with (StripAdmission.Layout).
@@ -219,7 +220,7 @@ public partial class MainWindow
         // the new one with a crossfade; a page opened from another one appears as it always has.
         bool shown = MonitorContent.Visibility == Visibility.Visible && _monitorView is not null && MonitorContent.Children.Contains(_monitorView);
         RefreshStatus();
-        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Visible;
+        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; ProxyContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         double width = ContentCanvas.Width, height = ContentCanvas.Height;
         if (!double.IsFinite(width) || !double.IsFinite(height)) return;

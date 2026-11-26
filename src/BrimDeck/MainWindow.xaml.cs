@@ -164,6 +164,7 @@ public partial class MainWindow : Window
         InitializeMonitor();
         InitializeShelf();
         InitializeDevices();
+        InitializeProxy();
         InitializeResize();
         InitializeScale();
         InitializeShadow();
@@ -723,6 +724,7 @@ public partial class MainWindow : Window
         System.Windows.Automation.AutomationProperties.SetName(MonitorPageButton, Loc.T("系统监控", "System monitor"));
         UpdateShelfPageButton();
         System.Windows.Automation.AutomationProperties.SetName(DevicesPageButton, Loc.T("设备电量", "Device batteries"));
+        System.Windows.Automation.AutomationProperties.SetName(ProxyPageButton, Loc.T("代理控制", "Proxy control"));
         System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("音乐", "Music"));
         System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));
     }
@@ -782,7 +784,7 @@ public partial class MainWindow : Window
             if (_columnCarousel is not null) { _columnElapsed = _columnCarousel.Elapsed; _columnCarousel.SetRunning(false, false); }
             if (_columnReadings.Count > 0) _stripElapsed = _columnReadings[0].Elapsed;
             foreach (var reading in _columnReadings) reading.SetRunning(false, false);
-            _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _stripCarousel = null; _compactClock = null; _compactStrip = null;
+            _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _stripCarousel = null; _compactClock = null; _compactStrip = null; _compactProxy = null;
             _columnCarousel = null; _columnReadings.Clear(); _columnStrips.Clear();
             if (_alert is not null)
             {

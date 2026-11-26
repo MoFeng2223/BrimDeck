@@ -5,15 +5,15 @@ namespace BrimDeck.Core;
 public static class DeckPages
 {
     // The page switch, left to right, until the order is changed in the settings (DeckSettings.PageOrder). The clipboard comes
-    // before the devices, as their groups do in the settings' list.
-    public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Clipboard, DeckPage.Devices];
+    // before the devices, as their groups do in the settings' list; the opt-in proxy page joins last.
+    public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Clipboard, DeckPage.Devices, DeckPage.Proxy];
     // Each known page once, in the saved order; a page missing from the file takes its default place after the others.
     public static List<DeckPage> Normalize(IEnumerable<DeckPage>? order) => [.. (order ?? []).Where(page => Enum.IsDefined(page)).Concat(Order).Distinct()];
 
     public static bool Shown(DeckSettings settings, DeckPage page) => page switch
     {
         DeckPage.Usage => settings.UsagePage, DeckPage.Music => settings.MusicPage, DeckPage.Monitor => settings.MonitorPage, DeckPage.Devices => settings.DevicesPage,
-        DeckPage.Clipboard => settings.ClipboardPage, _ => false
+        DeckPage.Clipboard => settings.ClipboardPage, DeckPage.Proxy => settings.ProxyPage, _ => false
     };
 
     public static IReadOnlyList<DeckPage> Visible(DeckSettings settings) => settings.PageOrder.Where(page => Shown(settings, page)).ToList();
@@ -35,7 +35,7 @@ public static class DeckPages
     public static DeckPage? Opening(DefaultDeckPage choice) => choice switch
     {
         DefaultDeckPage.Usage => DeckPage.Usage, DefaultDeckPage.Music => DeckPage.Music, DefaultDeckPage.Monitor => DeckPage.Monitor, DefaultDeckPage.Devices => DeckPage.Devices,
-        DefaultDeckPage.Clipboard => DeckPage.Clipboard, _ => null
+        DefaultDeckPage.Clipboard => DeckPage.Clipboard, DefaultDeckPage.Proxy => DeckPage.Proxy, _ => null
     };
 
     // Every page's size lies within these; the usage page is also at least as wide as its columns need (MinimumWidth).
@@ -58,6 +58,7 @@ public static class DeckPages
             case DeckPage.Monitor: settings.MonitorWidth = width; settings.MonitorHeight = height; break;
             case DeckPage.Devices: settings.DevicesWidth = width; settings.DevicesHeight = height; break;
             case DeckPage.Clipboard: settings.ClipboardWidth = width; settings.ClipboardHeight = height; break;
+            case DeckPage.Proxy: settings.ProxyWidth = width; settings.ProxyHeight = height; break;
             default: settings.Width = width; settings.Height = height; break;
         }
     }
@@ -68,6 +69,7 @@ public static class DeckPages
         DeckPage.Monitor => (settings.MonitorWidth, settings.MonitorHeight),
         DeckPage.Devices => (settings.DevicesWidth, settings.DevicesHeight),
         DeckPage.Clipboard => (settings.ClipboardWidth, settings.ClipboardHeight),
+        DeckPage.Proxy => (settings.ProxyWidth, settings.ProxyHeight),
         _ => (Math.Max(settings.Width, settings.MinimumWidth), settings.Height)
     };
 

@@ -75,6 +75,7 @@ public partial class App
         var plan = MemoryPlan;
         Monitor?.UsePlan(plan);
         Devices?.UsePlan(plan);
+        Proxy?.UsePlan(plan);
         if (Media is not null) UseMediaPlan(Media, plan);
         if (plan.WarmAtStart) { WarmMonitor(); PageWarm.Start(Dispatcher); }
         UpdateCollectionLatency();
@@ -125,6 +126,19 @@ public partial class App
         {
             if (devices.Demand != DeviceDemand.None) later = true;
             else { Devices = null; devices.Changed -= DeviceBatteriesChanged; devices.Dispose(); released = true; }
+        }
+        if (ProxyControl is { } proxyControl && !Settings.ProxyPage && _proxyPages.Count == 0)
+        {
+            ProxyControl = null;
+            proxyControl.StateChanged -= ProxyControllerStateChanged;
+            proxyControl.TrafficChanged -= ProxyControllerTrafficChanged;
+            proxyControl.Dispose();
+            released = true;
+        }
+        if (Proxy is { } proxy && !Settings.ProxyPage && !Settings.ShowsProxy(Settings.Style) && _proxyPages.Count + _proxyStrips.Count == 0 && !_proxySettings)
+        {
+            if (proxy.Demand != ProxyDemand.None) later = true;
+            else { Proxy = null; proxy.Changed -= ProxyStatusChanged; proxy.Dispose(); released = true; }
         }
         if (_restingMedia is { } media) { _restingMedia = null; media.Dispose(); released = true; }
         if (!Settings.ClipboardPage) released |= Shelf.Rest();

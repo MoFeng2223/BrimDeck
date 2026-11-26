@@ -68,9 +68,9 @@ public sealed record IgnoredMediaApp(string AppId = "", string Name = "", string
 public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, OpenCode = 17, OpenCodeGo = 18, OpenRouter = 19, Pi = 20, CodeAgent = 21, CommandCode = 22, CommandCodeApi = 23, WorkBuddy = 24, WorkBuddyAi = 25, MiMo = 26, MiMoApi = 27, MiMoTokenPlan = 28, MiMoLinked = 29, KimiPlatform = 30, Qoder = 31, QoderCn = 32, Qianwen = 33, QwenCloud = 34, QwenWorkCn = 35, QwenWork = 36, Trae = 37, TraeCn = 38, Doubao = 39, Dola = 40, VolcengineArk = 41, BytePlusArk = 42 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckSettings.PageOrder.
-public enum DeckPage { Usage, Music, Monitor, Clipboard, Devices }
+public enum DeckPage { Usage, Music, Monitor, Clipboard, Devices, Proxy }
 // Hover: the page of the collapsed part under the pointer (MainWindow.Hover.cs); over a part that names none, the last page.
-public enum DefaultDeckPage { Last, Usage, Music, Monitor, Clipboard, Devices, Hover }
+public enum DefaultDeckPage { Last, Usage, Music, Monitor, Clipboard, Devices, Hover, Proxy }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
 // What a double click on an end of the collapsed notch or capsule does: turn its auto width on or off, or start moving it
@@ -90,14 +90,14 @@ public enum EqualizerMode { Flow = 0, Spectrum = 1 }
 public enum QuotaRingStyle { Nested = 0, Single = 1 }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left; Music places
 // only the title or lyric. Saved as numbers, so new members go at the end.
-public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer, Devices }
+public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer, Devices, Proxy }
 public static class CompactParts
 {
     // The order of new settings and of restoring the defaults: the equalizer and the clock come last.
-    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices, CompactPart.Equalizer, CompactPart.Clock];
+    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices, CompactPart.Proxy, CompactPart.Equalizer, CompactPart.Clock];
     // The order in which parts missing from a saved file are added after its own. A file saved before the equalizer and the clock
-    // were put in order adds them after its parts, the clock last, where they stood; the devices' batteries (1.3.0) join last.
-    private static readonly IReadOnlyList<CompactPart> Missing = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices];
+    // were put in order adds them after its parts, the clock last, where they stood; the devices' batteries (1.3.0) and proxy status join last.
+    private static readonly IReadOnlyList<CompactPart> Missing = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices, CompactPart.Proxy];
     // Each known part once, in the saved order; a part missing from the file takes its place after the others.
     public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Missing).Distinct()];
 }
@@ -339,6 +339,13 @@ public static class MonitorSizes
     public static readonly (double Width, double Height) Default = (620, 220);
     public static (double Width, double Height) For(PanelSize size) => size switch
     { PanelSize.Compact => (480, 160), PanelSize.Spacious => (860, 320), _ => Default };
+}
+
+public static class ProxySizes
+{
+    public static readonly (double Width, double Height) Default = (640, 230);
+    public static (double Width, double Height) For(PanelSize size) => size switch
+    { PanelSize.Compact => (500, 170), PanelSize.Spacious => (880, 320), _ => Default };
 }
 
 public sealed class DeckSettings
@@ -743,6 +750,15 @@ public sealed class DeckSettings
     // The notch and the capsule each show the devices' batteries (CompactPart.Devices).
     public bool NotchDevices { get; set; }
     public bool CapsuleDevices { get; set; }
+    // The notch and the capsule each show the local proxy status icon (CompactPart.Proxy), hidden automatically while no supported proxy runs.
+    public bool NotchProxy { get; set; }
+    public bool CapsuleProxy { get; set; }
+    // Which traffic-capture indicators the collapsed proxy icon displays beside the routing mode (Both, SystemProxy, Tun).
+    public ProxyIndicators ProxyIndicators { get; set; } = ProxyIndicators.Both;
+    // The expanded proxy control page (DeckPage.Proxy): off by default; connects to Mihomo's local API only while open.
+    public bool ProxyPage { get; set; }
+    public double ProxyWidth { get; set; } = ProxySizes.Default.Width;
+    public double ProxyHeight { get; set; } = ProxySizes.Default.Height;
     // The expanded page shows a line under memory and network with the frame rate of the program in front, its name and its display's
     // refresh rate (FrameRates). Off by default; read only while the page is open, and only where the user may read Windows' frame
     // events (the Performance Log Users group, or BrimDeck elevated).
@@ -822,6 +838,7 @@ public sealed class DeckSettings
     // The indicator is too thin for readings, as for the clock.
     public bool ShowsMonitor(CompactStyle style) => style switch { CompactStyle.Notch => NotchMonitor, CompactStyle.Capsule => CapsuleMonitor, _ => false };
     public bool ShowsDevices(CompactStyle style) => style switch { CompactStyle.Notch => NotchDevices, CompactStyle.Capsule => CapsuleDevices, _ => false };
+    public bool ShowsProxy(CompactStyle style) => style switch { CompactStyle.Notch => NotchProxy, CompactStyle.Capsule => CapsuleProxy, _ => false };
     // The file transfer's count needs the page and its column: with either hidden, nothing can be dropped there.
     public bool ShowsTransfer(CompactStyle style) => ClipboardPage && ShelfShown != ShelfShown.Clipboard && style switch { CompactStyle.Notch => NotchTransfer, CompactStyle.Capsule => CapsuleTransfer, _ => false };
     // The page's columns are stacked as cards only while it shows both.
@@ -950,6 +967,8 @@ public sealed class DeckSettings
         MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : MonitorSizes.Default.Width;
         DevicesWidth = double.IsFinite(DevicesWidth) ? Math.Clamp(DevicesWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : 460;
         DevicesHeight = double.IsFinite(DevicesHeight) ? Math.Clamp(DevicesHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
+        ProxyWidth = double.IsFinite(ProxyWidth) ? Math.Clamp(ProxyWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : ProxySizes.Default.Width;
+        ProxyHeight = double.IsFinite(ProxyHeight) ? Math.Clamp(ProxyHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ProxySizes.Default.Height;
         DeviceChoices = [.. (DeviceChoices ?? []).OfType<DeviceChoice>().Where(device => !string.IsNullOrWhiteSpace(device.Key)).DistinctBy(device => device.Key).Take(256)];
         foreach (var device in DeviceChoices)
         {
@@ -1037,6 +1056,7 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(NotchEdge)) NotchEdge = ScreenEdge.Top;
         if (!Enum.IsDefined(LineEdge)) LineEdge = ScreenEdge.Top;
         if (!Enum.IsDefined(LineOpens)) LineOpens = IndicatorOpens.Panel;
+        if (!Enum.IsDefined(ProxyIndicators)) ProxyIndicators = ProxyIndicators.Both;
         if (NotchAnchor is { } notchAnchor && !Enum.IsDefined(notchAnchor)) NotchAnchor = null;
         if (LineAnchor is { } lineAnchor && !Enum.IsDefined(lineAnchor)) LineAnchor = null;
         if (!Enum.IsDefined(GripDoubleClick)) GripDoubleClick = GripDoubleClick.Move;

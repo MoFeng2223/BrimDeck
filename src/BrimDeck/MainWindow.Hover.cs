@@ -50,6 +50,7 @@ public partial class MainWindow
         "cover" or CompactPart.Equalizer or CompactPart.Music => new(DeckPage.Music),
         CompactPart.Monitor => new(DeckPage.Monitor),
         CompactPart.Devices => new(DeckPage.Devices),
+        CompactPart.Proxy => new(DeckPage.Proxy),
         CompactPart.Rings => new(DeckPage.Usage),
         CompactPart.Transfer => new(DeckPage.Clipboard, Files: true),
         _ => new(null),
