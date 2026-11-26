@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A development helper, not part of BrimDeck: brim.exe for a fixed folder that hands its command line to the brim.exe
+       beside the BrimDeck that is running now, so "brim" and the coding agents' hooks reach whichever build is in use. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>brim</AssemblyName>
+    <RootNamespace>BrimRouter</RootNamespace>
+    <ApplicationIcon>..\..\src\BrimDeck\Assets\BrimDeck.ico</ApplicationIcon>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+</Project>

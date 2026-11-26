@@ -15,6 +15,8 @@ internal static class BrimCommand
     public static string Folder => Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory);
     public static string File => Path.Combine(AppContext.BaseDirectory, "brim.exe");
     public static bool Installed => System.IO.File.Exists(File);
+    // The brim.exe written into the coding agents' hooks: File, or for development the one BRIMDECK_HOOK_BRIM names (HookBrim).
+    public static string HookFile => BrimDeck.Core.Agents.HookBrim.Choose(File, Environment.GetEnvironmentVariable(BrimDeck.Core.Agents.HookBrim.Variable), System.IO.File.Exists);
 
     // Whether the user's or the machine's PATH names BrimDeck's folder, as the registry has them now (a terminal opened
     // earlier still has the PATH of then). False when neither can be read.

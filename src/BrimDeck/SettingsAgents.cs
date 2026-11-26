@@ -21,8 +21,9 @@ public sealed partial class SettingsWindow
     // Set once the user looked for the tools while this window is open: the page then says what was found.
     private bool _agentsLooked;
 
-    // brim.exe beside BrimDeck, as the hooks run it; the hooks need it, so without it nothing can be installed.
-    private static string BrimFile => BrimCommand.File;
+    // brim.exe beside BrimDeck (or the development router BRIMDECK_HOOK_BRIM names), as the hooks run it; the hooks need it, so
+    // without it nothing can be installed.
+    private static string BrimFile => BrimCommand.HookFile;
 
     private void AgentsSettings()
     {

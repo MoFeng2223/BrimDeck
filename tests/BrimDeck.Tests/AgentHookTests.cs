@@ -20,6 +20,19 @@ internal static class AgentHookTests
         Settings(check);
         Watched(check);
         MoreTools(check);
+        HookProgram(check);
+    }
+
+    // BRIMDECK_HOOK_BRIM, for development: the hooks run the brim.exe it names in place of the one beside BrimDeck.
+    private static void HookProgram(Action<string, bool> check)
+    {
+        const string beside = @"D:\Builds\BrimDeck-a\brim.exe", router = @"C:\Users\me\.local\bin\brim.exe";
+        static bool Exists(string path) => path.Equals(router, StringComparison.OrdinalIgnoreCase) || path == @"C:\tools\other.exe" || path == @"C:\tools\brim.exe";
+        check("Hook program: unset or blank, the brim.exe beside BrimDeck", HookBrim.Choose(beside, null, Exists) == beside && HookBrim.Choose(beside, "  ", Exists) == beside);
+        check("Hook program: a brim.exe the variable names, with or without quotes", HookBrim.Choose(beside, router, Exists) == router && HookBrim.Choose(beside, " \"" + router + "\" ", Exists) == router
+            && HookBrim.Choose(beside, @"C:\tools\x\..\brim.exe", Exists) == @"C:\tools\brim.exe");
+        check("Hook program: a missing file, a relative path or another program's name is passed over",
+            HookBrim.Choose(beside, @"C:\missing\brim.exe", Exists) == beside && HookBrim.Choose(beside, "brim.exe", Exists) == beside && HookBrim.Choose(beside, @"C:\tools\other.exe", Exists) == beside);
     }
 
     private static AgentHookPlan Kimi(string json) => AgentHook.Plan(AgentHookFormats.Kimi, "kimi", "Kimi Code", Input(json), chinese: true);
