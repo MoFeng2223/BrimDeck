@@ -42,6 +42,9 @@ internal static class MailTests
         check("Mail: a sign-in name that was kept is used as it is", account.Endpoint()?.UserName == "john@icloud.com");
         check("Mail: a mailbox with its own server needs the server", new MailAccount { Provider = MailProviders.Custom, Address = "a@example.com" }.Endpoint() is null
             && new MailAccount { Provider = MailProviders.Custom, Address = "a@example.com", Host = "imap.example.com" }.Endpoint() is { Host: "imap.example.com", UserName: "a@example.com" });
+        check("Mail: a mailbox with its own server signs in with the user name given, else the address",
+            new MailAccount { Provider = MailProviders.Custom, Address = "a@example.com", Host = "imap.example.com", UserName = " e1234567 " }.Endpoint()?.UserName == "e1234567"
+            && new MailAccount { Provider = MailProviders.Custom, Address = "a@example.com", Host = "imap.example.com", UserName = "  " }.Endpoint()?.UserName == "a@example.com");
 
         var settings = new DeckSettings();
         var id = Guid.NewGuid();

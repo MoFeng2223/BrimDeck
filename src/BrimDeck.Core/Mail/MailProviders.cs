@@ -125,7 +125,9 @@ public static class MailProviders
         _ =>
         [
             Loc.T("在邮箱网页版的设置中开启 IMAP 服务，需要授权码的一并生成。", "Turn on IMAP in the mailbox's web settings; where the service asks for an authorization code, generate one."),
-            Loc.T("IMAP 服务器填主机名，例如 imap.example.com。只支持 993 端口的加密连接。", "Enter the IMAP server (for example imap.example.com). Only encrypted connections on port 993 are supported.")
+            Loc.T("IMAP 服务器填主机名，例如 imap.example.com。只支持 993 端口的加密连接。", "Enter the IMAP server (for example imap.example.com). Only encrypted connections on port 993 are supported."),
+            Loc.T("登录名不是邮箱地址的（例如公司邮箱用工号登录），把登录名填在“用户名”中；否则留空。",
+                "If the mailbox signs in with a name other than the email address (a work mailbox may use an employee ID), enter it under User name; otherwise leave it empty.")
         ]
     };
 }

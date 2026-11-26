@@ -212,6 +212,9 @@ public sealed partial class SettingsWindow
         }
         var host = new TextBox { MaxLength = 253, Text = existing?.Host ?? "" };
         if (provider.Id == MailProviders.Custom) shell.Body.Children.Add(MailField(Loc.T("IMAP 服务器", "IMAP server"), host));
+        // A mailbox with its own server may sign in with a name that is not the address (a company's employee ID); empty uses the address.
+        var user = new TextBox { MaxLength = 254, Text = existing?.UserName ?? "" };
+        if (provider.Id == MailProviders.Custom) shell.Body.Children.Add(MailField(Loc.T("用户名（选填，不填时使用邮箱地址）", "User name (optional; the email address when empty)"), user));
         var code = new PasswordBox { MaxLength = 1024 };
         if (!microsoft) shell.Body.Children.Add(MailField(MailProviders.SecretName(provider), code));
         var status = SyncStatusLine(); status.TextAlignment = TextAlignment.Left;
@@ -245,6 +248,7 @@ public sealed partial class SettingsWindow
             {
                 if (MailProviders.Host(host.Text) is not { } server) { SetSyncStatus(status, Loc.T("服务器地址只填主机名，例如 imap.example.com。", "Enter the server's host name only, such as imap.example.com."), true); return; }
                 draft.Host = server;
+                draft.UserName = user.Text.Trim();
             }
             busy = true; connect.IsEnabled = false;
             try
