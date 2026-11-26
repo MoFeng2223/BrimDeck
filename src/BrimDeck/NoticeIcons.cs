@@ -96,6 +96,7 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
             }
             return stored is not null ? ReadImageFile(stored) : null;
         }
+        if (iconRef.StartsWith("brand:", StringComparison.Ordinal)) return AppBrandIcons.Read(iconRef[6..]);
         if (iconRef.StartsWith("file:", StringComparison.Ordinal)) return ReadLocal(iconRef[5..]);
         if (iconRef.StartsWith("exe:", StringComparison.Ordinal)) return await ReadProgram(iconRef[4..]);
         if (WslDistribution(iconRef) is { } distro)

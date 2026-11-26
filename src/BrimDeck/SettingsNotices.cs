@@ -723,8 +723,8 @@ public sealed partial class SettingsWindow
         };
     }
 
-    // The icon a row shows: the application's own, read from its notices (or for a watched chat from its program), else its
-    // first letter on a plate. An icon still being read takes the plate's place when it arrives.
+    // The icon a row shows: the application's own, read from its notices, else the one AppBrandIcons gives (a watched chat's
+    // program, a common chat's built-in icon, a Windows application's Start menu entry), else its first letter on a plate. An icon still being read takes the plate's place when it arrives.
     private FrameworkElement NoticeAppIcon(string name, string? iconRef, double size, NoticeCenter center)
     {
         Image Picture(System.Windows.Media.Imaging.BitmapSource image)

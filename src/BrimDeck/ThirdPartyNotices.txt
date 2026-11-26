@@ -1884,3 +1884,8 @@ Grpc.Net.Client, Grpc.Net.Common, Grpc.Core.Api, Grpc.AspNetCore.Server 2.71.0
 https://github.com/grpc/grpc-dotnet
 Copyright 2019 The gRPC Authors
 Licensed under the Apache License, Version 2.0, reproduced above.
+
+
+Application icons in Assets\Apps (WeChat, QQ, DingTalk, Feishu)
+These icons and the names they stand for are trademarks of their respective owners. They are shown only to identify these
+applications in BrimDeck's settings and notices, and are not covered by BrimDeck's license.

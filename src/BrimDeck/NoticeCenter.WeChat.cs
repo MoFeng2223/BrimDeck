@@ -39,9 +39,9 @@ internal sealed partial class NoticeCenter
         Receive(WithIcon(input));
     }
 
-    // A watched chat names no icon itself; its notices carry its program's (ChatAppIcons).
+    // A watched chat names no icon itself; its notices carry its program's (ChatAppIcons), else its built-in one (AppBrandIcons).
     private static NoticeInput WithIcon(NoticeInput input)
-        => input.IconRef is null && ChatAppIcons.Ref(input.AppKey) is { } icon ? input with { IconRef = icon } : input;
+        => input.IconRef is null && (ChatAppIcons.Ref(input.AppKey) ?? AppBrandIcons.Ref(input.AppKey)) is { } icon ? input with { IconRef = icon } : input;
 
     // Brings WeChat's window forward and, for a notice that names a chat, opens that chat.
     private async Task<bool> OpenWeChatAsync(Notice notice)
