@@ -571,7 +571,7 @@ internal sealed class WindowsNoticeSource : IDisposable
         lock (_apps) _apps.TryGetValue(appId, out app);
         string? family = app is null ? null : Safe(() => app.PackageFamilyName);
         if (replay is { } toast && await ReplayAsync(appId, toast, !string.IsNullOrEmpty(family))) return true;
-        if (FocusOpenWindow(appId, string.IsNullOrEmpty(family) ? null : app)) return true;
+        if (FocusOpenWindow(appId)) return true;
         if (!string.IsNullOrEmpty(family))
         {
             try
@@ -598,14 +598,15 @@ internal sealed class WindowsNoticeSource : IDisposable
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { return false; }
     }
 
-    // packaged: the application's AppInfo when it is a packaged app, else null. A desktop program's AppInfo has no package, and
-    // asking it for one throws InvalidCastException (QQ, 2026-11-26), which left every open of a notice no longer in the center
-    // undone.
-    private static bool FocusOpenWindow(string appId, Windows.ApplicationModel.AppInfo? packaged)
+    // A packaged app's windows are told by the folder it is installed in. The AppInfo a notification carries cannot give it: asking
+    // it for its package throws InvalidCastException for every sender, packaged or not (Claude, Codex and QQ, 2026-11-26). The
+    // AppInfo Windows gives for the id itself can (Claude: its WindowsApps folder). Only a packaged app's id ("family!entry") is
+    // looked up; it also works for a notice kept from before BrimDeck started, whose AppInfo is not at hand.
+    private static bool FocusOpenWindow(string appId)
     {
         try
         {
-            string? folder = packaged is null ? null : Safe(() => packaged.Package?.InstalledLocation?.Path);
+            string? folder = appId.Contains('!') ? Safe(() => Windows.ApplicationModel.AppInfo.GetFromAppUserModelId(appId)?.Package?.InstalledLocation?.Path) : null;
             return NoticeAppWindows.TryFocus(NoticeAppWindows.Hint(appId, folder), new AppWindowSystem(), Environment.ProcessId);
         }
         catch (Exception ex) when (ex is COMException or System.ComponentModel.Win32Exception or InvalidOperationException or UnauthorizedAccessException or ArgumentException or System.IO.IOException) { return false; }
