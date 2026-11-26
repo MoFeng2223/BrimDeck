@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Automation.Peers;
 using System.Windows.Automation.Provider;
@@ -11,6 +12,12 @@ using BrimDeck.Core;
 
 internal static class ProxyStripChecks
 {
+    private const int WmGetObject = 0x003D;
+    private static readonly IntPtr UiaRootObjectId = new(-25);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
     public static void Run(Action<string, bool> check)
     {
         var snap = new ProxySnapshot(true, ProxyMode.Rule, SystemProxy: true, Tun: true, "Clash Verge");
@@ -198,11 +205,13 @@ internal static class ProxyStripChecks
         PanelTheme.Use(new DeckSettings { PanelTheme = PanelThemes.Dark });
         PanelLook.Set(list, PanelTheme.Main);
 
-        // Host inside a hidden HwndSource so WPF AutomationPeer.ProviderFromPeer resolves real UIA element providers.
+        // Host inside a hidden HwndSource and query WM_GETOBJECT (UiaRootObjectId) so WPF attaches the HWND to the
+        // root AutomationPeer even on headless CI runners where AutomationInteropProvider.ClientsAreListening is false.
         using var host = new HwndSource(new HwndSourceParameters("BrimDeckProxyNodeListTest") { Width = 360, Height = 160, WindowStyle = 0 })
         {
             RootVisual = list
         };
+        _ = SendMessage(host.Handle, WmGetObject, IntPtr.Zero, UiaRootObjectId);
 
         var nodesA = new List<ProxyNodeInfo>
         {
@@ -228,7 +237,6 @@ internal static class ProxyStripChecks
         var peer = UIElementAutomationPeer.CreatePeerForElement(list);
         var selProvider = peer?.GetPattern(PatternInterface.Selection) as ISelectionProvider;
         var children = peer?.GetChildren();
-        if (children is { Count: 3 }) children[0].SetFocus();
         var item0Sel = children is { Count: 3 } ? children[0].GetPattern(PatternInterface.SelectionItem) as ISelectionItemProvider : null;
         var item2Sel = children is { Count: 3 } ? children[2].GetPattern(PatternInterface.SelectionItem) as ISelectionItemProvider : null;
         bool uiaBase = peer is not null
@@ -239,6 +247,7 @@ internal static class ProxyStripChecks
             && item0Sel?.IsSelected == true
             && item2Sel?.IsSelected == false
             && item0Sel?.SelectionContainer is not null;
+        if (children is { Count: 3 }) children[0].SetFocus();
         bool uiaSelectOk = false;
         if (item2Sel is not null)
         {
