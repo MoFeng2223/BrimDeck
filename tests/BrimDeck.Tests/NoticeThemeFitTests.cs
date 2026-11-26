@@ -116,8 +116,10 @@ internal static class NoticeThemeFitTests
             page.Contains("PanelTheme.Hex(\"success\")") && page.Contains("PanelTheme.Hex(\"caution\")") && page.Contains("PanelTheme.Hex(\"danger\")") && page.Contains("UnreadColor => UI.Accent"));
         check("A row's states take the selected, hover and pressed fills, each its own",
             page.Contains("selected ? \"fillSelected\"") && page.Contains("\"hover\"") && page.Contains("\"pressed\"") && !page.Contains("selected ? UI.Fill :"));
-        check("Each of the page's four kinds of button goes through Feel, so each state has its own fill",
-            System.Text.RegularExpressions.Regex.Matches(page, @"\bFeel\(button, ").Count == 4 && !page.Contains("face.Background = UI.Brush(UI.FillSelected); };"));
+        // The pill, icon toggle and page buttons go through Feel; "全部"/"未读" is the panel's segmented switch, which paints its own states.
+        check("The page's \"全部\"/\"未读\" switch is the panel's segmented switch", page.Contains("AgendaDraw.Segments(Look, "));
+        check("Each of the page's three kinds of button goes through Feel, so each state has its own fill",
+            System.Text.RegularExpressions.Regex.Matches(page, @"\bFeel\(button, ").Count == 3 && !page.Contains("face.Background = UI.Brush(UI.FillSelected); };"));
         check("The foot of the list and of a long text fade by a mask, not by a color laid over them",
             page.Contains("NoticeFade.Foot(scroll, FadeHeight)") && page.Contains("NoticeFade.Foot(scroll, WordsFadeHeight)") && !page.Contains("LinearGradientBrush"));
         var settings = Source("SettingsNotices.cs");
