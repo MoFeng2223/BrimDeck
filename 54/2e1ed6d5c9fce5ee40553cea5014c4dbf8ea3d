@@ -1,0 +1,34 @@
+src/BrimDeck/SettingsAgents.cs
+  s_43ed6316f61a40::t_002df6402e3991 24-26
+scripts/brim-router/BrimRouter.csproj
+  s_43ed6316f61a40::t_77ea283665016c 1-21
+src/BrimDeck/Native/BrimCommand.cs
+  s_43ed6316f61a40::t_dd1a31def0f8d2 18-19
+scripts/brim-router/Program.cs
+  s_43ed6316f61a40::t_9e6c64fc0e98c1 1-108
+src/BrimDeck.Core/Agents/HookBrim.cs
+  s_43ed6316f61a40::t_d89668e8a4d978 1-19
+tests/BrimDeck.Tests/AgentHookTests.cs
+  s_43ed6316f61a40::t_2687f7d7359959 23-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "542e1ed6d5c9fce5ee40553cea5014c4dbf8ea3d",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_43ed6316f61a40": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ce64a4c7-8e1b-47c7-8b20-1c5e12e53af0",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
