@@ -181,6 +181,28 @@ public sealed partial class SettingsWindow
         statusContent.Children.Add(statusDot); statusContent.Children.Add(statusText);
         var statusBadge = new Border {Child = statusContent, Height = 28, Padding = new Thickness(10, 0, 10, 0),
             VerticalAlignment = VerticalAlignment.Center, ToolTip = Loc.T("点击上方刷新按钮后自动检测", "Checked automatically when you use the refresh button above")};
+        // 状态由和风源文件里的监测器直接回报真实 HTTP 结果，设置页只负责把状态画到徽章上。
+        void RenderStatus(HeFengCheck check)
+        {
+            var (text, brush) = check.State switch
+            {
+                HeFengState.Connected => (Loc.T("已连通", "Connected"), UI.Brush(_palette.Positive)),
+                HeFengState.Failed => (Loc.T("连接失败", "Failed"), UI.Brush(_palette.Negative)),
+                _ => (Loc.T("未测试", "Not tested"), UI.Brush(TextTertiary))
+            };
+            statusText.Text = text; statusText.Foreground = brush; statusDot.Fill = brush;
+            statusBadge.ToolTip = check.State == HeFengState.Untested
+                ? Loc.T("点击上方刷新按钮后自动检测", "Checked automatically when you use the refresh button above")
+                : $"{check.Detail} · {check.Elapsed.TotalSeconds:0.0}s";
+        }
+        void OnStatusChanged(HeFengCheck check)
+        {
+            // HTTP 回调在线程池上，WPF 控件只能在 UI 线程更新。
+            if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(new Action(() => RenderStatus(check))); return; }
+            RenderStatus(check);
+        }
+        HeFengMonitor.Changed += OnStatusChanged;
+        RenderStatus(HeFengMonitor.Current);
         var dailyCounter=TextLine("",11,TextSecondary);dailyCounter.VerticalAlignment=VerticalAlignment.Center;
         var monthlyCounter=TextLine("",11,TextSecondary);monthlyCounter.VerticalAlignment=VerticalAlignment.Center;
         City? picked=null;bool programmatic=false;CancellationTokenSource? pending=null;CancellationTokenSource? fetchCts=null;
@@ -300,32 +322,6 @@ public sealed partial class SettingsWindow
             monthlyCounter.Text=Ratio(RequestGate.ThisMonth("hefeng"),state.Schedule.HeFengMonthlyLimit);
         }
         UpdateCounters();
-        void SetStatus(string text, Brush brush, string tip)
-        {
-            statusText.Text = text; statusText.Foreground = brush; statusDot.Fill = brush; statusBadge.ToolTip = tip;
-        }
-        // 改了 Host / Key 就让旧结果失效，下一次真实刷新再判定，不在设置页额外发请求。
-        void ResetStatus()
-        {
-            SetStatus(Loc.T("未测试", "Not tested"), UI.Brush(TextTertiary),
-                Loc.T("配置已更改，下次刷新会重新检测", "Configuration changed; the next refresh will check again"));
-        }
-        void MarkRefresh(string cityName, bool ok, bool requested, TimeSpan elapsed)
-        {
-            UpdateCounters();
-            if (!requested)
-            {
-                statusBadge.ToolTip = Loc.T("本次来自缓存，未重新检测", "Served from cache; not rechecked");
-                return;
-            }
-            string detail = ok
-                ? Loc.T($"{cityName} 实况响应正常", $"{cityName} responded normally")
-                : RequestGate.Cooldown("hefeng") > TimeSpan.Zero
-                    ? Loc.T("请求闸门冷却中，请稍后再试", "Request gate cooling down; try again later")
-                    : Loc.T("请求已发出但未取到数据，请检查 Key、额度与网络", "Request sent but no data returned; check the key, quota and network");
-            SetStatus(ok ? Loc.T("已连通", "Connected") : Loc.T("连接失败", "Failed"),
-                ok ? UI.Brush(_palette.Positive) : UI.Brush(_palette.Negative), $"{detail} · {elapsed.TotalSeconds:0.0}s");
-        }
         TextBox LimitField(Func<int> read, Action<int> write, Action? changed = null)
         {
             // 0 在界面上显示成「无限」，写回去的仍然是 int 0；聚焦时清空占位文字，直接输入数字即可。
@@ -348,9 +344,9 @@ public sealed partial class SettingsWindow
             return input;
         }
         cardGrid.Children.Add(CardField(Loc.T("API Host", "API Host"),
-            TextField(state.Schedule.HeFengHost, text => { state.Schedule.HeFengHost = text; Save(); ResetStatus(); }), null, 0, 0));
+            TextField(state.Schedule.HeFengHost, text => { state.Schedule.HeFengHost = text; Save(); HeFengMonitor.Invalidate(); }), null, 0, 0));
         cardGrid.Children.Add(CardField(Loc.T("API Key", "API Key"),
-            SecretField(state.Schedule.HeFengKey, text => { state.Schedule.HeFengKey = text; Save(); ResetStatus(); }), null, 0, 2));
+            SecretField(state.Schedule.HeFengKey, text => { state.Schedule.HeFengKey = text; Save(); HeFengMonitor.Invalidate(); }), null, 0, 2));
         cardGrid.Children.Add(CardField(Loc.T("每日上限", "Daily limit"),
             LimitField(() => state.Schedule.HeFengDailyLimit, v => state.Schedule.HeFengDailyLimit = v, UpdateCounters), dailyCounter, 1, 0));
         cardGrid.Children.Add(CardField(Loc.T("每月上限", "Monthly limit"),
@@ -374,7 +370,7 @@ public sealed partial class SettingsWindow
         };
         void UpdateSnapshots() { Fill(); preview.RenderWeatherCard(); }
         WeatherData.SnapshotChanged += UpdateSnapshots;
-        cityRows.Unloaded+=(_,_)=>{WeatherData.SnapshotChanged -= UpdateSnapshots;active=false;pending?.Cancel();pending?.Dispose();pending=null;fetchCts?.Cancel();fetchCts?.Dispose();fetchCts=null;popup.IsOpen=false;ShowSearching(false);};
+        cityRows.Unloaded+=(_,_)=>{WeatherData.SnapshotChanged -= UpdateSnapshots;HeFengMonitor.Changed -= OnStatusChanged;active=false;pending?.Cancel();pending?.Dispose();pending=null;fetchCts?.Cancel();fetchCts?.Dispose();fetchCts=null;popup.IsOpen=false;ShowSearching(false);};
 
         // 添加城市后立即拉取一次天气写入缓存，列表温度随之刷新；未就绪时该行不显示温度，删除或离开页面的请求一律作废。
         async Task RefreshCityWeatherAsync(City? selectedCity)
@@ -384,9 +380,6 @@ public sealed partial class SettingsWindow
             fetchCts = request;
             var token = request.Token;
             var sourceId = state.Schedule.SourceFor(selectedCity);
-            bool watchHefeng = sourceId == "hefeng";
-            int before = watchHefeng ? RequestGate.Today("hefeng") : 0;
-            var watch = System.Diagnostics.Stopwatch.StartNew();
             try
             {
                 var city = selectedCity ?? await WeatherData.LocateAsync(state.Schedule, token);
@@ -394,19 +387,11 @@ public sealed partial class SettingsWindow
                 var snapshot = await WeatherData.CurrentAsync(city, state.Schedule, sourceId, token);
                 if (!active || token.IsCancellationRequested || sourceId != state.Schedule.SourceFor(selectedCity)
                     || (selectedCity is not null && !state.Cities.Contains(selectedCity))) return;
-                if (watchHefeng)
-                {
-                    // 只有这次真的发出请求才更新状态：缓存命中不该冒充连通测试，也不额外消耗配额。
-                    bool requested = RequestGate.Today("hefeng") > before;
-                    bool ok = requested && WeatherSources.Find("hefeng") is { } source
-                        && snapshot.Sources.Values.Any(value => value.Contains(source.Info.Name, StringComparison.Ordinal));
-                    MarkRefresh(DisplayCityName(city.Name), ok, requested, watch.Elapsed);
-                }
                 var key = WeatherData.CacheKey(city, sourceId);
                 WeatherData.SaveSnapshot(key, snapshot, selectedCity is null ? key : null);
             }
             catch { }
-            finally { if (ReferenceEquals(fetchCts, request)) fetchCts = null; }
+            finally { UpdateCounters(); if (ReferenceEquals(fetchCts, request)) fetchCts = null; }
         }
     }
     // 排版区标题沿用「显示的内容/页面顺序」一档的样式：13px 主色半粗，比通用小节标题更醒目。

@@ -4,6 +4,81 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
+// 和风可用性监测：只认「实况」这一条真实请求的结果。缓存命中、闸门拦截、请求级 400 都不算，
+// 避免把国外坐标必失败的分钟降水、或另一座城市的并发请求误判成来源不可用。
+internal enum HeFengState { Untested, Connected, Failed }
+
+internal sealed record HeFengCheck(HeFengState State, string Detail, DateTimeOffset At, TimeSpan Elapsed);
+
+internal static class HeFengMonitor
+{
+    private static readonly object Sync = new();
+    private static HeFengCheck _current = new(HeFengState.Untested,
+        Loc.T("等待下一次真实刷新", "Waiting for the next live refresh"), default, default);
+    private static int _generation;
+
+    public static HeFengCheck Current { get { lock (Sync) return _current; } }
+    public static event Action<HeFengCheck>? Changed;
+
+    // Host / Key 改动后旧结果作废；在途请求带着旧代次回来也不会覆盖新配置的状态。
+    public static void Invalidate()
+    {
+        HeFengCheck fresh;
+        lock (Sync)
+        {
+            _generation++;
+            _current = new HeFengCheck(HeFengState.Untested,
+                Loc.T("配置已更改，下次刷新会重新检测", "Configuration changed; the next refresh will check again"), DateTimeOffset.Now, default);
+            fresh = _current;
+        }
+        Changed?.Invoke(fresh);
+    }
+
+    // 由实况请求在收到 HTTP 结果后直接回报，generation 与发起时一致才写入。
+    internal static void Report(int generation, int status, string? body, TimeSpan elapsed)
+    {
+        var (state, detail) = Classify(status, body);
+        if (state is null) return;   // 闸门未放行 / 请求级错误：不判来源可用性
+        var check = new HeFengCheck(state.Value, detail!, DateTimeOffset.Now, elapsed);
+        lock (Sync)
+        {
+            if (generation != _generation) return;
+            _current = check;
+        }
+        Changed?.Invoke(check);
+    }
+
+    public static int Generation { get { lock (Sync) return _generation; } }
+
+    private static (HeFengState? State, string? Detail) Classify(int status, string? body)
+    {
+        if (status == 0) return (null, null);   // 请求闸门拦下，没有真实发出
+        if (status is 401 or 403) return (HeFengState.Failed, Loc.T("API Key 无效或无权限", "API Key invalid or unauthorized"));
+        if (status == 402) return (HeFengState.Failed, Loc.T("账户额度不足", "Account quota exhausted"));
+        if (status == 429) return (HeFengState.Failed, Loc.T("请求过于频繁", "Rate limited"));
+        if (status is 408 or -1) return (HeFengState.Failed, Loc.T("网络异常或超时", "Network error or timeout"));
+        if (status is 400 or 404 or 422) return (null, null);   // 参数/地点问题只影响该请求，不代表来源不可用
+        if (status is < 200 or >= 300) return (HeFengState.Failed, Loc.T($"HTTP {status}", $"HTTP {status}"));
+        if (body is null) return (HeFengState.Failed, Loc.T("响应为空", "Empty response"));
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            // v1 成功响应带 condition；错误响应只有 code/message 或 error，不能只看 HTTP 200。
+            if (Json.Get(root, "condition") is { ValueKind: JsonValueKind.Object })
+                return (HeFengState.Connected, Loc.T("实况接口响应正常", "Current-weather endpoint responded"));
+            string? code = Json.Text(root, "code");
+            string? message = Json.Text(root, "message");
+            if (message is null && Json.Get(root, "error") is { } error)
+                message = Json.Text(error, "message") ?? Json.Text(error, "description");
+            string detail = string.Join(" · ", new[] { code is null ? null : Loc.T($"错误码 {code}", $"Code {code}"), message }
+                .Where(part => !string.IsNullOrWhiteSpace(part)));
+            return (HeFengState.Failed, detail.Length > 0 ? detail : Loc.T("响应中没有实况数据", "No current-weather data in response"));
+        }
+        catch { return (HeFengState.Failed, Loc.T("返回内容不是有效 JSON", "Response is not valid JSON")); }
+    }
+}
+
 // 和风天气：需要用户自己的 Key/Host。v1 覆盖实况、逐时、每日（含日月与晨昏蒙影）与空气；
 // v7 补充分钟降水、官方预警与生活指数；时光机补过去 10 天。选定它时只读它的返回，缺项显示 "-"。
 internal sealed class HeFengSource : IWeatherSource
@@ -90,7 +165,8 @@ internal sealed class HeFengSource : IWeatherSource
         // localTime=true：v1 默认返回 UTC，而界面和“今天”都按城市当地时刻算，不换算会整体错一天。
         string query = $"localTime=true&lang={context.Lang}";
         // 四个接口各自过期：实况最短、逐天最长，互不牵连（官方推荐 10–30 分钟 / 30–60 分钟 / 1–6 小时）。
-        var current = Want(WeatherDomain.Current) ? Body(context, "current|" + context.Site, TimeSpan.FromMinutes(10), $"{host}/weather/v1/current/{context.Lat}/{context.Lon}?{query}", token) : Task.FromResult<string?>(null);
+        // 实况是可用性探针：只有它发出真实请求并收到响应，才更新和风连通状态。
+        var current = Want(WeatherDomain.Current) ? Body(context, "current|" + context.Site, TimeSpan.FromMinutes(10), $"{host}/weather/v1/current/{context.Lat}/{context.Lon}?{query}", token, probe: true) : Task.FromResult<string?>(null);
         var hours = Want(WeatherDomain.Hourly) ? Body(context, "hourly|" + context.Site + "|" + context.Day, TimeSpan.FromMinutes(30), $"{host}/weather/v1/hourly/{context.Lat}/{context.Lon}?hours=24&{query}", token) : Task.FromResult<string?>(null);
         var days = Want(WeatherDomain.Daily) ? Body(context, "daily|" + context.Site + "|" + context.Day, TimeSpan.FromHours(2), $"{host}/weather/v1/daily/{context.Lat}/{context.Lon}?days=10&{query}", token) : Task.FromResult<string?>(null);
         var air = Want(WeatherDomain.Air) ? Body(context, "air|" + context.Site, TimeSpan.FromMinutes(30), $"{host}/airquality/v1/current/{context.Lat}/{context.Lon}?lang={context.Lang}", token) : Task.FromResult<string?>(null);
@@ -110,13 +186,16 @@ internal sealed class HeFengSource : IWeatherSource
         return part.Current is null && part.Hours is null && part.Days is null && part.Air is null ? null : part;
     }
 
-    private static Task<string?> Body(Context context, string key, TimeSpan ttl, string url, CancellationToken token)
-        => WeatherCache.GetAsync<string>("hefeng", key, ttl, ct => SendAsync(context, url, ct), token);
+    private static Task<string?> Body(Context context, string key, TimeSpan ttl, string url, CancellationToken token, bool probe = false)
+        => WeatherCache.GetAsync<string>("hefeng", key, ttl, ct => SendAsync(context, url, ct, probe), token);
 
     // Key 走 X-QW-Api-Key 请求头：比放在查询字符串里安全，也避免同时使用两种认证方式。
-    private static async Task<string?> SendAsync(Context context, string url, CancellationToken token)
+    private static async Task<string?> SendAsync(Context context, string url, CancellationToken token, bool probe = false)
     {
+        int generation = HeFengMonitor.Generation;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
         var result = await WeatherHttp.GetAsync("hefeng", url, token, request => request.Headers.TryAddWithoutValidation("X-QW-Api-Key", context.Key), limits: context.Settings);
+        if (probe) HeFengMonitor.Report(generation, result.Status, result.Body, watch.Elapsed);
         return result.Body;
     }
 
