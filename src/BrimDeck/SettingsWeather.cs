@@ -173,17 +173,32 @@ public sealed partial class SettingsWindow
             loading.Visibility=on?Visibility.Visible:Visibility.Collapsed;
             if(on) empty.Visibility=Visibility.Collapsed;
         }
-        // 状态徽章与配额计数器提前声明：添加城市时触发的刷新在编译期会先引用到它们，晚声明会被判定为未赋值。
+        // 状态按钮与配额计数器提前声明：按钮回调和添加城市触发的刷新都会引用到它们，晚声明会被判定为未赋值。
+        var dailyCounter=TextLine("",11,TextSecondary);dailyCounter.VerticalAlignment=VerticalAlignment.Center;
+        var monthlyCounter=TextLine("",11,TextSecondary);monthlyCounter.VerticalAlignment=VerticalAlignment.Center;
         var statusDot = new Ellipse {Width = 7, Height = 7, Fill = UI.Brush(TextTertiary)};
         var statusText = TextLine(Loc.T("未测试", "Not tested"), 11, TextSecondary);
         statusText.VerticalAlignment = VerticalAlignment.Center; statusText.Margin = new Thickness(6, 0, 0, 0);
         var statusContent = new StackPanel {Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center};
         statusContent.Children.Add(statusDot); statusContent.Children.Add(statusText);
-        var statusBadge = new Border {Child = statusContent, Height = 28, Padding = new Thickness(10, 0, 10, 0),
-            VerticalAlignment = VerticalAlignment.Center, ToolTip = Loc.T("点击上方刷新按钮后自动检测", "Checked automatically when you use the refresh button above")};
-        // 状态由和风源文件里的监测器直接回报真实 HTTP 结果，设置页只负责把状态画到徽章上。
+        // 一个按钮同时承担两件事：圆点与文字是连通性状态，点击它就发一次真实请求手动测试。
+        var statusButton = new Button {Style = (Style)FindResource("SettingsOutlineButton"), Content = statusContent,
+            Height = 28, MinWidth = 108, Padding = new Thickness(10, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center,
+            ToolTip = Loc.T("点击测试连通性（计入配额）；刷新天气时也会自动检测", "Click to test connectivity (counts toward quota); a weather refresh also checks it")};
+        bool testing = false;
+        statusButton.Click += async (_, _) =>
+        {
+            if (testing) return;
+            testing = true; statusButton.IsEnabled = false;
+            statusText.Text = Loc.T("测试中…", "Testing…");
+            statusText.Foreground = UI.Brush(TextSecondary); statusDot.Fill = UI.Brush(TextSecondary);
+            try { await HeFengSource.ProbeAsync(state.Schedule, CancellationToken.None); }
+            finally { testing = false; statusButton.IsEnabled = true; UpdateCounters(); RenderStatus(HeFengMonitor.Current); }
+        };
+        // 状态由和风源文件里的监测器直接回报真实 HTTP 结果，设置页只负责把状态画到按钮上。
         void RenderStatus(HeFengCheck check)
         {
+            if (testing) return;
             var (text, brush) = check.State switch
             {
                 HeFengState.Connected => (Loc.T("已连通", "Connected"), UI.Brush(_palette.Positive)),
@@ -191,9 +206,9 @@ public sealed partial class SettingsWindow
                 _ => (Loc.T("未测试", "Not tested"), UI.Brush(TextTertiary))
             };
             statusText.Text = text; statusText.Foreground = brush; statusDot.Fill = brush;
-            statusBadge.ToolTip = check.State == HeFengState.Untested
-                ? Loc.T("点击上方刷新按钮后自动检测", "Checked automatically when you use the refresh button above")
-                : $"{check.Detail} · {check.Elapsed.TotalSeconds:0.0}s";
+            statusButton.ToolTip = check.State == HeFengState.Untested
+                ? Loc.T("点击测试连通性（计入配额）；刷新天气时也会自动检测", "Click to test connectivity (counts toward quota); a weather refresh also checks it")
+                : $"{check.Detail} · {check.Elapsed.TotalSeconds:0.0}s · " + Loc.T("点击重新测试", "Click to test again");
         }
         void OnStatusChanged(HeFengCheck check)
         {
@@ -203,8 +218,6 @@ public sealed partial class SettingsWindow
         }
         HeFengMonitor.Changed += OnStatusChanged;
         RenderStatus(HeFengMonitor.Current);
-        var dailyCounter=TextLine("",11,TextSecondary);dailyCounter.VerticalAlignment=VerticalAlignment.Center;
-        var monthlyCounter=TextLine("",11,TextSecondary);monthlyCounter.VerticalAlignment=VerticalAlignment.Center;
         City? picked=null;bool programmatic=false;CancellationTokenSource? pending=null;CancellationTokenSource? fetchCts=null;
         // 城市上限与 DeckSettings.Normalize 共用同一常量：满了就禁用添加并说明原因，不会出现「加了却被规范化丢掉」。
         bool CanAdd() => state.Cities.Count < DeckSettings.MaxWeatherCities;
@@ -271,9 +284,9 @@ public sealed partial class SettingsWindow
         var cardBody = new StackPanel();
         var cardHeading = TextLine(Loc.T("和风天气", "QWeather"), 14, TextPrimary, FontWeights.SemiBold);
         cardHeading.VerticalAlignment = VerticalAlignment.Center;
-        // 标题右侧只展示连通性状态，不在设置页发起测试；结果来自预览卡刷新时的真实和风请求。
+        // 标题右侧的按钮既显示连通性状态，也负责发起手动测试。
         var cardHeadingRow = new DockPanel {Margin = new Thickness(0, 0, 0, 14)};
-        DockPanel.SetDock(statusBadge, Dock.Right); cardHeadingRow.Children.Add(statusBadge); cardHeadingRow.Children.Add(cardHeading);
+        DockPanel.SetDock(statusButton, Dock.Right); cardHeadingRow.Children.Add(statusButton); cardHeadingRow.Children.Add(cardHeading);
         cardBody.Children.Add(cardHeadingRow);
         var cardGrid = new Grid();
         cardGrid.ColumnDefinitions.Add(new ColumnDefinition());

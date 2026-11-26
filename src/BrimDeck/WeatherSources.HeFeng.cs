@@ -99,13 +99,27 @@ internal sealed class HeFengSource : IWeatherSource
         public string Day => DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(Geo.UtcOffsetHours(City))).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
     }
 
+    // Key 随请求头明文传输，一律强制 HTTPS：用户填 http:// 也升级，避免 Key 在明文连接里裸奔。
+    // 自动请求与手动探针共用同一套归一化，不能各写一遍导致行为不一致。
+    internal static string NormalizeHost(string raw)
+    {
+        string host = raw.Trim().TrimEnd('/');
+        return host.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ? "https://" + host[7..]
+             : host.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ? host : "https://" + host;
+    }
+
+    // 手动测试：复用实况请求那条链路（含判定与状态发布），只是坐标固定北京、绕过缓存。
+    internal static async Task ProbeAsync(WeatherSettings settings, CancellationToken token)
+    {
+        string host = NormalizeHost(settings.HeFengHost);
+        if (host.Length == 0 || settings.HeFengKey.Trim().Length == 0) return;
+        var context = new Context(host, settings.HeFengKey.Trim(), new City("北京", 39.90, 116.41), settings);
+        await SendAsync(context, $"{host}/weather/v1/current/{context.Lat}/{context.Lon}?localTime=true&lang={context.Lang}", token, probe: true);
+    }
+
     public async Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
     {
-        string host = settings.HeFengHost.Trim().TrimEnd('/');
-        // Key 随请求头明文传输，一律强制 HTTPS：用户填 http:// 也升级，避免 Key 在明文连接里裸奔。
-        host = host.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ? "https://" + host[7..]
-             : host.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ? host : "https://" + host;
-        var context = new Context(host, settings.HeFengKey.Trim(), city, settings);
+        var context = new Context(NormalizeHost(settings.HeFengHost), settings.HeFengKey.Trim(), city, settings);
         // 历史单独占一段：时光机只认 LocationID、一天一次请求，挂在独立的第二轮，不混进首屏。
         // 延后轮次可能把历史与预警/指数等一起送来，这里按需拆分，互不干扰。
         bool wantHistory = need.Contains(WeatherDomain.History);
