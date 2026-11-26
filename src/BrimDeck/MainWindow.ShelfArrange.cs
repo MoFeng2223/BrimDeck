@@ -340,9 +340,6 @@ public partial class MainWindow
             HorizontalAlignment = left || Settings.ShelfSameSideStack ? HorizontalAlignment.Left : HorizontalAlignment.Right };
         // The column keeps the width it has in front and stands against the card's left edge; a narrower card cuts it off.
         var body = new Border { Padding = new Thickness(layout.CardPad, 2, layout.CardPad, 4), Child = column, HorizontalAlignment = HorizontalAlignment.Left };
-        // The card clips what it holds, and text under a clip is drawn in grayscale in this layered window (MainWindow.xaml:
-        // IslandContent). The card's fill beneath is opaque, so ClearType is safe: the text looks as it does side by side.
-        RenderOptions.SetClearTypeHint(body, ClearTypeHint.Enabled); RenderOptions.SetClearTypeHint(strip, ClearTypeHint.Enabled);
         var fill = new SolidColorBrush(); var rim = new SolidColorBrush();
         var card = new Border
         {

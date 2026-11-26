@@ -76,13 +76,13 @@ internal static class PanelTheme
 
     public static Color ToColor(ThemeColor color) => Color.FromArgb(color.A, color.R, color.G, color.B);
 
-    // A menu or tooltip takes the text rendering of what it opens from (App.OnStartup): unsmoothed over a pixel theme's panel,
-    // smoothed over the settings, which follow Windows rather than the panel theme, and over the tray. Opened over a panel that
-    // shows another profile, it takes that panel's brushes too, since it is not in the panel's tree to find them.
+    // A menu or tooltip takes the text rendering of what it opens from (App.OnStartup, TextClarity.Follow): unsmoothed over a
+    // pixel theme's panel, ClearType over an opaque one and over the settings, which follow Windows rather than the panel theme.
+    // Opened over a panel that shows another profile, it takes that panel's brushes too, since it is not in the panel's tree to
+    // find them.
     public static void Text(FrameworkElement popup, DependencyObject? from)
     {
-        if (from is not null && TextOptions.GetTextRenderingMode(from) == TextRenderingMode.Aliased) TextOptions.SetTextRenderingMode(popup, TextRenderingMode.Aliased);
-        else popup.ClearValue(TextOptions.TextRenderingModeProperty);
+        TextClarity.Follow(popup, from);
         if (from is not null) PanelLook.Of(from).PublishTo(popup.Resources, onlyOwn: true);
     }
 

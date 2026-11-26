@@ -27,6 +27,8 @@ internal sealed class ModelDateWindow : Window
         Picker.Applied += selected => { Applied?.Invoke(selected); Close(); };
         Picker.Cancelled += () => { Cancelled?.Invoke(); Close(); };
         Content = Picker;
+        // The picker's text lies on its opaque face.
+        TextClarity.SetClearType(this, true);
         // The window keeps the validation message's room below the picker, transparent while it is closed, so the message opens
         // and closes on the shared curve without the window resizing every frame.
         Height = Picker.FullHeight(Width);

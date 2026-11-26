@@ -117,6 +117,7 @@ try
     DeviceProtocolTests.Run(Check);
     DeviceSafetyTests.Run(Check);
     DevicePollingTests.Run(Check);
+    TextClarityTests.Run(Check);
     DeviceReadTests.Run(Check);
     BrandFamilyTests.Run(Check);
     BrandsControllerTests.Run(Check);

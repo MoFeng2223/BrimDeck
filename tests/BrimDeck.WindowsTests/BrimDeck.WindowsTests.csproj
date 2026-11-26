@@ -74,6 +74,7 @@
     <Compile Include="..\..\src\BrimDeck\CompactStylePreview.cs" Link="CompactStylePreview.cs" />
     <Compile Include="..\..\src\BrimDeck\UI.cs" Link="UI.cs" />
     <Compile Include="..\..\src\BrimDeck\PanelTheme.cs" Link="PanelTheme.cs" />
+    <Compile Include="..\..\src\BrimDeck\TextClarity.cs" Link="TextClarity.cs" />
     <Compile Include="..\..\src\BrimDeck\SettingsPalette.cs" Link="SettingsPalette.cs" />
     <Compile Include="..\..\src\BrimDeck\PageToolTips.cs" Link="PageToolTips.cs" />
     <!-- Which controls show their own hover, so a theme's hover mark leaves them alone (HoverOwnerChecks), with the music

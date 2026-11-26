@@ -20,6 +20,8 @@ internal static class SettingsChrome
             CaptionHeight = 52, ResizeBorderThickness = new Thickness(6),
             GlassFrameThickness = new Thickness(0), CornerRadius = new CornerRadius(SupportsDwmStyling ? 12 : 0), UseAeroCaptionButtons = false
         });
+        // The window is opaque: its text, and that of the menus and drop-downs opened from it, keeps ClearType (TextClarity).
+        TextClarity.SetClearType(window, true);
         window.SourceInitialized += (_, _) =>
         {
             var handle = new WindowInteropHelper(window).Handle;

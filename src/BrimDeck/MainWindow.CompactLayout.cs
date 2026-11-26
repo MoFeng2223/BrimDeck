@@ -141,7 +141,6 @@ public partial class MainWindow
         var view = new Canvas { Width = span, Height = row, ClipToBounds = true, VerticalAlignment = VerticalAlignment.Center, Tag = AlertRegionTag };
         Canvas.SetTop(parts, Snap((row - parts.DesiredSize.Height) / 2, dpi));
         view.Children.Add(parts);
-        RenderOptions.SetClearTypeHint(parts, ClearTypeHint.Enabled);
         CompactAlert.Children.Add(view);
         double shown = AlertShown.TotalSeconds;
         var (start, end) = CompactAlertLayout.Scroll(overflow, shown);
@@ -167,7 +166,6 @@ public partial class MainWindow
 
     // A region of the given width holding one element, centred vertically in the row. The element keeps its size and is
     // anchored to one side (after a leading gap, if any); a region narrower than that cuts the other side off.
-    // Text below the cut is set to ClearType again: the clip would otherwise turn it grayscale, and it lies over the opaque surface.
     private static FrameworkElement CompactRegion(FrameworkElement child, double width, double childWidth, double childHeight, double row, RegionAnchor anchor, double dpi, double leading = 0)
     {
         double w = SnapDown(width, dpi), cw = Math.Max(0, double.IsFinite(childWidth) ? childWidth : 0), ch = Math.Max(0, double.IsFinite(childHeight) ? childHeight : 0);
@@ -176,7 +174,6 @@ public partial class MainWindow
         child.Width = cw; child.HorizontalAlignment = HorizontalAlignment.Left; child.VerticalAlignment = VerticalAlignment.Top;
         Canvas.SetLeft(child, Snap(left, dpi)); Canvas.SetTop(child, Snap((row - ch) / 2, dpi));
         region.ClipToBounds = left < 0 || left + cw > w + .001;
-        if (region.ClipToBounds && child is TextBlock) RenderOptions.SetClearTypeHint(child, ClearTypeHint.Enabled);
         region.Children.Add(child);
         return region;
     }

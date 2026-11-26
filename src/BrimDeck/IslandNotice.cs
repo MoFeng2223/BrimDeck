@@ -107,7 +107,8 @@ internal sealed partial class IslandNotice : Window
         _shadow.Draw = DrawShadow; _shade.Draw = DrawShade; _glowWide.Draw = d => DrawGlow(d, wide: true); _glowCore.Draw = d => DrawGlow(d, wide: false);
         _bloomWide.Draw = d => DrawBloom(d, 3, 4); _bloomMiddle.Draw = d => DrawBloom(d, 1.5, 1.5); _bloomSmall.Draw = d => DrawBloom(d, .5, 0);
         _body.Draw = DrawBody; _parts.Draw = DrawParts; _edge.Draw = DrawEdgeLight; _beads.Draw = DrawBeads;
-        RenderOptions.SetClearTypeHint(_content, ClearTypeHint.Enabled);
+        // The notice lies over the island's opaque body; its text keeps ClearType under the clips that hold it.
+        TextClarity.SetClearType(_content, true);
         AutomationProperties.SetName(_hit, Loc.T("灵动提示", "Live notice"));
         _hoverOpen = new(Dispatcher, () => { _hoverOpen!.Stop(); if (_item is not null && !_leaving && _hit.IsMouseOver) OpenPage(byKey: false); });
         // A notice that stays until handled plays its motion again while it shows.

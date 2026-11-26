@@ -22,6 +22,8 @@ internal sealed class DragHint : Window
         SizeToContent = SizeToContent.WidthAndHeight;
         Topmost = true; ShowActivated = false; ShowInTaskbar = false; Focusable = false; IsHitTestVisible = false; Title = "BrimDeck";
         Content = _frame = Frame(look);
+        // The word lies on the frame's opaque fill.
+        TextClarity.SetClearType(this, true);
         _text = (TextBlock)_frame.Child;
         SourceInitialized += (_, _) =>
         {

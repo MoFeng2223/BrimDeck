@@ -244,7 +244,7 @@ public partial class MainWindow
         if (popup.Content is FrameworkElement scaled) UI.Scale(scaled, _scale);
         if (double.IsFinite(popup.Width)) popup.Width *= _scale;
         // A layered window renders grayscale text unless told otherwise; its rounded background is opaque, so ClearType is safe.
-        RenderOptions.SetClearTypeHint(popup, ClearTypeHint.Enabled);
+        TextClarity.SetClearType(popup, true);
         var point = anchor.PointToScreen(new Point(anchor.ActualWidth, anchor.ActualHeight));
         var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice ?? Matrix.Identity;
         point = transform.Transform(point);
@@ -501,8 +501,6 @@ public partial class MainWindow
             if (restoredIds.Contains(record.Provider)) row.Opacity = UsageLastSeen.Dimmed;
             list.Children.Add(item);
         }
-        // The viewport clip would turn the rows grayscale; they lie over the island's opaque surface.
-        RenderOptions.SetClearTypeHint(list, ClearTypeHint.Enabled);
         // Focusable so the arrow keys scroll the list; an outline around the whole list would only add noise.
         var scroll = new ScrollViewer { Content = list, Style = (Style)FindResource("ModelScrollViewer"), Focusable = true, FocusVisualStyle = null };
         _modelScroll = scroll;
