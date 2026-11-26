@@ -121,18 +121,10 @@ internal sealed class DayPoint
     public string? MoonPhase;
     public string? Moonrise;
     public string? Moonset;
-    // 晨昏蒙影三级与太阳正午/午夜（和风 astro 独有，Open-Meteo 无）。
-    public string? AstronomicalDawn;
-    public string? NauticalDawn;
-    public string? CivilDawn;
-    public string? CivilDusk;
-    public string? NauticalDusk;
-    public string? AstronomicalDusk;
+    // 太阳正午、月过中天（和风 astro 独有，Open-Meteo 无）：天文轨道曲线的峰值时刻。
+    // 晨昏蒙影三级、太阳午夜、月下点无视图消费，已从契约中移除。
     public string? SolarNoon;
-    public string? SolarMidnight;
-    // 月过中天/月下点：月亮最高与最低时刻。
     public string? MoonTransit;
-    public string? MoonUnderfoot;
     // 日均温（和风 temperatureAvg；Open-Meteo 无）。
     public double? AvgTempC;
     // 白天云量（和风 daytime.cloudCover）。
@@ -204,10 +196,8 @@ internal sealed class WeatherSnapshot
     public double[] DayPrecipMm {get;set;}=[]; public double[] DayUvMax {get;set;}=[]; public double[] DayWindMaxKmh {get;set;}=[]; public double[] DayGustMaxKmh {get;set;}=[];
     public double[] DayWindDirDeg {get;set;}=[]; public string[] DayWindDir {get;set;}=[]; public int[] DayHumidity {get;set;}=[]; public double[] DayPressureHpa {get;set;}=[]; public string[] DayMoonPhase {get;set;}=[];
     public string[] MoonriseTimes {get;set;}=[]; public string[] MoonsetTimes {get;set;}=[];
-    // 晨昏蒙影三级（天文/航海/民用）、太阳正午/午夜、月过中天/月下点：和风 astro 独有，Open-Meteo 无此数据。
-    public string[] AstronomicalDawnTimes {get;set;}=[]; public string[] NauticalDawnTimes {get;set;}=[]; public string[] CivilDawnTimes {get;set;}=[]; public string[] CivilDuskTimes {get;set;}=[];
-    public string[] NauticalDuskTimes {get;set;}=[]; public string[] AstronomicalDuskTimes {get;set;}=[]; public string[] SolarNoonTimes {get;set;}=[]; public string[] SolarMidnightTimes {get;set;}=[];
-    public string[] MoonTransitTimes {get;set;}=[]; public string[] MoonUnderfootTimes {get;set;}=[];
+    // 太阳正午、月过中天：和风 astro 独有的天文轨道峰值，Open-Meteo 无此数据。
+    public string[] SolarNoonTimes {get;set;}=[]; public string[] MoonTransitTimes {get;set;}=[];
     // 日均温与白天云量（和风独有）；夜间分段（夜间天气/湿度/风/降水/云量）。
     public double[] DayAvgC {get;set;}=[]; public double[] DayCloudPercent {get;set;}=[];
     public int[] DayNightCodes {get;set;}=[]; public string[] DayNightConditions {get;set;}=[]; public int[] DayNightHumidity {get;set;}=[];

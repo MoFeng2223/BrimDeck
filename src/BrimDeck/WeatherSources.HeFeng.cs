@@ -475,17 +475,9 @@ internal sealed class HeFengSource : IWeatherSource
                     day.MoonPhase = Json.Text(astro, "moonPhase");
                     day.Moonrise = Stamp(Json.Text(astro, "moonrise"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
                     day.Moonset = Stamp(Json.Text(astro, "moonset"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    // 晨昏蒙影三级（天文学→航海→民用，由暗到亮）、太阳正午/午夜、月过中天/月下点。
-                    day.AstronomicalDawn = Stamp(Json.Text(astro, "astronomicalDawn"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    day.NauticalDawn = Stamp(Json.Text(astro, "nauticalDawn"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    day.CivilDawn = Stamp(Json.Text(astro, "civilDawn"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    day.CivilDusk = Stamp(Json.Text(astro, "civilDusk"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    day.NauticalDusk = Stamp(Json.Text(astro, "nauticalDusk"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    day.AstronomicalDusk = Stamp(Json.Text(astro, "astronomicalDusk"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+                    // 天文轨道曲线的峰值：太阳正午、月过中天；其余 astro 时刻无视图消费，不解析。
                     day.SolarNoon = Stamp(Json.Text(astro, "solarNoon"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    day.SolarMidnight = Stamp(Json.Text(astro, "solarMidnight"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
                     day.MoonTransit = Stamp(Json.Text(astro, "moonTransit"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-                    day.MoonUnderfoot = Stamp(Json.Text(astro, "moonUnderfoot"), city)?.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
                 }
                 days.Add(day);
             }

@@ -323,16 +323,8 @@ internal static class WeatherAggregator
             DayNightPrecipMm = datePoints(dayMap, dates, point => point.NightPrecipMm ?? double.NaN),
             DayNightRainProb = datePoints(dayMap, dates, point => point.NightRainProb ?? -1),
             DayNightCloudPercent = datePoints(dayMap, dates, point => point.NightCloudPercent ?? double.NaN),
-            AstronomicalDawnTimes = datePoints(dayMap, dates, point => point.AstronomicalDawn ?? ""),
-            NauticalDawnTimes = datePoints(dayMap, dates, point => point.NauticalDawn ?? ""),
-            CivilDawnTimes = datePoints(dayMap, dates, point => point.CivilDawn ?? ""),
-            CivilDuskTimes = datePoints(dayMap, dates, point => point.CivilDusk ?? ""),
-            NauticalDuskTimes = datePoints(dayMap, dates, point => point.NauticalDusk ?? ""),
-            AstronomicalDuskTimes = datePoints(dayMap, dates, point => point.AstronomicalDusk ?? ""),
             SolarNoonTimes = datePoints(dayMap, dates, point => point.SolarNoon ?? ""),
-            SolarMidnightTimes = datePoints(dayMap, dates, point => point.SolarMidnight ?? ""),
             MoonTransitTimes = datePoints(dayMap, dates, point => point.MoonTransit ?? ""),
-            MoonUnderfootTimes = datePoints(dayMap, dates, point => point.MoonUnderfoot ?? ""),
             MinuteTimes = minutes.OrderBy(m => m.Time, StringComparer.Ordinal).Select(m => m.Time).ToArray(),
             MinutePrecip = minutes.OrderBy(m => m.Time, StringComparer.Ordinal).Select(m => m.Precip).ToArray(),
             MinuteSummary = minuteSummary ?? "",
@@ -417,12 +409,9 @@ internal static class WeatherAggregator
         any |= Set<double>(ref target.PressureHpa, source.PressureHpa);
         // 天文（日升日落、月升月落、月相）随每日预报一起返回，是 Daily 的普通字段。
         any |= FillString(ref target.Sunrise, source.Sunrise) | FillString(ref target.Sunset, source.Sunset);
-        // 晨昏蒙影与太阳正午/午夜、月过中天/月下点：和风 astro 独有的扩展时刻，同为 Daily 字段。
-        any |= FillString(ref target.AstronomicalDawn, source.AstronomicalDawn) | FillString(ref target.NauticalDawn, source.NauticalDawn)
-            | FillString(ref target.CivilDawn, source.CivilDawn) | FillString(ref target.CivilDusk, source.CivilDusk)
-            | FillString(ref target.NauticalDusk, source.NauticalDusk) | FillString(ref target.AstronomicalDusk, source.AstronomicalDusk)
-            | FillString(ref target.SolarNoon, source.SolarNoon) | FillString(ref target.SolarMidnight, source.SolarMidnight);
-        any |= FillString(ref target.MoonTransit, source.MoonTransit) | FillString(ref target.MoonUnderfoot, source.MoonUnderfoot);
+        // 太阳正午、月过中天：和风 astro 独有的天文轨道峰值，同为 Daily 字段。
+        any |= FillString(ref target.SolarNoon, source.SolarNoon);
+        any |= FillString(ref target.MoonTransit, source.MoonTransit);
         any |= FillString(ref target.Moonrise, source.Moonrise) | FillString(ref target.Moonset, source.Moonset)
             | FillString(ref target.MoonPhase, source.MoonPhase);
         // 日均温与白天云量：和风独有（Open-Meteo daily 不返回这两项）。
