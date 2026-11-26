@@ -187,8 +187,9 @@ public sealed class NoticeAppRule
     // "#RRGGBB" chosen by hand; empty takes the color read from the icon.
     public string AccentColor { get; set; } = "";
     // WeChat's, DingTalk's and Feishu's rows only ("读取消息内容"). WeChat: its messages are read from its chat list, with who
-    // sent them and their words, and can be answered (WeChatSource). DingTalk: the popups and call windows it shows are read
-    // (DingTalkWatch). Feishu: its banners are read and hidden, the island showing them instead (FeishuWatch).
+    // sent them and their words, and can be answered (WeChatSource), and its call windows are read (CallWindowWatch). DingTalk:
+    // its messages are read from its store (DingTalkMessages) and its call windows are read (CallWindowWatch). Feishu: its
+    // banners are read and hidden, the island showing them instead (FeishuWatch).
     // Off, only the flash of the taskbar button is told. Off by default: it reads message content (and changes the running WeChat).
     public bool ReadContent { get; set; }
     public NoticeAppRule Copy() { var copy = (NoticeAppRule)MemberwiseClone(); copy.Styles = Styles?.Copy(); return copy; }
@@ -213,7 +214,7 @@ public static class NoticeKeys
     // since watching the taskbar is the user's choice. Windows applications, command-line and WSL sources show without a rule.
     public static bool ListedOnly(string appKey) => appKey.StartsWith("flash:", StringComparison.Ordinal);
     // The notices whose source never says they are gone: a flash of a taskbar button (ChatFlashFilter, "flash:"), a Feishu
-    // banner read (FeishuWatch, "feishu:msg:") and a DingTalk message popup read (DingTalkWatch, "dingtalk:msg:"). The notices
+    // banner read (FeishuWatch, "feishu:msg:") and a DingTalk message read from its store (DingTalkMessages, "dingtalk:msg:"). The notices
     // page does not call them closed at the source (a notice kept from before BrimDeck restarted is), nor shows them faded.
     public static bool NeverClosed(string? instanceKey) => instanceKey is { } key
         && (key.StartsWith("flash:", StringComparison.Ordinal) || key.StartsWith("feishu:msg:", StringComparison.Ordinal) || key.StartsWith("dingtalk:msg:", StringComparison.Ordinal));

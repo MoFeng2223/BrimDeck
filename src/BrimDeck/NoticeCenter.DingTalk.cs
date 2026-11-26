@@ -5,12 +5,12 @@ namespace BrimDeck;
 
 // DingTalk in the notices. It sends no Windows notification. Without the row's "读取消息内容" only the flash of its taskbar
 // button is told ("有新消息", ChatFlash). With it, its messages are read from its own store with the chat, the sender and the
-// words (DingTalkMessages), its ringing calls from the windows it draws for them (DingTalkWatch), and the taskbar flash is
+// words (DingTalkMessages), its ringing calls from the windows it draws for them (CallWindowWatch), and the taskbar flash is
 // left out while the messages are being read -- it would only repeat what the store already said.
 internal sealed partial class NoticeCenter
 {
     private DingTalkMessages? _dingTalkMessages;
-    private DingTalkWatch? _dingTalkCalls;
+    private CallWindowWatch? _dingTalkCalls;
 
     // How the reading of DingTalk goes, for the settings page; Off while it is not chosen.
     public DingTalkState DingTalkState => _dingTalkMessages?.State ?? DingTalkState.Off;
@@ -23,7 +23,7 @@ internal sealed partial class NoticeCenter
         {
             if (_dingTalkMessages is null)
                 _dingTalkMessages = new DingTalkMessages(_dispatcher, input => { if (_enabled && !_disposed) Receive(WithIcon(input)); }, () => { if (!_disposed) Changed?.Invoke(); });
-            _dingTalkCalls ??= new DingTalkWatch(_dispatcher, input => { if (_enabled && !_disposed) Receive(WithIcon(input)); },
+            _dingTalkCalls ??= new CallWindowWatch(CallWindowWatch.DingTalk, input => { if (_enabled && !_disposed) Receive(WithIcon(input)); },
                 key => { if (!_disposed) Hub.SourceRemoved(key); });
             Changed?.Invoke();
             return;

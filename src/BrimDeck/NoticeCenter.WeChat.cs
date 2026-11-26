@@ -6,10 +6,12 @@ namespace BrimDeck;
 
 // WeChat in the notices. Without the row's "读取消息内容" only the flash of its taskbar button is told ("有新消息", ChatFlash).
 // With it the chat list is read (WeChatSource): each message is a notice under its chat's name, a click opens that chat, and
-// the notices page can answer it. Either way a click brings WeChat's window forward through WeChat's own address (ChatRestore).
+// the notices page can answer it, and a ringing call shows from the window WeChat draws for it (CallWindowWatch) until it is
+// answered, declined or given up. Either way a click brings WeChat's window forward through WeChat's own address (ChatRestore).
 internal sealed partial class NoticeCenter
 {
     private WeChatSource? _wechat;
+    private CallWindowWatch? _wechatCalls;
 
     // What the reading of WeChat's chat list is doing, for the settings page and the notices page; Off while it is not chosen.
     public WeChatState WeChatState => _wechat?.State ?? WeChatState.Off;
@@ -22,8 +24,11 @@ internal sealed partial class NoticeCenter
         {
             _wechat ??= new WeChatSource(_dispatcher, folder, input => { if (_enabled && !_disposed) Receive(WithIcon(input)); },
                 key => { if (!_disposed) Hub.SourceRemoved(key); }, () => { if (!_disposed) Changed?.Invoke(); });
+            _wechatCalls ??= new CallWindowWatch(CallWindowWatch.WeChat, input => { if (_enabled && !_disposed) Receive(WithIcon(input)); },
+                key => { if (!_disposed) Hub.SourceRemoved(key); });
             return;
         }
+        _wechatCalls?.Dispose(); _wechatCalls = null;
         if (_wechat is { } source) { _wechat = null; source.Dispose(); Changed?.Invoke(); }
         // A BrimDeck that ended without putting WeChat's byte back left a record of it; it is put back now.
         else if (!_wechatChecked) _ = Task.Run(() => { try { WeChatGate.Restore(folder); } catch (Exception ex) { Log(ex); } });
@@ -31,11 +36,12 @@ internal sealed partial class NoticeCenter
     }
     private bool _wechatChecked;
 
-    // A flash of a chat's taskbar button. While WeChat's list is read the reading says what arrived; otherwise the plain notice.
+    // A flash of a chat's taskbar button. While WeChat's list is read the reading says what arrived, and a ringing call has its
+    // own notice; otherwise the plain notice.
     private void OnFlash(NoticeInput input)
     {
         if (!_enabled || _disposed) return;
-        if (input.AppKey == WeChatRows.AppKey && _wechat is { } source && source.Flashed(input)) return;
+        if (input.AppKey == WeChatRows.AppKey && (_wechatCalls is { Ringing: true } || _wechat is { } source && source.Flashed(input))) return;
         if (input.AppKey == DingTalkStore.AppKey && DingTalkCovers()) return;
         if (input.AppKey == FeishuBanners.AppKey && _feishu is { } feishu && feishu.Flashed(input)) return;
         Receive(WithIcon(input));

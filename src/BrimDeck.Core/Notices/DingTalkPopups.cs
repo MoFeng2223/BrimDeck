@@ -1,7 +1,8 @@
 namespace BrimDeck.Core.Notices;
 
-// One text of a DingTalk window as UI Automation gives it: the Qt class of the label and its words, in the window's order.
-public readonly record struct DingTalkText(string Class, string Name);
+// One text of a chat program's call window as UI Automation gives it, in the window's order: the Qt class of the label, its
+// words and its id (CallWindowWatch).
+public readonly record struct PopupText(string Class, string Name, string Id = "");
 
 // DingTalk's ringing calls, which it shows in windows of its own (read 2026-11-26 on DingTalk 8.x, Windows 11, Chinese
 // interface). Its messages are not read here: DingTalk draws no popup for a group's message that does not name the user, so
@@ -26,7 +27,7 @@ public static class DingTalkPopups
         && string.Equals(program, CallProgram, StringComparison.OrdinalIgnoreCase) && className is CallClass or MeetingClass;
 
     // The notice a shown call window says; null when its texts are not as expected (DingTalk changed them, or it is empty).
-    public static NoticeInput? Read(string className, string windowTitle, IReadOnlyList<DingTalkText> texts, string instanceKey)
+    public static NoticeInput? Read(string className, string windowTitle, IReadOnlyList<PopupText> texts, string instanceKey)
     {
         var words = texts.Select(text => text with { Name = (text.Name ?? "").Trim() }).Where(text => text.Name.Length > 0).ToList();
         return className switch
@@ -38,7 +39,7 @@ public static class DingTalkPopups
     }
 
     // "余昊", "邀请你语音通话": the caller is the text before the invitation.
-    private static NoticeInput? Call(string windowTitle, List<DingTalkText> words, string instanceKey)
+    private static NoticeInput? Call(string windowTitle, List<PopupText> words, string instanceKey)
     {
         var names = words.Select(text => text.Name).Where(name => !Buttons.Contains(name) && name != windowTitle).ToList();
         int invite = names.FindIndex(IsInvite);
@@ -47,7 +48,7 @@ public static class DingTalkPopups
     }
 
     // "余昊 邀请你加入", "余昊", "余昊发起的视频会议_1126": who invites, then the meeting's name, last of the labels.
-    private static NoticeInput? Meeting(string windowTitle, List<DingTalkText> words, string instanceKey)
+    private static NoticeInput? Meeting(string windowTitle, List<PopupText> words, string instanceKey)
     {
         var labels = words.Where(text => text.Class == MeetingLabelClass).Select(text => text.Name).ToList();
         int invite = labels.FindIndex(IsInvite);

@@ -10,7 +10,7 @@ internal static class NoticeFlashTests
     {
         string language = Loc.Language;
         Loc.Use(Loc.Chinese);
-        try { Decisions(check); Coalescing(check); Table(check); Setting(check); DingTalk(check); }
+        try { Decisions(check); Coalescing(check); Table(check); Setting(check); DingTalk(check); WeChatCall(check); }
         finally { Loc.Use(language); }
     }
 
@@ -106,11 +106,31 @@ internal static class NoticeFlashTests
             && ChatFlashApps.InstalledPath(wechat, []) is null);
     }
 
+    // WeChat's call windows as UI Automation read them on 2026-11-26 (WeChatCalls).
+    private static void WeChatCall(Action<string, bool> check)
+    {
+        static PopupText T(string className, string id, string name) => new(className, name, id);
+        PopupText[] Window(string tips) => [T("mmui::XHBoxView", "voip_caller_view", "泡泡" + tips), T("mmui::XTextView", WeChatCalls.CallerId, "泡泡"), T("mmui::VOIPAnimateTextView", WeChatCalls.TipsId, tips)];
+        var voice = WeChatCalls.Read(WeChatCalls.CallClass, "微信", Window("邀请你语音通话.."), "wechatcall:1");
+        check("WeChat: a ringing voice call is a call from its caller, without the dots that keep changing",
+            voice is { Title: "泡泡", Body: "邀请你语音通话", Call: true, AppKey: WeChatRows.AppKey, AppName: "微信", InstanceKey: "wechatcall:1" });
+        check("WeChat: a ringing video call says so", WeChatCalls.Read(WeChatCalls.CallClass, "微信", Window("邀请你视频通话."), "k") is { Title: "泡泡", Body: "邀请你视频通话", Call: true });
+        check("WeChat: a call window whose invitation is not written yet says nothing, and other windows say nothing",
+            WeChatCalls.Read(WeChatCalls.CallClass, "微信", [T("mmui::XTextView", WeChatCalls.CallerId, "泡泡"), T("mmui::VOIPAnimateTextView", WeChatCalls.TipsId, "..")], "k") is null
+            && WeChatCalls.Read("mmui::MainWindow", "微信", Window("邀请你语音通话"), "k") is null);
+        check("WeChat: a call without a caller's name is a call from WeChat",
+            WeChatCalls.Read(WeChatCalls.CallClass, "微信", [T("mmui::VOIPAnimateTextView", WeChatCalls.TipsId, "邀请你语音通话")], "k") is { Title: "微信", Body: "邀请你语音通话" });
+        check("WeChat: only its call window, and only in Weixin.exe, is read",
+            WeChatCalls.Watched("WEIXIN.EXE", WeChatCalls.CallClass) && !WeChatCalls.Watched("Weixin.exe", "mmui::MainWindow")
+            && !WeChatCalls.Watched("WeChatAppEx.exe", WeChatCalls.CallClass) && !WeChatCalls.Watched(null, WeChatCalls.CallClass));
+        check("WeChat: a call's notice is not a chat's, so it offers no reply", WeChatRows.ChatOf(new Notice { AppKey = WeChatRows.AppKey, Title = "泡泡", InstanceKey = "wechatcall:1:2" }) is null);
+    }
+
     // DingTalk's windows as UI Automation read them on 2026-11-26 (DingTalkPopups).
     private static void DingTalk(Action<string, bool> check)
     {
-        static DingTalkText Q(string name) => new("QLabel", name);
-        static DingTalkText A(string name) => new("dtguitoolkit::AutoAdjustLabel", name);
+        static PopupText Q(string name) => new("QLabel", name);
+        static PopupText A(string name) => new("dtguitoolkit::AutoAdjustLabel", name);
         var call = DingTalkPopups.Read(DingTalkPopups.CallClass, "语音通话", [Q("语音通话"), Q("余昊"), Q("余昊"), Q("邀请你语音通话"), Q("通话纪要"), Q("挂断"), Q("接听")], "k3");
         check("DingTalk: a ringing call is a call from its caller", call is { Title: "余昊", Body: "邀请你语音通话", Call: true });
         var meeting = DingTalkPopups.Read(DingTalkPopups.MeetingClass, "钉钉视频会议", [A("余昊 邀请你加入"), A("余昊"), A("余昊,余昊_1126"), Q("接听"), Q("拒绝"), Q("麦克风已开"), Q("摄像头已关")], "k4");

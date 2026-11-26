@@ -1,23 +1,28 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Automation;
-using System.Windows.Threading;
 using BrimDeck.Core.Notices;
 
 namespace BrimDeck.Native;
 
-// DingTalk's ringing calls. Windows tells when a window is shown or hidden (a WinEvent hook, out of context, so nothing is
-// loaded into DingTalk); a top-level Qt window of DingTalk's call program is then asked through UI Automation what it is,
-// since Windows' own class for it is Qt's generic one, and a call window is read for who is calling (DingTalkPopups).
-// The notice stays until the window goes: answered, declined or given up. Nothing is sent to DingTalk, nothing in it is
-// changed or clicked, and no timer reads anything while no call window shows. DingTalk's messages are read from its own
-// store instead (DingTalkMessages).
-internal sealed class DingTalkWatch : IDisposable
+// The windows a chat program shows for a ringing call: DingTalk's (DingTalkPopups) and WeChat's (WeChatCalls). Windows tells
+// when a window is shown or hidden (a WinEvent hook, out of context, so nothing is loaded into the program); a top-level Qt
+// window of the program is then asked through UI Automation what it is, since Windows' own class for it is Qt's generic one,
+// and a call window is read for who is calling. The notice stays until the window goes: answered, declined or given up.
+// Nothing is sent to the program, nothing in it is changed or clicked, and no timer reads anything while no call window shows.
+internal sealed class CallWindowWatch : IDisposable
 {
+    // Which program's windows are watched, which of them are calls, and what a call window's texts say (null while it says
+    // nothing yet); a call's notices are keyed KeyPrefix and a count.
+    public sealed record Kind(string Program, Func<string, string, bool> Watched, Func<string, string, IReadOnlyList<PopupText>, string, NoticeInput?> Read, string KeyPrefix);
+    public static readonly Kind DingTalk = new(DingTalkPopups.CallProgram, DingTalkPopups.Watched, DingTalkPopups.Read, "dingtalk:call:");
+    public static readonly Kind WeChat = new(WeChatCalls.Program, WeChatCalls.Watched, WeChatCalls.Read, WeChatCalls.KeyPrefix);
+
     private const uint ObjectDestroy = 0x8001, ObjectShow = 0x8002, ObjectHide = 0x8003, OutOfContext = 0, SkipOwnProcess = 2;
     // A call window's texts are filled in just after it is shown; it is read after the first wait and, while it says nothing
     // yet, after the next ones.
     private static readonly int[] ReadWaits = [30, 150, 400, 900];
+    private readonly Kind _kind;
     private readonly Action<NoticeInput> _received;
     private readonly Action<string> _ended;
     private readonly WinEventDelegate _callback;
@@ -29,12 +34,12 @@ internal sealed class DingTalkWatch : IDisposable
     private bool _disposed;
 
     public bool Failed => _hook == 0;
-    // Whether a call of DingTalk's is ringing now, so that the flash of its taskbar button says nothing.
+    // Whether a call of the program is ringing now, so that the flash of its taskbar button says nothing.
     public bool Ringing => _calls.Count > 0;
 
-    public DingTalkWatch(Dispatcher dispatcher, Action<NoticeInput> received, Action<string> ended)
+    public CallWindowWatch(Kind kind, Action<NoticeInput> received, Action<string> ended)
     {
-        _received = received; _ended = ended;
+        _kind = kind; _received = received; _ended = ended;
         _callback = OnEvent;
         _hook = SetWinEventHook(ObjectDestroy, ObjectHide, 0, _callback, 0, 0, OutOfContext | SkipOwnProcess);
     }
@@ -57,7 +62,7 @@ internal sealed class DingTalkWatch : IDisposable
         _ = ReadAsync(window, program);
     }
 
-    // DingTalk's call program for a process of DingTalk's, else null; remembered by process id.
+    // The watched program's file name for a process of it, else null; remembered by process id.
     private string? Program(uint pid)
     {
         if (!_programs.TryGetValue(pid, out var program))
@@ -66,7 +71,7 @@ internal sealed class DingTalkWatch : IDisposable
             if (_programs.Count > 256) _programs.Clear();
             _programs[pid] = program;
         }
-        return string.Equals(program, DingTalkPopups.CallProgram, StringComparison.OrdinalIgnoreCase) ? program : null;
+        return string.Equals(program, _kind.Program, StringComparison.OrdinalIgnoreCase) ? program : null;
     }
 
     private async Task ReadAsync(nint window, string program)
@@ -79,11 +84,11 @@ internal sealed class DingTalkWatch : IDisposable
             {
                 await Task.Delay(wait - waited); waited = wait;
                 if (_disposed || !_shown.Contains(window)) return;
-                var (className, input) = await Task.Run(() => Read(window, program, instanceKey));
-                if (_disposed || !_shown.Contains(window) || className is null || !DingTalkPopups.Watched(program, className)) return;
+                var (className, input) = await Task.Run(() => Read(_kind, window, program, instanceKey));
+                if (_disposed || !_shown.Contains(window) || className is null || !_kind.Watched(program, className)) return;
                 if (instanceKey.Length == 0)
                 {
-                    instanceKey = $"dingtalk:call:{++_count}:{DateTime.UtcNow.Ticks}";
+                    instanceKey = $"{_kind.KeyPrefix}{++_count}:{DateTime.UtcNow.Ticks}";
                     _calls[window] = instanceKey;
                     if (input is null) continue;
                     input = input with { InstanceKey = instanceKey };
@@ -99,15 +104,15 @@ internal sealed class DingTalkWatch : IDisposable
     }
 
     // The window's class as UI Automation gives it and, for a call window, the notice its texts say; off the UI thread.
-    private static (string? Class, NoticeInput? Input) Read(nint window, string program, string instanceKey)
+    private static (string? Class, NoticeInput? Input) Read(Kind kind, nint window, string program, string instanceKey)
     {
         try
         {
             var root = AutomationElement.FromHandle(window);
             var current = root.Current;
             string className = current.ClassName ?? "";
-            if (!DingTalkPopups.Watched(program, className)) return (className, null);
-            var texts = new List<DingTalkText>();
+            if (!kind.Watched(program, className)) return (className, null);
+            var texts = new List<PopupText>();
             var walker = TreeWalker.RawViewWalker;
             var stack = new Stack<AutomationElement>();
             stack.Push(root);
@@ -116,12 +121,12 @@ internal sealed class DingTalkWatch : IDisposable
             {
                 var element = stack.Pop();
                 var info = element.Current;
-                if (info.ControlType == ControlType.Text) texts.Add(new DingTalkText(info.ClassName ?? "", info.Name ?? ""));
+                if (info.ControlType == ControlType.Text) texts.Add(new PopupText(info.ClassName ?? "", info.Name ?? "", info.AutomationId ?? ""));
                 var children = new List<AutomationElement>();
                 for (var child = walker.GetFirstChild(element); child is not null; child = walker.GetNextSibling(child)) children.Add(child);
                 for (int at = children.Count - 1; at >= 0; at--) stack.Push(children[at]);
             }
-            return (className, DingTalkPopups.Read(className, current.Name ?? "", texts, instanceKey));
+            return (className, kind.Read(className, current.Name ?? "", texts, instanceKey));
         }
         catch (Exception ex) when (ex is ElementNotAvailableException or COMException or InvalidOperationException or ArgumentException) { return (null, null); }
     }
