@@ -570,10 +570,10 @@ internal static class NoticeCoreTests
     {
         var defaults = new DeckSettings();
         defaults.Normalize();
-        check("Notices are on by default, with no WSL distribution, flashing, and QQ, WeChat and the Clock listed", defaults.NoticesEnabled && defaults.NoticeWslDistros.Count == 0
+        check("Notices are on by default, with no WSL distribution, flashing, and QQ and WeChat listed", defaults.NoticesEnabled && defaults.NoticeWslDistros.Count == 0
             && defaults.NoticeHistory && defaults.NoticeHistoryHours == 24 && defaults.NoticeHotkey == ""
             && defaults.NoticeStyles.Text.Seconds == 3 && defaults.NoticeStyles.Flash.Seconds == 3 && !defaults.NoticeStyles.Flash.Liquid && defaults.NoticeStyles.Stay.Liquid && defaults.NoticeStyles.Stay.Color == ""
-            && defaults.NoticeApps.Select(rule => rule.Key).SequenceEqual(["windows:QQ", "flash:wechat", "windows:Microsoft.WindowsAlarms_8wekyb3d8bbwe!App"]) && defaults.NoticeAppsListed);
+            && defaults.NoticeApps.Select(rule => rule.Key).SequenceEqual(["windows:QQ", "flash:wechat"]) && defaults.NoticeAppsListed);
         check("Every Windows application and source is received unless switched off; a taskbar-flash chat only once listed", defaults.NoticeReceives("windows:QQ")
             && defaults.NoticeReceives("windows:Other") && defaults.NoticeReceives("cli:make") && defaults.NoticeReceives("wsl:Ubuntu:app") && !defaults.NoticeReceives("flash:wecom"));
         var odd = new DeckSettings
@@ -590,7 +590,7 @@ internal static class NoticeCoreTests
             && !odd.NoticeApps[1].Enabled && odd.NoticeApps[1].Level == NoticeLevel.Auto && !odd.NoticeReceives("windows:Off"));
         var older = new DeckSettings { NoticeApps = [new() { Key = "windows:QQ", Level = NoticeLevel.Silent }, new() { Key = "windows:Mail" }] };
         older.Normalize();
-        check("A list saved before the default applications existed gains them once, keeping its own rules", older.NoticeApps.Count == 4 && older.NoticeRule("windows:QQ")!.Level == NoticeLevel.Silent && older.NoticeAppsListed);
+        check("A list saved before the default applications existed gains them once, keeping its own rules", older.NoticeApps.Count == 3 && older.NoticeRule("windows:QQ")!.Level == NoticeLevel.Silent && older.NoticeAppsListed);
         older.NoticeApps.RemoveAll(rule => rule.Key == "windows:QQ");
         older.Normalize();
         check("A default application the user removed stays removed", older.NoticeRule("windows:QQ") is null);

@@ -14,8 +14,8 @@ namespace BrimDeck;
 // The "应用" page (NoticeAppsSettingsPage). The common apps are always listed, received or not, so that what BrimDeck supports
 // shows at a glance; each row says how it goes (receiving, nothing yet, off in Windows) and opens to the steps that turn its
 // notifications on, in the app's own words, or for WeChat to its two ways of being noticed. Any other application's notices are
-// received without a row; one is listed to be set apart, and only from the applications that have sent notices, so that what is
-// listed is the sender itself. The command-line and WSL sources follow.
+// received without a row; one is listed to be set apart, from the applications that have sent notices (the sender itself), or
+// from the running programs or a chosen file (the sender most likely, NoticeSenderIds). The command-line and WSL sources follow.
 public sealed partial class SettingsWindow
 {
     private void NoticeAppsPage()
@@ -73,15 +73,15 @@ public sealed partial class SettingsWindow
     // banner switches; removing one gives it back the defaults.
     private void OtherAppsSection(NoticeCenter center)
     {
-        var add = AddAppButton(Loc.T("从通知记录添加", "Add from notice history"), AddNoticeAppMenu, Loc.T("从通知记录添加", "Add from notice history"));
-        SectionTitle(Loc.T("其他应用", "Other apps"), add, () => Loc.T("没有列在这里的应用，通知默认都会接收并在岛上提示。添加后可以单独关闭岛上提示、接收或系统横幅；移除后恢复默认。",
-            "The notices of apps not listed here are received and shown on the island by default. Once added, an app can be kept off the island, stop being received or have its system banner switched; removing it goes back to the defaults."));
+        var add = AddAppButton(Loc.T("添加应用", "Add app"), AddNoticeAppMenu, Loc.T("添加应用", "Add app"));
+        SectionTitle(Loc.T("其他应用", "Other apps"), add, () => Loc.T("灵动通知开启时，BrimDeck 接收所有应用发送的 Windows 通知，并按“提示方式”中的设置在岛上提示。不发送 Windows 通知的应用不会在岛上提示。\n添加应用后，可以单独关闭它的岛上提示、接收或系统横幅；移除后恢复默认设置。",
+            "While live notices are on, BrimDeck receives the Windows notifications every app sends and shows them on the island as How notices show sets. An app that sends no Windows notifications does not show on the island.\nOnce added, an app can be kept off the island, stop being received or have its system banner switched; removing it goes back to the default settings."));
         var listed = S.NoticeApps.Where(rule => NoticeKeys.OnAppList(rule.Key) && !IsCommonApp(rule.Key)).ToList();
         var rows = new List<FrameworkElement>();
         if (listed.Count == 0)
         {
-            var none = TextLine(Loc.T("其他应用的通知都会接收，按“提示方式”页显示。要单独关闭或调整某个应用，从通知记录中添加它。",
-                "Other apps' notices are all received and show as the How notices show page sets. To turn one off or set it apart, add it from the notice history."), 12, TextSecondary);
+            var none = TextLine(Loc.T("其他应用发送的 Windows 通知都会接收，并按“提示方式”中的设置显示。要单独关闭或调整某个应用，请点击“添加应用”。",
+                "The Windows notifications other apps send are all received and show as How notices show sets. To turn one off or set it apart, click Add app."), 12, TextSecondary);
             none.TextWrapping = TextWrapping.Wrap;
             rows.Add(new Border { Child = none, Padding = new Thickness(0, 13, 0, 13) });
         }
@@ -89,6 +89,12 @@ public sealed partial class SettingsWindow
         {
             rows.Add(AppColumns(windows: true));
             foreach (var rule in listed) rows.Add(NoticeAppRow(center, rule.Key, AppName(center, rule), windows: true));
+        }
+        if (_noticeAddNote is { } note)
+        {
+            _noticeAddNote = null;
+            var said = StatusLine(() => (note, true));
+            rows.Add(new Border { Child = said, Padding = new Thickness(0, 10, 0, 10) });
         }
         GroupShown([.. rows]);
     }
@@ -337,9 +343,10 @@ public sealed partial class SettingsWindow
         return new Border { Child = panel, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0, 1, 0, 0) };
     }
 
-    // "从通知记录添加": the applications that have sent notices, latest first, each with when and the title of its last notice, so
+    // "添加应用": the applications that have sent notices, latest first, each with when and the title of its last notice, so
     // that the sender itself is listed and can be told apart (a program whose notices Windows names after a helper, a browser's
-    // sites). Those already listed show as added. Typing filters by name; the list scrolls past what fits.
+    // sites); then the running programs, and a program chosen as a file, by the id their notices are most likely sent under
+    // (NoticeSenderIds). Those already listed show as added. Typing filters by name; the list scrolls past what fits.
     private void AddNoticeAppMenu(Button anchor)
     {
         var popup = new Popup { PlacementTarget = anchor, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
@@ -348,6 +355,12 @@ public sealed partial class SettingsWindow
         popup.Opened += (_, _) => Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, () => { search.Focus(); Keyboard.Focus(search); });
         popup.IsOpen = true;
     }
+
+    // The running programs the menu lists. The rendering of this page for checking puts its own in its place.
+    internal Func<IReadOnlyList<(string AppId, string Name, string Path)>> RunningSenders =
+        () => [.. NoticeSenderIds.Running().Select(sender => (sender.AppId, sender.Name, sender.Path))];
+    // Said under the other apps once, after a chosen program's id could not be found.
+    private string? _noticeAddNote;
 
     // The menu's content, apart from its popup so that the rendering of this page for checking can draw it. close runs before a
     // chosen application is added.
@@ -359,14 +372,26 @@ public sealed partial class SettingsWindow
         var items = new StackPanel { Width = 340 };
         var list = new ScrollViewer { Style = (Style)FindResource("SettingsScrollViewer"), Content = items, Focusable = false, MaxHeight = 340,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
-        var footer = TextLine(Loc.T("只列出发过通知的应用，添加的就是真正发送通知的那一个。\n其他应用发过一次通知后才会出现在这里。",
-            "Only apps that have sent notices are listed, so what you add is the sender itself. An app not listed here can be added once it has sent a notice."), 11, TextTertiary);
+        var browse = ActionButton(Loc.T("浏览可执行文件…", "Browse for an executable…"), Browse);
+        browse.HorizontalAlignment = HorizontalAlignment.Left; browse.Margin = new Thickness(4, 4, 4, 0);
+        var footer = TextLine(Loc.T("“最近发送过通知”列出灵动通知开启期间发送过通知的应用。\n从正在运行的应用或可执行文件添加时，实际发送通知的可能是另一个程序，此时设置不会生效。",
+            "\"Sent notices lately\" lists the apps that sent notices while live notices were on.\nAn app added from the running apps or as an executable may have its notices sent by another program, and its settings then do not apply."), 11, TextTertiary);
         footer.TextWrapping = TextWrapping.Wrap; footer.Width = 324;
         var foot = new Border { Child = footer, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0, 1, 0, 0), Margin = new Thickness(4, 5, 4, 0), Padding = new Thickness(6, 7, 6, 3) };
-        var body = new StackPanel(); body.Children.Add(search); body.Children.Add(list); body.Children.Add(foot);
+        var body = new StackPanel(); body.Children.Add(search); body.Children.Add(list); body.Children.Add(browse); body.Children.Add(foot);
         var menu = new Border { Child = body, Background = UI.Brush(_palette.Popup), BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(5) };
         var now = DateTimeOffset.UtcNow;
         var sent = center.Hub.KnownApps.Where(app => NoticeKeys.OnAppList(app.Key) && !IsCommonApp(app.Key)).ToList();
+        var sentKeys = sent.Select(app => app.Key).ToHashSet(StringComparer.Ordinal);
+        // A running program that has sent notices is listed once, among those; under its name, its file.
+        var running = new List<(NoticeKnownApp App, string File)>();
+        foreach (var sender in RunningSenders())
+        {
+            string key = NoticeKeys.Windows(sender.AppId);
+            if (sentKeys.Contains(key)) continue;
+            string? icon = sender.Path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? "exe:" + sender.Path : null;
+            running.Add((new NoticeKnownApp { Key = key, Name = sender.Name, Origin = NoticeOrigin.Windows, IconRef = icon }, System.IO.Path.GetFileName(sender.Path)));
+        }
         // The title of each application's latest notice still in the history (codes hidden), by key.
         var lastTitles = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var notice in center.Hub.Notices.OrderByDescending(notice => notice.CreatedAt))
@@ -377,28 +402,53 @@ public sealed partial class SettingsWindow
             Change(s => { if (s.NoticeRule(key) is null) s.NoticeApps.Add(new NoticeAppRule { Key = key, Name = name }); });
             ShowPage(_page);
         }
+        async void Browse()
+        {
+            close();
+            if (BrowseExecutable(Loc.T("选择要添加的应用", "Choose an app to add")) is not { } path) return;
+            if (await NoticeSenderIds.ForExecutableAsync(path) is { } chosen) { Add(NoticeKeys.Windows(chosen.AppId), chosen.Name); return; }
+            _noticeAddNote = Loc.T("无法确定这个程序发送通知时使用的应用标识。请在它发送过通知后，从“最近发送过通知”中添加。",
+                "The app id this program sends notices under could not be found. Add it from \"Sent notices lately\" once it has sent a notice.");
+            ShowPage(_page);
+        }
+        bool Added(string key) => S.NoticeRule(key) is not null || IsCommonApp(key);
+        void Header(string text)
+        {
+            var header = TextLine(text, 10.5, TextTertiary); header.Margin = new Thickness(10, items.Children.Count == 0 ? 4 : 10, 10, 3);
+            items.Children.Add(header);
+        }
+        void Note(string text)
+        {
+            var none = TextLine(text, 12, TextTertiary);
+            none.TextWrapping = TextWrapping.Wrap; none.Margin = new Thickness(10, 4, 10, 6);
+            items.Children.Add(none);
+        }
         void Fill()
         {
             items.Children.Clear();
             string filter = search.Text.Trim();
-            var shown = sent.Where(app => filter.Length == 0 || app.Name.Contains(filter, StringComparison.CurrentCultureIgnoreCase)).ToList();
-            if (shown.Count > 0)
+            bool Matches(NoticeKnownApp app) => filter.Length == 0 || app.Name.Contains(filter, StringComparison.CurrentCultureIgnoreCase);
+            var shownSent = sent.Where(Matches).ToList();
+            var shownRunning = running.Where(entry => Matches(entry.App)).ToList();
+            if (filter.Length > 0 && shownSent.Count == 0 && shownRunning.Count == 0)
             {
-                var header = TextLine(Loc.T("最近发过通知", "Sent notices lately"), 10.5, TextTertiary); header.Margin = new Thickness(10, 4, 10, 3); items.Children.Add(header);
+                Note(Loc.T($"没有找到“{filter}”。", $"Nothing called \"{filter}\"."));
+                return;
             }
-            foreach (var app in shown)
+            if (filter.Length == 0 || shownSent.Count > 0)
             {
-                bool added = S.NoticeRule(app.Key) is not null;
-                items.Children.Add(SentEntry(app, lastTitles.GetValueOrDefault(app.Key, ""), NoticeText.Relative(app.LastSeen, now), added, () => Add(app.Key, app.Name)));
+                Header(Loc.T("最近发送过通知", "Sent notices lately"));
+                foreach (var app in shownSent)
+                    items.Children.Add(SentEntry(app, lastTitles.GetValueOrDefault(app.Key, ""), NoticeText.Relative(app.LastSeen, now), Added(app.Key), () => Add(app.Key, app.Name)));
+                if (shownSent.Count == 0) Note(Loc.T("灵动通知开启以来，还没有其他应用发送过通知。", "No other app has sent a notice since live notices were turned on."));
             }
-            if (shown.Count == 0)
+            if (filter.Length == 0 || shownRunning.Count > 0)
             {
-                var none = TextLine(filter.Length > 0 ? Loc.T($"没有找到“{filter}”。\n应用发过一次通知后才会出现在这里。", $"Nothing called \"{filter}\".\nAn app appears here once it has sent a notice.")
-                    : Loc.T("还没有收到过其他应用的通知。\n应用发过一次通知后会出现在这里。", "No other app has sent a notice yet.\nAn app appears here once it has."), 12, TextTertiary);
-                none.TextWrapping = TextWrapping.Wrap; none.Margin = new Thickness(10, 8, 10, 10);
-                items.Children.Add(none);
+                Header(Loc.T("正在运行的应用", "Running apps"));
+                foreach (var (app, file) in shownRunning)
+                    items.Children.Add(SentEntry(app, file, "", Added(app.Key), () => Add(app.Key, app.Name)));
+                if (shownRunning.Count == 0) Note(Loc.T("没有可添加的应用", "No apps to add"));
             }
-            foot.Visibility = sent.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         }
         search.TextChanged += (_, _) => Fill();
         Fill();
@@ -413,7 +463,8 @@ public sealed partial class SettingsWindow
         }
     }
 
-    // One application in "从通知记录添加": icon, name and when, and under them its last notice's words; an added one is shown, not chosen.
+    // One application in "添加应用": icon, name and when, and under them its last notice's words (a running program's file); an
+    // added one is shown, not chosen.
     private Button SentEntry(NoticeKnownApp app, string words, string when, bool added, Action add)
     {
         var grid = new Grid();

@@ -297,6 +297,7 @@ internal sealed partial class Renderer(App app, string output, string language, 
         // calls' look, and the Clock, whose alarms stay whatever its level.
         _settings.NoticeRule("windows:QQ")!.Styles = new() { Flash = new() { Color = "#6E9CF0", Seconds = 8 }, Call = new() { Color = "#5DC98C", Liquid = true } };
         string clock = NoticeKeys.Windows("Microsoft.WindowsAlarms_8wekyb3d8bbwe!App");
+        if (_settings.NoticeRule(clock) is null) _settings.NoticeApps.Add(new NoticeAppRule { Key = clock, Name = Loc.T("时钟", "Clock") });
         _settings.NoticeRule(clock)!.Styles = new() { Stay = new() { Color = NoticeStyle.AppColor } };
         await SettingsPage("notice-apps-own", 20, height: 2600, prepare: window =>
         {

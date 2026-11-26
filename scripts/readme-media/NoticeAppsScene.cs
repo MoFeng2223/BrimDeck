@@ -66,18 +66,25 @@ internal sealed partial class Renderer
         await Picker("notice-apps-picker", "", SettingsTheme.Light);
         await Picker("notice-apps-picker-dark", "", SettingsTheme.Dark);
         await Picker("notice-apps-picker-none", Loc.T("企业微信", "WeCom"), SettingsTheme.Light);
+        await Picker("notice-apps-picker-running", "o", SettingsTheme.Light);
         // No other app listed.
         _settings.NoticeApps.RemoveAll(rule => rule.Key is "windows:Claude" || rule.Key.StartsWith("windows:" + edge, StringComparison.Ordinal) || rule.Key == "windows:" + adobe
             || rule.Key == NoticeKeys.Windows("Microsoft.WindowsAlarms_8wekyb3d8bbwe!App"));
         await SettingsPage("notice-apps-empty", 20, height: 1100, theme: SettingsTheme.Light, prepare: Installed(true));
     }
 
-    // The menu of "从通知记录添加" as it opens, drawn without its popup.
+    // The menu of "添加应用" as it opens, drawn without its popup.
     private async Task Picker(string name, string filter, SettingsTheme theme)
     {
         const double scale = 1.5;
         _settings.Theme = theme;
         var window = new SettingsWindow(app);
+        // The running programs are invented, so that the picture does not depend on what runs here.
+        Program.SetField(window, "RunningSenders", (Func<IReadOnlyList<(string, string, string)>>)(() =>
+        [
+            ("Microsoft.Office.OUTLOOK.EXE.15", "Outlook", @"C:\Program Files\Microsoft Office\root\Office16\OUTLOOK.EXE"),
+            ("md.obsidian", "Obsidian", @"C:\Users\Public\Obsidian\Obsidian.exe")
+        ]));
         window.ShowPage(20);
         var (menu, search) = ((Border, TextBox))Program.Call(window, "NoticeAppPicker", [typeof(Action)], (Action)(() => { }))!;
         search.Text = filter;
