@@ -936,15 +936,19 @@ public partial class MainWindow
         }
         foreach (var add in NoticeAddButtons(notice)) flow.Add(add);
         // The notice's own buttons that can still do something (NoticeCenter.Buttons): one that answers its sender while the sender
-        // waits, one that copies or opens always. The sender's main button is the page's main one when no application can be opened.
-        var own = center.Buttons(notice);
-        bool mainOwn = !center.CanOpen(notice);
-        foreach (var action in own.OrderBy(action => action.Primary).Take(NoticeIntake.MaxButtons))
+        // waits, one that copies or opens always. When no application can be opened, the page's main one is the sender's main button,
+        // else its first that opens something ("打开邮箱" of a mail), which then turns into the open icon as "打开应用" does.
+        var own = center.Buttons(notice).Take(NoticeIntake.MaxButtons).ToList();
+        var mainAction = center.CanOpen(notice) ? null : own.FirstOrDefault(action => action.Primary) ?? own.FirstOrDefault(action => action.Kind == NoticeActionKind.Open);
+        foreach (var action in own.OrderBy(action => ReferenceEquals(action, mainAction)))
         {
-            bool main = mainOwn && action.Primary;
+            bool main = ReferenceEquals(action, mainAction);
             if (AgendaReminders.Owns(notice)) { flow.Add(ReminderButton(notice, action, main)); if (main) row.MainLast = true; continue; }
-            flow.Add(PillButton(action.Label, action.Label, async () => { await center.RunAsync(notice, action); RenderNotices(); }, primary: main));
-            if (main) row.MainLast = true;
+            var button = PillButton(action.Label, action.Label, async () => { await center.RunAsync(notice, action); RenderNotices(); }, primary: main);
+            flow.Add(button);
+            if (!main) continue;
+            row.MainLast = true;
+            if (action.Kind == NoticeActionKind.Open) CompactToOpenIcon(row, button, action.Label);
         }
         foreach (var action in center.TimeActions(notice).Take(2))
             flow.Add(PillButton(action.Label, action.Label, () => { center.TimeAction(notice, action.Key); RenderNotices(); }));
@@ -953,17 +957,7 @@ public partial class MainWindow
             string open = OpenLabel(notice);
             var main = PillButton(open, open, () => _ = OpenFromPage(notice), primary: true);
             row.MainLast = true;
-            var face = (Border)main.Content;
-            var words = face.Child;
-            var icon = AgendaDraw.Icon(OpenIcon, 14, PanelTheme.Hex("surface"));
-            icon.HorizontalAlignment = HorizontalAlignment.Center; icon.VerticalAlignment = VerticalAlignment.Center;
-            row.CompactMain = compact =>
-            {
-                face.Child = compact ? icon : words;
-                face.Padding = compact ? new Thickness(0) : new Thickness(16, 0, 16, 0);
-                main.Width = compact ? 32 : double.NaN;
-                main.ToolTip = compact ? open : null;
-            };
+            CompactToOpenIcon(row, main, open);
             flow.Add(main);
         }
         // The row sets the space between its buttons itself (NoticeButtons.Gap).
@@ -971,7 +965,24 @@ public partial class MainWindow
         return row;
     }
 
-    // A box with an arrow leaving it at the top right, in the 24 unit box of AgendaDraw.Icon: "打开应用" where its words do not fit.
+    // Lets the row turn its main button, one that opens something, into a round open icon where its words do not fit.
+    private static void CompactToOpenIcon(NoticeButtons row, Button main, string name)
+    {
+        var face = (Border)main.Content;
+        var words = face.Child;
+        var icon = AgendaDraw.Icon(OpenIcon, 14, PanelTheme.Hex("surface"));
+        icon.HorizontalAlignment = HorizontalAlignment.Center; icon.VerticalAlignment = VerticalAlignment.Center;
+        row.CompactMain = compact =>
+        {
+            face.Child = compact ? icon : words;
+            face.Padding = compact ? new Thickness(0) : new Thickness(16, 0, 16, 0);
+            main.Width = compact ? 32 : double.NaN;
+            main.ToolTip = compact ? name : null;
+        };
+    }
+
+    // A box with an arrow leaving it at the top right, in the 24 unit box of AgendaDraw.Icon: an opening main button ("打开应用",
+    // "打开邮箱") where its words do not fit.
     private const string OpenIcon = "M14 4h6v6M20 4l-8.5 8.5M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10";
 
     // A planner reminder's buttons on this panel: "查看日程" opens the planner here; "稍后提醒" offers when to remind again (5 or 10
