@@ -652,15 +652,9 @@ internal sealed class WeatherView : UserControl
             values[i] = peak;
         }
         _minuteHasRain = values.Any(v => v > 0);
-        int first = Array.FindIndex(values, v => v > 0);
         // 和风在同一响应里带整段总结（如「5分钟后开始下小雨，50分钟后就停了」），直接用原文；
-        // Open-Meteo 没有这段总结，退回到按第一个有雨格估算。
-        minuteNote.Text = s.MinuteSummary is { Length: > 0 } summary ? summary : first switch
-        {
-            0 => Loc.T("正在下雨", "Raining now"),
-            > 0 => Loc.T($"{first * 5} 分钟后开始下雨", $"Rain in {first * 5} min"),
-            _ => Loc.T("未来 2 小时无降水", "No rain in the next 2 hours")
-        };
+        // Open-Meteo 没有这段总结，用第一个有雨点的真实时间戳减城市当前时刻，避免 15 分钟粒度被当成 5 分钟。
+        minuteNote.Text = s.MinuteSummary is { Length: > 0 } summary ? summary : RainStartNote(s, points);
         double peakValue = Math.Max(0.2, values.Max());
         // 无雨时整行本来就隐藏，不重建 24 个柱子。
         if (!_minuteHasRain) { UpdateMinuteVisibility(); return; }
@@ -678,6 +672,22 @@ internal sealed class WeatherView : UserControl
             });
         }
         UpdateMinuteVisibility();
+    }
+    // 没有来源总结时的兜底倒计时：取第一个有雨点的时间戳（与 MinutePrecip 同序），减城市当前时刻。
+    // 时间戳缺失或解析失败再退回按格估算，避免把 15 分钟粒度当成 5 分钟。
+    private static string RainStartNote(WeatherSnapshot s, double?[] points)
+    {
+        int first = Array.FindIndex(points, p => p is > 0);
+        if (first < 0) return Loc.T("未来 2 小时无降水", "No rain in the next 2 hours");
+        if (first < s.MinuteTimes.Length && WeatherClock.MinuteAt(s, s.MinuteTimes[first]) is { } start)
+        {
+            int minutes = Math.Max(0, (int)Math.Ceiling((start - WeatherClock.Now(s)).TotalMinutes));
+            return minutes == 0 ? Loc.T("正在下雨", "Raining now")
+                : Loc.T($"{minutes} 分钟后开始下雨", $"Rain in {minutes} min");
+        }
+        // 旧快照没有时间戳时按点数估间隔（和风 24 点=5 分钟，Open-Meteo 8 点=15 分钟，都覆盖 2 小时）。
+        int estimate = first * 120 / Math.Max(1, points.Length);
+        return Loc.T($"{estimate} 分钟后开始下雨", $"Rain in {estimate} min");
     }
     // 无数据或无降水整行归零（不占位）；只在逐时模式、真会下雨且高度够时展开；
     // 逐日模式优先保证 24 天预报的可用高度，不显示窄条；窄窗口只留文字不画柱。

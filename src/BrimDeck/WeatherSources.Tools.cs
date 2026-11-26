@@ -29,6 +29,18 @@ internal static class WeatherClock
         return DateTimeOffset.Now;
     }
 
+    // 分钟降水的时间戳 → 绝对时刻。和风 fxTime 自带 +08:00；Open-Meteo time 是城市当地时间、不带偏移，
+    // 后者必须按城市偏移解释，否则 DateTimeOffset.TryParse 会用本机时区，跨时区查城市时倒计时会错几个小时。
+    internal static DateTimeOffset? MinuteAt(WeatherSnapshot s, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        bool explicitOffset = text.EndsWith('Z') || (text.Length >= 6 && text[^6] is '+' or '-' && text[^3] == ':');
+        if (explicitOffset)
+            return DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var stamped) ? stamped : null;
+        if (!DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var local)) return null;
+        try { return new DateTimeOffset(local, Now(s).Offset); } catch { return null; }
+    }
+
     // 快照抓取时写下的今天在正序日期轴上的位置；找不到回退 0。用于选窗口这类不关心跨日的场景。
     internal static int SnapshotIndex(WeatherSnapshot s)
     {
