@@ -28,32 +28,32 @@ public partial class MainWindow
     {
         var moment = time.Moment;
         var end = moment.End ?? (moment.AllDay ? moment.Start : moment.Start.AddHours(1));
-        ShowNoticeForm(notice, null, null, false, NoticeAgenda.EventTitle(notice, time), moment.Start, end, moment.AllDay, DateOnly.FromDateTime(moment.Start), typing);
+        ShowNoticeForm(notice, null, null, false, NoticeAgenda.EventTitle(notice, time), moment.Start, end, moment.AllDay, DateOnly.FromDateTime(moment.Start), typing,
+            AgendaRepeat.None, AgendaReminders.Default(moment.AllDay));
     }
 
     // From "修改": the event or the to-do the notice added.
     private void OpenNoticeForm(Notice notice, AgendaEvent? item, AgendaTodo? todo, bool typing = true)
     {
         var today = DateOnly.FromDateTime(DateTime.Now);
-        if (item is not null) ShowNoticeForm(notice, item.Id, null, false, item.Title, item.Start, item.End, item.AllDay, item.FirstDay, typing, item.Repeat);
+        if (item is not null) ShowNoticeForm(notice, item.Id, null, false, item.Title, item.Start, item.End, item.AllDay, item.FirstDay, typing, item.Repeat, item.Remind);
         else if (todo is not null)
         {
             var day = todo.Day ?? today;
             var start = AgendaCalendar.NewEventStart(day, DateTime.Now);
-            ShowNoticeForm(notice, null, todo.Id, true, todo.Text, start, start.AddHours(1), false, day, typing);
+            ShowNoticeForm(notice, null, todo.Id, true, todo.Text, start, start.AddHours(1), false, day, typing, AgendaRepeat.None, AgendaReminders.Default(false));
         }
     }
 
-    private void ShowNoticeForm(Notice notice, string? eventId, string? todoId, bool asTodo, string text, DateTime start, DateTime end, bool allDay, DateOnly day, bool typing)
-        => ShowNoticeForm(notice, eventId, todoId, asTodo, text, start, end, allDay, day, typing, AgendaRepeat.None);
-
     // repeat: how the event changed repeats (a series is shown by its first time, and a change applies to every time of it).
-    private void ShowNoticeForm(Notice notice, string? eventId, string? todoId, bool asTodo, string text, DateTime start, DateTime end, bool allDay, DateOnly day, bool typing, AgendaRepeat repeat)
+    // remind: its reminder, null for none (a new event: AgendaReminders.Default).
+    private void ShowNoticeForm(Notice notice, string? eventId, string? todoId, bool asTodo, string text, DateTime start, DateTime end, bool allDay, DateOnly day, bool typing,
+        AgendaRepeat repeat, int? remind)
     {
         CloseNoticeForm();
         bool existing = eventId is not null || todoId is not null;
         var form = new NoticeAgendaForm(Look, AgendaKeyboard, existing, asTodo) { Today = () => DateOnly.FromDateTime(DateTime.Now) };
-        form.Fill(text, start, end, allDay, day, repeat);
+        form.Fill(text, start, end, allDay, day, repeat, remind);
         var state = new NoticeFormState(notice.Id, form, eventId, todoId);
         form.Submitted += () => SaveNoticeForm(state);
         form.Cancelled += () => { CloseNoticeForm(); RenderNotices(); };
@@ -72,19 +72,20 @@ public partial class MainWindow
         if (state.EventId is { } eventId && book.FindEvent(eventId) is { } item)
         {
             if (value.Todo) { if (book.EventToTodo(eventId, value.Day) is { } made) book.SetTodoText(made.Id, value.Text); }
-            else book.UpdateEvent(eventId, value.Text, value.Start, value.End, value.AllDay, item.Detail, value.Repeat);
+            else book.UpdateEvent(eventId, value.Text, value.Start, value.End, value.AllDay, item.Detail, value.Repeat, value.Remind);
         }
         else if (state.TodoId is { } todoId && book.FindTodo(todoId) is not null)
         {
             if (value.Todo) { book.SetTodoText(todoId, value.Text); book.SetTodoDay(todoId, value.Day); }
-            else if (book.TodoToEvent(todoId, value.Start, value.End, value.AllDay, repeat: value.Repeat) is { } made) book.UpdateEvent(made.Id, value.Text, value.Start, value.End, value.AllDay, null, value.Repeat);
+            else if (book.TodoToEvent(todoId, value.Start, value.End, value.AllDay, repeat: value.Repeat, remind: value.Remind) is { } made)
+                book.UpdateEvent(made.Id, value.Text, value.Start, value.End, value.AllDay, null, value.Repeat, value.Remind);
         }
         else if (notice is not null)
         {
             // New, or what it was to change is gone meanwhile (removed on the planner page): added afresh from the notice.
             var source = AgendaSource.From(notice);
             if (value.Todo) book.AddTodo(value.Text, value.Day, now, source: source);
-            else book.AddEvent(value.Text, value.Start, value.End, value.AllDay, now, source: source, repeat: value.Repeat);
+            else book.AddEvent(value.Text, value.Start, value.End, value.AllDay, now, source: source, repeat: value.Repeat, remind: value.Remind);
         }
         RenderNotices();
     }
@@ -212,26 +213,27 @@ internal sealed class NoticeAgendaForm : StackPanel
 
     // The values to start from: the words (an event's title, a to-do's text), the times of an event and how it repeats, the day of a
     // to-do.
-    public void Fill(string text, DateTime start, DateTime end, bool allDay, DateOnly day, AgendaRepeat repeat)
+    public void Fill(string text, DateTime start, DateTime end, bool allDay, DateOnly day, AgendaRepeat repeat, int? remind)
     {
-        _event.Fill(text, start, end, allDay, repeat);
+        _event.Fill(text, start, end, allDay, repeat, remind);
         _words.Text = text;
         _day.Date = day;
         CheckTodo();
     }
 
-    // What the form describes: a to-do (its words and day) or an event (its times and how it repeats); null while it is neither.
-    public (bool Todo, string Text, DateOnly Day, DateTime Start, DateTime End, bool AllDay, AgendaRepeat Repeat)? Value
+    // What the form describes: a to-do (its words and day) or an event (its times, how it repeats and its reminder); null while it
+    // is neither.
+    public (bool Todo, string Text, DateOnly Day, DateTime Start, DateTime End, bool AllDay, AgendaRepeat Repeat, int? Remind)? Value
     {
         get
         {
             if (_todo)
             {
                 string words = _words.Text.Trim();
-                return words.Length == 0 ? null : (true, words, _day.Date, default, default, false, AgendaRepeat.None);
+                return words.Length == 0 ? null : (true, words, _day.Date, default, default, false, AgendaRepeat.None, null);
             }
-            if (_event.Value is not { } item) return null;
-            return (false, item.Title, DateOnly.FromDateTime(item.Start), item.Start, item.End, item.AllDay, _event.Repeat.Repeat);
+            if (_event.Value is not { } item || !_event.Remind.Valid) return null;
+            return (false, item.Title, DateOnly.FromDateTime(item.Start), item.Start, item.End, item.AllDay, _event.Repeat.Repeat, _event.Remind.Remind);
         }
     }
 

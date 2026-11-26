@@ -58,7 +58,14 @@ public sealed record AgendaEvent
     public AgendaRepeat Repeat { get; init; }
     public DateOnly? Until { get; init; }
     public IReadOnlyList<DateOnly> Skipped { get; init; } = [];
+    // How many minutes before its start BrimDeck reminds of each time of the event; null: no reminder. 0 is at the start. An
+    // all-day event's start is 00:00 of its first day, so its reminder may be later than that, a negative number: -540 is 09:00 of
+    // the day itself, 900 is 09:00 of the day before (AgendaReminders).
+    public int? Remind { get; init; }
     internal JsonObject? Extra { get; init; }
+
+    // When BrimDeck reminds of this time of the event, or null when it does not.
+    public DateTime? RemindAt => Remind is { } minutes ? Start.AddMinutes(-minutes) : null;
 
     public DateOnly FirstDay => DateOnly.FromDateTime(Start);
     // The last day the event shows on: an all-day event's last date; a timed one ending at exactly 00:00 does not reach that day.
@@ -140,6 +147,9 @@ public sealed class AgendaData
     public List<AgendaEvent> Events { get; init; } = [];
     public List<AgendaTodo> Todos { get; init; } = [];
     public Dictionary<DateOnly, string> Notes { get; init; } = [];
+    // The reminders up to this time were given (or BrimDeck was running and passed them): a later start gives only those after
+    // it, the ones missed while BrimDeck was not running among them. Null before the first start that reminds.
+    public DateTime? RemindedTo { get; init; }
     internal JsonObject? Extra { get; init; }
 }
 

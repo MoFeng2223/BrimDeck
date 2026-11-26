@@ -122,6 +122,18 @@ public static class AgendaText
         return $"{Date(item.FirstDay, year)} {Clock(item.Start, item.FirstDay)} – {Date(item.LastDay, year)} {Clock(item.End, item.LastDay)}";
     }
 
+    // One time of an event as its reminder names it: "今天 16:30–17:00", "明天 全天", "11月26日 周四 15:00–16:00"; a time that ends on
+    // another day "今天 22:00 – 11月27日 02:00", one over several days all day "11月26日 周四 – 11月28日 周六".
+    public static string When(AgendaEvent time, DateOnly today)
+    {
+        string Day(DateOnly day) => day.DayNumber - today.DayNumber is 0 or 1 ? Relative(day, today)! : DayTitle(day, today);
+        if (time.AllDay) return time.DayCount > 1 ? $"{Day(time.FirstDay)} – {Day(time.LastDay)}" : $"{Day(time.FirstDay)} {Loc.T("全天", "all day")}";
+        var from = Clock(time.Start, time.FirstDay);
+        if (time.DayCount == 1) return $"{Day(time.FirstDay)} {from}–{Clock(time.End, time.FirstDay)}";
+        var endDay = DateOnly.FromDateTime(time.End);
+        return $"{Day(time.FirstDay)} {from} – {Date(endDay, today.Year)} {Clock(time.End, endDay)}";
+    }
+
     // How an event repeats, for a series that starts on first: "不重复", "每天", "每个工作日", "每周二", "每月 25 日", "每年 11月25日"
     // ("Does not repeat", "Daily", "Every weekday", "Weekly on Tue", "Monthly on day 25", "Yearly on Nov 25").
     public static string Repeat(AgendaRepeat repeat, DateOnly first) => repeat switch

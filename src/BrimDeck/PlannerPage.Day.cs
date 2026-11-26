@@ -271,7 +271,9 @@ internal sealed partial class PlannerPage
         var phase = AgendaQuery.Phase(segment, now);
         string? status = AgendaText.Status(segment, now);
         string? repeat = item.Repeat == AgendaRepeat.None ? null : AgendaText.Repeat(item.Repeat, item.FirstDay);
-        if (Second(item.Source, [repeat, item.Detail], status,phase == AgendaPhase.Ongoing && segment.Day == Today, marked, 11.5, 15, Look.Secondary) is { } second) text.Children.Add(second);
+        // The reminder, while it is still to come for this time of the event.
+        string? remind = item.RemindAt > now ? AgendaReminders.Text(item.Remind, item.AllDay) : null;
+        if (Second(item.Source, [repeat, item.Detail], status, phase == AgendaPhase.Ongoing && segment.Day == Today, marked, 11.5, 15, Look.Secondary, remind) is { } second) text.Children.Add(second);
         Grid.SetColumn(text, 4); grid.Children.Add(text);
 
         string rest = marked ? AgendaDraw.Tint(Look.Accent, .16) : editing ? Look.Fill : "#00000000";
@@ -291,8 +293,9 @@ internal sealed partial class PlannerPage
     }
 
     // The second line: the source (its application's icon and "Outlook · 王敏", which opens the notice while it is kept), the other
-    // words, the status (in the accent while the event is under way) and "刚加入". Null when there is nothing to say.
-    private TextBlock? Second(AgendaSource? source, IEnumerable<string?> words, string? status, bool live, bool marked, double size, double line, string color)
+    // words, the status (in the accent while the event is under way), the reminder (a bell in the accent and "提前 15 分钟") and
+    // "刚加入". Null when there is nothing to say.
+    private TextBlock? Second(AgendaSource? source, IEnumerable<string?> words, string? status, bool live, bool marked, double size, double line, string color, string? remind = null)
     {
         var block = AgendaDraw.Words("", size, line, color);
         bool any = false;
@@ -317,6 +320,14 @@ internal sealed partial class PlannerPage
         }
         foreach (var word in words) if (!string.IsNullOrWhiteSpace(word)) { Gap(); block.Inlines.Add(new Run(word.Trim())); }
         if (status is not null) { Gap(); block.Inlines.Add(new Run(status) { Foreground = live ? UI.Brush(Look.Accent) : block.Foreground }); }
+        if (remind is not null)
+        {
+            Gap();
+            var bell = AgendaDraw.Icon(AgendaRemindField.BellIcon, size - 0.5, Look.Accent);
+            bell.Margin = new Thickness(0, 0, 3, 0);
+            block.Inlines.Add(new InlineUIContainer(bell) { BaselineAlignment = BaselineAlignment.Center });
+            block.Inlines.Add(new Run(remind));
+        }
         if (marked) { Gap(); block.Inlines.Add(new Run(Loc.T("刚加入", "Just added"))); }
         return any ? block : null;
     }
@@ -478,7 +489,7 @@ internal sealed partial class PlannerPage
         var form = new AgendaEventForm(Look, _deck.AgendaKeyboard, submit, delete: item is not null, showStartDay: elsewhere) { Today = () => Today };
         if (series is not null)
         {
-            form.Fill(series.Title, series.Start, series.End, series.AllDay, series.Repeat);
+            form.Fill(series.Title, series.Start, series.End, series.AllDay, series.Repeat, series.Remind);
             _formTime = item!.FirstDay;
             form.Series = series.Repeat != AgendaRepeat.None;
             form.SeriesHasEarlier = series.OccursBefore(_formTime);
@@ -486,7 +497,7 @@ internal sealed partial class PlannerPage
         else
         {
             var start = AgendaCalendar.NewEventStart(_day, Now);
-            form.Fill(todo?.Text ?? "", start, start.AddHours(1), false);
+            form.Fill(todo?.Text ?? "", start, start.AddHours(1), false, AgendaRepeat.None, AgendaReminders.Default(false));
         }
         _formFor = item is not null ? "event:" + item.Id : todo is not null ? "todo:" + todo.Id : "new";
         form.Submitted += SubmitForm;
@@ -515,19 +526,21 @@ internal sealed partial class PlannerPage
     {
         if (_form?.Value is not { } value || _formFor is not { } what) return;
         var repeat = _form.Repeat.Repeat;
+        var remind = _form.Remind.Remind;
         CloseForm();
         var now = Now;
         if (what.StartsWith("event:", StringComparison.Ordinal))
         {
             string id = what[6..];
-            if (Book.UpdateEvent(id, value.Title, value.Start, value.End, value.AllDay, Book.FindEvent(id)?.Detail, repeat) is null)
-                Book.AddEvent(value.Title, value.Start, value.End, value.AllDay, now, repeat: repeat);
+            if (Book.UpdateEvent(id, value.Title, value.Start, value.End, value.AllDay, Book.FindEvent(id)?.Detail, repeat, remind) is null)
+                Book.AddEvent(value.Title, value.Start, value.End, value.AllDay, now, repeat: repeat, remind: remind);
         }
         else if (what.StartsWith("todo:", StringComparison.Ordinal))
         {
-            if (Book.TodoToEvent(what[5..], value.Start, value.End, value.AllDay, repeat: repeat) is null) Book.AddEvent(value.Title, value.Start, value.End, value.AllDay, now, repeat: repeat);
+            if (Book.TodoToEvent(what[5..], value.Start, value.End, value.AllDay, repeat: repeat, remind: remind) is null)
+                Book.AddEvent(value.Title, value.Start, value.End, value.AllDay, now, repeat: repeat, remind: remind);
         }
-        else Book.AddEvent(value.Title, value.Start, value.End, value.AllDay, now, repeat: repeat);
+        else Book.AddEvent(value.Title, value.Start, value.End, value.AllDay, now, repeat: repeat, remind: remind);
         Show();
     }
 

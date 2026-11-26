@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows.Threading;
 using BrimDeck.Core;
+using BrimDeck.Core.Agenda;
 using BrimDeck.Core.Notices;
 using BrimDeck.Native;
 using BrimDeck.Protocol;
@@ -494,9 +495,10 @@ internal sealed partial class NoticeCenter : IDisposable
     // ----- A notice's buttons -----
 
     // The buttons its sender gave that can still do something: one that answers the sender only while the sender waits (or
-    // the WSL agent can pass it on), one that copies or opens always.
+    // the WSL agent can pass it on), one that copies or opens always. A planner reminder's buttons are BrimDeck's own (AgendaReminders).
     public IReadOnlyList<NoticeAction> Buttons(Notice notice)
-        => [.. notice.Actions.Where(action => action.Key != "default" && (action.Kind != NoticeActionKind.Reply || (notice.Capabilities & NoticeCapabilities.Actions) != 0))];
+        => [.. notice.Actions.Where(action => action.Key != "default" && (action.Kind != NoticeActionKind.Reply || (notice.Capabilities & NoticeCapabilities.Actions) != 0
+            || AgendaReminders.Owns(notice)))];
 
     // Does what the button says. False when it could not (the clipboard was held, nothing opened the target); the notice then stays.
     public async Task<bool> RunAsync(Notice notice, NoticeAction action)
@@ -509,6 +511,8 @@ internal sealed partial class NoticeCenter : IDisposable
             case NoticeActionKind.Open: done = await OpenTargetAsync(action.Value ?? ""); break;
             default:
                 if (_waits.ContainsKey(notice.Id)) { EndWait(notice.Id, NoticeWaits.Action, action.Key); Answered?.Invoke(notice); return true; }
+                // A planner reminder's "查看日程" or "5 分钟后再提醒", on the main panel (the island and each page pass their own).
+                if (AgendaReminders.Owns(notice)) return _app.Deck?.AgendaReminderAction(notice, action.Key) == true;
                 return Invoke(notice, action.Key);
         }
         if (!done) return false;

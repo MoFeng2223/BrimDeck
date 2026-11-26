@@ -156,7 +156,7 @@ internal sealed partial class Renderer
             var look = Program.GetProperty(_deck, "Look");
             var form = Activator.CreateInstance(type, Program.Any, null, [look, (Action<TextBox>)(_ => { }), submit, delete, startDay, false], null)!;
             Program.SetProperty(form, "Today", (Func<DateOnly>)(() => today));
-            Program.Call(form, "Fill", [typeof(string), typeof(DateTime), typeof(DateTime), typeof(bool), typeof(AgendaRepeat)], title, start, end, false, repeat);
+            Program.Call(form, "Fill", [typeof(string), typeof(DateTime), typeof(DateTime), typeof(bool), typeof(AgendaRepeat), typeof(int?)], title, start, end, false, repeat, AgendaReminders.DefaultTimed);
             Program.SetField(Page(), "_form", form);
             Program.SetField(Page(), "_formFor", what);
         }
@@ -188,15 +188,15 @@ internal sealed partial class Renderer
     {
         DateTime T(int month, int day, double hour) => new DateTime(2026, month, day).AddHours(hour);
         DateOnly D(int month, int day) => new(2026, month, day);
-        void E(string zh, string en, DateTime start, DateTime end, bool allDay = false, string? detail = null, AgendaSource? source = null)
-            => book.AddEvent(Loc.T(zh, en), start, end, allDay, now, detail, source);
+        void E(string zh, string en, DateTime start, DateTime end, bool allDay = false, string? detail = null, AgendaSource? source = null, int? remind = null)
+            => book.AddEvent(Loc.T(zh, en), start, end, allDay, now, detail, source, remind: remind);
         AgendaSource Source(string app, string? sender, string key = "") => new() { NoticeId = Guid.NewGuid().ToString("N"), AppKey = "windows:" + (key.Length > 0 ? key : app), AppName = app, Sender = sender };
 
         E("Alpha 测试截止", "Alpha testing ends", T(11, 22, 0), T(11, 22, 0), allDay: true);
         E("整理本周计划", "Plan the week", T(11, 22, 10), T(11, 22, 11));
         E("和小林对设计稿", "Design review with Lin", T(11, 22, 14), T(11, 22, 15));
-        E("取快递", "Pick up the parcel", T(11, 22, 16.5), T(11, 22, 17));
-        E("写周报", "Write the weekly report", T(11, 22, 20), T(11, 22, 21.5));
+        E("取快递", "Pick up the parcel", T(11, 22, 16.5), T(11, 22, 17), remind: 15);
+        E("写周报", "Write the weekly report", T(11, 22, 20), T(11, 22, 21.5), remind: 60);
 
         var trip = book.AddEvent(Loc.T("出差上海", "Trip to Shanghai"), T(11, 23, 20), T(11, 25, 12), false, now)!;
         E("小周生日", "Zhou's birthday", T(11, 24, 0), T(11, 24, 0), allDay: true);

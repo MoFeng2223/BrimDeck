@@ -5,6 +5,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using BrimDeck.Core;
 using BrimDeck.Core.Agenda;
+using BrimDeck.Core.Notices;
 
 namespace BrimDeck;
 
@@ -105,6 +106,36 @@ public partial class MainWindow
         _agendaReveal = reveal;
         if (CurrentPage != DeckPage.Agenda) SelectPage(DeckPage.Agenda);
         else RenderAgendaPage();
+    }
+
+    // A button of a planner reminder's notice (AgendaReminders), on the island, the notices page or from NoticeCenter.RunAsync:
+    // "查看日程" opens this panel's planner on the event; "5 分钟后再提醒" puts the reminder off. Whether it did.
+    internal bool AgendaReminderAction(Notice notice, string key, TimeSpan? delay = null, DateTime? at = null)
+    {
+        var center = _app.Notices;
+        switch (key)
+        {
+            case AgendaReminders.OpenAction:
+                center.Hub.MarkViewed(notice.Id);
+                center.Withdraw(notice.Id);
+                if (_app.Agenda.RevealFor(notice, this) is not { } reveal || !DeckPages.Shown(Settings, DeckPage.Agenda)) { OpenNoticesPage(byKey: false, focus: notice.Id); return true; }
+                OpenPlanner(reveal);
+                return true;
+            case AgendaReminders.SnoozeAction:
+                return _app.Agenda.Snooze(notice, delay ?? TimeSpan.FromMinutes(5), at);
+            default: return false;
+        }
+    }
+
+    // Opens the panel on the planner page at what reveal names; an open panel switches to it.
+    private void OpenPlanner(AgendaReveal reveal)
+    {
+        if (_expanded) { _app.Agenda.Reveal(reveal.Day, reveal.View, reveal.ItemId, this); return; }
+        // Taken by the page as the opening draws it (RenderAgendaPage).
+        _app.Agenda.Reveal(reveal.Day, reveal.View, reveal.ItemId, this);
+        SelectPage(DeckPage.Agenda, remember: false);
+        _keepPageOnOpen = true;
+        try { OpenFromHotkey(byKey: false); } finally { _keepPageOnOpen = false; }
     }
 
     private void AgendaIconLoaded(string iconRef)

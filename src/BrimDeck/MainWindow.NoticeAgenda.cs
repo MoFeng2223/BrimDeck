@@ -93,8 +93,9 @@ public partial class MainWindow
     {
         var code = NoticeCodes.Words(notice, Settings.NoticeCodes).Hit;
         var read = AgendaRead(notice);
-        // A strip the user closed is not offered again (StripClose); the verification code still is.
-        if (!AgendaOffered || notice.AgendaDismissed || read.Kind is NoticeAgendaKind.None or NoticeAgendaKind.Code) return new(NoticeAgendaRead.None, [], null, code);
+        // A strip the user closed is not offered again (StripClose); the verification code still is. A planner reminder is about an
+        // event the planner has already.
+        if (!AgendaOffered || notice.AgendaDismissed || AgendaReminders.Owns(notice) || read.Kind is NoticeAgendaKind.None or NoticeAgendaKind.Code) return new(NoticeAgendaRead.None, [], null, code);
         var open = NoticeAgenda.Open(read, now);
         var added = AddedFrom(notice.Id);
         return new(open, open.Kind == NoticeAgendaKind.Times ? NoticeAgenda.NotAdded(open.Times, added) : [], added, code);
@@ -167,7 +168,10 @@ public partial class MainWindow
         {
             title = Loc.T("已加入日程", "Added as an event");
             var moment = new NoticeMoment(item.Start, item.AllDay ? (item.End.Date > item.Start.Date ? item.End : null) : item.End, item.AllDay, false, 0, 0, "");
-            second = NoticeMoments.Label(moment, now.Date) + " · " + item.Title;
+            second = NoticeMoments.Label(moment, now.Date);
+            // Its reminder, while it is still to come ("提前 15 分钟提醒"), before the title, which the strip cuts first.
+            if (item.RemindAt > now) second += " · " + Loc.T($"{AgendaReminders.Text(item.Remind, item.AllDay)}提醒", $"Reminder: {AgendaReminders.Text(item.Remind, item.AllDay)}");
+            second += " · " + item.Title;
             day = item.FirstDay;
             undo = () => _app.Agenda.Book.RemoveEvent(item.Id);
         }
@@ -264,7 +268,8 @@ public partial class MainWindow
     private void AddTime(Notice notice, NoticeAgendaTime time)
     {
         var moment = time.Moment;
-        _app.Agenda.Book.AddEvent(NoticeAgenda.EventTitle(notice, time), moment.Start, moment.End, moment.AllDay, DateTime.Now, source: AgendaSource.From(notice));
+        _app.Agenda.Book.AddEvent(NoticeAgenda.EventTitle(notice, time), moment.Start, moment.End, moment.AllDay, DateTime.Now, source: AgendaSource.From(notice),
+            remind: AgendaReminders.Default(moment.AllDay));
     }
 
     // ----- The event and to-do buttons -----
@@ -281,7 +286,7 @@ public partial class MainWindow
             {
                 var now = DateTime.Now;
                 var start = AgendaCalendar.NewEventStart(DateOnly.FromDateTime(now), now);
-                ShowNoticeForm(notice, null, null, false, text, start, start.AddHours(1), false, DateOnly.FromDateTime(start), true);
+                ShowNoticeForm(notice, null, null, false, text, start, start.AddHours(1), false, DateOnly.FromDateTime(start), true, AgendaRepeat.None, AgendaReminders.DefaultTimed);
             }),
             RoundGlyphButton(ListAddIcon, Loc.T("加入待办", "Add to to-dos"),
                 () => _app.Agenda.Book.AddTodo(text, DateOnly.FromDateTime(DateTime.Today), DateTime.Now, source: AgendaSource.From(notice)))

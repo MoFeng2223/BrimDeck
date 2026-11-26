@@ -50,7 +50,7 @@ internal sealed partial class Renderer
         var english = Add("Outlook", "Design review moved to Thursday at 3 PM", "Wang: the room is now on the 5th floor, please confirm.", 7);
         var longer = Add("Outlook", "【重要】评审会改期，请所有参会的同事务必在今天下班之前回复确认能否参加",
             "各位好：原定的评审会改到周四下午三点，如果时间冲突就改到周五上午十点。会议室改到 5 楼东侧，请提前十分钟到场，并带上各自负责部分的最新进展和需要大家讨论的问题。", 5);
-        var meeting = Add("Outlook", "周会改到周四下午三点", "王敏：会议室改到 5 楼，请确认能否参加。", 2);
+        var meeting = Add("Outlook", "周会改到明天下午三点", "王敏：会议室改到 5 楼，请确认能否参加。", 2);
         SelectPage(DeckPage.Notices);
 
         async Task Shot(string name, Notice focus, double w = 760, double h = 330)
@@ -84,13 +84,14 @@ internal sealed partial class Renderer
         void PlainForm(Notice notice)
         {
             var start = AgendaCalendar.NewEventStart(DateOnly.FromDateTime(DateTime.Now), DateTime.Now);
-            Program.Call(_deck, "ShowNoticeForm", [typeof(Notice), typeof(string), typeof(string), typeof(bool), typeof(string), typeof(DateTime), typeof(DateTime), typeof(bool), typeof(DateOnly), typeof(bool)],
-                notice, null, null, false, NoticeAgenda.TodoText(notice), start, start.AddHours(1), false, DateOnly.FromDateTime(start), false);
+            Program.Call(_deck, "ShowNoticeForm", [typeof(Notice), typeof(string), typeof(string), typeof(bool), typeof(string), typeof(DateTime), typeof(DateTime), typeof(bool), typeof(DateOnly), typeof(bool), typeof(AgendaRepeat), typeof(int?)],
+                notice, null, null, false, NoticeAgenda.TodoText(notice), start, start.AddHours(1), false, DateOnly.FromDateTime(start), false, AgendaRepeat.None, AgendaReminders.DefaultTimed);
         }
         void AddEvent(Notice notice, int index = 0)
         {
             var time = NoticeAgenda.Read(notice, TimeZoneInfo.Local).Times[index];
-            book.AddEvent(NoticeAgenda.EventTitle(notice, time), time.Moment.Start, time.Moment.End, time.Moment.AllDay, DateTime.Now, source: AgendaSource.From(notice));
+            book.AddEvent(NoticeAgenda.EventTitle(notice, time), time.Moment.Start, time.Moment.End, time.Moment.AllDay, DateTime.Now, source: AgendaSource.From(notice),
+                remind: AgendaReminders.Default(time.Moment.AllDay));
         }
 
         try
@@ -111,6 +112,12 @@ internal sealed partial class Renderer
             await Shot("8-added-todo", chat);
             await Shot("9-narrow-added-event", meeting, 460, 280);
             await Shot("9b-narrow-added-todo", chat, 460, 280);
+            // A planner reminder as it arrives (AgendaReminders.Notice), on a usual panel and the narrowest.
+            var parcel = book.AddEvent("取快递", DateTime.Now.AddMinutes(15), DateTime.Now.AddMinutes(45), false, DateTime.Now, "菜鸟驿站 · 取件码 6-2-3014", remind: 15)!;
+            hub.Receive(AgendaReminders.Notice(parcel, DateTime.Now, false, TimeZoneInfo.Local), _now.ToUniversalTime());
+            var reminder = hub.Notices.First(notice => notice.InstanceKey == AgendaReminders.InstanceKey(parcel));
+            await Shot("18-reminder", reminder);
+            await Shot("18b-narrow-reminder", reminder, 460, 280);
             await FormShot("form-3-edit-event", meeting, () => AddedForm(meeting));
             await FormShot("form-4-edit-todo", chat, () => AddedForm(chat));
             await FormShot("form-5-edit-todo-narrow", chat, () => AddedForm(chat), 460, 280);

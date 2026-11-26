@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows.Threading;
 using BrimDeck.Core.Agenda;
+using BrimDeck.Core.Notices;
 
 namespace BrimDeck;
 
@@ -8,12 +9,27 @@ namespace BrimDeck;
 // agenda.json from the data folder (next to settings.json) in the background at the start, saves a second after the last
 // change, and writes what is left at exit. A file that cannot be read for now (in use, no permission) is read again every
 // half minute, and nothing is written until it has been: what is changed meanwhile joins what it holds. Runs on the UI thread.
+//
+// It also gives the events' reminders (AgendaReminders) once the file was read, as notices of BrimDeck's own (Notices). Each check
+// gives the reminders since the last one: one due within NoticeClock.MissedLimit shows as it arrives; one missed longer (BrimDeck
+// was not running, the PC slept) is listed unread while its time has not ended, and dropped after. The time checked up to is
+// kept in agenda.json (AgendaData.RemindedTo) when a reminder was given and at exit, so a later start knows what it missed. A
+// reminder put off ("稍后提醒") is kept only while BrimDeck runs.
 internal sealed class AgendaCenter : IDisposable
 {
     private static readonly TimeSpan SaveDelay = TimeSpan.FromSeconds(1), RetryDelay = TimeSpan.FromSeconds(30);
+    // Reminders are checked at least this often, so a clock set forward or a PC that woke up is noticed soon.
+    private static readonly TimeSpan RemindRecheck = TimeSpan.FromMinutes(1);
+    // Missed reminders are looked for this far back at most.
+    private static readonly TimeSpan RemindLookBack = TimeSpan.FromDays(2);
     private readonly AgendaStore _store;
     private readonly Dispatcher _dispatcher;
     private readonly DispatcherTimer _save, _retry;
+    private readonly PromptTimer _remind;
+    // The time reminders were checked up to; null until the file was read.
+    private DateTime? _checkedTo;
+    // Reminders put off: the event, the start of its time, and when to remind again.
+    private readonly List<(string Id, DateTime Start, DateTime At)> _snoozed = [];
     // The writes in the background, one after another; each one's text was taken when it was queued.
     private Task _writing = Task.CompletedTask;
     // _loaded: the file was read (or there was none, or it was moved aside), so it may be written. _dirty: changes not written yet.
@@ -35,6 +51,13 @@ internal sealed class AgendaCenter : IDisposable
     public AgendaReveal? PendingReveal { get; private set; }
     public event Action<AgendaReveal>? RevealRequested;
 
+    // Where reminders go; set once the notices take notices in (App), which looks for the reminders due. Without it (the README
+    // renderer) nothing reminds.
+    public NoticeCenter? Notices { get => _notices; set { _notices = value; ScheduleReminders(); } }
+    private NoticeCenter? _notices;
+    // The clock reminders are worked out by; the README renderer may set another.
+    public Func<DateTime> Clock { get; set; } = () => DateTime.Now;
+
     public AgendaCenter(string dataFolder, Dispatcher dispatcher)
     {
         _store = new AgendaStore(dataFolder);
@@ -43,7 +66,10 @@ internal sealed class AgendaCenter : IDisposable
         _save.Tick += (_, _) => { _save.Stop(); _save.Interval = SaveDelay; Save(); };
         _retry = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = RetryDelay };
         _retry.Tick += (_, _) => { _retry.Stop(); Load(); };
+        _remind = new PromptTimer(dispatcher, CheckReminders);
         Book.Changed += BookChanged;
+        Microsoft.Win32.SystemEvents.TimeChanged += ClockMoved;
+        Microsoft.Win32.SystemEvents.PowerModeChanged += PowerChanged;
         Load();
     }
 
@@ -66,6 +92,92 @@ internal sealed class AgendaCenter : IDisposable
     {
         if (!_merging) { _dirty = true; QueueSave(); }
         Changed?.Invoke();
+        // An event added, moved or given another reminder: the next reminder may be another one.
+        ScheduleReminders();
+    }
+
+    // ---- Reminders ----
+
+    private void ClockMoved(object? sender, EventArgs e) => _dispatcher.BeginInvoke(ScheduleReminders);
+    private void PowerChanged(object? sender, Microsoft.Win32.PowerModeChangedEventArgs e) { if (e.Mode == Microsoft.Win32.PowerModes.Resume) ClockMoved(sender, e); }
+
+    // Gives what is due and waits for the next reminder.
+    private void ScheduleReminders()
+    {
+        if (_disposed || !_loaded) return;
+        CheckReminders();
+    }
+
+    // Gives the reminders since the last check and waits for the next one, at most RemindRecheck at a time.
+    private void CheckReminders()
+    {
+        _remind.Stop();
+        if (_disposed || !_loaded) return;
+        var now = AgendaTime.Second(Clock());
+        if (_checkedTo is null)
+        {
+            // The first start that reminds: nothing earlier is looked for. Kept at once, so the next start does not miss what is
+            // due meanwhile.
+            _checkedTo = Book.RemindedTo ?? now;
+            if (Book.RemindedTo is null) Keep(now);
+        }
+        var from = _checkedTo.Value;
+        if (from > now) from = now;
+        if (from < now - RemindLookBack) from = now - RemindLookBack;
+        bool gave = false;
+        if (Notices is { } notices)
+        {
+            if (now > from) foreach (var due in AgendaReminders.Due(Book.Events, from, now)) gave |= Give(notices, due.Event, due.At, now);
+            for (int i = _snoozed.Count - 1; i >= 0; i--)
+            {
+                var (id, start, at) = _snoozed[i];
+                if (at > now) continue;
+                _snoozed.RemoveAt(i);
+                if (AgendaReminders.Find(Book.FindEvent(id), start) is { } time) gave |= Give(notices, time, at, now);
+            }
+        }
+        _checkedTo = now;
+        if (gave) Keep(now);
+        var next = AgendaReminders.Next(Book.Events, now);
+        foreach (var (_, _, at) in _snoozed) if (next is null || at < next) next = at;
+        var wait = next is { } then ? then - Clock() : RemindRecheck;
+        _remind.Interval = wait < TimeSpan.FromSeconds(1) ? TimeSpan.FromSeconds(1) : wait > RemindRecheck ? RemindRecheck : wait;
+        _remind.Start();
+    }
+
+    // Gives one reminder, unless its time has ended. Whether a notice was posted.
+    private static bool Give(NoticeCenter notices, AgendaEvent time, DateTime at, DateTime now)
+    {
+        bool ended = time.AllDay ? time.LastDay < DateOnly.FromDateTime(now) : time.End <= now;
+        if (ended) return false;
+        notices.Post(AgendaReminders.Notice(time, now, missed: now - at > NoticeClock.MissedLimit, TimeZoneInfo.Local));
+        return true;
+    }
+
+    // The reminders up to time were given: written with the next save.
+    private void Keep(DateTime time)
+    {
+        Book.RemindedTo = time;
+        _dirty = true; QueueSave();
+    }
+
+    // "稍后提醒" on a reminder's notice: it goes, and the reminder comes again after delay (or at at, when given). False when the
+    // notice is not a reminder or its event's time is gone.
+    public bool Snooze(Notice notice, TimeSpan delay, DateTime? at = null)
+    {
+        if (Notices is not { } notices || AgendaReminders.Parse(notice.InstanceKey) is not { } key || AgendaReminders.Find(Book.FindEvent(key.Id), key.Start) is null) return false;
+        _snoozed.RemoveAll(item => item.Id == key.Id && item.Start == key.Start);
+        _snoozed.Add((key.Id, key.Start, at ?? AgendaTime.Second(Clock() + delay)));
+        notices.Delete(notice);
+        ScheduleReminders();
+        return true;
+    }
+
+    // "查看日程": the day and the event a reminder's notice is about, or null when the event is gone.
+    public AgendaReveal? RevealFor(Notice notice, object? from)
+    {
+        if (AgendaReminders.Parse(notice.InstanceKey) is not { } key || Book.FindEvent(key.Id) is null) return null;
+        return new AgendaReveal(DateOnly.FromDateTime(key.Start), AgendaView.Events, key.Id, from);
     }
 
     private void QueueSave()
@@ -94,6 +206,7 @@ internal sealed class AgendaCenter : IDisposable
             finally { _merging = false; }
             // Changed before the file could be read: what was changed is written now, together with what the file held.
             if (_dirty) QueueSave();
+            ScheduleReminders();
         }
         else _retry.Start();
         Changed?.Invoke();
@@ -134,6 +247,8 @@ internal sealed class AgendaCenter : IDisposable
     {
         if (!_loaded) return;
         _save.Stop();
+        // The reminders checked while running count as given: a later start looks for those missed from here on.
+        if (_checkedTo is { } checkedTo && !(Book.RemindedTo >= checkedTo)) { Book.RemindedTo = checkedTo; _dirty = true; }
         try { _writing.Wait(TimeSpan.FromSeconds(5)); } catch (AggregateException) { }
         if (!_dirty) return;
         _dirty = false;
@@ -146,7 +261,9 @@ internal sealed class AgendaCenter : IDisposable
         if (_disposed) return;
         Flush();
         _disposed = true;
-        _save.Stop(); _retry.Stop();
+        _save.Stop(); _retry.Stop(); _remind.Stop();
         Book.Changed -= BookChanged;
+        Microsoft.Win32.SystemEvents.TimeChanged -= ClockMoved;
+        Microsoft.Win32.SystemEvents.PowerModeChanged -= PowerChanged;
     }
 }

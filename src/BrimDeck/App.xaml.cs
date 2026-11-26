@@ -167,6 +167,8 @@ public partial class App : Application
         // used to skip every later one, which left a panel with no tray icon, no saving and no answer to a second start.
         Step(Deck.Show);
         Step(Notices.ApplySettings);
+        // The planner's reminders are notices: given once the notices take them in.
+        Step(() => Agenda.Notices = Notices);
         Step(Mail.ApplySettings);
         Step(InitializeHotkeys);
         Step(() => _dataKey = DataKey());

@@ -24,10 +24,13 @@ public sealed class AgendaBook
     public IReadOnlyDictionary<DateOnly, string> Notes => _notes;
     // Counts the changes, so a view can tell whether it is drawn from the current data.
     public int Revision { get; private set; }
+    // See AgendaData.RemindedTo. Set by whoever gives the reminders (AgendaCenter); not a change of what the planner shows, so
+    // setting it raises nothing: the setter saves it itself.
+    public DateTime? RemindedTo { get; set; }
     public event Action? Changed;
 
     // A copy of the data to save; the items themselves are shared, as they never change.
-    public AgendaData Snapshot() => new() { Events = [.. _events], Todos = [.. _todos], Notes = new(_notes), Extra = _kept.Extra };
+    public AgendaData Snapshot() => new() { Events = [.. _events], Todos = [.. _todos], Notes = new(_notes), RemindedTo = RemindedTo, Extra = _kept.Extra };
 
     // Replaces everything with what was read.
     public void Load(AgendaData data)
@@ -47,6 +50,8 @@ public sealed class AgendaBook
     private void Merge(AgendaData data, bool mine)
     {
         _kept = data;
+        // Merged, the later of the two.
+        RemindedTo = mine && RemindedTo is { } here && !(data.RemindedTo > here) ? here : data.RemindedTo;
         var events = _events.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
         var todos = _todos.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
         foreach (var item in data.Events) if (events.Add(item.Id) && !todos.Contains(item.Id)) _events.Add(item);
@@ -68,8 +73,9 @@ public sealed class AgendaBook
     // before or as it starts, an all-day event whose last day is before its first. Times are cut to the minute; a timed event
     // without an end lasts an hour; an all-day event keeps only the dates. An event that does not repeat keeps no last day or
     // skipped days; a series keeps its last day only when it is not before its first day, and the skipped days from its first day.
+    // A reminder out of range for the kind of event is dropped (AgendaReminders.Normalize).
     public static AgendaEvent? Shape(string id, string title, DateTime start, DateTime? end, bool allDay, string? detail, AgendaSource? source, DateTime created,
-        AgendaRepeat repeat = AgendaRepeat.None, DateOnly? until = null, IReadOnlyList<DateOnly>? skipped = null)
+        AgendaRepeat repeat = AgendaRepeat.None, DateOnly? until = null, IReadOnlyList<DateOnly>? skipped = null, int? remind = null)
     {
         if (Clean(title) is not { } name) return null;
         DateTime from, to;
@@ -92,13 +98,14 @@ public sealed class AgendaBook
         return new AgendaEvent
         {
             Id = id, Title = name, Start = from, End = to, AllDay = allDay, Detail = Clean(detail), Source = source, Created = AgendaTime.Second(created),
-            Repeat = repeat, Until = until, Skipped = skip
+            Repeat = repeat, Until = until, Skipped = skip, Remind = AgendaReminders.Normalize(remind, allDay)
         };
     }
 
-    public AgendaEvent? AddEvent(string title, DateTime start, DateTime? end, bool allDay, DateTime now, string? detail = null, AgendaSource? source = null, AgendaRepeat repeat = AgendaRepeat.None)
+    public AgendaEvent? AddEvent(string title, DateTime start, DateTime? end, bool allDay, DateTime now, string? detail = null, AgendaSource? source = null, AgendaRepeat repeat = AgendaRepeat.None,
+        int? remind = null)
     {
-        if (Shape(NewId(), title, start, end, allDay, detail, source, now, repeat) is not { } item) return null;
+        if (Shape(NewId(), title, start, end, allDay, detail, source, now, repeat, remind: remind) is not { } item) return null;
         _events.Add(item); Raise();
         return item;
     }
@@ -106,12 +113,22 @@ public sealed class AgendaBook
     // Changes an event's title, times, all-day, detail and, when given, how it repeats (null keeps it); its Id, source and creation
     // stay, and a series keeps its last day and skipped days (see Shape). A series' times are its first time's: every time of it
     // changes. Null when there is no such event or the new values are refused (see Shape); the event is unchanged then.
+    // The reminder stays as it was (made to fit an event that became all-day or timed, AgendaReminders.Normalize); the overload
+    // with remind sets it.
     public AgendaEvent? UpdateEvent(string id, string title, DateTime start, DateTime? end, bool allDay, string? detail, AgendaRepeat? repeat = null)
+        => Update(id, title, start, end, allDay, detail, repeat, null, keepRemind: true);
+
+    // remind: the new reminder, null for none.
+    public AgendaEvent? UpdateEvent(string id, string title, DateTime start, DateTime? end, bool allDay, string? detail, AgendaRepeat? repeat, int? remind)
+        => Update(id, title, start, end, allDay, detail, repeat, remind, keepRemind: false);
+
+    private AgendaEvent? Update(string id, string title, DateTime start, DateTime? end, bool allDay, string? detail, AgendaRepeat? repeat, int? remind, bool keepRemind)
     {
         int index = _events.FindIndex(item => item.Id == id);
         if (index < 0) return null;
         var old = _events[index];
-        if (Shape(id, title, start, end, allDay, detail, old.Source, old.Created, repeat ?? old.Repeat, old.Until, old.Skipped) is not { } shaped) return null;
+        if (keepRemind) remind = old.Remind;
+        if (Shape(id, title, start, end, allDay, detail, old.Source, old.Created, repeat ?? old.Repeat, old.Until, old.Skipped, remind) is not { } shaped) return null;
         var item = shaped with { Extra = _events[index].Extra };
         if (item == _events[index]) return item;
         _events[index] = item; Raise();
@@ -230,18 +247,18 @@ public sealed class AgendaBook
 
     // Gives a to-do a time: it becomes an event with its text as the title, keeping its Id, source and creation, and the to-do
     // is gone. Null (and the to-do stays) when there is no such to-do or the times are refused (see Shape).
-    public AgendaEvent? TodoToEvent(string todoId, DateTime start, DateTime? end, bool allDay, string? detail = null, AgendaRepeat repeat = AgendaRepeat.None)
+    public AgendaEvent? TodoToEvent(string todoId, DateTime start, DateTime? end, bool allDay, string? detail = null, AgendaRepeat repeat = AgendaRepeat.None, int? remind = null)
     {
         int index = _todos.FindIndex(item => item.Id == todoId);
         if (index < 0) return null;
         var todo = _todos[index];
-        if (Shape(todo.Id, todo.Text, start, end, allDay, detail, todo.Source, todo.Created, repeat) is not { } item) return null;
+        if (Shape(todo.Id, todo.Text, start, end, allDay, detail, todo.Source, todo.Created, repeat, remind: remind) is not { } item) return null;
         _todos.RemoveAt(index); _events.Add(item); Raise();
         return item;
     }
 
     // Takes an event back to a to-do of day (null: "长期"), with its title as the text, keeping its Id, source and creation.
-    // The event's detail line and how it repeats have no place in a to-do and are dropped.
+    // The event's detail line, how it repeats and its reminder have no place in a to-do and are dropped.
     public AgendaTodo? EventToTodo(string eventId, DateOnly? day)
     {
         int index = _events.FindIndex(item => item.Id == eventId);

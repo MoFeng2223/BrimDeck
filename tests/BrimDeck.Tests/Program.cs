@@ -184,6 +184,7 @@ try
     await CursorPricesTests.Run(root, Check);
     PointerMotionTests.Run(Check);
     AgendaTests.Run(root, Check);
+    AgendaReminderTests.Run(root, Check);
     var priceTime = DateTimeOffset.UtcNow;
     const string catalogJson = """
         {"data":[

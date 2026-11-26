@@ -849,6 +849,228 @@ internal sealed class AgendaRepeatField : ContentControl
     private const string Icon = "m17 2 4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3";
 }
 
+// An event's reminder (AgendaReminders): the bell (the accent while there is a reminder), the reminder in words ("提前 15 分钟") and
+// a chevron; a click opens the choices for a timed or an all-day event in an AgendaChoicePopup, the last of them "自定义…". That
+// turns the field into an amount typed in a box and its unit, "提前 [25] [分钟 ⌄]" (an all-day event's: "提前 [2] [天 09:00 ⌄]"); the
+// unit's choices end in "常用选项", which turns it back. Remind is the reminder (null: none); Valid is false while the amount typed
+// cannot be one.
+internal sealed class AgendaRemindField : ContentControl
+{
+    private readonly PanelLook _look;
+    private readonly Path _bell;
+    private readonly InkCentredText _label;
+    private readonly Border _custom;
+    private readonly StackPanel _customRow;
+    private readonly TextBox _amount;
+    private readonly InkCentredText _unitLabel;
+    private readonly Button _chip, _unitButton;
+    private int? _remind;
+    private bool _allDay, _customMode, _setting;
+    private AgendaReminders.Unit _unit = AgendaReminders.Unit.Minutes;
+    public event Action? Changed;
+    public AgendaChoicePopup Popup { get; }
+    public AgendaChoicePopup UnitPopup { get; }
+
+    public AgendaRemindField(PanelLook look, Action<TextBox> keyboard)
+    {
+        _look = look;
+        Popup = new AgendaChoicePopup(look);
+        UnitPopup = new AgendaChoicePopup(look);
+        string rest = look.Fill;
+
+        _label = AgendaDraw.Label("", 12, look.Primary);
+        _label.Margin = new Thickness(6, 0, 0, 0);
+        var chevron = AgendaDraw.CentredIcon(AgendaDraw.Chevron, 11, look.Tertiary);
+        chevron.Margin = new Thickness(6, 0, 0, 0);
+        var bell = Bell(false);
+        _bell = (Path)((Canvas)bell.Child).Children[0];
+        var chipRow = new StackPanel { Orientation = Orientation.Horizontal, Children = { bell, _label, chevron } };
+        var face = new Border { Height = 28, CornerRadius = new CornerRadius(look.Corner(8)), Padding = new Thickness(9, 0, 8, 0), Background = UI.Brush(rest), Child = chipRow };
+        _label.FitHeight(face, 28);
+        _chip = AgendaDraw.Bare(face, Loc.T("提醒", "Reminder"), Open, (over, down) => face.Background = UI.Brush(down ? look.Hex("pressed") : over ? look.FillSelected : rest));
+
+        // The custom amount: "提前", a box for the figures and the unit's button, on the field's fill.
+        var before = AgendaDraw.Label(Loc.T("提前", "Before:"), 12, look.Secondary);
+        before.Margin = new Thickness(6, 0, 6, 0);
+        _amount = AgendaFields.Box(look, keyboard);
+        _amount.Background = UI.Brush(look.FillSelected);
+        _amount.TextAlignment = TextAlignment.Center; _amount.MaxLength = 4; _amount.Width = 40; _amount.Height = 22;
+        ((LetterBox)_amount).Sample = "0";
+        Typography.SetNumeralAlignment(_amount, FontNumeralAlignment.Tabular);
+        InputMethod.SetIsInputMethodEnabled(_amount, false);
+        AutomationProperties.SetName(_amount, Loc.T("提前多少", "How long before"));
+        _amount.TextChanged += (_, _) => { if (!_setting) Typed(); };
+        _amount.PreviewKeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; Entered?.Invoke(); } };
+        _unitLabel = AgendaDraw.Label("", 12, look.Primary);
+        var unitChevron = AgendaDraw.CentredIcon(AgendaDraw.Chevron, 11, look.Tertiary);
+        unitChevron.Margin = new Thickness(4, 0, 0, 0);
+        var unitFace = new Border { Height = 22, CornerRadius = new CornerRadius(look.Corner(6)), Padding = new Thickness(6, 0, 5, 0), Background = Brushes.Transparent,
+            Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { _unitLabel, unitChevron } } };
+        _unitLabel.FitHeight(unitFace, 22);
+        _unitButton = AgendaDraw.Bare(unitFace, Loc.T("单位", "Unit"), OpenUnits, (over, down) => unitFace.Background = UI.Brush(down ? look.Hex("pressed") : over ? look.FillSelected : "#00000000"));
+        _unitButton.Margin = new Thickness(4, 0, 0, 0);
+        _customRow = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Children = { Bell(true), before, _amount, _unitButton } };
+        _custom = new Border { Height = 28, CornerRadius = new CornerRadius(look.Corner(8)), Padding = new Thickness(9, 0, 3, 0), Background = UI.Brush(rest), Child = _customRow };
+
+        Content = _chip;
+        Show();
+    }
+
+    // The bell: in the accent while there is a reminder.
+    private Viewbox Bell(bool on) => AgendaDraw.CentredIcon(BellIcon, 12, on ? _look.Accent : _look.Secondary);
+
+    // The reminder, null for none. Setting it shows the choices (or the custom amount for one that is not among them).
+    public int? Remind
+    {
+        get => _customMode ? Typed(false) : _remind;
+        set { _remind = AgendaReminders.Normalize(value, _allDay); _customMode = _remind is { } minutes && !AgendaReminders.Choices(_allDay).Contains(minutes) && AgendaReminders.Parts(minutes, _allDay) is not null; Show(); }
+    }
+
+    // Whether what the field shows makes a reminder (the custom amount typed in full).
+    public bool Valid => !_customMode || Typed(false) is not null;
+
+    // Whether the event is all day: its choices are other ones, and a reminder becomes the other kind's default.
+    public bool AllDay
+    {
+        get => _allDay;
+        set
+        {
+            if (value == _allDay) return;
+            int? was = Remind;
+            _allDay = value;
+            _customMode = false;
+            _remind = AgendaReminders.Switched(was, value);
+            Show();
+            Changed?.Invoke();
+        }
+    }
+
+    private void Show()
+    {
+        _bell.Stroke = UI.Brush(_remind is not null ? _look.Accent : _look.Secondary);
+        _label.Text.Text = AgendaReminders.Text(_remind, _allDay);
+        _label.InvalidateMeasure(); _label.InvalidateArrange();
+        if (_customMode)
+        {
+            if (_remind is { } minutes && AgendaReminders.Parts(minutes, _allDay) is { } parts) { _unit = parts.Unit; SetAmount(parts.Amount.ToString(CultureInfo.InvariantCulture)); }
+            ShowUnit();
+            Content = _custom;
+        }
+        else Content = _chip;
+    }
+
+    private void ShowUnit()
+    {
+        _unitLabel.Text.Text = _allDay ? Loc.T("天 09:00", "days, 09:00") : UnitName(_unit);
+        _unitLabel.InvalidateMeasure(); _unitLabel.InvalidateArrange();
+    }
+
+    private static string UnitName(AgendaReminders.Unit unit) => unit switch
+    {
+        AgendaReminders.Unit.Hours => Loc.T("小时", "hours"), AgendaReminders.Unit.Days => Loc.T("天", "days"), _ => Loc.T("分钟", "minutes")
+    };
+
+    private void SetAmount(string text) { _setting = true; _amount.Text = text; _setting = false; }
+
+    // The custom amount as a reminder; null while it is not one. paint: the figures turn red while they are not.
+    private int? Typed(bool paint = true)
+    {
+        int? remind = int.TryParse(_amount.Text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int amount) ? AgendaReminders.Custom(amount, _unit, _allDay) : null;
+        if (paint)
+        {
+            _amount.Foreground = UI.Brush(remind is null ? _look.Hex("danger") : _look.Primary);
+            if (remind is not null) _remind = remind;
+            Changed?.Invoke();
+        }
+        return remind;
+    }
+
+    private void Open()
+    {
+        var choices = new List<AgendaChoicePopup.Choice> { new(AgendaReminders.Text(null, _allDay), () => Pick(null), _remind is null) };
+        foreach (int minutes in AgendaReminders.Choices(_allDay)) choices.Add(new(AgendaReminders.Text(minutes, _allDay), () => Pick(minutes), _remind == minutes));
+        bool other = _remind is { } kept && !AgendaReminders.Choices(_allDay).Contains(kept);
+        choices.Add(new(Loc.T("自定义…", "Custom…"), Custom, other));
+        Popup.Show(this, choices);
+    }
+
+    private void Pick(int? remind)
+    {
+        _remind = remind; _customMode = false;
+        Show();
+        Changed?.Invoke();
+    }
+
+    // "自定义…": the custom amount, starting from the reminder chosen (or the default). A click in its box takes the keyboard, as
+    // the form's other boxes do.
+    private void Custom()
+    {
+        int start = _remind ?? AgendaReminders.Default(_allDay);
+        if (AgendaReminders.Parts(start, _allDay) is null) start = AgendaReminders.Default(_allDay);
+        _remind = start; _customMode = true;
+        Show();
+        Changed?.Invoke();
+    }
+
+    // Enter in the amount's box: what the form does with Enter in its other boxes.
+    public event Action? Entered;
+
+    private void OpenUnits()
+    {
+        var choices = new List<AgendaChoicePopup.Choice>();
+        if (!_allDay)
+            foreach (var unit in new[] { AgendaReminders.Unit.Minutes, AgendaReminders.Unit.Hours, AgendaReminders.Unit.Days })
+                choices.Add(new(UnitName(unit), () => { _unit = unit; ShowUnit(); Typed(); }, unit == _unit));
+        choices.Add(new(Loc.T("常用选项", "Common choices"), () => Pick(_remind is { } kept && AgendaReminders.Choices(_allDay).Contains(kept) ? kept : AgendaReminders.Default(_allDay))));
+        UnitPopup.Show(_unitButton, choices);
+    }
+
+    public bool PopupOpen => Popup.IsOpen || UnitPopup.IsOpen;
+    public void ClosePopups() { Popup.Close(); UnitPopup.Close(); }
+
+    public const string BellIcon = "M12 3C8.7 3 6.5 5.6 6.5 8.8v3.8l-1.7 3h14.4l-1.7-3V8.8C17.5 5.6 15.3 3 12 3zM9.6 17.6a2.4 2.4 0 0 0 4.8 0";
+}
+
+// Lays its children out left to right, Gap apart, starting a new line LineGap below where the next does not fit: the forms' "重复"
+// and "提醒", which go one under the other on a narrow column.
+internal sealed class AgendaWrapRow : Panel
+{
+    public double Gap { get; set; } = 6;
+    public double LineGap { get; set; } = 6;
+
+    protected override Size MeasureOverride(Size available)
+    {
+        double x = 0, y = 0, line = 0, widest = 0;
+        foreach (UIElement child in InternalChildren)
+        {
+            child.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            if (child.Visibility == Visibility.Collapsed) continue;
+            var size = child.DesiredSize;
+            if (x > 0 && x + Gap + size.Width > available.Width) { y += line + LineGap; x = 0; line = 0; }
+            x += (x > 0 ? Gap : 0) + size.Width;
+            line = Math.Max(line, size.Height);
+            widest = Math.Max(widest, x);
+        }
+        return new Size(widest, y + line);
+    }
+
+    protected override Size ArrangeOverride(Size final)
+    {
+        double x = 0, y = 0, line = 0;
+        foreach (UIElement child in InternalChildren)
+        {
+            if (child.Visibility == Visibility.Collapsed) continue;
+            var size = child.DesiredSize;
+            if (x > 0 && x + Gap + size.Width > final.Width) { y += line + LineGap; x = 0; line = 0; }
+            if (x > 0) x += Gap;
+            child.Arrange(new Rect(x, y, size.Width, size.Height));
+            x += size.Width;
+            line = Math.Max(line, size.Height);
+        }
+        return final;
+    }
+}
+
 // Which times of a repeating event "删除" takes: the one opened, that one and the later ones, or all of them.
 internal enum AgendaDeleteScope { All, This, Later }
 
@@ -868,6 +1090,8 @@ internal sealed class AgendaSplitRow : Panel
         Size left = Children[0].DesiredSize, right = Children[1].DesiredSize;
         _split = double.IsFinite(available.Width) && left.Width + Gap + right.Width > available.Width;
         double width = double.IsFinite(available.Width) ? available.Width : left.Width + Gap + right.Width;
+        // On lines of their own, the first part has the whole width: one that wraps (AgendaWrapRow) is as tall as its lines.
+        if (_split) { Children[0].Measure(new Size(width, double.PositiveInfinity)); left = Children[0].DesiredSize; }
         return _split ? new Size(width, left.Height + LineGap + right.Height) : new Size(width, Math.Max(left.Height, right.Height));
     }
 
@@ -961,6 +1185,7 @@ internal sealed class AgendaEventForm : Border
     public AgendaTimeField EndTime { get; }
     public ToggleButton AllDay { get; }
     public AgendaRepeatField Repeat { get; }
+    public AgendaRemindField Remind { get; }
     private readonly Button _submit, _cancel, _delete;
     private readonly AgendaChoicePopup _deleteChoices;
     private readonly FrameworkElement _dash;
@@ -1010,12 +1235,16 @@ internal sealed class AgendaEventForm : Border
         buttons.Children.Add(_cancel); buttons.Children.Add(_submit);
 
         Repeat = new AgendaRepeatField(look) { VerticalAlignment = VerticalAlignment.Center };
+        Remind = new AgendaRemindField(look, keyboard) { VerticalAlignment = VerticalAlignment.Center };
         times.Margin = new Thickness(0, 6, 0, -6);
-        var foot = new AgendaSplitRow { Margin = new Thickness(0, 6, 0, 0), Children = { Repeat, buttons } };
+        // How it repeats and its reminder side by side, one under the other where the column is too narrow; the buttons at the right,
+        // on a line of their own under them where they do not fit beside them.
+        var foot = new AgendaSplitRow { Margin = new Thickness(0, 6, 0, 0), Children = { new AgendaWrapRow { Children = { Repeat, Remind } }, buttons } };
         _titleRow = new AgendaLeadRow { Children = { Title } };
         Child = new StackPanel { Children = { _titleRow, times, foot } };
 
-        Title.Changed += Check; StartTime.Changed += Check; EndTime.Changed += Check; EndDay.Changed += Check;
+        Title.Changed += Check; StartTime.Changed += Check; EndTime.Changed += Check; EndDay.Changed += Check; Remind.Changed += Check;
+        Remind.Entered += Submit;
         StartDay.Changed += () =>
         {
             if (_compact) EndDay.Date = EndDay.Date.AddDays(StartDay.Date.DayNumber - _startWas.DayNumber);
@@ -1050,8 +1279,8 @@ internal sealed class AgendaEventForm : Border
     }
 
     // Whether a pop-up of the form is open (a month, the repeat rules, the delete choices): the panel stays open while it is.
-    public bool PopupOpen => StartDay.Popup.IsOpen || EndDay.Popup.IsOpen || Repeat.Popup.IsOpen || _deleteChoices.IsOpen;
-    public void ClosePopups() { StartDay.Popup.Close(); EndDay.Popup.Close(); Repeat.Popup.Close(); _deleteChoices.Close(); }
+    public bool PopupOpen => StartDay.Popup.IsOpen || EndDay.Popup.IsOpen || Repeat.Popup.IsOpen || Remind.PopupOpen || _deleteChoices.IsOpen;
+    public void ClosePopups() { StartDay.Popup.Close(); EndDay.Popup.Close(); Repeat.Popup.Close(); Remind.ClosePopups(); _deleteChoices.Close(); }
 
     private void Delete()
     {
@@ -1063,9 +1292,9 @@ internal sealed class AgendaEventForm : Border
     }
 
     // Puts the values in: an all-day event's end is its last day; a timed one ending at 00:00 ends at 24:00 of the day before. For a
-    // series, its first time and how it repeats.
-    public void Fill(string title, DateTime start, DateTime end, bool allDay) => Fill(title, start, end, allDay, AgendaRepeat.None);
-    public void Fill(string title, DateTime start, DateTime end, bool allDay, AgendaRepeat repeat)
+    // series, its first time and how it repeats. remind: its reminder (AgendaEvent.Remind), null for none; a new event is given
+    // AgendaReminders.Default.
+    public void Fill(string title, DateTime start, DateTime end, bool allDay, AgendaRepeat repeat, int? remind)
     {
         Title.Text = title;
         StartDay.Date = DateOnly.FromDateTime(start);
@@ -1092,6 +1321,8 @@ internal sealed class AgendaEventForm : Border
         if (_compact) EndDay.Visibility = EndDay.Date != StartDay.Date ? Visibility.Visible : Visibility.Collapsed;
         AllDay.IsChecked = allDay;
         AllDayChanged();
+        Remind.Remind = remind;
+        Check();
     }
 
     // The event the form describes, or null while it cannot be one.
@@ -1118,12 +1349,13 @@ internal sealed class AgendaEventForm : Border
     {
         bool allDay = AllDay.IsChecked == true;
         StartTime.IsEnabledField = !allDay; EndTime.IsEnabledField = !allDay;
+        Remind.AllDay = allDay;
         Check();
     }
 
-    private void Check() => _submit.IsEnabled = Value is not null;
+    private void Check() => _submit.IsEnabled = Value is not null && Remind.Valid;
 
-    private void Submit() { if (Value is not null) Submitted?.Invoke(); }
+    private void Submit() { if (Value is not null && Remind.Valid) Submitted?.Invoke(); }
 
     // The title takes the keyboard with its text selected (a new form, or one opened to change an event).
     public void FocusTitle(Action<Control> begin) { begin(Title.Box); Title.Box.Dispatcher.BeginInvoke(() => Title.Box.SelectAll(), System.Windows.Threading.DispatcherPriority.Input); }

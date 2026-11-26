@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using BrimDeck.Core;
+using BrimDeck.Core.Agenda;
 using BrimDeck.Core.Notices;
 using BrimDeck.Native;
 using static BrimDeck.Tracks;
@@ -937,6 +938,7 @@ public partial class MainWindow
         foreach (var action in own.OrderBy(action => action.Primary).Take(NoticeIntake.MaxButtons))
         {
             bool main = mainOwn && action.Primary;
+            if (AgendaReminders.Owns(notice)) { flow.Add(ReminderButton(notice, action, main)); if (main) row.MainLast = true; continue; }
             flow.Add(PillButton(action.Label, action.Label, async () => { await center.RunAsync(notice, action); RenderNotices(); }, primary: main));
             if (main) row.MainLast = true;
         }
@@ -967,6 +969,26 @@ public partial class MainWindow
 
     // A box with an arrow leaving it at the top right, in the 24 unit box of AgendaDraw.Icon: "打开应用" where its words do not fit.
     private const string OpenIcon = "M14 4h6v6M20 4l-8.5 8.5M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10";
+
+    // A planner reminder's buttons on this panel: "查看日程" opens the planner here; "稍后提醒" offers when to remind again (5 or 10
+    // minutes, or at the start while it is more than a minute away).
+    private Button ReminderButton(Notice notice, NoticeAction action, bool main)
+    {
+        if (action.Key != AgendaReminders.SnoozeAction)
+            return PillButton(action.Label, action.Label, () => { AgendaReminderAction(notice, action.Key); RenderNotices(); }, primary: main);
+        Button? button = null;
+        button = PillButton(Loc.T("稍后提醒", "Remind later"), Loc.T("稍后提醒", "Remind later"), () =>
+        {
+            var menu = NewMenu();
+            void Later(TimeSpan delay, DateTime? at = null) { AgendaReminderAction(notice, action.Key, delay, at); RenderNotices(); }
+            menu.Items.Add(Item(Loc.T("5 分钟后", "In 5 minutes"), () => Later(TimeSpan.FromMinutes(5))));
+            menu.Items.Add(Item(Loc.T("10 分钟后", "In 10 minutes"), () => Later(TimeSpan.FromMinutes(10))));
+            if (notice.Timing?.StartsAt is { } start && start - DateTimeOffset.Now > TimeSpan.FromMinutes(1))
+                menu.Items.Add(Item(Loc.T("开始时", "At the start"), () => Later(TimeSpan.Zero, start.LocalDateTime)));
+            OpenMenu(menu, button!);
+        }, primary: main);
+        return button;
+    }
 
     private static string OpenLabel(Notice notice) => notice.Call ? Loc.T($"打开 {notice.AppName} 接听", $"Answer in {notice.AppName}") : Loc.T("打开应用", "Open app");
 

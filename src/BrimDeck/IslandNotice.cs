@@ -9,6 +9,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
 using BrimDeck.Core;
+using BrimDeck.Core.Agenda;
 using BrimDeck.Core.Notices;
 using BrimDeck.Native;
 
@@ -1082,6 +1083,10 @@ internal sealed partial class IslandNotice : Window
         {
             switch (button.Kind)
             {
+                // A planner reminder's buttons act on this island's panel ("查看日程" opens its planner).
+                case NoticeActions.ButtonKind.Sender when button.Action is { } action && AgendaReminders.Owns(notice):
+                    _deck.AgendaReminderAction(notice, action.Key);
+                    break;
                 case NoticeActions.ButtonKind.Sender when button.Action is { } action:
                     await Center.RunAsync(notice, action);
                     break;

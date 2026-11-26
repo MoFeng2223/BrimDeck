@@ -87,6 +87,8 @@ public sealed class AgendaStore(string directory)
         var notes = new JsonObject();
         foreach (var (day, text) in data.Notes.Where(pair => !string.IsNullOrWhiteSpace(pair.Value)).OrderBy(pair => pair.Key)) notes[AgendaTime.Text(day)] = text;
         root["notes"] = notes;
+        if (data.RemindedTo is { } reminded) root["remindedTo"] = AgendaTime.Text(AgendaTime.Second(reminded));
+        else root.Remove("remindedTo");
         return root.ToJsonString(Written);
     }
 
@@ -96,7 +98,7 @@ public sealed class AgendaStore(string directory)
         var root = JsonNode.Parse(text, documentOptions: new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip }) as JsonObject
             ?? throw new JsonException("agenda.json is not an object");
         var ids = new HashSet<string>(StringComparer.Ordinal);
-        var data = new AgendaData { Extra = Rest(root, "format", "events", "todos", "notes") };
+        var data = new AgendaData { Extra = Rest(root, "format", "events", "todos", "notes", "remindedTo"), RemindedTo = AgendaTime.Parse(Text(root["remindedTo"])) };
         foreach (var node in root["events"] as JsonArray ?? [])
             if (node is JsonObject item && Event(item) is { } read && ids.Add(read.Id)) data.Events.Add(read);
         foreach (var node in root["todos"] as JsonArray ?? [])
@@ -107,7 +109,8 @@ public sealed class AgendaStore(string directory)
         return data;
     }
 
-    private static readonly string[] EventKeys = ["id", "title", "start", "end", "allDay", "detail", "source", "created", "repeat", "until", "skipped"];
+    // "repeat", "until" and "skipped" stay last: an unknown rule keeps them (EventKeys[..^3]).
+    private static readonly string[] EventKeys = ["id", "title", "start", "end", "allDay", "detail", "source", "created", "remind", "repeat", "until", "skipped"];
     // How "repeat" is written; an event that does not repeat has no "repeat", "until" or "skipped".
     private static readonly Dictionary<AgendaRepeat, string> RepeatNames = new()
     {
@@ -123,6 +126,8 @@ public sealed class AgendaStore(string directory)
         node["start"] = item.AllDay ? AgendaTime.Text(item.FirstDay) : AgendaTime.Text(item.Start);
         node["end"] = item.AllDay ? AgendaTime.Text(DateOnly.FromDateTime(item.End)) : AgendaTime.Text(item.End);
         node["allDay"] = item.AllDay; node["detail"] = item.Detail; node["source"] = Node(item.Source); node["created"] = AgendaTime.Text(item.Created);
+        // Only an event with a reminder has "remind": minutes before its start.
+        if (item.Remind is { } remind) node["remind"] = remind; else node.Remove("remind");
         if (RepeatNames.TryGetValue(item.Repeat, out var repeat))
         {
             node["repeat"] = repeat;
@@ -166,7 +171,9 @@ public sealed class AgendaStore(string directory)
         var repeat = RepeatNames.FirstOrDefault(pair => pair.Value == Text(node["repeat"])).Key;
         bool unknown = repeat == AgendaRepeat.None && node["repeat"] is not null;
         var skipped = (node["skipped"] as JsonArray ?? []).Select(day => AgendaTime.ParseDay(Text(day))).OfType<DateOnly>().Distinct().ToList();
-        var item = AgendaBook.Shape(Id(node), title, start, end, allDay, Text(node["detail"]), Source(node["source"]), created, repeat, AgendaTime.ParseDay(Text(node["until"])), skipped);
+        // A reminder that cannot be read, or one out of range (AgendaReminders.Normalize), is dropped: the event stays, without one.
+        int? remind = node["remind"] is System.Text.Json.Nodes.JsonValue minutes && minutes.TryGetValue<int>(out var read) ? read : null;
+        var item = AgendaBook.Shape(Id(node), title, start, end, allDay, Text(node["detail"]), Source(node["source"]), created, repeat, AgendaTime.ParseDay(Text(node["until"])), skipped, remind);
         return item is null ? null : item with { Extra = Rest(node, unknown ? EventKeys[..^3] : EventKeys) };
     }
 
