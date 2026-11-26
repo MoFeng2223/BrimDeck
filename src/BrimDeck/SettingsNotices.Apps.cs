@@ -312,13 +312,17 @@ public sealed partial class SettingsWindow
         return block;
     }
 
-    // What to turn on in a common app for its messages to reach Windows' notifications. QQ's setting is not named: its interface
-    // text is not readable from its files. DingTalk's and Feishu's are with their two ways (DingTalkModes, FeishuModes).
+    // What to turn on in a common app for its messages to reach Windows' notifications. QQ's, in its own words (its settings'
+    // "消息通知" page, 桌面弹窗提醒: 通知类型 set to "Windows通知", 通知显示消息详情, then a switch for each kind of message).
+    // DingTalk's and Feishu's are with their two ways (DingTalkModes, FeishuModes).
     private static (string Heading, string[] Steps)? CommonSteps(string key) => key switch
     {
-        "windows:QQ" => (Loc.T("在 QQ 中打开消息通知", "Turn on message notifications in QQ"),
-            [Loc.T("确认 QQ 正在运行并已登录。", "Make sure QQ is running and signed in."),
-             Loc.T("在 QQ 的设置中检查是否关闭了消息通知，关闭了就重新打开。", "In QQ's settings, check whether message notifications are off, and turn them back on if so.")]),
+        "windows:QQ" => (Loc.T("在 QQ 中改用 Windows 通知", "Switch QQ to Windows notifications"),
+            [Loc.T("打开 QQ 的“设置”，进入“消息通知”。", "Open QQ's Settings and go to \"消息通知\" (message notifications)."),
+             Loc.T("在“桌面弹窗提醒”中，把“通知类型”改为“Windows通知”，并打开“通知显示消息详情”。",
+                 "Under \"桌面弹窗提醒\" (desktop popups), set \"通知类型\" (notification type) to \"Windows通知\" (Windows notifications) and turn on \"通知显示消息详情\" (show message details)."),
+             Loc.T("在下面打开想要提醒的消息，例如“好友消息”“群聊消息”。",
+                 "Below, turn on the messages you want to be told of, such as \"好友消息\" (friends' messages) and \"群聊消息\" (group messages).")]),
         _ => null
     };
 

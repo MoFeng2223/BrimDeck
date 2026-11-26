@@ -25,6 +25,29 @@ internal sealed partial class Renderer
             await Shot("chat-read-netease-" + name, (Window)Activator.CreateInstance(netease, Program.Any, null, new object[] { theme }, null)!);
         }
 
+        // QQ's steps under its opened row, at the row's width in a wide and in the narrowest settings window.
+        foreach (var (theme, name) in new[] { (SettingsTheme.Light, "light"), (SettingsTheme.Dark, "dark") })
+        {
+            _settings.Theme = theme;
+            var settings = new SettingsWindow(app);
+            var (heading, steps) = ((string, string[]))typeof(SettingsWindow).GetMethod("CommonSteps", Program.Any)!.Invoke(null, ["windows:QQ"])!;
+            foreach (var width in new[] { 600.0, 420.0 })
+            {
+                var block = (FrameworkElement)typeof(SettingsWindow).GetMethod("Steps", Program.Any)!.Invoke(settings, [heading, steps])!;
+                var host = new Border { Child = block, Resources = settings.Resources, Width = width, Padding = new Thickness(16, 0, 16, 0) };
+                host.SetResourceReference(Border.BackgroundProperty, "SettingsSurface");
+                const double scale = 1.5;
+                host.Measure(new Size(width, double.PositiveInfinity)); host.Arrange(new Rect(host.DesiredSize));
+                await Settle();
+                host.Measure(new Size(width, double.PositiveInfinity)); host.Arrange(new Rect(host.DesiredSize)); host.UpdateLayout();
+                var picture = new RenderTargetBitmap((int)(width * scale), (int)Math.Ceiling(host.ActualHeight * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+                picture.Render(host); picture.Freeze();
+                Write(picture, Path.Combine(output, $"qq-steps-{width:0}-{name}.png"));
+                host.Child = null;
+            }
+            try { settings.Close(); } catch (ArgumentOutOfRangeException) { }
+        }
+
         // The status dot and a numbered step's mark beside their text (StepLine), at the scales of usual screens in the settings
         // window's text mode: how far the mark's middle is from the middle of the text's ink, in device pixels.
         var stepType = Type.GetType("BrimDeck.StepLine, BrimDeck")!;
