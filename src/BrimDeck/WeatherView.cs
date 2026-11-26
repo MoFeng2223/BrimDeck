@@ -69,18 +69,18 @@ internal sealed class WeatherView : UserControl
     // 底部「看什么」：卡片点一下换成该指标的逐时曲线，再点一次回到气温。逐日只有气温，所以非气温镜头一律切到逐时。
     private WeatherChip[] _drawnChips = [];
     private Lens _lens = Lens.Temp;
-    // 逐日列内的纵向顺序：星期/日期/转后图标/天气名/高温 →【折线图】→ 低温 →（转前名/同尺寸图标/风级）。折线插在高低温之间。
     private readonly UniformGrid lowRow = new() { Rows = 1, Columns = 7, Height = LowRowHeight };
-    // 逐日专用的折线下方信息行，与折线上方镜像：转前天气名在上、28px 转前（白天）图标居中、风向箭头 + 风级在下。
-    // 转前转后同天气时上下图标一样，但两行都必须画，保持折线两侧对称；逐时模式折叠，时刻仍留在 lowRow。
+    private readonly UniformGrid lowNote = new() { Rows = 1, Columns = 7, Height = 0 };
     private readonly UniformGrid dayInfoRow = new() { Rows = 1, Columns = 7, Height = 60 };
     private readonly List<TextBlock> tempLabels = new();   // 高/低温文本，供“隐藏高低温”档统一收起
     // 天气名称文本与其所在列的第 4 行：收纳到档 3 时上下两处名称同时收起（行高同步归零），折线保留。
     private readonly List<TextBlock> conditionLabels = new();
     private readonly List<RowDefinition> conditionRows = new();
-    // 当前预报区收纳状态：4 完整 / 3 藏天气文字 / 2 藏折线 / 0 整行折叠。
-    // 除「天气文字」和「折线」外，图标、风、温度、时刻等一律常驻；连这些也放不下时才整行折叠。
-    // 档 1 与档 2 高度相同（StateHeight 对 1/2 同值），降档会直接穿过 1 落到 0，等效于只有两档收纳。
+    // 预报列里的天气图标：档 1 连同图标行一起收起（只留数值与时刻），行高归零前先把图标藏掉，
+    // 否则 0 高的行不会裁切子元素，图标会溢到相邻行上。
+    private readonly List<UIElement> columnGlyphs = new();
+    // 当前预报区收纳状态：4 完整 / 3 藏天气文字 / 2 藏折线 / 1 藏图标 / 0 整行折叠。
+    // 五档各有独立高度：档 1 藏图标但保留温度与时刻，所以矮面板不会从「有图标」直接跌到「整行消失」。
     // 每一档需要的高度是骨架常量之和（StateHeight），决策是 room→状态 的纯函数；
     // 列每次重绘都会重建行定义，状态必须独立保存，重建后原样贴回，否则天气名称会闪回。
     private int _forecastLevel = 4;
@@ -139,18 +139,20 @@ internal sealed class WeatherView : UserControl
     private int _columns = 7;
     private double _chartWidth;
     private int _summaryCols = 2;
+    private double _summaryIcon = 48;   // Hero 图标当前档位；只在跨档时重建摘要，宽度连续变化由弹性 Star 列吸收
     private int generation;
     // 视口即内容区，宽度与高度随 Fit 传入值整体填充。预报区骨架恒定（各行行高固定、图标恒定 28px），
-    // 折线行是唯一弹性带；高度不足按 4→3→2→1→0 逐级收纳：4 完整 → 3 藏上下天气名称 → 2 藏折线 → 1 藏高低温 → 0 整行折叠。
+    // 折线行是唯一弹性带；高度不足按 4→3→2→1→0 逐级收纳：4 完整 → 3 藏上下天气名称 → 2 藏折线 → 1 藏图标 → 0 整行折叠。
     internal void Fit(double width, double height, bool force = false)
     {
         Width = width; Height = height;
         UpdateMinuteVisibility();
-        // 顶部读数卡随宽度在 2–6 列之间逐列增减；跨档时重建摘要。
-        int summaryCols = SummaryColumns(width);
-        if (summaryCols != _summaryCols || !_drawnChips.SequenceEqual(_app.Settings.Weather.Chips))
+        // 顶部读数卡按可用宽度取列数（2–6）、Hero 分三档尺寸；只有跨档才重建。
+        // 列宽本身由 Star 列弹性分配，连续拖宽时不需要重建：卡片跟着变宽变窄即可。
+        var summaryPlan = PlanSummary(width);
+        if (summaryPlan.Columns != _summaryCols || summaryPlan.Icon != _summaryIcon || !_drawnChips.SequenceEqual(_app.Settings.Weather.Chips))
         {
-            _summaryCols = summaryCols;
+            _summaryCols = summaryPlan.Columns; _summaryIcon = summaryPlan.Icon;
             if (_last is { } summarySnap) DrawSummary(summarySnap);
         }
         double avail = Math.Max(0, height - 16 - minuteRow.Height.Value);   // 根 Grid 上边距 0 + 底部页脚行 16 + 分钟窄条
@@ -165,7 +167,7 @@ internal sealed class WeatherView : UserControl
         // 列数或实际列数变了必须重画：改 Columns 而不重建子元素会让 UniformGrid 换行，旧列残影落在左侧。
         bool layoutChanged = force || columnsChanged || shownChanged;
         bool widthChanged = Math.Abs(chartWidth - _chartWidth) > 0.5;
-        _columns = columns; _chartWidth = chartWidth; forecast.Columns = shownValue; lowRow.Columns = shownValue; dayInfoRow.Columns = shownValue; chart.Width = chartWidth;
+        _columns = columns; _chartWidth = chartWidth; forecast.Columns = shownValue; lowRow.Columns = shownValue; lowNote.Columns = shownValue; dayInfoRow.Columns = shownValue; chart.Width = chartWidth;
         if (_last is { } f)
         {
             // 列数跨档：列元素与折线一起重建。跨档次数少，直接重画比节流更稳。
@@ -187,64 +189,69 @@ internal sealed class WeatherView : UserControl
         SyncSummaryAlignment();
     }
     // 今日天气内容不多，按内容高度贴顶即可，不跟着面板拉伸；多出来的高度全部交给下方预报区去填。
-    // 只有当面板矮到放不下预报条、只剩今日天气时，才让今日天气接管弹性行并居中，避免贴着页头、下面空一大片。
+    // 只有当面板矮到放不下预报条、只剩今日天气时，才让摘要区整体居中接管这一行，避免贴着页头、下面空一大片。
     private void SyncSummaryAlignment()
     {
         bool showDays = _indicesMode || days.Visibility == Visibility.Visible;   // 指数视图与 days 共用这一行，任一可见就占满
         summaryRow.Height = showDays ? GridLength.Auto : new GridLength(1, GridUnitType.Star);
         daysRow.Height = showDays ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
-        var place = showDays ? VerticalAlignment.Top : VerticalAlignment.Center;
-        foreach (UIElement child in summary.Children)
-        {
-            if (child is FrameworkElement element && element.VerticalAlignment != place) element.VerticalAlignment = place;
-        }
+        // 对齐作用在整块摘要上：Grid 自身按内容高度居中/贴顶，Hero 与指标区在内部各自对齐，
+        // 不再逐个改子元素的对齐（子元素一旦换行或换列，逐个设置就会互相打架）。
+        summary.VerticalAlignment = showDays ? VerticalAlignment.Top : VerticalAlignment.Center;
     }
     // 把当前状态原样贴到列元素上。列在每次重绘时都会 Clear + 新建行定义，行高与可见性回到默认值；
     // 重绘后必须重贴，否则天气名称/折线会闪回，直到下一次 Fit 才收起——拖动高度时看到的就是这个闪动。
-    // 图标尺寸恒定 28px 不随档位缩放：骨架只有「名称行的有无」一个变量，其余全部交给折线行伸缩。
+    // 图标尺寸恒定 28px 不随档位缩放：骨架只有「天气名行」「图标行」两个开关，其余全部交给折线行伸缩。
     private void ApplyForecastLevel()
     {
         int level = _forecastLevel;
         bool showCondition = level >= 4;
+        bool showGlyph = level >= 2;     // 档 1：图标整行收起，只留风/概率/空气/温度与时刻
         // 天气名行高按模式取：逐时列的名称行与逐日不是同一行号。
         var rows = _hourlyMode ? HourlyRowHeights : ColumnRowHeights;
-        double conditionHeight = showCondition ? rows[_hourlyMode ? HourlyConditionRow : DailyConditionRow] : 0;
+        int conditionIndex = _hourlyMode ? HourlyConditionRow : DailyConditionRow;
+        int glyphIndex = _hourlyMode ? HourlyGlyphRow : DailyGlyphRow;
+        double conditionHeight = showCondition ? rows[conditionIndex] : 0;
+        double glyphHeight = showGlyph ? rows[glyphIndex] : 0;
         foreach (var row in conditionRows) row.Height = new GridLength(conditionHeight);
         foreach (var label in conditionLabels) label.Visibility = showCondition ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var glyph in columnGlyphs) glyph.Visibility = showGlyph ? Visibility.Visible : Visibility.Collapsed;
 
         var chartVisibility = level >= 3 ? Visibility.Visible : Visibility.Collapsed;
         bool chartToggled = chart.Visibility != chartVisibility;
         chart.Visibility = chartVisibility;
-        // 折线收起时，上下各可见行按原有内容高度分配空间。
-        bool stretchForecast = level is 1 or 2 && _lens != Lens.Celestial;
+        // 折线行是唯一的弹性带。折线收起后不再把每一行都拉成 Star——那会把图标、温度、时刻均匀撑开，
+        // 行距全乱、越拉越丑；改为整块保持骨架原高、贴住底部下沉，多出来的高度由它上方那片区域吸收。
+        bool pinned = level < 3 && _lens != Lens.Celestial;
+        days.VerticalAlignment = pinned ? VerticalAlignment.Bottom : VerticalAlignment.Stretch;
         var flexible = new GridLength(1, GridUnitType.Star);
-        int conditionIndex = _hourlyMode ? HourlyConditionRow : DailyConditionRow;
-        double upperHeight = rows.Sum() - rows[conditionIndex] + conditionHeight + ColumnInset;
-        days.RowDefinitions[0].Height = stretchForecast ? new GridLength(upperHeight, GridUnitType.Star) : GridLength.Auto;
+        days.RowDefinitions[0].Height = GridLength.Auto;
         days.RowDefinitions[1].Height = chartVisibility == Visibility.Visible ? flexible : new GridLength(0);
         foreach (var border in forecast.Children.OfType<Border>())
         {
             if (border.Child is not Grid column) continue;
             for (int i = 0; i < column.RowDefinitions.Count; i++)
             {
-                if (i == conditionIndex) continue;
-                column.RowDefinitions[i].Height = new GridLength(rows[i],
-                    stretchForecast ? GridUnitType.Star : GridUnitType.Pixel);
+                double height = i == conditionIndex ? conditionHeight : i == glyphIndex ? glyphHeight : rows[i];
+                column.RowDefinitions[i].Height = new GridLength(height);
             }
         }
-        bool showTemp = level >= 2 && _lens != Lens.Celestial;   // 天文镜头有自己的底部时刻行，低温/时刻行让位
-        // 逐时与逐日必须同进退：lowRow 在逐日放低温、在逐时放时刻，只要显隐规则一致，days 的骨架就恒定。
+        bool showTemp = level >= 1 && _lens != Lens.Celestial;   // 天文镜头有自己的底部时刻行，低温/时刻行让位
+        // 底部三行各管各的显隐与定高，总高与拆开前完全一致（20 + 14 + 44 = 20 + 58）：
+        //   lowRow 逐日低温 / 逐时时刻，档 1 起常驻；
+        //   lowNote 逐日转前天气名，只在档 4 出现（与上方天气名同进退），逐时恒为 0；
+        //   dayInfoRow 转前图标 + 风，逐日档 2 起常驻，与折线互不牵连。
         lowRow.Visibility = showTemp ? Visibility.Visible : Visibility.Collapsed;
-        // 逐日信息行只在「有低温行 + 逐日模式」出现；切到逐时后时刻独占 lowRow，这一行收起。
-        dayInfoRow.Visibility = showTemp && !_hourlyMode ? Visibility.Visible : Visibility.Collapsed;
-        // 信息行只有两档：完整（天气名 + 28px 图标 + 风）与紧凑（图标 + 风）。
-        double infoHeight = showCondition ? DayInfoFull : DayInfoCompact;
-        lowRow.Height = stretchForecast ? double.NaN : LowRowHeight;
-        dayInfoRow.Height = stretchForecast ? double.NaN : infoHeight;
-        days.RowDefinitions[2].Height = stretchForecast && showTemp ? new GridLength(LowRowHeight, GridUnitType.Star) : GridLength.Auto;
-        days.RowDefinitions[3].Height = stretchForecast && showTemp && !_hourlyMode ? new GridLength(infoHeight, GridUnitType.Star) : GridLength.Auto;
-        foreach (Grid info in dayInfoRow.Children)
-            info.RowDefinitions[0].Height = new GridLength(showCondition ? DayInfoFull - DayInfoCompact : 0);
+        bool showNote = showTemp && !_hourlyMode && showCondition;
+        lowNote.Visibility = showNote ? Visibility.Visible : Visibility.Collapsed;
+        bool showInfo = showTemp && !_hourlyMode && level >= 2;
+        dayInfoRow.Visibility = showInfo ? Visibility.Visible : Visibility.Collapsed;
+        lowRow.Height = LowRowHeight;
+        lowNote.Height = showNote ? DayNoteHeight : 0;
+        dayInfoRow.Height = DayInfoCompact;
+        days.RowDefinitions[2].Height = GridLength.Auto;
+        days.RowDefinitions[3].Height = GridLength.Auto;
+        days.RowDefinitions[4].Height = GridLength.Auto;
         foreach (var p in tempLabels) p.Visibility = showTemp ? Visibility.Visible : Visibility.Collapsed;
         days.Visibility = !_indicesMode && level >= 1 ? Visibility.Visible : Visibility.Collapsed;
         // 折线行重新出现时行高从 0 展开，画布还没按新高度画过：立刻补一版，布局后 SizeChanged 会再校准一次。
@@ -252,27 +259,35 @@ internal sealed class WeatherView : UserControl
     }
     // 各收纳状态需要的高度：骨架行高全是常量（ColumnRowHeights 与各行固定高），状态高度因此也是常量。
     // 估算里加了少量安全余量：宁可早一档收起，也不让内容溢出弹性行——决策不需要任何实测。
-    private double StateHeight(int level)
+    // 档位语义：4 完整 / 3 藏天气文字 / 2 藏折线 / 1 藏图标（留温度与时刻）/ 0 整行折叠。
+    // 逐日比逐时多一条「转前图标 + 风」镜像行，逐时比逐日多两行小时级数据（降水概率、空气等级）：
+    // 两套骨架各自估算后取更高的那套，同一尺寸下两种模式的档位一致，切换不会跳档。
+    // 镜像行在档 2 起常驻（折线收起不影响它），只有连图标一起收起的档 1 才随之下线。
+    private double StateHeight(int level) => Math.Max(SkeletonHeight(level, true), SkeletonHeight(level, false));
+    private double SkeletonHeight(int level, bool hourly)
     {
         if (level <= 0) return 0;
-        // 预报列上段：两套骨架按模式取，合计去掉天气名行（档 3 起收起），外加列 Border 与 forecast 边距。
-        // 逐时列多一行降水概率（+14px），收档阈值相应更高；切逐时后 room 不足会先于逐日收档，属预期取舍。
-        var rows = _hourlyMode ? HourlyRowHeights : ColumnRowHeights;
-        int condRow = _hourlyMode ? HourlyConditionRow : DailyConditionRow;
+        // 天文镜头：预报列、天气名、温度与时刻行全部收起，整块只画一条折线画布。
+        // 若仍按普通档位估算，中等偏矮的面板会把「折线档」判为装不下，画布被藏、列又被镜头收起，
+        // 预报区于是整块空白——需求降到画布本身，它就能占满余下高度。
+        if (_lens == Lens.Celestial) return CelestialMinHeight;
+        var rows = hourly ? HourlyRowHeights : ColumnRowHeights;
+        int condRow = hourly ? HourlyConditionRow : DailyConditionRow;
+        int glyphRow = hourly ? HourlyGlyphRow : DailyGlyphRow;
         double h = ColumnInset + BandSafety;
-        for (int i = 0; i < rows.Length; i++) h += i == condRow && level < 4 ? 0 : rows[i];
-        if (level >= 3) h += ChartMinHeight + ChartTopMargin + BandSafety;  // 折线行按最小高度计，富余高度由它吸收
-        if (level >= 1)
+        for (int i = 0; i < rows.Length; i++)
         {
-            h += LowRowHeight + BandSafety;                                 // 低温/时刻行：除整行折叠外常驻
-            if (!_hourlyMode) h += (level >= 4 ? DayInfoFull : DayInfoCompact) + BandSafety;   // 逐日信息行：名称随天气文字同进退，图标与风常驻
+            if (i == condRow && level < 4) continue;
+            if (i == glyphRow && level < 2) continue;
+            h += rows[i];
         }
+        if (level >= 3) h += ChartMinHeight + ChartTopMargin + BandSafety;  // 折线行按最小高度计，富余高度由它吸收
+        if (level >= 2) h += LowRowHeight + BandSafety;                     // 低温/时刻行：档 2 起常驻
+        if (!hourly && level >= 4) h += DayNoteHeight + BandSafety;         // 转前天气名行：档 4 才有
+        if (!hourly && level >= 2) h += DayInfoCompact + BandSafety;        // 转前图标 + 风：档 2 起常驻
         return h;
     }
-    // 状态决策：room 的纯函数，双向即时、阈值不对称。降档在 room < StateHeight(level) 时立即执行
-    // （破版比早收更糟）；升档要求 room ≥ StateHeight(target) + UpgradeMargin 也立即执行——两条阈值
-    // 之间的 8px 死区隔开了升降边界，手抖与量化噪声在死区里不会引起任何状态变化。
-    // 旧版升档靠 160ms 去抖定时器，那是测量反馈回路（已删除）时代必须的保险；恒定骨架下 room 不依赖
+    // 状态决策：room 的纯函数，双向即时、阈值不对称。降档在 room < 档高 时立即执行
     // 预报状态、无回路可振荡，去抖只剩「拖动期间每帧重启定时器、必须停手才回升」的副作用，故弃用。
     private void UpdateForecastState(double room)
     {
@@ -331,12 +346,21 @@ internal sealed class WeatherView : UserControl
         _chartSettle.Stop(); _chartSettle.Start();
     }
     private const double summaryMinHeight = 86;   // 今日天气卡片两行的真实高度，与 summaryRow 初始值一致，让 room 估算准确
+    // —— 摘要区骨架：指标卡列宽在 84–120 之间弹性浮动，列数 2–6 随可用宽度取整。
+    // 理想列距 102（卡片内容约 96 + 左右外边距 6）。指标区占 Star 列，宽度变化直接由卡片伸缩吸收，
+    // 不重建、不留右侧固定空档——旧版「列数 × 105 固定宽」正是宽窗口右侧一大块空白与窄窗口挤扁 Hero 的来源。
+    private const double TilePitch = 102;
     private const double ChartMinHeight = 46;     // 折线画布最小高度：上下各留标签与圆点的空间，低于此折线档装不下
+    private const double CelestialMinHeight = 96; // 天文镜头的最低需求：整块只画画布本身（弧线带 + 地平线 + 时刻刻度）
+    // 天文镜头画完弧线、大天体与事件标注所需的最小高度：弧线区至少 52px（容得下大天体），
+    // 再加地平线以下的标注、色带与刻度。低于它才切矮版（只留地平线以下），画布高约 160、面板高约 300。
+    private const double CelestialArcHeight = 160;
     // —— 骨架尺寸的唯一事实来源：ApplyForecastLevel 贴行高、StateHeight 估状态高度，两边引用同一组常量。
     // 估算 = 真实开销 + BandSafety。要改任何一行尺寸只改这里（及列 Border 的 Padding），决策与呈现永远不会漂移。
     private const double LowRowHeight = 20;     // 低温/时刻行（低温与高温同字号 15px，行高相应加大）
-    private const double DayInfoFull = 58;      // 逐日信息行·完整（天气名 + 28px 图标 + 风）
+    private const double DayInfoFull = 58;      // 逐日信息行·完整（天气名 14 + 28px 图标 + 风 16），拆行后 = DayNoteHeight + DayInfoCompact
     private const double DayInfoCompact = 44;   // 逐日信息行·紧凑（图标 + 风）
+    private const double DayNoteHeight = DayInfoFull - DayInfoCompact;   // 辅注行：转前天气名（10px 字，14px 行高）
     private const double ChartTopMargin = 2;    // 折线画布上边距
     private const double ColumnInset = 6;       // 预报列上段真实开销：forecast 上边距 2 + 列 Border 上下 Padding 4
     private const double BandSafety = 2;        // 每条横带的安全余量：宁可早一档收起，也不让内容溢出弹性行
@@ -358,6 +382,10 @@ internal sealed class WeatherView : UserControl
         _look = look;
         Width = 620; Height = 290;
         Background = Brushes.Transparent; ApplyWeatherTheme();
+        // 内容整块填满视口：UserControl 默认按内容自然尺寸贴左上，预报区取 Star 行时整块内容只剩自然高度，
+        // 上下会被留出等量空白（页头下沿到摘要之间那一大条黑带就是这么来的）。显式拉伸后视图上沿紧贴页头。
+        HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        VerticalContentAlignment = VerticalAlignment.Stretch;
         state = WeatherData.Load(() => _app.Settings);
         // Grid 两行：今日天气(Auto 按内容贴顶) / 底部预报(Star 填满余下高度)，宽度与高度都随 Fit 传入值整体填充。
         // 今日天气内容不多，按内容高度就够；多出来的高度全部给下方预报区，让它上沿紧接天气、下沿贴住页脚，
@@ -390,17 +418,18 @@ internal sealed class WeatherView : UserControl
         root.Children.Add(indicesView);
         host.Children.Add(root); Content = host;
         // days 内部四行上下排列：预报列上段(星期/日期/图标/天气名称/高温)贴顶、折线图占据中间弹性行、
-        // 低温/时刻行在下、逐日再看一行的「转前天气名 + 同尺寸图标 + 风向风级」贴底，与折线上方镜像。折线行吸收预报区多出来的高度，
-        // 让底部信息行紧贴窗口下沿，而不是所有内容堆在顶部、下面空一大块。
+        // 折线下方再分三行独立排布（主值 低温/时刻、辅注 转前天气名/时刻说明、信息 转前图标+风），
+        // 与折线上方镜像。折线行吸收预报区多出来的高度，让底部各行紧贴窗口下沿。
         days.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         days.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         days.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         days.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        // 当前位置高亮垫底：跨四行(上段/折线/低温/逐日信息行)，Forecast、折线与底部各行都画在它上面。
+        days.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        // 当前位置高亮垫底：跨五行(上段/折线/低温/辅注/信息行)，Forecast、折线与底部各行都画在它上面。
         // 逐日高亮「今天」那一列，逐时高亮「现在」那一列——同一块 Border、同一套定位公式，两种模式共用。
-        Grid.SetRow(todayGlow, 0); Grid.SetRowSpan(todayGlow, 4); days.Children.Add(todayGlow);
+        Grid.SetRow(todayGlow, 0); Grid.SetRowSpan(todayGlow, 5); days.Children.Add(todayGlow);
         // 「现在」分界线垫在同一层：竖线在两格之间、文字在列区上方那两行空位里，都不参与命中测试。
-        Grid.SetRow(nowRule, 0); Grid.SetRowSpan(nowRule, 4); days.Children.Add(nowRule);
+        Grid.SetRow(nowRule, 0); Grid.SetRowSpan(nowRule, 5); days.Children.Add(nowRule);
         forecast.Margin = new Thickness(6, 2, 6, 0); Grid.SetRow(forecast, 0); days.Children.Add(forecast);
         // 折线画布与预报网格左边距同为 6px 显式左对齐，画布原点与列起点完全重合，点坐标按列中心计算。
         chart.Margin = new Thickness(6, 2, 6, 0); chart.HorizontalAlignment = HorizontalAlignment.Left; Grid.SetRow(chart, 1); days.Children.Add(chart);
@@ -424,7 +453,8 @@ internal sealed class WeatherView : UserControl
         days.KeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Space) { ToggleMode(); e.Handled = true; } };
         AutomationProperties.SetName(days, Loc.T("切换逐时/逐日预报", "Toggle hourly or daily forecast"));
         lowRow.Margin = new Thickness(6, 0, 6, 0); Grid.SetRow(lowRow, 2); days.Children.Add(lowRow);
-        dayInfoRow.Margin = new Thickness(6, 0, 6, 0); Grid.SetRow(dayInfoRow, 3); days.Children.Add(dayInfoRow);
+        lowNote.Margin = new Thickness(6, 0, 6, 0); Grid.SetRow(lowNote, 3); days.Children.Add(lowNote);
+        dayInfoRow.Margin = new Thickness(6, 0, 6, 0); Grid.SetRow(dayInfoRow, 4); days.Children.Add(dayInfoRow);
         Grid.SetRow(nowText, 0); Grid.SetRowSpan(nowText, 2); days.Children.Add(nowText);
         // 首帧与切页都走同一个入口：有请求在飞时直接返回，数据还在自动周期内就跳过，
         // 不再让 Loaded 与 IsVisibleChanged 各发一次、后者把前者取消。
@@ -500,7 +530,7 @@ internal sealed class WeatherView : UserControl
         _renderSignature = 0; _renderFailed = false;
         summary.Children.Clear();
         summary.Children.Add(new TextBlock { Text = Loc.T("暂无天气数据", "No weather data"), FontSize = 20, VerticalAlignment = VerticalAlignment.Center });
-        forecast.Children.Clear(); lowRow.Children.Clear(); dayInfoRow.Children.Clear(); chart.Children.Clear();
+        forecast.Children.Clear(); lowRow.Children.Clear(); lowNote.Children.Clear(); dayInfoRow.Children.Clear(); chart.Children.Clear();
         todayGlow.Visibility = Visibility.Collapsed; nowRule.Visibility = nowText.Visibility = Visibility.Collapsed;
         footerNote.Text = "";
     }
@@ -548,7 +578,7 @@ internal sealed class WeatherView : UserControl
         s.FetchedAt = default;
         try
         {
-            // 不再生成整份 JSON 字符串：直接序列化成 UTF-8 字节后做 FNV-1a。
+            // 直接序列化成 UTF-8 字节后做 FNV-1a。
             // 覆盖视图用到的全部字段（含数组与字典），30KB 量级下哈希只要几十微秒，分配量减半。
             var bytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(s, SignatureJson);
             ulong hash = 14695981039346656037UL;
@@ -638,13 +668,29 @@ internal sealed class WeatherView : UserControl
     private void UpdateMinuteVisibility()
     {
         bool show = !_indicesMode && _hourlyMode && _last is { MinutePrecip.Length: > 0 } && _minuteHasRain && Height >= 200;
+        // 窄条按 34px 从预报区里直接扣走：扣完如果连档 2（有图标、有温度）都装不下，就先不显示窄条。
+        // 旧版只看「有雨且高度 ≥ 200」，这 34px 常把整块预报压到整行折叠，摘要被迫居中、上下空出一大片。
+        if (show)
+        {
+            double measured = summary.ActualHeight > 8 ? summary.ActualHeight : summaryMinHeight;
+            show = Height - 16 - 34 - measured >= StateHeight(2);
+        }
         minuteRow.Height = show ? new GridLength(34) : new GridLength(0);
         minuteStrip.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         minuteBars.Visibility = Width >= 420 ? Visibility.Visible : Visibility.Collapsed;
     }
-    // 顶部读数卡列数：随宽度在 2–6 列之间逐列增减，每加宽约 120px 多一列。
-    // 两行 × N 列，同一列上下是一对相关读数；6 列时铺满 current 非元数据字段。
-    private static int SummaryColumns(double width) => width >= 1000 ? 6 : width >= 880 ? 5 : width >= 760 ? 4 : width >= 640 ? 3 : 2;
+    // 摘要区构型：指标卡列数 2–6，Hero 三档尺寸。Fit（判要不要重建）与 DrawSummary（建控件）共用这一处，
+    // 两侧永远不会漂移。指标区拿 Star 列，所以列数只决定「分几格」，格子本身永远铺满余宽。
+    private readonly record struct SummaryPlan(int Columns, double Icon, double Temp, double HeroWidth);
+    private static SummaryPlan PlanSummary(double width)
+    {
+        double inner = Math.Max(160, width - 28);       // 去掉 root 左右各 14 的外边距
+        var (icon, temp, heroWidth) = inner >= 1000 ? (64d, 52d, 178d)
+            : inner >= 700 ? (56d, 46d, 158d) : (48d, 38d, 142d);
+        // 按理想列距取整：剩给指标区的宽度 ÷ 102 四舍五入，列宽因此落在 84–120 的弹性区间。
+        int columns = Math.Clamp((int)Math.Round((inner - heroWidth) / TilePitch), 2, 6);
+        return new SummaryPlan(columns, icon, temp, heroWidth);
+    }
 
     // 预警等级归一：中文/英文都落到 1–4，用来排序与配色。
     private static int WarnRank(string level) => level switch
@@ -739,16 +785,20 @@ internal sealed class WeatherView : UserControl
         summary.Children.Clear(); summary.ColumnDefinitions.Clear();
         summary.RowDefinitions.Clear();
         int today = CityTodayIndex(s);    // 按城市当前日期在正序数组中定位“今天”；-1 = 跨日缓存对不上今天
-        int cols = _summaryCols = SummaryColumns(Width);
-        summary.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); summary.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(cols * 105) });
-        summary.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        var plan = PlanSummary(Width);
+        int cols = _summaryCols = plan.Columns; _summaryIcon = plan.Icon;
+        // 左列 Hero 取自然宽（图标 + 温度 + 高低温），右列指标区吃掉全部余宽：
+        // 卡片随面板连续伸缩，宽窗口不再在右侧留固定空档，窄窗口也不会把 Hero 挤成一条缝。
+        summary.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        summary.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        summary.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         // 今日天气内容顶对齐：内容不多，不跟着面板拉伸，多出的高度留给下方预报区填充。
         // 垂直基准由 SyncSummaryAlignment 统一管理（只剩今日天气时才改为居中）。
-        var hero = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 2, 8, 2), VerticalAlignment = VerticalAlignment.Top };
+        var hero = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 2, 10, 2), VerticalAlignment = VerticalAlignment.Center };
         // 左上角大图标是视图切换入口：悬浮播放天气动效，点击在「逐时/逐日预报」与「生活指数」间互换。
         var heroGlyph = new WeatherGlyph(s.WeatherCode, s.IsDay, animated: true)
         {
-            Width = 56, Height = 56, Margin = new Thickness(0, 0, 12, 0),
+            Width = plan.Icon, Height = plan.Icon, Margin = new Thickness(0, 0, 12, 0),
             VerticalAlignment = VerticalAlignment.Center, Cursor = System.Windows.Input.Cursors.Hand,
             ToolTip = Loc.T("点击切换生活指数 / 天气预报", "Click to toggle lifestyle indices / forecast")
         };
@@ -758,7 +808,7 @@ internal sealed class WeatherView : UserControl
         hero.Children.Add(heroGlyph);
         var side = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         var tempRow = new StackPanel { Orientation = Orientation.Horizontal };
-        tempRow.Children.Add(new TextBlock { Text = Degree(s.Temperature), FontSize = 44, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center });
+        tempRow.Children.Add(new TextBlock { Text = Degree(s.Temperature), FontSize = plan.Temp, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center });
         side.Children.Add(tempRow);
         var bottom = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(2, 2, 0, 0) };
         // 今日高低温取自 daily 数组（当天域），与实况温度分属两个数据域：实况来源成功而当天来源
@@ -778,9 +828,15 @@ internal sealed class WeatherView : UserControl
         // 来源与刷新时刻统一放在右下角页脚，摘要卡不再单占一行，左侧因此更紧凑。
         hero.Children.Add(side);
         summary.Children.Add(hero);
-        // 读数卡与左侧大图标同一基准顶对齐，多列时上沿才会齐平。
+        // 读数卡与左侧大图标同一基准垂直居中，多列时上下沿才会齐平。
         stats.Rows = 2; stats.Columns = cols;
-        stats.Children.Clear(); stats.VerticalAlignment = VerticalAlignment.Top; Grid.SetColumn(stats, 1); summary.Children.Add(stats);
+        stats.Children.Clear(); stats.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(stats, 1); summary.Children.Add(stats);
+        // 卡片密度按实际格宽微调：格宽不足 98 时图标与间距各收一档，把宽度让给文字，
+        // 84–120 的弹性列宽下标签才不至于整段被省略号吃掉。
+        double cell = (Math.Max(160, Width - 28) - plan.HeroWidth) / Math.Max(1, cols);
+        bool tight = cell < 98;
+        double metaGlyph = tight ? 16 : 18, metaGap = tight ? 4 : 5;
+        double valueFont = tight ? 11.5 : 12;
         string rise = Clock(s.SunriseTimes, today), set = Clock(s.SunsetTimes, today);
         // 同一列上下放相关读数：风速/阵风、体感/露点、湿度/降水、气压/能见度、空气/紫外线、云量/日月。
         // 风向/风级并入风速卡，降水类型/强度并入降水卡；日升/日落是镜头入口，始终放在最右下角。
@@ -817,9 +873,9 @@ internal sealed class WeatherView : UserControl
         {
             var (kind, ink, label, value, lens, tip) = available[metric];
             var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            // 字号按实测宽度定：格宽 105，减内边距 14、描边 2、图标 15 + 间距 5 后，文字可用约 69。
+            // 字号按实测宽度定：格宽 84–120 浮动，减内边距 14、描边 2、图标 16–18 + 间距 4–5 后，文字可用约 40–75。
             text.Children.Add(new TextBlock { Text = label, FontFamily = UI.PanelFont, FontSize = 9.5, Foreground = ColText, Margin = new Thickness(0, 0, 0, 2), TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis });
-            text.Children.Add(new TextBlock { Text = value, FontFamily = UI.PanelFont, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(_look.Primary), TextWrapping = TextWrapping.NoWrap });
+            text.Children.Add(new TextBlock { Text = value, FontFamily = UI.PanelFont, FontSize = valueFont, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(_look.Primary), TextWrapping = TextWrapping.NoWrap });
             var body = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
             // 风速卡用 8 方位箭头指示风向；箭头优先跟标题文字同档，文字缺失时才按角度分档。
             // 其余卡用各自的元信息图标。
@@ -827,11 +883,11 @@ internal sealed class WeatherView : UserControl
             if (lens == Lens.Wind && !double.IsNaN(windAngle))
             {
                 var windArrow = WeatherVisuals.WindArrowIcon(windAngle, ink);
-                windArrow.Margin = new Thickness(0, 0, 5, 0);
+                windArrow.Margin = new Thickness(0, 0, metaGap, 0);
                 body.Children.Add(windArrow);
             }
             else
-                body.Children.Add(new WeatherMetaIcon(kind, ink) { Width = 18, Height = 18, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 5, 0) });
+                body.Children.Add(new WeatherMetaIcon(kind, ink) { Width = metaGlyph, Height = metaGlyph, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, metaGap, 0) });
             body.Children.Add(text);
             bool active = lens is { } chosen && _lens == chosen;
             // 这些卡是同一组读数，底色统一用「白色低透明」叠在天空渐变上：哪一张都不抢眼，
@@ -881,6 +937,9 @@ internal sealed class WeatherView : UserControl
         if (_last is not { } snap) return;
         _lens = _lens == lens ? Lens.Temp : lens;
         if (_lens != Lens.Temp) _hourlyMode = true;
+        // 指数视图里点读数卡：镜头已经选好，顺手切回逐时预报——曲线画在下方的 days 里，
+        // 当前显示的却是指数视图，不切回来就只是「点了没反应」。ToggleView 已含一次 force Fit。
+        if (_indicesMode) { ToggleView(); DrawSummary(snap); return; }
         Fit(Width, Height, true);
         DrawSummary(snap);
     }
@@ -1032,7 +1091,7 @@ internal sealed class WeatherView : UserControl
     }
     private void DrawForecast(WeatherSnapshot s)
     {
-        forecast.Children.Clear(); lowRow.Children.Clear(); dayInfoRow.Children.Clear(); tempLabels.Clear(); conditionLabels.Clear(); conditionRows.Clear();
+        forecast.Children.Clear(); lowRow.Children.Clear(); lowNote.Children.Clear(); dayInfoRow.Children.Clear(); tempLabels.Clear(); conditionLabels.Clear(); conditionRows.Clear(); columnGlyphs.Clear();
         nowRule.Visibility = Visibility.Collapsed; nowText.Visibility = Visibility.Collapsed;   // 「现在」分界线只属于逐时
         // 天文镜头：预报列收起，弧线、色带与底部时刻行全部画进弹性的 chart 画布（由 DrawChart 统一绘制）。
         if (_lens == Lens.Celestial) { forecast.Visibility = Visibility.Collapsed; todayGlow.Visibility = Visibility.Collapsed; return; }
@@ -1045,13 +1104,15 @@ internal sealed class WeatherView : UserControl
     }
     // 逐日列骨架：5 行固定高度（星期 / 日期 / 图标 / 天气名 / 温度），合计 98px。
     // 逐时列骨架：6 行（风向风级 / 降水概率 / 空气等级 / 图标 / 天气名 / 温度），合计 112px——
-    // 降水概率与空气等级是逐时独有的小时级信息，用户定夺只进逐时列、逐日不加行。
+    // 降水概率与空气等级是逐时独有的小时级信息，只进逐时列、逐日不加行。
     // 两种模式行数因此不同，切换时上段高度差 14px，由弹性的折线行吸收（days 总高不变，只是折线带矮一截）；
     // 图标、天气名、温度三行在两套骨架里等高，切换时这三行像素级对齐。
     private static readonly double[] ColumnRowHeights = { 20, 14, 30, 14, 20 };
     private static readonly double[] HourlyRowHeights = { 20, 14, 14, 30, 14, 20 };
     // 天气名所在行：收纳档 3 收起的就是这一行；两套骨架行号不同，估算与贴回都必须按模式取。
     private const int DailyConditionRow = 3, HourlyConditionRow = 4;
+    // 图标所在行：收纳档 1 连图标一起收起（只留数值与时刻），两套骨架都是第 3 行之前那一行。
+    private const int DailyGlyphRow = 2, HourlyGlyphRow = 3;
     // 列内尺寸的唯一来源：逐时与逐日共用同一套骨架，就必须共用同一套字号与图标尺寸，
     // 否则切换模式时同样位置的图标/数字会大小跳变。任一处要改，只改这里。
     private const double ColGlyph = 28;    // 天气图标（行高 30，留 1px 上下呼吸）
@@ -1141,7 +1202,9 @@ internal sealed class WeatherView : UserControl
                 level.ToolTip = $"{Loc.T("空气质量", "Air quality")} {WeatherCodes.AqiText(aqi)} · AQI {aqi}";
                 CellAt(column, level, 2);
             }
-            CellAt(column, new WeatherGlyph(code, day) { Width = ColGlyph, Height = ColGlyph, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }, 3);
+            var hourGlyph = new WeatherGlyph(code, day) { Width = ColGlyph, Height = ColGlyph, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            CellAt(column, hourGlyph, HourlyGlyphRow);
+            columnGlyphs.Add(hourGlyph);
             // 第 5 行：天气名称。61/63/65 这几档在图标上几乎长得一样，文字补的正是图标说不出的那一级。
             var condition = new TextBlock { Text = HourCondition(code), FontSize = ColNote, TextWrapping = TextWrapping.NoWrap, TextAlignment = TextAlignment.Center, Foreground = ColCondition };
             CellAt(column, condition, 4);
@@ -1266,11 +1329,12 @@ internal sealed class WeatherView : UserControl
             CellAt(column, new TextBlock { Text = date.ToString("MM/dd"), Foreground = ColMuted, FontSize = ColNote, TextAlignment = TextAlignment.Center }, 1);
             int before = DayCodeAt(s, i);
             int night = NightCodeAt(s, i);
-            // 折线上方画「转后」（夜间），夜间缺失就退回白天；名称只写上方图标自己的天气，不写「转」。
-            // 转前转后同天气时两个图标都画且完全一致（同为白天样式）；只有真变了才用夜间样式区分。
+            // 折线上方画「转后」（夜间），夜间缺失就退回白天；只有真变了才用夜间样式区分。
             int topCode = DayTopCode(s, i);
             bool changed = night >= 0 && night != before;
-            CellAt(column, new WeatherGlyph(topCode, !changed) { Width = ColGlyph, Height = ColGlyph, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }, 2);
+            var dayGlyph = new WeatherGlyph(topCode, !changed) { Width = ColGlyph, Height = ColGlyph, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            CellAt(column, dayGlyph, DailyGlyphRow);
+            columnGlyphs.Add(dayGlyph);
             var condition = new TextBlock { Text = HourCondition(topCode), FontSize = ColNote, TextWrapping = TextWrapping.NoWrap, TextAlignment = TextAlignment.Center, Foreground = ColCondition };
             CellAt(column, condition, 3);
             conditionLabels.Add(condition); conditionRows.Add(column.RowDefinitions[3]);
@@ -1281,16 +1345,16 @@ internal sealed class WeatherView : UserControl
             forecast.Children.Add(new Border { CornerRadius = new CornerRadius(15), Margin = new Thickness(3, 0, 3, 0), Padding = new Thickness(4, 2, 4, 2), Background = Brushes.Transparent, Child = column });
             var low = new TextBlock { Text = Degree(s.DayLowC[i]), Foreground = UI.Brush(_look.Primary), FontSize = ColValue, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Center, Width = 64, TextWrapping = TextWrapping.NoWrap, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
             tempLabels.Add(low); lowRow.Children.Add(low);
-            var info = new Grid();
-            info.RowDefinitions.Add(new RowDefinition());
-            info.RowDefinitions.Add(new RowDefinition { Height = new GridLength(ColGlyph, GridUnitType.Star) });
-            info.RowDefinitions.Add(new RowDefinition { Height = new GridLength(DayInfoCompact - ColGlyph, GridUnitType.Star) });
+            // 转前天气名单独占辅注行（与上方天气名同字号同色），信息行只剩 28px 图标与风两行。
             var lowerName = new TextBlock { Text = HourCondition(before), FontSize = ColNote, TextWrapping = TextWrapping.NoWrap, TextAlignment = TextAlignment.Center, Foreground = ColCondition };
             conditionLabels.Add(lowerName);
-            info.Children.Add(lowerName);
+            lowNote.Children.Add(lowerName);
+            var info = new Grid();
+            info.RowDefinitions.Add(new RowDefinition { Height = new GridLength(ColGlyph, GridUnitType.Star) });
+            info.RowDefinitions.Add(new RowDefinition { Height = new GridLength(DayInfoCompact - ColGlyph, GridUnitType.Star) });
             var lowerGlyph = new WeatherGlyph(before, true) { Width = ColGlyph, Height = ColGlyph, HorizontalAlignment = HorizontalAlignment.Center };
             lowerGlyph.VerticalAlignment = VerticalAlignment.Center;
-            CellAt(info, lowerGlyph, 1);
+            CellAt(info, lowerGlyph, 0);
             string dirText = s.DayWindDir.Length > i ? s.DayWindDir[i] : "";
             double dir = s.DayWindDirDeg.Length > i ? s.DayWindDirDeg[i] : double.NaN;
             double wind = s.DayWindMaxKmh.Length > i ? s.DayWindMaxKmh[i] : double.NaN;
@@ -1303,7 +1367,7 @@ internal sealed class WeatherView : UserControl
             }
             string bft = Bft(wind);
             if (bft.Length > 0) windRow.Children.Add(new TextBlock { Text = bft, FontSize = ColNote, TextAlignment = TextAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Foreground = ColWind });
-            if (windRow.Children.Count > 0) CellAt(info, windRow, 2);
+            if (windRow.Children.Count > 0) CellAt(info, windRow, 1);
             if (!double.IsNaN(dir)) info.ToolTip = !string.IsNullOrWhiteSpace(dirText) ? dirText : WeatherCodes.DegreeToCompass(dir) + Loc.T("风", "");
             dayInfoRow.Children.Add(info);
         }
@@ -1358,7 +1422,6 @@ internal sealed class WeatherView : UserControl
         }
     }
     // 当日 24 小时逐时温度曲线：弹性高度带（随画布实际高度伸缩）、列中心取点，横轴按逐时列数均匀分列，
-    // 与上段预报网格同为 forecast.Columns 列，每个采样点对准对应时刻列的正中心；时刻由下方 lowRow 逐列表达，避免重复。
     private void DrawHourly(WeatherSnapshot s)
     {
         int n = Math.Max(1, forecast.Columns); if (n < 2) return;
@@ -1375,7 +1438,6 @@ internal sealed class WeatherView : UserControl
         {
             double yy = Y(s.HourTempsC[p]);
             var dot = new System.Windows.Shapes.Ellipse { Width = 5, Height = 5, Fill = brush }; Canvas.SetLeft(dot, X(p) - 2.5); Canvas.SetTop(dot, yy - 2.5); chart.Children.Add(dot);
-            // 每个点都标温度：列宽最小约 48px，单个「7°」只占 12–18px，相邻两点间隔 48px，不会压字。
             var probe = new TextBlock { Text = $"{s.HourTempsC[p]:0}°", FontSize = 9, Foreground = brush is SolidColorBrush solid ? Ink(solid.Color) : brush };
             probe.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             Canvas.SetLeft(probe, X(p) - probe.DesiredSize.Width / 2); Canvas.SetTop(probe, yy - 14); chart.Children.Add(probe);
@@ -1476,7 +1538,9 @@ internal sealed class WeatherView : UserControl
         todayGlow.Visibility = Visibility.Collapsed;
         DateTime now = CityNow(s).DateTime;
         double width = Math.Max(30, chart.Width), height = ChartBand();
-        double band = Math.Max(26, height - 26), horizon = Math.Max(26, height - 72);
+        bool showArcs = height >= CelestialArcHeight;
+        double band = Math.Max(26, height - 26);
+        double horizon = showArcs ? Math.Max(26, height - 72) : Math.Max(26, band - 34);
         Color gold = Color.FromRgb(255, 201, 77), silver = Color.FromRgb(226, 236, 248);
         var marks = new List<(DateTime at, string name, bool sun)>();
         var arcs = new List<(DateTime rise, DateTime set, DateTime peak, bool sun)>();
@@ -1562,7 +1626,7 @@ internal sealed class WeatherView : UserControl
             else fill = new SolidColorBrush(sun != default ? gold : silver);
             Line(X(from), band, X(to), band, fill, 5);
         }
-        foreach (var arc in visible)
+        foreach (var arc in showArcs ? visible : [])
         {
             var left = arc.rise < start ? start : arc.rise;
             var right = arc.set > end ? end : arc.set;
@@ -1590,7 +1654,8 @@ internal sealed class WeatherView : UserControl
         }
         int today = Array.FindIndex(s.DayDates, date => date == now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
         bool daylight = arcs.Any(a => a.sun && a.rise.Date == now.Date) ? active.sun : s.IsDay;
-        FrameworkElement? centerGlyph = daylight ? new WeatherGlyph(0, true)
+        FrameworkElement? centerGlyph = !showArcs ? null
+            : daylight ? new WeatherGlyph(0, true)
             : today >= 0 && today < s.DayMoonPhase.Length && !string.IsNullOrWhiteSpace(s.DayMoonPhase[today])
                 ? new MoonPhaseIcon(s.DayMoonPhase[today]) : null;
         if (centerGlyph is not null)
@@ -1609,7 +1674,7 @@ internal sealed class WeatherView : UserControl
                 Text = Loc.T("今日月升 ", "Moonrise today ") + todayMoonrise.at.ToString("HH:mm"),
                 FontSize = 11, Foreground = Ink(silver)
             };
-            Canvas.SetLeft(caption, 6); Canvas.SetTop(caption, 0); chart.Children.Add(caption);
+            Canvas.SetLeft(caption, 6); Canvas.SetTop(caption, showArcs ? 0 : Math.Max(0, horizon - 14)); chart.Children.Add(caption);
         }
         var captions = new List<(TextBlock label, double x, double left)>();
         double nextLeft = 0;
@@ -1696,7 +1761,6 @@ internal sealed class WeatherView : UserControl
     // 灵动岛空间有限：城市名只显示前两级（洪山区 · 武汉市）。
     internal static string BriefName(string full) => City.BriefOf(full);
     private bool AutoSelected => state.Selected < 0 || state.Selected >= state.Cities.Count;
-    // 定位失败时快照名是「当前位置」这个占位（数据层写死的中文串，不随界面语言变），那不是城市名，按钮上不重复写。
     private string AutoCityName => _autoCityName == "当前位置" ? "" : _autoCityName;
     internal string CityLabel
     {
