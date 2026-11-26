@@ -1,0 +1,32 @@
+src/BrimDeck/ThirdPartyNotices.txt
+  s_f7ff363e01605b::t_3e69c00b761ba6 1887-1891
+src/BrimDeck/NoticeCenter.WeChat.cs
+  s_f7ff363e01605b::t_9ad10fba61ecec 42,44
+src/BrimDeck/BrimDeck.csproj
+  s_f7ff363e01605b::t_10b5af08f61a93 16
+src/BrimDeck/SettingsNotices.Apps.cs
+  s_f7ff363e01605b::t_0e33d45bbd5774 422
+  s_f7ff363e01605b::t_e43c060f5da1e5 151
+src/BrimDeck/AppBrandIcons.cs
+  s_f7ff363e01605b::t_87c3e6ada5e961 1-39
+src/BrimDeck/NoticeIcons.cs
+  s_f7ff363e01605b::t_df35179cd5a08d 99
+src/BrimDeck/SettingsNotices.cs
+  s_f7ff363e01605b::t_630b75760a57aa 726-727
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d2490fe4d0ef29aac6d84b416bdfe0ba319baf1c",
+  "prompts": {},
+  "sessions": {
+    "s_f7ff363e01605b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "22d8760b-bcaa-4c40-b760-93feae44d5a7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
