@@ -284,7 +284,7 @@ internal sealed class WeatherView : UserControl
             h += rows[i];
         }
         if (level >= 3) h += ChartMinHeight + ChartTopMargin + BandSafety;  // 折线行按最小高度计，富余高度由它吸收
-        if (level >= 2) h += LowRowHeight + BandSafety;                     // 低温/时刻行：档 2 起常驻
+        if (level >= 1) h += LowRowHeight + BandSafety;                     // 低温/时刻行：档 1 起常驻（档 1 只收起图标）
         if (!hourly && level >= 4) h += DayNoteHeight + BandSafety;         // 转前天气名行：档 4 才有
         if (!hourly && level >= 2) h += DayInfoCompact + BandSafety;        // 转前图标 + 风：档 2 起常驻
         return h;
@@ -1029,7 +1029,7 @@ internal sealed class WeatherView : UserControl
                     "1" => "🏃", "2" => "🚗", "3" => "👕", "4" => "🎣",
                     "5" => "☀", "6" => "🧳", "7" => "🌼", "8" => "🛋",
                     "9" => "💊", "10" => "☁", "11" => "❄", "12" => "🕶",
-                    "13" => "💄", "14" => "👓", "15" => "☂", "16" => "🌬", _ => "📋"
+                    "13" => "💄", "14" => "🧺", "15" => "🚦", "16" => "🧴", _ => "📋"
                 };
                 var header = new Grid();
                 header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -1303,7 +1303,7 @@ internal sealed class WeatherView : UserControl
             nowText.Margin = new Thickness(Math.Max(0, edge - nowText.Width / 2), 0, 0, 0);
             return;
         }
-        // 「今天」列高亮：跨四行覆盖上段+折线+低温+逐日信息行，与列内左右各 3px 留白对齐。找不到今天（跨日缓存）就收起。
+        // 「今天」列高亮：跨五行覆盖上段+折线+低温+辅注+逐日信息行，与列内左右各 3px 留白对齐。找不到今天（跨日缓存）就收起。
         int today = WeatherClock.LiveIndex(s);
         var order = Order(s, forecast.Columns);
         int todayPos = -1;
