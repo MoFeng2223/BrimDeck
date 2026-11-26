@@ -1,0 +1,25 @@
+src/BrimDeck.Core/Mail/MailProviders.cs
+  s_a59dd24cd8755b::t_cb08f056064597 128-130
+tests/BrimDeck.Tests/MailTests.cs
+  s_a59dd24cd8755b::t_9e150da4a1273b 46
+  s_a59dd24cd8755b::t_9527d4d29216ff 45,47
+src/BrimDeck/SettingsMail.cs
+  s_a59dd24cd8755b::t_a25058104aef1b 215-217
+  s_a59dd24cd8755b::t_5c2ef25f4faa25 251
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f2d32a53e66667f84eff3c228554119c542a986b",
+  "prompts": {},
+  "sessions": {
+    "s_a59dd24cd8755b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "47526728-ee18-472b-ab4b-8717561b07b8",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": null
+    }
+  }
+}
