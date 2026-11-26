@@ -12,7 +12,7 @@ namespace BrimDeck;
 // 本文件只关心「能不能发、怎么发、结果如何」，不负责数据缓存与快照落盘。
 
 // 请求闸门：退避 + 每日预算。
-// 和风文档明确「不要在被限流时硬重试，会被判定为攻击并冻结账号」，因此 401/403 直接停 30 分钟，
+// 和风文档明确「不要在被限流时硬重试，会被判定为攻击并冻结账号」，因此 401/402/403 直接停 30 分钟，
 // 429 指数退避，网络失败短退避；成功即清零。预算只是防跑飞的安全网，正常用量远达不到。
 internal static class RequestGate
 {
@@ -74,10 +74,9 @@ internal static class RequestGate
             var now = DateTimeOffset.Now;
             if (status is >= 200 and < 300) { state.Failures = 0; state.Until = default; return; }
             _dirty = true;
-            // 4xx 里只有认证与限流代表「这个来源整体不可用」：
-            // 401/403 认证失败不会自己好，停半小时，别把 key 打到被冻结；
-            // 429 按指数退避（和风限流按分钟窗口恢复），并递增代次作废所有在途请求的响应。
-            if (status is 401 or 403) { state.Until = now + TimeSpan.FromMinutes(30); return; }
+            // 4xx 里只有认证/额度/限流代表「这个来源整体不可用」：
+            // 401/402/403 不会靠重试恢复，停半小时；429 按指数退避并递增代次作废在途响应。
+            if (status is 401 or 402 or 403) { state.Until = now + TimeSpan.FromMinutes(30); return; }
             if (status is 429)
             {
                 state.Generation++;
@@ -85,12 +84,8 @@ internal static class RequestGate
                 state.Until = now + TimeSpan.FromMinutes(Math.Min(60, 5 * Math.Pow(2, Math.Max(0, state.Failures - 1))));
                 return;
             }
-            // 400/404/422 是「这一个请求」的语义错误：参数不支持、地点不存在、坐标超出接口范围。
-            // 它们不代表来源不可用，也绝不能参与失败计数——否则一次 400 会把后续 429 的
-            // 指数退避直接推到最长，把来源冷却一小时。实际踩过的坑：
-            // 和风分钟降水对国外坐标固定返回 400，按失败处理后闸门停 2 分钟，
-            // 紧随其后的时光机/预警/指数请求全部被拒，国外城市的「时光机」于是永远空白；
-            // 城市搜索遇到无结果或特殊字符同样会收到 400，熔断后几分钟内所有搜索都落空。
+            // 400/404/422 只是「这一个请求」的语义错误（参数、地点、坐标范围），不代表来源不可用，
+            // 更不参与失败计数：和风分钟降水对国外坐标固定 400，一旦计数就会把后续请求全部冷却。
             if (status is 400 or 404 or 422) return;
             // 超时和网络异常只计数：单个慢响应不该让整个来源冷却（中国天气网实况常年 4 秒级）。
             if (status is 408 or -1)
@@ -190,7 +185,7 @@ internal readonly record struct HttpResult(string? Body, int Status);
 // 统一的网络入口：显式解压、固定 UA、超时、闸门与计数都在这里，来源只关心 URL 和解析。
 internal static class WeatherHttp
 {
-    public static readonly HttpClient Client = new(new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All }) { Timeout = TimeSpan.FromSeconds(20) };
+    private static readonly HttpClient Client = new(new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All }) { Timeout = TimeSpan.FromSeconds(20) };
     // 带和风 Key 的请求专用：禁用自动重定向，改由 SendAsync 手动跟随。
     private static readonly HttpClient NoRedirect = new(new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All, AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(20) };
 
