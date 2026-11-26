@@ -52,7 +52,7 @@ public sealed partial class SettingsWindow
         new(WeChatRows.AppKey, Loc.T("微信", "WeChat"), null),
         new(NoticeKeys.Windows("QQ"), "QQ", "QQ"),
         new(DingTalkPopups.AppKey, Loc.T("钉钉", "DingTalk"), null),
-        new(NoticeKeys.Windows("com.electron.Feishu"), Loc.T("飞书", "Feishu"), "com.electron.Feishu")
+        new(FeishuBanners.AppKey, Loc.T("飞书", "Feishu"), null)
     ];
 
     private static bool IsCommonApp(string key) => CommonApps().Any(app => app.Key == key);
@@ -62,8 +62,8 @@ public sealed partial class SettingsWindow
 
     private void CommonAppsSection(NoticeCenter center)
     {
-        SectionTitle(Loc.T("常用应用", "Common apps"), help: () => Loc.T("这些应用的消息可以在岛上提示。QQ、飞书需要在各自的设置中打开系统通知，展开一行可以看到方法；微信、钉钉可以选择提示方式。",
-            "These apps' messages can show on the island. QQ and Feishu need system notifications turned on in their own settings; open a row to see how. For WeChat and DingTalk, choose how their messages are noticed."));
+        SectionTitle(Loc.T("常用应用", "Common apps"), help: () => Loc.T("这些应用的消息可以在岛上提示。QQ 需要在它的设置中打开消息通知；微信、钉钉、飞书可以选择提示方式。展开一行可以看到方法。",
+            "These apps' messages can show on the island. QQ needs message notifications turned on in its settings; for WeChat, DingTalk and Feishu, choose how their messages are noticed. Open a row to see how."));
         var rows = new List<FrameworkElement> { AppColumns(windows: true) };
         foreach (var app in CommonApps()) rows.Add(NoticeAppRow(center, app.Key, app.Name, windows: true, app));
         GroupShown([.. rows]);
@@ -260,6 +260,7 @@ public sealed partial class SettingsWindow
             return S.NoticeRule(app.Key)?.ReadContent == true ? WeChatShort(center) : (NoteDot.Good, Loc.T("按任务栏闪烁提示", "Noticed by its taskbar flash"), null, null);
         }
         if (app.Key == DingTalkPopups.AppKey) return DingTalkShort(center, show);
+        if (app.Key == FeishuBanners.AppKey) return FeishuShort(center, show);
         string appId = app.Key["windows:".Length..];
         if (_bannerNotes.TryGetValue(appId, out var problem))
             // Opened, the row shows the way to Windows Settings under it (WindowsOffBlock).
@@ -280,6 +281,7 @@ public sealed partial class SettingsWindow
         var panel = new StackPanel { Margin = new Thickness(32, 0, 0, 0) };
         if (app.Key == WeChatRows.AppKey) panel.Children.Add(WeChatModes(center, rule, app.Name));
         else if (app.Key == DingTalkPopups.AppKey) panel.Children.Add(DingTalkModes(center, rule, app.Name));
+        else if (app.Key == FeishuBanners.AppKey) panel.Children.Add(FeishuModes(center, rule, app.Name));
         else
         {
             string appId = app.Key["windows:".Length..];
@@ -307,17 +309,13 @@ public sealed partial class SettingsWindow
         return block;
     }
 
-    // What to turn on in a common app for its messages to reach Windows' notifications, in the app's own words: Feishu's from its
-    // help center. QQ's setting is not named: its interface text is not readable from its files. DingTalk's are with its two ways
-    // (DingTalkModes).
+    // What to turn on in a common app for its messages to reach Windows' notifications. QQ's setting is not named: its interface
+    // text is not readable from its files. DingTalk's and Feishu's are with their two ways (DingTalkModes, FeishuModes).
     private static (string Heading, string[] Steps)? CommonSteps(string key) => key switch
     {
         "windows:QQ" => (Loc.T("在 QQ 中打开消息通知", "Turn on message notifications in QQ"),
             [Loc.T("确认 QQ 正在运行并已登录。", "Make sure QQ is running and signed in."),
              Loc.T("在 QQ 的设置中检查是否关闭了消息通知，关闭了就重新打开。", "In QQ's settings, check whether message notifications are off, and turn them back on if so.")]),
-        "windows:com.electron.Feishu" => (Loc.T("在飞书中打开横幅通知", "Turn on banner notifications in Feishu"),
-            [Loc.T("打开飞书的“设置”，进入“通知”。", "In Feishu, open \"Settings\", then \"Notifications\"."),
-             Loc.T("勾选“横幅消息通知”，并选择显示消息内容。", "Select \"Banner notification\" and choose to show the message content.")]),
         _ => null
     };
 

@@ -186,8 +186,9 @@ public sealed class NoticeAppRule
     public NoticeLevelStyles? Styles { get; set; }
     // "#RRGGBB" chosen by hand; empty takes the color read from the icon.
     public string AccentColor { get; set; } = "";
-    // WeChat's and DingTalk's rows only ("读取消息内容"). WeChat: its messages are read from its chat list, with who sent them and
-    // their words, and can be answered (WeChatSource). DingTalk: the popups and call windows it shows are read (DingTalkWatch).
+    // WeChat's, DingTalk's and Feishu's rows only ("读取消息内容"). WeChat: its messages are read from its chat list, with who
+    // sent them and their words, and can be answered (WeChatSource). DingTalk: the popups and call windows it shows are read
+    // (DingTalkWatch). Feishu: its banners are read and hidden, the island showing them instead (FeishuWatch).
     // Off, only the flash of the taskbar button is told. Off by default: it reads message content (and changes the running WeChat).
     public bool ReadContent { get; set; }
     public NoticeAppRule Copy() { var copy = (NoticeAppRule)MemberwiseClone(); copy.Styles = Styles?.Copy(); return copy; }

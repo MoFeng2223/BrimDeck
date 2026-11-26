@@ -17,14 +17,17 @@ public static class ChatFlashApps
     // 3.2 seconds (measured 2026-11-26), and again. Four seconds of stillness end a message, so a flashing that goes on is one.
     public static readonly TimeSpan DingTalkQuiet = TimeSpan.FromSeconds(4);
 
-    // WeChat and DingTalk are on (DingTalk flashes while "消息任务栏图标闪动" is on in its settings). The others are rows waiting
-    // to be verified on a real machine (their executable names are not checked).
+    // WeChat, Feishu and DingTalk are on (DingTalk flashes while "消息任务栏图标闪动" is on in its settings). Feishu flashes its
+    // button about five times within four seconds for each message while its window is not in front, also with its banner
+    // off, and not for a chat set to "免打扰" or with "新消息通知" off (measured 2026-11-26 on Feishu 8.9): the filter's window
+    // makes that one message. The others are rows waiting to be verified on a real machine (their executable names are not
+    // checked).
     public static readonly IReadOnlyList<ChatFlashApp> All =
     [
         new("wechat", "微信", "WeChat", ["Weixin.exe", "WeChat.exe"], true, ChatRestore.WeChatUri),
         new("wecom", "企业微信", "WeCom", ["WXWork.exe"], false),
         new("qq", "QQ", "QQ", ["QQ.exe"], false),
-        new("feishu", "飞书", "Feishu", ["Feishu.exe", "Lark.exe"], false),
+        new("feishu", "飞书", "Feishu", ["Feishu.exe", "Lark.exe"], true),
         new("dingtalk", "钉钉", "DingTalk", ["DingTalk.exe"], true, QuietGap: DingTalkQuiet)
     ];
 

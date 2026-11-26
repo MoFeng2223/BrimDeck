@@ -22,7 +22,9 @@ internal static class NoticeSenderIds
         uint own = (uint)Environment.ProcessId;
         EnumWindows((window, _) =>
         {
-            if (!IsWindowVisible(window) || GetWindowTextLength(window) == 0) return true;
+            // The title from what Windows keeps: asking the window (GetWindowTextLength) waits for an answer a suspended app's
+            // window never gives.
+            if (!IsWindowVisible(window) || InternalGetWindowText(window, new System.Text.StringBuilder(2), 2) == 0) return true;
             GetWindowThreadProcessId(window, out var pid);
             if (pid == 0 || pid == own || !seen.Add(pid)) return true;
             var described = AppIdentity.Describe((int)pid);
@@ -83,6 +85,6 @@ internal static class NoticeSenderIds
     private delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
     [DllImport("user32")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
     [DllImport("user32")] private static extern bool IsWindowVisible(IntPtr window);
-    [DllImport("user32", CharSet = CharSet.Unicode)] private static extern int GetWindowTextLength(IntPtr window);
+    [DllImport("user32", CharSet = CharSet.Unicode)] private static extern int InternalGetWindowText(IntPtr window, System.Text.StringBuilder text, int capacity);
     [DllImport("user32")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
 }

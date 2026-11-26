@@ -10,10 +10,10 @@ using BrimDeck.Core.Notices;
 namespace ReadmeMedia;
 
 // The notices' "Apps" settings page in its states: the common apps receiving, with nothing yet, not installed and off in Windows;
-// those rows opened (the steps, WeChat's two ways); the other apps; the page at the settings window's narrowest; and the menu that
-// adds an application from the notice history, with and without a match. Windows' notification settings are replaced by a
-// dictionary (Feishu's notifications off), so the registry is neither read nor written, and whether an app is installed is
-// answered here (DingTalk is not). For checking, not for the README.
+// those rows opened (the steps, the two ways of WeChat, DingTalk and Feishu); the other apps; the page at the settings window's
+// narrowest; and the menu that adds an application from the notice history, with and without a match. Windows' notification
+// settings are replaced by a dictionary (Claude's notifications off), so the registry is neither read nor written, and whether
+// an app is installed is answered here. For checking, not for the README.
 internal sealed partial class Renderer
 {
     private async Task NoticeAppsScene()
@@ -28,7 +28,7 @@ internal sealed partial class Renderer
         _settings.NoticeApps.Add(new NoticeAppRule { Key = "windows:" + adobe, Name = adobe, Level = NoticeLevel.Silent });
         var center = Activator.CreateInstance(Type.GetType("BrimDeck.NoticeCenter, BrimDeck")!, Program.Any, null, [app], null)!;
         Program.SetProperty(app, "Notices", center);
-        Program.SetField(center, "<BannerRegistry>k__BackingField", new FakeBanners(["com.electron.Feishu"]));
+        Program.SetField(center, "<BannerRegistry>k__BackingField", new FakeBanners(["Claude"]));
         var hub = (NoticeHub)center.GetType().GetProperty("Hub", Program.Any)!.GetValue(center)!;
         int serial = 0;
         void Add(string appId, string name, string title, int minutesAgo)
@@ -47,7 +47,7 @@ internal sealed partial class Renderer
         Add("Claude", "Claude", Loc.T("已完成：重构设置页面", "Done: settings page rework"), 18);
         Add("Microsoft.VisualStudioCode", "Visual Studio Code", Loc.T("任务“build”已完成", "Task \"build\" finished"), 10);
         Add("QQ", "QQ", Loc.T("产品群", "Product team"), 3);
-        string wechat = WeChatRows.AppKey, qq = NoticeKeys.Windows("QQ"), dingtalk = NoticeKeys.Windows("ali.dingtalk.release"), feishu = NoticeKeys.Windows("com.electron.Feishu");
+        string wechat = WeChatRows.AppKey, qq = NoticeKeys.Windows("QQ"), dingtalk = DingTalkPopups.AppKey, feishu = FeishuBanners.AppKey;
         Action<SettingsWindow> Installed(bool dingTalk, params string[] open) => window =>
         {
             Program.SetField(window, "AppInstalled", (Func<string, bool>)(id => dingTalk || id != "ali.dingtalk.release"));
@@ -63,6 +63,10 @@ internal sealed partial class Renderer
         await SettingsPage("notice-apps-wechat-read", 20, height: 1100, theme: SettingsTheme.Light, prepare: Installed(true, wechat));
         _settings.NoticeRule(wechat)!.ReadContent = false;
         _settings.NoticeRule(qq)!.Enabled = true;
+        _settings.NoticeRule(feishu)!.ReadContent = true;
+        await SettingsPage("notice-apps-feishu-read", 20, height: 1100, theme: SettingsTheme.Light, prepare: Installed(true, feishu));
+        await SettingsPage("notice-apps-feishu-read-narrow", 20, height: 1100, width: 840, theme: SettingsTheme.Dark, prepare: Installed(true, feishu));
+        _settings.NoticeRule(feishu)!.ReadContent = false;
         await Picker("notice-apps-picker", "", SettingsTheme.Light);
         await Picker("notice-apps-picker-dark", "", SettingsTheme.Dark);
         await Picker("notice-apps-picker-none", Loc.T("企业微信", "WeCom"), SettingsTheme.Light);

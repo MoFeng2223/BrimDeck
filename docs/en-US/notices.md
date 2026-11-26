@@ -101,13 +101,13 @@ While it shows, other notices go to the notice history and wait as usual; a norm
 
 ### Common chat apps
 
-BrimDeck reads the notifications apps send to Windows, so a chat app's messages reach the island only while its desktop notifications are on. WeChat and DingTalk send no Windows notifications and are noticed in other ways. "Common apps" on the "Apps" page always lists WeChat, QQ, DingTalk and Feishu, each saying under its name whether it is being received; opening a row shows the settings to turn on.
+BrimDeck reads the notifications apps send to Windows, so a chat app's messages reach the island only while its desktop notifications are on. WeChat, DingTalk and Feishu send no Windows notifications and are noticed in other ways. "Common apps" on the "Apps" page always lists WeChat, QQ, DingTalk and Feishu, each saying under its name whether it is being received; opening a row shows the settings to turn on.
 
 | App | What to turn on |
 |---|---|
 | QQ | Sends Windows notifications by default. If nothing shows, check that message notifications are on in QQ's settings and that Windows allows QQ's notifications under Settings › System › Notifications. |
 | DingTalk | Sends no Windows notifications. By default its flashing taskbar button tells of a new message; it can read message content instead, see [DingTalk](#dingtalk-two-ways-of-being-noticed) below. |
-| Feishu | Click your profile photo in the upper-left corner, open "Settings › Notifications", select "Message notifications" and "Banner notification", and choose to show the message content in the banner; without it the island only shows a line such as "new message". |
+| Feishu | Sends no Windows notifications. By default its flashing taskbar button tells of a new message; it can read message content instead, see [Feishu](#feishu-two-ways-of-being-noticed) below. |
 | WeChat | WeChat for PC sends no Windows notifications. Only its flashing taskbar button tells of a new message; the sender and the text cannot be read. |
 
 Each of them also needs its notifications allowed under Windows Settings › System › Notifications, with Do not disturb off. When an app's "System banner" is off on the "Apps" page, Windows no longer pops up its banners, but its notifications still go to the notification center and BrimDeck reads them as before.
@@ -131,6 +131,15 @@ DingTalk sends no Windows notifications: its message popups and call windows are
 - **Read message content**: when DingTalk shows a message popup or a call window in the corner of the screen, BrimDeck reads its text through Windows' UI Automation. A message shows the chat's name and its text (with the sender in a group), and a missed call shows as "钉钉电话" (DingTalk call). Voice and video calls and meeting invitations show as incoming calls until answered, declined or given up. Under "Notifications", select "Message Desktop Notifications" and choose "Show message details", then select "Message taskbar icon blinks"; for calls, on the same page under "Calls & Meetings Notifications", select "Display call/meeting invitation notifications".
 
 DingTalk shows message popups only for one-on-one chats, @mentions, people you follow and red envelopes; a group's other messages only make its taskbar button flash, so with "Read message content" they still show as "New message". With "Hide message details" chosen in DingTalk, the popup only says that a message arrived, and no content can be read. With "Display call/meeting invitation notifications" cleared, DingTalk for PC no longer receives voice and video call invitations (DingTalk says so when it is cleared): a call shows no call window and no missed-call popup, DingTalk's taskbar button only flashes once, and BrimDeck can show only "New message". A muted chat, and meetings while "Do not disturb in desktop video conferencing" is on, may show no popup. BrimDeck does not change DingTalk, click its windows or read its files.
+
+### Feishu: two ways of being noticed
+
+Feishu sends no Windows notifications: the banner of a new message is a window of its own. With Feishu's row opened in Settings › Live notices › Apps, choose "How it is noticed". Feishu's settings are under "Settings › Notifications" after clicking your profile photo in its upper-left corner.
+
+- **Taskbar flash** (the default): "New message" when Feishu's taskbar button flashes; no message content is read. Select "Message notifications" under Feishu's "Notifications". While Feishu's window is in front, its button does not flash, so nothing is told.
+- **Read message content**: when Feishu shows a message banner in the corner of the screen, BrimDeck hides that banner at once, reads the chat's name and the message in it through Windows' UI Automation, and shows them on the island instead. This works with Feishu's main window minimized, closed to the tray or showing another page. Under "Notifications", select "Message notifications" and "Banner notification", and choose "Show message details".
+
+Feishu shows no banner and does not flash its taskbar button for a muted chat, so such messages do not show on the island; the chat you are looking at in Feishu has no banner either. With "Read message content" chosen, if "Banner notification" is off in Feishu, messages are still told as "New message" by the taskbar flash; if "Hide message details" is chosen, the banner only says that a message arrived, and no content can be read. Feishu's banner about a new version shows as usual. BrimDeck only hides Feishu's message banners: it does not change Feishu's files, click its windows or read its data, and a message whose banner was hidden stays unread in Feishu.
 
 ### Windows: event log mode and polling
 

@@ -1250,14 +1250,15 @@ public sealed class DeckSettings
     // Whether a source's notices are received: a taskbar-flash chat while it is listed, any other source (a Windows application
     // included) unless switched off.
     public bool NoticeReceives(string appKey) => NoticeRule(appKey) is { } rule ? rule.Enabled : !NoticeKeys.ListedOnly(appKey);
-    // What a new user's list of applications holds: QQ (its notifications' application id is "QQ") and WeChat's and DingTalk's
-    // taskbar flash (ChatFlash). The Windows Clock was listed too while an unlisted Windows application's notices were not
+    // What a new user's list of applications holds: QQ (its notifications' application id is "QQ") and WeChat's, DingTalk's
+    // and Feishu's taskbar flash (ChatFlash). The Windows Clock was listed too while an unlisted Windows application's notices were not
     // received; they are now, so it is no longer listed for a new user (a file that has it keeps it until the user removes it).
     public static IReadOnlyList<NoticeAppRule> DefaultNoticeApps() =>
     [
         new() { Key = NoticeKeys.Windows("QQ"), Name = "QQ" },
         new() { Key = "flash:wechat", Name = Loc.T("微信", "WeChat") },
-        new() { Key = "flash:dingtalk", Name = Loc.T("钉钉", "DingTalk") }
+        new() { Key = "flash:dingtalk", Name = Loc.T("钉钉", "DingTalk") },
+        new() { Key = "flash:feishu", Name = Loc.T("飞书", "Feishu") }
     ];
 }
 

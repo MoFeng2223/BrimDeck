@@ -47,7 +47,7 @@ public static partial class NoticeAppWindows
     // Application ids whose program has a different file name than the id suggests.
     private static readonly (string Id, string[] Names)[] Known =
     [
-        ("Weixin", ["Weixin", "WeChat"]), ("WeChat", ["Weixin", "WeChat"]), ("ali.dingtalk.release", ["DingTalk"]), ("BiliBiliPC", ["bilibili"]),
+        ("Weixin", ["Weixin", "WeChat"]), ("WeChat", ["Weixin", "WeChat"]), ("ali.dingtalk.release", ["DingTalk"]), ("com.electron.Feishu", ["Feishu", "Lark"]), ("BiliBiliPC", ["bilibili"]),
         ("Microsoft.VisualStudioCode", ["Code"]), ("Anysphere.Cursor", ["Cursor"]), ("md.obsidian", ["Obsidian"])
     ];
 

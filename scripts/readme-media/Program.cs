@@ -252,9 +252,7 @@ internal sealed partial class Renderer(App app, string output, string language, 
             if (_settings.NoticeRule("windows:" + listed) is null) _settings.NoticeApps.Add(new NoticeAppRule { Key = "windows:" + listed, Name = listed });
         _settings.NoticeRule("windows:Backup Tool")!.Enabled = false;
         _settings.NoticeRule("windows:Outlook")!.Level = NoticeLevel.Silent;
-        // Two common chats that have sent nothing yet: their rows say what to turn on.
-        _settings.NoticeApps.Add(new NoticeAppRule { Key = "windows:ali.dingtalk.release", Name = Loc.T("钉钉", "DingTalk") });
-        _settings.NoticeApps.Add(new NoticeAppRule { Key = "windows:com.electron.Feishu", Name = Loc.T("飞书", "Feishu") });
+        // DingTalk and Feishu, listed by default, have sent nothing yet: their rows say what to turn on.
         _settings.NoticeApps.Add(new NoticeAppRule { Key = "windows:Claude Desktop With A Very Long Application Name (User Setup)", Name = "Claude Desktop With A Very Long Application Name (User Setup)", Level = NoticeLevel.Persistent, Styles = new() });
         var center = Activator.CreateInstance(Type.GetType("BrimDeck.NoticeCenter, BrimDeck")!, Program.Any, null, [app], null)!;
         Program.SetProperty(app, "Notices", center);

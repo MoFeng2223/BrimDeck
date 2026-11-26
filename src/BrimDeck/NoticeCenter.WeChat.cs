@@ -37,6 +37,7 @@ internal sealed partial class NoticeCenter
         if (!_enabled || _disposed) return;
         if (input.AppKey == WeChatRows.AppKey && _wechat is { } source && source.Flashed(input)) return;
         if (input.AppKey == DingTalkPopups.AppKey && _dingTalk is { } watch && watch.Flashed(input)) return;
+        if (input.AppKey == FeishuBanners.AppKey && _feishu is { } feishu && feishu.Flashed(input)) return;
         Receive(WithIcon(input));
     }
 

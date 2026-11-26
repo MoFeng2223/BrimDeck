@@ -16,6 +16,7 @@ internal static class AppBrandIcons
     {
         ["flash:wechat"] = "wechat",
         ["flash:dingtalk"] = "dingtalk",
+        ["flash:feishu"] = "feishu",
         [NoticeKeys.Windows("QQ")] = "qq",
         [NoticeKeys.Windows("ali.dingtalk.release")] = "dingtalk",
         [NoticeKeys.Windows("com.electron.Feishu")] = "feishu"

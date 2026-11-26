@@ -14,14 +14,15 @@ internal static class MediaAppWindows
         var processes = new Dictionary<uint, MediaAppProcess>();
         EnumWindows((handle, _) =>
         {
-            // The cheap tests first, so process and property lookups only run for ordinary visible windows.
-            if (!IsWindowVisible(handle) || GetWindow(handle, GwOwner) != 0 || GetWindowTextLength(handle) == 0) return true;
+            // The cheap tests first, so process and property lookups only run for ordinary visible windows. The title is read
+            // from what Windows keeps: asking the window waits for an answer a suspended app's window never gives.
+            if (!IsWindowVisible(handle) || GetWindow(handle, GwOwner) != 0 || InternalGetWindowText(handle, new StringBuilder(2), 2) == 0) return true;
             long style = (long)GetWindowLongPtr(handle, GwlExStyle);
             if ((style & WsExToolWindow) != 0) return true;
             GetWindowThreadProcessId(handle, out uint pid);
             if (!processes.TryGetValue(pid, out var process)) processes[pid] = process = AppIdentity.Describe((int)pid);
             DwmGetWindowAttribute(handle, DwmCloaked, out int cloaked, sizeof(int));
-            var title = new StringBuilder(256); GetWindowText(handle, title, title.Capacity);
+            var title = new StringBuilder(256); InternalGetWindowText(handle, title, title.Capacity);
             // A window without an id of its own belongs to the application its process is identified as (QueMusic sets
             // its id for the whole process).
             string appId = AppIdOf(handle) is { Length: > 0 } own ? own : process.AppId;
@@ -72,8 +73,7 @@ internal static class MediaAppWindows
     [DllImport("user32.dll")] private static extern bool IsIconic(nint handle);
     [DllImport("user32.dll")] private static extern nint GetWindow(nint handle, uint command);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint handle, int index);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowTextLength(nint handle);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(nint handle, StringBuilder text, int capacity);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int InternalGetWindowText(nint handle, StringBuilder text, int capacity);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint handle, out uint processId);
     [DllImport("user32.dll")] private static extern bool ShowWindow(nint handle, int command);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(nint handle);

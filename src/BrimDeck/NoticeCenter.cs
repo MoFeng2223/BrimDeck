@@ -168,7 +168,7 @@ internal sealed partial class NoticeCenter : IDisposable
         {
             _windows.Stop(); _wsl.Apply([]);
             EndWaits();
-            StopChatFlash(); ApplyWeChat(false); ApplyDingTalk(false);
+            StopChatFlash(); ApplyWeChat(false); ApplyDingTalk(false); ApplyFeishu(false);
             _maintenance.Stop(); _quietCheck.Stop();
             ScheduleDue();
             // Whatever shows ends and nothing waiting shows later; quota alerts and track changes keep working through the
@@ -189,6 +189,7 @@ internal sealed partial class NoticeCenter : IDisposable
         if (ChatFlashApps.All.Any(app => app.Enabled && settings.NoticeRule("flash:" + app.Id) is { Enabled: true })) StartChatFlash(); else StopChatFlash();
         ApplyWeChat(settings.NoticeRule(WeChatRows.AppKey) is { Enabled: true, ReadContent: true });
         ApplyDingTalk(settings.NoticeRule(DingTalkPopups.AppKey) is { Enabled: true, ReadContent: true });
+        ApplyFeishu(settings.NoticeRule(FeishuBanners.AppKey) is { Enabled: true, ReadContent: true });
         _wsl.Apply(settings.NoticeWslDistros);
         _maintenance.Start();
         Hub.Prune(DateTimeOffset.UtcNow);
@@ -786,7 +787,7 @@ internal sealed partial class NoticeCenter : IDisposable
         if (NoticeProtocol.ToAgent(NoticeTypes.Dismissed, notice.InstanceKey) is { } message) _wsl.Send(distro, message);
     }
 
-    public bool CanOpen(Notice notice) => notice.AppKey == WeChatRows.AppKey || notice.Origin == NoticeOrigin.Windows && (notice.Capabilities & NoticeCapabilities.OpenApp) != 0
+    public bool CanOpen(Notice notice) => notice.AppKey is WeChatRows.AppKey or FeishuBanners.AppKey || notice.Origin == NoticeOrigin.Windows && (notice.Capabilities & NoticeCapabilities.OpenApp) != 0
         || notice.Actions.Any(action => action.Key == "default") && (notice.Capabilities & NoticeCapabilities.Actions) != 0;
 
     // Opens the application the notice came from. False when that did not work; the caller keeps the details open and says so.
@@ -794,6 +795,8 @@ internal sealed partial class NoticeCenter : IDisposable
     {
         Hub.MarkViewed(notice.Id);
         if (notice.AppKey == WeChatRows.AppKey) return await OpenWeChatAsync(notice);
+        // Feishu's notices name no toast to replay: its open window is brought forward, else its Start menu entry starts it.
+        if (notice.AppKey == FeishuBanners.AppKey) return await _windows.LaunchAsync(FeishuBanners.StartMenuId);
         if (notice.Origin == NoticeOrigin.Windows)
         {
             if (notice.AppId.Length == 0) return false;
@@ -1240,6 +1243,7 @@ internal sealed partial class NoticeCenter : IDisposable
         _flash?.Dispose(); _flash = null;
         _wechat?.Dispose(); _wechat = null;
         _dingTalk?.Dispose(); _dingTalk = null;
+        _feishu?.Dispose(); _feishu = null;
         _windows.Dispose(); _wsl.Dispose();
         _disposed = true;
         // BrimDeck exits: the senders that wait hear nothing more (their connections end with the pipe), and no timer of

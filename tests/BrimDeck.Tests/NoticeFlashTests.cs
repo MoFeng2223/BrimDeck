@@ -87,7 +87,7 @@ internal static class NoticeFlashTests
 
     private static void Table(Action<string, bool> check)
     {
-        check("Flash: WeChat and DingTalk are enabled", ChatFlashApps.All.Where(app => app.Enabled).Select(app => app.Id).SequenceEqual(["wechat", "dingtalk"]));
+        check("Flash: WeChat, Feishu and DingTalk are enabled", ChatFlashApps.All.Where(app => app.Enabled).Select(app => app.Id).SequenceEqual(["wechat", "feishu", "dingtalk"]));
         check("Flash: ids are unique and every row names executables", ChatFlashApps.All.Select(app => app.Id).Distinct().Count() == ChatFlashApps.All.Count
             && ChatFlashApps.All.All(app => app.Executables.Count > 0 && app.Executables.All(e => e.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))));
         check("Flash: lookups by name and by path", ChatFlashApps.Find(@"D:\x\Weixin.exe")?.Id == "wechat" && ChatFlashApps.Find("") is null && ChatFlashApps.Find(null) is null && ChatFlashApps.Find("weixin") is null);
