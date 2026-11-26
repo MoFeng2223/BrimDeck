@@ -95,7 +95,7 @@ public sealed partial class SettingsWindow
                 };
                 Grid.SetColumn(picker,8);grid.Children.Add(picker);
                 if(city is not null){
-                    var remove=new Button {Style=(Style)FindResource("SettingsGlyphButton"),ToolTip=Loc.T("删除城市","Remove city"),Width=22,Height=24,Padding=new Thickness(0),VerticalAlignment=VerticalAlignment.Center,HorizontalAlignment=HorizontalAlignment.Center};
+                    var remove=new Button {Style=(Style)FindResource("SettingsGlyphButton"),ToolTip=Loc.T("删除城市","Remove city"),Width=22,Height=24,Padding=new Thickness(0),VerticalAlignment=VerticalAlignment.Center,HorizontalAlignment=HorizontalAlignment.Center,Margin=new Thickness(0,0,10,0)};
                     var cross=Stroke("M 0,0 L 8,8 M 8,0 L 0,8",8,8,TextSecondary);
                     cross.SetBinding(Shape.StrokeProperty,new System.Windows.Data.Binding("Foreground"){RelativeSource=new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.FindAncestor,typeof(Button),1)});
                     remove.Content=cross;
@@ -242,6 +242,7 @@ public sealed partial class SettingsWindow
         cityCard.SetResourceReference(Border.BorderBrushProperty,"SettingsBorder");
         Target.Children.Add(cityCard);
         WeatherChipControls();
+        LifestyleControls();
         var hefengCard = new Border { CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), Padding = new Thickness(16, 14, 16, 16), Margin = new Thickness(0, 0, 0, 28) };
         hefengCard.SetResourceReference(Border.BackgroundProperty, "SettingsSurface");
         hefengCard.SetResourceReference(Border.BorderBrushProperty, "SettingsBorder");
@@ -366,7 +367,6 @@ public sealed partial class SettingsWindow
             .Append((Name:ChinaDailyForecast.Name,Count:RequestGate.Today(ChinaDailyForecast.Id))).Where(item=>item.Count>0).ToArray();
         Group(Row(Loc.T("今日请求","Requests today"),TextLine(used.Length==0?Loc.T("尚未发起请求","No requests yet"):string.Join(" · ",used.Select(item=>$"{item.Name} {item.Count}")),12,TextSecondary)),
               Row(Loc.T("本地缓存","Local cache"),TextLine(Loc.T($"{usage.Count} 项 · {usage.Bytes/1024.0:0} KB（14 天未用自动清理）",$"{usage.Count} entries · {usage.Bytes/1024.0:0} KB (unused entries purged after 14 days)"),12,TextSecondary)));
-        LifestyleControls();
         preview.RefreshRequested += async () =>
         {
             using var fresh = WeatherCache.Fresh();
@@ -409,9 +409,20 @@ public sealed partial class SettingsWindow
             finally { if (ReferenceEquals(fetchCts, request)) fetchCts = null; }
         }
     }
+    // 排版区标题沿用「显示的内容/页面顺序」一档的样式：13px 主色半粗，比通用小节标题更醒目。
+    private void ChipSectionTitle(string title, FrameworkElement? action = null, double top = 0)
+    {
+        var label = TextLine(title, 13, TextPrimary, FontWeights.SemiBold);
+        label.VerticalAlignment = VerticalAlignment.Center;
+        var row = new DockPanel { Margin = new Thickness(0, top, 0, 10) };
+        if (action is not null) { DockPanel.SetDock(action, Dock.Right); action.VerticalAlignment = VerticalAlignment.Center; row.Children.Add(action); }
+        row.Children.Add(label);
+        Target.Children.Add(row);
+    }
+
     private void WeatherChipControls()
     {
-        SectionTitle(Loc.T("主页右上角胶囊", "Weather summary chips"));
+        ChipSectionTitle(Loc.T("实况信息", "Current conditions"));
         var grid = new UniformGrid { Rows = 2, Columns = 6 };
         var hint = Loc.T("点击显示或隐藏，拖动调整顺序。", "Click to show or hide. Drag to reorder.");
         Target.Children.Add(grid);
@@ -470,7 +481,7 @@ public sealed partial class SettingsWindow
 
     private void LifestyleControls()
     {
-        SectionTitle(Loc.T("生活指数排版", "Lifestyle index layout"));
+        ChipSectionTitle(Loc.T("生活指数", "Lifestyle indices"), top: 16);
         static string Label(LifestyleIndex type) => type switch
         {
             LifestyleIndex.Sport => Loc.T("运动", "Sport"),
@@ -673,14 +684,16 @@ internal sealed class WeatherSettingsCard : Border
         // 数字被拉开、今天的高亮框也胀成一大块——这就是它看起来「胖」的原因。
         var body=new Grid();body.ColumnDefinitions.Add(new ColumnDefinition());body.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
         var now=new StackPanel {Margin=new Thickness(20,14,0,14),VerticalAlignment=VerticalAlignment.Center};
-        var first=new StackPanel {Orientation=Orientation.Horizontal};var icon=new Border {Background=Brushes.Transparent, Width=66,Height=66,Margin=new Thickness(0,0,12,0),
+        // 一行排开：天气图标 → 天气名 → 当前温度，高度由 66px 图标独占，天气名不再另起一行垫在图标下方。
+        var first=new StackPanel {Orientation=Orientation.Horizontal};var icon=new Border {Background=Brushes.Transparent, Width=66,Height=66,Margin=new Thickness(0,0,14,0),VerticalAlignment=VerticalAlignment.Center,
             Child=snap is null || code<0
                 ? new TextBlock {Text="↻", FontSize=40,Foreground=primary,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center}
                 : new WeatherGlyph(code,day,animated:true), ToolTip=Loc.T("刷新天气","Refresh weather")};
         AttachAction(icon,()=>RefreshRequested?.Invoke());
         first.Children.Add(icon);
-        first.Children.Add(new TextBlock {Text=snap is null?"":Deg(future ? dateIndex<snap.DayHighC.Length?snap.DayHighC[dateIndex]:double.NaN : snap.Temperature),FontSize=46,FontWeight=FontWeights.Light,Foreground=primary,VerticalAlignment=VerticalAlignment.Center});now.Children.Add(first);
-        now.Children.Add(new TextBlock {Text=snap is null?"":code<0?"":WeatherVisuals.Condition(code),FontSize=15,FontWeight=FontWeights.Medium,Foreground=secondary});
+        first.Children.Add(new TextBlock {Text=snap is null?"":code<0?"":WeatherVisuals.Condition(code),FontSize=17,FontWeight=FontWeights.Medium,Foreground=secondary,VerticalAlignment=VerticalAlignment.Center});
+        first.Children.Add(new TextBlock {Text=snap is null?"":Deg(future ? dateIndex<snap.DayHighC.Length?snap.DayHighC[dateIndex]:double.NaN : snap.Temperature),FontSize=46,FontWeight=FontWeights.Light,Foreground=primary,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(12,0,0,0)});
+        now.Children.Add(first);
         var forecast=new UniformGrid {Rows=1,Columns=3,Margin=new Thickness(12,0,14,0),VerticalAlignment=VerticalAlignment.Center,HorizontalAlignment=HorizontalAlignment.Right};
 
         for(int i=0;i<3;i++) {
