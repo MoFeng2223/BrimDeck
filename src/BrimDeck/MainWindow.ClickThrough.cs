@@ -4,7 +4,8 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// Mouse pass-through (DeckSettings.ClickThrough), plus momentary hold from the hotkey (App.HoldPassThrough). The window lets
+// Mouse pass-through (DeckSettings.ClickThrough, or a window rule's WindowBehavior.PassThrough while it applies), plus momentary
+// hold from the hotkey (App.HoldPassThrough). The window lets
 // every click through to the window beneath (WS_EX_TRANSPARENT) and hovering does not open the panel; only the shortcuts do.
 // Open, the panel takes clicks only with ClickThroughPanel on, and then closes by the usual rules once the pointer has been
 // inside. Otherwise it ignores the pointer and stays open until a shortcut closes it. A hold always forces clicks through,
@@ -14,7 +15,9 @@ public partial class MainWindow
 {
     private bool _passingClicks, _passingAround;
 
-    internal bool ClickThrough => (Settings.ClickThrough || _app.HoldPassThrough) && !_preview;
+    internal bool ClickThrough => (Settings.ClickThrough || _app.HoldPassThrough || ContextPassesThrough) && !_preview;
+    // A window rule chose pass-through for what this panel's display shows now (WindowBehavior.PassThrough).
+    private bool ContextPassesThrough => Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.PassThrough;
     // The open panel neither takes clicks nor closes when the pointer leaves.
     private bool PanelIgnoresPointer => ClickThrough && _expanded && (!Settings.ClickThroughPanel || _app.HoldPassThrough);
     // Whether a panel opened by a shortcut takes the keyboard (PanelKeyboard) and Esc.

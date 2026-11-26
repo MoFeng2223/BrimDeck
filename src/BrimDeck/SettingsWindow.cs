@@ -45,7 +45,8 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     private event Action? PaletteChanged;
 
     public static string StyleName(CompactStyle style) => style switch { CompactStyle.Notch => Loc.T("刘海", "Notch"), CompactStyle.Capsule => Loc.T("胶囊", "Capsule"), _ => Loc.T("指示条", "Indicator") };
-    public static string BehaviorName(WindowBehavior behavior) => behavior switch { WindowBehavior.Normal => Loc.T("保持原有样式", "Keep style"), WindowBehavior.Line => Loc.T("显示为指示条", "As indicator"), _ => Loc.T("隐藏", "Hide") };
+    public static string BehaviorName(WindowBehavior behavior) => behavior switch { WindowBehavior.Normal => Loc.T("保持原有样式", "Keep style"), WindowBehavior.PassThrough => Loc.T("开启鼠标穿透", "Pass-through"),
+        WindowBehavior.Line => Loc.T("显示为指示条", "As indicator"), _ => Loc.T("隐藏", "Hide") };
 
     private const double DefaultWidth = 960, DefaultHeight = 780;
     // The minimum size is 840 x 640, reduced where the screen's work area (less a 24 margin) is smaller. Returns the
@@ -1362,8 +1363,10 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
 
     private FrameworkElement BehaviorRow(string title, WindowBehavior selected, Action<WindowBehavior> changed, string? help = null)
     {
-        var options = new UniformGrid { Columns = 3, Width = 324 };
-        foreach (var behavior in Enum.GetValues<WindowBehavior>())
+        // Pass-through keeps the style too, so it stands next to that choice. At the window's least width the longest Chinese title
+        // ("有窗口与 BrimDeck 重叠时" with its mark) still fits beside the four; "Pass-through" needs a little more to stay on one line.
+        var options = new UniformGrid { Columns = 4, Width = Loc.IsEnglish ? 408 : 376 };
+        foreach (var behavior in new[] { WindowBehavior.Normal, WindowBehavior.PassThrough, WindowBehavior.Line, WindowBehavior.Hide })
         {
             var option = new RadioButton { Content = BehaviorName(behavior), Style = (Style)FindResource("SettingsSegment"), GroupName = "Behavior" + title, IsChecked = selected == behavior };
             AutomationProperties.SetName(option, title + " · " + BehaviorName(behavior)); option.Checked += (_, _) => changed(behavior); options.Children.Add(option);

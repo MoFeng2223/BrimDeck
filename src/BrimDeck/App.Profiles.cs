@@ -110,13 +110,23 @@ public partial class App
         ChooseProfile(list[(at + 1) % list.Count].Id);
     }
 
-    // At start, a rule that held when BrimDeck last ended no longer does: the profile it replaced comes back before anything shows.
+    // At start, a rule that held when BrimDeck last ended no longer does: the profile it replaced comes back before anything shows,
+    // and pass-through it turned on goes off. A rule that still holds applies again with the first check.
     private void ReturnFromRule()
     {
-        if (Settings.ReturnProfile is not { } back || Profiles.Find(Settings, back) is null) return;
-        Settings = Profiles.Switch(Settings, back);
-        Settings.ReturnProfile = null;
-        QueueSave();
+        bool changed = false;
+        if (Settings.ReturnProfile is { } back && Profiles.Find(Settings, back) is not null)
+        {
+            Settings = Profiles.Switch(Settings, back);
+            Settings.ReturnProfile = null;
+            changed = true;
+        }
+        if (Settings.ClickThroughByRule)
+        {
+            Settings.ClickThrough = Settings.ClickThroughByRule = false;
+            changed = true;
+        }
+        if (changed) QueueSave();
     }
 
     // The rules are looked at every second and a half while any is on; with none, nothing runs.
@@ -160,8 +170,24 @@ public partial class App
             var (name, path) = rules.Any(rule => rule.Enabled && rule.Trigger == ProfileTrigger.Foreground) ? ForegroundApp() : ("", "");
             holding = Profiles.Holding(rules, ProcessSnapshot.AnyRecent, name, path);
         }
-        if (holding?.Id == _appliedRule?.Id) { HoldingRule = holding; return; }
+        if (holding?.Id == _appliedRule?.Id)
+        {
+            HoldingRule = holding;
+            // The holding rule's pass-through choice was changed: it applies at once.
+            if (holding is not null && holding.ClickThrough != _appliedRule!.ClickThrough)
+            {
+                _appliedRule = holding;
+                if (Profiles.RuleClickThrough(Settings, null, holding) is { } changed) UseRuleSettings(changed);
+            }
+            return;
+        }
         RuleChanged(holding);
+    }
+    private void UseRuleSettings(DeckSettings settings)
+    {
+        bool throughChanged = settings.ClickThrough != Settings.ClickThrough;
+        UpdateSettings(settings);
+        if (throughChanged) _settingsWindow?.ClickThroughChanged();
     }
     // The rule last acted on: a rule that keeps holding is not acted on again, so a profile the user picked meanwhile stays.
     private ProfileRule? _appliedRule;
@@ -175,13 +201,15 @@ public partial class App
             if (wanted != Settings.CurrentProfile) { to = wanted; back = Settings.ReturnProfile ?? Settings.CurrentProfile; }
         }
         else if (previous?.Profile is { } was && Settings.ReturnProfile is { } home && Settings.CurrentProfile == was) to = home;
+        DeckSettings? settings = null;
         if (to is { } target && Profiles.Find(Settings, target) is not null)
         {
             // A rule that follows another keeps the profile the first one replaced to come back to.
-            var settings = Profiles.Switch(Settings, target);
+            settings = Profiles.Switch(Settings, target);
             settings.ReturnProfile = back;
-            UpdateSettings(settings);
         }
+        settings = Profiles.RuleClickThrough(Settings, settings, next);
+        if (settings is not null) UseRuleSettings(settings);
         else ArrangePanels();
         _settingsWindow?.ProfilesChanged();
     }

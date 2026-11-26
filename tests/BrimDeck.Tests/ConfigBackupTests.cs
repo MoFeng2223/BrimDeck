@@ -141,6 +141,11 @@ internal static class ConfigBackupTests
         var held = settings.Copy(); held.ReturnProfile = first; held = Profiles.Switch(held, second); held.ReturnProfile = first;
         var returned = ConfigBackup.Prepare(Unpack(Pack(Content(held))), new DeckSettings(), new Dictionary<string, BackupDisplay?>(), _ => false);
         check("a profile a rule switched to while exporting goes back to the one it replaced", returned.CurrentProfile == first && returned.ReturnProfile is null);
+        var through = settings.Copy(); through.ClickThrough = through.ClickThroughByRule = true;
+        var chosenThrough = settings.Copy(); chosenThrough.ClickThrough = true;
+        check("pass-through a rule turned on while exporting goes off, and one the user chose stays",
+            ConfigBackup.Prepare(Unpack(Pack(Content(through))), new DeckSettings(), new Dictionary<string, BackupDisplay?>(), _ => false) is { ClickThrough: false, ClickThroughByRule: false }
+            && ConfigBackup.Prepare(Unpack(Pack(Content(chosenThrough))), new DeckSettings(), new Dictionary<string, BackupDisplay?>(), _ => false).ClickThrough);
         var twice = new Dictionary<string, BackupDisplay?> { [@"\\?\DISPLAY#DEL40B6#OLD-A"] = here[1], [@"\\?\DISPLAY#BOE#OLD-B"] = here[1] };
         check("two displays matched to the same one keep the first's settings", ConfigBackup.Prepare(package, new DeckSettings(), twice, _ => false)
             .DisplayMonitors.Single().Profile == second);

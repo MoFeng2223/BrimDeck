@@ -25,7 +25,8 @@ public sealed partial class SettingsWindow
         more.Children.Add(keyboard);
         var main = Toggle(Loc.T("鼠标穿透模式", "Mouse pass-through"), S.ClickThrough, value =>
         {
-            if (S.ClickThrough != value) Change(s => s.ClickThrough = value);
+            // The user's choice stays when a rule that turned it on stops holding.
+            if (S.ClickThrough != value) Change(s => { s.ClickThrough = value; s.ClickThroughByRule = false; });
             more.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
         }, help: Loc.T("开启后，鼠标经过不会展开面板，点击会直接落到下方窗口，适合玩游戏时使用。快捷键在“设置 › 快捷键”中设置。",
             "When on, the pointer passing over does not expand the panel and clicks go to the window beneath, which suits games. Set shortcuts in Settings › Shortcuts."));

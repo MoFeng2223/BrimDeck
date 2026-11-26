@@ -13,7 +13,9 @@ public enum ScreenEdge { Top, Bottom, Left, Right }
 // What the notch or the line hangs from on its edge where a taskbar is: the screen's edge, over the taskbar, or the taskbar's inner
 // edge. Without a taskbar on that edge the two are the same line. See DeckSettings.Dock.
 public enum EdgeAnchor { Screen, Taskbar }
-public enum WindowBehavior { Normal, Line, Hide }
+// PassThrough keeps the style, as Normal does, with mouse pass-through on (MainWindow.ClickThrough). It comes last so that the
+// numbers saved for the others stay as they were.
+public enum WindowBehavior { Normal, Line, Hide, PassThrough }
 // What hovering or clicking the indicator opens (DeckSettings.LineOpens): the panel, or first the capsule or the notch in its place.
 public enum IndicatorOpens { Panel, Capsule, Notch }
 // BackgroundFullscreen: a full-screen window on the panel's monitor that is not the foreground window.
@@ -529,6 +531,9 @@ public sealed class DeckSettings
     // it. ClickThroughPanel lets the open panel take clicks as usual; ClickThroughKeyboard lets a panel opened by a shortcut take
     // the keyboard and Esc, which it otherwise leaves to the window in use (a game).
     public bool ClickThrough { get; set; }
+    // A profile rule turned ClickThrough on (ProfileRule.ClickThrough): it goes off again when no rule that asks for it holds,
+    // or when BrimDeck starts again. The user turning pass-through on or off clears it, so their choice stays.
+    public bool ClickThroughByRule { get; set; }
     public bool ClickThroughPanel { get; set; }
     public bool ClickThroughKeyboard { get; set; }
     public bool MusicPage { get; set; } = true;

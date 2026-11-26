@@ -154,5 +154,15 @@ internal static class FullscreenRuleTests
         check("The choice for a window over the panel is saved, and an unknown one falls back to the indicator",
             savedChoice.Occupied == WindowBehavior.Hide && broken.Occupied == WindowBehavior.Line
             && JsonSerializer.Deserialize<DeckSettings>("{}")!.Occupied == WindowBehavior.Line);
+        // Pass-through keeps the style with mouse pass-through on; it was added after the other three, whose saved numbers stay.
+        check("The behaviors saved before pass-through keep their numbers",
+            (int)WindowBehavior.Normal == 0 && (int)WindowBehavior.Line == 1 && (int)WindowBehavior.Hide == 2);
+        var through = JsonSerializer.Deserialize<DeckSettings>(JsonSerializer.Serialize(new DeckSettings { Borderless = WindowBehavior.PassThrough, Occupied = WindowBehavior.PassThrough }))!;
+        through.Normalize();
+        check("Pass-through is saved for a context and the overlapping window",
+            through.Behavior(ScreenContext.Borderless, "Game", "") == WindowBehavior.PassThrough && through.Behavior(ScreenContext.Occupied) == WindowBehavior.PassThrough
+            && through.Behavior(ScreenContext.Desktop) == WindowBehavior.Normal);
+        check("Pass-through does not show the indicator", !new DeckSettings { Style = CompactStyle.Notch, Maximized = WindowBehavior.PassThrough, Borderless = WindowBehavior.PassThrough,
+            Exclusive = WindowBehavior.PassThrough, Occupied = WindowBehavior.PassThrough }.IndicatorMayShow);
     }
 }

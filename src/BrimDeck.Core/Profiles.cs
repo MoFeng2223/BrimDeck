@@ -31,8 +31,8 @@ public sealed class ProfileRuleDisplay
 }
 
 // Switches profiles while an app runs or is in front. The first rule in the list that holds applies: it may make another profile
-// current (Profile) and hide or change the panels of some displays (Displays). When it stops holding, the profile it replaced
-// comes back, unless the user chose a profile meanwhile.
+// current (Profile), hide or change the panels of some displays (Displays) and turn mouse pass-through on (ClickThrough). When it
+// stops holding, the profile it replaced comes back, unless the user chose a profile meanwhile, and so does pass-through.
 public sealed class ProfileRule
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -43,7 +43,9 @@ public sealed class ProfileRule
     public ProfileTrigger Trigger { get; set; }
     public Guid? Profile { get; set; }
     public List<ProfileRuleDisplay> Displays { get; set; } = [];
-    public ProfileRule Copy() => new() { Id = Id, Enabled = Enabled, Name = Name, Path = Path, Trigger = Trigger, Profile = Profile, Displays = [.. Displays.Select(d => d.Copy())] };
+    // Mouse pass-through goes on while the rule holds (DeckSettings.ClickThroughByRule).
+    public bool ClickThrough { get; set; }
+    public ProfileRule Copy() => new() { Id = Id, Enabled = Enabled, Name = Name, Path = Path, Trigger = Trigger, Profile = Profile, Displays = [.. Displays.Select(d => d.Copy())], ClickThrough = ClickThrough };
     public bool Matches(string? processName, string? imagePath) => ScreenPolicy.Matches(new FullscreenRule(Name, Path), processName, imagePath);
 }
 
@@ -64,7 +66,7 @@ public static class Profiles
         nameof(DeckSettings.Page3Hotkey), nameof(DeckSettings.Page4Hotkey), nameof(DeckSettings.Page5Hotkey), nameof(DeckSettings.Page6Hotkey),
         nameof(DeckSettings.Page7Hotkey), nameof(DeckSettings.Page8Hotkey), nameof(DeckSettings.Page9Hotkey), nameof(DeckSettings.Page10Hotkey),
         nameof(DeckSettings.RefreshHotkey), nameof(DeckSettings.CycleStyleHotkey), nameof(DeckSettings.LineStyleHotkey), nameof(DeckSettings.NextProfileHotkey), nameof(DeckSettings.HoldClickThroughHotkey),
-        nameof(DeckSettings.ClickThrough), nameof(DeckSettings.ClickThroughPanel), nameof(DeckSettings.ClickThroughKeyboard),
+        nameof(DeckSettings.ClickThrough), nameof(DeckSettings.ClickThroughByRule), nameof(DeckSettings.ClickThroughPanel), nameof(DeckSettings.ClickThroughKeyboard),
         nameof(DeckSettings.NeteaseFullControlEntry), nameof(DeckSettings.NeteaseAutoFullControl), nameof(DeckSettings.NeteaseFullControl),
         nameof(DeckSettings.KugouFullControl), nameof(DeckSettings.AppleMusicFullControl), nameof(DeckSettings.IgnoredMediaApps),
         nameof(DeckSettings.Display), nameof(DeckSettings.DisplayMonitors),
@@ -234,6 +236,17 @@ public static class Profiles
             if (holds) return rule;
         }
         return null;
+    }
+
+    // Pass-through once this rule holds (null: none holds), from the current settings: a rule that asks for it turns it on, if it
+    // is off; with no such rule holding, what a rule turned on goes off, and what the user chose stays. The change goes into
+    // settings (a copy of current when null); null when nothing changes.
+    public static DeckSettings? RuleClickThrough(DeckSettings current, DeckSettings? settings, ProfileRule? rule)
+    {
+        bool through = rule?.ClickThrough == true;
+        if (through && !current.ClickThrough) { settings ??= current.Copy(); settings.ClickThrough = settings.ClickThroughByRule = true; }
+        else if (!through && current.ClickThroughByRule) { settings ??= current.Copy(); settings.ClickThrough = settings.ClickThroughByRule = false; }
+        return settings;
     }
 
     // The process name a running rule looks for: the one saved, else the executable's.

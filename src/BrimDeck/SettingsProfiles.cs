@@ -273,8 +273,8 @@ public sealed partial class SettingsWindow
     private void ProfileRules(DeckSettings shared)
     {
         SectionTitle(Loc.T("自动切换", "Switch automatically"));
-        PlayerNote(Loc.T("指定的应用运行或在前台时，自动切换到所选的配置；也可以为每台显示器单独指定配置或不显示面板。条件结束后恢复原样。多条规则同时满足时，排在上面的生效，拖动左侧的手柄可以调整顺序。规则对所有配置都有效。",
-            "While the app runs or is in front, switches to the chosen profile; each display can also be given its own profile or no panel. When that ends, everything goes back. When several rules hold, the one higher up applies; drag the handle at the left to reorder. The rules apply whatever profile is in use."));
+        PlayerNote(Loc.T("指定的应用运行或在前台时，自动切换到所选的配置，也可以开启鼠标穿透；还可以为每台显示器单独指定配置或不显示面板。条件结束后恢复原样。多条规则同时满足时，排在上面的生效，拖动左侧的手柄可以调整顺序。规则对所有配置都有效。",
+            "While the app runs or is in front, switches to the chosen profile and can turn on mouse pass-through; each display can also be given its own profile or no panel. When that ends, everything goes back. When several rules hold, the one higher up applies; drag the handle at the left to reorder. The rules apply whatever profile is in use."));
         var head = new Grid { MinHeight = 44 };
         head.ColumnDefinitions.Add(new ColumnDefinition()); head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var label = TextLine(Loc.T("规则", "Rules"), 13, TextPrimary, FontWeights.SemiBold); label.VerticalAlignment = VerticalAlignment.Center;
@@ -333,6 +333,16 @@ public sealed partial class SettingsWindow
         int selected = rule.Profile is { } wanted && shared.Profiles.FindIndex(p => p.Id == wanted) is >= 0 and var at ? at + 1 : 0;
         picks.Children.Add(Row(Loc.T("切换到", "Switch to"), ProfileCombo(name + " · " + Loc.T("切换到", "Switch to"), profiles, selected,
             choice => Edit(r => r.Profile = choice == 0 ? null : shared.Profiles[choice - 1].Id))));
+        // Mouse pass-through while the rule holds: turned on, or left as it is.
+        var through = new UniformGrid { Columns = 2, Width = 240 };
+        foreach (var (on, text) in new[] { (true, Loc.T("开启鼠标穿透", "Turn on")), (false, Loc.T("保持原有设置", "Leave as is")) })
+        {
+            var option = new RadioButton { Content = text, Style = (Style)FindResource("SettingsSegment"), GroupName = "Through" + id.ToString("N"), IsChecked = rule.ClickThrough == on };
+            AutomationProperties.SetName(option, name + " · " + Loc.T("鼠标穿透", "Mouse pass-through") + " · " + text);
+            option.Checked += (_, _) => Edit(r => r.ClickThrough = on);
+            through.Children.Add(option);
+        }
+        picks.Children.Add(Row(Loc.T("鼠标穿透", "Mouse pass-through"), SegmentBorder(through)));
         // Each display while the rule holds: as the displays section sets it (what that is, in brackets), the profile in use, a
         // chosen profile, or no panel; in the order the displays section lists them.
         foreach (var display in displays)

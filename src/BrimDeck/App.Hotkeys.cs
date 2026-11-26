@@ -84,6 +84,8 @@ public partial class App
     {
         var settings = Settings.Copy();
         settings.ClickThrough = !settings.ClickThrough;
+        // The user's choice stays when a rule that turned it on stops holding.
+        settings.ClickThroughByRule = false;
         UpdateSettings(settings);
         _settingsWindow?.ClickThroughChanged();
     }

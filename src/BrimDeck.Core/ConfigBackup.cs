@@ -191,6 +191,8 @@ public static class ConfigBackup
         // A rule that held while the file was made has nothing to hold on here yet; its profile goes back as at a start.
         if (settings.ReturnProfile is { } back && Profiles.Find(settings, back) is not null) settings = Profiles.Switch(settings, back);
         settings.ReturnProfile = null;
+        // So does pass-through such a rule turned on.
+        if (settings.ClickThroughByRule) settings.ClickThrough = settings.ClickThroughByRule = false;
         BackupDisplay? Target(string id) => map.TryGetValue(id, out var target) ? target : null;
         settings.DisplayMonitors = [.. settings.DisplayMonitors.Select(d => Target(d.Id) is { } to ? d with { Id = to.Id, Name = to.Name } : d)
             .DistinctBy(d => d.Id, StringComparer.OrdinalIgnoreCase)];

@@ -201,6 +201,29 @@ internal static class ProfileTests
         // those of the profile that was current.
         var plain = System.Text.Json.JsonSerializer.Deserialize<PlainSettings>(System.Text.Json.JsonSerializer.Serialize(Profiles.Switch(back, focus.Id)))!;
         check("A version without profiles reads the current profile's settings", plain.Style == (int)CompactStyle.Capsule && plain.Language == back.Language);
+
+        // A rule's mouse pass-through: on while the rule holds, off again after, unless it was on before or the user chose.
+        var throughRule = new ProfileRule { Name = "Game", ClickThrough = true };
+        var keepRule = new ProfileRule { Name = "Editor" };
+        var savedRule = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>(System.Text.Json.JsonSerializer.Serialize(new DeckSettings { ProfileRules = [throughRule] }))!;
+        savedRule.Normalize();
+        check("A rule's pass-through choice is saved and copied", savedRule.ProfileRules is [{ ClickThrough: true }] && throughRule.Copy().ClickThrough && !keepRule.Copy().ClickThrough);
+        check("Pass-through a rule turned on is shared by every profile", !Profiles.IsProfileKey(nameof(DeckSettings.ClickThroughByRule)) && !Profiles.IsProfileKey(nameof(DeckSettings.ClickThrough)));
+        var throughOff = new DeckSettings();
+        var during = Profiles.RuleClickThrough(throughOff, null, throughRule);
+        check("A rule that asks for pass-through turns it on", during is { ClickThrough: true, ClickThroughByRule: true } && !throughOff.ClickThrough);
+        var after = Profiles.RuleClickThrough(during!, null, null);
+        check("Pass-through a rule turned on goes off when no rule holds", after is { ClickThrough: false, ClickThroughByRule: false });
+        check("A rule that leaves pass-through as is turns off what another rule turned on", Profiles.RuleClickThrough(during!, null, keepRule) is { ClickThrough: false });
+        check("A rule that leaves pass-through as is changes nothing", Profiles.RuleClickThrough(throughOff, null, keepRule) is null
+            && Profiles.RuleClickThrough(new DeckSettings { ClickThrough = true }, null, keepRule) is null);
+        check("Pass-through that was on before the rule stays on after it", Profiles.RuleClickThrough(new DeckSettings { ClickThrough = true }, null, throughRule) is null
+            && Profiles.RuleClickThrough(new DeckSettings { ClickThrough = true }, null, null) is null);
+        var userThrough = during!.Copy(); userThrough.ClickThroughByRule = false;
+        check("Pass-through the user turned on while the rule held stays after it", Profiles.RuleClickThrough(userThrough, null, null) is null);
+        var throughSwitch = Profiles.Switch(back, focus.Id);
+        var both = Profiles.RuleClickThrough(back, throughSwitch, throughRule);
+        check("A rule's pass-through goes with its profile switch", ReferenceEquals(both, throughSwitch) && both!.ClickThrough && both.CurrentProfile == focus.Id);
     }
 }
 
