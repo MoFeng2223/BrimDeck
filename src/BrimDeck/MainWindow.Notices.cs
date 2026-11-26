@@ -653,14 +653,18 @@ public partial class MainWindow
         DockPanel.SetDock(hero, System.Windows.Controls.Dock.Top); stack.Children.Add(hero);
         // The cover is drawn at 56 and shown smaller on a narrow column (HeroNarrow), leaving the words more room.
         var plate = NoticePlate(notice, 56);
-        var cover = new Viewbox { Width = 56, Height = 56, Stretch = Stretch.Uniform, Child = plate, VerticalAlignment = VerticalAlignment.Center };
-        hero.Children.Add(cover);
-        // The icon, the title and the lines beside them open the application, as the main button does.
-        if (center.CanOpen(notice))
+        var cover = new Viewbox { Width = 56, Height = 56, Stretch = Stretch.Uniform, Child = plate };
+        var coverBox = new Border { Child = cover, VerticalAlignment = VerticalAlignment.Center };
+        hero.Children.Add(coverBox);
+        // Only the icon opens what the main button opens: the application, or else the mailbox ("打开邮箱"). The words beside it are
+        // for selecting and copying, and a press between them does nothing. The hero takes a right click anywhere (OfferCopy).
+        hero.Background = Brushes.Transparent;
+        Func<Task>? openFromIcon = center.CanOpen(notice) ? () => OpenFromPage(notice)
+            : !AgendaReminders.Owns(notice) && PageMainAction(notice, center) is { Kind: NoticeActionKind.Open } mailbox ? async () => { await center.RunAsync(notice, mailbox); RenderNotices(); } : null;
+        if (openFromIcon is not null)
         {
-            hero.Background = Brushes.Transparent; hero.Cursor = Cursors.Hand;
-            // A press on the words selects them instead (SelectableWords).
-            hero.MouseLeftButtonUp += (_, e) => { if (WordsBox(e.OriginalSource) is not null) return; e.Handled = true; _ = OpenFromPage(notice); };
+            coverBox.Background = Brushes.Transparent; coverBox.Cursor = Cursors.Hand;
+            coverBox.MouseLeftButtonUp += (_, e) => { e.Handled = true; _ = openFromIcon(); };
         }
         var who = new StackPanel { Margin = new Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(who, 1); hero.Children.Add(who);
@@ -939,7 +943,7 @@ public partial class MainWindow
         // waits, one that copies or opens always. When no application can be opened, the page's main one is the sender's main button,
         // else its first that opens something ("打开邮箱" of a mail), which then turns into the open icon as "打开应用" does.
         var own = center.Buttons(notice).Take(NoticeIntake.MaxButtons).ToList();
-        var mainAction = center.CanOpen(notice) ? null : own.FirstOrDefault(action => action.Primary) ?? own.FirstOrDefault(action => action.Kind == NoticeActionKind.Open);
+        var mainAction = PageMainAction(notice, center);
         foreach (var action in own.OrderBy(action => ReferenceEquals(action, mainAction)))
         {
             bool main = ReferenceEquals(action, mainAction);
@@ -963,6 +967,15 @@ public partial class MainWindow
         // The row sets the space between its buttons itself (NoticeButtons.Gap).
         foreach (var button in flow.OfType<FrameworkElement>()) button.Margin = new Thickness(0);
         return row;
+    }
+
+    // The sender's button that the page shows as its main one, when no application can be opened: its main button, else its first
+    // that opens something.
+    private static NoticeAction? PageMainAction(Notice notice, NoticeCenter center)
+    {
+        if (center.CanOpen(notice)) return null;
+        var own = center.Buttons(notice).Take(NoticeIntake.MaxButtons).ToList();
+        return own.FirstOrDefault(action => action.Primary) ?? own.FirstOrDefault(action => action.Kind == NoticeActionKind.Open);
     }
 
     // Lets the row turn its main button, one that opens something, into a round open icon where its words do not fit.
