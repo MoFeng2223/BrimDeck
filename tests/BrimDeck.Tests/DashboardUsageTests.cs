@@ -115,6 +115,31 @@ internal static class DashboardUsageTests
         check("Mixed duplicate columns fetch both underlying sources only once", snapshots.Count == 2 && handler.Requests.Count == 2
             && handler.Requests.Distinct().Count() == 2 && snapshots.All(s => s.LiveQuota));
 
+        using (var enterpriseHandler = new SourceHandler
+        {
+            CodexResponse = """
+                {
+                  "plan_type": "ent26",
+                  "rate_limit": null,
+                  "spend_control": {"individual_limit": {
+                    "unit": "usd", "limit": "100", "used": "87.25", "remaining": "12.75",
+                    "remaining_percent": 13, "reset_at": 1796083200
+                  }}
+                }
+                """,
+        })
+        using (var enterpriseClient = new HttpClient(enterpriseHandler))
+        using (var enterpriseService = new UsageService(new SourceDesktop(), locations, enterpriseClient))
+        {
+            var enterpriseSettings = new DeckSettings { Apps = [new AppEntry { QuotaSource = ProviderId.Codex, UsageSource = ProviderId.Codex }] };
+            var enterprise = (await enterpriseService.RefreshAsync(enterpriseSettings)).Single();
+            var card = DashboardUsage.Columns(enterpriseSettings, [enterprise]).Single();
+            check("Codex Enterprise displays the personal budget when timed windows are absent",
+                enterprise.LiveQuota && enterprise.Plan == "ent26" && card.Quota.Metrics.SingleOrDefault() is
+                { Kind: MetricKind.Balance, Currency: "USD", Amount: 12.75m, Total: 100m, ValueText: "$12.75", UsedPercent: 87.25 } budget
+                && budget.ResetAt == DateTimeOffset.FromUnixTimeSeconds(1796083200));
+        }
+
         // WSL statistics join the local ones, and a WSL file system that does not answer in time only costs its own share.
         string Line(string id, int input) => JsonSerializer.Serialize(new { timestamp = DateTimeOffset.Now.AddMinutes(-3), type = "assistant", message = new { id, model = "claude-sonnet-4-6", usage = new { input_tokens = input, output_tokens = 0 } } });
         Directory.CreateDirectory(Path.Combine(locations.ClaudeHome, "projects"));
@@ -177,6 +202,7 @@ internal static class DashboardUsageTests
     private sealed class SourceHandler : HttpMessageHandler
     {
         public List<string> Requests { get; } = [];
+        public string CodexResponse { get; init; } = """{"rate_limit":{"primary_window":{"used_percent":22,"limit_window_seconds":18000}}}""";
         public int DelayMs { get; set; }
         // While set, the span from the first request's start to the last one's end on this clock (Busy).
         public System.Diagnostics.Stopwatch? Timeline { get; set; }
@@ -201,7 +227,7 @@ internal static class DashboardUsageTests
             var json = destination switch
             {
                 "https://api.anthropic.com/api/oauth/usage" => """{"five_hour":{"utilization":71}}""",
-                "https://chatgpt.com/backend-api/wham/usage" => """{"rate_limit":{"primary_window":{"used_percent":22,"limit_window_seconds":18000}}}""",
+                "https://chatgpt.com/backend-api/wham/usage" => CodexResponse,
                 _ => throw new InvalidOperationException("Unexpected destination")
             };
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json) };
