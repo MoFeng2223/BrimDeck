@@ -5,7 +5,10 @@ static class WeatherCacheTests
 {
     public static async Task Run(Action<string, bool> check)
     {
-        // 唯一命名空间：既隔离内存条目，也让磁盘目录可以整体清掉，不碰真实的天气缓存。
+        // 独立临时根目录：测试既不写正式缓存，也不依赖用户目录是否存在。
+        string originalRoot = WeatherFiles.Root;
+        string root = Path.Combine(Path.GetTempPath(), "brimdeck-weather-tests-" + Guid.NewGuid().ToString("N"));
+        WeatherFiles.UseRoot(root);
         string ns = "test-" + Guid.NewGuid().ToString("N");
         try
         {
@@ -70,11 +73,8 @@ static class WeatherCacheTests
         }
         finally
         {
-            try
-            {
-                string folder = Path.Combine(WeatherFiles.CacheRoot, ns);
-                if (Directory.Exists(folder)) Directory.Delete(folder, true);
-            }
+            WeatherFiles.UseRoot(originalRoot);
+            try { if (Directory.Exists(root)) Directory.Delete(root, true); }
             catch { }
         }
     }

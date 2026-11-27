@@ -267,7 +267,7 @@ internal static class WeatherHourHistory
 {
     // 保留最近 48 小时：足以覆盖「过去 10 小时」，也给隔天再打开留余量。
     private const int KeepHours = 48;
-    private static readonly string Root = Path.Combine(WeatherFiles.Root, "weather", "hour-history");
+    private static string Root => Path.Combine(WeatherFiles.Root, "weather", "hour-history");
     private static readonly JsonSerializerOptions Json = new()
     {
         NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,

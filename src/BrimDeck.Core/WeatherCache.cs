@@ -10,9 +10,11 @@ namespace BrimDeck.Core;
 // 任何一次写入都先写临时文件再覆盖移动，崩溃或断电最多丢掉最新一份，不会留下半个 JSON 让下次启动解析失败。
 public static class WeatherFiles
 {
-    public static string Root { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck");
-    public static string CacheRoot { get; } = Path.Combine(Root, "weather-cache");
-    public static string Snapshots { get; } = Path.Combine(Root, "weather", "snapshot");
+    public static string Root { get; private set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck");
+    public static string CacheRoot => Path.Combine(Root, "weather-cache");
+    public static string Snapshots => Path.Combine(Root, "weather", "snapshot");
+    // 仅供自动化测试：把落盘目录改到独立临时目录，测试结束再改回来。
+    public static void UseRoot(string root) => Root = root;
 
     public static void Ensure(string folder) { try { Directory.CreateDirectory(folder); } catch { } }
 
