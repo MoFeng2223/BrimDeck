@@ -167,9 +167,22 @@ public static class WeatherCache
             if (envelope is null || envelope.V != Schema || envelope.K != key || envelope.Value.Length == 0) { File.Delete(path); return false; }
             if (JsonSerializer.Deserialize<T>(envelope.Value, Json) is not { } parsed) return false;
             // 读盘期间内存可能已被并发请求写入更新鲜的值，别拿磁盘旧值盖掉。
-            if (Memory.TryGetValue(id, out var kept) && kept.Value is T newer && kept.At >= envelope.At) { value = newer; at = kept.At; return true; }
+            var disk = new Entry { Value = parsed, At = envelope.At };
+            while (true)
+            {
+                if (!Memory.TryGetValue(id, out var kept))
+                {
+                    if (Memory.TryAdd(id, disk)) break;
+                }
+                else if (kept.At >= disk.At)
+                {
+                    if (kept.Value is not T newer) return false;
+                    value = newer; at = kept.At; return true;
+                }
+                else if (Memory.TryUpdate(id, disk, kept)) break;
+            }
             Touch(ns, key);
-            Remember(id, parsed, envelope.At);
+            TrimMemory();
             value = parsed; at = envelope.At;
             return true;
         }
@@ -197,9 +210,14 @@ public static class WeatherCache
     private static void Remember(string id, object value, DateTimeOffset at)
     {
         Memory[id] = new Entry { Value = value, At = at };
+        TrimMemory();
+    }
+
+    private static void TrimMemory()
+    {
         if (Memory.Count <= MemoryLimit) return;
         foreach (var pair in Memory.OrderBy(pair => pair.Value.At).Take(Memory.Count - MemoryLimit).ToArray())
-            Memory.TryRemove(pair.Key, out _);
+            Memory.TryRemove(pair);
     }
 
     // 启动时清掉长期不用的条目（按最后访问时间：命中缓存会刷新文件时间戳）：历史按日期缓存，城市换得勤会留下不少一次性文件。

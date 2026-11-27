@@ -140,7 +140,13 @@ internal sealed class HeFengSource : IWeatherSource
 
     // 带缓存取一份和风原始响应；probe 只标记这条请求是否用于连通性判定。
     private static Task<string?> FetchBodyAsync(Context context, string key, TimeSpan ttl, string url, CancellationToken token, bool probe = false)
-        => WeatherCache.GetAsync<string>("hefeng", context.Scope + "|" + key, ttl, ct => FetchRawAsync(context, url, ct, probe), token);
+        => WeatherCache.GetAsync<string>("hefeng", context.Scope + "|" + key, ttl, async ct =>
+        {
+            var body = await FetchRawAsync(context, url, ct, probe);
+            if (body is null) return null;
+            using var document = JsonDocument.Parse(body);
+            return body;
+        }, token);
 
     // Key 走 X-QW-Api-Key 请求头：比放在查询字符串里安全，也避免同时使用两种认证方式。
     // 实测请求并回报探针状态，与通用传输层的 SendAsync 区分开。

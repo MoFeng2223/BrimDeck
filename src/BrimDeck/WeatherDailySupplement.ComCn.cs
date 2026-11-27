@@ -150,7 +150,10 @@ internal static class ChinaDailySupplement
     // 响应体落盘：国内站点不稳定，缓存同时也是断网时的兜底。
     private static Task<string?> Body(string key, TimeSpan ttl, string url, CancellationToken token, int seconds)
         => WeatherCache.GetAsync<string>(Id, key, ttl, async ct =>
-            (await WeatherHttp.GetAsync(Id, url, ct, request => request.Headers.Referrer = new Uri("https://www.weather.com.cn/"), seconds)).Body, token);
+        {
+            var response = await WeatherHttp.GetAsync(Id, url, ct, request => request.Headers.Referrer = new Uri("https://www.weather.com.cn/"), seconds);
+            return string.IsNullOrWhiteSpace(response.Body) ? null : response.Body;
+        }, token);
 
     private static string? ExtractArray(string body)
     {
