@@ -1048,7 +1048,7 @@ public partial class MainWindow
                 ShowMusicError(Loc.T("播放器未接受进度调整。", "The player did not accept the new position."));
             }
         }
-        RenderMusic();
+        if (IsMusicPage) RenderMusic();
     }
     private static bool SameMediaSong(MediaTrack first, MediaTrack second) => MediaRouting.SameSong(first, second) &&
         (string.IsNullOrEmpty(first.SongId) || string.IsNullOrEmpty(second.SongId) || first.SongId == second.SongId);
