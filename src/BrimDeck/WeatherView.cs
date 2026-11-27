@@ -140,8 +140,7 @@ internal sealed class WeatherView : UserControl
     private string _autoCityName = "";   // 最近一次自动定位到的城市
     private int _columns = 7;
     private double _chartWidth;
-    private int _summaryCols = 2;
-    private double _summaryIcon = 48;   // Hero 图标当前档位；只在跨档时重建摘要，宽度连续变化由弹性 Star 列吸收
+    private SummaryPlan? _summaryPlan;
     private int generation;
     // 视口即内容区，宽度与高度随 Fit 传入值整体填充。预报区骨架恒定（各行行高固定、图标恒定 28px），
     // 折线行是唯一弹性带；高度不足按 4→3→2→1→0 逐级收纳：4 完整 → 3 藏上下天气名称 → 2 藏折线 → 1 藏图标 → 0 整行折叠。
@@ -149,18 +148,25 @@ internal sealed class WeatherView : UserControl
     {
         Width = width; Height = height;
         UpdateMinuteVisibility();
-        // 顶部读数卡按可用宽度取列数（2–6）、Hero 分三档尺寸；只有跨档才重建。
+        // 顶部读数卡按可用宽度取列数（2–6）、按竖向余量取行数（2–3）；只有跨档才重建。
         // 列宽本身由 Star 列弹性分配，连续拖宽时不需要重建：卡片跟着变宽变窄即可。
         if (_indicesMode && _last is { } indicesSnap && !_drawnIndices.SequenceEqual(_app.Settings.Weather.LifestyleIndices))
             DrawIndices(indicesSnap);
-        var summaryPlan = PlanSummary(width);
-        if (summaryPlan.Columns != _summaryCols || summaryPlan.Icon != _summaryIcon || !_drawnChips.SequenceEqual(_app.Settings.Weather.Chips))
-        {
-            _summaryCols = summaryPlan.Columns; _summaryIcon = summaryPlan.Icon;
-            if (_last is { } summarySnap) DrawSummary(summarySnap);
-        }
         double avail = Math.Max(0, height - 16 - minuteRow.Height.Value);   // 根 Grid 上边距 0 + 底部页脚行 16 + 分钟窄条
         summaryRow.MinHeight = Math.Min(summaryMinHeight, avail);     // 今日天气最小高度封顶，避免自身被压坏
+        double room = Math.Max(0, avail - summaryMinHeight);
+        int previousLevel = _forecastLevel;
+        while (_forecastLevel > 0 && StateHeight(_forecastLevel) > room) _forecastLevel--;
+        while (_forecastLevel < 4 && StateHeight(_forecastLevel + 1) + UpgradeMargin <= room) _forecastLevel++;
+        bool compact = CompactForecast;
+        double upperHeight = avail - SkeletonHeight(_forecastLevel, _hourlyMode);
+        int rows = compact && upperHeight >= 3 * SummaryTileRow ? 3 : 2;
+        var summaryPlan = PlanSummary(width, rows);
+        bool summaryChanged = summaryPlan != _summaryPlan || compact != _compactSummary
+            || !_drawnChips.SequenceEqual(_app.Settings.Weather.Chips);
+        _compactSummary = compact;
+        _summaryPlan = summaryPlan;
+        if (summaryChanged && _last is { } summarySnap) DrawSummary(summarySnap, summaryPlan);
         double chartWidth = Math.Max(30, width - 40);
         int columns = LayoutColumns(width);
         // 24h 模式固定 24 列对应 24 个逐时数据点，保证「24 个日期 ↔ 24 个时刻」一一对应。
@@ -180,28 +186,22 @@ internal sealed class WeatherView : UserControl
             // 折线先横向缩放顶住，停手 120ms 后按最终宽度重建一次，文字恢复原始比例。
             else if (widthChanged) { UpdateAnchors(f); ScaleChart(); }
         }
-        // 列数、列内数据量、可用高度都没变，状态就不可能变：跳过整段决策。
-        if (!(force || columnsChanged || shownChanged || heightChanged)) return;
+        // 列数、列内数据量、可用高度、摘要行数都没变，状态就不可能变：跳过整段决策。
+        if (!(force || columnsChanged || shownChanged || heightChanged || summaryChanged || previousLevel != _forecastLevel)) return;
         _lastAvail = avail;
-        // 今日天气高度：days 可见时是 Auto 行，ActualHeight 就是内容高度；days 折叠（档 0）时 summary 接管
-        // 弹性行被拉伸居中，ActualHeight 等于整块可用高度、不是内容高度——改用 DesiredSize（布局测量产物=内容高）。
-        // 若仍用 ActualHeight，room≈0，档 0 永远等不到升档排期，窗口再拉大预报区也回不来。
-        // room 按 4px 向下量化：亚 4px 的高度振荡不参与状态判断。
-        double summaryH = days.Visibility == Visibility.Visible ? summary.ActualHeight : summary.DesiredSize.Height;
-        double room = Math.Floor((avail - Math.Max(summaryRow.MinHeight, summaryH)) / 4) * 4;   // 实际可让给预报区的空间
-        UpdateForecastState(room);
+        ApplyForecastLevel();
         SyncSummaryAlignment();
     }
-    // 今日天气内容不多，按内容高度贴顶即可，不跟着面板拉伸；多出来的高度全部交给下方预报区去填。
-    // 只有当面板矮到放不下预报条、只剩今日天气时，才让摘要区整体居中接管这一行，避免贴着页头、下面空一大片。
+    private bool _compactSummary;
+    private bool CompactForecast => !_indicesMode && _forecastLevel < 3;
+
     private void SyncSummaryAlignment()
     {
-        bool showDays = _indicesMode || days.Visibility == Visibility.Visible;   // 指数视图与 days 共用这一行，任一可见就占满
-        summaryRow.Height = showDays ? GridLength.Auto : new GridLength(1, GridUnitType.Star);
-        daysRow.Height = showDays ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
-        // 对齐作用在整块摘要上：Grid 自身按内容高度居中/贴顶，Hero 与指标区在内部各自对齐，
-        // 不再逐个改子元素的对齐（子元素一旦换行或换列，逐个设置就会互相打架）。
-        summary.VerticalAlignment = showDays ? VerticalAlignment.Top : VerticalAlignment.Center;
+        bool visible = _indicesMode || days.Visibility == Visibility.Visible;
+        bool expand = CompactForecast || !visible;
+        summaryRow.Height = expand ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
+        daysRow.Height = !visible ? new GridLength(0) : expand ? GridLength.Auto : new GridLength(1, GridUnitType.Star);
+        summary.VerticalAlignment = expand ? VerticalAlignment.Stretch : VerticalAlignment.Top;
     }
     // 把当前状态原样贴到列元素上。列在每次重绘时都会 Clear + 新建行定义，行高与可见性回到默认值；
     // 重绘后必须重贴，否则天气名称/折线会闪回，直到下一次 Fit 才收起——拖动高度时看到的就是这个闪动。
@@ -221,16 +221,18 @@ internal sealed class WeatherView : UserControl
         foreach (var label in conditionLabels) label.Visibility = showCondition ? Visibility.Visible : Visibility.Collapsed;
         foreach (var glyph in columnGlyphs) glyph.Visibility = showGlyph ? Visibility.Visible : Visibility.Collapsed;
 
-        var chartVisibility = level >= 3 ? Visibility.Visible : Visibility.Collapsed;
+        double chartHeight = ChartHeightFor(level);
+        var chartVisibility = chartHeight > 0 ? Visibility.Visible : Visibility.Collapsed;
+        chart.MinHeight = chartHeight;
         bool chartToggled = chart.Visibility != chartVisibility;
         chart.Visibility = chartVisibility;
         // 折线行是唯一的弹性带。折线收起后不再把每一行都拉成 Star——那会把图标、温度、时刻均匀撑开，
         // 行距全乱、越拉越丑；改为整块保持骨架原高、贴住底部下沉，多出来的高度由它上方那片区域吸收。
-        bool pinned = level < 3 && _lens != Lens.Celestial;
+        bool pinned = CompactForecast;
         days.VerticalAlignment = pinned ? VerticalAlignment.Bottom : VerticalAlignment.Stretch;
         var flexible = new GridLength(1, GridUnitType.Star);
         days.RowDefinitions[0].Height = GridLength.Auto;
-        days.RowDefinitions[1].Height = chartVisibility == Visibility.Visible ? flexible : new GridLength(0);
+        days.RowDefinitions[1].Height = chartHeight == 0 || pinned ? new GridLength(chartHeight) : flexible;
         foreach (var border in forecast.Children.OfType<Border>())
         {
             if (border.Child is not Grid column) continue;
@@ -270,14 +272,21 @@ internal sealed class WeatherView : UserControl
     // 逐日比逐时多一条「转前图标 + 风」镜像行，逐时比逐日多两行小时级数据（降水概率、空气等级）：
     // 两套骨架各自估算后取更高的那套，同一尺寸下两种模式的档位一致，切换不会跳档。
     // 镜像行在档 1 起常驻（折线收起不影响它）：档 1 收图标缩成风向带贴底，档 0 才整行下线。
+    private double ChartHeightFor(int level) => _lens switch
+    {
+        Lens.Celestial when level >= 3 => CelestialArcHeight,
+        Lens.Celestial when level >= 1 => CelestialMinHeight,
+        _ when level >= 3 => ChartMinHeight,
+        _ => 0
+    };
+
     private double StateHeight(int level) => Math.Max(SkeletonHeight(level, true), SkeletonHeight(level, false));
     private double SkeletonHeight(int level, bool hourly)
     {
         if (level <= 0) return 0;
-        // 天文镜头：预报列、天气名、温度与时刻行全部收起，整块只画一条折线画布。
-        // 若仍按普通档位估算，中等偏矮的面板会把「折线档」判为装不下，画布被藏、列又被镜头收起，
-        // 预报区于是整块空白——需求降到画布本身，它就能占满余下高度。
-        if (_lens == Lens.Celestial) return CelestialMinHeight;
+        double chartHeight = ChartHeightFor(level);
+        double chartSpace = chartHeight > 0 ? chartHeight + ChartTopMargin + BandSafety : 0;
+        if (_lens == Lens.Celestial) return chartSpace;
         var rows = hourly ? HourlyRowHeights : ColumnRowHeights;
         int condRow = hourly ? HourlyConditionRow : DailyConditionRow;
         int glyphRow = hourly ? HourlyGlyphRow : DailyGlyphRow;
@@ -288,7 +297,7 @@ internal sealed class WeatherView : UserControl
             if (i == glyphRow && level < 2) continue;
             h += rows[i];
         }
-        if (level >= 3) h += ChartMinHeight + ChartTopMargin + BandSafety;  // 折线行按最小高度计，富余高度由它吸收
+        h += chartSpace;
         if (level >= 1) h += LowRowHeight + BandSafety;                     // 低温/时刻行：档 1 起常驻（档 1 只收起图标）
         if (!hourly && level >= 4) h += DayNoteHeight + BandSafety;         // 转前天气名行：档 4 才有
         if (!hourly && level >= 2) h += DayInfoCompact + BandSafety;            // 转前图标 + 风：档 2 起完整（图标 + 风向带）
@@ -297,12 +306,6 @@ internal sealed class WeatherView : UserControl
     }
     // 状态决策：room 的纯函数，双向即时、阈值不对称。降档在 room < 档高 时立即执行
     // 预报状态、无回路可振荡，去抖只剩「拖动期间每帧重启定时器、必须停手才回升」的副作用，故弃用。
-    private void UpdateForecastState(double room)
-    {
-        while (_forecastLevel > 0 && StateHeight(_forecastLevel) > room) _forecastLevel--;
-        while (_forecastLevel < 4 && StateHeight(_forecastLevel + 1) + UpgradeMargin <= room) _forecastLevel++;
-        ApplyForecastLevel();
-    }
     // 节流窗口里被跳过的那一次重画：33ms 后补上。拖到一半停手、或拖动在节流窗口内结束，都不会留下半截折线。
     private void FlushLater()
     {
@@ -357,7 +360,9 @@ internal sealed class WeatherView : UserControl
     // —— 摘要区骨架：指标卡列宽在 84–120 之间弹性浮动，列数 2–6 随可用宽度取整。
     // 理想列距 102（卡片内容约 96 + 左右外边距 6）。指标区占 Star 列，宽度变化直接由卡片伸缩吸收，
     // 不重建、不留右侧固定空档——旧版「列数 × 105 固定宽」正是宽窗口右侧一大块空白与窄窗口挤扁 Hero 的来源。
-    private const double TilePitch = 102;
+    // 每个卡位包含卡片左右各 3 DIP 的外边距。
+    private const double TilePitch = 124;
+    private const double SummaryTileRow = 44;     // 一排读数卡的高度（卡约 41 + 上下外边距 6）：行数升档的余量门槛
     private const double ChartMinHeight = 46;     // 折线画布最小高度：上下各留标签与圆点的空间，低于此折线档装不下
     private const double CelestialMinHeight = 96; // 天文镜头的最低需求：整块只画画布本身（弧线带 + 地平线 + 时刻刻度）
     // 天文镜头画完弧线、大天体与事件标注所需的最小高度：弧线区至少 52px（容得下大天体），
@@ -722,7 +727,7 @@ internal sealed class WeatherView : UserControl
         // 旧版只看「有雨且高度 ≥ 200」，这 34px 常把整块预报压到整行折叠，摘要被迫居中、上下空出一大片。
         if (show)
         {
-            double measured = summary.ActualHeight > 8 ? summary.ActualHeight : summaryMinHeight;
+            double measured = summaryMinHeight;
             // 与预报升档同一阈值：窄条要占 34px，只有升到档 2 后才有空间容纳图标行。
             show = Height - 16 - 34 - measured >= StateHeight(2) + UpgradeMargin;
         }
@@ -730,20 +735,25 @@ internal sealed class WeatherView : UserControl
         minuteStrip.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         minuteBars.Visibility = Width >= 420 ? Visibility.Visible : Visibility.Collapsed;
     }
-    // 摘要区构型：指标卡列数 2–6，Hero 三档尺寸。Fit（判要不要重建）与 DrawSummary（建控件）共用这一处，
-    // 两侧永远不会漂移。指标区拿 Star 列，所以列数只决定「分几格」，格子本身永远铺满余宽。
-    private readonly record struct SummaryPlan(int Columns, double Icon, double Temp, double HeroWidth);
-    private static SummaryPlan PlanSummary(double width)
+    // 摘要区构型：指标卡列数 2–6、行数 2–3，Hero 按宽度分三档、余量档再放大一号。Fit（判要不要重建）
+    // 与 DrawSummary（建控件）共用这一处，两侧永远不会漂移。指标区拿 Star 列，列数只决定「分几格」，
+    // 格子本身永远铺满余宽。
+    private readonly record struct SummaryPlan(int Columns, int Rows, double Icon, double Temp, double HeroWidth);
+    private SummaryPlan PlanSummary(double width, int rows)
     {
         double inner = Math.Max(160, width - 28);       // 去掉 root 左右各 14 的外边距
-        var (icon, temp, heroWidth) = inner >= 1000 ? (64d, 52d, 178d)
-            : inner >= 700 ? (56d, 46d, 158d) : (48d, 38d, 142d);
-        // 按理想列距取整：剩给指标区的宽度 ÷ 102 四舍五入，列宽因此落在 84–120 的弹性区间。
-        int columns = Math.Clamp((int)Math.Round((inner - heroWidth) / TilePitch), 2, 6);
-        return new SummaryPlan(columns, icon, temp, heroWidth);
+        var (icon, temp, heroWidth) = rows == 3
+            ? (3 * SummaryTileRow - 4, 54d, 276d)
+            : (56d, 44d, 164d);
+        int columns = Math.Clamp((int)((inner - heroWidth) / TilePitch), 1, 6);
+        if (rows == 3)
+        {
+            int visible = _app.Settings.Weather.Chips.Count(chip => chip.Visible);
+            columns = Math.Min(columns, Math.Max(1, (visible + rows - 1) / rows));
+        }
+        return new SummaryPlan(columns, rows, icon, temp, heroWidth);
     }
 
-    // 预警等级归一：和风 color.code 是小写英文（red/amber/blue…），severity 用英文词；中文旧写法也一并认。
     private static int WarnRank(string level) => level.Trim().ToLowerInvariant() switch
     {
         "红色" or "red" or "purple" or "black" or "extreme" => 4,
@@ -874,20 +884,19 @@ internal sealed class WeatherView : UserControl
             ? null
             : Loc.T($"强度 {Num(s.PrecipRateMmH, " mm/h", 1)} · {PrecipName(s.PrecipType)}", $"Rate {Num(s.PrecipRateMmH, " mm/h", 1)} · {PrecipName(s.PrecipType)}");
     // 左上：大图标 + 大字温度 + 高低温/预警；右上：随宽度扩展的实况读数卡（体感/湿度/风速…天文入口）。来源统一放右下角页脚。
-    private void DrawSummary(WeatherSnapshot s)
+    private void DrawSummary(WeatherSnapshot s, SummaryPlan? layout = null)
     {
         summary.Children.Clear(); summary.ColumnDefinitions.Clear();
         summary.RowDefinitions.Clear();
         int today = WeatherClock.LiveIndex(s);    // 按城市当前日期在正序数组中定位“今天”；-1 = 跨日缓存对不上今天
-        var plan = PlanSummary(Width);
-        int cols = _summaryCols = plan.Columns; _summaryIcon = plan.Icon;
+        var plan = layout ?? PlanSummary(Width, _summaryPlan?.Rows ?? 2);
+        _summaryPlan = plan;
+        int cols = plan.Columns;
         // 左列 Hero 取自然宽（图标 + 温度 + 高低温），右列指标区吃掉全部余宽：
         // 卡片随面板连续伸缩，宽窗口不再在右侧留固定空档，窄窗口也不会把 Hero 挤成一条缝。
-        summary.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        summary.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(plan.HeroWidth) });
         summary.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        summary.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        // 今日天气内容顶对齐：内容不多，不跟着面板拉伸，多出的高度留给下方预报区填充。
-        // 垂直基准由 SyncSummaryAlignment 统一管理（只剩今日天气时才改为居中）。
+        summary.RowDefinitions.Add(new RowDefinition { Height = _compactSummary ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
         var hero = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 2, 10, 2), VerticalAlignment = VerticalAlignment.Center };
         // 左上角大图标是视图切换入口：悬浮播放天气动效，点击在「逐时/逐日预报」与「生活指数」间互换。
         var heroGlyph = new WeatherGlyph(s.WeatherCode, s.IsDay, animated: true)
@@ -923,16 +932,19 @@ internal sealed class WeatherView : UserControl
         side.Children.Add(bottom);
         // 来源与刷新时刻统一放在右下角页脚，摘要卡不再单占一行，左侧因此更紧凑。
         hero.Children.Add(side);
-        summary.Children.Add(hero);
-        // 读数卡与左侧大图标同一基准垂直居中，多列时上下沿才会齐平。
-        stats.Rows = 2; stats.Columns = cols;
+        summary.Children.Add(new Viewbox {
+            Child = hero, StretchDirection = StretchDirection.DownOnly,
+            HorizontalAlignment = _compactSummary ? HorizontalAlignment.Center : HorizontalAlignment.Left
+        });
+
+        stats.Width = cols * TilePitch;
+        stats.HorizontalAlignment = HorizontalAlignment.Right;
+        // 读数卡与左侧大图标同一基准垂直居中，多列时上下沿才会齐平；行数随余量档两行或三行。
+        stats.Columns = cols;
         stats.Children.Clear(); stats.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(stats, 1); summary.Children.Add(stats);
         // 卡片密度按实际格宽微调：格宽不足 98 时图标与间距各收一档，把宽度让给文字，
-        // 84–120 的弹性列宽下标签才不至于整段被省略号吃掉。
-        double cell = (Math.Max(160, Width - 28) - plan.HeroWidth) / Math.Max(1, cols);
-        bool tight = cell < 98;
-        double metaGlyph = tight ? 16 : 18, metaGap = tight ? 4 : 5;
-        double valueFont = tight ? 11.5 : 12;
+        // 84–120 的弹性列宽下标签才不至于整段被省略号吃掉。余量档 Hero 实际比登记宽 8px，一并扣掉。
+        const double metaGlyph = 18, metaGap = 5, valueFont = 12;
         string rise = Clock(s.SunriseTimes, today), set = Clock(s.SunsetTimes, today);
         // 同一列上下放相关读数：风速/阵风、体感/露点、湿度/降水、气压/能见度、空气/紫外线、云量/日月。
         // 风向/风级并入风速卡，降水类型/强度并入降水卡；日升/日落是镜头入口，始终放在最右下角。
@@ -958,12 +970,34 @@ internal sealed class WeatherView : UserControl
         ];
         _drawnChips = [.. _app.Settings.Weather.Chips];
         var available = upper.Concat(lower).ToDictionary(tile => tile.lens!.Value);
-        foreach (var row in _app.Settings.Weather.ChipRows(cols))
+        var rows = _app.Settings.Weather.ChipRows(cols);
+        var shown = new HashSet<WeatherMetric>();
+        foreach (var row in rows)
         {
-            var metrics = row.Where(chip => chip.Visible).Take(cols).ToArray();
-            for (int i = metrics.Length; i < cols; i++)
+            var chips = row.Where(chip => chip.Visible).Take(cols).ToArray();
+            AddRow(chips);
+            foreach (var chip in chips) shown.Add(chip.Metric);
+        }
+        stats.Rows = 2;
+        if (plan.Rows > 2)
+        {
+            // 续行按设置中的列取值：同一列的上下两项先于下一列。
+            var extra = rows[0].Zip(rows[1])
+                .SelectMany(pair => new[] { pair.First, pair.Second })
+                .Where(chip => chip.Visible && !shown.Contains(chip.Metric))
+                .Take(cols).ToArray();
+            if (extra.Length > 0)
+            {
+                stats.Rows++;
+                AddRow(extra);
+            }
+        }
+
+        void AddRow(WeatherChip[] chips)
+        {
+            for (int i = chips.Length; i < cols; i++)
                 stats.Children.Add(new Border { IsHitTestVisible = false });
-            foreach (var chip in metrics) AddTile(chip.Metric);
+            foreach (var chip in chips) AddTile(chip.Metric);
         }
 
         void AddTile(Lens metric)
@@ -972,8 +1006,10 @@ internal sealed class WeatherView : UserControl
             var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             // 字号按实测宽度定：格宽 84–120 浮动，减内边距 14、描边 2、图标 16–18 + 间距 4–5 后，文字可用约 40–75。
             text.Children.Add(new TextBlock { Text = label, FontFamily = UI.PanelFont, FontSize = 9.5, Foreground = ColText, Margin = new Thickness(0, 0, 0, 2), TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis });
-            text.Children.Add(new TextBlock { Text = value, FontFamily = UI.PanelFont, FontSize = valueFont, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(_look.Primary), TextWrapping = TextWrapping.NoWrap });
-            var body = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
+            text.Children.Add(new TextBlock { Text = value, FontFamily = UI.PanelFont, FontSize = valueFont, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(_look.Primary), TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis });
+            var body = new Grid { VerticalAlignment = VerticalAlignment.Center };
+            body.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            body.ColumnDefinitions.Add(new ColumnDefinition());
             // 风速卡用 8 方位箭头指示风向；箭头优先跟标题文字同档，文字缺失时才按角度分档。
             // 其余卡用各自的元信息图标。
             double windAngle = WeatherCodes.Wind8Angle(s.WindDirection, s.WindDirectionDeg);
@@ -985,6 +1021,7 @@ internal sealed class WeatherView : UserControl
             }
             else
                 body.Children.Add(new WeatherMetaIcon(kind, ink) { Width = metaGlyph, Height = metaGlyph, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, metaGap, 0) });
+            Grid.SetColumn(text, 1);
             body.Children.Add(text);
             bool active = lens is { } chosen && _lens == chosen;
             // 这些卡是同一组读数，底色统一用「白色低透明」叠在天空渐变上：哪一张都不抢眼，
@@ -1001,7 +1038,7 @@ internal sealed class WeatherView : UserControl
                 CornerRadius = new CornerRadius(10), Margin = new Thickness(3), Padding = new Thickness(7, 4, 7, 4), Child = body,
                 BorderThickness = new Thickness(1)
             };
-            if (tip is not null) tile.ToolTip = tip;
+            tile.ToolTip = tip is null ? value : $"{value} · {tip}";
             // 悬浮只换底色与描边，就是普通按钮的反馈：不缩放、不位移。
             // 卡片在窄窗口 2×2 里彼此只隔 6px，整体放大 1.035 会顶到邻卡、看着像在互相推挤；
             // 里面的图标也被同一个放大带着抖，所以这里连 WeatherMotion 都不挂。
@@ -1613,7 +1650,7 @@ internal sealed class WeatherView : UserControl
         todayGlow.Visibility = Visibility.Collapsed;
         DateTime now = WeatherClock.Now(s).DateTime;
         double width = Math.Max(30, chart.Width), height = ChartBand();
-        bool showArcs = height >= CelestialArcHeight;
+        bool showArcs = ChartHeightFor(_forecastLevel) >= CelestialArcHeight;
         double band = Math.Max(26, height - 26);
         double horizon = showArcs ? Math.Max(26, height - 72) : Math.Max(26, band - 34);
         Color gold = Color.FromRgb(255, 201, 77), silver = Color.FromRgb(226, 236, 248);
