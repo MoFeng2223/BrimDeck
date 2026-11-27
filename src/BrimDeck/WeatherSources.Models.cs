@@ -66,6 +66,7 @@ internal sealed class AirPart
     public int? Pm10 { get; set; }
     public int? Level { get; set; }
     public string? Text { get; set; }
+    public string? Standard { get; set; }         // AQI 标准代码（us_aqi / cn-mee / qaqi），文案与颜色不能混用
     public string? Primary { get; set; }          // 首要污染物代码
     public string? PrimaryName { get; set; }      // 首要污染物名称
     public string? HealthEffect { get; set; }     // 对健康的影响
@@ -183,7 +184,7 @@ internal sealed class WeatherSnapshot
     // 风级（和风 wind.scale；-1 表示无）、降水强度 mm/h 与降水类型（rain/snow/ice/mixed/none/unknown）。
     public int WindScale {get;set;}=-1; public double PrecipRateMmH {get;set;} public string PrecipType {get;set;}="";
     // 空气质量：-1 表示来源没有提供，界面据此隐藏；AqiText 是等级文字（优/良/…），界面按「等级 数值」展示。
-    public int Aqi {get;set;}=-1; public int Pm25 {get;set;}=-1; public int Pm10 {get;set;}=-1; public int AqiLevel {get;set;}=-1; public string AqiText {get;set;}="";
+    public int Aqi {get;set;}=-1; public int Pm25 {get;set;}=-1; public int Pm10 {get;set;}=-1; public int AqiLevel {get;set;}=-1; public string AqiText {get;set;}=""; public string AqiStandard {get;set;}="";
     // 通用国际标准 AQI（qaqi，-1 表示无）：国内同时有中国标准时并列展示。
     public int AqiGlobal {get;set;}=-1;
     // 空气详情：首要污染物、健康影响与两类人群建议。快照只运原始数据，展示文案由视图自行排版。

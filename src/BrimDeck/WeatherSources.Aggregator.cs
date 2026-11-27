@@ -150,6 +150,7 @@ internal static class WeatherAggregator
                         if (air.Pm10 is null && a.Pm10 is not null) { air.Pm10 = a.Pm10; any = true; }
                         if (air.Level is null && a.Level is not null) { air.Level = a.Level; any = true; }
                         if (air.Text is null && a.Text is not null) { air.Text = a.Text; any = true; }
+                        if (air.Standard is null && a.Standard is not null) { air.Standard = a.Standard; any = true; }
                         if (air.Primary is null && a.Primary is not null) { air.Primary = a.Primary; any = true; }
                         if (air.PrimaryName is null && a.PrimaryName is not null) { air.PrimaryName = a.PrimaryName; any = true; }
                         if (air.HealthEffect is null && a.HealthEffect is not null) { air.HealthEffect = a.HealthEffect; any = true; }
@@ -287,6 +288,7 @@ internal static class WeatherAggregator
             Pm10 = air?.Pm10 ?? -1,
             AqiLevel = air?.Level ?? -1,
             AqiText = air?.Text ?? "",
+            AqiStandard = air?.Standard ?? "",
             AirPrimary = air?.PrimaryName ?? air?.Primary ?? "",
             AirEffect = air?.HealthEffect ?? "",
             AirAdvice = air?.HealthGeneral ?? "",

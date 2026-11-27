@@ -174,6 +174,26 @@ internal static class WeatherCodes
         4 => Loc.T("中度污染", "Moderate pollution"), 5 => Loc.T("重度污染", "Heavy"), _ => Loc.T("严重污染", "Severe")
     };
 
+    // Open-Meteo 的 us_aqi 用美国标准：同样的 140 在中国标准里是「轻度污染」，在美标里是「对敏感人群不健康」。
+    public static string UsAqiText(int aqi) => aqi switch
+    {
+        < 0 => "",
+        <= 50 => Loc.T("优", "Good"),
+        <= 100 => Loc.T("中等", "Moderate"),
+        <= 150 => Loc.T("对敏感人群不健康", "Unhealthy for sensitive groups"),
+        <= 200 => Loc.T("不健康", "Unhealthy"),
+        <= 300 => Loc.T("非常不健康", "Very unhealthy"),
+        _ => Loc.T("危险", "Hazardous")
+    };
+
+    public static string AqiStandardLabel(string standard) => standard switch
+    {
+        "us_aqi" => Loc.T("美国 AQI 标准", "US AQI"),
+        "cn-mee" => Loc.T("中国 HJ 633 标准", "China HJ 633"),
+        "qaqi" => Loc.T("国际 AQI 标准", "International AQI"),
+        _ => ""
+    };
+
     // 中文/英文风向 → 角度，供箭头与文字保持同一档。
     public static double DegreesFromText(string? text)
     {

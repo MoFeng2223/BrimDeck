@@ -524,6 +524,7 @@ internal sealed class HeFengSource : IWeatherSource
                 AqiGlobal = aqiGlobal,
                 Level = int.TryParse(level, out var parsed) ? parsed : null,
                 Text = Json.Text(chosen, "category"),
+                Standard = Json.Text(chosen, "code"),
                 Primary = primary is { } p ? Json.Text(p, "code") : null,
                 PrimaryName = primary is { } pn ? Json.Text(pn, "name") : null,
                 HealthEffect = health is { } he ? Json.Text(he, "effect") : null,

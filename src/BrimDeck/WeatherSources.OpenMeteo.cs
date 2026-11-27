@@ -97,9 +97,17 @@ internal sealed class OpenMeteoSource : IWeatherSource
                 // 先按当地时间定位当前小时取 UV，序列里没有（过去两小时的旧点不算）再退回最近一条有 UV 的。
                 if (part.Current is { Uv: null })
                 {
-                    string nowKey = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(Geo.UtcOffsetHours(city))).ToString("yyyy-MM-ddTHH:00", CultureInfo.InvariantCulture);
+                    // 优先城市时区 ID（带夏令时），其次拿响应里的 timezone，最后才按经度估算偏移。
+                    string? zone = !string.IsNullOrWhiteSpace(city.TimeZoneId) ? city.TimeZoneId : part.TimeZone;
+                    var now = zone is not null && TimeZoneInfo.TryFindSystemTimeZoneById(zone, out var info)
+                        ? TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, info)
+                        : DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(Geo.UtcOffsetHours(city)));
+                    string nowKey = now.ToString("yyyy-MM-ddTHH:00", CultureInfo.InvariantCulture);
+                    string nextKey = now.AddHours(1).ToString("yyyy-MM-ddTHH:00", CultureInfo.InvariantCulture);
+                    // 当前整点没值时只认紧接着的下一小时；旧序列里第一条非空记录可能是几十分钟前的旧 UV。
                     var pick = part.Hours.FirstOrDefault(hour => hour.Time == nowKey && hour.Uv is not null)
-                        ?? part.Hours.FirstOrDefault(hour => hour.Uv is not null);
+                        ?? part.Hours.FirstOrDefault(hour => hour.Uv is not null
+                            && string.CompareOrdinal(hour.Time, nowKey) >= 0 && string.CompareOrdinal(hour.Time, nextKey) <= 0);
                     if (pick is { Uv: { } uv }) part.Current.Uv = uv;
                 }
             }
@@ -113,8 +121,9 @@ internal sealed class OpenMeteoSource : IWeatherSource
                 part.Air = new AirPart
                 {
                     Aqi = Json.Integer(current, "us_aqi"), Pm25 = Json.Integer(current, "pm2_5"), Pm10 = Json.Integer(current, "pm10"),
+                    Standard = "us_aqi",
                     Level = Json.Integer(current, "us_aqi") is { } aqi ? WeatherCodes.AqiBand(aqi) : null,
-                    Text = Json.Integer(current, "us_aqi") is { } value ? WeatherCodes.AqiText(value) : null
+                    Text = Json.Integer(current, "us_aqi") is { } value ? WeatherCodes.UsAqiText(value) : null
                 };
         }
         catch { }
