@@ -16,6 +16,8 @@ internal sealed class WarningItem
     public string Text { get; set; } = "";
     public string Level { get; set; } = "";
     public string Type { get; set; } = "";
+    // 和风 expireTime：到点即失效；旧快照没有这个字段时按仍有效处理。
+    public DateTimeOffset? ExpireTime { get; set; }
 }
 
 // 生活指数：和风的 type ID、名称、等级、类别与说明

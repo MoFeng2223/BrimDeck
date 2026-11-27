@@ -17,7 +17,7 @@ internal sealed class HeFengSource : IWeatherSource
     public bool CanServe(City city, WeatherSettings settings) => settings.HeFengKeyConfigured && settings.HeFengHost.Trim().Length > 0;
 
     // 一次请求要用到的公共参数：坐标只保留两位小数（v1 只认这个精度）。
-    private sealed record Context(string Host, string Key, City City, WeatherSettings Settings)
+    private sealed record Context(string Host, string Key, City City, WeatherSettings Settings, int Generation)
     {
         public string Lat => City.Latitude.ToString("0.00", CultureInfo.InvariantCulture);
         public string Lon => City.Longitude.ToString("0.00", CultureInfo.InvariantCulture);
@@ -43,13 +43,13 @@ internal sealed class HeFengSource : IWeatherSource
         string rawHost = settings.HeFengHost.Trim(), key = WeatherSecrets.Key;
         if (rawHost.Length == 0 || key.Length == 0) return;
         string host = NormalizeHost(rawHost);
-        var context = new Context(host, key, new City("北京", 39.90, 116.41), settings);
+        var context = new Context(host, key, new City("北京", 39.90, 116.41), settings, HeFengMonitor.Generation);
         await FetchRawAsync(context, $"{host}/weather/v1/current/{context.Lat}/{context.Lon}?localTime=true&lang={context.Lang}", token, probe: true);
     }
 
     public async Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
     {
-        var context = new Context(NormalizeHost(settings.HeFengHost), WeatherSecrets.Key, city, settings);
+        var context = new Context(NormalizeHost(settings.HeFengHost), WeatherSecrets.Key, city, settings, HeFengMonitor.Generation);
         // 历史单独占一段：时光机只认 LocationID、一天一次请求，挂在独立的第二轮，不混进首屏。
         // 延后轮次可能把历史与预警/指数等一起送来，这里按需拆分，互不干扰。
         bool wantHistory = need.Contains(WeatherDomain.History);
@@ -139,10 +139,9 @@ internal sealed class HeFengSource : IWeatherSource
     // 实测请求并回报探针状态，与通用传输层的 SendAsync 区分开。
     private static async Task<string?> FetchRawAsync(Context context, string url, CancellationToken token, bool probe = false)
     {
-        int generation = HeFengMonitor.Generation;
         var watch = System.Diagnostics.Stopwatch.StartNew();
         var result = await WeatherHttp.GetAsync("hefeng", url, token, request => request.Headers.TryAddWithoutValidation("X-QW-Api-Key", context.Key), limits: context.Settings);
-        if (probe) HeFengMonitor.Report(generation, result.Status, result.Body, watch.Elapsed);
+        if (probe) HeFengMonitor.Report(context.Generation, result.Status, result.Body, watch.Elapsed);
         return result.Body;
     }
 
@@ -618,7 +617,9 @@ internal sealed class HeFengSource : IWeatherSource
                     Title = Json.Text(item, "headline") ?? "",
                     Text = Json.Text(item, "description") ?? "",
                     Level = level,
-                    Type = type
+                    Type = type,
+                    ExpireTime = Json.Text(item, "expireTime") is { } expiry
+                        && DateTimeOffset.TryParse(expiry, CultureInfo.InvariantCulture, DateTimeStyles.None, out var expires) ? expires : null
                 });
             }
             // 空数组是一次有效回答（当前无预警），不能折叠成 null，否则聚合器分不清「没预警」和「没请求到」。

@@ -736,8 +736,8 @@ internal sealed class WeatherView : UserControl
         "蓝色" or "blue" or "green" or "minor" => "蓝",
         _ => level
     };
-    // 摘要卡里的预警胶囊：只留「类型 · 等级」，完整标题/正文放 ToolTip，点击切到生活指数视图。
-    private Border WarningBadge(WarningItem w, int total)
+    // 摘要卡里的预警胶囊：只留「类型 · 等级」，点开可读全部预警；天气图标仍负责切生活指数。
+    private Border WarningBadge(WarningItem w, IReadOnlyList<WarningItem> warnings, WeatherSnapshot s)
     {
         (Color bg, Color fg) = WarnRank(w.Level) switch
         {
@@ -752,7 +752,7 @@ internal sealed class WeatherView : UserControl
             ? (w.Level.Length > 0 ? $"{w.Type} · {WarnLevelShort(w.Level)}" : w.Type)
             : (w.Title.Length > 0 ? w.Title : w.Level);
         row.Children.Add(new TextBlock { Text = name, FontSize = 11, Foreground = Ink(fg), TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center });
-        if (total > 1) row.Children.Add(new TextBlock { Text = $"+{total - 1}", FontSize = 10, Foreground = Ink(fg), Margin = new Thickness(4, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
+        if (warnings.Count > 1) row.Children.Add(new TextBlock { Text = $"+{warnings.Count - 1}", FontSize = 10, Foreground = Ink(fg), Margin = new Thickness(4, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
         var badge = new Border
         {
             Child = row, Background = new SolidColorBrush(bg), CornerRadius = new CornerRadius(7),
@@ -763,8 +763,46 @@ internal sealed class WeatherView : UserControl
                 : (w.Title.Length > 0 ? w.Title : null)
         };
         AutomationProperties.SetName(badge, Loc.T("气象预警", "Weather warning") + " " + name);
-        badge.MouseLeftButtonUp += (_, e) => { e.Handled = true; if (!_indicesMode) ToggleView(); };
+        badge.MouseLeftButtonUp += (_, e) => { e.Handled = true; ShowWarnings(badge, warnings, s.Name); };
         return badge;
+    }
+
+    // 预警详情：胶囊（含 +N）打开一个可聚焦的浮层，按等级列出全部有效预警的标题与正文；Esc 或点外部关闭。
+    private void ShowWarnings(Border target, IReadOnlyList<WarningItem> warnings, string city)
+    {
+        var body = new StackPanel { Margin = new Thickness(4, 2, 4, 2) };
+        body.Children.Add(new TextBlock
+        {
+            Text = Loc.T($"{city} · 全部预警", $"{city} · All warnings"),
+            FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(_look.Primary),
+            Margin = new Thickness(0, 0, 0, 6)
+        });
+        foreach (var item in warnings.OrderByDescending(w => WarnRank(w.Level)))
+        {
+            string heading = item.Type.Length > 0
+                ? (item.Level.Length > 0 ? $"{item.Type} · {WarnLevelShort(item.Level)}" : item.Type)
+                : item.Title;
+            body.Children.Add(new TextBlock { Text = heading, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(_look.Primary), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 2) });
+            string detail = string.Join("\n", new[] { item.Title, item.Text }.Where(part => part.Length > 0 && part != heading).Distinct(StringComparer.Ordinal));
+            if (detail.Length > 0)
+                body.Children.Add(new TextBlock { Text = detail, FontSize = 11.5, Foreground = ColText, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) });
+        }
+        var frame = new Border
+        {
+            Child = new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 320 },
+            Background = UI.Brush(_look.Hex("popup")), BorderBrush = UI.Brush(_look.Hex("popupBorder")),
+            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(10, 8, 10, 8),
+            MaxWidth = 340, Focusable = true
+        };
+        var popup = new Popup
+        {
+            Child = frame, PlacementTarget = target, Placement = PlacementMode.Bottom,
+            StaysOpen = false, AllowsTransparency = true
+        };
+        frame.KeyDown += (_, key) => { if (key.Key == System.Windows.Input.Key.Escape) popup.IsOpen = false; };
+        AutomationProperties.SetName(frame, Loc.T("全部气象预警", "All weather warnings"));
+        popup.IsOpen = true;
+        frame.Focus();
     }
     // 风速卡的标题直接带上 8 方位风向与风级，省一张卡；没有风向文字（如 Open-Meteo）时按度数归一。
     private string WindTitle(WeatherSnapshot s)
@@ -848,11 +886,13 @@ internal sealed class WeatherView : UserControl
         bool hasDay = today >= 0 && today < s.DayHighC.Length && today < s.DayLowC.Length;   // 日期轴过期时不拿旧日期冒充今天的高低温
         string range = hasDay ? $"{Degree(s.DayHighC[today])} / {Degree(s.DayLowC[today])}" : "-- / --";
         // 有预警：高低温缩成小字挪到温度右侧，把温度下方这行让给最高等级的预警；无预警维持原样。
-        var warn = s.Warnings.OrderByDescending(w => WarnRank(w.Level)).FirstOrDefault();
+        // 离线打开旧快照时也要按有效期过滤：到点的预警不需要等解除消息就不该再显示。
+        var activeWarnings = s.Warnings.Where(w => w.ExpireTime is null || w.ExpireTime > DateTimeOffset.Now).ToArray();
+        var warn = activeWarnings.OrderByDescending(w => WarnRank(w.Level)).FirstOrDefault();
         if (warn is not null)
         {
             tempRow.Children.Add(new TextBlock { Text = range, FontSize = 11, Margin = new Thickness(8, 0, 0, 6), Foreground = ColText, VerticalAlignment = VerticalAlignment.Bottom });
-            bottom.Children.Add(WarningBadge(warn, s.Warnings.Length));
+            bottom.Children.Add(WarningBadge(warn, activeWarnings, s));
         }
         else bottom.Children.Add(new TextBlock { Text = range, FontSize = 13, Foreground = ColText, VerticalAlignment = VerticalAlignment.Center });
         side.Children.Add(bottom);
