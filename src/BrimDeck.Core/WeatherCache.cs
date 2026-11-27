@@ -71,9 +71,14 @@ public static class WeatherCache
     }
 
     private static readonly ConcurrentDictionary<string, Entry> Memory = new(StringComparer.Ordinal);
-    // 固定 32 个分片闸门代替每键一把锁：键只增不减会让锁字典无限膨胀；按哈希取模分片，同键依旧互斥。
-    private static readonly SemaphoreSlim[] Shards = Enumerable.Range(0, 32).Select(_ => new SemaphoreSlim(1, 1)).ToArray();
-    private static SemaphoreSlim Gate(string id) => Shards[(uint)id.GetHashCode() % (uint)Shards.Length];
+    private sealed class PendingKey
+    {
+        public readonly SemaphoreSlim Gate = new(1, 1);
+        public int Users;
+        public int Writes;
+        public object? Latest;
+    }
+    private static readonly Dictionary<string, PendingKey> Pending = new(StringComparer.Ordinal);
     // 手动刷新要绕过的只是「还没过期就直用缓存」这一层：AsyncLocal 随执行流进入并行的每个来源请求，
     // 自动刷新与其它调用看不到它；读取仍会写回缓存，失败照旧退回过期副本。
     private static readonly AsyncLocal<int> Bypass = new();
@@ -111,20 +116,41 @@ public static class WeatherCache
         string id = ns + "/" + key;
         bool freshOnly = Bypass.Value > 0;
         if (!freshOnly && TryLookup<T>(id, ns, key, out var value, out var at) && DateTimeOffset.Now - at < ttl) return value;
-        var gate = Gate(id);
-        await gate.WaitAsync(token);
+        PendingKey pending;
+        int observed;
+        lock (Pending)
+        {
+            if (!Pending.TryGetValue(id, out var existing)) Pending[id] = existing = new();
+            pending = existing;
+            pending.Users++;
+            observed = pending.Writes;
+        }
+        bool entered = false;
         try
         {
+            await pending.Gate.WaitAsync(token);
+            entered = true;
+            if (freshOnly && observed != pending.Writes && pending.Latest is T shared) return shared;
             // 排队期间前一个请求可能已经写好，命中就不必再发一次。
             if (!freshOnly && TryLookup<T>(id, ns, key, out value, out at) && DateTimeOffset.Now - at < ttl) return value;
             // 委托解析响应抛 JsonException 时同样回退过期缓存，而不是把异常直接抛给调用方。
             T? fresh;
             try { fresh = await fetch(token); }
             catch (JsonException) { fresh = null; }
-            if (fresh is not null) { Store(id, ns, key, fresh); return fresh; }
+            if (fresh is not null)
+            {
+                Store(id, ns, key, fresh);
+                lock (Pending) { pending.Latest = fresh; pending.Writes++; }
+                return fresh;
+            }
             return allowStale && TryLookup<T>(id, ns, key, out var stale, out _) ? stale : null;
         }
-        finally { gate.Release(); }
+        finally
+        {
+            if (entered) pending.Gate.Release();
+            lock (Pending)
+                if (--pending.Users == 0) { Pending.Remove(id); pending.Gate.Dispose(); }
+        }
     }
 
     private static bool TryLookup<T>(string id, string ns, string key, out T value, out DateTimeOffset at) where T : class

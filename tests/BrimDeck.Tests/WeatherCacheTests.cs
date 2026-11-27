@@ -70,6 +70,28 @@ static class WeatherCacheTests
             var strict = await WeatherCache.GetAsync(ns, "stale", TimeSpan.Zero,
                 _ => Task.FromResult<string?>(null), CancellationToken.None, allowStale: false);
             check("Weather cache: with stale copies disallowed a failed refresh returns nothing", strict is null && calls == 2);
+            foreach (bool allowStale in new[] { true, false })
+            {
+                var fallback = await WeatherCache.GetAsync<string>(ns, "stale", TimeSpan.Zero,
+                    _ => throw new System.Text.Json.JsonException(), CancellationToken.None, allowStale);
+                check($"Invalid JSON respects stale policy {allowStale}", fallback == (allowStale ? "old" : null));
+            }
+            using (WeatherCache.Fresh())
+            {
+                var release = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+                int requests = 0;
+                Task<string?> ManualFetch(CancellationToken _) { requests++; return release.Task; }
+                var leading = WeatherCache.GetAsync(ns, "parallel-refresh", TimeSpan.Zero, ManualFetch, CancellationToken.None);
+                var waiting = WeatherCache.GetAsync(ns, "parallel-refresh", TimeSpan.Zero, ManualFetch, CancellationToken.None);
+                release.SetResult("updated");
+                var results = await Task.WhenAll(leading, waiting);
+                check("Overlapping manual refreshes share a successful fetch", requests == 1 && results.All(value => value == "updated"));
+            }
+            var city = new City("New York", 40.75, -73.98) { TimeZoneId = "America/New_York" };
+            check("Legacy snapshot and source keys upgrade to stable city identity",
+                City.UpgradeStorageKey(city.ToString()) == city.StorageKey()
+                && City.UpgradeStorageKey(city + "|hefeng") == city.StorageKey() + "|hefeng");
+            check("Nonadjacent city hierarchy levels survive", City.Compose("New York", "County", "New York") == "New York · County · New York");
         }
         finally
         {
