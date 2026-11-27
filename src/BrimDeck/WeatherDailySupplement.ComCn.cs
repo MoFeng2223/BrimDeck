@@ -26,12 +26,12 @@ internal static class ChinaDailySupplement
 
     internal static async Task<List<DayPoint>> FetchAsync(City city, DateTime today, CancellationToken token)
     {
-        var (name, _) = Geo.Parts(city);
+        var (name, province) = Geo.Parts(city);
         // 和风城市 id 与中国天气网代码同源：结构化 id（如洪山区 101200113）直接定位到区县站，
         // 免去按城市名搜索一次；没有 id 时退回原路径按城市名解析。
         string? id = city.LocationId is { Length: >= 9 } code && code.StartsWith("101") && code.All(char.IsDigit)
             ? code
-            : await ResolveIdAsync(name, token);
+            : await ResolveIdAsync(name, province, token);
         if (id is null) return [];
         var months = new List<Task<string?>>();
         var start = today;
@@ -80,8 +80,9 @@ internal static class ChinaDailySupplement
                     {
                         day.WindDir = windParts[0];
                         day.WindDirDeg = WeatherCodes.DegreesFromText(windParts[0]);
-                        day.WindMaxKmh = WindPowerKmh(windParts[0], windPower);
                     }
+                    // 风级可能在 ws1 而不在风向串里：没有 wd1 时也必须把风速补上。
+                    day.WindMaxKmh ??= WindPowerKmh(windParts.Length > 0 ? windParts[0] : null, windPower);
                     if (windParts.Length > 1 && day.NightWindDir is null)
                     {
                         day.NightWindDir = windParts[1];
@@ -106,10 +107,10 @@ internal static class ChinaDailySupplement
         return null;
     }
 
-    private static async Task<string?> ResolveIdAsync(string name, CancellationToken token)
+    private static async Task<string?> ResolveIdAsync(string name, string province, CancellationToken token)
     {
-        // 城市 ID 是静态数据，落盘 30 天：启动后不必先搜一次城市，断网也能定位到已有城市。
-        return await WeatherCache.GetAsync<string>(Id, "id|" + name, TimeSpan.FromDays(30), async ct =>
+        // 城市 ID 是静态数据，落盘 30 天；同名城市按省份分开，避免「朝阳」串到别的省。
+        return await WeatherCache.GetAsync<string>(Id, "id|" + province + "|" + name, TimeSpan.FromDays(30), async ct =>
         {
             var result = await WeatherHttp.GetAsync(Id, $"https://toy1.weather.com.cn/search?cityname={Json.Esc(name)}", ct,
                 request => request.Headers.Referrer = new Uri("https://www.weather.com.cn/"), 3);
@@ -121,10 +122,28 @@ internal static class ChinaDailySupplement
             {
                 string? reference = Json.Text(item, "ref");
                 string? found = reference?.Split('~')[0];
-                if (found is { Length: >= 9 } && found.All(char.IsDigit) && found.StartsWith("101")) return found;
+                if (found is { Length: >= 9 } && found.All(char.IsDigit) && found.StartsWith("101")
+                    && SameProvince(reference, province)) return found;
             }
             return null;
         }, token);
+    }
+
+    // 和风城市 id 与中国天气网搜索结果同源，ref 形如「101271001~sichuan~泸州~…~四川」；
+    // 只接受与当前城市同省的站点，没有同省候选就按无结果处理，也不写 ID 缓存。
+    private static bool SameProvince(string? reference, string province)
+    {
+        if (reference is null || province.Length == 0) return false;
+        string expected = TrimRegion(province);
+        return expected.Length > 0 && reference.Split('~').Any(part => TrimRegion(part) == expected);
+    }
+
+    private static string TrimRegion(string text)
+    {
+        string value = text.Trim();
+        foreach (var suffix in new[] { "壮族自治区", "回族自治区", "维吾尔自治区", "特别行政区", "自治区", "省", "市" })
+            if (value.EndsWith(suffix, StringComparison.Ordinal)) return value[..^suffix.Length];
+        return value;
     }
 
     // 响应体落盘：国内站点不稳定，缓存同时也是断网时的兜底。
