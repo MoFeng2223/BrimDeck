@@ -493,10 +493,9 @@ internal sealed class WeatherView : UserControl
         // 缓存键一律是实际城市键：手动选城市用所选城市的键，自动定位用 AutoKey 指向的键；
         // "auto" 只在 AutoKey 里做映射，不是数据键。AutoKey 为空（首启动）时跳过缓存预渲染。
         string key = selected >= 0 && selected < state.Cities.Count ? state.KeyFor(state.Cities[selected]) : state.AutoKey;
-        if (key.Length > 0 && state.Cache.TryGetValue(key, out var cached)) { Render(cached); _shownKey = key; }
         // 显示数据与城市绑定：换到没有缓存的城市就清掉上一城的残留画面，刷新失败或取消时也不会把
         // 别的城市的数据挂在新城市标签下；有该城市自己的缓存则直接渲染缓存。
-        else if (_last is not null && _shownKey != key) ShowEmpty();
+        ShowKey(key);
         fetching = true; RaiseState();
         try {
             using var fresh = force ? WeatherCache.Fresh() : null;
@@ -517,11 +516,8 @@ internal sealed class WeatherView : UserControl
             // 旧请求交给 token 中断；generation 只在部分结果回写时挡一次，避免迟到的首屏覆盖新请求。
             var sourceId = state.Schedule.SourceFor(selected < 0 ? null : city);
             key = WeatherData.CacheKey(city, sourceId);
-            if (_shownKey != key && state.Cache.TryGetValue(key, out var locatedCache))
-            {
-                Render(locatedCache);
-                _shownKey = key;
-            }
+            // 定位后可能换成另一座城市：同样走切城逻辑，没缓存就清空旧画面，别等数据到了才发现城市标签不对。
+            ShowKey(key);
             var snapshot = await WeatherData.CurrentAsync(city, state.Schedule, sourceId, token, partial => { if (request == generation && selected == state.Selected && sourceId == state.Schedule.SourceFor(selected < 0 ? null : city) && (_shownKey != key || _last is null)) QueuePartial(partial, key, request); });
             if (request != generation || selected != state.Selected || token.IsCancellationRequested || sourceId != state.Schedule.SourceFor(selected < 0 ? null : city)) return;
             // 终版马上就到：作废还没执行的 partial，避免一次刷新把整页重建两遍。
@@ -538,7 +534,15 @@ internal sealed class WeatherView : UserControl
         } catch { if (request == generation && (_last is null || _shownKey != key)) { _pendingPartial = null; _renderSignature = 0; summary.Children.Clear(); summary.Children.Add(new TextBlock { Text = Loc.T("天气数据不可用", "Weather data unavailable"), FontSize = 20, VerticalAlignment = VerticalAlignment.Center }); } }
         finally { if (ReferenceEquals(_token, cts)) { fetching = false; _token = null; } cts.Dispose(); RaiseState(); }
     }
-    // 空态：换到没有缓存的城市后、刷新尚未成功时清掉上一城的残留画面（预报列、折线、页脚一并清）。
+    // 切城：键变了就显示新城市的缓存；没有缓存则清空旧画面。键未变时保留本城数据（含部分结果）。
+    private void ShowKey(string key)
+    {
+        if (key.Length == 0) { if (_last is not null) ShowEmpty(); return; }
+        if (_shownKey == key) return;
+        if (state.Cache.TryGetValue(key, out var cached)) { Render(cached); _shownKey = key; }
+        else ShowEmpty();
+    }
+    // 空态：换到没有缓存的城市后、刷新尚未成功时清掉上一城的残留画面（指数、分钟降水、页脚一并清）。
     private void ShowEmpty()
     {
         _last = null; _shownKey = ""; _pendingPartial = null;
@@ -548,6 +552,10 @@ internal sealed class WeatherView : UserControl
         summary.Children.Add(new TextBlock { Text = Loc.T("暂无天气数据", "No weather data"), FontSize = 20, VerticalAlignment = VerticalAlignment.Center });
         forecast.Children.Clear(); lowRow.Children.Clear(); lowNote.Children.Clear(); dayInfoRow.Children.Clear(); chart.Children.Clear();
         todayGlow.Visibility = Visibility.Collapsed; nowRule.Visibility = nowText.Visibility = Visibility.Collapsed;
+        // 生活指数视图与分钟窄条也是上一城的内容：一并清掉，但不改用户选中的视图模式。
+        indicesBody.Children.Clear(); minuteBars.Children.Clear();
+        _minuteHasRain = false; minuteNote.Text = "";
+        UpdateMinuteVisibility();
         footerNote.Text = "";
     }
     // 部分结果（不含历史）与终版通常只隔几十毫秒：合并到一次渲染，避免一次刷新把整页重建两遍。
@@ -631,7 +639,14 @@ internal sealed class WeatherView : UserControl
     private void DrawMinute(WeatherSnapshot s)
     {
         minuteBars.Children.Clear();
-        var points = s.MinutePrecip;
+        // 离线快照里的整段降水可能已经过去：先按真实时间戳剔除已结束的区间，再画柱与倒计时。
+        // 旧快照没有时间戳时保留全部点，沿用按格估算的兼容路径。
+        var nowAt = WeatherClock.Now(s);
+        var live = Enumerable.Range(0, s.MinutePrecip.Length)
+            .Select(index => new MinutePoint { Time = index < s.MinuteTimes.Length ? s.MinuteTimes[index] : "", Precip = s.MinutePrecip[index] })
+            .Where(point => WeatherClock.MinuteAt(s, point.Time) is not { } at || at >= nowAt)
+            .ToArray();
+        var points = live.Select(point => point.Precip).ToArray();
         if (points.Length == 0)
         {
             _minuteHasRain = false;
@@ -654,7 +669,9 @@ internal sealed class WeatherView : UserControl
         _minuteHasRain = values.Any(v => v > 0);
         // 和风在同一响应里带整段总结（如「5分钟后开始下小雨，50分钟后就停了」），直接用原文；
         // Open-Meteo 没有这段总结，用第一个有雨点的真实时间戳减城市当前时刻，避免 15 分钟粒度被当成 5 分钟。
-        minuteNote.Text = s.MinuteSummary is { Length: > 0 } summary ? summary : RainStartNote(s, points);
+        // 缓存的相对时间总结只在对应预测区间还有效时照抄；雨点已全部过去就改显示无降水。
+        minuteNote.Text = s.MinuteSummary is { Length: > 0 } summary && points.Any(point => point is > 0)
+            ? summary : RainStartNote(s, live);
         double peakValue = Math.Max(0.2, values.Max());
         // 无雨时整行本来就隐藏，不重建 24 个柱子。
         if (!_minuteHasRain) { UpdateMinuteVisibility(); return; }
@@ -675,11 +692,11 @@ internal sealed class WeatherView : UserControl
     }
     // 没有来源总结时的兜底倒计时：取第一个有雨点的时间戳（与 MinutePrecip 同序），减城市当前时刻。
     // 时间戳缺失或解析失败再退回按格估算，避免把 15 分钟粒度当成 5 分钟。
-    private static string RainStartNote(WeatherSnapshot s, double?[] points)
+    private static string RainStartNote(WeatherSnapshot s, MinutePoint[] points)
     {
-        int first = Array.FindIndex(points, p => p is > 0);
+        int first = Array.FindIndex(points, p => p.Precip is > 0);
         if (first < 0) return Loc.T("未来 2 小时无降水", "No rain in the next 2 hours");
-        if (first < s.MinuteTimes.Length && WeatherClock.MinuteAt(s, s.MinuteTimes[first]) is { } start)
+        if (WeatherClock.MinuteAt(s, points[first].Time) is { } start)
         {
             int minutes = Math.Max(0, (int)Math.Ceiling((start - WeatherClock.Now(s)).TotalMinutes));
             return minutes == 0 ? Loc.T("正在下雨", "Raining now")
@@ -699,7 +716,8 @@ internal sealed class WeatherView : UserControl
         if (show)
         {
             double measured = summary.ActualHeight > 8 ? summary.ActualHeight : summaryMinHeight;
-            show = Height - 16 - 34 - measured >= StateHeight(2);
+            // 与预报升档同一阈值：窄条要占 34px，只有升到档 2 后才有空间容纳图标行。
+            show = Height - 16 - 34 - measured >= StateHeight(2) + UpgradeMargin;
         }
         minuteRow.Height = show ? new GridLength(34) : new GridLength(0);
         minuteStrip.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
