@@ -238,10 +238,27 @@ internal static class WeatherData
     {
         var snapshot = await WeatherAggregator.FetchAsync(city, schedule, sourceId, token, progress);
         token.ThrowIfCancellationRequested();
-        if (snapshot.Sources.Count > 0 || double.IsFinite(snapshot.Temperature)) return snapshot;
-        if (Snapshots.TryGetValue(CacheKey(city, sourceId), out var cached)) return cached;
+        if (HasWeather(snapshot)) return snapshot;
+        // 预警返回有效空列表也是成功，但不能因此把同城上次成功的实况/预报当成缺测覆盖掉。
+        if (Snapshots.TryGetValue(CacheKey(city, sourceId), out var cached))
+        {
+            if (snapshot.Sources.Count > 0)
+            {
+                cached = cached.ShallowCopy();
+                cached.Warnings = [.. snapshot.Warnings];
+                cached.Indices = [.. snapshot.Indices];
+                cached.Sources = new Dictionary<string, string>(cached.Sources, StringComparer.Ordinal);
+                foreach (var (domain, source) in snapshot.Sources) cached.Sources[domain] = source;
+            }
+            return cached;
+        }
         return snapshot;
     }
+
+    // 只有天气相关域的成功才算一次可用取数；只有预警/指数成功时回退同城缓存的天气。
+    internal static bool HasWeather(WeatherSnapshot snapshot)
+        => double.IsFinite(snapshot.Temperature) || snapshot.Sources.Keys.Any(domain =>
+            domain is "Current" or "Hourly" or "Daily" or "Air" or "History" or "Minutely");
 }
 
 // 本地逐时历史：每次快照落盘时把其中的整点数据按「城市 + 整点」累积，供下一个窗口的过去小时使用。

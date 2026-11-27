@@ -214,4 +214,6 @@ internal sealed class WeatherSnapshot
     public IndexItem[] Indices {get;set;}=[];
     // 每个数据域实际贡献的来源，例如 Daily → "和风天气 + 中国天气网"；页脚主来源取这里的 Daily/Current。
     public Dictionary<string,string> Sources {get;set;}=[];
+    // 只需替换扩展域时的浅拷贝：数组按引用共享，调用方只改写自己替换的属性。
+    internal WeatherSnapshot ShallowCopy() => (WeatherSnapshot)MemberwiseClone();
 }

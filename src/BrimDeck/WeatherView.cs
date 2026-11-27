@@ -525,7 +525,8 @@ internal sealed class WeatherView : UserControl
             Render(snapshot); _shownKey = key;
             // 定位/选择出的实际城市即缓存键：自动定位的快照也按位置存，AutoKey 记下映射。
             // 只回写天气快照与定位指针，不走整体 Save：设置页刚保存的城市/来源改动不被刷新流程覆盖。
-            WeatherData.SaveSnapshot(key, snapshot, AutoSelected ? key : null);
+            // 天气域全失败时 CurrentAsync 已回退同城缓存；若连缓存都没有，别用缺测快照覆盖已有数据。
+            if (WeatherData.HasWeather(snapshot)) WeatherData.SaveSnapshot(key, snapshot, AutoSelected ? key : null);
             _cycleStart = DateTime.UtcNow;
             // 下一次自动刷新从本次成功刷新重新起算，页头倒计时环与实际自动刷新时刻保持同步。
             timer.Stop(); timer.Start();

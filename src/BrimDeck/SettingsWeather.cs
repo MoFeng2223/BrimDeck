@@ -401,7 +401,7 @@ public sealed partial class SettingsWindow
                 if (!active || token.IsCancellationRequested || sourceId != state.Schedule.SourceFor(selectedCity)
                     || (selectedCity is not null && !state.Cities.Contains(selectedCity))) return;
                 var key = WeatherData.CacheKey(city, sourceId);
-                WeatherData.SaveSnapshot(key, snapshot, selectedCity is null ? key : null);
+                if (WeatherData.HasWeather(snapshot)) WeatherData.SaveSnapshot(key, snapshot, selectedCity is null ? key : null);
             }
             catch { }
             finally { UpdateCounters(); if (ReferenceEquals(fetchCts, request)) fetchCts = null; }
