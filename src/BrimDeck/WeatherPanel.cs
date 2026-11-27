@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -8,6 +8,27 @@ namespace BrimDeck;
 public partial class MainWindow
 {
     private WeatherView? _weatherView;
+    private WeatherData.State? _compactWeatherState;
+    private void CompactWeatherChanged() => Dispatcher.InvokeAsync(() =>
+    {
+        if (!_expanded && IsVisible && Settings.ShowsWeather(EffectiveStyle)) RenderCompact();
+    });
+
+    private FrameworkElement? CompactWeather(double scale)
+    {
+        if (!Settings.ShowsWeather(EffectiveStyle)) return null;
+        var state = _compactWeatherState ??= WeatherData.Load(() => Settings);
+        string key = state.Selected >= 0 && state.Selected < state.Cities.Count ? state.KeyFor(state.Cities[state.Selected]) : state.AutoKey;
+        if (!state.Cache.TryGetValue(key, out var snapshot) || !double.IsFinite(snapshot.Temperature)) return null;
+        var badge = new StackPanel { Orientation = Orientation.Horizontal, ToolTip = snapshot.Name };
+        if (snapshot.WeatherCode >= 0)
+            badge.Children.Add(new WeatherGlyph(snapshot.WeatherCode, snapshot.IsDay) { Width = 16 * scale, Height = 16 * scale, Margin = new Thickness(0, 0, 3 * scale, 0) });
+        badge.Children.Add(UI.Fixed($"{snapshot.Temperature:0}°", 13 * scale, 18 * scale, Look.Primary));
+        badge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        badge.Width = Math.Ceiling(badge.DesiredSize.Width);
+        badge.Height = badge.DesiredSize.Height;
+        return badge;
+    }
     private string _weatherSpin = "";
     private PromptTimer? _weatherRingTimer;
     private async void WeatherRefresh_Click(object sender, RoutedEventArgs e)

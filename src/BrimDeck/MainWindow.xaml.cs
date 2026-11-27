@@ -143,6 +143,8 @@ public partial class MainWindow : Window
             if (_expanded && !_preview) PointerChanged(_pointerInside);
         }) { Interval = TimeSpan.FromSeconds(1) };
         InitializeComponent();
+        WeatherData.SnapshotChanged += CompactWeatherChanged;
+        Closed += (_, _) => WeatherData.SnapshotChanged -= CompactWeatherChanged;
         // Out of sight until the boot (or, without animations, until it has its place): the window shows before it is placed.
         HoverZone.Opacity = 0;
         // The island stays in sight over a taskbar that Start or search has lifted above every application window, and above

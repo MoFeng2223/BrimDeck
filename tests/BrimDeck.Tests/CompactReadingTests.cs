@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using BrimDeck.Core;
 
 // The collapsed readings' table: migration from the old modes, presets, order, drop priority, widths and copies.
@@ -286,18 +286,18 @@ internal static class CompactReadingTests
     // The order of the collapsed parts: one per style, each part once, kept by copies and by saving.
     private static void PartOrder(Action<string, bool> check)
     {
-        CompactPart[] standard = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices, CompactPart.Equalizer, CompactPart.Clock];
+        CompactPart[] standard = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices, CompactPart.Weather, CompactPart.Equalizer, CompactPart.Clock];
         check("Compact order: by default the equalizer and the clock come last", new DeckSettings().NotchOrder.SequenceEqual(standard)
             && CompactParts.Default.SequenceEqual(standard));
         var odd = Read("""{"AppVersion":"0.1.0","NotchOrder":[2,9,2,0]}""");
-        check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactPart.Monitor, CompactPart.Rings, CompactPart.Music, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices])
+        check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactPart.Monitor, CompactPart.Rings, CompactPart.Music, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices, CompactPart.Weather])
             && odd.CapsuleOrder.SequenceEqual(standard));
         var older = Read("""{"AppVersion":"1.2.2","NotchOrder":[1,2,0]}""");
         check("Compact order: an order saved before the equalizer and the clock had a place puts the equalizer before the clock, at the end",
-            older.NotchOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices]));
+            older.NotchOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices, CompactPart.Weather]));
         var moved = Read("""{"AppVersion":"1.2.3","NotchOrder":[4,0,3,1,2]}""");
         check("Compact order: the equalizer and the clock keep a place chosen for them",
-            moved.NotchOrder.SequenceEqual([CompactPart.Clock, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices]));
+            moved.NotchOrder.SequenceEqual([CompactPart.Clock, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices, CompactPart.Weather]));
         var musicOff = Upgraded("""{"AppVersion":"1.2.2","NotchMusic":false}""");
         check("Compact equalizer: a file from before its own switch shows it as the music was shown",
             !musicOff.NotchEqualizer && musicOff.CapsuleEqualizer && !musicOff.EqualizerAlways && Upgraded("""{"AppVersion":"1.2.2"}""").NotchEqualizer);
@@ -320,6 +320,6 @@ internal static class CompactReadingTests
         check("Compact order: each style keeps its own and Copy is deep", settings.CompactOrder(CompactStyle.Capsule)[0] == CompactPart.Music
             && settings.CompactOrder(CompactStyle.Notch).SequenceEqual(standard));
         var read = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
-        check("Compact order: survives saving and reading", read.CapsuleOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices]));
+        check("Compact order: survives saving and reading", read.CapsuleOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices, CompactPart.Weather]));
     }
 }

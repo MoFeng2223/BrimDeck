@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -1196,10 +1196,12 @@ public partial class MainWindow
         // The devices' batteries keep one width too (as many devices as show, each with the room of its widest figure), counted with them.
         var devices = CompactDevices(scale);
         double devicesWidth = devices is null ? 0 : DevicePixels.Up(devices.PreferredWidth, dpi);
-        double transferWidth = transfer?.Width ?? 0, fixedFace = FixedFace(scale, clock?.ReservedWidth ?? 0, transferWidth, devicesWidth);
+        var weather = CompactWeather(scale);
+        double weatherWidth = weather?.Width ?? 0;
+        double transferWidth = transfer?.Width ?? 0, fixedFace = FixedFace(scale, clock?.ReservedWidth ?? 0, transferWidth, devicesWidth, weatherWidth);
         // The system readings ask for the width of everything chosen, on whole device pixels; the whole ones that fit their region show.
         var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings, Look), scale,
-            !(media && showCover) && !equalizer && apps.Count == 0 && text.Length == 0 && clock is null && transfer is null && devices is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden, _stripAdmission, coreDisplay: Settings.CoreDisplay, free: Settings.MonitorShowFree, matrixColumns: Settings.CoreMatrixColumns,
+            !(media && showCover) && !equalizer && apps.Count == 0 && text.Length == 0 && clock is null && transfer is null && devices is null && weather is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden, _stripAdmission, coreDisplay: Settings.CoreDisplay, free: Settings.MonitorShowFree, matrixColumns: Settings.CoreMatrixColumns,
                 coreCount: _app.Monitor?.Latest?.Cpu.OrDefault?.Cores.Count ?? 0) : null;
         _stripLayout = _stripAdmission.Layout;
         // Readings that do not fit scroll through a window of whole readings, as the rings do (CompactSpacing.Window).
@@ -1247,8 +1249,9 @@ public partial class MainWindow
         double titleFloor = hasText ? Math.Min(shortest, titleWanted) : 0;
         var ringWidths = apps.Select(_ => layout.RingSize).ToList();
         bool hasRings = ringWidths.Count > 0, hasReadings = readingWidths.Count > 0;
-        int parts = (hasCover ? 1 : 0) + (hasEqualizer ? 1 : 0) + (hasClock ? 1 : 0) + (hasTransfer ? 1 : 0) + (hasDevices ? 1 : 0) + (hasText ? 1 : 0) + (hasRings ? 1 : 0) + (hasReadings ? 1 : 0);
-        double others = (hasCover ? layout.CoverSize : 0) + (hasEqualizer ? layout.EqualizerSize : 0) + (hasClock ? clock!.ReservedWidth : 0) + (hasTransfer ? transferWidth : 0) + (hasDevices ? devicesWidth : 0) + Math.Max(0, parts - 1) * unit;
+        bool hasWeather = hasFixed && weather is not null;
+        int parts = (hasWeather ? 1 : 0) + (hasCover ? 1 : 0) + (hasEqualizer ? 1 : 0) + (hasClock ? 1 : 0) + (hasTransfer ? 1 : 0) + (hasDevices ? 1 : 0) + (hasText ? 1 : 0) + (hasRings ? 1 : 0) + (hasReadings ? 1 : 0);
+        double others = (hasWeather ? weatherWidth : 0) + (hasCover ? layout.CoverSize : 0) + (hasEqualizer ? layout.EqualizerSize : 0) + (hasClock ? clock!.ReservedWidth : 0) + (hasTransfer ? transferWidth : 0) + (hasDevices ? devicesWidth : 0) + Math.Max(0, parts - 1) * unit;
         double pool = SnapDown(contentWidth, dpi) - others - titleShare;
         // Too short for both narrowest windows, the title gives way down to its shortest.
         double needed = CompactSpacing.Minimum(ringWidths, layout.RingGap) + CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0);
@@ -1276,6 +1279,7 @@ public partial class MainWindow
         if (hasCover) shown.Add(("cover", new(layout.CoverSize)));
         foreach (var part in Settings.CompactOrder(EffectiveStyle))
         {
+            if (part == CompactPart.Weather && hasWeather) shown.Add((part, new(weatherWidth)));
             if (part == CompactPart.Rings && rings.Window > 0) shown.Add((part, new(rings.Window)));
             else if (part == CompactPart.Music && hasText) shown.Add((part, new(0)));
             else if (part == CompactPart.Monitor && readings.Window > 0) shown.Add((part, new(readings.Window)));
@@ -1294,6 +1298,8 @@ public partial class MainWindow
             FrameworkElement element;
             switch (shown[i].Part)
             {
+                case CompactPart.Weather:
+                    element = CompactRegion(weather!, room, weatherWidth, weather!.Height, row, RegionAnchor.Left, dpi); break;
                 case "cover":
                     var cover = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius, look: Look); AutomationProperties.SetName(cover, _mediaTrack!.Caption);
                     element = CompactRegion(cover, room, layout.CoverSize, layout.CoverSize, row, RegionAnchor.Left, dpi); break;
