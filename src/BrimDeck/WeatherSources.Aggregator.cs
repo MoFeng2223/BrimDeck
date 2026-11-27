@@ -228,10 +228,11 @@ internal static class WeatherAggregator
         foreach (var (time, point) in local)
             if (!hours.ContainsKey(time)) hours[time] = point;
         // 字典合并后顺序不保证有序（本地历史与预报源交错插入），先按整点键排好序再找锚点，窗口切片才可靠。
-        var anchor = DateTimeOffset.UtcNow.ToOffset(ClockOffset(zone, city)).AddHours(-1);
+        var anchor = DateTimeOffset.UtcNow.AddHours(-1);
         var hourList = Enumerable.Range(0, 24).Select(offset =>
         {
-            string time = HourKey(anchor.AddHours(offset));
+            var instant = anchor.AddHours(offset);
+            string time = HourKey(instant.ToOffset(ClockOffset(zone, city, instant)));
             return hours.GetValueOrDefault(time) ?? new HourPoint { Time = time };
         }).ToArray();
         if (air is not null && air.HourAqi.Count > 0)
@@ -440,9 +441,9 @@ internal static class WeatherAggregator
         return DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(Geo.UtcOffsetHours(city))).Date;
     }
     // 城市当地的「现在」：逐时窗口锚点按当地时钟算，查询国外城市时不能用用户本地时间。
-    private static TimeSpan ClockOffset(string? zone, City city)
+    private static TimeSpan ClockOffset(string? zone, City city, DateTimeOffset? instant = null)
         => zone is not null && TimeZoneInfo.TryFindSystemTimeZoneById(zone, out var info)
-            ? info.GetUtcOffset(DateTimeOffset.UtcNow) : TimeSpan.FromHours(Geo.UtcOffsetHours(city));
+            ? info.GetUtcOffset(instant ?? DateTimeOffset.UtcNow) : TimeSpan.FromHours(Geo.UtcOffsetHours(city, instant));
     // 整点键：与 HourPoint.Time 同一格式（yyyy-MM-ddTHH:mm，当地时钟），可直接做字符串比较。
     private static string HourKey(DateTimeOffset at)
         => new DateTimeOffset(at.Year, at.Month, at.Day, at.Hour, 0, 0, at.Offset).ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
