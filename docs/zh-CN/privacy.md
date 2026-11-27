@@ -15,6 +15,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | DeepSeek Harness | 读取 DeepSeek Harness 的登录（`%USERPROFILE%\.dsh\.credentials.yaml`），向 DeepSeek 开放平台查询账户余额与累计消费金额；未登录账户时，使用其中保存的 API 密钥查询余额 | 读取本地会话记录（`%USERPROFILE%\.dsh\sessions`） |
 | Kimi Code | 读取 Kimi Code 的登录（`%USERPROFILE%\.kimi-code\credentials\` 下的 `kimi-code.json`，海外版为 `kimi-code-env-…json`）、服务地址与站点设置（`config.toml`，以及可选的 `region` 文件），向所选站点（api.kimi.com 或 api.kimi.ai）查询套餐额度与会员等级；不续期登录，不修改 Kimi Code 的任何文件 | 读取本地会话记录（`%USERPROFILE%\.kimi-code\sessions`） |
 | OpenCode | 以只读方式读取 OpenCode 数据库（`%USERPROFILE%\.local\share\opencode\opencode.db`）中的 OpenCode Console 登录，没有时读取同一目录下 `auth.json` 中的 API 密钥，向 opencode.ai 查询 OpenCode Go 额度；不续期登录，不修改 OpenCode 的任何文件 | 以只读方式读取同一数据库中的模型请求记录 |
+| GitHub Copilot | 以只读方式读取 OpenCode 数据库或 `auth.json` 中的 GitHub.com Copilot 登录，只向 api.github.com 查询账户额度 | 本机会话统计可选用 OpenCode |
 | Command Code | 读取 Command Code 的登录密钥（`%USERPROFILE%\.commandcode\auth.json`），向 api.commandcode.ai 查询套餐额度、账期与本账期用量；不修改 Command Code 的任何文件 | 读取本地会话记录（`%USERPROFILE%\.commandcode\projects`）与模型目录中的单价（`%USERPROFILE%\.commandcode\cache\model-catalog`） |
 | WorkBuddy | 使用在设置中通过 WorkBuddy 官网登录获得的凭据（加密保存在 BrimDeck 设置目录的 `secrets.dat`），向 www.workbuddy.cn 查询积分余额、套餐名称与周期，过期时向同一地址续期；不读取 WorkBuddy 桌面版的登录，不修改 WorkBuddy 的任何文件 | 读取本地会话记录（`%USERPROFILE%\.workbuddy\projects`）中的 Token 数 |
 | WorkBuddy AI | 与 WorkBuddy 相同，凭据单独保存，只发往 www.workbuddy.ai；不读取 WorkBuddy AI 桌面版的登录 | 读取本地会话记录（`%USERPROFILE%\.workbuddy-ai\projects`）中的 Token 数 |

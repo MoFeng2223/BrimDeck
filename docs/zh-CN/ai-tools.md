@@ -20,6 +20,7 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 | Kimi Code | ✓ | ✓ | 在本机登录 Kimi Code（CLI、桌面版或 VS Code 扩展） |
 | Pi | | ✓ | 在本机使用 Pi Coding Agent（读取会话 Token 与费用统计） |
 | OpenCode | ✓ | ✓ | 配额：在本机的 OpenCode（CLI 或桌面版）中登录 OpenCode Console，且工作区订阅了 OpenCode Go。用量统计只需在本机使用 OpenCode |
+| GitHub Copilot | ✓ | | 在本机 OpenCode 中登录 GitHub.com Copilot。要在同一张卡片上显示本机 Token 统计，将用量来源选为 OpenCode |
 | Command Code | ✓ | ✓ | 在本机登录 Command Code（CLI 或桌面版） |
 | WorkBuddy | ✓ | ✓ | 配额：在设置中通过浏览器登录 WorkBuddy 官网。用量统计只需在本机使用 WorkBuddy 国内版桌面应用 |
 | WorkBuddy AI | ✓ | ✓ | 配额：在设置中通过浏览器登录 WorkBuddy 国际版官网。用量统计只需在本机使用 WorkBuddy AI 桌面应用 |

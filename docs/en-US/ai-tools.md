@@ -20,6 +20,7 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | Kimi Code | ✓ | ✓ | Sign in to Kimi Code (CLI, desktop app or VS Code extension) on this PC |
 | Pi | | ✓ | Use Pi Coding Agent on this PC (reads session token and cost statistics) |
 | OpenCode | ✓ | ✓ | Quota: sign in to OpenCode Console in OpenCode (CLI or desktop app) on this PC, with an OpenCode Go plan on the workspace. Usage only needs OpenCode to be used on this PC |
+| GitHub Copilot | ✓ | | Sign in to GitHub.com Copilot in OpenCode on this PC. Select OpenCode as the usage source to show local token statistics in the same card |
 | Command Code | ✓ | ✓ | Sign in to Command Code (CLI or desktop app) on this PC |
 | WorkBuddy | ✓ | ✓ | Quota: sign in on the WorkBuddy website in the browser from settings. Usage only needs the WorkBuddy China edition desktop app to be used on this PC |
 | WorkBuddy AI | ✓ | ✓ | Quota: sign in on the WorkBuddy AI website in the browser from settings. Usage only needs the WorkBuddy AI desktop app to be used on this PC |
