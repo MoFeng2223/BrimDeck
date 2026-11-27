@@ -68,9 +68,9 @@ public sealed record IgnoredMediaApp(string AppId = "", string Name = "", string
 public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, OpenCode = 17, OpenCodeGo = 18, OpenRouter = 19, Pi = 20, CodeAgent = 21, CommandCode = 22, CommandCodeApi = 23, WorkBuddy = 24, WorkBuddyAi = 25, MiMo = 26, MiMoApi = 27, MiMoTokenPlan = 28, MiMoLinked = 29, KimiPlatform = 30, Qoder = 31, QoderCn = 32, Qianwen = 33, QwenCloud = 34, QwenWorkCn = 35, QwenWork = 36, Trae = 37, TraeCn = 38, Doubao = 39, Dola = 40, VolcengineArk = 41, BytePlusArk = 42 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckSettings.PageOrder.
-public enum DeckPage { Usage, Music, Monitor, Clipboard, Devices }
+public enum DeckPage { Usage, Music, Monitor, Clipboard, Devices, PowerPlans }
 // Hover: the page of the collapsed part under the pointer (MainWindow.Hover.cs); over a part that names none, the last page.
-public enum DefaultDeckPage { Last, Usage, Music, Monitor, Clipboard, Devices, Hover }
+public enum DefaultDeckPage { Last, Usage, Music, Monitor, Clipboard, Devices, Hover, PowerPlans }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
 // What a double click on an end of the collapsed notch or capsule does: turn its auto width on or off, or start moving it
@@ -727,6 +727,10 @@ public sealed class DeckSettings
     public bool DevicesPage { get; set; } = true;
     public double DevicesWidth { get; set; } = 460;
     public double DevicesHeight { get; set; } = 200;
+    // The power plan switcher page: enumerates and switches Windows power schemes.
+    public bool PowerPlanPage { get; set; } = true;
+    public double PowerPlanWidth { get; set; } = 460;
+    public double PowerPlanHeight { get; set; } = 200;
     // The devices' order, names and where each shows (DeviceLists), by their key (DeviceBattery.Key). Empty until the user changes
     // the list; a device not in it shows everywhere, after those that are.
     public List<DeviceChoice> DeviceChoices { get; set; } = [];
@@ -945,6 +949,8 @@ public sealed class DeckSettings
         MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : MonitorSizes.Default.Width;
         DevicesWidth = double.IsFinite(DevicesWidth) ? Math.Clamp(DevicesWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : 460;
         DevicesHeight = double.IsFinite(DevicesHeight) ? Math.Clamp(DevicesHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
+        PowerPlanWidth = double.IsFinite(PowerPlanWidth) ? Math.Clamp(PowerPlanWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : 460;
+        PowerPlanHeight = double.IsFinite(PowerPlanHeight) ? Math.Clamp(PowerPlanHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
         DeviceChoices = [.. (DeviceChoices ?? []).OfType<DeviceChoice>().Where(device => !string.IsNullOrWhiteSpace(device.Key)).DistinctBy(device => device.Key).Take(256)];
         foreach (var device in DeviceChoices)
         {

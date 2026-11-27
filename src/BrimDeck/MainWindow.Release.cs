@@ -44,6 +44,10 @@ public partial class MainWindow
                     ShelfToolbar.Children.Clear(); _shelfRows.Clear(); _shelfTabs.Clear(); _fileFrame = null; _searchBox = null; _editBox = null;
                     _shelfBuilt = null; _shelfStale = true;
                     break;
+                case DeckPage.PowerPlans:
+                    held |= _powerPlanView is not null;
+                    _powerPlanView = null; _powerPlanKey = "";
+                    break;
             }
             released |= held;
         }
