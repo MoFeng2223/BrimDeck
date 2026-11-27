@@ -359,7 +359,7 @@ public sealed partial class SettingsWindow
         cardGrid.Children.Add(CardField(Loc.T("API Host", "API Host"),
             TextField(state.Schedule.HeFengHost, text => { state.Schedule.HeFengHost = text; Save(); HeFengMonitor.Invalidate(); }), null, 0, 0));
         cardGrid.Children.Add(CardField(Loc.T("API Key", "API Key"),
-            SecretField(state.Schedule.HeFengKey, text => { state.Schedule.HeFengKey = text; Save(); HeFengMonitor.Invalidate(); }), null, 0, 2));
+            SecretField(WeatherSecrets.Key, text => { WeatherSecrets.Write(text); state.Schedule.HeFengKeyConfigured = WeatherSecrets.Key.Length > 0; Save(); HeFengMonitor.Invalidate(); }), null, 0, 2));
         cardGrid.Children.Add(CardField(Loc.T("每日上限", "Daily limit"),
             LimitField(() => state.Schedule.HeFengDailyLimit, v => state.Schedule.HeFengDailyLimit = v, UpdateCounters), dailyCounter, 1, 0));
         cardGrid.Children.Add(CardField(Loc.T("每月上限", "Monthly limit"),

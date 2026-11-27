@@ -14,6 +14,17 @@ public interface IProviderSecrets
     void Delete(Guid instanceId);
 }
 
+// 和风 API Key 与其它提供方密钥共用 DPAPI 存储：固定的 Guid 区别于每个配置行的随机实例 ID。
+// 设置里只留「已配置」标记，密钥不随 settings.json 或配置档案流转。
+public static class WeatherSecrets
+{
+    public static readonly Guid KeyId = new("6f1c9b0e-8a2d-4f57-b3a6-0d5e4a71cf92");
+    private static IProviderSecrets? _store;
+    public static void Use(IProviderSecrets store) => _store = store;
+    public static string Key => _store?.Read(KeyId) ?? "";
+    public static void Write(string key) => _store?.Write(KeyId, key.Trim());
+}
+
 public sealed record ProviderTestResult(ProviderSnapshot Snapshot, double Seconds, IReadOnlyList<string> Logs);
 
 internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secret, DateTimeOffset now, CancellationToken cancellation, string? memory = null)

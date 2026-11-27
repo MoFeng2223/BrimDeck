@@ -112,7 +112,7 @@ internal static class WeatherData
             string plain = new(raw.Where(ch => ch is not ('\'' or '’')).ToArray());
             if (plain.Length > 0 && plain != raw) attempts.Insert(0, plain);
         }
-        if (settings.HeFengKey.Trim().Length > 0 && settings.HeFengHost.Trim().Length > 0)
+        if (WeatherSecrets.Key.Length > 0 && settings.HeFengHost.Trim().Length > 0)
         {
             bool failed = false;
             foreach (var attempt in attempts)
@@ -154,7 +154,7 @@ internal static class WeatherData
         // 不该把城市搜索一起停掉——否则用户搜新词会全部落空，看起来像搜索坏了。
         // 超时 8 秒：搜索是交互操作，不该让输入框等满 20 秒。
         var result = await WeatherHttp.GetAsync("hefeng", $"{host}/geo/v2/city/lookup?location={Uri.EscapeDataString(query)}&number=10&lang={lang}", token,
-            request => request.Headers.TryAddWithoutValidation("X-QW-Api-Key", settings.HeFengKey.Trim()), 8, settings);
+            request => request.Headers.TryAddWithoutValidation("X-QW-Api-Key", WeatherSecrets.Key), 8, settings);
         if (result.Body is { Length: > 0 } raw)
         {
             using var probe = JsonDocument.Parse(raw);
@@ -181,7 +181,7 @@ internal static class WeatherData
     // 3) 无和风 Key：退回按 IP 城市名搜索或直接用 IP 返回的地名拼装。
     internal static async Task<City?> LocateAsync(WeatherSettings settings, CancellationToken token)
     {
-        bool hefeng=settings.HeFengKey.Trim().Length>0&&settings.HeFengHost.Trim().Length>0;
+        bool hefeng=WeatherSecrets.Key.Length>0&&settings.HeFengHost.Trim().Length>0;
         // 阶段一（Windows 定位 → 和风反查区县）与阶段二（IP 定位）分开 try/catch：
         // 反查抛异常时不清空已取得的系统坐标，流程落到 IP 阶段继续——只丢「区县级」精度，不丢定位本身。
         (double Lat,double Lon)? precise=null;

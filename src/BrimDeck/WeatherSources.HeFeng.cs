@@ -12,7 +12,7 @@ internal sealed class HeFengSource : IWeatherSource
     public WeatherSourceInfo Info { get; } = new(Id, Loc.T("和风天气", "QWeather"),
         // 官方「天气和基础服务」每月前 5 万次免费（个人用量等于免费）；台风/辐照/海洋等付费或无坐标接口的能力不接入。
         [WeatherDomain.Current, WeatherDomain.Hourly, WeatherDomain.Daily, WeatherDomain.Air, WeatherDomain.History, WeatherDomain.Minutely, WeatherDomain.Warning, WeatherDomain.Indices]);
-    public bool CanServe(City city, WeatherSettings settings) => settings.HeFengKey.Trim().Length > 0 && settings.HeFengHost.Trim().Length > 0;
+    public bool CanServe(City city, WeatherSettings settings) => settings.HeFengKeyConfigured && settings.HeFengHost.Trim().Length > 0;
 
     // 一次请求要用到的公共参数：坐标只保留两位小数（v1 只认这个精度）。
     private sealed record Context(string Host, string Key, City City, WeatherSettings Settings)
@@ -38,7 +38,7 @@ internal sealed class HeFengSource : IWeatherSource
     internal static async Task ProbeAsync(WeatherSettings settings, CancellationToken token)
     {
         // 先判空再归一化：NormalizeHost("") 会得到 "https://"，拿它当有效 Host 会白发一个必失败的请求。
-        string rawHost = settings.HeFengHost.Trim(), key = settings.HeFengKey.Trim();
+        string rawHost = settings.HeFengHost.Trim(), key = WeatherSecrets.Key;
         if (rawHost.Length == 0 || key.Length == 0) return;
         string host = NormalizeHost(rawHost);
         var context = new Context(host, key, new City("北京", 39.90, 116.41), settings);
@@ -47,7 +47,7 @@ internal sealed class HeFengSource : IWeatherSource
 
     public async Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
     {
-        var context = new Context(NormalizeHost(settings.HeFengHost), settings.HeFengKey.Trim(), city, settings);
+        var context = new Context(NormalizeHost(settings.HeFengHost), WeatherSecrets.Key, city, settings);
         // 历史单独占一段：时光机只认 LocationID、一天一次请求，挂在独立的第二轮，不混进首屏。
         // 延后轮次可能把历史与预警/指数等一起送来，这里按需拆分，互不干扰。
         bool wantHistory = need.Contains(WeatherDomain.History);
