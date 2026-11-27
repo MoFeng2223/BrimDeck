@@ -13,7 +13,7 @@ public partial class MainWindow
 
     private string PowerPlanKey() => string.Join("|", Loc.Language, Look.Generation, SystemParameters.HighContrast);
 
-    private void RenderPowerPlans()
+    private void RenderPowerPlans(bool refresh = true)
     {
         RefreshStatus();
         UsageContent.Visibility = Visibility.Collapsed;
@@ -34,7 +34,7 @@ public partial class MainWindow
         var key = PowerPlanKey();
         if (_powerPlanView is not null && key == _powerPlanKey && PowerPlanContent.Children.Contains(_powerPlanView))
         {
-            _powerPlanView.RefreshPlans();
+            if (refresh) _powerPlanView.RefreshPlans();
             return;
         }
         _powerPlanKey = key;

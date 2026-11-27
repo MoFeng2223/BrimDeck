@@ -21,6 +21,7 @@ internal sealed class PowerPlanView : Grid
     private readonly List<(Guid Id, Border Card, Border Dot, Path Icon, TextBlock Name, TextBlock State)> _cards = [];
     private IReadOnlyList<PowerPlanInfo> _plans = [];
     private Guid? _hovered;
+    private Guid? _pressed;
     private string? _statusMessage;
     private bool _statusIsError;
 
@@ -79,7 +80,7 @@ internal sealed class PowerPlanView : Grid
         bool sameRoster = plans.Count == _plans.Count
             && plans.Select((p, i) => p.Id == _plans[i].Id && p.Name == _plans[i].Name && p.Description == _plans[i].Description).All(x => x);
         _plans = plans;
-        if (!sameRoster || _cards.Count != plans.Count)
+        if (!sameRoster || _cards.Count != plans.Count || _grid.Children.Count == 0)
             RebuildCards();
         else
             UpdateCardStates();
@@ -205,7 +206,28 @@ internal sealed class PowerPlanView : Grid
             var planId = plan.Id;
             card.MouseEnter += (_, _) => { _hovered = planId; UpdateCardStates(); };
             card.MouseLeave += (_, _) => { if (_hovered == planId) { _hovered = null; UpdateCardStates(); } };
-            card.MouseLeftButtonUp += (_, e) => { ActivatePlan(planId); e.Handled = true; };
+            card.MouseLeftButtonDown += (_, e) =>
+            {
+                _pressed = planId;
+                card.CaptureMouse();
+                UpdateCardStates();
+                e.Handled = true;
+            };
+            card.MouseLeftButtonUp += (_, e) =>
+            {
+                bool sameCard = _pressed == planId;
+                _pressed = null;
+                if (card.IsMouseCaptured) card.ReleaseMouseCapture();
+                var pos = e.GetPosition(card);
+                bool inside = pos.X >= 0 && pos.Y >= 0 && pos.X <= card.ActualWidth && pos.Y <= card.ActualHeight;
+                if (sameCard && inside) ActivatePlan(planId);
+                else UpdateCardStates();
+                e.Handled = true;
+            };
+            card.LostMouseCapture += (_, _) =>
+            {
+                if (_pressed == planId) { _pressed = null; UpdateCardStates(); }
+            };
             card.KeyDown += (_, e) =>
             {
                 if (e.Key is Key.Enter or Key.Space) { ActivatePlan(planId); e.Handled = true; }
@@ -259,6 +281,7 @@ internal sealed class PowerPlanView : Grid
         string accentGraphic = look.Readable(look.Hex("accent"));
         var activeFill = UI.Brush(look.Hex("fillSelected"));
         var hoverFill = UI.Brush(look.Hex("hover"));
+        var pressedFill = UI.Brush(look.Hex("pressed"));
         var normalFill = UI.Brush(look.Hex("fill"));
         var hairline = UI.Brush(look.Hex("hairline"));
         var activeBorder = UI.Brush(accentGraphic);
@@ -274,8 +297,9 @@ internal sealed class PowerPlanView : Grid
             var plan = _plans[i];
             bool active = plan.IsActive;
             bool hovered = _hovered == id;
+            bool pressed = _pressed == id;
 
-            card.Background = active ? activeFill : hovered ? hoverFill : normalFill;
+            card.Background = active ? activeFill : pressed ? pressedFill : hovered ? hoverFill : normalFill;
             card.BorderBrush = active ? activeBorder : hovered ? UI.Brush(look.Hex("outline")) : hairline;
 
             icon.Stroke = active ? accentDotBrush : hovered ? primary : secondary;

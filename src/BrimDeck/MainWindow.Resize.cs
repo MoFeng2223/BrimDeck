@@ -345,7 +345,7 @@ public partial class MainWindow
         // the size).
         if (_resizePage == DeckPage.Monitor) RenderMonitor();
         else if (_resizePage == DeckPage.Devices) RenderDevices();
-        else if (_resizePage == DeckPage.PowerPlans) RenderPowerPlans();
+        else if (_resizePage == DeckPage.PowerPlans) RenderPowerPlans(refresh: false);
         // The clipboard page is built again only where its sizes step; in between its columns stretch (StretchShelf). It is built
         // once more when the size is saved (FinishResize).
         else if (_resizePage == DeckPage.Clipboard) StretchShelf();
