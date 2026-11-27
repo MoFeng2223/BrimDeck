@@ -102,7 +102,7 @@ internal sealed class WeatherView : UserControl
     private bool _renderFailed;
     private string _shownKey = "";   // 当前画面显示的是哪座城市（缓存键）：显示数据与城市绑定，换城不残留
     // 排队中的部分结果：历史单独一轮时 partial 与终版只隔几十毫秒，合并到一次渲染。
-    private WeatherSnapshot? _pendingPartial;
+    private Action? _pendingPartial;
     private bool _partialQueued;
     // 重画节流：拖动改宽度时 Fit 每帧都会被调用，而重建 24 列的列元素与折线并不便宜。
     // 画布宽度与列数当场更新，真正重建最多 30fps，落后的一帧由 _flush 补上。
@@ -382,6 +382,8 @@ internal sealed class WeatherView : UserControl
     private double ChartBand() { double h = chart.ActualHeight; return !double.IsNaN(h) && h >= 20 ? h : ChartMinHeight; }
     private readonly Grid host = new();
     private bool fetching;
+    private (int Index, City? City, string Source) Selection => (state.Selected, AutoSelected ? null : state.Cities[state.Selected], state.Schedule.SourceFor(AutoSelected ? null : state.Cities[state.Selected]));
+    private (int Index, City? City, string Source) _activeSelection;
     private CancellationTokenSource? _token;
     private DateTimeOffset _cycleStart = DateTime.UtcNow;
     internal bool IsFetching => fetching;
@@ -481,9 +483,9 @@ internal sealed class WeatherView : UserControl
 
     private async Task EnsureFreshAsync()
     {
-        if (fetching) return;
+        if (fetching && _activeSelection == Selection) return;
         var key = AutoSelected ? state.AutoKey : state.KeyFor(state.Cities[state.Selected]);
-        if (_shownKey == key && _last is { } snapshot && DateTimeOffset.Now - snapshot.FetchedAt < AutoInterval) return;
+        if (!fetching && _shownKey == key && _last is { } snapshot && DateTimeOffset.Now - snapshot.FetchedAt < AutoInterval) return;
         await Refresh();
     }
 
@@ -501,7 +503,10 @@ internal sealed class WeatherView : UserControl
         var cts = new CancellationTokenSource();
         _token = cts;
         var token = cts.Token;
-        int request = ++generation; var selected = state.Selected;
+        int request = ++generation;
+        var selection = _activeSelection = Selection;
+        var selected = selection.Index;
+        bool StillSelected() => request == generation && selection == Selection && !token.IsCancellationRequested;
         // 缓存键一律是实际城市键：手动选城市用所选城市的键，自动定位用 AutoKey 指向的键；
         // "auto" 只在 AutoKey 里做映射，不是数据键。AutoKey 为空（首启动）时跳过缓存预渲染。
         string key = selected >= 0 && selected < state.Cities.Count ? state.KeyFor(state.Cities[selected]) : state.AutoKey;
@@ -517,7 +522,7 @@ internal sealed class WeatherView : UserControl
             {
                 var located = await WeatherData.LocateAsync(state.Schedule, token);
                 token.ThrowIfCancellationRequested();
-                if (selected != state.Selected || request != generation) return;
+                if (!StillSelected()) return;
                 if (located is null)
                 {
                     if (_last is null) ShowEmpty();
@@ -526,12 +531,16 @@ internal sealed class WeatherView : UserControl
                 city = located;
             }
             // 旧请求交给 token 中断；generation 只在部分结果回写时挡一次，避免迟到的首屏覆盖新请求。
-            var sourceId = state.Schedule.SourceFor(selected < 0 ? null : city);
+            var sourceId = selection.Source;
             key = WeatherData.CacheKey(city, sourceId);
             // 定位后可能换成另一座城市：同样走切城逻辑，没缓存就清空旧画面，别等数据到了才发现城市标签不对。
             ShowKey(key);
-            var snapshot = await WeatherData.CurrentAsync(city, state.Schedule, sourceId, token, partial => { if (request == generation && selected == state.Selected && sourceId == state.Schedule.SourceFor(selected < 0 ? null : city) && (_shownKey != key || _last is null)) QueuePartial(partial, key, request); });
-            if (request != generation || selected != state.Selected || token.IsCancellationRequested || sourceId != state.Schedule.SourceFor(selected < 0 ? null : city)) return;
+            var snapshot = await WeatherData.CurrentAsync(city, state.Schedule, sourceId, token, partial => { if (StillSelected() && (_shownKey != key || _last is null)) QueuePartial(partial, key, StillSelected); });
+            if (!StillSelected())
+            {
+                if (!token.IsCancellationRequested && WeatherData.HasWeather(snapshot)) WeatherData.SaveSnapshot(key, snapshot);
+                return;
+            }
             // 终版马上就到：作废还没执行的 partial，避免一次刷新把整页重建两遍。
             _pendingPartial = null;
             Render(snapshot); _shownKey = key;
@@ -544,7 +553,7 @@ internal sealed class WeatherView : UserControl
             timer.Stop(); timer.Start();
         } catch (OperationCanceledException) {
             // 取消即本轮作废，界面与状态由新的 Refresh 接管（画面已是目标城市自己的缓存或空态）。
-        } catch { if (request == generation && (_last is null || _shownKey != key)) { _pendingPartial = null; _renderSignature = 0; summary.Children.Clear(); summary.Children.Add(new TextBlock { Text = Loc.T("天气数据不可用", "Weather data unavailable"), FontSize = 20, VerticalAlignment = VerticalAlignment.Center }); } }
+        } catch { if (StillSelected() && (_last is null || _shownKey != key)) { _pendingPartial = null; _renderSignature = 0; summary.Children.Clear(); summary.Children.Add(new TextBlock { Text = Loc.T("天气数据不可用", "Weather data unavailable"), FontSize = 20, VerticalAlignment = VerticalAlignment.Center }); } }
         finally { if (ReferenceEquals(_token, cts)) { fetching = false; _token = null; } cts.Dispose(); RaiseState(); }
     }
     // 切城：键变了就显示新城市的缓存；没有缓存则清空旧画面。键未变时保留本城数据（含部分结果）。
@@ -573,18 +582,17 @@ internal sealed class WeatherView : UserControl
     }
     // 部分结果（不含历史）与终版通常只隔几十毫秒：合并到一次渲染，避免一次刷新把整页重建两遍。
     // 终版到达时会清空 _pendingPartial，排队中的这帧于是直接空转，不会用旧数据盖掉新画面。
-    private void QueuePartial(WeatherSnapshot snapshot, string key, int request)
+    private void QueuePartial(WeatherSnapshot snapshot, string key, Func<bool> stillSelected)
     {
-        _pendingPartial = snapshot;
+        _pendingPartial = () => { if (stillSelected()) { Render(snapshot); _shownKey = key; } };
         if (_partialQueued) return;
         _partialQueued = true;
         Dispatcher.BeginInvoke(DispatcherPriority.Render, new Action(() =>
         {
             _partialQueued = false;
-            if (_pendingPartial is not { } s) return;
+            var render = _pendingPartial;
             _pendingPartial = null;
-            if (request != generation) return;
-            Render(s); _shownKey = key;
+            render?.Invoke();
         }));
     }
     // 列数几何的唯一计算点：宽度→列数、快照→实际列数，Fit（判变）与 Render（重画）共用。
