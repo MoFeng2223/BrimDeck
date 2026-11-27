@@ -54,7 +54,32 @@ public static class PowerSchemes
         {
             Marshal.FreeHGlobal(buffer);
         }
-        return list;
+        return FilterDisplayPlans(list);
+    }
+
+    // On ASUS systems with Armoury Crate's standard Silent / Performance / Turbo plans, show those three in order
+    // (hiding duplicate Windows Balanced and PD-only variants). Non-ASUS systems keep all enumerated plans.
+    private static IReadOnlyList<PowerPlanInfo> FilterDisplayPlans(List<PowerPlanInfo> plans)
+    {
+        if (!HasAsusThermalInterface()) return plans;
+        var silent = plans.FirstOrDefault(p => p.Name.Equals("Silent", StringComparison.OrdinalIgnoreCase));
+        var performance = plans.FirstOrDefault(p => p.Name.Equals("Performance", StringComparison.OrdinalIgnoreCase));
+        var turbo = plans.FirstOrDefault(p => p.Name.Equals("Turbo", StringComparison.OrdinalIgnoreCase));
+        if (silent is not null && performance is not null && turbo is not null)
+            return [silent, performance, turbo];
+        return plans;
+    }
+
+    private static bool HasAsusThermalInterface()
+    {
+        const uint GenericReadWrite = 0xC0000000;
+        const uint FileShareReadWrite = 3;
+        const uint OpenExisting = 3;
+        const uint FileAttributeNormal = 0x80;
+        IntPtr handle = CreateFileW(@"\\.\ATKACPI", GenericReadWrite, FileShareReadWrite, IntPtr.Zero, OpenExisting, FileAttributeNormal, IntPtr.Zero);
+        if (handle == IntPtr.Zero || handle == new IntPtr(-1)) return false;
+        CloseHandle(handle);
+        return true;
     }
 
     public static Guid? GetActive()

@@ -91,11 +91,12 @@ internal sealed class PowerPlanView : Grid
         if (width <= 0) return;
         int count = _plans.Count;
         int cols = width >= 640 ? 4
-            : width >= 400 ? (count <= 4 ? 2 : 3)
+            : width >= 400 ? (count == 3 || count >= 5 ? 3 : 2)
             : 2;
         if (count > 0) cols = Math.Min(cols, count);
         if (cols < 1) cols = 1;
         if (_grid.Columns != cols) _grid.Columns = cols;
+        _grid.VerticalAlignment = count <= cols ? VerticalAlignment.Center : VerticalAlignment.Top;
     }
 
     private void RebuildCards()
