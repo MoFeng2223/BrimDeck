@@ -515,7 +515,7 @@ internal sealed partial class MonitorView : Grid
         // An open card follows its app's readings; it closes when the app has left the list.
         if (_card is not null)
         {
-            var sample = _processes?.Top.Concat(_processes.ByMemory).FirstOrDefault(s => s.Id == _card.Id);
+            var sample = _processes?.For(_card.Id, _list?.Sort ?? ProcessSort.Cpu);
             if (sample is null) CloseCard(animate: true); else _card.Show(sample, _cores, _layout.Body, _layout.Caption);
         }
     }

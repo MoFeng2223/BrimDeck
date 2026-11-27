@@ -1037,7 +1037,7 @@ internal sealed partial class Renderer(App app, string output, string language, 
             App(3304, "Windows PowerShell", "powershell.exe", [9, 8, 9, 8, 9], 160, 2, Path.Combine(system, @"WindowsPowerShell\v1.0\powershell.exe")),
             App(2210, "Microsoft Edge", "msedge.exe", [6, 7, 6, 7, 6], 720, 5)
         ];
-        var processes = new ProcessList(ProcessSample.Folded(apps, ProcessSort.Cpu), ProcessSample.Folded(apps, ProcessSort.Memory));
+        var processes = new ProcessList(ProcessSample.Folded(apps, ProcessSort.Cpu), ProcessSample.Folded(apps, ProcessSort.Memory), ProcessSample.Folded(apps, ProcessSort.Gpu));
         double[] History(Func<int, double> reading) => [.. Enumerable.Range(tick - 59, 60).Select(reading)];
         // Two solid-state drives, the first split into two letters; a laptop on mains, charging; and the power the processor and
         // the graphics card report, which the page calls an estimate.

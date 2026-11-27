@@ -223,17 +223,21 @@ public static class GpuEngines
     { "3D" => "3D", "Compute" => "CMP", "Copy" => "CPY", "VideoDecode" => "DEC", "VideoEncode" => "ENC", "VideoProcessing" => "VP", _ => kind.Length <= 3 ? kind : kind[..3].ToUpperInvariant() };
 }
 
-// A process folded into an app's entry. CpuPercent is percent of one core, like ProcessSample's.
-public sealed record ProcessMember(string Name, double CpuPercent, ulong MemoryBytes);
+// A process folded into an app's entry. CpuPercent is percent of one core, like ProcessSample's; GpuPercent is that process's
+// busiest graphics engine, as Task Manager's GPU column.
+public sealed record ProcessMember(string Name, double CpuPercent, ulong MemoryBytes, double GpuPercent = 0);
 
-public enum ProcessSort { Cpu, Memory }
+public enum ProcessSort { Cpu, Memory, Gpu }
 
 // A row of the process list: one process, or an app with its other processes folded in.
 // CpuPercent is percent of one core as it is measured (250 is two and a half cores); the page shows it as a share of the
 // whole machine (MonitorFormat.ProcessShare), so an app never passes 100 %. MemoryBytes is the private working set, the
-// figure Task Manager shows. AppKey identifies the executable an entry folds by; null keeps the process on its own.
+// figure Task Manager shows. GpuPercent is the busiest graphics engine for the process (0..100+), as Task Manager's GPU
+// column; the page shows it as a percent (MonitorFormat.ProcessGpu). AppKey identifies the executable an entry folds by;
+// null keeps the process on its own.
 public sealed record ProcessSample(int Pid, string Name, double CpuPercent, ulong MemoryBytes, string? AppKey = null, string? Path = null)
 {
+    public double GpuPercent { get; init; }
     public IReadOnlyList<ProcessMember> Members { get; init; } = [];
     // Stable while the entry stays in the list: the app, or the process.
     public string Id => AppKey ?? "pid " + Pid;
@@ -249,8 +253,15 @@ public sealed record ProcessSample(int Pid, string Name, double CpuPercent, ulon
             if (!groups.TryGetValue(sample.Id, out var group)) { groups[sample.Id] = group = []; order.Add(sample.Id); }
             group.Add(sample);
         }
-        int Heavier(ProcessSample first, ProcessSample second) => sort == ProcessSort.Cpu && first.CpuPercent != second.CpuPercent
-            ? second.CpuPercent.CompareTo(first.CpuPercent) : second.MemoryBytes.CompareTo(first.MemoryBytes);
+        int Heavier(ProcessSample first, ProcessSample second) => sort switch
+        {
+            ProcessSort.Cpu when first.CpuPercent != second.CpuPercent => second.CpuPercent.CompareTo(first.CpuPercent),
+            ProcessSort.Gpu when first.GpuPercent != second.GpuPercent => second.GpuPercent.CompareTo(first.GpuPercent),
+            ProcessSort.Memory when first.MemoryBytes != second.MemoryBytes => second.MemoryBytes.CompareTo(first.MemoryBytes),
+            ProcessSort.Cpu => second.MemoryBytes.CompareTo(first.MemoryBytes),
+            ProcessSort.Gpu => second.CpuPercent.CompareTo(first.CpuPercent),
+            _ => second.CpuPercent.CompareTo(first.CpuPercent)
+        };
         var entries = order.Select(key =>
         {
             var group = groups[key];
@@ -260,7 +271,8 @@ public sealed record ProcessSample(int Pid, string Name, double CpuPercent, ulon
             return head with
             {
                 CpuPercent = group.Sum(sample => sample.CpuPercent), MemoryBytes = (ulong)group.Sum(sample => (decimal)sample.MemoryBytes),
-                Members = group.Select(sample => new ProcessMember(sample.Name, sample.CpuPercent, sample.MemoryBytes)).ToList()
+                GpuPercent = group.Sum(sample => sample.GpuPercent),
+                Members = group.Select(sample => new ProcessMember(sample.Name, sample.CpuPercent, sample.MemoryBytes, sample.GpuPercent)).ToList()
             };
         }).ToList();
         entries.Sort(Heavier);
@@ -268,10 +280,24 @@ public sealed record ProcessSample(int Pid, string Name, double CpuPercent, ulon
     }
 }
 
-// Top is ranked by processor use, ByMemory by memory, both folded.
-public sealed record ProcessList(IReadOnlyList<ProcessSample> Top, IReadOnlyList<ProcessSample> ByMemory)
+// Top is ranked by processor use, ByMemory by memory, ByGpu by graphics use, each folded.
+public sealed record ProcessList(IReadOnlyList<ProcessSample> Top, IReadOnlyList<ProcessSample> ByMemory, IReadOnlyList<ProcessSample> ByGpu)
 {
-    public IReadOnlyList<ProcessSample> Ranked(ProcessSort sort) => sort == ProcessSort.Memory ? ByMemory : Top;
+    public IReadOnlyList<ProcessSample> Ranked(ProcessSort sort) => sort switch
+    {
+        ProcessSort.Memory => ByMemory,
+        ProcessSort.Gpu => ByGpu,
+        _ => Top
+    };
+
+    // The app as the chosen sort ranks it, so a card keeps that sort's member order; another ranking when it is only listed there.
+    public ProcessSample? For(string id, ProcessSort sort)
+    {
+        if (Ranked(sort).FirstOrDefault(sample => sample.Id == id) is { } ranked) return ranked;
+        return (sort == ProcessSort.Cpu ? null : Top.FirstOrDefault(sample => sample.Id == id))
+            ?? (sort == ProcessSort.Memory ? null : ByMemory.FirstOrDefault(sample => sample.Id == id))
+            ?? (sort == ProcessSort.Gpu ? null : ByGpu.FirstOrDefault(sample => sample.Id == id));
+    }
 }
 
 // DownHistory and UpHistory are the last network readings, oldest first, bytes per second; empty until there are two.

@@ -606,8 +606,9 @@ public partial class App : Application
             (shown & CompactMonitorItems.Charge) != 0,
             // The frame rate for a row that shows it, or an open page with room for its line.
             (shown & CompactMonitorItems.Frames) != 0 || Page(ExpandedDemand.Frames) && (_presentingMonitor.Any(deck => deck.PageShowsFrames) || _pageExtras && _pageFrames),
-            // The graphics adapters for the page and the row's GPU reading (the power asks for them itself).
-            Page(ExpandedDemand.Gpu) || (shown & CompactMonitorItems.Gpu) != 0);
+            // The graphics adapters for the page and the row's GPU reading (the power asks for them itself); also while the process
+            // list is shown, so its GPU column and sort have the engine counters.
+            Page(ExpandedDemand.Gpu) || (shown & CompactMonitorItems.Gpu) != 0 || Page(ExpandedDemand.Processes));
     }
     // The page reads the machine's power only where there may be something to read: not once the sampler knows there is neither a power
     // source nor a battery (a desktop with nothing), so such a page does not keep asking.

@@ -41,11 +41,20 @@ public sealed class GpuTotals
 
 // Sums the graphics counters per engine (adapter, physical adapter of a linked group, engine number) and keeps each type's busiest
 // engine. The engine types are kept between readings, so a reading makes no string per counter: the sampler reads several hundred
-// engine instances every second.
+// engine instances every second. ProcessUsage is each process's busiest engine in percent, as Task Manager's GPU column, from the
+// same pass.
 public sealed class GpuCounters
 {
     private readonly HashSet<string> _types = [];
     private readonly Dictionary<(ulong Luid, int Physical, int Engine), (string Type, double Value)> _engines = [];
+    private readonly Dictionary<(int Pid, ulong Luid, int Physical, int Engine), double> _processEngines = [];
+    private Dictionary<int, double> _processUsage = [];
+
+    // Each process's busiest engine from the last Sum, in percent; empty until a reading or after ForgetProcessUsage.
+    public IReadOnlyDictionary<int, double> ProcessUsage => _processUsage;
+
+    // Drops the last process shares: a failed or closed reading must not keep them (GpuProvider.Sample).
+    public void ForgetProcessUsage() => _processUsage = [];
 
     public Dictionary<ulong, GpuTotals> Sum(IReadOnlyList<(string Instance, double Value)> engines,
         IReadOnlyList<(string Instance, double Value)> dedicated, IReadOnlyList<(string Instance, double Value)> shared)
@@ -53,6 +62,7 @@ public sealed class GpuCounters
         var totals = new Dictionary<ulong, GpuTotals>();
         var types = _types.GetAlternateLookup<ReadOnlySpan<char>>();
         _engines.Clear();
+        _processEngines.Clear();
         for (int i = 0; i < engines.Count; i++)
         {
             var (instance, value) = engines[i];
@@ -60,14 +70,21 @@ public sealed class GpuCounters
             int at = instance.IndexOf("engtype_", StringComparison.Ordinal);
             var span = at < 0 ? ReadOnlySpan<char>.Empty : instance.AsSpan(at + 8);
             if (!types.TryGetValue(span, out var type)) { type = span.ToString(); _types.Add(type); }
-            var key = (luid, Number(instance, "_phys_"), Number(instance, "_eng_"));
-            _engines[key] = (type, (_engines.TryGetValue(key, out var engine) ? engine.Value : 0) + value);
+            int physical = Number(instance, "_phys_"), engine = Number(instance, "_eng_");
+            var key = (luid, physical, engine);
+            _engines[key] = (type, (_engines.TryGetValue(key, out var known) ? known.Value : 0) + value);
+            if (GpuReadings.Pid(instance) is { } pid)
+                _processEngines[(pid, luid, physical, engine)] = (_processEngines.TryGetValue((pid, luid, physical, engine), out var process) ? process : 0) + value;
         }
         foreach (var ((luid, _, _), (type, value)) in _engines)
         {
             var adapter = Totals(totals, luid);
             adapter.Engines[type] = Math.Max(adapter.Engines.GetValueOrDefault(type), value);
         }
+        var usage = new Dictionary<int, double>();
+        foreach (var ((pid, _, _, _), value) in _processEngines)
+            if (!usage.TryGetValue(pid, out var most) || value > most) usage[pid] = value;
+        _processUsage = usage;
         // An adapter's memory is listed per physical adapter of a linked group; the group's memory is their sum.
         for (int i = 0; i < dedicated.Count; i++)
             if (GpuReadings.Luid(dedicated[i].Instance) is { } luid && totals.TryGetValue(luid, out var adapter)) adapter.Dedicated = (adapter.Dedicated ?? 0) + dedicated[i].Value;
@@ -96,6 +113,15 @@ public static class GpuReadings
     // Below this much dedicated memory an adapter is taken as integrated where the system cannot say (before Windows 10 2004):
     // integrated adapters report a small carve-out (Intel 128 MB, AMD 512 MB by default), discrete ones their own memory.
     public const ulong IntegratedBelow = 1UL << 30;
+
+    // The process id in an engine instance name: "pid_1234_luid_0x…"; null without one (adapter memory, or a broken name).
+    public static int? Pid(ReadOnlySpan<char> instance)
+    {
+        if (!instance.StartsWith("pid_", StringComparison.Ordinal)) return null;
+        var rest = instance[4..];
+        int end = rest.IndexOf('_');
+        return int.TryParse(end < 0 ? rest : rest[..end], out int pid) ? pid : null;
+    }
 
     // The LUID in an engine or adapter memory instance name: "pid_1234_luid_0x00000000_0x0000C5E2_phys_0_eng_0_engtype_3D" or
     // "luid_0x00000000_0x0000C5E2_phys_0". The high part comes first.

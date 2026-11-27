@@ -384,12 +384,6 @@ internal sealed class SystemSampler : IDisposable
         bool gpuCollected = !gpuSoon && _gpuWanted && counters && _gpuPdh?.Collect() == true;
         if (!cpuSoon) _cpuAt = now;
         if (!gpuSoon) _gpuAt = now;
-        if (!_listProcesses) { _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting); _processesAt = double.NegativeInfinity; _processes.Forget(); }
-        else if (listProcesses || !_lastProcesses.HasValue || now - _processesAt >= ProcessSeconds)
-        {
-            // Named after the first list is shown (Resolve): the executables' descriptions and icons take 200 to 480 ms on the first list.
-            _lastProcesses = _processes.Sample(now, name: !listProcesses); _processesAt = now;
-        }
         // While network is not read the provider forgets its baseline and the history goes, so the first rate after it turns on is not an
         // average over the time off and old readings do not join new ones.
         if (!_readNetwork || _networkRestart) { _networkRestart = false; _network.Forget(); _history.Clear(); }
@@ -415,6 +409,14 @@ internal sealed class SystemSampler : IDisposable
         if (cpuStart) _cpuRestart = false;
         var cpu = !readCpu ? Reading<CpuSample>.Unavailable(Why.Waiting) : cpuPrime ? PrimeCpu(cpuCollected) : cpuSoon ? _lastCpu : _cpu!.Sample(cpuCollected); var gpus = gpuSoon ? _lastGpus : _gpu.Sample(gpuCollected);
         _lastCpu = cpu; _lastGpus = gpus;
+        // Processes after the adapters: their GPU column uses the same engine counters just summed (GpuProvider.ProcessUsage),
+        // or none when that reading failed, so a stale share is not kept. A skipped collection leaves the last good shares.
+        if (!_listProcesses) { _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting); _processesAt = double.NegativeInfinity; _processes.Forget(); }
+        else if (listProcesses || !_lastProcesses.HasValue || now - _processesAt >= ProcessSeconds)
+        {
+            // Named after the first list is shown (Resolve): the executables' descriptions and icons take 200 to 480 ms on the first list.
+            _lastProcesses = _processes.Sample(now, _gpuWanted ? _gpu.ProcessUsage : null, name: !listProcesses); _processesAt = now;
+        }
         // Asked on every tick, so the zones' counters leave the query once temperatures are no longer wanted or a better source gives them.
         if (_zones!.Sample(temperatures && !_processorHeat && counters, now) is { } zone) cpu = cpu.Map(sample => sample with { Temperature = zone.Celsius, TemperatureZone = zone.Zone });
         // The processor's own sensors through the sensor service where enhanced sensors are set up, else a hardware monitor the user
@@ -708,7 +710,7 @@ internal sealed class ProcessProvider : IDisposable
     private int _capacity;
     private Dictionary<int, (long Created, long Time)> _previous = [];
     private double? _time;
-    private readonly SteadyRanking _cpuRanking = SteadyRanking.Cpu(), _memoryRanking = SteadyRanking.Memory();
+    private readonly SteadyRanking _cpuRanking = SteadyRanking.Cpu(), _memoryRanking = SteadyRanking.Memory(), _gpuRanking = SteadyRanking.Gpu();
     // By executable name: its path and the name the page shows, once found.
     private readonly Dictionary<string, (string? Path, string Name)> _apps = new(StringComparer.OrdinalIgnoreCase);
     private const int MaximumApps = 256;
@@ -716,13 +718,14 @@ internal sealed class ProcessProvider : IDisposable
     public volatile bool Hold;
 
     // The rows of the last list that were left without their names and icons (Sample with name false), for Resolve.
-    private List<ProcessSample>? _unnamedByCpu, _unnamedByMemory, _plainByCpu, _plainByMemory;
+    private List<ProcessSample>? _unnamedByCpu, _unnamedByMemory, _unnamedByGpu, _plainByCpu, _plainByMemory, _plainByGpu;
 
     // The list left unnamed is let go: it is old once the readings pause or the page no longer lists processes.
-    public void Forget() => _unnamedByCpu = _unnamedByMemory = _plainByCpu = _plainByMemory = null;
+    public void Forget() => _unnamedByCpu = _unnamedByMemory = _unnamedByGpu = _plainByCpu = _plainByMemory = _plainByGpu = null;
 
     // name false: the rows carry the executables' names (or the descriptions already found) and no icons, and Resolve names them later.
-    public Reading<ProcessList> Sample(double now, bool name = true)
+    // gpu: each process's busiest engine in percent from the graphics counters (GpuCounters.ProcessUsage); null when the adapters are not read.
+    public Reading<ProcessList> Sample(double now, IReadOnlyDictionary<int, double>? gpu = null, bool name = true)
     {
         Forget();
         if (!Read()) return Reading<ProcessList>.Unavailable(Why.NoProcesses);
@@ -742,7 +745,8 @@ internal sealed class ProcessProvider : IDisposable
                 var image = length > 0 ? Marshal.PtrToStringUni(Marshal.ReadIntPtr(entry, 64), length / 2) : pid == 4 ? "System" : "";
                 current[pid] = (created, time);
                 double cpu = _previous.TryGetValue(pid, out var before) && before.Created == created ? MonitorMetrics.CpuPercent(before.Time, time, seconds) ?? 0 : 0;
-                if (image.Length > 0) samples.Add(new ProcessSample(pid, image, cpu, memory, image.ToLowerInvariant()));
+                double gpuPercent = gpu is not null && gpu.TryGetValue(pid, out var share) ? share : 0;
+                if (image.Length > 0) samples.Add(new ProcessSample(pid, image, cpu, memory, image.ToLowerInvariant()) { GpuPercent = gpuPercent });
             }
             int next = Marshal.ReadInt32(entry);
             if (next == 0) break;
@@ -756,23 +760,25 @@ internal sealed class ProcessProvider : IDisposable
         double elapsed = seconds;
         var top = _cpuRanking.Arrange(ProcessSample.Folded(samples, ProcessSort.Cpu), sample => sample.CpuPercent, elapsed, Hold);
         var byMemory = _memoryRanking.Arrange(ProcessSample.Folded(samples, ProcessSort.Memory), sample => sample.MemoryBytes, elapsed, Hold);
-        if (name) return new ProcessList(Named(top.Take(Kept)), Named(byMemory.Take(Kept)));
-        _unnamedByCpu = top.Take(Kept).ToList(); _unnamedByMemory = byMemory.Take(Kept).ToList();
-        _plainByCpu = Plain(_unnamedByCpu); _plainByMemory = Plain(_unnamedByMemory);
-        return new ProcessList(_plainByCpu, _plainByMemory);
+        var byGpu = _gpuRanking.Arrange(ProcessSample.Folded(samples, ProcessSort.Gpu), sample => sample.GpuPercent, elapsed, Hold);
+        if (name) return new ProcessList(Named(top.Take(Kept)), Named(byMemory.Take(Kept)), Named(byGpu.Take(Kept)));
+        _unnamedByCpu = top.Take(Kept).ToList(); _unnamedByMemory = byMemory.Take(Kept).ToList(); _unnamedByGpu = byGpu.Take(Kept).ToList();
+        _plainByCpu = Plain(_unnamedByCpu); _plainByMemory = Plain(_unnamedByMemory); _plainByGpu = Plain(_unnamedByGpu);
+        return new ProcessList(_plainByCpu, _plainByMemory, _plainByGpu);
     }
 
     // The list left unnamed by the last Sample, named now (the descriptions and the icons are looked up here); null when there is none, or
     // when nothing changed from the list shown (every name known, every icon already read), so no second list is raised for it.
     public Reading<ProcessList>? Resolve()
     {
-        if (_unnamedByCpu is not { } cpu || _unnamedByMemory is not { } memory || _plainByCpu is not { } plainCpu || _plainByMemory is not { } plainMemory) return null;
+        if (_unnamedByCpu is not { } cpu || _unnamedByMemory is not { } memory || _unnamedByGpu is not { } gpu
+            || _plainByCpu is not { } plainCpu || _plainByMemory is not { } plainMemory || _plainByGpu is not { } plainGpu) return null;
         Forget();
         int icons = ProcessIcons.Prepared;
-        var byCpu = Named(cpu); var byMemory = Named(memory);
-        bool same = ProcessIcons.Prepared == icons && Same(byCpu, plainCpu) && Same(byMemory, plainMemory);
+        var byCpu = Named(cpu); var byMemory = Named(memory); var byGpu = Named(gpu);
+        bool same = ProcessIcons.Prepared == icons && Same(byCpu, plainCpu) && Same(byMemory, plainMemory) && Same(byGpu, plainGpu);
         if (same) return null;
-        return new ProcessList(byCpu, byMemory);
+        return new ProcessList(byCpu, byMemory, byGpu);
     }
     private static bool Same(List<ProcessSample> named, List<ProcessSample> plain)
         => named.Count == plain.Count && named.Zip(plain).All(pair => pair.First.Name == pair.Second.Name && pair.First.Path == pair.Second.Path);

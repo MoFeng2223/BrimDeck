@@ -25,6 +25,14 @@ public static class MonitorFormat
         return value < 9.95 ? Decimal(value) : ((int)Math.Round(value)).ToString(CultureInfo.InvariantCulture);
     }
 
+    // A process's graphics use as Task Manager's GPU column (percent of its busiest engine). One decimal below 10; whole from
+    // there, at most "100".
+    public static string ProcessGpu(double percent)
+    {
+        double value = Math.Clamp(double.IsFinite(percent) ? percent : 0, 0, 100);
+        return value < 9.95 ? Decimal(value) : ((int)Math.Round(value)).ToString(CultureInfo.InvariantCulture);
+    }
+
     // Bytes per second as KB/s below 1 MB/s, then MB/s, then GB/s (decimal units, as Task Manager's network speeds).
     public static Quantity Rate(double bytesPerSecond)
     {

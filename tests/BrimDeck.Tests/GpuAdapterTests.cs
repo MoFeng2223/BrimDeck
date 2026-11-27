@@ -17,6 +17,9 @@ internal static class GpuAdapterTests
 
     private static void Parsing(Action<string, bool> check)
     {
+        check("GPU PID: from an engine instance", GpuReadings.Pid("pid_11904_luid_0x00000000_0x0001795E_phys_0_eng_0_engtype_3D") == 11904);
+        check("GPU PID: none without a process", GpuReadings.Pid("luid_0x00000000_0x0000C5E2_phys_0") is null && GpuReadings.Pid("_Total") is null
+            && GpuReadings.Pid("pid_x_luid_0x0") is null);
         check("GPU LUID: from an engine instance", GpuReadings.Luid("pid_11904_luid_0x00000000_0x0001795E_phys_0_eng_0_engtype_3D") == Nvidia);
         check("GPU LUID: from an adapter memory instance", GpuReadings.Luid("luid_0x00000000_0x0000C5E2_phys_0") == Intel);
         check("GPU LUID: the high part comes first", GpuReadings.Luid("luid_0x00000001_0x00000002_phys_0") == (1UL << 32 | 2));
@@ -61,8 +64,13 @@ internal static class GpuAdapterTests
         check("GPU totals: each adapter on its own, processes summed", totals[Nvidia].Engines["3D"] == 30 && totals[Intel].Engines["3D"] == 55 && totals.Count == 4);
         check("GPU totals: an adapter's usage is its busiest engine type", totals[Nvidia].Usage == 40 && totals[Intel].Usage == 55);
         check("GPU totals: memory per adapter, unlisted is unknown", totals[Nvidia].Dedicated == 1_180_934_144 && totals[Intel].Shared == 600_000_000 && totals[Warp].Shared is null);
+        check("GPU process usage: each process's busiest engine (Task Manager)", counters.ProcessUsage[100] == 40 && counters.ProcessUsage[200] == 15
+            && counters.ProcessUsage[300] == 90 && counters.ProcessUsage[400] == 70);
+        counters.ForgetProcessUsage();
+        check("GPU process usage: a failed or closed reading drops the last shares", counters.ProcessUsage.Count == 0);
         var again = Counters(counters, nvidia3D: 80);
         check("GPU totals: a new reading starts from nothing", again[Nvidia].Engines["3D"] == 80 && again[Nvidia].Usage == 80);
+        check("GPU process usage: a new reading fills the shares again", counters.ProcessUsage[100] == 40 && counters.ProcessUsage[200] == 40);
         var copies = counters.Sum([("pid_1_luid_0x00000000_0x0001795E_phys_0_eng_3_engtype_Copy", 35), ("pid_2_luid_0x00000000_0x0001795E_phys_0_eng_3_engtype_Copy", 25),
             ("pid_1_luid_0x00000000_0x0001795E_phys_0_eng_4_engtype_Copy", 50), ("pid_1_luid_0x00000000_0x0001795E_phys_1_eng_3_engtype_Copy", 20)], [], []);
         check("GPU totals: engines of one type are read apart, the busiest kept (Task Manager)", copies[Nvidia].Engines["Copy"] == 60 && copies[Nvidia].Usage == 60);

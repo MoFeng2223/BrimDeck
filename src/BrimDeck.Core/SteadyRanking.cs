@@ -20,6 +20,8 @@ public sealed class SteadyRanking(double relative, double margin, double fall)
     public static SteadyRanking Cpu() => new(.12, 1, 4);
     // For memory in bytes.
     public static SteadyRanking Memory() => new(.04, 24 * 1_048_576, 4);
+    // For graphics use in percent of an engine (0..100), as Task Manager's GPU column.
+    public static SteadyRanking Gpu() => new(.12, 1, 4);
 
     // The order to show the entries in, elapsed seconds after the last call. With hold nothing already listed changes rank;
     // entries that left are dropped and new ones go last.

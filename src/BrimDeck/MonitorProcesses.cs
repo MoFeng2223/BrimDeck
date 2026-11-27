@@ -40,9 +40,9 @@ internal sealed class ProcessListView : FrameworkElement
     private Rect[] _sortRects = [];
     private Reading<ProcessList> _reading = Reading<ProcessList>.Unavailable("");
     // The highlight: its place as a slot (it glides between rows of a column) and its opacity; the pills' hover and the chosen
-    // pill's place (0 for CPU, 1 for memory); how far a pressed row gives.
+    // pill's place (0 for CPU, 1 for memory, 2 for GPU); how far a pressed row gives.
     private Eased _highlightSlot = new(0, Eased.Hover * 1.25), _highlight = new(0, Eased.Hover), _chosen, _press = new(0, Eased.Hover);
-    private readonly Eased[] _pillHover = [new(0, Eased.Hover), new(0, Eased.Hover)];
+    private readonly Eased[] _pillHover = [new(0, Eased.Hover), new(0, Eased.Hover), new(0, Eased.Hover)];
     // Each row's drawing, kept while its figures and its width stay the same: during a move the rows are only placed again.
     private readonly Dictionary<string, DrawingCache<(ProcessSample, ProcessSort, bool, double, double, bool, double)>> _rowDrawings = [];
 
@@ -56,12 +56,12 @@ internal sealed class ProcessListView : FrameworkElement
 
     private (int Rows, int Columns) Grid => MonitorLayout.ListGrid(ActualWidth, ActualHeight, _layout.RowHeight);
 
-    // For screen readers: the two sort pills, then each app's row as it shows ("Chrome，CPU 12%，内存 1.2 GB"); invoking a row
+    // For screen readers: the sort pills, then each app's row as it shows ("Chrome，CPU 12%，GPU 4%，内存 1.2 GB"); invoking a row
     // opens its card, as a click does.
     protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.List, () => Loc.T("进程列表", "Process list"), parts: Parts);
     private IEnumerable<DrawnPart> Parts()
     {
-        string[] sorts = [Loc.T("按 CPU 排序", "Sort by CPU"), Loc.T("按内存排序", "Sort by memory")];
+        string[] sorts = [Loc.T("按 CPU 排序", "Sort by CPU"), Loc.T("按内存排序", "Sort by memory"), Loc.T("按 GPU 排序", "Sort by GPU")];
         for (int i = 0; i < _sortRects.Length && i < sorts.Length; i++)
         {
             var sort = (ProcessSort)i;
@@ -75,10 +75,13 @@ internal sealed class ProcessListView : FrameworkElement
             var box = RowRect(i, rows, columns);
             if (box.Bottom > ActualHeight + .5) continue;
             yield return new DrawnPart(sample.Id, sample.Name + Loc.T("，CPU ", ", CPU ") + MonitorFormat.ProcessShare(sample.CpuPercent, _cores) + "%"
+                + Loc.T("，GPU ", ", GPU ") + MonitorFormat.ProcessGpu(sample.GpuPercent) + "%"
                 + Loc.T("，内存 ", ", memory ") + MonitorFormat.ProcessMemory(sample.MemoryBytes), box, Invoke: () => _open(sample, box));
         }
     }
     private double ColumnWidth(int columns) => columns <= 1 ? ActualWidth : (ActualWidth - ColumnGap * (columns - 1)) / columns;
+
+    public ProcessSort Sort => _sort;
 
     // A new sort from another panel or from this one's pills: the rows reorder as a new reading would, and the pill slides.
     public void SetSort(ProcessSort sort, bool motion)
@@ -131,7 +134,8 @@ internal sealed class ProcessListView : FrameworkElement
     private bool Step(double now)
     {
         InvalidateVisual();
-        bool moving = _highlightSlot.Moving(now) || _highlight.Moving(now) || _chosen.Moving(now) || _press.Moving(now) || _pillHover[0].Moving(now) || _pillHover[1].Moving(now)
+        bool moving = _highlightSlot.Moving(now) || _highlight.Moving(now) || _chosen.Moving(now) || _press.Moving(now)
+            || _pillHover.Any(pill => pill.Moving(now))
             || _motion.Values.Any(m => m.Slot.Moving(now) || m.Alpha.Moving(now));
         if (!moving && _pressed is null) _pressedShown = null;
         return moving;
@@ -211,22 +215,22 @@ internal sealed class ProcessListView : FrameworkElement
     {
         // The sort pills name the list; the rows speak for themselves.
         double line = MonitorLayout.ListHead - 6, baseline = Math.Round(line / 2 + _layout.Caption * .38);
-        // Two pills at the right: CPU and memory, the chosen one filled.
-        string[] names = ["CPU", Loc.T("内存", "Memory")];
+        // Three pills at the right: CPU, memory and GPU, the chosen one filled.
+        string[] names = ["CPU", Loc.T("内存", "Memory"), "GPU"];
         var texts = names.Select(name => MonitorDraw.Text(name, _layout.Caption, Look.Secondary, ppd)).ToArray();
         double pad = 8, x = w;
-        _sortRects = new Rect[2];
-        for (int i = 1; i >= 0; i--)
+        _sortRects = new Rect[names.Length];
+        for (int i = names.Length - 1; i >= 0; i--)
         {
             double width = texts[i].WidthIncludingTrailingWhitespace + pad * 2;
             x -= width;
             _sortRects[i] = new Rect(x, 1, width, line - 2);
             x -= 2;
         }
-        var strip = new Rect(_sortRects[0].X - 1, 0, _sortRects[1].Right - _sortRects[0].X + 2, line);
+        var strip = new Rect(_sortRects[0].X - 1, 0, _sortRects[^1].Right - _sortRects[0].X + 2, line);
         drawing.DrawRoundedRectangle(UI.Brush(Look.Fill), null, strip, line / 2, line / 2);
         double now = Eased.Now, radius = (line - 2) / 2;
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < names.Length; i++)
         {
             double hover = Math.Clamp(_pillHover[i].At(now), 0, 1);
             if (hover <= .01) continue;
@@ -234,11 +238,14 @@ internal sealed class ProcessListView : FrameworkElement
             drawing.DrawRoundedRectangle(UI.Brush(Look.Hex("hover")), null, _sortRects[i], radius, radius);
             drawing.Pop();
         }
-        // The chosen pill slides between the two, its width following.
-        double at = Math.Clamp(_chosen.At(now), 0, 1);
-        var pill = new Rect(_sortRects[0].X + (_sortRects[1].X - _sortRects[0].X) * at, 1, _sortRects[0].Width + (_sortRects[1].Width - _sortRects[0].Width) * at, line - 2);
+        // The chosen pill slides between neighbours, its width following.
+        double at = Math.Clamp(_chosen.At(now), 0, names.Length - 1);
+        int from = (int)Math.Floor(at), to = Math.Min(from + 1, names.Length - 1);
+        double t = at - from;
+        var a = _sortRects[from]; var b = _sortRects[to];
+        var pill = new Rect(a.X + (b.X - a.X) * t, 1, a.Width + (b.Width - a.Width) * t, line - 2);
         drawing.DrawRoundedRectangle(UI.Brush(Look.FillSelected), null, pill, radius, radius);
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < names.Length; i++)
         {
             bool chosen = (int)_sort == i;
             var text = MonitorDraw.Text(names[i], _layout.Caption, chosen ? Look.Primary : Look.Secondary, ppd, strong: chosen);
@@ -258,7 +265,8 @@ internal sealed class ProcessListView : FrameworkElement
             var letter = MonitorDraw.Text(sample.Name.Length > 0 ? char.ToUpperInvariant(sample.Name[0]).ToString() : "?", Math.Max(8, icon * .55), Look.Secondary, ppd, strong: true);
             drawing.DrawText(letter, new Point(iconRect.X + (icon - letter.Width) / 2, iconRect.Y + (icon - letter.Height) / 2));
         }
-        string cpu = MonitorFormat.ProcessShare(sample.CpuPercent, _cores) + "%", memory = MonitorFormat.ProcessMemory(sample.MemoryBytes);
+        string cpu = MonitorFormat.ProcessShare(sample.CpuPercent, _cores) + "%", gpu = MonitorFormat.ProcessGpu(sample.GpuPercent) + "%",
+            memory = MonitorFormat.ProcessMemory(sample.MemoryBytes);
         double right = r.Right;
         void Figure(string text, bool primary, double slot)
         {
@@ -270,9 +278,10 @@ internal sealed class ProcessListView : FrameworkElement
         {
             // How many processes an app has is on its card.
             Figure(memory, _sort == ProcessSort.Memory, Math.Ceiling(_layout.Body * 4.3));
+            Figure(gpu, _sort == ProcessSort.Gpu, Math.Ceiling(_layout.Body * 4));
             Figure(cpu, _sort == ProcessSort.Cpu, Math.Ceiling(_layout.Body * 4));
         }
-        else Figure(_sort == ProcessSort.Memory ? memory : cpu, true, Math.Ceiling(_layout.Body * 4));
+        else Figure(_sort switch { ProcessSort.Memory => memory, ProcessSort.Gpu => gpu, _ => cpu }, true, Math.Ceiling(_layout.Body * 4));
         // The name takes what the figures leave; each figure's slot is wider than its text.
         double nameLeft = iconRect.Right + 7;
         MonitorDraw.Baseline(drawing, MonitorDraw.Trimmed(sample.Name, _layout.Body, Look.Primary, Math.Max(10, right - nameLeft - 6), ppd), nameLeft, baseline);
@@ -305,7 +314,7 @@ internal sealed class ProcessListView : FrameworkElement
     }
     private void HoverPill(int sort)
     {
-        for (int i = 0; i < 2; i++) _pillHover[i].Fade(i == sort && i != (int)_sort, Motion.Enabled);
+        for (int i = 0; i < _pillHover.Length; i++) _pillHover[i].Fade(i == sort && i != (int)_sort, Motion.Enabled);
         _hoverSort = sort;
     }
     protected override void OnMouseMove(MouseEventArgs e)
@@ -339,14 +348,14 @@ internal sealed class ProcessListView : FrameworkElement
     }
 }
 
-// An app's card, opened from its row: its icon and name, where it runs from, its CPU and memory, how many processes it has and
-// the busiest of them; for an app with a window, a button that brings it to the front. It grows in from just smaller than
+// An app's card, opened from its row: its icon and name, where it runs from, its CPU, GPU and memory, how many processes it has
+// and the busiest of them; for an app with a window, a button that brings it to the front. It grows in from just smaller than
 // itself, follows the readings while open, and closes on a click.
 internal sealed class ProcessCard : Border
 {
     // The look of the panel this element is drawn in (PanelLook.Of); the main look outside a panel.
     private PanelLook Look => PanelLook.Of(this);
-    private readonly TextBlock _name, _where, _cpu, _memory, _count;
+    private readonly TextBlock _name, _where, _cpu, _gpu, _memory, _count;
     private readonly StackPanel _members;
     private readonly Image _icon;
     private readonly Button _switch;
@@ -389,8 +398,9 @@ internal sealed class ProcessCard : Border
         _where = UI.Line("", caption, Look.Tertiary); _where.FontFamily = UI.PanelFont;
         titles.Children.Add(_name); titles.Children.Add(_where); head.Children.Add(titles);
         stack.Children.Add(head);
-        var figures = new System.Windows.Controls.Primitives.UniformGrid { Columns = 3, Margin = new Thickness(0, 0, 0, 8) };
-        (_cpu, _memory, _count) = (Cell(figures, "CPU", body, caption, Look), Cell(figures, Loc.T("内存", "Memory"), body, caption, Look), Cell(figures, Loc.T("进程", "Processes"), body, caption, Look));
+        var figures = new System.Windows.Controls.Primitives.UniformGrid { Columns = 4, Margin = new Thickness(0, 0, 0, 8) };
+        (_cpu, _gpu, _memory, _count) = (Cell(figures, "CPU", body, caption, Look), Cell(figures, "GPU", body, caption, Look),
+            Cell(figures, Loc.T("内存", "Memory"), body, caption, Look), Cell(figures, Loc.T("进程", "Processes"), body, caption, Look));
         stack.Children.Add(figures);
         _members = new StackPanel();
         stack.Children.Add(_members);
@@ -424,18 +434,21 @@ internal sealed class ProcessCard : Border
         _where.Text = sample.Path ?? (sample.AppKey ?? "") + " · PID " + sample.Pid;
         _where.ToolTip = sample.Path;
         _cpu.Text = MonitorFormat.ProcessShare(sample.CpuPercent, cores) + "%";
+        _gpu.Text = MonitorFormat.ProcessGpu(sample.GpuPercent) + "%";
         _memory.Text = MonitorFormat.ProcessMemory(sample.MemoryBytes);
         _count.Text = Math.Max(1, sample.Members.Count).ToString();
-        _spoken = sample.Name + " · CPU " + _cpu.Text + Loc.T(" · 内存 ", " · memory ") + _memory.Text + Loc.T($" · {_count.Text} 个进程", $" · {_count.Text} processes");
+        _spoken = sample.Name + " · CPU " + _cpu.Text + " · GPU " + _gpu.Text + Loc.T(" · 内存 ", " · memory ") + _memory.Text
+            + Loc.T($" · {_count.Text} 个进程", $" · {_count.Text} processes");
         _members.Children.Clear();
         // The busiest of the app's processes, up to five.
         foreach (var member in sample.Members.Take(5))
         {
             var row = new DockPanel { Margin = new Thickness(0, 2, 0, 0) };
             var mem = UI.Line(MonitorFormat.ProcessMemory(member.MemoryBytes), caption, Look.Tertiary); mem.FontFamily = UI.PanelFont; mem.Width = 44; mem.TextAlignment = TextAlignment.Right;
+            var gpu = UI.Line(MonitorFormat.ProcessGpu(member.GpuPercent) + "%", caption, Look.Tertiary); gpu.FontFamily = UI.PanelFont; gpu.Width = 40; gpu.TextAlignment = TextAlignment.Right;
             var cpu = UI.Line(MonitorFormat.ProcessShare(member.CpuPercent, cores) + "%", caption, Look.Secondary); cpu.FontFamily = UI.PanelFont; cpu.Width = 44; cpu.TextAlignment = TextAlignment.Right;
-            DockPanel.SetDock(mem, Dock.Right); DockPanel.SetDock(cpu, Dock.Right);
-            row.Children.Add(mem); row.Children.Add(cpu);
+            DockPanel.SetDock(mem, Dock.Right); DockPanel.SetDock(gpu, Dock.Right); DockPanel.SetDock(cpu, Dock.Right);
+            row.Children.Add(mem); row.Children.Add(gpu); row.Children.Add(cpu);
             var name = UI.Line(member.Name, caption, Look.Secondary); name.FontFamily = UI.PanelFont; row.Children.Add(name);
             _members.Children.Add(row);
         }

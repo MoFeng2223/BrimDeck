@@ -16,6 +16,8 @@ internal sealed class GpuProvider
     private readonly PdhQuery? _pdh;
     private bool _wanted, _engines, _memory, _shared;
     private readonly GpuCounters _counters = new();
+    // False until a Sample has summed the engines, and after a failed or closed reading. A skipped collection leaves it as it was.
+    private bool _processUsageLive;
     // By LUID. Read once, and again when the counters name an adapter not described: the LUIDs change when a driver restarts.
     // A read that fails or misses an adapter never shuts it out for long (GpuDescriptions): it is asked about again after a pause
     // that grows from seconds to minutes, so an adapter that failed once returns, and a device DXGI never lists (an NPU) costs a
@@ -29,6 +31,10 @@ internal sealed class GpuProvider
     // Lists the adapters now rather than with the first reading (the smooth memory mode does it at the start, off the page's way).
     public void Describe() => _descriptions ??= new GpuDescriptions(GpuAdapters.Read, Now());
 
+    // Each process's busiest engine from the last successful Sample, in percent; null while the counters are off, before a
+    // reading, or after a failed one. A skipped collection (SystemSampler's gpuSoon) leaves the last good shares in place.
+    public IReadOnlyDictionary<int, double>? ProcessUsage => _processUsageLive ? _counters.ProcessUsage : null;
+
     // The counters are in the query only while something shows an adapter: the engine counter has an instance per process and engine,
     // often thousands, and is the costliest part of a collection. Called on every tick, before the collection. Whether the counters
     // have just joined the query (they need a first collection).
@@ -37,7 +43,7 @@ internal sealed class GpuProvider
         if (wanted == _wanted || _pdh is null) return false;
         _wanted = wanted;
         if (wanted) { _engines = _pdh.Add(EnginePath); _memory = _pdh.Add(MemoryPath); _shared = _pdh.Add(SharedPath); }
-        else { _pdh.Remove(EnginePath); _pdh.Remove(MemoryPath); _pdh.Remove(SharedPath); }
+        else { _pdh.Remove(EnginePath); _pdh.Remove(MemoryPath); _pdh.Remove(SharedPath); ForgetProcessUsage(); }
         return wanted;
     }
     private static double Now() => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
@@ -45,17 +51,24 @@ internal sealed class GpuProvider
     // Every adapter with counters, or why there is none.
     public Reading<IReadOnlyList<GpuSample>> Sample(bool collected)
     {
-        if (!_wanted && _pdh is not null) return Reading<IReadOnlyList<GpuSample>>.Unavailable(Why.Waiting);
-        if (!_engines) return Reading<IReadOnlyList<GpuSample>>.Unavailable(_pdh?.IsOpen == true ? Why.NoGpu : Why.NoCounters);
-        if (!collected) return Reading<IReadOnlyList<GpuSample>>.Unavailable(Why.NoCounters);
+        if (!_wanted && _pdh is not null) { ForgetProcessUsage(); return Reading<IReadOnlyList<GpuSample>>.Unavailable(Why.Waiting); }
+        if (!_engines) { ForgetProcessUsage(); return Reading<IReadOnlyList<GpuSample>>.Unavailable(_pdh?.IsOpen == true ? Why.NoGpu : Why.NoCounters); }
+        if (!collected) { ForgetProcessUsage(); return Reading<IReadOnlyList<GpuSample>>.Unavailable(Why.NoCounters); }
         var engines = _pdh!.Read(EnginePath);
-        if (engines.Count == 0) return Reading<IReadOnlyList<GpuSample>>.Unavailable(Why.Waiting);
+        if (engines.Count == 0) { ForgetProcessUsage(); return Reading<IReadOnlyList<GpuSample>>.Unavailable(Why.Waiting); }
         var totals = _counters.Sum(engines, _memory ? _pdh.Read(MemoryPath) : [], _shared ? _pdh.Read(SharedPath) : []);
+        _processUsageLive = true;
         Describe();
         var descriptions = _descriptions!;
         var adapters = descriptions.For(totals.Keys, Now());
         var samples = GpuReadings.Samples(totals, adapters, descriptions.Described, Why.NoGpuMemory);
         return samples.Count > 0 ? samples : Reading<IReadOnlyList<GpuSample>>.Unavailable(Why.NoGpu);
+    }
+
+    private void ForgetProcessUsage()
+    {
+        _processUsageLive = false;
+        _counters.ForgetProcessUsage();
     }
 }
 
