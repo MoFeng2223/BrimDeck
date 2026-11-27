@@ -27,9 +27,10 @@ internal static class WindowsLocation
         {
             // RequestAccessAsync 要求前台窗口的 UI 线程；调用方多为 UI 事件，跨线程时借调度器回去。
             var dispatcher = System.Windows.Application.Current?.Dispatcher;
-            if (dispatcher is { } d && !d.CheckAccess()) return await await d.InvokeAsync(() => ReadAsync(token));
+            if (dispatcher is { } d && !d.CheckAccess()) return await await d.InvokeAsync(() => ReadAsync(token), System.Windows.Threading.DispatcherPriority.Normal, token);
             return await ReadAsync(token);
         }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch { return null; }
     }
 
@@ -38,9 +39,14 @@ internal static class WindowsLocation
         try
         {
             var dispatcher = System.Windows.Application.Current?.Dispatcher;
-            if (dispatcher is { } d && !d.CheckAccess()) return await await d.InvokeAsync(() => AllowedAsync(token));
+            if (dispatcher is { } d && !d.CheckAccess()) return await await d.InvokeAsync(() => AllowedAsync(token), System.Windows.Threading.DispatcherPriority.Normal, token);
+            token.ThrowIfCancellationRequested();
+            if (System.Windows.Application.Current?.Windows.OfType<System.Windows.Window>().Any(window => window.IsActive) != true)
+                return Windows.Security.Authorization.AppCapabilityAccess.AppCapability.Create("location").CheckAccess()
+                    == Windows.Security.Authorization.AppCapabilityAccess.AppCapabilityAccessStatus.Allowed;
             return await Geolocator.RequestAccessAsync().AsTask(token) == GeolocationAccessStatus.Allowed;
         }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch { return false; }
     }
 
@@ -48,7 +54,8 @@ internal static class WindowsLocation
     {
         try
         {
-            if (await Geolocator.RequestAccessAsync().AsTask(token) != GeolocationAccessStatus.Allowed) return null;
+            token.ThrowIfCancellationRequested();
+            if (!await AllowedAsync(token)) return null;
             var locator = new Geolocator { DesiredAccuracy = PositionAccuracy.Default };
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
             cts.CancelAfter(TimeSpan.FromSeconds(12));
@@ -57,6 +64,7 @@ internal static class WindowsLocation
             lock (Lock) _last = (DateTime.UtcNow, point.Latitude, point.Longitude);
             return (point.Latitude, point.Longitude);
         }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch { return null; }
     }
 }
