@@ -240,14 +240,20 @@ internal static class WeatherData
                 {
                     var best=found.OrderBy(c=>Math.Abs(c.Latitude-lat)+Math.Abs(c.Longitude-lon)).First();
                     // 有系统坐标时搜索只用来拿规范的名称与 LocationId，坐标以系统定位为准。
-                    return precise is { } position ? best with { Latitude = position.Lat, Longitude = position.Lon } : best;
+                    return precise is { } position ? best with { Latitude = position.Lat, Longitude = position.Lon, TimeZoneId = null } : best;
                 }
             }
             var parts=new List<string>();
             if(root.TryGetProperty("city",out name)&&name.ValueKind==JsonValueKind.String&&name.GetString() is {Length:>0} s)parts.Add(s);
             if(root.TryGetProperty("region",out var region)&&region.ValueKind==JsonValueKind.String&&region.GetString() is {Length:>0} r)parts.Add(r);
             if(root.TryGetProperty("country",out var country)&&country.ValueKind==JsonValueKind.String&&country.GetString() is {Length:>0} c&&!parts.Contains(c))parts.Add(c);
-            return new City(parts.Count>0?City.Compose([.. parts]):"当前位置",precise?.Lat ?? lat,precise?.Lon ?? lon) { CountryCode = Json.Text(root, "country_code"), TimeZoneId = Json.Get(root, "timezone") is { } tz ? Json.Text(tz, "id") : null };
+            // 精确坐标在手时同样不信任 IP 时区（原因同上）：清空让聚合层按坐标自行确定；
+            // 没有精确坐标时坐标与时区同属 IP 返回，保留。
+            return new City(parts.Count>0?City.Compose([.. parts]):"当前位置",precise?.Lat ?? lat,precise?.Lon ?? lon)
+            {
+                CountryCode = Json.Text(root, "country_code"),
+                TimeZoneId = (precise is null && Json.Get(root, "timezone") is { } tz) ? Json.Text(tz, "id") : null
+            };
         } catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; } catch { return null; }
     }
     // 天气聚合入口：当前、24 小时、24 天（历史 10 + 今天 + 未来 13）、日升日落与空气质量由 WeatherAggregator 统一拼装。
