@@ -314,9 +314,9 @@ internal sealed class PowerPlanView : Grid
     {
         if (plan.Id == PowerSaverGuid || Matches(plan.Name, "silent", "saver", "eco", "quiet", "节能", "静音"))
             return "M 5,19 C 5,10 11,5 19,5 C 19,13 14,19 5,19 Z M 5,19 L 13,11";
-        if (plan.Id == BalancedGuid || Matches(plan.Name, "balanced", "平衡"))
-            return "M 4,16 A 8,8 0 0 1 20,16 M 12,16 L 16,10 M 12,16 A 1.5,1.5 0 1 0 12,16.01";
-        return "M 13.5,2.5 L 5.5,13.5 H 11.5 L 10.5,21.5 L 18.5,10.5 H 12.5 Z";
+        if (plan.Id == UltimatePerformanceGuid || Matches(plan.Name, "turbo", "ultimate", "增强", "狂暴", "野兽", "卓越"))
+            return "M 13.5,2.5 L 5.5,13.5 H 11.5 L 10.5,21.5 L 18.5,10.5 H 12.5 Z";
+        return "M 4,16 A 8,8 0 0 1 20,16 M 12,16 L 16,10 M 12,16 A 1.5,1.5 0 1 0 12,16.01";
     }
 
     private static bool Matches(string text, params string[] keywords)
