@@ -27,6 +27,7 @@ internal static class ChinaDailySupplement
     internal static async Task<List<DayPoint>> FetchAsync(City city, DateTime today, CancellationToken token)
     {
         var (name, province) = Geo.Parts(city);
+        if (province.Length == 0 && TrimRegion(name) is "北京" or "上海" or "天津" or "重庆") province = name;
         // 和风城市 id 与中国天气网代码同源：结构化 id（如洪山区 101200113）直接定位到区县站，
         // 免去按城市名搜索一次；没有 id 时退回原路径按城市名解析。
         string? id = city.LocationId is { Length: >= 9 } code && code.StartsWith("101") && code.All(char.IsDigit)

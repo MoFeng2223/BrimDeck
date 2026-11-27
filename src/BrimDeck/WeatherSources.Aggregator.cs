@@ -58,11 +58,12 @@ internal static class WeatherAggregator
         bool deferred, CancellationToken token)
     {
         // 历史域单独成组（同来源可能出现两次）：各组各自起算超时预算，历史的分批请求不侵占预警/指数的 15 秒。
-        var groups = new Dictionary<(IWeatherSource Source, bool History), List<WeatherDomain>>();
+        var groups = new Dictionary<(IWeatherSource Source, bool History, bool Air), List<WeatherDomain>>();
         foreach (var (domain, owner) in owners)
         {
             if (owner is null || IsDeferred(domain) != deferred) continue;
-            var key = (owner, domain == WeatherDomain.History);
+            if (domain == WeatherDomain.History && owner is OpenMeteoSource && parts.GetValueOrDefault(owner.Info.Id)?.Days is { Count: > 0 }) continue;
+            var key = (owner, domain == WeatherDomain.History, domain == WeatherDomain.Air);
             if (!groups.TryGetValue(key, out var list)) groups[key] = list = [];
             list.Add(domain);
         }
@@ -227,15 +228,12 @@ internal static class WeatherAggregator
         foreach (var (time, point) in local)
             if (!hours.ContainsKey(time)) hours[time] = point;
         // 字典合并后顺序不保证有序（本地历史与预报源交错插入），先按整点键排好序再找锚点，窗口切片才可靠。
-        var ordered = hours.Values.OrderBy(p => p.Time, StringComparer.Ordinal).ToList();
-        // 锚点之后一条都没有（缓存只剩过期旧序列、来源没有未来小时）时不能把旧数据 Skip(0) 冒充预报：
-        // 返回空窗口，界面留空，宁可缺也不误导。
-        int start = -1;
-        string anchor = HourKey(DateTimeOffset.Now.ToOffset(ClockOffset(zone, city)).AddHours(-1));
-        for (int index = 0; index < ordered.Count; index++)
-            if (string.CompareOrdinal(ordered[index].Time, anchor) >= 0) { start = index; break; }
-        var hourList = start < 0 ? Array.Empty<HourPoint>() : ordered.Skip(start).Take(24).ToArray();
-        // 空气质量逐时预报按整点键落到天气逐时窗口；缺哪个小时就留 -1，界面隐藏该点。
+        var anchor = DateTimeOffset.UtcNow.ToOffset(ClockOffset(zone, city)).AddHours(-1);
+        var hourList = Enumerable.Range(0, 24).Select(offset =>
+        {
+            string time = HourKey(anchor.AddHours(offset));
+            return hours.GetValueOrDefault(time) ?? new HourPoint { Time = time };
+        }).ToArray();
         if (air is not null && air.HourAqi.Count > 0)
             foreach (var hour in hourList)
                 if (air.HourAqi.TryGetValue(hour.Time, out var aqi)) hour.Aqi = aqi;
@@ -244,7 +242,7 @@ internal static class WeatherAggregator
         {
             if (point.NightCode is not null) continue;
             var night = hourList.FirstOrDefault(hour => hour.Time.StartsWith(date, StringComparison.Ordinal)
-                && int.TryParse(hour.Time.Length >= 13 ? hour.Time.Substring(11, 2) : "", out int hourOfDay) && hourOfDay >= 18);
+                && hour.Code.HasValue && int.TryParse(hour.Time.Length >= 13 ? hour.Time.Substring(11, 2) : "", out int hourOfDay) && hourOfDay >= 18);
             if (night?.Code is { } code) point.NightCode = code;
         }
         var localNow = DateTimeOffset.UtcNow.ToOffset(ClockOffset(zone, city)).DateTime;
@@ -280,7 +278,7 @@ internal static class WeatherAggregator
             WindScale = current.WindScale ?? -1,
             PrecipRateMmH = current.PrecipRateMmH ?? double.NaN,
             PrecipType = current.PrecipType ?? "",
-            WeatherCode = current.Code ?? 0,
+            WeatherCode = current.Code ?? -1,
             IsDay = daylight,
             Aqi = air?.Aqi ?? -1,
             AqiGlobal = air?.AqiGlobal ?? -1,

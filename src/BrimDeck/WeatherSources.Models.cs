@@ -81,6 +81,9 @@ internal sealed class AirPart
 // 一个小时的观测/预报，时间统一为 yyyy-MM-ddTHH:mm。
 internal sealed class HourPoint
 {
+    public bool HasData() => Temperature.HasValue || FeelsLike.HasValue || Humidity.HasValue || Code.HasValue
+        || RainProb.HasValue || PrecipMm.HasValue || WindKmh.HasValue || WindGustKmh.HasValue || WindDirDeg.HasValue
+        || PressureHpa.HasValue || Uv.HasValue || DewPointC.HasValue || CloudPercent.HasValue || VisibilityKm.HasValue || Aqi.HasValue;
     public string Time { get; set; } = "";
     public double? Temperature { get; set; }
     public double? FeelsLike { get; set; }
