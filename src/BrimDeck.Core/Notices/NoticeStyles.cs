@@ -4,7 +4,8 @@ namespace BrimDeck.Core.Notices;
 // (NoticeLevelStyles), and an application may have its own (NoticeAppRule.Styles), which then comes first. Level 1 is BrimDeck's
 // own (its features, the command line, plug-ins) and looks the same always (NoticeLevelStyles.Text).
 // Icon: the application's icon beside the words. Seconds: how long levels 1 and 2 stay, one of SecondsSteps; level 3 stays until
-// handled, at most DeckSettings.NoticeStaySeconds. Liquid: levels 2 and 3 play the liquid as well as the backlight. Color: the
+// handled, at most DeckSettings.NoticeStaySeconds. Liquid: levels 2 and 3 play the liquid. Light: they flash the backlight;
+// false only together with Liquid (the liquid alone), so the effects offered are the backlight, the liquid, and both. Color: the
 // backlight of levels 2 and 3, "" white (the island's own light), AppColor the application's color, else "#RRGGBB". The settings
 // page offers it for level 3 only; an application's own looks offer it for level 2 as well. Sound: what levels 2 and 3 play
 // (NoticeSounds): null the level's own default, "" nothing, a built-in sound's id, or "file:" and an imported file's name.
@@ -20,6 +21,7 @@ public sealed class NoticeStyle
     public bool Icon { get; set; } = true;
     public double Seconds { get; set; } = DefaultSeconds;
     public bool Liquid { get; set; }
+    public bool Light { get; set; } = true;
     public string Color { get; set; } = "";
     public string? Sound { get; set; }
 
@@ -32,6 +34,8 @@ public sealed class NoticeStyle
     internal void Normalize()
     {
         Seconds = Step(Seconds);
+        // Neither the liquid nor the light would play nothing: the light alone then.
+        if (!Liquid) Light = true;
         var color = (Color ?? "").Trim();
         Color = color == AppColor ? AppColor : AppPresets.NormalizeColor(color);
     }

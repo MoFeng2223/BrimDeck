@@ -1,8 +1,8 @@
 namespace BrimDeck.Core.Notices;
 
 // What the island plays for a notice: nothing (it only shows the words), the indicator's one brightening, the backlight
-// alone (the indicator: its breathing bloom), or the backlight with the liquid.
-public enum NoticeEffect { Still, Brighten, Glow, Liquid }
+// alone (the indicator: its breathing bloom), the backlight with the liquid, or the liquid alone.
+public enum NoticeEffect { Still, Brighten, Glow, Liquid, LiquidOnly }
 
 // How strongly a notice shows on the island (NoticeLevel), from what the notice is and what its sender asked. The levels are
 // fixed: the user chooses no level, only whether an application's notices show on the island at all (NoticeAppRule.Level Silent).
@@ -33,11 +33,12 @@ public static class NoticeLevels
 
     // What the island plays. subdued: the notice shows beyond the rate limit, so it shows as a plain one. liquid: the style of a
     // notice's level asks for the liquid (NoticeStyle.Liquid); null for an item without a style (a quota alert, a track change),
-    // where Lively plays the liquid and Glow the backlight alone. The indicator has no room for words: a plain notice lights its
-    // line once, without the bloom.
-    public static NoticeEffect Effect(NoticeLevel level, bool subdued, IslandForm form, bool? liquid = null) => (subdued ? NoticeLevel.Plain : level) switch
+    // where Lively plays the liquid and Glow the backlight alone. light: the style asks for the backlight (NoticeStyle.Light);
+    // false with the liquid plays the liquid alone. The indicator has no room for words: a plain notice lights its line once,
+    // without the bloom.
+    public static NoticeEffect Effect(NoticeLevel level, bool subdued, IslandForm form, bool? liquid = null, bool light = true) => (subdued ? NoticeLevel.Plain : level) switch
     {
-        NoticeLevel.Glow or NoticeLevel.Lively or NoticeLevel.Persistent when liquid is { } chosen => chosen ? NoticeEffect.Liquid : NoticeEffect.Glow,
+        NoticeLevel.Glow or NoticeLevel.Lively or NoticeLevel.Persistent when liquid is { } chosen => !chosen ? NoticeEffect.Glow : light ? NoticeEffect.Liquid : NoticeEffect.LiquidOnly,
         NoticeLevel.Lively or NoticeLevel.Persistent => NoticeEffect.Liquid,
         NoticeLevel.Glow => NoticeEffect.Glow,
         NoticeLevel.Plain when form == IslandForm.Line => NoticeEffect.Brighten,

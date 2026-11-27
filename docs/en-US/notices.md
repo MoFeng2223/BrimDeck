@@ -46,12 +46,12 @@ Each notice shows on the island at one level. The levels are fixed; they cannot 
 | Level | What shows |
 |---|---|
 | 1 · Text | The island keeps its shape; only its content is replaced by the notice's words. The notice can take the whole island, or only the place of one part of the collapsed island (quota ring, music, system monitor, clock, file shelf, device batteries) while the other parts show as usual. The indicator, which has no room for words, lights up once. |
-| 2 · Flash | Used by apps' notices. The island shows the notice's words and its edge flashes: "Glow" lights the backlight twice and the island's outline keeps still; "Lively" adds the liquid ripples of the section above. The indicator breathes. |
+| 2 · Flash | Used by apps' notices. The island shows the notice's words and its edge flashes: "Glow" lights the backlight twice and the island's outline keeps still; "Liquid" plays the liquid ripples of the section above without the light; "Glow + liquid" plays both. On the indicator the glow is its breathing bloom. |
 | 3 · Stay | Used by calls, ringing alarms, event reminders and approvals waiting for you. As level 2, and it stays until it is handled or its longest stay is over, playing again about every 3 seconds. The glow can be set to another color. |
 
 With an app's "Island" switch off on the "Apps" page, its notices only go to the notice history and do not show on the island.
 
-How levels 2 and 3 look is set under Settings › Live notices › How notices show: whether the app icon shows, how long level 2 shows (0.5 seconds or 1 to 10 seconds, 3 by default), the effect (Glow or Lively) and the sound of both levels, and level 3's default color and longest stay (10 seconds to 3 minutes, 1 minute by default). "Try it" beside each level sends a sample notice. Notices take the whole island; only a message that names a place with `--slot` replaces just one part.
+How levels 2 and 3 look is set under Settings › Live notices › How notices show: whether the app icon shows, how long level 2 shows (0.5 seconds or 1 to 10 seconds, 3 by default), the effect (Glow, Liquid, or Glow + liquid) and the sound of both levels, and level 3's default color and longest stay (10 seconds to 3 minutes, 1 minute by default). "Try it" beside each level sends a sample notice. Notices take the whole island; only a message that names a place with `--slot` replaces just one part.
 
 When an app needs a different look, click the arrow beside its name under Settings › Live notices › Apps to open "Own looks". That app's notices then follow its own settings, which come before the "How notices show" page and the look a message asks for. It shows the look of level 2, and for a source of the command line or a program level 3 as well: each has a glow color, an effect, a sound and the app icon switch, and level 2 a display time. Besides:
 

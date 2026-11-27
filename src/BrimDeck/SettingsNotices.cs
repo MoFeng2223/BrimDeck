@@ -5,7 +5,6 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Effects;
 using BrimDeck.Core;
 using BrimDeck.Core.Notices;
 using BrimDeck.Native;
@@ -47,13 +46,7 @@ public sealed partial class SettingsWindow
             var test = ActionButton(Loc.T("试一下", "Try it"), () => center.SendTest(level));
             AutomationProperties.SetName(test, Loc.T("试一下", "Try it") + " " + LevelTitle(level));
             SectionTitle(LevelTitle(level), test, () => LevelHelp(level));
-            var style = S.NoticeStyles.For(level);
-            var preview = LevelPreview(level, style);
-            Group([preview, .. LevelRows(level, style, change =>
-            {
-                Change(s => change(s.NoticeStyles.For(level)));
-                Redraw(preview, LevelPreview(level, S.NoticeStyles.For(level)));
-            }, level.ToString(), own: false)]);
+            Group([.. LevelRows(level, S.NoticeStyles.For(level), change => Change(s => change(s.NoticeStyles.For(level))), level.ToString(), own: false)]);
         }
         NoticeSoundSection(center);
         NoticeStripSection();
@@ -65,8 +58,8 @@ public sealed partial class SettingsWindow
     private static string LevelHelp(NoticeLevel level) => level == NoticeLevel.Persistent
         ? Loc.T("来电、闹钟和需要审批的提示使用这一等级：一直留在岛上并定时闪动，直到处理、展开面板或超过最长停留时间。",
             "Calls, alarms and approvals use this level: the notice stays on the island and flashes now and then until it is handled, the panel is opened or the longest stay is over.")
-        : Loc.T("应用的通知使用这一等级：岛上显示提示文字，边缘闪一下，停留时间到后恢复原样。辉光：边缘亮一下；灵动：辉光加液体波纹。",
-            "Apps' notices use this level: the island shows the notice's words and its edge flashes, until the time is up. Glow: the edge lights up once. Lively: the glow and a liquid ripple.");
+        : Loc.T("应用的通知使用这一等级：岛上显示提示文字并播放一次效果，停留时间到后恢复原样。辉光：边缘亮起，轮廓不动；液态：轮廓像液体一样波动，不发光；辉光 + 液态：两种效果一起播放。",
+            "Apps' notices use this level: the island shows the notice's words and plays its effect once, until the time is up. Glow: the edge lights up and the outline keeps still. Liquid: the outline ripples like a liquid, without the light. Glow + liquid: both together.");
 
     // Whether arriving notices show on the collapsed island: each profile's switch, under 收起外观 (Compact). Independent of the
     // notices page under 展开外观; either one receives notices.
@@ -115,26 +108,18 @@ public sealed partial class SettingsWindow
                     "Stacks the sessions' and the apps' icons in one group, the most urgent in front, with one word or number. Off, two groups, the AI coding tools first.")));
     }
 
-    // A look changed: its preview (shown) takes the picture of the new look (fresh) in place. The page is not rebuilt, so the
-    // control just used keeps its place and focus.
-    private static void Redraw(Border shown, Border fresh)
-    {
-        var island = fresh.Child;
-        fresh.Child = null;
-        shown.Child = island;
-    }
-
-    // The rows of one look (style, shown as a notice of level shows): the effect, the backlight's color, the icon, how long level 2
+    // The rows of one look (style, of a notice of level): the effect, the backlight's color, the icon, how long level 2
     // stays and the sound. The "提示方式" page offers the color for level 3 only, as the one of a message that names none, and level
     // 3's longest stay, which is the same for every application; an application's own looks (own) offer the color for level 2 as
-    // well. edit saves a change to the look and redraws its preview;
-    // the rows stay as they are. name tells the rows of several groups on a page apart for screen readers and the segment groups.
+    // well. edit saves a change to the look; the rows stay as they are, so the control just used keeps its place and focus. name tells the rows of several groups on a page apart for screen readers and the segment groups.
     private List<FrameworkElement> LevelRows(NoticeLevel level, NoticeStyle style, Action<Action<NoticeStyle>> edit, string name, bool own)
     {
         var rows = new List<FrameworkElement>
         {
-            NoticeChoice(Loc.T("效果", "Effect"), "NoticeEffect" + name, style.Liquid, [(false, Loc.T("辉光", "Glow")), (true, Loc.T("灵动", "Lively"))],
-                value => edit(s => s.Liquid = value), 150)
+            // The backlight, the liquid, or both (NoticeStyle.Liquid and Light).
+            NoticeChoice<(bool Liquid, bool Light)>(Loc.T("效果", "Effect"), "NoticeEffect" + name, (style.Liquid, style.Light || !style.Liquid),
+                [((false, true), Loc.T("辉光", "Glow")), ((true, false), Loc.T("液态", "Liquid")), ((true, true), Loc.T("辉光 + 液态", "Glow + liquid"))],
+                value => edit(s => { s.Liquid = value.Liquid; s.Light = value.Light; }), 280)
         };
         if (level == NoticeLevel.Persistent || own) rows.Add(LightRow(style, edit, name, own));
         rows.Add(Toggle(Loc.T("显示应用图标", "Show app icon"), style.Icon, value => edit(s => s.Icon = value)));
@@ -310,40 +295,6 @@ public sealed partial class SettingsWindow
     {
         0 => Loc.T("蓝色", "Blue"), 1 => Loc.T("绿色", "Green"), 2 => Loc.T("琥珀色", "Amber"), 3 => Loc.T("红色", "Red"), _ => Loc.T("紫色", "Purple")
     };
-
-    // A still picture of a notice of this level on a capsule in the panel theme's colors: the words, the icon while it shows, and
-    // the backlight of levels 2 and 3 in the style's color. sample: the application, title and words shown; by default a chat's
-    // message, and an alarm for level 3.
-    private Border LevelPreview(NoticeLevel level, NoticeStyle style, (string App, string Title, string Body)? sample = null)
-    {
-        bool alarm = level == NoticeLevel.Persistent;
-        var (app, heading, body) = sample ?? (alarm ? (Loc.T("时钟", "Clock"), Loc.T("闹钟", "Alarm"), Loc.T("07:30 起床", "07:30 Wake up"))
-            : ("QQ", Loc.T("产品群", "Product team"), Loc.T("小周：今天的版本什么时候发？", "Zhou: when does today's build go out?")));
-        var look = NoticeLook.Current();
-        var accent = (Color)ColorConverter.ConvertFromString(_palette.Accent);
-        var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        if (style.Icon)
-        {
-            var plate = NoticeLetter.Plate(app, 16, accent);
-            plate.Margin = new Thickness(0, 0, 7, 0); plate.VerticalAlignment = VerticalAlignment.Center; row.Children.Add(plate);
-        }
-        var words = new TextBlock { FontFamily = UI.PanelFont, FontSize = 11.5, Foreground = UI.Brush(look.Primary), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
-        words.Inlines.Add(new System.Windows.Documents.Run(heading) { FontWeight = FontWeights.SemiBold });
-        words.Inlines.Add(new System.Windows.Documents.Run("  " + body) { Foreground = UI.Brush(look.Secondary) });
-        row.Children.Add(words);
-        var island = new Border { Height = 28, Width = 236, CornerRadius = new CornerRadius(14), Background = new SolidColorBrush(look.Surface), Padding = new Thickness(style.Icon ? 7 : 14, 0, 14, 0),
-            BorderBrush = UI.Brush(_palette.Divider), BorderThickness = new Thickness(1), Child = row, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        if (level != NoticeLevel.Plain)
-        {
-            // White on a light settings window would not show, so there the island's own light is drawn in the tertiary text.
-            var color = style.Color.Length > 0 && style.Color != NoticeStyle.AppColor ? (Color)ColorConverter.ConvertFromString(style.Color)
-                : style.Color == NoticeStyle.AppColor ? accent : _palette.Dark ? IslandNotice.DefaultLight : (Color)ColorConverter.ConvertFromString(TextTertiary);
-            island.BorderBrush = new SolidColorBrush(color);
-            island.Effect = new DropShadowEffect { Color = color, BlurRadius = 16, ShadowDepth = 0, Opacity = .75 };
-        }
-        AutomationProperties.SetName(island, Loc.T("示意：", "Sample: ") + LevelTitle(level));
-        return new Border { Height = 64, Margin = new Thickness(0, 10, 0, 10), CornerRadius = new CornerRadius(8), Background = UI.Brush(_palette.Sidebar), Child = island };
-    }
 
     // When notices keep quiet: Windows' focus and presentation states, and BrimDeck's own pause.
     private void NoticeQuietSection(NoticeCenter center)
@@ -666,33 +617,25 @@ public sealed partial class SettingsWindow
                 return;
             }
             Group(toggle);
-            // One look: its preview and rows. shown reads the look from the application's looks; pick does too, making the calls'
-            // own look on its first change. A change redraws the preview only.
-            void Look(NoticeLevel level, (string, string, string) sample, Func<NoticeLevelStyles, NoticeStyle> shown, Func<NoticeLevelStyles, NoticeStyle> pick, string group)
-            {
-                var preview = LevelPreview(level, shown(styles), sample);
-                Group([preview, .. LevelRows(level, shown(styles), change =>
-                {
-                    EditRule(key, name, r => { r.Styles ??= S.NoticeStyles.Copy(); change(pick(r.Styles)); });
-                    if (S.NoticeRule(key)?.Styles is { } now) Redraw(preview, LevelPreview(level, shown(now), sample));
-                }, group, own: true)]);
-            }
-            var sample = (name, name, Loc.T("一条新通知", "A new notice"));
+            // One look's rows. shown reads the look from the application's looks; pick does too, making the calls' own look on its
+            // first change.
+            void Look(NoticeLevel level, Func<NoticeLevelStyles, NoticeStyle> shown, Func<NoticeLevelStyles, NoticeStyle> pick, string group)
+                => Group([.. LevelRows(level, shown(styles), change => EditRule(key, name, r => { r.Styles ??= S.NoticeStyles.Copy(); change(pick(r.Styles)); }), group, own: true)]);
             NoticeLevel[] levels = ProgramSource(key) ? Levels : [NoticeLevel.Glow];
             foreach (var level in levels)
             {
                 SectionTitle(levels.Length > 1 ? LevelTitle(level) : Loc.T("通知 · ", "Notices · ") + LevelTitle(level));
-                Look(level, sample, s => s.For(level), s => s.For(level), key + level);
+                Look(level, s => s.For(level), s => s.For(level), key + level);
             }
             if (TakesCalls(key, name))
             {
                 SectionTitle(Loc.T("来电", "Calls"), help: () => Loc.T("语音和视频来电一直留在岛上并定时闪动，直到接听、挂断或展开面板。", "Voice and video calls stay on the island and flash now and then until answered, declined or the panel is opened."));
-                Look(NoticeLevel.Persistent, (name, Loc.T("小周", "Zhou"), Loc.T("邀请你语音通话", "Incoming voice call")), s => s.ForCall(), s => s.Call ??= s.Stay.Copy(), key + "Call");
+                Look(NoticeLevel.Persistent, s => s.ForCall(), s => s.Call ??= s.Stay.Copy(), key + "Call");
             }
             if (!levels.Contains(NoticeLevel.Persistent) && StayKind(key) is { } stay)
             {
                 SectionTitle(stay.Title, help: () => stay.Help);
-                Look(NoticeLevel.Persistent, (name, name, stay.Sample), s => s.Stay, s => s.Stay, key + "Stay");
+                Look(NoticeLevel.Persistent, s => s.Stay, s => s.Stay, key + "Stay");
             }
         });
         if (panel.Children.Count > 0 && panel.Children[^1] is Border last) last.Margin = new Thickness(0, 0, 0, 8);
@@ -710,16 +653,16 @@ public sealed partial class SettingsWindow
 
     // The notices of a source that stay until handled whatever its level: a clock's alarms, a calendar's or a to-do list's
     // reminders, and what a program waits on (an approval, a question). Null for any other source.
-    private static (string Title, string Help, string Sample)? StayKind(string key)
+    private static (string Title, string Help)? StayKind(string key)
     {
         if (ProgramSource(key))
-            return (Loc.T("等待处理", "Waiting on you"), Loc.T("需要批准或回答的提示一直留在岛上，直到处理。", "A notice that asks for an approval or an answer stays on the island until it is handled."), Loc.T("等待批准", "Waiting for approval"));
+            return (Loc.T("等待处理", "Waiting on you"), Loc.T("需要批准或回答的提示一直留在岛上，直到处理。", "A notice that asks for an approval or an answer stays on the island until it is handled."));
         if (!key.StartsWith("windows:", StringComparison.Ordinal) || NoticeTimeSources.ForApp(key["windows:".Length..]) is not { } source) return null;
         return source.Role switch
         {
-            NoticeTimeRole.Clock => (Loc.T("闹钟与计时器", "Alarms and timers"), Loc.T("响铃的闹钟和结束的计时器一直留在岛上，直到处理。", "A ringing alarm or a finished timer stays on the island until it is handled."), Loc.T("07:30 起床", "07:30 Wake up")),
-            NoticeTimeRole.Reminders => (Loc.T("提醒", "Reminders"), Loc.T("到时的提醒一直留在岛上，直到处理。", "A reminder that is due stays on the island until it is handled."), Loc.T("交周报", "Send the weekly report")),
-            _ => (Loc.T("日程提醒", "Event reminders"), Loc.T("日程开始前的提醒一直留在岛上，直到处理。", "A reminder of an event about to start stays on the island until it is handled."), Loc.T("周会 15:00", "Weekly meeting 15:00"))
+            NoticeTimeRole.Clock => (Loc.T("闹钟与计时器", "Alarms and timers"), Loc.T("响铃的闹钟和结束的计时器一直留在岛上，直到处理。", "A ringing alarm or a finished timer stays on the island until it is handled.")),
+            NoticeTimeRole.Reminders => (Loc.T("提醒", "Reminders"), Loc.T("到时的提醒一直留在岛上，直到处理。", "A reminder that is due stays on the island until it is handled.")),
+            _ => (Loc.T("日程提醒", "Event reminders"), Loc.T("日程开始前的提醒一直留在岛上，直到处理。", "A reminder of an event about to start stays on the island until it is handled."))
         };
     }
 

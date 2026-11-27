@@ -22,7 +22,8 @@ namespace BrimDeck;
 //
 // How much of that plays follows the notice's level (NoticeLevels.Effect): a plain one only shows its words (the indicator, which
 // has none, lights up once), a glowing one flashes the backlight without moving the outline (the indicator breathes), a lively
-// one moves as well, and one that stays until handled plays the lively motion again every few seconds.
+// one moves as well, one set to the liquid alone moves without the light, and one that stays until handled plays its motion
+// again every few seconds.
 //
 // The window lies over the island with room around it for the ripples and the backlight, and is shown only while a notice is.
 // While it shows, the island underneath is hidden (MainWindow.SetIslandCovered) and drawn here in the same outline and material.
@@ -33,9 +34,13 @@ namespace BrimDeck;
 // bloom are each drawn once and kept as a picture (Layer), blur included; a frame only changes how strongly they show (Paint).
 // The island itself keeps its drawing too. Only what the liquid moves is drawn again every frame: the stretches of the outline
 // that stand out with their beads (DrawParts) and, while the light flashes, the light along the edge that follows them, both
-// from as few of the outline's points as the ripples need (Sample); or the indicator's thread. Redrawn whole every frame, a
-// long island (about 1800 outline points, nine strokes for the edge's light and three blurs) missed about one frame in five at
-// 165 Hz.
+// from as few of the outline's points as the ripples need (Sample); or the indicator's thread, and that only while the liquid
+// moves it or its color changes. Redrawn whole every frame, a long island (about 1800 outline points, nine strokes for the
+// edge's light and three blurs) missed about one frame in five at 165 Hz.
+//
+// A frame's drawings go straight into their layers (Layer.DrawNow), with each figure's points handed over whole, and the frames
+// end as soon as the shape is at rest and the light has faded (IslandLiquid.Settled). What is left is mostly what WPF itself
+// takes to run a frame, drawn or not: it evaluates every frame on this thread, whatever the graphics card does afterwards.
 internal sealed partial class IslandNotice : Window
 {
     private static readonly Color LineFlash = Color.FromRgb(0xF5, 0xF5, 0xF7), GlowColor = Color.FromRgb(0xF0, 0xF3, 0xF8);
@@ -102,7 +107,10 @@ internal sealed partial class IslandNotice : Window
             _stage.Children.Add(layer.Element);
         }
         foreach (var layer in new[] { _shade, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _edge }) layer.Shown = 0;
-        _stage.Children.Add(_content); _stage.Children.Add(_hit);
+        // The content is clipped to the island's outline. It lies in a container of its own: a frame that draws anything makes
+        // WPF work out the bounds of every child of the stage again, and for a clipped child that is the bounds of its clip, each
+        // time. Straight under the stage, the content's clip took about a quarter of what a frame of the liquid cost this thread.
+        _stage.Children.Add(new Canvas { IsHitTestVisible = false, Children = { _content } }); _stage.Children.Add(_hit);
         _hit.Child = _buttons;
         _shadow.Draw = DrawShadow; _shade.Draw = DrawShade; _glowWide.Draw = d => DrawGlow(d, wide: true); _glowCore.Draw = d => DrawGlow(d, wide: false);
         _bloomWide.Draw = d => DrawBloom(d, 3, 4); _bloomMiddle.Draw = d => DrawBloom(d, 1.5, 1.5); _bloomSmall.Draw = d => DrawBloom(d, .5, 0);
@@ -119,7 +127,7 @@ internal sealed partial class IslandNotice : Window
         _hit.MouseRightButtonUp += (_, e) => e.Handled = true;
         SourceInitialized += (_, _) => WindowsHost.ConfigureOverlay(this, _app.Settings.WindowCapture);
         _app.Notices.Icons.Loaded += IconLoaded;
-        Closed += (_, _) => { StopMotion(); _hoverOpen.Stop(); _replay.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; };
+        Closed += (_, _) => { StopMotion(); _scrollStop?.Invoke(); _hoverOpen.Stop(); _replay.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; };
         DpiChanged += (_, _) => { if (_item is not null && !_leaving) Dress(); };
     }
 
@@ -157,7 +165,7 @@ internal sealed partial class IslandNotice : Window
         bool continuing = IsVisible && !_leaving && _item is not null && part == (_part is not null);
         // Another notice in place that takes the island where the one shown took a part, or the other way round: the shown one goes
         // at once and the new one starts as a new one.
-        if (IsVisible && !continuing && _item is not null && !_leaving) { StopMotion(); _content.Children.Clear(); _deck.SetIslandCovered(false); }
+        if (IsVisible && !continuing && _item is not null && !_leaving) { StopMotion(); ClearContent(); _deck.SetIslandCovered(false); }
         _item = item; _leaving = false;
         int generation = ++_generation;
         // Another notice in place: the words that show leave first. A new one: the island's own words leave first, unless the notice
@@ -280,7 +288,7 @@ internal sealed partial class IslandNotice : Window
         StopMotion();
         _leaving = false;
         _deck.SetIslandCovered(false, reveal);
-        _content.Children.Clear();
+        ClearContent();
         if (!reveal) { Empty(); return; }
         int generation = _generation;
         AfterFrames(HandFrames, () => { if (generation == _generation && _item is null) Empty(); });
@@ -395,7 +403,7 @@ internal sealed partial class IslandNotice : Window
         Canvas.SetLeft(_content, _island.X); Canvas.SetTop(_content, _island.Y); _content.Width = _island.Width; _content.Height = _island.Height;
         var outline = IslandBorder.BuildOutline(_island.Width, _island.Height, _shape.Shoulder, new CornerRadius(_shape.TopRadius, _shape.TopRadius, _shape.BottomRadius, _shape.BottomRadius));
         _content.Clip = _part is { } area ? Geometry.Combine(outline, new RectangleGeometry(new Rect(area.X - _island.X, area.Y - _island.Y, area.Width, area.Height)), GeometryCombineMode.Intersect, null) : outline;
-        _still = null; _rest = null; _sampled = null; _edgeBrushes = null; _rimPen = null; _gradient = null;
+        _still = null; _rest = null; _sampled = null; _edgeBrushes = null; _rimBrush = null; _gradient = null;
         Redraw();
     }
 
@@ -414,7 +422,7 @@ internal sealed partial class IslandNotice : Window
     {
         double dpi = PresentationSource.FromVisual(this) is null ? (WindowsHost.MonitorScreen(_deck.HotkeyMonitor) ?? WindowsHost.PrimaryScreen()).Scale : VisualTreeHelper.GetDpi(this).DpiScaleX;
         _look = NoticeLook.Current(dpi); _dpi = dpi;
-        _fill = null; _rim = null; _edgeBrushes = null; _rimPen = null; _gradient = null;
+        _fill = null; _rim = null; _edgeBrushes = null; _rimBrush = null; _gradient = null;
         // The island's shadow, from a copy of its body behind it; a see-through surface would show that copy, so it has none.
         _shadow.Effect = _look.ShadowOpacity <= 0 || _look.HighContrast || _look.Surface.A < 255 ? null : new DropShadowEffect
         {
@@ -456,7 +464,7 @@ internal sealed partial class IslandNotice : Window
     private bool MotionAllowed => Soft.Enabled && !_look.HighContrast;
 
     // What the shown item plays on this island (NoticeLevels.Effect): a notice that shows beyond the rate limit plays as a plain one.
-    private NoticeEffect Played => _item is { } item ? NoticeLevels.Effect(item.Level, item.Subdued, Form, item.Style?.Liquid) : NoticeEffect.Still;
+    private NoticeEffect Played => _item is { } item ? NoticeLevels.Effect(item.Level, item.Subdued, Form, item.Style?.Liquid, item.Style?.Light ?? true) : NoticeEffect.Still;
 
     // The backlight's color: the one chosen for levels 2 and 3 (white, the application's or a swatch), white for level 1.
     private Color Light()
@@ -494,13 +502,16 @@ internal sealed partial class IslandNotice : Window
         var effect = Played;
         if (!MotionAllowed || effect == NoticeEffect.Still) { Paint(); return; }
         // Without the liquid the model keeps the island's shape and only times the backlight (the indicator: its breathing).
-        bool liquid = effect == NoticeEffect.Liquid;
+        bool liquid = effect is NoticeEffect.Liquid or NoticeEffect.LiquidOnly;
         _liquid = Model(liquid);
         _effect = effect;
         var light = Light();
         if (light != _light) { _light = light; Relight(); }
         else if (_edgeMoved) _edge.InvalidateVisual();
-        _length = liquid ? _liquid.Total : NoticeLevels.EffectLength(effect, Form) + .05;
+        // The frames end once the shape is at rest again and the light has faded: the model's whole length (Total) leaves a
+        // fifth of a second after the last ripple in which every frame would draw nothing.
+        double lit = effect == NoticeEffect.LiquidOnly ? 0 : NoticeLevels.EffectLength(effect == NoticeEffect.Brighten ? effect : NoticeEffect.Glow, Form);
+        _length = (liquid ? Math.Max(_liquid.Settled, lit) : lit) + .05;
         _start = Eased.Now; _t = 0;
         Motion.Start(_body, Step);
         if (_item is { Persistent: true }) { _replay.Interval = AttentionCoordinator.PersistentReplay; _replay.Start(); }
@@ -534,23 +545,35 @@ internal sealed partial class IslandNotice : Window
     private void Paint()
     {
         if (_shape is null) return;
-        bool line = Form == IslandForm.Line, playing = _liquid is not null && _part is null;
-        double glow = playing && !line ? IslandLiquid.GlowAt(_t) : 0;
-        double breath = playing && line && _effect != NoticeEffect.Brighten ? IslandLiquid.BreathAt(_t) : 0;
+        // The liquid alone (NoticeEffect.LiquidOnly) plays without any of the light.
+        bool line = Form == IslandForm.Line, playing = _liquid is not null && _part is null, lit = playing && _effect != NoticeEffect.LiquidOnly;
+        double glow = lit && !line ? IslandLiquid.GlowAt(_t) : 0;
+        double breath = lit && line && _effect != NoticeEffect.Brighten ? IslandLiquid.BreathAt(_t) : 0;
         _glowWide.Shown = _glowCore.Shown = glow;
         _edge.Shown = glow > 0 ? glow * EdgeLight().Strength : 0;
-        // The light along the edge follows the liquid while it shows.
-        if (glow > 0 && _liquid is { Liquid: true }) _edge.InvalidateVisual();
+        // The light along the edge follows the liquid while it shows. What a frame draws is drawn at once (Layer.DrawNow), not
+        // left to the next layout pass.
+        if (glow > 0 && _liquid is { Liquid: true }) _edge.DrawNow();
         _shade.Shown = (line ? breath * LineShadeMost : glow * ShadeMost) * new ThemeColor(255, _light.R, _light.G, _light.B).Luminance;
         _bloomWide.Shown = breath * .55; _bloomMiddle.Shown = breath * .6; _bloomSmall.Shown = breath * .8;
-        if (line) _body.InvalidateVisual();
-        else if (_liquid is { Liquid: true } || _partsDrawn) { _parts.InvalidateVisual(); _beads.InvalidateVisual(); }
+        if (line) PaintLine();
+        else if (_liquid is { Liquid: true } || _partsDrawn) { _parts.DrawNow(); _beads.DrawNow(); }
+    }
+
+    // The indicator is drawn again only when it changes: every frame while the liquid moves it, else when its color does.
+    // What it was last drawn as (DrawLine).
+    private (bool Moving, Color Color)? _lineDrawn;
+
+    private void PaintLine()
+    {
+        bool moving = _liquid is { Liquid: true };
+        if (!moving && _lineDrawn == (moving, LineColor())) return;
+        _body.DrawNow();
     }
 
     // ----- Drawing -----
 
-    private Brush? _fill, _rim, _gradient;
-    private Pen? _rimPen;
+    private Brush? _fill, _rim, _gradient, _rimBrush;
 
     private Brush Fill => _fill ??= Freeze(new SolidColorBrush(_look.Surface));
     private Brush Rim => _rim ??= Freeze(_look.Rim.Clone());
@@ -563,6 +586,13 @@ internal sealed partial class IslandNotice : Window
     // every Span and a long swell one in about eight; every point of a curve is kept. Made once for the layers that draw it.
     private double[] _outs = [];
     private readonly List<int> _kept = [];
+    // The kept points in the stage: where each lies at rest, its outward normal as long as one DIP of the design, and how far it
+    // stands out. The drawings of a frame move each point along its normal from these, without asking the model again.
+    private Point[] _at = [];
+    private Vector[] _normal = [];
+    private double[] _out = [];
+    // The points of one figure of a frame's drawing, filled and handed over whole (PolyLineTo).
+    private readonly List<Point> _run = [];
     private (IslandLiquid Model, double Time)? _sampled;
     private const double Fine = .05;
     private const int Span = 24;
@@ -573,8 +603,8 @@ internal sealed partial class IslandNotice : Window
         var model = moving ?? Still;
         double time = moving is null ? 0 : _t;
         if (_sampled is { } made && ReferenceEquals(made.Model, model) && made.Time == time) return model;
-        var outline = model.Outline;
-        int count = outline.Count;
+        var outline = model.OutlinePoints;
+        int count = outline.Length;
         if (_outs.Length < count) _outs = new double[count];
         if (moving is null) Array.Clear(_outs, 0, count); else moving.EdgeOuts(time, _outs);
         _kept.Clear();
@@ -583,11 +613,16 @@ internal sealed partial class IslandNotice : Window
             _kept.Add(a);
             if (a == count - 1) break;
             int b = a + 1;
-            var at = outline[a];
+            ref readonly var at = ref outline[a];
+            // At rest so far: every point from a to b lies on the outline, as most of a long island does at any moment. The next
+            // one that does too needs no look at those between.
+            bool rest = _outs[a] == 0 && _outs[b] == 0;
             for (; b < count - 1 && b - a < Span; b++)
             {
-                var next = outline[b + 1];
+                ref readonly var next = ref outline[b + 1];
                 if (next.Nx != at.Nx || next.Ny != at.Ny) break;
+                if (rest && _outs[b + 1] == 0) continue;
+                rest = false;
                 double step = (_outs[b + 1] - _outs[a]) / (b + 1 - a);
                 bool fits = true;
                 for (int j = a + 1; j <= b && fits; j++) fits = Math.Abs(_outs[j] - _outs[a] - step * (j - a)) <= Fine;
@@ -595,15 +630,36 @@ internal sealed partial class IslandNotice : Window
             }
             a = b;
         }
+        int kept = _kept.Count;
+        if (_at.Length < kept) { _at = new Point[kept]; _normal = new Vector[kept]; _out = new double[kept]; }
+        for (int k = 0; k < kept; k++)
+        {
+            ref readonly var p = ref outline[_kept[k]];
+            _at[k] = new Point(_island.X + p.X * _k, _island.Y + p.Y * _k);
+            _normal[k] = new Vector(p.Nx * _k, p.Ny * _k);
+            _out[k] = _outs[_kept[k]];
+        }
         _sampled = (model, time);
         return model;
     }
 
-    // A point of the frame's outline moved off along its normal, in the stage.
-    private Point Off(IslandLiquid model, int i, double off)
+    // The k-th kept point moved off along its normal, in the stage: by off from where it lies at rest (At), or by off more than
+    // it stands out at this frame (Off).
+    private Point At(int k, double off) => _at[k] + _normal[k] * off;
+    private Point Off(int k, double off) => _at[k] + _normal[k] * (_out[k] + off);
+
+    // The k-th kept point as it stands at this frame, moved in by depth (the stage's DIPs) across the edge as it runs there,
+    // between its neighbours within from..to. A band between the edge and these points is as wide on a ripple's slope as on
+    // level edge, as a line drawn with a pen is; moved along the normals at rest it would thin out on the slopes.
+    private Point Inside(int k, int from, int to, double depth)
     {
-        var p = model.Outline[i];
-        return new(_island.X + (p.X + p.Nx * off) * _k, _island.Y + (p.Y + p.Ny * off) * _k);
+        var point = Off(k, 0);
+        var along = Off(Math.Min(to, k + 1), 0) - Off(Math.Max(from, k - 1), 0);
+        var across = new Vector(along.Y, -along.X);
+        double length = across.Length;
+        if (!(length > 1e-9)) return point - _normal[k] / _k * depth;
+        across /= length;
+        return across * _normal[k] < 0 ? point + across * depth : point - across * depth;
     }
 
     // The island at rest, exactly as IslandBorder draws it.
@@ -671,6 +727,7 @@ internal sealed partial class IslandNotice : Window
     private const double EdgeMost = .9;
     private static readonly (double Depth, double Alpha)[] EdgeSteps = MakeEdgeSteps();
     private Brush[]? _edgeBrushes;
+    private Point[] _edgeLine = [];
 
     private static (double Depth, double Alpha)[] MakeEdgeSteps()
     {
@@ -712,8 +769,9 @@ internal sealed partial class IslandNotice : Window
     {
         _edgeMoved = false;
         if (_part is not null || Form == IslandForm.Line) return;
-        var model = Sample();
-        if (_kept.Count < 3) return;
+        Sample();
+        int count = _kept.Count;
+        if (count < 3) return;
         _edgeMoved = _liquid is { Liquid: true };
         var (color, _) = EdgeLight();
         bool notch = Form == IslandForm.Notch;
@@ -723,6 +781,9 @@ internal sealed partial class IslandNotice : Window
         // The notch's fades out up its shoulders to nothing where they meet the screen.
         if (notch) drawing.PushOpacityMask(Freeze(new LinearGradientBrush(Colors.Transparent, Colors.Black, new Point(0, _island.Y + _k), new Point(0, _island.Y + Math.Max(2 * _k, _shape.Shoulder * 7 / 16)))
             { MappingMode = BrushMappingMode.Absolute }));
+        // The line the light begins at is the same for every band: its points are made once.
+        if (_edgeLine.Length < count) _edgeLine = new Point[count];
+        for (int k = 0; k < count; k++) _edgeLine[k] = Off(k, -EdgeInset);
         for (int step = 0; step < EdgeSteps.Length; step++)
         {
             double depth = EdgeInset + EdgeSteps[step].Depth;
@@ -730,13 +791,17 @@ internal sealed partial class IslandNotice : Window
             using (var g = band.Open())
             {
                 // The capsule's: the ring between two loops. The notch's: along the line and back along its depth.
-                g.BeginFigure(Off(model, _kept[0], _outs[_kept[0]] - EdgeInset), true, true);
-                for (int k = 1; k < _kept.Count; k++) g.LineTo(Off(model, _kept[k], _outs[_kept[k]] - EdgeInset), true, false);
-                if (notch) for (int k = _kept.Count - 1; k >= 0; k--) g.LineTo(Off(model, _kept[k], _outs[_kept[k]] - depth), true, false);
-                else
+                g.BeginFigure(_edgeLine[0], true, true);
+                _run.Clear();
+                for (int k = 1; k < count; k++) _run.Add(_edgeLine[k]);
+                if (notch) for (int k = count - 1; k >= 0; k--) _run.Add(Off(k, -depth));
+                g.PolyLineTo(_run, true, false);
+                if (!notch)
                 {
-                    g.BeginFigure(Off(model, _kept[0], _outs[_kept[0]] - depth), true, true);
-                    for (int k = 1; k < _kept.Count; k++) g.LineTo(Off(model, _kept[k], _outs[_kept[k]] - depth), true, false);
+                    g.BeginFigure(Off(0, -depth), true, true);
+                    _run.Clear();
+                    for (int k = 1; k < count; k++) _run.Add(Off(k, -depth));
+                    g.PolyLineTo(_run, true, false);
                 }
             }
             band.Freeze();
@@ -763,28 +828,35 @@ internal sealed partial class IslandNotice : Window
     private void DrawParts(DrawingContext drawing)
     {
         _partsDrawn = false;
-        if (_liquid is not { Liquid: true } liquid || Form == IslandForm.Line || _part is not null) return;
+        if (_liquid is not { Liquid: true } || Form == IslandForm.Line || _part is not null) return;
         Sample();
         // A see-through surface drawn twice would show darker: there the stretch begins at the edge itself.
-        double rim = _look.RimWidth, seam = _look.Surface.A < 255 ? 0 : Math.Max(1, rim + .5) / _k, half = rim / 2 / _k;
+        double rim = _look.RimWidth, seam = _look.Surface.A < 255 ? 0 : Math.Max(1, rim + .5) / _k;
         const double Least = .04;
         StreamGeometry? swells = null, rims = null;
         StreamGeometryContext? g = null, r = null;
         int count = _kept.Count;
         for (int k = 0; k < count; k++)
         {
-            if (!(_outs[_kept[k]] > Least)) continue;
+            if (!(_out[k] > Least)) continue;
             int from = Math.Max(0, k - 1);
-            while (k < count && _outs[_kept[k]] > Least) k++;
+            while (k < count && _out[k] > Least) k++;
             int to = Math.Min(count - 1, k);
             g ??= (swells = new StreamGeometry { FillRule = FillRule.Nonzero }).Open();
-            g.BeginFigure(Off(liquid, _kept[from], -seam), true, true);
-            for (int j = from; j <= to; j++) g.LineTo(Off(liquid, _kept[j], _outs[_kept[j]]), true, false);
-            for (int j = to; j > from; j--) g.LineTo(Off(liquid, _kept[j], -seam), true, false);
+            g.BeginFigure(At(from, -seam), true, true);
+            _run.Clear();
+            for (int j = from; j <= to; j++) _run.Add(Off(j, 0));
+            for (int j = to; j > from; j--) _run.Add(At(j, -seam));
+            g.PolyLineTo(_run, true, false);
             if (!(rim > 0)) continue;
-            r ??= (rims = new StreamGeometry()).Open();
-            r.BeginFigure(Off(liquid, _kept[from], _outs[_kept[from]] - half), false, false);
-            for (int j = from + 1; j <= to; j++) r.LineTo(Off(liquid, _kept[j], _outs[_kept[j]] - half), true, true);
+            // The rim along the new edge: the band from the edge to the rim's width inside it, filled. Drawn as a line with a
+            // pen, as at first, it cost a frame more than anything else of the liquid: WPF widens a stroke on the processor.
+            r ??= (rims = new StreamGeometry { FillRule = FillRule.Nonzero }).Open();
+            r.BeginFigure(Off(from, 0), true, true);
+            _run.Clear();
+            for (int j = from + 1; j <= to; j++) _run.Add(Off(j, 0));
+            for (int j = to; j >= from; j--) _run.Add(Inside(j, from, to, rim));
+            r.PolyLineTo(_run, true, false);
         }
         g?.Close(); r?.Close();
         if (swells is not null)
@@ -796,7 +868,7 @@ internal sealed partial class IslandNotice : Window
             if (rims is not null)
             {
                 rims.Freeze();
-                drawing.DrawGeometry(null, _rimPen ??= Freeze(new Pen(OnIsland(Rim), rim) { LineJoin = PenLineJoin.Round }), rims);
+                drawing.DrawGeometry(_rimBrush ??= OnIsland(Rim), null, rims);
             }
             _partsDrawn = true;
         }
@@ -817,17 +889,26 @@ internal sealed partial class IslandNotice : Window
     }
 
     // How bright the indicator is at this frame: two breaths, or the one of a plain notice.
-    private double LineLight => _effect == NoticeEffect.Brighten ? IslandLiquid.FlashAt(_t) : IslandLiquid.BreathAt(_t);
+    private double LineLight => _effect switch { NoticeEffect.Brighten => IslandLiquid.FlashAt(_t), NoticeEffect.LiquidOnly => 0, _ => IslandLiquid.BreathAt(_t) };
+
+    // The indicator's color at this frame: its own, brightened towards the light as it breathes.
+    private Color LineColor()
+    {
+        var color = PanelTheme.ColorOf("indicator");
+        if (_liquid is null) return color;
+        double b = LineLight * .85;
+        var flash = _light == GlowColor ? LineFlash : _light;
+        return Color.FromArgb((byte)Math.Round(color.A + (flash.A - color.A) * b), (byte)Math.Round(color.R + (flash.R - color.R) * b),
+            (byte)Math.Round(color.G + (flash.G - color.G) * b), (byte)Math.Round(color.B + (flash.B - color.B) * b));
+    }
 
     // The indicator: its thread with round ends, the droplets leaving them, in the indicator's color brightening as it breathes.
     private void DrawLine(DrawingContext drawing)
     {
-        var color = PanelTheme.ColorOf("indicator");
-        if (_liquid is not { } liquid) { drawing.DrawGeometry(Freeze(new SolidColorBrush(color)), null, RestOutline()); return; }
-        double b = LineLight * .85;
-        var flash = _light == GlowColor ? LineFlash : _light;
-        var lit = Color.FromArgb((byte)Math.Round(color.A + (flash.A - color.A) * b), (byte)Math.Round(color.R + (flash.R - color.R) * b),
-            (byte)Math.Round(color.G + (flash.G - color.G) * b), (byte)Math.Round(color.B + (flash.B - color.B) * b));
+        var lit = LineColor();
+        _lineDrawn = (_liquid is { Liquid: true }, lit);
+        // Without the liquid the thread keeps its shape, the one it has at rest: only its color changes.
+        if (_liquid is not { Liquid: true } liquid) { drawing.DrawGeometry(Freeze(new SolidColorBrush(lit)), null, RestOutline()); return; }
         double cx = _island.X + _island.Width / 2, cy = _island.Y + _island.Height / 2, h0 = liquid.Height / 2;
         double left = -liquid.LineEnd(_t, -1) + h0, right = liquid.LineEnd(_t, 1) - h0;
         var geometry = new StreamGeometry { FillRule = FillRule.Nonzero };
@@ -949,7 +1030,7 @@ internal sealed partial class IslandNotice : Window
     // been read from the start, and start again; without animations they end in an ellipsis.
     private void BuildContent()
     {
-        _content.Children.Clear();
+        ClearContent();
         _buttons.Children.Clear();
         _announced = null;
         if (_item is null || Form == IslandForm.Line) return;
@@ -996,16 +1077,44 @@ internal sealed partial class IslandNotice : Window
         window.Children.Add(line);
         if (width <= viewport) return;
         if (!Soft.Enabled) { line.Width = viewport; line.TextTrimming = TextTrimming.CharacterEllipsis; return; }
-        // Read from the start, carried along at an even pace to its end, held there, and back to the start.
-        double travel = width - viewport, seconds = travel / (32 * scale);
+        Scroll(line, width - viewport, (width - viewport) / (32 * scale));
+    }
+
+    // Stops the scrolling of the words that show (Scroll); null while none scroll.
+    private Action? _scrollStop;
+
+    private void ClearContent()
+    {
+        _scrollStop?.Invoke(); _scrollStop = null;
+        _content.Children.Clear();
+    }
+
+    // How long words that scroll rest at their start and at their end, in seconds.
+    private const double ScrollHold = 1.2;
+
+    // Words longer than their room are read from the start, carried along at an even pace to their end, held there, and put
+    // back at the start, round after round. Only the carrying is an animation; a timer waits out the holds. As one animation
+    // over the whole round, as at first, WPF ran every frame of the display for as long as the notice showed, the holds
+    // included, which cost more processor time than the notice's own motion.
+    private void Scroll(TextBlock line, double travel, double seconds)
+    {
         var move = new TranslateTransform();
         line.RenderTransform = move;
-        var scroll = new DoubleAnimationUsingKeyFrames { RepeatBehavior = RepeatBehavior.Forever, Duration = TimeSpan.FromSeconds(1.2 + seconds + 1.2) };
-        scroll.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.Zero)));
-        scroll.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(1.2))));
-        scroll.KeyFrames.Add(new LinearDoubleKeyFrame(-travel, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(1.2 + seconds))));
-        scroll.KeyFrames.Add(new LinearDoubleKeyFrame(-travel, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(1.2 + seconds + 1.2))));
-        move.BeginAnimation(TranslateTransform.XProperty, scroll);
+        bool stopped = false, atEnd = false;
+        var hold = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(ScrollHold) };
+        hold.Tick += (_, _) =>
+        {
+            hold.Stop();
+            if (stopped) return;
+            if (atEnd) { atEnd = false; move.X = 0; hold.Start(); return; }
+            var carry = new DoubleAnimation(0, -travel, TimeSpan.FromSeconds(Math.Max(.01, seconds))) { FillBehavior = FillBehavior.Stop };
+            carry.Completed += (_, _) => { if (stopped) return; atEnd = true; hold.Start(); };
+            // The words' place once the animation is over, set before it starts: they stay there when it ends.
+            move.X = -travel;
+            move.BeginAnimation(TranslateTransform.XProperty, carry);
+        };
+        hold.Start();
+        _scrollStop = () => { stopped = true; hold.Stop(); move.BeginAnimation(TranslateTransform.XProperty, null); };
     }
 
     // The notice's buttons at the right of the island, when the island shows any (NoticeActions.OnIsland: the panel opens on a click,
@@ -1169,9 +1278,13 @@ internal sealed partial class IslandNotice : Window
         private readonly Canvas? _keeper;
         private readonly BitmapCache? _picture;
         private readonly Bounds? _bounds;
+        // What the layer shows, in a visual of its own under it: a frame of the motion draws into it at once (DrawNow). Drawn
+        // through OnRender alone, every layer a frame changes took a layout pass of its own as well.
+        private readonly DrawingVisual _drawn = new();
         public Layer(bool kept = false)
         {
             IsHitTestVisible = false;
+            AddVisualChild(_drawn);
             if (!kept) return;
             _picture = new BitmapCache { SnapsToDevicePixels = true };
             _keeper = new Canvas { IsHitTestVisible = false, CacheMode = _picture, Children = { (_bounds = new Bounds()), this } };
@@ -1194,7 +1307,16 @@ internal sealed partial class IslandNotice : Window
             if (_bounds!.Area == area) return;
             _bounds.Area = area; _bounds.InvalidateVisual();
         }
-        protected override void OnRender(DrawingContext drawingContext) { if (Ready?.Invoke() != false) Draw?.Invoke(drawingContext); }
+        protected override int VisualChildrenCount => 1;
+        protected override Visual GetVisualChild(int index) => index == 0 ? _drawn : throw new ArgumentOutOfRangeException(nameof(index));
+
+        // Draws the layer now. InvalidateVisual still draws it with the next layout pass, for what changes it seldom.
+        public void DrawNow()
+        {
+            using var context = _drawn.RenderOpen();
+            if (Ready?.Invoke() != false) Draw?.Invoke(context);
+        }
+        protected override void OnRender(DrawingContext drawingContext) => DrawNow();
 
         // Draws nothing that shows: it gives the kept picture its bounds.
         private sealed class Bounds : FrameworkElement

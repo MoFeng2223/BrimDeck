@@ -143,6 +143,13 @@ internal static class NoticeLevelTests
         check("Effect: a notice's look chooses between the backlight alone and the liquid for levels 2 and 3", forms.All(form => NoticeLevels.Effect(NoticeLevel.Glow, false, form, liquid: true) == NoticeEffect.Liquid
             && NoticeLevels.Effect(NoticeLevel.Persistent, false, form, liquid: false) == NoticeEffect.Glow && NoticeLevels.Effect(NoticeLevel.Lively, false, form, liquid: false) == NoticeEffect.Glow)
             && NoticeLevels.Effect(NoticeLevel.Plain, false, IslandForm.Capsule, liquid: true) == NoticeEffect.Still && NoticeLevels.Effect(NoticeLevel.Glow, true, IslandForm.Capsule, liquid: true) == NoticeEffect.Still);
+        check("Effect: a look without the light plays the liquid alone; without the liquid either, the backlight", forms.All(form => NoticeLevels.Effect(NoticeLevel.Glow, false, form, liquid: true, light: false) == NoticeEffect.LiquidOnly
+            && NoticeLevels.Effect(NoticeLevel.Persistent, false, form, liquid: true, light: false) == NoticeEffect.LiquidOnly && NoticeLevels.Effect(NoticeLevel.Glow, false, form, liquid: false, light: false) == NoticeEffect.Glow)
+            && NoticeLevels.Effect(NoticeLevel.Glow, true, IslandForm.Capsule, liquid: true, light: false) == NoticeEffect.Still && NoticeLevels.Effect(NoticeLevel.Lively, false, IslandForm.Capsule, light: false) == NoticeEffect.Liquid);
+        var unlit = new DeckSettings { NoticeStyles = new() { Flash = new() { Liquid = false, Light = false }, Stay = new() { Liquid = true, Light = false } } };
+        unlit.Normalize();
+        check("Effect: a saved look with neither the liquid nor the light shows the light; the liquid alone is kept", unlit.NoticeStyles.Flash.Light && !unlit.NoticeStyles.Flash.Liquid
+            && unlit.NoticeStyles.Stay.Liquid && !unlit.NoticeStyles.Stay.Light && unlit.NoticeStyles.Copy().Stay is { Liquid: true, Light: false } && new NoticeStyle().Light);
         check("Effect: a notice shown beyond the rate limit plays as a plain one", NoticeLevels.Effect(NoticeLevel.Lively, true, IslandForm.Capsule) == NoticeEffect.Still
             && NoticeLevels.Effect(NoticeLevel.Glow, true, IslandForm.Notch) == NoticeEffect.Still && NoticeLevels.Effect(NoticeLevel.Glow, true, IslandForm.Line) == NoticeEffect.Brighten);
         check("Effect: the backlight alone plays until its second flash has faded", NoticeLevels.EffectLength(NoticeEffect.Glow, IslandForm.Capsule) == IslandLiquid.GlowLength

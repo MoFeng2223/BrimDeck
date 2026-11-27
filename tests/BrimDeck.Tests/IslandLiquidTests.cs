@@ -97,6 +97,18 @@ internal static class IslandLiquidTests
         check("Island capsule: the same seed plays the same motion", first.Outline.All(p => first.EdgeOut(p.S, .3) == again.EdgeOut(p.S, .3)));
         var still = new IslandLiquid(IslandForm.Capsule, 376, 32, liquid: false);
         check("Island capsule: without the liquid effect it keeps still", still.Outline.All(p => still.EdgeOut(p.S, .3) == 0));
+        // Settled: when the frames of the motion may end. Nothing stands out from then on, and something still does shortly before.
+        bool settles = true;
+        foreach (double width in (double[])[196, 376, 1340])
+        {
+            var model = new IslandLiquid(IslandForm.Capsule, width, 32);
+            var stands = new double[model.Outline.Count];
+            bool rests = model.Settled > 1 && model.Settled <= model.Total - .1;
+            for (double t = model.Settled; t <= model.Total; t += .01) { model.EdgeOuts(t, stands); rests &= stands.All(o => o == 0); }
+            model.EdgeOuts(model.Settled - .15, stands);
+            settles &= rests && stands.Any(o => o > 0);
+        }
+        check("Island capsule: it is at rest from Settled on, before its whole length is over, and not before", settles && still.Settled == 0);
     }
 
     private static void Notch(Action<string, bool> check)
@@ -160,5 +172,10 @@ internal static class IslandLiquidTests
         }
         check("Island indicator: it beads without breaking and its ends draw in no more than twice its thickness", thin && ends);
         check("Island indicator: its droplets stay close to it", near);
+        line.LineDrops(line.Settled, circles, necks);
+        check("Island indicator: at Settled its droplets are gone, it is as thick as at rest and its ends have filled up again", line.Settled > .6 && line.Settled < line.Total
+            && circles.Count == 0 && necks.Count == 0 && Math.Abs(line.LineHalf(10, line.Settled) - 2) < 1e-9
+            && Math.Abs(line.LineEnd(line.Settled, 1) - 28) < .1 && Math.Abs(line.LineEnd(line.Settled, -1) - 28) < .1
+            && new IslandLiquid(IslandForm.Line, 56, 4, liquid: false).Settled == 0);
     }
 }

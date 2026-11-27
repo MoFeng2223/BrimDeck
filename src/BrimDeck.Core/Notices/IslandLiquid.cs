@@ -41,6 +41,10 @@ public sealed class IslandLiquid
     public double Height { get; }
     public double Separation { get; }
     public double Total { get; private set; }
+    // When the shape is at rest again, so that a frame after it draws what one at rest does: the last ripple has faded (the
+    // capsule and the notch), or the last droplet is gone, the beading has settled and the ends have filled up again to within a
+    // twentieth of a DIP (the indicator). 0 without the liquid. Total leaves time after it.
+    public double Settled { get; private set; }
     public bool Liquid { get; }
 
     private readonly double _fury, _angle, _pull;
@@ -74,6 +78,12 @@ public sealed class IslandLiquid
             case IslandForm.Notch: BuildOutline(); SpawnRipples(rand); if (!liquid) _ripples.Clear(); break;
             default: SpawnDrops(rand); if (!liquid) _drops.Clear(); break;
         }
+        _along = [.. _outline.Select(p => p.S)];
+        foreach (var w in _ripples) Settled = Math.Max(Settled, w.Born + w.Life);
+        // A droplet's share of the end flows back as exp(-(a - Pinch) / Refill): after 4.5 times Refill about a hundredth is left.
+        foreach (var b in _drops) Settled = Math.Max(Settled, b.Born + Math.Max(b.Life, Pinch + 4.5 * Refill));
+        if (_drops.Count > 0) Settled = Math.Max(Settled, separation + .45);
+        Settled = Math.Min(Settled, Total);
     }
 
     public bool Finished(double t) => t >= Total;
@@ -173,6 +183,10 @@ public sealed class IslandLiquid
     // ----- The outline and its ripples (the notch and the capsule) -----
 
     public IReadOnlyList<EdgePoint> Outline => _outline;
+    // The same points without a copy of each, for what reads all of them every frame. The outline does not change once made.
+    public ReadOnlySpan<EdgePoint> OutlinePoints => System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_outline);
+    // How far along the outline each point lies (EdgePoint.S), by itself.
+    private double[] _along = [];
     public double OutlineLength { get; private set; }
 
     // The whole outline below the screen's edge, from where the right shoulder leaves the screen round to where the left one meets
@@ -380,6 +394,7 @@ public sealed class IslandLiquid
         int count = _outline.Count;
         Array.Clear(into, 0, Math.Min(count, into.Length));
         if (_ripples.Count == 0 || count == 0 || into.Length < count) return;
+        var along = _along;
         foreach (var w in _ripples)
         {
             double a = t - w.Born;
@@ -388,10 +403,10 @@ public sealed class IslandLiquid
             void Add(double from, double to)
             {
                 int low = 0, high = count;
-                while (low < high) { int mid = (low + high) / 2; if (_outline[mid].S < from) low = mid + 1; else high = mid; }
-                for (int i = low; i < count && _outline[i].S <= to; i++)
+                while (low < high) { int mid = (low + high) / 2; if (along[mid] < from) low = mid + 1; else high = mid; }
+                for (int i = low; i < count && along[i] <= to; i++)
                 {
-                    double ds = Along(_outline[i].S, place);
+                    double ds = Along(along[i], place);
                     if (Math.Abs(ds) <= reach) into[i] += height * Math.Exp(-ds * ds / spread);
                 }
             }
@@ -406,7 +421,7 @@ public sealed class IslandLiquid
         {
             // Most of a long island is at rest at any moment.
             if (into[i] == 0) continue;
-            double s = _outline[i].S, fromTop = _closed ? 6 : Math.Min(s, OutlineLength - s);
+            double s = along[i], fromTop = _closed ? 6 : Math.Min(s, OutlineLength - s);
             into[i] = Band * Math.Tanh(into[i] / Band) * Smooth(fromTop / 6);
         }
     }
