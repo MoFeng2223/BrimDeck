@@ -43,8 +43,8 @@ internal static class WeatherData
         WeatherFiles.Ensure(WeatherFiles.Snapshots);
         WeatherCache.Prune(TimeSpan.FromDays(14));
         RequestGate.Restore();
-        foreach(var (key,snapshot,canonical) in ReadSnapshots())
-            if (!Snapshots.TryGetValue(key, out var kept) || kept.FetchedAt < snapshot.FetchedAt || canonical && kept.FetchedAt == snapshot.FetchedAt)
+        foreach(var (key,snapshot) in ReadSnapshots())
+            if (!Snapshots.TryGetValue(key, out var kept) || kept.FetchedAt < snapshot.FetchedAt)
             {
                 Snapshots[key] = snapshot;
                 Written[key] = snapshot.FetchedAt;
@@ -54,7 +54,7 @@ internal static class WeatherData
         try
         {
             string pointer=Path.Combine(WeatherFiles.Root,"weather","auto.json");
-            if(File.Exists(pointer)&&JsonSerializer.Deserialize<SnapshotFile>(File.ReadAllText(pointer),WeatherJson) is { Key.Length:>0 } entry)_autoKey=City.UpgradeStorageKey(entry.Key);
+            if(File.Exists(pointer)&&JsonSerializer.Deserialize<SnapshotFile>(File.ReadAllText(pointer),WeatherJson) is { Key.Length:>0 } entry)_autoKey=entry.Key;
         }
         catch { }
     }
@@ -63,23 +63,23 @@ internal static class WeatherData
         Start();
         return new State(settings);
     }
-    private static IEnumerable<(string Key,WeatherSnapshot Value,bool Canonical)> ReadSnapshots()
+    private static IEnumerable<(string Key,WeatherSnapshot Value)> ReadSnapshots()
     {
         string[] files;
         try { files=Directory.Exists(WeatherFiles.Snapshots)?Directory.GetFiles(WeatherFiles.Snapshots,"*.json"):[]; }
         catch { yield break; }
         foreach(var file in files)
         {
-            string key="";bool canonical=false;WeatherSnapshot? snapshot=null;
+            string key="";WeatherSnapshot? snapshot=null;
             try
             {
-                if(JsonSerializer.Deserialize<SnapshotFile>(File.ReadAllText(file),WeatherJson) is { Value:{ } value } entry){key=City.UpgradeStorageKey(entry.Key);canonical=key==entry.Key;snapshot=value;snapshot.CityKey=key;}
+                if(JsonSerializer.Deserialize<SnapshotFile>(File.ReadAllText(file),WeatherJson) is { Value:{ } value } entry){key=entry.Key;snapshot=value;snapshot.CityKey=key;}
             }
             catch { }
             if(snapshot is null||key.Length==0)continue;
             // 记下已落盘的时间，接下来的保存就不会把它再写一遍。
 
-            yield return (key,snapshot,canonical);
+            yield return (key,snapshot);
         }
     }
     internal static void SaveSnapshot(string key,WeatherSnapshot snapshot,string? autoKey=null)
@@ -304,18 +304,17 @@ internal static class WeatherHourHistory
         WeatherFiles.Ensure(Root);
         string[] files;
         try { files = Directory.GetFiles(Root, "*.json"); } catch { return; }
-        foreach (var file in files.Order(StringComparer.Ordinal))
+        foreach (var file in files)
         {
             try
             {
                 if (JsonSerializer.Deserialize<FileFormat>(File.ReadAllText(file), Json) is not { } entry) continue;
-                string key = City.UpgradeStorageKey(entry.Key);
+                string key = entry.Key;
                 if (!Memory.TryGetValue(key, out var dict)) Memory[key] = dict = new(StringComparer.Ordinal);
                 foreach (var hour in entry.Hours ?? [])
                 {
                     if (string.IsNullOrWhiteSpace(hour.Time)) continue;
-                    if (key == entry.Key) dict[hour.Time] = hour;
-                    else dict.TryAdd(hour.Time, hour);
+                    dict[hour.Time] = hour;
                 }
             }
             catch { }

@@ -87,10 +87,6 @@ static class WeatherCacheTests
                 var results = await Task.WhenAll(leading, waiting);
                 check("Overlapping manual refreshes share a successful fetch", requests == 1 && results.All(value => value == "updated"));
             }
-            var city = new City("New York", 40.75, -73.98) { TimeZoneId = "America/New_York" };
-            check("Legacy snapshot and source keys upgrade to stable city identity",
-                City.UpgradeStorageKey(city.ToString()) == city.StorageKey()
-                && City.UpgradeStorageKey(city + "|hefeng") == city.StorageKey() + "|hefeng");
             check("Nonadjacent city hierarchy levels survive", City.Compose("New York", "County", "New York") == "New York · County · New York");
         }
         finally

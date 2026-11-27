@@ -85,17 +85,6 @@ public sealed record City(string Name, double Latitude, double Longitude, string
 {
     public string StorageKey() => FormattableString.Invariant($"city/{Uri.EscapeDataString(Name)}/{Latitude:R}/{Longitude:R}/{Uri.EscapeDataString(LocationId)}");
 
-    // Old versions stored the generated record description, sometimes using decimal commas.
-    public static string UpgradeStorageKey(string key)
-    {
-        if (!key.StartsWith("City { Name = ", StringComparison.Ordinal)) return key;
-        var legacy = System.Text.RegularExpressions.Regex.Match(key,
-            @"^City \{ Name = (.*), Latitude = ([-+0-9.,Ee]+), Longitude = ([-+0-9.,Ee]+), LocationId = (.*?), TimeZoneId = .*?, Brief = .*?, GeoParts = .*? \}(\|[^|]+)?$");
-        static bool Coordinate(string value, out double coordinate) => double.TryParse(value.Replace(',', '.'),
-            System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out coordinate);
-        if (!legacy.Success || !Coordinate(legacy.Groups[2].Value, out var lat) || !Coordinate(legacy.Groups[3].Value, out var lon)) return key;
-        return new City(legacy.Groups[1].Value, lat, lon, legacy.Groups[4].Value).StorageKey() + legacy.Groups[5].Value;
-    }
     public string? TimeZoneId { get; init; }
     // 层级分隔符与接口返回顺序一致：区县 · 城市 · 省级 · 国家。
     public const string Separator = " · ";
@@ -209,8 +198,7 @@ public sealed class WeatherSettings
         Chips = (Chips ?? []).Where(chip => chip is not null && ChipMetrics.Contains(chip.Metric))
             .Concat(ChipMetrics.Select(metric => new WeatherChip(metric))).DistinctBy(chip => chip.Metric).ToList();
         CitySources = (CitySources ?? []).Where(pair => pair.Value is "hefeng" or "openmeteo")
-            .GroupBy(pair => City.UpgradeStorageKey(pair.Key), StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.FirstOrDefault(pair => pair.Key == group.Key).Value ?? group.Last().Value, StringComparer.Ordinal);
+            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
         HeFengHost = (HeFengHost ?? "").Trim();
     }
 }
