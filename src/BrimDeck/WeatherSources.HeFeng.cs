@@ -22,6 +22,7 @@ internal sealed class HeFengSource : IWeatherSource
         public string Lat => City.Latitude.ToString("0.00", CultureInfo.InvariantCulture);
         public string Lon => City.Longitude.ToString("0.00", CultureInfo.InvariantCulture);
         public string Lang => Loc.IsEnglish ? "en" : "zh";
+        public string Scope { get; } = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Host + "\n" + Key)));
         public string Site => $"{Lat},{Lon}|{Lang}";
         // 城市当地日期：跨过当地零点后逐时/逐天窗口整体前移，缓存键带上它，旧响应自动作废（文档专门警告过「跨天」）。
         public string Day => DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(Geo.UtcOffsetHours(City))).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -37,14 +38,20 @@ internal sealed class HeFengSource : IWeatherSource
     }
 
     // 手动测试：复用实况请求那条链路（含判定与状态发布），只是坐标固定北京、绕过缓存。
-    internal static async Task ProbeAsync(WeatherSettings settings, CancellationToken token)
+    internal static async Task<HeFengCheck> ProbeAsync(WeatherSettings settings, CancellationToken token)
     {
         // 先判空再归一化：NormalizeHost("") 会得到 "https://"，拿它当有效 Host 会白发一个必失败的请求。
         string rawHost = settings.HeFengHost.Trim(), key = WeatherSecrets.Key;
-        if (rawHost.Length == 0 || key.Length == 0) return;
+        if (rawHost.Length == 0 || key.Length == 0) return new(HeFengState.NotSent, Loc.T("请填写 Host 和 Key", "Enter a host and key"), default);
         string host = NormalizeHost(rawHost);
         var context = new Context(host, key, new City("北京", 39.90, 116.41), settings, HeFengMonitor.Generation);
-        await FetchRawAsync(context, $"{host}/weather/v1/current/{context.Lat}/{context.Lon}?localTime=true&lang={context.Lang}", token, probe: true);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var result = await RequestAsync(context, $"{host}/weather/v1/current/{context.Lat}/{context.Lon}?localTime=true&lang={context.Lang}", token);
+        HeFengMonitor.Report(context.Generation, result.Status, result.Body, watch.Elapsed);
+        var (state, detail) = HeFengMonitor.Classify(result.Status, result.Body);
+        return result.Status == 0
+            ? new(HeFengState.NotSent, Loc.T("请求额度或冷却限制", "Quota or cooldown limit"), watch.Elapsed)
+            : new(state ?? HeFengState.Failed, detail ?? $"HTTP {result.Status}", watch.Elapsed);
     }
 
     public async Task<WeatherPart?> FetchAsync(City city, WeatherSettings settings, IReadOnlyCollection<WeatherDomain> need, CancellationToken token)
@@ -133,14 +140,17 @@ internal sealed class HeFengSource : IWeatherSource
 
     // 带缓存取一份和风原始响应；probe 只标记这条请求是否用于连通性判定。
     private static Task<string?> FetchBodyAsync(Context context, string key, TimeSpan ttl, string url, CancellationToken token, bool probe = false)
-        => WeatherCache.GetAsync<string>("hefeng", key, ttl, ct => FetchRawAsync(context, url, ct, probe), token);
+        => WeatherCache.GetAsync<string>("hefeng", context.Scope + "|" + key, ttl, ct => FetchRawAsync(context, url, ct, probe), token);
 
     // Key 走 X-QW-Api-Key 请求头：比放在查询字符串里安全，也避免同时使用两种认证方式。
     // 实测请求并回报探针状态，与通用传输层的 SendAsync 区分开。
+    private static Task<HttpResult> RequestAsync(Context context, string url, CancellationToken token)
+        => WeatherHttp.GetAsync("hefeng", url, token, request => request.Headers.TryAddWithoutValidation("X-QW-Api-Key", context.Key), limits: context.Settings);
+
     private static async Task<string?> FetchRawAsync(Context context, string url, CancellationToken token, bool probe = false)
     {
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        var result = await WeatherHttp.GetAsync("hefeng", url, token, request => request.Headers.TryAddWithoutValidation("X-QW-Api-Key", context.Key), limits: context.Settings);
+        var result = await RequestAsync(context, url, token);
         if (probe) HeFengMonitor.Report(context.Generation, result.Status, result.Body, watch.Elapsed);
         return result.Body;
     }
@@ -182,7 +192,7 @@ internal sealed class HeFengSource : IWeatherSource
 
     // 时光机只接受 LocationID，用与本城相同的坐标反查一次并落盘 30 天；失败就整个历史域跳过，不影响其它数据。
     private static Task<string?> LookupLocationIdAsync(Context context, CancellationToken token)
-        => WeatherCache.GetAsync<string>("hefeng", $"place|{context.Lat},{context.Lon}", TimeSpan.FromDays(30), async ct =>
+        => WeatherCache.GetAsync<string>("hefeng", $"{context.Scope}|place|{context.Lat},{context.Lon}", TimeSpan.FromDays(30), async ct =>
         {
             var body = await FetchRawAsync(context, $"{context.Host}/geo/v2/city/lookup?location={context.Lon},{context.Lat}&number=1", ct);
             if (body is null) return null;

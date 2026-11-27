@@ -21,6 +21,8 @@ internal static class WeatherData
         // "auto" 只作指向，供重启后免定位直接命中缓存、设置页「当前位置」行取数。
 
         public string AutoKey { get => _autoKey.EndsWith("|" + Schedule.SourceFor(null), StringComparison.Ordinal) ? _autoKey : ""; }
+        public City? LocatedCity { get; set; }
+        public string DisplayAutoKey => LocatedCity is { } city ? CacheKey(city, Schedule.SourceFor(null)) : AutoKey;
         public string KeyFor(City city) => CacheKey(city, Schedule.SourceFor(city));
     }
     private sealed class SnapshotFile { public string Key {get;set;}=""; public WeatherSnapshot? Value {get;set;} }
@@ -41,13 +43,18 @@ internal static class WeatherData
         WeatherFiles.Ensure(WeatherFiles.Snapshots);
         WeatherCache.Prune(TimeSpan.FromDays(14));
         RequestGate.Restore();
-        foreach(var (key,snapshot) in ReadSnapshots())Snapshots[key]=snapshot;
+        foreach(var (key,snapshot,canonical) in ReadSnapshots())
+            if (!Snapshots.TryGetValue(key, out var kept) || kept.FetchedAt < snapshot.FetchedAt || canonical && kept.FetchedAt == snapshot.FetchedAt)
+            {
+                Snapshots[key] = snapshot;
+                Written[key] = snapshot.FetchedAt;
+            }
         // 自动定位指针（weather/auto.json，与快照分开放，避免混进快照枚举）：
         // 快照都按真实城市键存，"auto" 只是映射，重启后靠它免定位命中缓存。
         try
         {
             string pointer=Path.Combine(WeatherFiles.Root,"weather","auto.json");
-            if(File.Exists(pointer)&&JsonSerializer.Deserialize<SnapshotFile>(File.ReadAllText(pointer),WeatherJson) is { Key.Length:>0 } entry)_autoKey=entry.Key;
+            if(File.Exists(pointer)&&JsonSerializer.Deserialize<SnapshotFile>(File.ReadAllText(pointer),WeatherJson) is { Key.Length:>0 } entry)_autoKey=City.UpgradeStorageKey(entry.Key);
         }
         catch { }
     }
@@ -56,32 +63,33 @@ internal static class WeatherData
         Start();
         return new State(settings);
     }
-    private static IEnumerable<(string Key,WeatherSnapshot Value)> ReadSnapshots()
+    private static IEnumerable<(string Key,WeatherSnapshot Value,bool Canonical)> ReadSnapshots()
     {
         string[] files;
         try { files=Directory.Exists(WeatherFiles.Snapshots)?Directory.GetFiles(WeatherFiles.Snapshots,"*.json"):[]; }
         catch { yield break; }
         foreach(var file in files)
         {
-            string key="";WeatherSnapshot? snapshot=null;
+            string key="";bool canonical=false;WeatherSnapshot? snapshot=null;
             try
             {
-                if(JsonSerializer.Deserialize<SnapshotFile>(File.ReadAllText(file),WeatherJson) is { Value:{ } value } entry){key=entry.Key;snapshot=value;}
+                if(JsonSerializer.Deserialize<SnapshotFile>(File.ReadAllText(file),WeatherJson) is { Value:{ } value } entry){key=City.UpgradeStorageKey(entry.Key);canonical=key==entry.Key;snapshot=value;snapshot.CityKey=key;}
             }
             catch { }
             if(snapshot is null||key.Length==0)continue;
             // 记下已落盘的时间，接下来的保存就不会把它再写一遍。
-            lock(SnapLock)Written[key]=snapshot.FetchedAt;
-            yield return (key,snapshot);
+
+            yield return (key,snapshot,canonical);
         }
     }
     internal static void SaveSnapshot(string key,WeatherSnapshot snapshot,string? autoKey=null)
     {
         lock(SnapLock)
         {
-            if (!Snapshots.TryGetValue(key, out var previous) || snapshot.FetchedAt >= previous.FetchedAt)
-                Snapshots[key] = snapshot;
-            if(!(Written.TryGetValue(key,out var at)&&snapshot.FetchedAt<=at))
+            Snapshots.TryGetValue(key, out var previous);
+            if (previous is not null && previous.FetchedAt > snapshot.FetchedAt) return;
+            Snapshots[key] = snapshot;
+            if (!Written.TryGetValue(key, out var at) || at != snapshot.FetchedAt || !ReferenceEquals(previous, snapshot))
             {
                 if(WeatherFiles.WriteAtomic(Path.Combine(WeatherFiles.Snapshots,WeatherFiles.Name(key,".json")),JsonSerializer.Serialize(new SnapshotFile{Key=key,Value=snapshot},WeatherJson)))
                 {
@@ -89,6 +97,7 @@ internal static class WeatherData
                     // 快照确实被接受后才并入本地历史；历史键=快照的真实城市键（CityKey，Merge 时写入）。
                     WeatherHourHistory.Record(snapshot.CityKey,snapshot);
                 }
+                else Written.Remove(key);
             }
             if(autoKey is {Length:>0})
             {
@@ -136,7 +145,7 @@ internal static class WeatherData
             foreach (var c in list.EnumerateArray())
                 cities.Add(new City(
                     City.Compose(Json.Text(c, "name"), Json.Text(c, "admin2"), Json.Text(c, "admin1"), Json.Text(c, "country")),
-                    c.GetProperty("latitude").GetDouble(), c.GetProperty("longitude").GetDouble()) { TimeZoneId = Json.Text(c, "timezone") });
+                    c.GetProperty("latitude").GetDouble(), c.GetProperty("longitude").GetDouble()) { TimeZoneId = Json.Text(c, "timezone"), CountryCode = Json.Text(c, "country_code") });
         return cities;
     }
     // 和风 GeoAPI v2 city/lookup：按地名或「经度,纬度」坐标反查最多 10 个，结构化解析省/市/国家/城市 id。
@@ -158,12 +167,16 @@ internal static class WeatherData
         if (result.Body is { Length: > 0 } raw)
         {
             using var probe = JsonDocument.Parse(raw);
-            if (!(Json.Text(probe.RootElement, "code") is { Length: > 0 } code && code != "200")) body = raw;
+            var code = Json.Text(probe.RootElement, "code");
+            if (code == "404") return [];
+            if (code is not (null or "200")) throw new HttpRequestException($"QWeather city lookup failed ({code})");
+            body = raw;
         }
         var cities = new List<City>();
-        if (body.Length == 0) return cities;
+
+        if (body.Length == 0) throw new HttpRequestException($"QWeather city lookup failed ({result.Status})");
         using var doc = JsonDocument.Parse(body);
-        if (Json.Get(doc.RootElement, "location") is not { ValueKind: JsonValueKind.Array } list) return cities;
+        if (Json.Get(doc.RootElement, "location") is not { ValueKind: JsonValueKind.Array } list) throw new JsonException("Missing QWeather city list");
         foreach (var item in list.EnumerateArray())
         {
             double? lat = Json.Number(item, "lat"), lon = Json.Number(item, "lon");
@@ -191,13 +204,13 @@ internal static class WeatherData
             {
                 try
                 {
-                    var found=await SearchHeFeng(Math.Round(coords.Lon,3)+","+Math.Round(coords.Lat,3),settings,token);
+                    var found=await SearchHeFeng(FormattableString.Invariant($"{coords.Lon:0.###},{coords.Lat:0.###}"),settings,token);
                     if(found.Count>0)return found[0];
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
                 catch { }
             }
-        } catch { }
+        } catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; } catch { }
         try {
             using var doc=JsonDocument.Parse(await Http.GetStringAsync("https://ipwho.is/?lang="+(Loc.IsEnglish?"en":"zh-CN"),token));
             var root=doc.RootElement;
@@ -208,32 +221,32 @@ internal static class WeatherData
             // 只需要 IP 补城市名；返回时坐标仍用系统定位的精确值。
             if(hefeng&&precise is null)
             {
-                var found=await SearchHeFeng(Math.Round(lon,3)+","+Math.Round(lat,3),settings,token);
+                var found=await SearchHeFeng(FormattableString.Invariant($"{lon:0.###},{lat:0.###}"),settings,token);
                 if(found.Count>0)
                 {
                     // IP 坐标只有城市精度：丢掉反查结果里的区县段与区县 id，不冒充精确到区。
-                    return new City(City.WithoutDistrict(found[0].Name), lat, lon) { TimeZoneId = found[0].TimeZoneId };
+                    return new City(City.WithoutDistrict(found[0].Name), lat, lon) { TimeZoneId = found[0].TimeZoneId, CountryCode = Json.Text(root, "country_code") };
                 }
             }
             if(root.TryGetProperty("city",out var name)&&name.ValueKind==JsonValueKind.String&&name.GetString() is {Length:>0} query) {
                 var found=await Search(query,settings,token);
                 if(found.Count>0)
                 {
-                    var best=found.OrderBy(c=>Math.Abs(c.Latitude-(precise?.Lat??lat))+Math.Abs(c.Longitude-(precise?.Lon??lon))).First();
+                    var best=found.OrderBy(c=>Math.Abs(c.Latitude-lat)+Math.Abs(c.Longitude-lon)).First();
                     // 有系统坐标时搜索只用来拿规范的名称与 LocationId，坐标以系统定位为准。
-                    return precise is { } coords ? best with { Latitude=coords.Lat,Longitude=coords.Lon } : best;
+                    return best;
                 }
             }
             var parts=new List<string>();
             if(root.TryGetProperty("city",out name)&&name.ValueKind==JsonValueKind.String&&name.GetString() is {Length:>0} s)parts.Add(s);
             if(root.TryGetProperty("region",out var region)&&region.ValueKind==JsonValueKind.String&&region.GetString() is {Length:>0} r)parts.Add(r);
             if(root.TryGetProperty("country",out var country)&&country.ValueKind==JsonValueKind.String&&country.GetString() is {Length:>0} c&&!parts.Contains(c))parts.Add(c);
-            return new City(parts.Count>0?City.Compose([.. parts]):"当前位置",precise?.Lat??lat,precise?.Lon??lon);
-        } catch { return null; }
+            return new City(parts.Count>0?City.Compose([.. parts]):"当前位置",lat,lon) { CountryCode = Json.Text(root, "country_code"), TimeZoneId = Json.Get(root, "timezone") is { } tz ? Json.Text(tz, "id") : null };
+        } catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; } catch { return null; }
     }
     // 天气聚合入口：当前、24 小时、24 天（历史 10 + 今天 + 未来 13）、日升日落与空气质量由 WeatherAggregator 统一拼装。
     // 历史单独一轮，progress 让界面先画不含历史的版本，历史到了再用返回值整体替换。
-    internal static string CacheKey(City city, string sourceId) => city.ToString() + "|" + sourceId;
+    internal static string CacheKey(City city, string sourceId) => city.StorageKey() + "|" + sourceId;
     internal static async Task<WeatherSnapshot> CurrentAsync(City city, WeatherSettings schedule, string sourceId, CancellationToken token, Action<WeatherSnapshot>? progress = null)
     {
         var snapshot = await WeatherAggregator.FetchAsync(city, schedule, sourceId, token, progress);
@@ -242,11 +255,11 @@ internal static class WeatherData
         // 预警返回有效空列表也是成功，但不能因此把同城上次成功的实况/预报当成缺测覆盖掉。
         if (Snapshots.TryGetValue(CacheKey(city, sourceId), out var cached))
         {
-            if (snapshot.Sources.Count > 0)
+            if (snapshot.Sources.ContainsKey("Warning") || snapshot.Sources.ContainsKey("Indices"))
             {
                 cached = cached.ShallowCopy();
-                cached.Warnings = [.. snapshot.Warnings];
-                cached.Indices = [.. snapshot.Indices];
+                if (snapshot.Sources.ContainsKey("Warning")) cached.Warnings = [.. snapshot.Warnings];
+                if (snapshot.Sources.ContainsKey("Indices")) cached.Indices = [.. snapshot.Indices];
                 cached.Sources = new Dictionary<string, string>(cached.Sources, StringComparer.Ordinal);
                 foreach (var (domain, source) in snapshot.Sources) cached.Sources[domain] = source;
             }
@@ -292,7 +305,7 @@ internal static class WeatherHourHistory
                 if (JsonSerializer.Deserialize<FileFormat>(File.ReadAllText(file), Json) is not { } entry) continue;
                 var dict = new Dictionary<string, HourPoint>(StringComparer.Ordinal);
                 foreach (var hour in entry.Hours ?? []) if (!string.IsNullOrWhiteSpace(hour.Time)) dict[hour.Time] = hour;
-                if (dict.Count > 0) Memory[entry.Key] = dict;
+                if (dict.Count > 0) Memory[City.UpgradeStorageKey(entry.Key)] = dict;
             }
             catch { }
         }
@@ -317,7 +330,7 @@ internal static class WeatherHourHistory
             {
                 string time = snapshot.HourTimes[i];
                 if (string.IsNullOrWhiteSpace(time)) continue;
-                dict[time] = new HourPoint
+                var hour = new HourPoint
                 {
                     Time = time,
                     Temperature = At(snapshot.HourTempsC, i), FeelsLike = At(snapshot.HourFeelsLikeC, i),
@@ -327,6 +340,7 @@ internal static class WeatherHourHistory
                     DewPointC = At(snapshot.HourDewPointC, i), CloudPercent = At(snapshot.HourCloudPercent, i), VisibilityKm = At(snapshot.HourVisibilityKm, i),
                     Aqi = Int(snapshot.HourAqi, i)
                 };
+                if (hour.HasData()) dict[time] = hour;
             }
             if (dict.Count == 0) return;
             var newest = dict.Keys.Select(ParseTime).DefaultIfEmpty(DateTime.MinValue).Max();

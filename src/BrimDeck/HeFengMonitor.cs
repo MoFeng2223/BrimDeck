@@ -6,7 +6,7 @@ namespace BrimDeck;
 // 和风可用性监测：只认「实况」这一条真实请求的结果。缓存命中、闸门拦截、请求级 400 都不算，
 // 避免把国外坐标必失败的分钟降水、或另一座城市的并发请求误判成来源不可用。
 // 分类依赖和风的 HTTP 语义，所以和来源实现放同一层；只把文件独立出来，不让来源反向依赖设置页。
-internal enum HeFengState { Untested, Connected, Failed }
+internal enum HeFengState { Untested, Connected, Failed, NotSent }
 
 internal sealed record HeFengCheck(HeFengState State, string Detail, TimeSpan Elapsed);
 
@@ -50,7 +50,7 @@ internal static class HeFengMonitor
 
     public static int Generation { get { lock (Sync) return _generation; } }
 
-    private static (HeFengState? State, string? Detail) Classify(int status, string? body)
+    internal static (HeFengState? State, string? Detail) Classify(int status, string? body)
     {
         if (status == 0) return (null, null);   // 请求闸门拦下，没有真实发出
         if (status is 401 or 403) return (HeFengState.Failed, Loc.T("API Key 无效或无权限", "API Key invalid or unauthorized"));

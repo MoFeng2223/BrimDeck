@@ -16,6 +16,8 @@ public sealed partial class SettingsWindow
         var state=WeatherData.Load(() => S);var cityRows=new StackPanel();bool active=true;
         string autoName="当前位置";if(state.AutoKey.Length>0&&state.Cache.TryGetValue(state.AutoKey,out var autoSnap))autoName=autoSnap.Name;
         var preview=new WeatherSettingsCard(state);
+        var lifetime = new CancellationTokenSource();
+        int locationVersion = 0;
         // 城市配额徽章：挂在「当前城市」标题右侧的细描边胶囊里，还有空位用绿色、加满转红色。
         var cityQuotaText=TextLine("",11,TextPrimary);cityQuotaText.VerticalAlignment=VerticalAlignment.Center;
         var cityQuota=new Border {Child=cityQuotaText,CornerRadius=new CornerRadius(10),Padding=new Thickness(9,2,9,2),Background=Brushes.Transparent,BorderBrush=(Brush)FindResource("SettingsBorder"),BorderThickness=new Thickness(1),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(8,0,0,0)};
@@ -54,11 +56,11 @@ public sealed partial class SettingsWindow
             const double cityRowHeight=54;
             for(int i=-1;i<state.Cities.Count;i++) {
                 bool selected=i==state.Selected;var city=i<0?null:state.Cities[i];
-                string? temperature=null;int code=3;bool day=true;
+                string? temperature=null;int code=-1;bool day=true;
                 string name=Loc.T("自动定位","Auto location");string? subtitle=null;
                 if(city is null){
                     string local=autoName;
-                    if(state.Cache.TryGetValue(state.AutoKey,out var snap)){
+                    if(state.Cache.TryGetValue(state.DisplayAutoKey,out var snap)){
                         temperature=double.IsFinite(snap.Temperature)?$"{snap.Temperature:0}°":"--";code=snap.WeatherCode;day=snap.IsDay;
                         if(!snap.Name.Contains("当前位置"))local=snap.Name;
                     }
@@ -90,7 +92,7 @@ public sealed partial class SettingsWindow
                 PopupMotion.Attach(picker);
                 picker.SelectionChanged+=(_,_)=>{
                     if(picker.SelectedIndex<0)return;
-                    state.Schedule.CitySources[city?.ToString() ?? "auto"]=sources[picker.SelectedIndex].Info.Id;
+                    state.Schedule.CitySources[city?.StorageKey() ?? "auto"]=sources[picker.SelectedIndex].Info.Id;
                     Save();preview.RenderWeatherCard();Fill();
                     _=RefreshCityWeatherAsync(city);
                 };
@@ -107,6 +109,9 @@ public sealed partial class SettingsWindow
                 var frame=new Border {Child=grid,Height=cityRowHeight,Tag=city,RenderTransform=new TranslateTransform(),
                     Background=selected?(Brush)FindResource("SettingsAccentTint"):Brushes.Transparent,
                     BorderBrush=UI.Brush(_palette.RowDivider),BorderThickness=new Thickness(0,city is null?0:1,0,0),Cursor=System.Windows.Input.Cursors.Hand};
+                frame.Focusable = true;
+                System.Windows.Automation.AutomationProperties.SetName(frame, name);
+                frame.KeyDown += (_, e) => { if (frame.IsKeyboardFocused && e.Key is Key.Enter or Key.Space) { Select(); e.Handled = true; } };
                 frame.MouseLeftButtonUp+=(_,e)=>{
                     bool overGrip=grid.Children.OfType<GripHandle>().Any(handle=>handle.IsMouseOver);
                     if(!picker.IsMouseOver && !overGrip && e.OriginalSource is not Button)Select();
@@ -131,14 +136,14 @@ public sealed partial class SettingsWindow
         {
             try
             {
+                int version = ++locationVersion;
                 var source = state.Schedule.SourceFor(null);
-                var local = await WeatherData.LocateAsync(state.Schedule, CancellationToken.None);
-                if (!active || local is null || source != state.Schedule.SourceFor(null)) return;
+                var local = await WeatherData.LocateAsync(state.Schedule, lifetime.Token);
+                if (!active || version != locationVersion || local is null || source != state.Schedule.SourceFor(null)) return;
+                state.LocatedCity = local;
                 autoName = local.Name;
-                var key = WeatherData.CacheKey(local, source);
-                if (key != state.AutoKey && state.Cache.TryGetValue(key, out var cached))
-                    WeatherData.SaveSnapshot(key, cached, key);
-                else Fill();
+                Fill();
+                preview.RenderWeatherCard();
             }
             catch { }
         }
@@ -169,12 +174,13 @@ public sealed partial class SettingsWindow
         void ShowSearching(bool on)
         {
             spinner.Visibility=on?Visibility.Visible:Visibility.Collapsed;
-            if(on) spinTransform.BeginAnimation(RotateTransform.AngleProperty,spinAnimation);
+            if(on && Soft.Enabled) spinTransform.BeginAnimation(RotateTransform.AngleProperty,spinAnimation);
             else {spinTransform.BeginAnimation(RotateTransform.AngleProperty,null);spinTransform.Angle=0;}
             loading.Visibility=on?Visibility.Visible:Visibility.Collapsed;
             if(on) empty.Visibility=Visibility.Collapsed;
         }
         // 状态按钮与配额计数器提前声明：按钮回调和添加城市触发的刷新都会引用到它们，晚声明会被判定为未赋值。
+        var requestsToday = TextLine("",12,TextSecondary);
         var dailyCounter=TextLine("",11,TextSecondary);dailyCounter.VerticalAlignment=VerticalAlignment.Center;
         var monthlyCounter=TextLine("",11,TextSecondary);monthlyCounter.VerticalAlignment=VerticalAlignment.Center;
         var statusDot = new Ellipse {Width = 7, Height = 7, Fill = UI.Brush(TextTertiary)};
@@ -192,8 +198,21 @@ public sealed partial class SettingsWindow
             testing = true; statusButton.IsEnabled = false;
             statusText.Text = Loc.T("测试中…", "Testing…");
             statusText.Foreground = UI.Brush(TextSecondary); statusDot.Fill = UI.Brush(TextSecondary);
-            try { await HeFengSource.ProbeAsync(state.Schedule, CancellationToken.None); }
-            finally { testing = false; statusButton.IsEnabled = true; UpdateCounters(); RenderStatus(HeFengMonitor.Current); }
+            int version = HeFengMonitor.Generation;
+            HeFengCheck? result = null;
+            try { result = await HeFengSource.ProbeAsync(state.Schedule, lifetime.Token); }
+            catch (OperationCanceledException) when (!active) { }
+            catch { result = new(HeFengState.Failed, Loc.T("无法完成测试", "Test could not complete"), default); }
+            finally
+            {
+                testing = false;
+                if (active)
+                {
+                    statusButton.IsEnabled = true;
+                    UpdateCounters();
+                    RenderStatus(version == HeFengMonitor.Generation && result is not null ? result : HeFengMonitor.Current);
+                }
+            }
         };
         // 状态由 HeFengMonitor 按真实 HTTP 结果回报，设置页只负责把状态画到按钮上。
         void RenderStatus(HeFengCheck check)
@@ -202,6 +221,7 @@ public sealed partial class SettingsWindow
             var (text, brush) = check.State switch
             {
                 HeFengState.Connected => (Loc.T("已连通", "Connected"), UI.Brush(_palette.Positive)),
+                HeFengState.NotSent => (Loc.T("未发出", "Not sent"), UI.Brush(TextSecondary)),
                 HeFengState.Failed => (Loc.T("连接失败", "Failed"), UI.Brush(_palette.Negative)),
                 _ => (Loc.T("未测试", "Not tested"), UI.Brush(TextTertiary))
             };
@@ -213,10 +233,10 @@ public sealed partial class SettingsWindow
         void OnStatusChanged(HeFengCheck check)
         {
             // HTTP 回调在线程池上，WPF 控件只能在 UI 线程更新。
-            if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(new Action(() => RenderStatus(check))); return; }
-            RenderStatus(check);
+            if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(new Action(() => RenderStatus(HeFengMonitor.Current))); return; }
+            RenderStatus(HeFengMonitor.Current);
         }
-        HeFengMonitor.Changed += OnStatusChanged;
+
         RenderStatus(HeFengMonitor.Current);
         City? picked=null;bool programmatic=false;CancellationTokenSource? pending=null;CancellationTokenSource? fetchCts=null;
         // 城市上限与 DeckSettings.Normalize 共用同一常量：满了就禁用添加并说明原因，不会出现「加了却被规范化丢掉」。
@@ -234,7 +254,7 @@ public sealed partial class SettingsWindow
         input.TextChanged+=async (_,_)=>{
             if(programmatic)return;
             pending?.Cancel();pending?.Dispose();pending=new();var token=pending.Token;picked=null;add.IsEnabled=false;
-            options.SelectedIndex=-1;options.Visibility=Visibility.Visible;empty.Text=noResultText;empty.Visibility=Visibility.Collapsed;
+            options.ItemsSource=null;options.SelectedIndex=-1;options.Visibility=Visibility.Visible;empty.Text=noResultText;empty.Visibility=Visibility.Collapsed;
             var query=input.Text.Trim();
             if(query.Length<2){ShowSearching(false);popup.IsOpen=false;return;}
             ShowSearching(true);popup.IsOpen=true;
@@ -247,11 +267,11 @@ public sealed partial class SettingsWindow
                 options.Visibility=any?Visibility.Visible:Visibility.Collapsed;
                 empty.Text=noResultText;
                 empty.Visibility=any?Visibility.Collapsed:Visibility.Visible;
-                popup.IsOpen=true;
+
             }
             catch(OperationCanceledException){ }
-            catch { if(pending is not null&&token==pending.Token){options.ItemsSource=null;options.Visibility=Visibility.Collapsed;empty.Text=failedText;empty.Visibility=Visibility.Visible;popup.IsOpen=true;} }
-            finally { if(pending is not null&&token==pending.Token)ShowSearching(false); }
+            catch { if(pending is not null&&token==pending.Token){options.ItemsSource=null;options.Visibility=Visibility.Collapsed;empty.Text=failedText;empty.Visibility=Visibility.Visible;} }
+            finally { if(active){UpdateCounters(); if(pending is not null&&token==pending.Token)ShowSearching(false);} }
         };
         // 搜索行与城市行共用列宽，作为清单页脚；添加按钮落在数据源列，整组收进一张卡。
         var foot=CityGrid();
@@ -320,16 +340,45 @@ public sealed partial class SettingsWindow
             box.TextChanged += (_, _) => save(box.Text);
             return box;
         }
-        PasswordBox SecretField(string value, Action<string> save)
+        PasswordBox SecretField()
         {
-            // Password 在这之后才挂事件，初始装载不会误触发一次保存。
-            var box = new PasswordBox { Style = (Style)FindResource("SettingsPassword"), MaxLength = 4096, Password = value };
-            box.PasswordChanged += (_, _) => save(box.Password);
+            var box = new PasswordBox { Style = (Style)FindResource("SettingsPassword"), MaxLength = 4096 };
+            string saved;
+            try { saved = WeatherSecrets.Key; }
+            catch
+            {
+                box.IsEnabled = false;
+                var message = Loc.T("无法读取已保存的密钥。请检查密钥文件后重新打开设置。", "Cannot read the saved key. Check the secret store and reopen settings.");
+                cardBody.Children.Add(TextLine(message, 11, TextSecondary));
+                return box;
+            }
+            box.Password = saved;
+            bool restoring = false;
+            box.PasswordChanged += (_, _) =>
+            {
+                if (restoring) return;
+                string value = box.Password;
+                try { WeatherSecrets.Write(value); }
+                catch
+                {
+                    restoring = true;
+                    try { box.Password = saved; } finally { restoring = false; }
+                    MessageBox.Show(this, Loc.T("密钥保存失败。请检查写入权限后重试。", "Could not save the key. Check write permissions and retry."));
+                    return;
+                }
+                saved = value;
+                state.Schedule.HeFengKeyConfigured = value.Trim().Length > 0;
+                Save();
+                HeFengMonitor.Invalidate();
+            };
             return box;
         }
         // 已用/上限计数：挂在字段标签右侧；上限为 0 时分母显示 ∞。改动上限后立即刷新。
         void UpdateCounters()
         {
+            var used=WeatherSources.All.Select(source=>(Name:source.Info.Id=="hefeng"?Loc.T("和风","QWeather"):source.Info.Name,Count:RequestGate.Today(source.Info.Id)))
+                .Append((Name:ChinaDailySupplement.Name,Count:RequestGate.Today(ChinaDailySupplement.Id))).Append((Name:Loc.T("和风地名","QWeather search"),Count:RequestGate.Today(HeFengSource.GeoId))).Where(item=>item.Count>0).ToArray();
+            requestsToday.Text = used.Length==0?Loc.T("尚未发起请求","No requests yet"):string.Join(" · ",used.Select(item=>$"{item.Name} {item.Count}"));
             string Ratio(int used,int limit)=>$"{used}/{(limit==0?"∞":limit.ToString())}";
             dailyCounter.Text=Ratio(RequestGate.Today("hefeng"),state.Schedule.HeFengDailyLimit);
             monthlyCounter.Text=Ratio(RequestGate.ThisMonth("hefeng"),state.Schedule.HeFengMonthlyLimit);
@@ -359,7 +408,7 @@ public sealed partial class SettingsWindow
         cardGrid.Children.Add(CardField(Loc.T("API Host", "API Host"),
             TextField(state.Schedule.HeFengHost, text => { state.Schedule.HeFengHost = text; Save(); HeFengMonitor.Invalidate(); }), null, 0, 0));
         cardGrid.Children.Add(CardField(Loc.T("API Key", "API Key"),
-            SecretField(WeatherSecrets.Key, text => { WeatherSecrets.Write(text); state.Schedule.HeFengKeyConfigured = WeatherSecrets.Key.Length > 0; Save(); HeFengMonitor.Invalidate(); }), null, 0, 2));
+            SecretField(), null, 0, 2));
         cardGrid.Children.Add(CardField(Loc.T("每日上限", "Daily limit"),
             LimitField(() => state.Schedule.HeFengDailyLimit, v => state.Schedule.HeFengDailyLimit = v, UpdateCounters), dailyCounter, 1, 0));
         cardGrid.Children.Add(CardField(Loc.T("每月上限", "Monthly limit"),
@@ -372,9 +421,7 @@ public sealed partial class SettingsWindow
         // 请求与缓存：按用户指定来源请求 + 分域缓存，这里把当天的实际请求量和磁盘占用摆出来，配额一目了然。
         SectionTitle(Loc.T("请求与缓存","Requests and cache"));
         var usage=WeatherCache.Usage();
-        var used=WeatherSources.All.Select(source=>(Name:source.Info.Id=="hefeng"?Loc.T("和风","QWeather"):source.Info.Name,Count:RequestGate.Today(source.Info.Id)))
-            .Append((Name:ChinaDailySupplement.Name,Count:RequestGate.Today(ChinaDailySupplement.Id))).Append((Name:Loc.T("和风地名","QWeather search"),Count:RequestGate.Today(HeFengSource.GeoId))).Where(item=>item.Count>0).ToArray();
-        Group(Row(Loc.T("今日请求","Requests today"),TextLine(used.Length==0?Loc.T("尚未发起请求","No requests yet"):string.Join(" · ",used.Select(item=>$"{item.Name} {item.Count}")),12,TextSecondary)),
+        Group(Row(Loc.T("今日请求","Requests today"),requestsToday),
               Row(Loc.T("本地缓存","Local cache"),TextLine(Loc.T($"{usage.Count} 项 · {usage.Bytes/1024.0:0} KB（14 天未用自动清理）",$"{usage.Count} entries · {usage.Bytes/1024.0:0} KB (unused entries purged after 14 days)"),12,TextSecondary)));
         preview.RefreshRequested += async () =>
         {
@@ -382,12 +429,16 @@ public sealed partial class SettingsWindow
             await RefreshCityWeatherAsync(state.Selected >= 0 && state.Selected < state.Cities.Count ? state.Cities[state.Selected] : null);
         };
         void UpdateSnapshots() { Fill(); preview.RenderWeatherCard(); }
-        WeatherData.SnapshotChanged += UpdateSnapshots;
-        cityRows.Unloaded+=(_,_)=>{WeatherData.SnapshotChanged -= UpdateSnapshots;HeFengMonitor.Changed -= OnStatusChanged;active=false;pending?.Cancel();pending?.Dispose();pending=null;fetchCts?.Cancel();fetchCts?.Dispose();fetchCts=null;popup.IsOpen=false;ShowSearching(false);};
+
+        cityRows.Unloaded+=(_,_)=>{WeatherData.SnapshotChanged -= UpdateSnapshots;HeFengMonitor.Changed -= OnStatusChanged;active=false;lifetime.Cancel();lifetime.Dispose();pending?.Cancel();pending?.Dispose();pending=null;fetchCts?.Cancel();fetchCts?.Dispose();fetchCts=null;popup.IsOpen=false;ShowSearching(false);};
 
         // 添加城市后立即拉取一次天气写入缓存，列表温度随之刷新；未就绪时该行不显示温度，删除或离开页面的请求一律作废。
+        HeFengMonitor.Changed += OnStatusChanged;
+        WeatherData.SnapshotChanged += UpdateSnapshots;
+
         async Task RefreshCityWeatherAsync(City? selectedCity)
         {
+            if (selectedCity is null) locationVersion++;
             fetchCts?.Cancel();
             using var request = new CancellationTokenSource();
             fetchCts = request;
@@ -400,6 +451,7 @@ public sealed partial class SettingsWindow
                 var snapshot = await WeatherData.CurrentAsync(city, state.Schedule, sourceId, token);
                 if (!active || token.IsCancellationRequested || sourceId != state.Schedule.SourceFor(selectedCity)
                     || (selectedCity is not null && !state.Cities.Contains(selectedCity))) return;
+                if (selectedCity is null) { state.LocatedCity = city; autoName = city.Name; }
                 var key = WeatherData.CacheKey(city, sourceId);
                 if (WeatherData.HasWeather(snapshot)) WeatherData.SaveSnapshot(key, snapshot, selectedCity is null ? key : null);
             }
@@ -635,13 +687,13 @@ internal sealed class WeatherSettingsCard : Border
     internal void RenderWeatherCard()
     {
         CornerRadius=new CornerRadius(14);Margin=new Thickness(0,0,0,18);ClipToBounds=true;
-        var key=state.Selected>=0&&state.Selected<state.Cities.Count?state.KeyFor(state.Cities[state.Selected]):state.AutoKey;
+        var key=state.Selected>=0&&state.Selected<state.Cities.Count?state.KeyFor(state.Cities[state.Selected]):state.DisplayAutoKey;
         if (key != displayedKey) selectedDay = 0;
         displayedKey = key;
         WeatherSnapshot? snap=null;
         if(state.Cache.TryGetValue(key,out var cached)) snap=cached;
-        int code=snap?.WeatherCode??0;bool day=snap?.IsDay??true;
-        string cityName=state.Selected>=0&&state.Selected<state.Cities.Count?state.Cities[state.Selected].Name:"当前位置";
+        int code=snap?.WeatherCode??-1;bool day=snap?.IsDay??true;
+        string cityName=state.Selected>=0&&state.Selected<state.Cities.Count?state.Cities[state.Selected].Name:state.LocatedCity?.Name ?? "当前位置";
         string Place(string n)=>n=="当前位置"?Loc.T("当前位置","Current location"):n;
         string Deg(double value)=>double.IsNaN(value)?"--":$"{value:0}°";
         string Num(double value,string suffix)=>double.IsNaN(value)?"--":value.ToString("0.#",System.Globalization.CultureInfo.InvariantCulture)+suffix;
@@ -693,13 +745,16 @@ internal sealed class WeatherSettingsCard : Border
         var forecast=new UniformGrid {Rows=1,Columns=3,Margin=new Thickness(12,0,14,0),VerticalAlignment=VerticalAlignment.Center,HorizontalAlignment=HorizontalAlignment.Right};
 
         for(int i=0;i<3;i++) {
-            string dayTitle="";int dCode=0;string rain="";string high="";string low="";
+            bool selectable = false;
+            string dayTitle="";int dCode=-1;string rain="";string high="";string low="";
             if(snap is not null&&snap.DayDates.Length>0) {
                 int idx=today+i; if(idx<0||idx>=snap.DayDates.Length) break;
                 if (!DateTime.TryParse(snap.DayDates[idx],out var date)) continue;
          dayTitle=i==0?Loc.T("今天","Today"):i==1?Loc.T("明天","Tomorrow"):Loc.T(new[]{"周日","周一","周二","周三","周四","周五","周六"}[(int)date.DayOfWeek],new[]{"Sun","Mon","Tue","Wed","Thu","Fri","Sat"}[(int)date.DayOfWeek]);
-                dCode=snap.DayCodes.Length>idx&&snap.DayCodes[idx]>=0?snap.DayCodes[idx]:3;
+                dCode=snap.DayCodes.Length>idx&&snap.DayCodes[idx]>=0?snap.DayCodes[idx]:-1;
                 int r=snap.DayRainProb.Length>idx?snap.DayRainProb[idx]:-1;rain=r>=20?r+"%":"–";
+                selectable = dCode >= 0 || r >= 0 || idx < snap.DayHighC.Length && double.IsFinite(snap.DayHighC[idx])
+                    || idx < snap.DayLowC.Length && double.IsFinite(snap.DayLowC[idx]) || i == 0 && double.IsFinite(snap.Temperature);
                 high=Deg(snap.DayHighC.Length>idx?snap.DayHighC[idx]:double.NaN);low=Deg(snap.DayLowC.Length>idx?snap.DayLowC[idx]:double.NaN);
             }
             // 每列固定 64px：正好装下「今天 / 图标 / 降水 / 15°/4°」，三列合计 192，右边留出呼吸位。
@@ -718,8 +773,8 @@ internal sealed class WeatherSettingsCard : Border
                 Margin=new Thickness(2,0,2,0),Background=new SolidColorBrush(Color.FromArgb((byte)(i==selectedDay?34:14),255,255,255)),
                 BorderBrush=i==selectedDay?new SolidColorBrush(Color.FromArgb(56,255,255,255)):Brushes.Transparent};
             int offset=i;
-            if(snap is not null) AttachAction(holder,()=>{selectedDay=offset;RenderWeatherCard();});
-            else col.Visibility=Visibility.Hidden;
+            if(selectable) AttachAction(holder,()=>{selectedDay=offset;RenderWeatherCard();});
+            else if(snap is null) col.Visibility=Visibility.Hidden;
             forecast.Children.Add(holder);
         }
         body.Children.Add(now);Grid.SetColumn(forecast,1);body.Children.Add(forecast);

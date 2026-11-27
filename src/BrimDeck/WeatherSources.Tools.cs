@@ -7,13 +7,13 @@ namespace BrimDeck;
 // 国内/国外判断与统一的城市名拆分。
 internal static class Geo
 {
-    // 中国范围框（含港澳台与南海诸岛）：决定国内来源能否服务这座城市，
-    // 也用于判断和风分钟降水这类「仅中国坐标」的接口是否值得请求。
-    public static bool IsChina(City city) => city.Latitude is >= 17 and <= 54 && city.Longitude is >= 73 and <= 136;
+    public static bool IsChina(City city) => city.CountryCode is { Length: > 0 } country
+        ? country.Equals("CN", StringComparison.OrdinalIgnoreCase)
+        : City.SplitLevels(city.Name).LastOrDefault()?.Trim().ToUpperInvariant() is "中国" or "中國" or "CHINA" or "CN";
     // 城市级名称与省份：都从 City 唯一的完整名称里拆，区县城市取其所属地级市（国内源接口只认城市级）。
     public static (string City, string Province) Parts(City city) => City.GeoPartsOf(city.Name);
     // 中国统一 UTC+8；其他地区按经度估算，仅用于本地日升日落推算的兜底。
-    public static double UtcOffsetHours(City city, DateTimeOffset? at = null) => city.TimeZoneId is { Length: > 0 } id && TimeZoneInfo.TryFindSystemTimeZoneById(id, out var zone) ? zone.GetUtcOffset(at ?? DateTimeOffset.UtcNow).TotalHours : IsChina(city) ? 8 : (int)Math.Round(city.Longitude / 15.0);
+    public static double UtcOffsetHours(City city, DateTimeOffset? at = null) => city.TimeZoneId is { Length: > 0 } id && TimeZoneInfo.TryFindSystemTimeZoneById(id, out var zone) ? zone.GetUtcOffset(at ?? DateTimeOffset.UtcNow).TotalHours : (int)Math.Round(city.Longitude / 15.0);
 }
 
 // 城市时钟与日期轴定位：只有一套实现，数据层、设置页和视图都从这里取“今天”。
@@ -45,7 +45,7 @@ internal static class WeatherClock
         if (explicitOffset)
             return DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var stamped) ? stamped : null;
         if (!DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var local)) return null;
-        try { return new DateTimeOffset(local, Now(s).Offset); } catch { return null; }
+        try { return new DateTimeOffset(local, s.TimeZoneId is { Length: > 0 } id && TimeZoneInfo.TryFindSystemTimeZoneById(id, out var zone) ? zone.GetUtcOffset(local) : Now(s).Offset); } catch { return null; }
     }
 
     // 快照抓取时写下的今天在正序日期轴上的位置；找不到回退 0。用于选窗口这类不关心跨日的场景。
@@ -97,7 +97,7 @@ internal static class WeatherCodes
         "300" or "301" => 80, "302" => 95, "303" or "304" => 96, "305" or "309" => 61,
         "306" or "314" => 63, "307" or "315" => 65, "308" or "316" => 65, "310" or "317" => 65,
         "311" or "312" or "318" => 65, "313" => 66, "404" or "405" or "406" => 77,
-        "400" or "408" => 71, "401" or "409" => 73, "402" or "410" or "403" => 75, "407" => 85,
+        "399" => 61, "499" => 73, "400" or "408" => 71, "401" or "409" => 73, "402" or "410" or "403" => 75, "407" => 85,
         "500" or "501" or "509" or "510" or "514" or "515" => 45,
         "502" or "511" or "512" or "513" => 45, "503" or "504" or "507" or "508" => 45,
         "900" => 0, "901" => 0, "999" => 3, _ => 3
@@ -105,6 +105,7 @@ internal static class WeatherCodes
 
     // 蒲福风级（"3-4" 级）→ 风速 km/h，取区间的中值。解析不出风级（串里没有数字）返回 null 视为缺失：
     // 非有限值一旦写进数据会占住空位，阻断后续来源补写，来源回退因此失效。
+    private static readonly double[] WindUpper = [0.2, 1.5, 3.3, 5.4, 7.9, 10.7, 13.8, 17.1, 20.7, 24.4, 28.4, 32.6, 36.9];
     public static double? FromWindPower(string? power)
     {
         if (string.IsNullOrWhiteSpace(power)) return null;
@@ -112,9 +113,8 @@ internal static class WeatherCodes
         if (numbers.Length == 0) return null;
         double level = numbers.Average();
         // 蒲福风级对应的风速上界（m/s）：0→0.2, 1→1.5, 2→3.3, ... 12→32.6；取上界的 80% 作为代表值。
-        double[] upper = [0.2, 1.5, 3.3, 5.4, 7.9, 10.7, 13.8, 17.1, 20.7, 24.4, 28.4, 32.6, 36.9];
-        int index = Math.Clamp((int)Math.Round(level), 0, upper.Length - 1);
-        return upper[index] * 0.8 * 3.6;
+        int index = Math.Clamp((int)Math.Round(level), 0, WindUpper.Length - 1);
+        return ((index == 0 ? 0 : WindUpper[index - 1]) + WindUpper[index]) / 2 * 3.6;
     }
 
     // 风速 km/h → 蒲福风级：按各级风速上界（m/s）反向查表，来源没给风级（Open-Meteo）时由界面调用兜底。
@@ -122,8 +122,7 @@ internal static class WeatherCodes
     {
         if (kmh is not { } speed || double.IsNaN(speed)) return -1;
         double ms = speed / 3.6;
-        double[] upper = [0.2, 1.5, 3.3, 5.4, 7.9, 10.7, 13.8, 17.1, 20.7, 24.4, 28.4, 32.6, double.MaxValue];
-        for (int i = 0; i < upper.Length; i++) if (ms <= upper[i]) return i;
+        for (int i = 0; i < WindUpper.Length; i++) if (ms <= WindUpper[i]) return i;
         return 12;
     }
 
