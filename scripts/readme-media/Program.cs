@@ -189,6 +189,8 @@ internal sealed partial class Renderer(App app, string output, string language, 
             if (scenes.Contains("notice-buttons")) await NoticeButtonsScene();
             // The row of the notices' "Apps" settings that says brim is not on PATH, in each of its states; for checking.
             if (scenes.Contains("brim-path")) await BrimPathScene();
+            // The AI coding tools' settings page with its switches for answering on the island; for checking.
+            if (scenes.Contains("agent-asks")) await AgentAsksScene();
             // The mailboxes' settings page in each state and the window that adds a mailbox; for checking.
             if (scenes.Contains("mail")) await MailScene();
             // The island's light when a notice arrives, in every theme on a light and a dark desktop, and a long island's motion; for checking.

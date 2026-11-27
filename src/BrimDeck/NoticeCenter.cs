@@ -375,8 +375,14 @@ internal sealed partial class NoticeCenter : IDisposable
             if (message.Type == NoticeTypes.List) return Admit("pipe") ? new(ListReply(message)) : Refuse("rate-limited");
             if (message.Type != NoticeTypes.Notify) return Refuse("unknown-type");
             if (!Admit("pipe")) return Refuse("rate-limited");
-            // A coding agent's approval or question waits as long as the user chose in the settings (the hook asks no time of its own).
-            if (message.Wait == true && BrimDeck.Core.Agents.AgentKeys.Ask(message.ReplaceId) is not null) message.TimeoutMs = Settings.AgentWaitMinutes * 60_000L;
+            // A coding agent's approval or question waits as long as the user chose in the settings (the hook asks no time of its
+            // own). One whose tool shows no prompt of its own meanwhile is only told of, unless the user chose to answer that
+            // tool here (AgentAsks): its hook then hears that nobody waits, and the tool asks in its own window.
+            if (message.Wait == true && BrimDeck.Core.Agents.AgentKeys.Ask(message.ReplaceId) is not null)
+            {
+                if (BrimDeck.Core.Agents.AgentAsks.OnlyTold(Settings, message)) BrimDeck.Core.Agents.AgentAsks.Tell(message);
+                else message.TimeoutMs = Settings.AgentWaitMinutes * 60_000L;
+            }
             var input = NoticeIntake.FromPipe(message);
             var outcome = Receive(input);
             var reply = Reply(outcome, message.EventId);
@@ -460,15 +466,30 @@ internal sealed partial class NoticeCenter : IDisposable
         Tell(waiter, NoticeWaits.Action, AnswerKey, answers);
         Hub.Answered(notice.Id);
         Withdraw(notice.Id);
-        Answered?.Invoke(notice);
+        Answered?.Invoke(notice, AnswerKey);
         return true;
     }
 
     // Takes a coding agent's report of its session (AgentCenter) and gives the reply; set once at start.
     public Func<NoticeMessage, NoticeMessage>? AgentReport { get; set; }
 
-    // A notice its sender waited for was answered here (a button or the questions): the agents' sessions work again.
-    public event Action<Notice>? Answered;
+    // A notice its sender waited for was answered here: the button's key, or AnswerKey for its questions.
+    public event Action<Notice, string?>? Answered;
+    // The sender of a notice that waited went away before any answer here.
+    public event Action<Notice>? Abandoned;
+
+    // Closes the notices of a coding agent's approval or question (key: AgentKeys.For), waited for or only told, once its
+    // session moved on: as their sender's own close would. A hook that still waits hears that its notice was dismissed, and
+    // prints nothing.
+    public void CloseAsk(string key)
+    {
+        foreach (var notice in Hub.Notices.Where(notice => notice.ReplaceKey == key && notice.SourcePresent && notice.Timing is null).ToList())
+        {
+            EndWait(notice.Id, NoticeWaits.Dismissed);
+            Hub.SourceRemoved(notice.InstanceKey);
+            Withdraw(notice.Id);
+        }
+    }
 
     // Whether a sender still waits for the notice's answer.
     public bool Awaits(Notice notice) => _waits.ContainsKey(notice.Id);
@@ -487,6 +508,7 @@ internal sealed partial class NoticeCenter : IDisposable
     {
         if (_disposed || !_waits.TryGetValue(id, out var waiter) || waiter.Result != wait) return;
         EndWait(id, NoticeWaits.Dismissed);
+        if (Hub.Find(id) is { } notice) Abandoned?.Invoke(notice);
     }
 
     private void EndWaits()
@@ -512,7 +534,7 @@ internal sealed partial class NoticeCenter : IDisposable
             case NoticeActionKind.Copy: done = Copy(action.Value ?? ""); break;
             case NoticeActionKind.Open: done = await OpenTargetAsync(action.Value ?? ""); break;
             default:
-                if (_waits.ContainsKey(notice.Id)) { EndWait(notice.Id, NoticeWaits.Action, action.Key); Answered?.Invoke(notice); return true; }
+                if (_waits.ContainsKey(notice.Id)) { EndWait(notice.Id, NoticeWaits.Action, action.Key); Answered?.Invoke(notice, action.Key); return true; }
                 // A planner reminder's "查看日程" or "5 分钟后再提醒", on the main panel (the island and each page pass their own).
                 if (AgendaReminders.Owns(notice)) return _app.Deck?.AgendaReminderAction(notice, action.Key) == true;
                 return Invoke(notice, action.Key);

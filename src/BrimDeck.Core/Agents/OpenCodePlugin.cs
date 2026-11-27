@@ -10,11 +10,17 @@ namespace BrimDeck.Core.Agents;
 //
 // The two generations of OpenCode load different things from the one file:
 // - OpenCode 2.x reads the default export's id and setup (a plain object: a function is refused). setup subscribes to the
-//   events (session.execution.*, permission.asked, permission.replied) and answers an approval with ctx.permission.reply. A
-//   question is a form there, which a plugin cannot answer, so questions stay in OpenCode.
+//   events (session.execution.*, session.tool.success, permission.asked, permission.replied) and answers an approval with
+//   ctx.permission.reply. A question is a form there (form.created), which a plugin cannot answer: the island tells of it,
+//   and it is answered in OpenCode (form.replied).
 // - OpenCode 1.x (1.18.29 and later read the default export's server; MiMo Code, built on 1.x, calls a named export) gets the
 //   event hook: session.status, session.idle, permission.asked and question.asked, answered through the plugin's client
-//   (POST /permission/{id}/reply, /question/{id}/reply).
+//   (POST /permission/{id}/reply, /question/{id}/reply). A turn the user stopped (session.error with MessageAbortedError) or
+//   ended by refusing an approval goes idle like a finished one, up to three times over: it is told as stopped, once.
+//
+// A report that the session works carries a tool's name only to mark it as another call than the one an approval waits on
+// (AgentSessions): the tools' "busy" and "tool finished" come within milliseconds of an approval's request, by another process,
+// and would otherwise end the wait when they arrive after it. The approval's own answer in the tool ends brim (settle).
 public static class OpenCodePlugin
 {
     public const string FileName = "brimdeck.js";
@@ -89,9 +95,16 @@ public static class OpenCodePlugin
           try { child.kill() } catch {}
         }
 
+        // A report that the session is alive, marked as no call an approval could wait on.
+        const alive = { hook_event_name: "PostToolUse", tool_name: "session" }
+
         // OpenCode 1.x and MiMo Code.
         const legacy = async (ctx) => {
           const directory = ctx.directory
+          // Sessions whose turn the user stopped, or ended by refusing an approval: their next idle is no finished turn.
+          const stopped = new Set()
+          // Sessions told idle since they last worked: the tool says it up to three times for one turn.
+          const idle = new Set()
 
           // Posts an answer to the tool's server: with the plugin's own client where it has one, else to the server's address.
           const post = async (url, requestID, body) => {
@@ -115,24 +128,37 @@ public static class OpenCodePlugin
               const base = { session_id: p.sessionID, cwd: directory }
               switch (event && event.type) {
                 case "session.status":
-                  if (p.status && p.status.type === "busy") void hook({ ...base, hook_event_name: "PostToolUse" })
+                  if (p.status && p.status.type === "busy") {
+                    idle.delete(p.sessionID)
+                    void hook({ ...base, ...alive })
+                  }
+                  break
+                case "session.error":
+                  if (p.error && p.error.name === "MessageAbortedError") stopped.add(p.sessionID)
                   break
                 case "session.idle":
-                  void hook({ ...base, hook_event_name: "Stop" })
+                  if (idle.has(p.sessionID)) break
+                  idle.add(p.sessionID)
+                  void hook({ ...base, hook_event_name: "Stop", status: stopped.delete(p.sessionID) ? "aborted" : undefined })
                   break
                 case "permission.asked":
+                  idle.delete(p.sessionID)
                   void ask(p.id, {
                     ...base, hook_event_name: "PermissionRequest", tool_name: p.permission, tool_input: toolInput(p.permission, p.patterns),
                     permission_suggestions: (p.always || []).length > 0 ? p.always : undefined
                   }, (reply) => reply.reply && post("/permission/{requestID}/reply", p.id, { reply: reply.reply }))
                   break
                 case "question.asked":
+                  idle.delete(p.sessionID)
                   void ask(p.id, {
                     ...base, hook_event_name: "PreToolUse", tool_name: "AskUserQuestion",
                     tool_input: { questions: (p.questions || []).map((q) => ({ question: q.question, header: q.header, options: q.options || [], multiSelect: q.multiple === true })) }
                   }, (reply) => reply.answers && post("/question/{requestID}/reply", p.id, { answers: reply.answers }))
                   break
                 case "permission.replied":
+                  if (p.reply === "reject") stopped.add(p.sessionID)
+                  settle(p.requestID)
+                  break
                 case "question.replied":
                 case "question.rejected":
                   settle(p.requestID)
@@ -149,8 +175,10 @@ public static class OpenCodePlugin
 
           const handle = (event) => {
             const d = event.data || {}
-            if (!d.sessionID) return
-            const base = { session_id: d.sessionID, cwd: (event.location && event.location.directory) || here }
+            const form = event.type === "form.created" ? d.form : undefined
+            const sessionID = form ? form.sessionID : d.sessionID
+            if (!sessionID) return
+            const base = { session_id: sessionID, cwd: (event.location && event.location.directory) || here }
             switch (event.type) {
               case "session.execution.started":
                 void hook({ ...base, hook_event_name: "UserPromptSubmit" })
@@ -172,6 +200,19 @@ public static class OpenCodePlugin
                 break
               case "permission.replied":
                 settle(d.requestID)
+                break
+              case "session.tool.success":
+                void hook({ ...base, ...alive })
+                break
+              case "form.created": {
+                // A question: the first one's title and words are told; it is answered in OpenCode.
+                if (!form.metadata || form.metadata.kind !== "question") break
+                const field = (form.fields || [])[0] || {}
+                void hook({ ...base, hook_event_name: "Notification", notification_type: "ask_user_question", title: field.title, message: field.description || field.title })
+                break
+              }
+              case "form.replied":
+                void hook({ ...base, hook_event_name: "PostToolUse" })
                 break
             }
           }

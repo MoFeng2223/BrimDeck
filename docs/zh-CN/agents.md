@@ -6,12 +6,12 @@
 - 一轮对话完成时发送一条通知；需要审批或提问时发送一条留在岛上的通知。
 - 直接在岛上或通知页中允许、拒绝操作，或回答工具的提问（可以选择选项，也可以输入自己的回答）。
 
-全部在本机处理：钩子通过本机命名管道把会话状态交给 BrimDeck，不经过网络。
+全部在本机处理：钩子通过本机命名管道把会话状态交给 BrimDeck，不经过网络。Claude Code、CodeAgent、Qoder 的钩子会给出会话记录文件的位置，BrimDeck 只在本机读取其中新增的内容，用来得知你在工具中拒绝了操作或中断了本轮对话。
 
 ## 安装钩子
 
 1. 打开 设置 › 灵动提示 › AI 编程工具。
-2. 点“查找已安装的工具”。BrimDeck 按各工具的设置目录和程序位置查找，列出找到的工具。
+2. 点“查找已安装的工具”。BrimDeck 按各工具的设置目录和程序位置查找，列出找到的工具；只列出下表中支持的工具。
 3. 对单个工具点“安装”或“卸载”，或用“全部安装”“全部卸载”一次处理所有找到的工具。
 
 几个应用共用同一个设置文件时算作一个工具。例如 Claude Code CLI、Claude 桌面版和 IDE 扩展都读取 `%USERPROFILE%\.claude\settings.json`，安装一次即可。
@@ -29,61 +29,76 @@
 | 工具 | 设置文件 | 岛上能做的事 |
 |---|---|---|
 | Claude Code（CLI、桌面版、IDE 扩展） | `%USERPROFILE%\.claude\settings.json`（或 `CLAUDE_CONFIG_DIR`） | 显示状态、完成通知、审批（允许、拒绝、总是允许）、回答提问 |
-| Codex（CLI、桌面版） | `%USERPROFILE%\.codex\hooks.json`（或 `CODEX_HOME`） | 显示状态、完成通知、审批（允许、拒绝） |
-| Antigravity（桌面版、IDE、CLI） | `%USERPROFILE%\.gemini\config\hooks.json` | 显示状态、完成通知 |
+| Codex（CLI、桌面版） | `%USERPROFILE%\.codex\hooks.json`（或 `CODEX_HOME`） | 显示状态、完成通知、审批（允许、拒绝；需打开开关） |
+| Antigravity（桌面版、IDE、CLI） | `%USERPROFILE%\.gemini\config\hooks.json` | 显示状态、完成通知；提问时提醒 |
 | Cursor（编辑器、CLI） | `%USERPROFILE%\.cursor\hooks.json` | 显示状态、完成通知 |
-| CodeAgent CLI | `%USERPROFILE%\.cac\settings.json`（或 `CODEAGENT3_CONFIG_DIR`） | 显示状态、完成通知、审批、回答提问 |
-| Qoder（CLI、桌面版） | `%USERPROFILE%\.qoder\settings.json` | 显示状态、完成通知、审批、回答提问 |
-| Qoder CN（CLI、桌面版） | `%USERPROFILE%\.qoder-cn\settings.json` | 显示状态、完成通知、审批、回答提问 |
-| WorkBuddy | `%USERPROFILE%\.workbuddy\settings.json` | 显示状态、完成通知、审批（允许、拒绝） |
-| WorkBuddy AI | `%USERPROFILE%\.workbuddy-ai\settings.json` | 显示状态、完成通知、审批（允许、拒绝） |
-| ZCode（自带的代理） | `%USERPROFILE%\.zcode\cli\config.json` | 显示状态、完成通知、审批、回答提问 |
-| OpenCode（CLI、桌面版） | 插件 `%USERPROFILE%\.config\opencode\plugins\brimdeck.js` | 显示状态、完成通知、审批（允许一次、总是允许、拒绝）；1.x 还可以回答提问 |
+| CodeAgent CLI | `%USERPROFILE%\.cac\settings.json`（或 `CODEAGENT3_CONFIG_DIR`） | 显示状态、完成通知、审批、回答提问（需打开开关） |
+| Qoder（CLI、桌面版） | `%USERPROFILE%\.qoder\settings.json` | 显示状态、完成通知、审批、回答提问（桌面版需打开开关） |
+| Qoder CN（CLI、桌面版） | `%USERPROFILE%\.qoder-cn\settings.json` | 显示状态、完成通知、审批、回答提问（桌面版需打开开关） |
+| WorkBuddy | `%USERPROFILE%\.workbuddy\settings.json` | 显示状态、完成通知、审批（允许、拒绝；需打开开关） |
+| ZCode（自带的代理） | `%USERPROFILE%\.zcode\cli\config.json` | 显示状态、完成通知、审批、回答提问（需打开开关） |
+| OpenCode（CLI、桌面版） | 插件 `%USERPROFILE%\.config\opencode\plugins\brimdeck.js` | 显示状态、完成通知、审批（允许一次、总是允许、拒绝）；1.x 还可以回答提问，2.x 提问时提醒 |
 | MiMo Code（CLI） | 插件 `%USERPROFILE%\.config\mimocode\plugins\brimdeck.js` | 显示状态、完成通知、审批、回答提问 |
-| Command Code（CLI、桌面版） | 插件 `%USERPROFILE%\.commandcode\mods\brimdeck.ts` | 显示状态、完成通知、审批（允许、拒绝）、回答提问 |
+| Command Code（CLI、桌面版） | 插件 `%USERPROFILE%\.commandcode\mods\brimdeck.ts` | 显示状态、完成通知、审批（允许、拒绝）、回答提问（均需打开开关） |
 | Kimi Code（桌面版、CLI） | `%USERPROFILE%\.kimi-code\config.toml`（或 `KIMI_CODE_HOME`） | 显示状态、完成通知；待审批、待回答时提醒 |
 | TRAE（含 TRAE SOLO） | `%USERPROFILE%\.trae\hooks.json` | 显示状态、完成通知；待审批、待回答时提醒 |
 | TRAE CN（含 TRAE SOLO CN） | `%USERPROFILE%\.trae-cn\hooks.json` | 显示状态、完成通知；待审批、待回答时提醒 |
 
+“需打开开关”的含义见下文“审批与提问”。
+
 说明：
 
+- **Claude Code** 的提问与审批一样经过审批钩子：Claude Code 自己的提问框照常显示，岛上也可以回答，先回答的一方生效。
 - **Codex** 只运行用户审阅过的钩子。安装后，在 Codex 中输入 `/hooks`（桌面版在“设置 › Hooks”中），审阅并信任 BrimDeck 的钩子后才会生效。钩子内容改变（例如“更新”之后）需要重新审阅。
-- **Antigravity** 的桌面版、IDE 与 CLI 读取同一个钩子文件，算作一个工具。它的钩子没有审批和提问事件，审批与提问仍在 Antigravity 中进行。
+- **Antigravity** 的桌面版、IDE 与 CLI 读取同一个钩子文件，算作一个工具。它的钩子没有审批事件，审批仍在 Antigravity 中进行；提问时岛上显示一条提醒，在 Antigravity 中回答后自动收起。
 - **Cursor** 的钩子没有单独的审批事件，因此 Cursor 的审批仍在 Cursor 中进行。
 - **Cursor** 默认还会运行 Claude Code 设置文件中的钩子。BrimDeck 只按 Cursor 自己的钩子显示它的会话，所以要显示 Cursor 的会话，需要安装 Cursor 一行的钩子。
-- **CodeAgent、Qoder、Qoder CN** 的钩子格式与 Claude Code 相同，BrimDeck 按 Claude Code 的格式安装和回复。
-- **WorkBuddy、WorkBuddy AI** 各有自己的设置文件，分别安装。它们的钩子不能添加“总是允许”规则，也不能回答提问（提问的钩子在你回答之后才运行），所以岛上只有“允许”“拒绝”，提问仍在 WorkBuddy 中回答。
-- **OpenCode** 没有命令钩子。BrimDeck 在它的插件目录中写入插件 `brimdeck.js`，OpenCode 启动时自动加载；卸载时删除这个文件。安装后需要重新启动 OpenCode。OpenCode 自己的确认框与岛上的按钮同时有效，先回答的一方生效；在 OpenCode 中先回答后，岛上的通知随之关闭。同一个文件适用于 OpenCode 2.x 与 1.18.29 及以上的 1.x。OpenCode 2.x 的插件不能回答提问，提问仍在 OpenCode 中回答。
+- **CodeAgent、Qoder、Qoder CN** 的钩子格式与 Claude Code 相同，BrimDeck 按 Claude Code 的格式安装和回复。Qoder 与 Qoder CN 的命令行在提问时，自己的提问框与岛上同时有效；桌面版与 CodeAgent 在岛上等待期间不显示提问框。Qoder IDE 的钩子行为与桌面版、命令行不同，尚未适配。
+- **WorkBuddy** 的钩子不能添加“总是允许”规则，也不能回答提问（提问的钩子在你回答之后才运行），所以岛上只有“允许”“拒绝”，提问仍在 WorkBuddy 中回答。WorkBuddy 默认直接运行命令、不请求审批，这时岛上不会出现审批。
+- **OpenCode** 没有命令钩子。BrimDeck 在它的插件目录中写入插件 `brimdeck.js`，OpenCode 启动时自动加载；卸载时删除这个文件。安装后需要重新启动 OpenCode。OpenCode 自己的确认框与岛上的按钮同时有效，先回答的一方生效；在 OpenCode 中先回答后，岛上的通知随之关闭。同一个文件适用于 OpenCode 2.x 与 1.18.29 及以上的 1.x。OpenCode 桌面版是否加载这个插件尚未验证。OpenCode 2.x 的插件不能回答提问：提问时岛上显示一条提醒，在 OpenCode 中回答后提醒自动收起。
 - **MiMo Code** 基于 OpenCode 1.x，用同样的插件接入。Xiaomi MiMo 桌面版每次启动都会清空自己的插件目录，不加载用户插件，因此只有 MiMo Code CLI 的会话会显示。
-- **Command Code** 的命令钩子没有审批事件，BrimDeck 改为写入插件（mod）`brimdeck.ts`，CLI 与桌面版在新的会话中自动加载；卸载时删除这个文件。审批与提问先在岛上等待，交回后由 Command Code 照常询问。Command Code 出于安全强制询问的操作不接受插件的“允许”，始终在 Command Code 中确认。
+- **Command Code** 的命令钩子没有审批事件，BrimDeck 改为写入插件（mod）`brimdeck.ts`，CLI 与桌面版在新的会话中自动加载；卸载时删除这个文件。Command Code 先等待插件、再显示自己的确认框，所以审批与提问默认只在岛上提醒；打开开关后先在岛上等待，交回后由 Command Code 照常询问。Command Code 出于安全强制询问的操作不接受插件的“允许”，始终在 Command Code 中确认。
 - **Kimi Code** 的钩子写在 `config.toml` 末尾的 `[[hooks]]` 表中，安装后需要重新启动 Kimi Code。它的钩子不能作出决定：需要审批或提问时，岛上显示一条留在岛上的提醒，在 Kimi Code 中处理后提醒自动收起。
-- **TRAE、TRAE CN** 各有自己的 `hooks.json`，分别安装。安装后，还需要在 TRAE 的“设置 › Hooks”中打开全局钩子，钩子才会运行。它的钩子不能回答 TRAE 自己的确认框：TRAE 等待审批或回答时，岛上显示一条留在岛上的提醒，在 TRAE 中处理后提醒自动收起。TRAE 默认在沙箱中运行钩子，沙箱是否允许钩子连接 BrimDeck 尚未验证；没有显示会话时，可在 TRAE 的钩子设置中改为在本机运行。
+- **TRAE、TRAE CN** 各有自己的 `hooks.json`，分别安装。安装后，还需要在 TRAE 的“设置 › Hooks”中打开“已配置的 Hooks”，并把“Hooks 命令运行方式”从默认的“沙箱运行”改为“本地自动运行”：在沙箱中钩子不会运行，也没有任何提示。它的钩子不能回答 TRAE 自己的确认框：TRAE 等待审批或回答时，岛上显示一条留在岛上的提醒，在 TRAE 中处理后提醒自动收起。在 TRAE 中中断时没有任何钩子事件，会话会一直显示为运行中，30 分钟没有消息后移除。
 - **ZCode** 的配置文件钩子默认关闭。安装时 BrimDeck 在该文件的 `hooks` 中打开 `enabled`，卸载时只在其中没有其他钩子时一并移除。安装只作用于 ZCode 自带的代理；在 ZCode 中选用的 Claude Code、Codex 等内置代理使用各自的配置，不受影响。
 - Codex、Antigravity 与 Cursor 没有可由钩子回答的提问，它们的提问仍在工具中回答。
 - Codex、Antigravity、Kimi Code 通过命令行运行钩子。BrimDeck 的安装路径带空格时，写入的是它的短路径（例如 `C:\PROGRA~1\BrimDeck\brim.exe`），这些工具才能正确运行。
 
-以下工具可以被找到，但暂时不能自动安装：
+以下工具暂不支持，查找时不会列出：
 
 | 工具 | 原因 |
 |---|---|
 | DeepSeek Harness | 没有命令钩子，只能通过插件和启动配置接入 |
 | 千问办公、QwenWork | 只在部分对话引擎下运行用户钩子，且钩子不能回答审批 |
+| WorkBuddy AI | 不读取设置文件中的钩子，只能通过它自己的插件接入 |
 
 ## 审批与提问
 
-工具请求审批或提问时：
+工具请求审批或提问时，岛上出现一条留在岛上的通知；收起栏中该会话显示为“待批准”或“待回答”。之后在哪里回答，取决于工具在钩子等待期间是否显示自己的确认框。
 
-1. 岛上出现一条留在岛上的通知；收起栏中该会话显示为“待审批”或“待回答”。
-2. 悬停或单击岛，展开到通知页。审批显示要运行的命令或要修改的文件，以及“允许”“拒绝”“总是允许”“在终端处理”按钮；提问显示每个问题和选项，下方的输入框可以输入自己的回答。
-3. 回答后，工具立即继续运行。
+### 工具与岛上同时可答
 
-等待期间，终端中不会出现确认框。以下情况会交回终端，按工具原来的方式确认：
+适用于 Claude Code、CodeAgent、Qoder、Qoder CN、ZCode、OpenCode、MiMo Code 的审批，以及 Claude Code、Qoder 命令行、Qoder CN 命令行、MiMo Code 的提问。工具自己的确认框照常显示，岛上也可以回答，先回答的一方生效：
 
-- 超过 设置 › 灵动提示 › AI 编程工具 › 在岛上等待回答 中设置的时间（默认 5 分钟）。
-- 关闭这条通知，或点“在终端处理”“在终端回答”。
-- BrimDeck 没有运行。此时钩子立即结束，工具不会等待。
+1. 悬停或单击岛，展开到通知页。审批显示要运行的命令或要修改的文件，以及“允许”“拒绝”“总是允许”“在终端处理”按钮；提问显示每个问题和选项，下方的输入框可以输入自己的回答。
+2. 在岛上回答后，工具立即继续运行。
+3. 在工具中先回答后，岛上的通知自动收起。多数工具在该操作运行结束、你发出新的指令或本轮结束时收起；Claude Code、CodeAgent、Qoder 在工具中拒绝或中断时，BrimDeck 从会话记录文件得知，几秒内收起。
 
-在 Claude 桌面版和 IDE 扩展中，应用自己的确认框与岛上的按钮同时有效，先回答的一方生效。
+### 等待期间工具不显示确认框
+
+适用于 Codex、WorkBuddy 的审批，Command Code 的审批与提问，CodeAgent、Qoder 桌面版、Qoder CN 桌面版、ZCode 的提问。这些工具先等待钩子返回，再显示自己的确认框或提问框。
+
+- 默认：岛上只提醒，不带按钮和选项；工具照常显示自己的确认框，在工具中处理后提醒自动收起。
+- 在 设置 › 灵动提示 › AI 编程工具 › 审批与提问 中打开该工具的“在岛上审批”或“在岛上回答提问”后：改为在岛上回答，期间工具不显示自己的确认框。以下情况交回工具，按工具原来的方式确认：
+  - 超过“在岛上等待回答”中设置的时间（默认 5 分钟）。
+  - 关闭这条通知，或点“在终端处理”“在终端回答”。
+  - BrimDeck 没有运行。此时钩子立即结束，工具不会等待。
+
+Codex 与 WorkBuddy 的这一行为来自对它们程序代码的核对，尚未在真实会话中验证。
+
+### 只提醒
+
+Kimi Code、TRAE、TRAE CN 的审批与提问，以及 Antigravity 与 OpenCode 2.x 的提问，钩子不能作出决定：岛上显示一条留在岛上的提醒，在工具中处理后自动收起。
 
 ## 收起栏
 

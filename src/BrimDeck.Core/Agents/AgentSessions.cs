@@ -13,6 +13,10 @@ public sealed record AgentSession(string Harness, string Name, string Id, AgentS
 {
     public string Key => Harness + "\u0001" + Id;
     public DateTimeOffset Since { get; init; } = UpdatedAt;
+    // While it waits for the user: the mark of the tool call it waits on (NoticeMessage.Call), when its hook gave one.
+    public string? Call { get; init; }
+    // The file the tool writes the session to, when its hook names one (AgentTranscripts).
+    public string? Transcript { get; init; }
 }
 
 // The sessions BrimDeck knows of, kept in memory only: a restart forgets them, and the next hook brings a session back.
@@ -48,6 +52,8 @@ public sealed class AgentSessions
         AgentSessionStates.Ended => AgentState.Ended, _ => null
     };
 
+    public AgentSession? Find(string harness, string id) => _sessions.GetValueOrDefault(harness + "\u0001" + id);
+
     // Takes one report (validated: NoticeProtocol.Validate). True when what is shown changed.
     public bool Apply(NoticeMessage message, DateTimeOffset now)
     {
@@ -58,13 +64,33 @@ public sealed class AgentSessions
         _sessions.TryGetValue(key, out var before);
         // A new prompt starts the words over; a later report keeps what it does not say.
         bool fresh = state == AgentState.Working && message.Title is { Length: > 0 };
+        // The result of another tool call than the one the session waits on (one run beside it, a subagent's, which shares the
+        // session's id) does not end the wait: the session is alive, and still waits.
+        if (!fresh && state == AgentState.Working && before is { State: AgentState.Approval or AgentState.Question, Call: { Length: > 0 } pending }
+            && message.Call is { Length: > 0 } call && call != pending)
+        {
+            _sessions[key] = before with { UpdatedAt = now };
+            return false;
+        }
+        // A session BrimDeck already knows that says it started goes on as it was: WorkBuddy says so right after each prompt,
+        // Qoder when a task is opened again, Claude Code when it compacts in the middle of a turn.
+        if (state == AgentState.Started && before is not null)
+        {
+            if (before.State is AgentState.Working or AgentState.Approval or AgentState.Question) _sessions[key] = before with { UpdatedAt = now };
+            return false;
+        }
+        // A tool that says it is idle right after its turn finished (Claude Code's and Qoder's idle_prompt) leaves the finished
+        // turn showing for its time.
+        if (state == AgentState.Idle && before?.State == AgentState.Done) return false;
         var session = new AgentSession(harness, Text(message.AppName, before?.Name ?? harness), id, state,
             Text(message.Context, before?.Project ?? ""), Text(message.Title, before?.Prompt ?? ""), fresh ? Text(message.Body, "") : Text(message.Body, before?.Message ?? ""),
             before?.StartedAt ?? now, now)
         {
             // A turn starts with a new prompt, or with work that follows anything but working or waiting for the user.
             Since = before is not null && !fresh && (state is AgentState.Approval or AgentState.Question
-                || before.State is AgentState.Working or AgentState.Approval or AgentState.Question) ? before.Since : now
+                || before.State is AgentState.Working or AgentState.Approval or AgentState.Question) ? before.Since : now,
+            Call = state is AgentState.Approval or AgentState.Question && !string.IsNullOrWhiteSpace(message.Call) ? message.Call : null,
+            Transcript = string.IsNullOrWhiteSpace(message.Transcript) ? before?.Transcript : message.Transcript
         };
         _sessions[key] = session;
         if (_sessions.Count > Limit)
@@ -72,12 +98,22 @@ public sealed class AgentSessions
         return before is null || before with { UpdatedAt = now } != session;
     }
 
-    // A session whose waiting the user answered on the island: it works again until its next report says otherwise.
+    // A session whose waiting was answered, on the island or (its hook gone) in the tool: it works again until its next report
+    // says otherwise.
     public bool Answered(string harness, string id, DateTimeOffset now)
     {
         string key = harness + "\u0001" + id;
         if (!_sessions.TryGetValue(key, out var session) || session.State is not (AgentState.Approval or AgentState.Question)) return false;
-        _sessions[key] = session with { State = AgentState.Working, UpdatedAt = now };
+        _sessions[key] = session with { State = AgentState.Working, UpdatedAt = now, Call = null };
+        return true;
+    }
+
+    // A session whose turn the user stopped, as its transcript tells (no hook does): it is idle.
+    public bool Interrupted(string harness, string id, DateTimeOffset now)
+    {
+        string key = harness + "\u0001" + id;
+        if (!_sessions.TryGetValue(key, out var session) || session.State is not (AgentState.Working or AgentState.Approval or AgentState.Question)) return false;
+        _sessions[key] = session with { State = AgentState.Idle, UpdatedAt = now, Call = null };
         return true;
     }
 

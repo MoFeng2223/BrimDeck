@@ -134,17 +134,76 @@ public static class NotifyCli
         var quick = sender.SendQuick ?? sender.Send;
         // BrimDeck is not running: nothing more is tried, so the tool waits for nothing.
         if (plan.Report is { } report && await quick(report) is null) return Print(plan.Quiet);
-        if (plan.Close is { } close && Prepare(close) is null) await quick(close);
         if (plan.Notice is { } notice && Prepare(notice) is null) await quick(notice);
         if (plan.Ask is not { } ask || sender.SendWaiting is null) return Print(plan.Quiet);
         // A long command or file is cut until the message fits a frame.
         while (Prepare(ask) is not null && ask.Code is { Length: > 256 } code) ask.Code = code[..(code.Length / 2)] + "…";
         if (Prepare(ask) is not null) return Print(plan.Quiet);
-        var (reply, result) = await sender.SendWaiting(ask);
+        var waiting = sender.SendWaiting(ask);
+        if (plan.Watch is { } watch)
+        {
+            // Answered or stopped in the tool itself, which only its transcript tells: the session's new state goes to BrimDeck,
+            // and this process ends, which closes the connection and with it the notice.
+            using var stop = new CancellationTokenSource();
+            var watching = WatchAsync(watch, stop.Token);
+            if (await Task.WhenAny(waiting, watching) == watching && await watching is { } moved)
+            {
+                await quick(moved);
+                return Print(plan.Quiet);
+            }
+            stop.Cancel();
+        }
+        var (reply, result) = await waiting;
         if (reply?.Waiting != true || plan.Reply(result) is not { } output) return Print(plan.Quiet);
         Print(output);
         if (plan.Answered is { } answered) await quick(answered);
         return 0;
+    }
+
+    // How often a waiting hook looks at the session's transcript, and how long after the call's result a stop of the turn may
+    // still follow it (a refusal in the Claude desktop app writes both, one after the other).
+    private static readonly TimeSpan WatchEvery = TimeSpan.FromMilliseconds(400), StopFollows = TimeSpan.FromMilliseconds(500);
+    // How far back from the transcript's end the call that waits is looked for: it was written before its hook ran.
+    private const int WatchBack = 2 * 1024 * 1024;
+
+    // Watches the session's transcript while a hook waits on the island: the report to send once the call got its result in
+    // the tool itself (Moved) or the user stopped the turn (Interrupted). Only what is added after the hook started counts.
+    // Never ends otherwise; null once stopped.
+    private static async Task<NoticeMessage?> WatchAsync(AgentCallWatch watch, CancellationToken stop)
+    {
+        try
+        {
+            long start = AgentTranscripts.Length(watch.File);
+            // No transcript to read (a path of another system, a session that keeps none).
+            if (start < 0) { await Task.Delay(Timeout.Infinite, stop); return null; }
+            var ids = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var line in AgentTranscripts.Lines(watch.File, Math.Max(0, start - WatchBack), start))
+                using (var record = AgentTranscripts.Record(line))
+                    if (record is not null) AgentTranscripts.Calls(record.RootElement, watch.Tool, watch.Call, ids);
+            var tail = new TranscriptTail(watch.File, start);
+            bool moved = false;
+            while (true)
+            {
+                foreach (var line in tail.Read())
+                    using (var record = AgentTranscripts.Record(line))
+                    {
+                        if (record is null) continue;
+                        if (AgentTranscripts.Interrupted(record.RootElement)) return watch.Interrupted;
+                        AgentTranscripts.Calls(record.RootElement, watch.Tool, watch.Call, ids);
+                        moved |= AgentTranscripts.Result(record.RootElement, ids);
+                    }
+                if (moved)
+                {
+                    await Task.Delay(StopFollows, stop);
+                    foreach (var line in tail.Read())
+                        using (var record = AgentTranscripts.Record(line))
+                            if (record is not null && AgentTranscripts.Interrupted(record.RootElement)) return watch.Interrupted;
+                    return watch.Moved;
+                }
+                await Task.Delay(WatchEvery, stop);
+            }
+        }
+        catch (OperationCanceledException) { return null; }
     }
 
     // Writes a hook's output, if any; a hook exits with 0 either way.

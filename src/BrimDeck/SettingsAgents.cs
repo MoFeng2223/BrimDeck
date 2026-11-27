@@ -43,9 +43,10 @@ public sealed partial class SettingsWindow
             ShowPage(AgentsSettingsPage);
         });
         find.Style = (Style)FindResource("SettingsOutlineButton");
+        string supported = string.Join(Loc.T("、", ", "), AgentHarnesses.All.Select(h => h.Name));
         SectionTitle(Loc.T("已安装的工具", "Installed tools"), find, () => Loc.T(
-            "按各工具的设置目录和程序位置查找。几个应用共用同一个设置文件时算作一个工具，例如 Claude Code CLI 与 Claude 桌面版。安装钩子会修改该工具的用户设置文件，首次修改前在同一目录保留一份 .brimdeck-backup 副本；卸载只删除 BrimDeck 添加的条目。",
-            "Tools are found by their settings folders and program locations. Apps that share one settings file count as one tool, such as the Claude Code CLI and the Claude desktop app. Installing hooks changes the tool's user settings file, and a .brimdeck-backup copy is kept beside it before the first change; removing them deletes only what BrimDeck added."));
+            $"目前支持：{supported}。按各工具的设置目录和程序位置查找。几个应用共用同一个设置文件时算作一个工具，例如 Claude Code CLI 与 Claude 桌面版。安装钩子会修改该工具的用户设置文件，首次修改前在同一目录保留一份 .brimdeck-backup 副本；卸载只删除 BrimDeck 添加的条目。",
+            $"Supported now: {supported}. Tools are found by their settings folders and program locations. Apps that share one settings file count as one tool, such as the Claude Code CLI and the Claude desktop app. Installing hooks changes the tool's user settings file, and a .brimdeck-backup copy is kept beside it before the first change; removing them deletes only what BrimDeck added."));
         var found = S.AgentHarnessesFound.Select(AgentHarnesses.Find).OfType<AgentHarness>().ToList();
         var rows = new List<FrameworkElement>();
         if (!File.Exists(BrimFile))
@@ -68,14 +69,34 @@ public sealed partial class SettingsWindow
         }
         Group([.. rows]);
 
-        SectionTitle(Loc.T("审批与提问", "Approvals and questions"));
-        Group(MusicChoice(Loc.T("在岛上等待回答", "Wait on the island"), S.AgentWaitMinutes, [(1, Loc.T("1 分钟", "1 minute")), (3, Loc.T("3 分钟", "3 minutes")), (5, Loc.T("5 分钟", "5 minutes")),
+        SectionTitle(Loc.T("审批与提问", "Approvals and questions"), help: () => Loc.T(
+            "下面带开关的工具，在岛上等待期间不显示自己的确认框。开关关闭时岛上只提醒，仍在工具中处理；打开后改为在岛上审批或回答。其他工具的确认框与岛上同时有效，先回答的一方生效。",
+            "A tool with a switch below shows no prompt of its own while the island waits. Switched off, the island only tells and you answer in the tool; switched on, you answer on the island. Other tools' prompts and the island both work, and the first answer counts."));
+        var asks = new List<FrameworkElement>
+        {
+            MusicChoice(Loc.T("在岛上等待回答", "Wait on the island"), S.AgentWaitMinutes, [(1, Loc.T("1 分钟", "1 minute")), (3, Loc.T("3 分钟", "3 minutes")), (5, Loc.T("5 分钟", "5 minutes")),
                 (10, Loc.T("10 分钟", "10 minutes")), (30, Loc.T("30 分钟", "30 minutes"))], value => Change(s => s.AgentWaitMinutes = value),
-            help: Loc.T("工具请求审批或提问时，先在岛上等待你回答，期间终端里不会出现确认框；超过这个时间、关闭这条通知或点“在终端处理”后，交回终端按原来的方式确认。",
-                "When a tool asks for approval or asks a question, it first waits for your answer on the island, and the terminal shows no prompt meanwhile. After this time, or when you close the notice or choose \"Use the terminal\", the terminal asks as it always does.")));
+                help: Loc.T("岛上等待你审批或回答的最长时间。超过后通知收起，由工具按原来的方式询问。",
+                    "How long the island waits for your approval or answer at most. After it the notice goes, and the tool asks as it always does."))
+        };
+        foreach (var harness in found)
+        {
+            if (harness.HoldsApprovals) asks.Add(HeldToggle(harness, Loc.T("在岛上审批", "approve on the island"), s => s.AgentApprovalsHeld));
+            if (harness.HoldsQuestions) asks.Add(HeldToggle(harness, Loc.T("在岛上回答提问", "answer questions on the island"), s => s.AgentQuestionsHeld));
+        }
+        Group([.. asks]);
 
         OtherToolsSection();
     }
+
+    // The switch of one tool that shows no prompt of its own while the island waits: whether its approvals, or its questions,
+    // are answered on the island (off: the island only tells of them).
+    private FrameworkElement HeldToggle(AgentHarness harness, string what, Func<DeckSettings, List<string>> list)
+        => Toggle(harness.Name + Loc.T("：", ": ") + what, list(S).Contains(harness.Id), value => Change(s =>
+        {
+            list(s).Remove(harness.Id);
+            if (value) list(s).Add(harness.Id);
+        }));
 
     // A line of the tools' group: what to do, or what went wrong.
     private FrameworkElement Note(string text, bool problem)
@@ -99,7 +120,6 @@ public sealed partial class SettingsWindow
             HookState.Installed => Loc.T("已安装钩子 · ", "Hooks installed · ") + can,
             HookState.Outdated => Loc.T("钩子需要更新：BrimDeck 的位置或钩子内容已变化", "Hooks need an update: BrimDeck moved or the hooks changed"),
             HookState.Unreadable => Loc.T("设置文件无法读取，未作修改", "The settings file cannot be read and was left as it is"),
-            HookState.Unsupported => harness.Unsupported?.Invoke() ?? "",
             _ => Loc.T("未安装钩子 · 安装后", "No hooks · Once installed: ") + can
         };
         if (state == HookState.Installed && harness.AfterInstall is { } after) status += Loc.T("。", ". ") + after();

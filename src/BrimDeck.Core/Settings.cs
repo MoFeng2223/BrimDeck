@@ -815,6 +815,11 @@ public sealed class DeckSettings
     public int AgentWaitMinutes { get; set; } = 5;
     // The coding agents found on this PC the last time the settings looked (AgentHarnesses ids), listed again without looking.
     public List<string> AgentHarnessesFound { get; set; } = [];
+    // The coding agents (AgentHarnesses ids) whose approvals, and whose questions, are answered on the island although the tool
+    // then shows no prompt of its own while the island waits (AgentHarness.HoldsApprovals, HoldsQuestions). A tool not listed
+    // asks in its own window as it always does, and the island only tells that it waits.
+    public List<string> AgentApprovalsHeld { get; set; } = [];
+    public List<string> AgentQuestionsHeld { get; set; } = [];
     // The expanded page shows a line under memory and network with the frame rate of the program in front, its name and its display's
     // refresh rate (FrameRates). Off by default; read only while the page is open, and only where the user may read Windows' frame
     // events (the Performance Log Users group, or BrimDeck elevated).
@@ -1043,6 +1048,8 @@ public sealed class DeckSettings
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.AgentHarnessesFound = [.. AgentHarnessesFound ?? []];
+        copy.AgentApprovalsHeld = [.. AgentApprovalsHeld ?? []];
+        copy.AgentQuestionsHeld = [.. AgentQuestionsHeld ?? []];
         copy.MailAccounts = (MailAccounts ?? []).Select(account => account.Copy()).ToList();
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
         copy.FullscreenRules = FullscreenRules.Select(rule => rule with { }).ToList();
@@ -1059,6 +1066,8 @@ public sealed class DeckSettings
     {
         AgentWaitMinutes = Math.Clamp(AgentWaitMinutes, 1, (int)(BrimDeck.Protocol.NoticeProtocol.MaxTimeoutMs / 60000));
         AgentHarnessesFound = [.. (AgentHarnessesFound ?? []).Where(id => id is { Length: > 0 }).Distinct(StringComparer.Ordinal)];
+        AgentApprovalsHeld = [.. (AgentApprovalsHeld ?? []).Where(id => id is { Length: > 0 }).Distinct(StringComparer.Ordinal)];
+        AgentQuestionsHeld = [.. (AgentQuestionsHeld ?? []).Where(id => id is { Length: > 0 }).Distinct(StringComparer.Ordinal)];
         MailAccounts = BrimDeck.Core.Mail.MailAccount.Normalize(MailAccounts);
         // Saved per-theme choices: one entry per theme id as the panel names it, each with its lists present.
         ThemeChoices = (ThemeChoices ?? []).Where(pair => pair.Value is not null && pair.Key.Length > 0).GroupBy(pair => PanelThemes.NormalizeId(pair.Key))

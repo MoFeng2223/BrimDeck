@@ -81,7 +81,7 @@ public static class Profiles
         nameof(DeckSettings.NoticeWslDistros), nameof(DeckSettings.NoticeCommandAccess), nameof(DeckSettings.NoticeStyles), nameof(DeckSettings.NoticeStaySeconds), nameof(DeckSettings.NoticeSoundVolume), nameof(DeckSettings.NoticeStripIcons), nameof(DeckSettings.NoticeStripAgents), nameof(DeckSettings.NoticeAgentsMerged),
         nameof(DeckSettings.NoticeCodes), nameof(DeckSettings.NoticeRespectFocus), nameof(DeckSettings.NoticesPausedUntil),
         nameof(DeckSettings.NoticeHistory), nameof(DeckSettings.NoticeHistoryHours), nameof(DeckSettings.NoticeHotkey),
-        nameof(DeckSettings.NoticeApps), nameof(DeckSettings.NoticeAppsListed), nameof(DeckSettings.NoticeClockUnlisted), nameof(DeckSettings.AgentWaitMinutes), nameof(DeckSettings.AgentHarnessesFound), nameof(DeckSettings.MailAccounts)
+        nameof(DeckSettings.NoticeApps), nameof(DeckSettings.NoticeAppsListed), nameof(DeckSettings.NoticeClockUnlisted), nameof(DeckSettings.AgentWaitMinutes), nameof(DeckSettings.AgentHarnessesFound), nameof(DeckSettings.AgentApprovalsHeld), nameof(DeckSettings.AgentQuestionsHeld), nameof(DeckSettings.MailAccounts)
     };
 
     public static bool IsProfileKey(string key) => !GlobalKeys.Contains(key);

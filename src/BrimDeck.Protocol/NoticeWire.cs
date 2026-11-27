@@ -111,6 +111,13 @@ public sealed class NoticeMessage
     public List<NoticeAnswer>? Answers { get; set; }
     // Type "agent": a coding agent's session (AgentWire). AppName names the tool, AppId its id (AgentHarnessIds), Session the
     // session, State its state (AgentSessionStates), Context the project, Title what it was asked, Body what it said last.
+    // Call marks the tool call a report is about (AgentHook.Stamp): the call a session waits on, or the one that just ran, so
+    // that another call's result does not end the wait. Transcript is the file the tool writes the session to.
+    public string? Call { get; set; }
+    public string? Transcript { get; set; }
+    // With Wait, from a coding agent's hook: the tool shows no prompt of its own while the hook waits. BrimDeck then waits
+    // only when the user chose to answer that tool on the island; otherwise the notice only tells, and the hook returns at once.
+    public bool? Holds { get; set; }
 }
 
 // One question of NoticeMessage.Questions.
@@ -406,6 +413,8 @@ public static class NoticeProtocol
         message.NoticeId = Clip(message.NoticeId, MaxField);
         message.Cursor = Clip(message.Cursor, MaxField);
         message.Code = Clip(message.Code, MaxCode);
+        message.Call = Clip(message.Call, 64);
+        message.Transcript = Clip(message.Transcript, 1024);
         if (message.Questions is { } questions)
             message.Questions = questions.Where(q => q is not null && !string.IsNullOrWhiteSpace(q.Question)).Take(MaxQuestions).Select((q, i) => new NoticeQuestion
             {

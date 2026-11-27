@@ -1,12 +1,13 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using BrimDeck.Core;
 using BrimDeck.Core.Agents;
 using BrimDeck.Core.Notices;
 using BrimDeck.Protocol;
 
 // The coding agents' hooks: what "brim hook" makes of each tool's hook input and prints back, the sessions BrimDeck keeps from
 // the reports, the hooks written into and taken out of the tools' settings files, and the questions a notice carries.
-internal static class AgentHookTests
+internal static partial class AgentHookTests
 {
     private static readonly DateTimeOffset T0 = new(2026, 11, 24, 12, 0, 0, TimeSpan.Zero);
 
@@ -21,6 +22,8 @@ internal static class AgentHookTests
         Watched(check);
         MoreTools(check);
         HookProgram(check);
+        Asks(check);
+        Transcripts(check);
     }
 
     // BRIMDECK_HOOK_BRIM, for development: the hooks run the brim.exe it names in place of the one beside BrimDeck.
@@ -46,17 +49,17 @@ internal static class AgentHookTests
             approval.Ask is null && approval.Report is { State: "approval", Title: "请求运行命令", AppId: "kimi", Context: "app" }
             && approval.Notice is { Level: "persistent", ReplaceId: "agent:kimi:session_1", Code: "npm test", Category: "warning", Wait: null, Actions: null, Body: "请在 Kimi Code 中处理" });
         var result = Kimi("""{"hook_event_name":"PermissionResult","session_id":"session_1","decision":"approved"}""");
-        check("Kimi: the approval answered in Kimi Code closes the notice and the session works again",
-            result.Report?.State == "working" && result.Close is { ReplaceId: "agent:kimi:session_1", Stop: true, AppName: "Kimi Code" } && result.Notice is null);
+        check("Kimi: the approval answered in Kimi Code is work again, whatever call the session waited on",
+            result.Report is { State: "working", Call: null } && result.Notice is null && approval.Report!.Call is { Length: 16 });
         var question = Kimi("""{"hook_event_name":"PreToolUse","session_id":"session_1","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which one?","options":[{"label":"A"}]}]}}""");
-        check("Kimi: a question is told, and its answer closes the notice",
-            question.Ask is null && question.Report?.State == "question" && question.Notice is { Body: "Which one?", Category: "info", Level: "persistent" }
-            && Kimi("""{"hook_event_name":"PostToolUse","session_id":"session_1","tool_name":"AskUserQuestion"}""").Close is not null
-            && Kimi("""{"hook_event_name":"PostToolUse","session_id":"session_1","tool_name":"Bash"}""") is { Close: null, Report.State: "working" }
+        check("Kimi: a question is told, and only its own result is marked as the call the session waited on",
+            question.Ask is null && question.Report is { State: "question", Call: { } asked } && question.Notice is { Body: "Which one?", Category: "info", Level: "persistent" }
+            && Kimi("""{"hook_event_name":"PostToolUse","session_id":"session_1","tool_name":"AskUserQuestion","tool_input":{"answers":{"Which one?":"A"},"questions":[{"question":"Which one?","options":[{"label":"A"}]}]}}""").Report?.Call == asked
+            && Kimi("""{"hook_event_name":"PostToolUse","session_id":"session_1","tool_name":"Bash"}""") is { Notice: null, Report: { State: "working", Call: { } other } } && other != asked
             && Kimi("""{"hook_event_name":"PreToolUse","session_id":"session_1","tool_name":"Bash"}""").Report is null);
         check("Kimi: a prompt given as parts is read, and the turn's ends are told apart",
             Kimi("""{"hook_event_name":"UserPromptSubmit","session_id":"s","prompt":[{"type":"text","text":"fix"},{"type":"image"},{"type":"text","text":"it"}]}""").Report is { State: "working", Title: "fix it" }
-            && Kimi("""{"hook_event_name":"Stop","session_id":"s","stop_hook_active":false}""") is { Report.State: "done", Notice: { Category: "success", Body: null }, Close: not null }
+            && Kimi("""{"hook_event_name":"Stop","session_id":"s","stop_hook_active":false}""") is { Report.State: "done", Notice: { Category: "success", Body: null } }
             && Kimi("""{"hook_event_name":"StopFailure","session_id":"s","error_message":"quota"}""").Notice is { Category: "error", Body: "quota" }
             && Kimi("""{"hook_event_name":"Interrupt","session_id":"s"}""") is { Report.State: "idle", Notice: null }
             && Kimi("""{"hook_event_name":"SessionEnd","session_id":"s"}""").Report?.State == "ended");
@@ -65,7 +68,7 @@ internal static class AgentHookTests
             waits.Ask is null && waits.Report is { State: "approval", Context: "site" } && waits.Notice is { Title: "等待审批", Body: "Run npm install?", Level: "persistent", ReplaceId: "agent:trae:t1" }
             && Trae("""{"hook_event_name":"Notification","session_id":"t1","notification_type":"ask_user_question"}""") is { Report.State: "question", Notice.Body: "请在 TRAE 中处理" }
             && Trae("""{"hook_event_name":"Notification","session_id":"t1","notification_type":"idle_prompt"}""") is { Report.State: "idle", Notice: null }
-            && Trae("""{"hook_event_name":"PostToolUse","session_id":"t1","tool_name":"RunCommand"}""") is { Report.State: "working", Close: not null }
+            && Trae("""{"hook_event_name":"PostToolUse","session_id":"t1","tool_name":"RunCommand"}""") is { Report.State: "working", Notice: null }
             && Trae("""{"hook_event_name":"Stop","session_id":"t1","last_assistant_message":"Done."}""") is { Report: { State: "done", Body: "Done." }, Notice.Body: "Done." });
         var paths = new AgentPaths(@"C:\Users\me", @"C:\Users\me\AppData\Roaming", @"C:\Users\me\AppData\Local", name => name == "KIMI_CODE_HOME" ? @"D:\kimi" : null);
         var kimi = AgentHarnesses.Find("kimi")!;
@@ -94,7 +97,7 @@ internal static class AgentHookTests
             && (string?)traeFile["hooks"]!["Stop"]![0]!["hooks"]![0]!["type"] == "command" && traeFile["hooks"]!["Stop"]![0]!["hooks"]![0]!["async"] is null
             && traeFile["hooks"]!["PreToolUse"] is null && traeFile["hooks"]!["SessionEnd"] is null
             && AgentHarnesses.CommandLine(AgentHarnesses.Find("trae-cn")!, @"C:\B\brim.exe") == "C:\\B\\brim.exe hook trae --name \"TRAE CN\" --id trae-cn"
-            && AgentHarnesses.State(trae, traeFile.ToJsonString(), brim) == HookState.Installed && trae.Tells && trae.AfterInstall is not null);
+            && AgentHarnesses.State(trae, traeFile.ToJsonString(), brim) == HookState.Installed && trae.Tells && trae.AfterInstall!().Contains("TRAE") && AgentHarnesses.Find("trae-cn")!.AfterInstall!().Contains("TRAE CN"));
     }
 
     // WorkBuddy AI, Command Code, MiMo Code, and what the tools' own code showed of the earlier ones.
@@ -103,13 +106,20 @@ internal static class AgentHookTests
         var paths = new AgentPaths(@"C:\Users\me", @"C:\Users\me\AppData\Roaming", @"C:\Users\me\AppData\Local", _ => null);
         const string brim = @"C:\B\brim.exe";
         var buddy = AgentHarnesses.Find("workbuddy")!;
-        var buddyAi = AgentHarnesses.Find("workbuddy-ai")!;
-        var buddyHooks = JsonNode.Parse(AgentHarnesses.Installed(buddyAi, null, brim)!)!["hooks"]!;
-        check("WorkBuddy: each edition has its own settings file, and no hook waits for a question",
-            buddy.SettingsFile(paths) == @"C:\Users\me\.workbuddy\settings.json" && buddyAi.SettingsFile(paths) == @"C:\Users\me\.workbuddy-ai\settings.json"
+        var buddyHooks = JsonNode.Parse(AgentHarnesses.Installed(buddy, null, brim)!)!["hooks"]!;
+        check("WorkBuddy: hooks go into its own settings file, and no hook waits for a question",
+            buddy.SettingsFile(paths) == @"C:\Users\me\.workbuddy\settings.json"
             && buddyHooks["PreToolUse"] is null && buddyHooks["PermissionRequest"] is not null && !buddy.Questions && buddy.Approvals
-            && (string?)buddyHooks["Stop"]![0]!["hooks"]![0]!["command"] == "C:/B/brim.exe hook codebuddy --name \"WorkBuddy AI\" --id workbuddy-ai"
-            && (string?)JsonNode.Parse(AgentHarnesses.Installed(buddy, null, brim)!)!["hooks"]!["Stop"]![0]!["hooks"]![0]!["command"] == "C:/B/brim.exe hook codebuddy --name WorkBuddy --id workbuddy");
+            && (string?)buddyHooks["Stop"]![0]!["hooks"]![0]!["command"] == "C:/B/brim.exe hook codebuddy --name WorkBuddy --id workbuddy");
+        check("Tools BrimDeck cannot connect are not in the list, so looking for tools never shows them",
+            new[] { "workbuddy-ai", "dsh", "qwenwork", "qwenwork-cn" }.All(id => AgentHarnesses.Find(id) is null)
+            && !AgentHarnesses.All.Any(h => AgentHarnesses.Detected(h, paths, p => p.StartsWith(@"C:\Users\me\.workbuddy-ai", StringComparison.Ordinal) || p.StartsWith(@"C:\Users\me\.dsh", StringComparison.Ordinal))));
+        check("WorkBuddy: a turn the user stopped ends with Stop and its own words for it, which is no finished turn",
+            AgentHook.Plan(AgentHookFormats.CodeBuddy, "workbuddy", "WorkBuddy", Input("""{"hook_event_name":"Stop","session_id":"s","last_assistant_message":"Interrupted by user"}"""), true) is { Report.State: "idle", Notice: null }
+            && AgentHook.Plan(AgentHookFormats.CodeBuddy, "workbuddy", "WorkBuddy", Input("""{"hook_event_name":"Stop","session_id":"s","last_assistant_message":"Done."}"""), true) is { Report.State: "done", Notice.Body: "Done." }
+            && Claude("""{"hook_event_name":"Stop","session_id":"s","last_assistant_message":"Interrupted by user"}""").Report?.State == "done"
+            && AgentHook.Plan(AgentHookFormats.CodeBuddy, "workbuddy", "WorkBuddy", Input("""{"hook_event_name":"Notification","notification_type":"auth_success"}"""), true).Report is null
+            && AgentHook.Plan(AgentHookFormats.CodeBuddy, "workbuddy", "WorkBuddy", Input("""{"hook_event_name":"Notification","session_id":"s","notification_type":"auth_success"}"""), true).Report is null);
         var asked = AgentHook.Plan(AgentHookFormats.CodeBuddy, "workbuddy", "WorkBuddy", Input("""
             {"hook_event_name":"PermissionRequest","session_id":"s","tool_name":"Bash","tool_input":{"command":"ls"},"permission_suggestions":[{"rule":{"toolName":"Bash"},"behavior":"allow"}]}
             """), true);
@@ -146,6 +156,17 @@ internal static class AgentHookTests
         check("Codex: a patch is a file change, though it comes as a command",
             AgentHook.Plan(AgentHookFormats.Codex, "codex", "Codex", Input("""{"hook_event_name":"PermissionRequest","session_id":"t","tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch"}}"""), true).Ask?.Title == "请求修改文件");
         check("ZCode: a tool that failed is reported too", AgentHarnesses.Find("zcode")!.Hooks.Any(h => h.Event == "PostToolUseFailure"));
+        check("Codex: the session that tidies its memories is none of the user's",
+            AgentHook.Plan(AgentHookFormats.Codex, "codex", "Codex", Input("""{"hook_event_name":"SessionStart","session_id":"m","cwd":"C:\\Users\\me\\.codex\\memories","transcript_path":null}"""), true).Report is null
+            && AgentHook.Plan(AgentHookFormats.Codex, "codex", "Codex", Input("""{"hook_event_name":"SessionStart","session_id":"m","cwd":"C:\\w\\memories","transcript_path":"C:\\r.jsonl"}"""), true).Report?.State == "started"
+            && AgentHook.Plan(AgentHookFormats.Codex, "codex", "Codex", Input("""{"hook_event_name":"SessionEnd","session_id":"t","cwd":"C:\\w\\app"}"""), true).Report?.State == "ended");
+        var form = AgentHook.Plan(AgentHookFormats.OpenCode, "opencode", "OpenCode", Input("""{"hook_event_name":"Notification","session_id":"ses_1","notification_type":"ask_user_question","title":"Style","message":"Which style?"}"""), true);
+        check("OpenCode: a question asked as a form is only told; a turn stopped or ended by a refusal is told as stopped, and a sign of life is no call",
+            form is { Ask: null, Report: { State: "question", Call: null }, Notice: { Title: "Style", Body: "Which style?", Level: "persistent", ReplaceId: "agent:opencode:ses_1" } }
+            && Claude("""{"hook_event_name":"Notification","session_id":"s","notification_type":"ask_user_question","message":"Q"}""") is { Report: null, Notice: null }
+            && openPlugin.Contains("case \"form.created\"") && openPlugin.Contains("MessageAbortedError") && openPlugin.Contains("if (p.reply === \"reject\") stopped.add(p.sessionID)")
+            && openPlugin.Contains("const alive = { hook_event_name: \"PostToolUse\", tool_name: \"session\" }") && mimoPlugin.Contains("if (idle.has(p.sessionID)) break")
+            && AgentHook.Plan(AgentHookFormats.OpenCode, "opencode", "OpenCode", Input("""{"hook_event_name":"PostToolUse","session_id":"ses_1","tool_name":"session"}"""), true).Report is { State: "working", Call: { Length: 16 } });
     }
 
     private static JsonElement Input(string json) { using var document = JsonDocument.Parse(json); return document.RootElement.Clone(); }
@@ -198,8 +219,24 @@ internal static class AgentHookTests
         check("Hook plan: a file change and another tool are named by what they touch",
             Claude("""{"hook_event_name":"PermissionRequest","session_id":"s","tool_name":"Write","tool_input":{"file_path":"C:\\a.txt","content":"x"}}""").Ask is { Title: "请求修改文件", Code: "C:\\a.txt" }
             && Claude("""{"hook_event_name":"PermissionRequest","session_id":"s","tool_name":"mcp__x","tool_input":{"q":1}}""").Ask is { Title: "请求使用 mcp__x", Code: "{\"q\":1}" });
-        check("Hook plan: AskUserQuestion is not asked twice through its permission",
-            Claude("""{"hook_event_name":"PermissionRequest","session_id":"s","tool_name":"AskUserQuestion","tool_input":{}}""").Ask is null);
+        check("Hook plan: Claude Code's question is asked with its permission, beside its own prompt, and not before the tool runs",
+            Claude(Asking("PermissionRequest")) is { Ask: { Wait: true, Holds: null, Questions.Count: 1 }, Report.State: "question" }
+            && Claude(Asking("PreToolUse")) is { Ask: null, Report: null }
+            && Claude("""{"hook_event_name":"PermissionRequest","session_id":"s","tool_name":"AskUserQuestion","tool_input":{}}""").Ask is null);
+        check("Hook plan: the tools built on Claude Code ask before the tool runs, which holds their own prompt back; the Qoder CLI asks with the permission too",
+            Tool("codeagent", Asking("PreToolUse")).Ask is { Holds: true, Questions.Count: 1 } && Tool("codeagent", Asking("PermissionRequest")).Ask is null
+            && Tool("qoder", Asking("PreToolUse")).Ask is { Holds: true } && Tool("qoder-cn", Asking("PermissionRequest")).Ask is { Holds: null, Questions.Count: 1 }
+            && Tool("zcode", Asking("PreToolUse")).Ask is { Holds: true } && Tool("zcode", Asking("PermissionRequest")) is { Ask: null, Report: null });
+        check("Hook plan: a turn the API refused is told as stopped with an error",
+            Claude("""{"hook_event_name":"StopFailure","session_id":"s","error":"rate_limit","error_details":"429 Too Many Requests","last_assistant_message":"API Error: Rate limit reached"}""")
+                is { Report.State: "done", Notice: { Category: "error", Title: "出错停止", Body: "API Error: Rate limit reached" } }
+            && Claude("""{"hook_event_name":"StopFailure","session_id":"s","error":"unknown"}""").Notice?.Body == "unknown");
+        var watched = Claude("""{"hook_event_name":"PermissionRequest","session_id":"s","transcript_path":"C:\\t\\s.jsonl","tool_name":"Bash","tool_input":{"command":"npm test"}}""");
+        check("Hook plan: Claude Code's reports name the session's transcript, and an approval watches it for its call",
+            Claude("""{"hook_event_name":"UserPromptSubmit","session_id":"s","transcript_path":"C:\\t\\s.jsonl","prompt":"go"}""").Report?.Transcript == @"C:\t\s.jsonl"
+            && watched is { Watch: { File: @"C:\t\s.jsonl", Tool: "Bash", Moved.State: "working", Interrupted.State: "idle" } watch, Report.Call: { } waited } && watch.Call == waited
+            && Claude("""{"hook_event_name":"PermissionRequest","session_id":"s","tool_name":"Bash","tool_input":{"command":"npm test"}}""").Watch is null
+            && AgentHook.Plan(AgentHookFormats.Codex, "codex", "Codex", Input("""{"hook_event_name":"PermissionRequest","session_id":"t","transcript_path":"C:\\t\\r.jsonl","tool_name":"Bash","tool_input":{"command":"ls"}}"""), true) is { Watch: null, Report.Transcript: null });
         check("Hook plan: other tools before they run are left alone", Claude("""{"hook_event_name":"PreToolUse","session_id":"s","tool_name":"Bash","tool_input":{"command":"ls"}}""").Report is null);
         var cursor = AgentHook.Plan(AgentHookFormats.Cursor, "cursor", "Cursor", Input("""{"hook_event_name":"stop","conversation_id":"c1","status":"aborted","workspace_roots":["/d/w/site"]}"""), true);
         check("Hook plan: Cursor's events and fields are read, and an aborted turn tells no result",
@@ -230,11 +267,12 @@ internal static class AgentHookTests
             approval.Reply(Chosen(AgentHook.Terminal)) is null && approval.Reply(new() { Type = NoticeTypes.Result, Result = NoticeWaits.Dismissed }) is null
             && approval.Reply(new() { Type = NoticeTypes.Result, Result = NoticeWaits.Expired }) is null && approval.Reply(null) is null);
 
-        var question = Claude("""
-            {"hook_event_name":"PreToolUse","session_id":"s1","tool_name":"AskUserQuestion","tool_input":{"questions":[
+        const string twoQuestions = """
+            {"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"AskUserQuestion","tool_input":{"questions":[
             {"question":"Which framework?","header":"Framework","options":[{"label":"React","description":"Component library"},{"label":"Vue","description":"Progressive"}],"multiSelect":false},
             {"question":"Which checks?","header":"Checks","options":[{"label":"Lint"},{"label":"Tests"},{"label":"Types"}],"multiSelect":true}]}}
-            """);
+            """;
+        var question = Claude(twoQuestions);
         check("Hook plan: a question waits with each question, its options and room for words of the user's own",
             question.Report?.State == "question" && question.Ask is { Wait: true, Title: "Framework", Questions: { Count: 2 } qs, ReplaceId: "agent:claude:s1" }
             && qs[0] is { Id: "0", Header: "Framework", MultiSelect: false, AllowOther: true, Options: { Count: 2 } o } && o[1] is { Key: "1", Label: "Vue", Description: "Progressive" }
@@ -245,10 +283,14 @@ internal static class AgentHookTests
             Answers = [new() { Id = "0", Text = "Svelte" }, new() { Id = "1", Keys = ["0", "2"] }]
         };
         var reply = JsonNode.Parse(question.Reply(answered)!)!["hookSpecificOutput"]!;
-        check("Hook reply: answers go back keyed by the question, typed words as they are and several options joined",
-            (string?)reply["hookEventName"] == "PreToolUse" && (string?)reply["permissionDecision"] == "allow"
-            && (string?)reply["updatedInput"]!["answers"]!["Which framework?"] == "Svelte" && (string?)reply["updatedInput"]!["answers"]!["Which checks?"] == "Lint, Types"
-            && reply["updatedInput"]!["questions"]!.AsArray().Count == 2);
+        check("Hook reply: Claude Code's answers go back in the permission's decision, keyed by the question, typed words as they are and several options joined",
+            (string?)reply["hookEventName"] == "PermissionRequest" && (string?)reply["decision"]!["behavior"] == "allow" && reply["permissionDecision"] is null
+            && (string?)reply["decision"]!["updatedInput"]!["answers"]!["Which framework?"] == "Svelte" && (string?)reply["decision"]!["updatedInput"]!["answers"]!["Which checks?"] == "Lint, Types"
+            && reply["decision"]!["updatedInput"]!["questions"]!.AsArray().Count == 2);
+        var before = JsonNode.Parse(Tool("codeagent", twoQuestions.Replace("PermissionRequest", "PreToolUse")).Reply(answered)!)!["hookSpecificOutput"]!;
+        check("Hook reply: a tool asked before its question tool runs takes the answers as that tool's input",
+            (string?)before["hookEventName"] == "PreToolUse" && (string?)before["permissionDecision"] == "allow" && before["decision"] is null
+            && (string?)before["updatedInput"]!["answers"]!["Which checks?"] == "Lint, Types" && before["updatedInput"]!["questions"]!.AsArray().Count == 2);
         check("Hook reply: an answer left out, or an option that is not there, prints nothing",
             question.Reply(new() { Type = NoticeTypes.Result, Result = NoticeWaits.Action, Answers = [new() { Id = "0", Keys = ["0"] }] }) is null
             && question.Reply(new() { Type = NoticeTypes.Result, Result = NoticeWaits.Action, Answers = [new() { Id = "0", Keys = ["7"] }, new() { Id = "1", Keys = ["0"] }] }) is null);
@@ -278,6 +320,15 @@ internal static class AgentHookTests
         check("Agent keys: the key of a session's approval names the tool and the session",
             AgentKeys.Ask(AgentKeys.For("claude", "s:1")) is ("claude", "s:1") && AgentKeys.Ask("agent-done:claude:s") is null && AgentKeys.Ask("agent:x") is null && AgentKeys.Ask(null) is null);
     }
+
+    private static NoticeMessage Marked(NoticeMessage report, string call) { report.Call = call; return report; }
+
+    // A question as a tool's hook gives it, with the event it comes with.
+    private static string Asking(string evt)
+        => "{\"hook_event_name\":\"" + evt + "\",\"session_id\":\"s\",\"tool_name\":\"AskUserQuestion\",\"tool_input\":{\"questions\":[{\"question\":\"Q?\",\"options\":[{\"label\":\"A\"}]}]}}";
+
+    // A tool that takes Claude Code's hook format under its own id.
+    private static AgentHookPlan Tool(string id, string json) => AgentHook.Plan(AgentHookFormats.Claude, id, id, Input(json), chinese: true);
 
     private static NoticeMessage Report(string state, string session = "s1", string? title = null, string? body = null, string harness = "claude")
         => new() { Type = NoticeTypes.Agent, AppId = harness, AppName = "Claude Code", Session = session, State = state, Context = "app", Title = title, Body = body };
@@ -316,6 +367,40 @@ internal static class AgentHookTests
         check("Sessions: work after a finished turn is a new task", turns.All.Single().Since == T0.AddMinutes(6));
         turns.Apply(Report("working", title: "again"), T0.AddMinutes(7));
         check("Sessions: a new prompt is a new task", turns.All.Single().Since == T0.AddMinutes(7));
+
+        var waits = new AgentSessions();
+        waits.Apply(Report("working", title: "go"), T0);
+        waits.Apply(Marked(Report("approval"), "aaaa"), T0.AddSeconds(1));
+        check("Sessions: the result of another call leaves the wait, the result of its own ends it",
+            !waits.Apply(Marked(Report("working"), "bbbb"), T0.AddSeconds(2)) && waits.All.Single() is { State: AgentState.Approval, Call: "aaaa" } still && still.UpdatedAt == T0.AddSeconds(2)
+            && waits.Apply(Marked(Report("working"), "aaaa"), T0.AddSeconds(3)) && waits.All.Single() is { State: AgentState.Working, Call: null });
+        waits.Apply(Marked(Report("approval"), "aaaa"), T0.AddSeconds(4));
+        bool unmarked = waits.Apply(Report("working"), T0.AddSeconds(5)) && waits.All.Single().State == AgentState.Working;
+        waits.Apply(Marked(Report("question"), "aaaa"), T0.AddSeconds(6));
+        bool prompted = waits.Apply(Marked(Report("working", title: "next"), "bbbb"), T0.AddSeconds(7)) && waits.All.Single() is { State: AgentState.Working, Prompt: "next" };
+        waits.Apply(Report("approval"), T0.AddSeconds(8));
+        check("Sessions: a report without a mark, a new prompt, and any result when the wait has no mark end the wait",
+            unmarked && prompted && waits.Apply(Marked(Report("working"), "cccc"), T0.AddSeconds(9)) && waits.All.Single().State == AgentState.Working);
+        var starts = new AgentSessions();
+        starts.Apply(Report("working", title: "go"), T0);
+        bool working = !starts.Apply(Report("started"), T0.AddSeconds(1)) && starts.All.Single() is { State: AgentState.Working, Prompt: "go" } kept && kept.UpdatedAt == T0.AddSeconds(1);
+        starts.Apply(Report("done", body: "Ok."), T0.AddMinutes(1));
+        check("Sessions: a known session that says it started goes on as it was, at work or finished",
+            working && !starts.Apply(Report("started"), T0.AddMinutes(2)) && starts.All.Single() is { State: AgentState.Done } shown && shown.UpdatedAt == T0.AddMinutes(1)
+            && starts.Apply(Report("started", session: "new"), T0.AddMinutes(2)) && starts.All.Count == 2);
+        var rests = new AgentSessions();
+        rests.Apply(Report("working", title: "go"), T0);
+        rests.Apply(Report("done", body: "Ok."), T0.AddMinutes(1));
+        check("Sessions: idle said right after a finished turn leaves it showing for its time",
+            !rests.Apply(Report("idle"), T0.AddMinutes(1).AddSeconds(1)) && rests.All.Single() is { State: AgentState.Done } done && done.UpdatedAt == T0.AddMinutes(1)
+            && rests.Active(T0.AddMinutes(5)).Count == 1);
+        var named = Report("working", title: "again"); named.Transcript = @"C:\t\s.jsonl";
+        rests.Apply(named, T0.AddMinutes(2));
+        rests.Apply(Report("working"), T0.AddMinutes(2).AddSeconds(5));
+        check("Sessions: a session keeps the transcript its hook named", rests.Find("claude", "s1")?.Transcript == @"C:\t\s.jsonl" && rests.Find("claude", "nope") is null);
+        check("Sessions: a turn the user stopped is idle; a session that is not at work is left as it is",
+            rests.Interrupted("claude", "s1", T0.AddMinutes(3)) && rests.All.Single().State == AgentState.Idle
+            && !rests.Interrupted("claude", "s1", T0.AddMinutes(3)) && !rests.Interrupted("claude", "nope", T0));
         Stacks(check);
     }
 
@@ -361,8 +446,16 @@ internal static class AgentHookTests
             Antigravity("""{"hookEventName":"Stop","conversationId":"c1","terminationReason":"USER_CANCELED"}""") is { Report.State: "idle", Notice: null }
             && Antigravity("""{"hookEventName":"Stop","conversationId":"c1","terminationReason":"ERROR","error":"quota"}""").Notice is { Category: "error", Body: "quota" });
         check("Antigravity: other events and unreadable input still print an object; other tools print nothing",
-            Antigravity("""{"hookEventName":"PreToolUse","conversationId":"c1"}""") is { Report: null, Ask: null, Quiet: "{}" } && Antigravity("""{"x":1}""").Quiet == "{}"
+            Antigravity("""{"hookEventName":"PostInvocation","conversationId":"c1"}""") is { Report: null, Ask: null, Quiet: "{}" } && Antigravity("""{"x":1}""").Quiet == "{}"
             && AgentHook.Quiet(AgentHookFormats.Claude, "stop") is null);
+        var asking = Antigravity("""
+            {"hookEventName":"PreToolUse","conversationId":"c1","cwd":"d:\\w\\site","stepIdx":2,"toolCall":{"args":{"questions":[{"is_multi_select":false,"options":["A","B"],"question":"Which one?"}]},"id":"call_1","name":"ask_question"}}
+            """);
+        check("Antigravity: its question is told before its form shows, nothing waits for it, and nothing is printed before a tool",
+            asking is { Ask: null, Quiet: null, Report: { State: "question", Context: "site", Call: null }, Notice: { Title: "需要你选择", Body: "Which one?", Level: "persistent", ReplaceId: "agent:antigravity:c1", Wait: null } }
+            && Antigravity("""{"hookEventName":"PreToolUse","conversationId":"c1","toolCall":{"args":{"CommandLine":"ls"},"name":"run_command"}}""") is { Report: null, Notice: null, Quiet: null }
+            && Antigravity("""{"hookEventName":"PreToolUse","conversationId":"c1","toolCall":{"name":"ask_question"}}""").Notice?.Body == "请在 Antigravity 中处理"
+            && Antigravity("""{"hookEventName":"PreInvocation","conversationId":"c1","invocationNum":1}""").Report is { State: "working", Call: null });
     }
 
     private static void Settings(Action<string, bool> check)
@@ -375,6 +468,10 @@ internal static class AgentHookTests
             agy.SettingsFile(paths0) == @"C:\Users\me\.gemini\config\hooks.json" && named["other"] is not null && (bool?)named["brimdeck"]!["enabled"] == true
             && (string?)named["brimdeck"]!["Stop"]![0]!["command"] == @"C:\B\brim.exe hook antigravity" && named["brimdeck"]!["Stop"]![0]!["async"] is null
             && named["brimdeck"]!["PreInvocation"] is JsonArray && AgentHarnesses.State(agy, named.ToJsonString(), @"C:\B\brim.exe") == HookState.Installed);
+        var asks = named["brimdeck"]!["PreToolUse"]![0]!;
+        check("Hook settings: Antigravity's question tool has a hook of its own, in a group with its matcher",
+            (string?)asks["matcher"] == "ask_question" && (string?)asks["hooks"]![0]!["command"] == @"C:\B\brim.exe hook antigravity" && (string?)asks["hooks"]![0]!["type"] == "command"
+            && (int?)asks["hooks"]![0]!["timeout"] == 10 && named["brimdeck"]!["PreToolUse"]!.AsArray().Count == 1 && named["brimdeck"]!["Stop"]![0]!["hooks"] is null);
         var unnamed = JsonNode.Parse(AgentHarnesses.Removed(agy, named.ToJsonString())!)!.AsObject();
         check("Hook settings: removing Antigravity's takes only BrimDeck's named hook", unnamed.Select(p => p.Key).SequenceEqual(["other"])
             && JsonNode.Parse(AgentHarnesses.Removed(agy, """{"brimdeck":{"Stop":[{"command":"mine.exe"}]}}""")!)!["brimdeck"] is not null);
@@ -416,13 +513,9 @@ internal static class AgentHookTests
         check("Hook settings: a plugin file of the same name that is not BrimDeck's is never written or removed",
             AgentHarnesses.State(opencode, "export const Mine = 1", "b") == HookState.Unreadable && AgentHarnesses.Installed(opencode, "export const Mine = 1", "b") is null
             && AgentHarnesses.Removed(opencode, "export const Mine = 1") is null && AgentHarnesses.Removed(opencode, plugin) == "");
-        var qwen = AgentHarnesses.Find("qwenwork")!;
-        check("Hook settings: a tool found without hooks BrimDeck can write says why and is never written",
-            qwen.Unsupported is not null && AgentHarnesses.State(qwen, null, "b") == HookState.Unsupported && AgentHarnesses.Installed(qwen, "{}", "b") is null
-            && AgentHookFiles.Install(qwen, paths0, "b") is { Length: > 0 } && AgentHookFiles.Uninstall(qwen, paths0) is null);
-        check("Hook settings: every tool has its own id, and each one that can be installed has a known hook format",
+        check("Hook settings: every tool has its own id and a known hook format",
             AgentHarnesses.All.Select(h => h.Id).Distinct().Count() == AgentHarnesses.All.Count
-            && AgentHarnesses.All.Where(h => h.Unsupported is null).All(h => AgentHookFormats.All.Contains(h.Format) && (h.Hooks.Count > 0 || h.Shape == HookFileShape.PluginFile)));
+            && AgentHarnesses.All.All(h => AgentHookFormats.All.Contains(h.Format) && (h.Hooks.Count > 0 || h.Shape == HookFileShape.PluginFile)));
         var openApproval = AgentHook.Plan(AgentHookFormats.OpenCode, "opencode", "OpenCode", Input("""{"hook_event_name":"PermissionRequest","session_id":"ses_1","cwd":"C:/w/app","tool_name":"bash","tool_input":{"command":"git push"},"permission_suggestions":["git push *"]}"""), true);
         check("OpenCode: an approval answers in OpenCode's words: once, always or reject",
             openApproval.Ask is { Title: "请求运行命令", Code: "git push" } oa && oa.Actions!.Any(x => x.Key == AgentHook.AlwaysAllow)
@@ -449,12 +542,15 @@ internal static class AgentHookTests
             """;
         var installed = AgentHarnesses.Installed(claude, existing, brim)!;
         var root = JsonNode.Parse(installed)!;
-        var ask = root["hooks"]!["PreToolUse"]!.AsArray().Last()!;
+        var ask = root["hooks"]!["PermissionRequest"]![0]!;
         check("Hook settings: installing keeps the user's settings and other hooks, and adds BrimDeck's",
-            (bool?)root["respectGitignore"] == true && root["hooks"]!["PreToolUse"]!.AsArray().Count == 2 && (string?)root["hooks"]!["PreToolUse"]![0]!["hooks"]![0]!["command"] == "C:/x/git-ai.exe checkpoint claude --hook-input stdin"
-            && (string?)ask["matcher"] == "AskUserQuestion" && (string?)ask["hooks"]![0]!["command"] == brim && ask["hooks"]![0]!["args"]!.AsArray().Select(a => (string?)a).SequenceEqual(["hook", "claude"])
+            (bool?)root["respectGitignore"] == true && root["hooks"]!["PreToolUse"]!.AsArray().Count == 1 && (string?)root["hooks"]!["PreToolUse"]![0]!["hooks"]![0]!["command"] == "C:/x/git-ai.exe checkpoint claude --hook-input stdin"
+            && (string?)ask["matcher"] == "*" && (string?)ask["hooks"]![0]!["command"] == brim && ask["hooks"]![0]!["args"]!.AsArray().Select(a => (string?)a).SequenceEqual(["hook", "claude"])
             && (int?)ask["hooks"]![0]!["timeout"] == AgentHarnesses.WaitingTimeoutSeconds && ask["hooks"]![0]!["async"] is null
-            && (bool?)root["hooks"]!["Stop"]![0]!["hooks"]![0]!["async"] == true && root["hooks"]!["PermissionRequest"] is not null);
+            && (bool?)root["hooks"]!["Stop"]![0]!["hooks"]![0]!["async"] == true && (bool?)root["hooks"]!["StopFailure"]![0]!["hooks"]![0]!["async"] == true);
+        check("Hook settings: Claude Code's question needs no hook of its own, the tools built on it get one; Codex tells a session's end",
+            !claude.Hooks.Any(h => h.Event == "PreToolUse") && AgentHarnesses.Find("codeagent")!.Hooks.Any(h => h is { Event: "PreToolUse", Matcher: "AskUserQuestion", Waits: true })
+            && !AgentHarnesses.Find("qoder")!.Hooks.Any(h => h.Event == "StopFailure") && codex.Hooks.Any(h => h is { Event: "SessionEnd", Waits: false }));
         check("Hook settings: installed reads as installed, installing again changes nothing",
             AgentHarnesses.State(claude, installed, brim) == HookState.Installed && AgentHarnesses.Installed(claude, installed, brim) == installed
             && AgentHarnesses.State(claude, existing, brim) == HookState.Missing && AgentHarnesses.State(claude, null, brim) == HookState.Missing);

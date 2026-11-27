@@ -55,7 +55,8 @@ public sealed record HookEntry(string Event, string? Matcher, bool Waits);
 
 // A coding agent ("harness") whose hooks BrimDeck can install: where its settings are, how they hold hooks, and which events
 // it reports. Tools that share one settings file are one harness (the Claude desktop app and the Claude Code CLI; the
-// Antigravity app, IDE and CLI). A tool found but without hooks BrimDeck can write has Unsupported, which says why.
+// Antigravity app, IDE and CLI). Only tools whose sessions BrimDeck can connect are listed: one it cannot (DeepSeek Harness and
+// QwenWork have no hooks a settings file could hold, WorkBuddy AI reads none from its own) is not looked for, and so never shown.
 public sealed record AgentHarness(
     string Id, string Name, string Format, Func<string> Components,
     // The settings file, from the user's folder and the environment.
@@ -67,7 +68,6 @@ public sealed record AgentHarness(
     bool Approvals, bool Questions,
     // What the user must still do after installing, shown beside the row (Codex reviews new hooks before it runs them).
     Func<string>? AfterInstall = null,
-    Func<string>? Unsupported = null,
     // Whether the tool reads "async" (runs a hook in the background); one that does not gets none.
     bool Async = true,
     // The plugin file of a tool without command hooks (HookFileShape.PluginFile).
@@ -75,7 +75,14 @@ public sealed record AgentHarness(
     // Whether the hooks file carries "version": 1 (Cursor, TRAE).
     bool Versioned = false,
     // Approvals and questions are answered in the tool only; the island tells of them with a notice until they are.
-    bool Tells = false);
+    bool Tells = false)
+{
+    // The tool shows no approval prompt, or no question, of its own while its hook waits on the island (AgentHook says which
+    // tools, and how that is known). Such a one is answered on the island only when the user chose so (AgentAsks); otherwise
+    // the island tells of it and the tool asks as it always does.
+    public bool HoldsApprovals => Approvals && AgentHook.ApprovalHolds(Format, Id);
+    public bool HoldsQuestions => Questions && AgentHook.QuestionHolds(Format, Id);
+}
 
 // The folders the harnesses' settings are found from; the tests give their own.
 public sealed record AgentPaths(string Home, string Roaming, string Local, Func<string, string?> Variable)
@@ -93,7 +100,7 @@ public sealed record AgentPaths(string Home, string Roaming, string Local, Func<
 }
 
 // Whether a harness's hooks are in its settings.
-public enum HookState { Missing, Installed, Outdated, Unreadable, Unsupported }
+public enum HookState { Missing, Installed, Outdated, Unreadable }
 
 public static class AgentHarnesses
 {
@@ -103,16 +110,27 @@ public static class AgentHarnesses
     // The name of BrimDeck's hook in a settings file of named hooks (HookFileShape.Named).
     public const string HookName = "brimdeck";
 
+    // Claude Code asks a question through PermissionRequest as it asks for an approval, beside its own prompt: no PreToolUse
+    // hook waits for one, which would hold Claude Code's prompt up. StopFailure ends a turn the API refused, in place of Stop.
     private static readonly HookEntry[] ClaudeHooks =
+    [
+        new("SessionStart", null, false), new("UserPromptSubmit", null, false), new("PostToolUse", "*", false), new("Stop", null, false), new("StopFailure", null, false),
+        new("Notification", null, false), new("SessionEnd", null, false), new("PermissionRequest", "*", true)
+    ];
+
+    // The tools built on Claude Code: a question comes with PreToolUse (CodeAgent, the Qoder desktop app), which the tool waits
+    // for before it asks, and from the Qoder CLI with PermissionRequest after it.
+    private static readonly HookEntry[] ClaudeLikeHooks =
     [
         new("SessionStart", null, false), new("UserPromptSubmit", null, false), new("PostToolUse", "*", false), new("Stop", null, false),
         new("Notification", null, false), new("SessionEnd", null, false),
         new("PermissionRequest", "*", true), new("PreToolUse", "AskUserQuestion", true)
     ];
 
+    // Codex ends a session with SessionEnd (and each run of "codex exec" with it).
     private static readonly HookEntry[] CodexHooks =
     [
-        new("SessionStart", null, false), new("UserPromptSubmit", null, false), new("PostToolUse", null, false), new("Stop", null, false),
+        new("SessionStart", null, false), new("UserPromptSubmit", null, false), new("PostToolUse", null, false), new("Stop", null, false), new("SessionEnd", null, false),
         new("PermissionRequest", null, true)
     ];
 
@@ -151,33 +169,34 @@ public static class AgentHarnesses
         new("SessionStart", null, false), new("UserPromptSubmit", null, false), new("PostToolUse", null, false), new("Stop", null, false), new("Notification", null, false)
     ];
 
-    // Antigravity's hooks block its loop, and it has no event for an approval or a question: the session's start, each call of the
-    // model (which carries the user's last words) and the loop's end.
-    private static readonly HookEntry[] AntigravityHooks = [new("SessionStart", null, false), new("PreInvocation", null, false), new("Stop", null, false)];
+    // Antigravity's hooks block its loop, and it has no event for an approval: the session's start, each call of the model (which
+    // carries the user's last words), the loop's end, and its question tool before it runs (the matcher is a regular expression).
+    private static readonly HookEntry[] AntigravityHooks =
+    [
+        new("SessionStart", null, false), new("PreInvocation", null, false), new("Stop", null, false), new("PreToolUse", "ask_question", false)
+    ];
 
     // A tool built on Claude Code that reads hooks from its own folder in Claude Code's format.
     private static AgentHarness ClaudeLike(string id, string name, Func<string> components, string folder, string? variable, Func<AgentPaths, IEnumerable<string>> evidence)
         => new(id, name, AgentHookFormats.Claude, components, p => Path.Combine(p.Under(variable, folder), "settings.json"), evidence,
-            HookFileShape.Nested, HookCommandStyle.Shell, ClaudeHooks, Approvals: true, Questions: true, Async: false);
+            HookFileShape.Nested, HookCommandStyle.Shell, ClaudeLikeHooks, Approvals: true, Questions: true, Async: false);
 
-    // WorkBuddy and WorkBuddy AI: the CodeBuddy Code inside reads its hooks from the app's own folder and runs them through
-    // Git Bash, one at a time.
+    // WorkBuddy: the CodeBuddy Code inside reads its hooks from the app's own folder and runs them through Git Bash, one at a
+    // time. (WorkBuddy AI hands its CodeBuddy Code settings of its own making and reads no hooks from its folder.)
     private static AgentHarness WorkBuddy(string id, string name, Func<string> components, string folder)
         => new(id, name, AgentHookFormats.CodeBuddy, components, p => Path.Combine(p.Home, folder, "settings.json"),
             p => [Path.Combine(p.Home, folder, "settings.json"), Path.Combine(p.Home, folder, "projects")],
             HookFileShape.Nested, HookCommandStyle.Shell, CodeBuddyHooks, Approvals: true, Questions: false, Async: false);
 
     // TRAE and TRAE CN: each reads hooks.json of its own folder, in Claude Code's nesting with a version, and runs a command
-    // through PowerShell. Its global hooks run only once the user switched them on in TRAE's settings.
+    // through PowerShell. Its global hooks run only once the user switched them on in TRAE's settings, and only when hook
+    // commands run locally: in its sandbox, the default, they do not run at all and nothing says so.
     private static AgentHarness Trae(string id, string name, Func<string> components, string folder, string data)
         => new(id, name, AgentHookFormats.Trae, components, p => Path.Combine(p.Home, folder, "hooks.json"),
             p => [Path.Combine(p.Roaming, data), Path.Combine(p.Home, folder, "argv.json")],
             HookFileShape.Nested, HookCommandStyle.PowerShell, TraeHooks, Approvals: false, Questions: false, Async: false, Versioned: true, Tells: true,
-            AfterInstall: () => Loc.T($"在 {name} 的“设置 › Hooks”中打开全局钩子后才会运行", $"They run once global hooks are turned on in {name}'s Settings › Hooks"));
-
-    // A tool found whose sessions cannot be connected with a command hook.
-    private static AgentHarness Unconnectable(string id, string name, Func<string> components, Func<AgentPaths, IEnumerable<string>> evidence, Func<string> why)
-        => new(id, name, "", components, _ => "", evidence, HookFileShape.Nested, HookCommandStyle.Cmd, [], Approvals: false, Questions: false, Unsupported: why);
+            AfterInstall: () => Loc.T($"还需在 {name} 的“设置 › Hooks”中打开“已配置的 Hooks”，并把“Hooks 命令运行方式”改为“本地自动运行”",
+                $"In {name}'s Settings › Hooks, also turn on the configured global hooks and set hook commands to run locally, not in the sandbox"));
 
     public static IReadOnlyList<AgentHarness> All { get; } =
     [
@@ -205,7 +224,6 @@ public static class AgentHarnesses
         ClaudeLike("qoder-cn", "Qoder CN", () => Loc.T("Qoder CN CLI 与 Qoder CN 桌面版", "Qoder CN CLI and Qoder CN desktop app"), ".qoder-cn", "QODERCN_CONFIG_DIR",
             p => [Path.Combine(p.Under("QODERCN_CONFIG_DIR", ".qoder-cn"), "bin"), Path.Combine(p.Under("QODERCN_CONFIG_DIR", ".qoder-cn"), "settings.json")]),
         WorkBuddy("workbuddy", "WorkBuddy", () => Loc.T("WorkBuddy 桌面版（内置 CodeBuddy Code）", "WorkBuddy desktop app (with CodeBuddy Code)"), ".workbuddy"),
-        WorkBuddy("workbuddy-ai", "WorkBuddy AI", () => Loc.T("WorkBuddy AI 桌面版（内置 CodeBuddy Code）", "WorkBuddy AI desktop app (with CodeBuddy Code)"), ".workbuddy-ai"),
         new("opencode", "OpenCode", AgentHookFormats.OpenCode, () => Loc.T("OpenCode CLI 与 OpenCode 桌面版（通过插件）", "OpenCode CLI and OpenCode desktop app (through a plugin)"),
             p => Path.Combine(p.Under("XDG_CONFIG_HOME", ".config", "opencode", "plugins"), OpenCodePlugin.FileName),
             p => [p.Under("XDG_CONFIG_HOME", ".config", "opencode"), Path.Combine(p.Home, ".local", "share", "opencode", "opencode.db"), .. p.OnPath("opencode.cmd"), .. p.OnPath("opencode.exe")],
@@ -227,15 +245,6 @@ public static class AgentHarnesses
             AfterInstall: () => Loc.T("重新启动 MiMo Code 后生效", "They run once MiMo Code is restarted")),
         Trae("trae", "TRAE",() => Loc.T("TRAE 与 TRAE SOLO", "TRAE and TRAE SOLO"), ".trae", "Trae"),
         Trae("trae-cn", "TRAE CN", () => Loc.T("TRAE CN 与 TRAE SOLO CN", "TRAE CN and TRAE SOLO CN"), ".trae-cn", "Trae CN"),
-        Unconnectable("dsh", "DeepSeek Harness", () => Loc.T("DeepSeek Harness 桌面版与 dsh", "DeepSeek Harness desktop app and dsh"),
-            p => [Path.Combine(p.Home, ".dsh")],
-            () => Loc.T("DeepSeek Harness 没有命令钩子，只能通过插件和启动配置接入，暂不支持自动安装", "DeepSeek Harness has no command hooks, only plugins added to its startup configuration; installing is not supported yet")),
-        Unconnectable("qwenwork", "QwenWork", () => Loc.T("QwenWork 桌面版", "QwenWork desktop app"),
-            p => [Path.Combine(p.Home, ".qwenwork")],
-            () => Loc.T("QwenWork 只在部分对话引擎下运行用户钩子，且钩子不能回答审批，暂不支持", "QwenWork runs user hooks only with some of its engines, and a hook cannot answer an approval; not supported yet")),
-        Unconnectable("qwenwork-cn", "QwenWork CN", () => Loc.T("千问办公桌面版", "QwenWork CN desktop app"),
-            p => [Path.Combine(p.Home, ".qwenworkcn")],
-            () => Loc.T("千问办公只在部分对话引擎下运行用户钩子，且钩子不能回答审批，暂不支持", "QwenWork CN runs user hooks only with some of its engines, and a hook cannot answer an approval; not supported yet")),
         new("zcode", "ZCode", AgentHookFormats.Claude, () => Loc.T("ZCode 桌面版自带的代理", "The ZCode desktop app's own agent"),
             p => Path.Combine(p.Home, ".zcode", "cli", "config.json"),
             p => [Path.Combine(p.Home, ".zcode", "cli", "config.json"), Path.Combine(p.Home, ".zcode", "cli")],
@@ -300,7 +309,6 @@ public static class AgentHarnesses
     // Whether the text holds BrimDeck's hooks as they are now: every hook with this brim, and nothing else of BrimDeck's.
     public static HookState State(AgentHarness harness, string? text, string brim)
     {
-        if (harness.Unsupported is not null) return HookState.Unsupported;
         if (harness.Plugin is { } plugin)
             return text is null ? HookState.Missing : text == plugin.Text(brim) ? HookState.Installed : plugin.Ours(text) ? HookState.Outdated : HookState.Unreadable;
         if (harness.Shape == HookFileShape.Toml) return TomlHooks.State(harness, text, brim);
@@ -314,8 +322,7 @@ public static class AgentHarnesses
 
     // The text with BrimDeck's hooks in place (any of its earlier ones replaced), or null when the file cannot be read as JSON.
     public static string? Installed(AgentHarness harness, string? text, string brim)
-        => harness.Unsupported is not null ? null
-            : harness.Plugin is { } plugin ? (text is null || plugin.Ours(text) ? plugin.Text(brim) : null)
+        => harness.Plugin is { } plugin ? (text is null || plugin.Ours(text) ? plugin.Text(brim) : null)
             : harness.Shape == HookFileShape.Toml ? TomlHooks.Installed(harness, text, brim)
             : Parse(text, out _) is { } root ? Write(Install(harness, root, brim)) : null;
 
@@ -570,17 +577,16 @@ public static class AgentHookFiles
 
     public static HookState State(AgentHarness harness, AgentPaths paths, string brim)
     {
-        if (harness.Unsupported is not null) return HookState.Unsupported;
         try { return AgentHarnesses.State(harness, Read(harness.SettingsFile(paths)), Program(harness, brim)); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return HookState.Unreadable; }
     }
 
     // Null when done; otherwise why not.
-    public static string? Install(AgentHarness harness, AgentPaths paths, string brim) => harness.Unsupported is { } why ? why()
-        : Change(harness.SettingsFile(paths), text => AgentHarnesses.Installed(harness, text, Program(harness, brim)), plugin: harness.Shape == HookFileShape.PluginFile);
+    public static string? Install(AgentHarness harness, AgentPaths paths, string brim)
+        => Change(harness.SettingsFile(paths), text => AgentHarnesses.Installed(harness, text, Program(harness, brim)), plugin: harness.Shape == HookFileShape.PluginFile);
 
-    public static string? Uninstall(AgentHarness harness, AgentPaths paths) => harness.Unsupported is not null ? null
-        : Change(harness.SettingsFile(paths), text => text is null ? null : AgentHarnesses.Removed(harness, text), missingIsDone: true, plugin: harness.Shape == HookFileShape.PluginFile);
+    public static string? Uninstall(AgentHarness harness, AgentPaths paths)
+        => Change(harness.SettingsFile(paths), text => text is null ? null : AgentHarnesses.Removed(harness, text), missingIsDone: true, plugin: harness.Shape == HookFileShape.PluginFile);
 
     [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, EntryPoint = "GetShortPathNameW")]
     private static extern uint GetShortPathName(string longPath, System.Text.StringBuilder shortPath, uint size);
