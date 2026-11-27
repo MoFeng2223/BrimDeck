@@ -19,8 +19,8 @@ public sealed record OpenCodeCredential(string Token, DateTimeOffset? ExpiresAt,
 //     the active row of integration "opencode". 1.x kept API keys in auth.json ({ "<provider>": { type: "api", key } }).
 //   - Records: 2.x writes each model response to session_message (type "assistant", data { model: { id, providerID },
 //     cost, tokens: { input, output, reasoning, cache: { read, write } } }); 1.x writes them to message (data with role
-//     "assistant", modelID, providerID, and the same cost and tokens). Moving to 2.x leaves the 1.x tables as they were and
-//     does not copy them, so both are read. input excludes the cache, and reasoning is billed as output but not counted in
+//     "assistant", modelID, providerID, and the same cost and tokens). Both tables are read, preferring the 2.x record
+//     when the same message ID exists in both. input excludes the cache, and reasoning is billed as output but not counted in
 //     output. cost is what OpenCode charges at its own list prices; for Go models it is what the request counted against the
 //     allowance, and 0 for free models. A failed response has no tokens. A session also counts the request that names it,
 //     which has no record of its own and is not read.
@@ -51,6 +51,60 @@ public static class OpenCodeUsage
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }
         return null;
+    }
+
+    internal static string? ReadGitHubCopilotToken(IDesktopSources desktop, string database, string data, DateTimeOffset now)
+    {
+        string? Token(JsonElement entry) =>
+            entry.Get("type").Text() == "oauth"
+            && entry.Get("enterpriseUrl").Text().Length == 0
+            && entry.Get("methodID").Text() is "" or "device"
+            && (entry.Get("expires").Number() is null or 0 || entry.Get("expires").Date() > now)
+            && entry.Get("access").Text() is { Length: > 0 } access ? access : null;
+
+        var rows = desktop.QueryDatabase(database, "SELECT value FROM credential WHERE integration_id = 'github-copilot' AND (active = 1 OR active IS NULL) ORDER BY active DESC, time_updated DESC") ?? [];
+        foreach (var row in rows)
+        {
+            if (row.FirstOrDefault() is not { Length: > 0 } value) continue;
+            try
+            {
+                using var doc = JsonDocument.Parse(value);
+                if (Token(doc.RootElement) is { } token) return token;
+            }
+            catch (JsonException) { }
+        }
+
+        try
+        {
+            using var auth = SharedFile.ReadJson(Path.Combine(data, "auth.json"));
+            return Token(auth?.RootElement.Get("github-copilot") ?? default);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return null; }
+    }
+
+    internal static UsageMetric? GitHubCopilotAllowance(JsonElement root)
+    {
+        var premium = root.Get("quota_snapshots").Get("premium_interactions");
+        var total = premium.Get("entitlement").Number();
+        if (premium.Get("unlimited").ValueKind == JsonValueKind.True || total is not > 0) return null;
+
+        bool credits = premium.Get("token_based_billing").ValueKind == JsonValueKind.True || root.Get("token_based_billing").ValueKind == JsonValueKind.True;
+        string label = credits ? "Copilot AI 积分" : "Copilot 高级请求";
+        var reset = root.Get("quota_reset_date_utc").Date();
+        if (reset is null && DateOnly.TryParseExact(root.Get("quota_reset_date").Text(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
+            reset = new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+
+        const string id = "github-copilot-premium";
+        var remaining = premium.Get("quota_remaining").Number() ?? premium.Get("remaining").Number();
+        if (total <= 1e15 && remaining is >= 0 and <= 1e15)
+            return new(MetricKind.Balance, label)
+            {
+                Id = id, Amount = (decimal)remaining.Value, Total = (decimal)total.Value,
+                Unit = credits ? "积分" : "次", ResetAt = reset,
+            };
+        return premium.Get("percent_remaining").Number() is { } left
+            ? new(MetricKind.Percent, label) { Id = id, Percent = 100 - Math.Clamp(left, 0, 100), ResetAt = reset }
+            : null;
     }
 
     public static OpenCodeCredential? Parse(string? value)
@@ -118,7 +172,8 @@ public static class OpenCodeUsage
         }
         Query("session_message", "type = 'assistant'");
         Query("message", "json_extract(data, '$.role') = 'assistant'");
-        snapshot.Entries = Parse(rows).Where(e => e.Time >= start && e.Time <= now && e.Total > 0).OrderBy(e => e.Time).ToList();
+        snapshot.Entries = Parse(rows).Where(e => e.Time >= start && e.Time <= now && e.Total > 0)
+            .DistinctBy(e => e.Key).OrderBy(e => e.Time).ToList();
         snapshot.UsageComplete = complete;
         int sessions = rows.Where(row => row.Length > 1 && row[1] is not null).Select(row => row[1]).Distinct().Count();
         snapshot.UsageNote = Loc.T($"本机 OpenCode {start.LocalDateTime:yyyy-MM-dd} 起 · {sessions} 个会话 · {snapshot.Entries.Count} 次模型请求",

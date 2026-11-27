@@ -143,11 +143,12 @@ static class OpenCodeUsageTests
 
         desktop.Queries.Clear();
         desktop.Tables = [["session_message"], ["message"]];
-        desktop.Legacy = [["v1", "old", At(5), null, "kimi-k2", "50", "0", "0", "5", "0", "0.0004"]];
+        desktop.Legacy = [["v1", "old", At(5), null, "kimi-k2", "50", "0", "0", "5", "0", "0.0004"],
+            ["m1", "s1", At(1), null, "glm-5.3", "100", "0", "0", "10", "0", "0.001"]];
         snapshot = new ProviderSnapshot(ProviderId.OpenCode);
         OpenCodeUsage.Read(snapshot, desktop, database, start, start.AddDays(2));
         var legacy = desktop.Queries.Single(q => q.Contains("FROM message "));
-        check("1.x records left in the message table are read as well", legacy.Contains("json_extract(data, '$.role') = 'assistant'") && legacy.Contains("$.modelID") &&
+        check("OpenCode counts migrated records once and includes records remaining in the 1.x table", legacy.Contains("json_extract(data, '$.role') = 'assistant'") && legacy.Contains("$.modelID") &&
             snapshot.Entries.Select(e => e.Key).SequenceEqual(["opencode:m1", "opencode:v1", "opencode:m3"]) && snapshot.Entries[1].Model == "kimi-k2");
 
         desktop.Legacy = null;
@@ -222,6 +223,71 @@ static class OpenCodeUsageTests
         handler.Respond = _ => Reply("""{"usage":{"rolling":{"percent":10},"weekly":{"percent":5},"monthly":{"percent":1}}}""");
         snapshot = await Refresh();
         check("A 1.x key is sent without a workspace", snapshot.LiveQuota && handler.Calls.Single() is { Authorization: "Bearer oc_sk_fixture", Workspace: null });
+
+        desktop.CopilotCredentials = [["""{"type":"oauth","methodID":"device","access":"fixture-copilot","expires":0}"""]];
+        File.WriteAllText(Path.Combine(locations.OpenCodeData, "auth.json"), """{"opencode-go":{"type":"api","key":"oc_sk_fixture"}}""");
+        settings.Apps[0].QuotaSource = ProviderId.GitHubCopilot;
+        var saved = JsonSerializer.Serialize(settings);
+        var restored = JsonSerializer.Deserialize<DeckSettings>(saved)!;
+        restored.Normalize();
+        check("GitHub Copilot is a separately saved quota source that can be paired with OpenCode usage",
+            ProviderCatalog.IsBuiltIn(ProviderId.GitHubCopilot) && !ProviderCatalog.IsUsageSource(ProviderId.GitHubCopilot)
+            && saved.Contains("\"QuotaSource\":\"github-copilot\"")
+            && restored.Apps.Single() is { QuotaSource: ProviderId.GitHubCopilot, UsageSource: ProviderId.OpenCode });
+
+        async Task<DashboardColumn> RefreshCopilotCard() =>
+            DashboardUsage.Columns(restored, await service.RefreshAsync(restored)).Single();
+
+        handler.Calls.Clear();
+        handler.Respond = _ => Reply("""
+            {"copilot_plan":"business","quota_reset_date_utc":"2026-12-01T00:00:00Z",
+             "quota_snapshots":{"premium_interactions":{"has_quota":true,"unlimited":false,"token_based_billing":true,
+             "entitlement":20000,"remaining":11973,"quota_remaining":11973.2}}}
+            """);
+        var card = await RefreshCopilotCard();
+        snapshot = card.Quota;
+        check("The Copilot card reads GitHub quota and pairs it with OpenCode usage without querying Console",
+            handler.Calls.Single() is { Uri: "https://api.github.com/copilot_internal/user", Authorization: "token fixture-copilot" }
+            && snapshot.Id == ProviderId.GitHubCopilot && snapshot.LiveQuota && snapshot.Source == "GitHub Copilot" && snapshot.Plan == "business"
+            && snapshot.Entries.Count == 0 && card.Usage.Id == ProviderId.OpenCode && card.Usage.Entries.Count == 1
+            && snapshot.Metrics.SingleOrDefault() is { Kind: MetricKind.Balance, Amount: 11973.2m, Total: 20000m, Unit: "积分" } allowance
+            && allowance.ResetAt == DateTimeOffset.Parse("2026-12-01T00:00:00Z"));
+
+        desktop.CopilotCredentials = null;
+        File.WriteAllText(Path.Combine(locations.OpenCodeData, "auth.json"), """{"github-copilot":{"type":"oauth","access":"fixture-legacy","expires":0}}""");
+        handler.Calls.Clear();
+        card = await RefreshCopilotCard();
+        check("The Copilot source accepts an OpenCode 1.x device sign-in", card.Quota.LiveQuota && handler.Calls.Single().Authorization == "token fixture-legacy");
+
+        handler.Respond = _ => Reply("""
+            {"quota_reset_date_utc":"2026-12-01T00:00:00Z","quota_snapshots":{"premium_interactions":{
+              "has_quota":false,"unlimited":false,"token_based_billing":true,"entitlement":20000,"remaining":0}}}
+            """);
+        card = await RefreshCopilotCard();
+        check("An exhausted Copilot allowance still displays zero and its reset time",
+            card.Quota.LiveQuota && card.Quota.Metrics.SingleOrDefault() is
+            { Kind: MetricKind.Balance, Amount: 0m, Total: 20000m, ValueText: "0", UsedPercent: 100 } exhausted
+            && exhausted.ResetAt == DateTimeOffset.Parse("2026-12-01T00:00:00Z"));
+
+        handler.Respond = _ => Reply("""
+            {"quota_snapshots":{"premium_interactions":{"has_quota":false,"entitlement":0,"percent_remaining":0}}}
+            """);
+        card = await RefreshCopilotCard();
+        check("An account without a Copilot allowance has no quota metric",
+            !card.Quota.LiveQuota && card.Quota.Metrics.Count == 0);
+
+        handler.Calls.Clear();
+        settings.Apps[0].QuotaSource = ProviderId.OpenCode;
+        snapshot = await Refresh();
+        check("The OpenCode quota source does not switch to Copilot when only Copilot is signed in",
+            handler.Calls.Count == 0 && !snapshot.LiveQuota && snapshot.Entries.Count == 1);
+
+        File.WriteAllText(Path.Combine(locations.OpenCodeData, "auth.json"), """{"opencode-go":{"type":"api","key":"oc_sk_fixture"},"github-copilot":{"type":"oauth","access":"fixture-legacy","expires":0}}""");
+        handler.Calls.Clear();
+        handler.Respond = _ => Reply("""{"usage":{"rolling":{"percent":10}}}""");
+        snapshot = await Refresh();
+        check("An OpenCode quota card still reads Go when both sign-ins are present",
+            handler.Calls.Single() is { Uri: "https://opencode.ai/zen/go/v1/usage" } && snapshot.Source == "OpenCode Go");
     }
 
     private static HttpResponseMessage Reply(string json) => new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
@@ -229,6 +295,7 @@ static class OpenCodeUsageTests
     private sealed class Database : IDesktopSources
     {
         public IReadOnlyList<string?[]>? Credentials { get; set; } = [];
+        public IReadOnlyList<string?[]>? CopilotCredentials { get; set; }
         public IReadOnlyList<string?[]>? Tables { get; set; } = [];
         public IReadOnlyList<string?[]>? Current { get; set; } = [];
         public IReadOnlyList<string?[]>? Legacy { get; set; } = [];
@@ -236,7 +303,7 @@ static class OpenCodeUsageTests
         public IReadOnlyList<string?[]>? QueryDatabase(string database, string sql)
         {
             lock (Queries) Queries.Add(sql);
-            return sql.Contains("FROM credential") ? Credentials : sql.Contains("sqlite_master") ? Tables : sql.Contains("FROM session_message") ? Current : sql.Contains("FROM message ") ? Legacy : null;
+            return sql.Contains("integration_id = 'github-copilot'") ? CopilotCredentials : sql.Contains("FROM credential") ? Credentials : sql.Contains("sqlite_master") ? Tables : sql.Contains("FROM session_message") ? Current : sql.Contains("FROM message ") ? Legacy : null;
         }
         public string? ReadCursorToken(string database) => null;
         public Task<IReadOnlyList<LocalEndpoint>> FindAntigravityAsync(CancellationToken cancellation) => Task.FromResult<IReadOnlyList<LocalEndpoint>>([]);

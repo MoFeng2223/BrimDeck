@@ -216,6 +216,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
             _includeWsl = settings.IncludeWsl;
             // The Claude and Grok Bot account APIs are asked only for rows that read online; rows that do not share one local snapshot.
             bool claudeOnline = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Claude && app.QuotaOnline);
+            bool openCodeQuota = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.OpenCode);
             bool claudeLocal = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Claude && ProviderCatalog.ReadsLocalQuota(app));
             bool grokBotOnline = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.GrokBot && app.QuotaOnline);
             bool grokBotLocal = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.GrokBot && ProviderCatalog.ReadsLocalQuota(app));
@@ -245,8 +246,8 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
             if (grokBotOnline) sources = sources.Append(ProviderId.GrokBot);
             // Xiaomi MiMo's linked keys have no records of their own: their statistics are MiMo's.
             if (required.Contains(ProviderId.MiMoLinked)) sources = sources.Append(ProviderId.MiMoLinked);
-            // Quota-only built-in sources with browser sign-ins have no local usage records; they are read only for their quota rows.
-            sources = sources.Concat(new[] { ProviderId.Qianwen, ProviderId.QwenCloud, ProviderId.Doubao, ProviderId.Dola }.Where(required.Contains));
+            // These built-in sources provide account quota without their own local usage records.
+            sources = sources.Concat(new[] { ProviderId.Qianwen, ProviderId.QwenCloud, ProviderId.Doubao, ProviderId.Dola, ProviderId.GitHubCopilot }.Where(required.Contains));
             using var publisher = progress is not null && !_published ? new SnapshotPublisher(progress, ProgressInterval) : null;
             var finished = new Dictionary<string, ProviderSnapshot>();
             void Finished(string key, ProviderSnapshot snapshot)
@@ -254,7 +255,9 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
                 if (publisher is null) return;
                 lock (finished) { finished[key] = snapshot; publisher.Publish([.. finished.Values]); }
             }
-            var tasks = sources.Select(id => FetchAsync(id, usageStart, claudeOnline, deadline.Token, cancellation, snapshot => Finished("source:" + id, snapshot))).ToList();
+            var tasks = sources.Select(id => FetchAsync(id, usageStart,
+                id switch { ProviderId.Claude => claudeOnline, ProviderId.OpenCode => openCodeQuota, _ => true },
+                deadline.Token, cancellation, snapshot => Finished("source:" + id, snapshot))).ToList();
             // The sign-ins of custom sources are read on the calling thread before their tasks start; none of that holds up the others.
             var configured = Task.Run(async () =>
             {
@@ -287,12 +290,12 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
 
     // Each source runs on a pool thread from its first line, so its local scan (log files, databases) overlaps the network requests
     // of every other source instead of delaying their start. finished gets the snapshot as soon as the source has one.
-    private async Task<ProviderSnapshot> FetchAsync(ProviderId id, DateTime? usageStart, bool claudeOnline, CancellationToken ct, CancellationToken lifetime,
+    private async Task<ProviderSnapshot> FetchAsync(ProviderId id, DateTime? usageStart, bool readOnlineQuota, CancellationToken ct, CancellationToken lifetime,
         Action<ProviderSnapshot>? finished = null)
     {
         var timer = System.Diagnostics.Stopwatch.StartNew();
         ProviderSnapshot result;
-        try { result = await Task.Run(() => FetchCoreAsync(id, usageStart, claudeOnline, ct, lifetime, finished), CancellationToken.None); }
+        try { result = await Task.Run(() => FetchCoreAsync(id, usageStart, readOnlineQuota, ct, lifetime, finished), CancellationToken.None); }
         catch (Exception ex) when (!lifetime.IsCancellationRequested)
         {
             bool timedOut = ex is OperationCanceledException;
@@ -371,7 +374,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
         snapshot.UsageNote = (read.LocalAvailable ? read.LocalNote + " · " : "") + result.UsageNote + tail;
     }
 
-    private async Task<ProviderSnapshot> FetchCoreAsync(ProviderId id, DateTime? usageStart, bool claudeOnline, CancellationToken ct, CancellationToken lifetime, Action<ProviderSnapshot>? finished)
+    private async Task<ProviderSnapshot> FetchCoreAsync(ProviderId id, DateTime? usageStart, bool readOnlineQuota, CancellationToken ct, CancellationToken lifetime, Action<ProviderSnapshot>? finished)
     {
         var now = _clock();
         var start = new DateTimeOffset(usageStart?.Date ?? now.LocalDateTime.Date.AddDays(-29));
@@ -438,7 +441,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
                     // Without an online Claude row this snapshot only serves token statistics, so no sign-in is read. Its plan is
                     // the local account record's, which a Claude row switched on shows until its first online reading: the best
                     // known without a request, though it names only the organization Claude Code uses.
-                    if (claudeOnline) await ReadClaudeAsync(snapshot, claudeAccount, now, ct);
+                    if (readOnlineQuota) await ReadClaudeAsync(snapshot, claudeAccount, now, ct);
                     break;
                 case ProviderId.Cursor:
                     await ReadCursorAsync(snapshot, now, start, ct);
@@ -459,7 +462,10 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
                     await ReadKimiAsync(snapshot, now, ct);
                     break;
                 case ProviderId.OpenCode:
-                    await ReadOpenCodeAsync(snapshot, now, ct);
+                    if (readOnlineQuota) await ReadOpenCodeAsync(snapshot, now, ct);
+                    break;
+                case ProviderId.GitHubCopilot:
+                    await ReadGitHubCopilotAsync(snapshot, now, ct);
                     break;
                 case ProviderId.MiMo:
                     await ReadMiMoAsync(snapshot, now, ct);
@@ -2185,6 +2191,35 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
         snapshot.Quotas = quotas;
         Connected(snapshot, "OpenCode Go", now);
         if (limited) snapshot.Status = Loc.T("已达到 OpenCode Go 的用量上限，重置前请求会被拒绝", "The OpenCode Go limit is reached; requests are refused until it resets.");
+    }
+
+    private async Task ReadGitHubCopilotAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
+        var token = OpenCodeUsage.ReadGitHubCopilotToken(desktop, _locations.OpenCodeDatabase, _locations.OpenCodeData, now);
+        if (token is null)
+        {
+            snapshot.StatusLabel = Loc.T("未连接", "Not connected");
+            snapshot.Status = Loc.T("请先在 OpenCode 中登录 GitHub.com Copilot", "Sign in to GitHub.com Copilot in OpenCode first.");
+            return;
+        }
+        using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com/copilot_internal/user");
+        request.Headers.Authorization = new AuthenticationHeaderValue("token", token);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+        request.Headers.UserAgent.ParseAdd("BrimDeck/0.1");
+        using var doc = await SendAsync(_http, request, ct);
+
+        const string source = "GitHub Copilot";
+        snapshot.Plan = doc.RootElement.Get("copilot_plan").Text();
+        snapshot.PlanSource = source;
+        snapshot.Scope = "account";
+        if (OpenCodeUsage.GitHubCopilotAllowance(doc.RootElement) is not { } allowance)
+        {
+            snapshot.StatusLabel = Loc.T("额度不可用", "No quota data");
+            snapshot.Status = Loc.T("GitHub Copilot 未返回可显示的个人额度", "GitHub Copilot did not report a personal quota to display.");
+            return;
+        }
+        snapshot.Metrics = [allowance];
+        Connected(snapshot, source, now);
     }
 
     // CodeAgent's credit allowance (CodeAgentUsage), read with the sign-in CodeAgent keeps. An expired or refused sign-in is renewed

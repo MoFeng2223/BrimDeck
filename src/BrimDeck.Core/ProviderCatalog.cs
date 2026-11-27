@@ -9,7 +9,7 @@ public static class ProviderCatalog
 {
     public static readonly ProviderId[] BuiltIns = [ProviderId.Claude, ProviderId.Codex, ProviderId.Antigravity, ProviderId.Cursor];
     // Sources read automatically from local applications; only the first four are added to new settings by default.
-    public static readonly ProviderId[] AutomaticSources = [.. BuiltIns, ProviderId.GrokBot, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.OpenCode, ProviderId.CodeAgent, ProviderId.CommandCode, ProviderId.WorkBuddy, ProviderId.WorkBuddyAi, ProviderId.MiMo, ProviderId.MiMoLinked, ProviderId.Qoder, ProviderId.QoderCn, ProviderId.QwenWorkCn, ProviderId.QwenWork, ProviderId.Trae, ProviderId.TraeCn, ProviderId.Qianwen, ProviderId.QwenCloud, ProviderId.Doubao, ProviderId.Dola];
+    public static readonly ProviderId[] AutomaticSources = [.. BuiltIns, ProviderId.GrokBot, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.OpenCode, ProviderId.GitHubCopilot, ProviderId.CodeAgent, ProviderId.CommandCode, ProviderId.WorkBuddy, ProviderId.WorkBuddyAi, ProviderId.MiMo, ProviderId.MiMoLinked, ProviderId.Qoder, ProviderId.QoderCn, ProviderId.QwenWorkCn, ProviderId.QwenWork, ProviderId.Trae, ProviderId.TraeCn, ProviderId.Qianwen, ProviderId.QwenCloud, ProviderId.Doubao, ProviderId.Dola];
     // Sources that need a browser sign-in in settings are read automatically after it, so the menu lists them with the automatic sources.
     public static readonly ProviderId[] Sources = [.. AutomaticSources, ProviderId.GlmChina, ProviderId.GlmGlobal, ProviderId.MiMoApi, ProviderId.MiMoTokenPlan, ProviderId.DeepSeek, ProviderId.KimiApi, ProviderId.KimiPlatform, ProviderId.OpenCodeGo, ProviderId.CommandCodeApi, ProviderId.OpenRouter, ProviderId.NewApi, ProviderId.Sub2Api, ProviderId.VolcengineArk, ProviderId.BytePlusArk, ProviderId.Custom];
     // Grok Bot is quota-only; Pi is usage-only and must never appear in the quota-source menu. Qoder's statistics are its IDE's.
@@ -52,6 +52,8 @@ public static class ProviderCatalog
             "The membership plan quota of the account signed in to Kimi Code; the sign-in is never renewed"),
         ProviderId.OpenCode => Loc.T("OpenCode 登录 OpenCode Console 的工作区的 OpenCode Go 额度；不续期登录",
             "The OpenCode Go allowance of the workspace OpenCode signed in to OpenCode Console with; the sign-in is never renewed"),
+        ProviderId.GitHubCopilot => Loc.T("读取 OpenCode 中已登录的 GitHub.com Copilot 账号额度；本机会话统计请选择 OpenCode",
+            "Reads the quota of the GitHub.com Copilot account signed in through OpenCode. Choose OpenCode for local session statistics."),
         ProviderId.CodeAgent => Loc.T("CodeAgent 登录账户的积分额度，所有模型共用；登录过期时用 CodeAgent CLI 自动续期",
             "The credit allowance of the account signed in to CodeAgent, shared by every model; an expired sign-in is renewed with CodeAgent CLI"),
         ProviderId.CommandCode => Loc.T("Command Code 登录账户的套餐额度：5 小时、每周与每月额度，以及额外积分",
@@ -94,11 +96,13 @@ public static class ProviderCatalog
     public static string Group(ProviderId id) => IsBuiltIn(id) ?Loc.T("自动读取", "Read automatically") : Loc.T("手动填写", "Entered by hand");
     public static string Name(ProviderId id) => id switch
     {
+        ProviderId.GitHubCopilot => "GitHub Copilot",
         ProviderId.GlmChina => Loc.T("智谱 GLM", "Zhipu GLM"), ProviderId.GlmGlobal => "Z.ai GLM", ProviderId.Dsh => "DeepSeek Harness", ProviderId.GrokBot => "Grok Bot", ProviderId.Kimi => "Kimi Code", ProviderId.KimiApi => "Kimi Code API", ProviderId.KimiPlatform => Loc.T("Kimi 开放平台", "Kimi Open Platform"),ProviderId.OpenCode => "OpenCode", ProviderId.OpenCodeGo => "OpenCode Go", ProviderId.CommandCode => "Command Code", ProviderId.CommandCodeApi => "Command Code API", ProviderId.WorkBuddy => "WorkBuddy", ProviderId.WorkBuddyAi => "WorkBuddy AI", ProviderId.MiMo => Loc.T("Xiaomi MiMo 桌面订阅", "Xiaomi MiMo Desktop subscription"), ProviderId.MiMoApi => "Xiaomi MiMo API", ProviderId.MiMoLinked => "Xiaomi MiMo", ProviderId.MiMoTokenPlan => "Xiaomi MiMo Token Plan", ProviderId.Qoder => "Qoder", ProviderId.QoderCn => "Qoder CN", ProviderId.Qianwen => Loc.T("千问", "Qianwen"), ProviderId.QwenWorkCn => Loc.T("千问办公", "QwenWork CN"), ProviderId.QwenWork => "QwenWork", ProviderId.QwenCloud => "QwenCloud", ProviderId.Trae => "TRAE", ProviderId.TraeCn => "TRAE CN", ProviderId.Doubao => Loc.T("豆包", "Doubao"), ProviderId.Dola => "Dola", ProviderId.VolcengineArk => Loc.T("火山方舟", "Volcengine Ark"), ProviderId.BytePlusArk => "BytePlus ModelArk", ProviderId.OpenRouter => "OpenRouter", ProviderId.DeepSeek => "DeepSeek", ProviderId.NewApi => "New API", ProviderId.Sub2Api => "Sub2API", ProviderId.Custom => Loc.T("自定义", "Custom"),
         _ => id.ToString()
     };
     public static string Key(ProviderId id) => id switch
     {
+        ProviderId.GitHubCopilot => "github-copilot",
         ProviderId.GlmChina => "glm-cn", ProviderId.GlmGlobal => "glm-global", ProviderId.NewApi => "newapi", ProviderId.Sub2Api => "sub2api", ProviderId.KimiApi => "kimi-api", ProviderId.KimiPlatform => "kimi-platform",ProviderId.OpenCodeGo => "opencode-go", ProviderId.CommandCodeApi => "commandcode-api", ProviderId.MiMoApi => "mimo-api", ProviderId.MiMoLinked => "mimo-linked", ProviderId.MiMoTokenPlan => "mimo-token-plan", ProviderId.QoderCn => "qoder-cn", ProviderId.QwenWorkCn => "qwenwork-cn", ProviderId.TraeCn => "trae-cn", ProviderId.VolcengineArk => "volcengine-ark", ProviderId.BytePlusArk => "byteplus-ark",
         _ => id.ToString().ToLowerInvariant()
     };
