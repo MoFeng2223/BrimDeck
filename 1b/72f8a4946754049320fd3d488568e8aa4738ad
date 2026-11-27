@@ -1,0 +1,73 @@
+tests/BrimDeck.IslandChecks/CompactLineChecks.cs
+  s_09a86b440f5d05::t_339818e439fe30 1-22,26-67,72-80,82-160,162-230
+  s_09a86b440f5d05::t_84882a61825115 23-25,68-71,81,161
+src/BrimDeck/MusicVisuals.cs
+  s_09a86b440f5d05::t_d121d14466c22d 935-936,938
+  s_09a86b440f5d05::t_73dcc2d5034f88 260-262
+  s_09a86b440f5d05::t_98db63fbb36e45 212
+  s_09a86b440f5d05::t_f0711147666df7 220
+  s_09a86b440f5d05::t_c5001e141e1306 196-199
+  s_09a86b440f5d05::t_67bba7e7ed62ad 713
+src/BrimDeck/MonitorStrip.cs
+  s_09a86b440f5d05::t_27ea189aba3a3a 374
+  s_09a86b440f5d05::t_b3db1be3cb8e85 408-410
+  s_09a86b440f5d05::t_8d5e8c5733ba02 481-485
+  s_09a86b440f5d05::t_e4c64a73a17b81 558
+  s_09a86b440f5d05::t_45bc728f2a7c1e 569-573
+  s_09a86b440f5d05::t_ef3a638851652d 595
+  s_09a86b440f5d05::t_bbc82e1f282710 446-448
+  s_09a86b440f5d05::t_dc39edf761b632 325-326,468,511,527,550,560,567
+  s_09a86b440f5d05::t_837c86cba59700 256-263
+tests/BrimDeck.IslandChecks/Program.cs
+  s_09a86b440f5d05::t_5c43c8c5a5bfbe 15,17-18
+src/BrimDeck/MainWindow.Shelf.cs
+  s_09a86b440f5d05::t_9c08c1694cd8f4 128
+src/BrimDeck/CompactLine.cs
+  s_09a86b440f5d05::t_fe35ee2e070bcf 1-4,6-33,39-80
+  s_09a86b440f5d05::t_bb0bc21f1f0237 5
+  s_09a86b440f5d05::t_84882a61825115 34-38
+src/BrimDeck/DeviceStrip.cs
+  s_09a86b440f5d05::t_dbec8b906bed87 76,79-80
+  s_09a86b440f5d05::t_eecff4723831ce 61-62
+src/BrimDeck/MainWindow.CompactAttention.cs
+  s_09a86b440f5d05::t_89ea1be7cd69eb 37-40
+src/BrimDeck/MainWindow.Music.cs
+  s_09a86b440f5d05::t_45afd123ffd0d7 1468
+  s_09a86b440f5d05::t_71f6e522d8cc1d 1497-1502
+  s_09a86b440f5d05::t_02e7aba483d56d 1317-1318
+  s_09a86b440f5d05::t_84882a61825115 1471
+src/BrimDeck/MonitorDraw.cs
+  s_09a86b440f5d05::t_e55eb050bb8d7c 99-101,103,107
+  s_09a86b440f5d05::t_fc53af7040f575 22-23,26-27
+  s_09a86b440f5d05::t_f55bca2e713338 31-32
+  s_09a86b440f5d05::t_042c5cf4a0bdef 94-95
+src/BrimDeck/MainWindow.CompactColumn.cs
+  s_09a86b440f5d05::t_45afd123ffd0d7 114
+src/BrimDeck/CompactStacks.cs
+  s_09a86b440f5d05::t_04a222a68dd7a1 161
+  s_09a86b440f5d05::t_9c08c1694cd8f4 169-205
+  s_09a86b440f5d05::t_d7549cd65c3709 1
+  s_09a86b440f5d05::t_f6563cb2f9b41d 140
+  s_09a86b440f5d05::t_d9bcc852c41735 147-152
+src/BrimDeck.Core/EqualizerLayout.cs
+  s_09a86b440f5d05::t_4931e4322c6752 9-12,20
+src/BrimDeck/MainWindow.CompactLayout.cs
+  s_09a86b440f5d05::t_bce8c44a937d98 128-131,133-135
+  s_09a86b440f5d05::t_93255d8ad0d936 173-175,181-183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1b72f8a4946754049320fd3d488568e8aa4738ad",
+  "prompts": {},
+  "sessions": {
+    "s_09a86b440f5d05": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "132f9b4c-2347-4e6d-a48a-772ce4c11d7f",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
