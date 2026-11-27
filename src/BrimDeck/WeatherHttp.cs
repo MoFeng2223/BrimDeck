@@ -30,7 +30,13 @@ internal static class RequestGate
     private static readonly Dictionary<string, int> DailyLimit = new(StringComparer.Ordinal)
     {
         [ChinaDailySupplement.Id] = 600,
-        ["openmeteo"] = 1200
+        ["openmeteo"] = 1200,
+        // 地名搜索与天气取数分通道：冷却互不牵连，额度单独配置，不落到默认 500 次且无月上限的策略。
+        [HeFengSource.GeoId] = 500
+    };
+    private static readonly Dictionary<string, int> MonthlyLimit = new(StringComparer.Ordinal)
+    {
+        [HeFengSource.GeoId] = 10000
     };
     private static readonly object Sync = new();
     private static bool _dirty;
@@ -49,7 +55,7 @@ internal static class RequestGate
             if (state.Day != today) { state.Day = today; state.Count = 0; }
             if (state.Until > clock) return false;
             int daily = source == "hefeng" ? limits?.HeFengDailyLimit ?? 1500 : DailyLimit.GetValueOrDefault(source, 500);
-            int monthly = source == "hefeng" ? limits?.HeFengMonthlyLimit ?? 50000 : 0;
+            int monthly = source == "hefeng" ? limits?.HeFengMonthlyLimit ?? 50000 : MonthlyLimit.GetValueOrDefault(source, 0);
             if ((daily > 0 && state.Count >= daily) || (monthly > 0 && state.MonthCount >= monthly)) return false;
             state.Count++;
             state.MonthCount++;

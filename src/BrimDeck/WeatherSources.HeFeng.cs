@@ -9,6 +9,8 @@ namespace BrimDeck;
 internal sealed class HeFengSource : IWeatherSource
 {
     internal const string Id = "hefeng";
+    // 地名搜索走独立闸门：天气通道限流时仍可搜新城市；额度在 RequestGate 里单独配置。
+    internal const string GeoId = "hefenggeo";
     public WeatherSourceInfo Info { get; } = new(Id, Loc.T("和风天气", "QWeather"),
         // 官方「天气和基础服务」每月前 5 万次免费（个人用量等于免费）；台风/辐照/海洋等付费或无坐标接口的能力不接入。
         [WeatherDomain.Current, WeatherDomain.Hourly, WeatherDomain.Daily, WeatherDomain.Air, WeatherDomain.History, WeatherDomain.Minutely, WeatherDomain.Warning, WeatherDomain.Indices]);

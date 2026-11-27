@@ -373,7 +373,7 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("请求与缓存","Requests and cache"));
         var usage=WeatherCache.Usage();
         var used=WeatherSources.All.Select(source=>(Name:source.Info.Id=="hefeng"?Loc.T("和风","QWeather"):source.Info.Name,Count:RequestGate.Today(source.Info.Id)))
-            .Append((Name:ChinaDailySupplement.Name,Count:RequestGate.Today(ChinaDailySupplement.Id))).Where(item=>item.Count>0).ToArray();
+            .Append((Name:ChinaDailySupplement.Name,Count:RequestGate.Today(ChinaDailySupplement.Id))).Append((Name:Loc.T("和风地名","QWeather search"),Count:RequestGate.Today(HeFengSource.GeoId))).Where(item=>item.Count>0).ToArray();
         Group(Row(Loc.T("今日请求","Requests today"),TextLine(used.Length==0?Loc.T("尚未发起请求","No requests yet"):string.Join(" · ",used.Select(item=>$"{item.Name} {item.Count}")),12,TextSecondary)),
               Row(Loc.T("本地缓存","Local cache"),TextLine(Loc.T($"{usage.Count} 项 · {usage.Bytes/1024.0:0} KB（14 天未用自动清理）",$"{usage.Count} entries · {usage.Bytes/1024.0:0} KB (unused entries purged after 14 days)"),12,TextSecondary)));
         preview.RefreshRequested += async () =>

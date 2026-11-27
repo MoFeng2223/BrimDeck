@@ -146,7 +146,7 @@ public sealed class WeatherSettings
     public List<LifestyleSlot> LifestyleIndices { get; set; } = DefaultIndices.Select(type => new LifestyleSlot(type)).ToList();
     public List<WeatherChip> Chips { get; set; } = ChipMetrics.Select(metric => new WeatherChip(metric)).ToList();
     public Dictionary<string, string> CitySources { get; set; } = [];
-    public string SourceFor(City? city) => CitySources.GetValueOrDefault(city?.ToString() ?? "auto") ?? (HeFengKeyConfigured && HeFengHost.Length > 0 ? "hefeng" : "openmeteo");
+    public string SourceFor(City? city) => CitySources.GetValueOrDefault(city?.ToString() ?? "auto") ?? (HeFengKeyConfigured && HeFengHost.Trim().Length > 0 ? "hefeng" : "openmeteo");
     public int HeFengDailyLimit { get; set; } = 1500;
     public int HeFengMonthlyLimit { get; set; } = 50000;
     // 只标记密钥是否已写入受保护存储；明文一律不进 settings.json 和配置档案。

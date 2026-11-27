@@ -153,7 +153,7 @@ internal static class WeatherData
         // 搜索用独立闸门通道：天气取数（尤其时光机一轮 10 次请求）触发 429/失败熔断时，
         // 不该把城市搜索一起停掉——否则用户搜新词会全部落空，看起来像搜索坏了。
         // 超时 8 秒：搜索是交互操作，不该让输入框等满 20 秒。
-        var result = await WeatherHttp.GetAsync("hefeng", $"{host}/geo/v2/city/lookup?location={Uri.EscapeDataString(query)}&number=10&lang={lang}", token,
+        var result = await WeatherHttp.GetAsync(HeFengSource.GeoId, $"{host}/geo/v2/city/lookup?location={Uri.EscapeDataString(query)}&number=10&lang={lang}", token,
             request => request.Headers.TryAddWithoutValidation("X-QW-Api-Key", WeatherSecrets.Key), 8, settings);
         if (result.Body is { Length: > 0 } raw)
         {
