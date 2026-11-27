@@ -85,7 +85,8 @@ public static class OpenCodeUsage
     internal static UsageMetric? GitHubCopilotAllowance(JsonElement root)
     {
         var premium = root.Get("quota_snapshots").Get("premium_interactions");
-        if (premium.Get("unlimited").ValueKind == JsonValueKind.True || premium.Get("has_quota").ValueKind == JsonValueKind.False) return null;
+        var total = premium.Get("entitlement").Number();
+        if (premium.Get("unlimited").ValueKind == JsonValueKind.True || total is not > 0) return null;
 
         bool credits = premium.Get("token_based_billing").ValueKind == JsonValueKind.True || root.Get("token_based_billing").ValueKind == JsonValueKind.True;
         string label = credits ? "Copilot AI 积分" : "Copilot 高级请求";
@@ -94,9 +95,8 @@ public static class OpenCodeUsage
             reset = new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
 
         const string id = "github-copilot-premium";
-        var total = premium.Get("entitlement").Number();
         var remaining = premium.Get("quota_remaining").Number() ?? premium.Get("remaining").Number();
-        if (total is > 0 and <= 1e15 && remaining is >= 0 and <= 1e15)
+        if (total <= 1e15 && remaining is >= 0 and <= 1e15)
             return new(MetricKind.Balance, label)
             {
                 Id = id, Amount = (decimal)remaining.Value, Total = (decimal)total.Value,

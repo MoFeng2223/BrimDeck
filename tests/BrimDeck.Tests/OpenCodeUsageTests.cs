@@ -259,6 +259,23 @@ static class OpenCodeUsageTests
         card = await RefreshCopilotCard();
         check("The Copilot source accepts an OpenCode 1.x device sign-in", card.Quota.LiveQuota && handler.Calls.Single().Authorization == "token fixture-legacy");
 
+        handler.Respond = _ => Reply("""
+            {"quota_reset_date_utc":"2026-12-01T00:00:00Z","quota_snapshots":{"premium_interactions":{
+              "has_quota":false,"unlimited":false,"token_based_billing":true,"entitlement":20000,"remaining":0}}}
+            """);
+        card = await RefreshCopilotCard();
+        check("An exhausted Copilot allowance still displays zero and its reset time",
+            card.Quota.LiveQuota && card.Quota.Metrics.SingleOrDefault() is
+            { Kind: MetricKind.Balance, Amount: 0m, Total: 20000m, ValueText: "0", UsedPercent: 100 } exhausted
+            && exhausted.ResetAt == DateTimeOffset.Parse("2026-12-01T00:00:00Z"));
+
+        handler.Respond = _ => Reply("""
+            {"quota_snapshots":{"premium_interactions":{"has_quota":false,"entitlement":0,"percent_remaining":0}}}
+            """);
+        card = await RefreshCopilotCard();
+        check("An account without a Copilot allowance has no quota metric",
+            !card.Quota.LiveQuota && card.Quota.Metrics.Count == 0);
+
         handler.Calls.Clear();
         settings.Apps[0].QuotaSource = ProviderId.OpenCode;
         snapshot = await Refresh();
