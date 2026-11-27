@@ -471,11 +471,12 @@ internal sealed class WeatherView : UserControl
         Grid.SetRow(nowText, 0); Grid.SetRowSpan(nowText, 2); days.Children.Add(nowText);
         // 首帧与切页都走同一个入口：有请求在飞时直接返回，数据还在自动周期内就跳过，
         // 不再让 Loaded 与 IsVisibleChanged 各发一次、后者把前者取消。
-        IsVisibleChanged += async (_, _) => { if (IsVisible) { state = WeatherData.Load(() => _app.Settings); await EnsureFreshAsync(); } };
-        Loaded += async (_, _) => { await EnsureFreshAsync(); timer.Start(); };
+        _timeBoundary.Tick += (_, _) => { _timeBoundary.Stop(); if (IsVisible && _last is { } snap) Render(snap); };
+        IsVisibleChanged += async (_, _) => { if (IsVisible) { state = WeatherData.Load(() => _app.Settings); await EnsureFreshAsync(); if (_last is { } snap) Render(snap); } else { _timeBoundary.Stop(); if (_warningPopup is { } popup) popup.IsOpen = false; } };
+        Loaded += async (_, _) => { await EnsureFreshAsync(); if (IsLoaded) timer.Start(); };
         // 15 分钟周期是硬触发；正在手动刷新时让它跑完，不打断。
-        timer.Tick += async (_, _) => { if (!fetching) await Refresh(); };
-        Unloaded += (_, _) => { timer.Stop(); generation++; };
+        timer.Tick += async (_, _) => { if (IsVisible && !fetching) await Refresh(); };
+        Unloaded += (_, _) => { timer.Stop(); _timeBoundary.Stop(); Cancel(); generation++; };
     }
 
     private async Task EnsureFreshAsync()
@@ -624,18 +625,40 @@ internal sealed class WeatherView : UserControl
         catch { return 0; }
         finally { s.FetchedAt = fetched; }
     }
+    private readonly DispatcherTimer _timeBoundary = new();
+    private DateTimeOffset _nextBoundary;
+
+    private void ScheduleBoundary(WeatherSnapshot s, DateTimeOffset now)
+    {
+        var midnight = now.Date.AddDays(1);
+        var next = WeatherClock.MinuteAt(s, midnight.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture))
+            ?? now.AddDays(1);
+        foreach (var warning in s.Warnings)
+            if (warning.ExpireTime is { } expiry && expiry > now && expiry < next) next = expiry;
+        foreach (var text in s.MinuteTimes)
+            if (WeatherClock.MinuteAt(s, text) is { } at && at >= now && at < next) next = at.AddMilliseconds(1);
+        _nextBoundary = next;
+        _timeBoundary.Stop();
+        _timeBoundary.Interval = next > now ? next - now : TimeSpan.FromSeconds(1);
+        if (IsLoaded && IsVisible) _timeBoundary.Start();
+    }
+
     private void Render(WeatherSnapshot s)
     {
         if (_hourlyMode && s.HourTimes.Length == 0) { _hourlyMode = false; _lens = Lens.Temp; }
         _last = s;
         ApplyLayout(s);
         if (AutoSelected) _autoCityName = s.Name;
+        var now = WeatherClock.Now(s);
+        bool timeChanged = now >= _nextBoundary;
+        ScheduleBoundary(s, now);
         ulong signature = Signature(s);
-        if (signature != 0 && signature == _renderSignature && !_renderFailed && forecast.Children.Count == forecast.Columns)
+        if (!timeChanged && signature != 0 && signature == _renderSignature && !_renderFailed && forecast.Children.Count == forecast.Columns)
         {
             DrawPart("页脚", () => DrawFooter(s));
             return;
         }
+        if (_warningPopup is { } warningPopup) warningPopup.IsOpen = false;
         _renderSignature = signature;
         bool drawn = true;
         drawn &= DrawPart("页脚", () => DrawFooter(s));
@@ -798,11 +821,14 @@ internal sealed class WeatherView : UserControl
                 : (w.Title.Length > 0 ? w.Title : null)
         };
         AutomationProperties.SetName(badge, Loc.T("气象预警", "Weather warning") + " " + name);
+        badge.Focusable = true;
+        badge.KeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Space) { e.Handled = true; ShowWarnings(badge, warnings, s.Name); } };
         badge.MouseLeftButtonUp += (_, e) => { e.Handled = true; ShowWarnings(badge, warnings, s.Name); };
         return badge;
     }
 
     // 预警详情：胶囊（含 +N）打开一个可聚焦的浮层，按等级列出全部有效预警的标题与正文；Esc 或点外部关闭。
+    private Popup? _warningPopup;
     private void ShowWarnings(Border target, IReadOnlyList<WarningItem> warnings, string city)
     {
         var body = new StackPanel { Margin = new Thickness(4, 2, 4, 2) };
@@ -834,9 +860,12 @@ internal sealed class WeatherView : UserControl
             Child = frame, PlacementTarget = target, Placement = PlacementMode.Bottom,
             StaysOpen = false, AllowsTransparency = true
         };
-        frame.KeyDown += (_, key) => { if (key.Key == System.Windows.Input.Key.Escape) popup.IsOpen = false; };
+        frame.KeyDown += (_, key) => { if (key.Key == System.Windows.Input.Key.Escape) { popup.IsOpen = false; target.Focus(); key.Handled = true; } };
         AutomationProperties.SetName(frame, Loc.T("全部气象预警", "All weather warnings"));
         popup.IsOpen = true;
+        _warningPopup = popup;
+        popup.Closed += (_, _) => { if (ReferenceEquals(_warningPopup, popup)) _warningPopup = null; };
+
         frame.Focus();
     }
     // 风速卡的标题直接带上 8 方位风向与风级，省一张卡；没有风向文字（如 Open-Meteo）时按度数归一。
@@ -907,6 +936,8 @@ internal sealed class WeatherView : UserControl
         };
         AutomationProperties.SetName(heroGlyph, Loc.T("切换生活指数与天气预报", "Toggle lifestyle indices and forecast"));
         WeatherMotion.Attach(heroGlyph);
+        heroGlyph.Focusable = true;
+        heroGlyph.KeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Space) { e.Handled = true; ToggleView(); } };
         heroGlyph.MouseLeftButtonUp += (_, e) => { e.Handled = true; ToggleView(); };
         hero.Children.Add(heroGlyph);
         var side = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
@@ -1262,7 +1293,7 @@ internal sealed class WeatherView : UserControl
             ? $"{bft}{Loc.T("级", "")}" : "";
     // 逐日昼夜：白天是「转前」，夜间是「转后」。折线两侧各画一个图标、各配自己的天气名，两个图标本身表达转折，文字不写「转」。
     private static int DayCodeAt(WeatherSnapshot s, int i)
-        => s.DayCodes.Length > i && s.DayCodes[i] >= 0 ? s.DayCodes[i] : 3;
+        => s.DayCodes.Length > i && s.DayCodes[i] >= 0 ? s.DayCodes[i] : -1;
     private static int NightCodeAt(WeatherSnapshot s, int i)
         => s.DayNightCodes.Length > i && s.DayNightCodes[i] >= 0 ? s.DayNightCodes[i] : -1;
     // 上方画「转后」（夜间），夜间缺失或与白天相同就退回白天；下方固定画「转前」（白天）。同天气时两个图标一样也照画。
@@ -1510,8 +1541,9 @@ internal sealed class WeatherView : UserControl
             // 空气质量逐时预报：和风 /airquality/v1/hourly 的 AQI，按与 HourTimes 对齐的数组画柱状；-1 的小时跳过。
             case Lens.Aqi when s.HourAqi.Any(v => v >= 0):
                 DrawBars(Array.ConvertAll(s.HourAqi, v => v < 0 ? double.NaN : v), double.NaN, "", 0, Color.FromRgb(126, 208, 154)); return;
-            case Lens.Celestial when s.SunriseTimes.Length > 0: DrawCelestialView(s); return;
+            case Lens.Celestial: DrawCelestialView(s); return;
         }
+        if (_lens != Lens.Temp) { chart.Children.Add(Note(Loc.T("暂无该指标数据", "No data for this metric"))); return; }
         if (_hourlyMode) { DrawHourly(s); return; }
         var high = s.DayHighC; var low = s.DayLowC;
         var order = Order(s, forecast.Columns);
