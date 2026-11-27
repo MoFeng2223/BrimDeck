@@ -207,10 +207,10 @@ internal static class WeatherAggregator
             }
         }
 
-        // 逐时窗口固定以「当前整点前 1 小时」为起点、共 24 条：过去 1 小时 + 当前 + 未来 22 小时。
-        // 过去那 1 小时和风/各预报源都拿不到（和风从下一整点起、时光机不含今天），由本地历史补：
-        // 每次成功刷新都把当时的整点数据存进 weather/hour-history，下一小时它就成了「过去」那一格。
-        // 本地也没有就留空（NaN / -1），界面隐藏数值，不联网补、不冒充预报。
+        // 逐时窗口固定以「当前整点」为起点、共 24 条：当前 + 未来 23 小时。
+        // 过去的小时不展示（各预报源都拿不到，不联网补、不冒充预报）。当前小时和风要到下一整点才给，
+        // 优先用本地历史兜底：每次成功刷新都把当时的整点数据存进 weather/hour-history，
+        // 同一小时内的后续刷新就能用上实测；本地也没有就留空（NaN / -1），界面隐藏数值。
         if (supplement is not null)
         {
             bool contributed = false;
@@ -228,7 +228,7 @@ internal static class WeatherAggregator
         foreach (var (time, point) in local)
             if (!hours.ContainsKey(time)) hours[time] = point;
         // 字典合并后顺序不保证有序（本地历史与预报源交错插入），先按整点键排好序再找锚点，窗口切片才可靠。
-        var anchor = DateTimeOffset.UtcNow.AddHours(-1);
+        var anchor = DateTimeOffset.UtcNow;
         var hourList = Enumerable.Range(0, 24).Select(offset =>
         {
             var instant = anchor.AddHours(offset);

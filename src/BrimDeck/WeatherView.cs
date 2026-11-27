@@ -1314,15 +1314,15 @@ internal sealed class WeatherView : UserControl
         return night >= 0 ? night : DayCodeAt(s, i);
     }
     // 逐时模式：列里放「风向风级 / 降水概率 / 空气等级 / 图标 / 天气名称 / 温度」，时刻放在最底部那一行，与折线共用同一个列几何。
-    // 0 点那一列改标日期（如「11月20日」）。「现在」不占任何一列：它落在「过去那一格」与「当前那一格」
-    // 之间的分界线上——竖线贯穿列区到底行、线顶写「现在」，当前这一格照常显示自己的时刻。
+    // 0 点那一列改标日期（如「11月20日」）。「现在」不占任何一列：它落在「当前整点」列内、当前与下一整点
+    // 标签之间——竖线贯穿列区到底行、线顶写「现在」，当前这一格照常显示自己的时刻。
     private void DrawHourlyForecast(WeatherSnapshot s)
     {
         int n = Math.Max(1, forecast.Columns);
         for (int p = 0; p < n && p < s.HourTimes.Length; p++)
         {
             bool day = int.TryParse(s.HourTimes[p].Length >= 13 ? s.HourTimes[p][11..13] : "", out int hour) && hour is >= 6 and < 18;
-            int code = s.HourCodes.Length > p && s.HourCodes[p] >= 0 ? s.HourCodes[p] : 3;
+            int code = s.HourCodes.Length > p && s.HourCodes[p] >= 0 ? s.HourCodes[p] : -1;
             var column = Column(HourlyRowHeights);
             // 第 1 行：风向箭头 + 蒲福风级。气象学的风向是「来向」，箭头直接指向来向，所以北风朝上、东风朝右；
             // 逐日只能给一个聚合风向，小时级的风向变化正是逐时独有的信息。风速数值不进列（与逐日底部同款取舍：
@@ -1371,11 +1371,14 @@ internal sealed class WeatherView : UserControl
                 level.ToolTip = $"{Loc.T("空气质量", "Air quality")} {WeatherCodes.AqiText(aqi)} · AQI {aqi}";
                 CellAt(column, level, 2);
             }
-            var hourGlyph = new WeatherGlyph(code, day) { Width = ColGlyph, Height = ColGlyph, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            CellAt(column, hourGlyph, HourlyGlyphRow);
-            columnGlyphs.Add(hourGlyph);
-            // 第 5 行：天气名称。61/63/65 这几档在图标上几乎长得一样，文字补的正是图标说不出的那一级。
-            var condition = new TextBlock { Text = HourCondition(code), FontSize = ColNote, TextWrapping = TextWrapping.NoWrap, TextAlignment = TextAlignment.Center, Foreground = ColCondition };
+            if (code >= 0)
+            {
+                var hourGlyph = new WeatherGlyph(code, day) { Width = ColGlyph, Height = ColGlyph, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+                CellAt(column, hourGlyph, HourlyGlyphRow);
+                columnGlyphs.Add(hourGlyph);
+            }
+            // 第 5 行：天气名称。61/63/65 这几档在图标上几乎长得一样，文字补的正是图标说不出的那一级；缺数据的格子连文字一起置空。
+            var condition = new TextBlock { Text = code >= 0 ? HourCondition(code) : "", FontSize = ColNote, TextWrapping = TextWrapping.NoWrap, TextAlignment = TextAlignment.Center, Foreground = ColCondition };
             CellAt(column, condition, 4);
             conditionLabels.Add(condition); conditionRows.Add(column.RowDefinitions[HourlyConditionRow]);
             // 第 6 行固定显示当时的气温，不跟着镜头变——切镜头后那个指标已由上方折线/柱状图体现。
