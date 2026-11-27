@@ -6,6 +6,7 @@ namespace BrimDeck.Core;
 // reports in PowerInputs; PowerResolver chooses what to show, in this order, and says where each figure comes from:
 //   1. SystemMeter: a meter of the whole platform that Windows exposes through the Energy Meter Interface or the ACPI power meter
 //      (the "Energy Meter" and "Power Meter" performance counters). Measured. Few machines have one (some tablets and servers).
+//      Passed over when a discrete GPU's board power alone is higher: those meters often miss the GPU's rail.
 //   2. Battery: the power the battery supplies while the machine runs on it (Windows.Devices.Power.Battery's charge rate), which is
 //      all that the machine draws, display and fans included. Measured, but only on battery.
 //   3. Components: the processor package (RAPL, through the Energy Meter counters), memory where it has a meter of its own, and each
@@ -77,7 +78,15 @@ public static class PowerResolver
         }
         PowerSample Make(double watts, PowerOrigin origin, PowerSource source) => new(watts, origin, source, parts) { Missing = missing };
 
-        if (Value(inputs.SystemMeter) is { } meter && meter >= MeterFloor) return Make(meter, PowerOrigin.Measured, PowerSource.SystemMeter);
+        // A platform meter that sits below the discrete graphics board alone cannot be the whole machine: RAPL PSYS and many ACPI
+        // meters miss the GPU's PCIe rail, so trusting them would under-read a loaded desktop card (e.g. 60 W "system" while the
+        // board draws 160 W). Fall through to the component sum when that happens.
+        if (Value(inputs.SystemMeter) is { } meter && meter >= MeterFloor)
+        {
+            double? gpu = null;
+            foreach (var part in parts) if (part.Key == "gpu") gpu = (gpu ?? 0) + part.Watts;
+            if (gpu is null || meter + MeterFloor >= gpu) return Make(meter, PowerOrigin.Measured, PowerSource.SystemMeter);
+        }
         if (Value(inputs.BatteryDischarge) is { } battery && battery >= BatteryFloor) return Make(battery, PowerOrigin.Measured, PowerSource.Battery);
         if (parts.Count > 0) return Make(parts.Sum(part => part.Watts), PowerOrigin.Estimated, PowerSource.Components);
         string reason = inputs.NoSourceReason.Length > 0 ? inputs.NoSourceReason

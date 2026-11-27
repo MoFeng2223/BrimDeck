@@ -434,7 +434,7 @@ internal sealed class SystemSampler : IDisposable
         IReadOnlyList<StorageDrive> storage = _storageWanted ? _storage.Sample(now, _driveTemperatures) : [];
         Remember(_cpuHistory, cpu.OrDefault?.Usage);
         // The usage each adapter's driver gives, where it gives one (GpuDrivers); the curves follow the figure shown.
-        var adapters = gpus.TryGet(out var read) ? Remember(_drivers!.Read(read, now, temperatures, _gpuUsage)) : [];
+        var adapters = gpus.TryGet(out var read) ? Remember(_drivers!.Read(read, now, temperatures, _gpuUsage, _powerWanted)) : [];
         if (!_gpuWanted) _gpuHistories.Clear();
         // The machine's power and battery: read only while something shows them; the history and the peak start over once none does.
         var power = Reading<PowerSample>.Unavailable(Why.Waiting);

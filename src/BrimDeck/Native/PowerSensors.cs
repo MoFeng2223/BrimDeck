@@ -93,6 +93,10 @@ internal sealed class PowerProvider(PdhQuery? pdh, Action stuck) : IDisposable
         foreach (var gpu in gpus)
         {
             string name = gpu.Name ?? "GPU";
+            // Identical NVIDIA cards are told apart by their bus, else by their order (the nth of this name). The ordinal is
+            // counted for every NVIDIA adapter, including those that already have driver watts, so a later fallback without a
+            // bus does not reuse the first card's nvidia-smi line.
+            int? ordinal = GpuDriverReadings.TakeNvidiaOrdinal(seen, gpu.VendorId, name);
             // AMD's and Intel's discrete adapters gave their power with their usage (GpuDrivers), while they work.
             if (gpu.DriverWatts is { } watts)
             {
@@ -100,13 +104,13 @@ internal sealed class PowerProvider(PdhQuery? pdh, Action stuck) : IDisposable
                 continue;
             }
             // NVIDIA's through nvidia-smi, and only an adapter that is working.
-            if (gpu.VendorId != GpuDriverReadings.Nvidia && !(gpu.VendorId == 0 && name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase))) continue;
-            // Identical cards are told apart by their bus, else by their order (the nth of this name).
-            int ordinal = seen.GetValueOrDefault(name); seen[name] = ordinal + 1;
+            if (ordinal is null) continue;
             string key = name + "#" + ordinal;
-            // Idle counts as under a few percent of Windows' figure (the desktop's own drawing): the helper takes about 25 MB while it
-            // runs, and starting it for an adapter that only draws the desktop is not worth it.
-            if (gpu.EngineUsage >= Busy) _busyAt[key] = now;
+            // Idle counts as under a few percent of the figure shown (Windows' engines or the driver's own): the helper takes about
+            // 25 MB while it runs, and starting it for an adapter that only draws the desktop is not worth it. The driver's meter
+            // is included so a CUDA or encode load that fills nvidia-smi / NVAPI while Windows' 3D engine stays quiet still gets
+            // board power (otherwise the strip can show ~60 W while the card draws its full 160 W).
+            if (Math.Max(gpu.EngineUsage, gpu.Usage) >= Busy) _busyAt[key] = now;
             if (!_busyAt.TryGetValue(key, out var last) || now - last > Awake)
             {
                 read.Add(new GpuPowerInput(name, Reading<double>.Unavailable(Loc.T("空闲", "idle"))));
@@ -114,7 +118,7 @@ internal sealed class PowerProvider(PdhQuery? pdh, Action stuck) : IDisposable
             }
             if (_smi is not null && PowerResolver.RestartDue(_smi.Ended, now, _smiStartedAt)) { _smi.Dispose(); _smi = null; }
             if (_smi is null) { _smi = new NvidiaSmi(); _smiStartedAt = now; }
-            read.Add(new GpuPowerInput(name, _smi.Read(GpuDriverReadings.Bus(gpu.Location), name, ordinal)));
+            read.Add(new GpuPowerInput(name, _smi.Read(GpuDriverReadings.Bus(gpu.Location), name, ordinal.Value)));
         }
         // Every adapter idle for good: the helper ends, and its memory goes with it.
         if (_smi is not null && _busyAt.Values.All(at => now - at > Awake)) { _smi.Dispose(); _smi = null; }

@@ -45,6 +45,12 @@ static class PowerTests
         // A whole-system meter wins over everything and is a measurement.
         var metered = PowerResolver.Resolve(new PowerInputs { SystemMeter = W(95.5), BatteryDischarge = W(30), Cpu = W(40) });
         check("Power: a system meter is measured and comes first", metered.TryGet(out var m) && m.Watts == 95.5 && !m.Estimated && m.Source == PowerSource.SystemMeter);
+        // A platform meter below the discrete GPU's board power is incomplete (PSYS / ACPI without the GPU rail): use the parts.
+        var underGpu = PowerResolver.Resolve(new PowerInputs { SystemMeter = W(53), Cpu = W(12), Gpus = [new GpuPowerInput("NVIDIA GeForce RTX 4060 Ti", W(159.6))] });
+        check("Power: a system meter below the GPU board falls back to the component sum",
+            underGpu.TryGet(out var ug) && ug.Estimated && ug.Source == PowerSource.Components && Math.Abs(ug.Watts - 171.6) < 1e-9);
+        check("Power: a system meter still wins when it covers the GPU board",
+            PowerResolver.Resolve(new PowerInputs { SystemMeter = W(220), Gpus = [new GpuPowerInput("GPU", W(160))] }).OrDefault is { Source: PowerSource.SystemMeter, Watts: 220 });
 
         // On battery the discharge is the whole machine, measured, with the parts kept for the breakdown.
         var discharging = PowerResolver.Resolve(new PowerInputs { BatteryDischarge = W(23.4), Cpu = W(9.1) });
@@ -73,6 +79,11 @@ static class PowerTests
         (string, double?)[] twins = [("NVIDIA RTX 4090", 210.5), ("NVIDIA RTX 4090", 198.2)];
         check("Power: identical adapters are read by their order, not one counted twice", PowerResolver.PickGpu(twins, "NVIDIA RTX 4090", 0).OrDefault == 210.5 && PowerResolver.PickGpu(twins, "NVIDIA RTX 4090", 1).OrDefault == 198.2
             && !PowerResolver.PickGpu(twins, "NVIDIA RTX 4090", 2).HasValue);
+        // First card already has driver watts (80 W); the second falls back without a bus and must use ordinal 1 (20 W), not 0 again.
+        (string, double?)[] fallbackTwins = [("NVIDIA RTX 4090", 80.0), ("NVIDIA RTX 4090", 20.0)];
+        check("Power: a fallback after a driver-watts twin uses the next line, not the first card's again",
+            PowerResolver.PickGpu(fallbackTwins, "NVIDIA RTX 4090", 1).OrDefault == 20.0
+            && PowerResolver.PickGpu(fallbackTwins, "NVIDIA RTX 4090", 0).OrDefault == 80.0);
         // One line for two identical cards (the driver's first lines not all in yet) is the first card's, not both cards' (210 W, not 420 W).
         (string, double?)[] single = [("NVIDIA RTX 4090", 210.0)];
         check("Power: a single line is not read again for a second identical adapter", PowerResolver.PickGpu(single, "NVIDIA RTX 4090", 0).OrDefault == 210

@@ -104,6 +104,24 @@ internal static class GpuAdapterTests
         check("GPU driver: rates from growing counters", GpuDriverReadings.Rate(10, 100, 10.5, 101) == .5 && GpuDriverReadings.Rate(10, 100, 9, 101) is null
             && GpuDriverReadings.Rate(10, 100, 11, 100) is null);
         check("GPU driver: the bus of a location", GpuDriverReadings.Bus("1:0.0") == 1 && GpuDriverReadings.Bus("10:2.1") == 10 && GpuDriverReadings.Bus(null) is null && GpuDriverReadings.Bus("x") is null);
+        check("GPU driver: board power is applied only when it is wanted; usage and temperature stay",
+            GpuDriverReadings.Apply(discrete, 31, 42.5, 61, power: false) is { DriverWatts: null, Usage: .31, DriverTemperature: 61 }
+            && GpuDriverReadings.Apply(discrete, 31, 42.5, 61, power: true).DriverWatts == 42.5);
+
+        const string twins = "NVIDIA GeForce RTX 4090";
+        var seen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        // The first identical card may already have driver watts (an early return); the second, falling back without a bus, must
+        // still be ordinal 1, or nvidia-smi's first line (the first card) would be added again (160 W instead of 100 W).
+        check("GPU driver: identical NVIDIA cards count their ordinal before a driver-watts return",
+            GpuDriverReadings.TakeNvidiaOrdinal(seen, GpuDriverReadings.Nvidia, twins) == 0
+            && GpuDriverReadings.TakeNvidiaOrdinal(seen, GpuDriverReadings.Nvidia, twins) == 1);
+        check("GPU driver: a non-NVIDIA adapter is not counted in that ordinal",
+            GpuDriverReadings.TakeNvidiaOrdinal(seen, GpuDriverReadings.Amd, twins) is null
+            && GpuDriverReadings.TakeNvidiaOrdinal(seen, GpuDriverReadings.Nvidia, twins) == 2);
+        var named = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        check("GPU driver: a missing vendor id still counts by the NVIDIA name",
+            GpuDriverReadings.TakeNvidiaOrdinal(named, 0, twins) == 0 && GpuDriverReadings.TakeNvidiaOrdinal(named, 0, "AMD Radeon") is null
+            && !GpuDriverReadings.IsNvidia(0, "AMD Radeon") && GpuDriverReadings.IsNvidia(GpuDriverReadings.Nvidia, "GPU"));
 
         var gate = new GpuDriverGate();
         var idle = discrete with { EngineUsage = 0 };

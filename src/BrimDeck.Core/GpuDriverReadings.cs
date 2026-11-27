@@ -15,13 +15,13 @@ public static class GpuDriverReadings
     };
 
     // The adapter with the driver's usage (percent, unless the usage is to be Windows'), board power (watts) and temperature (°C)
-    // where they were read. An integrated adapter's power is inside the processor package already (PowerInputs.Cpu), so it is never
-    // taken: it would be counted twice.
-    public static GpuSample Apply(GpuSample gpu, double? percent, double? watts, double? celsius = null, GpuUsageSource source = GpuUsageSource.Driver)
+    // where they were read. Board power is taken only when it is wanted (power): an unused reading is not stored. An integrated
+    // adapter's power is inside the processor package already (PowerInputs.Cpu), so it is never taken: it would be counted twice.
+    public static GpuSample Apply(GpuSample gpu, double? percent, double? watts, double? celsius = null, GpuUsageSource source = GpuUsageSource.Driver, bool power = true)
     {
         if (source == GpuUsageSource.Driver && percent is { } usage && double.IsFinite(usage))
             gpu = gpu with { Usage = Math.Clamp(usage / 100, 0, 1), UsageSource = SourceName(gpu.VendorId) };
-        if (watts is { } power && PowerResolver.Plausible(power) && gpu.Kind != GpuKind.Integrated) gpu = gpu with { DriverWatts = power };
+        if (power && watts is { } board && PowerResolver.Plausible(board) && gpu.Kind != GpuKind.Integrated) gpu = gpu with { DriverWatts = board };
         // Zero is what a driver gives without a sensor, as the graphics kernel does (GpuTemperatures).
         if (celsius is { } heat && heat > 0 && Temperatures.Plausible(heat) is { } temperature) gpu = gpu with { DriverTemperature = temperature };
         return gpu;
@@ -38,6 +38,21 @@ public static class GpuDriverReadings
     // The bus of a location as GpuReadings.Location writes it ("1:0.0" is bus 1).
     public static uint? Bus(string? location) =>
         location is { Length: > 0 } && location.IndexOf(':') is var colon and > 0 && uint.TryParse(location.AsSpan(0, colon), out uint bus) ? bus : null;
+
+    // An NVIDIA adapter: by its vendor id, or by its name when Windows gives no id.
+    public static bool IsNvidia(uint vendorId, string? name) =>
+        vendorId == Nvidia || vendorId == 0 && name is not null && name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase);
+
+    // The nth same-named NVIDIA adapter in this listing (0 for the first), counted for every NVIDIA card including ones that
+    // already have driver watts. A later fallback without a bus must not reuse the first card's nvidia-smi line. Null when the
+    // adapter is not NVIDIA (those are not counted).
+    public static int? TakeNvidiaOrdinal(Dictionary<string, int> seen, uint vendorId, string name)
+    {
+        if (!IsNvidia(vendorId, name)) return null;
+        int ordinal = seen.GetValueOrDefault(name);
+        seen[name] = ordinal + 1;
+        return ordinal;
+    }
 }
 
 // Which adapters may be asked: one Windows saw working (an engine above zero) within the last AwakeSeconds. A laptop's discrete

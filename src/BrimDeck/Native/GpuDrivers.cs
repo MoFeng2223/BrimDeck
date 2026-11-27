@@ -7,10 +7,11 @@ namespace BrimDeck.Native;
 // Each adapter's usage asked of its own driver (GpuDriverReadings says why), the way PresentMon and LibreHardwareMonitor read it:
 // NVIDIA through NVAPI (nvapi64.dll), AMD through ADL (atiadlxx.dll), Intel through its control library (ControlLib.dll), each
 // from the system folder where the driver puts it and loaded only once an adapter of that make is working. AMD's and Intel's
-// discrete adapters also give their board power here; NVIDIA's comes from nvidia-smi (PowerSensors). An adapter is asked only
-// while Windows sees it working (GpuDriverGate), and every call is guarded (SensorGuard) by the adapter's name: a driver that
-// never answers is not asked again, and the usage stays the busiest engine. Belongs to the sampling thread. stuck: the sampler
-// gives up its thread for another.
+// discrete adapters also give their board power here; NVIDIA's comes from nvidia-smi (PowerSensors). NvAPI_GPU_ClientPowerTopologyGetStatus
+// is a percentage of TDP, not watts, so it is not used; NVML is kept in that helper because nvml.dll cannot be unloaded from this
+// process. An adapter is asked only while Windows sees it working (GpuDriverGate), and every call is guarded (SensorGuard) by the
+// adapter's name: a driver that never answers is not asked again, and the usage stays the busiest engine. Belongs to the sampling
+// thread. stuck: the sampler gives up its thread for another.
 internal sealed class GpuDrivers(Action stuck)
 {
     private readonly GpuDriverGate _gate = new();
@@ -19,8 +20,9 @@ internal sealed class GpuDrivers(Action stuck)
     private readonly IntelDriver _intel = new();
 
     // temperatures: whether anything shows a temperature; only NVIDIA's costs a call of its own, made only then. usage: whether the
-    // driver's usage is taken (GpuUsageSource); its power and temperature are either way.
-    public List<GpuSample> Read(IReadOnlyList<GpuSample> gpus, double now, bool temperatures, GpuUsageSource usage)
+    // driver's usage is taken (GpuUsageSource); its temperature is either way. power: whether board power is taken; AMD's and Intel's
+    // come with their usage, NVIDIA's from nvidia-smi in PowerSensors.
+    public List<GpuSample> Read(IReadOnlyList<GpuSample> gpus, double now, bool temperatures, GpuUsageSource usage, bool power)
     {
         _gate.Keep(gpus.Select(gpu => gpu.Luid));
         _nvidia.Temperatures = temperatures;
@@ -35,7 +37,7 @@ internal sealed class GpuDrivers(Action stuck)
             var device = new GuardedDevice(GuardedReading.GpuDriver, name, name);
             if (driver is null || !_gate.Awake(gpu, now) || SensorGuard.Stopped(device.Reading, device.Device)) { read.Add(gpu); continue; }
             var (percent, watts, celsius) = SensorGuard.Ask(device, () => driver.Read(gpu, now), stuck);
-            read.Add(GpuDriverReadings.Apply(gpu, percent, watts, celsius, usage));
+            read.Add(GpuDriverReadings.Apply(gpu, percent, watts, celsius, usage, power));
         }
         return read;
     }
@@ -100,6 +102,8 @@ internal abstract class DriverLibrary : IGpuDriver
 // by their ids through nvapi_QueryInterface; each adapter by its PCI bus (NvAPI_GPU_GetBusId). The temperature is the GPU
 // sensor of NvAPI_GPU_GetThermalSettings (NV_GPU_THERMAL_SETTINGS, version 2: version, count, then three sensors of controller,
 // lowest, highest, current and target, all sensors asked for at once with NVAPI_THERMAL_TARGET_ALL, 15; target 1 is the GPU).
+// Board power is not read here: NvAPI_GPU_ClientPowerTopologyGetStatus is a percentage of TDP (LibreHardwareMonitor treats it as
+// a load), not watts. Real watts come from nvidia-smi in PowerSensors.
 internal sealed class NvidiaDriver : DriverLibrary
 {
     private const uint Initialize = 0x0150E828, EnumPhysicalGpus = 0xE5AC921F, GetBusId = 0x1BE0B8E5, GetDynamicPstatesInfoEx = 0x60DED2ED,

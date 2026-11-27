@@ -105,7 +105,7 @@ The page shows the whole machine's power draw in watts with the last minute as a
 2. **The battery's discharge**: while a laptop runs on battery, what the battery supplies is what the machine draws.
 3. **The sum of the components**: the processor's power plus the board power of discrete graphics cards (NVIDIA, AMD, Intel). This is an estimate that leaves out the display, drives, fans and power-supply loss, and the tooltip says so.
 
-Power is read only while the system monitor page is open or the notch or capsule shows it. An NVIDIA card's power is read through nvidia-smi, which ships with its driver, and only while the card is working, so a sleeping discrete card is never woken.
+Power is read only while the system monitor page is open or the notch or capsule shows it. An NVIDIA card's board power is read through nvidia-smi, which ships with its driver, and only while the card is working, so a sleeping discrete card is never woken. A platform meter that sits below the discrete GPU's own board power is treated as incomplete and replaced by the component sum.
 
 PCs whose CPU power cannot be read (some AMD PCs, for example) can turn on [enhanced sensors](enhanced-sensors.md) for that too.
 
