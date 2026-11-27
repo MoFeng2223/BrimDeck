@@ -221,7 +221,10 @@ internal static class WeatherData
             // 只需要 IP 补城市名；返回时坐标仍用系统定位的精确值。
             if(hefeng&&precise is null)
             {
-                var found=await SearchHeFeng(FormattableString.Invariant($"{lon:0.###},{lat:0.###}"),settings,token);
+                List<City> found;
+                try { found=await SearchHeFeng(FormattableString.Invariant($"{lon:0.###},{lat:0.###}"),settings,token); }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+                catch { found=[]; }
                 if(found.Count>0)
                 {
                     // IP 坐标只有城市精度：丢掉反查结果里的区县段与区县 id，不冒充精确到区。
@@ -229,19 +232,22 @@ internal static class WeatherData
                 }
             }
             if(root.TryGetProperty("city",out var name)&&name.ValueKind==JsonValueKind.String&&name.GetString() is {Length:>0} query) {
-                var found=await Search(query,settings,token);
+                List<City> found;
+                try { found=await Search(query,settings,token); }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+                catch { found=[]; }
                 if(found.Count>0)
                 {
                     var best=found.OrderBy(c=>Math.Abs(c.Latitude-lat)+Math.Abs(c.Longitude-lon)).First();
                     // 有系统坐标时搜索只用来拿规范的名称与 LocationId，坐标以系统定位为准。
-                    return best;
+                    return precise is { } position ? best with { Latitude = position.Lat, Longitude = position.Lon } : best;
                 }
             }
             var parts=new List<string>();
             if(root.TryGetProperty("city",out name)&&name.ValueKind==JsonValueKind.String&&name.GetString() is {Length:>0} s)parts.Add(s);
             if(root.TryGetProperty("region",out var region)&&region.ValueKind==JsonValueKind.String&&region.GetString() is {Length:>0} r)parts.Add(r);
             if(root.TryGetProperty("country",out var country)&&country.ValueKind==JsonValueKind.String&&country.GetString() is {Length:>0} c&&!parts.Contains(c))parts.Add(c);
-            return new City(parts.Count>0?City.Compose([.. parts]):"当前位置",lat,lon) { CountryCode = Json.Text(root, "country_code"), TimeZoneId = Json.Get(root, "timezone") is { } tz ? Json.Text(tz, "id") : null };
+            return new City(parts.Count>0?City.Compose([.. parts]):"当前位置",precise?.Lat ?? lat,precise?.Lon ?? lon) { CountryCode = Json.Text(root, "country_code"), TimeZoneId = Json.Get(root, "timezone") is { } tz ? Json.Text(tz, "id") : null };
         } catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; } catch { return null; }
     }
     // 天气聚合入口：当前、24 小时、24 天（历史 10 + 今天 + 未来 13）、日升日落与空气质量由 WeatherAggregator 统一拼装。
@@ -298,14 +304,19 @@ internal static class WeatherHourHistory
         WeatherFiles.Ensure(Root);
         string[] files;
         try { files = Directory.GetFiles(Root, "*.json"); } catch { return; }
-        foreach (var file in files)
+        foreach (var file in files.Order(StringComparer.Ordinal))
         {
             try
             {
                 if (JsonSerializer.Deserialize<FileFormat>(File.ReadAllText(file), Json) is not { } entry) continue;
-                var dict = new Dictionary<string, HourPoint>(StringComparer.Ordinal);
-                foreach (var hour in entry.Hours ?? []) if (!string.IsNullOrWhiteSpace(hour.Time)) dict[hour.Time] = hour;
-                if (dict.Count > 0) Memory[City.UpgradeStorageKey(entry.Key)] = dict;
+                string key = City.UpgradeStorageKey(entry.Key);
+                if (!Memory.TryGetValue(key, out var dict)) Memory[key] = dict = new(StringComparer.Ordinal);
+                foreach (var hour in entry.Hours ?? [])
+                {
+                    if (string.IsNullOrWhiteSpace(hour.Time)) continue;
+                    if (key == entry.Key) dict[hour.Time] = hour;
+                    else dict.TryAdd(hour.Time, hour);
+                }
             }
             catch { }
         }
@@ -314,17 +325,20 @@ internal static class WeatherHourHistory
     // 读出该城市已累积的整点数据（副本，调用方改不到内存库）。
     internal static Dictionary<string, HourPoint> Read(string key)
     {
-        Start();
-        lock (Lock) return Memory.TryGetValue(key, out var dict) ? new Dictionary<string, HourPoint>(dict, StringComparer.Ordinal) : [];
+        lock (Lock)
+        {
+            Start();
+            return Memory.TryGetValue(key, out var dict) ? new Dictionary<string, HourPoint>(dict, StringComparer.Ordinal) : [];
+        }
     }
 
     // 把一份快照里的整点数据并入历史；以最新整点为基准保留最近 KeepHours 小时，写盘失败不影响刷新。
     internal static void Record(string key, WeatherSnapshot snapshot)
     {
         if (string.IsNullOrWhiteSpace(key)) return;
-        Start();
         lock (Lock)
         {
+            Start();
             if (!Memory.TryGetValue(key, out var dict)) Memory[key] = dict = new Dictionary<string, HourPoint>(StringComparer.Ordinal);
             for (int i = 0; i < snapshot.HourTimes.Length; i++)
             {
