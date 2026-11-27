@@ -1,7 +1,5 @@
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -106,7 +104,6 @@ public partial class App : Application
         Secrets = new ProviderSecrets(folder);
         WeatherSecrets.Use(Secrets);
         Store = new SettingsStore(folder); Settings = Store.Load();
-        MigrateWeatherKey();
         ReturnFromRule(); Profiles.Keep(Settings);
         // Before anything is read: a reading left unanswered when the last run ended stops now (SensorGuard).
         SensorGuard.Start(folder);
@@ -587,45 +584,6 @@ public partial class App : Application
             try { copy.Normalize(); System.Text.Json.JsonSerializer.SerializeToNode(copy); }
             catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Debug.WriteLine(ex); }
         }));
-    }
-    // 旧版本把和风 Key 明文写进 settings.json；首次启动搬到 DPAPI 存储，并从配置档案的原始 JSON 里剔除。
-    private void MigrateWeatherKey()
-    {
-        string legacy = "";
-        try
-        {
-            using var doc = JsonDocument.Parse(File.ReadAllText(Store.FilePath));
-            legacy = FindLegacyKey(doc.RootElement);
-        }
-        catch { }
-        bool wasMarked = Settings.Weather.HeFengKeyConfigured;
-        bool marked = wasMarked;
-        if (legacy.Length > 0)
-        {
-            // 写入失败就保留文件内容，下次启动再试；不能在密钥落进 DPAPI 前把明文从设置里抹掉。
-            try { WeatherSecrets.Write(legacy); marked = true; } catch { }
-        }
-        else if (WeatherSecrets.Key.Length == 0) marked = false;
-        Settings.Weather.HeFengKeyConfigured = marked;
-        foreach (var profile in Settings.Profiles ?? [])
-            if (profile.Values?["Weather"] is JsonObject weather) weather.Remove("HeFengKey");
-        if ((legacy.Length > 0 && marked) || marked != wasMarked) FlushSettings();
-
-        static string FindLegacyKey(JsonElement node)
-        {
-            if (node.ValueKind == JsonValueKind.Object)
-            {
-                if (node.TryGetProperty("Weather", out var weather) && weather.ValueKind == JsonValueKind.Object
-                    && weather.TryGetProperty("HeFengKey", out var key) && key.ValueKind == JsonValueKind.String)
-                    return key.GetString() ?? "";
-                foreach (var property in node.EnumerateObject())
-                    if (FindLegacyKey(property.Value) is { Length: > 0 } found) return found;
-            }
-            else if (node.ValueKind == JsonValueKind.Array)
-                foreach (var item in node.EnumerateArray())
-                    if (FindLegacyKey(item) is { Length: > 0 } found) return found;
-            return "";
-        }
     }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }
