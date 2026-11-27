@@ -427,8 +427,11 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
                     if (account.Length > 0) request.Headers.TryAddWithoutValidation("ChatGPT-Account-Id", account);
                     using var doc = await SendAsync(_http, request, ct);
                     var quotas = QuotaParser.Codex(doc.RootElement, now, true);
-                    if (quotas.Count == 0) throw new InvalidDataException();
+                    var personalLimit = QuotaParser.CodexPersonalLimit(doc.RootElement, now);
+                    if (quotas.Count == 0 && personalLimit is null) throw new InvalidDataException();
                     snapshot.Quotas = quotas;
+                    if (personalLimit is not null)
+                        snapshot.Metrics = [.. quotas.Select(UsageMetric.FromQuota), personalLimit];
                     snapshot.Plan = doc.RootElement.Get("plan_type").Text();
                     snapshot.PlanSource = Loc.T("Codex 账户", "Codex account");
                     Connected(snapshot, Loc.T("Codex 账户", "Codex account"), now);

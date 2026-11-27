@@ -196,7 +196,7 @@ internal static class UI
         return period == "每周" ? Loc.Label(group + " 每周") : group + " " + Loc.Label(period);
     }
     public static string DisplayPlan(string plan) => plan.Trim().ToLowerInvariant() switch
-    { "prolite" => "Pro Lite", "pro" or "google ai pro" => "Pro", "google ai ultra" => "Ultra", "plus" => "Plus", "free" => "Free", "max" => "Max", "team" => "Team", "business" => "Business", "enterprise" => "Enterprise", _ => plan.Trim() };
+    { "prolite" => "Pro Lite", "pro" or "google ai pro" => "Pro", "google ai ultra" => "Ultra", "plus" => "Plus", "free" => "Free", "max" => "Max", "team" => "Team", "business" => "Business", "ent26" or "enterprise" => "Enterprise", _ => plan.Trim() };
     public static void OpenUrl(string url) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
 }
 

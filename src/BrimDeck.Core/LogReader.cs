@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -354,6 +355,40 @@ public static class QuotaParser
         }
         return result;
     }
+    internal static UsageMetric? CodexPersonalLimit(JsonElement root, DateTimeOffset now)
+    {
+        var limit = root.Get("spend_control").Get("individual_limit");
+        var reset = limit.Get("reset_at").Date();
+        if (reset is null && limit.Get("reset_after_seconds").Number() is { } after && after is >= 0 and < 31536000)
+            reset = now.AddSeconds(after);
+
+        const string id = "codex-personal-limit";
+        const string label = "个人预算";
+        var unit = limit.Get("unit").Text().ToLowerInvariant();
+        static decimal? Amount(JsonElement value) =>
+            decimal.TryParse(value.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var number) ? number : null;
+
+        if (unit is "usd" or "credit" or "credits" && Amount(limit.Get("limit")) is > 0 and var total)
+        {
+            var remaining = Amount(limit.Get("remaining"));
+            if (remaining is null && Amount(limit.Get("used")) is >= 0 and var used)
+                remaining = total - used;
+            if (remaining is { } amount)
+                return new(MetricKind.Balance, label)
+                {
+                    Id = id, Amount = Math.Clamp(amount, 0, total), Total = total, ResetAt = reset,
+                    Currency = unit == "usd" ? "USD" : "", Unit = unit == "usd" ? "" : "积分",
+                };
+        }
+
+        var percent = limit.Get("remaining_percent").Number();
+        if (percent is null && limit.Get("used_percent").Number() is { } usedPercent)
+            percent = 100 - usedPercent;
+        return percent is { } left
+            ? new(MetricKind.Percent, label) { Id = id, Percent = 100 - Math.Clamp(left, 0, 100), ResetAt = reset }
+            : null;
+    }
+
     public static List<Quota> Claude(JsonElement root)
     {
         var result = new List<Quota>();
