@@ -19,16 +19,17 @@ internal enum MonitorGlyph { Down, Up, Thermometer, Drive, Screen, DownTotal, Up
 
 internal static class MonitorDraw
 {
-    // The arrows and the thermometer on a 16 unit grid, stroked.
+    // The arrows and the thermometer on a 16 unit grid, stroked. Both arrows span 2.75 to 13.25, about the box's centre: the down
+    // arrow drawn a quarter unit higher and the up arrow a quarter lower stood a pixel apart in the collapsed row at 150 %.
     private static readonly Dictionary<MonitorGlyph, Geometry> Glyphs = new()
     {
-        [MonitorGlyph.Down] = Frozen("M8,2.5 V13 M3.8,8.8 L8,13 L12.2,8.8"),
-        [MonitorGlyph.Up] = Frozen("M8,13.5 V3 M3.8,7.2 L8,3 L12.2,7.2"),
+        [MonitorGlyph.Down] = Frozen("M8,2.75 V13.25 M3.8,9.05 L8,13.25 L12.2,9.05"),
+        [MonitorGlyph.Up] = Frozen("M8,13.25 V2.75 M3.8,6.95 L8,2.75 L12.2,6.95"),
         [MonitorGlyph.Thermometer] = Frozen("M6,9.6 V4.4 A2,2 0 0 1 10,4.4 V9.6 A3.2,3.2 0 1 1 6,9.6 Z M8,7.2 V12"),
         // A drive seen from its edge, with its activity light.
         [MonitorGlyph.Drive] = Frozen("M3.5,4.5 H12.5 A1.5,1.5 0 0 1 14,6 V10 A1.5,1.5 0 0 1 12.5,11.5 H3.5 A1.5,1.5 0 0 1 2,10 V6 A1.5,1.5 0 0 1 3.5,4.5 Z M10.6,8 H11.6"),
-        // A monitor on its stand, for the frame rate.
-        [MonitorGlyph.Screen] = Frozen("M3.5,2.5 H12.5 A1.5,1.5 0 0 1 14,4 V10 A1.5,1.5 0 0 1 12.5,11.5 H3.5 A1.5,1.5 0 0 1 2,10 V4 A1.5,1.5 0 0 1 3.5,2.5 Z M8,11.5 V14 M5.5,14 H10.5"),
+        // A monitor on its stand, for the frame rate; from 2.25 to 13.75, about the box's centre.
+        [MonitorGlyph.Screen] = Frozen("M3.5,2.25 H12.5 A1.5,1.5 0 0 1 14,3.75 V9.75 A1.5,1.5 0 0 1 12.5,11.25 H3.5 A1.5,1.5 0 0 1 2,9.75 V3.75 A1.5,1.5 0 0 1 3.5,2.25 Z M8,11.25 V13.75 M5.5,13.75 H10.5"),
         // Two chevrons down and up (Lucide's chevrons-down and chevrons-up, scaled from 24 to 16), for the traffic over a period: the
         // pair spans 4 to 12 about the box's centre.
         [MonitorGlyph.DownTotal] = Frozen("M4.67,4 L8,7.33 L11.33,4 M4.67,8.67 L8,12 L11.33,8.67"),
@@ -90,20 +91,20 @@ internal static class MonitorDraw
 
     // A dial: three quarters of a circle, from lower left over the top to lower right, on the quota rings' track, filled clockwise
     // by the share, with the reading's letter inside. The gap tells it from the full quota rings beside it in the collapsed row,
-    // and a letter stays legible at that size where a glyph does not. Its centre sits a thirty-second of its size below the
-    // centre given, so the open circle looks centred; the letter is centred on its own outline, not on the font's box.
+    // and a letter stays legible at that size where a glyph does not. On the page its centre sits a thirty-second of its size below
+    // the centre given, so the open circle looks centred; the letter is centred on its own outline, not on the font's box.
     // parts: the track and the letter (Face), the share's arc (Share), or all of it; the collapsed row draws the two apart, as
     // only the arc moves while a reading eases (MonitorStrip).
     private const double DialStart = Math.PI * 1.25, DialSweep = Math.PI * 1.5;
+    // onCentre: the circle's centre is the centre given. The collapsed row asks for it: there the dials stand among whole rings
+    // (the quotas', the devices') and beside figures, all on one midline (CompactLine), and a dial lowered to centre its open
+    // outline had its top below the rings' and its letter a pixel and a half below the figure after it (150 %).
     public static void Dial(DrawingContext drawing, Point center, double size, double ring, double letterSize, double? share, string color, string letter, double ppd,
-        DialParts parts = DialParts.All, PanelLook? look = null, bool centerVisibleBounds = false)
+        DialParts parts = DialParts.All, PanelLook? look = null, bool onCentre = false)
     {
         var Look = look ?? PanelTheme.Main;
         double radius = size / 2 - ring / 2;
-        // A compact row mixes open dials with complete quota rings. Centre the open arc's visible bounds:
-        // its lower ends reach radius / sqrt(2), while its top reaches the full radius.
-        double offset = centerVisibleBounds ? radius * (1 - Math.Sqrt(.5)) / 2 : size / 32;
-        var c = new Point(center.X, center.Y + offset);
+        var c = new Point(center.X, center.Y + (onCentre ? 0 : size / 32));
         if ((parts & DialParts.Face) != 0) DialArc(drawing, c, radius, ring, 1, Look.Hex("ringTrack"));
         if ((parts & DialParts.Share) != 0 && share is { } value && value > .002) DialArc(drawing, c, radius, ring, Math.Min(1, value), color);
         if ((parts & DialParts.Face) == 0) return;

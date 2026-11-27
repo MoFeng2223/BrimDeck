@@ -125,10 +125,14 @@ public partial class MainWindow
         double row = Math.Max(layout.RingSize, layout.LineHeight);
         var ring = UI.Ring(share, Look.QuotaTheme(alert.Entry), layout.RingSize, layout.RingThickness, look: Look);
         var parts = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        // The ring is centred on the row's midline and the texts stand on the row's baseline (CompactLine), the digits' middle level
+        // with the ring's; centred by their line boxes they stood below it.
+        double baseline = CompactLine.Baseline(row, font, dpi);
+        double BaselineTop(TextBlock text) => baseline - (double.IsFinite(text.BaselineOffset) ? text.BaselineOffset : text.FontFamily.Baseline * text.FontSize);
         if (layout.RingWidth > 0) parts.Children.Add(CompactRegion(ring, layout.RingWidth, layout.RingSize, layout.RingSize, row, RegionAnchor.Left, dpi));
-        if (layout.NameWidth > 0) parts.Children.Add(CompactRegion(name, layout.NameWidth, Math.Min(nameWidth, name.MaxWidth), line, row, RegionAnchor.Left, dpi));
-        if (layout.TextWidth > 0) parts.Children.Add(CompactRegion(used, layout.TextWidth, usedWidth, line, row, RegionAnchor.Left, dpi));
-        if (reset is not null && layout.ResetWidth > 0) parts.Children.Add(CompactRegion(reset, layout.ResetWidth, resetWidth, line, row, RegionAnchor.Left, dpi, layout.Gap));
+        if (layout.NameWidth > 0) parts.Children.Add(CompactRegion(name, layout.NameWidth, Math.Min(nameWidth, name.MaxWidth), line, row, RegionAnchor.Left, dpi, top: BaselineTop(name)));
+        if (layout.TextWidth > 0) parts.Children.Add(CompactRegion(used, layout.TextWidth, usedWidth, line, row, RegionAnchor.Left, dpi, top: BaselineTop(used)));
+        if (reset is not null && layout.ResetWidth > 0) parts.Children.Add(CompactRegion(reset, layout.ResetWidth, resetWidth, line, row, RegionAnchor.Left, dpi, layout.Gap, BaselineTop(reset)));
         parts.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         double span = SnapDown(width, dpi), full = parts.DesiredSize.Width;
         // The allowance keeps rounding noise from starting a one-pixel scroll.
@@ -166,13 +170,17 @@ public partial class MainWindow
 
     // A region of the given width holding one element, centred vertically in the row. The element keeps its size and is
     // anchored to one side (after a leading gap, if any); a region narrower than that cuts the other side off.
-    private static FrameworkElement CompactRegion(FrameworkElement child, double width, double childWidth, double childHeight, double row, RegionAnchor anchor, double dpi, double leading = 0)
+    // The element's midline (CompactLine.Middle of its height) is put on the row's, which every part of the row shares. top: where
+    // the element starts instead, for a text placed by its baseline (BaselineTop).
+    private static FrameworkElement CompactRegion(FrameworkElement child, double width, double childWidth, double childHeight, double row, RegionAnchor anchor, double dpi, double leading = 0, double? top = null)
     {
         double w = SnapDown(width, dpi), cw = Math.Max(0, double.IsFinite(childWidth) ? childWidth : 0), ch = Math.Max(0, double.IsFinite(childHeight) ? childHeight : 0);
         double left = anchor switch { RegionAnchor.Right => w - cw, RegionAnchor.Center => (w - cw) / 2, _ => Math.Min(leading, w) };
         var region = new Canvas { Width = w, Height = row, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
         child.Width = cw; child.HorizontalAlignment = HorizontalAlignment.Left; child.VerticalAlignment = VerticalAlignment.Top;
-        Canvas.SetLeft(child, Snap(left, dpi)); Canvas.SetTop(child, Snap((row - ch) / 2, dpi));
+        // A text placed by its baseline is kept off the layout's rounding, which would move it and the baseline with it.
+        if (top is not null) child.UseLayoutRounding = false;
+        Canvas.SetLeft(child, Snap(left, dpi)); Canvas.SetTop(child, top ?? CompactLine.Top(row, ch, dpi));
         region.ClipToBounds = left < 0 || left + cw > w + .001;
         region.Children.Add(child);
         return region;

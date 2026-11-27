@@ -1314,6 +1314,8 @@ public partial class MainWindow
     {
         var title = new MusicMarquee { Text = text, Width = width, Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
             ScrollAllowed = layout.TextScrolls, Backdrop = Look.MarqueeBackdrop, InkFade = Look.InkFade,
+            // On the row's baseline, level with the figures of the parts beside it.
+            Baseline = CompactLine.Baseline(layout.TextHeight, layout.TextFont, VisualTreeHelper.GetDpi(this).DpiScaleX),
             Laps = true, Rested = text.Length > 0 && text == _compactTitleRested };
         title.Finished += () => { if (ReferenceEquals(_compactMarquee, title)) _compactTitleRested = title.Text; };
         title.Gliding += gliding => { if (ReferenceEquals(_compactMarquee, title)) MusicGliding(gliding); };
@@ -1463,10 +1465,10 @@ public partial class MainWindow
                     var cover = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius, look: Look); AutomationProperties.SetName(cover, _mediaTrack!.Caption);
                     element = CompactRegion(cover, room, layout.CoverSize, layout.CoverSize, row, RegionAnchor.Left, dpi); break;
                 case CompactPart.Equalizer:
-                    _compactEqualizer = new MusicEqualizer { Bars = Settings.EqualizerBars, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = EqualizerColor };
+                    _compactEqualizer = new MusicEqualizer { Bars = Settings.EqualizerBars, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = EqualizerColor, OnRowLine = true };
                     element = CompactRegion(_compactEqualizer, room, layout.EqualizerSize, layout.EqualizerHeight, row, RegionAnchor.Left, dpi); break;
                 case CompactPart.Clock:
-                    element = CompactRegion(clock!, room, clock!.ReservedWidth, clock.Height, row, RegionAnchor.Left, dpi); _compactClock = clock; break;
+                    element = CompactRegion(clock!, room, clock!.ReservedWidth, clock.Height, row, RegionAnchor.Left, dpi, top: CompactLine.TopOfCentred(row, clock.Height, dpi)); _compactClock = clock; break;
                 case CompactPart.Transfer:
                     element = CompactRegion(transfer!, room, transferWidth, transfer!.Height, row, RegionAnchor.Left, dpi); break;
                 case CompactPart.Devices:
@@ -1492,9 +1494,12 @@ public partial class MainWindow
             // What the part opens the panel on when the pointer is at it (HoverPartAt, MainWindow.Hover.cs).
             element.Tag = HoverPartOf(shown[i].Part);
             element.SetValue(CompactPartOfProperty, shown[i].Part);
-            // The carousels' fades lie outside their window (a negative margin); the margin puts the window at its place.
-            element.Margin = new Thickness(element.Margin.Left + left, 0, element.Margin.Right, 0);
-            element.HorizontalAlignment = HorizontalAlignment.Left; element.VerticalAlignment = VerticalAlignment.Center;
+            // The carousels' fades lie outside their window (a negative margin); the margin puts the window at its place. Down the
+            // row every part's midline is put on the row's, a whole device pixel below its top (CompactLine): the parts place their
+            // marks and their text against that one line, whatever their own heights.
+            bool sized = double.IsFinite(element.Height);
+            element.Margin = new Thickness(element.Margin.Left + left, sized ? CompactLine.Top(row, element.Height, dpi) : 0, element.Margin.Right, 0);
+            element.HorizontalAlignment = HorizontalAlignment.Left; element.VerticalAlignment = sized ? VerticalAlignment.Top : VerticalAlignment.Center;
             grid.Children.Add(element);
         }
         CompactRings.Children.Add(grid); UpdateMusicTimer();

@@ -193,6 +193,10 @@ internal sealed class MusicEqualizer : FrameworkElement
     // does only moves its own rectangle in the retained drawing.
     private RectangleGeometry[]? _bars;
     private Brush? _barsColor;
+    // Whether the bars stand about the collapsed row's midline (CompactLine.Middle of their height) rather than the exact half of
+    // their height: the row's equalizer does, so the bars at rest are level with the rings and the figures beside them.
+    public bool OnRowLine { get; init; }
+    private double Middle(double height, double dpi) => OnRowLine ? CompactLine.Middle(height, dpi) : double.NaN;
     private void Redraw(bool force = false)
     {
         var size = RenderSize;
@@ -205,7 +209,7 @@ internal sealed class MusicEqualizer : FrameworkElement
             using var dc = _drawing.Open();
             for (int i = 0; i < count; i++)
             {
-                var (x, y, w, h) = EqualizerLayout.Bar(i, Bars, _levels[i], size.Width, size.Height, BarWidth, dpi);
+                var (x, y, w, h) = EqualizerLayout.Bar(i, Bars, _levels[i], size.Width, size.Height, BarWidth, dpi, Middle(size.Height, dpi));
                 _bars[i] = new RectangleGeometry(new Rect(x, y, w, h), radius, radius);
                 dc.DrawGeometry(Color, null, _bars[i]);
             }
@@ -213,7 +217,7 @@ internal sealed class MusicEqualizer : FrameworkElement
         }
         for (int i = 0; i < count; i++)
         {
-            var (x, y, w, h) = EqualizerLayout.Bar(i, Bars, _levels[i], size.Width, size.Height, BarWidth, dpi);
+            var (x, y, w, h) = EqualizerLayout.Bar(i, Bars, _levels[i], size.Width, size.Height, BarWidth, dpi, Middle(size.Height, dpi));
             var rect = new Rect(x, y, w, h);
             if (_bars![i].Rect != rect) _bars[i].Rect = rect;
         }
@@ -253,6 +257,9 @@ internal sealed class MusicMarquee : FrameworkElement
     // text changes or Replay is called; Rested starts it there. Without (the open page's lyric), it scrolls for as long as it may.
     public bool Laps { get; init; }
     public bool Rested { get => _rested; init => _rested = value; }
+    // Where the text's baseline lies below the element's top, on a whole device pixel: the collapsed row's title stands on the
+    // row's baseline (CompactLine), level with the figures beside it. Without one the line box is centred in the height.
+    public double? Baseline { get; init; }
     // Raised once the laps are done, so the window can keep the text resting when the row is built again.
     public event Action? Finished;
     // Raised when the glide's clock starts and when it lets go: while it runs, WPF draws a frame every refresh anyway.
@@ -703,7 +710,7 @@ internal sealed class MusicMarquee : FrameworkElement
         dc.PushTransform(_shift);
         double x = overflow == 0 && CenterWhenFits ? Snap((size.Width - text.Width) / 2) : 0;
         ApplyKaraoke(text, x);
-        dc.DrawText(text, new Point(x, Snap((size.Height - text.Height) / 2 + text.Baseline) - text.Baseline));
+        dc.DrawText(text, new Point(x, (Baseline ?? Snap((size.Height - text.Height) / 2 + text.Baseline)) - text.Baseline));
         dc.Pop();
         if (_glyphs is null) dc.Pop(); else if (_fade is not null) dc.DrawRectangle(_fade, null, new Rect(size));
         UpdateAnimation();
@@ -925,10 +932,10 @@ internal sealed class QuotaCarousel : GlideCarousel
         for (int i = 0; i < items.Count; i++)
         {
             var ring = Ring(items[i], size, thickness, rowScale, Look);
-            // Keep the row's centre even when an odd diameter leaves a half-DIP above and below it.
-            // Centring a separate, rounded-height carousel moved the rings half a pixel off the readings.
+            // Centred on the row's midline (CompactLine), as the dials and the devices' rings are, off the layout's rounding: a ring
+            // with an odd number of pixels across then keeps half a pixel above and below it rather than a whole one on one side.
             ring.UseLayoutRounding = false;
-            Canvas.SetTop(ring, (Height - size) / 2);
+            Canvas.SetTop(ring, CompactLine.Middle(Height, scale) - size / 2);
             Canvas.SetLeft(ring, edge + i * step); _strip.Children.Add(ring);
         }
         // A Canvas measures the strip at its full width. Inside the Grid the strip would be

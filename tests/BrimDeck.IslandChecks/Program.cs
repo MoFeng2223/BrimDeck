@@ -12,8 +12,10 @@ using BrimDeck.Core;
 internal static class Checks
 {
     [STAThread]
-    private static int Main()
+    private static int Main(string[] args)
     {
+        // "line [folder]": the collapsed row's midline and baseline, measured on its parts drawn offscreen (CompactLineChecks).
+        if (args is ["line", ..]) return CompactLineChecks.Run(args.Length > 1 ? args[1] : null);
         try
         {
             var app = (App)RuntimeHelpers.GetUninitializedObject(typeof(App));

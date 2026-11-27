@@ -58,7 +58,8 @@ internal sealed class DeviceStrip : FrameworkElement
 
     protected override void OnRender(DrawingContext drawing)
     {
-        double ppd = MonitorDraw.PixelsPerDip(this), row = Row, center = row / 2, ring = Ring, stroke = Math.Max(1, 1.5 * _scale), icon = Math.Round(9 * _scale);
+        // Each line's midline and its figure's baseline are the collapsed row's (CompactLine), as the system readings' are.
+        double ppd = MonitorDraw.PixelsPerDip(this), row = Row, center = CompactLine.Middle(row, ppd), ring = Ring, stroke = Math.Max(1, 1.5 * _scale), icon = Math.Round(9 * _scale);
         double x = Math.Max(0, Math.Round((ActualWidth - PreferredWidth) / 2));
         foreach (var device in _devices.Devices)
         {
@@ -72,10 +73,11 @@ internal sealed class DeviceStrip : FrameworkElement
             if (_devices.Figures)
             {
                 var figure = MonitorDraw.Text(Devices.Figure(device.Percent), _font, device.Percent is null ? Look.Tertiary : device.Figure, ppd);
-                MonitorDraw.Baseline(drawing, figure, x + ring + Math.Round(4 * _scale), Math.Round(center + _font * .36));
+                MonitorDraw.Baseline(drawing, figure, x + ring + Math.Round(4 * _scale), CompactLine.Above(center, _font, ppd));
             }
             if (device.Earlier) drawing.Pop();
-            if (Stacked) center += row + _lineGap;
+            // The next line starts on a whole device pixel, so its midline is one as well.
+            if (Stacked) center += CompactLine.Snap(row + _lineGap, ppd);
             else x += Slot + Gap;
         }
     }

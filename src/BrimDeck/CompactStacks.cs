@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -136,15 +137,19 @@ internal static class CompactStacks
     public static TextBlock Words(string text, double s, string color) => new()
     {
         Text = text, FontFamily = UI.PanelFont, FontSize = CompactMusicLayout.Half(11.5 * s), FontWeight = FontWeights.SemiBold,
-        Foreground = UI.Brush(color), TextWrapping = TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center
+        Foreground = UI.Brush(color), TextWrapping = TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Top
     };
 
     // A stack and the words after it, as one fixed part: it starts and ends on whole device pixels (see TransferBadge). reserve:
     // the words' widest form, whose width the part keeps while the words change within it (a running time).
     public static Grid Row(FrameworkElement stack, TextBlock? words, double s, double dpi, string? reserve = null)
     {
-        stack.HorizontalAlignment = HorizontalAlignment.Left; stack.VerticalAlignment = VerticalAlignment.Center;
-        var row = new Grid { Height = Math.Max(stack.Height, CompactMusicLayout.Whole(16 * s)), Background = Brushes.Transparent };
+        // The icons are centred on the part's midline and the words stand on the row's baseline (CompactLine): centred by its line
+        // box, which holds the font's ascent and descent, a number stood a device pixel below the figures of the readings.
+        double height = Math.Max(stack.Height, CompactMusicLayout.Whole(16 * s)), middle = CompactLine.Middle(height, dpi);
+        stack.HorizontalAlignment = HorizontalAlignment.Left; stack.VerticalAlignment = VerticalAlignment.Top;
+        stack.UseLayoutRounding = false; stack.Margin = new Thickness(0, middle - stack.Height / 2, 0, 0);
+        var row = new Grid { Height = height, Background = Brushes.Transparent };
         row.Children.Add(stack);
         double width = stack.Width;
         if (words is not null)
@@ -153,11 +158,49 @@ internal static class CompactStacks
             if (reserve is not null) { var widest = Words(reserve, s, "#000000"); Typography.SetNumeralAlignment(widest, FontNumeralAlignment.Tabular); wordsWidth = Math.Max(wordsWidth, Measure(widest)); }
             double start = DevicePixels.Up(stack.Width + CompactMusicLayout.Whole(5 * s), dpi);
             words.HorizontalAlignment = HorizontalAlignment.Left; words.Margin = new Thickness(start, 0, 0, 0);
+            CompactLine.Place(words, CompactLine.Above(middle, words.FontSize, dpi));
             row.Children.Add(words);
             width = start + wordsWidth;
         }
         row.Width = DevicePixels.Up(width, dpi);
         return row;
+    }
+
+    // The file transfer's count (CompactPart.Transfer): a tray and the number of files, as one fixed part.
+    public static Grid Tray(int count, double scale, double dpi, PanelLook look)
+    {
+        double s = CompactMusicLayout.SafeScale(scale), icon = CompactMusicLayout.Whole(14 * s), gap = CompactMusicLayout.Whole(3 * s);
+        // The number starts on a whole device pixel and the badge ends on one. Layout rounding moves a margin that lies between two
+        // pixels onto the next (17 DIPs are 25.5 pixels at 150% and become 26), which took the room from the number: a count of two
+        // digits no longer fit and, wrapping as every TextBlock does by default (App.xaml), stood on two lines cut by the badge.
+        double start = DevicePixels.Up(icon + gap, dpi);
+        var number = new TextBlock
+        {
+            Text = count.ToString(CultureInfo.InvariantCulture), FontFamily = UI.PanelFont, FontSize = CompactMusicLayout.Half(11.5 * s), FontWeight = FontWeights.SemiBold,
+            Foreground = UI.Brush(look.Primary), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, TextWrapping = TextWrapping.NoWrap
+        };
+        Typography.SetNumeralAlignment(number, FontNumeralAlignment.Tabular);
+        number.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        double digits = number.DesiredSize.Width;
+        number.Margin = new Thickness(start, 0, 0, 0);
+        // The tray is centred on the part's midline and the number stands on the row's baseline (CompactLine). The number used to be
+        // centred by its line box and the tray by its box, whose drawing lay half a unit low: both stood a device pixel below the
+        // figures and the rings beside them (150 %).
+        double height = CompactMusicLayout.Whole(16 * s), middle = CompactLine.Middle(height, dpi);
+        CompactLine.Place(number, CompactLine.Above(middle, number.FontSize, dpi));
+        var badge = new Grid { Width = DevicePixels.Up(start + digits, dpi), Height = height, Background = Brushes.Transparent };
+        // The tray on the 16 unit grid of the row's other marks (PowerIcons), scaled to the icon's size with the same 1.35 DIP line,
+        // rather than a larger drawing stretched to fit, which thickened and blurred it. It spans 3 to 13, about the grid's centre.
+        double grid = icon / 16;
+        var tray = new Path
+        {
+            Data = Geometry.Parse("M 1.5,8.5 L 3.5,3 H 12.5 L 14.5,8.5 V 12 A 1,1 0 0 1 13.5,13 H 2.5 A 1,1 0 0 1 1.5,12 Z M 1.5,8.5 H 5.5 L 6.5,10 H 9.5 L 10.5,8.5 H 14.5"),
+            Stroke = UI.Brush(look.Secondary), StrokeThickness = 1.35 / grid, StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
+            Width = 16, Height = 16, LayoutTransform = new ScaleTransform(grid, grid), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
+            UseLayoutRounding = false, Margin = new Thickness(0, middle - icon / 2, 0, 0)
+        };
+        badge.Children.Add(tray); badge.Children.Add(number);
+        return badge;
     }
 
     private static double Measure(TextBlock words)

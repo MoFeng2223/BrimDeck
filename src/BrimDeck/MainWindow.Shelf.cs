@@ -125,31 +125,7 @@ public partial class MainWindow
         int count = Settings.ShowsTransfer(EffectiveStyle) ? ShelfData.Files.Count : 0;
         _transferShown = count; _compactTransfer = null;
         if (count == 0) return null;
-        double s = CompactMusicLayout.SafeScale(scale), icon = CompactMusicLayout.Whole(14 * s), gap = CompactMusicLayout.Whole(3 * s);
-        // The number starts on a whole device pixel and the badge ends on one. Layout rounding moves a margin that lies between two
-        // pixels onto the next (17 DIPs are 25.5 pixels at 150% and become 26), which took the room from the number: a count of two
-        // digits no longer fit and, wrapping as every TextBlock does by default (App.xaml), stood on two lines cut by the badge.
-        double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX, start = DevicePixels.Up(icon + gap, dpi);
-        var number = new TextBlock
-        {
-            Text = count.ToString(CultureInfo.InvariantCulture), FontFamily = UI.PanelFont, FontSize = CompactMusicLayout.Half(11.5 * s), FontWeight = FontWeights.SemiBold,
-            Foreground = UI.Brush(Look.Primary), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.NoWrap
-        };
-        Typography.SetNumeralAlignment(number, FontNumeralAlignment.Tabular);
-        number.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        double digits = number.DesiredSize.Width;
-        number.Margin = new Thickness(start, 0, 0, 0);
-        var badge = new Grid { Width = DevicePixels.Up(start + digits, dpi), Height = CompactMusicLayout.Whole(16 * s), Background = Brushes.Transparent };
-        // The tray on the 16 unit grid of the row's other marks (PowerIcons), scaled to the icon's size with the same 1.35 DIP line,
-        // rather than a larger drawing stretched to fit, which thickened and blurred it.
-        double grid = icon / 16;
-        var tray = new Path
-        {
-            Data = Geometry.Parse("M 1.5,9 L 3.5,3.5 H 12.5 L 14.5,9 V 12.5 A 1,1 0 0 1 13.5,13.5 H 2.5 A 1,1 0 0 1 1.5,12.5 Z M 1.5,9 H 5.5 L 6.5,10.5 H 9.5 L 10.5,9 H 14.5"),
-            Stroke = UI.Brush(Look.Secondary), StrokeThickness = 1.35 / grid, StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
-            Width = 16, Height = 16, LayoutTransform = new ScaleTransform(grid, grid), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center
-        };
-        badge.Children.Add(tray); badge.Children.Add(number);
+        var badge = CompactStacks.Tray(count, scale, VisualTreeHelper.GetDpi(this).DpiScaleX, Look);
         string tip = Loc.T($"文件中转：{count} 个文件", count == 1 ? "File transfer: 1 file" : $"File transfer: {count} files");
         badge.ToolTip = tip; AutomationProperties.SetName(badge, tip);
         _compactTransfer = badge;

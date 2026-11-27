@@ -34,8 +34,10 @@ public partial class MainWindow
         if (agents is null || notices is null) return agents ?? notices;
         double s = CompactMusicLayout.SafeScale(scale), gap = CompactMusicLayout.Whole(8 * s);
         var both = new Grid { Width = agents.Width + gap + notices.Width, Height = Math.Max(agents.Height, notices.Height), Background = Brushes.Transparent };
-        agents.HorizontalAlignment = HorizontalAlignment.Left; agents.VerticalAlignment = VerticalAlignment.Center;
-        notices.HorizontalAlignment = HorizontalAlignment.Left; notices.VerticalAlignment = VerticalAlignment.Center; notices.Margin = new Thickness(agents.Width + gap, 0, 0, 0);
+        // The two groups share one midline (CompactLine): the agents' group is taller by its state rings.
+        double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        agents.HorizontalAlignment = HorizontalAlignment.Left; agents.VerticalAlignment = VerticalAlignment.Top; agents.Margin = new Thickness(0, CompactLine.Top(both.Height, agents.Height, dpi), 0, 0);
+        notices.HorizontalAlignment = HorizontalAlignment.Left; notices.VerticalAlignment = VerticalAlignment.Top; notices.Margin = new Thickness(agents.Width + gap, CompactLine.Top(both.Height, notices.Height, dpi), 0, 0);
         both.Children.Add(agents); both.Children.Add(notices);
         return both;
     }
