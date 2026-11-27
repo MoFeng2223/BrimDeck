@@ -21,7 +21,8 @@ internal sealed class PowerPlanView : Grid
     private readonly List<(Guid Id, Border Card, Border Dot, Path Icon, TextBlock Name, TextBlock State)> _cards = [];
     private IReadOnlyList<PowerPlanInfo> _plans = [];
     private Guid? _hovered;
-    private string? _error;
+    private string? _statusMessage;
+    private bool _statusIsError;
 
     private static readonly Guid PowerSaverGuid = new("a1841308-3541-4fab-bc81-f71556f20b4a");
     private static readonly Guid BalancedGuid = new("381b4222-f694-41f0-9685-ff5bb260df2e");
@@ -71,7 +72,7 @@ internal sealed class PowerPlanView : Grid
             _plans = [];
             _grid.Children.Clear();
             _cards.Clear();
-            ShowError(Loc.T("读取电源方案失败：", "Failed to read power plans: ") + ex.Message);
+            ShowStatus(Loc.T("读取电源方案失败：", "Failed to read power plans: ") + ex.Message, isError: true);
             return;
         }
 
@@ -218,23 +219,36 @@ internal sealed class PowerPlanView : Grid
 
     private void ActivatePlan(Guid id)
     {
-        var (ok, error) = PowerSchemes.SetActive(id);
-        if (!ok)
+        var plan = _plans.FirstOrDefault(p => p.Id == id);
+        var result = plan is not null ? PowerSchemes.SetActive(plan) : new PowerPlanSwitchResult(PowerSchemes.SetActive(id).Success, null, null);
+        if (!result.Success)
         {
-            ShowError(Loc.T("切换电源方案失败：", "Failed to switch power plan: ") + (error ?? ""));
+            ShowStatus(Loc.T("切换电源方案失败：", "Failed to switch power plan: ") + (result.Error ?? ""), isError: true);
             return;
         }
-        _error = null;
-        _statusText.Visibility = Visibility.Collapsed;
+        if (!string.IsNullOrEmpty(result.HardwareMode))
+            ShowStatus(result.HardwareMode, isError: false);
+        else
+            ClearStatus();
         RefreshPlans();
     }
 
-    private void ShowError(string message)
+    private void ShowStatus(string message, bool isError)
     {
-        _error = message;
+        _statusMessage = message;
+        _statusIsError = isError;
         _statusText.Text = message;
-        _statusText.Foreground = UI.Brush(Look.Readable(Look.Hex("danger"), 4.5));
+        _statusText.Foreground = isError
+            ? UI.Brush(Look.Readable(Look.Hex("danger"), 4.5))
+            : UI.Brush(Look.Tertiary);
         _statusText.Visibility = Visibility.Visible;
+    }
+
+    private void ClearStatus()
+    {
+        _statusMessage = null;
+        _statusIsError = false;
+        _statusText.Visibility = Visibility.Collapsed;
     }
 
     private void UpdateCardStates()
@@ -276,7 +290,10 @@ internal sealed class PowerPlanView : Grid
             state.Foreground = active ? accentBrush : tertiary;
         }
 
-        if (_error is null) _statusText.Visibility = Visibility.Collapsed;
+        if (_statusMessage is null) _statusText.Visibility = Visibility.Collapsed;
+        else _statusText.Foreground = _statusIsError
+            ? UI.Brush(look.Readable(look.Hex("danger"), 4.5))
+            : tertiary;
     }
 
     private static string SubtitleFor(PowerPlanInfo plan)
