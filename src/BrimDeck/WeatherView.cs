@@ -89,8 +89,8 @@ internal sealed class WeatherView : UserControl
     // 「今天」列选择态高亮：垫在 days 底部、跨四行（预报列上段/折线/低温/逐日信息行），从列顶贯穿到最底部，折线与下方各行都被它包住。
     // 显式左对齐 + 左边距定位，与预报网格列几何完全一致，避免 Stretch+Width 时被居中导致的横向偏移。
     private readonly Border todayGlow = new() { CornerRadius = new CornerRadius(15), IsHitTestVisible = false, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Stretch };
-    // 逐时的「现在」不是某一列，而是「过去那一格」与「当前那一格」之间的分界：
-    // 一条竖线贯穿列区到底行，线顶标「现在」。这样 22:00 那一格仍然写「22:00」，当前落在两格之间。
+    // 逐时的「现在」不占任何一列：一条竖线贯穿列区到底行、线顶标「现在」，按真实时刻插在
+    // 当前整点列内（01:20 落在 01:00 列的 1/3 处），时刻标签照常显示各自的整点。
     private readonly Border nowRule = new() { Width = 2, CornerRadius = new CornerRadius(1), IsHitTestVisible = false, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Stretch, Visibility = Visibility.Collapsed };
     private readonly TextBlock nowText = new() { Text = "", Width = 40, FontSize = 9.5, TextAlignment = TextAlignment.Center, IsHitTestVisible = false, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Visibility = Visibility.Collapsed };
     internal static readonly TimeSpan AutoInterval = TimeSpan.FromMinutes(15);
@@ -474,11 +474,13 @@ internal sealed class WeatherView : UserControl
         // 首帧与切页都走同一个入口：有请求在飞时直接返回，数据还在自动周期内就跳过，
         // 不再让 Loaded 与 IsVisibleChanged 各发一次、后者把前者取消。
         _timeBoundary.Tick += (_, _) => { _timeBoundary.Stop(); if (IsVisible && _last is { } snap) Render(snap); };
-        IsVisibleChanged += async (_, _) => { if (IsVisible) { state = WeatherData.Load(() => _app.Settings); await EnsureFreshAsync(); if (_last is { } snap) Render(snap); } else { _timeBoundary.Stop(); if (_warningPopup is { } popup) popup.IsOpen = false; } };
+        // 「现在」分界线按分钟走：只重贴线与标签，不重建列；隐藏/卸载即停。
+        _nowTick.Tick += (_, _) => { if (IsVisible && _hourlyMode && _lens != Lens.Celestial && _last is { } snap) PlaceNowRule(snap); };
+        IsVisibleChanged += async (_, _) => { if (IsVisible) { state = WeatherData.Load(() => _app.Settings); await EnsureFreshAsync(); if (_last is { } snap) Render(snap); _nowTick.Start(); } else { _timeBoundary.Stop(); _nowTick.Stop(); if (_warningPopup is { } popup) popup.IsOpen = false; } };
         Loaded += async (_, _) => { await EnsureFreshAsync(); if (IsLoaded) timer.Start(); };
         // 15 分钟周期是硬触发；正在手动刷新时让它跑完，不打断。
         timer.Tick += async (_, _) => { if (IsVisible && !fetching) await Refresh(); };
-        Unloaded += (_, _) => { timer.Stop(); _timeBoundary.Stop(); Cancel(); generation++; };
+        Unloaded += (_, _) => { timer.Stop(); _timeBoundary.Stop(); _nowTick.Stop(); Cancel(); generation++; };
     }
 
     private async Task EnsureFreshAsync()
@@ -634,6 +636,7 @@ internal sealed class WeatherView : UserControl
         finally { s.FetchedAt = fetched; }
     }
     private readonly DispatcherTimer _timeBoundary = new();
+    private readonly DispatcherTimer _nowTick = new() { Interval = TimeSpan.FromMinutes(1) };   // 「现在」分界线的分钟步进
     private DateTimeOffset _nextBoundary;
 
     private void ScheduleBoundary(WeatherSnapshot s, DateTimeOffset now)
@@ -1401,20 +1404,22 @@ internal sealed class WeatherView : UserControl
             });
         }
     }
-    // 当前整点所在列：窗口固定以「当前整点前 1 小时」为起点，所以正常就落在第 2 列（序号 1）。
-    // 必须按整点比、不能按「离现在最近」比：22:40 时 23:00 只差 20 分钟，按最近取会把「现在」标到还没到的那一列。
-    // 时钟按城市所在时区算（快照里带 UTC 偏移），查国外城市时不会拿本机时间硬套。
-    private static int HourNow(WeatherSnapshot s, int n)
+    // 当前时刻的「现在」位置（列左沿计，可带小数）：先按整点选列——最后一个不晚于当前整点的列
+    // （22:40 归 22:00，不会标到还没到的 23:00），再把分钟在列内插值（01:20 → 列号 1 + 20/60）。
+    // 时钟按城市时区算；标签中心的对齐（+0.5 列）由 PlaceNowRule 负责。
+    private static double HourNow(WeatherSnapshot s, int n)
     {
-        string now = WeatherClock.Now(s).ToString("yyyy-MM-ddTHH:00", CultureInfo.InvariantCulture);
+        var now = WeatherClock.Now(s);
+        string hourKey = now.ToString("yyyy-MM-ddTHH:00", CultureInfo.InvariantCulture);
         int best = 0;
         for (int p = 0; p < Math.Min(n, s.HourTimes.Length); p++)
         {
             if (s.HourTimes[p].Length < 16) continue;
-            if (string.CompareOrdinal(s.HourTimes[p], now) <= 0) best = p;   // 最后一个不晚于当前整点的列
+            if (string.CompareOrdinal(s.HourTimes[p], hourKey) <= 0) best = p;   // 最后一个不晚于当前整点的列
             else break;
         }
-        return best;
+        double fraction = (now.Minute + now.Second / 60.0) / 60.0;
+        return Math.Min(best + fraction, n);   // 末列尾段封到列区右沿，不越界
     }
     // 底部时刻行文字：0 点标日期（如「11月20日」）/ 其余原样 HH:mm。直接从 ISO 串切，不依赖 DateTime.Parse 的区域设置。
     private static string HourLabel(WeatherSnapshot s, int p)
@@ -1427,6 +1432,24 @@ internal sealed class WeatherView : UserControl
         int day = int.TryParse(time[8..10], out int d) ? d : 0;
         return $"{month}月{day}日";
     }
+    // 逐时「现在」分界线：时刻标签画在列中心，整点即标签位置——竖线 = 当前整点标签 + 分钟占比 × 列宽
+    // （01:20 落在 01:00 与 02:00 标签之间、离 01:00 约 1/3 处）；列区左边距 6，与预报网格同一套几何。
+    // 分钟步进由 _nowTick 只重贴这一处，不重建列。
+    private void PlaceNowRule(WeatherSnapshot s)
+    {
+        double col = forecast.Columns > 0 ? Math.Max(2, _chartWidth / forecast.Columns) : 0;
+        double now = HourNow(s, Math.Max(1, forecast.Columns));
+        double edge = 6 + Math.Min(now + 0.5, forecast.Columns) * col;   // +0.5：从列左沿换算到标签中心
+        nowRule.Visibility = Visibility.Visible;
+        nowRule.Width = 2;
+        nowRule.Margin = new Thickness(Math.Max(0, edge - 1), 14, 0, 0);   // 顶部 14px 让给「现在」两个字
+        nowRule.Background = NowRuleBrush;
+        nowText.Visibility = Visibility.Visible;
+        nowText.Text = Loc.T("现在", "Now");
+        nowText.Foreground = NowTextBrush;
+        nowText.Margin = new Thickness(Math.Max(0, edge - nowText.Width / 2), 0, 0, 0);
+    }
+
     // 只依赖列宽的两块覆盖层：逐日的「今天」高亮、逐时的「现在」分界线。
     // 列内容与列宽无关，拖动改宽时只重贴这两块，不重建整列。
     private void UpdateAnchors(WeatherSnapshot s)
@@ -1435,18 +1458,8 @@ internal sealed class WeatherView : UserControl
         double col = forecast.Columns > 0 ? Math.Max(2, _chartWidth / forecast.Columns) : 0;
         if (_hourlyMode)
         {
-            // 第 now 列的左沿就是「过去 / 当前」的交界（列区左边距 6，与预报网格同一套几何）。
-            int now = HourNow(s, Math.Max(1, forecast.Columns));
-            double edge = 6 + now * col;
             todayGlow.Visibility = Visibility.Collapsed;
-            nowRule.Visibility = Visibility.Visible;
-            nowRule.Width = 2;
-            nowRule.Margin = new Thickness(Math.Max(0, edge - 1), 14, 0, 0);   // 顶部 14px 让给「现在」两个字
-            nowRule.Background = NowRuleBrush;
-            nowText.Visibility = Visibility.Visible;
-            nowText.Text = Loc.T("现在", "Now");
-            nowText.Foreground = NowTextBrush;
-            nowText.Margin = new Thickness(Math.Max(0, edge - nowText.Width / 2), 0, 0, 0);
+            PlaceNowRule(s);
             return;
         }
         // 「今天」列高亮：跨五行覆盖上段+折线+低温+辅注+逐日信息行，与列内左右各 3px 留白对齐。找不到今天（跨日缓存）就收起。
