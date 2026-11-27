@@ -143,11 +143,12 @@ static class OpenCodeUsageTests
 
         desktop.Queries.Clear();
         desktop.Tables = [["session_message"], ["message"]];
-        desktop.Legacy = [["v1", "old", At(5), null, "kimi-k2", "50", "0", "0", "5", "0", "0.0004"]];
+        desktop.Legacy = [["v1", "old", At(5), null, "kimi-k2", "50", "0", "0", "5", "0", "0.0004"],
+            ["m1", "s1", At(1), null, "glm-5.3", "100", "0", "0", "10", "0", "0.001"]];
         snapshot = new ProviderSnapshot(ProviderId.OpenCode);
         OpenCodeUsage.Read(snapshot, desktop, database, start, start.AddDays(2));
         var legacy = desktop.Queries.Single(q => q.Contains("FROM message "));
-        check("1.x records left in the message table are read as well", legacy.Contains("json_extract(data, '$.role') = 'assistant'") && legacy.Contains("$.modelID") &&
+        check("OpenCode counts migrated records once and includes records remaining in the 1.x table", legacy.Contains("json_extract(data, '$.role') = 'assistant'") && legacy.Contains("$.modelID") &&
             snapshot.Entries.Select(e => e.Key).SequenceEqual(["opencode:m1", "opencode:v1", "opencode:m3"]) && snapshot.Entries[1].Model == "kimi-k2");
 
         desktop.Legacy = null;

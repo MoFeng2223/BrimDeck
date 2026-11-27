@@ -19,8 +19,8 @@ public sealed record OpenCodeCredential(string Token, DateTimeOffset? ExpiresAt,
 //     the active row of integration "opencode". 1.x kept API keys in auth.json ({ "<provider>": { type: "api", key } }).
 //   - Records: 2.x writes each model response to session_message (type "assistant", data { model: { id, providerID },
 //     cost, tokens: { input, output, reasoning, cache: { read, write } } }); 1.x writes them to message (data with role
-//     "assistant", modelID, providerID, and the same cost and tokens). Moving to 2.x leaves the 1.x tables as they were and
-//     does not copy them, so both are read. input excludes the cache, and reasoning is billed as output but not counted in
+//     "assistant", modelID, providerID, and the same cost and tokens). Both tables are read, preferring the 2.x record
+//     when the same message ID exists in both. input excludes the cache, and reasoning is billed as output but not counted in
 //     output. cost is what OpenCode charges at its own list prices; for Go models it is what the request counted against the
 //     allowance, and 0 for free models. A failed response has no tokens. A session also counts the request that names it,
 //     which has no record of its own and is not read.
@@ -118,7 +118,8 @@ public static class OpenCodeUsage
         }
         Query("session_message", "type = 'assistant'");
         Query("message", "json_extract(data, '$.role') = 'assistant'");
-        snapshot.Entries = Parse(rows).Where(e => e.Time >= start && e.Time <= now && e.Total > 0).OrderBy(e => e.Time).ToList();
+        snapshot.Entries = Parse(rows).Where(e => e.Time >= start && e.Time <= now && e.Total > 0)
+            .DistinctBy(e => e.Key).OrderBy(e => e.Time).ToList();
         snapshot.UsageComplete = complete;
         int sessions = rows.Where(row => row.Length > 1 && row[1] is not null).Select(row => row[1]).Distinct().Count();
         snapshot.UsageNote = Loc.T($"本机 OpenCode {start.LocalDateTime:yyyy-MM-dd} 起 · {sessions} 个会话 · {snapshot.Entries.Count} 次模型请求",
