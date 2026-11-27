@@ -163,6 +163,7 @@ public partial class MainWindow : Window
         InitializeMonitor();
         InitializeShelf();
         InitializeDevices();
+        InitializePowerPlans();
         InitializeResize();
         InitializeScale();
         InitializeShadow();
@@ -722,6 +723,7 @@ public partial class MainWindow : Window
         System.Windows.Automation.AutomationProperties.SetName(MonitorPageButton, Loc.T("系统监控", "System monitor"));
         UpdateShelfPageButton();
         System.Windows.Automation.AutomationProperties.SetName(DevicesPageButton, Loc.T("设备电量", "Device batteries"));
+        System.Windows.Automation.AutomationProperties.SetName(PowerPlanPageButton, Loc.T("电源方案", "Power plans"));
         System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("音乐", "Music"));
         System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));
     }
