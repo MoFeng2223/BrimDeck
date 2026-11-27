@@ -252,7 +252,7 @@ Options of `brim notify send`:
 | `--wait` | Wait until the notice is handled, closed or runs out of time |
 | `--timeout DURATION` | How long to wait for the result, for example `5m`; 3 minutes by default, 30 at most. A notice that stays is on the island for at most the longest stay set under "How notices show", or this time when it is shorter |
 | `--no-history` | Only show it on the island; do not list it among the recent notices |
-| `--json FILE` | Read the whole message as JSON from a file, or from standard input with `-`; options given on the command line come over its values |
+| `--json FILE` | Read the whole message as JSON from a file, or from standard input with `-`; options given on the command line come over its values. The JSON should be UTF-8; on Windows, JSON that is not UTF-8 is read in the PC's code page (the console's for what is piped in, the system's for a file) |
 
 Where you gave a source its own looks (Settings › Live notices › Apps, the arrow beside its name), those come first: `--glow`, the category's color and `--icon none` then change nothing for it.
 

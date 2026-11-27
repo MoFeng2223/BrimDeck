@@ -122,7 +122,8 @@ public static class NotifyCli
                 buffer.Write(chunk, 0, n);
                 if (buffer.Length > MaxHookInput) return Print(AgentHook.Quiet(hook.Format, ""));
             }
-            ReadOnlySpan<byte> json = buffer.ToArray();
+            // A tool that writes its hook input in the PC's code page rather than UTF-8 is still read.
+            ReadOnlySpan<byte> json = InputText.Utf8(buffer.ToArray());
             if (json.StartsWith("\uFEFF"u8)) json = json[3..];
             using var document = System.Text.Json.JsonDocument.Parse(json.ToArray());
             input = document.RootElement.Clone();
@@ -228,8 +229,9 @@ public static class NotifyCli
             Console.Error.WriteLine(Name + ": could not read " + (file == "-" ? "standard input" : file) + ": " + ex.Message);
             return null;
         }
-        // A file saved with a byte order mark is still JSON.
-        ReadOnlySpan<byte> text = json;
+        // A file saved with a byte order mark is still JSON, and so is one in the PC's code page (what cmd pipes, a file saved
+        // as "ANSI").
+        ReadOnlySpan<byte> text = InputText.Utf8(json, file: file != "-");
         if (text.StartsWith("﻿"u8)) text = text[3..];
         if (NoticeProtocol.Deserialize(text) is { } message) return message;
         Console.Error.WriteLine(Name + ": " + (file == "-" ? "standard input" : file) + " does not hold a message as JSON.");

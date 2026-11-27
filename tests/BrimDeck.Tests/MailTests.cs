@@ -236,6 +236,20 @@ internal static class MailTests
             using var watch = seen.Watch(server);
             watch.Start();
             await Until(() => seen.State == MailState.Watching);
+            // "【议题征集】" and "：11/28(周六)" as GBK bytes, written out so that the test needs no code page of its own.
+            byte[] subject = [0xA1, 0xBE, 0xD2, 0xE9, 0xCC, 0xE2, 0xD5, 0xF7, 0xBC, 0xAF, 0xA1, 0xBF];
+            byte[] text = [0xA3, 0xBA, 0x31, 0x31, 0x2F, 0x32, 0x38, 0x28, 0xD6, 0xDC, 0xC1, 0xF9, 0x29];
+            server.Add("Sender", "s@example.com", "=?gb2312?B?" + Convert.ToBase64String(subject) + "?=", text, "gb2312", push: true);
+            check("Mail watch: a subject and a text in GB2312 (Chinese mail from Outlook and Exchange) are read as Chinese",
+                await Until(() => seen.Count == 1) && seen.Mail[0] is { Subject: "【议题征集】", Preview: "：11/28(周六)" });
+        }
+
+        using (var server = new FakeImap())
+        {
+            var seen = new Seen();
+            using var watch = seen.Watch(server);
+            watch.Start();
+            await Until(() => seen.State == MailState.Watching);
             for (int i = 0; i < MailWatch.MaxAtOnce + 15; i++) server.Add("Sender " + i, "s@example.com", "Mail " + i, "text");
             server.Push();
             check("Mail watch: of a flood only the latest are reported", await Until(() => seen.Count >= MailWatch.MaxAtOnce) && await Task.Delay(400).ContinueWith(_ => true)
@@ -283,7 +297,8 @@ internal static class MailTests
     private sealed class FakeImap : IDisposable
     {
         public const uint Validity = 7;
-        private sealed record Message(uint Uid, string FromName, string FromAddress, string Subject, string Text, bool Seen);
+        // Text is the body's bytes as the server holds them, in Charset.
+        private sealed record Message(uint Uid, string FromName, string FromAddress, string Subject, byte[] Text, string Charset, bool Seen);
 
         private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
         private readonly CancellationTokenSource _stop = new();
@@ -309,8 +324,12 @@ internal static class MailTests
         }
 
         public void Add(string fromName, string fromAddress, string subject, string text, bool push = false, bool seen = false)
+            => Add(fromName, fromAddress, subject, Encoding.UTF8.GetBytes(text), "UTF-8", push, seen);
+
+        // A message whose body is in another charset: its bytes and the charset's name.
+        public void Add(string fromName, string fromAddress, string subject, byte[] text, string charset, bool push = false, bool seen = false)
         {
-            lock (_gate) _messages.Add(new(_nextUid++, fromName, fromAddress, subject, text, seen));
+            lock (_gate) _messages.Add(new(_nextUid++, fromName, fromAddress, subject, text, charset, seen));
             if (push) Push();
         }
 
@@ -394,7 +413,8 @@ internal static class MailTests
                         {
                             var parts = command.Split(' ');
                             string set = parts[verb == "FETCH" ? 1 : 2];
-                            var reply = new StringBuilder();
+                            using var reply = new MemoryStream();
+                            void Put(string words) => reply.Write(Encoding.UTF8.GetBytes(words));
                             foreach (var (message, index) in messages.Select((m, i) => (m, i)))
                             {
                                 uint number = verb == "FETCH" ? (uint)index + 1 : message.Uid;
@@ -409,14 +429,15 @@ internal static class MailTests
                                     string from = $"((\"{name}\" NIL \"{address[0]}\" \"{address[1]}\"))";
                                     items.Add($"ENVELOPE (\"{DateTimeOffset.UtcNow:r}\" \"{message.Subject}\" {from} NIL NIL ((NIL NIL \"me\" \"example.com\")) NIL NIL NIL \"<{message.Uid}@example.com>\")");
                                 }
-                                byte[] text = Encoding.UTF8.GetBytes(message.Text);
-                                if (command.Contains("BODYSTRUCTURE")) items.Add($"BODYSTRUCTURE (\"TEXT\" \"PLAIN\" (\"CHARSET\" \"UTF-8\") NIL NIL \"8BIT\" {text.Length} 1)");
-                                reply.Append($"* {index + 1} FETCH ({string.Join(' ', items)}");
+                                byte[] text = message.Text;
+                                if (command.Contains("BODYSTRUCTURE")) items.Add($"BODYSTRUCTURE (\"TEXT\" \"PLAIN\" (\"CHARSET\" \"{message.Charset}\") NIL NIL \"8BIT\" {text.Length} 1)");
+                                Put($"* {index + 1} FETCH ({string.Join(' ', items)}");
                                 var body = Regex.Match(command, @"BODY\.PEEK\[([^\]]*)\]<(\d+)\.(\d+)>");
-                                if (body.Success) reply.Append($" BODY[{body.Groups[1].Value}]<{body.Groups[2].Value}> {{{text.Length}}}\r\n").Append(message.Text);
-                                reply.Append(")\r\n");
+                                if (body.Success) { Put($" BODY[{body.Groups[1].Value}]<{body.Groups[2].Value}> {{{text.Length}}}\r\n"); reply.Write(text); }
+                                Put(")\r\n");
                             }
-                            await Send(reply + $"{tag} OK done\r\n");
+                            Put($"{tag} OK done\r\n");
+                            await stream.WriteAsync(reply.ToArray());
                             break;
                         }
                         case "NOOP":

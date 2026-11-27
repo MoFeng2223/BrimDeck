@@ -46,6 +46,11 @@ public sealed class MailWatch(MailEndpoint endpoint, Func<CancellationToken, Tas
     // The preview kept of a message's text.
     public const int MaxPreview = 300;
 
+    // .NET has GB2312, GBK, Big5, Shift_JIS and the other code pages only once they are registered, and MimeKit looks for them
+    // once, the first time it decodes anything: registered later, a subject or a text in GB2312 (Chinese mail from Outlook and
+    // Exchange) is read as Latin-1 for as long as the app runs. So they are registered before the first connection is made.
+    static MailWatch() => System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+
     private readonly MailPace _pace = pace ?? new();
     private readonly CancellationTokenSource _stop = new();
     private readonly object _gate = new();

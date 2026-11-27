@@ -43,6 +43,7 @@ try
     BrimCliTests.Run(Check);
     AgentHookTests.Run(Check);
     await MailTests.Run(Check);
+    BrimCliTests.Input(Check);
     CommandPathTests.Run(Check);
     NoticeCodeTests.Run(root, Check);
     RowBatchesTests.Run(Check);

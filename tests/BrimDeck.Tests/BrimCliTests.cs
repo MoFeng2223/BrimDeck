@@ -151,6 +151,27 @@ internal static class BrimCliTests
             && NotifyCommandLine.Combine(NoticeProtocol.Deserialize("{}"u8)!, new NoticeMessage { Title = "t" }, "brim") is { Title: "t" });
     }
 
+    // What is piped in or read from a file in the PC's code page rather than UTF-8. Run after MailTests: reading such bytes
+    // registers the code pages for the whole process, which would hide a mail watch that forgot to.
+    public static void Input(Action<string, bool> check)
+    {
+        // "测试" in GBK, written out as bytes.
+        byte[] gbk = [.. "{\"title\":\""u8, 0xB2, 0xE2, 0xCA, 0xD4, .. "\"}"u8];
+        byte[] utf8 = Encoding.UTF8.GetBytes("{\"title\":\"测试\"}");
+        check("Input: UTF-8 is left as it is whatever the PC's code page", ReferenceEquals(InputText.Utf8(utf8, [936]), utf8) && ReferenceEquals(InputText.Utf8(utf8), utf8)
+            && ReferenceEquals(InputText.Utf8(utf8, file: true), utf8));
+        check("Input: bytes that are not UTF-8 are read in the PC's code page", InputText.Utf8(gbk, [936]).SequenceEqual(utf8) && NoticeProtocol.Deserialize(InputText.Utf8(gbk, [936]))?.Title == "测试");
+        check("Input: no console (0) and UTF-8 itself are passed over for the next code page", InputText.Utf8(gbk, [0, 65001, 936]).SequenceEqual(utf8));
+        check("Input: bytes the code page cannot read, or no code page to read them in, stay as they are", InputText.Utf8([0x7B, 0x81], [936]) is [0x7B, 0x81] && ReferenceEquals(InputText.Utf8(gbk, []), gbk));
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        foreach (var (page, words) in new[] { (936, "测试"), (54936, "测试"), (950, "測試"), (932, "テスト"), (949, "테스트"), (1251, "тест"), (1252, "café"), (850, "café"), (437, "café") })
+        {
+            string json = "{\"title\":\"" + words + "\"}";
+            byte[] bytes = Encoding.GetEncoding(page).GetBytes(json);
+            check($"Input: code page {page} is read", !System.Text.Unicode.Utf8.IsValid(bytes) && InputText.Utf8(bytes, [page]).SequenceEqual(Encoding.UTF8.GetBytes(json)));
+        }
+    }
+
     private static void Wire(Action<string, bool> check)
     {
         string Text(NoticeMessage message) => Encoding.UTF8.GetString(NoticeProtocol.Serialize(message));
