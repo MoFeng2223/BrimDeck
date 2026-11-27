@@ -112,7 +112,7 @@ internal static class WeatherAggregator
         string? zone = city.TimeZoneId ?? parts.Values.Select(part => part.TimeZone).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
         var today = LocalToday(zone, city);
         var dates = Enumerable.Range(-10, 24).Select(offset => today.AddDays(offset)).ToArray();
-        var dayMap = dates.ToDictionary(date => date.ToString("yyyy-MM-dd"), _ => new DayPoint());
+        var dayMap = dates.ToDictionary(WeatherClock.DateKey, _ => new DayPoint());
         foreach (var (date, point) in dayMap) point.Date = date;
         var hours = new SortedDictionary<string, HourPoint>(StringComparer.Ordinal);
         var current = new CurrentPart();
@@ -190,7 +190,7 @@ internal static class WeatherAggregator
                     if (part.Days is { Count: > 0 } ds)
                     {
                         bool any = false;
-                        string todayKey = today.ToString("yyyy-MM-dd");
+                        string todayKey = WeatherClock.DateKey(today);
                         foreach (var day in ds)
                         {
                             // 按日期归属：今天及以后算预报，之前算历史。
@@ -248,7 +248,7 @@ internal static class WeatherAggregator
         }
         var localNow = DateTimeOffset.UtcNow.ToOffset(ClockOffset(zone, city)).DateTime;
         bool daylight = current.IsDay ?? (localNow.Hour is >= 6 and < 18);
-        if (dayMap.TryGetValue(localNow.ToString("yyyy-MM-dd"), out var localDay)
+        if (dayMap.TryGetValue(WeatherClock.DateKey(localNow), out var localDay)
             && DateTime.TryParse(localDay.Sunrise, out var sunrise) && DateTime.TryParse(localDay.Sunset, out var sunset)
             && sunrise.Date == localNow.Date && sunset.Date == localNow.Date && sunrise < sunset)
             daylight = localNow >= sunrise && localNow < sunset;
@@ -258,9 +258,10 @@ internal static class WeatherAggregator
             // 快照一律按真实城市键存（自动定位也一样）：CityKey 供快照落盘与逐时历史使用，
             // 与下方 WeatherHourHistory.Read 的读取键严格一致；"auto" 只是 State.AutoKey 的映射。
             CityKey = cityKey,
-            Today = today.ToString("yyyy-MM-dd"),
+            Today = WeatherClock.DateKey(today),
             FetchedAt = DateTimeOffset.Now,
-            // 城市时钟偏移：界面靠它把「现在」认到正确的整点列上（国外城市与本机不在同一时区）。
+            // 城市时钟：优先用 IANA 时区按当前时刻解析偏移，旧快照才靠固定偏移兜底。
+            TimeZoneId = zone ?? "",
             UtcOffsetMinutes = (int)ClockOffset(zone, city).TotalMinutes,
             Temperature = current.Temperature ?? double.NaN,
             FeelsLike = current.FeelsLike ?? current.Temperature ?? double.NaN,
@@ -290,7 +291,7 @@ internal static class WeatherAggregator
             AirEffect = air?.HealthEffect ?? "",
             AirAdvice = air?.HealthGeneral ?? "",
             AirAdviceSensitive = air?.HealthSensitive ?? "",
-            DayDates = dates.Select(date => date.ToString("yyyy-MM-dd")).ToArray(),
+            DayDates = dates.Select(WeatherClock.DateKey).ToArray(),
             DayCodes = datePoints(dayMap, dates, point => point.Code ?? -1),
             DayConditions = datePoints(dayMap, dates, point => point.Condition ?? ""),
             DayHighC = datePoints(dayMap, dates, point => point.HighC ?? double.NaN),
@@ -352,7 +353,7 @@ internal static class WeatherAggregator
     }
 
     private static T[] datePoints<T>(Dictionary<string, DayPoint> map, DateTime[] dates, Func<DayPoint, T> select)
-        => dates.Select(date => select(map[date.ToString("yyyy-MM-dd")])).ToArray();
+        => dates.Select(date => select(map[WeatherClock.DateKey(date)])).ToArray();
 
     // 空位才写入：来源链靠前的那份数据优先，后面的来源只补空缺。
     private static bool Set<T>(ref T? field, T? value) where T : struct

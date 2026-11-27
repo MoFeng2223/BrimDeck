@@ -169,8 +169,10 @@ internal sealed class WeatherSnapshot
     // 快照实际归属城市的历史键（city.ToString()）。快照一律按真实城市键存（自动定位也一样，
     // "auto" 只是 State.AutoKey 指向最新定位结果的映射），逐时历史与快照同键，手动选同一城市可复用。
     public string CityKey {get;set;}="";
-    // 城市所在地的 UTC 偏移（分钟）：逐时「现在」列要按城市时钟认，查国外城市时不能用本机时间。MinValue = 未知。
+    // 城市所在地的 UTC 偏移（分钟）：旧快照的兜底，MinValue = 未知。
     public int UtcOffsetMinutes {get;set;} = int.MinValue;
+    // 城市 IANA 时区：优先按当前时刻解析偏移，夏令时切换后离线快照也能认对「今天」。
+    public string TimeZoneId {get;set;}="";
     // 当前时刻
     public double Temperature {get;set;} public double FeelsLike {get;set;} public int HumidityPercent {get;set;} public double WindKmh {get;set;} public int WeatherCode {get;set;} public bool IsDay {get;set;}
     public double WindGustKmh {get;set;} public double WindDirectionDeg {get;set;} public string WindDirection {get;set;}="";

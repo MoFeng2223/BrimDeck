@@ -19,7 +19,7 @@ internal static class ChinaDailySupplement
     {
         if (days is null) return true;
         return !Enumerable.Range(0, 14).All(offset =>
-            days.Any(day => day.Date == today.AddDays(offset).ToString("yyyy-MM-dd") &&
+            days.Any(day => day.Date == WeatherClock.DateKey(today.AddDays(offset)) &&
                 day.HighC.HasValue && day.LowC.HasValue && day.Code.HasValue && day.NightCode.HasValue &&
                 day.PrecipMm.HasValue && day.WindDir is not null && day.WindMaxKmh.HasValue));
     }
@@ -38,7 +38,7 @@ internal static class ChinaDailySupplement
         var end = today.AddDays(13);
         for (var month = new DateTime(start.Year, start.Month, 1); month <= end; month = month.AddMonths(1))
         {
-            string stamp = month.ToString("yyyyMM");
+            string stamp = WeatherClock.MonthKey(month);
             months.Add(Body($"{id}|{stamp}", TimeSpan.FromHours(6), $"https://d1.weather.com.cn/calendar_new/{stamp[..4]}/{id}_{stamp}.html", token, 6));
         }
         var bodies = await Task.WhenAll(months);

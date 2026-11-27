@@ -19,9 +19,16 @@ internal static class Geo
 // 城市时钟与日期轴定位：只有一套实现，数据层、设置页和视图都从这里取“今天”。
 internal static class WeatherClock
 {
-    // 城市当地此刻；快照没带时区信息时退回本机时间。
+    // 公历日期键：来源返回的日期都是 yyyy-MM-dd，键不能跟随线程的区域性（佛历会把 2026 写成 2569）。
+    internal static string DateKey(DateTime date) => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    internal static string MonthKey(DateTime date) => date.ToString("yyyyMM", CultureInfo.InvariantCulture);
+
+    // 城市当地此刻；优先按快照保存的 IANA 时区解析（夏令时随之切换），旧快照才退回固定偏移。
     internal static DateTimeOffset Now(WeatherSnapshot s)
     {
+        if (!string.IsNullOrWhiteSpace(s.TimeZoneId)
+            && TimeZoneInfo.TryFindSystemTimeZoneById(s.TimeZoneId, out var zone))
+            return TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, zone);
         if (s.UtcOffsetMinutes is > -1440 and < 1440)
         {
             try { return DateTimeOffset.Now.ToOffset(TimeSpan.FromMinutes(s.UtcOffsetMinutes)); } catch { }
@@ -51,7 +58,7 @@ internal static class WeatherClock
     // 城市当前日期在日期轴上的位置；缓存跨日对不上时返回 -1，让视图把日期轴标成过期。
     internal static int LiveIndex(WeatherSnapshot s)
     {
-        string today = Now(s).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        string today = DateKey(Now(s).DateTime);
         for (int i = 0; i < s.DayDates.Length; i++) if (s.DayDates[i].StartsWith(today, StringComparison.Ordinal)) return i;
         return -1;
     }
