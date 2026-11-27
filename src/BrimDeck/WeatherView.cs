@@ -79,6 +79,8 @@ internal sealed class WeatherView : UserControl
     // 预报列里的天气图标：档 1 连同图标行一起收起（只留数值与时刻），行高归零前先把图标藏掉，
     // 否则 0 高的行不会裁切子元素，图标会溢到相邻行上。
     private readonly List<UIElement> columnGlyphs = new();
+    private readonly List<UIElement> lowerGlyphs = new();
+    private readonly List<Grid> dayInfoGrids = new();
     // 当前预报区收纳状态：4 完整 / 3 藏天气文字 / 2 藏折线 / 1 藏图标 / 0 整行折叠。
     // 五档各有独立高度：档 1 藏图标但保留温度与时刻，所以矮面板不会从「有图标」直接跌到「整行消失」。
     // 每一档需要的高度是骨架常量之和（StateHeight），决策是 room→状态 的纯函数；
@@ -242,15 +244,18 @@ internal sealed class WeatherView : UserControl
         // 底部三行各管各的显隐与定高，总高与拆开前完全一致（20 + 14 + 44 = 20 + 58）：
         //   lowRow 逐日低温 / 逐时时刻，档 1 起常驻；
         //   lowNote 逐日转前天气名，只在档 4 出现（与上方天气名同进退），逐时恒为 0；
-        //   dayInfoRow 转前图标 + 风，逐日档 2 起常驻，与折线互不牵连。
+        //   dayInfoRow 转前图标 + 风，逐日档 1 起常驻：档 1 收图标缩成风向带，风向保留到档 0。
         lowRow.Visibility = showTemp ? Visibility.Visible : Visibility.Collapsed;
         bool showNote = showTemp && !_hourlyMode && showCondition;
         lowNote.Visibility = showNote ? Visibility.Visible : Visibility.Collapsed;
-        bool showInfo = showTemp && !_hourlyMode && level >= 2;
+        bool showInfo = showTemp && !_hourlyMode && level >= 1;
         dayInfoRow.Visibility = showInfo ? Visibility.Visible : Visibility.Collapsed;
+        // 档 1 收起转前图标：信息行收缩为风向带并贴底，风向不占用图标空出来的高度。
+        foreach (var glyph in lowerGlyphs) glyph.Visibility = showGlyph ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var grid in dayInfoGrids) grid.RowDefinitions[0].Height = new GridLength(showGlyph ? ColGlyph : 0, GridUnitType.Star);
         lowRow.Height = LowRowHeight;
         lowNote.Height = showNote ? DayNoteHeight : 0;
-        dayInfoRow.Height = DayInfoCompact;
+        dayInfoRow.Height = showGlyph ? DayInfoCompact : DayInfoCompact - ColGlyph;
         days.RowDefinitions[2].Height = GridLength.Auto;
         days.RowDefinitions[3].Height = GridLength.Auto;
         days.RowDefinitions[4].Height = GridLength.Auto;
@@ -261,10 +266,10 @@ internal sealed class WeatherView : UserControl
     }
     // 各收纳状态需要的高度：骨架行高全是常量（ColumnRowHeights 与各行固定高），状态高度因此也是常量。
     // 估算里加了少量安全余量：宁可早一档收起，也不让内容溢出弹性行——决策不需要任何实测。
-    // 档位语义：4 完整 / 3 藏天气文字 / 2 藏折线 / 1 藏图标（留温度与时刻）/ 0 整行折叠。
+    // 档位语义：4 完整 / 3 藏天气文字 / 2 藏折线 / 1 藏图标（留温度、时刻与风向）/ 0 整行折叠。
     // 逐日比逐时多一条「转前图标 + 风」镜像行，逐时比逐日多两行小时级数据（降水概率、空气等级）：
     // 两套骨架各自估算后取更高的那套，同一尺寸下两种模式的档位一致，切换不会跳档。
-    // 镜像行在档 2 起常驻（折线收起不影响它），只有连图标一起收起的档 1 才随之下线。
+    // 镜像行在档 1 起常驻（折线收起不影响它）：档 1 收图标缩成风向带贴底，档 0 才整行下线。
     private double StateHeight(int level) => Math.Max(SkeletonHeight(level, true), SkeletonHeight(level, false));
     private double SkeletonHeight(int level, bool hourly)
     {
@@ -286,7 +291,8 @@ internal sealed class WeatherView : UserControl
         if (level >= 3) h += ChartMinHeight + ChartTopMargin + BandSafety;  // 折线行按最小高度计，富余高度由它吸收
         if (level >= 1) h += LowRowHeight + BandSafety;                     // 低温/时刻行：档 1 起常驻（档 1 只收起图标）
         if (!hourly && level >= 4) h += DayNoteHeight + BandSafety;         // 转前天气名行：档 4 才有
-        if (!hourly && level >= 2) h += DayInfoCompact + BandSafety;        // 转前图标 + 风：档 2 起常驻
+        if (!hourly && level >= 2) h += DayInfoCompact + BandSafety;            // 转前图标 + 风：档 2 起完整（图标 + 风向带）
+        if (!hourly && level == 1) h += DayInfoCompact - ColGlyph + BandSafety; // 档 1 只留风向带，行高随图标收起收缩
         return h;
     }
     // 状态决策：room 的纯函数，双向即时、阈值不对称。降档在 room < 档高 时立即执行
@@ -1175,7 +1181,7 @@ internal sealed class WeatherView : UserControl
     }
     private void DrawForecast(WeatherSnapshot s)
     {
-        forecast.Children.Clear(); lowRow.Children.Clear(); lowNote.Children.Clear(); dayInfoRow.Children.Clear(); tempLabels.Clear(); conditionLabels.Clear(); conditionRows.Clear(); columnGlyphs.Clear();
+        forecast.Children.Clear(); lowRow.Children.Clear(); lowNote.Children.Clear(); dayInfoRow.Children.Clear(); tempLabels.Clear(); conditionLabels.Clear(); conditionRows.Clear(); columnGlyphs.Clear(); lowerGlyphs.Clear(); dayInfoGrids.Clear();
         nowRule.Visibility = Visibility.Collapsed; nowText.Visibility = Visibility.Collapsed;   // 「现在」分界线只属于逐时
         // 天文镜头：预报列收起，弧线、色带与底部时刻行全部画进弹性的 chart 画布（由 DrawChart 统一绘制）。
         if (_lens == Lens.Celestial) { forecast.Visibility = Visibility.Collapsed; todayGlow.Visibility = Visibility.Collapsed; return; }
@@ -1422,6 +1428,8 @@ internal sealed class WeatherView : UserControl
             var lowerGlyph = new WeatherGlyph(before, true) { Width = ColGlyph, Height = ColGlyph, HorizontalAlignment = HorizontalAlignment.Center };
             lowerGlyph.VerticalAlignment = VerticalAlignment.Center;
             CellAt(info, lowerGlyph, 0);
+            lowerGlyphs.Add(lowerGlyph);
+            dayInfoGrids.Add(info);
             string dirText = s.DayWindDir.Length > i ? s.DayWindDir[i] : "";
             double dir = s.DayWindDirDeg.Length > i ? s.DayWindDirDeg[i] : double.NaN;
             double wind = s.DayWindMaxKmh.Length > i ? s.DayWindMaxKmh[i] : double.NaN;
