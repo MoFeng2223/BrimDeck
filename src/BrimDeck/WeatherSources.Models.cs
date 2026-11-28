@@ -2,11 +2,12 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// 分钟降水：每 5 分钟一个点（和风 /v7/minutely/5m、Open-Meteo minutely_15 折算）
+// 分钟降水：时间戳是区间起点；和风 5 分钟、Open-Meteo 15 分钟，由来源写入实际跨度。
 internal sealed class MinutePoint
 {
     public string Time { get; set; } = "";
     public double? Precip { get; set; }
+    public int SpanMinutes { get; set; }
 }
 
 // 气象预警：一条预警的标题、正文、等级与类型

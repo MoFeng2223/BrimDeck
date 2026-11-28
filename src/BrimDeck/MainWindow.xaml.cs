@@ -659,7 +659,7 @@ public partial class MainWindow : Window
         _grips?.InvalidateVisual();
         if (sameTheme) { Island.Pattern = Look.Texture(dpiScale: dpi) ?? Look.Scanlines(dpiScale: dpi); FitShadowCache(dpi); return; }
         Foreground = UI.Brush(Look.Primary);
-        _weatherView?.ApplyWeatherTheme();
+        _weatherView?.ApplyWeatherTheme(Look);
         Look.Dress(Island, dpiScale: dpi);
         if (IslandShadow.Effect is System.Windows.Media.Effects.DropShadowEffect shadow) Look.Dress(shadow);
         // Pixel art draws the island's text unsmoothed, as on a pixel screen, and casts a stepped shadow.

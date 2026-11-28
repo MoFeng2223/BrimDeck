@@ -114,15 +114,16 @@ internal sealed class WeatherView : UserControl
     private double _chartDrawnWidth;
     private DispatcherTimer? _chartSettle;
     // 主题配色只有几种，画刷冻结后共享：一次重画会碰上百个元素，逐个 new 只会白白制造垃圾。
-    private readonly PanelLook _look;
+    private PanelLook _look;
     private Brush ColText => UI.Brush(_look.Secondary);
     private Brush ColMuted => UI.Brush(_look.Tertiary);
     private Brush ColCondition => UI.Brush(_look.Primary);
     private Brush ColWind => Ink(Color.FromRgb(160,205,235));
     private Brush ChartTemp => Ink(Color.FromRgb(102,194,255));
     private Brush Ink(Color color) => new SolidColorBrush(_look.Readable(color, PanelThemes.TextContrast));
-    internal void ApplyWeatherTheme()
+    internal void ApplyWeatherTheme(PanelLook look)
     {
+        _look = look;
         Foreground = UI.Brush(_look.Primary);
         minuteTitle.Foreground = footerNote.Foreground = ColMuted;
         minuteNote.Foreground = ColText;
@@ -142,6 +143,7 @@ internal sealed class WeatherView : UserControl
     private double _chartWidth;
     private SummaryPlan? _summaryPlan;
     private int generation;
+    private int _visibilityEpoch;   // 隐藏/卸载会让等待中的加载续体作废，避免它回头启动计时器
     // 视口即内容区，宽度与高度随 Fit 传入值整体填充。预报区骨架恒定（各行行高固定、图标恒定 28px），
     // 折线行是唯一弹性带；高度不足按 4→3→2→1→0 逐级收纳：4 完整 → 3 藏上下天气名称 → 2 藏折线 → 1 藏图标 → 0 整行折叠。
     internal void Fit(double width, double height, bool force = false)
@@ -396,7 +398,7 @@ internal sealed class WeatherView : UserControl
         _app = app;
         _look = look;
         Width = 620; Height = 290;
-        Background = Brushes.Transparent; ApplyWeatherTheme();
+        Background = Brushes.Transparent; ApplyWeatherTheme(look);
         // 内容整块填满视口：UserControl 默认按内容自然尺寸贴左上，预报区取 Star 行时整块内容只剩自然高度，
         // 上下会被留出等量空白（页头下沿到摘要之间那一大条黑带就是这么来的）。显式拉伸后视图上沿紧贴页头。
         HorizontalContentAlignment = HorizontalAlignment.Stretch;
@@ -480,19 +482,20 @@ internal sealed class WeatherView : UserControl
         {
             if (!IsVisible) { Pause(); return; }
             if (!IsLoaded) return;
+            int epoch = _visibilityEpoch;
             state = WeatherData.Load(() => _app.Settings);
-            await ResumeAsync();
+            await ResumeAsync(epoch);
         };
-        Loaded += async (_, _) => { if (IsVisible) await ResumeAsync(); };
+        Loaded += async (_, _) => { if (IsVisible) await ResumeAsync(_visibilityEpoch); };
         // 15 分钟周期是硬触发；正在手动刷新时让它跑完，不打断。
         timer.Tick += async (_, _) => { if (IsVisible && !fetching) await Refresh(); };
         Unloaded += (_, _) => Pause();
     }
 
-    private async Task ResumeAsync()
+    private async Task ResumeAsync(int epoch)
     {
         await EnsureFreshAsync();
-        if (!IsLoaded || !IsVisible) return;
+        if (epoch != _visibilityEpoch || !IsLoaded || !IsVisible) return;
         if (_last is { } snap) Render(snap);
         timer.Start();
         _nowTick.Start();
@@ -507,6 +510,7 @@ internal sealed class WeatherView : UserControl
         if (_warningPopup is { } popup) popup.IsOpen = false;
         Cancel();
         generation++;
+        _visibilityEpoch++;
     }
 
     private async Task EnsureFreshAsync()
@@ -667,6 +671,23 @@ internal sealed class WeatherView : UserControl
     private readonly DispatcherTimer _nowTick = new() { Interval = TimeSpan.FromMinutes(1) };   // 「现在」分界线的分钟步进
     private DateTimeOffset _nextBoundary;
 
+    // 分钟点的 Time 是区间起点。来源写明跨度时直接用；老快照按相邻时间戳推导，最后才按来源兜底。
+    private static int MinuteSpan(WeatherSnapshot s, MinutePoint[] points, int index, DateTimeOffset start)
+    {
+        if (points[index].SpanMinutes > 0) return points[index].SpanMinutes;
+        if (index + 1 < points.Length && WeatherClock.MinuteAt(s, points[index + 1].Time) is { } next)
+        {
+            int gap = (int)Math.Round((next - start).TotalMinutes);
+            if (gap is > 0 and <= 60) return gap;
+        }
+        if (index > 0 && WeatherClock.MinuteAt(s, points[index - 1].Time) is { } previous)
+        {
+            int gap = (int)Math.Round((start - previous).TotalMinutes);
+            if (gap is > 0 and <= 60) return gap;
+        }
+        return s.Sources.TryGetValue("Minutely", out var source) && source.Contains("Open-Meteo", StringComparison.OrdinalIgnoreCase) ? 15 : 5;
+    }
+
     private void ScheduleBoundary(WeatherSnapshot s, DateTimeOffset now)
     {
         var midnight = now.Date.AddDays(1);
@@ -674,8 +695,14 @@ internal sealed class WeatherView : UserControl
             ?? now.AddDays(1);
         foreach (var warning in s.Warnings)
             if (warning.ExpireTime is { } expiry && expiry > now && expiry < next) next = expiry;
-        foreach (var point in s.Minutes)
-            if (WeatherClock.MinuteAt(s, point.Time) is { } at && at >= now && at < next) next = at.AddMilliseconds(1);
+        for (int i = 0; i < s.Minutes.Length; i++)
+            if (WeatherClock.MinuteAt(s, s.Minutes[i].Time) is { } at)
+            {
+                // 起点要重画「开始下雨」，终点要重画正在进行的区间结束。
+                if (at >= now && at < next) next = at.AddMilliseconds(1);
+                var end = at.AddMinutes(MinuteSpan(s, s.Minutes, i, at));
+                if (end > now && end < next) next = end.AddMilliseconds(1);
+            }
         _nextBoundary = next;
         _timeBoundary.Stop();
         _timeBoundary.Interval = next > now ? next - now : TimeSpan.FromSeconds(1);
@@ -714,9 +741,13 @@ internal sealed class WeatherView : UserControl
     private void DrawMinute(WeatherSnapshot s)
     {
         minuteBars.Children.Clear();
-        // 按真实时间戳剔除已结束的区间，再画柱与倒计时。
+        // 按真实时间戳剔除已经结束的区间；正在进行的区间要保留，否则下雨时会说无降水。
         var nowAt = WeatherClock.Now(s);
-        var live = s.Minutes.Where(point => WeatherClock.MinuteAt(s, point.Time) is { } at && at >= nowAt).ToArray();
+        var ordered = s.Minutes;
+        var live = new List<MinutePoint>();
+        for (int i = 0; i < ordered.Length; i++)
+            if (WeatherClock.MinuteAt(s, ordered[i].Time) is { } at && at.AddMinutes(MinuteSpan(s, ordered, i, at)) > nowAt)
+                live.Add(ordered[i]);
         var points = live.Select(point => point.Precip).ToArray();
         if (points.Length == 0)
         {
@@ -738,11 +769,11 @@ internal sealed class WeatherView : UserControl
             values[i] = peak;
         }
         _minuteHasRain = values.Any(v => v > 0);
-        // 和风在同一响应里带整段总结（如「5分钟后开始下小雨，50分钟后就停了」），直接用原文；
-        // Open-Meteo 没有这段总结，用第一个有雨点的真实时间戳减城市当前时刻，避免 15 分钟粒度被当成 5 分钟。
-        // 缓存的相对时间总结只在对应预测区间还有效时照抄；雨点已全部过去就改显示无降水。
-        minuteNote.Text = s.MinuteSummary is { Length: > 0 } summary && points.Any(point => point is > 0)
-            ? summary : RainStartNote(s, live);
+        // 和风原文摘要带「X 分钟后」这类相对时间，只在本次抓取的缓存周期内照抄；跨周期继续显示会越来越不准。
+        // Open-Meteo 没有摘要，统一按第一个有效雨点的真实时间戳减城市当前时刻算倒计时。
+        bool summaryFresh = DateTimeOffset.UtcNow - s.FetchedAt < TimeSpan.FromMinutes(10);
+        minuteNote.Text = summaryFresh && s.MinuteSummary is { Length: > 0 } summary && points.Any(point => point is > 0)
+            ? summary : RainStartNote(s, live.ToArray());
         double peakValue = Math.Max(0.2, values.Max());
         // 无雨时整行本来就隐藏，不重建 24 个柱子。
         if (!_minuteHasRain) { UpdateMinuteVisibility(); return; }

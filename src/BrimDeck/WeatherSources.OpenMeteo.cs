@@ -145,7 +145,7 @@ internal sealed class OpenMeteoSource : IWeatherSource
                     string? time = times[i].ValueKind == JsonValueKind.String ? times[i].GetString() : null;
                     if (time is null) continue;
                     double? precip = Json.Get(m, "precipitation") is { } arr && i < arr.GetArrayLength() && arr[i].ValueKind == JsonValueKind.Number ? arr[i].GetDouble() : null;
-                    part.Minutes.Add(new MinutePoint { Time = time, Precip = precip });
+                    part.Minutes.Add(new MinutePoint { Time = time, Precip = precip, SpanMinutes = 15 });
                 }
             }
         }

@@ -65,7 +65,7 @@ public partial class MainWindow
         _weatherHiddenSince = null;
         if (_weatherView is null) return false;
         _weatherView.IsVisibleChanged -= WeatherVisibilityChanged;
-        _weatherView.StateChanged -= RenderWeatherRefreshButton;
+        _weatherView.StateChanged -= RenderWeatherChrome;
         _weatherView.Cancel();
         WeatherContent.Children.Clear();
         _weatherView = null;
@@ -121,7 +121,7 @@ public partial class MainWindow
         {
             if (!_expanded && !_preview) return;
             _weatherView = new WeatherView(_app, Look) { SettingsRequested = () => _app.OpenSettingsPage(SettingsWindow.WeatherSettingsPage) };
-            _weatherView.StateChanged += RenderWeatherRefreshButton;
+            _weatherView.StateChanged += RenderWeatherChrome;
             _weatherView.IsVisibleChanged += WeatherVisibilityChanged;
             WeatherContent.Children.Add(new Viewbox { Stretch = Stretch.Uniform, Child = _weatherView });
         }

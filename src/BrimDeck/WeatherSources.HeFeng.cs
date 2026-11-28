@@ -605,7 +605,7 @@ internal sealed class HeFengSource : IWeatherSource
             {
                 string? time = Json.Text(item, "fxTime") ?? Json.Text(item, "time");
                 if (time is null) continue;
-                result.Add(new MinutePoint { Time = time, Precip = Json.Number(item, "precip") });
+                result.Add(new MinutePoint { Time = time, Precip = Json.Number(item, "precip"), SpanMinutes = 5 });
             }
             return (result.Count > 0 ? result : null, summary);
         }

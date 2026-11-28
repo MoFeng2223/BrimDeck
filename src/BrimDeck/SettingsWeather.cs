@@ -23,6 +23,7 @@ public sealed partial class SettingsWindow
         var cityQuota=new Border {Child=cityQuotaText,CornerRadius=new CornerRadius(10),Padding=new Thickness(9,2,9,2),Background=Brushes.Transparent,BorderBrush=(Brush)FindResource("SettingsBorder"),BorderThickness=new Thickness(1),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(8,0,0,0)};
         void UpdateCityQuota(){cityQuotaText.Text=$"{state.Cities.Count}/{DeckSettings.MaxWeatherCities}";cityQuotaText.Foreground=UI.Brush(state.Cities.Count<DeckSettings.MaxWeatherCities?_palette.Positive:_palette.Negative);}
         void Save() {try {_app.QueueSave(); }catch {}}
+        void NotifyWeatherSelection(){foreach(var deck in _app.Decks) deck.WeatherSelectionChanged();}
         // 城市清单用同一套列宽，间隔也是真实的列：拖拽位 / 间隔 / 城市 / 间隔 / 天气 / 间隔 / 温度 / 间隔 / 数据源 / 间隔 / 删除。
         // 列头、数据行、搜索页脚共用它，文字和控件落在同一列而不是靠相邻列硬挤。
         Grid CityGrid()
@@ -102,10 +103,10 @@ public sealed partial class SettingsWindow
                     var cross=Stroke("M 0,0 L 8,8 M 8,0 L 0,8",8,8,TextSecondary);
                     cross.SetBinding(Shape.StrokeProperty,new System.Windows.Data.Binding("Foreground"){RelativeSource=new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.FindAncestor,typeof(Button),1)});
                     remove.Content=cross;
-                    remove.Click+=(_,_)=>{int at=state.Cities.IndexOf(city);if(at<0)return;state.Cities.RemoveAt(at);if(state.Selected==at)state.Selected=-1;else if(state.Selected>at)state.Selected--;Save();preview.RenderWeatherCard();Fill();UpdateAdd();};
+                    remove.Click+=(_,_)=>{int at=state.Cities.IndexOf(city);if(at<0)return;state.Cities.RemoveAt(at);if(state.Selected==at)state.Selected=-1;else if(state.Selected>at)state.Selected--;Save();NotifyWeatherSelection();preview.RenderWeatherCard();Fill();UpdateAdd();};
                     Grid.SetColumn(remove,10);grid.Children.Add(remove);
                 }
-                void Select(){state.Selected=city is null ? -1 : state.Cities.IndexOf(city);Save();preview.RenderWeatherCard();Fill();}
+                void Select(){state.Selected=city is null ? -1 : state.Cities.IndexOf(city);Save();NotifyWeatherSelection();preview.RenderWeatherCard();Fill();}
                 var frame=new Border {Child=grid,Height=cityRowHeight,Tag=city,RenderTransform=new TranslateTransform(),
                     Background=selected?(Brush)FindResource("SettingsAccentTint"):Brushes.Transparent,
                     BorderBrush=UI.Brush(_palette.RowDivider),BorderThickness=new Thickness(0,city is null?0:1,0,0),Cursor=System.Windows.Input.Cursors.Hand};
@@ -698,7 +699,10 @@ internal sealed class WeatherSettingsCard : Border
         string Deg(double? value)=>value is { } v && double.IsFinite(v)?$"{v:0}°":"--";
         string Num(double? value,string suffix)=>value is { } v && double.IsFinite(v)?v.ToString("0.#",System.Globalization.CultureInfo.InvariantCulture)+suffix:"--";
         string Clock(DayPoint[] days,int index,Func<DayPoint,string?> pick)=>index>=0&&index<days.Length&&pick(days[index]) is { Length: >= 16 } text?text[11..16]:"--:--";
-        int today=snap is null?0:WeatherClock.SnapshotIndex(snap);
+        int liveToday=snap is null?0:WeatherClock.LiveIndex(snap);
+        bool staleForecast=snap is not null&&liveToday<0;
+        // 跨日缓存仍用抓取时的日期轴取数，但标签不再冒充今天/明天。
+        int today=snap is null?0:staleForecast?WeatherClock.SnapshotIndex(snap):liveToday;
         int dateIndex=today+selectedDay;
         bool future=selectedDay>0;
         if(future && snap is not null){code=dateIndex>=0&&dateIndex<snap.Days.Length?(snap.Days[dateIndex].Code??-1):-1;day=true;}
@@ -750,7 +754,8 @@ internal sealed class WeatherSettingsCard : Border
             if(snap is not null&&snap.Days.Length>0) {
                 int idx=today+i; if(idx<0||idx>=snap.Days.Length) break;
                 if (!DateTime.TryParse(snap.Days[idx].Date,out var date)) continue;
-         dayTitle=i==0?Loc.T("今天","Today"):i==1?Loc.T("明天","Tomorrow"):Loc.T(new[]{"周日","周一","周二","周三","周四","周五","周六"}[(int)date.DayOfWeek],new[]{"Sun","Mon","Tue","Wed","Thu","Fri","Sat"}[(int)date.DayOfWeek]);
+         string weekday=Loc.T(new[]{"周日","周一","周二","周三","周四","周五","周六"}[(int)date.DayOfWeek],new[]{"Sun","Mon","Tue","Wed","Thu","Fri","Sat"}[(int)date.DayOfWeek]);
+         dayTitle=staleForecast?(i==0?Loc.T("已过期","Expired"):weekday):i==0?Loc.T("今天","Today"):i==1?Loc.T("明天","Tomorrow"):weekday;
                 var dayPoint=snap.Days[idx];
                 dCode=dayPoint.Code??-1;
                 int r=dayPoint.RainProb??-1;rain=r>=20?r+"%":"–";
