@@ -1,0 +1,25 @@
+src/BrimDeck/App.xaml.cs
+  s_8c3ce2fa757a4a::t_27b0ebaf325b2d 116-117
+src/BrimDeck/Native/Direct3D9Block.cs
+  s_8c3ce2fa757a4a::t_27b0ebaf325b2d 1-96
+src/BrimDeck.Core/Settings.cs
+  s_8c3ce2fa757a4a::t_f591a07c8e01ea 680-682
+src/BrimDeck/SettingsWindow.cs
+  s_8c3ce2fa757a4a::t_1de9fa626df458 805-808
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a34ea1e78e2b6509fbc44ad68e3d3a0d02dbf746",
+  "prompts": {},
+  "sessions": {
+    "s_8c3ce2fa757a4a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cd4fffd7-db01-407c-a446-b03f50258333",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
