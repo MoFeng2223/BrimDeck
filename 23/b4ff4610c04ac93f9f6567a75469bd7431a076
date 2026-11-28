@@ -1,0 +1,26 @@
+src/BrimDeck/MainWindow.Notices.cs
+  s_04299565df45d0::t_63305dc50f2793 596
+  s_04299565df45d0::t_b48d8d5eda3625 291-295,297,301,308-311
+  s_04299565df45d0::t_9e5f11a226e440 376
+  s_04299565df45d0::t_e132cbf93fe71a 635-640
+  s_04299565df45d0::t_7502c0c551d064 390-391
+  s_04299565df45d0::t_df4ac0f33314f5 1300-1301,1304-1305,1308-1309
+  s_04299565df45d0::t_9bc526ff070987 1262-1266,1268
+  s_04299565df45d0::t_1e6cd8be11af4f 1310
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "23b4ff4610c04ac93f9f6567a75469bd7431a076",
+  "prompts": {},
+  "sessions": {
+    "s_04299565df45d0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b8a3159-215e-4a5c-9ceb-c26e93b037d2",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
