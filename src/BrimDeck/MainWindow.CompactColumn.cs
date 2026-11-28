@@ -41,7 +41,9 @@ public partial class MainWindow
         // The notices give up what is wider than the column, a step at a time (CompactAttention).
         var notices = CompactAttention(scale, 0);
         for (int level = 1; level < AttentionLevels && (notices?.Width ?? 0) > column + .5; level++) notices = CompactAttention(scale, level);
-        var layout = CompactMusicLayout.Calculate(10000, scale, media, apps.Count, text.Length > 0, FixedFace(scale, clock?.ReservedWidth ?? 0, transfer?.Width ?? 0, devices?.PreferredWidth ?? 0, notices?.Width ?? 0), 0, equalizer, Settings.EqualizerBars, ring: QuotaRing.Diameter(Settings.QuotaRingStyle));
+        // The planner's part stands its kinds one below the other (AgendaStripView.Column).
+        var agenda = CompactAgendaColumn(scale, column);
+        var layout = CompactMusicLayout.Calculate(10000, scale, media, apps.Count, text.Length > 0, FixedFace(scale, clock?.ReservedWidth ?? 0, transfer?.Width ?? 0, devices?.PreferredWidth ?? 0, notices?.Width ?? 0, agenda?.Width ?? 0), 0, equalizer, Settings.EqualizerBars, ring: QuotaRing.Diameter(Settings.QuotaRingStyle));
         // One strip per reading, each alone on its line and centred in it. The drives show no glyph here: each drive has a line with its
         // letter and its figures, stacked or side by side as chosen in the settings, so any number of drives stand one below the other.
         var strips = new List<MonitorStrip>();
@@ -119,6 +121,8 @@ public partial class MainWindow
                     Add(transfer, transfer.Height, CompactPart.Transfer); break;
                 case CompactPart.Notices when notices is not null:
                     Add(notices, notices.Height, CompactPart.Notices); break;
+                case CompactPart.Agenda when agenda is not null:
+                    Add(agenda, agenda.Height, CompactPart.Agenda); break;
                 // The devices a line each; should a device's line be wider than the column, they scroll as the readings do.
                 case CompactPart.Devices when devices is not null:
                     if (devices.PreferredWidth > column + .5)

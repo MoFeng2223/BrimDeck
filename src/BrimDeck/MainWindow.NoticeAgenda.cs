@@ -23,9 +23,9 @@ public partial class MainWindow
     // Below this width the strip takes its short form: the time in a few words, "加入" for "加入日程", no second line.
     private const double CompactStripWidth = 300;
 
-    // What NoticeAgenda read from each notice, by its revision: the page is built again every second while a time moves, and a
-    // notice is read only once. Its words are only held here in memory.
-    private readonly Dictionary<string, (int Revision, NoticeAgendaRead Read)> _agendaReads = new(StringComparer.Ordinal);
+    // What NoticeAgenda read from each notice, by its revision and whether times were looked for (DeckSettings.AgendaFromNotices):
+    // the page is built again every second while a time moves, and a notice is read only once. Its words are only held here in memory.
+    private readonly Dictionary<string, (int Revision, bool Times, NoticeAgendaRead Read)> _agendaReads = new(StringComparer.Ordinal);
     private const int AgendaReadsKept = 512;
     // The items added from each notice, as of the book's revision.
     private Dictionary<string, AgendaFromNotice>? _agendaAdded;
@@ -68,10 +68,12 @@ public partial class MainWindow
 
     private NoticeAgendaRead AgendaRead(Notice notice)
     {
-        if (_agendaReads.TryGetValue(notice.Id, out var kept) && kept.Revision == notice.Revision) return kept.Read;
+        // Off, no time is looked for: no strip offers one, and the notice can still be added by hand as one of plain words.
+        bool times = AgendaCenter.Habits.AgendaFromNotices;
+        if (_agendaReads.TryGetValue(notice.Id, out var kept) && kept.Revision == notice.Revision && kept.Times == times) return kept.Read;
         if (_agendaReads.Count >= AgendaReadsKept) _agendaReads.Clear();
-        var read = NoticeAgenda.Read(notice, TimeZoneInfo.Local);
-        _agendaReads[notice.Id] = (notice.Revision, read);
+        var read = NoticeAgenda.Read(notice, TimeZoneInfo.Local, times);
+        _agendaReads[notice.Id] = (notice.Revision, times, read);
         return read;
     }
 
@@ -131,7 +133,7 @@ public partial class MainWindow
         string label = NoticeMoments.Label(time.Moment, now.Date), brief = NoticeMoments.Brief(time.Moment, now.Date);
         var (line, words) = StripTitle(label, offer.Open.Times.Count > 1 ? TimesMenuButton(notice, offer) : null);
         texts.Children.Add(line);
-        var detail = StripDetail(time.Detail);
+        var detail = StripDetail(time.DetailFor(AgendaCenter.Habits.AgendaEventMinutes));
         texts.Children.Add(detail);
         string full = Loc.T("加入日程", "Add event"), shortName = Loc.T("加入", "Add");
         var add = StripButton(full, Loc.T($"加入日程：{label}", $"Add event: {label}"), () => AddTime(notice, time));
@@ -267,9 +269,12 @@ public partial class MainWindow
 
     private void AddTime(Notice notice, NoticeAgendaTime time)
     {
+        // A new event: without an end read it lasts, and it reminds, as the settings say.
         var moment = time.Moment;
-        _app.Agenda.Book.AddEvent(NoticeAgenda.EventTitle(notice, time), moment.Start, moment.End, moment.AllDay, DateTime.Now, source: AgendaSource.From(notice),
-            remind: AgendaReminders.Default(moment.AllDay));
+        var habits = AgendaCenter.Habits;
+        var end = moment.End ?? (moment.AllDay ? (DateTime?)null : AgendaCalendar.NewEventEnd(moment.Start, habits.AgendaEventMinutes));
+        _app.Agenda.Book.AddEvent(NoticeAgenda.EventTitle(notice, time), moment.Start, end, moment.AllDay, DateTime.Now, source: AgendaSource.From(notice),
+            remind: habits.AgendaRemind(moment.AllDay));
     }
 
     // ----- The event and to-do buttons -----
@@ -285,8 +290,10 @@ public partial class MainWindow
             RoundGlyphButton(CalendarAddIcon, Loc.T("加入日程", "Add event"), () =>
             {
                 var now = DateTime.Now;
+                var habits = AgendaCenter.Habits;
                 var start = AgendaCalendar.NewEventStart(DateOnly.FromDateTime(now), now);
-                ShowNoticeForm(notice, null, null, false, text, start, start.AddHours(1), false, DateOnly.FromDateTime(start), true, AgendaRepeat.None, AgendaReminders.DefaultTimed);
+                ShowNoticeForm(notice, null, null, false, text, start, AgendaCalendar.NewEventEnd(start, habits.AgendaEventMinutes), false, DateOnly.FromDateTime(start), true,
+                    AgendaRepeat.None, habits.AgendaRemind(false));
             }),
             RoundGlyphButton(ListAddIcon, Loc.T("加入待办", "Add to to-dos"),
                 () => _app.Agenda.Book.AddTodo(text, DateOnly.FromDateTime(DateTime.Today), DateTime.Now, source: AgendaSource.From(notice)))

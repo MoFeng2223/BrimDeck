@@ -559,7 +559,7 @@ internal static class NoticeCoreTests
         check("The notices' count hides with the notices page", !strip.ShowsNotices(CompactStyle.Capsule));
         check("The notices are part 7, added at the end of an order saved without them; the coding agents' part 8 is dropped, they show within part 7",
             (int)CompactPart.Notices == 7 && (int)CompactPart.Agents == 8 && CompactParts.Normalize([CompactPart.Rings, CompactPart.Agents]) is var order
-            && order[^1] == CompactPart.Notices && !order.Contains(CompactPart.Agents));
+            && order[^2] == CompactPart.Notices && order[^1] == CompactPart.Agenda && !order.Contains(CompactPart.Agents));
         strip.NotchNotices = true; strip.NoticeStripAgents = true;
         bool agentsOn = strip.ShowsAgents(CompactStyle.Notch) && !strip.ShowsAgents(CompactStyle.Line);
         strip.NoticeStripAgents = false;

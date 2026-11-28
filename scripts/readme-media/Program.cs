@@ -217,6 +217,8 @@ internal sealed partial class Renderer(App app, string output, string language, 
             if (scenes.Contains("clock-dates")) await ClockDatesScene();
             if (scenes.Contains("clock-settings")) await ClockSettingsScene();
             if (scenes.Contains("agenda")) await AgendaScene();
+            // The collapsed row with the planner part in each of its states; for checking.
+            if (scenes.Contains("agenda-strip")) await AgendaStripScene();
             // Memory and the drives showing what is in use and what is free, expanded and collapsed, and the option; for checking.
             // The expanded monitor's grid editor on its settings page, the saved grid and the readings waiting above it; for checking.
             if (scenes.Contains("monitor-grid"))

@@ -13,6 +13,15 @@ public sealed record NoticeAgendaTime(NoticeMoment Moment, bool FromReminder)
 {
     // The strip's second line: where the time comes from and how long it is taken to last.
     public string Detail => FromReminder ? Loc.T("来自提醒", "From the reminder") : NoticeMoments.Detail(Moment);
+
+    // The same, with a time without an end taken to last eventMinutes (DeckSettings.AgendaEventMinutes): "从正文认出 · 时长按 30 分钟".
+    public string DetailFor(int eventMinutes)
+    {
+        if (FromReminder || Moment.AllDay || Moment.End is not null) return Detail;
+        string where = Moment.InTitle ? Loc.T("从标题认出", "From the title") : Loc.T("从正文认出", "From the body");
+        string length = AgendaText.Length(AgendaCalendar.EventLengths.Contains(eventMinutes) ? eventMinutes : AgendaCalendar.DefaultEventLength);
+        return where + Loc.T($" · 时长按 {length}", $" · {length} assumed");
+    }
 }
 
 // What was read from one revision of a notice. Times are in the order offered, without the past ones only once Open is asked.
@@ -30,11 +39,14 @@ public static class NoticeAgenda
 
     // Reads the notice once per revision (the caller keeps the result): the reminder's own event first, then the times in its words
     // without one at the same moment. zone: the user's time zone, in which the reminder's start becomes wall time.
-    public static NoticeAgendaRead Read(Notice notice, TimeZoneInfo zone)
+    // findTimes false (DeckSettings.AgendaFromNotices off): no time is looked for, neither a reminder's own nor one in the words, so
+    // a notice that names one is a notice of words, which can still be added by hand; the verification code is found as before.
+    public static NoticeAgendaRead Read(Notice notice, TimeZoneInfo zone, bool findTimes = true)
     {
         if (notice.Call) return NoticeAgendaRead.None;
         if (notice.Timing is { } timing && (timing.Native || timing.Kind is NoticeTimeKind.Alarm or NoticeTimeKind.Stopwatch or NoticeTimeKind.Countdown)) return NoticeAgendaRead.None;
         if (VerificationCode.Find(notice.Title, notice.Body) is not null) return new(NoticeAgendaKind.Code, []);
+        if (!findTimes) return TodoText(notice).Length > 0 ? new(NoticeAgendaKind.Text, []) : NoticeAgendaRead.None;
         var times = new List<NoticeAgendaTime>();
         if (Reminder(notice.Timing, zone) is { } reminded) times.Add(new(reminded, true));
         foreach (var moment in NoticeMoments.Find(notice.Title, notice.Body, notice.CreatedAt == default ? notice.ReceivedAt : notice.CreatedAt, zone))

@@ -94,16 +94,17 @@ public enum EqualizerMode { Flow = 0, Spectrum = 1 }
 public enum QuotaRingStyle { Nested = 0, Single = 1 }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left; Music places
 // only the title or lyric. Saved as numbers, so new members go at the end. Agents is no longer a part of its own: the coding
-// agents show within Notices (the notices, MainWindow.CompactAttention.cs); a saved order that names it drops it.
-public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer, Devices, Notices, Agents }
+// agents show within Notices (the notices, MainWindow.CompactAttention.cs); a saved order that names it drops it. Agenda: the
+// planner's event, to-dos and note of today (MainWindow.CompactAgenda.cs).
+public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer, Devices, Notices, Agents, Agenda }
 public static class CompactParts
 {
     // The order of new settings and of restoring the defaults: the equalizer and the clock come last, the clock at the very end.
-    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices, CompactPart.Notices, CompactPart.Equalizer, CompactPart.Clock];
+    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices, CompactPart.Notices, CompactPart.Agenda, CompactPart.Equalizer, CompactPart.Clock];
     // The order in which parts missing from a saved file are added after its own. A file saved before the equalizer and the clock
     // were put in order adds them after its parts, the clock last, where they stood; the devices' batteries (1.3.0) and then the
-    // notices' count join last.
-    private static readonly IReadOnlyList<CompactPart> Missing = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices, CompactPart.Notices];
+    // notices' count join last, and after them the planner's part.
+    private static readonly IReadOnlyList<CompactPart> Missing = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices, CompactPart.Notices, CompactPart.Agenda];
     // Each known part once, in the saved order; a part missing from the file takes its place after the others.
     public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part) && part != CompactPart.Agents).Concat(Missing).Distinct()];
 }
@@ -796,6 +797,35 @@ public sealed class DeckSettings
     public double AgendaHeight { get; set; } = 330;
     public AgendaView AgendaView { get; set; }
     public bool AgendaBlocks { get; set; }
+    // The notch and the capsule each show the planner's part (CompactPart.Agenda): today's event, to-dos and note, as chosen
+    // below; shown only while there is any. On by default.
+    public bool NotchAgenda { get; set; } = true;
+    public bool CapsuleAgenda { get; set; } = true;
+    // What the planner's part shows. The three switches choose the kinds it may show; AgendaStripMode, whether one of them at a
+    // time (Auto, AgendaStrip.Shown) or all that have something. The event shows its time with or without its title, the to-dos
+    // their number or the first one's words.
+    public AgendaStripMode AgendaStripMode { get; set; }
+    public bool AgendaStripEvents { get; set; } = true;
+    public bool AgendaStripTodos { get; set; } = true;
+    public bool AgendaStripNote { get; set; } = true;
+    public AgendaStripEventForm AgendaStripEventForm { get; set; }
+    public AgendaStripTodoForm AgendaStripTodoForm { get; set; }
+    // The planner's habits. AgendaWeekStart: the first day of its weeks. AgendaEventMinutes: how long a new event lasts
+    // (AgendaCalendar.EventLengths). AgendaRemindTimed and AgendaRemindAllDay: a new event's reminder, in minutes before its start
+    // as AgendaEvent.Remind counts them, null for none (AgendaReminders). AgendaSnoozeMinutes: how long the island's button puts a
+    // reminder off (AgendaReminders.SnoozeChoices). AgendaLeftTodos: what becomes of unfinished to-dos of earlier days.
+    // AgendaDoneTodos: where a day's ticked to-dos show. AgendaFromNotices: a notice that names a time offers to add it as an
+    // event; off, the time is not looked for, and the notice can still be added by hand.
+    public AgendaWeekStart AgendaWeekStart { get; set; }
+    public int AgendaEventMinutes { get; set; } = AgendaCalendar.DefaultEventLength;
+    public int? AgendaRemindTimed { get; set; } = AgendaReminders.DefaultTimed;
+    public int? AgendaRemindAllDay { get; set; } = AgendaReminders.DefaultAllDay;
+    public int AgendaSnoozeMinutes { get; set; } = AgendaReminders.DefaultSnooze;
+    public AgendaLeftTodos AgendaLeftTodos { get; set; }
+    public AgendaDoneTodos AgendaDoneTodos { get; set; }
+    public bool AgendaFromNotices { get; set; } = true;
+    // A new event's reminder as the settings have it: for a timed event or for an all-day one.
+    public int? AgendaRemind(bool allDay) => allDay ? AgendaRemindAllDay : AgendaRemindTimed;
     // The devices' order, names and where each shows (DeviceLists), by their key (DeviceBattery.Key). Empty until the user changes
     // the list; a device not in it shows everywhere, after those that are.
     public List<DeviceChoice> DeviceChoices { get; set; } = [];
@@ -961,6 +991,9 @@ public sealed class DeckSettings
     // click on it opens.
     public bool ShowsAgents(CompactStyle style) => NoticeStripAgents && style switch { CompactStyle.Notch => NotchNotices, CompactStyle.Capsule => CapsuleNotices, _ => false };
     public bool ShowsNotices(CompactStyle style) => DeckPages.Shown(this, DeckPage.Notices) && style switch { CompactStyle.Notch => NotchNotices, CompactStyle.Capsule => CapsuleNotices, _ => false };
+    // The planner's part needs the planner page, which a click on it opens, and a kind to show.
+    public bool ShowsAgenda(CompactStyle style) => DeckPages.Shown(this, DeckPage.Agenda) && (AgendaStripEvents || AgendaStripTodos || AgendaStripNote)
+        && style switch { CompactStyle.Notch => NotchAgenda, CompactStyle.Capsule => CapsuleAgenda, _ => false };
     // The file transfer's count needs the page and its column: with either hidden, nothing can be dropped there.
     public bool ShowsTransfer(CompactStyle style) => ClipboardPage && ShelfShown != ShelfShown.Clipboard && style switch { CompactStyle.Notch => NotchTransfer, CompactStyle.Capsule => CapsuleTransfer, _ => false };
     // The page's columns are stacked as cards only while it shows both.
@@ -1105,6 +1138,17 @@ public sealed class DeckSettings
         AgendaWidth = double.IsFinite(AgendaWidth) ? Math.Clamp(AgendaWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : 760;
         AgendaHeight = double.IsFinite(AgendaHeight) ? Math.Clamp(AgendaHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 330;
         if (!Enum.IsDefined(AgendaView)) AgendaView = AgendaView.Events;
+        if (!Enum.IsDefined(AgendaStripMode)) AgendaStripMode = AgendaStripMode.Auto;
+        if (!Enum.IsDefined(AgendaStripEventForm)) AgendaStripEventForm = AgendaStripEventForm.Title;
+        if (!Enum.IsDefined(AgendaStripTodoForm)) AgendaStripTodoForm = AgendaStripTodoForm.Count;
+        if (!Enum.IsDefined(AgendaWeekStart)) AgendaWeekStart = AgendaWeekStart.Monday;
+        if (!AgendaCalendar.EventLengths.Contains(AgendaEventMinutes)) AgendaEventMinutes = AgendaCalendar.DefaultEventLength;
+        // A reminder out of range for its kind of event is none, as an event's own is (AgendaReminders.Normalize).
+        AgendaRemindTimed = AgendaReminders.Normalize(AgendaRemindTimed, false);
+        AgendaRemindAllDay = AgendaReminders.Normalize(AgendaRemindAllDay, true);
+        if (!AgendaReminders.SnoozeChoices.Contains(AgendaSnoozeMinutes)) AgendaSnoozeMinutes = AgendaReminders.DefaultSnooze;
+        if (!Enum.IsDefined(AgendaLeftTodos)) AgendaLeftTodos = AgendaLeftTodos.Ask;
+        if (!Enum.IsDefined(AgendaDoneTodos)) AgendaDoneTodos = AgendaDoneTodos.Stay;
         DeviceChoices = [.. (DeviceChoices ?? []).OfType<DeviceChoice>().Where(device => !string.IsNullOrWhiteSpace(device.Key)).DistinctBy(device => device.Key).Take(256)];
         foreach (var device in DeviceChoices)
         {

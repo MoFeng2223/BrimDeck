@@ -191,6 +191,8 @@ try
     PointerMotionTests.Run(Check);
     AgendaTests.Run(root, Check);
     AgendaReminderTests.Run(root, Check);
+    AgendaStripTests.Run(Check);
+    AgendaHabitTests.Run(Check);
     var priceTime = DateTimeOffset.UtcNow;
     const string catalogJson = """
         {"data":[

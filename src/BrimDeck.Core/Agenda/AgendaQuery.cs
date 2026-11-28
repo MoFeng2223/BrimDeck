@@ -107,6 +107,20 @@ public static class AgendaQuery
         return new(main, longTerm, main.Count(todo => !todo.Done), carry);
     }
 
+    // The to-dos of a day as the list shows them, after where ticked ones go (DeckSettings.AgendaDoneTodos): Stay, where they were;
+    // Last, after the unfinished ones of their list (the day's, and "长期" on its own), each keeping its order; Hidden, not listed.
+    // Open and CarryOver stay as they are, so the switches' counts do not change.
+    public static AgendaTodoDay Arranged(AgendaTodoDay todos, AgendaDoneTodos done)
+    {
+        IReadOnlyList<AgendaTodo> Arrange(IReadOnlyList<AgendaTodo> list) => done switch
+        {
+            AgendaDoneTodos.Last => [.. list.Where(todo => !todo.Done), .. list.Where(todo => todo.Done)],
+            AgendaDoneTodos.Hidden => [.. list.Where(todo => !todo.Done)],
+            _ => list
+        };
+        return done == AgendaDoneTodos.Stay ? todos : todos with { Main = Arrange(todos.Main), LongTerm = Arrange(todos.LongTerm) };
+    }
+
     private static bool InMain(AgendaTodo todo, DateOnly day, DateOnly today)
         => todo.Day == day
         || todo.Due is not null && (todo.Done ? todo.DoneDay == day : day == today || todo.Due == day);

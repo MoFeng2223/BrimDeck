@@ -614,13 +614,15 @@ internal sealed class AgendaDatePopup
         head.Children.Add(title);
         stack.Children.Add(head);
         var days = new UniformGrid { Columns = 7, Margin = new Thickness(0, 4, 0, 0) };
-        for (int i = 0; i < 7; i++)
+        // Weeks begin on the day the settings say, as the planner's month does.
+        var weekStart = AgendaCenter.Habits.AgendaWeekStart;
+        foreach (var weekday in AgendaCalendar.Weekdays(weekStart))
         {
-            var name = AgendaDraw.Words(AgendaText.Weekday((DayOfWeek)((i + 1) % 7)), 10.5, 18, look.Tertiary);
+            var name = AgendaDraw.Words(AgendaText.Weekday(weekday), 10.5, 18, look.Tertiary);
             name.TextAlignment = TextAlignment.Center;
             days.Children.Add(name);
         }
-        var first = AgendaCalendar.FirstShown(_month.Year, _month.Month);
+        var first = AgendaCalendar.FirstShown(_month.Year, _month.Month, weekStart);
         for (int i = 0; i < 42; i++)
         {
             var day = first.AddDays(i);
@@ -929,7 +931,8 @@ internal sealed class AgendaRemindField : ContentControl
     // Whether what the field shows makes a reminder (the custom amount typed in full).
     public bool Valid => !_customMode || Typed(false) is not null;
 
-    // Whether the event is all day: its choices are other ones, and a reminder becomes the other kind's default.
+    // Whether the event is all day: its choices are other ones, and a reminder becomes the other kind's default as the settings have
+    // it (none there: none).
     public bool AllDay
     {
         get => _allDay;
@@ -939,7 +942,7 @@ internal sealed class AgendaRemindField : ContentControl
             int? was = Remind;
             _allDay = value;
             _customMode = false;
-            _remind = AgendaReminders.Switched(was, value);
+            _remind = AgendaReminders.Switched(was, value, AgendaCenter.Habits);
             Show();
             Changed?.Invoke();
         }
@@ -1293,7 +1296,7 @@ internal sealed class AgendaEventForm : Border
 
     // Puts the values in: an all-day event's end is its last day; a timed one ending at 00:00 ends at 24:00 of the day before. For a
     // series, its first time and how it repeats. remind: its reminder (AgendaEvent.Remind), null for none; a new event is given
-    // AgendaReminders.Default.
+    // the settings' (DeckSettings.AgendaRemind). An all-day event's hidden times, shown when it is made timed, are a new event's.
     public void Fill(string title, DateTime start, DateTime end, bool allDay, AgendaRepeat repeat, int? remind)
     {
         Title.Text = title;
@@ -1304,7 +1307,7 @@ internal sealed class AgendaEventForm : Border
         if (allDay)
         {
             EndDay.Date = DateOnly.FromDateTime(end);
-            var timedEnd = start.AddHours(1);
+            var timedEnd = AgendaCalendar.NewEventEnd(start, AgendaCenter.Habits.AgendaEventMinutes);
             EndTime.Set(timedEnd.Date > start.Date ? TimeSpan.FromHours(24) : timedEnd.TimeOfDay);
         }
         else if (end.TimeOfDay == TimeSpan.Zero && end > start)

@@ -18,7 +18,8 @@ internal sealed partial class PlannerPage
 {
     private ScrollViewer? _eventScroll, _todoScroll, _blockScroll;
     private double _eventOffset, _todoOffset;
-    // The minute of the day at the top of the time line; null until the view opens for a day (AgendaCalendar.OpeningMinute).
+    // The minute of the day at the top of the time line; null until the view opens for a day. It opens an hour before the day's
+    // first timed event, at 8:00 without one, today as any other day (AgendaCalendar.OpeningMinute); the "now" line shows the time.
     private double? _blockMinute;
     // While the page puts its rows back, moves of its scroll positions and focus are its own.
     private bool _rebuilding;
@@ -387,7 +388,7 @@ internal sealed partial class PlannerPage
             line.Add(mark, new(PlannerTimeline.Kind.Now, minute, minute));
         }
         foreach (var placement in AgendaQuery.Columns(segments, BlockSpan)) line.Add(Block(placement.Segment, now), Slot(placement));
-        _blockMinute ??= AgendaCalendar.OpeningMinute(_day, now, segments);
+        _blockMinute ??= AgendaCalendar.OpeningMinute(segments);
         Grid.SetRow(scroll, 1);
         _rebuilding = true;
         try { Detach(scroll); grid.Children.Add(scroll); } finally { _rebuilding = false; }
@@ -510,8 +511,10 @@ internal sealed partial class PlannerPage
         }
         else
         {
+            // A new event lasts and reminds as the settings say (AgendaEventMinutes, AgendaRemindTimed).
+            var habits = AgendaCenter.Habits;
             var start = AgendaCalendar.NewEventStart(_day, Now);
-            form.Fill(todo?.Text ?? "", start, start.AddHours(1), false, AgendaRepeat.None, AgendaReminders.Default(false));
+            form.Fill(todo?.Text ?? "", start, AgendaCalendar.NewEventEnd(start, habits.AgendaEventMinutes), false, AgendaRepeat.None, habits.AgendaRemind(false));
         }
         _formFor = item is not null ? "event:" + item.Id : todo is not null ? "todo:" + todo.Id : "new";
         form.Submitted += SubmitForm;
@@ -575,7 +578,8 @@ internal sealed partial class PlannerPage
     {
         var scroll = _todoScroll ??= NewScroll(offset => _todoOffset = offset);
         var today = Today;
-        var todos = Book.TodosOf(_day, today);
+        // Ticked ones where the settings put them (AgendaQuery.Arranged); the counts on the switches stay as they are.
+        var todos = AgendaQuery.Arranged(Book.TodosOf(_day, today), AgendaCenter.Habits.AgendaDoneTodos);
         var list = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
         if (todos.CarryOver is { } carry)
         {

@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace BrimDeck.Core.Agenda;
 
 // The planner's words, in the interface language (Loc). Dates are written without the year unless it differs from the year
@@ -160,6 +162,14 @@ public static class AgendaText
             > 1 => Loc.T($"{date}截止 · 还有 {days} 天", $"Due {date} · {Loc.Count(days, "day", "days")} left"),
             _ => Loc.T($"{date}截止 · 已过期 {-days} 天", $"Due {date} · {Loc.Count(-days, "day", "days")} overdue")
         };
+    }
+
+    // How long an event lasts, as the settings offer it (AgendaCalendar.EventLengths): "30 分钟", "1 小时", "1.5 小时".
+    public static string Length(int minutes)
+    {
+        if (minutes < 60) return Loc.T($"{minutes} 分钟", Loc.Count(minutes, "minute", "minutes"));
+        string hours = (minutes / 60.0).ToString("0.#", CultureInfo.InvariantCulture);
+        return Loc.T($"{hours} 小时", minutes == 60 ? "1 hour" : hours + " hours");
     }
 
     // Over today's to-dos: "昨天有 2 项未完成" or "之前有 3 项未完成".

@@ -54,6 +54,7 @@ public partial class MainWindow
         CompactPart.Transfer => new(DeckPage.Clipboard, Files: true),
         CompactPart.Notices => new(DeckPage.Notices),
         CompactPart.Agents => new(DeckPage.Notices),
+        CompactPart.Agenda => new(DeckPage.Agenda),
         _ => new(null),
     };
 

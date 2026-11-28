@@ -16,7 +16,8 @@ namespace BrimDeck;
 //
 // The page keeps what the user is typing in through every redraw: the note's box, the to-do box, a to-do being changed and the
 // event form are kept and put back in the new rows, and the lists keep their scroll positions. It is drawn again only when what it
-// shows changed (ShownKey): the data, the day, the minute where times are shown, the size step, the theme or the language.
+// shows changed (ShownKey): the data, the day, the minute where times are shown, the size step, the theme, the language, or the
+// settings it follows (the week's first day, where ticked to-dos go; AgendaCenter.Habits).
 internal sealed partial class PlannerPage : Grid
 {
     private readonly MainWindow _deck;
@@ -39,6 +40,8 @@ internal sealed partial class PlannerPage : Grid
 
     // The frame's parts; their contents are set by Show.
     private Grid _monthHead = null!, _monthGrid = null!, _dayHead = null!, _week = null!;
+    // The wide month's row of weekday names, filled by ShowMonth for the week's first day.
+    private Grid? _weekdays;
     private Border _status = null!, _body = null!, _footer = null!;
 
     // An item just added from a notice ("刚加入"), marked on its day until the mark times out or the day is left.
@@ -97,10 +100,11 @@ internal sealed partial class PlannerPage : Grid
     private string ShownKey()
     {
         var now = Now;
+        var habits = AgendaCenter.Habits;
         bool timed = _view == AgendaView.Events && _day == Today;
         // Today's events follow the time by the minute; a finer key drew the whole page again on every step of a resize.
         return string.Join('|', Book.Revision, _day, _month, _view, _blocks, Today, timed ? now.Ticks / TimeSpan.TicksPerMinute : 0, Center.ReadState, Center.SaveFailed, _marked,
-            _formFor, _editingTodo, _todoLongTerm);
+            _formFor, _editingTodo, _todoLongTerm, habits.AgendaWeekStart, habits.AgendaDoneTodos);
     }
 
     // Draws the contents again if anything they show changed.
@@ -126,6 +130,7 @@ internal sealed partial class PlannerPage : Grid
         _monthHead = new Grid { Height = 24 };
         _dayHead = new Grid { Height = 24 };
         _monthGrid = new Grid();
+        _weekdays = null;
         _week = new Grid { Height = AgendaCalendar.WeekHeight, Margin = new Thickness(0, 6, 0, 0) };
         _status = new Border { Visibility = Visibility.Collapsed };
         _body = new Border { ClipToBounds = true };
@@ -146,7 +151,7 @@ internal sealed partial class PlannerPage : Grid
                 month.RowDefinitions.Add(new RowDefinition { Height = new GridLength(22) });
                 month.RowDefinitions.Add(new RowDefinition());
                 month.Children.Add(_monthHead);
-                var weekdays = Weekdays(); weekdays.Margin = new Thickness(0, 4, 0, 0); Grid.SetRow(weekdays, 1); month.Children.Add(weekdays);
+                var weekdays = _weekdays = new Grid { Height = 18, Margin = new Thickness(0, 4, 0, 0) }; Grid.SetRow(weekdays, 1); month.Children.Add(weekdays);
                 _monthGrid.Margin = new Thickness(0, AgendaCalendar.MonthGap, 0, 0);
                 Grid.SetRow(_monthGrid, 2); month.Children.Add(_monthGrid);
                 Children.Add(month);
@@ -181,21 +186,22 @@ internal sealed partial class PlannerPage : Grid
         return grid;
     }
 
-    private Grid Weekdays()
+    // The weekday names over the wide month, in the order its weeks have (AgendaCalendar.Weekdays).
+    private void FillWeekdays(Grid row, AgendaWeekStart first)
     {
-        var row = new Grid { Height = 18 };
+        row.Children.Clear(); row.ColumnDefinitions.Clear();
+        var days = AgendaCalendar.Weekdays(first);
         for (int i = 0; i < 7; i++)
         {
             row.ColumnDefinitions.Add(new ColumnDefinition());
-            var name = AgendaDraw.Words(Weekday(i), 11, 18, Look.Tertiary);
+            var name = AgendaDraw.Words(Weekday(days[i]), 11, 18, Look.Tertiary);
             name.TextAlignment = TextAlignment.Center;
             Grid.SetColumn(name, i); row.Children.Add(name);
         }
-        return row;
     }
 
-    // Monday first: "一" … "日" / "Mon" … "Sun" (the narrow week's small names too).
-    private static string Weekday(int column) => Loc.IsEnglish ? AgendaText.Weekday((DayOfWeek)((column + 1) % 7)) : "一二三四五六日"[column].ToString();
+    // A weekday's short name: "一" … "日" / "Mon" … "Sun" (the narrow week's small names too).
+    private static string Weekday(DayOfWeek day) => Loc.IsEnglish ? AgendaText.Weekday(day) : "日一二三四五六"[(int)day].ToString();
 
     // ---- The heads ----
 
@@ -210,7 +216,8 @@ internal sealed partial class PlannerPage : Grid
                 ShowMonth();
                 break;
             case AgendaLayout.Narrow:
-                Head(_monthHead, Title(AgendaText.Month(_day.Year, _day.Month)), null, AgendaCalendar.WeekStart(_day) != AgendaCalendar.WeekStart(today), Loc.T("上一周", "Previous week"), Loc.T("下一周", "Next week"), -7, true);
+                var first = AgendaCenter.Habits.AgendaWeekStart;
+                Head(_monthHead, Title(AgendaText.Month(_day.Year, _day.Month)), null, AgendaCalendar.WeekStart(_day, first) != AgendaCalendar.WeekStart(today, first), Loc.T("上一周", "Previous week"), Loc.T("下一周", "Next week"), -7, true);
                 ShowWeek();
                 break;
             default:
@@ -404,8 +411,10 @@ internal sealed partial class PlannerPage : Grid
         _monthGrid.Children.Clear(); _monthGrid.RowDefinitions.Clear(); _monthGrid.ColumnDefinitions.Clear();
         for (int i = 0; i < 7; i++) _monthGrid.ColumnDefinitions.Add(new ColumnDefinition());
         for (int i = 0; i < 6; i++) _monthGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(_cell) });
-        var first = AgendaCalendar.FirstShown(_month.Year, _month.Month);
-        int rows = AgendaCalendar.Rows(_month.Year, _month.Month);
+        var weekStart = AgendaCenter.Habits.AgendaWeekStart;
+        if (_weekdays is not null) FillWeekdays(_weekdays, weekStart);
+        var first = AgendaCalendar.FirstShown(_month.Year, _month.Month, weekStart);
+        int rows = AgendaCalendar.Rows(_month.Year, _month.Month, weekStart);
         var marks = Book.Marks(first, rows * 7);
         for (int i = 0; i < rows * 7; i++)
         {
@@ -418,7 +427,7 @@ internal sealed partial class PlannerPage : Grid
     private void ShowWeek()
     {
         _week.Children.Clear(); _week.ColumnDefinitions.Clear();
-        var start = AgendaCalendar.WeekStart(_day);
+        var start = AgendaCalendar.WeekStart(_day, AgendaCenter.Habits.AgendaWeekStart);
         var marks = Book.Marks(start, 7);
         for (int i = 0; i < 7; i++)
         {
@@ -438,7 +447,7 @@ internal sealed partial class PlannerPage : Grid
         var stack = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top };
         if (week)
         {
-            var name = AgendaDraw.Words(Weekday(((int)day.DayOfWeek + 6) % 7), 10.5, 14, Look.Tertiary);
+            var name = AgendaDraw.Words(Weekday(day.DayOfWeek), 10.5, 14, Look.Tertiary);
             name.TextAlignment = TextAlignment.Center;
             stack.Children.Add(name);
             stack.Margin = new Thickness(0, 3 - DayInset.Top, 0, 0);

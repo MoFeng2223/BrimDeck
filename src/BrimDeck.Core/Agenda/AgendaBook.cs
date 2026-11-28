@@ -6,6 +6,12 @@ public sealed record AgendaFromNotice(IReadOnlyList<AgendaEvent> Events, IReadOn
     public bool Any => Events.Count > 0 || Todos.Count > 0;
 }
 
+// How much AgendaBook.Import took in: the events and to-dos added, and the days whose note was added or added to.
+public sealed record AgendaImport(int Events, int Todos, int Notes)
+{
+    public bool Any => Events > 0 || Todos > 0 || Notes > 0;
+}
+
 // The planner's data and every change to it. Items are records: a change replaces one with an updated copy, keeping its Id.
 // Each change that does something raises Changed once (AgendaCenter saves and redraws on it); a change that is refused or
 // changes nothing returns null or false and raises nothing. Used on one thread only.
@@ -57,6 +63,28 @@ public sealed class AgendaBook
         foreach (var item in data.Events) if (events.Add(item.Id) && !todos.Contains(item.Id)) _events.Add(item);
         foreach (var item in data.Todos) if (todos.Add(item.Id) && !events.Contains(item.Id)) _todos.Add(item);
         foreach (var (day, text) in data.Notes) if (!string.IsNullOrWhiteSpace(text) && !(mine && _notes.ContainsKey(day))) _notes[day] = text;
+    }
+
+    // Takes in the data of another file (an export, a copy of agenda.json from another PC): the events and to-dos whose Id is not
+    // here yet are added, and nothing here is changed or removed. A note of a day that has none is taken as it is; where both
+    // have one, the other's is added under this one's unless this one says it already.
+    public AgendaImport Import(AgendaData other)
+    {
+        var ids = _events.Select(item => item.Id).Concat(_todos.Select(item => item.Id)).ToHashSet(StringComparer.Ordinal);
+        int events = 0, todos = 0, notes = 0;
+        foreach (var item in other.Events) if (ids.Add(item.Id)) { _events.Add(item); events++; }
+        foreach (var item in other.Todos) if (ids.Add(item.Id)) { _todos.Add(item); todos++; }
+        foreach (var (day, text) in other.Notes)
+        {
+            if (string.IsNullOrWhiteSpace(text)) continue;
+            if (!_notes.TryGetValue(day, out var mine)) _notes[day] = text;
+            else if (mine.Contains(text.Trim(), StringComparison.Ordinal)) continue;
+            else _notes[day] = mine.TrimEnd() + "\n" + text.Trim();
+            notes++;
+        }
+        var taken = new AgendaImport(events, todos, notes);
+        if (taken.Any) Raise();
+        return taken;
     }
 
     private void Raise() { Revision++; Changed?.Invoke(); }

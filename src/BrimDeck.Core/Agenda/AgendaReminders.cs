@@ -17,6 +17,17 @@ public static class AgendaReminders
     // A new event's reminder: 15 minutes before a timed one, 09:00 of the day of an all-day one.
     public const int DefaultTimed = 15, DefaultAllDay = -9 * 60;
     public static int Default(bool allDay) => allDay ? DefaultAllDay : DefaultTimed;
+    // How long the island's button puts a reminder off, in minutes: what the settings offer (DeckSettings.AgendaSnoozeMinutes).
+    public static readonly IReadOnlyList<int> SnoozeChoices = [5, 10, 15, 30];
+    public const int DefaultSnooze = 5;
+    // The minutes the button puts a reminder off: the setting, or DefaultSnooze for one it does not offer.
+    public static int SnoozeMinutes(int minutes) => SnoozeChoices.Contains(minutes) ? minutes : DefaultSnooze;
+    // The button's words: "5 分钟后再提醒", "Remind in 5 min".
+    public static string SnoozeText(int minutes)
+    {
+        int shown = SnoozeMinutes(minutes);
+        return Loc.T($"{shown} 分钟后再提醒", $"Remind in {shown} min");
+    }
 
     // The choices offered besides "不提醒" and "自定义": at the start, 5, 10, 15 and 30 minutes, an hour, a day before; for an all-day
     // event 09:00 of the day, of the day before, two days and a week before.
@@ -51,6 +62,8 @@ public static class AgendaReminders
 
     // An event that becomes all-day or timed in the form takes the other kind's default; none stays none.
     public static int? Switched(int? remind, bool allDay) => remind is null ? null : Default(allDay);
+    // The same with the other kind's default as the settings have it (DeckSettings.AgendaRemind): none there makes it none.
+    public static int? Switched(int? remind, bool allDay, DeckSettings settings) => remind is null ? null : settings.AgendaRemind(allDay);
 
     // "不提醒", "开始时", "提前 15 分钟", "提前 2 小时", "提前 1 天"; all day "当天 09:00", "前一天 09:00", "提前 2 天 09:00", "提前 1 周 09:00".
     public static string Text(int? remind, bool allDay)
@@ -104,8 +117,8 @@ public static class AgendaReminders
     // ---- The notice ----
 
     public static string AppKey { get; } = NoticeKeys.Internal("agenda");
-    // Its buttons: "查看日程" shows the event on the planner page; "5 分钟后再提醒" takes it away and reminds again later (the notices
-    // page offers other delays too).
+    // Its buttons: "查看日程" shows the event on the planner page; "5 分钟后再提醒" (the minutes as the settings have them,
+    // DeckSettings.AgendaSnoozeMinutes) takes it away and reminds again later (the notices page offers other delays too).
     public const string OpenAction = "brimdeck:agenda-open", SnoozeAction = "brimdeck:agenda-snooze";
     public const string IconRef = "glyph:calendar";
 
@@ -137,7 +150,8 @@ public static class AgendaReminders
     // The notice of a reminder. A timed event's carries its times, so the notice says "15 分钟后开始" and counts down as an event's
     // reminder from Outlook does; it is not BrimDeck's own timing (Native), so it reminds once and not again at the start. An
     // all-day event's says which day. missed: given late (BrimDeck was not running at its time); it is listed unread, not shown.
-    public static NoticeInput Notice(AgendaEvent time, DateTime now, bool missed, TimeZoneInfo zone)
+    // snoozeMinutes: what its second button puts it off by (SnoozeText).
+    public static NoticeInput Notice(AgendaEvent time, DateTime now, bool missed, TimeZoneInfo zone, int snoozeMinutes = DefaultSnooze)
     {
         string body = time.Detail ?? (time.Source is { } source ? AgendaText.Source(source) : "");
         return new NoticeInput
@@ -150,7 +164,7 @@ public static class AgendaReminders
                 Kind = NoticeTimeKind.Event, StartsAt = Offset(time.Start, zone), EndsAt = Offset(time.End, zone),
                 RemindAt = time.RemindAt is { } at ? Offset(at, zone) : null
             },
-            Actions = [new(OpenAction, Loc.T("查看日程", "View event"), NoticeActionKind.Reply, Primary: true), new(SnoozeAction, Loc.T("5 分钟后再提醒", "Remind in 5 min"))]
+            Actions = [new(OpenAction, Loc.T("查看日程", "View event"), NoticeActionKind.Reply, Primary: true), new(SnoozeAction, SnoozeText(snoozeMinutes))]
         };
     }
 

@@ -109,7 +109,8 @@ public partial class MainWindow
     }
 
     // A button of a planner reminder's notice (AgendaReminders), on the island, the notices page or from NoticeCenter.RunAsync:
-    // "查看日程" opens this panel's planner on the event; "5 分钟后再提醒" puts the reminder off. Whether it did.
+    // "查看日程" opens this panel's planner on the event; "5 分钟后再提醒" puts the reminder off, by the minutes the settings have
+    // now (AgendaCenter.SnoozeDelay) unless delay says otherwise. Whether it did.
     internal bool AgendaReminderAction(Notice notice, string key, TimeSpan? delay = null, DateTime? at = null)
     {
         var center = _app.Notices;
@@ -122,7 +123,7 @@ public partial class MainWindow
                 OpenPlanner(reveal);
                 return true;
             case AgendaReminders.SnoozeAction:
-                return _app.Agenda.Snooze(notice, delay ?? TimeSpan.FromMinutes(5), at);
+                return _app.Agenda.Snooze(notice, delay ?? AgendaCenter.SnoozeDelay, at);
             default: return false;
         }
     }

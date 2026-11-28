@@ -1,5 +1,7 @@
 using System.IO;
+using System.Windows;
 using System.Windows.Threading;
+using BrimDeck.Core;
 using BrimDeck.Core.Agenda;
 using BrimDeck.Core.Notices;
 
@@ -15,8 +17,17 @@ namespace BrimDeck;
 // was not running, the PC slept) is listed unread while its time has not ended, and dropped after. The time checked up to is
 // kept in agenda.json (AgendaData.RemindedTo) when a reminder was given and at exit, so a later start knows what it missed. A
 // reminder put off ("稍后提醒") is kept only while BrimDeck runs.
+//
+// With AgendaLeftTodos.Move it also moves the unfinished to-dos of earlier days to today (AgendaBook.MoveToToday): once the file
+// was read, on the first check of reminders on a new day (they are checked at least once a minute, so no timer of its own runs),
+// and when the setting is switched to Move (ApplySettings).
 internal sealed class AgendaCenter : IDisposable
 {
+    // The planner's habits as the settings have them now (DeckSettings.AgendaWeekStart and the rest, the same for every profile);
+    // a new DeckSettings's where there is no App.
+    internal static DeckSettings Habits => (Application.Current as App)?.Settings ?? NoSettings;
+    private static readonly DeckSettings NoSettings = new();
+
     private static readonly TimeSpan SaveDelay = TimeSpan.FromSeconds(1), RetryDelay = TimeSpan.FromSeconds(30);
     // Reminders are checked at least this often, so a clock set forward or a PC that woke up is noticed soon.
     private static readonly TimeSpan RemindRecheck = TimeSpan.FromMinutes(1);
@@ -28,6 +39,8 @@ internal sealed class AgendaCenter : IDisposable
     private readonly PromptTimer _remind;
     // The time reminders were checked up to; null until the file was read.
     private DateTime? _checkedTo;
+    // The day the to-dos left on earlier days were last moved to (AgendaLeftTodos.Move).
+    private DateOnly? _movedOn;
     // Reminders put off: the event, the start of its time, and when to remind again.
     private readonly List<(string Id, DateTime Start, DateTime At)> _snoozed = [];
     // The writes in the background, one after another; each one's text was taken when it was queued.
@@ -113,6 +126,8 @@ internal sealed class AgendaCenter : IDisposable
     {
         _remind.Stop();
         if (_disposed || !_loaded) return;
+        // A move changes the book, which checks the reminders once more from here (BookChanged); this check then finds them done.
+        MoveLeftTodos();
         var now = AgendaTime.Second(Clock());
         if (_checkedTo is null)
         {
@@ -150,7 +165,7 @@ internal sealed class AgendaCenter : IDisposable
     {
         bool ended = time.AllDay ? time.LastDay < DateOnly.FromDateTime(now) : time.End <= now;
         if (ended) return false;
-        notices.Post(AgendaReminders.Notice(time, now, missed: now - at > NoticeClock.MissedLimit, TimeZoneInfo.Local));
+        notices.Post(AgendaReminders.Notice(time, now, missed: now - at > NoticeClock.MissedLimit, TimeZoneInfo.Local, Habits.AgendaSnoozeMinutes));
         return true;
     }
 
@@ -171,6 +186,28 @@ internal sealed class AgendaCenter : IDisposable
         notices.Delete(notice);
         ScheduleReminders();
         return true;
+    }
+
+    // The island's "5 分钟后再提醒": the delay as the settings have it when the button is pressed.
+    public static TimeSpan SnoozeDelay => TimeSpan.FromMinutes(AgendaReminders.SnoozeMinutes(Habits.AgendaSnoozeMinutes));
+
+    // ---- To-dos left on earlier days ----
+
+    // The settings changed: switched to Move, what is left moves now.
+    public void ApplySettings()
+    {
+        _movedOn = null;
+        MoveLeftTodos();
+    }
+
+    // With AgendaLeftTodos.Move, once a day: the unfinished to-dos of earlier days without a due day become today's.
+    private void MoveLeftTodos()
+    {
+        if (_disposed || !_loaded || Habits.AgendaLeftTodos != AgendaLeftTodos.Move) return;
+        var today = DateOnly.FromDateTime(Clock());
+        if (_movedOn == today) return;
+        _movedOn = today;
+        Book.MoveToToday(today);
     }
 
     // "查看日程": the day and the event a reminder's notice is about, or null when the event is gone.
@@ -206,6 +243,7 @@ internal sealed class AgendaCenter : IDisposable
             finally { _merging = false; }
             // Changed before the file could be read: what was changed is written now, together with what the file held.
             if (_dirty) QueueSave();
+            MoveLeftTodos();
             ScheduleReminders();
         }
         else _retry.Start();

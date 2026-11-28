@@ -166,6 +166,7 @@ public partial class MainWindow : Window
         InitializeDropHelper();
         InitializeDevices();
         InitializeAgenda();
+        InitializeAgendaStrip();
         InitializeResize();
         InitializeScale();
         InitializeShadow();

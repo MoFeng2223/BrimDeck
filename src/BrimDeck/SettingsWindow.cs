@@ -30,12 +30,12 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     private ScrollViewer _scroll = null!;
     private static string[] _pages => [Loc.T("常规", "General"), Loc.T("收起外观", "Collapsed view"), Loc.T("展开外观", "Expanded view"),
         Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck"), Loc.T("面板主题", "Panel theme"), Loc.T("显示与读数", "Display and readings"), Loc.T("增强传感器", "Enhanced sensors"), Loc.T("快捷键", "Shortcuts"), Loc.T("显示与设备", "Display and devices"),
-        Loc.T("剪贴板", "Clipboard"), Loc.T("文件中转", "File transfer"), Loc.T("快捷操作", "Quick actions"), Loc.T("显示器与配置", "Displays and profiles"), Loc.T("页面布局", "Page layout"), Loc.T("剪贴板同步", "Clipboard sync"), Loc.T("提示方式", "How notices show"), Loc.T("应用", "Apps"), Loc.T("AI 编程工具", "AI coding tools"), Loc.T("邮箱", "Mailboxes")];
+        Loc.T("剪贴板", "Clipboard"), Loc.T("文件中转", "File transfer"), Loc.T("快捷操作", "Quick actions"), Loc.T("显示器与配置", "Displays and profiles"), Loc.T("页面布局", "Page layout"), Loc.T("剪贴板同步", "Clipboard sync"), Loc.T("提示方式", "How notices show"), Loc.T("应用", "Apps"), Loc.T("AI 编程工具", "AI coding tools"), Loc.T("邮箱", "Mailboxes"), Loc.T("日程与待办", "Events and to-dos")];
     // The order of the pages in the navigation; the theme page (ThemePage) and the shortcuts (HotkeysPage) are listed with the
     // basic pages, and the system monitor's page (MonitorSettingsPage) has its own group after music, then the clipboard's
-    // pages (the layout first), the devices' page and the notices pages (NoticesSettingsPage, NoticeAppsSettingsPage, the coding agents and the mailboxes), before About. The profiles page
+    // pages (the layout first), the devices' page and the notices pages (NoticesSettingsPage, NoticeAppsSettingsPage, the coding agents and the mailboxes) and the planner's page (AgendaSettingsPage), before About. The profiles page
     // (ProfilesPage) closes the basic pages.
-    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, HotkeysPage, ProfilesPage, 3, 4, 5, 6, MusicGesturesPage, MonitorSettingsPage, SensorsPage, ShelfLayoutSettingsPage, ClipboardSettingsPage, TransferSettingsPage, ClipboardSyncSettingsPage, DevicesSettingsPage, NoticesSettingsPage, NoticeAppsSettingsPage, AgentsSettingsPage, MailSettingsPage, 7];
+    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, HotkeysPage, ProfilesPage, 3, 4, 5, 6, MusicGesturesPage, MonitorSettingsPage, SensorsPage, ShelfLayoutSettingsPage, ClipboardSettingsPage, TransferSettingsPage, ClipboardSyncSettingsPage, DevicesSettingsPage, NoticesSettingsPage, NoticeAppsSettingsPage, AgentsSettingsPage, MailSettingsPage, AgendaSettingsPage, 7];
     private int _page;
     private bool _preview;
     private StackPanel? _appRows;
@@ -321,7 +321,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     {
         if (page < 0 || page >= _pages.Length) return;
         RememberFocus();
-        if (page != _page) { _expandedSource = null; _openSizes.Clear(); _phraseEdit = null; }
+        if (page != _page) { _expandedSource = null; _openSizes.Clear(); _phraseEdit = null; _agendaResult = null; }
         if (page != ThemePage) WatchThemeFolder(false);
         _sourceTestCancellation?.Cancel();
         EndAppDrag(false, false);
@@ -339,9 +339,9 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         _page = page; _navigation.Children.Clear(); _content.Children.Clear(); _aboutUpdateView = null; _scroll.ScrollToTop();
         foreach (int i in PageOrder)
         {
-            if (i is 0 or 3 or 5 or 7 or MonitorSettingsPage or ShelfLayoutSettingsPage or DevicesSettingsPage or NoticesSettingsPage)
+            if (i is 0 or 3 or 5 or 7 or MonitorSettingsPage or ShelfLayoutSettingsPage or DevicesSettingsPage or NoticesSettingsPage or AgendaSettingsPage)
             {
-                var group = TextLine(i switch { 0 => Loc.T("基础设置", "Basics"), 3 => Loc.T("AI 用量", "AI usage"), MonitorSettingsPage => Loc.T("系统监控", "System monitor"), ShelfLayoutSettingsPage => Loc.T("中转站", "Shelf"), DevicesSettingsPage => Loc.T("设备电量", "Device batteries"), NoticesSettingsPage => Loc.T("通知", "Notices"), 5 => Loc.T("音乐", "Music"), _ => Loc.T("关于", "About") },10.5,TextTertiary);
+                var group = TextLine(i switch { 0 => Loc.T("基础设置", "Basics"), 3 => Loc.T("AI 用量", "AI usage"), MonitorSettingsPage => Loc.T("系统监控", "System monitor"), ShelfLayoutSettingsPage => Loc.T("中转站", "Shelf"), DevicesSettingsPage => Loc.T("设备电量", "Device batteries"), NoticesSettingsPage => Loc.T("通知", "Notices"), AgendaSettingsPage => Loc.T("计划", "Planner"), 5 => Loc.T("音乐", "Music"), _ => Loc.T("关于", "About") },10.5,TextTertiary);
                 group.Margin = new Thickness(12, i == 0 ? 0 : 24, 0, 8); _navigation.Children.Add(group);
             }
             int target=i; bool selected=page==i;
@@ -356,13 +356,13 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         }
         // The About page is titled by the wordmark itself, so the name does not appear twice.
         var head = new DockPanel { Margin = new Thickness(0,0,0,page == 7 ? 10 : 20) };
-        if (page is < 4 or 5 or 6 or ThemePage or MonitorSettingsPage or HotkeysPage or DevicesSettingsPage or ClipboardSettingsPage or ShelfLayoutSettingsPage or MusicGesturesPage or NoticesSettingsPage or NoticeAppsSettingsPage)
+        if (page is < 4 or 5 or 6 or ThemePage or MonitorSettingsPage or HotkeysPage or DevicesSettingsPage or ClipboardSettingsPage or ShelfLayoutSettingsPage or MusicGesturesPage or NoticesSettingsPage or NoticeAppsSettingsPage or AgendaSettingsPage)
         {
             // Resets every setting on the page, so it asks first (SW-09, S-03); it keeps the look of the other "restore defaults" links.
             var reset=ActionButton(Loc.T("恢复默认", "Restore defaults"),()=>{ if(Confirm(Loc.T("恢复默认", "Restore defaults"),ResetConfirmText(page),Loc.T("恢复默认", "Restore defaults")))ResetPage(); }); reset.FontSize=11; DockPanel.SetDock(reset,Dock.Right); head.Children.Add(reset);
         }
         head.Children.Add(page == 7 ? Wordmark(28) : TextLine(_pages[page],24,TextPrimary,FontWeights.SemiBold)); _content.Children.Add(head);
-        switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; case ThemePage: ThemesPage(); break; case MonitorSettingsPage: MonitorSettings(); break; case SensorsPage: SensorsSettings(); break; case HotkeysPage: HotkeysSettings(); break; case DevicesSettingsPage: DevicesSettings(); break; case ClipboardSettingsPage: ClipboardSettings(); break; case TransferSettingsPage: TransferSettings(); break; case ClipboardSyncSettingsPage: ClipboardSyncSettings(); break; case ShelfLayoutSettingsPage: ShelfLayoutSettings(); break; case MusicGesturesPage: MusicGesturesSettings(); break; case ProfilesPage: ProfilesSettings(); break; case NoticesSettingsPage: NoticesPage(); break; case NoticeAppsSettingsPage: NoticeAppsPage(); break; case AgentsSettingsPage: AgentsSettings(); break; case MailSettingsPage: MailSettings(); break; }
+        switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; case ThemePage: ThemesPage(); break; case MonitorSettingsPage: MonitorSettings(); break; case SensorsPage: SensorsSettings(); break; case HotkeysPage: HotkeysSettings(); break; case DevicesSettingsPage: DevicesSettings(); break; case ClipboardSettingsPage: ClipboardSettings(); break; case TransferSettingsPage: TransferSettings(); break; case ClipboardSyncSettingsPage: ClipboardSyncSettings(); break; case ShelfLayoutSettingsPage: ShelfLayoutSettings(); break; case MusicGesturesPage: MusicGesturesSettings(); break; case ProfilesPage: ProfilesSettings(); break; case NoticesSettingsPage: NoticesPage(); break; case NoticeAppsSettingsPage: NoticeAppsPage(); break; case AgentsSettingsPage: AgentsSettings(); break; case MailSettingsPage: MailSettings(); break; case AgendaSettingsPage: AgendaSettings(); break; }
         if (_content.Children[^1] is Border lastGroup) lastGroup.Margin = new Thickness(lastGroup.Margin.Left, lastGroup.Margin.Top, lastGroup.Margin.Right, 0);
         // Apply the offset before the frame is drawn, so the rebuilt page never shows its top for a frame.
         if (keep > 0) { _scroll.UpdateLayout(); _scroll.ScrollToVerticalOffset(keep); _scroll.UpdateLayout(); }
@@ -399,6 +399,8 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         AgentsSettingsPage => "M 1,2.5 H 15 V 13.5 H 1 Z M 4,6 L 6.5,8 L 4,10 M 8,10.5 H 12",
         // An envelope: the connected mailboxes.
         MailSettingsPage => "M 1.5,3.5 H 14.5 V 12.5 H 1.5 Z M 1.5,4 L 8,9 L 14.5,4",
+        // A calendar page with a tick: the panel's planner button (MainWindow.xaml, AgendaPageButton) at two thirds of its 24 DIP box.
+        AgendaSettingsPage => "M 5.3,1.7 V 4 M 10.7,1.7 V 4 M 3.3,3 H 12.7 A 1.3,1.3 0 0 1 14,4.3 V 13 A 1.3,1.3 0 0 1 12.7,14.3 H 3.3 A 1.3,1.3 0 0 1 2,13 V 4.3 A 1.3,1.3 0 0 1 3.3,3 Z M 2,6.7 H 14 M 6,10.3 L 7.3,11.7 L 10,9",
         5 => "M 6,12.5 V 3 L 14,1.5 V 11 M 6,12.5 A 2,2 0 1 1 2,12.5 A 2,2 0 1 1 6,12.5 M 14,11 A 2,2 0 1 1 10,11 A 2,2 0 1 1 14,11",
         _ => "M 8,1 A 7,7 0 1 1 7.99,1 M 8,7 V 12 M 8,4 V 4.2"
     },16,16,color);
@@ -678,7 +680,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                 case HotkeysPage:foreach(var kind in Enum.GetValues<HotkeyKind>())s.SetHotkey(kind,defaults.Hotkey(kind));break;
                 case 1:s.Style=defaults.Style;s.LineOpens=defaults.LineOpens;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;
                     s.NotchEqualizer=defaults.NotchEqualizer;s.CapsuleEqualizer=defaults.CapsuleEqualizer;s.NotchClock=defaults.NotchClock;s.CapsuleClock=defaults.CapsuleClock;s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=[.. PanelTheme.Current.ClockGradients[0].Stops];s.Clock24Hour=defaults.Clock24Hour;s.ClockSeconds=defaults.ClockSeconds;s.ClockDate=defaults.ClockDate;s.ClockDatePosition=defaults.ClockDatePosition;s.ClockDateFormat=defaults.ClockDateFormat;s.ClockWeekday=defaults.ClockWeekday;CopyCollapsedSize(s,defaults);s.GripDoubleClick=defaults.GripDoubleClick;
-                    s.NotchMonitor=defaults.NotchMonitor;s.CapsuleMonitor=defaults.CapsuleMonitor;s.NotchDevices=defaults.NotchDevices;s.CapsuleDevices=defaults.CapsuleDevices;s.NotchOrder=defaults.NotchOrder;s.CapsuleOrder=defaults.CapsuleOrder;s.NotchTransfer=defaults.NotchTransfer;s.CapsuleTransfer=defaults.CapsuleTransfer;s.NotchNotices=defaults.NotchNotices;s.CapsuleNotices=defaults.CapsuleNotices;
+                    s.NotchMonitor=defaults.NotchMonitor;s.CapsuleMonitor=defaults.CapsuleMonitor;s.NotchDevices=defaults.NotchDevices;s.CapsuleDevices=defaults.CapsuleDevices;s.NotchOrder=defaults.NotchOrder;s.CapsuleOrder=defaults.CapsuleOrder;s.NotchTransfer=defaults.NotchTransfer;s.CapsuleTransfer=defaults.CapsuleTransfer;s.NotchNotices=defaults.NotchNotices;s.CapsuleNotices=defaults.CapsuleNotices;s.NotchAgenda=defaults.NotchAgenda;s.CapsuleAgenda=defaults.CapsuleAgenda;
                     // The clock goes back to the one the panel theme suggests, as choosing the theme gives.
                     PanelThemes.ApplyClock(PanelTheme.Current,s);break;
                 case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.RightClickSettings=defaults.RightClickSettings;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;s.MouseWheel=defaults.MouseWheel;s.ExpandAtPointer=defaults.ExpandAtPointer;
@@ -713,6 +715,12 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                     s.NoticeCodes=defaults.NoticeCodes;s.NoticeRespectFocus=defaults.NoticeRespectFocus;s.NoticesPausedUntil=null;s.NoticeHistory=defaults.NoticeHistory;s.NoticeHistoryHours=defaults.NoticeHistoryHours;break;
                 // The list goes back to the applications a new user has; the WSL distributions stay, as they are set up in them.
                 case NoticeAppsSettingsPage:s.NoticeApps=[.. DeckSettings.DefaultNoticeApps()];s.NoticeAppsListed=true;break;
+                // The planner's habits and what its collapsed part shows; the notch's and capsule's switches for the part are Collapsed
+                // view's (case 1), the page and its size Expanded view's (case 2). The events, to-dos and notes are data, not settings.
+                case AgendaSettingsPage:s.AgendaStripMode=defaults.AgendaStripMode;s.AgendaStripEvents=defaults.AgendaStripEvents;s.AgendaStripTodos=defaults.AgendaStripTodos;s.AgendaStripNote=defaults.AgendaStripNote;
+                    s.AgendaStripEventForm=defaults.AgendaStripEventForm;s.AgendaStripTodoForm=defaults.AgendaStripTodoForm;s.AgendaWeekStart=defaults.AgendaWeekStart;s.AgendaEventMinutes=defaults.AgendaEventMinutes;
+                    s.AgendaRemindTimed=defaults.AgendaRemindTimed;s.AgendaRemindAllDay=defaults.AgendaRemindAllDay;s.AgendaSnoozeMinutes=defaults.AgendaSnoozeMinutes;s.AgendaLeftTodos=defaults.AgendaLeftTodos;
+                    s.AgendaDoneTodos=defaults.AgendaDoneTodos;s.AgendaFromNotices=defaults.AgendaFromNotices;break;
             }
         });
         if(_page==0)RebuildTheme();else ShowPage(_page);

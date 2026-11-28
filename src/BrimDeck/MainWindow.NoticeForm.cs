@@ -27,9 +27,11 @@ public partial class MainWindow
     private void OpenNoticeForm(Notice notice, NoticeAgendaTime time, bool typing = true)
     {
         var moment = time.Moment;
-        var end = moment.End ?? (moment.AllDay ? moment.Start : moment.Start.AddHours(1));
+        // A new event: without an end read it lasts, and it reminds, as the settings say.
+        var habits = AgendaCenter.Habits;
+        var end = moment.End ?? (moment.AllDay ? moment.Start : AgendaCalendar.NewEventEnd(moment.Start, habits.AgendaEventMinutes));
         ShowNoticeForm(notice, null, null, false, NoticeAgenda.EventTitle(notice, time), moment.Start, end, moment.AllDay, DateOnly.FromDateTime(moment.Start), typing,
-            AgendaRepeat.None, AgendaReminders.Default(moment.AllDay));
+            AgendaRepeat.None, habits.AgendaRemind(moment.AllDay));
     }
 
     // From "修改": the event or the to-do the notice added.
@@ -40,13 +42,14 @@ public partial class MainWindow
         else if (todo is not null)
         {
             var day = todo.Day ?? today;
+            var habits = AgendaCenter.Habits;
             var start = AgendaCalendar.NewEventStart(day, DateTime.Now);
-            ShowNoticeForm(notice, null, todo.Id, true, todo.Text, start, start.AddHours(1), false, day, typing, AgendaRepeat.None, AgendaReminders.Default(false));
+            ShowNoticeForm(notice, null, todo.Id, true, todo.Text, start, AgendaCalendar.NewEventEnd(start, habits.AgendaEventMinutes), false, day, typing, AgendaRepeat.None, habits.AgendaRemind(false));
         }
     }
 
     // repeat: how the event changed repeats (a series is shown by its first time, and a change applies to every time of it).
-    // remind: its reminder, null for none (a new event: AgendaReminders.Default).
+    // remind: its reminder, null for none (a new event: the settings', DeckSettings.AgendaRemind).
     private void ShowNoticeForm(Notice notice, string? eventId, string? todoId, bool asTodo, string text, DateTime start, DateTime end, bool allDay, DateOnly day, bool typing,
         AgendaRepeat repeat, int? remind)
     {

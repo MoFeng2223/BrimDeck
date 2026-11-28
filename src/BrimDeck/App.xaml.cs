@@ -353,6 +353,8 @@ public partial class App : Application
         ApplyToDecks(styles);
         Notices.ApplySettings();
         Mail.ApplySettings();
+        // The planner's to-dos left on earlier days move to today once the setting says so (AgendaCenter.ApplySettings).
+        Agenda.ApplySettings();
         var dataKey = DataKey(); bool dataChanged = dataKey != _dataKey; _dataKey = dataKey;
         QueueSave();
         CollapsedChanged();

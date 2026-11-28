@@ -104,6 +104,7 @@ public sealed partial class SettingsWindow
             CompactPart.Transfer => (Loc.T("文件中转", "File transfer"), style == CompactStyle.Notch ? S.NotchTransfer : S.CapsuleTransfer, null),
             CompactPart.Devices => (Loc.T("设备电量", "Device batteries"), S.ShowsDevices(style), null),
             CompactPart.Notices => (Loc.T("通知", "Notices"), style == CompactStyle.Notch ? S.NotchNotices : S.CapsuleNotices, null),
+            CompactPart.Agenda => (Loc.T("计划", "Planner"), style == CompactStyle.Notch ? S.NotchAgenda : S.CapsuleAgenda, null),
             _ => (Loc.T("系统监控", "System monitor"), S.ShowsMonitor(style), null)
         };
         void Show(bool on) => Change(s =>
@@ -116,6 +117,7 @@ public sealed partial class SettingsWindow
                 case CompactPart.Transfer: if (notch) s.NotchTransfer = on; else s.CapsuleTransfer = on; break;
                 case CompactPart.Devices: if (notch) s.NotchDevices = on; else s.CapsuleDevices = on; break;
                 case CompactPart.Notices: if (notch) s.NotchNotices = on; else s.CapsuleNotices = on; break;
+                case CompactPart.Agenda: if (notch) s.NotchAgenda = on; else s.CapsuleAgenda = on; break;
                 default: if (notch) s.NotchMonitor = on; else s.CapsuleMonitor = on; break;
             }
         });
