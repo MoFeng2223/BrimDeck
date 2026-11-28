@@ -119,7 +119,8 @@ internal sealed class HeFengSource : IWeatherSource
         // 四个接口各自过期：实况最短、逐天最长，互不牵连（官方推荐 10–30 分钟 / 30–60 分钟 / 1–6 小时）。
         // 实况是可用性探针：只有它发出真实请求并收到响应，才更新和风连通状态。
         var current = Want(WeatherDomain.Current) ? FetchBodyAsync(context, "current|" + context.Site, TimeSpan.FromMinutes(10), $"{host}/weather/v1/current/{context.Lat}/{context.Lon}?{query}", token, probe: true) : Task.FromResult<string?>(null);
-        var hours = Want(WeatherDomain.Hourly) ? FetchBodyAsync(context, "hourly|" + context.Site + "|" + context.Day, TimeSpan.FromMinutes(30), $"{host}/weather/v1/hourly/{context.Lat}/{context.Lon}?hours=24&{query}", token) : Task.FromResult<string?>(null);
+
+        var hours = Want(WeatherDomain.Hourly) ? FetchBodyAsync(context, "hourly|" + context.Site + "|" + context.Day, TimeSpan.FromMinutes(30), $"{host}/weather/v1/hourly/{context.Lat}/{context.Lon}?hours=48&{query}", token) : Task.FromResult<string?>(null);
         var days = Want(WeatherDomain.Daily) ? FetchBodyAsync(context, "daily|" + context.Site + "|" + context.Day, TimeSpan.FromHours(2), $"{host}/weather/v1/daily/{context.Lat}/{context.Lon}?days=10&{query}", token) : Task.FromResult<string?>(null);
         var air = Want(WeatherDomain.Air) ? FetchBodyAsync(context, "air|" + context.Site, TimeSpan.FromMinutes(30), $"{host}/airquality/v1/current/{context.Lat}/{context.Lon}?lang={context.Lang}", token) : Task.FromResult<string?>(null);
         // 空气质量预报与实况分开缓存：实况 30 分钟、未来 24 小时逐时同样 30 分钟，缓存键带当地日期。
