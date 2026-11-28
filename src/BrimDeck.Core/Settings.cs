@@ -94,7 +94,7 @@ public enum EqualizerMode { Flow = 0, Spectrum = 1 }
 public enum QuotaRingStyle { Nested = 0, Single = 1 }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left; Music places
 // only the title or lyric. Saved as numbers, so new members go at the end. Agents is no longer a part of its own: the coding
-// agents show within Notices (the live notices, MainWindow.CompactAttention.cs); a saved order that names it drops it.
+// agents show within Notices (the notices, MainWindow.CompactAttention.cs); a saved order that names it drops it.
 public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer, Devices, Notices, Agents }
 public static class CompactParts
 {
@@ -807,7 +807,7 @@ public sealed class DeckSettings
     // The notch and the capsule each show the devices' batteries (CompactPart.Devices).
     public bool NotchDevices { get; set; }
     public bool CapsuleDevices { get; set; }
-    // The notch and the capsule each show the live notices (CompactPart.Notices): the unread notices and, with NoticeStripAgents,
+    // The notch and the capsule each show the notices (CompactPart.Notices): the unread notices and, with NoticeStripAgents,
     // the coding agents' sessions; shown only while there is any. On by default.
     public bool NotchNotices { get; set; } = true;
     public bool CapsuleNotices { get; set; } = true;
@@ -901,7 +901,7 @@ public sealed class DeckSettings
     // The collapsed count of unread notices (CompactPart.Notices) shows the icons of the applications they came from before the
     // number; off, a bell.
     public bool NoticeStripIcons { get; set; } = true;
-    // The live notices' part shows the coding agents' sessions too, before the unread notices. On by default.
+    // The notices' part shows the coding agents' sessions too, before the unread notices. On by default.
     public bool NoticeStripAgents { get; set; } = true;
     // The sessions' icons and the applications' icons stack in one group, the one that most needs the user in front, with one
     // word or number after it; off, two groups side by side, each with its own words.
@@ -954,7 +954,7 @@ public sealed class DeckSettings
     // The indicator is too thin for readings, as for the clock.
     public bool ShowsMonitor(CompactStyle style) => style switch { CompactStyle.Notch => NotchMonitor, CompactStyle.Capsule => CapsuleMonitor, _ => false };
     public bool ShowsDevices(CompactStyle style) => style switch { CompactStyle.Notch => NotchDevices, CompactStyle.Capsule => CapsuleDevices, _ => false };
-    // The coding agents show within the live notices' part (NoticeStripAgents). The notices' count needs the notices page, which a
+    // The coding agents show within the notices' part (NoticeStripAgents). The notices' count needs the notices page, which a
     // click on it opens.
     public bool ShowsAgents(CompactStyle style) => NoticeStripAgents && style switch { CompactStyle.Notch => NotchNotices, CompactStyle.Capsule => CapsuleNotices, _ => false };
     public bool ShowsNotices(CompactStyle style) => DeckPages.Shown(this, DeckPage.Notices) && style switch { CompactStyle.Notch => NotchNotices, CompactStyle.Capsule => CapsuleNotices, _ => false };

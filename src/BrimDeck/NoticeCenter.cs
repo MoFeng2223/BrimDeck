@@ -367,7 +367,7 @@ internal sealed partial class NoticeCenter : IDisposable
         {
             NoticePipeServer.Answer Refuse(string why) => new(NoticeProtocol.Reply(NoticeResults.Rejected, why, message.EventId));
             if (_disposed) return Refuse("shutting-down");
-            // An agent's session state shows on the collapsed row whether or not live notices are on.
+            // An agent's session state shows on the collapsed row whether or not notices are on.
             if (message.Type == NoticeTypes.Agent)
                 return AgentReport is { } report ? (Admit("agent") ? new(report(message)) : Refuse("rate-limited")) : Refuse("unknown-type");
             if (!_enabled) return Refuse("notices-off");
@@ -917,7 +917,7 @@ internal sealed partial class NoticeCenter : IDisposable
         Receive(new NoticeInput
         {
             Origin = NoticeOrigin.Test, AppKey = TestAppKey, AppName = "BrimDeck", InstanceKey = "test:" + Guid.NewGuid().ToString("N"),
-            Title = Loc.T("灵动提示测试", "Live notice test"),
+            Title = Loc.T("通知测试", "Notice test"),
             Body = Loc.T("通知会在岛上显示。鼠标移上去即可打开通知页。", "Notices show on the island. Rest the pointer on it to open the notices page."),
             Category = NoticeCategory.Info, Level = level, Align = align
         });

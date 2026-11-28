@@ -53,7 +53,7 @@ public sealed partial class SettingsWindow
         HotkeyKind.CycleStyle => Loc.T("切换刘海、胶囊或指示条", "Switch notch, capsule or bar"),
         HotkeyKind.LineStyle => Loc.T("切换指示条与刘海或胶囊", "Switch between bar and notch or capsule"),
         HotkeyKind.NextProfile => Loc.T("切换到下一个配置", "Switch to the next profile"),
-        HotkeyKind.Notices => Loc.T("打开灵动提示", "Open live notices"),
+        HotkeyKind.Notices => Loc.T("打开通知", "Open notices"),
         _ => Loc.T($"展开/收起第 {PagePlace(kind) + 1} 个页面", $"Expand/collapse page {PagePlace(kind) + 1}")
     };
 
@@ -71,8 +71,8 @@ public sealed partial class SettingsWindow
         HotkeyKind.CycleStyle => Loc.T("按刘海、胶囊、指示条的顺序循环切换收起样式。", "Cycles the collapsed style: notch, capsule, bar."),
         HotkeyKind.LineStyle => Loc.T("刘海或胶囊切换为指示条，再按一次切换回原来的样式。", "Turns the notch or capsule into the bar; press again to turn it back."),
         HotkeyKind.NextProfile => Loc.T("按“显示器与配置”页的列表顺序，切换到下一个配置。", "Switches to the next profile, in the order of the Displays and profiles page."),
-        HotkeyKind.Notices => Loc.T("有提示时打开它的详情并可用键盘操作（Tab 切换、Enter 确认、Esc 关闭）；没有提示时打开通知历史。默认不设置，避免与其他程序冲突。",
-            "With a notice on screen, opens its details for the keyboard (Tab to move, Enter to choose, Esc to close); otherwise opens the notice history. Unset by default, to avoid clashing with other programs."),
+        HotkeyKind.Notices => Loc.T("有提示时打开它的详情并可用键盘操作（Tab 切换、Enter 确认、Esc 关闭）；没有提示时打开通知页。默认不设置，避免与其他程序冲突。",
+            "With a notice on screen, opens its details for the keyboard (Tab to move, Enter to choose, Esc to close); otherwise opens the Notices page. Unset by default, to avoid clashing with other programs."),
         _ => null
     };
 

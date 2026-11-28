@@ -1345,7 +1345,7 @@ public partial class MainWindow
         // The devices' batteries keep one width too (as many devices as show, each with the room of its widest figure), counted with them.
         var devices = CompactDevices(scale);
         double devicesWidth = devices is null ? 0 : DevicePixels.Up(devices.PreferredWidth, dpi);
-        // The live notices (the unread notices and the coding agents' sessions), as the file transfer's count: a fixed part whose
+        // The notices (the unread notices and the coding agents' sessions), as the file transfer's count: a fixed part whose
         // width follows its icons and words (MainWindow.CompactAttention.cs).
         var notices = CompactAttention(scale, 0);
         double noticesWidth = notices?.Width ?? 0;
@@ -1357,7 +1357,7 @@ public partial class MainWindow
         _stripLayout = _stripAdmission.Layout;
         // Readings that do not fit scroll through a window of whole readings, as the rings do (CompactSpacing.Window).
         double ringDiameter = QuotaRing.Diameter(Settings.QuotaRingStyle);
-        // A surface with a width of its own keeps it: the live notices give up what would widen it (CompactAttention).
+        // A surface with a width of its own keeps it: the notices give up what would widen it (CompactAttention).
         if (!Settings.CompactAutoWidth(EffectiveStyle) && notices is not null)
         {
             double given = GivenContentWidth();

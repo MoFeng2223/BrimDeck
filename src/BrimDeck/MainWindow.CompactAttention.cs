@@ -10,7 +10,7 @@ using BrimDeck.Core.Notices;
 
 namespace BrimDeck;
 
-// The collapsed row's live notices (CompactPart.Notices): the unread notices (MainWindow.NoticeStrip.cs) and the coding agents'
+// The collapsed row's notices (CompactPart.Notices): the unread notices (MainWindow.NoticeStrip.cs) and the coding agents'
 // sessions (MainWindow.AgentStrip.cs, DeckSettings.NoticeStripAgents), in one place. Apart (the default) they are two groups side
 // by side, the agents first, each with its own words; merged (DeckSettings.NoticeAgentsMerged) the sessions' and the
 // applications' icons stack in one group, the one that most needs the user in front, with one word or number after it.

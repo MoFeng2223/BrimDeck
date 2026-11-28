@@ -38,7 +38,7 @@ public partial class MainWindow
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor, Look), DateTime.Now, scale, Look, ClockDate.Of(Settings)) : null;
         var transfer = TransferBadge(scale);
         var devices = CompactDevices(scale);
-        // The live notices give up what is wider than the column, a step at a time (CompactAttention).
+        // The notices give up what is wider than the column, a step at a time (CompactAttention).
         var notices = CompactAttention(scale, 0);
         for (int level = 1; level < AttentionLevels && (notices?.Width ?? 0) > column + .5; level++) notices = CompactAttention(scale, level);
         var layout = CompactMusicLayout.Calculate(10000, scale, media, apps.Count, text.Length > 0, FixedFace(scale, clock?.ReservedWidth ?? 0, transfer?.Width ?? 0, devices?.PreferredWidth ?? 0, notices?.Width ?? 0), 0, equalizer, Settings.EqualizerBars, ring: QuotaRing.Diameter(Settings.QuotaRingStyle));

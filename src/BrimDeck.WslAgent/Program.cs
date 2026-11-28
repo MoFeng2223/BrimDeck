@@ -29,7 +29,7 @@ internal static class Program
         s_name = brim ? "brim" : "brim-notify";
         var command = brim ? BrimCommandLine.Parse(args[1..], Environment.GetEnvironmentVariable(BrimCommandLine.SourceVariable)) : NotifyCommandLine.Parse(args is ["notify", .. var rest] ? rest : args);
         return await NotifyCli.RunAsync(command, new NotifySender(Version, SendAsync, Start,
-            Unreachable: "BrimDeck could not be reached (is it running, with this distribution switched on under live notices?).",
+            Unreachable: "BrimDeck could not be reached (is it running, with this distribution switched on under notices?).",
             NotReceiving: "BrimDeck is not receiving notices from this distribution.")
         {
             Name = s_name, Usage = brim ? BrimCommandLine.Usage : NotifyCommandLine.Usage, SendWaiting = SendWaitingAsync

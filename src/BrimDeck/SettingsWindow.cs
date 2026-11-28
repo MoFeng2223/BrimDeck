@@ -341,7 +341,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         {
             if (i is 0 or 3 or 5 or 7 or MonitorSettingsPage or ShelfLayoutSettingsPage or DevicesSettingsPage or NoticesSettingsPage)
             {
-                var group = TextLine(i switch { 0 => Loc.T("基础设置", "Basics"), 3 => Loc.T("AI 用量", "AI usage"), MonitorSettingsPage => Loc.T("系统监控", "System monitor"), ShelfLayoutSettingsPage => Loc.T("中转站", "Shelf"), DevicesSettingsPage => Loc.T("设备电量", "Device batteries"), NoticesSettingsPage => Loc.T("灵动提示", "Live notices"), 5 => Loc.T("音乐", "Music"), _ => Loc.T("关于", "About") },10.5,TextTertiary);
+                var group = TextLine(i switch { 0 => Loc.T("基础设置", "Basics"), 3 => Loc.T("AI 用量", "AI usage"), MonitorSettingsPage => Loc.T("系统监控", "System monitor"), ShelfLayoutSettingsPage => Loc.T("中转站", "Shelf"), DevicesSettingsPage => Loc.T("设备电量", "Device batteries"), NoticesSettingsPage => Loc.T("通知", "Notices"), 5 => Loc.T("音乐", "Music"), _ => Loc.T("关于", "About") },10.5,TextTertiary);
                 group.Margin = new Thickness(12, i == 0 ? 0 : 24, 0, 8); _navigation.Children.Add(group);
             }
             int target=i; bool selected=page==i;
@@ -534,7 +534,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                     DeckPage.Monitor => (DefaultDeckPage.Monitor, Loc.T("系统监控", "System monitor")),
                     DeckPage.Clipboard => (DefaultDeckPage.Clipboard, Loc.T("剪贴板与文件中转", "Clipboard and file transfer")),
                     DeckPage.Devices => (DefaultDeckPage.Devices, Loc.T("设备电量", "Device batteries")),
-                    DeckPage.Notices => (DefaultDeckPage.Notices, Loc.T("通知历史", "Notice history")),
+                    DeckPage.Notices => (DefaultDeckPage.Notices, Loc.T("通知", "Notices")),
                     DeckPage.Agenda => (DefaultDeckPage.Agenda, Loc.T("计划", "Planner")),
                     _ => (DefaultDeckPage.Usage, Loc.T("AI 用量", "AI usage"))
                 });
@@ -553,7 +553,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         foreach (var page in S.PageOrder)
             pages.Children.Add(page switch
             {
-                DeckPage.Notices => SizeRow(Loc.T("显示灵动通知", "Show live notices"), Loc.T("灵动通知", "live notices"), page, S.NoticesPage, value => { Change(s => s.NoticesPage = value); FillStarts(); }, Collect(NoticeSizeControls), pages, FillStarts),
+                DeckPage.Notices => SizeRow(Loc.T("显示通知", "Show notices"), Loc.T("通知", "notices"), page, S.NoticesPage, value => { Change(s => s.NoticesPage = value); FillStarts(); }, Collect(NoticeSizeControls), pages, FillStarts),
                 DeckPage.Music => SizeRow(Loc.T("显示音乐", "Show music"), Loc.T("音乐", "music"), page, S.MusicPage, value => { Change(s => s.MusicPage = value); FillStarts(); }, Collect(MusicSizeControls), pages, FillStarts),
                 DeckPage.Monitor => SizeRow(Loc.T("显示系统监控", "Show system monitor"), Loc.T("系统监控", "system monitor"), page, S.MonitorPage, value => { Change(s => s.MonitorPage = value); FillStarts(); }, Collect(MonitorSizeControls), pages, FillStarts),
                 DeckPage.Clipboard => SizeRow(Loc.T("显示剪贴板与文件中转", "Show clipboard and file transfer"), Loc.T("剪贴板与文件中转", "clipboard and file transfer"), page, S.ClipboardPage, value => { Change(s => s.ClipboardPage = value); FillStarts(); }, Collect(ShelfSizeControls), pages, FillStarts),

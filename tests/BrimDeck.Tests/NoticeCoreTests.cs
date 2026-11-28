@@ -557,13 +557,13 @@ internal static class NoticeCoreTests
         check("The notices' count shows on the style it is on for, never on the indicator", strip.ShowsNotices(CompactStyle.Capsule) && !strip.ShowsNotices(CompactStyle.Notch) && !strip.ShowsNotices(CompactStyle.Line));
         strip.NoticesPage = false;
         check("The notices' count hides with the notices page", !strip.ShowsNotices(CompactStyle.Capsule));
-        check("The live notices are part 7, added at the end of an order saved without them; the coding agents' part 8 is dropped, they show within part 7",
+        check("The notices are part 7, added at the end of an order saved without them; the coding agents' part 8 is dropped, they show within part 7",
             (int)CompactPart.Notices == 7 && (int)CompactPart.Agents == 8 && CompactParts.Normalize([CompactPart.Rings, CompactPart.Agents]) is var order
             && order[^1] == CompactPart.Notices && !order.Contains(CompactPart.Agents));
         strip.NotchNotices = true; strip.NoticeStripAgents = true;
         bool agentsOn = strip.ShowsAgents(CompactStyle.Notch) && !strip.ShowsAgents(CompactStyle.Line);
         strip.NoticeStripAgents = false;
-        check("The coding agents show where the live notices are on, and not with NoticeStripAgents off", agentsOn && !strip.ShowsAgents(CompactStyle.Notch));
+        check("The coding agents show where the notices are on, and not with NoticeStripAgents off", agentsOn && !strip.ShowsAgents(CompactStyle.Notch));
     }
 
     private static void SettingsValues(string root, Action<string, bool> check)

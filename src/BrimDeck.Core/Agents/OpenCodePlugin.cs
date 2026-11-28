@@ -40,7 +40,7 @@ public static class OpenCodePlugin
         => Marker + "\n" + Template.Replace("__BRIM__", JsonSerializer.Serialize(brim)).Replace("__ARGS__", JsonSerializer.Serialize(arguments)).Replace("__EXPORTS__", exports).ReplaceLineEndings("\n");
 
     private const string Template = """
-        // Written by BrimDeck (Settings › Live notices › AI coding tools); removing the hooks there deletes this file.
+        // Written by BrimDeck (Settings › Notices › AI coding tools); removing the hooks there deletes this file.
         // Shows the tool's sessions on the BrimDeck island, and lets approvals and questions be answered there.
         import { spawn } from "node:child_process"
 

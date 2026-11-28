@@ -4,14 +4,14 @@ With a mailbox connected, BrimDeck sends a notice when new mail arrives:
 
 - The notice shows the sender, the subject and the start of the text, on the island and on the notices page like any other notice.
 - It carries the mail service's icon; mail from an "Other mailbox" shows an envelope, under the domain of its address (company.com, for example).
-- A verification code in the mail can be copied with the "Copy code" button (turn on Settings › Live notices › How notices show › Hide verification codes).
+- A verification code in the mail can be copied with the "Copy code" button (turn on Settings › Notices › How notices show › Hide verification codes).
 - "Open mailbox" opens the mailbox's website in the browser.
 
-If you already use a mail app such as Outlook, Foxmail or Thunderbird, or have turned on notifications for webmail in the browser, you do not need to connect a mailbox: those Windows notifications already show on the notices page (see [Live notices](notices.md)). Connecting a mailbox is for when you would rather not keep a mail app running.
+If you already use a mail app such as Outlook, Foxmail or Thunderbird, or have turned on notifications for webmail in the browser, you do not need to connect a mailbox: those Windows notifications already show on the notices page (see [Notices](notices.md)). Connecting a mailbox is for when you would rather not keep a mail app running.
 
 ## Adding a mailbox
 
-1. Open Settings › Live notices › Mailboxes and choose "Add mailbox".
+1. Open Settings › Notices › Mailboxes and choose "Add mailbox".
 2. Type your email address. BrimDeck recognizes the mail service from the address' domain; once it has, press Enter to go on, and the address is carried to the next step. You can also choose the service in the list, or type its name to filter the list. For a work, school or self-hosted mailbox, choose "Other mailbox" under the list.
 3. Follow the steps in the window to generate an authorization code (or app password) on the service's website, enter the code and choose "Connect". The button at the right of the code field shows what you typed.
 
@@ -65,7 +65,7 @@ The arrow beside the address opens the row, which shows the mail service, the IM
 - Mail that arrived while the PC slept or was offline is listed unread on the notices page once the connection is back, without popping up (this holds for any mail more than 10 minutes old when BrimDeck learns of it).
 - Each mail takes its own row on the notices page; several mails from one sender are not put together.
 - At most the latest 20 at a time.
-- With both switches of live notices off, mailboxes are not connected.
+- With both switches of notices off, mailboxes are not connected.
 
 Where the server pushes (IMAP IDLE), new mail is usually announced within seconds; BrimDeck also looks every 60 seconds, since some services do not always push.
 
@@ -75,6 +75,6 @@ Where the server pushes (IMAP IDLE), new mail is usually announced within second
 - Only the sender, subject, time and the start of the text of new mail in the inbox are read (about 500 bytes of plain text; up to 16 KB of an HTML mail, from which the text is taken). Attachments are not downloaded and other folders are not read.
 - The inbox is opened read-only: nothing is marked read, sent, moved or deleted.
 - The code is stored with Windows' encryption for the current user (DPAPI) in `%LOCALAPPDATA%\BrimDeck\secrets.dat`; `settings.json` holds only the address and the service's name. An exported configuration does not contain the code, so it has to be entered again after importing on another PC.
-- Mail notices go into the notice history like every other notice, encrypted on this PC; see [Live notices](notices.md#privacy) for how long they are kept.
+- Mail notices go into the notice history like every other notice, encrypted on this PC; see [Notices](notices.md#privacy) for how long they are kept.
 
 IMAP is spoken with MailKit (MIT license; see ThirdPartyNotices.txt).

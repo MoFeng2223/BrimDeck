@@ -117,7 +117,7 @@ internal sealed partial class IslandNotice : Window
         _body.Draw = DrawBody; _parts.Draw = DrawParts; _edge.Draw = DrawEdgeLight; _beads.Draw = DrawBeads;
         // The notice lies over the island's opaque body; its text keeps ClearType under the clips that hold it.
         TextClarity.SetClearType(_content, true);
-        AutomationProperties.SetName(_hit, Loc.T("灵动提示", "Live notice"));
+        AutomationProperties.SetName(_hit, Loc.T("通知", "Notice"));
         _hoverOpen = new(Dispatcher, () => { _hoverOpen!.Stop(); if (_item is not null && !_leaving && _hit.IsMouseOver) OpenPage(byKey: false); });
         // A notice that stays until handled plays its motion again while it shows.
         _replay = new(Dispatcher, () => { _replay!.Stop(); if (_item is { Persistent: true } && !_leaving && IsVisible) StartMotion(); });
@@ -326,7 +326,7 @@ internal sealed partial class IslandNotice : Window
     private void NameHit()
     {
         if (Track is { } track) { AutomationProperties.SetName(_hit, Loc.T("正在播放：", "Now playing: ") + track.Title); return; }
-        AutomationProperties.SetName(_hit, Loc.T("灵动提示", "Live notice"));
+        AutomationProperties.SetName(_hit, Loc.T("通知", "Notice"));
     }
 
     // acted: a click or the hotkey, rather than the pointer resting on the notice. With the notices page switched off there is

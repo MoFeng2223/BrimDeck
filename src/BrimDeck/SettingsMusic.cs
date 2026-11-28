@@ -101,13 +101,9 @@ public sealed partial class SettingsWindow
             CompactPart.Equalizer => (Loc.T("律动条", "Equalizer"), S.ShowsEqualizer(style), null),
             CompactPart.Music => (Loc.T("正在播放的音乐", "Music now playing"), S.ShowsMusic(style),
                 Loc.T("拖动只改变歌名或歌词的位置。封面始终在最左侧。", "Dragging moves only the title or lyric. The cover stays at the left.")),
-            CompactPart.Transfer => (Loc.T("文件中转", "File transfer"), style == CompactStyle.Notch ? S.NotchTransfer : S.CapsuleTransfer,
-                Loc.T("显示文件中转里的文件数量，没有文件时不显示。单击直接展开到剪贴板与文件中转页。", "Shows how many files the file transfer holds, and nothing while it is empty. Clicking it opens the clipboard and file transfer page.")),
-            CompactPart.Devices => (Loc.T("设备电量", "Device batteries"), S.ShowsDevices(style),
-                Loc.T("显示哪些设备、是否显示数字，在“设备电量”设置页中选择。", "Which devices show, and whether with figures, is chosen on the device batteries settings page.")),
-            CompactPart.Notices => (Loc.T("灵动通知", "Live notices"), style == CompactStyle.Notch ? S.NotchNotices : S.CapsuleNotices,
-                Loc.T("显示未读通知和 AI 编程工具的会话，都没有时不显示，单击打开通知页。分开或合并显示等在“灵动提示 › 提示方式”中设置。",
-                    "Shows the unread notices and the AI coding tools' sessions, and nothing when there are none; clicking it opens the notices page. Whether they show apart or together is set under Live notices › How notices show.")),
+            CompactPart.Transfer => (Loc.T("文件中转", "File transfer"), style == CompactStyle.Notch ? S.NotchTransfer : S.CapsuleTransfer, null),
+            CompactPart.Devices => (Loc.T("设备电量", "Device batteries"), S.ShowsDevices(style), null),
+            CompactPart.Notices => (Loc.T("通知", "Notices"), style == CompactStyle.Notch ? S.NotchNotices : S.CapsuleNotices, null),
             _ => (Loc.T("系统监控", "System monitor"), S.ShowsMonitor(style), null)
         };
         void Show(bool on) => Change(s =>

@@ -24,7 +24,7 @@ public static class CommandCodeMod
     public static string Text(string brim) => Marker + "\n" + Template.Replace("__BRIM__", JsonSerializer.Serialize(brim)).ReplaceLineEndings("\n");
 
     private const string Template = """
-        // Written by BrimDeck (Settings › Live notices › AI coding tools); removing the hooks there deletes this file.
+        // Written by BrimDeck (Settings › Notices › AI coding tools); removing the hooks there deletes this file.
         // Shows Command Code's sessions on the BrimDeck island, and lets approvals and questions be answered there.
         import { spawn } from "node:child_process"
 

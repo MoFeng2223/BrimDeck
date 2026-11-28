@@ -11,7 +11,7 @@ using BrimDeck.Native;
 
 namespace BrimDeck;
 
-// The two "灵动提示" pages. How notices show (NoticesSettingsPage): how levels 2 and 3 look (level 1 is BrimDeck's own and
+// The two "通知" pages. How notices show (NoticesSettingsPage): how levels 2 and 3 look (level 1 is BrimDeck's own and
 // fixed; the levels themselves are fixed, NoticeLevels.Resolve), the collapsed count of unread notices, the quiet times and the
 // history; whether notices show at all is each profile's switch under 收起外观 (NoticeIslandSection). Apps
 // (NoticeAppsSettingsPage, SettingsNotices.Apps.cs): the common apps, always listed, and the other Windows applications set
@@ -65,7 +65,7 @@ public sealed partial class SettingsWindow
     // notices page under 展开外观; either one receives notices.
     private void NoticeIslandSection()
     {
-        SectionTitle(Loc.T("灵动提示", "Live notices"), ActionButton(Loc.T("提示方式", "How notices show"), () => ShowPage(NoticesSettingsPage)));
+        SectionTitle(Loc.T("通知", "Notices"), ActionButton(Loc.T("提示方式", "How notices show"), () => ShowPage(NoticesSettingsPage)));
         Group(Toggle(Loc.T("提示新通知", "Show new notices"), S.NoticeIsland, value => Change(s => s.NoticeIsland = value),
             help: Loc.T("收到通知时，在刘海、胶囊或指示条上按“提示方式”中的等级显示。每块屏幕按自己使用的配置决定是否显示。与“展开外观”中的通知页互不影响。",
                 "Shows an arriving notice on the notch, capsule or indicator, by the levels under How notices show. Each screen follows the profile it uses. Independent of the notices page under Expanded view.")));
@@ -89,13 +89,13 @@ public sealed partial class SettingsWindow
         var expanded = ActionButton(Loc.T("展开外观", "Expanded view"), () => ShowPage(2)); expanded.Margin = new Thickness(6, 0, 0, 0);
         controls.Children.Add(expanded);
         var note = TextLine(Loc.T("可在“收起外观”或“展开外观”中开启", "Turn it on under Collapsed view or Expanded view"), 11.5, TextSecondary);
-        Group(Row(Loc.T("灵动通知未开启", "Live notices are off"), controls, note));
+        Group(Row(Loc.T("通知未开启", "Notices are off"), controls, note));
     }
 
     // The collapsed count of unread notices: switched on for the notch and the capsule under 收起外观 › 显示内容, shown here.
     private void NoticeStripSection()
     {
-        SectionTitle(Loc.T("灵动通知", "Live notices"), ActionButton(Loc.T("收起外观", "Collapsed view"), () => ShowPage(1)),
+        SectionTitle(Loc.T("通知", "Notices"), ActionButton(Loc.T("收起外观", "Collapsed view"), () => ShowPage(1)),
             () => Loc.T("收起时显示未读通知和 AI 编程工具的会话，在“收起外观”的显示内容中打开和排序。打开通知页后未读清零。",
                 "Shows the unread notices and the AI coding tools' sessions on the island; turn it on and place it in Collapsed view's content. Opening the notices page clears the unread ones."));
         Group(Toggle(Loc.T("显示应用图标", "Show app icons"), S.NoticeStripIcons, value => Change(s => s.NoticeStripIcons = value),

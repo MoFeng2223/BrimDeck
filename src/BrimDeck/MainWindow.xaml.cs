@@ -755,7 +755,7 @@ public partial class MainWindow : Window
         UpdateShelfPageButton();
         System.Windows.Automation.AutomationProperties.SetName(DevicesPageButton, Loc.T("设备电量", "Device batteries"));
         System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("音乐", "Music"));
-        System.Windows.Automation.AutomationProperties.SetName(NoticesPageButton, Loc.T("通知历史", "Notice history"));
+        System.Windows.Automation.AutomationProperties.SetName(NoticesPageButton, Loc.T("通知", "Notices"));
         System.Windows.Automation.AutomationProperties.SetName(AgendaPageButton, Loc.T("计划", "Planner"));
         System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));
     }

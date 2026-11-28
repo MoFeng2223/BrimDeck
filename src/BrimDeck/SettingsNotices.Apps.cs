@@ -74,8 +74,8 @@ public sealed partial class SettingsWindow
     private void OtherAppsSection(NoticeCenter center)
     {
         var add = AddAppButton(Loc.T("添加应用", "Add app"), AddNoticeAppMenu, Loc.T("添加应用", "Add app"));
-        SectionTitle(Loc.T("其他应用", "Other apps"), add, () => Loc.T("灵动通知开启时，BrimDeck 接收所有应用发送的 Windows 通知，并按“提示方式”中的设置在岛上提示。不发送 Windows 通知的应用不会在岛上提示。\n添加应用后，可以单独关闭它的岛上提示、接收或系统横幅；移除后恢复默认设置。",
-            "While live notices are on, BrimDeck receives the Windows notifications every app sends and shows them on the island as How notices show sets. An app that sends no Windows notifications does not show on the island.\nOnce added, an app can be kept off the island, stop being received or have its system banner switched; removing it goes back to the default settings."));
+        SectionTitle(Loc.T("其他应用", "Other apps"), add, () => Loc.T("通知开启时，BrimDeck 接收所有应用发送的 Windows 通知，并按“提示方式”中的设置在岛上提示。不发送 Windows 通知的应用不会在岛上提示。\n添加应用后，可以单独关闭它的岛上提示、接收或系统横幅；移除后恢复默认设置。",
+            "While notices are on, BrimDeck receives the Windows notifications every app sends and shows them on the island as How notices show sets. An app that sends no Windows notifications does not show on the island.\nOnce added, an app can be kept off the island, stop being received or have its system banner switched; removing it goes back to the default settings."));
         var listed = S.NoticeApps.Where(rule => NoticeKeys.OnAppList(rule.Key) && !IsCommonApp(rule.Key)).ToList();
         var rows = new List<FrameworkElement>();
         if (listed.Count == 0)
@@ -378,8 +378,8 @@ public sealed partial class SettingsWindow
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         var browse = ActionButton(Loc.T("浏览可执行文件…", "Browse for an executable…"), Browse);
         browse.HorizontalAlignment = HorizontalAlignment.Left; browse.Margin = new Thickness(4, 4, 4, 0);
-        var footer = TextLine(Loc.T("“最近发送过通知”列出灵动通知开启期间发送过通知的应用。\n从正在运行的应用或可执行文件添加时，实际发送通知的可能是另一个程序，此时设置不会生效。",
-            "\"Sent notices lately\" lists the apps that sent notices while live notices were on.\nAn app added from the running apps or as an executable may have its notices sent by another program, and its settings then do not apply."), 11, TextTertiary);
+        var footer = TextLine(Loc.T("“最近发送过通知”列出通知开启期间发送过通知的应用。\n从正在运行的应用或可执行文件添加时，实际发送通知的可能是另一个程序，此时设置不会生效。",
+            "\"Sent notices lately\" lists the apps that sent notices while notices were on.\nAn app added from the running apps or as an executable may have its notices sent by another program, and its settings then do not apply."), 11, TextTertiary);
         footer.TextWrapping = TextWrapping.Wrap; footer.Width = 324;
         var foot = new Border { Child = footer, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0, 1, 0, 0), Margin = new Thickness(4, 5, 4, 0), Padding = new Thickness(6, 7, 6, 3) };
         var body = new StackPanel(); body.Children.Add(search); body.Children.Add(list); body.Children.Add(browse); body.Children.Add(foot);
@@ -444,7 +444,7 @@ public sealed partial class SettingsWindow
                 Header(Loc.T("最近发送过通知", "Sent notices lately"));
                 foreach (var app in shownSent)
                     items.Children.Add(SentEntry(app, lastTitles.GetValueOrDefault(app.Key, ""), NoticeText.Relative(app.LastSeen, now), Added(app.Key), () => Add(app.Key, app.Name)));
-                if (shownSent.Count == 0) Note(Loc.T("灵动通知开启以来，还没有其他应用发送过通知。", "No other app has sent a notice since live notices were turned on."));
+                if (shownSent.Count == 0) Note(Loc.T("通知开启以来，还没有其他应用发送过通知。", "No other app has sent a notice since notices were turned on."));
             }
             if (filter.Length == 0 || shownRunning.Count > 0)
             {

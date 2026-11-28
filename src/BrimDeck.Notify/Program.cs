@@ -35,8 +35,8 @@ internal static class Program
             var command = Brim ? BrimCommandLine.Parse(args, Environment.GetEnvironmentVariable(BrimCommandLine.SourceVariable)) : NotifyCommandLine.Parse(args);
             if (command.Kind == NotifyCommandKind.Stdio) return await RelayAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
             return await NotifyCli.RunAsync(command, new NotifySender(Version, SendAsync, Start,
-                Unreachable: "BrimDeck is not running, or live notices are switched off in its settings.",
-                NotReceiving: "BrimDeck is not receiving notices (not running, or live notices are off).")
+                Unreachable: "BrimDeck is not running, or notices are switched off in its settings.",
+                NotReceiving: "BrimDeck is not receiving notices (not running, or notices are off).")
             {
                 Name = Name, Usage = Brim ? BrimCommandLine.Usage : NotifyCommandLine.Usage, SendWaiting = SendWaitingAsync, SendQuick = SendQuickAsync
             });

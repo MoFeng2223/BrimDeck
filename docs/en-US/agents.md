@@ -10,7 +10,7 @@ Everything stays on this PC: the hooks hand the session state to BrimDeck over a
 
 ## Installing the hooks
 
-1. Open Settings › Live notices › AI coding tools.
+1. Open Settings › Notices › AI coding tools.
 2. Choose "Find installed tools". BrimDeck looks for each tool's settings folder and program and lists the tools it finds.
 3. Choose "Install" or "Remove" for one tool, or "Install all" and "Remove all" for every tool found.
 
@@ -90,7 +90,7 @@ This covers the approvals of Claude Code, CodeAgent, the Qoder and Qoder CN desk
 This covers the approvals of Codex, WorkBuddy and the Qoder and Qoder CN IDEs, the approvals and questions of Command Code, and the questions of CodeAgent, the Qoder and Qoder CN desktop apps and ZCode. These tools wait for the hook to return before they show their own prompt.
 
 - By default the island only tells, without buttons or options; the tool shows its own prompt as usual, and the reminder closes once you answered there.
-- With the tool's "approve on the island" or "answer questions on the island" switched on in Settings › Live notices › AI coding tools › Approvals and questions, you answer on the island instead, and the tool shows no prompt of its own meanwhile. The tool asks as it always does when:
+- With the tool's "approve on the island" or "answer questions on the island" switched on in Settings › Notices › AI coding tools › Approvals and questions, you answer on the island instead, and the tool shows no prompt of its own meanwhile. The tool asks as it always does when:
   - The time set in "Wait on the island" runs out (5 minutes by default).
   - You close the notice, or choose "Use the terminal" or "Answer in the terminal".
   - BrimDeck is not running. The hook then ends at once, and the tool does not wait.
@@ -103,9 +103,9 @@ The approvals and questions of Kimi Code, TRAE and TRAE CN, and the questions of
 
 ## Collapsed row
 
-The notch and the capsule's "Live notices" part shows the AI coding tools' sessions too by default: a round icon for each active session, the tool's own program icon (its first letter when its desktop app is not installed); a tool with several sessions shows its icon once for each, at most 3 icons in all, the session that most needs you at the right. Each icon's ring shows its own session's state: turning blue while it works; yellow, with a small shake and a "!" or "?", while it waits for an approval or an answer; green with a tick once done. The words after them say what the sessions are doing: how long the only working session has run, or how many work or wait. Nothing shows without an active session. Clicking it opens the notices page.
+The notch and the capsule's "Notices" part shows the AI coding tools' sessions too by default: a round icon for each active session, the tool's own program icon (its first letter when its desktop app is not installed); a tool with several sessions shows its icon once for each, at most 3 icons in all, the session that most needs you at the right. Each icon's ring shows its own session's state: turning blue while it works; yellow, with a small shake and a "!" or "?", while it waits for an approval or an answer; green with a tick once done. The words after them say what the sessions are doing: how long the only working session has run, or how many work or wait. Nothing shows without an active session. Clicking it opens the notices page.
 
-You can switch "Live notices" off, or drag it to another place, in Settings › Collapsed view › Shown content; under Settings › Live notices › How notices show › Live notices you can switch off "Show AI coding tools", or switch on "Stack as one group" to stack the sessions' icons with the unread notices' app icons in one group. A finished session shows for 10 minutes; a working session that sends nothing for 30 minutes counts as ended.
+You can switch "Notices" off, or drag it to another place, in Settings › Collapsed view › Shown content; under Settings › Notices › How notices show › Notices you can switch off "Show AI coding tools", or switch on "Stack as one group" to stack the sessions' icons with the unread notices' app icons in one group. A finished session shows for 10 minutes; a working session that sends nothing for 30 minutes counts as ended.
 
 ## Connecting other tools
 

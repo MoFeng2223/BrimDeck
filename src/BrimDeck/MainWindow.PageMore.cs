@@ -118,7 +118,7 @@ public partial class MainWindow
             _ => Loc.T("剪贴板与文件中转", "Clipboard and file transfer")
         },
         DeckPage.Devices => Loc.T("设备电量", "Device batteries"),
-        DeckPage.Notices => Loc.T("通知历史", "Notice history"),
+        DeckPage.Notices => Loc.T("通知", "Notices"),
         DeckPage.Agenda => Loc.T("计划", "Planner"),
         _ => Loc.T("AI 用量", "AI usage")
     };

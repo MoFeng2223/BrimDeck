@@ -66,7 +66,7 @@ public partial class MainWindow
         _ => Loc.T("已结束", "Ended")
     };
 
-    // The agents' group of the live notices shown apart (MainWindow.CompactAttention.cs). words: whether it says in words what the
+    // The agents' group of the notices shown apart (MainWindow.CompactAttention.cs). words: whether it says in words what the
     // sessions are doing. single: only the front icon (CompactAttention's last step).
     private FrameworkElement? AgentStrip(double scale, bool words = true, bool single = false)
     {

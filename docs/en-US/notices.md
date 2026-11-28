@@ -1,21 +1,21 @@
-# Live notices
+# Notices
 
 When a notification arrives, the notch, capsule or indicator grows out of its place and shows the application's icon, title and summary; hover for about a quarter of a second or click to see the details, and a few seconds later it returns to its shape. By default Windows' own banners and notification center stay as they are and BrimDeck shows its own copy alongside; to see each notification only once, switch off an app's "System banner" on the "Apps" page (see below). Everything is processed on this PC, without any cloud service; with a [mailbox](mail.md) connected, only the mailbox's own server is contacted.
 
 ## Turning them on
 
-Live notices have two switches, both on by default; notices are received while either is on, and no longer once both are off:
+Notices have two switches, both on by default; notices are received while either is on, and no longer once both are off:
 
-- Settings › Collapsed view › Live notices › Show new notices: arriving notices show on the notch, the capsule or the indicator.
-- Settings › Expanded view › Show live notices: the open panel shows the notices page.
+- Settings › Collapsed view › Notices › Show new notices: arriving notices show on the notch, the capsule or the indicator.
+- Settings › Expanded view › Show notices: the open panel shows the notices page.
 
 The two switches are independent: with only the notices page on, notices do not interrupt you and only go to the page; with only "Show new notices" on, notices show as usual and there is no notices page.
 
 Both switches belong to a profile. When screens use different profiles (Settings › Displays and profiles), each screen shows notices by its own profile's switch; screens that use the same profile with "Show new notices" on all show them.
 
-The notch and the capsule also show the "Live notices" part by default, with the unread notices and the AI coding tools' sessions (see [AI coding tools](agents.md)): under Settings › Collapsed view › Content you can turn "Live notices" off or drag it among the other parts. The unread notices need the notices page and clear once that page has been opened; with neither unread notices nor sessions the part shows nothing, and clicking it opens the notices page. Unread notices show as the icons of the apps they came from, stacked together (the newest at the right, at most 3, a missed call first), with the total after them. Under Settings › Live notices › How notices show › Live notices: switch off "Show app icons" to show a bell instead; switch off "Show AI coding tools" to show only the unread notices; switch on "Stack as one group" to stack the sessions' and the apps' icons in one group, the most urgent in front, with one word or number (by default they are two groups, the AI coding tools first). Without auto width, the part never widens the island: short of room, the tools first drop their words, then each group keeps one icon. The indicator bar shows no live notices.
+The notch and the capsule also show the "Notices" part by default, with the unread notices and the AI coding tools' sessions (see [AI coding tools](agents.md)): under Settings › Collapsed view › Content you can turn "Notices" off or drag it among the other parts. The unread notices need the notices page and clear once that page has been opened; with neither unread notices nor sessions the part shows nothing, and clicking it opens the notices page. Unread notices show as the icons of the apps they came from, stacked together (the newest at the right, at most 3, a missed call first), with the total after them. Under Settings › Notices › How notices show › Notices: switch off "Show app icons" to show a bell instead; switch off "Show AI coding tools" to show only the unread notices; switch on "Stack as one group" to stack the sessions' and the apps' icons in one group, the most urgent in front, with one word or number (by default they are two groups, the AI coding tools first). Without auto width, the part never widens the island: short of room, the tools first drop their words, then each group keeps one icon. The indicator bar shows no notices.
 
-Settings › Live notices has two pages: "How notices show" sets how levels 2 and 3 look, and "Apps" sets which apps' notices are received and whether they show on the island. Then:
+Settings › Notices has two pages: "How notices show" sets how levels 2 and 3 look, and "Apps" sets which apps' notices are received and whether they show on the island. Then:
 
 - The open panel gains a "Notice history" page (bell icon, with a red dot while there are notices you have not seen; a notice that popped up but that you did not hover, open or see on the page still counts as unseen). It lists the notices kept, where each can be read, opened in its application, copied or deleted; notices can be paused or cleared.
   - Notices of a chat application (WeChat, QQ, DingTalk, Feishu, Teams, Slack, Telegram and the like) with the same title are one conversation (a chat application's title is the chat's name): it takes one row in the list, showing its newest notice and how many it holds; the left side shows the newest, with the other messages in full under it (up to 20). The delete button deletes the whole conversation's records. Mail and every other application's notices take one row each.
@@ -51,9 +51,9 @@ Each notice shows on the island at one level. The levels are fixed; they cannot 
 
 With an app's "Island" switch off on the "Apps" page, its notices only go to the notice history and do not show on the island.
 
-How levels 2 and 3 look is set under Settings › Live notices › How notices show: whether the app icon shows, how long level 2 shows (0.5 seconds or 1 to 10 seconds, 3 by default), the effect (Glow, Liquid, or Glow + liquid) and the sound of both levels, and level 3's default color and longest stay (10 seconds to 3 minutes, 1 minute by default). "Try it" beside each level sends a sample notice. Notices take the whole island; only a message that names a place with `--slot` replaces just one part.
+How levels 2 and 3 look is set under Settings › Notices › How notices show: whether the app icon shows, how long level 2 shows (0.5 seconds or 1 to 10 seconds, 3 by default), the effect (Glow, Liquid, or Glow + liquid) and the sound of both levels, and level 3's default color and longest stay (10 seconds to 3 minutes, 1 minute by default). "Try it" beside each level sends a sample notice. Notices take the whole island; only a message that names a place with `--slot` replaces just one part.
 
-When an app needs a different look, click the arrow beside its name under Settings › Live notices › Apps to open "Own looks". That app's notices then follow its own settings, which come before the "How notices show" page and the look a message asks for. It shows the look of level 2, and for a source of the command line or a program level 3 as well: each has a glow color, an effect, a sound and the app icon switch, and level 2 a display time. Besides:
+When an app needs a different look, click the arrow beside its name under Settings › Notices › Apps to open "Own looks". That app's notices then follow its own settings, which come before the "How notices show" page and the look a message asks for. It shows the look of level 2, and for a source of the command line or a program level 3 as well: each has a glow color, an effect, a sound and the app icon switch, and level 2 a display time. Besides:
 
 - Chat apps (QQ, DingTalk, Feishu and others) have a "Calls" group with its own color, effect and icon for voice and video calls; a call stays on the island until answered, declined or the panel is opened.
 - Clock, calendar and reminder apps have a group for their alarms or event reminders, which always stay.
@@ -93,11 +93,11 @@ While it shows, other notices go to the notice history and wait as usual; a norm
 
 | Source | What it is | Default |
 |---|---|---|
-| Windows app notifications | The current user's notifications in Windows' notification center: source, icon, time and text. Every app's notifications are received by default; to stop receiving an app, switch off its "Receive" under Settings › Live notices › Apps: the common apps are always listed at the top; any other app is added with "Add app", from the apps that have sent notices lately, the running apps or an executable. Removing one goes back to the default. An app added from "Sent notices lately" is the sender itself; an app added from the running apps or as an executable may have its notices sent by another program, and its settings then do not apply. Messages inside applications are not read, and the notification center is not cleared or changed, unless "Let brim list and remove all notices" is on and `brim notify remove` removes a notice. | On |
+| Windows app notifications | The current user's notifications in Windows' notification center: source, icon, time and text. Every app's notifications are received by default; to stop receiving an app, switch off its "Receive" under Settings › Notices › Apps: the common apps are always listed at the top; any other app is added with "Add app", from the apps that have sent notices lately, the running apps or an executable. Removing one goes back to the default. An app added from "Sent notices lately" is the sender itself; an app added from the running apps or as an executable may have its notices sent by another program, and its settings then do not apply. Messages inside applications are not read, and the notification center is not cleared or changed, unless "Let brim list and remove all notices" is on and `brim notify remove` removes a notice. | On |
 | WeChat new messages | WeChat for PC does not send Windows notifications. While "Receive" is on in WeChat's row on the "Apps" page, its flashing taskbar icon shows "WeChat has new messages"; the messages and their senders are not read. Reading message content is a choice of its own, below. | On |
 | brim-notify | `BrimDeck.Notify.exe` on Windows and `brim-notify` in WSL send notices directly. | On |
 | WSL desktop notifications | Standard desktop notifications (freedesktop D-Bus, such as `notify-send`) in the chosen distributions. | Off, per distribution |
-| Mailboxes | New mail in the mailboxes you connect: the sender, the subject and the start of the text. Added under Settings › Live notices › Mailboxes; see [Mailboxes](mail.md). | None connected |
+| Mailboxes | New mail in the mailboxes you connect: the sender, the subject and the start of the text. Added under Settings › Notices › Mailboxes; see [Mailboxes](mail.md). | None connected |
 
 ### Common chat apps
 
@@ -114,7 +114,7 @@ Each of them also needs its notifications allowed under Windows Settings › Sys
 
 ### WeChat: reading message content
 
-WeChat for PC sends no Windows notifications, so by default only its flashing taskbar button tells of a new message. With WeChat's row opened in Settings › Live notices › Apps and "How it is noticed" changed from "Taskbar flash" to "Read message content" (choosing it asks for confirmation), BrimDeck reads the chat list in WeChat's window instead:
+WeChat for PC sends no Windows notifications, so by default only its flashing taskbar button tells of a new message. With WeChat's row opened in Settings › Notices › Apps and "How it is noticed" changed from "Taskbar flash" to "Read message content" (choosing it asks for confirmation), BrimDeck reads the chat list in WeChat's window instead:
 
 - A notice shows the chat's name and its latest message (with the sender in a group), and a chat's messages are kept together on the notices page; "Open app" opens WeChat on that chat.
 - The notices page can reply: the text is sent through WeChat's own input box and Send button. Nothing is sent while WeChat's input box holds unsent text.
@@ -125,7 +125,7 @@ This changes the running WeChat. WeChat exposes its interface only when it detec
 
 ### DingTalk: two ways of being noticed
 
-DingTalk sends no Windows notifications: its message popups and call windows are its own. With DingTalk's row opened in Settings › Live notices › Apps, choose "How it is noticed". DingTalk's settings are in the menu of your profile photo and name in its upper-left corner: choose "Settings", then "Notifications".
+DingTalk sends no Windows notifications: its message popups and call windows are its own. With DingTalk's row opened in Settings › Notices › Apps, choose "How it is noticed". DingTalk's settings are in the menu of your profile photo and name in its upper-left corner: choose "Settings", then "Notifications".
 
 - **Taskbar flash** (the default): "New message" when DingTalk's taskbar button flashes; no message content is read. Select "Message taskbar icon blinks" under DingTalk's "Notifications".
 - **Read message content**: when DingTalk shows a message popup or a call window in the corner of the screen, BrimDeck reads its text through Windows' UI Automation. A message shows the chat's name and its text (with the sender in a group), and a missed call shows as "钉钉电话" (DingTalk call). Voice and video calls and meeting invitations show as incoming calls until answered, declined or given up. Under "Notifications", select "Message Desktop Notifications" and choose "Show message details", then select "Message taskbar icon blinks"; for calls, on the same page under "Calls & Meetings Notifications", select "Display call/meeting invitation notifications".
@@ -134,7 +134,7 @@ DingTalk shows message popups only for one-on-one chats, @mentions, people you f
 
 ### Feishu: two ways of being noticed
 
-Feishu sends no Windows notifications: the banner of a new message is a window of its own. With Feishu's row opened in Settings › Live notices › Apps, choose "How it is noticed". Feishu's settings are under "Settings › Notifications" after clicking your profile photo in its upper-left corner.
+Feishu sends no Windows notifications: the banner of a new message is a window of its own. With Feishu's row opened in Settings › Notices › Apps, choose "How it is noticed". Feishu's settings are under "Settings › Notifications" after clicking your profile photo in its upper-left corner.
 
 - **Taskbar flash** (the default): "New message" when Feishu's taskbar button flashes; no message content is read. Select "Message notifications" under Feishu's "Notifications". While Feishu's window is in front, its button does not flash, so nothing is told.
 - **Read message content**: when Feishu shows a message banner in the corner of the screen, BrimDeck hides that banner at once, reads the chat's name and the message in it through Windows' UI Automation, and shows them on the island instead. This works with Feishu's main window minimized, closed to the tray or showing another page. Under "Notifications", select "Message notifications" and "Banner notification", and choose "Show message details".
@@ -153,7 +153,7 @@ If Windows has not yet decided whether BrimDeck may read notifications, the sett
 
 ### Windows: an app's own notification banners
 
-Settings › Live notices › Apps › System banner (set per app). This switch is Windows Settings › System › Notifications › an app › "Show notification banners", shown as it is now. Switched off, that app's notifications no longer pop up in the corner of the screen and show once, on the island; they still go to the notification center, where BrimDeck reads them.
+Settings › Notices › Apps › System banner (set per app). This switch is Windows Settings › System › Notifications › an app › "Show notification banners", shown as it is now. Switched off, that app's notifications no longer pop up in the corner of the screen and show once, on the island; they still go to the notification center, where BrimDeck reads them.
 
 - **What changes**: only the DWORD value `ShowBanner` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\<app id>` of the current user: set to 0 when switched off, deleted when switched on (Windows reads no value as on). No administrator rights are needed and nothing is restarted.
 - **It lasts**: as when changed in Windows Settings, it stays after BrimDeck exits or is uninstalled. After a change in Windows Settings, the switch follows when you come back to BrimDeck's settings window.
@@ -205,7 +205,7 @@ To remove it: switch the distribution off in settings, then delete `~/.local/sha
 
 `brim` is BrimDeck's command line; notices are its first group of commands. On Windows it is `brim.exe` in BrimDeck's folder, and in a WSL distribution you switched on it is `~/.local/bin/brim`. It starts for each call, hands the message to the running BrimDeck and exits; while BrimDeck is not running it exits with code 3 after about 2 seconds and does not start BrimDeck.
 
-Setup adds BrimDeck's folder to PATH (the current user's when installing for the current user, the machine's when installing for all users), so a newly opened terminal finds `brim`; uninstalling takes that entry out and leaves the rest of PATH as it is. A terminal opened before installing has to be opened again. The portable copy does not change PATH. While BrimDeck's folder is not in PATH, terminals, scripts and the hooks of AI tools do not find `brim` and have to call it by its full path ("Copy command line path" gives the full path of `brim.exe`). Settings › Live notices › Apps › Command line and programs then says "brim is not on PATH": "Add to PATH" adds it for the current user, and the same place says why when PATH could not be changed; the description beside the title has the steps to add it by hand (search the Start menu for "environment variables" › "Edit environment variables for your account" › Path under User variables › Edit › New), and "Copy folder" copies the folder to enter.
+Setup adds BrimDeck's folder to PATH (the current user's when installing for the current user, the machine's when installing for all users), so a newly opened terminal finds `brim`; uninstalling takes that entry out and leaves the rest of PATH as it is. A terminal opened before installing has to be opened again. The portable copy does not change PATH. While BrimDeck's folder is not in PATH, terminals, scripts and the hooks of AI tools do not find `brim` and have to call it by its full path ("Copy command line path" gives the full path of `brim.exe`). Settings › Notices › Apps › Command line and programs then says "brim is not on PATH": "Add to PATH" adds it for the current user, and the same place says why when PATH could not be changed; the description beside the title has the steps to add it by hand (search the Start menu for "environment variables" › "Edit environment variables for your account" › Path under User variables › Edit › New), and "Copy folder" copies the folder to enter.
 
 ```text
 # Show a notice
@@ -234,9 +234,9 @@ Options of `brim notify send`:
 | Option | What it does |
 |---|---|
 | `-b/--body TEXT` | The body; it may also be the second argument |
-| `-s/--source NAME` | The source's name; the environment variable `BRIM_SOURCE` names it for a whole script or hook. `brim` when not given. Settings › Live notices › Apps lists sources by this name, each with its own choices |
+| `-s/--source NAME` | The source's name; the environment variable `BRIM_SOURCE` names it for a whole script or hook. `brim` when not given. Settings › Notices › Apps lists sources by this name, each with its own choices |
 | `--context TEXT` | A second line beside the source: a project, a branch, a session |
-| `-l/--level LEVEL` | `silent`, `plain`, `flash`, `persistent`, or `0` to `3`. Not given, level 2; with the source's "Island" switch off, notices page only. How levels 2 and 3 look is decided under Settings › Live notices › How notices show |
+| `-l/--level LEVEL` | `silent`, `plain`, `flash`, `persistent`, or `0` to `3`. Not given, level 2; with the source's "Island" switch off, notices page only. How levels 2 and 3 look is decided under Settings › Notices › How notices show |
 | `-c/--category KIND` | `message`, `task`, `success`, `warning`, `error`, `info`. A notice that stays glows orange, red or green for `warning`, `error` and `success` |
 | `--glow "#RRGGBB"` | The backlight of a notice that stays; it comes before the category's color and the default color of the settings |
 | `--slot PLACE` | Where a level 1 notice shows: `island` (the whole island), `usage`, `music`, `monitor`, `clock`, `transfer`, `devices`. Not given, the notice takes the whole island; when the collapsed island has no such part, or is the indicator, the notice takes the whole island |
@@ -254,7 +254,7 @@ Options of `brim notify send`:
 | `--no-history` | Only show it on the island; do not list it among the recent notices |
 | `--json FILE` | Read the whole message as JSON from a file, or from standard input with `-`; options given on the command line come over its values. The JSON should be UTF-8; on Windows, JSON that is not UTF-8 is read in the PC's code page (the console's for what is piped in, the system's for a file) |
 
-Where you gave a source its own looks (Settings › Live notices › Apps, the arrow beside its name), those come first: `--glow`, the category's color and `--icon none` then change nothing for it.
+Where you gave a source its own looks (Settings › Notices › Apps, the arrow beside its name), those come first: `--glow`, the category's color and `--icon none` then change nothing for it.
 
 Buttons:
 
@@ -276,7 +276,7 @@ Exit codes:
 | 0 | Delivered (or kept quiet by your rules); when waiting, a button was chosen and its key is on standard output |
 | 1 | Usage error (a message over 64 KB even with its texts cut to BrimDeck's limits included) |
 | 2 | Refused by BrimDeck (a `close`, `stop` or `remove` that found no such key or id included) |
-| 3 | BrimDeck is not running, live notices are off, or no answer came in time (the notice may still show) |
+| 3 | BrimDeck is not running, notices are off, or no answer came in time (the notice may still show) |
 | 4 | When waiting: the notice was closed or deleted without a choice, or its source's "Receive" switch is off |
 | 5 | When waiting: it ran out of time |
 
@@ -313,7 +313,7 @@ brim notify remove deploy -s deploy-script
 brim notify remove --notice 5112c23c8fcd4de886842687835782fa
 ```
 
-- Which notices: by default only those sent by `brim` and other programs. With "Let brim list and remove all notices" on under Settings › Live notices › Apps › Compatibility (off by default), every notice is listed and can be removed, Windows apps' and WSL desktop notifications included. Any program on this PC can run `brim`, so turn it on only if they may read these notices.
+- Which notices: by default only those sent by `brim` and other programs. With "Let brim list and remove all notices" on under Settings › Notices › Apps › Compatibility (off by default), every notice is listed and can be removed, Windows apps' and WSL desktop notifications included. Any program on this PC can run `brim`, so turn it on only if they may read these notices.
 - Removing a Windows app's notice also removes it from Windows' notification center. When that notification has changed in Windows or cannot be removed, only BrimDeck's record goes; `brim` says so and still exits with 0. A WSL desktop notification is removed from BrimDeck only.
 - By key, the source must be the one the notice was sent with; by id, the source does not matter. `close` by id closes only notices of the command line and programs.
 - Removing a notice whose sender waits for an answer (`--wait` or `--action`) ends that command as closed without a choice, with exit code 4.
@@ -338,7 +338,7 @@ Alarms, timers, countdowns, mail and event reminders are recognized and shown by
 | Event | Reminders of Microsoft 365 Calendar and Mail and Calendar; Outlook notifications that read as reminders ("In 15 minutes", "Now", or a line starting with "3:00 PM - 3:30 PM"); Teams meeting reminders and "meeting started"; Google Calendar reminders in a browser and web mail notifications that read as reminders; `brim-notify event` | High priority, "Starts in 14 min", "In progress"; for `brim-notify event` BrimDeck itself reminds before the start |
 
 - Notices are sorted by the application's id (AUMID) and the notice's text, in memory on this PC; the original notification is not kept, and no mailbox or calendar is read (apart from the mailboxes you connect on the Mailboxes page; see [Mailboxes](mail.md)). The sorting is heuristic: Outlook's and Teams' reminder wording varies by version and language, and what is not recognized shows as an ordinary notice.
-- The reminders of Clock, Outlook, To Do, Teams, Calendar and similar apps show by default; to stop one, add the app under Settings › Live notices › Apps and switch off its "Receive".
+- The reminders of Clock, Outlook, To Do, Teams, Calendar and similar apps show by default; to stop one, add the app under Settings › Notices › Apps and switch off its "Receive".
 - Alarms, ended countdowns and event reminders are high priority, show at level 3 and are not affected by the "at most 3 in 10 seconds" limit, but at most 3 ring per minute from one source (each Windows application on its own; brim-notify, and WSL applications, each share one); the rest wait their turn, so a script that sets many timers at once does not hold back another application's alarm. An application whose "Island" switch is off stays quiet as usual. While locked, presenting or paused they only count toward the summary. An event entered more than 10 minutes after its start is recorded as an ordinary notice. Windows notifications that arrived while the PC slept are recorded, not shown, on waking, except reminders raised in the last 10 minutes or for an event starting within 10 minutes either way, which still alert. At most 200 timers, events still to remind and running stopwatches are kept; beyond that, the one BrimDeck received first is dropped from the source holding the most (and the log says so), so other applications' reminders are not affected.
 - The live words follow one shared second tick, which runs only while a running timer shows on the island or on the notice history page. Countdowns and events are worked out from the clock, again at once after waking or a change of the system time. A reminder missed by more than 10 minutes (asleep, BrimDeck not running) does not pop up; the list says "Ended at 15:30".
 - Limits: Windows does not share the Clock app's running timers, stopwatch or alarm list, nor the snooze and dismiss buttons of its notifications, so a Clock alarm shows only when it rings and cannot be snoozed from BrimDeck; for a timer on the island use `brim-notify timer`. Calendar sync (reading Outlook's or Windows' calendar directly) is not supported yet; the applications' own reminder notifications are used.
@@ -378,7 +378,7 @@ brim-notify "New mail" --kind mail
 - Order: what you are working with > high priority notices > other notices > quota alerts > track changes. Alarms, ended countdowns and event reminders are high priority (see "Time notices").
 - Nothing is shown while the session is locked or switched, while the panels are hidden or hidden by a full-screen rule. During a Windows focus session, presentation mode and BrimDeck's own pause nothing pops up; afterwards one summary shows how many arrived. Windows' separate "Do not disturb" switch has no public interface and is not detected; use BrimDeck's pause instead.
 - Several monitors: each screen shows notices when "Show new notices" is on in the profile it uses. If a screen's panel is hidden, the notice stays in the notice history; it does not jump to another screen. The same notice shows once on each screen that shows notices and counts once toward the limit; handling it on one screen (a click, opening the notices page) ends it on the others too.
-- Settings › Shortcuts › Open live notices (unset by default): with a notice on screen it opens the details for the keyboard (Tab to move, Enter to choose, Esc to close); otherwise it opens the notice history.
+- Settings › Shortcuts › Open notices (unset by default): with a notice on screen it opens the details for the keyboard (Tab to move, Enter to choose, Esc to close); otherwise it opens the Notices page.
 
 ## Privacy
 
@@ -389,7 +389,7 @@ brim-notify "New mail" --kind mail
 - The diagnostic log `notices.log` holds only error types, codes and code locations, never titles or bodies.
 - The local channel accepts only the current user on this PC (a named pipe that refuses network access). A notice's content is only ever shown as text: it is never run and its links are never opened.
 - Every Windows app shows notices by default; a common app, or an app added to the "Apps" page, can be kept off the island or stop being received, have its Windows system banner switched, and have its own looks. Sources from the command line and programs are listed automatically after they first send, and can be kept off the island or stop being received.
-- Verification codes (Settings › Live notices › How notices show › Hide verification codes, off by default): when on, BrimDeck recognizes a code in a notice's title and body on this PC (a Chinese or English keyword with digits or a short letter-and-digit code nearby; order numbers, amounts, phone numbers, dates and links do not count) and hides it with dots on the island and the notices page; a screen reader hears "verification code hidden". The notices page gets a "Copy code" button. Recognition goes nowhere online and into no log; the clipboard is written only when that button is clicked, marked so that Windows keeps it out of the clipboard history and cloud sync, and emptied after 60 seconds if it still holds that code (left alone if something else was copied). The encrypted notice history keeps the hidden text, so a code cannot be copied after a restart; switching the setting off restores everything. The recognition rules are ported from xiaotang-daozai (MIT, see ThirdPartyNotices.txt) and prefer missing a code to hiding something that is not one.
+- Verification codes (Settings › Notices › How notices show › Hide verification codes, off by default): when on, BrimDeck recognizes a code in a notice's title and body on this PC (a Chinese or English keyword with digits or a short letter-and-digit code nearby; order numbers, amounts, phone numbers, dates and links do not count) and hides it with dots on the island and the notices page; a screen reader hears "verification code hidden". The notices page gets a "Copy code" button. Recognition goes nowhere online and into no log; the clipboard is written only when that button is clicked, marked so that Windows keeps it out of the clipboard history and cloud sync, and emptied after 60 seconds if it still holds that code (left alone if something else was copied). The encrypted notice history keeps the hidden text, so a code cannot be copied after a restart; switching the setting off restores everything. The recognition rules are ported from xiaotang-daozai (MIT, see ThirdPartyNotices.txt) and prefer missing a code to hiding something that is not one.
 
 ## Compatibility (tested)
 
