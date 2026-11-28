@@ -15,13 +15,15 @@ internal static class GitHubUpdates
 
     // /releases/latest skips drafts and prereleases. The release workflow copies each beta's update.json to the beta-channel
     // release. Packages are fetched from their own tag so a release published between the check and the download cannot swap the file.
+    // update.json is always read from GitHub; the package may come through a gh-proxy mirror when GitHub itself is slow.
     public static InstallerUpdateBackend Create(string dataDirectory) => Create(new Uri(RepositoryUrl + "/releases/latest/download/" + UpdateManifest.FileName),
         (manifest, package) => new Uri($"{RepositoryUrl}/releases/download/v{manifest.Version}/{package.File}"), Http, InstallerAppId, dataDirectory,
-        new Uri(RepositoryUrl + "/releases/download/beta-channel/" + UpdateManifest.FileName));
+        new Uri(RepositoryUrl + "/releases/download/beta-channel/" + UpdateManifest.FileName), new DownloadRoutes(Http, GitHubMirrors.For));
 
     internal static InstallerUpdateBackend Create(Uri manifest, Func<UpdateManifest, UpdatePackage, Uri> package, HttpClient http, string appId, string dataDirectory,
-        Uri? betaManifest = null) =>
-        new(http, manifest, package, BuildVersion, Path.Combine(dataDirectory, "updates"), Mode(appId, AppContext.BaseDirectory), betaManifest: betaManifest);
+        Uri? betaManifest = null, DownloadRoutes? routes = null) =>
+        new(http, manifest, package, BuildVersion, Path.Combine(dataDirectory, "updates"), Mode(appId, AppContext.BaseDirectory), betaManifest: betaManifest,
+            routes: routes);
 
     // A copy the installer registered updates through the installer; a portable copy replaces its own files.
     internal static UpdateMode Mode(string appId, string directory) =>

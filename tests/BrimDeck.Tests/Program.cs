@@ -164,6 +164,7 @@ try
     await AppUpdateTests.Run(root, Check);
     ReleaseHistoryTests.Run(root, Check);
     await InstallerUpdateTests.Run(root, Check);
+    await DownloadRouteTests.Run(root, Check);
     await PortableUpdateTests.Run(root, Check);
     SettingsMigrationTests.Run(root, Check);
     ConfigBackupTests.Run(root, Check);

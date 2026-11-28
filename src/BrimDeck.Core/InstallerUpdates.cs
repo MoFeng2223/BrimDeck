@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using System.Text.Json;
@@ -75,14 +76,17 @@ public sealed class InstallerUpdateBackend : IAppUpdateBackend
     private readonly string _directory;
     private readonly string _appPath;
     private readonly Func<ProcessStartInfo, bool> _launch;
+    private readonly DownloadRoutes? _routes;
     private UpdateManifest? _available;
 
     // appPath is the running executable; a portable copy replaces the folder it is in. betaManifest is the newest beta's
-    // update.json, read only when betas are asked for.
+    // update.json, read only when betas are asked for. routes picks the addresses a package is downloaded from; the manifests
+    // are always read from their own address, since they carry the size and SHA-256 every download is checked against.
     public InstallerUpdateBackend(HttpClient http, Uri manifest, Func<UpdateManifest, UpdatePackage, Uri> package, string currentVersion,
-        string directory, UpdateMode mode, Func<ProcessStartInfo, bool>? launch = null, string? appPath = null, Uri? betaManifest = null)
+        string directory, UpdateMode mode, Func<ProcessStartInfo, bool>? launch = null, string? appPath = null, Uri? betaManifest = null,
+        DownloadRoutes? routes = null)
     {
-        _http = http; _manifest = manifest; _betaManifest = betaManifest; _package = package; _directory = directory; Mode = mode;
+        _http = http; _manifest = manifest; _betaManifest = betaManifest; _package = package; _directory = directory; Mode = mode; _routes = routes;
         CurrentVersion = currentVersion;
         _appPath = appPath ?? Environment.ProcessPath ?? "";
         _launch = launch ?? (start => { using var process = Process.Start(start); return process is not null; });
@@ -156,6 +160,7 @@ public sealed class InstallerUpdateBackend : IAppUpdateBackend
         value?.Delta ?? (value?.Date is { } date ? date - DateTimeOffset.UtcNow : null);
 
     private static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(30);
+    // Each address is tried in turn until one delivers the package intact; the progress starts again from 0 with each address.
     public async Task DownloadAsync(AppRelease release, Action<int> progress, CancellationToken cancellation)
     {
         var manifest = _available is { } available && available.Version == release.Version ? available
@@ -164,37 +169,48 @@ public sealed class InstallerUpdateBackend : IAppUpdateBackend
         var package = manifest.Package(Mode) ?? throw new InvalidDataException("The release has no package for this copy.");
         Directory.CreateDirectory(_directory);
         var target = Path.Combine(_directory, package.File); var partial = target + ".partial";
-        try
+        var direct = _package(manifest, package);
+        var routes = _routes is null ? [direct] : await _routes.OrderAsync(direct, package.Size, cancellation).ConfigureAwait(false);
+        ExceptionDispatchInfo? failure = null;
+        foreach (var uri in routes)
         {
-            using (var response = await _http.GetAsync(_package(manifest, package), HttpCompletionOption.ResponseHeadersRead, cancellation).ConfigureAwait(false))
+            try { await DownloadFromAsync(uri, package, partial, progress, cancellation).ConfigureAwait(false); failure = null; break; }
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellation.IsCancellationRequested)
             {
-                response.EnsureSuccessStatusCode();
-                if (response.Content.Headers.ContentLength is { } length && length != package.Size) throw new InvalidDataException("Package size mismatch.");
-                await using var source = await response.Content.ReadAsStreamAsync(cancellation).ConfigureAwait(false);
-                await using var file = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
-                using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                var buffer = new byte[81920]; long total = 0; int reported = -1, read;
-                // The client timeout ends with the response headers; a body that stops arriving fails after 30 seconds without data.
-                using var stall = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-                stall.CancelAfter(StallTimeout);
-                while ((read = await source.ReadAsync(buffer, stall.Token).ConfigureAwait(false)) > 0)
-                {
-                    stall.CancelAfter(StallTimeout);
-                    total += read;
-                    if (total > package.Size) throw new InvalidDataException("Package size mismatch.");
-                    hash.AppendData(buffer, 0, read);
-                    await file.WriteAsync(buffer.AsMemory(0, read), cancellation).ConfigureAwait(false);
-                    var percent = (int)(total * 100 / package.Size);
-                    if (percent != reported) { reported = percent; progress(percent); }
-                }
-                if (total != package.Size || !Matches(hash.GetHashAndReset(), package.Sha256)) throw new InvalidDataException("Package checksum mismatch.");
+                TryDelete(partial); failure = ExceptionDispatchInfo.Capture(ex);
             }
-            File.Move(partial, target, true);
-            var pending = Path.Combine(_directory, PendingFile);
-            File.WriteAllText(pending + ".tmp", manifest.ToJson());
-            File.Move(pending + ".tmp", pending, true);
+            catch { TryDelete(partial); throw; }
         }
-        catch { TryDelete(partial); throw; }
+        failure?.Throw();
+        File.Move(partial, target, true);
+        var pending = Path.Combine(_directory, PendingFile);
+        File.WriteAllText(pending + ".tmp", manifest.ToJson());
+        File.Move(pending + ".tmp", pending, true);
+    }
+
+    private async Task DownloadFromAsync(Uri uri, UpdatePackage package, string partial, Action<int> progress, CancellationToken cancellation)
+    {
+        using var response = await _http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellation).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentLength is { } length && length != package.Size) throw new InvalidDataException("Package size mismatch.");
+        await using var source = await response.Content.ReadAsStreamAsync(cancellation).ConfigureAwait(false);
+        await using var file = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[81920]; long total = 0; int reported = -1, read;
+        // The client timeout ends with the response headers; a body that stops arriving fails after 30 seconds without data.
+        using var stall = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        stall.CancelAfter(StallTimeout);
+        while ((read = await source.ReadAsync(buffer, stall.Token).ConfigureAwait(false)) > 0)
+        {
+            stall.CancelAfter(StallTimeout);
+            total += read;
+            if (total > package.Size) throw new InvalidDataException("Package size mismatch.");
+            hash.AppendData(buffer, 0, read);
+            await file.WriteAsync(buffer.AsMemory(0, read), cancellation).ConfigureAwait(false);
+            var percent = (int)(total * 100 / package.Size);
+            if (percent != reported) { reported = percent; progress(percent); }
+        }
+        if (total != package.Size || !Matches(hash.GetHashAndReset(), package.Sha256)) throw new InvalidDataException("Package checksum mismatch.");
     }
 
     // The file is hashed again right before it is run or extracted, so a download changed after verification is never used.

@@ -71,6 +71,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 ## 联网与安全
 
 - 仅连接以下地址：各工具的官方接口、你在设置中填写的站点、OpenRouter 模型目录及记录中用到的模型的渠道列表（同步模型单价，只发送模型名称）、歌词服务（LRCLIB、网易云音乐、QQ 音乐、酷狗音乐）、播放器提供的封面地址，以及 GitHub Releases（检查更新；启用增强传感器时下载传感器服务与 PawnIO 官方模块）。
+- 下载更新时，BrimDeck 先测试直接连接 GitHub 的速度，足够快时只连接 GitHub。不够快时，同时测试 gh-proxy 的几个节点（v4、cdn、v6、axisnow.gh-proxy.org），从最快的线路下载安装包或免安装压缩包。这些节点会看到你的 IP 地址和所下载的文件名。版本信息 `update.json` 始终直接从 GitHub 读取，下载的文件必须与其中记录的大小和 SHA-256 一致才会安装。
 - Claude 桌面版的数据目录包括 `%APPDATA%\Claude`、商店版 `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude` 和 `%LOCALAPPDATA%\Packages\AnthropicPBC.Claude_*\LocalCache\Roaming\Claude`，以及 `%LOCALAPPDATA%\Claude-Data\<安装名>`。
 - 读取的登录令牌仅在内存中使用，不写入磁盘；Claude 桌面版与 Grok Bot 桌面版的登录缓存使用当前用户的 Windows 加密功能在内存中解密。
 - 自定义脚本在沙盒中运行，无法访问文件、进程或 .NET 对象，限制详见[支持的工具](ai-tools.md#自定义脚本)。
