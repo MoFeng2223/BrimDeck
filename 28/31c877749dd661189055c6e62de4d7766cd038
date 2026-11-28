@@ -1,0 +1,32 @@
+src/BrimDeck.Core/InstallerUpdates.cs
+  s_7af96fbae6fb73::t_a4f0e9937af2fa 3,79,83-84,86-87,89,163,172-175,177-178,180,182,184-213
+src/BrimDeck/Updates/GitHubUpdates.cs
+  s_7af96fbae6fb73::t_13c6591fca258a 18,21,24-26
+docs/en-US/privacy.md
+  s_7af96fbae6fb73::t_9a393bdfff474c 74
+src/BrimDeck.Core/DownloadRoutes.cs
+  s_7af96fbae6fb73::t_48b2f7b7ff913c 1-70
+tests/BrimDeck.Tests/Program.cs
+  s_7af96fbae6fb73::t_f565f67c9cf7ae 167
+tests/BrimDeck.Tests/DownloadRouteTests.cs
+  s_7af96fbae6fb73::t_f565f67c9cf7ae 25-26,45
+  s_7af96fbae6fb73::t_c60f543b201360 1-24,27-44,46-111
+docs/zh-CN/privacy.md
+  s_7af96fbae6fb73::t_9a393bdfff474c 74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2831c877749dd661189055c6e62de4d7766cd038",
+  "prompts": {},
+  "sessions": {
+    "s_7af96fbae6fb73": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "07186ab5-8d6c-4c97-be3a-2f206a303078",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
