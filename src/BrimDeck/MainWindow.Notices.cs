@@ -288,21 +288,27 @@ public partial class MainWindow
     }
 
     // The page has come into view: the list moves to the selected row when it lies below what the list shows from its top
-    // (NoticePageFocus.Offset). Done once laid out, as the panel opening on it lays it out at its full size.
-    private void ScrollListToFocus()
+    // (NoticePageFocus.Offset). The page built while the panel is closed moves there at once (now), laid out while hidden, so
+    // that the opening only shows it: moved as the panel opened, the layout and the rows coming into view held its first frames.
+    // A page built as the panel opens moves once laid out at its full size.
+    private bool _listAtFocus;
+    private void ScrollListToFocus(bool now = false)
     {
+        _listAtFocus = false;
         if (_pageScroll is not { } scroll || _rowsFocus is not { } focus) return;
         string conversation = Conversation(focus);
         if (_pageRows.FirstOrDefault(r => Conversation(r.Notice) == conversation).Row is not { } row) return;
-        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
+        void Move()
         {
             if (!ReferenceEquals(_pageScroll, scroll) || scroll.Content is not Visual list || !row.IsDescendantOf(list)) return;
             scroll.UpdateLayout();
             if (scroll.ViewportHeight <= 0) return;
             double top = row.TransformToAncestor(list).Transform(new Point()).Y;
             double offset = NoticePageFocus.Offset(top, row.ActualHeight, scroll.ViewportHeight, FadeHeight);
-            if (offset > 0) scroll.ScrollToVerticalOffset(offset);
-        });
+            if (offset > 0) { scroll.ScrollToVerticalOffset(offset); if (now) scroll.UpdateLayout(); }
+            _listAtFocus = true;
+        }
+        if (now) Move(); else Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, Move);
     }
 
     private void NoticesPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Notices);
@@ -367,6 +373,7 @@ public partial class MainWindow
         SettleNoticeFocus();
         if (_noticesPrebuilt && NoticesContent.Visibility == Visibility.Visible && FitNoticeLayout() && UpdateNoticeRows()) return;
         RenderNotices(fresh: true);
+        ScrollListToFocus(now: true);
         _noticesPrebuilt = true;
     }
 
@@ -380,7 +387,8 @@ public partial class MainWindow
         if (!ready) { RenderNotices(fresh: true); return; }
         // What RenderNotices does only for a page on screen.
         WatchPageLive();
-        ScrollListToFocus();
+        // Moved to the selected row while the panel was closed (PrebuildNotices), unless the page could not be laid out then.
+        if (!_listAtFocus) ScrollListToFocus();
     }
 
     // The panel closed: the page is built again for the next opening, at the top of its list and without what was opened on it;
@@ -585,7 +593,7 @@ public partial class MainWindow
     // fresh: the page comes into view (the panel opens on it, or another page gives way to it).
     private void RenderNotices(bool fresh = false)
     {
-        _noticesPrebuilt = false;
+        _noticesPrebuilt = false; _listAtFocus = false; _scrollToFocusPending = false;
         fresh |= NoticesContent.Visibility != Visibility.Visible;
         SubscribeNotices();
         RefreshStatus();
@@ -624,7 +632,12 @@ public partial class MainWindow
         WatchPageLive();
         // Coming into view on the open panel, the list shows the selected row; built while the panel is closed, it does so as the
         // panel opens (ShowNoticesOnOpening).
-        if (fresh && (_expanded || _preview)) ScrollListToFocus();
+        if (fresh && (_expanded || _preview))
+        {
+            string? conversation = _rowsFocus is { } shown ? Conversation(shown) : null;
+            if (_pageRows.Any(r => Conversation(r.Notice) == conversation)) ScrollListToFocus();
+            else _scrollToFocusPending = conversation is not null;
+        }
     }
 
     // The notice in the focus has been read, with the rest of its conversation, which the focus shows under it: their dots go.
@@ -1246,9 +1259,13 @@ public partial class MainWindow
         // Keep the full extent when restoring a scroll offset. Build through the keyboard row
         // before requesting focus, even when that row is below the initial batch.
         int keyboardIndex = refocus is null ? -1 : listed.FindIndex(notice => notice.Id == refocus);
-        // The selected row is built at once too, so that the list can move to it as the page comes into view (ScrollListToFocus).
+        // Built while the panel is closed (PrebuildNotices), the page builds the selected row at once too, so that the list can move
+        // to it before the panel opens (ScrollListToFocus). Built on screen (the panel opening on a page that changed since, or
+        // the page switched to), it keeps to the first rows: building and laying out every row down to one far down held the
+        // opening's first frame about half as long again (notice-perf "late deep", 64 to 95 ms); the list moves to the row
+        // once a later batch has built it (AddNoticeRow).
         string focusConversation = Conversation(focus);
-        int focusIndex = listed.FindIndex(notice => Conversation(notice) == focusConversation);
+        int focusIndex = !_expanded && !_preview ? listed.FindIndex(notice => Conversation(notice) == focusConversation) : -1;
         int first = restoreScroll ? listed.Count : Math.Min(listed.Count, Math.Max(InitialNoticeRows, Math.Max(keyboardIndex, focusIndex) + 1));
         // A later batch can bring the page's first live row: WatchPageLive after each, or nothing would follow the tick.
         _noticeBatches = new RowBatches<Notice>(listed, (i, notice) => AddNoticeRow(list, i, notice, i < first ? now : DateTimeOffset.UtcNow),
@@ -1280,10 +1297,16 @@ public partial class MainWindow
 
     private void AddNoticeRow(Panel list, int index, Notice notice, DateTimeOffset now)
     {
-        var (row, select) = Row(notice, now, RowSelected(notice));
+        bool selected = RowSelected(notice);
+        var (row, select) = Row(notice, now, selected);
         list.Children.Insert(index, row);
         _pageRows.Add((notice, notice.Revision, RowKey(notice, now), row, select));
+        // The page came into view with the selected row still to build: the list moves to it now that it is built.
+        if (selected && _scrollToFocusPending) { _scrollToFocusPending = false; ScrollListToFocus(); }
     }
+
+    // The page came into view on screen before its selected row was built (ListColumn).
+    private bool _scrollToFocusPending;
 
     // The notice the list's rows were drawn around: the rows of its conversation have the selected fill. Rows that later batches
     // add read it, so that they follow a focus picked while they were still being built.
