@@ -53,7 +53,9 @@ internal sealed partial class PlannerPage
     private readonly System.Windows.Threading.DispatcherTimer _noteSave;
     private static readonly TimeSpan NoteDelay = TimeSpan.FromSeconds(.8);
 
-    private const double HourHeight = 32, LineTop = 8, AxisWidth = 40, BlockLeft = 44, BlockGap = 3;
+    // Each block counts at least this long when the blocks are put in columns: at the lowest hour, a block of PlannerTimeline.MinBlock
+    // is an hour high, and a shorter event before another one would lie over it.
+    private static readonly TimeSpan BlockSpan = TimeSpan.FromMinutes(Math.Ceiling(PlannerTimeline.MinBlock * 60 / AgendaCalendar.MinHourHeight));
 
     // ---- What the panel asks ----
 
@@ -206,7 +208,10 @@ internal sealed partial class PlannerPage
     }
 
     // Puts the rows in and scrolls back to where the list was, keeping the focus of a box among them.
-    private void Fill(ScrollViewer scroll, FrameworkElement content, double offset)
+    private void Fill(ScrollViewer scroll, FrameworkElement content, double offset) => Fill(scroll, content, () => offset);
+
+    // offset is asked for once the view is laid out: the block view's offset depends on the hour's height its layout fits.
+    private void Fill(ScrollViewer scroll, FrameworkElement content, Func<double> offset)
     {
         var focused = Keyboard.FocusedElement as UIElement;
         bool within = focused is not null && Within(focused, scroll);
@@ -215,11 +220,11 @@ internal sealed partial class PlannerPage
         {
             scroll.Content = content;
             if (within && focused is not null && Within(focused, content)) focused.Focus();
-            if (offset > 0 && scroll.IsLoaded) { scroll.UpdateLayout(); scroll.ScrollToVerticalOffset(offset); }
-            else if (offset > 0) scroll.Loaded += Restore;
+            if (offset() > 0 && scroll.IsLoaded) { scroll.UpdateLayout(); scroll.ScrollToVerticalOffset(offset()); }
+            else if (offset() > 0) scroll.Loaded += Restore;
         }
         finally { _rebuilding = false; }
-        void Restore(object sender, RoutedEventArgs e) { scroll.Loaded -= Restore; scroll.ScrollToVerticalOffset(offset); }
+        void Restore(object sender, RoutedEventArgs e) { scroll.Loaded -= Restore; scroll.ScrollToVerticalOffset(offset()); }
     }
 
     private TextBlock Empty(string text)
@@ -363,42 +368,59 @@ internal sealed partial class PlannerPage
             }
             grid.Children.Add(new Border { Height = 20, ClipToBounds = true, Child = chips, Margin = new Thickness(0, 0, 0, 6) });
         }
-        var scroll = _blockScroll ??= NewScroll(offset => _blockMinute = offset * 60 / HourHeight);
-        var line = new PlannerTimeline { Height = LineTop * 2 + 24 * HourHeight };
+        var scroll = _blockScroll ??= BlockScroll();
+        // Until the view has been laid out it has no height, and the hour is the highest; the view's first size fits it (BlockScroll).
+        var line = new PlannerTimeline { Hour = AgendaCalendar.HourHeightFor(scroll.ActualHeight) };
         for (int hour = 0; hour <= 24; hour++)
         {
-            double y = LineTop + hour * HourHeight;
-            line.Add(new Border { Height = 1, Background = UI.Brush(Look.Hairline) }, new(PlannerTimeline.Kind.Line, y, y + 1));
+            line.Add(new Border { Height = 1, Background = UI.Brush(Look.Hairline) }, new(PlannerTimeline.Kind.Line, hour * 60, hour * 60));
             var label = AgendaDraw.Words($"{hour:00}:00", 10.5, 12, Look.Tertiary);
             label.TextAlignment = TextAlignment.Right;
-            line.Add(label, new(PlannerTimeline.Kind.Label, y, y));
+            line.Add(label, new(PlannerTimeline.Kind.Label, hour * 60, hour * 60));
         }
         if (_day == Today)
         {
-            double y = LineTop + now.TimeOfDay.TotalMinutes * HourHeight / 60;
+            double minute = now.TimeOfDay.TotalMinutes;
             var mark = new Grid { Height = 6, IsHitTestVisible = false };
             mark.Children.Add(new Border { Height = 1.5, Background = UI.Brush(Look.Hex("danger")), VerticalAlignment = VerticalAlignment.Center });
             mark.Children.Add(new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(Look.Hex("danger")), HorizontalAlignment = HorizontalAlignment.Left });
-            line.Add(mark, new(PlannerTimeline.Kind.Now, y, y));
+            line.Add(mark, new(PlannerTimeline.Kind.Now, minute, minute));
         }
-        foreach (var placement in AgendaQuery.Columns(segments, TimeSpan.FromMinutes(30))) line.Add(Block(placement.Segment, now), Slot(placement));
+        foreach (var placement in AgendaQuery.Columns(segments, BlockSpan)) line.Add(Block(placement.Segment, now), Slot(placement));
         _blockMinute ??= AgendaCalendar.OpeningMinute(_day, now, segments);
         Grid.SetRow(scroll, 1);
         _rebuilding = true;
         try { Detach(scroll); grid.Children.Add(scroll); } finally { _rebuilding = false; }
-        Fill(scroll, line, _blockMinute.Value * HourHeight / 60);
+        // Asked for when the view scrolls, after its first layout has fitted the hour.
+        Fill(scroll, line, () => _blockMinute is { } top ? line.OffsetOf(top) : 0);
         return grid;
     }
 
+    // The block view's scroll: the hour's height follows the height the view has (AgendaCalendar.HourHeightFor), on its first layout
+    // and on every resize of the panel, and the view keeps the same minute at its top.
+    private ScrollViewer BlockScroll()
+    {
+        var scroll = NewScroll(offset => { if (_blockScroll?.Content is PlannerTimeline line) _blockMinute = line.MinuteAt(offset); });
+        scroll.SizeChanged += (_, e) =>
+        {
+            if (!e.HeightChanged || scroll.Content is not PlannerTimeline line) return;
+            double hour = AgendaCalendar.HourHeightFor(scroll.ActualHeight);
+            if (hour == line.Hour) return;
+            line.Hour = hour;
+            if (_blockMinute is { } top) scroll.ScrollToVerticalOffset(line.OffsetOf(top));
+        };
+        return scroll;
+    }
+
+    // The block's minutes of the day; one shorter than half an hour is drawn as long as half an hour.
     private static PlannerTimeline.Slot Slot(AgendaPlacement placement)
     {
         var segment = placement.Segment;
         double from = (segment.Start - AgendaTime.Midnight(segment.Day)).TotalMinutes, to = (segment.End - AgendaTime.Midnight(segment.Day)).TotalMinutes;
-        to = Math.Max(to, from + 30);
-        return new(PlannerTimeline.Kind.Block, LineTop + from * HourHeight / 60, LineTop + to * HourHeight / 60 - 1, placement.Column, placement.Columns);
+        return new(PlannerTimeline.Kind.Block, from, Math.Max(to, from + 30), placement.Column, placement.Columns);
     }
 
-    // A block: its title and times on two lines, on one where it is under an hour high; ended ones faint.
+    // A block: its title and times on two lines, on one where it is too low for two (PlannerBlockWords); ended ones faint.
     private FrameworkElement Block(AgendaSegment segment, DateTime now)
     {
         var item = segment.Event;
@@ -409,23 +431,15 @@ internal sealed partial class PlannerPage
         var times = AgendaText.Times(segment);
         if (AgendaText.Left(segment, now) is { } left) times += " · " + left;
         if (marked) times += " · " + Loc.T("刚加入", "Just added");
-        double minutes = Math.Max(30, (segment.End - segment.Start).TotalMinutes);
-        bool two = minutes * HourHeight / 60 - 1 >= 30;
-        FrameworkElement content;
-        if (two)
-        {
-            var name = AgendaDraw.Words(item.Title, 11.5, 15, title, FontWeights.SemiBold);
-            var when = AgendaDraw.Words(times, 11, 14, Look.Secondary);
-            content = new StackPanel { Margin = new Thickness(0, 1, 0, 0), Children = { name, when } };
-        }
-        else
-        {
-            var one = AgendaDraw.Words("", 11.5, 15, title, FontWeights.SemiBold);
-            one.Inlines.Add(new Run(item.Title));
-            one.Inlines.Add(new Run(" " + times) { FontSize = 11, FontWeight = FontWeights.Normal, Foreground = UI.Brush(Look.Secondary) });
-            one.VerticalAlignment = VerticalAlignment.Center;
-            content = one;
-        }
+        var name = AgendaDraw.Words(item.Title, 11.5, 15, title, FontWeights.SemiBold);
+        var when = AgendaDraw.Words(times, 11, 14, Look.Secondary);
+        var two = new StackPanel { Margin = new Thickness(0, 1, 0, 0), Children = { name, when } };
+        // One line fits the lowest block (PlannerTimeline.MinBlock).
+        var one = AgendaDraw.Words("", 11.5, 14, title, FontWeights.SemiBold);
+        one.Inlines.Add(new Run(item.Title));
+        one.Inlines.Add(new Run(" " + times) { FontSize = 11, FontWeight = FontWeights.Normal, Foreground = UI.Brush(Look.Secondary) });
+        one.VerticalAlignment = VerticalAlignment.Center;
+        var content = new PlannerBlockWords(two, one);
         var block = new Border
         {
             CornerRadius = new CornerRadius(Look.Corner(5)), Background = UI.Brush(rest), BorderBrush = UI.Brush(past ? AgendaDraw.Tint(Look.Accent, .5) : Look.Accent),
@@ -805,14 +819,33 @@ internal sealed partial class PlannerPage
     }
 }
 
-// The block view's time line: the hours' lines and names, the "now" line and the blocks, each placed by its Slot; the blocks share
-// the width right of the axis by their columns (AgendaQuery.Columns), with a small gap between them.
+// The block view's time line: the hours' lines and names, the "now" line and the blocks, each placed by its Slot in minutes of the
+// day; Hour turns minutes into height, and a new Hour lays the line out again without building it again. The blocks share the
+// width right of the axis by their columns (AgendaQuery.Columns), with a small gap between them.
 internal sealed class PlannerTimeline : Panel
 {
     public enum Kind { Line, Label, Now, Block }
+    // Top and Bottom: minutes of the day.
     public sealed record Slot(Kind Kind, double Top, double Bottom, int Column = 0, int Columns = 1);
     private readonly Dictionary<UIElement, Slot> _slots = [];
     private const double AxisWidth = 40, LabelWidth = 34, BlockLeft = 44, Gap = 3, NowLeft = 36;
+    // A block is at least high enough for one line of its words. Below NamedEvery an hour, every other hour is named: a name on
+    // every line left the names 2 DIP apart.
+    public const double MinBlock = 14;
+    private const double NamedEvery = 20;
+    private double _hour = AgendaCalendar.MaxHourHeight;
+
+    public double Hour
+    {
+        get => _hour;
+        set { if (value == _hour) return; _hour = value; InvalidateMeasure(); }
+    }
+
+    // The scroll offset that puts minute at the view's top, its line TimelineTop below it, and the minute at an offset.
+    public double OffsetOf(double minute) => minute * _hour / 60;
+    public double MinuteAt(double offset) => offset * 60 / _hour;
+
+    private double Y(double minute) => AgendaCalendar.TimelineTop + minute * _hour / 60;
 
     public void Add(UIElement child, Slot slot)
     {
@@ -825,32 +858,65 @@ internal sealed class PlannerTimeline : Panel
     protected override Size MeasureOverride(Size available)
     {
         double width = double.IsFinite(available.Width) ? available.Width : 300;
-        foreach (UIElement child in Children)
-        {
-            var (rect, _) = Place(_slots[child], width);
-            child.Measure(rect.Size);
-        }
-        return new Size(width, double.IsFinite(Height) ? Height : 0);
+        foreach (UIElement child in Children) child.Measure(Place(_slots[child], width).Size);
+        return new Size(width, AgendaCalendar.TimelineTop * 2 + 24 * _hour);
     }
 
     protected override Size ArrangeOverride(Size final)
     {
-        foreach (UIElement child in Children) child.Arrange(Place(_slots[child], final.Width).Rect);
+        foreach (UIElement child in Children)
+        {
+            var slot = _slots[child];
+            // Opacity, not Visibility: it changes no layout.
+            if (slot.Kind == Kind.Label) child.Opacity = _hour < NamedEvery && (int)(slot.Top / 60) % 2 == 1 ? 0 : 1;
+            child.Arrange(Place(slot, final.Width));
+        }
         return final;
     }
 
-    private static (Rect Rect, bool) Place(Slot slot, double width) => slot.Kind switch
+    private Rect Place(Slot slot, double width) => slot.Kind switch
     {
-        Kind.Line => (new Rect(AxisWidth, slot.Top, Math.Max(0, width - AxisWidth), 1), true),
-        Kind.Label => (new Rect(0, slot.Top - 5, LabelWidth, 12), true),
-        Kind.Now => (new Rect(NowLeft, slot.Top - 3, Math.Max(0, width - NowLeft), 6), true),
-        _ => (Block(slot, width), true)
+        Kind.Line => new Rect(AxisWidth, Y(slot.Top), Math.Max(0, width - AxisWidth), 1),
+        Kind.Label => new Rect(0, Y(slot.Top) - 5, LabelWidth, 12),
+        Kind.Now => new Rect(NowLeft, Y(slot.Top) - 3, Math.Max(0, width - NowLeft), 6),
+        _ => Block(slot, width)
     };
 
-    private static Rect Block(Slot slot, double width)
+    private Rect Block(Slot slot, double width)
     {
         double room = Math.Max(0, width - BlockLeft), each = (room - Gap * (slot.Columns - 1)) / Math.Max(1, slot.Columns);
         double left = BlockLeft + slot.Column * (each + Gap);
-        return new Rect(left, slot.Top, Math.Max(0, each), Math.Max(1, slot.Bottom - slot.Top));
+        double top = Y(slot.Top);
+        return new Rect(left, top, Math.Max(0, each), Math.Max(MinBlock, Y(slot.Bottom) - 1 - top));
+    }
+}
+
+// A block's words: the title over its times where the block is high enough for both (TwoLines), on one line where it is not. The
+// block's height follows the hour's (PlannerTimeline.Hour), so the choice is made at each measure; only the chosen form is a child.
+internal sealed class PlannerBlockWords(FrameworkElement two, FrameworkElement one) : FrameworkElement
+{
+    private const double TwoLines = 30;
+    private FrameworkElement? _shown;
+
+    protected override int VisualChildrenCount => _shown is null ? 0 : 1;
+    protected override Visual GetVisualChild(int index) => _shown ?? throw new ArgumentOutOfRangeException(nameof(index));
+
+    protected override Size MeasureOverride(Size available)
+    {
+        var form = available.Height >= TwoLines ? two : one;
+        if (!ReferenceEquals(form, _shown))
+        {
+            if (_shown is not null) { RemoveVisualChild(_shown); RemoveLogicalChild(_shown); }
+            _shown = form;
+            AddLogicalChild(form); AddVisualChild(form);
+        }
+        form.Measure(available);
+        return form.DesiredSize;
+    }
+
+    protected override Size ArrangeOverride(Size final)
+    {
+        _shown?.Arrange(new Rect(final));
+        return final;
     }
 }

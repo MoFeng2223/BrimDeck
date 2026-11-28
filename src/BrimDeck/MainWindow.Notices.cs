@@ -602,7 +602,7 @@ public partial class MainWindow
 
     private ScrollViewer? _pageScroll;
     // The height of the fade at the foot of the list, and of the one under a long text in the focus.
-    private const double FadeHeight = 36, WordsFadeHeight = 18;
+    private const double FadeHeight = 36, WordsFadeHeight = 18, NoticeListGap = 10;
     // The least width of the focus and of the list (DIP).
     private const double FocusMinimum = 170, ListMinimum = 228;
 
@@ -1175,7 +1175,7 @@ public partial class MainWindow
         head.Children.Add(tools);
 
         // The rows out of view are not laid out again for every width of a drag (ViewportStack).
-        var list = new ViewportStack { Margin = new Thickness(0, 8, 0, FadeHeight) };
+        var list = new ViewportStack { Margin = new Thickness(0, 0, 0, FadeHeight) };
         KeyboardNavigation.SetDirectionalNavigation(list, KeyboardNavigationMode.Contained);
         var listed = Listed(center);
         // Keep the full extent when restoring a scroll offset. Build through the keyboard row
@@ -1199,7 +1199,9 @@ public partial class MainWindow
         }
         // The rows' fill reaches 8 beyond the title on the left, so that their icons line up with it. The scroll viewer itself reaches
         // out, not the list in it: the viewer clips what lies beyond its bounds, and cut the rows' rounded left edge flush to their icons.
-        var scroll = new ScrollViewer { Content = list, Margin = new Thickness(-8, 0, 0, 0), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false, PanningMode = PanningMode.VerticalOnly };
+        // The space under the header lies outside the viewer too: inside it, the space scrolled away with the rows, and a scrolled
+        // list was cut flush to the header.
+        var scroll = new ScrollViewer { Content = list, Margin = new Thickness(-8, NoticeListGap, 0, 0), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false, PanningMode = PanningMode.VerticalOnly };
         _pageScroll = scroll;
         // The list fades out at its foot into the panel, by a mask that is the same on every material (NoticeFade); the free
         // space under the last row is as high as the fade.

@@ -54,14 +54,36 @@ public static class AgendaCalendar
         return midnight.AddMinutes(Math.Min(minutes, 23 * 60));
     }
 
-    // The minute of the day the block view's time line opens at (its top edge), always on a whole hour so its name shows whole: on
-    // today the hour before now; on another day the hour of the first timed event that starts on the day (one from the evening before
-    // only when there is none); with none, 8:00.
+    // The block view's time line shows the working day, DayHours from DayStart (8:00 to 18:00), in the height it has: an hour is as
+    // high as fits them between the line's top (TimelineTop) and the fade at its foot (TimelineFoot), in whole DIPs, at least
+    // MinHourHeight and at most MaxHourHeight (a taller view shows more hours).
+    public const int DayStart = 8, DayHours = 10;
+    public const double TimelineTop = 8, TimelineFoot = 18, MinHourHeight = 14, MaxHourHeight = 32;
+
+    // An hour's height for a time line whose view is view high; before the view has a height, the most.
+    public static double HourHeightFor(double view)
+        => view > 0 ? Math.Clamp(Math.Floor((view - TimelineTop - TimelineFoot) / DayHours), MinHourHeight, MaxHourHeight) : MaxHourHeight;
+
+    // The minute of the day the block view's time line opens at (its top edge), always on a whole hour so its name shows whole. It
+    // opens on DayStart, showing the working day, unless what must be seen lies outside it: on today now, with an hour before and an
+    // hour after it; on another day the first timed event that starts on the day (one from the evening before only when there is
+    // none) and its first hour. Then the view moves just far enough to show it.
     public static double OpeningMinute(DateOnly day, DateTime now, IEnumerable<AgendaSegment> segments)
     {
-        if (day == DateOnly.FromDateTime(now)) return Math.Max(0, now.Hour - 1) * 60;
+        if (day == DateOnly.FromDateTime(now)) return Opening(now.TimeOfDay.TotalMinutes - 60, now.TimeOfDay.TotalMinutes + 60);
         var timed = segments.Where(segment => !segment.AllDay).ToList();
         var first = (timed.Where(segment => !segment.FromEarlier).Select(segment => (DateTime?)segment.Start).Min()) ?? timed.Select(segment => (DateTime?)segment.Start).Min();
-        return first is { } start ? start.Hour * 60 : 8 * 60;
+        if (first is not { } start) return DayStart * 60;
+        double minute = (start - AgendaTime.Midnight(day)).TotalMinutes;
+        return Opening(minute, minute + 60);
+    }
+
+    // The whole hour the view opens at so that from to to (minutes of the day) is in it: DayStart where it is, else the nearest.
+    private static double Opening(double from, double to)
+    {
+        double top = DayStart * 60;
+        if (from < top) top = Math.Floor(from / 60) * 60;
+        else if (to > top + DayHours * 60) top = Math.Ceiling(to / 60) * 60 - DayHours * 60;
+        return Math.Clamp(top, 0, (24 - DayHours) * 60);
     }
 }

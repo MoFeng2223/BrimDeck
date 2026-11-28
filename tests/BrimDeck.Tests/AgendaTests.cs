@@ -593,10 +593,17 @@ static class AgendaTests
         Event(book, "出差", "2026-11-23 20:00", "2026-11-25 12:00");
         Event(book, "值守", "2026-11-23 22:00", "2026-11-24 02:00");
         Event(book, "夜里", "2026-11-26 22:00", "2026-11-27 02:00");
-        check("Agenda: the time line opens on the hour before now today, at the first event starting on another day, at 8:00 on an empty day",
-            AgendaCalendar.OpeningMinute(Today, Now, book.Segments(Today)) == 13 * 60 && AgendaCalendar.OpeningMinute(D("2026-11-24"), Now, book.Segments(D("2026-11-24"))) == 9 * 60
+        Event(book, "晚饭", "2026-11-28 20:00", "2026-11-28 21:00");
+        check("Agenda: the time line opens on 8:00 to 18:00, and moves only as far as needed to show now today or another day's first event",
+            AgendaCalendar.OpeningMinute(Today, Now, book.Segments(Today)) == 8 * 60 && AgendaCalendar.OpeningMinute(D("2026-11-24"), Now, book.Segments(D("2026-11-24"))) == 8 * 60
             && AgendaCalendar.OpeningMinute(D("2026-11-30"), Now, book.Segments(D("2026-11-30"))) == 8 * 60 && AgendaCalendar.OpeningMinute(Today, T("2026-11-22 00:20"), []) == 0
+            && AgendaCalendar.OpeningMinute(Today, T("2026-11-22 07:30"), []) == 6 * 60 && AgendaCalendar.OpeningMinute(Today, T("2026-11-22 16:50"), []) == 8 * 60
+            && AgendaCalendar.OpeningMinute(Today, T("2026-11-22 19:30"), []) == 11 * 60 && AgendaCalendar.OpeningMinute(Today, T("2026-11-22 23:40"), []) == 14 * 60
+            && AgendaCalendar.OpeningMinute(D("2026-11-28"), Now, book.Segments(D("2026-11-28"))) == 11 * 60
             && AgendaCalendar.OpeningMinute(D("2026-11-27"), Now, book.Segments(D("2026-11-27"))) == 0);
+        check("Agenda: an hour of the time line is as high as fits ten hours in its view, from 14 to 32",
+            AgendaCalendar.HourHeightFor(173) == 14 && AgendaCalendar.HourHeightFor(200) == 17 && AgendaCalendar.HourHeightFor(100) == 14
+            && AgendaCalendar.HourHeightFor(400) == 32 && AgendaCalendar.HourHeightFor(0) == 32);
     }
 
     private static void English(Action<string, bool> check)
