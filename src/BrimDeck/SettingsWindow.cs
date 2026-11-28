@@ -802,7 +802,10 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
             ClickThroughRows(),
             Toggle(Loc.T("允许录制软件捕获窗口", "Allow window capture"), S.WindowCapture, value => Change(s => s.WindowCapture = value), help:
                 Loc.T("开启后，OBS 等录制软件可以用“窗口采集”单独捕获面板，同时面板会出现在 Alt + Tab 的窗口列表中。",
-                    "When on, OBS and other recording apps can capture the panel on its own with window capture. The panel also appears in the Alt+Tab list.")));
+                    "When on, OBS and other recording apps can capture the panel on its own with window capture. The panel also appears in the Alt+Tab list.")),
+            Toggle(Loc.T("兼容 NVIDIA 显示模式切换", "NVIDIA display mode switching"), S.AvoidDirect3D9, value => Change(s => s.AvoidDirect3D9 = value), help:
+                Loc.T("开启后，BrimDeck 不再阻止 NVIDIA Advanced Optimus 切换内屏的显示模式，但可能增加 CPU 和内存占用。重新启动 BrimDeck 后生效。",
+                    "When on, BrimDeck no longer blocks NVIDIA Advanced Optimus from switching the built-in display's mode, but CPU and memory usage may increase. Takes effect after BrimDeck restarts.")));
     }
 
     // Each row independently chooses its quota source, statistics source and dashboard name.

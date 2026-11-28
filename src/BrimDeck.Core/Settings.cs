@@ -677,6 +677,9 @@ public sealed class DeckSettings
     // The panel window can be captured on its own by recording apps (OBS window capture). Off, the window keeps the no-activate
     // style that recording apps cannot capture, and that keeps it out of Alt+Tab.
     public bool WindowCapture { get; set; }
+    // WPF is kept from loading d3d9.dll and draws in software (Direct3D9Block), so NVIDIA Advanced Optimus can switch the laptop
+    // panel between GPUs while BrimDeck runs. It costs CPU and memory, and it applies from the next start.
+    public bool AvoidDirect3D9 { get; set; }
     public WindowBehavior Maximized { get; set; } = WindowBehavior.Line;
     public WindowBehavior Borderless { get; set; } = WindowBehavior.Hide;
     public WindowBehavior Exclusive { get; set; } = WindowBehavior.Hide;
