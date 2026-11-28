@@ -224,16 +224,16 @@ internal static class MusicTests
             foreach (var (width, height) in new[] { (w, h), (1200.0, 400.0), (440.0, 140.0) })
             {
                 var l = MusicLayout.Calculate(width, height, true, true); var cols = l.Columns(true);
-                double lyricsHeight = cols.CurrentLine + (cols.LyricLines - 1) * l.Metrics.LyricLine;
+                double lyricsHeight = cols.CurrentLine * Math.Max(1, cols.WrapLines) + cols.After * l.Metrics.LyricLine;
                 double titles = l.Metrics.TitleLine + (cols.ShowAlbum ? 2 : 1) * l.Metrics.ArtistLine + (cols.EqualizerBelow ? cols.EqualizerGap + l.Metrics.Equalizer : 0);
-                columnsOk &= cols.LyricLines >= 1 && lyricsHeight <= cols.Height + 1e-9 && titles <= cols.Height + 1e-9
+                columnsOk &= cols.LyricLines is >= 1 and <= 2 && lyricsHeight <= cols.Height + 1e-9 && titles <= cols.Height + 1e-9
                     && cols.InfoWidth + 2 * cols.DividerGap + 1 + cols.LyricsWidth == l.BodyWidth && cols.LyricsWidth > cols.InfoWidth
-                    && Math.Abs(cols.After - cols.Before) <= 1 && cols.Before <= cols.After && cols.CurrentLyric > l.Metrics.Lyric;
+                    && cols.Before == 0 && cols.After <= 1 && cols.CurrentLyric > l.Metrics.Lyric;
             }
         }
         var wideColumns = MusicLayout.Calculate(1200, 400, true, true).Columns(true);
         check("Without the cover the titles take the left column and the lyrics the rest, as many lines as fit around the larger current one",
-            columnsOk && wideColumns.LyricLines > MusicLayout.Calculate(1200, 400, true, true).LyricLines
+            columnsOk && wideColumns.WrapLines >= 2 && wideColumns.After == 1
             && MusicLayout.Calculate(440, 200, true, true).Columns(false) is { InfoWidth: 440 - 40, LyricsWidth: 0, LyricLines: 0 });
         // With the cover, the column layout gives it the room first: above the titles where it can have its share of the height,
         // beside them where it cannot, and shown at every page size, with a lyrics column or without one.
@@ -274,19 +274,19 @@ internal static class MusicTests
         check("Column layout without the cover: at the usual sizes the equalizer is under the titles, with a lyrics column or without one",
             MusicLayout.Calculate(440, 200, true, true).Columns(true).EqualizerBelow && MusicLayout.Calculate(760, 300, true, true).Columns(true).EqualizerBelow
             && MusicLayout.Calculate(440, 200, false, true).Columns(false).EqualizerBelow);
-        // An even count of lyric lines has the current one in the lower half while the equalizer is at the top right (with the
-        // cover), and in the upper half while it is under the titles; an odd count has it in the middle either way.
-        var linesFailures = new List<string>(); var counts = new HashSet<int>();
+        // Current wraps 2–3 rows with only the next line under it (no previous).
+        var linesFailures = new List<string>(); var wraps = new HashSet<int>();
         for (double height = DeckPages.MinHeight; height <= DeckPages.MaxHeight; height += 4)
             foreach (bool withCover in new[] { true, false })
             {
-                var cols = MusicLayout.Calculate(760, height, true, true).Columns(true, withCover); int lines = cols.LyricLines;
-                if (withCover) counts.Add(lines);
-                int expected = (lines - 1) / 2;
-                if (cols.Before != expected || cols.Before + 1 + cols.After != lines) linesFailures.Add($"{height} cover={withCover}: {cols.Before} before, {cols.After} after");
+                var cols = MusicLayout.Calculate(760, height, true, true).Columns(true, withCover);
+                wraps.Add(cols.WrapLines);
+                if (cols.Before != 0 || cols.After > 1) linesFailures.Add($"{height} cover={withCover}: {cols.Before} before, {cols.After} after");
+                double slot = cols.CurrentLine * Math.Max(1, cols.WrapLines) + cols.After * MusicLayout.Calculate(760, height, true, true).Metrics.LyricLine;
+                if (slot > cols.Height + 1e-9) linesFailures.Add($"{height} cover={withCover}: wrap {cols.WrapLines} overflows {slot} in {cols.Height}");
             }
-        check("Column layout: the current line sits high, with the extra line of an even count left for the lines after it" + (linesFailures.Count > 0 ? " (" + string.Join("; ", linesFailures.Take(4)) + ")" : ""),
-            linesFailures.Count == 0 && counts.Contains(5) && counts.Contains(6));
+        check("Column layout: wrapped current keeps the next line under it" + (linesFailures.Count > 0 ? " (" + string.Join("; ", linesFailures.Take(4)) + ")" : ""),
+            linesFailures.Count == 0 && wraps.Contains(2) && wraps.IsSubsetOf([1, 2, 3]));
         check("Column layout: without the cover nothing is kept for one", MusicLayout.Calculate(760, 300, true, true).Columns(true) is { Cover: 0, SideCover: 0 });
         check("The bottom margin below the transport equals the side margin", standard.Metrics.Bottom == standard.Metrics.Side && spacious.Metrics.Bottom == spacious.Metrics.Side);
         var failures = new List<string>(); double title = 0;

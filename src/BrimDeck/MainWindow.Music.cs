@@ -38,9 +38,12 @@ public partial class MainWindow
     private Brush _musicAccent = MusicVisuals.Accent(null);
     // The color the cover gave, if it gave one; _musicAccent is the theme's equalizer color otherwise.
     private Color? _coverAccent;
+    // Soft atmosphere tint from the cover (MusicVisuals.CoverGlow); null without a usable sample.
+    private Color? _coverGlow;
     private Lyrics _lyrics = Lyrics.Empty;
     // The track _lyrics were found for.
     private MediaTrack? _lyricsTrack;
+    private MusicLyricsState _lyricsState = MusicLyricsState.None;
     private CancellationTokenSource? _lyricsRequest;
     // Completed when Apple Music or KuGou writes a lyric file while the current song has none of its player's own.
     private TaskCompletionSource? _localLyricsWritten;
@@ -61,11 +64,9 @@ public partial class MainWindow
     private DispatcherTimer? _timelineHoldEnd;
     private Slider? _musicSeek;
     private readonly ScaleTransform _musicCoverScale = new(1, 1);
-    private TextBlock? _musicElapsed, _musicDuration, _musicMessage;
-    // The current line scrolls when it is wider than the column; the lines around it are cut off with an ellipsis.
-    private MusicMarquee? _lyricCurrent, _musicTitle;
+    private TextBlock? _musicElapsed, _musicDuration, _lyricNext, _musicMessage;
+    private MusicMarquee? _musicTitle, _lyricCurrent;
     // Without the cover the lyrics column shows more lines around the current one (MusicLayout.Columns).
-    private TextBlock[] _lyricsAbove = [], _lyricsBelow = [];
     private Grid? _musicInfo;
     private Canvas? _musicControls;
     private Button? _musicFullControl;
@@ -118,6 +119,7 @@ public partial class MainWindow
         if (_musicStarted) _app.StartMedia();
         if (!Settings.MediaWanted) { _mediaTrack = null; _mediaCover = null; _mediaTracks = []; _seekPreview.Observe(null, DateTimeOffset.UtcNow); }
         UpdateLyrics();
+        SyncMusicWash();
     }
     private void ApplyDefaultMusicPage()
     {
@@ -166,6 +168,7 @@ public partial class MainWindow
     {
         // The music page keeps what it built while another page shows (RenderMusic's key), so switching back does not build it again.
         _detailPopup?.Close(); _details = false; _page = page; _handover.Drop();
+        if (page != DeckPage.Music) SyncMusicWash();
         ApplySettings(animatePage, pageOnly: true);
     }
     // The wheel walks the shown pages (down moves along the switch, up moves back) or steps the system volume. A wheel that
@@ -282,7 +285,11 @@ public partial class MainWindow
         _seekPreview.Observe(track, now);
         _timelineHold.Observe(track, now); ScheduleTimelineHoldEnd(now);
         bool coverChanged = _mediaCover != cover;
-        if (coverChanged) { _mediaCover = cover; _musicAccent = MusicVisuals.Accent(_mediaCover, out _coverAccent, Look); }
+        if (coverChanged)
+        {
+            _mediaCover = cover;
+            _musicAccent = MusicVisuals.Accent(_mediaCover, out _coverAccent, out _coverGlow, Look);
+        }
         // A new song scrolls its title again, even one of the same name.
         if (changedSong) _compactTitleRested = null;
         if (changedSong)
@@ -295,6 +302,7 @@ public partial class MainWindow
         if (lyricsChanged) UpdateLyrics();
         if (changedSong || lyricsChanged || coverChanged || old?.State != _mediaTrack?.State || old?.HasTimeline != _mediaTrack?.HasTimeline) RenderCompact();
         if (IsMusicPage) RenderMusic();
+        else if (changedSong || coverChanged) SyncMusicWash();
         // Native lyric events must update compact text even while playback is paused.
         UpdateMusicPosition();
         UpdateMusicTimer();
@@ -326,50 +334,84 @@ public partial class MainWindow
         var requested = _mediaTrack;
         // NetEase's song/detail can fill a blank artist or album after the song's lyrics are shown (MediaRouting.FillDetails):
         // the lyrics found stay, and are not looked up again.
-        if (key.Length > 0 && requested is not null && _lyricsTrack is { } found && (_lyrics.Lines.Count > 0 || _lyrics.Instrumental)
-            && MediaRouting.OnlyDetailsFilled(found, requested))
+        if (key.Length > 0 && requested is not null && _lyricsTrack is { } known && (_lyrics.Lines.Count > 0 || _lyrics.Instrumental)
+            && MediaRouting.OnlyDetailsFilled(known, requested))
         { _lyricsKey = key; _lyricsTrack = requested; return; }
         _lyricsKey = key; _lyricsRequest?.Cancel(); _lyricsRequest?.Dispose(); _lyricsRequest = null;
         // A player announces a song in a few updates (its title, then its length or its song ID), each of which looks the lyrics
         // up again. Lyrics found for the same song stay shown until the next ones are found: cleared, the lyrics of KuGou's own
         // file, found at once, went and came back.
-        if (key.Length == 0 || requested is null || _lyricsTrack is not { } shown || shown.Id != requested.Id || !SameMediaSong(shown, requested))
+        bool songChanged = key.Length == 0 || requested is null || _lyricsTrack is not { } shown || shown.Id != requested.Id || !SameMediaSong(shown, requested);
+        if (songChanged)
         { _lyrics = Lyrics.Empty; _lyricsTrack = null; _compactLyric = ""; _musicRenderKey = ""; }
-        if (key.Length == 0 || requested is null) return;
+        if (key.Length == 0 || requested is null) { SetLyricsState(MusicLyricsState.None); return; }
         if (!requested.IsQqMusic && !string.IsNullOrWhiteSpace(requested.EmbeddedLyrics))
         { ShowLyrics(Lyrics.Parse(requested.EmbeddedLyrics, null, requested.Duration.TotalSeconds, requested.Source), requested); return; }
+        SetLyricsState(MusicLyricsState.Loading);
         var request = CancellationTokenSource.CreateLinkedTokenSource(_app.Lifetime.Token); _lyricsRequest = request;
-        try
+        // Apple Music and KuGou write a song's lyrics as the song starts, which can be after the song changes here, or later
+        // still: until the player's own are found they are looked for again 3 and 15 seconds later and whenever the player
+        // writes a lyric file, keeping any lyrics already shown.
+        bool waitLocal = requested.IsAppleMusic || requested.IsKugou;
+        for (int attempt = 0; ; attempt++)
         {
-            // Apple Music and KuGou write a song's lyrics as the song starts, which can be after the song changes here, or later
-            // still: until the player's own are found they are looked for again 3 and 15 seconds later and whenever the player
-            // writes a lyric file, keeping any lyrics already shown.
-            for (int attempt = 0; ; attempt++)
+            Lyrics lyrics;
+            try { lyrics = await _app.Lyrics.FindAsync(requested, true, request.Token); }
+            catch (OperationCanceledException) { return; }
+            catch (Exception)
             {
-                var lyrics = await _app.Lyrics.FindAsync(requested, true, request.Token);
-                if (request.IsCancellationRequested || _lyricsKey != key) return;
-                if (lyrics.Lines.Count > 0 || lyrics.Instrumental || attempt == 0) ShowLyrics(lyrics, requested);
-                if (requested.IsAppleMusic ? lyrics.Source == LyricsService.AppleSource : !requested.IsKugou || lyrics.Source == LyricsService.KugouLocalSource) break;
+                // A hard failure after providers were asked: the area says unavailable, not a blank slot.
+                if (_lyricsKey == key) SetLyricsState(MusicLyricsState.Unavailable);
+                return;
+            }
+            if (request.IsCancellationRequested || _lyricsKey != key) return;
+            bool hit = lyrics.Lines.Count > 0 || lyrics.Instrumental;
+            bool own = requested.IsAppleMusic ? lyrics.Source == LyricsService.AppleSource
+                : !requested.IsKugou || lyrics.Source == LyricsService.KugouLocalSource;
+            if (hit) ShowLyrics(lyrics, requested);
+            else if (!waitLocal || own) { ShowLyrics(Lyrics.Empty, requested); break; }
+            // After the last timed retry the area says there are none, but a lyric file the player writes later still shows.
+            else if (attempt >= 2) ShowLyrics(Lyrics.Empty, requested);
+            if (hit && own) break;
+            try
+            {
                 var written = (_localLyricsWritten = new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
                 await (attempt < 2 ? Task.WhenAny(written, Task.Delay(TimeSpan.FromSeconds(attempt == 0 ? 3 : 15), request.Token)) : written.WaitAsync(request.Token));
                 request.Token.ThrowIfCancellationRequested();
                 // The file is read once Apple Music has finished writing it.
                 if (written.IsCompleted) await Task.Delay(TimeSpan.FromSeconds(1), request.Token);
             }
+            catch (OperationCanceledException) { return; }
         }
-        catch (OperationCanceledException) { }
-        catch (Exception) { /* Lyrics are optional; provider failures keep the no-lyrics layout. */ }
     }
     // Timed lyrics in place of timed lyrics (found again, or the player's own in place of a provider's) change only the lines
     // shown, as the song plays; the page and the collapsed row are built again only when the lyrics take another form.
     private void ShowLyrics(Lyrics lyrics, MediaTrack track)
     {
+        var state = lyrics.Lines.Count > 0 || lyrics.Instrumental ? MusicLyricsState.Ready : MusicLyricsState.None;
         bool sameForm = ReferenceEquals(lyrics, _lyrics) || LyricsForm(lyrics).Equals(LyricsForm(_lyrics)) && lyrics.Synced && lyrics.Lines.Count > 0;
-        _lyrics = lyrics; _lyricsTrack = track;
-        if (sameForm) { UpdateMusicPosition(); return; }
+        bool sameState = _lyricsState == state;
+        _lyrics = lyrics; _lyricsTrack = track; _lyricsState = state;
+        if (sameForm && sameState) { UpdateMusicPosition(); return; }
         _musicRenderKey = "";
         if (IsMusicPage) RenderMusic(); RenderCompact();
     }
+    private void SetLyricsState(MusicLyricsState state)
+    {
+        if (_lyricsState == state) return;
+        _lyricsState = state;
+        _musicRenderKey = "";
+        if (IsMusicPage) RenderMusic();
+        RenderCompact();
+    }
+    // Shown in the lyric area while lyrics are enabled and there is nothing to sing along to yet.
+    private string LyricsStatusLabel => _lyricsState switch
+    {
+        MusicLyricsState.Loading => Loc.T("正在加载歌词…", "Loading lyrics…"),
+        MusicLyricsState.None => Loc.T("暂无歌词", "No lyrics"),
+        MusicLyricsState.Unavailable => Loc.T("无法获取歌词", "Lyrics unavailable"),
+        _ => ""
+    };
     // What of the lyrics the page is built from (RenderMusic): timed lyrics fill its lines as the song plays, so other timed
     // lyrics build no new page; untimed lyrics are shown whole.
     private static object LyricsForm(Lyrics lyrics) => lyrics.Synced && lyrics.Lines.Count > 0 ? "timed" : lyrics;
@@ -480,6 +522,7 @@ public partial class MainWindow
         bool shown = MusicContent.IsVisible && _expanded && !_preview;
         RefreshStatus();
         UsageContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Visible;
+        SyncMusicWash();
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         double h = ContentCanvas.Height, w = ContentCanvas.Width;
         var track = _mediaTrack;
@@ -488,6 +531,9 @@ public partial class MainWindow
         bool playerLyrics = track?.IsQqMusic == true && _lyrics.Lines.Count == 0 && !_lyrics.Instrumental;
         bool hasPlayerLyric = playerLyrics && Settings.LyricsEnabled && !string.IsNullOrWhiteSpace(track?.CurrentLyric) && track?.State != MediaState.Stopped;
         bool hasLyrics = playerLyrics ? hasPlayerLyric : (_lyrics.Lines.Count > 0 || _lyrics.Instrumental) && Settings.LyricsEnabled;
+        // Loading / none / unavailable take the lyric slot when lyrics are on and there is nothing to show yet.
+        string lyricsStatus = Settings.LyricsEnabled && track is not null && !hasLyrics ? LyricsStatusLabel : "";
+        bool lyricsArea = hasLyrics || lyricsStatus.Length > 0;
         bool logMode = track?.IsNeteaseLog == true;
         bool appleEntry = track is { IsAppleMusic: true } && _media?.AppleMusicFullControl == false;
         bool kugouEntry = track is { IsKugou: true } && (_media?.CanEnableKugouFullControl == true || _media?.RestartingKugou == true);
@@ -499,7 +545,7 @@ public partial class MainWindow
         var modes = track is null ? [] : MusicPlaybackModes.Supported(track);
         // While the timeline is held (MusicTimelineHold) the bar stays in its place, empty and without times.
         bool timeline = track?.HasTimeline == true || track is not null && _timelineHold.Holds(DateTimeOffset.UtcNow);
-        var layout = MusicLayout.Calculate(w, h, hasLyrics, timeline, message.Length > 0, logMode || appleEntry || kugouEntry, transport: !showSmtcHint,
+        var layout = MusicLayout.Calculate(w, h, lyricsArea, timeline, message.Length > 0, logMode || appleEntry || kugouEntry, transport: !showSmtcHint,
             lyricsExpected: Settings.LyricsEnabled);
         var c = layout.Metrics;
         ApplyPageHeader(PanelHeader.Music(c));
@@ -510,8 +556,8 @@ public partial class MainWindow
         // equalizer under them, as the column layout draws them without a lyrics column (bare).
         bool bare = !Settings.MusicPageCover && !Settings.LyricsEnabled;
         bool splitLyrics = Settings.MusicLyricsLayout == MusicLyricsLayout.Columns && !bare;
-        bool lyricColumn = splitLyrics && (hasLyrics || message.Length > 0);
-        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{LyricsForm(_lyrics).GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.MusicLyricsLayout}|{Settings.MusicLyricsAlign}|{Settings.EqualizerColor}|{Settings.EqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{Settings.MusicEqualizerBars}|{Settings.UiFont}|{Loc.Language}|{animate}";
+        bool lyricColumn = splitLyrics && (lyricsArea || message.Length > 0);
+        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{_lyricsState}|{w}|{h}|{LyricsForm(_lyrics).GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.MusicLyricsLayout}|{Settings.MusicLyricsAlign}|{Settings.MusicCaptionOrder}|{Settings.EqualizerColor}|{Settings.EqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{Settings.MusicEqualizerBars}|{Settings.UiFont}|{Loc.Language}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
         _musicRenderKey = key;
         string song = track is null ? "" : $"{track.Id}|{track.SongKey}|{track.Title}|{track.Artist}";
@@ -543,7 +589,7 @@ public partial class MainWindow
         // Keep the transport layer attached: replacing a hovered button restarts
         // hit testing and its fade-in on every metadata, artwork or lyric update.
         _handover.Hold(MusicContent, keep: _musicControls);
-        _musicSeek = null; _musicElapsed = null; _musicDuration = null; _musicEqualizer = null; _musicTitle = null; _lyricCurrent = null; _lyricsAbove = []; _lyricsBelow = []; _musicMessage = null; _musicInfo = null;
+        _musicSeek = null; _musicElapsed = null; _musicDuration = null; _musicEqualizer = null; _musicTitle = null; _lyricCurrent = null; _lyricNext = null; _lyricAdvancing = false; _musicMessage = null; _musicInfo = null;
         MusicContent.Margin = new Thickness(c.Side, 0, c.Side, c.Bottom);
         if (track is null)
         {
@@ -559,7 +605,7 @@ public partial class MainWindow
         }
         var body = new Grid();
         bool synchronized = playerLyrics || _lyrics.CanSynchronize(track);
-        if (splitLyrics || bare) MusicColumns(body, layout, track, lyricColumn, hasLyrics, synchronized, playerLyrics, message, shown && songChanging, lyricsArrive, coverUnder);
+        if (splitLyrics || bare) MusicColumns(body, layout, track, lyricColumn, hasLyrics, synchronized, playerLyrics, message, lyricsStatus, shown && songChanging, lyricsArrive, coverUnder);
         else
         {
             // Without the cover the titles' column can sit against the page's left edge or be centred (MusicLyricsAlign).
@@ -626,18 +672,11 @@ public partial class MainWindow
             var middle = new Grid(); Grid.SetRow(middle, 1); right.Children.Add(middle); _musicInfo = middle;
             if (hasLyrics && lyricLines > 0 && synchronized)
             {
-                // As many lines as the room under the titles holds, not just the current one and its neighbours: the lines
-                // above are filled from the bottom and the lines below from the top, as in the column layout.
-                int above = Math.Max(0, lyricLines - 1) / 2, below = lyricLines - 1 - above;
-                var lyrics = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-                TextBlock Dim() { var dim = UI.Fixed("", c.Lyric, c.LyricLine, Look.Tertiary); dim.TextAlignment = centered ? TextAlignment.Center : TextAlignment.Left; lyrics.Children.Add(dim); return dim; }
-                _lyricsAbove = [.. Enumerable.Range(0, above).Select(_ => Dim())];
-                // All lines share one size; only its color (MusicLyricColor) marks the current one.
-                _lyricCurrent = new MusicMarquee { FontSize = c.Lyric, Height = c.LyricLine, CenterWhenFits = centered, Foreground = LyricInk,
-                    Backdrop = Look.MarqueeBackdrop, InkFade = Look.InkFade };
-                lyrics.Children.Add(_lyricCurrent); UpdateLyricScrolling();
-                _lyricsBelow = [.. Enumerable.Range(0, below).Select(_ => Dim())];
-                lyrics.Visibility = layout.ShowMessage ? Visibility.Collapsed : Visibility.Visible; middle.Children.Add(lyrics);
+                var align = centered ? TextAlignment.Center : TextAlignment.Left;
+                // The lyrics take the room under the titles, as MusicLayout.Calculate counts their lines.
+                double room = layout.MiddleHeight - c.MiddleGap;
+                var (font, line, wrap) = MusicLayout.CurrentLyricMetrics(c, room, lyrics: true);
+                middle.Children.Add(BuildTimedLyrics(c, font, line, wrap, room >= line * wrap + c.LyricLine, align, layout.ShowMessage ? Visibility.Collapsed : Visibility.Visible));
             }
             else if (hasLyrics && lyricLines > 0)
             {
@@ -649,6 +688,12 @@ public partial class MainWindow
                 // The viewport clip would turn the lyrics grayscale; they lie over the island's opaque surface.
                 RenderOptions.SetClearTypeHint(text, ClearTypeHint.Enabled);
                 AutomationProperties.SetName(lyrics, Loc.T("歌词", "Lyrics")); middle.Children.Add(lyrics);
+            }
+            else if (lyricsStatus.Length > 0 && lyricLines > 0)
+            {
+                var status = LyricsStatusBlock(lyricsStatus, c.Lyric, c.LyricLine, centered);
+                status.Visibility = layout.ShowMessage ? Visibility.Collapsed : Visibility.Visible;
+                middle.Children.Add(status);
             }
             if (lyricsArrive) { var fade = Soft.Fade(0, 1, Soft.Move, Soft.Follow); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop; middle.BeginAnimation(OpacityProperty, fade); }
             if (layout.MiddleHeight >= c.MiddleGap + c.LyricLine)
@@ -853,11 +898,16 @@ public partial class MainWindow
     // name for screen readers is the whole title; a tooltip shows it whole while it overhangs.
     private MusicMarquee PageTitle(MediaTrack track, MusicMetrics c, bool center, bool merge)
     {
-        string tail = merge && track.Artist.Length > 0 ? " · " + track.Artist : "";
-        var title = new MusicMarquee { Text = track.Title, Tail = tail, AccessibleName = MusicTitleFit.ReadAs(track.Title, tail), TailFontSize = c.Artist, TailForeground = UI.Brush(Look.Secondary), FontSize = c.Title,
+        string head = track.Title, tail = "";
+        if (merge && track.Artist.Length > 0)
+        {
+            if (Settings.MusicCaptionOrder == MusicCaptionOrder.ArtistTitle) { head = track.Artist; tail = " · " + track.Title; }
+            else tail = " · " + track.Artist;
+        }
+        var title = new MusicMarquee { Text = head, Tail = tail, AccessibleName = MusicTitleFit.ReadAs(head, tail), TailFontSize = c.Artist, TailForeground = UI.Brush(Look.Secondary), FontSize = c.Title,
             FontWeight = FontWeights.SemiBold, Height = c.TitleLine, CenterWhenFits = center, EdgeWidth = Math.Max(MusicMarquee.Edge, Math.Round(c.Title * .6)), Backdrop = Look.MarqueeBackdrop, InkFade = Look.InkFade };
-        AutomationProperties.SetName(title, MusicTitleFit.ReadAs(track.Title, tail));
-        ShowCutText(title, track.Title + tail);
+        AutomationProperties.SetName(title, MusicTitleFit.ReadAs(head, tail));
+        ShowCutText(title, head + tail);
         _musicTitle = title; UpdateLyricScrolling();
         return title;
     }
@@ -871,15 +921,17 @@ public partial class MainWindow
     // (or at the right, read from the left). The page with neither the cover nor the lyrics is drawn here too, as the titles
     // alone.
     private void MusicColumns(Grid body, MusicLayout layout, MediaTrack track, bool lyricColumn, bool hasLyrics, bool synchronized, bool playerLyrics,
-        string message, bool rise, bool lyricsArrive, BitmapSource? coverUnder)
+        string message, string lyricsStatus, bool rise, bool lyricsArrive, BitmapSource? coverUnder)
     {
         var c = layout.Metrics;
-        var columns = layout.Columns(lyricColumn, Settings.MusicPageCover);
+        var columns = layout.Columns(lyricColumn, Settings.MusicPageCover, lyricColumn ? _musicInfoShare : null);
         // Where the equalizer stands at the top right, and the room it and its gap take of a line that reaches it.
         double barsWidth = MusicEqualizerWidth(c), barsTop = (c.TitleLine - c.Equalizer) / 2, barsRoom = MusicTitleFit.CenteredInset(barsWidth);
         bool MeetsBars(double top, double height) => !columns.EqualizerBelow && top < barsTop + c.Equalizer + 2 && top + height > barsTop - 2;
         var upper = new Grid { Height = columns.Height, VerticalAlignment = VerticalAlignment.Top };
         body.Children.Add(upper);
+        _musicSplitInfo = null; _musicSplitLyrics = null; _musicSplitGrip = null; _musicSplitBarsClear = 0; _musicSplitTitles = null;
+        _musicSplitCover = (columns.Cover, columns.SideCover);
         // The cover stands above the titles, or beside them in a part too short for that (MusicLayout.Columns sizes it and says
         // which); the divider and the lyrics' column stay where they are, and beside the cover the titles take the room it
         // leaves of the information column.
@@ -934,13 +986,14 @@ public partial class MainWindow
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal };
             row.Children.Add(Art(sideArt, over: false));
-            titles.Width = Math.Max(0, columns.InfoWidth - sideArt - c.MiddleGap - (titleMeetsBars ? barsRoom : 0));
+            _musicSplitTitlesTrim = sideArt + c.MiddleGap + (titleMeetsBars ? barsRoom : 0);
+            titles.Width = Math.Max(0, columns.InfoWidth - _musicSplitTitlesTrim); _musicSplitTitles = titles;
             titles.Margin = new Thickness(c.MiddleGap, 0, 0, 0);
             titles.VerticalAlignment = VerticalAlignment.Center;
             row.Children.Add(titles); info.Children.Add(row);
         }
         else info.Children.Add(titles);
-        upper.Children.Add(info);
+        upper.Children.Add(info); _musicSplitInfo = info;
         if (!columns.EqualizerBelow) upper.Children.Add(_musicEqualizer);
         if (rise) RiseIn(info);
         var middle = new Grid { VerticalAlignment = VerticalAlignment.Center }; _musicInfo = middle;
@@ -954,32 +1007,18 @@ public partial class MainWindow
             middle.Children.Add(_musicMessage); info.Children.Add(middle); return;
         }
         double inset = Math.Min(c.MiddleGap, columns.Height / 4);
-        upper.Children.Add(new Border { Width = 1, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(columns.InfoWidth + columns.DividerGap, inset, 0, inset),
-            Background = UI.Brush(Look.Hex("rowDivider")), IsHitTestVisible = false });
-        middle.HorizontalAlignment = HorizontalAlignment.Left; middle.Width = columns.LyricsWidth; middle.Margin = new Thickness(columns.LyricsX, 0, 0, 0);
-        upper.Children.Add(middle);
-        // The lyrics' column ends at the page's right edge: what is at the equalizer's height ends before it.
-        var clearOfBars = new Thickness(0, 0, barsRoom, 0);
-        if (MeetsBars((columns.Height - c.LyricLine) / 2, c.LyricLine)) _musicMessage.Margin = clearOfBars;
+        // Drag grip between the player column and the lyrics; the thin line is the visible divider.
+        upper.Children.Add(MusicLyricsSplitGrip(layout, columns, inset, Settings.MusicPageCover));
+        // When the equalizer sits at the upper-right, the whole lyrics column ends before its bars (wrapped lines included).
+        _musicSplitBarsClear = columns.EqualizerBelow ? 0 : barsRoom;
+        middle.HorizontalAlignment = HorizontalAlignment.Left;
+        middle.Width = Math.Max(0, columns.LyricsWidth - _musicSplitBarsClear);
+        middle.Margin = new Thickness(columns.LyricsX, 0, 0, 0);
+        upper.Children.Add(middle); _musicSplitLyrics = middle;
         var lyricsVisibility = message.Length > 0 ? Visibility.Collapsed : Visibility.Visible;
         if (hasLyrics && synchronized)
         {
-            int above = playerLyrics ? 0 : columns.Before, below = playerLyrics ? 0 : columns.After;
-            var lyrics = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Visibility = lyricsVisibility };
-            TextBlock Dim() { var line = UI.Fixed("", c.Lyric, c.LyricLine, Look.Tertiary); lyrics.Children.Add(line); return line; }
-            _lyricsAbove = [.. Enumerable.Range(0, above).Select(_ => Dim())];
-            _lyricCurrent = new MusicMarquee { FontSize = columns.CurrentLyric, Height = columns.CurrentLine, CenterWhenFits = false, Foreground = LyricInk,
-                Backdrop = Look.MarqueeBackdrop, InkFade = Look.InkFade };
-            lyrics.Children.Add(_lyricCurrent); UpdateLyricScrolling();
-            _lyricsBelow = [.. Enumerable.Range(0, below).Select(_ => Dim())];
-            double lineTop = (columns.Height - columns.CurrentLine - (above + below) * c.LyricLine) / 2;
-            foreach (FrameworkElement line in lyrics.Children)
-            {
-                double lineHeight = ReferenceEquals(line, _lyricCurrent) ? columns.CurrentLine : c.LyricLine;
-                if (MeetsBars(lineTop, lineHeight)) line.Margin = clearOfBars;
-                lineTop += lineHeight;
-            }
-            middle.Children.Add(lyrics);
+            middle.Children.Add(BuildTimedLyrics(c, columns.CurrentLyric, columns.CurrentLine, columns.WrapLines, columns.After > 0, TextAlignment.Left, lyricsVisibility));
         }
         else if (hasLyrics)
         {
@@ -989,8 +1028,13 @@ public partial class MainWindow
                 VerticalAlignment = VerticalAlignment.Center, Height = Math.Max(1, Math.Floor(columns.Height / c.LyricLine)) * c.LyricLine, CanContentScroll = false, Visibility = lyricsVisibility };
             // The viewport clip would turn the lyrics grayscale; they lie over the island's opaque surface.
             RenderOptions.SetClearTypeHint(text, ClearTypeHint.Enabled);
-            if (MeetsBars((columns.Height - lyrics.Height) / 2, lyrics.Height)) lyrics.Margin = clearOfBars;
             AutomationProperties.SetName(lyrics, Loc.T("歌词", "Lyrics")); middle.Children.Add(lyrics);
+        }
+        else if (lyricsStatus.Length > 0)
+        {
+            var status = LyricsStatusBlock(lyricsStatus, c.Lyric, c.LyricLine, center: false);
+            status.Visibility = lyricsVisibility;
+            middle.Children.Add(status);
         }
         middle.Children.Add(_musicMessage);
         if (lyricsArrive) { var fade = Soft.Fade(0, 1, Soft.Move, Soft.Follow); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop; middle.BeginAnimation(OpacityProperty, fade); }
@@ -1123,18 +1167,7 @@ public partial class MainWindow
         // How far the current line is sung (Karaoke): the lyric area lights each character up as it is sung, sweeping through
         // them, in the open page's line and in the collapsed row's middle text.
         var (words, sweep) = _lyrics.Karaoke(track, DateTimeOffset.UtcNow, _lyricHold, Settings.MusicSimulatedKaraoke);
-        if (page && _lyricCurrent is not null) { _lyricCurrent.Text = line.Current; _lyricCurrent.Karaoke(words, Animated(sweep)); }
-        if (page && _lyricsAbove.Length + _lyricsBelow.Length > 0)
-        {
-            // The lines above are filled from the bottom, so the line just sung stays next to the current one.
-            var window = CurrentLyricWindow(track, _lyricsAbove.Length, _lyricsBelow.Length);
-            for (int i = 0; i < _lyricsAbove.Length; i++)
-            {
-                int from = window.Before.Count - _lyricsAbove.Length + i;
-                _lyricsAbove[i].Text = from >= 0 ? window.Before[from] : "";
-            }
-            for (int i = 0; i < _lyricsBelow.Length; i++) _lyricsBelow[i].Text = i < window.After.Count ? window.After[i] : "";
-        }
+        if (page && _lyricCurrent is not null) UpdateTimedLyrics(line.Current, line.Next, words, Animated(sweep));
         if (CompactLyrics && !PausedHides(PausedMusicHide.Text) && _compactLyric != line.Current)
         {
             _compactLyric = line.Current;
@@ -1185,7 +1218,7 @@ public partial class MainWindow
         bool page = _expanded && IsMusicPage;
         // Nothing on screen would take this sample: stop the frame loop instead of burning frames on a hidden
         // or non-lyric row. The 250 ms position tick starts it again when a target becomes visible.
-        if (page ? _lyricCurrent is null : !_karaokeCompact || _compactMarquee is null) return false;
+        if (page ? _lyricCurrent is null || _lyricAdvancing : !_karaokeCompact || _compactMarquee is null) return false;
         var (words, sweep) = _lyrics.Karaoke(track, DateTimeOffset.UtcNow, _lyricHold, Settings.MusicSimulatedKaraoke);
         if (words is null) return false;
         if (page) _lyricCurrent!.Karaoke(words, sweep);
@@ -1221,14 +1254,23 @@ public partial class MainWindow
         double insets = CollapsedGeometry.SurfaceWidth(style, shape.Surface.Height, 1, _scale) - 1;
         return double.IsFinite(span) && span > 0 ? Math.Max(0, span - Math.Max(0, insets)) : double.PositiveInfinity;
     }
-    // The collapsed lyric: the line, or the title without one, and for an instrumental when chosen (DeckSettings.MusicInstrumentalTitle).
-    private string CompactLyricText(MediaTrack track, string line)
-        => line.Length == 0 || Settings.MusicInstrumentalTitle && _lyrics.Instrumental ? track.Caption : line;
-    private LyricWindow CurrentLyricWindow(MediaTrack track, int before, int after)
+    // Collapsed middle caption: title · artist, or artist · title when chosen (DeckSettings.MusicCaptionOrder).
+    private string TrackCaption(MediaTrack track) => track.CaptionFor(Settings.MusicCaptionOrder);
+    private TextBlock LyricsStatusBlock(string text, double font, double line, bool center)
     {
-        if (!NeedsLyrics || track.State == MediaState.Stopped) return LyricWindow.Empty;
-        if (track.IsQqMusic && _lyrics.Lines.Count == 0 && !_lyrics.Instrumental) return LyricWindow.Only(track.CurrentLyric ?? "");
-        return _lyrics.Around(track, DateTimeOffset.UtcNow, before, after, _lyricHold);
+        var block = UI.Fixed(text, font, line, Look.Tertiary);
+        block.TextAlignment = center ? TextAlignment.Center : TextAlignment.Left;
+        block.VerticalAlignment = VerticalAlignment.Center;
+        AutomationProperties.SetName(block, text);
+        return block;
+    }
+    // The collapsed lyric: the line, or the title / status without one, and for an instrumental when chosen (DeckSettings.MusicInstrumentalTitle).
+    private string CompactLyricText(MediaTrack track, string line)
+    {
+        if (line.Length > 0) return line;
+        if (Settings.MusicInstrumentalTitle && _lyrics.Instrumental) return TrackCaption(track);
+        if (LyricsStatusLabel is { Length: > 0 } status) return status;
+        return TrackCaption(track);
     }
     // The color taken from the playing song's cover; null without one, or when the cover gave no color.
     internal Color? CoverColor => _mediaCover is not null && _mediaTrack is { State: not MediaState.Stopped } ? _coverAccent : null;
@@ -1260,7 +1302,7 @@ public partial class MainWindow
         string text = "";
         if (media && !hideText)
         {
-            if (notice || Settings.MusicText == CompactMusicText.Title) text = _mediaTrack!.Caption;
+            if (notice || Settings.MusicText == CompactMusicText.Title) text = TrackCaption(_mediaTrack!);
             else if (Settings.MusicText == CompactMusicText.Lyrics)
             {
                 _compactLyric = CurrentLyrics(_mediaTrack!).Current;
@@ -1376,7 +1418,7 @@ public partial class MainWindow
             switch (shown[i].Part)
             {
                 case "cover":
-                    var cover = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius, look: Look); AutomationProperties.SetName(cover, _mediaTrack!.Caption);
+                    var cover = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius, look: Look); AutomationProperties.SetName(cover, TrackCaption(_mediaTrack!));
                     element = CompactRegion(cover, room, layout.CoverSize, layout.CoverSize, row, RegionAnchor.Left, dpi); break;
                 case CompactPart.Equalizer:
                     _compactEqualizer = new MusicEqualizer { Bars = Settings.EqualizerBars, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = EqualizerColor };
@@ -1478,8 +1520,8 @@ public partial class MainWindow
             _ => UI.Brush(Look.Hex(theme))
         };
     }
-    // The collapsed bars: while a song plays or is paused, or at all times when chosen (EqualizerAlways).
-    private bool CompactEqualizerShown => Settings.ShowsEqualizer(EffectiveStyle) && (Settings.EqualizerAlways || _mediaTrack is { State: not MediaState.Stopped });
+    // The collapsed bars: while a song is playing, or at all times when chosen (EqualizerAlways — then system sound while idle).
+    private bool CompactEqualizerShown => Settings.ShowsEqualizer(EffectiveStyle) && (Settings.EqualizerAlways || MusicAudioActive);
     private bool TitleGliding => !_expanded && _alert is null && _compactEqualizer is not null && _compactMarquee?.IsGliding == true;
     private void MusicGliding(bool gliding) => UpdateMusicTimer();
     // A display frame while the collapsed title glides (Motion): the bars move once at least a timer's interval has passed,
@@ -1518,14 +1560,12 @@ public partial class MainWindow
         else _musicTick.Stop();
         if (_expanded || EffectiveStyle != CompactStyle.Line || !Settings.MusicIndicatorProgress || _mediaTrack is not { HasTimeline: true, State: not MediaState.Stopped }) MusicIndicator.Visibility = Visibility.Collapsed;
     }
-    // The open page: the current lyric scrolls only while a song plays, the panel is open on this page and animation is on. The title
-    // is the song's name, not its audio, so it scrolls whenever the page is open and the title does not fit; paused, it would otherwise
-    // rest cut at its start with no way to read the rest. Both scroll in high contrast too (TextScrolls).
+    // The open page's title scrolls when it does not fit; the current lyric wraps instead of marqueuing.
     private void UpdateLyricScrolling()
     {
         bool open = TextScrolls
             && IsVisible && !IsSuppressed && !DisplayPower.Off && _expanded && IsMusicPage;
-        _lyricCurrent?.SetScrolling(open && MusicAudioActive); _musicTitle?.SetScrolling(open);
+        _lyricCurrent?.SetScrolling(false); _musicTitle?.SetScrolling(open);
     }
     // The carousel runs its own timer and WPF animation; it only needs to know when it may move.
     private void UpdateQuotaCarousel()

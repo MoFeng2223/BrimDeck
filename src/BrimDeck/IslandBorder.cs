@@ -181,6 +181,9 @@ public sealed class IslandBorder : Border
         return brush;
     }
 
+    // The drawn surface shape. Collapsed content uses a cheaper rectangular layout clip at rest (SettledClip); callers that must
+    // stay inside the visible island (e.g. the music wash) clip to this instead.
+    internal Geometry SurfaceClip() => Outline();
     private Geometry Outline()
     {
         double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip, step = PixelStairs.Step(Pixel, dpi);

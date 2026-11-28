@@ -47,7 +47,12 @@ public sealed record MediaTrack
     public double Rate { get; init; } = 1;
     public TimeSpan Duration => End > Start ? End - Start : TimeSpan.Zero;
     public string SongKey => $"{Title}\n{Artist}\n{Album}\n{Math.Round(Duration.TotalSeconds)}";
-    public string Caption => string.IsNullOrWhiteSpace(Artist) ? Title : $"{Title} · {Artist}";
+    public string Caption => CaptionFor(MusicCaptionOrder.TitleArtist);
+    public string CaptionFor(MusicCaptionOrder order)
+    {
+        if (string.IsNullOrWhiteSpace(Artist)) return Title;
+        return order == MusicCaptionOrder.ArtistTitle ? $"{Artist} · {Title}" : $"{Title} · {Artist}";
+    }
     public TimeSpan Position(DateTimeOffset now)
     {
         if (!HasTimeline) return TimeSpan.Zero;

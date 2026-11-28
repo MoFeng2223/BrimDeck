@@ -57,7 +57,11 @@ public partial class MainWindow
     private bool OnControl(DependencyObject? node)
     {
         for (; node is not null && !ReferenceEquals(node, MusicContent); node = node is Visual ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node))
+        {
             if (node is ButtonBase or RangeBase or Thumb or TextBoxBase or Hyperlink) return true;
+            // Player / lyrics column split: resizing must not start a music gesture drag.
+            if (ReferenceEquals(node, _musicSplitGrip)) return true;
+        }
         return false;
     }
 

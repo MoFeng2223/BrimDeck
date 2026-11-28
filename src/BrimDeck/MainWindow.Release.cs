@@ -27,7 +27,8 @@ public partial class MainWindow
                 case DeckPage.Music:
                     _musicControls = null; _musicFullControl = null; _musicSmtcHint = null; _musicControlButtons.Clear();
                     _musicSeek = null; _musicElapsed = null; _musicDuration = null; _musicEqualizer = null; _musicTitle = null; _musicMessage = null; _musicInfo = null;
-                    _lyricCurrent = null; _lyricsAbove = []; _lyricsBelow = [];
+                    _lyricCurrent = null; _lyricNext = null; _lyricCurrHost = null; _lyricNextHost = null; _lyricAdvancing = false;
+                    _musicSplitInfo = null; _musicSplitLyrics = null; _musicSplitGrip = null; _musicSplitTitles = null;
                     _musicRenderKey = ""; _musicSong = ""; _musicForm = ""; _musicCoverShown = null; _musicHadLyrics = false;
                     break;
                 case DeckPage.Monitor:

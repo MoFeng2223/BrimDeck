@@ -504,8 +504,8 @@ public sealed class DeckSettings
     // The rings' arcs show what is left of each quota instead of what is used. Off by default; a file without it reads as off.
     public bool QuotaRingRemaining { get; set; }
     public bool CapsuleMusic { get; set; } = true;
-    // The notch and the capsule each switch the equalizer on. It shows while a song plays (or is paused), or, with EqualizerAlways,
-    // at all times: then it reads the whole system's sound while no song plays.
+    // The notch and the capsule each switch the equalizer on. It shows while a song is playing, or, with EqualizerAlways,
+    // at all times: then it reads the whole system's sound while nothing plays.
     public bool NotchEqualizer { get; set; } = true;
     public bool CapsuleEqualizer { get; set; } = true;
     public bool EqualizerAlways { get; set; }
@@ -550,6 +550,15 @@ public sealed class DeckSettings
     // page's left edge or be centred.
     public MusicLyricsLayout MusicLyricsLayout { get; set; } = MusicLyricsLayout.Columns;
     public MusicLyricsAlign MusicLyricsAlign { get; set; } = MusicLyricsAlign.Left;
+    // Order of title and artist in merged captions (Settings › Music › General).
+    public MusicCaptionOrder MusicCaptionOrder { get => _musicCaptionOrder; set => _musicCaptionOrder = Enum.IsDefined(value) ? value : MusicCaptionOrder.TitleArtist; }
+    private MusicCaptionOrder _musicCaptionOrder = MusicCaptionOrder.TitleArtist;
+    // Collapsed notch/capsule backdrop while music plays (Settings › Music › When collapsed). Default none keeps the plain surface.
+    public MusicBackdrop MusicCompactBackdrop { get => _musicCompactBackdrop; set => _musicCompactBackdrop = Enum.IsDefined(value) ? value : MusicBackdrop.None; }
+    private MusicBackdrop _musicCompactBackdrop = MusicBackdrop.None;
+    // Expanded music page backdrop: plain surface, soft cover tint, or blurred cover (Settings › Music › When expanded).
+    public MusicBackdrop MusicBackdrop { get => _musicBackdrop; set => _musicBackdrop = Enum.IsDefined(value) ? value : MusicBackdrop.Cover; }
+    private MusicBackdrop _musicBackdrop = MusicBackdrop.Cover;
     // What dragging with the left button over the expanded music page does in each direction, and a two-finger touchpad swipe
     // to either side (MusicGestures). A number not listed does nothing.
     public MusicGestureAction MusicDragLeft { get => _musicDragLeft; set => _musicDragLeft = Gesture(value); }
@@ -1010,6 +1019,9 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(MusicText)) MusicText = CompactMusicText.None;
         if (!Enum.IsDefined(MusicLyricsLayout)) MusicLyricsLayout = MusicLyricsLayout.Columns;
         if (!Enum.IsDefined(MusicLyricsAlign)) MusicLyricsAlign = MusicLyricsAlign.Left;
+        if (!Enum.IsDefined(MusicCaptionOrder)) MusicCaptionOrder = MusicCaptionOrder.TitleArtist;
+        if (!Enum.IsDefined(MusicCompactBackdrop)) MusicCompactBackdrop = MusicBackdrop.None;
+        if (!Enum.IsDefined(MusicBackdrop)) MusicBackdrop = MusicBackdrop.Cover;
         if (!Enum.IsDefined(ClockStyle)) ClockStyle = ClockStyle.Minimal;
         if (!Enum.IsDefined(ClockColor)) ClockColor = ClockColor.White;
         ClockCustomColor = AppPresets.NormalizeColor(ClockCustomColor) is { Length: > 0 } custom ? custom : ClockColors.DefaultCustom;

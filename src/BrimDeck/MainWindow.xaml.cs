@@ -696,7 +696,8 @@ public partial class MainWindow : Window
         FitShadowCache(dpi);
         MusicIndicator.Background = UI.Brush(Look.Hex("indicatorProgress"));
         SetImmediate(_surface, SolidColorBrush.ColorProperty, Look.ColorOf(!_expanded && Collapsed.Style == CompactStyle.Line ? "indicator" : "surface"));
-        _musicAccent = MusicVisuals.Accent(_mediaCover, out _coverAccent, Look);
+        _musicAccent = MusicVisuals.Accent(_mediaCover, out _coverAccent, out _coverGlow, Look);
+        WarmMusicWash();
         _musicRenderKey = ""; _compactRendered = null; _alertRendered = null;
         if (_detailPopup is { } popup) Dispatcher.BeginInvoke(() => { if (ReferenceEquals(_detailPopup, popup)) popup.Close(); });
         if (MediaSourceButton.ContextMenu?.IsOpen == true) Dispatcher.BeginInvoke(CloseSourceMenu);
@@ -837,7 +838,16 @@ public partial class MainWindow : Window
         if (_clipSettle is null)
         {
             _clipSettle = new DispatcherTimer(DispatcherPriority.Background, Dispatcher);
-            _clipSettle.Tick += (_, _) => { _clipSettle.Stop(); if (!_expanded && !_poweringOff && !_booting && !Resizing && !_bootWaiting) Island.SettledClip = true; };
+            _clipSettle.Tick += (_, _) =>
+            {
+                _clipSettle.Stop();
+                if (!_expanded && !_poweringOff && !_booting && !Resizing && !_bootWaiting)
+                {
+                    Island.SettledClip = true;
+                    // Re-apply the wash's outline clip: SettledClip switches the island to a rectangular layout clip.
+                    FitMusicWash();
+                }
+            };
         }
         _clipSettle.Stop();
         _clipSettle.Interval = TimeSpan.FromMilliseconds(Math.Max(1, after) + 100);
@@ -878,6 +888,7 @@ public partial class MainWindow : Window
         // host's own state, as a new screen context closes the panel without passing here.
         if (expanded != _host.Open) _host.Front(expanded);
         _expanded = expanded;
+        SyncMusicWash();
         UpdateMotion();
         // The smooth memory mode holds off full collections while a panel is open (App.UpdateCollectionLatency).
         if (expanded && !wasExpanded) _app.UpdateCollectionLatency();

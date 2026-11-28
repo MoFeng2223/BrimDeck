@@ -53,11 +53,13 @@ internal static class MusicVisuals
         return border;
     }
     // The color taken from the cover, or the theme's equalizer color when there is no cover or it gives none.
-    internal static Brush Accent(BitmapSource? source, PanelLook? look = null) => Accent(source, out _, look);
-    internal static Brush Accent(BitmapSource? source, out Color? cover, PanelLook? look = null)
+    // glow: soft atmosphere tint from the same sample (natural saturation; gray covers stay gray).
+    internal static Brush Accent(BitmapSource? source, PanelLook? look = null) => Accent(source, out _, out _, look);
+    internal static Brush Accent(BitmapSource? source, out Color? cover, out Color? glow, PanelLook? look = null)
     {
         var Look = look ?? PanelTheme.Main;
         cover = null;
+        glow = null;
         if (source is null) return UI.Brush(Look.Hex("equalizer"));
         try
         {
@@ -80,15 +82,35 @@ internal static class MusicVisuals
             double hue = delta == 0 ? 0 : maxChannel == r ? ((g - b) / delta + (g < b ? 6 : 0)) / 6
                 : maxChannel == g ? ((b - r) / delta + 2) / 6 : ((r - g) / delta + 4) / 6;
             bool dark = Look.Current.IsDark;
+            double glowSat = Math.Min(saturation, .45), glowLight = dark ? Math.Clamp(light, .42, .62) : Math.Clamp(light, .35, .55);
+            glow = PanelTheme.ToColor(ThemeColor.FromHsl(hue * 360, glowSat, glowLight));
+            // Near-gray covers have no usable equalizer hue (hue 0 would become pink after the boost).
+            if (saturation < .08) return UI.Brush(Look.Hex("equalizer"));
             saturation = Math.Max(.35, saturation); light = dark ? Math.Clamp(light, .62, .78) : Math.Clamp(light, .30, .42);
-            double chroma = (1 - Math.Abs(2 * light - 1)) * saturation, x = chroma * (1 - Math.Abs(hue * 6 % 2 - 1)), m = light - chroma / 2;
-            (r, g, b) = (hue * 6) switch
-            { < 1 => (chroma, x, 0d), < 2 => (x, chroma, 0d), < 3 => (0d, chroma, x), < 4 => (0d, x, chroma), < 5 => (x, 0d, chroma), _ => (chroma, 0d, x) };
-            r += m; g += m; b += m;
-            var accent = Look.Readable(Color.FromRgb((byte)(r * 255), (byte)(g * 255), (byte)(b * 255)));
+            var accent = Look.Readable(PanelTheme.ToColor(ThemeColor.FromHsl(hue * 360, saturation, light)));
             var brush = new SolidColorBrush(accent); brush.Freeze(); cover = accent; return brush;
         }
         catch (Exception) { return UI.Brush(Look.Hex("equalizer")); }
+    }
+    // Soft radial tint of the cover's glow. Expanded keeps a left-weighted wash; collapsed fills the notch/capsule.
+    internal static Brush CoverGlow(Color glow, bool dark, bool compact = false)
+    {
+        byte peak = (byte)(dark ? 72 : 48);
+        Color At(byte alpha) => Color.FromArgb(alpha, glow.R, glow.G, glow.B);
+        var brush = new RadialGradientBrush(new GradientStopCollection
+        {
+            new(At(peak), 0),
+            new(At((byte)(peak * .55)), .45),
+            new(At(0), 1),
+        })
+        {
+            GradientOrigin = compact ? new Point(.5, .5) : new Point(.2, .35),
+            Center = compact ? new Point(.5, .5) : new Point(.2, .35),
+            RadiusX = compact ? 1.35 : 1.05,
+            RadiusY = compact ? 2.2 : 1.2,
+        };
+        brush.Freeze();
+        return brush;
     }
     // The state of a move's clock as the scrolling regions plan their turns with it (CycleTurn).
     internal static MoveClock MoveClockOf(Clock clock) => clock.CurrentState switch
@@ -285,9 +307,37 @@ internal sealed class MusicMarquee : FrameworkElement
     public double EdgeWidth { get; init; } = Edge;
     // False when the region is too narrow for a meaningful stretch of text: the text then rests at its start, cut at the edge.
     public bool ScrollAllowed { get; init; } = true;
+    // The open page's current lyric may wrap (2–3 rows) instead of scrolling; karaoke still sweeps each character.
+    public bool Wrap { get; init; }
+    public int WrapLines { get; init; } = 2;
+    // How tall the wrapped line is at `width` (capped by WrapLines), so the lyrics host can sit tight above the next line.
+    public double MeasureWrapHeight(double width)
+    {
+        if (!Wrap || width <= 0 || Text.Length == 0) return 0;
+        var text = new FormattedText(Text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+            _typeface, FontSize, Brushes.White, VisualTreeHelper.GetDpi(this).PixelsPerDip)
+        {
+            MaxTextWidth = width,
+            MaxLineCount = Math.Max(1, WrapLines),
+            Trimming = TextTrimming.WordEllipsis,
+        };
+        return text.Height;
+    }
     // Without a color of its own, the primary text color of the panel it is drawn in.
-    private readonly Brush? _foreground;
-    public Brush Foreground { get => _foreground ?? UI.Brush(Look.Primary); init => _foreground = value; }
+    private Brush? _foreground;
+    public Brush Foreground
+    {
+        get => _foreground ?? UI.Brush(Look.Primary);
+        set
+        {
+            if (ReferenceEquals(_foreground, value)) return;
+            _foreground = value; _karaokeFaded = null; _karaokeColor = null;
+            // The cached text carries the old brush, and with InkFade so do the faded ends: both are made again on the next draw.
+            _formatted = null; _faded = false;
+            if (_inkFade) _fadeWidth = -1;
+            Painter.InvalidateVisual();
+        }
+    }
     // With a backdrop, the text is drawn by a child that re-enables ClearType below this element's clip, and the edge fades are
     // drawn over the text in the backdrop color instead of an opacity mask. A clip or a mask on the drawing element forces grayscale.
     public Color? Backdrop
@@ -401,6 +451,21 @@ internal sealed class MusicMarquee : FrameworkElement
         var edges = Edges(text);
         int front = Math.Min((int)Math.Floor(sung), total - 1);
         double soft = Math.Max(1, FontSize * SoftEdge);
+        // Wrapped lines break monotonic X order, so a whole-line soft edge jumps back to the start of each row. Keep the
+        // sliding fill inside the character being sung, and fade everything after it by index.
+        if (Wrap)
+        {
+            // A surrogate pair is lit as one character: the range starts at its high half and spans both halves.
+            if (front > 0 && char.IsLowSurrogate(Text[front])) front--;
+            int after = front + 1;
+            if (after < total && char.IsLowSurrogate(Text[after])) after++;
+            if (after < total) text.SetForegroundBrush(KaraokeFaded, after, total - after);
+            double left = edges[front], right = edges[after];
+            if (right <= left) right = left + Math.Max(1, FontSize * .45);
+            double wrapAt = left + Math.Clamp((sung - front) / (after - front), 0, 1) * (right - left);
+            text.SetForegroundBrush(SweepEdge(origin + wrapAt - soft / 2, origin + wrapAt + soft / 2), front, Math.Max(1, after - front));
+            return;
+        }
         // Where the sweep stands: as far into the character being sung as it is sung. Over the line the edge moves a little
         // further, from wholly before the first character to wholly past the last, so the line starts all faded and ends all lit.
         double at = edges[front] + (sung - front) * (edges[front + 1] - edges[front]) + soft * (sung / total - .5);
@@ -475,6 +540,14 @@ internal sealed class MusicMarquee : FrameworkElement
         _edges = null;
         var text = new FormattedText(Text + Tail, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
             _typeface, FontSize, _ink ?? Foreground, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        if (Wrap)
+        {
+            double width = ActualWidth > 0 ? ActualWidth : RenderSize.Width;
+            if (width > 0) text.MaxTextWidth = width;
+            text.MaxLineCount = Math.Max(1, WrapLines);
+            text.Trimming = TextTrimming.WordEllipsis;
+            text.TextAlignment = CenterWhenFits ? TextAlignment.Center : TextAlignment.Left;
+        }
         if (Tail.Length > 0)
         {
             text.SetFontWeight(FontWeights.Normal, Text.Length, Tail.Length);
@@ -484,7 +557,7 @@ internal sealed class MusicMarquee : FrameworkElement
         }
         return text;
     }
-    public void SetScrolling(bool enabled) { _scrolling = enabled; UpdateAnimation(); }
+    public void SetScrolling(bool enabled) { _scrolling = Wrap ? false : enabled; UpdateAnimation(); }
     private void ResetText() { _formatted = null; _faded = false; _sweepReady = false; _rested = false; ResetAnimation(); Painter.InvalidateVisual(); }
     // Scrolls the laps again from the start (the panel closed and the row shows again).
     public void Replay()
@@ -619,12 +692,14 @@ internal sealed class MusicMarquee : FrameworkElement
     private void Draw(DrawingContext dc, Size size)
     {
         if (size.Width <= 0) return;
+        if (Wrap && (_formatted is null || Math.Abs((_formatted.MaxTextWidth > 0 ? _formatted.MaxTextWidth : -1) - size.Width) > .5))
+            _formatted = null;
         var text = Formatted;
         double scale = VisualTreeHelper.GetDpi(this).PixelsPerDip;
         double Snap(double value) => Math.Round(value * scale) / scale;
         // Whole device pixels for the scroll distance, the centred start and the baseline, so resting glyphs are not split across
-        // pixels at 150 %. The small allowance keeps rounding noise from starting a one-pixel scroll.
-        double overflow = MusicTitleFit.Overflow(text.Width, size.Width, scale);
+        // pixels at 150 %. The small allowance keeps rounding noise from starting a one-pixel scroll. Wrapped lyrics do not scroll.
+        double overflow = Wrap ? 0 : MusicTitleFit.Overflow(text.Width, size.Width, scale);
         double fadeWidth = overflow > 0 ? size.Width : 0;
         if (_fadeWidth != fadeWidth)
         {
@@ -659,9 +734,11 @@ internal sealed class MusicMarquee : FrameworkElement
         if (overflow > 0) dc.DrawRectangle(Brushes.Transparent, null, new Rect(size));
         if (_glyphs is null) dc.PushClip(new RectangleGeometry(new Rect(size)));
         dc.PushTransform(_shift);
-        double x = overflow == 0 && CenterWhenFits ? Snap((size.Width - text.Width) / 2) : 0;
+        double x = Wrap || overflow > 0 || !CenterWhenFits ? 0 : Snap((size.Width - text.Width) / 2);
         ApplyKaraoke(text, x);
-        dc.DrawText(text, new Point(x, Snap((size.Height - text.Height) / 2 + text.Baseline) - text.Baseline));
+        // Wrapped lyrics sit at the top so the next line can sit tight underneath; other marquees stay vertically centred.
+        double y = Wrap ? 0 : Snap((size.Height - text.Height) / 2 + text.Baseline) - text.Baseline;
+        dc.DrawText(text, new Point(x, y));
         dc.Pop();
         if (_glyphs is null) dc.Pop(); else if (_fade is not null) dc.DrawRectangle(_fade, null, new Rect(size));
         UpdateAnimation();

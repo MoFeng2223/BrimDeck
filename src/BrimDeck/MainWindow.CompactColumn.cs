@@ -37,7 +37,7 @@ public partial class MainWindow
         string text = "";
         if (media && !hideText)
         {
-            if (notice || Settings.MusicText == CompactMusicText.Title) text = _mediaTrack!.Caption;
+            if (notice || Settings.MusicText == CompactMusicText.Title) text = TrackCaption(_mediaTrack!);
             else if (Settings.MusicText == CompactMusicText.Lyrics)
             {
                 _compactLyric = CurrentLyrics(_mediaTrack!).Current;
@@ -92,7 +92,7 @@ public partial class MainWindow
         if (cover)
         {
             var image = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius, look: Look);
-            System.Windows.Automation.AutomationProperties.SetName(image, _mediaTrack!.Caption);
+            System.Windows.Automation.AutomationProperties.SetName(image, TrackCaption(_mediaTrack!));
             Add(image, layout.CoverSize, "cover");
         }
         foreach (var part in Settings.CompactOrder(EffectiveStyle))

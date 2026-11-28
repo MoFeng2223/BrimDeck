@@ -621,7 +621,9 @@ public sealed partial class LyricsService : IDisposable
     private async Task<Lyrics> FindNetease(MediaTrack track, CancellationToken token)
     {
         var search = await Get("https://music.163.com/api/search/get/web?type=1&limit=8&s=" + Uri.EscapeDataString(SearchWords(track)), token);
-        if (search is not { ValueKind: JsonValueKind.Object } root || !root.TryGetProperty("result", out var result) || !result.TryGetProperty("songs", out var songs) || songs.ValueKind != JsonValueKind.Array) return Lyrics.Empty;
+        // Abroad replies put an opaque string in "result" instead of the song list; probing that string throws.
+        if (search is not { ValueKind: JsonValueKind.Object } root || !root.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Object
+            || !result.TryGetProperty("songs", out var songs) || songs.ValueKind != JsonValueKind.Array) return Lyrics.Empty;
         static string Artists(JsonElement song) => song.TryGetProperty("artists", out var artists) && artists.ValueKind == JsonValueKind.Array ? string.Join(" / ", artists.EnumerateArray().Select(a => Str(a, "name"))) : "";
         foreach (var song in Fitting(track, songs.EnumerateArray().Where(song => song.TryGetProperty("id", out _)), song => (Str(song, "name"), Artists(song), Num(song, "duration") / 1000)))
         {
