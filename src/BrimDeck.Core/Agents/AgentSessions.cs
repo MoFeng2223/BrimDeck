@@ -137,14 +137,20 @@ public sealed class AgentSessions
 // which session an answer on the island belongs to: "agent:<harness>:<session>". One session asks one thing at a time.
 public static class AgentKeys
 {
-    private const string Prefix = "agent:";
+    private const string Prefix = "agent:", DonePrefix = "agent-done:";
 
     public static string For(string harness, string session) => BrimDeck.Protocol.AgentKeysWire.For(harness, session);
 
-    public static (string Harness, string Session)? Ask(string? replaceKey)
+    public static (string Harness, string Session)? Ask(string? replaceKey) => Split(replaceKey, Prefix);
+
+    // The tool any notice of an agent's hook is from: an approval or a question (Ask), or a finished turn ("agent-done:<harness>:
+    // <session>", AgentKeysWire.Done). Null for every other notice.
+    public static string? Harness(string? replaceKey) => (Split(replaceKey, Prefix) ?? Split(replaceKey, DonePrefix))?.Harness;
+
+    private static (string Harness, string Session)? Split(string? replaceKey, string prefix)
     {
-        if (replaceKey is null || !replaceKey.StartsWith(Prefix, StringComparison.Ordinal)) return null;
-        int split = replaceKey.IndexOf(':', Prefix.Length);
-        return split > Prefix.Length && split < replaceKey.Length - 1 ? (replaceKey[Prefix.Length..split], replaceKey[(split + 1)..]) : null;
+        if (replaceKey is null || !replaceKey.StartsWith(prefix, StringComparison.Ordinal)) return null;
+        int split = replaceKey.IndexOf(':', prefix.Length);
+        return split > prefix.Length && split < replaceKey.Length - 1 ? (replaceKey[prefix.Length..split], replaceKey[(split + 1)..]) : null;
     }
 }

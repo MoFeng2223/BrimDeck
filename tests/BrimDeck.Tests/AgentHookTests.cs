@@ -320,6 +320,9 @@ internal static partial class AgentHookTests
             NoticeIntake.FromPipe(new NoticeMessage { Title = "Pick", Questions = [new() { Question = "Which?" }] }).Questions.Count == 0);
         check("Agent keys: the key of a session's approval names the tool and the session",
             AgentKeys.Ask(AgentKeys.For("claude", "s:1")) is ("claude", "s:1") && AgentKeys.Ask("agent-done:claude:s") is null && AgentKeys.Ask("agent:x") is null && AgentKeys.Ask(null) is null);
+        check("Agent keys: an approval's and a finished turn's notice name their tool; other notices none",
+            AgentKeys.Harness(AgentKeys.For("qoder", "s:1")) == "qoder" && AgentKeys.Harness(AgentKeysWire.Done("codeagent", "s")) == "codeagent"
+            && AgentKeys.Harness("agent-done:x") is null && AgentKeys.Harness("other:qoder:s") is null && AgentKeys.Harness(null) is null);
     }
 
     private static NoticeMessage Marked(NoticeMessage report, string call) { report.Call = call; return report; }

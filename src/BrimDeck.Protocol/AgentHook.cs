@@ -110,7 +110,7 @@ public static class AgentHook
             Report = State(AgentSessionStates.Done, body: last), Quiet = quiet,
             Notice = new NoticeMessage
             {
-                AppName = Name, Context = Context, ReplaceId = "agent-done:" + Id + ":" + Session, Category = failed ? "error" : "success",
+                AppName = Name, Context = Context, ReplaceId = AgentKeysWire.Done(Id, Session), Category = failed ? "error" : "success",
                 Title = failed ? T("出错停止", "Stopped with an error") : T("已完成", "Done"), Body = last is { Length: > 0 } ? Cut(last, MessageLimit) : null
             }
         };
@@ -615,4 +615,7 @@ public static class AgentHook
 public static class AgentKeysWire
 {
     public static string For(string harness, string session) => "agent:" + harness + ":" + session;
+
+    // The key of a session's finished turn, which replaces its last one.
+    public static string Done(string harness, string session) => "agent-done:" + harness + ":" + session;
 }

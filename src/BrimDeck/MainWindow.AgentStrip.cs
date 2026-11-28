@@ -131,15 +131,10 @@ public partial class MainWindow
     {
         double size = CompactStacks.Diameter(s);
         var color = PanelTheme.Readable(AgentColor(session.Harness));
-        if (_app.Notices?.Icons is not { } icons) return CompactStacks.Icon(null, size, s, Look, session.Name, color);
-        foreach (var iconRef in AgentIcons.For(session.Harness))
-        {
-            _noticeStripIcons.Add(iconRef);
-            if (icons.Get(iconRef, out _) is { } image) return CompactStacks.Icon(image, size, s, Look, session.Name, color);
-            // Still being read: the letter for now, the icon once it arrives (NoticeStripIconLoaded).
-            if (icons.IsLoading(iconRef)) break;
-        }
-        return CompactStacks.Icon(null, size, s, Look, session.Name, color);
+        if (_app.Notices?.Icons is not { } icons || AgentIcons.Ref(session.Harness) is not { } iconRef) return CompactStacks.Icon(null, size, s, Look, session.Name, color);
+        // Still being read: the letter for now, the icon once it arrives (NoticeStripIconLoaded).
+        _noticeStripIcons.Add(iconRef);
+        return CompactStacks.Icon(icons.Get(iconRef, out _), size, s, Look, session.Name, color);
     }
 
     // The tool's color as the usage page gives it; a tool connected by hand takes a gray.
@@ -157,30 +152,4 @@ public partial class MainWindow
     }
 
     private bool PointerOnAgents() => PointerOnPart(_compactAgents);
-}
-
-// Where a coding tool's icon comes from: the Start menu's entry of its desktop application (NoticeIcons reads "aumid:" icons
-// from the Apps folder, as the Start menu shows them). The ids are those the applications register; each was checked on a
-// machine with the application installed (2026-11-25). A tool with none, or whose application is not installed, shows its
-// letter. A command-line tool shows its desktop application's icon when that is installed too.
-internal static class AgentIcons
-{
-    private static readonly Dictionary<string, string[]> s_ids = new(StringComparer.Ordinal)
-    {
-        ["claude"] = ["Claude_pzs8sxrjxfjjc!Claude"],
-        ["codex"] = ["OpenAI.Codex_2p2nqsd0c76g0!App"],
-        ["cursor"] = ["Anysphere.Cursor"],
-        ["antigravity"] = ["electron.app.Antigravity"],
-        ["kimi"] = ["com.kimi.code.desktop"],
-        ["trae"] = ["ByteDance.Trae"],
-        ["trae-cn"] = ["ByteDance.TraeCN"],
-        ["opencode"] = ["ai.opencode.desktop"],
-        ["workbuddy"] = ["WorkBuddy.WorkBuddy"],
-        ["workbuddy-ai"] = ["WorkBuddy.WorkBuddyAI"],
-        ["zcode"] = ["dev.zcode.app"],
-        ["mimo"] = ["com.xiaomi.mimo.desktop"],
-        ["commandcode"] = ["ai.commandcode.desktop", "electron.app.Command Code"],
-    };
-
-    public static IEnumerable<string> For(string harness) => s_ids.TryGetValue(harness, out var ids) ? ids.Select(id => "aumid:" + id) : [];
 }

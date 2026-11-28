@@ -384,6 +384,8 @@ internal sealed partial class NoticeCenter : IDisposable
                 else message.TimeoutMs = Settings.AgentWaitMinutes * 60_000L;
             }
             var input = NoticeIntake.FromPipe(message);
+            // A coding agent's hook names no icon: its notices carry the tool's own (AgentIcons).
+            if (input.IconRef is null && AgentIcons.ForNotice(input.ReplaceKey) is { } agentIcon) input = input with { IconRef = agentIcon };
             var outcome = Receive(input);
             var reply = Reply(outcome, message.EventId);
             // The sender waits for how its notice ends (NoticeMessage.Wait): the connection is kept, and gets the result.
@@ -1197,7 +1199,12 @@ internal sealed partial class NoticeCenter : IDisposable
         {
             // What arrived while the file was read, or the list that moved here from another folder, is written now.
             bool arrived = Hub.Notices.Count > 0;
-            if (read.State == NoticeHistoryState.Loaded) Hub.Load(read.Notices, read.Apps, DateTimeOffset.UtcNow);
+            if (read.State == NoticeHistoryState.Loaded)
+            {
+                // Agents' notices kept by a version that gave them no icon get the tool's now.
+                foreach (var kept in read.Notices) kept.IconRef ??= AgentIcons.ForNotice(kept.ReplaceKey);
+                Hub.Load(read.Notices, read.Apps, DateTimeOffset.UtcNow);
+            }
             SetLoaded(true);
             if (arrived || _retired is not null) QueueSave();
         }

@@ -230,4 +230,4 @@ BrimDeck is licensed under the [Apache License 2.0](LICENSE). Third-party licens
 
 - The system monitor page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq, licensed under the MIT License; thanks to its author.
 - Parts of the device battery protocols are ported from several open-source projects, listed in [Supported devices](docs/en-US/devices.md#acknowledgements); thanks to their authors.
-- The icons of third-party apps and mail services built into BrimDeck (such as WeChat, QQ, Gmail and Outlook) are trademarks of their respective owners. They are used only to show which app or service something belongs to, and are not covered by the Apache License 2.0.
+- The icons of third-party apps, mail services and AI coding tools built into BrimDeck (such as WeChat, QQ, Gmail, Outlook, Claude and Cursor) are trademarks of their respective owners. They are used only to show which app or service something belongs to, and are not covered by the Apache License 2.0.

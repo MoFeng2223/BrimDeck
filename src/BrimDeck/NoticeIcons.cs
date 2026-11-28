@@ -84,6 +84,24 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
 
     private async Task<byte[]?> ReadAsync(string iconRef)
     {
+        // A coding tool's icon (AgentIcons): the first of its sources that gives one, kept as a Windows logo is, so its saved
+        // notices still show it once the tool is gone.
+        if (AgentIcons.Sources(iconRef) is { } sources)
+        {
+            var stored = StoredPath(iconRef);
+            foreach (var source in sources)
+            {
+                // The built-in icon, the last source, is not kept: it is there whenever asked for, and a tool installed later
+                // reads its own again.
+                if (source.StartsWith("brand:", StringComparison.Ordinal)) return (stored is not null ? ReadImageFile(stored) : null) ?? AppBrandIcons.Read(source[6..]);
+                var bytes = source.StartsWith("aumid:", StringComparison.Ordinal) ? await windowsLogo(source[6..])
+                    : source.StartsWith("exe:", StringComparison.Ordinal) ? await ReadProgram(source[4..]) : null;
+                if (bytes is null) continue;
+                if (stored is not null) TryWrite(stored, bytes);
+                return bytes;
+            }
+            return stored is not null ? ReadImageFile(stored) : null;
+        }
         if (iconRef.StartsWith("aumid:", StringComparison.Ordinal))
         {
             string appId = iconRef[6..];

@@ -15,6 +15,7 @@
     <Resource Include="Assets\Fonts\*.ttf" />
     <EmbeddedResource Include="Assets\Apps\*.png" LogicalName="BrimDeck.Apps.%(Filename)%(Extension)" />
     <EmbeddedResource Include="Assets\Mail\*.png" LogicalName="BrimDeck.Mail.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Assets\Agents\*.png" LogicalName="BrimDeck.Agents.%(Filename)%(Extension)" />
     <Content Include="ThirdPartyNotices.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

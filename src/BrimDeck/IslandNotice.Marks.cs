@@ -32,12 +32,7 @@ internal sealed partial class IslandNotice
         if (notice.Call) return CompactStacks.Call(size, s, look, notice.SourcePresent, Soft.Enabled);
         if (AgentAsk(notice) is not var (harness, state)) return null;
         double diameter = CompactStacks.Diameter(s), whole = diameter + 2 * CompactStacks.RingPad(s);
-        System.Windows.Media.Imaging.BitmapSource? icon = null;
-        foreach (var iconRef in AgentIcons.For(harness))
-        {
-            if (Center.Icons.Get(iconRef, out _) is { } image) { icon = image; break; }
-            if (Center.Icons.IsLoading(iconRef)) break;
-        }
+        var icon = Center.Icons.Get(AgentIcons.Ref(harness), out _);
         var face = CompactStacks.Icon(icon, diameter, s, look, notice.AppName, PanelTheme.Readable(look.ColorOf("accent")));
         var ringed = CompactStacks.State(face, state, s, look, Soft.Enabled);
         // The ring reaches past the icon's room; it is placed around the room's middle and left unclipped.
@@ -48,7 +43,7 @@ internal sealed partial class IslandNotice
     }
 
     // Whether the icon that arrived is the one a coding agent's notice shows.
-    private bool OwnMarkIcon(string iconRef) => AgentAsk(Notice) is var (harness, _) && AgentIcons.For(harness).Contains(iconRef, StringComparer.Ordinal);
+    private bool OwnMarkIcon(string iconRef) => AgentAsk(Notice) is var (harness, _) && AgentIcons.Ref(harness) == iconRef;
 
     // The words at the right of the content, left of the buttons: a ringing call's time (in the success color, counting) or
     // what an agent waits for (in the caution color). Returns the room they take with the gap before them; none when the words
