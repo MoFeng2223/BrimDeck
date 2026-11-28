@@ -61,17 +61,21 @@ public static class AgentHook
 {
     // The keys of an approval's buttons, and of the button that hands it back to the terminal.
     public const string Allow = "allow", AlwaysAllow = "always", Deny = "deny", Terminal = "terminal";
-    // The tool that asks the user a question, as every tool with Claude Code's hooks names it.
-    private const string QuestionTool = "AskUserQuestion";
+    // The tool that asks the user a question, as every tool with Claude Code's hooks names it, and as Codex names it.
+    private const string QuestionTool = "AskUserQuestion", CodexQuestionTool = "request_user_input";
     // Words of a last message kept in a notice.
     private const int MessageLimit = 600;
 
     // ----- What each tool does while a hook waits (measured in the tools' own sessions; where not, the source is named) -----
 
-    // Whether the tool holds its own approval prompt back until the PermissionRequest hook returned. Codex and CodeBuddy Code
-    // (WorkBuddy) by their code, not yet seen in a session; Command Code asks its mod first. Claude Code, CodeAgent, Qoder,
-    // ZCode and OpenCode show their prompt beside the hook, and the first answer counts.
-    public static bool ApprovalHolds(string format, string id) => format is AgentHookFormats.Codex or AgentHookFormats.CodeBuddy || id == "commandcode";
+    // Whether the tool holds its own approval prompt back until the PermissionRequest hook returned: Codex (its app shows its
+    // card once the hook returned), CodeBuddy Code (WorkBuddy) by its code, Command Code, which asks its mod first, and the Qoder
+    // IDE (Qoder and Qoder CN share their settings with the IDE, so the harness may hold). Claude Code, CodeAgent, the Qoder app
+    // and CLI, ZCode and OpenCode show their prompt beside the hook, and the first answer counts.
+    public static bool ApprovalHolds(string format, string id) => format is AgentHookFormats.Codex or AgentHookFormats.CodeBuddy || id is "commandcode" or "qoder" or "qoder-cn";
+
+    // Whether one request holds the tool's prompt back: the Qoder app and CLI do not, the Qoder IDE does.
+    private static bool ApprovalHolds(string format, string id, bool ide) => ApprovalHolds(format, id) && (ide || id is not ("qoder" or "qoder-cn"));
 
     // Whether the tool holds its own question back while a hook that could answer it waits: every tool whose question comes
     // with PreToolUse, which it waits for. Claude Code's comes with PermissionRequest beside its own prompt, and OpenCode 1.x
@@ -87,7 +91,9 @@ public static class AgentHook
     };
 
     // One session's reports and notices, in the words of the hook's language.
-    private sealed record Scope(string Format, string Id, string Name, string Session, string Project, string? Transcript, Func<string, string, string> T)
+    // Ide: the Qoder IDE, which reads the Qoder app's settings but holds its approval and question back until the hook returned,
+    // reads another approval reply, and ends its session after each turn.
+    private sealed record Scope(string Format, string Id, string Name, string Session, string Project, string? Transcript, Func<string, string, string> T, bool Ide = false)
     {
         public string? Context => Project.Length > 0 ? Project : null;
         public string Key => AgentKeysWire.For(Id, Session);
@@ -133,7 +139,10 @@ public static class AgentHook
         string? session = Text(input, "session_id") ?? Text(input, "conversation_id") ?? Text(input, "conversationId") ?? Text(input, "sessionId") ?? Text(input, "thread_id");
         if (session is null || evt.Length == 0) return new() { Quiet = Quiet(format, evt) };
         // Only Claude Code's own transcript is read (AgentTranscripts); the tools built on it write theirs the same way.
-        var scope = new Scope(format, id, name, session, Project(input), format == AgentHookFormats.Claude ? Text(input, "transcript_path") : null, T);
+        // The Qoder IDE (international and CN) gives each event an "extra" object of the signed-in user, which neither the Qoder
+        // app nor its CLI gives (seen in all three, 2026-11-28).
+        bool ide = format == AgentHookFormats.Claude && id is "qoder" or "qoder-cn" && input.TryGetProperty("extra", out var extra) && extra.ValueKind == JsonValueKind.Object;
+        var scope = new Scope(format, id, name, session, Project(input), format == AgentHookFormats.Claude ? Text(input, "transcript_path") : null, T, ide);
         if (format == AgentHookFormats.Antigravity) return Antigravity(scope, evt, input);
         // Cursor runs the hooks of Claude Code's settings too (its "third-party hooks"), in Claude Code's words: with Cursor's own
         // hooks installed the session would show twice, so only those report it.
@@ -141,13 +150,21 @@ public static class AgentHook
         // Codex tidies its memories in a session of its own, in its memories folder and without a transcript, which runs the
         // user's hooks too: it is none of the user's sessions.
         if (format == AgentHookFormats.Codex && scope.Project == "memories" && Text(input, "transcript_path") is null) return new();
+        // The Codex app sends requests of its own after a turn (a session forked from the user's, without a transcript, whose
+        // prompt says what it is), which end at once with Interrupt and SessionEnd: none of them is the user's work.
+        if (format == AgentHookFormats.Codex && (evt == "sessionstart" && Text(input, "source") == "fork"
+            || evt == "userpromptsubmit" && Text(input, "transcript_path") is null && Text(input, "prompt") is { } asked && asked.StartsWith("This is an app-generated request", StringComparison.Ordinal)))
+            return new();
         if (format is AgentHookFormats.Kimi or AgentHookFormats.Trae) return Watched(scope, evt, input);
         string? tool = Tool(input);
         var args = Arguments(input);
         switch (evt)
         {
             case "sessionstart": return new() { Report = scope.State(AgentSessionStates.Started) };
-            case "sessionend": return new() { Report = scope.State(AgentSessionStates.Ended) };
+            // The Qoder IDE ends its session after every turn, finished or stopped, while its chat stays open.
+            case "sessionend": return new() { Report = scope.State(scope.Ide ? AgentSessionStates.Idle : AgentSessionStates.Ended) };
+            // Codex: the user stopped the turn (no Stop follows).
+            case "interrupt": return new() { Report = scope.State(AgentSessionStates.Idle) };
             case "userpromptsubmit" or "beforesubmitprompt": return new() { Report = scope.State(AgentSessionStates.Working, OneLine(Text(input, "prompt") ?? "", 200)) };
             case "posttooluse" or "posttoolusefailure" or "afterfileedit" or "aftershellexecution" or "aftermcpexecution":
                 return new() { Report = scope.State(AgentSessionStates.Working, call: Stamp(tool, args)) };
@@ -172,9 +189,18 @@ public static class AgentHook
                 };
             case "permissionrequest" when format != AgentHookFormats.Cursor:
                 if (tool != QuestionTool) return Approval(scope, input, tool ?? "", args);
+                // The Qoder IDE shows its question only once this hook returned, and how it would read answers is not known: the
+                // island tells of the question, and the IDE asks it at once.
+                if (scope.Ide) return scope.Told(AgentSessionStates.Question, Header(args) ?? T("需要你选择", "Needs your choice"), FirstQuestion(args), null, Stamp(tool, args));
                 return QuestionsAt(format, id).Permission ? Question(scope, args, atPermission: true) : new();
+            // The Qoder IDE runs the question's PreToolUse after the user answered it.
+            case "pretooluse" when scope.Ide: return new();
             case "pretooluse" when format is AgentHookFormats.Claude or AgentHookFormats.OpenCode && tool == QuestionTool && QuestionsAt(format, id).PreTool:
                 return Question(scope, args, atPermission: false);
+            // Codex asks its question (request_user_input, in plan mode) once PreToolUse returned, and no hook can answer it
+            // (Codex fails a hook that rewrites the input): the island tells of it, and the call's result closes it.
+            case "pretooluse" when format == AgentHookFormats.Codex && tool == CodexQuestionTool:
+                return scope.Told(AgentSessionStates.Question, Header(args) ?? T("需要你选择", "Needs your choice"), FirstQuestion(args), null, Stamp(tool, args));
             default: return new();
         }
     }
@@ -293,9 +319,13 @@ public static class AgentHook
         }
     }
 
-    // The first question a question tool asks, to show under the notice's title.
-    private static string? FirstQuestion(JsonElement args)
-        => args.ValueKind == JsonValueKind.Object && args.TryGetProperty("questions", out var list) && list.ValueKind == JsonValueKind.Array && list.GetArrayLength() > 0 ? Text(list[0], "question") : null;
+    // The first question a question tool asks, to show under the notice's title, and its header.
+    private static string? FirstQuestion(JsonElement args) => First(args) is { } first ? Text(first, "question") : null;
+
+    private static string? Header(JsonElement args) => First(args) is { } first ? Text(first, "header") : null;
+
+    private static JsonElement? First(JsonElement args)
+        => args.ValueKind == JsonValueKind.Object && args.TryGetProperty("questions", out var list) && list.ValueKind == JsonValueKind.Array && list.GetArrayLength() > 0 ? list[0] : null;
 
     // A field that is words, or a list of parts of which some are words ({"type":"text","text":"..."}), as Kimi Code gives a prompt.
     private static string Words(JsonElement input, string name)
@@ -324,38 +354,87 @@ public static class AgentHook
         var T = scope.T;
         string format = scope.Format;
         var (title, code) = Wanted(tool, args, T);
-        // Claude Code offers what "always allow" would add; the hook gives one back to apply it (Codex takes none).
-        JsonElement? always = format is AgentHookFormats.Claude or AgentHookFormats.OpenCode && input.TryGetProperty("permission_suggestions", out var suggestions)
-            && suggestions.ValueKind == JsonValueKind.Array && suggestions.GetArrayLength() > 0 ? suggestions[0].Clone() : null;
         var actions = new List<NoticeActionInfo>
         {
             new() { Key = Allow, Label = T("允许", "Allow"), Style = NoticeActionTypes.Primary },
             new() { Key = Deny, Label = T("拒绝", "Deny") }
         };
-        if (always is not null) actions.Add(new() { Key = AlwaysAllow, Label = T("总是允许", "Always allow") });
+        // What the tool itself offers beyond allowing once, each a button of its own (Claude Code, CodeAgent, the Qoder app and
+        // CLI: a rule for the command, a folder for the session, a mode), given back alone when picked. OpenCode lists the
+        // patterns "always" adds, which its reply adds all at once. Codex, ZCode and the Qoder IDE give none here; what their
+        // own prompt offers beyond once (similar commands, a mode) stays with the terminal button.
+        var suggestions = format is AgentHookFormats.Claude or AgentHookFormats.OpenCode && input.TryGetProperty("permission_suggestions", out var given)
+            && given.ValueKind == JsonValueKind.Array ? given.EnumerateArray().Select(s => s.Clone()).ToList() : [];
+        var offered = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        if (format == AgentHookFormats.OpenCode)
+        {
+            var patterns = suggestions.Where(s => s.ValueKind == JsonValueKind.String).Select(s => s.GetString()!).ToList();
+            if (suggestions.Count > 0)
+                actions.Add(new() { Key = AlwaysAllow, Label = patterns.Count > 0 ? Cut(T($"总是允许 {string.Join(" ", patterns)}", $"Always allow {string.Join(" ", patterns)}"), OfferLimit) : T("总是允许", "Always allow") });
+        }
+        else
+            foreach (var suggestion in suggestions)
+            {
+                if (offered.Count == MaxOffers || Offer(suggestion, T) is not { } label || actions.Any(a => a.Label == label)) continue;
+                string key = offered.Count == 0 ? AlwaysAllow : AlwaysAllow + ":" + offered.Count.ToString(CultureInfo.InvariantCulture);
+                offered[key] = suggestion;
+                actions.Add(new() { Key = key, Label = label });
+            }
         actions.Add(new() { Key = Terminal, Label = T("在终端处理", "Use the terminal") });
         var ask = new NoticeMessage
         {
             AppName = scope.Name, Context = scope.Context, ReplaceId = scope.Key, Category = "warning",
             Title = title, Body = Text(args, "description") is { Length: > 0 } why ? Cut(why, MessageLimit) : null, Code = Cut(code, NoticeProtocol.MaxCode),
-            Actions = actions, Wait = true, Holds = ApprovalHolds(format, scope.Id) ? true : null
+            Actions = actions, Wait = true, Holds = ApprovalHolds(format, scope.Id, scope.Ide) ? true : null
         };
         string? call = Stamp(tool, args);
         return new()
         {
             Report = scope.State(AgentSessionStates.Approval, title, call: call), Ask = ask, Answered = scope.State(AgentSessionStates.Working, call: call),
-            Reply = result => result is { Result: NoticeWaits.Action, ActionKey: Allow or AlwaysAllow or Deny } chosen
-                ? format == AgentHookFormats.OpenCode ? OpenCodeReply(chosen.ActionKey!) : Decision(chosen.ActionKey!, always, T) : null,
+            Reply = result => result is { Result: NoticeWaits.Action, ActionKey: { } key }
+                && (key is Allow or Deny || offered.ContainsKey(key) || format == AgentHookFormats.OpenCode && key == AlwaysAllow && suggestions.Count > 0)
+                ? format == AgentHookFormats.OpenCode ? OpenCodeReply(key) : scope.Ide ? IdeDecision(key, T) : Decision(key, offered.TryGetValue(key, out var picked) ? picked : null, T)
+                : null,
             Watch = scope.Transcript is { } file && call is not null ? new(file, tool, call, scope.State(AgentSessionStates.Working, call: call), scope.State(AgentSessionStates.Idle)) : null
         };
     }
+
+    // Buttons for what the tool offers beyond allowing once, at most; the words of OpenCode's; how much of a rule and of a folder
+    // a button shows (the notices page gives each its own line, as wide as the column).
+    private const int MaxOffers = 3, OfferLimit = 40, RuleLimit = 24, FolderLimit = 32;
+
+    // The words of a suggestion's button: what it allows (a rule, the folder it touches, a mode) and where the tool keeps it.
+    // Null for what the island does not offer (rules that deny or ask, removing rules); a second button of the same words is not
+    // offered.
+    private static string? Offer(JsonElement suggestion, Func<string, string, string> T)
+    {
+        if (suggestion.ValueKind != JsonValueKind.Object) return null;
+        string scope = Text(suggestion, "destination") switch
+        {
+            "session" => T("（本会话）", " (this session)"), "localSettings" => T("（本项目）", " (this project)"),
+            "projectSettings" => T("（本项目，共享）", " (this project, shared)"), "userSettings" => T("（所有项目）", " (all projects)"), _ => ""
+        };
+        string? what = Text(suggestion, "type") switch
+        {
+            "addRules" when Text(suggestion, "behavior") is null or "allow" && suggestion.TryGetProperty("rules", out var rules) && rules.ValueKind == JsonValueKind.Array && rules.GetArrayLength() > 0
+                => T("总是允许 ", "Always allow ") + Cut(string.Join(", ", rules.EnumerateArray().Select(r => Text(r, "ruleContent") ?? Text(r, "toolName")).OfType<string>()), RuleLimit),
+            "addDirectories" when suggestion.TryGetProperty("directories", out var folders) && folders.ValueKind == JsonValueKind.Array && folders.GetArrayLength() > 0
+                => T("允许访问 ", "Allow access to ") + Tail(string.Join(", ", folders.EnumerateArray().Where(f => f.ValueKind == JsonValueKind.String).Select(f => f.GetString())), FolderLimit),
+            "setMode" when Text(suggestion, "mode") is { } mode => T("切换到 ", "Switch to ") + Cut(mode, 20) + T(" 模式", " mode"),
+            _ => null
+        };
+        return what is null ? null : what + scope;
+    }
+
+    // A path's end, which names the folder, where the whole is too long.
+    private static string Tail(string text, int limit) => text.Length <= limit ? text : "…" + text[^(limit - 1)..];
 
     // OpenCode's reply to a permission: once, always or reject.
     private static string OpenCodeReply(string key) => "{\"reply\":\"" + (key == Deny ? "reject" : key == AlwaysAllow ? "always" : "once") + "\"}";
 
     // {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}, with the suggestion given back
-    // for "always allow" and a reason for a denial.
-    private static string Decision(string key, JsonElement? always, Func<string, string, string> T)
+    // for what the user picked beyond once, and a reason for a denial.
+    private static string Decision(string key, JsonElement? suggestion, Func<string, string, string> T)
     {
         using var buffer = new MemoryStream();
         using (var json = new Utf8JsonWriter(buffer))
@@ -366,8 +445,26 @@ public static class AgentHook
             json.WriteStartObject("decision");
             json.WriteString("behavior", key == Deny ? "deny" : "allow");
             if (key == Deny) json.WriteString("message", T("用户在 BrimDeck 中拒绝了这个操作。", "The user denied this in BrimDeck."));
-            if (key == AlwaysAllow && always is { } suggestion) { json.WritePropertyName("updatedPermissions"); json.WriteStartArray(); suggestion.WriteTo(json); json.WriteEndArray(); }
+            if (key != Deny && key != Allow && suggestion is { } picked) { json.WritePropertyName("updatedPermissions"); json.WriteStartArray(); picked.WriteTo(json); json.WriteEndArray(); }
             json.WriteEndObject();
+            json.WriteEndObject();
+            json.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(buffer.ToArray());
+    }
+
+    // The Qoder IDE's reply (its hooks page, docs.qoder.com/extensions/hooks): the decision beside the event's name, with a
+    // reason; it reads no suggestions.
+    private static string IdeDecision(string key, Func<string, string, string> T)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer))
+        {
+            json.WriteStartObject();
+            json.WriteStartObject("hookSpecificOutput");
+            json.WriteString("hookEventName", "PermissionRequest");
+            json.WriteString("permissionDecision", key == Deny ? "deny" : "allow");
+            if (key == Deny) json.WriteString("permissionDecisionReason", T("用户在 BrimDeck 中拒绝了这个操作。", "The user denied this in BrimDeck."));
             json.WriteEndObject();
             json.WriteEndObject();
         }

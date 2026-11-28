@@ -23,6 +23,7 @@ internal static partial class AgentHookTests
         MoreTools(check);
         HookProgram(check);
         Asks(check);
+        Offers(check);
         Transcripts(check);
     }
 
@@ -567,8 +568,11 @@ internal static partial class AgentHookTests
         check("Hook settings: Cursor's flat list takes a PowerShell command line beside the user's hooks",
             (int?)flat["version"] == 1 && flat["hooks"]!["postToolUse"]!.AsArray().Count == 2 && (string?)flat["hooks"]!["stop"]![0]!["command"] == "& 'C:\\Program Files\\BrimDeck\\brim.exe' hook cursor"
             && flat["hooks"]!["stop"]![0]!["type"] is null);
-        check("Hook settings: Codex runs one command line through cmd, with the path quoted",
-            (string?)JsonNode.Parse(AgentHarnesses.Installed(codex, null, brim)!)!["hooks"]!["PermissionRequest"]![0]!["hooks"]![0]!["command"] == "\"C:\\Program Files\\BrimDeck\\brim.exe\" hook codex");
+        var codexHooks = JsonNode.Parse(AgentHarnesses.Installed(codex, null, brim)!)!["hooks"]!;
+        check("Hook settings: Codex runs one command line through PowerShell, with the call operator before a path with spaces",
+            (string?)codexHooks["PermissionRequest"]![0]!["hooks"]![0]!["command"] == "& 'C:\\Program Files\\BrimDeck\\brim.exe' hook codex");
+        check("Hook settings: Codex reports a stopped turn and tells of its plan-mode question before it is asked",
+            codexHooks["Interrupt"] is not null && (string?)codexHooks["PreToolUse"]![0]!["matcher"] == "request_user_input");
         check("Hook settings: a path without spaces needs no call operator in PowerShell", AgentHarnesses.CommandLine(cursor, @"C:\B\brim.exe") == @"C:\B\brim.exe hook cursor");
         check("Hook settings: BrimDeck's hooks are told by brim.exe and \"hook\", and nothing else is",
             AgentHarnesses.Ours(JsonNode.Parse("""{"command":"C:\\B\\brim.exe","args":["hook","claude"]}""")) && AgentHarnesses.Ours(JsonNode.Parse("""{"command":"& 'C:\\B b\\brim.exe' hook cursor"}"""))

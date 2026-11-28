@@ -989,13 +989,15 @@ public partial class MainWindow
         var own = center.Buttons(notice).Take(NoticeIntake.MaxButtons).ToList();
         var mainAction = PageMainAction(notice, center);
         // A coding agent's approval keeps its main answer and the first other one ("允许", "拒绝") in the row; what else the tool
-        // offers ("总是允许 …（本项目）", "允许访问 …（本会话）", "在终端处理") goes above the row, a line each, as the tools list
-        // them in their own prompts. In the row they took a line each, and pushed the main one below the column's foot.
+        // offers ("总是允许 …（本项目）", "允许访问 …（本会话）", "在终端处理") is listed by "更多" beside the main one, as the tools
+        // list it under the arrow of their own "允许". In the row they took a line each, and pushed the main one below the column's
+        // foot and the command out of sight.
         var choices = BrimDeck.Core.Agents.AgentKeys.Ask(notice.ReplaceKey) is not null && !AgendaReminders.Owns(notice)
             ? own.Where(action => !ReferenceEquals(action, mainAction)).Skip(1).ToList() : [];
         foreach (var action in own.Where(action => !choices.Contains(action)).OrderBy(action => ReferenceEquals(action, mainAction)))
         {
             bool main = ReferenceEquals(action, mainAction);
+            if (main && choices.Count > 0) flow.Add(MoreChoices(notice, center, choices));
             if (AgendaReminders.Owns(notice)) { flow.Add(ReminderButton(notice, action, main)); if (main) row.MainLast = true; continue; }
             var button = PillButton(action.Label, action.Label, async () => { await center.RunAsync(notice, action); RenderNotices(); }, primary: main);
             flow.Add(button);
@@ -1023,30 +1025,21 @@ public partial class MainWindow
         }
         // The row sets the space between its buttons itself (NoticeButtons.Gap).
         foreach (var button in flow.OfType<FrameworkElement>()) button.Margin = new Thickness(0);
-        if (choices.Count == 0) return row;
-        var foot = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
-        foreach (var action in choices) foot.Children.Add(ChoiceButton(action.Label, async () => { await center.RunAsync(notice, action); RenderNotices(); }));
-        row.Margin = new Thickness(0, 4, 0, 0);
-        foot.Children.Add(row);
-        return foot;
+        return row;
     }
 
-    // One of the further answers of an agent's approval: a line as wide as the column, its words at the left and cut with "…"
-    // where they do not fit, in the fill of the page's other buttons.
-    private static Button ChoiceButton(string text, Action click)
+    // "更多 ▾": the further answers of an agent's approval, in a menu under it.
+    private Button MoreChoices(Notice notice, NoticeCenter center, List<NoticeAction> choices)
     {
-        var button = PillButton(text, text, click);
-        var face = (Border)button.Content;
-        face.CornerRadius = new CornerRadius(PanelTheme.Corner(10));
-        face.Padding = new Thickness(14, 0, 14, 0);
-        var words = UI.Fixed(text, 12.5, 32, UI.Primary, FontWeights.SemiBold);
-        words.TextTrimming = TextTrimming.CharacterEllipsis;
-        words.VerticalAlignment = VerticalAlignment.Center;
-        face.Child = words;
-        button.HorizontalAlignment = HorizontalAlignment.Stretch;
-        button.Margin = new Thickness(0, 0, 0, 6);
-        button.ToolTip = text;
-        return button;
+        string name = Loc.T("更多 ▾", "More ▾");
+        Button? more = null;
+        more = PillButton(name, Loc.T("更多允许方式", "More ways to answer"), () =>
+        {
+            var menu = NewMenu();
+            foreach (var action in choices) menu.Items.Add(Item(action.Label, async () => { await center.RunAsync(notice, action); RenderNotices(); }));
+            OpenMenu(menu, more!);
+        });
+        return more;
     }
 
     // The sender's button that the page shows as its main one, when no application can be opened: its main button, else its first

@@ -16,7 +16,7 @@ internal static partial class AgentHookTests
             new[] { "claude", "opencode", "mimo", "kimi", "trae", "trae-cn", "cursor", "antigravity" }.All(id => Holds(id) == (false, false)));
         check("Asks: the tools that wait for the hook first have a switch for what they hold back",
             Holds("codex") == (true, false) && Holds("workbuddy") == (true, false) && Holds("commandcode") == (true, true)
-            && Holds("codeagent") == (false, true) && Holds("qoder") == (false, true) && Holds("qoder-cn") == (false, true) && Holds("zcode") == (false, true));
+            && Holds("codeagent") == (false, true) && Holds("qoder") == (true, true) && Holds("qoder-cn") == (true, true) && Holds("zcode") == (false, true));
         const string runs = """{"hook_event_name":"PermissionRequest","session_id":"s","tool_name":"Bash","tool_input":{"command":"rm x"}}""";
         var codex = AgentHook.Plan(AgentHookFormats.Codex, "codex", "Codex", Input(runs), chinese: false).Ask!;
         check("Asks: an approval says whether its tool holds its own prompt back",
@@ -56,6 +56,69 @@ internal static partial class AgentHookTests
             Tool("zcode", Asking("PreToolUse")).Report?.Call is { } question
             && Tool("zcode", Asking("PostToolUse").Replace("\"tool_input\":{", "\"tool_input\":{\"answers\":{\"Q?\":\"A\"},")).Report?.Call == question
             && AgentHook.Stamp(null, default) is null && AgentHook.Stamp("Bash", default) is { Length: 16 });
+    }
+
+    // What the tools offer beyond allowing once, and what the island does with each tool's own ways (5.24, 5.25 of the live
+    // tests): the suggestions as they came from the Claude desktop app and the Qoder app, 2026-11-28.
+    private static void Offers(Action<string, bool> check)
+    {
+        const string suggested = """
+            {"hook_event_name":"PermissionRequest","session_id":"s","tool_name":"Bash","tool_input":{"command":"echo OK > D:/t/opt.txt"},"permission_suggestions":[
+            {"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"echo OK *"}],"behavior":"allow","destination":"localSettings"},
+            {"type":"addDirectories","directories":["D:\\t"],"destination":"session"},
+            {"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"rm *"}],"behavior":"deny","destination":"localSettings"},
+            {"type":"setMode","mode":"acceptEdits","destination":"session"}]}
+            """;
+        var plan = Tool("qoder", suggested);
+        var actions = plan.Ask!.Actions!;
+        check("Offers: each suggestion is a button of its own with what it allows and where it is kept; a rule that denies is not offered",
+            actions.Select(a => a.Key).SequenceEqual([AgentHook.Allow, AgentHook.Deny, AgentHook.AlwaysAllow, AgentHook.AlwaysAllow + ":1", AgentHook.AlwaysAllow + ":2", AgentHook.Terminal])
+            && actions[2].Label == "总是允许 echo OK *（本项目）" && actions[3].Label == "允许访问 D:\\t（本会话）" && actions[4].Label == "切换到 acceptEdits 模式（本会话）");
+        JsonElement Updated(string key) => JsonDocument.Parse(plan.Reply(Chosen(key))!).RootElement.GetProperty("hookSpecificOutput").GetProperty("decision");
+        check("Offers: the button picked gives back its own suggestion alone, as the tool gave it",
+            Updated(AgentHook.AlwaysAllow + ":1") is var folder && folder.GetProperty("behavior").GetString() == "allow" && folder.GetProperty("updatedPermissions").GetArrayLength() == 1
+            && folder.GetProperty("updatedPermissions")[0].GetProperty("type").GetString() == "addDirectories" && folder.GetProperty("updatedPermissions")[0].GetProperty("destination").GetString() == "session"
+            && Updated(AgentHook.AlwaysAllow + ":2").GetProperty("updatedPermissions")[0].GetProperty("mode").GetString() == "acceptEdits"
+            && !Updated(AgentHook.Allow).TryGetProperty("updatedPermissions", out _) && plan.Reply(Chosen(AgentHook.AlwaysAllow + ":3")) is null);
+        string longRule = suggested.Replace("echo OK *", new string('x', 60));
+        check("Offers: a long rule is cut, and its scope still shows",
+            Tool("qoder", longRule).Ask!.Actions![2].Label is { } cut && cut.EndsWith("…（本项目）", StringComparison.Ordinal) && cut.Length <= 4 + 40 + 5);
+        var open = AgentHook.Plan(AgentHookFormats.OpenCode, "mimo", "MiMo Code", Input("""{"hook_event_name":"PermissionRequest","session_id":"s","tool_name":"bash","tool_input":{"command":"echo hi"},"permission_suggestions":["echo *"]}"""), true);
+        check("Offers: OpenCode's always names the patterns it adds",
+            open.Ask!.Actions!.Single(a => a.Key == AgentHook.AlwaysAllow).Label == "总是允许 echo *" && open.Reply(Chosen(AgentHook.AlwaysAllow)) == """{"reply":"always"}""");
+
+        // The Qoder IDE: an "extra" object of the signed-in user with every event, and a PermissionRequest with tool_use_id.
+        const string extra = "\"extra\":{\"email\":\"a@b.c\"},\"request_set_id\":\"r\",";
+        string Ide(string json) => json.Replace("{\"hook_event_name\"", "{" + extra + "\"hook_event_name\"");
+        var ideApproval = Tool("qoder", Ide("""{"hook_event_name":"PermissionRequest","session_id":"s","tool_name":"Bash","tool_input":{"command":"echo OK"},"tool_use_id":"t1"}"""));
+        var ideOutput = JsonDocument.Parse(ideApproval.Reply(Chosen(AgentHook.Deny))!).RootElement.GetProperty("hookSpecificOutput");
+        check("Qoder IDE: its approval holds the IDE back, and the reply is its own permissionDecision",
+            ideApproval.Ask is { Holds: true } && Tool("qoder", suggested).Ask is { Holds: null }
+            && ideOutput.GetProperty("permissionDecision").GetString() == "deny" && ideOutput.GetProperty("permissionDecisionReason").GetString()!.Length > 0 && !ideOutput.TryGetProperty("decision", out _)
+            && JsonDocument.Parse(ideApproval.Reply(Chosen(AgentHook.Allow))!).RootElement.GetProperty("hookSpecificOutput").GetProperty("permissionDecision").GetString() == "allow");
+        var ideQuestion = Tool("qoder-cn", Ide(Asking("PermissionRequest")));
+        check("Qoder IDE: its question is told at once, its PreToolUse after the answer is left alone, and its result closes it",
+            ideQuestion is { Ask: null, Notice: { Level: "persistent", Body: "Q?" }, Report: { State: "question", Call: { } asked } }
+            && Tool("qoder-cn", Ide(Asking("PreToolUse"))) is { Ask: null, Report: null, Notice: null }
+            && Tool("qoder-cn", Ide(Asking("PostToolUse"))).Report is { State: "working" } done && done.Call == asked
+            && Tool("qoder-cn", Asking("PermissionRequest")).Ask is { Holds: null, Questions.Count: 1 });
+        check("Qoder IDE: the session it ends after every turn stays, idle; the Qoder app's end removes it",
+            Tool("qoder", Ide("""{"hook_event_name":"SessionEnd","session_id":"s","reason":"success"}""")).Report?.State == "idle"
+            && Tool("qoder", """{"hook_event_name":"SessionEnd","session_id":"s","reason":"other"}""").Report?.State == "ended");
+
+        AgentHookPlan Codex(string json) => AgentHook.Plan(AgentHookFormats.Codex, "codex", "Codex", Input(json), chinese: true);
+        check("Codex: the app's own requests after a turn are none of the user's sessions; a prompt of the CLI without a transcript is",
+            Codex("""{"hook_event_name":"SessionStart","session_id":"f","cwd":"D:\\p","source":"fork","transcript_path":null}""") is { Report: null, Notice: null }
+            && Codex("""{"hook_event_name":"UserPromptSubmit","session_id":"f","cwd":"D:\\p","transcript_path":null,"prompt":"This is an app-generated request for a suggestion"}""").Report is null
+            && Codex("""{"hook_event_name":"UserPromptSubmit","session_id":"e","cwd":"D:\\p","transcript_path":null,"prompt":"Reply OK"}""").Report?.State == "working"
+            && Codex("""{"hook_event_name":"SessionStart","session_id":"m","cwd":"D:\\p","source":"startup"}""").Report?.State == "started");
+        check("Codex: a stopped turn is idle", Codex("""{"hook_event_name":"Interrupt","session_id":"m","turn_id":"t"}""").Report?.State == "idle");
+        const string codexAsks = """{"hook_event_name":"PreToolUse","session_id":"m","tool_name":"request_user_input","tool_use_id":"c1","tool_input":{"questions":[{"header":"颜色","id":"color","question":"Red 还是 Blue？","options":[{"label":"Red"},{"label":"Blue"}]}]}}""";
+        var codexQuestion = Codex(codexAsks);
+        check("Codex: its plan-mode question is told without waiting, and its result closes it",
+            codexQuestion is { Ask: null, Notice: { Title: "颜色", Body: "Red 还是 Blue？" }, Report: { State: "question", Call: { } call } }
+            && Codex(codexAsks.Replace("PreToolUse", "PostToolUse")).Report is { State: "working" } result && result.Call == call
+            && Codex("""{"hook_event_name":"PreToolUse","session_id":"m","tool_name":"Bash","tool_input":{"command":"ls"}}""").Report is null);
     }
 
     private static void Transcripts(Action<string, bool> check)

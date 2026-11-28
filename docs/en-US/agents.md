@@ -28,13 +28,13 @@ Installing changes the tool's user settings file:
 
 | Tool | Settings file | What the island can do |
 |---|---|---|
-| Claude Code (CLI, desktop app, IDE extensions) | `%USERPROFILE%\.claude\settings.json` (or `CLAUDE_CONFIG_DIR`) | State, finished notices, approvals (allow, deny, always allow), answering questions |
-| Codex (CLI, desktop app) | `%USERPROFILE%\.codex\hooks.json` (or `CODEX_HOME`) | State, finished notices, approvals (allow, deny; needs its switch) |
+| Claude Code (CLI, desktop app, IDE extensions) | `%USERPROFILE%\.claude\settings.json` (or `CLAUDE_CONFIG_DIR`) | State, finished notices, approvals (allow, deny, and what Claude Code offers beyond, such as always allow), answering questions |
+| Codex (CLI, desktop app) | `%USERPROFILE%\.codex\hooks.json` (or `CODEX_HOME`) | State, finished notices, approvals (allow, deny; needs its switch); a reminder for a plan-mode question |
 | Antigravity (desktop app, IDE, CLI) | `%USERPROFILE%\.gemini\config\hooks.json` | State, finished notices; a reminder for a question |
 | Cursor (editor, CLI) | `%USERPROFILE%\.cursor\hooks.json` | State, finished notices |
 | CodeAgent CLI | `%USERPROFILE%\.cac\settings.json` (or `CODEAGENT3_CONFIG_DIR`) | State, finished notices, approvals, answering questions (needs its switch) |
-| Qoder (CLI, desktop app) | `%USERPROFILE%\.qoder\settings.json` | State, finished notices, approvals, answering questions (the desktop app needs its switch) |
-| Qoder CN (CLI, desktop app) | `%USERPROFILE%\.qoder-cn\settings.json` | State, finished notices, approvals, answering questions (the desktop app needs its switch) |
+| Qoder (CLI, desktop app, IDE) | `%USERPROFILE%\.qoder\settings.json` | State, finished notices, approvals (the IDE needs its switch), answering questions (the desktop app needs its switch; a reminder in the IDE) |
+| Qoder CN (CLI, desktop app, IDE) | `%USERPROFILE%\.qoder-cn\settings.json` | State, finished notices, approvals (the IDE needs its switch), answering questions (the desktop app needs its switch; a reminder in the IDE) |
 | WorkBuddy | `%USERPROFILE%\.workbuddy\settings.json` | State, finished notices, approvals (allow, deny; needs its switch) |
 | ZCode (its own agent) | `%USERPROFILE%\.zcode\cli\config.json` | State, finished notices, approvals, answering questions (needs its switch) |
 | OpenCode (CLI, desktop app) | Plugin `%USERPROFILE%\.config\opencode\plugins\brimdeck.js` | State, finished notices, approvals (once, always, reject); answering questions in 1.x, a reminder for a question in 2.x |
@@ -49,11 +49,12 @@ Installing changes the tool's user settings file:
 Notes:
 
 - **Claude Code** asks a question through its approval hook, as it asks for an approval: Claude Code's own prompt shows as usual, the island can answer too, and the first answer counts.
-- **Codex** runs only hooks you have reviewed. After installing, enter `/hooks` in Codex (in the desktop app, Settings › Hooks) and trust BrimDeck's hooks before they run. Changed hooks (after "Update", for example) need another review.
+- **Codex** runs only hooks you have reviewed. After installing, enter `/hooks` in Codex (in the desktop app, Settings › Hooks) and trust BrimDeck's hooks before they run. Changed hooks (after "Update", for example) need another review. "Allow similar commands" in Codex's prompt cannot be chosen by a hook; choose "Use the terminal" and pick it in Codex. The requests the Codex desktop app sends by itself after a turn do not show as sessions.
 - **Antigravity**'s desktop app, IDE and CLI read one hooks file, so they count as one tool. Its hooks have no approval event, so approvals stay in Antigravity; for a question the island shows a reminder, which closes once you answered in Antigravity.
 - **Cursor** hooks have no approval event of their own, so Cursor's approvals stay in Cursor.
 - **Cursor** also runs the hooks in Claude Code's settings file by default. BrimDeck shows a Cursor session only from Cursor's own hooks, so install the hooks of the Cursor row to see its sessions.
-- **CodeAgent, Qoder and Qoder CN** use Claude Code's hook format; BrimDeck installs and answers in that format. When the Qoder and Qoder CN CLIs ask a question, their own prompt and the island both work; the desktop apps and CodeAgent show no question of their own while the island waits. The Qoder IDE's hooks behave differently from the desktop app's and the CLI's and are not adapted yet.
+- **CodeAgent, Qoder and Qoder CN** use Claude Code's hook format; BrimDeck installs and answers in that format. When the Qoder and Qoder CN CLIs ask a question, their own prompt and the island both work; the desktop apps and CodeAgent show no question of their own while the island waits.
+- **The Qoder IDE and Qoder CN IDE** read the desktop app's settings file, but their hooks behave differently: the IDE waits for the hook to return before it shows its own approval card or question. Its approvals are therefore only a reminder by default, answered on the island once "approve on the island (Qoder IDE)" is switched on; its questions are a reminder only and are answered in the IDE. The IDE ends its session after every turn, and the island keeps the session as idle.
 - **WorkBuddy**'s hooks cannot add an "always allow" rule or answer a question (the question's hook runs only after you answered), so the island offers Allow and Deny, and questions stay in WorkBuddy. By default WorkBuddy runs commands without asking for approval, and then no approval shows on the island.
 - **OpenCode** has no command hooks. BrimDeck writes the plugin `brimdeck.js` into its plugin folder, which OpenCode loads when it starts; removing deletes the file. Restart OpenCode after installing. OpenCode's own prompt and the island's buttons work at the same time and the first answer counts; answered in OpenCode first, the notice on the island closes. The same file serves OpenCode 2.x and 1.x from 1.18.29. Whether the OpenCode desktop app loads this plugin is not verified yet. A plugin of OpenCode 2.x cannot answer a question: the island shows a reminder for one, which closes once you answered in OpenCode.
 - **MiMo Code** is built on OpenCode 1.x and is connected with the same plugin. The Xiaomi MiMo desktop app empties its own plugin folder at each start and loads no user plugins, so only sessions of the MiMo Code CLI show.
@@ -62,7 +63,7 @@ Notes:
 - **TRAE and TRAE CN** each have a `hooks.json` of their own and are installed separately. After installing, turn on the configured global hooks in TRAE's Settings › Hooks, and change how hook commands run from the default, the sandbox, to running locally: in the sandbox the hooks do not run, and nothing says so. A hook cannot answer TRAE's own prompt: while TRAE waits for approval or an answer, the island shows a reminder that stays, and closes it once you answered in TRAE. When you stop a turn in TRAE, no hook runs: the session keeps showing as working, and is dropped after 30 minutes without a message.
 - **ZCode**'s settings-file hooks are off by default. Installing turns on `enabled` in that file's `hooks`; removing takes it out again only when no other hooks are left there. Installing covers ZCode's own agent; the built-in agents you can pick in ZCode, such as Claude Code and Codex, use settings of their own and are not affected.
 - Codex, Antigravity and Cursor have no questions a hook can answer; their questions are answered in the tool.
-- Codex, Antigravity and Kimi Code run a hook as a command line. Where BrimDeck's folder has a space in its path, its short path is written (`C:\PROGRA~1\BrimDeck\brim.exe`, for example), which these tools run correctly.
+- Antigravity and Kimi Code run a hook as a command line. Where BrimDeck's folder has a space in its path, its short path is written (`C:\PROGRA~1\BrimDeck\brim.exe`, for example), which these tools run correctly. Codex runs a hook through PowerShell; a path with a space is written as `& 'C:\Program Files\BrimDeck\brim.exe' hook codex`.
 
 These tools are not supported yet, and looking for tools does not list them:
 
@@ -78,15 +79,15 @@ When a tool asks for approval or asks a question, a notice that stays appears on
 
 ### The tool and the island both answer
 
-This covers the approvals of Claude Code, CodeAgent, Qoder, Qoder CN, ZCode, OpenCode and MiMo Code, and the questions of Claude Code, the Qoder and Qoder CN CLIs and MiMo Code. The tool's own prompt shows as usual, the island can answer too, and the first answer counts:
+This covers the approvals of Claude Code, CodeAgent, the Qoder and Qoder CN desktop apps and CLIs, ZCode, OpenCode and MiMo Code, and the questions of Claude Code, the Qoder and Qoder CN CLIs and MiMo Code. The tool's own prompt shows as usual, the island can answer too, and the first answer counts:
 
-1. Hover over or click the island to open the notices page. An approval shows the command to run or the file to change, with "Allow", "Deny", "Always allow" and "Use the terminal"; a question shows each question with its options, and a box below for your own answer.
+1. Hover over or click the island to open the notices page. An approval shows the command to run or the file to change, with "Allow", "Deny" and "Use the terminal". Where the tool offers other ways to allow, the island shows a button for each, with its scope, such as "Always allow echo OK * (this project)" or "Allow access to D:\Projects (this session)", and applies only the one you choose. Claude Code, CodeAgent, the Qoder and Qoder CN desktop apps and CLIs, OpenCode and MiMo Code offer them; Codex's "Allow similar commands", ZCode's "Always allow this command" and switching modes cannot be chosen by a hook, so choose "Use the terminal" for those. A question shows each question with its options, and a box below for your own answer.
 2. Once you answer on the island, the tool goes on at once.
 3. Answered in the tool first, the notice on the island closes by itself. For most tools that is when the action has run, you send a new prompt or the turn ends; when you refuse or stop in Claude Code, CodeAgent or Qoder, BrimDeck learns it from the session's record and closes the notice within seconds.
 
 ### The tool shows no prompt while the island waits
 
-This covers the approvals of Codex and WorkBuddy, the approvals and questions of Command Code, and the questions of CodeAgent, the Qoder and Qoder CN desktop apps and ZCode. These tools wait for the hook to return before they show their own prompt.
+This covers the approvals of Codex, WorkBuddy and the Qoder and Qoder CN IDEs, the approvals and questions of Command Code, and the questions of CodeAgent, the Qoder and Qoder CN desktop apps and ZCode. These tools wait for the hook to return before they show their own prompt.
 
 - By default the island only tells, without buttons or options; the tool shows its own prompt as usual, and the reminder closes once you answered there.
 - With the tool's "approve on the island" or "answer questions on the island" switched on in Settings › Live notices › AI coding tools › Approvals and questions, you answer on the island instead, and the tool shows no prompt of its own meanwhile. The tool asks as it always does when:
@@ -94,11 +95,11 @@ This covers the approvals of Codex and WorkBuddy, the approvals and questions of
   - You close the notice, or choose "Use the terminal" or "Answer in the terminal".
   - BrimDeck is not running. The hook then ends at once, and the tool does not wait.
 
-For Codex and WorkBuddy this comes from reading their code; it has not been checked in a real session yet.
+For WorkBuddy this comes from reading its code; it has not been checked in a real session yet.
 
 ### Reminders only
 
-The approvals and questions of Kimi Code, TRAE and TRAE CN, and the questions of Antigravity and OpenCode 2.x, cannot be decided by a hook: the island shows a reminder that stays, and closes it once you answered in the tool.
+The approvals and questions of Kimi Code, TRAE and TRAE CN, and the questions of Antigravity, OpenCode 2.x, Codex (plan mode) and the Qoder and Qoder CN IDEs, cannot be decided by a hook, or the answer's format is not confirmed yet: the island shows a reminder that stays, and closes it once you answered in the tool.
 
 ## Collapsed row
 

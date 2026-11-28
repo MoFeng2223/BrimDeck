@@ -81,7 +81,9 @@ public sealed partial class SettingsWindow
         };
         foreach (var harness in found)
         {
-            if (harness.HoldsApprovals) asks.Add(HeldToggle(harness, Loc.T("在岛上审批", "approve on the island"), s => s.AgentApprovalsHeld));
+            // Of Qoder's forms only the IDE holds its approval back; the app's and the CLI's prompts work beside the island.
+            if (harness.HoldsApprovals) asks.Add(HeldToggle(harness, harness.Id is "qoder" or "qoder-cn" ? Loc.T("在岛上审批（Qoder IDE）", "approve on the island (Qoder IDE)")
+                : Loc.T("在岛上审批", "approve on the island"), s => s.AgentApprovalsHeld));
             if (harness.HoldsQuestions) asks.Add(HeldToggle(harness, Loc.T("在岛上回答提问", "answer questions on the island"), s => s.AgentQuestionsHeld));
         }
         Group([.. asks]);

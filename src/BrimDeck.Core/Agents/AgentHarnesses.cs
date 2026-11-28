@@ -127,11 +127,12 @@ public static class AgentHarnesses
         new("PermissionRequest", "*", true), new("PreToolUse", "AskUserQuestion", true)
     ];
 
-    // Codex ends a session with SessionEnd (and each run of "codex exec" with it).
+    // Codex ends a session with SessionEnd (and each run of "codex exec" with it), a turn the user stopped with Interrupt in
+    // place of Stop, and shows its question (request_user_input, in plan mode) once the hook before it returned.
     private static readonly HookEntry[] CodexHooks =
     [
         new("SessionStart", null, false), new("UserPromptSubmit", null, false), new("PostToolUse", null, false), new("Stop", null, false), new("SessionEnd", null, false),
-        new("PermissionRequest", null, true)
+        new("Interrupt", null, false), new("PreToolUse", "request_user_input", false), new("PermissionRequest", null, true)
     ];
 
     private static readonly HookEntry[] CursorHooks =
@@ -207,7 +208,8 @@ public static class AgentHarnesses
         new("codex", "Codex", AgentHookFormats.Codex, () => Loc.T("Codex CLI 与 Codex 桌面版", "Codex CLI and Codex desktop app"),
             p => Path.Combine(p.Under("CODEX_HOME", ".codex"), "hooks.json"),
             p => [Path.Combine(p.Under("CODEX_HOME", ".codex"), "config.toml"), Path.Combine(p.Under("CODEX_HOME", ".codex"), "sessions")],
-            HookFileShape.Nested, HookCommandStyle.Cmd, CodexHooks, Approvals: true, Questions: false,
+            // Codex runs a hook's command through PowerShell (seen in its CLI and app, 2026-11-28): a quoted path alone is a string.
+            HookFileShape.Nested, HookCommandStyle.PowerShell, CodexHooks, Approvals: true, Questions: false,
             AfterInstall: () => Loc.T("在 Codex 中输入 /hooks，审阅并信任新钩子后才会生效", "In Codex, enter /hooks and trust the new hooks before they run")),
         new("antigravity", "Antigravity", AgentHookFormats.Antigravity, () => Loc.T("Antigravity 桌面版、Antigravity IDE 与 Antigravity CLI", "Antigravity desktop app, Antigravity IDE and Antigravity CLI"),
             p => Path.Combine(p.Home, ".gemini", "config", "hooks.json"),
