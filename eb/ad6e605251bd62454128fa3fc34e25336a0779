@@ -1,0 +1,92 @@
+src/BrimDeck.WslAgent/Program.cs
+  s_86d15b01ec7d6f::t_880f202e001bf1 32
+docs/zh-CN/mail.md
+  s_86d15b01ec7d6f::t_ffcdef5f866c68 7,10,14,68,78
+src/BrimDeck/MainWindow.xaml.cs
+  s_86d15b01ec7d6f::t_a50d7220c98cc7 758
+README.zh-CN.md
+  s_86d15b01ec7d6f::t_ffcdef5f866c68 153,158
+src/BrimDeck/SettingsMusic.cs
+  s_86d15b01ec7d6f::t_8967364b000b9a 104-106
+tests/BrimDeck.Tests/NoticeCoreTests.cs
+  s_86d15b01ec7d6f::t_b2a99638b745ee 560,566
+docs/en-US/notices.md
+  s_86d15b01ec7d6f::t_ffcdef5f866c68 1,7,9-10,16,18,54,56,96,100,117,128,137,156,208,237,239,257,279,316,341,392
+  h_dc4d9c798f1bc1 381
+src/BrimDeck/SettingsNotices.Apps.cs
+  s_86d15b01ec7d6f::t_880f202e001bf1 77-78,381-382,447
+docs/zh-CN/agents.md
+  s_86d15b01ec7d6f::t_ffcdef5f866c68 13,93,106,108
+src/BrimDeck/MainWindow.CompactColumn.cs
+  s_86d15b01ec7d6f::t_880f202e001bf1 41
+src/BrimDeck/MainWindow.CompactAttention.cs
+  s_86d15b01ec7d6f::t_880f202e001bf1 13
+docs/en-US/agents.md
+  s_86d15b01ec7d6f::t_ffcdef5f866c68 13,93,106,108
+src/BrimDeck/MainWindow.Music.cs
+  s_86d15b01ec7d6f::t_880f202e001bf1 1348,1360
+docs/zh-CN/notices.md
+  s_86d15b01ec7d6f::t_ffcdef5f866c68 1,7,9-10,16,18,54,56,96,100,117,128,137,156,208,237,239,257,279,316,341,387,392
+  s_481a47d8850645::t_7f5a9215537ea6 381
+src/BrimDeck/IslandNotice.cs
+  s_86d15b01ec7d6f::t_880f202e001bf1 120,329
+src/BrimDeck/SettingsWindow.cs
+  s_86d15b01ec7d6f::t_a50d7220c98cc7 537
+  s_86d15b01ec7d6f::t_880f202e001bf1 344,556
+src/BrimDeck/NoticeCenter.cs
+  s_86d15b01ec7d6f::t_880f202e001bf1 370,920
+src/BrimDeck/SettingsNotices.cs
+  s_86d15b01ec7d6f::t_880f202e001bf1 14,68,92,98
+src/BrimDeck.Core/Settings.cs
+  s_86d15b01ec7d6f::t_880f202e001bf1 97,810,904,957
+README.md
+  s_86d15b01ec7d6f::t_ffcdef5f866c68 153,158
+docs/zh-CN/privacy.md
+  s_86d15b01ec7d6f::t_ffcdef5f866c68 59-60,85-86
+src/BrimDeck.Core/Agents/OpenCodePlugin.cs
+  s_86d15b01ec7d6f::t_880f202e001bf1 43
+src/BrimDeck.Core/Agents/CommandCodeMod.cs
+  s_86d15b01ec7d6f::t_880f202e001bf1 27
+src/BrimDeck/MainWindow.AgentStrip.cs
+  s_86d15b01ec7d6f::t_880f202e001bf1 69
+src/BrimDeck/SettingsHotkeys.cs
+  s_86d15b01ec7d6f::t_a50d7220c98cc7 74-75
+  s_86d15b01ec7d6f::t_880f202e001bf1 56
+src/BrimDeck.Notify/Program.cs
+  s_86d15b01ec7d6f::t_880f202e001bf1 38-39
+src/BrimDeck/MainWindow.PageMore.cs
+  s_86d15b01ec7d6f::t_a50d7220c98cc7 121
+docs/en-US/mail.md
+  s_86d15b01ec7d6f::t_ffcdef5f866c68 7,10,14,68,78
+docs/en-US/privacy.md
+  s_86d15b01ec7d6f::t_ffcdef5f866c68 59-60,85-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ebad6e605251bd62454128fa3fc34e25336a0779",
+  "prompts": {},
+  "humans": {
+    "h_dc4d9c798f1bc1": {
+      "author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_481a47d8850645": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6cc7b338-74af-46df-aebe-e070a1ce0b57",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_86d15b01ec7d6f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eaf534d2-0434-423b-8a79-afafb3d5bcb5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
