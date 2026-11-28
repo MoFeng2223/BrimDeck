@@ -6,7 +6,7 @@ namespace BrimDeck;
 //   WeatherSources.Models.cs     传输模型（来源与聚合层的数据契约）
 //   WeatherSources.Aggregator.cs 按域取数并合并成 WeatherSnapshot
 //   WeatherSources.OpenMeteo.cs / WeatherSources.HeFeng.cs   可选来源实现
-//   WeatherDailySupplement.ComCn.cs                          和风日预报的国内补充通道（非可选来源）
+//   WeatherDailySupplement.ComCn.cs / .OpenMeteo.cs          和风日预报的国内/国外补充通道（非可选来源）
 //   HeFengMonitor.cs                                         和风实况连通性状态
 //   WeatherSources.Tools.cs                                  Geo / WeatherCodes / WeatherClock / Json 工具
 // WeatherDomain 与 WeatherSettings 定义在 BrimDeck.Core：它们是 settings.json 的一部分。

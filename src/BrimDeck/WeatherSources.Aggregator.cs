@@ -5,12 +5,15 @@ using BrimDeck.Core;
 namespace BrimDeck;
 
 // 单源聚合：每个域只请求用户选定的那一家；同一次刷新把多个域合并成尽量少的请求。
-// 指定来源缺的字段就留空，不跨源补缺；唯一的例外是和风日预报在国内由中国天气网补充通道补齐缺口。
+// 指定来源缺的字段就留空，不跨源补缺；唯一的例外是和风日预报：国内由中国天气网、
+// 国外由 Open-Meteo 的补充通道补齐日期轴缺口。
 internal static class WeatherAggregator
 {
     private static readonly TimeSpan SourceTimeout = TimeSpan.FromSeconds(15);
     // 时光机 10 次请求分批执行，耗时远超其它域：单独计时，不与预警/指数共用 15 秒预算。
     private static readonly TimeSpan HistoryTimeout = TimeSpan.FromSeconds(25);
+    // 日预报补充通道的补回结果与来源名：合并时按实际贡献记到页脚来源里。
+    private sealed record DailySupplement(List<DayPoint> Days, string Name);
 
     // 两段式：首屏先取实况/预报/空气/分钟；时光机（10 次请求）与和风 v7 重域（预警/指数）放到第二段。
     // progress 在第一段结束后回调一次，界面先画不含历史的版本，历史到了再整体替换。
@@ -27,15 +30,24 @@ internal static class WeatherAggregator
         await FetchRoundAsync(city, settings, owners, parts, deferred: true, token: token);
         return Merge(city, sourceId, owners, parts, await supplement);
 
-        async Task<List<DayPoint>> LoadDailySupplementAsync()
+        async Task<DailySupplement?> LoadDailySupplementAsync()
         {
-            if (!ChinaDailySupplement.Applies(sourceId, city)) return [];
-            var today = LocalToday(city.TimeZoneId ?? "Asia/Shanghai", city);
+            string? zone = city.TimeZoneId ?? parts.Values.Select(part => part.TimeZone).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+            var today = LocalToday(zone, city);
             var days = parts.GetValueOrDefault(sourceId)?.Days;
-            if (!ChinaDailySupplement.Missing(days, today)) return [];
-            try { return await ChinaDailySupplement.FetchAsync(city, today, token); }
+            bool china = ChinaDailySupplement.Applies(sourceId, city);
+            bool overseas = OpenMeteoDailySupplement.Applies(sourceId, city);
+            if (!china && !overseas) return null;
+            // 两条通道都只在主来源的日级数据有缺口时才发请求；补到的日期同样先过缺口判断。
+            if (china ? !ChinaDailySupplement.Missing(days, today) : !OpenMeteoDailySupplement.Missing(days, today)) return null;
+            try
+            {
+                var fetched = china ? await ChinaDailySupplement.FetchAsync(city, today, token)
+                    : await OpenMeteoDailySupplement.FetchAsync(city, settings, today, token);
+                return fetched.Count > 0 ? new DailySupplement(fetched, china ? ChinaDailySupplement.Name : OpenMeteoDailySupplement.Name) : null;
+            }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-            catch { return []; }
+            catch { return null; }
         }
     }
 
@@ -107,7 +119,7 @@ internal static class WeatherAggregator
     }
 
     // 合并：先建立以今天为中心的 24 天日期轴（历史 10 + 今天 + 未来 13），再按域把负责来源的数据叠上去。
-    private static WeatherSnapshot Merge(City city, string sourceId, IReadOnlyDictionary<WeatherDomain, IWeatherSource?> owners, Dictionary<string, WeatherPart> parts, List<DayPoint>? supplement = null)
+    private static WeatherSnapshot Merge(City city, string sourceId, IReadOnlyDictionary<WeatherDomain, IWeatherSource?> owners, Dictionary<string, WeatherPart> parts, DailySupplement? supplement = null)
     {
         // 以城市当地日期为中心：查询国外城市时，“今天”不能按用户所在时区算。
         string? zone = city.TimeZoneId ?? parts.Values.Select(part => part.TimeZone).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
@@ -214,13 +226,13 @@ internal static class WeatherAggregator
         if (supplement is not null)
         {
             bool contributed = false;
-            foreach (var day in supplement)
+            foreach (var day in supplement.Days)
                 if (dayMap.TryGetValue(day.Date, out var target))
                     contributed |= MergeDay(target, day);
             if (contributed)
             {
                 if (!used.TryGetValue(WeatherDomain.Daily, out var names)) used[WeatherDomain.Daily] = names = [];
-                names.Add(ChinaDailySupplement.Name);
+                names.Add(supplement.Name);
             }
         }
         var cityKey = WeatherData.CacheKey(city, sourceId);
