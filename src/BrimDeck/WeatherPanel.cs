@@ -19,11 +19,11 @@ public partial class MainWindow
         if (!Settings.ShowsWeather(EffectiveStyle)) return null;
         var state = _compactWeatherState ??= WeatherData.Load(() => Settings);
         string key = state.Selected >= 0 && state.Selected < state.Cities.Count ? state.KeyFor(state.Cities[state.Selected]) : state.AutoKey;
-        if (!state.Cache.TryGetValue(key, out var snapshot) || !double.IsFinite(snapshot.Temperature)) return null;
+        if (!state.Cache.TryGetValue(key, out var snapshot) || snapshot.Temperature is not { } temp || !double.IsFinite(temp)) return null;
         var badge = new StackPanel { Orientation = Orientation.Horizontal, ToolTip = snapshot.Name };
-        if (snapshot.WeatherCode >= 0)
-            badge.Children.Add(new WeatherGlyph(snapshot.WeatherCode, snapshot.IsDay) { Width = 16 * scale, Height = 16 * scale, Margin = new Thickness(0, 0, 3 * scale, 0) });
-        badge.Children.Add(UI.Fixed($"{snapshot.Temperature:0}°", 13 * scale, 18 * scale, Look.Primary));
+        if (snapshot.WeatherCode is { } code && code >= 0)
+            badge.Children.Add(new WeatherGlyph(code, snapshot.IsDay) { Width = 16 * scale, Height = 16 * scale, Margin = new Thickness(0, 0, 3 * scale, 0) });
+        badge.Children.Add(UI.Fixed($"{temp:0}°", 13 * scale, 18 * scale, Look.Primary));
         badge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         badge.Width = Math.Ceiling(badge.DesiredSize.Width);
         badge.Height = badge.DesiredSize.Height;

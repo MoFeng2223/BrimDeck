@@ -61,13 +61,13 @@ public sealed partial class SettingsWindow
                 if(city is null){
                     string local=autoName;
                     if(state.Cache.TryGetValue(state.DisplayAutoKey,out var snap)){
-                        temperature=double.IsFinite(snap.Temperature)?$"{snap.Temperature:0}°":"--";code=snap.WeatherCode;day=snap.IsDay;
+                        temperature=snap.Temperature is { } t && double.IsFinite(t)?$"{t:0}°":"--";code=snap.WeatherCode??-1;day=snap.IsDay;
                         if(!snap.Name.Contains("当前位置"))local=snap.Name;
                     }
                     if(local.Trim().Length>0&&!local.Contains("当前位置"))subtitle=DisplayCityName(local);
                 } else {
                     var parts=SplitName(city.Name);name=parts.Title;subtitle=DisplayCityName(city.Name);
-                    if(state.Cache.TryGetValue(state.KeyFor(city),out var snap)){temperature=double.IsFinite(snap.Temperature)?$"{snap.Temperature:0}°":"--";code=snap.WeatherCode;day=snap.IsDay;}
+                    if(state.Cache.TryGetValue(state.KeyFor(city),out var snap)){temperature=snap.Temperature is { } t && double.IsFinite(t)?$"{t:0}°":"--";code=snap.WeatherCode??-1;day=snap.IsDay;}
                 }
                 var grid=CityGrid();var sources=WeatherSources.All;
                 if(selected){
@@ -695,13 +695,13 @@ internal sealed class WeatherSettingsCard : Border
         int code=snap?.WeatherCode??-1;bool day=snap?.IsDay??true;
         string cityName=state.Selected>=0&&state.Selected<state.Cities.Count?state.Cities[state.Selected].Name:state.LocatedCity?.Name ?? "当前位置";
         string Place(string n)=>n=="当前位置"?Loc.T("当前位置","Current location"):n;
-        string Deg(double value)=>double.IsNaN(value)?"--":$"{value:0}°";
-        string Num(double value,string suffix)=>double.IsNaN(value)?"--":value.ToString("0.#",System.Globalization.CultureInfo.InvariantCulture)+suffix;
-        string Clock(string[] times,int index)=>index>=0&&index<times.Length&&times[index].Length>=16?times[index][11..16]:"--:--";
+        string Deg(double? value)=>value is { } v && double.IsFinite(v)?$"{v:0}°":"--";
+        string Num(double? value,string suffix)=>value is { } v && double.IsFinite(v)?v.ToString("0.#",System.Globalization.CultureInfo.InvariantCulture)+suffix:"--";
+        string Clock(DayPoint[] days,int index,Func<DayPoint,string?> pick)=>index>=0&&index<days.Length&&pick(days[index]) is { Length: >= 16 } text?text[11..16]:"--:--";
         int today=snap is null?0:WeatherClock.SnapshotIndex(snap);
         int dateIndex=today+selectedDay;
         bool future=selectedDay>0;
-        if(future && snap is not null){code=(uint)dateIndex < (uint)snap.DayCodes.Length ? snap.DayCodes[dateIndex] : -1;day=true;}
+        if(future && snap is not null){code=dateIndex>=0&&dateIndex<snap.Days.Length?(snap.Days[dateIndex].Code??-1):-1;day=true;}
         // 天空底色保持拟真的天气渐变，不掺设置页主题色；只有前景文字/图标按天空深浅做对比度校正。
         // 这样晴昼是通透的蓝天、夜晚是深邃蓝黑，浅天空（雾、雪）时前景自动压深保证可读。
         var sky=WeatherVisuals.Sky(code,day);
@@ -740,22 +740,23 @@ internal sealed class WeatherSettingsCard : Border
         AttachAction(icon,()=>RefreshRequested?.Invoke());
         first.Children.Add(icon);
         first.Children.Add(new TextBlock {Text=snap is null?"":code<0?"":WeatherVisuals.Condition(code),FontSize=17,FontWeight=FontWeights.Medium,Foreground=secondary,VerticalAlignment=VerticalAlignment.Center});
-        first.Children.Add(new TextBlock {Text=snap is null?"":Deg(future ? dateIndex<snap.DayHighC.Length?snap.DayHighC[dateIndex]:double.NaN : snap.Temperature),FontSize=46,FontWeight=FontWeights.Light,Foreground=primary,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(12,0,0,0)});
+        first.Children.Add(new TextBlock {Text=snap is null?"":Deg(future ? dateIndex>=0&&dateIndex<snap.Days.Length?snap.Days[dateIndex].HighC:null : snap.Temperature),FontSize=46,FontWeight=FontWeights.Light,Foreground=primary,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(12,0,0,0)});
         now.Children.Add(first);
         var forecast=new UniformGrid {Rows=1,Columns=3,Margin=new Thickness(12,0,14,0),VerticalAlignment=VerticalAlignment.Center,HorizontalAlignment=HorizontalAlignment.Right};
 
         for(int i=0;i<3;i++) {
             bool selectable = false;
             string dayTitle="";int dCode=-1;string rain="";string high="";string low="";
-            if(snap is not null&&snap.DayDates.Length>0) {
-                int idx=today+i; if(idx<0||idx>=snap.DayDates.Length) break;
-                if (!DateTime.TryParse(snap.DayDates[idx],out var date)) continue;
+            if(snap is not null&&snap.Days.Length>0) {
+                int idx=today+i; if(idx<0||idx>=snap.Days.Length) break;
+                if (!DateTime.TryParse(snap.Days[idx].Date,out var date)) continue;
          dayTitle=i==0?Loc.T("今天","Today"):i==1?Loc.T("明天","Tomorrow"):Loc.T(new[]{"周日","周一","周二","周三","周四","周五","周六"}[(int)date.DayOfWeek],new[]{"Sun","Mon","Tue","Wed","Thu","Fri","Sat"}[(int)date.DayOfWeek]);
-                dCode=snap.DayCodes.Length>idx&&snap.DayCodes[idx]>=0?snap.DayCodes[idx]:-1;
-                int r=snap.DayRainProb.Length>idx?snap.DayRainProb[idx]:-1;rain=r>=20?r+"%":"–";
-                selectable = dCode >= 0 || r >= 0 || idx < snap.DayHighC.Length && double.IsFinite(snap.DayHighC[idx])
-                    || idx < snap.DayLowC.Length && double.IsFinite(snap.DayLowC[idx]) || i == 0 && double.IsFinite(snap.Temperature);
-                high=Deg(snap.DayHighC.Length>idx?snap.DayHighC[idx]:double.NaN);low=Deg(snap.DayLowC.Length>idx?snap.DayLowC[idx]:double.NaN);
+                var dayPoint=snap.Days[idx];
+                dCode=dayPoint.Code??-1;
+                int r=dayPoint.RainProb??-1;rain=r>=20?r+"%":"–";
+                selectable = dCode >= 0 || r >= 0 || dayPoint.HighC is { } hi && double.IsFinite(hi)
+                    || dayPoint.LowC is { } lo && double.IsFinite(lo) || i == 0 && snap.Temperature is { } ct && double.IsFinite(ct);
+                high=Deg(dayPoint.HighC);low=Deg(dayPoint.LowC);
             }
             // 每列固定 64px：正好装下「今天 / 图标 / 降水 / 15°/4°」，三列合计 192，右边留出呼吸位。
             var col=new StackPanel {Width=64,VerticalAlignment=VerticalAlignment.Center};
@@ -782,16 +783,16 @@ internal sealed class WeatherSettingsCard : Border
         var footer=new Grid();
         footer.ColumnDefinitions.Add(new ColumnDefinition());
         footer.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
-        var humidity=future ? snap?.DayHumidity.ElementAtOrDefault(dateIndex) : snap?.HumidityPercent;
-        if(future && (snap is null || dateIndex>=snap.DayHumidity.Length)) humidity=null;
-        double wind=future && snap is not null ? dateIndex<snap.DayWindMaxKmh.Length?snap.DayWindMaxKmh[dateIndex]:double.NaN : snap?.WindKmh??double.NaN;
+        var selectedDayPoint=snap is not null && dateIndex>=0 && dateIndex<snap.Days.Length ? snap.Days[dateIndex] : null;
+        var humidity=future ? selectedDayPoint?.Humidity : snap?.HumidityPercent;
+        double wind=future ? selectedDayPoint?.WindMaxKmh??double.NaN : snap?.WindKmh??double.NaN;
         // 风向文字优先，缺失时按度数经 8 方位归一，与实况风速卡同一套规则（DegreesFromText → Compass8Angle）。
-        string windDir=future && snap is not null ? dateIndex<snap.DayWindDir.Length?snap.DayWindDir[dateIndex]:"" : snap?.WindDirection??"";
-        double windDeg=future && snap is not null ? dateIndex<snap.DayWindDirDeg.Length?snap.DayWindDirDeg[dateIndex]:double.NaN : snap?.WindDirectionDeg??double.NaN;
+        string windDir=future ? selectedDayPoint?.WindDir??"" : snap?.WindDirection??"";
+        double windDeg=future ? selectedDayPoint?.WindDirDeg??double.NaN : snap?.WindDirectionDeg??double.NaN;
         if(string.IsNullOrWhiteSpace(windDir)&&!double.IsNaN(windDeg)) windDir=WeatherCodes.DegreeToCompass(windDeg)+Loc.T("风","");
         double windAngle=WeatherCodes.Wind8Angle(windDir,windDeg);
-        string meta1=snap is null?"":future ? Loc.T($"最低 {Deg(dateIndex<snap.DayLowC.Length?snap.DayLowC[dateIndex]:double.NaN)}",$"Low {Deg(dateIndex<snap.DayLowC.Length?snap.DayLowC[dateIndex]:double.NaN)}") : Loc.T($"体感 {Num(snap.FeelsLike,"°")}",$"Feels like {Num(snap.FeelsLike,"°")}");
-        string meta2=snap is null?"":Loc.T($"湿度 {(humidity>=0?humidity+"%":"--")}",$"Humidity {(humidity>=0?humidity+"%":"--")}");
+        string meta1=snap is null?"":future ? Loc.T($"最低 {Deg(selectedDayPoint?.LowC)}",$"Low {Deg(selectedDayPoint?.LowC)}") : Loc.T($"体感 {Num(snap.FeelsLike,"°")}",$"Feels like {Num(snap.FeelsLike,"°")}");
+        string meta2=snap is null?"":Loc.T($"湿度 {(humidity is { } h && h>=0?h+"%":"--")}",$"Humidity {(humidity is { } h2 && h2>=0?h2+"%":"--")}");
         // 风速文本与灵动岛风速卡同构：有方位先出方位 + 速度，没有才退回「风 + 速度」。
         string meta3=snap is null?"":windDir.Length>0
             ? Loc.T($"{windDir} {Num(wind," km/h")}",$"{windDir} {Num(wind," km/h")}")
@@ -816,7 +817,7 @@ internal sealed class WeatherSettingsCard : Border
         // 日升日落条目与其他元信息行水平居中对齐：图标与文本各自垂直居中，整块在 footer 右侧垂直居中。
         var sun=new StackPanel {Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Center};
         sun.Children.Add(new WeatherMetaIcon(WeatherMetaKind.Sunrise,InkColor("#FFC85A")){Width=14,Height=14,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,5,0)});
-        sun.Children.Add(new TextBlock {Text=snap is null?"":Loc.T($"日升 {Clock(snap.SunriseTimes,dateIndex)} · 日落 {Clock(snap.SunsetTimes,dateIndex)}",$"Sunrise {Clock(snap.SunriseTimes,dateIndex)} · Sunset {Clock(snap.SunsetTimes,dateIndex)}"),FontSize=11,Foreground=secondary,VerticalAlignment=VerticalAlignment.Center});
+        sun.Children.Add(new TextBlock {Text=snap is null?"":Loc.T($"日升 {Clock(snap.Days,dateIndex,d=>d.Sunrise)} · 日落 {Clock(snap.Days,dateIndex,d=>d.Sunset)}",$"Sunrise {Clock(snap.Days,dateIndex,d=>d.Sunrise)} · Sunset {Clock(snap.Days,dateIndex,d=>d.Sunset)}"),FontSize=11,Foreground=secondary,VerticalAlignment=VerticalAlignment.Center});
         footer.Children.Add(meta);
         Grid.SetColumn(sun,1);
         sun.Margin=new Thickness(0,0,14,0);

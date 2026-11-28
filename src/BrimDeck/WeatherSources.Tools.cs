@@ -23,7 +23,7 @@ internal static class WeatherClock
     internal static string DateKey(DateTime date) => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
     internal static string MonthKey(DateTime date) => date.ToString("yyyyMM", CultureInfo.InvariantCulture);
 
-    // 城市当地此刻；优先按快照保存的 IANA 时区解析（夏令时随之切换），旧快照才退回固定偏移。
+    // 城市当地此刻；优先按快照保存的 IANA 时区解析（夏令时随之切换），拿不到时区才退回按经度估算的固定偏移。
     internal static DateTimeOffset Now(WeatherSnapshot s)
     {
         if (!string.IsNullOrWhiteSpace(s.TimeZoneId)
@@ -51,7 +51,7 @@ internal static class WeatherClock
     // 快照抓取时写下的今天在正序日期轴上的位置；找不到回退 0。用于选窗口这类不关心跨日的场景。
     internal static int SnapshotIndex(WeatherSnapshot s)
     {
-        for (int i = 0; i < s.DayDates.Length; i++) if (s.DayDates[i].StartsWith(s.Today, StringComparison.Ordinal)) return i;
+        for (int i = 0; i < s.Days.Length; i++) if (s.Days[i].Date.StartsWith(s.Today, StringComparison.Ordinal)) return i;
         return 0;
     }
 
@@ -59,7 +59,7 @@ internal static class WeatherClock
     internal static int LiveIndex(WeatherSnapshot s)
     {
         string today = DateKey(Now(s).DateTime);
-        for (int i = 0; i < s.DayDates.Length; i++) if (s.DayDates[i].StartsWith(today, StringComparison.Ordinal)) return i;
+        for (int i = 0; i < s.Days.Length; i++) if (s.Days[i].Date.StartsWith(today, StringComparison.Ordinal)) return i;
         return -1;
     }
 }

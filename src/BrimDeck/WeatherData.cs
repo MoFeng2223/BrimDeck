@@ -27,8 +27,9 @@ internal static class WeatherData
     }
     private sealed class SnapshotFile { public string Key {get;set;}=""; public WeatherSnapshot? Value {get;set;} }
     private static readonly HttpClient Http=new() {Timeout=TimeSpan.FromSeconds(20)};
-    // 快照用 NaN 表示来源未提供的数值；命名浮点字面量让缓存可以安全写入并还原，缩进让缓存可读。
-    private static readonly JsonSerializerOptions WeatherJson=new() {WriteIndented=true,Encoder=System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,NumberHandling=System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals,DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull};
+    // 快照持有结构化 nullable 对象：CurrentPart/DayPoint 用 public 字段（合并时 ref 写入），必须 IncludeFields 才会落盘。
+    // 缺字段是 null，WhenWritingNull 直接不写；缩进让缓存可读。
+    private static readonly JsonSerializerOptions WeatherJson=new() {WriteIndented=true,IncludeFields=true,Encoder=System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,NumberHandling=System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals,DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull};
     // 已落盘的快照时间：同一条数据没有更新就不再重复写盘，刷新一座城只碰一个文件。
     private static readonly object SnapLock=new();
     private static readonly Dictionary<string,DateTimeOffset> Written=new(StringComparer.Ordinal);
@@ -282,7 +283,7 @@ internal static class WeatherData
 
     // 只有天气相关域的成功才算一次可用取数；只有预警/指数成功时回退同城缓存的天气。
     internal static bool HasWeather(WeatherSnapshot snapshot)
-        => double.IsFinite(snapshot.Temperature) || snapshot.Sources.Keys.Any(domain =>
+        => snapshot.Temperature is { } t && double.IsFinite(t) || snapshot.Sources.Keys.Any(domain =>
             domain is "Current" or "Hourly" or "Daily" or "Air" or "History" or "Minutely");
 }
 
@@ -295,6 +296,7 @@ internal static class WeatherHourHistory
     private static string Root => Path.Combine(WeatherFiles.Root, "weather", "hour-history");
     private static readonly JsonSerializerOptions Json = new()
     {
+        IncludeFields = true,
         NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
@@ -345,21 +347,11 @@ internal static class WeatherHourHistory
         {
             Start();
             if (!Memory.TryGetValue(key, out var dict)) Memory[key] = dict = new Dictionary<string, HourPoint>(StringComparer.Ordinal);
-            for (int i = 0; i < snapshot.HourTimes.Length; i++)
+            // 快照直接持有 HourPoint，无需从哨兵数组还原；只挑有数据的整点入历史。
+            foreach (var hour in snapshot.Hours)
             {
-                string time = snapshot.HourTimes[i];
-                if (string.IsNullOrWhiteSpace(time)) continue;
-                var hour = new HourPoint
-                {
-                    Time = time,
-                    Temperature = At(snapshot.HourTempsC, i), FeelsLike = At(snapshot.HourFeelsLikeC, i),
-                    Humidity = Int(snapshot.HourHumidity, i), Code = Int(snapshot.HourCodes, i), RainProb = Int(snapshot.HourRainProb, i),
-                    PrecipMm = At(snapshot.HourPrecipMm, i), WindKmh = At(snapshot.HourWindKmh, i), WindGustKmh = At(snapshot.HourWindGustKmh, i),
-                    WindDirDeg = At(snapshot.HourWindDirDeg, i), PressureHpa = At(snapshot.HourPressureHpa, i), Uv = At(snapshot.HourUv, i),
-                    DewPointC = At(snapshot.HourDewPointC, i), CloudPercent = At(snapshot.HourCloudPercent, i), VisibilityKm = At(snapshot.HourVisibilityKm, i),
-                    Aqi = Int(snapshot.HourAqi, i)
-                };
-                if (hour.HasData()) dict[time] = hour;
+                if (string.IsNullOrWhiteSpace(hour.Time) || !hour.HasData()) continue;
+                dict[hour.Time] = hour;
             }
             if (dict.Count == 0) return;
             var newest = dict.Keys.Select(ParseTime).DefaultIfEmpty(DateTime.MinValue).Max();
@@ -376,6 +368,4 @@ internal static class WeatherHourHistory
 
     private static DateTime ParseTime(string t)
         => DateTime.TryParseExact(t, "yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var value) ? value : DateTime.MinValue;
-    private static double? At(double[] values, int i) => i >= 0 && i < values.Length && !double.IsNaN(values[i]) ? values[i] : null;
-    private static int? Int(int[] values, int i) => i >= 0 && i < values.Length && values[i] >= 0 ? values[i] : null;
 }

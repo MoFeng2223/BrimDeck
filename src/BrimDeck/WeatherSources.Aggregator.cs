@@ -222,7 +222,7 @@ internal static class WeatherAggregator
         // 逐时窗口固定以「当前整点」为起点、共 24 条：当前 + 未来 23 小时。
         // 过去的小时不展示（各预报源都拿不到，不联网补、不冒充预报）。当前小时和风要到下一整点才给，
         // 优先用本地历史兜底：每次成功刷新都把当时的整点数据存进 weather/hour-history，
-        // 同一小时内的后续刷新就能用上实测；本地也没有就留空（NaN / -1），界面隐藏数值。
+        // 同一小时内的后续刷新就能用上实测；本地也没有就留空（null），界面隐藏数值。
         if (supplement is not null)
         {
             bool contributed = false;
@@ -264,6 +264,8 @@ internal static class WeatherAggregator
             && DateTime.TryParse(localDay.Sunrise, out var sunrise) && DateTime.TryParse(localDay.Sunset, out var sunset)
             && sunrise.Date == localNow.Date && sunset.Date == localNow.Date && sunrise < sunset)
             daylight = localNow >= sunrise && localNow < sunset;
+        // 昼夜兜底：来源没给 IsDay 时按当地日出日落推算，写回结构化 Current（快照 IsDay 代理读它）。
+        current.IsDay = daylight;
         var snapshot = new WeatherSnapshot
         {
             Name = city.Name,
@@ -272,101 +274,22 @@ internal static class WeatherAggregator
             CityKey = cityKey,
             Today = WeatherClock.DateKey(today),
             FetchedAt = DateTimeOffset.Now,
-            // 城市时钟：优先用 IANA 时区按当前时刻解析偏移，旧快照才靠固定偏移兜底。
+            // 城市时钟：优先用 IANA 时区按当前时刻解析偏移，拿不到时区才按经度估算。
             TimeZoneId = zone ?? "",
             UtcOffsetMinutes = (int)ClockOffset(zone, city).TotalMinutes,
-            Temperature = current.Temperature ?? double.NaN,
-            FeelsLike = current.FeelsLike ?? current.Temperature ?? double.NaN,
-            HumidityPercent = current.Humidity ?? -1,
-            WindKmh = current.WindKmh ?? double.NaN,
-            WindGustKmh = current.WindGustKmh ?? double.NaN,
-            WindDirectionDeg = current.WindDirDeg ?? double.NaN,
-            WindDirection = current.WindDir ?? "",
-            PressureHpa = current.PressureHpa ?? double.NaN,
-            VisibilityKm = current.VisibilityKm ?? double.NaN,
-            DewPointC = current.DewPointC ?? double.NaN,
-            UvIndex = current.Uv ?? double.NaN,
-            CloudPercent = current.CloudPercent ?? double.NaN,
-            PrecipitationMm = current.PrecipMm ?? double.NaN,
-            WindScale = current.WindScale ?? -1,
-            PrecipRateMmH = current.PrecipRateMmH ?? double.NaN,
-            PrecipType = current.PrecipType ?? "",
-            WeatherCode = current.Code ?? -1,
-            IsDay = daylight,
-            Aqi = air?.Aqi ?? -1,
-            AqiGlobal = air?.AqiGlobal ?? -1,
-            Pm25 = air?.Pm25 ?? -1,
-            Pm10 = air?.Pm10 ?? -1,
-            AqiLevel = air?.Level ?? -1,
-            AqiText = air?.Text ?? "",
-            AqiStandard = air?.Standard ?? "",
-            AirPrimary = air?.PrimaryName ?? air?.Primary ?? "",
-            AirEffect = air?.HealthEffect ?? "",
-            AirAdvice = air?.HealthGeneral ?? "",
-            AirAdviceSensitive = air?.HealthSensitive ?? "",
-            DayDates = dates.Select(WeatherClock.DateKey).ToArray(),
-            DayCodes = datePoints(dayMap, dates, point => point.Code ?? -1),
-            DayConditions = datePoints(dayMap, dates, point => point.Condition ?? ""),
-            DayHighC = datePoints(dayMap, dates, point => point.HighC ?? double.NaN),
-            DayLowC = datePoints(dayMap, dates, point => point.LowC ?? double.NaN),
-            DayFeelsHighC = datePoints(dayMap, dates, point => point.FeelsHighC ?? double.NaN),
-            DayFeelsLowC = datePoints(dayMap, dates, point => point.FeelsLowC ?? double.NaN),
-            SunriseTimes = datePoints(dayMap, dates, point => point.Sunrise ?? ""),
-            SunsetTimes = datePoints(dayMap, dates, point => point.Sunset ?? ""),
-            DayRainProb = datePoints(dayMap, dates, point => point.RainProb ?? -1),
-            DayPrecipMm = datePoints(dayMap, dates, point => point.PrecipMm ?? double.NaN),
-            DayUvMax = datePoints(dayMap, dates, point => point.UvMax ?? double.NaN),
-            DayWindMaxKmh = datePoints(dayMap, dates, point => point.WindMaxKmh ?? double.NaN),
-            DayGustMaxKmh = datePoints(dayMap, dates, point => point.GustMaxKmh ?? double.NaN),
-            DayWindDirDeg = datePoints(dayMap, dates, point => point.WindDirDeg ?? double.NaN),
-            DayWindDir = datePoints(dayMap, dates, point => point.WindDir ?? ""),
-            DayHumidity = datePoints(dayMap, dates, point => point.Humidity ?? -1),
-            DayPressureHpa = datePoints(dayMap, dates, point => point.PressureHpa ?? double.NaN),
-            DayMoonPhase = datePoints(dayMap, dates, point => point.MoonPhase ?? ""),
-            MoonriseTimes = datePoints(dayMap, dates, point => point.Moonrise ?? ""),
-            MoonsetTimes = datePoints(dayMap, dates, point => point.Moonset ?? ""),
-            DayAvgC = datePoints(dayMap, dates, point => point.AvgTempC ?? double.NaN),
-            DayCloudPercent = datePoints(dayMap, dates, point => point.CloudPercent ?? double.NaN),
-            DayNightCodes = datePoints(dayMap, dates, point => point.NightCode ?? -1),
-            DayNightConditions = datePoints(dayMap, dates, point => point.NightCondition ?? ""),
-            DayNightHumidity = datePoints(dayMap, dates, point => point.NightHumidity ?? -1),
-            DayNightWindMaxKmh = datePoints(dayMap, dates, point => point.NightWindMaxKmh ?? double.NaN),
-            DayNightGustMaxKmh = datePoints(dayMap, dates, point => point.NightGustMaxKmh ?? double.NaN),
-            DayNightWindDirDeg = datePoints(dayMap, dates, point => point.NightWindDirDeg ?? double.NaN),
-            DayNightWindDir = datePoints(dayMap, dates, point => point.NightWindDir ?? ""),
-            DayNightPrecipMm = datePoints(dayMap, dates, point => point.NightPrecipMm ?? double.NaN),
-            DayNightRainProb = datePoints(dayMap, dates, point => point.NightRainProb ?? -1),
-            DayNightCloudPercent = datePoints(dayMap, dates, point => point.NightCloudPercent ?? double.NaN),
-            SolarNoonTimes = datePoints(dayMap, dates, point => point.SolarNoon ?? ""),
-            MoonTransitTimes = datePoints(dayMap, dates, point => point.MoonTransit ?? ""),
-            MinuteTimes = minutes.OrderBy(m => m.Time, StringComparer.Ordinal).Select(m => m.Time).ToArray(),
-            MinutePrecip = minutes.OrderBy(m => m.Time, StringComparer.Ordinal).Select(m => m.Precip).ToArray(),
+            // 结构化对象直接赋值：来源层的 nullable 契约原样带进快照，不再拍平成哨兵数组。
+            Current = current,
+            Air = air,
+            Hours = hourList,
+            Days = dates.Select(date => dayMap[WeatherClock.DateKey(date)]).ToArray(),
+            Minutes = minutes.OrderBy(m => m.Time, StringComparer.Ordinal).ToArray(),
             MinuteSummary = minuteSummary ?? "",
             Warnings = [.. warnings],
             Indices = [.. indices],
-            HourTimes = hourList.Select(hour => hour.Time).ToArray(),
-            HourTempsC = hourList.Select(hour => hour.Temperature ?? double.NaN).ToArray(),
-            HourFeelsLikeC = hourList.Select(hour => hour.FeelsLike ?? double.NaN).ToArray(),
-            HourHumidity = hourList.Select(hour => hour.Humidity ?? -1).ToArray(),
-            HourCodes = hourList.Select(hour => hour.Code ?? -1).ToArray(),
-            HourRainProb = hourList.Select(hour => hour.RainProb ?? -1).ToArray(),
-            HourAqi = hourList.Select(hour => hour.Aqi ?? -1).ToArray(),
-            HourPrecipMm = hourList.Select(hour => hour.PrecipMm ?? double.NaN).ToArray(),
-            HourWindKmh = hourList.Select(hour => hour.WindKmh ?? double.NaN).ToArray(),
-            HourWindGustKmh = hourList.Select(hour => hour.WindGustKmh ?? double.NaN).ToArray(),
-            HourWindDirDeg = hourList.Select(hour => hour.WindDirDeg ?? double.NaN).ToArray(),
-            HourPressureHpa = hourList.Select(hour => hour.PressureHpa ?? double.NaN).ToArray(),
-            HourUv = hourList.Select(hour => hour.Uv ?? double.NaN).ToArray(),
-            HourDewPointC = hourList.Select(hour => hour.DewPointC ?? double.NaN).ToArray(),
-            HourCloudPercent = hourList.Select(hour => hour.CloudPercent ?? double.NaN).ToArray(),
-            HourVisibilityKm = hourList.Select(hour => hour.VisibilityKm ?? double.NaN).ToArray(),
             Sources = used.ToDictionary(pair => pair.Key.ToString(), pair => string.Join(" + ", pair.Value))
         };
         return snapshot;
     }
-
-    private static T[] datePoints<T>(Dictionary<string, DayPoint> map, DateTime[] dates, Func<DayPoint, T> select)
-        => dates.Select(date => select(map[WeatherClock.DateKey(date)])).ToArray();
 
     // 空位才写入：来源链靠前的那份数据优先，后面的来源只补空缺。
     private static bool Set<T>(ref T? field, T? value) where T : struct

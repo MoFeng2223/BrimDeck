@@ -458,7 +458,7 @@ internal sealed class WeatherView : UserControl
         days.Background = Brushes.Transparent;                       // 透明也要有画刷，否则空白处收不到命中测试
         void ToggleMode()
         {
-            if (_last is not { } snap || snap.HourTimes.Length == 0) return;
+            if (_last is not { } snap || snap.Hours.Length == 0) return;
             _hourlyMode = !_hourlyMode;
             _lens = Lens.Temp;                                        // 切回逐日时没有非气温镜头，顺手复位
             Fit(Width, Height, true); DrawSummary(snap);
@@ -600,7 +600,7 @@ internal sealed class WeatherView : UserControl
     // 列数几何的唯一计算点：宽度→列数、快照→实际列数，Fit（判变）与 Render（重画）共用。
     private static int LayoutColumns(double width) => Math.Clamp(7 + (int)Math.Round((width - 440) / 760.0 * 17), 7, 24);
     private int LayoutShown(int columns, WeatherSnapshot? s) => Math.Max(1, s is { } available
-        ? (_hourlyMode ? Math.Min(columns, Math.Max(1, available.HourTimes.Length)) : Math.Min(columns, available.DayDates.Length))
+        ? (_hourlyMode ? Math.Min(columns, Math.Max(1, available.Hours.Length)) : Math.Min(columns, available.Days.Length))
         : columns);
     private void ApplyLayout(WeatherSnapshot s)
     {
@@ -617,6 +617,7 @@ internal sealed class WeatherView : UserControl
     // 内容签名不含 FetchedAt：自动刷新拿回同一份数据时只需换页脚时刻，整页重建没有意义。
     private static readonly System.Text.Json.JsonSerializerOptions SignatureJson = new()
     {
+        IncludeFields = true,   // CurrentPart/DayPoint 用 public 字段存数据，不写上就漏掉实况/逐日变化，界面不会刷新。
         NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals
     };
     private static ulong Signature(WeatherSnapshot s)
@@ -646,8 +647,8 @@ internal sealed class WeatherView : UserControl
             ?? now.AddDays(1);
         foreach (var warning in s.Warnings)
             if (warning.ExpireTime is { } expiry && expiry > now && expiry < next) next = expiry;
-        foreach (var text in s.MinuteTimes)
-            if (WeatherClock.MinuteAt(s, text) is { } at && at >= now && at < next) next = at.AddMilliseconds(1);
+        foreach (var point in s.Minutes)
+            if (WeatherClock.MinuteAt(s, point.Time) is { } at && at >= now && at < next) next = at.AddMilliseconds(1);
         _nextBoundary = next;
         _timeBoundary.Stop();
         _timeBoundary.Interval = next > now ? next - now : TimeSpan.FromSeconds(1);
@@ -656,7 +657,7 @@ internal sealed class WeatherView : UserControl
 
     private void Render(WeatherSnapshot s)
     {
-        if (_hourlyMode && s.HourTimes.Length == 0) { _hourlyMode = false; _lens = Lens.Temp; }
+        if (_hourlyMode && s.Hours.Length == 0) { _hourlyMode = false; _lens = Lens.Temp; }
         _last = s;
         ApplyLayout(s);
         if (AutoSelected) _autoCityName = s.Name;
@@ -685,13 +686,9 @@ internal sealed class WeatherView : UserControl
     private void DrawMinute(WeatherSnapshot s)
     {
         minuteBars.Children.Clear();
-        // 离线快照里的整段降水可能已经过去：先按真实时间戳剔除已结束的区间，再画柱与倒计时。
-        // 旧快照没有时间戳时保留全部点，沿用按格估算的兼容路径。
+        // 按真实时间戳剔除已结束的区间，再画柱与倒计时。
         var nowAt = WeatherClock.Now(s);
-        var live = Enumerable.Range(0, s.MinutePrecip.Length)
-            .Select(index => new MinutePoint { Time = index < s.MinuteTimes.Length ? s.MinuteTimes[index] : "", Precip = s.MinutePrecip[index] })
-            .Where(point => WeatherClock.MinuteAt(s, point.Time) is not { } at || at >= nowAt)
-            .ToArray();
+        var live = s.Minutes.Where(point => WeatherClock.MinuteAt(s, point.Time) is { } at && at >= nowAt).ToArray();
         var points = live.Select(point => point.Precip).ToArray();
         if (points.Length == 0)
         {
@@ -708,8 +705,8 @@ internal sealed class WeatherView : UserControl
             int to = Math.Max(from + 1, (i + 1) * points.Length / slots);
             double peak = 0;
             for (int j = from; j < Math.Min(to, points.Length); j++)
-                // 缺失点现在是 null；旧快照可能仍存着 NaN，两种都跳过。
-                if (points[j] is { } value && !double.IsNaN(value)) peak = Math.Max(peak, value);
+                // 缺失点是 null，跳过。
+                if (points[j] is { } value) peak = Math.Max(peak, value);
             values[i] = peak;
         }
         _minuteHasRain = values.Any(v => v > 0);
@@ -736,27 +733,22 @@ internal sealed class WeatherView : UserControl
         }
         UpdateMinuteVisibility();
     }
-    // 没有来源总结时的兜底倒计时：取第一个有雨点的时间戳（与 MinutePrecip 同序），减城市当前时刻。
-    // 时间戳缺失或解析失败再退回按格估算，避免把 15 分钟粒度当成 5 分钟。
+    // 没有来源总结时的倒计时：取第一个有雨点的时间戳（与 Minutes 同序），减城市当前时刻。
     private static string RainStartNote(WeatherSnapshot s, MinutePoint[] points)
     {
         int first = Array.FindIndex(points, p => p.Precip is > 0);
         if (first < 0) return Loc.T("未来 2 小时无降水", "No rain in the next 2 hours");
-        if (WeatherClock.MinuteAt(s, points[first].Time) is { } start)
-        {
-            int minutes = Math.Max(0, (int)Math.Ceiling((start - WeatherClock.Now(s)).TotalMinutes));
-            return minutes == 0 ? Loc.T("正在下雨", "Raining now")
-                : Loc.T($"{minutes} 分钟后开始下雨", $"Rain in {minutes} min");
-        }
-        // 旧快照没有时间戳时按点数估间隔（和风 24 点=5 分钟，Open-Meteo 8 点=15 分钟，都覆盖 2 小时）。
-        int estimate = first * 120 / Math.Max(1, points.Length);
-        return Loc.T($"{estimate} 分钟后开始下雨", $"Rain in {estimate} min");
+        // 调用方 DrawMinute 已按时间戳过滤，这里每个点都有可解析的时间戳。
+        var start = WeatherClock.MinuteAt(s, points[first].Time)!.Value;
+        int minutes = Math.Max(0, (int)Math.Ceiling((start - WeatherClock.Now(s)).TotalMinutes));
+        return minutes == 0 ? Loc.T("正在下雨", "Raining now")
+            : Loc.T($"{minutes} 分钟后开始下雨", $"Rain in {minutes} min");
     }
     // 无数据或无降水整行归零（不占位）；只在逐时模式、真会下雨且高度够时展开；
     // 逐日模式优先保证 24 天预报的可用高度，不显示窄条；窄窗口只留文字不画柱。
     private void UpdateMinuteVisibility()
     {
-        bool show = !_indicesMode && _hourlyMode && _last is { MinutePrecip.Length: > 0 } && _minuteHasRain && Height >= 200;
+        bool show = !_indicesMode && _hourlyMode && _last is { Minutes.Length: > 0 } && _minuteHasRain && Height >= 200;
         // 窄条按 34px 从预报区里直接扣走：扣完如果连档 2（有图标、有温度）都装不下，就先不显示窄条。
         // 旧版只看「有雨且高度 ≥ 200」，这 34px 常把整块预报压到整行折叠，摘要被迫居中、上下空出一大片。
         if (show)
@@ -883,10 +875,10 @@ internal sealed class WeatherView : UserControl
     private string WindTitle(WeatherSnapshot s)
     {
         string dir = s.WindDirection;
-        if (string.IsNullOrWhiteSpace(dir) && !double.IsNaN(s.WindDirectionDeg))
-            dir = WeatherCodes.DegreeToCompass(s.WindDirectionDeg) + Loc.T("风", "");
+        if (string.IsNullOrWhiteSpace(dir) && s.WindDirectionDeg is { } deg && double.IsFinite(deg))
+            dir = WeatherCodes.DegreeToCompass(deg) + Loc.T("风", "");
         if (string.IsNullOrWhiteSpace(dir)) return Loc.T("风速", "Wind");
-        return s.WindScale >= 0 ? $"{dir} {s.WindScale}{Loc.T("级", " Bft")}" : dir;
+        return s.WindScale is { } scale && scale >= 0 ? $"{dir} {scale}{Loc.T("级", " Bft")}" : dir;
     }
 
     // 降水类型只显示类型名本身，图标按类型区分；未知/空保留通用“降水”，无降水用云朵而非水滴。
@@ -914,13 +906,13 @@ internal sealed class WeatherView : UserControl
     // 和风给了 category 就直接用，否则按国标 HJ 633 由 AQI 换算。
     private static string AirLevel(WeatherSnapshot s)
     {
-        if (s.Aqi < 0) return "--";
-        string level = s.AqiText.Length > 0 ? s.AqiText : WeatherCodes.AqiText(s.Aqi);
-        return $"{level} {s.Aqi}";
+        if (s.Aqi is not { } aqi) return "--";
+        string level = s.AqiText.Length > 0 ? s.AqiText : WeatherCodes.AqiText(aqi);
+        return $"{level} {aqi}";
     }
 
     private string? PrecipTip(WeatherSnapshot s)
-        => double.IsNaN(s.PrecipRateMmH) && string.IsNullOrWhiteSpace(s.PrecipType)
+        => s.PrecipRateMmH is null && string.IsNullOrWhiteSpace(s.PrecipType)
             ? null
             : Loc.T($"强度 {Num(s.PrecipRateMmH, " mm/h", 1)} · {PrecipName(s.PrecipType)}", $"Rate {Num(s.PrecipRateMmH, " mm/h", 1)} · {PrecipName(s.PrecipType)}");
     // 左上：大图标 + 大字温度 + 高低温/预警；右上：随宽度扩展的实况读数卡（体感/湿度/风速…天文入口）。来源统一放右下角页脚。
@@ -939,7 +931,7 @@ internal sealed class WeatherView : UserControl
         summary.RowDefinitions.Add(new RowDefinition { Height = _compactSummary ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
         var hero = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 2, 10, 2), VerticalAlignment = VerticalAlignment.Center };
         // 左上角大图标是视图切换入口：悬浮播放天气动效，点击在「逐时/逐日预报」与「生活指数」间互换。
-        var heroGlyph = new WeatherGlyph(s.WeatherCode, s.IsDay, animated: true)
+        var heroGlyph = new WeatherGlyph(s.WeatherCode ?? -1, s.IsDay, animated: true)
         {
             Width = plan.Icon, Height = plan.Icon, Margin = new Thickness(0, 0, 12, 0),
             VerticalAlignment = VerticalAlignment.Center, Cursor = System.Windows.Input.Cursors.Hand,
@@ -959,10 +951,10 @@ internal sealed class WeatherView : UserControl
         // 今日高低温取自 daily 数组（当天域），与实况温度分属两个数据域：实况来源成功而当天来源
         // 失败时数组可能为空，直接索引会越界异常、被 Render 的 catch 吞成整页空白。缺当天就显示
         // 占位符，实况大温度/图标/四张卡照常渲染——两个域互不牵连。
-        bool hasDay = today >= 0 && today < s.DayHighC.Length && today < s.DayLowC.Length;   // 日期轴过期时不拿旧日期冒充今天的高低温
-        string range = hasDay ? $"{Degree(s.DayHighC[today])} / {Degree(s.DayLowC[today])}" : "-- / --";
+        bool hasDay = today >= 0 && today < s.Days.Length;   // 日期轴过期时不拿旧日期冒充今天的高低温
+        string range = hasDay ? $"{Degree(s.Days[today].HighC)} / {Degree(s.Days[today].LowC)}" : "-- / --";
         // 有预警：高低温缩成小字挪到温度右侧，把温度下方这行让给最高等级的预警；无预警维持原样。
-        // 离线打开旧快照时也要按有效期过滤：到点的预警不需要等解除消息就不该再显示。
+        // 按有效期过滤：到点的预警不需要等解除消息就不该再显示。
         var activeWarnings = s.Warnings.Where(w => w.ExpireTime is null || w.ExpireTime > DateTimeOffset.Now).ToArray();
         var warn = activeWarnings.OrderByDescending(w => WarnRank(w.Level)).FirstOrDefault();
         if (warn is not null)
@@ -987,7 +979,7 @@ internal sealed class WeatherView : UserControl
         // 卡片密度按实际格宽微调：格宽不足 98 时图标与间距各收一档，把宽度让给文字，
         // 84–120 的弹性列宽下标签才不至于整段被省略号吃掉。余量档 Hero 实际比登记宽 8px，一并扣掉。
         const double metaGlyph = 18, metaGap = 5, valueFont = 12;
-        string rise = Clock(s.SunriseTimes, today), set = Clock(s.SunsetTimes, today);
+        string rise = Clock(s.Days, today, d => d.Sunrise), set = Clock(s.Days, today, d => d.Sunset);
         // 同一列上下放相关读数：风速/阵风、体感/露点、湿度/降水、气压/能见度、空气/紫外线、云量/日月。
         // 风向/风级并入风速卡，降水类型/强度并入降水卡；日升/日落是镜头入口，始终放在最右下角。
         // UniformGrid 按行填充：先写满上排再写下排，同一列的上下两张才会成对。
@@ -995,9 +987,9 @@ internal sealed class WeatherView : UserControl
         [
             (WeatherVisuals.MetricKind(Lens.Wind), WeatherVisuals.MetricInk(Lens.Wind), WindTitle(s), Num(s.WindKmh, " km/h"), Lens.Wind, null),
             (WeatherVisuals.MetricKind(Lens.Feels), WeatherVisuals.MetricInk(Lens.Feels), Loc.T("体感", "Feels like"), Num(s.FeelsLike, "°"), Lens.Feels, null),
-            (WeatherVisuals.MetricKind(Lens.Humidity), WeatherVisuals.MetricInk(Lens.Humidity), Loc.T("湿度", "Humidity"), s.HumidityPercent >= 0 ? $"{s.HumidityPercent}%" : "--", Lens.Humidity, null),
+            (WeatherVisuals.MetricKind(Lens.Humidity), WeatherVisuals.MetricInk(Lens.Humidity), Loc.T("湿度", "Humidity"), s.HumidityPercent is { } hum && hum >= 0 ? $"{hum}%" : "--", Lens.Humidity, null),
             (WeatherVisuals.MetricKind(Lens.Pressure), WeatherVisuals.MetricInk(Lens.Pressure), Loc.T("气压", "Pressure"), Num(s.PressureHpa, " hPa"), Lens.Pressure, null),
-            (WeatherVisuals.MetricKind(Lens.Aqi), WeatherVisuals.AqiInk(s.Aqi), Loc.T("空气质量", "Air quality"), AirLevel(s), Lens.Aqi,
+            (WeatherVisuals.MetricKind(Lens.Aqi), WeatherVisuals.AqiInk(s.Aqi ?? -1), Loc.T("空气质量", "Air quality"), AirLevel(s), Lens.Aqi,
                 WeatherCodes.AqiStandardLabel(s.AqiStandard) is { Length: > 0 } standard ? standard : null),
             (WeatherVisuals.MetricKind(Lens.Cloud), WeatherVisuals.MetricInk(Lens.Cloud), Loc.T("云量", "Cloud"), Num(s.CloudPercent, "%"), Lens.Cloud, null)
         ];
@@ -1054,7 +1046,7 @@ internal sealed class WeatherView : UserControl
             body.ColumnDefinitions.Add(new ColumnDefinition());
             // 风速卡用 8 方位箭头指示风向；箭头优先跟标题文字同档，文字缺失时才按角度分档。
             // 其余卡用各自的元信息图标。
-            double windAngle = WeatherCodes.Wind8Angle(s.WindDirection, s.WindDirectionDeg);
+            double windAngle = WeatherCodes.Wind8Angle(s.WindDirection, s.WindDirectionDeg ?? double.NaN);
             if (lens == Lens.Wind && !double.IsNaN(windAngle))
             {
                 var windArrow = WeatherVisuals.WindArrowIcon(windAngle, ink);
@@ -1119,10 +1111,12 @@ internal sealed class WeatherView : UserControl
         Fit(Width, Height, true);
         DrawSummary(snap);
     }
-    // 数值/时间的容错格式化：来源没有提供的字段显示为 --，不让 NaN 或空串进入界面。
-    private static string Num(double value, string suffix, int digits = 0) => double.IsNaN(value) ? "--" : value.ToString($"F{digits}", System.Globalization.CultureInfo.InvariantCulture) + suffix;
-    private static string Degree(double value) => double.IsNaN(value) ? "--" : $"{value:0}°";
-    private static string Clock(string[] times, int index) => index >= 0 && index < times.Length && times[index].Length >= 16 ? times[index][11..16] : "--:--";
+    // 数值/时间的容错格式化：来源没给的字段（null）显示为 --，不让空值进入界面。
+    private static string Num(double? value, string suffix, int digits = 0) => value is { } v && double.IsFinite(v) ? v.ToString($"F{digits}", System.Globalization.CultureInfo.InvariantCulture) + suffix : "--";
+    private static string Degree(double? value) => value is { } v && double.IsFinite(v) ? $"{v:0}°" : "--";
+    // 结构化日期轴上第 index 天的时刻字段取 HH:mm；过期缓存（index=-1）或缺时刻都给 --:--。
+    private static string Clock(DayPoint[] days, int index, Func<DayPoint, string?> pick)
+        => index >= 0 && index < days.Length && pick(days[index]) is { Length: >= 16 } text ? text[11..16] : "--:--";
     // 右下角页脚：主来源与本次刷新时刻，用底部原有的 16px 空边，不向上挤占摘要卡与预报区。
     // 跨日缓存（日期轴对不上城市的今天）标注缓存时刻与「缓存」字样，不冒充刚更新。
     private void DrawFooter(WeatherSnapshot s)
@@ -1240,7 +1234,7 @@ internal sealed class WeatherView : UserControl
     // 宽度自适应列数，按时间正序（过去→今天→未来）取窗口：最小 7 列=今天+未来6天，最大 24 列=过去10+今天+未来13，左右按同比例同步扩展。
     private static int[] Order(WeatherSnapshot s, int columns)
     {
-        int len = s.DayDates.Length;
+        int len = s.Days.Length;
         int today = WeatherClock.LiveIndex(s);          // 按城市当前日期定位“今天”
         // 缓存跨日、城市的今天不在轴上时退回快照自带锚点选窗口：窗口只是决定取哪些天，
         // 「今天」标签与高亮由调用方按日期轴是否过期另行处理。
@@ -1304,9 +1298,9 @@ internal sealed class WeatherView : UserControl
             ? $"{bft}{Loc.T("级", "")}" : "";
     // 逐日昼夜：白天是「转前」，夜间是「转后」。折线两侧各画一个图标、各配自己的天气名，两个图标本身表达转折，文字不写「转」。
     private static int DayCodeAt(WeatherSnapshot s, int i)
-        => s.DayCodes.Length > i && s.DayCodes[i] >= 0 ? s.DayCodes[i] : -1;
+        => i >= 0 && i < s.Days.Length && s.Days[i].Code is { } code && code >= 0 ? code : -1;
     private static int NightCodeAt(WeatherSnapshot s, int i)
-        => s.DayNightCodes.Length > i && s.DayNightCodes[i] >= 0 ? s.DayNightCodes[i] : -1;
+        => i >= 0 && i < s.Days.Length && s.Days[i].NightCode is { } code && code >= 0 ? code : -1;
     // 上方画「转后」（夜间），夜间缺失或与白天相同就退回白天；下方固定画「转前」（白天）。同天气时两个图标一样也照画。
     private static int DayTopCode(WeatherSnapshot s, int i)
     {
@@ -1319,16 +1313,17 @@ internal sealed class WeatherView : UserControl
     private void DrawHourlyForecast(WeatherSnapshot s)
     {
         int n = Math.Max(1, forecast.Columns);
-        for (int p = 0; p < n && p < s.HourTimes.Length; p++)
+        for (int p = 0; p < n && p < s.Hours.Length; p++)
         {
-            bool day = int.TryParse(s.HourTimes[p].Length >= 13 ? s.HourTimes[p][11..13] : "", out int hour) && hour is >= 6 and < 18;
-            int code = s.HourCodes.Length > p && s.HourCodes[p] >= 0 ? s.HourCodes[p] : -1;
+            var hour = s.Hours[p];
+            bool day = int.TryParse(hour.Time.Length >= 13 ? hour.Time[11..13] : "", out int hourOfDay) && hourOfDay is >= 6 and < 18;
+            int code = hour.Code ?? -1;
             var column = Column(HourlyRowHeights);
             // 第 1 行：风向箭头 + 蒲福风级。气象学的风向是「来向」，箭头直接指向来向，所以北风朝上、东风朝右；
             // 逐日只能给一个聚合风向，小时级的风向变化正是逐时独有的信息。风速数值不进列（与逐日底部同款取舍：
             // 箭头+等级足够，km/h 属低频细节，逐时风速曲线已由风镜头承载）；箭头与等级都缺就留空。
-            double deg = p < s.HourWindDirDeg.Length ? s.HourWindDirDeg[p] : double.NaN;
-            string bft = p < s.HourWindKmh.Length ? Bft(s.HourWindKmh[p]) : "";
+            double deg = hour.WindDirDeg ?? double.NaN;
+            string bft = hour.WindKmh is { } kmh ? Bft(kmh) : "";
             bool arrow = !double.IsNaN(deg);
             if (arrow || bft.Length > 0)
             {
@@ -1340,9 +1335,9 @@ internal sealed class WeatherView : UserControl
             // 第 2 行：降水概率。行高在骨架里常驻预留，空白并不省空间——有概率数据就显示（含 0%），
             // 「0%」本身是有效信息（该整点确实无降水）；概率缺失的来源退回降水量 ≥0.1mm 显示数值，两者都没有才留空。
             // 颜色与降水镜头的柱色同源，悬停 tooltip 给概率与降水量全文。
-            int prob = p < s.HourRainProb.Length ? s.HourRainProb[p] : -1;
-            double pmm = p < s.HourPrecipMm.Length ? s.HourPrecipMm[p] : double.NaN;
-            if (prob >= 0 || (!double.IsNaN(pmm) && pmm >= 0.1))
+            int prob = hour.RainProb ?? -1;
+            double pmm = hour.PrecipMm ?? double.NaN;
+            if (prob >= 0 || pmm >= 0.1)
             {
                 var rain = new TextBlock
                 {
@@ -1359,7 +1354,7 @@ internal sealed class WeatherView : UserControl
             // 第 3 行：空气质量等级。文字与颜色由该小时 AQI 按国标 HJ 633 换算（复用 AqiText/AqiInk，与空气卡同一套标准），
             // 列窄只写短名（去掉「污染」后缀：优/良/轻度/中度/重度/严重），悬停 tooltip 给全文与数值。
             // 逐时 AQI 仅和风提供，其他来源/城市该行留空——0 信息不占位。
-            int aqi = p < s.HourAqi.Length ? s.HourAqi[p] : -1;
+            int aqi = hour.Aqi ?? -1;
             if (aqi >= 0)
             {
                 var level = new TextBlock
@@ -1383,7 +1378,7 @@ internal sealed class WeatherView : UserControl
             conditionLabels.Add(condition); conditionRows.Add(column.RowDefinitions[HourlyConditionRow]);
             // 第 6 行固定显示当时的气温，不跟着镜头变——切镜头后那个指标已由上方折线/柱状图体现。
             // NoWrap：App.xaml 默认 Wrap，窄列里数值会折成两行。
-            string hourValue = p < s.HourTempsC.Length ? Degree(s.HourTempsC[p]) : "--";
+            string hourValue = Degree(hour.Temperature);
             CellAt(column, new TextBlock
             {
                 Text = hourValue, FontSize = hourValue.Length > 4 ? ColValue - 2 : ColValue,
@@ -1415,10 +1410,11 @@ internal sealed class WeatherView : UserControl
         var now = WeatherClock.Now(s);
         string hourKey = now.ToString("yyyy-MM-ddTHH:00", CultureInfo.InvariantCulture);
         int best = 0;
-        for (int p = 0; p < Math.Min(n, s.HourTimes.Length); p++)
+        for (int p = 0; p < Math.Min(n, s.Hours.Length); p++)
         {
-            if (s.HourTimes[p].Length < 16) continue;
-            if (string.CompareOrdinal(s.HourTimes[p], hourKey) <= 0) best = p;   // 最后一个不晚于当前整点的列
+            string time = s.Hours[p].Time;
+            if (time.Length < 16) continue;
+            if (string.CompareOrdinal(time, hourKey) <= 0) best = p;   // 最后一个不晚于当前整点的列
             else break;
         }
         double fraction = (now.Minute + now.Second / 60.0) / 60.0;
@@ -1427,7 +1423,7 @@ internal sealed class WeatherView : UserControl
     // 底部时刻行文字：0 点标日期（如「11月20日」）/ 其余原样 HH:mm。直接从 ISO 串切，不依赖 DateTime.Parse 的区域设置。
     private static string HourLabel(WeatherSnapshot s, int p)
     {
-        string time = p >= 0 && p < s.HourTimes.Length ? s.HourTimes[p] : "";
+        string time = p >= 0 && p < s.Hours.Length ? s.Hours[p].Time : "";
         if (time.Length < 13 || !int.TryParse(time[11..13], out int hour)) return "--";
         // 非 0 点照原样显示时刻（HH:mm，与逐时数组一致，不另造格式）；0 点改标日期。
         if (hour != 0) return time.Length >= 16 ? time[11..16] : $"{hour:00}:00";
@@ -1436,7 +1432,6 @@ internal sealed class WeatherView : UserControl
         return $"{month}月{day}日";
     }
     // 逐时「现在」分界线：时刻标签画在列中心，整点即标签位置——竖线 = 当前整点标签 + 分钟占比 × 列宽
-    // （01:20 落在 01:00 与 02:00 标签之间、离 01:00 约 1/3 处）；列区左边距 6，与预报网格同一套几何。
     // 分钟步进由 _nowTick 只重贴这一处，不重建列。
     private void PlaceNowRule(WeatherSnapshot s)
     {
@@ -1486,7 +1481,7 @@ internal sealed class WeatherView : UserControl
         var order = Order(s, forecast.Columns);
         for (int p = 0; p < order.Length; p++)
         {
-            int i = order[p]; var date = DateTime.Parse(s.DayDates[i]); var column = Column(ColumnRowHeights);
+            int i = order[p]; var date = DateTime.Parse(s.Days[i].Date); var column = Column(ColumnRowHeights);
             string label = stale ? Loc.T(new[] { "周日", "周一", "周二", "周三", "周四", "周五", "周六" }[(int)date.DayOfWeek], new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }[(int)date.DayOfWeek])
                 : i == today ? Loc.T("今天", "Today") : i == today + 1 ? Loc.T("明天", "Tomorrow") : Loc.T(new[] { "周日", "周一", "周二", "周三", "周四", "周五", "周六" }[(int)date.DayOfWeek], new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }[(int)date.DayOfWeek]);
             bool isToday = i == today;
@@ -1504,11 +1499,11 @@ internal sealed class WeatherView : UserControl
             CellAt(column, condition, 3);
             conditionLabels.Add(condition); conditionRows.Add(column.RowDefinitions[3]);
             // 高温在预报列第 5 行、低温在下方独立低温行，折线夹在两者之间；两个温度都登记进 tempLabels 供低档位统一收起。
-            var high = new TextBlock { Text = Degree(s.DayHighC[i]), FontSize = ColValue, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Center, Width = 64, TextWrapping = TextWrapping.NoWrap, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            var high = new TextBlock { Text = Degree(s.Days[i].HighC), FontSize = ColValue, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Center, Width = 64, TextWrapping = TextWrapping.NoWrap, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
             tempLabels.Add(high); CellAt(column, high, 4);
             // 今天列的选择态高亮由垫底的 todayGlow 贯穿整列承担，列自身保持透明。
             forecast.Children.Add(new Border { CornerRadius = new CornerRadius(15), Margin = new Thickness(3, 0, 3, 0), Padding = new Thickness(4, 2, 4, 2), Background = Brushes.Transparent, Child = column });
-            var low = new TextBlock { Text = Degree(s.DayLowC[i]), Foreground = UI.Brush(_look.Primary), FontSize = ColValue, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Center, Width = 64, TextWrapping = TextWrapping.NoWrap, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            var low = new TextBlock { Text = Degree(s.Days[i].LowC), Foreground = UI.Brush(_look.Primary), FontSize = ColValue, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Center, Width = 64, TextWrapping = TextWrapping.NoWrap, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
             tempLabels.Add(low); lowRow.Children.Add(low);
             // 转前天气名单独占辅注行（与上方天气名同字号同色），信息行只剩 28px 图标与风两行。
             var lowerName = new TextBlock { Text = HourCondition(before), FontSize = ColNote, TextWrapping = TextWrapping.NoWrap, TextAlignment = TextAlignment.Center, Foreground = ColCondition };
@@ -1522,9 +1517,9 @@ internal sealed class WeatherView : UserControl
             CellAt(info, lowerGlyph, 0);
             lowerGlyphs.Add(lowerGlyph);
             dayInfoGrids.Add(info);
-            string dirText = s.DayWindDir.Length > i ? s.DayWindDir[i] : "";
-            double dir = s.DayWindDirDeg.Length > i ? s.DayWindDirDeg[i] : double.NaN;
-            double wind = s.DayWindMaxKmh.Length > i ? s.DayWindMaxKmh[i] : double.NaN;
+            string dirText = s.Days[i].WindDir ?? "";
+            double dir = s.Days[i].WindDirDeg ?? double.NaN;
+            double wind = s.Days[i].WindMaxKmh ?? double.NaN;
             var windRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
             if (!double.IsNaN(dir))
             {
@@ -1549,27 +1544,30 @@ internal sealed class WeatherView : UserControl
         _chartDrawnWidth = Math.Max(30, chart.Width);
         // 镜头优先：非气温镜头只存在于逐时（逐日只有高低温两列数），所以这里直接按指标画。
         // 对应数组整体缺失时退回气温曲线，宁可少一个镜头也不要给一张空图。
+        // 镜头只在真正要画时才从结构化 HourPoint 取一次序列；缺值 null → NaN 供通用折线/柱状函数跳过。
+        double[] Series(Func<HourPoint, double?> pick) => s.Hours.Select(h => pick(h) ?? double.NaN).ToArray();
         static bool Has(double[] a) => a.Length > 0 && a.Any(v => !double.IsNaN(v));
         switch (_lens)
         {
-            case Lens.Feels when Has(s.HourFeelsLikeC): DrawHourlyLine(s.HourFeelsLikeC, new SolidColorBrush(Color.FromRgb(255, 176, 102)), true); return;
-            case Lens.Humidity when s.HourHumidity.Any(v => v >= 0): DrawBars(Array.ConvertAll(s.HourHumidity, v => v < 0 ? double.NaN : v), 100, "%"); return;
-            case Lens.Wind when Has(s.HourWindKmh): DrawBars(s.HourWindKmh, double.NaN, ""); return;
-            case Lens.Gust when Has(s.HourWindGustKmh): DrawBars(s.HourWindGustKmh, double.NaN, "", 0, Color.FromRgb(126, 212, 226)); return;
-            case Lens.Precip when Has(s.HourPrecipMm): DrawBars(s.HourPrecipMm, double.NaN, "", 1, Color.FromRgb(96, 168, 246)); return;
-            case Lens.Pressure when Has(s.HourPressureHpa): DrawHourlyLine(s.HourPressureHpa, new SolidColorBrush(Color.FromRgb(168, 186, 208)), false); return;
-            case Lens.DewPoint when Has(s.HourDewPointC): DrawHourlyLine(s.HourDewPointC, new SolidColorBrush(Color.FromRgb(88, 146, 220)), true); return;
-            case Lens.Uv when Has(s.HourUv): DrawBars(s.HourUv, double.NaN, "", 1, Color.FromRgb(255, 206, 112)); return;
-            case Lens.Cloud when Has(s.HourCloudPercent): DrawBars(s.HourCloudPercent, 100, "%", 0, Color.FromRgb(196, 214, 232)); return;
-            case Lens.Visibility when Has(s.HourVisibilityKm): DrawHourlyLine(s.HourVisibilityKm, new SolidColorBrush(Color.FromRgb(150, 204, 232)), false, 1); return;
-            // 空气质量逐时预报：和风 /airquality/v1/hourly 的 AQI，按与 HourTimes 对齐的数组画柱状；-1 的小时跳过。
-            case Lens.Aqi when s.HourAqi.Any(v => v >= 0):
-                DrawBars(Array.ConvertAll(s.HourAqi, v => v < 0 ? double.NaN : v), double.NaN, "", 0, Color.FromRgb(126, 208, 154)); return;
+            case Lens.Feels when Has(Series(h => h.FeelsLike)): DrawHourlyLine(Series(h => h.FeelsLike), new SolidColorBrush(Color.FromRgb(255, 176, 102)), true); return;
+            case Lens.Humidity when Series(h => h.Humidity).Any(v => !double.IsNaN(v)): DrawBars(Series(h => h.Humidity), 100, "%"); return;
+            case Lens.Wind when Has(Series(h => h.WindKmh)): DrawBars(Series(h => h.WindKmh), double.NaN, ""); return;
+            case Lens.Gust when Has(Series(h => h.WindGustKmh)): DrawBars(Series(h => h.WindGustKmh), double.NaN, "", 0, Color.FromRgb(126, 212, 226)); return;
+            case Lens.Precip when Has(Series(h => h.PrecipMm)): DrawBars(Series(h => h.PrecipMm), double.NaN, "", 1, Color.FromRgb(96, 168, 246)); return;
+            case Lens.Pressure when Has(Series(h => h.PressureHpa)): DrawHourlyLine(Series(h => h.PressureHpa), new SolidColorBrush(Color.FromRgb(168, 186, 208)), false); return;
+            case Lens.DewPoint when Has(Series(h => h.DewPointC)): DrawHourlyLine(Series(h => h.DewPointC), new SolidColorBrush(Color.FromRgb(88, 146, 220)), true); return;
+            case Lens.Uv when Has(Series(h => h.Uv)): DrawBars(Series(h => h.Uv), double.NaN, "", 1, Color.FromRgb(255, 206, 112)); return;
+            case Lens.Cloud when Has(Series(h => h.CloudPercent)): DrawBars(Series(h => h.CloudPercent), 100, "%", 0, Color.FromRgb(196, 214, 232)); return;
+            case Lens.Visibility when Has(Series(h => h.VisibilityKm)): DrawHourlyLine(Series(h => h.VisibilityKm), new SolidColorBrush(Color.FromRgb(150, 204, 232)), false, 1); return;
+            // 空气质量逐时预报：和风 /airquality/v1/hourly 的 AQI，按小时对齐；该小时无 AQI（null）跳过。
+            case Lens.Aqi when Series(h => h.Aqi).Any(v => !double.IsNaN(v)):
+                DrawBars(Series(h => h.Aqi), double.NaN, "", 0, Color.FromRgb(126, 208, 154)); return;
             case Lens.Celestial: DrawCelestialView(s); return;
         }
         if (_lens != Lens.Temp) { chart.Children.Add(Note(Loc.T("暂无该指标数据", "No data for this metric"))); return; }
         if (_hourlyMode) { DrawHourly(s); return; }
-        var high = s.DayHighC; var low = s.DayLowC;
+        var high = s.Days.Select(d => d.HighC ?? double.NaN).ToArray();
+        var low = s.Days.Select(d => d.LowC ?? double.NaN).ToArray();
         var order = Order(s, forecast.Columns);
         var valid = order.Where(i => !double.IsNaN(high[i]) && !double.IsNaN(low[i])).ToArray();
         if (valid.Length < 2) return;                                     // 来源缺失温度时不出折线，避免 NaN 坐标
@@ -1595,18 +1593,19 @@ internal sealed class WeatherView : UserControl
         int n = Math.Max(1, forecast.Columns); if (n < 2) return;
         double w = Math.Max(30, chart.Width), col = Math.Max(2, w / n);
         double X(int p) => (p + 0.5) * col;
-        var valid = Enumerable.Range(0, n).Where(i => s.HourTempsC.Length > i && !double.IsNaN(s.HourTempsC[i])).ToArray();
+        double[] temps = s.Hours.Select(h => h.Temperature ?? double.NaN).ToArray();
+        var valid = Enumerable.Range(0, Math.Min(n, temps.Length)).Where(i => !double.IsNaN(temps[i])).ToArray();
         if (valid.Length < 2) return;
-        double min = valid.Min(i => s.HourTempsC[i]), range = Math.Max(1, valid.Max(i => s.HourTempsC[i]) - min);
+        double min = valid.Min(i => temps[i]), range = Math.Max(1, valid.Max(i => temps[i]) - min);
         var brush = ChartTemp;
         double bandTop = 17, bandBottom = ChartBand() - 11;              // 弹性高度带：随画布实际高度伸缩
         double Y(double v) => bandBottom - (v - min) / range * (bandBottom - bandTop);
-        DrawTrend(valid.Select(p => new Point(X(p), Y(s.HourTempsC[p]))).ToArray(), brush);
+        DrawTrend(valid.Select(p => new Point(X(p), Y(temps[p]))).ToArray(), brush);
         foreach (int p in valid)
         {
-            double yy = Y(s.HourTempsC[p]);
+            double yy = Y(temps[p]);
             var dot = new System.Windows.Shapes.Ellipse { Width = 5, Height = 5, Fill = brush }; Canvas.SetLeft(dot, X(p) - 2.5); Canvas.SetTop(dot, yy - 2.5); chart.Children.Add(dot);
-            var probe = new TextBlock { Text = $"{s.HourTempsC[p]:0}°", FontSize = 9, Foreground = brush is SolidColorBrush solid ? Ink(solid.Color) : brush };
+            var probe = new TextBlock { Text = $"{temps[p]:0}°", FontSize = 9, Foreground = brush is SolidColorBrush solid ? Ink(solid.Color) : brush };
             probe.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             Canvas.SetLeft(probe, X(p) - probe.DesiredSize.Width / 2); Canvas.SetTop(probe, yy - 14); chart.Children.Add(probe);
         }
@@ -1751,8 +1750,8 @@ internal sealed class WeatherView : UserControl
                 }
             }
         }
-        Collect(s.SunriseTimes, s.SunsetTimes, s.SolarNoonTimes, true);
-        Collect(s.MoonriseTimes, s.MoonsetTimes, s.MoonTransitTimes, false);
+        Collect(s.Days.Select(d => d.Sunrise ?? "").ToArray(), s.Days.Select(d => d.Sunset ?? "").ToArray(), s.Days.Select(d => d.SolarNoon ?? "").ToArray(), true);
+        Collect(s.Days.Select(d => d.Moonrise ?? "").ToArray(), s.Days.Select(d => d.Moonset ?? "").ToArray(), s.Days.Select(d => d.MoonTransit ?? "").ToArray(), false);
         var active = arcs.Where(a => a.rise <= now && now < a.set).OrderByDescending(a => a.sun).FirstOrDefault();
         var center = active == default ? now : active.peak;
         var start = center.AddHours(-12);
@@ -1820,12 +1819,12 @@ internal sealed class WeatherView : UserControl
             var glyph = new WeatherGlyph(0, arc.sun) { Width = 24, Height = 24 };
             Canvas.SetLeft(glyph, X(now) - 12); Canvas.SetTop(glyph, Y(now) - 12); chart.Children.Add(glyph);
         }
-        int today = Array.FindIndex(s.DayDates, date => date == now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        int today = Array.FindIndex(s.Days, d => d.Date == now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
         bool daylight = arcs.Any(a => a.sun && a.rise.Date == now.Date) ? active.sun : s.IsDay;
         FrameworkElement? centerGlyph = !showArcs ? null
             : daylight ? new WeatherGlyph(0, true)
-            : today >= 0 && today < s.DayMoonPhase.Length && !string.IsNullOrWhiteSpace(s.DayMoonPhase[today])
-                ? new MoonPhaseIcon(s.DayMoonPhase[today]) : null;
+            : today >= 0 && today < s.Days.Length && !string.IsNullOrWhiteSpace(s.Days[today].MoonPhase)
+                ? new MoonPhaseIcon(s.Days[today].MoonPhase!) : null;
         if (centerGlyph is not null)
         {
             centerGlyph.Width = centerGlyph.Height = 52;
