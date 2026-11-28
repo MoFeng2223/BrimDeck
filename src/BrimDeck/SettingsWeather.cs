@@ -95,6 +95,7 @@ public sealed partial class SettingsWindow
                     if(picker.SelectedIndex<0)return;
                     state.Schedule.CitySources[city?.StorageKey() ?? "auto"]=sources[picker.SelectedIndex].Info.Id;
                     Save();preview.RenderWeatherCard();Fill();
+                    if (state.Selected < 0 ? city is null : city is not null && state.Cities.IndexOf(city)==state.Selected) NotifyWeatherSelection();
                     _=RefreshCityWeatherAsync(city);
                 };
                 Grid.SetColumn(picker,8);grid.Children.Add(picker);

@@ -42,6 +42,7 @@ internal static class RequestGate
     private static bool _dirty;
     private static bool _restored;
     private static Timer? _flushTimer;
+    private static int _flushFailures;
 
     public static bool TryEnter(string source, WeatherSettings? limits)
     {
@@ -166,14 +167,20 @@ internal static class RequestGate
 
     public static void Flush()
     {
-        lock (Sync) FlushCore();
+        lock (Sync)
+        {
+            _flushTimer?.Dispose();
+            _flushTimer = null;
+            FlushCore();
+        }
     }
 
     private static void FlushCore()
     {
         if (!_dirty) return;
         var counts = States.ToDictionary(p => p.Key, p => new Usage(p.Value.Day, p.Value.Count, p.Value.MonthCount));
-        if (WeatherFiles.WriteAtomic(UsagePath, JsonSerializer.Serialize(counts, Json))) _dirty = false;
+        if (WeatherFiles.WriteAtomic(UsagePath, JsonSerializer.Serialize(counts, Json))) { _dirty = false; _flushFailures = 0; }
+        else _flushFailures++;
     }
 
     // 计数不再逐请求写盘：30 秒合并一次，进程被终止最多丢半分钟的用量。
@@ -181,15 +188,24 @@ internal static class RequestGate
     private static void MarkDirty()
     {
         _dirty = true;
-        _flushTimer ??= new Timer(_ =>
+        if (_flushTimer is null) ScheduleFlush(TimeSpan.FromSeconds(30));
+    }
+
+    // 写盘失败时脏数据还在，旧实现直接丢掉定时器导致再也不会重试；这里按 30→60→120…秒退避，
+    // 成功后 FlushCore 清掉脏标记，不再安排下一次，空闲时没有轮询。
+    private static void ScheduleFlush(TimeSpan delay)
+    {
+        _flushTimer = new Timer(_ =>
         {
             lock (Sync)
             {
                 _flushTimer?.Dispose();
                 _flushTimer = null;
                 FlushCore();
+                if (_dirty && _flushTimer is null)
+                    ScheduleFlush(TimeSpan.FromSeconds(Math.Min(30 * (1 << Math.Min(_flushFailures, 4)), 300)));
             }
-        }, null, TimeSpan.FromSeconds(30), Timeout.InfiniteTimeSpan);
+        }, null, delay, Timeout.InfiniteTimeSpan);
     }
 }
 

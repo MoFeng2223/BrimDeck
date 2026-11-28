@@ -12,11 +12,17 @@ public partial class MainWindow
     private System.Windows.Threading.DispatcherTimer? _weatherRelease;
     private DateTime? _weatherHiddenSince;
 
-    internal void WeatherSelectionChanged()
+    // source 是发起切城操作的视图：它随后自己 Refresh，不用再被通知一次；其它视图与设置页改动则按新选择重取。
+    internal void WeatherSelectionChanged(WeatherView? source = null)
     {
         var previous = _liveWeather;
         UpdateWeatherDemand();
         if (previous != _liveWeather && IsVisible && !_expanded) RenderCompact();
+        if (_weatherView is { } view && !ReferenceEquals(view, source) && IsVisible)
+        {
+            view.ReloadSettings();
+            RenderWeatherChrome();
+        }
     }
     private void UpdateWeatherDemand()
     {

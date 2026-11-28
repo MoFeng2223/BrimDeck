@@ -2012,8 +2012,15 @@ internal sealed class WeatherView : UserControl
     {
         if (state.Selected == index) return;
         state.Selected = index; _app.QueueSave();
-        foreach (var deck in _app.Decks) deck.WeatherSelectionChanged();
+        foreach (var deck in _app.Decks) deck.WeatherSelectionChanged(this);
         await Refresh();
+    }
+    // 设置页增删/切换城市后视图仍展开时走这里：Refresh 开头会取消在途请求，再按最新城市取数。
+    internal void ReloadSettings()
+    {
+        if (!IsLoaded || !IsVisible) return;
+        state = WeatherData.Load(() => _app.Settings);
+        _ = Refresh();
     }
     internal Action? SettingsRequested;
 }

@@ -156,15 +156,50 @@ internal sealed class OpenMeteoSource : IWeatherSource
 
     // 响应体落盘：四份数据（预报/逐时/空气/分钟降水）各自过期，未过期直接读盘，重启后同样能复用，断网时退回上一份。
     private static async Task<string> Body(string key, TimeSpan ttl, string url, CancellationToken token, bool allowStale = true)
-        => await WeatherCache.GetAsync<string>("openmeteo", key, ttl, async ct =>
+    {
+        string kind = key.Split('|')[0];
+        return await WeatherCache.GetAsync<string>("openmeteo", key, ttl, async ct =>
         {
             var body = (await WeatherHttp.GetAsync("openmeteo", url, ct)).Body;
             if (body is null) return null;
-            if (!allowStale)
+            try
             {
                 using var json = JsonDocument.Parse(body);
-                if (Json.Get(json.RootElement, "current") is not { } current || Json.Number(current, "temperature_2m") is null) return null;
+                // 不论是否允许旧缓存都要验：HTTP 200 但内容截断/缺段时不能把坏响应写成新鲜缓存。
+                if (!Usable(kind, json.RootElement)) return null;
             }
+            catch (JsonException) { return null; }
             return body;
         }, token, allowStale) ?? "";
+    }
+
+    // 按缓存键对应的请求类型检查必需数据段：失败时 fetch 返回 null，WeatherCache 保留旧缓存（或按 allowStale 返回空）。
+    private static bool Usable(string kind, JsonElement root)
+    {
+        static bool Array(JsonElement? parent, string name, out JsonElement array)
+        {
+            array = default;
+            if (parent is not { } value || Json.Get(value, name) is not { } found || found.ValueKind != JsonValueKind.Array) return false;
+            array = found; return true;
+        }
+        switch (kind)
+        {
+            case "current":
+                return Json.Get(root, "current") is { } current && Json.Number(current, "temperature_2m") is not null;
+            case "forecast":
+                return Json.Get(root, "current") is { } now && Json.Number(now, "temperature_2m") is not null
+                    && Array(Json.Get(root, "daily"), "time", out var dates) && dates.GetArrayLength() > 0;
+            case "hourly":
+                if (!Array(Json.Get(root, "hourly"), "time", out var times) || times.GetArrayLength() == 0) return false;
+                if (!Array(Json.Get(root, "hourly"), "temperature_2m", out var temperatures)) return false;
+                return temperatures.GetArrayLength() == times.GetArrayLength();
+            case "air":
+                return Json.Get(root, "current") is { } air
+                    && (Json.Integer(air, "pm2_5") is not null || Json.Integer(air, "pm10") is not null || Json.Integer(air, "us_aqi") is not null);
+            case "minute":
+                return Array(Json.Get(root, "minutely_15"), "time", out var minutes) && minutes.GetArrayLength() > 0;
+            default:
+                return true;
+        }
+    }
 }
