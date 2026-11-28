@@ -59,7 +59,7 @@ internal static class RequestGate
             if ((daily > 0 && state.Count >= daily) || (monthly > 0 && state.MonthCount >= monthly)) return false;
             state.Count++;
             state.MonthCount++;
-            _dirty = true;   // 所有来源统一标记，交给定时器合并落盘，不再只给和风单开一条路径
+            MarkDirty();   // 所有来源统一标记，交给定时器合并落盘，不再只给和风单开一条路径
             return true;
         }
     }
@@ -79,7 +79,7 @@ internal static class RequestGate
             if (state.Generation != generation) return;
             var now = DateTimeOffset.Now;
             if (status is >= 200 and < 300) { state.Failures = 0; state.Until = default; return; }
-            _dirty = true;
+            MarkDirty();
             // 4xx 里只有认证/额度/限流代表「这个来源整体不可用」：
             // 401/402/403 不会靠重试恢复，停半小时；429 按指数退避并递增代次作废在途响应。
             if (status is 401 or 402 or 403) { state.Until = now + TimeSpan.FromMinutes(30); return; }
@@ -136,7 +136,6 @@ internal static class RequestGate
     public static void Restore()
     {
         lock (Sync) RestoreCore();
-        Schedule();
     }
 
     private static void RestoreCore()
@@ -178,10 +177,19 @@ internal static class RequestGate
     }
 
     // 计数不再逐请求写盘：30 秒合并一次，进程被终止最多丢半分钟的用量。
-    private static void Schedule()
+    // Called under Sync. One burst schedules one write and leaves no idle polling timer.
+    private static void MarkDirty()
     {
-        if (_flushTimer is not null) return;
-        _flushTimer = new Timer(_ => Flush(), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+        _dirty = true;
+        _flushTimer ??= new Timer(_ =>
+        {
+            lock (Sync)
+            {
+                _flushTimer?.Dispose();
+                _flushTimer = null;
+                FlushCore();
+            }
+        }, null, TimeSpan.FromSeconds(30), Timeout.InfiniteTimeSpan);
     }
 }
 

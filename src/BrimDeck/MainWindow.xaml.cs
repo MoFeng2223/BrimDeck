@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Automation.Peers;
 using System.Windows.Automation.Provider;
 using System.Windows.Controls;
@@ -143,8 +143,8 @@ public partial class MainWindow : Window
             if (_expanded && !_preview) PointerChanged(_pointerInside);
         }) { Interval = TimeSpan.FromSeconds(1) };
         InitializeComponent();
-        WeatherData.SnapshotChanged += CompactWeatherChanged;
-        Closed += (_, _) => WeatherData.SnapshotChanged -= CompactWeatherChanged;
+        CompactRings.IsVisibleChanged += (_, _) => UpdateWeatherDemand();
+        Closed += (_, _) => { _liveWeather?.Release(CompactWeatherChanged); _liveWeather = null; ReleaseWeatherView(); };
         // Out of sight until the boot (or, without animations, until it has its place): the window shows before it is placed.
         HoverZone.Opacity = 0;
         // The island stays in sight over a taskbar that Start or search has lifted above every application window, and above
@@ -741,6 +741,7 @@ public partial class MainWindow : Window
     // The compact island shows one ring per enabled application: the highest used share among its quotas.
     internal void RenderCompact()
     {
+        UpdateWeatherDemand();
         _inRenderCompact = true;
         try
         {
@@ -911,7 +912,11 @@ public partial class MainWindow : Window
         int carried = !turning && !expanded ? _turn.Carried(now, false, duration) : 0;
         if (carried > 0) duration = carried;
         ExpandedContent.IsHitTestVisible = expanded;
-        if (expanded) ExpandedContent.Visibility = Visibility.Visible;
+        if (expanded)
+        {
+            if (IsWeatherPage && _weatherView is null) RenderWeather();
+            ExpandedContent.Visibility = Visibility.Visible;
+        }
         // The indicator has no content: it fades out with the other tracks and is hidden once gone.
         if (!line) Compact.Visibility = Visibility.Visible;
         else if (duration == 0) Compact.Visibility = Visibility.Hidden;
@@ -1046,6 +1051,7 @@ public partial class MainWindow : Window
         else { RenderSyncButton(); RenderWeatherChrome(); }
         UpdateMusicTimer();
         UpdateMonitorDemand();
+        UpdateWeatherDemand();
         UpdateGrips();
         ApplyClickThrough();
     }

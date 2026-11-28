@@ -1,4 +1,4 @@
-﻿using BrimDeck.Core;
+using BrimDeck.Core;
 
 namespace BrimDeck;
 
@@ -33,6 +33,8 @@ internal sealed class IndexItem
 // 当前实况：所有字段可空，来源只填自己知道的字段。用字段而不是属性，合并时可以 ref 写入。
 internal sealed class CurrentPart
 {
+    internal CurrentPart Copy() => (CurrentPart)MemberwiseClone();
+    public DateTimeOffset? ObservedAt;
     public double? Temperature;
     public double? FeelsLike;
     public int? Humidity;

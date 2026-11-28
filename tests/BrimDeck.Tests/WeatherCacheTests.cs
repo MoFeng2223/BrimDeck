@@ -19,6 +19,10 @@ static class WeatherCacheTests
             var second = await WeatherCache.GetAsync(ns, "ttl", TimeSpan.FromMinutes(10), Fetch, CancellationToken.None);
             check("Weather cache: a hit inside the TTL is served without fetching again", first == "v1" && second == "v1" && calls == 1);
 
+            WeatherCache.ReleaseMemory();
+            var reloaded = await WeatherCache.GetAsync(ns, "ttl", TimeSpan.FromMinutes(10), Fetch, CancellationToken.None);
+            check("Weather cache: releasing memory preserves the disk TTL without another request", reloaded == first && calls == 1);
+
             // Fresh 只绕过「未过期直用」，退出后恢复缓存行为。
             calls = 0;
             using (WeatherCache.Fresh())

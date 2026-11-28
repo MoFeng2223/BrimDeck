@@ -16,7 +16,7 @@ internal static class WeatherData
         public List<City> Cities { get => _settings().WeatherCities; set => _settings().WeatherCities = value; }
         public int Selected { get => _settings().WeatherSelected; set => _settings().WeatherSelected = value; }
         public WeatherSettings Schedule { get => _settings().Weather; set => _settings().Weather = value; }
-        public IReadOnlyDictionary<string, WeatherSnapshot> Cache => Snapshots;
+        public bool TrySnapshot(string key, out WeatherSnapshot snapshot) => TryReadSnapshot(key, out snapshot);
         // 自动定位指针：最近一次定位到的实际城市键。快照一律按真实城市键存（定位映射选择的城市/区），
         // "auto" 只作指向，供重启后免定位直接命中缓存、设置页「当前位置」行取数。
 
@@ -44,12 +44,6 @@ internal static class WeatherData
         WeatherFiles.Ensure(WeatherFiles.Snapshots);
         WeatherCache.Prune(TimeSpan.FromDays(14));
         RequestGate.Restore();
-        foreach(var (key,snapshot) in ReadSnapshots())
-            if (!Snapshots.TryGetValue(key, out var kept) || kept.FetchedAt < snapshot.FetchedAt)
-            {
-                Snapshots[key] = snapshot;
-                Written[key] = snapshot.FetchedAt;
-            }
         // 自动定位指针（weather/auto.json，与快照分开放，避免混进快照枚举）：
         // 快照都按真实城市键存，"auto" 只是映射，重启后靠它免定位命中缓存。
         try
@@ -64,30 +58,41 @@ internal static class WeatherData
         Start();
         return new State(settings);
     }
-    private static IEnumerable<(string Key,WeatherSnapshot Value)> ReadSnapshots()
+    private static bool TryReadSnapshot(string key, out WeatherSnapshot snapshot)
     {
-        string[] files;
-        try { files=Directory.Exists(WeatherFiles.Snapshots)?Directory.GetFiles(WeatherFiles.Snapshots,"*.json"):[]; }
-        catch { yield break; }
-        foreach(var file in files)
+        lock (SnapLock)
         {
-            string key="";WeatherSnapshot? snapshot=null;
+            if (Snapshots.TryGetValue(key, out snapshot!)) return true;
+            if (key.Length == 0) return false;
             try
             {
-                if(JsonSerializer.Deserialize<SnapshotFile>(File.ReadAllText(file),WeatherJson) is { Value:{ } value } entry){key=entry.Key;snapshot=value;snapshot.CityKey=key;}
+                var path = Path.Combine(WeatherFiles.Snapshots, WeatherFiles.Name(key, ".json"));
+                if (!File.Exists(path)) return false;
+                var entry = JsonSerializer.Deserialize<SnapshotFile>(File.ReadAllText(path), WeatherJson);
+                if (entry?.Key != key || entry.Value is null) return false;
+                snapshot = entry.Value;
+                snapshot.CityKey = key;
+                Snapshots[key] = snapshot;
+                Written[key] = snapshot.FetchedAt;
+                return true;
             }
-            catch { }
-            if(snapshot is null||key.Length==0)continue;
-            // 记下已落盘的时间，接下来的保存就不会把它再写一遍。
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return false; }
+        }
+    }
 
-            yield return (key,snapshot);
+    internal static void ReleaseCachedSnapshots()
+    {
+        lock (SnapLock)
+        {
+            foreach (var key in Written.Keys) Snapshots.Remove(key);
+            Written.Clear();
         }
     }
     internal static void SaveSnapshot(string key,WeatherSnapshot snapshot,string? autoKey=null)
     {
         lock(SnapLock)
         {
-            Snapshots.TryGetValue(key, out var previous);
+            TryReadSnapshot(key, out var previous);
             if (previous is not null && previous.FetchedAt > snapshot.FetchedAt) return;
             Snapshots[key] = snapshot;
             if (!Written.TryGetValue(key, out var at) || at != snapshot.FetchedAt || !ReferenceEquals(previous, snapshot))
@@ -262,11 +267,17 @@ internal static class WeatherData
     internal static string CacheKey(City city, string sourceId) => city.StorageKey() + "|" + sourceId;
     internal static async Task<WeatherSnapshot> CurrentAsync(City city, WeatherSettings schedule, string sourceId, CancellationToken token, Action<WeatherSnapshot>? progress = null)
     {
-        var snapshot = await WeatherAggregator.FetchAsync(city, schedule, sourceId, token, progress);
+        var snapshot = await WeatherAggregator.FetchAsync(city, schedule, sourceId, token, progress is null ? null : partial =>
+        {
+            token.ThrowIfCancellationRequested();
+            WeatherLive.FromDetails(city, sourceId, partial);
+            progress(partial);
+        });
         token.ThrowIfCancellationRequested();
+        WeatherLive.FromDetails(city, sourceId, snapshot);
         if (HasWeather(snapshot)) return snapshot;
         // 预警返回有效空列表也是成功，但不能因此把同城上次成功的实况/预报当成缺测覆盖掉。
-        if (Snapshots.TryGetValue(CacheKey(city, sourceId), out var cached))
+        if (TryReadSnapshot(CacheKey(city, sourceId), out var cached))
         {
             if (snapshot.Sources.ContainsKey("Warning") || snapshot.Sources.ContainsKey("Indices"))
             {
@@ -301,52 +312,31 @@ internal static class WeatherHourHistory
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
     private static readonly object Lock = new();
-    private static readonly Dictionary<string, Dictionary<string, HourPoint>> Memory = new(StringComparer.Ordinal);
-    private static int _started;
-
     private sealed class FileFormat { public string Key { get; set; } = ""; public List<HourPoint> Hours { get; set; } = []; }
 
-    private static void Start()
-    {
-        if (Interlocked.Exchange(ref _started, 1) == 1) return;
-        WeatherFiles.Ensure(Root);
-        string[] files;
-        try { files = Directory.GetFiles(Root, "*.json"); } catch { return; }
-        foreach (var file in files)
-        {
-            try
-            {
-                if (JsonSerializer.Deserialize<FileFormat>(File.ReadAllText(file), Json) is not { } entry) continue;
-                string key = entry.Key;
-                if (!Memory.TryGetValue(key, out var dict)) Memory[key] = dict = new(StringComparer.Ordinal);
-                foreach (var hour in entry.Hours ?? [])
-                {
-                    if (string.IsNullOrWhiteSpace(hour.Time)) continue;
-                    dict[hour.Time] = hour;
-                }
-            }
-            catch { }
-        }
-    }
-
-    // 读出该城市已累积的整点数据（副本，调用方改不到内存库）。
     internal static Dictionary<string, HourPoint> Read(string key)
     {
         lock (Lock)
         {
-            Start();
-            return Memory.TryGetValue(key, out var dict) ? new Dictionary<string, HourPoint>(dict, StringComparer.Ordinal) : [];
+            var result = new Dictionary<string, HourPoint>(StringComparer.Ordinal);
+            try
+            {
+                var path = Path.Combine(Root, WeatherFiles.Name(key, ".json"));
+                if (File.Exists(path) && JsonSerializer.Deserialize<FileFormat>(File.ReadAllText(path), Json) is { } entry && entry.Key == key)
+                    foreach (var hour in entry.Hours ?? [])
+                        if (!string.IsNullOrWhiteSpace(hour.Time)) result[hour.Time] = hour;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }
+            return result;
         }
     }
-
     // 把一份快照里的整点数据并入历史；以最新整点为基准保留最近 KeepHours 小时，写盘失败不影响刷新。
     internal static void Record(string key, WeatherSnapshot snapshot)
     {
         if (string.IsNullOrWhiteSpace(key)) return;
         lock (Lock)
         {
-            Start();
-            if (!Memory.TryGetValue(key, out var dict)) Memory[key] = dict = new Dictionary<string, HourPoint>(StringComparer.Ordinal);
+            var dict = Read(key);
             // 快照直接持有 HourPoint，无需从哨兵数组还原；只挑有数据的整点入历史。
             foreach (var hour in snapshot.Hours)
             {

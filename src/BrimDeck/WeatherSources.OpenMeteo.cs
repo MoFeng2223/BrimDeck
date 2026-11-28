@@ -17,7 +17,9 @@ internal sealed class OpenMeteoSource : IWeatherSource
         bool wantForecast = Want(WeatherDomain.Current) || Want(WeatherDomain.Daily) || Want(WeatherDomain.History);
         string location = FormattableString.Invariant($"latitude={city.Latitude.ToString(CultureInfo.InvariantCulture)}&longitude={city.Longitude.ToString(CultureInfo.InvariantCulture)}&timezone=auto");
         string site = FormattableString.Invariant($"{city.Latitude:0.00},{city.Longitude:0.00}");
-        var forecast = wantForecast ? Body("forecast|" + site, TimeSpan.FromMinutes(15), $"https://api.open-meteo.com/v1/forecast?{location}&current=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,weather_code,pressure_msl,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,sunrise,sunset,moonrise,moonset,uv_index_max,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,relative_humidity_2m_mean,pressure_msl_mean&past_days=10&forecast_days=14", token) : Task.FromResult("");
+        bool onlyCurrent = need.Count == 1 && Want(WeatherDomain.Current);
+        var forecast = onlyCurrent ? Body("current|" + site, TimeSpan.FromMinutes(15),
+            $"https://api.open-meteo.com/v1/forecast?{location}&current=temperature_2m,weather_code,is_day&timeformat=unixtime", token, allowStale: false) : wantForecast ? Body("forecast|" + site, TimeSpan.FromMinutes(15), $"https://api.open-meteo.com/v1/forecast?{location}&current=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,weather_code,pressure_msl,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,sunrise,sunset,moonrise,moonset,uv_index_max,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,relative_humidity_2m_mean,pressure_msl_mean&past_days=10&forecast_days=14", token) : Task.FromResult("");
         var hourly = Want(WeatherDomain.Hourly) ? Body("hourly|" + site, TimeSpan.FromMinutes(30), $"https://api.open-meteo.com/v1/forecast?{location}&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,precipitation_probability,weather_code,pressure_msl,cloud_cover,visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index&forecast_hours=48", token) : Task.FromResult("");
         var air = Want(WeatherDomain.Air) ? Body("air|" + site, TimeSpan.FromMinutes(30), $"https://air-quality-api.open-meteo.com/v1/air-quality?{location}&current=pm2_5,pm10,us_aqi,european_aqi", token) : Task.FromResult("");
         // 分钟降水（未来 2 小时的 15 分钟级）独立缓存。
@@ -32,6 +34,10 @@ internal sealed class OpenMeteoSource : IWeatherSource
             if (Json.Get(root, "current") is { } current)
                 part.Current = new CurrentPart
                 {
+                    ObservedAt = Json.Get(current, "time") is { ValueKind: JsonValueKind.Number } time && time.TryGetInt64(out long unix)
+                        ? DateTimeOffset.FromUnixTimeSeconds(unix)
+                        : DateTime.TryParse(Json.Text(current, "time"), CultureInfo.InvariantCulture, DateTimeStyles.None, out var local)
+                            ? new DateTimeOffset(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), TimeSpan.FromSeconds(Json.Integer(root, "utc_offset_seconds") ?? 0)) : null,
                     Temperature = Json.Number(current, "temperature_2m"), FeelsLike = Json.Number(current, "apparent_temperature"),
                     Humidity = Json.Integer(current, "relative_humidity_2m"), DewPointC = Json.Number(current, "dew_point_2m"),
                     PrecipMm = Json.Number(current, "precipitation"), Code = Json.Integer(current, "weather_code"),
@@ -68,6 +74,7 @@ internal sealed class OpenMeteoSource : IWeatherSource
             }
         }
         catch { }
+        if (onlyCurrent) return part.Current is null ? null : part;
         try
         {
             using var doc = JsonDocument.Parse(hourly.Result);
@@ -148,6 +155,16 @@ internal sealed class OpenMeteoSource : IWeatherSource
     }
 
     // 响应体落盘：四份数据（预报/逐时/空气/分钟降水）各自过期，未过期直接读盘，重启后同样能复用，断网时退回上一份。
-    private static async Task<string> Body(string key, TimeSpan ttl, string url, CancellationToken token)
-        => await WeatherCache.GetAsync<string>("openmeteo", key, ttl, async ct => (await WeatherHttp.GetAsync("openmeteo", url, ct)).Body, token) ?? "";
+    private static async Task<string> Body(string key, TimeSpan ttl, string url, CancellationToken token, bool allowStale = true)
+        => await WeatherCache.GetAsync<string>("openmeteo", key, ttl, async ct =>
+        {
+            var body = (await WeatherHttp.GetAsync("openmeteo", url, ct)).Body;
+            if (body is null) return null;
+            if (!allowStale)
+            {
+                using var json = JsonDocument.Parse(body);
+                if (Json.Get(json.RootElement, "current") is not { } current || Json.Number(current, "temperature_2m") is null) return null;
+            }
+            return body;
+        }, token, allowStale) ?? "";
 }

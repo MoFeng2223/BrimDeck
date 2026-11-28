@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -8,7 +8,72 @@ namespace BrimDeck;
 public partial class MainWindow
 {
     private WeatherView? _weatherView;
-    private WeatherData.State? _compactWeatherState;
+    private WeatherLive? _liveWeather;
+    private System.Windows.Threading.DispatcherTimer? _weatherRelease;
+    private DateTime? _weatherHiddenSince;
+
+    internal void WeatherSelectionChanged()
+    {
+        var previous = _liveWeather;
+        UpdateWeatherDemand();
+        if (previous != _liveWeather && IsVisible && !_expanded) RenderCompact();
+    }
+    private void UpdateWeatherDemand()
+    {
+        WeatherLive.Selection? key = null;
+        if (!_app.Exiting && !_preview && IsLoaded && !_expanded && CompactRings.IsVisible && _alert is null &&
+            !IsSuppressed && Settings.ShowsWeather(EffectiveStyle))
+        {
+            var settings = _app.Settings;
+            var city = settings.WeatherCities.ElementAtOrDefault(settings.WeatherSelected);
+            var source = settings.Weather.SourceFor(city);
+            key = new(city, source, source == "hefeng" ? settings.Weather.HeFengHost : "", source == "hefeng" ? HeFengMonitor.Generation : 0);
+        }
+        if (_liveWeather?.Key == key) return;
+        _liveWeather?.Release(CompactWeatherChanged);
+        var app = _app;
+        _liveWeather = key is null ? null : WeatherLive.Acquire(key, () => app.Settings.Weather, CompactWeatherChanged);
+    }
+
+    private void WeatherVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        _weatherHiddenSince = _weatherView?.IsVisible == false ? DateTime.UtcNow : null;
+        ScheduleWeatherRelease();
+    }
+
+    internal void ScheduleWeatherRelease()
+    {
+        _weatherRelease?.Stop();
+        if (_weatherHiddenSince is not { } hidden || _app.Exiting) return;
+        _weatherRelease ??= new(System.Windows.Threading.DispatcherPriority.ApplicationIdle, Dispatcher);
+        _weatherRelease.Tick -= ReleaseWeatherTick;
+        _weatherRelease.Tick += ReleaseWeatherTick;
+        var remaining = hidden + _app.MemoryPlan.ReleaseAfter - DateTime.UtcNow;
+        _weatherRelease.Interval = remaining > TimeSpan.Zero ? remaining : TimeSpan.FromMilliseconds(1);
+        _weatherRelease.Start();
+    }
+
+    private void ReleaseWeatherTick(object? sender, EventArgs args)
+    {
+        _weatherRelease?.Stop();
+        if (_weatherView?.IsVisible == false && ReleaseWeatherView()) _app.WeatherReleased();
+    }
+
+    private bool ReleaseWeatherView()
+    {
+        _weatherRelease?.Stop();
+        _weatherHiddenSince = null;
+        if (_weatherView is null) return false;
+        _weatherView.IsVisibleChanged -= WeatherVisibilityChanged;
+        _weatherView.StateChanged -= RenderWeatherRefreshButton;
+        _weatherView.Cancel();
+        WeatherContent.Children.Clear();
+        _weatherView = null;
+        _weatherRingTimer?.Stop();
+        _weatherRingTimer = null;
+        _weatherSpin = "";
+        return true;
+    }
     private void CompactWeatherChanged() => Dispatcher.InvokeAsync(() =>
     {
         if (!_expanded && IsVisible && Settings.ShowsWeather(EffectiveStyle)) RenderCompact();
@@ -17,13 +82,18 @@ public partial class MainWindow
     private FrameworkElement? CompactWeather(double scale)
     {
         if (!Settings.ShowsWeather(EffectiveStyle)) return null;
-        var state = _compactWeatherState ??= WeatherData.Load(() => Settings);
-        string key = state.Selected >= 0 && state.Selected < state.Cities.Count ? state.KeyFor(state.Cities[state.Selected]) : state.AutoKey;
-        if (!state.Cache.TryGetValue(key, out var snapshot) || snapshot.Temperature is not { } temp || !double.IsFinite(temp)) return null;
-        var badge = new StackPanel { Orientation = Orientation.Horizontal, ToolTip = snapshot.Name };
-        if (snapshot.WeatherCode is { } code && code >= 0)
-            badge.Children.Add(new WeatherGlyph(code, snapshot.IsDay) { Width = 16 * scale, Height = 16 * scale, Margin = new Thickness(0, 0, 3 * scale, 0) });
-        badge.Children.Add(UI.Fixed($"{temp:0}°", 13 * scale, 18 * scale, Look.Primary));
+        if (_liveWeather?.Latest is not { } snapshot) return null;
+        var age = DateTimeOffset.UtcNow - snapshot.At;
+        var badge = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            ToolTip = $"{snapshot.Name} · {snapshot.At.ToLocalTime():MM-dd HH:mm}",
+            Opacity = age > _liveWeather.Interval ? 0.65 : 1
+        };
+        string temperature = _liveWeather.Stale ? "—" : $"{snapshot.Temperature:0}°";
+        if (!_liveWeather.Stale && snapshot.Code is { } code && code >= 0)
+            badge.Children.Add(new WeatherGlyph(code, snapshot.Day) { Width = 16 * scale, Height = 16 * scale, Margin = new Thickness(0, 0, 3 * scale, 0) });
+        badge.Children.Add(UI.Fixed(temperature, 13 * scale, 18 * scale, Look.Primary));
         badge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         badge.Width = Math.Ceiling(badge.DesiredSize.Width);
         badge.Height = badge.DesiredSize.Height;
@@ -49,8 +119,10 @@ public partial class MainWindow
         ApplyHeader(PanelHeader.For(36, 20));
         if (_weatherView is null)
         {
+            if (!_expanded && !_preview) return;
             _weatherView = new WeatherView(_app, Look) { SettingsRequested = () => _app.OpenSettingsPage(SettingsWindow.WeatherSettingsPage) };
             _weatherView.StateChanged += RenderWeatherRefreshButton;
+            _weatherView.IsVisibleChanged += WeatherVisibilityChanged;
             WeatherContent.Children.Add(new Viewbox { Stretch = Stretch.Uniform, Child = _weatherView });
         }
         FitWeather();

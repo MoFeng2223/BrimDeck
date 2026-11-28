@@ -309,6 +309,7 @@ internal static class WeatherAggregator
     private static bool MergeCurrent(CurrentPart target, CurrentPart source)
     {
         bool any = false;
+        target.ObservedAt ??= source.ObservedAt;
         any |= Set(ref target.Temperature, source.Temperature);
         any |= Set(ref target.FeelsLike, source.FeelsLike);
         any |= Set(ref target.Humidity, source.Humidity);

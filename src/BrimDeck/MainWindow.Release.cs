@@ -45,9 +45,7 @@ public partial class MainWindow
                     _shelfBuilt = null; _shelfStale = true;
                     break;
                 case DeckPage.Weather:
-                    held |= _weatherView is not null;
-                    _weatherRingTimer?.Stop();
-                    _weatherView = null; _weatherSpin = ""; _weatherRingTimer = null;
+                    held |= ReleaseWeatherView();
                     break;
             }
             released |= held;

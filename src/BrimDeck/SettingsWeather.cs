@@ -14,7 +14,7 @@ public sealed partial class SettingsWindow
     private void WeatherSettings()
     {
         var state=WeatherData.Load(() => S);var cityRows=new StackPanel();bool active=true;
-        string autoName="当前位置";if(state.AutoKey.Length>0&&state.Cache.TryGetValue(state.AutoKey,out var autoSnap))autoName=autoSnap.Name;
+        string autoName="当前位置";if(state.AutoKey.Length>0&&state.TrySnapshot(state.AutoKey,out var autoSnap))autoName=autoSnap.Name;
         var preview=new WeatherSettingsCard(state);
         var lifetime = new CancellationTokenSource();
         int locationVersion = 0;
@@ -60,14 +60,14 @@ public sealed partial class SettingsWindow
                 string name=Loc.T("自动定位","Auto location");string? subtitle=null;
                 if(city is null){
                     string local=autoName;
-                    if(state.Cache.TryGetValue(state.DisplayAutoKey,out var snap)){
+                    if(state.TrySnapshot(state.DisplayAutoKey,out var snap)){
                         temperature=snap.Temperature is { } t && double.IsFinite(t)?$"{t:0}°":"--";code=snap.WeatherCode??-1;day=snap.IsDay;
                         if(!snap.Name.Contains("当前位置"))local=snap.Name;
                     }
                     if(local.Trim().Length>0&&!local.Contains("当前位置"))subtitle=DisplayCityName(local);
                 } else {
                     var parts=SplitName(city.Name);name=parts.Title;subtitle=DisplayCityName(city.Name);
-                    if(state.Cache.TryGetValue(state.KeyFor(city),out var snap)){temperature=snap.Temperature is { } t && double.IsFinite(t)?$"{t:0}°":"--";code=snap.WeatherCode??-1;day=snap.IsDay;}
+                    if(state.TrySnapshot(state.KeyFor(city),out var snap)){temperature=snap.Temperature is { } t && double.IsFinite(t)?$"{t:0}°":"--";code=snap.WeatherCode??-1;day=snap.IsDay;}
                 }
                 var grid=CityGrid();var sources=WeatherSources.All;
                 if(selected){
@@ -691,7 +691,7 @@ internal sealed class WeatherSettingsCard : Border
         if (key != displayedKey) selectedDay = 0;
         displayedKey = key;
         WeatherSnapshot? snap=null;
-        if(state.Cache.TryGetValue(key,out var cached)) snap=cached;
+        if(state.TrySnapshot(key,out var cached)) snap=cached;
         int code=snap?.WeatherCode??-1;bool day=snap?.IsDay??true;
         string cityName=state.Selected>=0&&state.Selected<state.Cities.Count?state.Cities[state.Selected].Name:state.LocatedCity?.Name ?? "当前位置";
         string Place(string n)=>n=="当前位置"?Loc.T("当前位置","Current location"):n;

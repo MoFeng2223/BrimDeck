@@ -476,16 +476,42 @@ internal sealed class WeatherView : UserControl
         _timeBoundary.Tick += (_, _) => { _timeBoundary.Stop(); if (IsVisible && _last is { } snap) Render(snap); };
         // 「现在」分界线按分钟走：只重贴线与标签，不重建列；隐藏/卸载即停。
         _nowTick.Tick += (_, _) => { if (IsVisible && _hourlyMode && _lens != Lens.Celestial && _last is { } snap) PlaceNowRule(snap); };
-        IsVisibleChanged += async (_, _) => { if (IsVisible) { state = WeatherData.Load(() => _app.Settings); await EnsureFreshAsync(); if (_last is { } snap) Render(snap); _nowTick.Start(); } else { _timeBoundary.Stop(); _nowTick.Stop(); if (_warningPopup is { } popup) popup.IsOpen = false; } };
-        Loaded += async (_, _) => { await EnsureFreshAsync(); if (IsLoaded) timer.Start(); };
+        IsVisibleChanged += async (_, _) =>
+        {
+            if (!IsVisible) { Pause(); return; }
+            if (!IsLoaded) return;
+            state = WeatherData.Load(() => _app.Settings);
+            await ResumeAsync();
+        };
+        Loaded += async (_, _) => { if (IsVisible) await ResumeAsync(); };
         // 15 分钟周期是硬触发；正在手动刷新时让它跑完，不打断。
         timer.Tick += async (_, _) => { if (IsVisible && !fetching) await Refresh(); };
-        Unloaded += (_, _) => { timer.Stop(); _timeBoundary.Stop(); _nowTick.Stop(); Cancel(); generation++; };
+        Unloaded += (_, _) => Pause();
+    }
+
+    private async Task ResumeAsync()
+    {
+        await EnsureFreshAsync();
+        if (!IsLoaded || !IsVisible) return;
+        if (_last is { } snap) Render(snap);
+        timer.Start();
+        _nowTick.Start();
+    }
+
+    private void Pause()
+    {
+        timer.Stop(); _timeBoundary.Stop(); _nowTick.Stop();
+        _flush?.Stop(); _flush = null; _redrawPending = false;
+        _chartSettle?.Stop(); _chartSettle = null;
+        _pendingPartial = null;
+        if (_warningPopup is { } popup) popup.IsOpen = false;
+        Cancel();
+        generation++;
     }
 
     private async Task EnsureFreshAsync()
     {
-        if (fetching && _activeSelection == Selection) return;
+        if (fetching && _token?.IsCancellationRequested == false && _activeSelection == Selection) return;
         var key = AutoSelected ? state.AutoKey : state.KeyFor(state.Cities[state.Selected]);
         if (!fetching && _shownKey == key && _last is { } snapshot && DateTimeOffset.Now - snapshot.FetchedAt < AutoInterval) return;
         await Refresh();
@@ -531,6 +557,7 @@ internal sealed class WeatherView : UserControl
                     return;
                 }
                 city = located;
+                WeatherLive.Located(city);
             }
             // 旧请求交给 token 中断；generation 只在部分结果回写时挡一次，避免迟到的首屏覆盖新请求。
             var sourceId = selection.Source;
@@ -552,7 +579,7 @@ internal sealed class WeatherView : UserControl
             if (WeatherData.HasWeather(snapshot)) WeatherData.SaveSnapshot(key, snapshot, AutoSelected ? key : null);
             _cycleStart = DateTime.UtcNow;
             // 下一次自动刷新从本次成功刷新重新起算，页头倒计时环与实际自动刷新时刻保持同步。
-            timer.Stop(); timer.Start();
+            timer.Stop(); if (IsVisible && IsLoaded) timer.Start();
         } catch (OperationCanceledException) {
             // 取消即本轮作废，界面与状态由新的 Refresh 接管（画面已是目标城市自己的缓存或空态）。
         } catch { if (StillSelected() && (_last is null || _shownKey != key)) { _pendingPartial = null; _renderSignature = 0; summary.Children.Clear(); summary.Children.Add(new TextBlock { Text = Loc.T("天气数据不可用", "Weather data unavailable"), FontSize = 20, VerticalAlignment = VerticalAlignment.Center }); } }
@@ -563,7 +590,7 @@ internal sealed class WeatherView : UserControl
     {
         if (key.Length == 0) { if (_last is not null) ShowEmpty(); return; }
         if (_shownKey == key) return;
-        if (state.Cache.TryGetValue(key, out var cached)) { Render(cached); _shownKey = key; }
+        if (state.TrySnapshot(key, out var cached)) { Render(cached); _shownKey = key; }
         else ShowEmpty();
     }
     // 空态：换到没有缓存的城市后、刷新尚未成功时清掉上一城的残留画面（指数、分钟降水、页脚一并清）。
@@ -657,6 +684,7 @@ internal sealed class WeatherView : UserControl
 
     private void Render(WeatherSnapshot s)
     {
+        s = WeatherLive.ForDisplay(s);
         if (_hourlyMode && s.Hours.Length == 0) { _hourlyMode = false; _lens = Lens.Temp; }
         _last = s;
         ApplyLayout(s);
@@ -1953,6 +1981,7 @@ internal sealed class WeatherView : UserControl
     {
         if (state.Selected == index) return;
         state.Selected = index; _app.QueueSave();
+        foreach (var deck in _app.Decks) deck.WeatherSelectionChanged();
         await Refresh();
     }
     internal Action? SettingsRequested;

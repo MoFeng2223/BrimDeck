@@ -52,7 +52,7 @@ public partial class App
 
     private void PowerModeChanged(object? sender, PowerModeChangedEventArgs e)
     {
-        if (e.Mode == PowerModes.Resume) Dispatcher.BeginInvoke(CheckUpdatesIfDue);
+        if (e.Mode == PowerModes.Resume) Dispatcher.BeginInvoke(() => { CheckUpdatesIfDue(); WeatherLive.Wake(); });
     }
 
     // Download progress also raises Changed; the panel is touched only when the marked version or the update's notes notice changes.

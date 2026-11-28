@@ -222,6 +222,8 @@ public static class WeatherCache
 
     // 启动时清掉长期不用的条目（按最后访问时间：命中缓存会刷新文件时间戳）：历史按日期缓存，城市换得勤会留下不少一次性文件。
     private static int _pruned;
+    public static void ReleaseMemory() => Memory.Clear();
+
     public static void Prune(TimeSpan age)
     {
         if (Interlocked.Exchange(ref _pruned, 1) == 1) return;

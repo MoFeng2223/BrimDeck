@@ -32,6 +32,13 @@ public partial class App
     // the balanced mode's clean-up off for good.
     internal void RequestTrim() { _usedAt = DateTime.UtcNow; ScheduleTrim(); }
 
+    internal void WeatherReleased()
+    {
+        WeatherData.ReleaseCachedSnapshots();
+        _trimmedAt = null;
+        ScheduleTrim();
+    }
+
     private void ScheduleTrim()
     {
         _trim?.Stop();
@@ -53,6 +60,8 @@ public partial class App
         // Someone is using a panel or the settings: try again after the next quiet stretch.
         if (Decks.Any(deck => deck.IsExpanded || deck.IsResizing) || _settingsWindow is { WindowState: not WindowState.Minimized }) { RequestTrim(); return; }
         _trimmedAt = DateTime.UtcNow;
+        WeatherData.ReleaseCachedSnapshots();
+        WeatherCache.ReleaseMemory();
         GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
         // Aggressive also returns the memory the heap no longer uses to the system.
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
@@ -73,6 +82,7 @@ public partial class App
     internal void ApplyMemoryMode()
     {
         var plan = MemoryPlan;
+        foreach (var deck in Decks) deck?.ScheduleWeatherRelease();
         Monitor?.UsePlan(plan);
         Devices?.UsePlan(plan);
         if (Media is not null) UseMediaPlan(Media, plan);

@@ -118,7 +118,7 @@ internal sealed class HeFengSource : IWeatherSource
         string query = $"localTime=true&lang={context.Lang}";
         // 四个接口各自过期：实况最短、逐天最长，互不牵连（官方推荐 10–30 分钟 / 30–60 分钟 / 1–6 小时）。
         // 实况是可用性探针：只有它发出真实请求并收到响应，才更新和风连通状态。
-        var current = Want(WeatherDomain.Current) ? FetchBodyAsync(context, "current|" + context.Site, TimeSpan.FromMinutes(10), $"{host}/weather/v1/current/{context.Lat}/{context.Lon}?{query}", token, probe: true) : Task.FromResult<string?>(null);
+        var current = Want(WeatherDomain.Current) ? FetchBodyAsync(context, "current|" + context.Site, TimeSpan.FromMinutes(10), $"{host}/weather/v1/current/{context.Lat}/{context.Lon}?{query}", token, probe: true, allowStale: need.Count != 1) : Task.FromResult<string?>(null);
 
         var hours = Want(WeatherDomain.Hourly) ? FetchBodyAsync(context, "hourly|" + context.Site + "|" + context.Day, TimeSpan.FromMinutes(30), $"{host}/weather/v1/hourly/{context.Lat}/{context.Lon}?hours=48&{query}", token) : Task.FromResult<string?>(null);
         var days = Want(WeatherDomain.Daily) ? FetchBodyAsync(context, "daily|" + context.Site + "|" + context.Day, TimeSpan.FromHours(2), $"{host}/weather/v1/daily/{context.Lat}/{context.Lon}?days=10&{query}", token) : Task.FromResult<string?>(null);
@@ -140,14 +140,14 @@ internal sealed class HeFengSource : IWeatherSource
     }
 
     // 带缓存取一份和风原始响应；probe 只标记这条请求是否用于连通性判定。
-    private static Task<string?> FetchBodyAsync(Context context, string key, TimeSpan ttl, string url, CancellationToken token, bool probe = false)
+    private static Task<string?> FetchBodyAsync(Context context, string key, TimeSpan ttl, string url, CancellationToken token, bool probe = false, bool allowStale = true)
         => WeatherCache.GetAsync<string>("hefeng", context.Scope + "|" + key, ttl, async ct =>
         {
             var body = await FetchRawAsync(context, url, ct, probe);
             if (body is null) return null;
             using var document = JsonDocument.Parse(body);
             return body;
-        }, token);
+        }, token, allowStale);
 
     // Key 走 X-QW-Api-Key 请求头：比放在查询字符串里安全，也避免同时使用两种认证方式。
     // 实测请求并回报探针状态，与通用传输层的 SendAsync 区分开。
@@ -362,6 +362,7 @@ internal sealed class HeFengSource : IWeatherSource
             double offset = Geo.UtcOffsetHours(city);
             return new CurrentPart
             {
+                ObservedAt = DateTimeOffset.TryParse(Json.Text(root, "observationTime"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var observed) ? observed : null,
                 Temperature = TemperatureC(root, "temperature"),
                 FeelsLike = TemperatureC(root, "feelsLike"),
                 Humidity = PercentInt(root, "humidity"),
