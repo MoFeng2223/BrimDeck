@@ -27,7 +27,7 @@ public partial class MainWindow
     private readonly HashSet<string> _readOnPage = new(StringComparer.Ordinal);
     private bool Fresh(Notice notice) => _freshNotices.Contains(notice.Id) && !_readOnPage.Contains(notice.Id);
     // The rows the page lists, with the revision each was built from, and what else the page was built from (see UpdateNoticeRows).
-    private readonly List<(Notice Notice, int Revision, string Key, FrameworkElement Row)> _pageRows = [];
+    private readonly List<(Notice Notice, int Revision, string Key, FrameworkElement Row, Action<bool> Select)> _pageRows = [];
     private string _pageKey = "";
     // The settings, size and theme the page was last built for (NoticeLayout).
     private (DeckSettings? Settings, int Theme, double Width, double Height) _noticeLayout;
@@ -262,12 +262,47 @@ public partial class MainWindow
     {
         if (!DeckPages.Shown(Settings, DeckPage.Notices)) return;
         if (focus is not null) _noticeFocus = focus;
-        if (_expanded) { SelectPage(DeckPage.Notices); if (focus is not null) RenderNotices(); return; }
-        SelectPage(DeckPage.Notices, remember: false);
-        // Opening marks the list seen before it draws the page (SetExpanded): marked here afterwards, the page was built a second
-        // time in the middle of the opening.
-        _keepPageOnOpen = true;
-        try { OpenFromHotkey(byKey: byKey); } finally { _keepPageOnOpen = false; }
+        // The notice opened for is listed whatever the filters (SettleNoticeFocus), and the list moves to it.
+        _openingFocus = focus;
+        try
+        {
+            if (_expanded) { SelectPage(DeckPage.Notices); if (focus is not null) RenderNotices(fresh: true); return; }
+            SelectPage(DeckPage.Notices, remember: false);
+            // Opening marks the list seen before it draws the page (SetExpanded): marked here afterwards, the page was built a second
+            // time in the middle of the opening.
+            _keepPageOnOpen = true;
+            try { OpenFromHotkey(byKey: byKey); } finally { _keepPageOnOpen = false; }
+        }
+        finally { _openingFocus = null; }
+    }
+
+    // The notice the page is being opened for (OpenNoticesPage), while it opens.
+    private string? _openingFocus;
+
+    // The page comes into view: the notice picked last stays in front while the list shows it, else the newest leads
+    // (NoticePageFocus.Settle).
+    private void SettleNoticeFocus()
+    {
+        var (picked, filter) = NoticePageFocus.Settle(_app.Notices.Hub.Notices, _noticeFocus, _openingFocus, new NoticeListFilter(_noticeEarlier, _noticeUnread), DateTime.Today, _freshNotices);
+        _noticeFocus = picked; _noticeEarlier = filter.Earlier; _noticeUnread = filter.UnreadOnly;
+    }
+
+    // The page has come into view: the list moves to the selected row when it lies below what the list shows from its top
+    // (NoticePageFocus.Offset). Done once laid out, as the panel opening on it lays it out at its full size.
+    private void ScrollListToFocus()
+    {
+        if (_pageScroll is not { } scroll || _rowsFocus is not { } focus) return;
+        string conversation = Conversation(focus);
+        if (_pageRows.FirstOrDefault(r => Conversation(r.Notice) == conversation).Row is not { } row) return;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
+        {
+            if (!ReferenceEquals(_pageScroll, scroll) || scroll.Content is not Visual list || !row.IsDescendantOf(list)) return;
+            scroll.UpdateLayout();
+            if (scroll.ViewportHeight <= 0) return;
+            double top = row.TransformToAncestor(list).Transform(new Point()).Y;
+            double offset = NoticePageFocus.Offset(top, row.ActualHeight, scroll.ViewportHeight, FadeHeight);
+            if (offset > 0) scroll.ScrollToVerticalOffset(offset);
+        });
     }
 
     private void NoticesPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Notices);
@@ -277,6 +312,7 @@ public partial class MainWindow
     {
         TakeFreshNotices();
         _noticeEarlier = false;
+        SettleNoticeFocus();
         _app.Notices.Hub.MarkAllViewed();
     }
 
@@ -328,6 +364,7 @@ public partial class MainWindow
         // What the opening resets (NoticesPageShown), without marking anything seen.
         TakeFreshNotices();
         _noticeEarlier = false;
+        SettleNoticeFocus();
         if (_noticesPrebuilt && NoticesContent.Visibility == Visibility.Visible && FitNoticeLayout() && UpdateNoticeRows()) return;
         RenderNotices(fresh: true);
         _noticesPrebuilt = true;
@@ -343,9 +380,11 @@ public partial class MainWindow
         if (!ready) { RenderNotices(fresh: true); return; }
         // What RenderNotices does only for a page on screen.
         WatchPageLive();
+        ScrollListToFocus();
     }
 
-    // The panel closed: the page is built again for the next opening, at the top of its list and without what was opened on it.
+    // The panel closed: the page is built again for the next opening, at the top of its list and without what was opened on it;
+    // the opening moves the list to the selected row (ShowNoticesOnOpening).
     private void NoticesPanelClosed() => QueueNoticePrebuild(PrebuildAfterClosing);
 
     private void NoticesChanged()
@@ -459,7 +498,7 @@ public partial class MainWindow
         var now = DateTimeOffset.UtcNow;
         for (int i = 0; i < _pageRows.Count; i++)
         {
-            var (notice, revision, key, _) = _pageRows[i];
+            var (notice, revision, key, _, _) = _pageRows[i];
             if (!ReferenceEquals(listed[i], notice) || notice.Revision != revision || RowKey(notice, now) != key) return false;
         }
         return _focusKey == FocusKey(FocusedNotice(center), now);
@@ -483,7 +522,8 @@ public partial class MainWindow
     //
     // Two columns, as the music page: on the left the focus, one notice at a time with its application's icon as the cover, its
     // title, its words and what can be done with it; on the right today's notices, scrolling within the panel. The focus is an
-    // incoming call, else the notice the user picked (in the list, or by resting the pointer on it on the island), else the newest.
+    // incoming call, else the notice the user picked (in the list, or by resting the pointer on it on the island) while the list
+    // shows it as the page comes into view (NoticePageFocus), else the newest.
     // Without any notice, one empty state takes both columns.
 
     // Status colors of the design: an incoming call (and a success), a warning, an error (danger); unread dots. All from the theme,
@@ -512,9 +552,9 @@ public partial class MainWindow
     // conversation takes one row, its newest notice; the focus shows the others under it.
     private List<Notice> Listed(NoticeCenter center)
     {
-        IEnumerable<Notice> notices = center.Hub.Notices;
-        if (!_noticeEarlier) notices = notices.Where(Today);
-        if (_noticeUnread) notices = notices.Where(n => _freshNotices.Contains(n.Id));
+        var filter = new NoticeListFilter(_noticeEarlier, _noticeUnread);
+        var today = DateTime.Today;
+        var notices = center.Hub.Notices.Where(n => NoticePageFocus.Listed(n, filter, today, _freshNotices));
         _conversations.Clear();
         var heads = new List<Notice>();
         foreach (var notice in notices)
@@ -564,6 +604,7 @@ public partial class MainWindow
         var now = DateTimeOffset.UtcNow;
         _pageKey = NoticePageKey(center); _noticeLayout = NoticeLayout();
         var focus = FocusedNotice(center);
+        _rowsFocus = focus;
         MarkReadOnPage(center, focus);
         KeepNoticeForm(focus);
         _focusKey = FocusKey(focus, now);
@@ -581,6 +622,9 @@ public partial class MainWindow
         if (refocus is not null && _pageRows.FirstOrDefault(r => r.Notice.Id == refocus).Row is { } focused)
             Dispatcher.BeginInvoke(() => focused.Focus(), System.Windows.Threading.DispatcherPriority.Input);
         WatchPageLive();
+        // Coming into view on the open panel, the list shows the selected row; built while the panel is closed, it does so as the
+        // panel opens (ShowNoticesOnOpening).
+        if (fresh && (_expanded || _preview)) ScrollListToFocus();
     }
 
     // The notice in the focus has been read, with the rest of its conversation, which the focus shows under it: their dots go.
@@ -944,7 +988,12 @@ public partial class MainWindow
         // else its first that opens something ("打开邮箱" of a mail), which then turns into the open icon as "打开应用" does.
         var own = center.Buttons(notice).Take(NoticeIntake.MaxButtons).ToList();
         var mainAction = PageMainAction(notice, center);
-        foreach (var action in own.OrderBy(action => ReferenceEquals(action, mainAction)))
+        // A coding agent's approval keeps its main answer and the first other one ("允许", "拒绝") in the row; what else the tool
+        // offers ("总是允许 …（本项目）", "允许访问 …（本会话）", "在终端处理") goes above the row, a line each, as the tools list
+        // them in their own prompts. In the row they took a line each, and pushed the main one below the column's foot.
+        var choices = BrimDeck.Core.Agents.AgentKeys.Ask(notice.ReplaceKey) is not null && !AgendaReminders.Owns(notice)
+            ? own.Where(action => !ReferenceEquals(action, mainAction)).Skip(1).ToList() : [];
+        foreach (var action in own.Where(action => !choices.Contains(action)).OrderBy(action => ReferenceEquals(action, mainAction)))
         {
             bool main = ReferenceEquals(action, mainAction);
             if (AgendaReminders.Owns(notice)) { flow.Add(ReminderButton(notice, action, main)); if (main) row.MainLast = true; continue; }
@@ -974,7 +1023,30 @@ public partial class MainWindow
         }
         // The row sets the space between its buttons itself (NoticeButtons.Gap).
         foreach (var button in flow.OfType<FrameworkElement>()) button.Margin = new Thickness(0);
-        return row;
+        if (choices.Count == 0) return row;
+        var foot = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+        foreach (var action in choices) foot.Children.Add(ChoiceButton(action.Label, async () => { await center.RunAsync(notice, action); RenderNotices(); }));
+        row.Margin = new Thickness(0, 4, 0, 0);
+        foot.Children.Add(row);
+        return foot;
+    }
+
+    // One of the further answers of an agent's approval: a line as wide as the column, its words at the left and cut with "…"
+    // where they do not fit, in the fill of the page's other buttons.
+    private static Button ChoiceButton(string text, Action click)
+    {
+        var button = PillButton(text, text, click);
+        var face = (Border)button.Content;
+        face.CornerRadius = new CornerRadius(PanelTheme.Corner(10));
+        face.Padding = new Thickness(14, 0, 14, 0);
+        var words = UI.Fixed(text, 12.5, 32, UI.Primary, FontWeights.SemiBold);
+        words.TextTrimming = TextTrimming.CharacterEllipsis;
+        words.VerticalAlignment = VerticalAlignment.Center;
+        face.Child = words;
+        button.HorizontalAlignment = HorizontalAlignment.Stretch;
+        button.Margin = new Thickness(0, 0, 0, 6);
+        button.ToolTip = text;
+        return button;
     }
 
     // The sender's button that the page shows as its main one, when no application can be opened: its main button, else its first
@@ -1181,9 +1253,12 @@ public partial class MainWindow
         // Keep the full extent when restoring a scroll offset. Build through the keyboard row
         // before requesting focus, even when that row is below the initial batch.
         int keyboardIndex = refocus is null ? -1 : listed.FindIndex(notice => notice.Id == refocus);
-        int first = restoreScroll ? listed.Count : Math.Min(listed.Count, Math.Max(InitialNoticeRows, keyboardIndex + 1));
+        // The selected row is built at once too, so that the list can move to it as the page comes into view (ScrollListToFocus).
+        string focusConversation = Conversation(focus);
+        int focusIndex = listed.FindIndex(notice => Conversation(notice) == focusConversation);
+        int first = restoreScroll ? listed.Count : Math.Min(listed.Count, Math.Max(InitialNoticeRows, Math.Max(keyboardIndex, focusIndex) + 1));
         // A later batch can bring the page's first live row: WatchPageLive after each, or nothing would follow the tick.
-        _noticeBatches = new RowBatches<Notice>(listed, (i, notice) => AddNoticeRow(list, i, notice, focus, i < first ? now : DateTimeOffset.UtcNow),
+        _noticeBatches = new RowBatches<Notice>(listed, (i, notice) => AddNoticeRow(list, i, notice, i < first ? now : DateTimeOffset.UtcNow),
             action => Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, action), NoticeBatchSize, WatchPageLive);
         _noticeBatches.Start(first);
         if (listed.Count == 0)
@@ -1210,11 +1285,68 @@ public partial class MainWindow
         return border;
     }
 
-    private void AddNoticeRow(Panel list, int index, Notice notice, Notice focus, DateTimeOffset now)
+    private void AddNoticeRow(Panel list, int index, Notice notice, DateTimeOffset now)
     {
-        var row = Row(notice, now, Conversation(notice) == Conversation(focus));
+        var (row, select) = Row(notice, now, RowSelected(notice));
         list.Children.Insert(index, row);
-        _pageRows.Add((notice, notice.Revision, RowKey(notice, now), row));
+        _pageRows.Add((notice, notice.Revision, RowKey(notice, now), row, select));
+    }
+
+    // The notice the list's rows were drawn around: the rows of its conversation have the selected fill. Rows that later batches
+    // add read it, so that they follow a focus picked while they were still being built.
+    private Notice? _rowsFocus;
+    private bool RowSelected(Notice notice) => _rowsFocus is { } focus && Conversation(notice) == Conversation(focus);
+
+    // A row was picked: only the focus column is built again, and the rows change their fill in place. Building the whole page
+    // again rebuilt the list too: at the top it came back with only its first rows, and the scroll bar grew long and shrank as
+    // the rest arrived; scrolled down it built every row at once, which held the click for a while.
+    private void PickNotice(Notice notice)
+    {
+        var center = _app.Notices;
+        var before = FocusedNotice(center);
+        bool inPlace = NoticesContent.Visibility == Visibility.Visible && _pageScroll is not null && NoticesContent.Children.Count == 2
+            && _pageKey == NoticePageKey(center) && FitNoticeLayout();
+        _noticeFocus = notice.Id;
+        if (!inPlace) { RenderNotices(); return; }
+        var focus = FocusedNotice(center);
+        if (focus is null) { RenderNotices(); return; }
+        if (ReferenceEquals(focus, before)) return;
+        _noticesPrebuilt = false;
+        var now = DateTimeOffset.UtcNow;
+        MarkReadOnPage(center, focus);
+        KeepNoticeForm(focus);
+        _focusKey = FocusKey(focus, now);
+        // What the old focus column registered.
+        var old = NoticesContent.Children[0];
+        _liveRows.Clear();
+        _wordBatches?.Cancel(); _wordBatches = null;
+        foreach (var reference in _waitingPlates.Keys.ToList())
+        {
+            var plates = _waitingPlates[reference];
+            plates.RemoveAll(p => p.Plate.IsDescendantOf(old));
+            if (plates.Count == 0) _waitingPlates.Remove(reference);
+        }
+        NoticesContent.Children.RemoveAt(0);
+        NoticesContent.Children.Insert(0, FocusColumn(focus, center, now));
+        // The rows: the selected fill moves; a row whose words changed (its conversation was read, so its dot goes) is built again.
+        _rowsFocus = focus;
+        Listed(center);
+        for (int i = 0; i < _pageRows.Count; i++)
+        {
+            var (shown, revision, key, row, select) = _pageRows[i];
+            string fresh = RowKey(shown, now);
+            if (fresh == key && shown.Revision == revision) { select(RowSelected(shown)); continue; }
+            if (row.Parent is not Panel list) continue;
+            bool focused = row.IsKeyboardFocused;
+            var (rebuilt, reselect) = Row(shown, now, RowSelected(shown));
+            int at = list.Children.IndexOf(row);
+            list.Children.RemoveAt(at);
+            list.Children.Insert(at, rebuilt);
+            _pageRows[i] = (shown, shown.Revision, fresh, rebuilt, reselect);
+            if (focused) rebuilt.Focus();
+        }
+        _pageKey = NoticePageKey(center);
+        WatchPageLive();
     }
 
     // "全部"/"未读": the panel's segmented switch (AgendaDraw.Segments), as on the planner page. One fill on the track marks the
@@ -1302,7 +1434,8 @@ public partial class MainWindow
     private const int PreviewLength = 160;
 
     // A row of the list: the icon with a dot while unread, the title and when, and a line of preview.
-    private FrameworkElement Row(Notice notice, DateTimeOffset now, bool selected)
+    // Returns the row and what gives it the selected fill or takes it away.
+    private (FrameworkElement Row, Action<bool> Select) Row(Notice notice, DateTimeOffset now, bool selected)
     {
         var row = new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(10)), Padding = new Thickness(8, 7, 8, 7), Background = UI.Brush(selected ? UI.FillSelected : "Transparent"), Cursor = Cursors.Hand };
         var grid = new Grid();
@@ -1356,7 +1489,7 @@ public partial class MainWindow
         row.MouseEnter += (_, _) => { over = true; Paint(); };
         row.MouseLeave += (_, _) => { over = false; down = false; Paint(); };
         row.PreviewMouseLeftButtonDown += (_, _) => { down = true; Paint(); };
-        row.MouseLeftButtonUp += (_, e) => { _noticeFocus = notice.Id; RenderNotices(); e.Handled = true; };
+        row.MouseLeftButtonUp += (_, e) => { down = false; Paint(); PickNotice(notice); e.Handled = true; };
         // From the keyboard, once a hotkey gave the panel the keyboard (MainWindow.Hotkeys.cs): Enter or Space puts the notice in front.
         row.Focusable = true;
         row.FocusVisualStyle = (Style)Application.Current.FindResource("PanelRowKeyboardFocus");
@@ -1364,10 +1497,10 @@ public partial class MainWindow
         row.KeyDown += (_, e) =>
         {
             if (e.Key is not (Key.Enter or Key.Space) || e.OriginalSource != row) return;
-            _noticeFocus = notice.Id; RenderNotices(); e.Handled = true;
+            PickNotice(notice); e.Handled = true;
         };
         AutomationProperties.SetName(row, notice.AppName + ", " + codeWords.SpokenTitle + ", " + NoticeText.Relative(notice.ReceivedAt, now));
-        return row;
+        return (row, on => { if (selected == on) return; selected = on; Paint(); });
     }
 
     // What a row's fill looks like over the panel, as an opaque color: the color behind the unread dot's ring.

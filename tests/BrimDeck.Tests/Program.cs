@@ -49,6 +49,7 @@ try
     RowBatchesTests.Run(Check);
     NoticeWindowsAppTests.Run(Check);
     NoticeFocusTests.Run(Check);
+    NoticePageFocusTests.Run(Check);
     NoticeFlashTests.Run(Check);
     NoticeDingTalkTests.Run(Check);
     NoticeFeishuTests.Run(Check);
