@@ -1,0 +1,36 @@
+src/BrimDeck/Native/Direct3D9Block.cs
+  s_8c3ce2fa757a4a::t_ab4915cfce6914 9-10
+  s_481a47d8850645::t_c4bcb4aaf97e45 1-8,11-96
+src/BrimDeck/SettingsWindow.cs
+  s_8c3ce2fa757a4a::t_f06c6d3f03a6d6 782-785
+src/BrimDeck/BrimDeck.csproj
+  s_8c3ce2fa757a4a::t_09f29d7661e027 25
+src/BrimDeck/App.xaml.cs
+  s_8c3ce2fa757a4a::t_c5a5f20bc9f962 105-106
+src/BrimDeck.Core/Settings.cs
+  s_8c3ce2fa757a4a::t_f44452ff3fbc8b 621-623
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "770c693458ff2fb207c4f373943b15394b17060c",
+  "prompts": {},
+  "sessions": {
+    "s_481a47d8850645": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6cc7b338-74af-46df-aebe-e070a1ce0b57",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    },
+    "s_8c3ce2fa757a4a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cd4fffd7-db01-407c-a446-b03f50258333",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "MoFeng2223 <MoFeng2223@gmail.com>"
+    }
+  }
+}
